@@ -63,7 +63,9 @@ export async function GET(request: NextRequest) {
     if (!isBypassed) {
       const hasAccess = await checkActiveMembership(tokens.access_token);
       if (!hasAccess) {
-        return NextResponse.redirect(`${appUrl}/login?error=no_membership`);
+        return NextResponse.redirect(
+          `${appUrl}/login?error=no_membership&detail=${encodeURIComponent(`Your Whop user ID: ${userInfo.sub}`)}`
+        );
       }
     }
 

@@ -56,10 +56,15 @@ export async function GET(request: NextRequest) {
     // 2. Fetch user info
     const userInfo = await fetchWhopUserInfo(tokens.access_token);
 
-    // 3. Verify active membership
-    const hasAccess = await checkActiveMembership(tokens.access_token);
-    if (!hasAccess) {
-      return NextResponse.redirect(`${appUrl}/login?error=no_membership`);
+    // 3. Verify active membership (bypass for whitelisted test users)
+    const bypassUsers = process.env.WHOP_BYPASS_USER_IDS?.split(",") ?? [];
+    const isBypassed = bypassUsers.includes(userInfo.sub);
+
+    if (!isBypassed) {
+      const hasAccess = await checkActiveMembership(tokens.access_token);
+      if (!hasAccess) {
+        return NextResponse.redirect(`${appUrl}/login?error=no_membership`);
+      }
     }
 
     // 4. Create or sign in Supabase user

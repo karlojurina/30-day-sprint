@@ -17,40 +17,19 @@ export default function TeamLoginPage() {
     setError("");
     setLoading(true);
 
-    try {
-      // Use API route to verify team membership (bypasses RLS)
-      const res = await fetch("/api/auth/team/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-      const data = await res.json();
-
-      if (!res.ok) {
-        setError(
-          res.status === 401
-            ? "Invalid email or password"
-            : res.status === 403
-              ? "You are not authorized to access the team dashboard"
-              : "Something went wrong"
-        );
-        setLoading(false);
-        return;
-      }
-
-      // Set the session on the browser client
-      await supabase.auth.setSession({
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
-      });
-
-      // Hard reload so AuthContext re-initializes with the session in place
-      window.location.href = "/admin";
-    } catch {
-      setError("Something went wrong. Please try again.");
+    if (signInError) {
+      setError("Invalid email or password");
       setLoading(false);
+      return;
     }
+
+    // Hard reload — AuthContext will use /api/auth/me to verify team membership
+    window.location.href = "/admin";
   }
 
   return (

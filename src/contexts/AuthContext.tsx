@@ -35,30 +35,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const supabase = createClient();
 
   const fetchProfile = useCallback(
-    async (userId: string) => {
-      // Check if team member
-      const { data: team } = await supabase
-        .from("team_members")
-        .select("*")
-        .eq("id", userId)
-        .single();
+    async (_userId: string) => {
+      // Get the current session token
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (!currentSession?.access_token) return;
 
-      if (team) {
-        setTeamMember(team);
-        setStudent(null);
-        return;
-      }
+      // Use API route to fetch profile (bypasses RLS issues)
+      try {
+        const res = await fetch("/api/auth/me", {
+          headers: { Authorization: `Bearer ${currentSession.access_token}` },
+        });
 
-      // Check if student
-      const { data: studentData } = await supabase
-        .from("students")
-        .select("*")
-        .eq("supabase_user_id", userId)
-        .single();
+        if (!res.ok) return;
 
-      if (studentData) {
-        setStudent(studentData);
-        setTeamMember(null);
+        const data = await res.json();
+
+        if (data.role === "team") {
+          setTeamMember(data.profile);
+          setStudent(null);
+        } else if (data.role === "student") {
+          setStudent(data.profile);
+          setTeamMember(null);
+        } else {
+          setTeamMember(null);
+          setStudent(null);
+        }
+      } catch {
+        // Silently fail — user will just not be recognized
       }
     },
     [supabase]

@@ -17,42 +17,39 @@ export default function TeamLoginPage() {
     setError("");
     setLoading(true);
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      // Use API route to verify team membership (bypasses RLS)
+      const res = await fetch("/api/auth/team/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
 
-    if (signInError) {
-      setError("Invalid email or password");
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(
+          res.status === 401
+            ? "Invalid email or password"
+            : res.status === 403
+              ? "You are not authorized to access the team dashboard"
+              : "Something went wrong"
+        );
+        setLoading(false);
+        return;
+      }
+
+      // Set the session on the browser client
+      await supabase.auth.setSession({
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+      });
+
+      router.replace("/admin");
+    } catch {
+      setError("Something went wrong. Please try again.");
       setLoading(false);
-      return;
     }
-
-    // Verify they're a team member
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setError("Authentication failed");
-      setLoading(false);
-      return;
-    }
-
-    const { data: teamMember } = await supabase
-      .from("team_members")
-      .select("id")
-      .eq("id", user.id)
-      .single();
-
-    if (!teamMember) {
-      await supabase.auth.signOut();
-      setError("You are not authorized to access the team dashboard");
-      setLoading(false);
-      return;
-    }
-
-    router.replace("/admin");
   }
 
   return (

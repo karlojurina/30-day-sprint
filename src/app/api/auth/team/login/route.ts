@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { createServiceClient } from "@/lib/supabase-server";
 
 export async function POST(request: NextRequest) {
@@ -8,18 +9,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Missing email or password" }, { status: 400 });
   }
 
-  const supabase = createServiceClient();
+  // Use a throwaway anon client for sign-in (so it doesn't taint the service client)
+  const anonClient = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { auth: { persistSession: false } }
+  );
 
-  // Sign in the user
   const { data: signInData, error: signInError } =
-    await supabase.auth.signInWithPassword({ email, password });
+    await anonClient.auth.signInWithPassword({ email, password });
 
   if (signInError) {
     return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
   }
 
-  // Check if they're a team member (using service role — bypasses RLS)
-  const { data: teamMember } = await supabase
+  // Use a separate service role client for the team_members check (bypasses RLS)
+  const serviceClient = createServiceClient();
+
+  const { data: teamMember } = await serviceClient
     .from("team_members")
     .select("id, role, full_name")
     .eq("id", signInData.user.id)
@@ -29,7 +36,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Not authorized" }, { status: 403 });
   }
 
-  // Return the session tokens for the client to store
   return NextResponse.json({
     session: signInData.session,
     teamMember,

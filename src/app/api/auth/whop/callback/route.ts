@@ -121,11 +121,11 @@ export async function GET(request: NextRequest) {
       console.error("Student upsert failed:", upsertError);
     }
 
-    // 6. Create a client-side session by signing in with the anon client
-    // We need to set auth cookies for the browser
+    // 6. Create a session for the browser
     const anonClient = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { auth: { persistSession: false } }
     );
 
     const { data: sessionData, error: sessionError } =
@@ -136,29 +136,21 @@ export async function GET(request: NextRequest) {
       return NextResponse.redirect(`${appUrl}/login?error=session_failed`);
     }
 
-    // 7. Set session cookies and redirect
-    const response = NextResponse.redirect(`${appUrl}/dashboard`);
-
-    // Clear PKCE cookie
+    // 7. Pass session to client-side handler via temporary cookie
+    const response = NextResponse.redirect(`${appUrl}/auth/complete`);
     response.cookies.delete(PKCE_COOKIE_NAME);
 
-    // Set Supabase session cookies
-    response.cookies.set("sb-access-token", sessionData.session.access_token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 3600,
-      path: "/",
-    });
-
     response.cookies.set(
-      "sb-refresh-token",
-      sessionData.session.refresh_token,
+      "pending_session",
+      JSON.stringify({
+        access_token: sessionData.session.access_token,
+        refresh_token: sessionData.session.refresh_token,
+      }),
       {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        httpOnly: false, // Client JS needs to read this
+        secure: true,
         sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 30, // 30 days
+        maxAge: 60, // Expires in 1 minute
         path: "/",
       }
     );

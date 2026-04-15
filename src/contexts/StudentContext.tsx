@@ -37,9 +37,14 @@ interface StudentContextType {
 
 const StudentContext = createContext<StudentContextType | null>(null);
 
+async function getAccessToken() {
+  const supabase = createClient();
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? null;
+}
+
 export function StudentProvider({ children }: { children: ReactNode }) {
   const { student } = useAuth();
-  const supabase = createClient();
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [completions, setCompletions] = useState<StudentTaskCompletion[]>([]);
@@ -47,43 +52,40 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [discountRequest, setDiscountRequest] = useState<DiscountRequest | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Fetch all data on mount
+  // Fetch all data via API route (bypasses RLS)
   useEffect(() => {
     if (!student) return;
 
     async function fetchData() {
-      const today = new Date().toISOString().split("T")[0];
+      const token = await getAccessToken();
+      if (!token) {
+        setLoading(false);
+        return;
+      }
 
-      const [tasksRes, completionsRes, noteRes, discountRes] = await Promise.all([
-        supabase.from("tasks").select("*").order("week").order("sort_order"),
-        supabase
-          .from("student_task_completions")
-          .select("*")
-          .eq("student_id", student!.id),
-        supabase
-          .from("daily_notes")
-          .select("*")
-          .eq("student_id", student!.id)
-          .eq("note_date", today)
-          .single(),
-        supabase
-          .from("discount_requests")
-          .select("*")
-          .eq("student_id", student!.id)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .single(),
-      ]);
+      try {
+        const res = await fetch("/api/student/data", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
-      if (tasksRes.data) setTasks(tasksRes.data);
-      if (completionsRes.data) setCompletions(completionsRes.data);
-      if (noteRes.data) setTodayNote(noteRes.data);
-      if (discountRes.data) setDiscountRequest(discountRes.data);
+        if (!res.ok) {
+          setLoading(false);
+          return;
+        }
+
+        const data = await res.json();
+        setTasks(data.tasks);
+        setCompletions(data.completions);
+        setTodayNote(data.todayNote);
+        setDiscountRequest(data.discountRequest);
+      } catch (err) {
+        console.error("Failed to fetch student data:", err);
+      }
       setLoading(false);
     }
 
     fetchData();
-  }, [student, supabase]);
+  }, [student]);
 
   // Derived state
   const completedTaskIds = useMemo(
@@ -130,114 +132,131 @@ export function StudentProvider({ children }: { children: ReactNode }) {
 
   const discountEligible = discountTasksCompleted >= DISCOUNT_REQUIRED_TASKS;
 
-  // Actions
+  // Actions — all via API routes
   const toggleTask = useCallback(
     async (taskId: string) => {
       if (!student) return;
 
+      const token = await getAccessToken();
+      if (!token) return;
+
       const isCompleted = completedTaskIds.has(taskId);
 
+      // Optimistic update
       if (isCompleted) {
-        // Uncheck: delete completion
-        const completion = completions.find((c) => c.task_id === taskId);
-        if (!completion) return;
-
         setCompletions((prev) => prev.filter((c) => c.task_id !== taskId));
-
-        const { error } = await supabase
-          .from("student_task_completions")
-          .delete()
-          .eq("id", completion.id);
-
-        if (error) {
-          // Revert on failure
-          setCompletions((prev) => [...prev, completion]);
-          console.error("Failed to uncheck task:", error);
-        }
       } else {
-        // Check: insert completion
         const optimistic: StudentTaskCompletion = {
           id: crypto.randomUUID(),
           student_id: student.id,
           task_id: taskId,
           completed_at: new Date().toISOString(),
         };
-
         setCompletions((prev) => [...prev, optimistic]);
-
-        const { data, error } = await supabase
-          .from("student_task_completions")
-          .insert({ student_id: student.id, task_id: taskId })
-          .select()
-          .single();
-
-        if (error) {
-          // Revert on failure
-          setCompletions((prev) =>
-            prev.filter((c) => c.id !== optimistic.id)
-          );
-          console.error("Failed to check task:", error);
-        } else if (data) {
-          // Replace optimistic with real data
-          setCompletions((prev) =>
-            prev.map((c) => (c.id === optimistic.id ? data : c))
-          );
-        }
       }
 
-      // Update last_active_at
-      await supabase
-        .from("students")
-        .update({ last_active_at: new Date().toISOString() })
-        .eq("id", student.id);
+      try {
+        const res = await fetch("/api/student/toggle-task", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ taskId }),
+        });
+
+        if (!res.ok) {
+          // Revert: re-fetch all completions
+          const dataRes = await fetch("/api/student/data", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (dataRes.ok) {
+            const data = await dataRes.json();
+            setCompletions(data.completions);
+          }
+        } else {
+          const result = await res.json();
+          if (result.action === "checked" && result.completion) {
+            // Replace optimistic with real data
+            setCompletions((prev) =>
+              prev.map((c) =>
+                c.task_id === taskId && !c.id.includes("-")
+                  ? c
+                  : c.task_id === taskId
+                    ? result.completion
+                    : c
+              )
+            );
+          }
+        }
+      } catch {
+        // Revert on network error: re-fetch
+        const token2 = await getAccessToken();
+        if (token2) {
+          const dataRes = await fetch("/api/student/data", {
+            headers: { Authorization: `Bearer ${token2}` },
+          });
+          if (dataRes.ok) {
+            const data = await dataRes.json();
+            setCompletions(data.completions);
+          }
+        }
+      }
     },
-    [student, completedTaskIds, completions, supabase]
+    [student, completedTaskIds]
   );
 
   const saveNote = useCallback(
     async (content: string) => {
       if (!student) return;
-      const today = new Date().toISOString().split("T")[0];
 
-      const { data, error } = await supabase
-        .from("daily_notes")
-        .upsert(
-          { student_id: student.id, note_date: today, content },
-          { onConflict: "student_id,note_date" }
-        )
-        .select()
-        .single();
+      const token = await getAccessToken();
+      if (!token) return;
 
-      if (error) {
-        console.error("Failed to save note:", error);
-      } else if (data) {
-        setTodayNote(data);
+      try {
+        const res = await fetch("/api/student/save-note", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ content }),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          setTodayNote(data.note);
+        }
+      } catch (err) {
+        console.error("Failed to save note:", err);
       }
-
-      // Update last_active_at
-      await supabase
-        .from("students")
-        .update({ last_active_at: new Date().toISOString() })
-        .eq("id", student.id);
     },
-    [student, supabase]
+    [student]
   );
 
   const requestDiscount = useCallback(async () => {
     if (!student || !discountEligible) return;
 
-    const { data, error } = await supabase
-      .from("discount_requests")
-      .insert({ student_id: student.id })
-      .select()
-      .single();
+    const token = await getAccessToken();
+    if (!token) return;
 
-    if (error) {
-      console.error("Failed to request discount:", error);
-    } else if (data) {
-      setDiscountRequest(data);
+    try {
+      const res = await fetch("/api/discounts/request", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setDiscountRequest(data);
+      }
+    } catch (err) {
+      console.error("Failed to request discount:", err);
     }
-  }, [student, discountEligible, supabase]);
+  }, [student, discountEligible]);
 
   return (
     <StudentContext.Provider

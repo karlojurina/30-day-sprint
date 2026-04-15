@@ -45,7 +45,8 @@ export default function TeamLoginPage() {
         refresh_token: data.session.refresh_token,
       });
 
-      router.replace("/admin");
+      // Hard reload so AuthContext re-initializes with the session in place
+      window.location.href = "/admin";
     } catch {
       setError("Something went wrong. Please try again.");
       setLoading(false);

@@ -23,14 +23,12 @@ export async function GET() {
   const authUrl = `${WHOP_AUTHORIZE_URL}?${params}`;
 
   // Store PKCE verifier and state in a cookie
-  // Use a regular response (not redirect) to ensure the cookie is stored,
-  // then redirect via HTML meta refresh
   const cookieValue = JSON.stringify({ codeVerifier, state });
-  const html = `<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=${authUrl}"></head><body>Redirecting...</body></html>`;
-  const response = new NextResponse(html, {
-    status: 200,
-    headers: { "Content-Type": "text/html" },
-  });
+  const response = NextResponse.redirect(authUrl);
+
+  // Clear any stale PKCE cookie from a previous attempt
+  response.cookies.delete(PKCE_COOKIE_NAME);
+
   response.cookies.set(PKCE_COOKIE_NAME, cookieValue, {
     httpOnly: true,
     secure: true,

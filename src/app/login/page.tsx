@@ -6,6 +6,7 @@ import { Suspense } from "react";
 function LoginContent() {
   const searchParams = useSearchParams();
   const error = searchParams.get("error");
+  const detail = searchParams.get("detail");
 
   const errorMessages: Record<string, string> = {
     no_membership: "You need an active EcomTalent membership to access the platform.",
@@ -28,7 +29,10 @@ function LoginContent() {
 
         {error && (
           <div className="bg-danger/10 border border-danger/20 rounded-lg px-4 py-3 text-sm text-danger">
-            {errorMessages[error] || "An error occurred. Please try again."}
+            <p>{errorMessages[error] || "An error occurred. Please try again."}</p>
+            {detail && (
+              <p className="mt-1 text-xs text-danger/70 break-all">{detail}</p>
+            )}
           </div>
         )}
 

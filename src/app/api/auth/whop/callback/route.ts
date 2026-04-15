@@ -158,7 +158,10 @@ export async function GET(request: NextRequest) {
 
     return response;
   } catch (err) {
-    console.error("OAuth callback error:", err);
-    return NextResponse.redirect(`${appUrl}/login?error=callback_failed`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("OAuth callback error:", message);
+    return NextResponse.redirect(
+      `${appUrl}/login?error=callback_failed&detail=${encodeURIComponent(message)}`
+    );
   }
 }

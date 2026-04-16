@@ -1,13 +1,22 @@
 import { NextResponse } from "next/server";
-import { generateCodeVerifier, generateCodeChallenge, generateState } from "@/lib/pkce";
-import { WHOP_AUTHORIZE_URL, PKCE_COOKIE_NAME, PKCE_COOKIE_MAX_AGE } from "@/lib/constants";
+import {
+  generateCodeVerifier,
+  generateCodeChallenge,
+  generateState,
+  signState,
+} from "@/lib/pkce";
+import { WHOP_AUTHORIZE_URL } from "@/lib/constants";
 
 export async function GET() {
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
-  const state = generateState();
-  const nonce = generateState(); // Random string for replay protection
+  const nonce = generateState(); // replay protection, sent to Whop
   const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/whop/callback`;
+
+  // Encode the PKCE verifier into the signed state parameter — avoids cookies
+  // entirely. We round-trip the verifier through Whop safely via HMAC.
+  const secret = process.env.PKCE_COOKIE_SECRET!;
+  const state = signState(codeVerifier, secret);
 
   const params = new URLSearchParams({
     response_type: "code",
@@ -21,21 +30,5 @@ export async function GET() {
   });
 
   const authUrl = `${WHOP_AUTHORIZE_URL}?${params}`;
-
-  // Store PKCE verifier and state in a cookie
-  const cookieValue = JSON.stringify({ codeVerifier, state });
-  const response = NextResponse.redirect(authUrl);
-
-  // Clear any stale PKCE cookie from a previous attempt
-  response.cookies.delete(PKCE_COOKIE_NAME);
-
-  response.cookies.set(PKCE_COOKIE_NAME, cookieValue, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    maxAge: PKCE_COOKIE_MAX_AGE,
-    path: "/",
-  });
-
-  return response;
+  return NextResponse.redirect(authUrl);
 }

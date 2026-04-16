@@ -6,7 +6,7 @@ import {
   checkActiveMembership,
   generateStudentPassword,
 } from "@/lib/whop";
-import { PKCE_COOKIE_NAME } from "@/lib/constants";
+import { unsignState } from "@/lib/pkce";
 import { createClient } from "@supabase/supabase-js";
 
 export async function GET(request: NextRequest) {
@@ -25,23 +25,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${appUrl}/login?error=missing_params`);
   }
 
-  // Read and verify PKCE cookie
-  const pkceCookie = request.cookies.get(PKCE_COOKIE_NAME);
-  if (!pkceCookie) {
-    return NextResponse.redirect(`${appUrl}/login?error=session_expired`);
+  // Verify signed state and extract the PKCE verifier. No cookie required —
+  // the verifier rides inside the HMAC-signed state parameter.
+  const secret = process.env.PKCE_COOKIE_SECRET!;
+  const unsigned = unsignState(state, secret);
+  if (!unsigned) {
+    return NextResponse.redirect(`${appUrl}/login?error=state_invalid`);
   }
-
-  let pkceData: { codeVerifier: string; state: string };
-  try {
-    pkceData = JSON.parse(pkceCookie.value);
-  } catch {
-    return NextResponse.redirect(`${appUrl}/login?error=invalid_session`);
-  }
-
-  // CSRF check
-  if (state !== pkceData.state) {
-    return NextResponse.redirect(`${appUrl}/login?error=state_mismatch`);
-  }
+  const codeVerifier = unsigned.codeVerifier;
 
   try {
     const redirectUri = `${appUrl}/api/auth/whop/callback`;
@@ -49,7 +40,7 @@ export async function GET(request: NextRequest) {
     // 1. Exchange code for tokens
     const tokens = await exchangeCodeForTokens(
       code,
-      pkceData.codeVerifier,
+      codeVerifier,
       redirectUri
     );
 
@@ -138,7 +129,6 @@ export async function GET(request: NextRequest) {
 
     // 7. Pass session to client-side handler via temporary cookie
     const response = NextResponse.redirect(`${appUrl}/auth/complete`);
-    response.cookies.delete(PKCE_COOKIE_NAME);
 
     response.cookies.set(
       "pending_session",

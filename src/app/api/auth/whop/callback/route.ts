@@ -62,19 +62,23 @@ export async function GET(request: NextRequest) {
     }
 
     // 4. Create or sign in Supabase user
-    const supabase = createServiceClient();
+    // We use a DEDICATED client for auth operations because
+    // signInWithPassword mutates the client's auth state to the user's
+    // JWT, which would then apply RLS to subsequent DB queries and hit
+    // the self-referencing team_members policy → infinite recursion.
+    const authClient = createServiceClient();
     const email = userInfo.email || `${userInfo.sub}@whop.ecomtalent.com`;
     const password = generateStudentPassword(userInfo.sub);
 
     // Try to sign in first (returning user)
     let userId: string;
     const { data: signInData, error: signInError } =
-      await supabase.auth.signInWithPassword({ email, password });
+      await authClient.auth.signInWithPassword({ email, password });
 
     if (signInError) {
-      // New user — create account
+      // New user — create account (admin API doesn't affect auth state)
       const { data: signUpData, error: signUpError } =
-        await supabase.auth.admin.createUser({
+        await authClient.auth.admin.createUser({
           email,
           password,
           email_confirm: true,
@@ -95,8 +99,9 @@ export async function GET(request: NextRequest) {
       userId = signInData.user.id;
     }
 
-    // 5. Upsert student record (persist BOTH access and refresh tokens so
-    //    the manual sync has a fallback if refresh_token is missing)
+    // 5. Upsert student record using a FRESH service-role client so the
+    //    query runs with service-role permissions (bypasses RLS).
+    const supabase = createServiceClient();
     const { data: upsertedStudent, error: upsertError } = await supabase
       .from("students")
       .upsert(

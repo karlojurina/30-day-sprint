@@ -67,7 +67,13 @@ export async function GET(request: NextRequest) {
     // JWT, which would then apply RLS to subsequent DB queries and hit
     // the self-referencing team_members policy → infinite recursion.
     const authClient = createServiceClient();
-    const email = userInfo.email || `${userInfo.sub}@whop.ecomtalent.com`;
+    // Always use a Whop-specific synthetic email for the Supabase Auth
+    // account, keyed by whop_user_id. This prevents collisions when a
+    // Whop account shares an email with an existing Supabase user
+    // (e.g. the team admin) — each Whop user gets a distinct auth row.
+    // The student's real email is still stored separately on the
+    // students table for display.
+    const email = `${userInfo.sub}@whop.ecomtalent.com`;
     const password = generateStudentPassword(userInfo.sub);
 
     // Try to sign in first (returning user)

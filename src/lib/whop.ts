@@ -114,17 +114,28 @@ export async function refreshWhopTokens(
 /**
  * Fetch all completed course-lesson interactions for a given Whop user.
  * Paginates through results. Uses the user's OAuth access token.
+ *
+ * Whop's API requires `course_id` (or `lesson_id`) to scope the query.
+ * We pass our course ID via WHOP_COURSE_ID env var. user_id still works
+ * as an additional filter to return only this student's interactions.
  */
 export async function fetchCompletedLessons(
   accessToken: string,
   whopUserId: string
 ): Promise<WhopLessonInteraction[]> {
+  const courseId = process.env.WHOP_COURSE_ID;
+  if (!courseId) {
+    throw new Error(
+      "WHOP_COURSE_ID env var not set — needed to query course_lesson_interactions"
+    );
+  }
+
   const all: WhopLessonInteraction[] = [];
   let cursor: string | undefined;
-  // Cap at 5 pages to avoid runaway loops
   for (let page = 0; page < 5; page++) {
     const params = new URLSearchParams({
       completed: "true",
+      course_id: courseId,
       user_id: whopUserId,
       first: "100",
     });

@@ -135,10 +135,14 @@ export function TaskDetailSheet({
               {isWatch ? (
                 <div className="space-y-3">
                   <div className="p-4 rounded-xl bg-[var(--color-bg-elevated)] border border-[var(--color-border)] text-[13px] text-[var(--color-text-tertiary)] leading-relaxed">
-                    Watch tasks unlock automatically when you finish the course module on Whop.
+                    Watch tasks auto-check when you finish the lesson in Whop&apos;s player. Or hit &quot;sync Whop&quot; in the header after watching.
                   </div>
                   <a
-                    href="https://whop.com/ecomtalent"
+                    href={
+                      task.whop_lesson_id
+                        ? `https://whop.com/joined/ecomtalent/knowledge-KBhMkENW27qoZB/app/courses/cors_6cYEj5qoUcmbcpSryUrfiR/lessons/${task.whop_lesson_id}/`
+                        : "https://whop.com/ecomtalent"
+                    }
                     target="_blank"
                     rel="noopener"
                     className="
@@ -156,7 +160,7 @@ export function TaskDetailSheet({
                     >
                       <path d="M8 5v14l11-7z" />
                     </svg>
-                    Open in Whop
+                    Open lesson in Whop
                   </a>
                 </div>
               ) : (

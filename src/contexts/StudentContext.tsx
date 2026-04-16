@@ -11,11 +11,23 @@ import {
 } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "./AuthContext";
-import type { Task, StudentTaskCompletion, DailyNote, DiscountRequest } from "@/types/database";
-import { DISCOUNT_REQUIRED_TASKS } from "@/lib/constants";
+import type {
+  Task,
+  Checkpoint,
+  StudentTaskCompletion,
+  DailyNote,
+  DiscountRequest,
+} from "@/types/database";
+
+export interface CheckpointProgress {
+  completed: number;
+  total: number;
+  isComplete: boolean;
+}
 
 interface StudentContextType {
   tasks: Task[];
+  checkpoints: Checkpoint[];
   completions: StudentTaskCompletion[];
   todayNote: DailyNote | null;
   discountRequest: DiscountRequest | null;
@@ -24,10 +36,12 @@ interface StudentContextType {
   // Derived state
   completedTaskIds: Set<string>;
   weekProgress: Record<number, { completed: number; total: number }>;
+  checkpointProgress: Record<string, CheckpointProgress>;
   overallProgress: number;
   activationPoints: { ap1: boolean; ap2: boolean; ap3: boolean };
   discountEligible: boolean;
-  discountTasksCompleted: number;
+  discountCheckpointsCompleted: number;
+  discountCheckpointsTotal: number;
 
   // Actions
   toggleTask: (taskId: string) => Promise<void>;
@@ -39,7 +53,9 @@ const StudentContext = createContext<StudentContextType | null>(null);
 
 async function getAccessToken() {
   const supabase = createClient();
-  const { data: { session } } = await supabase.auth.getSession();
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
   return session?.access_token ?? null;
 }
 
@@ -47,6 +63,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const { student } = useAuth();
 
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
   const [completions, setCompletions] = useState<StudentTaskCompletion[]>([]);
   const [todayNote, setTodayNote] = useState<DailyNote | null>(null);
   const [discountRequest, setDiscountRequest] = useState<DiscountRequest | null>(null);
@@ -75,6 +92,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
 
         const data = await res.json();
         setTasks(data.tasks);
+        setCheckpoints(data.checkpoints ?? []);
         setCompletions(data.completions);
         setTodayNote(data.todayNote);
         setDiscountRequest(data.discountRequest);
@@ -107,6 +125,25 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     return progress;
   }, [tasks, completedTaskIds]);
 
+  const checkpointProgress = useMemo(() => {
+    const progress: Record<string, CheckpointProgress> = {};
+    for (const cp of checkpoints) {
+      progress[cp.id] = { completed: 0, total: 0, isComplete: false };
+    }
+    for (const task of tasks) {
+      if (!progress[task.checkpoint_id]) continue;
+      progress[task.checkpoint_id].total++;
+      if (completedTaskIds.has(task.id)) {
+        progress[task.checkpoint_id].completed++;
+      }
+    }
+    for (const id of Object.keys(progress)) {
+      progress[id].isComplete =
+        progress[id].total > 0 && progress[id].completed === progress[id].total;
+    }
+    return progress;
+  }, [tasks, checkpoints, completedTaskIds]);
+
   const overallProgress = useMemo(() => {
     if (tasks.length === 0) return 0;
     return Math.round((completedTaskIds.size / tasks.length) * 100);
@@ -124,13 +161,29 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     };
   }, [tasks, completedTaskIds]);
 
-  const discountTasksCompleted = useMemo(() => {
-    return tasks.filter(
-      (t) => t.is_discount_required && completedTaskIds.has(t.id)
+  // Discount eligibility: all checkpoints up to and including the one marked
+  // is_discount_gate must be fully complete.
+  const { discountEligible, discountCheckpointsCompleted, discountCheckpointsTotal } = useMemo(() => {
+    const gateCp = checkpoints.find((c) => c.is_discount_gate);
+    if (!gateCp) {
+      return {
+        discountEligible: false,
+        discountCheckpointsCompleted: 0,
+        discountCheckpointsTotal: 0,
+      };
+    }
+    const required = checkpoints.filter(
+      (c) => c.sort_order <= gateCp.sort_order
+    );
+    const done = required.filter(
+      (c) => checkpointProgress[c.id]?.isComplete
     ).length;
-  }, [tasks, completedTaskIds]);
-
-  const discountEligible = discountTasksCompleted >= DISCOUNT_REQUIRED_TASKS;
+    return {
+      discountEligible: done === required.length,
+      discountCheckpointsCompleted: done,
+      discountCheckpointsTotal: required.length,
+    };
+  }, [checkpoints, checkpointProgress]);
 
   // Actions — all via API routes
   const toggleTask = useCallback(
@@ -262,16 +315,19 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     <StudentContext.Provider
       value={{
         tasks,
+        checkpoints,
         completions,
         todayNote,
         discountRequest,
         loading,
         completedTaskIds,
         weekProgress,
+        checkpointProgress,
         overallProgress,
         activationPoints,
         discountEligible,
-        discountTasksCompleted,
+        discountCheckpointsCompleted,
+        discountCheckpointsTotal,
         toggleTask,
         saveNote,
         requestDiscount,

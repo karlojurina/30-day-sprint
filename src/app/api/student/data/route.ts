@@ -34,30 +34,33 @@ export async function GET(request: NextRequest) {
   const today = new Date().toISOString().split("T")[0];
 
   // Fetch all student data in parallel
-  const [tasksRes, completionsRes, noteRes, discountRes] = await Promise.all([
-    supabase.from("tasks").select("*").order("week").order("sort_order"),
-    supabase
-      .from("student_task_completions")
-      .select("*")
-      .eq("student_id", student.id),
-    supabase
-      .from("daily_notes")
-      .select("*")
-      .eq("student_id", student.id)
-      .eq("note_date", today)
-      .single(),
-    supabase
-      .from("discount_requests")
-      .select("*")
-      .eq("student_id", student.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single(),
-  ]);
+  const [tasksRes, checkpointsRes, completionsRes, noteRes, discountRes] =
+    await Promise.all([
+      supabase.from("tasks").select("*").order("week").order("sort_order"),
+      supabase.from("checkpoints").select("*").order("sort_order"),
+      supabase
+        .from("student_task_completions")
+        .select("*")
+        .eq("student_id", student.id),
+      supabase
+        .from("daily_notes")
+        .select("*")
+        .eq("student_id", student.id)
+        .eq("note_date", today)
+        .single(),
+      supabase
+        .from("discount_requests")
+        .select("*")
+        .eq("student_id", student.id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single(),
+    ]);
 
   return NextResponse.json({
     student,
     tasks: tasksRes.data ?? [],
+    checkpoints: checkpointsRes.data ?? [],
     completions: completionsRes.data ?? [],
     todayNote: noteRes.data ?? null,
     discountRequest: discountRes.data ?? null,

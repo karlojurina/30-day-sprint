@@ -10,7 +10,7 @@ interface DiscountGateProps {
 
 export function DiscountGate({ completed, required }: DiscountGateProps) {
   const { discountRequest, requestDiscount } = useStudent();
-  const isUnlocked = completed >= required;
+  const isUnlocked = required > 0 && completed >= required;
   const hasRequested = !!discountRequest;
   const hasApproved = discountRequest?.status === "approved";
   const remaining = Math.max(0, required - completed);
@@ -82,7 +82,7 @@ export function DiscountGate({ completed, required }: DiscountGateProps) {
               ? "Pending review. You'll get the code once it's approved."
               : isUnlocked
                 ? "You put the work in. Claim it now."
-                : `${remaining} more task${remaining === 1 ? "" : "s"} to unlock. Finish Week 1 and 2's required set.`}
+                : `${remaining} checkpoint${remaining === 1 ? "" : "s"} to unlock. Finish Onboarding, Foundations, and First Ads.`}
         </p>
 
         {/* Action */}

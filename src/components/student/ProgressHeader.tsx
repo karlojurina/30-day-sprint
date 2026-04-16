@@ -3,12 +3,16 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { getDayNumber } from "@/types/database";
-import { TOTAL_TASKS, DISCOUNT_REQUIRED_TASKS } from "@/lib/constants";
+import { TOTAL_TASKS } from "@/lib/constants";
 
 export function ProgressHeader() {
   const { student, signOut } = useAuth();
-  const { completedTaskIds, discountTasksCompleted, overallProgress } =
-    useStudent();
+  const {
+    completedTaskIds,
+    discountCheckpointsCompleted,
+    discountCheckpointsTotal,
+    overallProgress,
+  } = useStudent();
 
   if (!student) return null;
 
@@ -16,7 +20,7 @@ export function ProgressHeader() {
   const daysLeft = Math.max(0, 30 - dayNumber);
   const discountRemaining = Math.max(
     0,
-    DISCOUNT_REQUIRED_TASKS - discountTasksCompleted
+    discountCheckpointsTotal - discountCheckpointsCompleted
   );
   const firstName = student.name?.split(" ")[0] || "";
 
@@ -96,7 +100,7 @@ export function ProgressHeader() {
                 aria-hidden
               />
               <span className="mono-label">
-                {discountRemaining} to discount
+                {discountRemaining} checkpoint{discountRemaining === 1 ? "" : "s"} to discount
               </span>
             </div>
           ) : (

@@ -18,8 +18,20 @@ export interface Student {
   membership_status: "active" | "canceled" | "past_due" | "expired";
   joined_at: string;
   last_active_at: string;
+  whop_refresh_token: string | null;
+  last_watch_sync_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface Checkpoint {
+  id: string;
+  sort_order: number;
+  title: string;
+  subtitle: string | null;
+  theme_key: string;
+  is_discount_gate: boolean;
+  created_at: string;
 }
 
 export interface Task {
@@ -32,6 +44,8 @@ export interface Task {
   is_activation_point: boolean;
   activation_point_id: "AP1" | "AP2" | "AP3" | null;
   is_discount_required: boolean;
+  checkpoint_id: string;
+  whop_lesson_id: string | null;
   created_at: string;
 }
 

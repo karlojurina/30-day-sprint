@@ -39,8 +39,13 @@ function snakeOffset(indexInWeek: number, weekLength: number): number {
 }
 
 export function JourneyPath() {
-  const { tasks, completedTaskIds, discountTasksCompleted, toggleTask } =
-    useStudent();
+  const {
+    tasks,
+    completedTaskIds,
+    discountCheckpointsCompleted,
+    discountCheckpointsTotal,
+    toggleTask,
+  } = useStudent();
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   // Find the current task — first non-completed, non-watch task
@@ -126,8 +131,8 @@ export function JourneyPath() {
                   {task.id === discountGateInsertedAfter && (
                     <div className="mt-10 sm:mt-8">
                       <DiscountGate
-                        completed={discountTasksCompleted}
-                        required={13}
+                        completed={discountCheckpointsCompleted}
+                        required={discountCheckpointsTotal}
                       />
                     </div>
                   )}

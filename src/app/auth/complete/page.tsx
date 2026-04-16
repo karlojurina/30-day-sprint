@@ -43,10 +43,19 @@ export default function AuthCompletePage() {
   }, []);
 
   return (
-    <div className="flex items-center justify-center min-h-screen">
-      <div className="text-center space-y-2">
-        <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin mx-auto" />
-        <p className="text-sm text-text-secondary">Signing you in...</p>
+    <div className="flex items-center justify-center min-h-screen relative">
+      <div
+        aria-hidden
+        className="fixed inset-0 pointer-events-none"
+        style={{
+          background:
+            "radial-gradient(ellipse 50% 40% at 50% 50%, var(--color-accent-glow) 0%, transparent 65%)",
+          opacity: 0.3,
+        }}
+      />
+      <div className="relative text-center space-y-3">
+        <div className="w-8 h-8 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin mx-auto" />
+        <p className="mono-label-accent">Signing you in…</p>
       </div>
     </div>
   );

@@ -1,133 +1,155 @@
 "use client";
 
+import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { getDayNumber } from "@/types/database";
-import { ProgressBar } from "@/components/student/ProgressBar";
-import { PlaybookChecklist } from "@/components/student/PlaybookChecklist";
-import { DiscountTracker } from "@/components/student/DiscountTracker";
-import { DailyNoteInput } from "@/components/student/DailyNoteInput";
+import { ProgressHeader } from "@/components/student/ProgressHeader";
+import { JourneyPath } from "@/components/student/JourneyPath";
+import { DailyNoteInline } from "@/components/student/DailyNoteInline";
 import { TOTAL_TASKS } from "@/lib/constants";
 
 export default function DashboardPage() {
-  const { student, signOut } = useAuth();
+  const { student } = useAuth();
   const { overallProgress, completedTaskIds, loading } = useStudent();
 
   if (loading || !student) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+        <div className="w-8 h-8 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   const dayNumber = getDayNumber(student.joined_at);
-  const daysLeft = Math.max(0, 30 - dayNumber);
+  const firstName = student.name?.split(" ")[0] || "";
+  const remainingTasks = TOTAL_TASKS - completedTaskIds.size;
+  const isComplete = overallProgress === 100;
+
+  // Opening line, Karlo's voice, varies by state
+  const openingLine = isComplete
+    ? "Journey done. Let's talk what's next."
+    : dayNumber === 1
+      ? `You're in${firstName ? `, ${firstName}` : ""}. Let's go.`
+      : completedTaskIds.size === 0
+        ? "Still haven't started. Tap the first node."
+        : remainingTasks <= 3
+          ? "Almost there. Don't stop now."
+          : `${remainingTasks} left. Keep moving.`;
 
   return (
-    <div className="min-h-screen">
-      {/* Header */}
-      <header className="sticky top-0 z-10 bg-bg-primary/80 backdrop-blur-lg border-b border-border">
-        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {student.avatar_url ? (
-              <img
-                src={student.avatar_url}
-                alt=""
-                className="w-8 h-8 rounded-full"
-              />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-accent/15 flex items-center justify-center text-accent text-sm font-bold">
-                {(student.name || "?")[0].toUpperCase()}
-              </div>
-            )}
-            <div>
-              <p className="text-sm font-semibold">
-                {student.name || "Student"}
-              </p>
-              <p className="text-xs text-text-secondary">
-                Day {dayNumber} of 30
-                {daysLeft > 0 && ` — ${daysLeft} days left`}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={signOut}
-            className="text-xs text-text-tertiary hover:text-text-secondary transition-colors"
+    <div className="relative min-h-screen">
+      {/* Background radial glow anchored to current task area */}
+      <div
+        aria-hidden
+        className="fixed inset-0 pointer-events-none z-0"
+        style={{
+          background:
+            "radial-gradient(ellipse 50% 40% at 50% 40%, var(--color-accent-glow) 0%, transparent 60%)",
+          opacity: 0.35,
+        }}
+      />
+
+      <div className="relative z-10">
+        <ProgressHeader />
+
+        <main className="max-w-[720px] mx-auto px-5 sm:px-6 pt-10 pb-24">
+          {/* Hero */}
+          <motion.section
+            initial="hidden"
+            animate="visible"
+            variants={{
+              hidden: {},
+              visible: {
+                transition: { staggerChildren: 0.08, delayChildren: 0.05 },
+              },
+            }}
+            className="mb-12 text-center sm:text-left"
           >
-            Sign out
-          </button>
-        </div>
-      </header>
+            <motion.div
+              variants={{
+                hidden: { opacity: 0, y: 8 },
+                visible: { opacity: 1, y: 0 },
+              }}
+              transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+              className="mono-label-accent mb-3"
+            >
+              30-Day Sprint · Ad Creative
+            </motion.div>
+            <motion.h1
+              variants={{
+                hidden: { opacity: 0, y: 10 },
+                visible: { opacity: 1, y: 0 },
+              }}
+              transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+              className="display-heading text-[40px] sm:text-[56px] leading-[0.95] mb-4"
+            >
+              {openingLine}
+            </motion.h1>
+            <motion.p
+              variants={{
+                hidden: { opacity: 0, y: 10 },
+                visible: { opacity: 1, y: 0 },
+              }}
+              transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+              className="text-[15px] leading-relaxed text-[var(--color-text-secondary)] max-w-[440px] mx-auto sm:mx-0"
+            >
+              Tap a node to open it. Watch videos unlock from Whop — the rest you check off yourself.
+            </motion.p>
+          </motion.section>
 
-      {/* Main content */}
-      <main className="max-w-2xl mx-auto px-4 py-6 space-y-6">
-        {/* Overall progress */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h1 className="text-lg font-bold">30-Day Sprint</h1>
-            <span className="text-sm text-text-secondary">
-              {completedTaskIds.size}/{TOTAL_TASKS} tasks
-            </span>
-          </div>
-          <ProgressBar value={overallProgress} label="Overall progress" />
-        </div>
+          {/* The path — spine of the experience */}
+          <JourneyPath />
 
-        {/* Playbook */}
-        <PlaybookChecklist />
+          {/* Daily note */}
+          <section className="mt-16">
+            <DailyNoteInline />
+          </section>
 
-        {/* Discount tracker */}
-        <DiscountTracker />
-
-        {/* Daily notes */}
-        <DailyNoteInput />
-
-        {/* Post Month 1 content */}
-        {overallProgress === 100 && (
-          <div className="bg-bg-card border border-success/20 rounded-xl p-5 space-y-3">
-            <h3 className="text-base font-bold text-success">
-              You finished the sprint!
-            </h3>
-            <div className="text-sm text-text-secondary space-y-3 leading-relaxed">
-              <p>
-                You&apos;ve gone through the entire program, submitted action
-                items, started applying to the job board, and submitted your
-                first ad bounties. Now what?
-              </p>
-              <p className="font-semibold text-text-primary">
-                Month 1 job board mindset: Get experience, not rich.
-              </p>
-              <p>
-                If you&apos;re brand new — no prior experience working with
-                brands — your biggest win right now is simply getting hired.
-                What you&apos;re earning isn&apos;t money yet. You&apos;re
-                earning experience, knowledge, and proof that you can actually
-                do the work.
-              </p>
-              <p className="font-semibold text-text-primary">
-                Month 2+: Your bounties become your leverage.
-              </p>
-              <p>
-                Take that winning bounty. Screenshot the stats. Add it to your
-                portfolio. Now when you apply to job board posts, you&apos;re
-                not just saying &quot;I can make ads.&quot; You&apos;re saying:
-                &quot;Here&apos;s how much revenue it generated.&quot;
-              </p>
-              <p className="font-semibold text-text-primary">
-                The pattern from here:
-              </p>
-              <ul className="list-disc list-inside space-y-1 text-text-secondary">
-                <li>Keep submitting ad bounties every week</li>
-                <li>Keep applying to job board posts</li>
-                <li>Keep attending weekly calls and engaging in Discord</li>
-                <li>
-                  Watch your portfolio grow and your rates go up
-                </li>
-              </ul>
-            </div>
-          </div>
-        )}
-      </main>
+          {/* Post-completion content */}
+          {isComplete && (
+            <motion.section
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+              className="mt-16 mx-auto max-w-[560px] px-4"
+            >
+              <div className="p-6 sm:p-8 rounded-2xl bg-[var(--color-bg-card)] border border-[var(--color-accent)]/20">
+                <div className="mono-label-accent mb-3">You finished.</div>
+                <h3 className="display-heading text-[26px] mb-4">
+                  Month 1: Get experience, not rich.
+                </h3>
+                <div className="space-y-4 text-[14px] leading-relaxed text-[var(--color-text-secondary)]">
+                  <p>
+                    You went through the program, submitted action items, started applying, sent in your first bounties. Here&apos;s where it goes from here.
+                  </p>
+                  <p className="text-[var(--color-text-primary)] font-medium">
+                    If you&apos;re new — your win is getting hired.
+                  </p>
+                  <p>
+                    You&apos;re not earning money yet. You&apos;re earning experience, knowledge, and proof you can do the work.
+                  </p>
+                  <p className="text-[var(--color-text-primary)] font-medium">
+                    Month 2+: Bounties are your leverage.
+                  </p>
+                  <p>
+                    Winning bounty? Screenshot the stats. Add it to your portfolio. Now when you apply, you&apos;re not saying &quot;I can make ads.&quot; You&apos;re saying &quot;here&apos;s the revenue it generated.&quot;
+                  </p>
+                  <p className="text-[var(--color-text-primary)] font-medium">
+                    The pattern:
+                  </p>
+                  <ul className="space-y-1.5 pl-4 list-disc marker:text-[var(--color-accent)]">
+                    <li>Submit bounties every week</li>
+                    <li>Apply to job board posts</li>
+                    <li>Show up to weekly calls + Discord</li>
+                    <li>Watch your portfolio grow, rates go up</li>
+                  </ul>
+                </div>
+              </div>
+            </motion.section>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

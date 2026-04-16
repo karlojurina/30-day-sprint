@@ -1,149 +1,160 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useStudent } from "@/contexts/StudentContext";
-import { TaskNode } from "./TaskNode";
-import { WeekZone } from "./WeekZone";
+import { CheckpointNode } from "./CheckpointNode";
+import { CheckpointExpanded } from "./CheckpointExpanded";
+import { FlowingPath } from "./FlowingPath";
 import { TaskDetailSheet } from "./TaskDetailSheet";
 import { DiscountGate } from "./DiscountGate";
 import type { Task } from "@/types/database";
 
-// Karlo-voiced week framings
-const WEEK_META: Record<
-  number,
-  { title: string; subtitle: string }
-> = {
-  1: {
-    title: "Foundation + First Ads",
-    subtitle: "Setup. Get the basics in. No skipping steps.",
-  },
-  2: {
-    title: "Level Up Your Editing",
-    subtitle: "Now you sharpen. Make ads that don't look like ads.",
-  },
-  3: {
-    title: "Strategy + Job Board",
-    subtitle: "You've got the skills. Time to use them.",
-  },
-  4: {
-    title: "Ad Bounties — The Real Work",
-    subtitle: "Real briefs. Real brands. Real money on the line.",
-  },
-};
-
-function snakeOffset(indexInWeek: number, weekLength: number): number {
-  // Returns a value from -1 to 1 for horizontal offset
-  // Creates a snake: 0, 0.6, 1, 0.6, 0, -0.6, -1, -0.6, 0, ...
-  const phase = (indexInWeek / Math.max(1, weekLength - 1)) * Math.PI * 2;
-  return Math.sin(phase);
-}
-
 export function JourneyPath() {
   const {
     tasks,
+    checkpoints,
     completedTaskIds,
+    checkpointProgress,
     discountCheckpointsCompleted,
     discountCheckpointsTotal,
     toggleTask,
   } = useStudent();
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
-  // Find the current task — first non-completed, non-watch task
-  const currentTaskId = useMemo(() => {
-    for (const task of tasks) {
-      if (completedTaskIds.has(task.id)) continue;
-      if (task.task_type === "watch") continue;
-      return task.id;
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [openCheckpointId, setOpenCheckpointId] = useState<string | null>(null);
+
+  // Ref to the scroll container so FlowingPath can measure relative positions
+  const containerRef = useRef<HTMLDivElement>(null);
+  // One ref per checkpoint node for path measurement
+  const nodeRefs = useMemo(
+    () => checkpoints.map(() => ({ current: null as HTMLDivElement | null })),
+    [checkpoints]
+  );
+
+  // Find the "current" checkpoint and task
+  const currentCheckpointId = useMemo(() => {
+    for (const cp of checkpoints) {
+      if (!checkpointProgress[cp.id]?.isComplete) return cp.id;
     }
-    // If everything that's checkable is done, surface the first incomplete watch task
-    for (const task of tasks) {
-      if (!completedTaskIds.has(task.id)) return task.id;
+    return checkpoints[checkpoints.length - 1]?.id ?? null;
+  }, [checkpoints, checkpointProgress]);
+
+  const currentTaskId = useMemo(() => {
+    // First non-completed, non-watch task in the current checkpoint — or any
+    // non-completed task if all "action" tasks in current cp are done
+    const currentCpTasks = tasks
+      .filter((t) => t.checkpoint_id === currentCheckpointId)
+      .sort((a, b) => a.sort_order - b.sort_order);
+    for (const t of currentCpTasks) {
+      if (completedTaskIds.has(t.id)) continue;
+      if (t.task_type === "watch") continue;
+      return t.id;
+    }
+    for (const t of currentCpTasks) {
+      if (!completedTaskIds.has(t.id)) return t.id;
     }
     return null;
-  }, [tasks, completedTaskIds]);
+  }, [tasks, currentCheckpointId, completedTaskIds]);
 
-  // Group tasks by week
-  const tasksByWeek = useMemo(() => {
-    const grouped: Record<number, Task[]> = {};
-    for (const task of tasks) {
-      if (!grouped[task.week]) grouped[task.week] = [];
-      grouped[task.week].push(task);
+  // Tasks grouped by checkpoint (preserve sort order)
+  const tasksByCheckpoint = useMemo(() => {
+    const grouped: Record<string, Task[]> = {};
+    for (const cp of checkpoints) {
+      grouped[cp.id] = [];
     }
-    // Sort each week by sort_order
-    for (const week in grouped) {
-      grouped[week].sort((a, b) => a.sort_order - b.sort_order);
+    for (const task of tasks) {
+      if (!grouped[task.checkpoint_id]) continue;
+      grouped[task.checkpoint_id].push(task);
+    }
+    for (const id of Object.keys(grouped)) {
+      grouped[id].sort((a, b) => a.sort_order - b.sort_order);
     }
     return grouped;
-  }, [tasks]);
+  }, [tasks, checkpoints]);
 
-  const weeks = Object.keys(tasksByWeek)
-    .map(Number)
-    .sort((a, b) => a - b);
+  // How many checkpoints (indexes) are "completed so far" — used by FlowingPath
+  const completedThroughIndex = useMemo(() => {
+    let lastComplete = -1;
+    checkpoints.forEach((cp, i) => {
+      if (checkpointProgress[cp.id]?.isComplete) lastComplete = i;
+    });
+    return lastComplete;
+  }, [checkpoints, checkpointProgress]);
 
-  // Find where the discount gate should be rendered
-  // It appears after the last required task (13 total across Weeks 1-2)
-  const discountGateInsertedAfter = useMemo(() => {
-    let requiredSeen = 0;
-    for (const task of tasks) {
-      if (task.is_discount_required) {
-        requiredSeen++;
-        if (requiredSeen === 13) return task.id;
-      }
-    }
-    return null;
-  }, [tasks]);
+  // Discount gate — render after the checkpoint with is_discount_gate
+  const discountGateAfterId = useMemo(
+    () => checkpoints.find((c) => c.is_discount_gate)?.id ?? null,
+    [checkpoints]
+  );
+
+  if (checkpoints.length === 0) {
+    return (
+      <div className="py-16 text-center">
+        <p className="text-[var(--color-text-tertiary)] text-sm">
+          Loading your journey…
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="relative">
-      {/* SVG vertical connector line (subtle, behind nodes) */}
-      <div
-        aria-hidden
-        className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-px bg-gradient-to-b from-transparent via-[var(--color-border-strong)] to-transparent pointer-events-none"
+    <div ref={containerRef} className="relative">
+      {/* Organic flowing path behind the nodes */}
+      <FlowingPath
+        nodeRefs={nodeRefs}
+        containerRef={containerRef}
+        completedThroughIndex={completedThroughIndex}
       />
 
-      {/* Path content */}
-      <div className="relative flex flex-col gap-10 sm:gap-7 py-6">
-        {weeks.map((weekNum) => {
-          const weekTasks = tasksByWeek[weekNum];
-          const weekCompleted = weekTasks.filter((t) =>
-            completedTaskIds.has(t.id)
-          ).length;
+      {/* Checkpoints stack */}
+      <div className="relative flex flex-col items-center gap-20 sm:gap-24 py-8">
+        {checkpoints.map((cp, i) => {
+          const progress = checkpointProgress[cp.id] ?? {
+            completed: 0,
+            total: 0,
+            isComplete: false,
+          };
+          const isOpen = openCheckpointId === cp.id;
+          const isCurrent = cp.id === currentCheckpointId && !progress.isComplete;
 
           return (
-            <div key={weekNum} className="flex flex-col gap-10 sm:gap-8">
-              <WeekZone
-                weekNumber={weekNum}
-                title={WEEK_META[weekNum]?.title ?? `Week ${weekNum}`}
-                subtitle={WEEK_META[weekNum]?.subtitle ?? ""}
-                completed={weekCompleted}
-                total={weekTasks.length}
+            <div key={cp.id} className="relative w-full flex flex-col items-center">
+              <CheckpointNode
+                ref={nodeRefs[i] as React.RefObject<HTMLDivElement>}
+                checkpoint={cp}
+                completed={progress.completed}
+                total={progress.total}
+                isComplete={progress.isComplete}
+                isCurrent={isCurrent}
+                isOpen={isOpen}
+                indexInPath={i}
+                onToggle={() =>
+                  setOpenCheckpointId((prev) => (prev === cp.id ? null : cp.id))
+                }
               />
-              {weekTasks.map((task, idx) => (
-                <div key={task.id}>
-                  <TaskNode
-                    task={task}
-                    isCompleted={completedTaskIds.has(task.id)}
-                    isCurrent={task.id === currentTaskId}
-                    offsetX={snakeOffset(idx, weekTasks.length)}
-                    onClick={() => setSelectedTask(task)}
+
+              <CheckpointExpanded
+                isOpen={isOpen}
+                tasks={tasksByCheckpoint[cp.id] ?? []}
+                completedTaskIds={completedTaskIds}
+                currentTaskId={currentTaskId}
+                onTaskClick={(t) => setSelectedTask(t)}
+              />
+
+              {/* Discount gate rendered just after its checkpoint */}
+              {cp.id === discountGateAfterId && (
+                <div className="mt-14 w-full">
+                  <DiscountGate
+                    completed={discountCheckpointsCompleted}
+                    required={discountCheckpointsTotal}
                   />
-                  {/* Insert discount gate after the 13th required task */}
-                  {task.id === discountGateInsertedAfter && (
-                    <div className="mt-10 sm:mt-8">
-                      <DiscountGate
-                        completed={discountCheckpointsCompleted}
-                        required={discountCheckpointsTotal}
-                      />
-                    </div>
-                  )}
                 </div>
-              ))}
+              )}
             </div>
           );
         })}
       </div>
 
-      {/* Task detail sheet */}
       <TaskDetailSheet
         task={selectedTask}
         isCompleted={

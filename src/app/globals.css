@@ -125,6 +125,18 @@ body::before {
   animation: pulse-ring 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 
+/* Pulse ring for SVG paths (used by CheckpointNode) */
+@keyframes pulse-ring-svg {
+  0%, 100% {
+    opacity: 0.6;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0;
+    transform: scale(1.12);
+  }
+}
+
 /* Soft warm radial glow */
 .warm-glow::before {
   content: "";

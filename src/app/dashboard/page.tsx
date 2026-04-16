@@ -1,17 +1,65 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
-import { getDayNumber } from "@/types/database";
+import { getDayNumber, type Checkpoint } from "@/types/database";
 import { ProgressHeader } from "@/components/student/ProgressHeader";
 import { JourneyPath } from "@/components/student/JourneyPath";
 import { DailyNoteInline } from "@/components/student/DailyNoteInline";
+import { CheckpointCelebration } from "@/components/student/CheckpointCelebration";
 import { TOTAL_TASKS } from "@/lib/constants";
+
+function celebrationKey(studentId: string, checkpointId: string) {
+  return `ecom_celebrated_${studentId}_${checkpointId}`;
+}
 
 export default function DashboardPage() {
   const { student } = useAuth();
-  const { overallProgress, completedTaskIds, loading } = useStudent();
+  const {
+    overallProgress,
+    completedTaskIds,
+    loading,
+    checkpoints,
+    checkpointProgress,
+  } = useStudent();
+
+  // Celebration state
+  const [celebrating, setCelebrating] = useState<Checkpoint | null>(null);
+  // Track which checkpoints we've already acknowledged on THIS mount to avoid
+  // re-firing while the user toggles tasks during a session
+  const seenCompleteRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!student) return;
+    // Seed the "already complete" set from checkpoints that were complete
+    // on mount — we never celebrate for a pre-existing completion
+    if (seenCompleteRef.current.size === 0) {
+      for (const cp of checkpoints) {
+        if (checkpointProgress[cp.id]?.isComplete) {
+          seenCompleteRef.current.add(cp.id);
+        }
+      }
+      return;
+    }
+
+    // Detect NEW completions
+    for (const cp of checkpoints) {
+      if (!checkpointProgress[cp.id]?.isComplete) continue;
+      if (seenCompleteRef.current.has(cp.id)) continue;
+      // New completion — check localStorage for persistent dedupe
+      const key = celebrationKey(student.id, cp.id);
+      if (localStorage.getItem(key)) {
+        seenCompleteRef.current.add(cp.id);
+        continue;
+      }
+      localStorage.setItem(key, new Date().toISOString());
+      seenCompleteRef.current.add(cp.id);
+      setCelebrating(cp);
+      break; // only one celebration at a time
+    }
+  }, [student, checkpoints, checkpointProgress]);
 
   if (loading || !student) {
     return (
@@ -26,7 +74,6 @@ export default function DashboardPage() {
   const remainingTasks = TOTAL_TASKS - completedTaskIds.size;
   const isComplete = overallProgress === 100;
 
-  // Opening line, Karlo's voice, varies by state
   const openingLine = isComplete
     ? "Journey done. Let's talk what's next."
     : dayNumber === 1
@@ -39,14 +86,14 @@ export default function DashboardPage() {
 
   return (
     <div className="relative min-h-screen">
-      {/* Background radial glow anchored to current task area */}
+      {/* Background radial glow */}
       <div
         aria-hidden
         className="fixed inset-0 pointer-events-none z-0"
         style={{
           background:
-            "radial-gradient(ellipse 50% 40% at 50% 40%, var(--color-accent-glow) 0%, transparent 60%)",
-          opacity: 0.35,
+            "radial-gradient(ellipse 50% 40% at 50% 30%, var(--color-accent-glow) 0%, transparent 60%)",
+          opacity: 0.3,
         }}
       />
 
@@ -94,19 +141,16 @@ export default function DashboardPage() {
               transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
               className="text-[15px] leading-relaxed text-[var(--color-text-secondary)] max-w-[440px] mx-auto sm:mx-0"
             >
-              Tap a node to open it. Watch videos unlock from Whop — the rest you check off yourself.
+              Tap a checkpoint to see its tasks. Watch videos sync from Whop — the rest you check off yourself.
             </motion.p>
           </motion.section>
 
-          {/* The path — spine of the experience */}
           <JourneyPath />
 
-          {/* Daily note */}
           <section className="mt-16">
             <DailyNoteInline />
           </section>
 
-          {/* Post-completion content */}
           {isComplete && (
             <motion.section
               initial={{ opacity: 0, y: 20 }}
@@ -150,6 +194,12 @@ export default function DashboardPage() {
           )}
         </main>
       </div>
+
+      {/* Celebration overlay — fires once per checkpoint per student */}
+      <CheckpointCelebration
+        checkpoint={celebrating}
+        onDismiss={() => setCelebrating(null)}
+      />
     </div>
   );
 }

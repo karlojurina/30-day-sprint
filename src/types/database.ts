@@ -18,8 +18,11 @@ export interface Student {
   membership_status: "active" | "canceled" | "past_due" | "expired";
   joined_at: string;
   last_active_at: string;
+  whop_access_token: string | null;
   whop_refresh_token: string | null;
   last_watch_sync_at: string | null;
+  whop_last_sync_error: string | null;
+  whop_last_sync_error_at: string | null;
   created_at: string;
   updated_at: string;
 }

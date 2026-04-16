@@ -95,7 +95,8 @@ export async function GET(request: NextRequest) {
       userId = signInData.user.id;
     }
 
-    // 5. Upsert student record (also persist refresh_token for later sync)
+    // 5. Upsert student record (persist BOTH access and refresh tokens so
+    //    the manual sync has a fallback if refresh_token is missing)
     const { data: upsertedStudent, error: upsertError } = await supabase
       .from("students")
       .upsert(
@@ -107,6 +108,7 @@ export async function GET(request: NextRequest) {
           avatar_url: userInfo.picture,
           discord_username: userInfo.username,
           last_active_at: new Date().toISOString(),
+          whop_access_token: tokens.access_token ?? null,
           whop_refresh_token: tokens.refresh_token ?? null,
         },
         { onConflict: "whop_user_id" }
@@ -118,16 +120,27 @@ export async function GET(request: NextRequest) {
       console.error("Student upsert failed:", upsertError);
     }
 
-    // 5b. Fire-and-forget initial watch-progress sync. Don't block the
-    // redirect on this — a failure here shouldn't prevent login.
+    // 5b. Initial watch-progress sync with a short timeout. We don't want
+    //     to block the redirect forever, but we do want to capture Whop
+    //     errors into whop_last_sync_error so they're visible in the UI.
     if (upsertedStudent?.id) {
-      syncWatchProgress({
+      const syncPromise = syncWatchProgress({
         studentId: upsertedStudent.id,
         whopUserId: userInfo.sub,
         accessToken: tokens.access_token,
-      }).catch((err) => {
-        console.error("Initial watch sync failed (non-blocking):", err);
       });
+      const timeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), 2500)
+      );
+      // Whichever finishes first — sync result or timeout. Errors are
+      // already persisted to DB inside syncWatchProgress's catch.
+      await Promise.race([
+        syncPromise.catch((err) => {
+          console.error("Initial sync failed:", err);
+          return null;
+        }),
+        timeoutPromise,
+      ]);
     }
 
     // 6. Create a session for the browser

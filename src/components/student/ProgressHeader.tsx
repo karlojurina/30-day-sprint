@@ -17,6 +17,7 @@ export function ProgressHeader() {
   } = useStudent();
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [syncReAuth, setSyncReAuth] = useState(false);
 
   if (!student) return null;
 
@@ -24,10 +25,15 @@ export function ProgressHeader() {
     if (syncing) return;
     setSyncing(true);
     setSyncMessage(null);
+    setSyncReAuth(false);
     const result = await refreshWatchProgress();
     setSyncing(false);
     setSyncMessage(result.message);
-    setTimeout(() => setSyncMessage(null), 3000);
+    setSyncReAuth(Boolean(result.reAuth));
+    // Sticky messages if they hint at re-auth; otherwise auto-dismiss
+    if (!result.reAuth) {
+      setTimeout(() => setSyncMessage(null), 5000);
+    }
   };
 
   const dayNumber = getDayNumber(student.joined_at);
@@ -114,9 +120,27 @@ export function ProgressHeader() {
           </div>
         </div>
 
-        {/* Sync status message (ephemeral) */}
+        {/* Sync status message (ephemeral; sticky if re-auth needed) */}
         {syncMessage && (
-          <div className="mb-2 mono-label-accent">{syncMessage}</div>
+          <div className="mb-2 flex items-center gap-2 flex-wrap">
+            <span
+              className={
+                syncReAuth
+                  ? "text-[12px] text-[var(--color-danger)]"
+                  : "mono-label-accent"
+              }
+            >
+              {syncMessage}
+            </span>
+            {syncReAuth && (
+              <a
+                href="/api/auth/whop/authorize"
+                className="mono-label-accent underline hover:opacity-80"
+              >
+                Re-authenticate →
+              </a>
+            )}
+          </div>
         )}
 
         {/* Progress row: overall + discount status */}

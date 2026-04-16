@@ -47,7 +47,11 @@ interface StudentContextType {
   toggleTask: (taskId: string) => Promise<void>;
   saveNote: (content: string) => Promise<void>;
   requestDiscount: () => Promise<void>;
-  refreshWatchProgress: () => Promise<{ synced: number; message: string }>;
+  refreshWatchProgress: () => Promise<{
+    synced: number;
+    message: string;
+    reAuth?: boolean;
+  }>;
 }
 
 const StudentContext = createContext<StudentContextType | null>(null);
@@ -301,10 +305,13 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       });
 
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Unknown error" }));
+        const err = await res
+          .json()
+          .catch(() => ({ error: "Unknown error", reAuth: false }));
         return {
           synced: 0,
           message: err.error || "Sync failed",
+          reAuth: Boolean(err.reAuth),
         };
       }
 
@@ -321,13 +328,17 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         setCompletions(fresh.completions);
       }
 
-      return {
-        synced: data.syncedCount ?? 0,
-        message:
-          data.syncedCount > 0
-            ? `Synced ${data.syncedCount} lesson${data.syncedCount === 1 ? "" : "s"} from Whop.`
-            : "All up to date.",
-      };
+      const synced = data.syncedCount ?? 0;
+      const fetched = data.fetchedCount ?? 0;
+      let message: string;
+      if (synced > 0) {
+        message = `Synced ${synced} lesson${synced === 1 ? "" : "s"} from Whop.`;
+      } else if (fetched > 0) {
+        message = `Found ${fetched} completion${fetched === 1 ? "" : "s"} on Whop, but none matched a lesson ID in the app.`;
+      } else {
+        message = "All up to date.";
+      }
+      return { synced, message };
     } catch {
       return { synced: 0, message: "Network error" };
     }

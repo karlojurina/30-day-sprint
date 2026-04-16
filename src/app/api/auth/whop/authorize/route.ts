@@ -22,7 +22,7 @@ export async function GET() {
     response_type: "code",
     client_id: process.env.WHOP_CLIENT_ID!,
     redirect_uri: redirectUri,
-    scope: "openid profile email",
+    scope: "openid profile email course_analytics:read",
     state,
     nonce,
     code_challenge: codeChallenge,

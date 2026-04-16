@@ -7,6 +7,7 @@ import {
   generateStudentPassword,
 } from "@/lib/whop";
 import { unsignState } from "@/lib/pkce";
+import { syncWatchProgress } from "@/app/api/student/_lib/watch-sync";
 import { createClient } from "@supabase/supabase-js";
 
 export async function GET(request: NextRequest) {
@@ -94,22 +95,39 @@ export async function GET(request: NextRequest) {
       userId = signInData.user.id;
     }
 
-    // 5. Upsert student record
-    const { error: upsertError } = await supabase.from("students").upsert(
-      {
-        whop_user_id: userInfo.sub,
-        supabase_user_id: userId,
-        email: userInfo.email,
-        name: userInfo.name,
-        avatar_url: userInfo.picture,
-        discord_username: userInfo.username,
-        last_active_at: new Date().toISOString(),
-      },
-      { onConflict: "whop_user_id" }
-    );
+    // 5. Upsert student record (also persist refresh_token for later sync)
+    const { data: upsertedStudent, error: upsertError } = await supabase
+      .from("students")
+      .upsert(
+        {
+          whop_user_id: userInfo.sub,
+          supabase_user_id: userId,
+          email: userInfo.email,
+          name: userInfo.name,
+          avatar_url: userInfo.picture,
+          discord_username: userInfo.username,
+          last_active_at: new Date().toISOString(),
+          whop_refresh_token: tokens.refresh_token ?? null,
+        },
+        { onConflict: "whop_user_id" }
+      )
+      .select("id")
+      .single();
 
     if (upsertError) {
       console.error("Student upsert failed:", upsertError);
+    }
+
+    // 5b. Fire-and-forget initial watch-progress sync. Don't block the
+    // redirect on this — a failure here shouldn't prevent login.
+    if (upsertedStudent?.id) {
+      syncWatchProgress({
+        studentId: upsertedStudent.id,
+        whopUserId: userInfo.sub,
+        accessToken: tokens.access_token,
+      }).catch((err) => {
+        console.error("Initial watch sync failed (non-blocking):", err);
+      });
     }
 
     // 6. Create a session for the browser

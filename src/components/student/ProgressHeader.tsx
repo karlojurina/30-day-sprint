@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { getDayNumber } from "@/types/database";
@@ -12,9 +13,22 @@ export function ProgressHeader() {
     discountCheckpointsCompleted,
     discountCheckpointsTotal,
     overallProgress,
+    refreshWatchProgress,
   } = useStudent();
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
   if (!student) return null;
+
+  const onSync = async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncMessage(null);
+    const result = await refreshWatchProgress();
+    setSyncing(false);
+    setSyncMessage(result.message);
+    setTimeout(() => setSyncMessage(null), 3000);
+  };
 
   const dayNumber = getDayNumber(student.joined_at);
   const daysLeft = Math.max(0, 30 - dayNumber);
@@ -63,13 +77,47 @@ export function ProgressHeader() {
               </p>
             </div>
           </div>
-          <button
-            onClick={signOut}
-            className="mono-label hover:text-[var(--color-text-primary)] transition-colors"
-          >
-            Sign out
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              onClick={onSync}
+              disabled={syncing}
+              className={`mono-label flex items-center gap-1.5 transition-colors ${
+                syncing
+                  ? "opacity-60"
+                  : "hover:text-[var(--color-text-primary)]"
+              }`}
+              title="Pull your Whop course progress"
+            >
+              <svg
+                className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`}
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                />
+              </svg>
+              <span className="hidden sm:inline">
+                {syncing ? "syncing" : "sync Whop"}
+              </span>
+            </button>
+            <button
+              onClick={signOut}
+              className="mono-label hover:text-[var(--color-text-primary)] transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
+
+        {/* Sync status message (ephemeral) */}
+        {syncMessage && (
+          <div className="mb-2 mono-label-accent">{syncMessage}</div>
+        )}
 
         {/* Progress row: overall + discount status */}
         <div className="flex items-center gap-3">

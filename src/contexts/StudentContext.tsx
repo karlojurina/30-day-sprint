@@ -47,6 +47,7 @@ interface StudentContextType {
   toggleTask: (taskId: string) => Promise<void>;
   saveNote: (content: string) => Promise<void>;
   requestDiscount: () => Promise<void>;
+  refreshWatchProgress: () => Promise<{ synced: number; message: string }>;
 }
 
 const StudentContext = createContext<StudentContextType | null>(null);
@@ -287,6 +288,51 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     [student]
   );
 
+  const refreshWatchProgress = useCallback(async () => {
+    if (!student) return { synced: 0, message: "Not logged in" };
+
+    const token = await getAccessToken();
+    if (!token) return { synced: 0, message: "Session expired" };
+
+    try {
+      const res = await fetch("/api/student/refresh-watch-sync", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Unknown error" }));
+        return {
+          synced: 0,
+          message: err.error || "Sync failed",
+        };
+      }
+
+      const data = await res.json();
+
+      // Re-fetch all student data to pick up the new completions
+      const dataRes = await fetch("/api/student/data", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (dataRes.ok) {
+        const fresh = await dataRes.json();
+        setTasks(fresh.tasks);
+        setCheckpoints(fresh.checkpoints ?? []);
+        setCompletions(fresh.completions);
+      }
+
+      return {
+        synced: data.syncedCount ?? 0,
+        message:
+          data.syncedCount > 0
+            ? `Synced ${data.syncedCount} lesson${data.syncedCount === 1 ? "" : "s"} from Whop.`
+            : "All up to date.",
+      };
+    } catch {
+      return { synced: 0, message: "Network error" };
+    }
+  }, [student]);
+
   const requestDiscount = useCallback(async () => {
     if (!student || !discountEligible) return;
 
@@ -331,6 +377,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         toggleTask,
         saveNote,
         requestDiscount,
+        refreshWatchProgress,
       }}
     >
       {children}

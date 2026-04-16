@@ -9,6 +9,8 @@ import type {
   WhopUserInfo,
   WhopPromoCodeRequest,
   WhopPromoCodeResponse,
+  WhopLessonInteraction,
+  WhopLessonInteractionsResponse,
 } from "@/types/whop";
 
 /**
@@ -81,6 +83,75 @@ export function generateStudentPassword(whopUserId: string): string {
   return createHmac("sha256", process.env.STUDENT_AUTH_SECRET!)
     .update(whopUserId)
     .digest("hex");
+}
+
+/**
+ * Refresh a Whop access token using a stored refresh_token. Used by the
+ * watch-sync endpoint to re-poll lesson progress without forcing the student
+ * to log back in.
+ */
+export async function refreshWhopTokens(
+  refreshToken: string
+): Promise<WhopTokenResponse> {
+  const res = await fetch(WHOP_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: process.env.WHOP_CLIENT_ID!,
+    }),
+  });
+
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Whop token refresh failed: ${error}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Fetch all completed course-lesson interactions for a given Whop user.
+ * Paginates through results. Uses the user's OAuth access token.
+ */
+export async function fetchCompletedLessons(
+  accessToken: string,
+  whopUserId: string
+): Promise<WhopLessonInteraction[]> {
+  const all: WhopLessonInteraction[] = [];
+  let cursor: string | undefined;
+  // Cap at 5 pages to avoid runaway loops
+  for (let page = 0; page < 5; page++) {
+    const params = new URLSearchParams({
+      completed: "true",
+      user_id: whopUserId,
+      first: "100",
+    });
+    if (cursor) params.set("after", cursor);
+
+    const res = await fetch(
+      `${WHOP_API_BASE}/course_lesson_interactions?${params}`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    );
+
+    if (!res.ok) {
+      const error = await res.text();
+      throw new Error(
+        `Whop lesson interactions fetch failed (${res.status}): ${error}`
+      );
+    }
+
+    const data = (await res.json()) as WhopLessonInteractionsResponse;
+    all.push(...(data.data ?? []));
+    if (!data.page_info?.has_next_page) break;
+    cursor = data.page_info.end_cursor;
+    if (!cursor) break;
+  }
+
+  return all;
 }
 
 /**

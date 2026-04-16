@@ -141,7 +141,7 @@ export default function DashboardPage() {
               transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
               className="text-[15px] leading-relaxed text-[var(--color-text-secondary)] max-w-[440px] mx-auto sm:mx-0"
             >
-              Tap a checkpoint to see its tasks. Watch videos sync from Whop — the rest you check off yourself.
+              Tap any lesson to open it. Watch videos sync automatically from Whop — action items you check off yourself.
             </motion.p>
           </motion.section>
 

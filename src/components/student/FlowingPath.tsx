@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
+import { motion, useScroll, useTransform } from "framer-motion";
+import type { PathNode } from "@/lib/path-layout";
 
 interface FlowingPathProps {
-  /** Refs to the checkpoint node wrappers, in order */
-  nodeRefs: RefObject<HTMLDivElement | null>[];
-  /** Container ref so we measure relative to it */
-  containerRef: RefObject<HTMLDivElement | null>;
-  /** Which index is the first INCOMPLETE checkpoint — everything before glows */
+  nodes: PathNode[];
+  containerWidth: number;
+  totalHeight: number;
+  /** Index up to which the path should be "completed" (highlighted) */
   completedThroughIndex: number;
+  scrollContainerRef: React.RefObject<HTMLDivElement | null>;
 }
 
 interface Point {
@@ -16,78 +18,81 @@ interface Point {
   y: number;
 }
 
+/**
+ * SVG path drawn through all nodes (checkpoints AND lessons) on the
+ * path container. Renders two strokes:
+ *   1. A muted dashed base line (all nodes).
+ *   2. A bright accent overlay that draws via scroll progress — so
+ *      as the user scrolls the page, the path fills in behind them.
+ *
+ * Receives computed (x, y) from path-layout.ts instead of measuring
+ * DOM refs. This keeps the path guaranteed aligned with the nodes.
+ */
 export function FlowingPath({
-  nodeRefs,
-  containerRef,
+  nodes,
+  containerWidth,
+  totalHeight,
   completedThroughIndex,
+  scrollContainerRef,
 }: FlowingPathProps) {
-  const [points, setPoints] = useState<Point[]>([]);
-  const [size, setSize] = useState({ width: 0, height: 0 });
-  const svgRef = useRef<SVGSVGElement>(null);
+  const pathRef = useRef<SVGPathElement>(null);
+  const completedPathRef = useRef<SVGPathElement>(null);
+  const [pathLength, setPathLength] = useState(0);
 
-  const recompute = () => {
-    const container = containerRef.current;
-    if (!container) return;
-    const cRect = container.getBoundingClientRect();
-    const newPoints: Point[] = [];
-    for (const ref of nodeRefs) {
-      const el = ref.current;
-      if (!el) continue;
-      const r = el.getBoundingClientRect();
-      newPoints.push({
-        x: r.left + r.width / 2 - cRect.left,
-        y: r.top + r.height / 2 - cRect.top,
-      });
-    }
-    setPoints(newPoints);
-    setSize({ width: cRect.width, height: cRect.height });
-  };
+  // Scroll-driven progress: 0 at top of container, 1 at bottom of viewport reaching container bottom
+  const { scrollYProgress } = useScroll({
+    target: scrollContainerRef,
+    offset: ["start end", "end start"],
+  });
 
-  useLayoutEffect(() => {
-    recompute();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeRefs.length]);
+  // We want the path to "fill in" from top to bottom as the user scrolls.
+  // At scrollYProgress=0 (not yet visible): dashoffset = full length (hidden)
+  // At scrollYProgress=0.5ish (middle visible): dashoffset = ~half (drawing)
+  // At scrollYProgress=1 (past): dashoffset = 0 (fully drawn)
+  const rawScrollDash = useTransform(
+    scrollYProgress,
+    [0, 0.2, 0.9],
+    [pathLength, pathLength * 0.85, 0]
+  );
 
+  // "Completion" dashoffset — reveal path up through `completedThroughIndex`
+  // Each node is 1 / (nodes.length - 1) of the way along.
+  const completedFraction =
+    nodes.length <= 1
+      ? 0
+      : Math.max(0, completedThroughIndex + 1) / nodes.length;
+  const completedDash = pathLength - pathLength * completedFraction;
+
+  // Combine: completed segment always drawn, scrolling segment draws ahead
+  // Use the smaller dashoffset (more visible) of the two.
+  const effectiveDash = useTransform(rawScrollDash, (v) =>
+    Math.min(v, completedDash)
+  );
+
+  // Measure path length on mount / resize
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const observer = new ResizeObserver(() => recompute());
-    if (containerRef.current) observer.observe(containerRef.current);
-    for (const ref of nodeRefs) {
-      if (ref.current) observer.observe(ref.current);
+    if (pathRef.current) {
+      setPathLength(pathRef.current.getTotalLength());
     }
-    window.addEventListener("resize", recompute);
-    // Recompute periodically for the first 2 seconds to catch expansion transitions
-    const id = setInterval(recompute, 200);
-    const stop = setTimeout(() => clearInterval(id), 2000);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", recompute);
-      clearInterval(id);
-      clearTimeout(stop);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [nodes, containerWidth]);
 
-  if (points.length < 2) return null;
+  if (nodes.length < 2 || !containerWidth) return null;
 
-  // Build the full flowing path
+  const centerX = containerWidth / 2;
+  const points: Point[] = nodes.map((n) => ({
+    x: centerX + n.x,
+    y: n.y + 60, // center of a 120px checkpoint shape (lesson pills are smaller; approx ok)
+  }));
+
   const fullPath = buildBezier(points);
-
-  // Build the "completed so far" segment
-  const completedPath =
-    completedThroughIndex > 0
-      ? buildBezier(points.slice(0, Math.min(completedThroughIndex + 1, points.length)))
-      : null;
 
   return (
     <svg
-      ref={svgRef}
       aria-hidden
       className="absolute inset-0 pointer-events-none"
-      width={size.width}
-      height={size.height}
-      viewBox={`0 0 ${size.width} ${size.height}`}
-      preserveAspectRatio="none"
+      width={containerWidth}
+      height={totalHeight}
+      viewBox={`0 0 ${containerWidth} ${totalHeight}`}
       style={{ zIndex: 0 }}
     >
       <defs>
@@ -101,8 +106,9 @@ export function FlowingPath({
         </linearGradient>
       </defs>
 
-      {/* Base muted path (all segments) */}
+      {/* Base path — muted dashed line through all nodes */}
       <path
+        ref={pathRef}
         d={fullPath}
         fill="none"
         stroke="url(#flow-muted)"
@@ -111,27 +117,27 @@ export function FlowingPath({
         strokeDasharray="8 10"
       />
 
-      {/* Completed overlay path — bright accent */}
-      {completedPath && (
-        <path
-          d={completedPath}
-          fill="none"
-          stroke="url(#flow-active)"
-          strokeWidth={3}
-          strokeLinecap="round"
-          style={{
-            filter:
-              "drop-shadow(0 0 8px var(--color-accent-glow))",
-          }}
-        />
-      )}
+      {/* Bright overlay — uses stroke-dashoffset on full length for scroll-draw */}
+      <motion.path
+        ref={completedPathRef}
+        d={fullPath}
+        fill="none"
+        stroke="url(#flow-active)"
+        strokeWidth={3}
+        strokeLinecap="round"
+        strokeDasharray={pathLength}
+        strokeDashoffset={effectiveDash}
+        style={{
+          filter: "drop-shadow(0 0 8px var(--color-accent-glow))",
+        }}
+      />
     </svg>
   );
 }
 
 /**
- * Build an organic cubic-bezier path through a series of points, with control
- * handles offset alternately to create a gentle S-curve flow between nodes.
+ * Build an organic cubic-bezier path through a series of points with
+ * handles offset alternately for a gentle flowing snake feel.
  */
 function buildBezier(pts: Point[]): string {
   if (pts.length === 0) return "";
@@ -140,13 +146,14 @@ function buildBezier(pts: Point[]): string {
     const a = pts[i];
     const b = pts[i + 1];
     const dy = b.y - a.y;
-    const curveOffset = Math.max(40, dy * 0.45);
-    // Alternate control-point side for organic feel
+    const curveOffset = Math.max(20, dy * 0.4);
     const sideA = i % 2 === 0 ? 1 : -1;
     const sideB = -sideA;
-    const cx1 = a.x + sideA * Math.min(80, Math.abs(b.x - a.x) * 0.5 + 40);
+    const cx1 =
+      a.x + sideA * Math.min(60, Math.abs(b.x - a.x) * 0.5 + 20);
     const cy1 = a.y + curveOffset;
-    const cx2 = b.x + sideB * Math.min(80, Math.abs(b.x - a.x) * 0.5 + 40);
+    const cx2 =
+      b.x + sideB * Math.min(60, Math.abs(b.x - a.x) * 0.5 + 20);
     const cy2 = b.y - curveOffset;
     d += ` C ${cx1} ${cy1}, ${cx2} ${cy2}, ${b.x} ${b.y}`;
   }

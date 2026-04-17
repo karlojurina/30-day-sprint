@@ -6,6 +6,7 @@ import {
   getCheckpointTheme,
   colorVarsForFamily,
 } from "@/lib/checkpoints";
+import { TITLES } from "@/lib/titles";
 
 interface CheckpointCardProps {
   checkpoint: Checkpoint;
@@ -132,6 +133,22 @@ export function CheckpointCard({
             <span className="mono-label-accent">in progress</span>
           )}
         </div>
+
+        {/* Unlockable title */}
+        {!isComplete && (() => {
+          const unlocksTitle = TITLES.find(
+            (t) => t.minCheckpoints === checkpoint.sort_order
+          );
+          if (!unlocksTitle) return null;
+          return (
+            <p
+              className={`mt-2 text-[11px] font-mono font-semibold uppercase tracking-wider ${side === "left" ? "" : ""}`}
+              style={{ color: "var(--color-text-quaternary)" }}
+            >
+              Unlocks: {unlocksTitle.label}
+            </p>
+          );
+        })()}
 
         {/* Karlo voice line — only for current and complete */}
         {(isCurrent || isComplete) && (

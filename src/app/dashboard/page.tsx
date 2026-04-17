@@ -4,11 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
-import { getDayNumber, type Checkpoint } from "@/types/database";
+import { getDayNumber, type Checkpoint, type StudentTitle } from "@/types/database";
 import { ProgressHeader } from "@/components/student/ProgressHeader";
 import { JourneyPath } from "@/components/student/JourneyPath";
 import { DailyNoteInline } from "@/components/student/DailyNoteInline";
 import { CheckpointCelebration } from "@/components/student/CheckpointCelebration";
+import { TitleCelebration } from "@/components/student/TitleCelebration";
+import { RewardModal } from "@/components/student/RewardModal";
+import { MonthReviewCard } from "@/components/student/MonthReviewCard";
 import { TOTAL_TASKS } from "@/lib/constants";
 
 function celebrationKey(studentId: string, checkpointId: string) {
@@ -23,13 +26,20 @@ export default function DashboardPage() {
     loading,
     checkpoints,
     checkpointProgress,
+    currentTitle,
+    pendingReward,
+    dismissReward,
+    monthReview,
   } = useStudent();
 
-  // Celebration state
+  // Checkpoint celebration state
   const [celebrating, setCelebrating] = useState<Checkpoint | null>(null);
+  // Title celebration state
+  const [celebratingTitle, setCelebratingTitle] = useState<StudentTitle | null>(null);
   // Track which checkpoints we've already acknowledged on THIS mount to avoid
   // re-firing while the user toggles tasks during a session
   const seenCompleteRef = useRef<Set<string>>(new Set());
+  const seenTitleRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!student) return;
@@ -60,6 +70,28 @@ export default function DashboardPage() {
       break; // only one celebration at a time
     }
   }, [student, checkpoints, checkpointProgress]);
+
+  // Title celebration — fires when title changes (after checkpoint celebration)
+  useEffect(() => {
+    if (!student || currentTitle === "recruit") return;
+
+    // Seed on first mount
+    if (seenTitleRef.current === null) {
+      seenTitleRef.current = currentTitle;
+      return;
+    }
+
+    // Detect title change
+    if (currentTitle !== seenTitleRef.current) {
+      const key = `ecom_title_${student.id}_${currentTitle}`;
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, new Date().toISOString());
+        // Delay slightly so checkpoint celebration shows first
+        setTimeout(() => setCelebratingTitle(currentTitle), 800);
+      }
+      seenTitleRef.current = currentTitle;
+    }
+  }, [student, currentTitle]);
 
   if (loading || !student) {
     return (
@@ -147,6 +179,13 @@ export default function DashboardPage() {
 
           <JourneyPath />
 
+          {/* Day 28 Month in Review */}
+          {monthReview && dayNumber >= 28 && (
+            <section className="mt-16">
+              <MonthReviewCard review={monthReview} />
+            </section>
+          )}
+
           <section className="mt-16">
             <DailyNoteInline />
           </section>
@@ -199,6 +238,18 @@ export default function DashboardPage() {
       <CheckpointCelebration
         checkpoint={celebrating}
         onDismiss={() => setCelebrating(null)}
+      />
+
+      {/* Title upgrade celebration — fires once per title per student */}
+      <TitleCelebration
+        title={celebratingTitle}
+        onDismiss={() => setCelebratingTitle(null)}
+      />
+
+      {/* Hidden reward loot drop */}
+      <RewardModal
+        reward={pendingReward}
+        onDismiss={dismissReward}
       />
     </div>
   );

@@ -17,7 +17,16 @@ import type {
   StudentTaskCompletion,
   DailyNote,
   DiscountRequest,
+  LessonNote,
+  StudentTitle,
+  Quiz,
+  QuizQuestion,
+  StudentQuizAttempt,
+  HiddenReward,
+  StudentReward,
+  MonthReview,
 } from "@/types/database";
+import { getTitleForCheckpoints } from "@/lib/titles";
 
 export interface CheckpointProgress {
   completed: number;
@@ -31,9 +40,10 @@ interface StudentContextType {
   completions: StudentTaskCompletion[];
   todayNote: DailyNote | null;
   discountRequest: DiscountRequest | null;
+  lessonNotes: Record<string, string>; // taskId → content
   loading: boolean;
 
-  // Derived state
+  // Derived / direct state
   completedTaskIds: Set<string>;
   weekProgress: Record<number, { completed: number; total: number }>;
   checkpointProgress: Record<string, CheckpointProgress>;
@@ -42,10 +52,27 @@ interface StudentContextType {
   discountEligible: boolean;
   discountCheckpointsCompleted: number;
   discountCheckpointsTotal: number;
+  streak: { current: number; longest: number };
+  currentTitle: StudentTitle;
+  completedCheckpointCount: number;
+  quizzes: Quiz[];
+  quizQuestions: Record<string, QuizQuestion[]>; // quizId → questions
+  quizAttempts: StudentQuizAttempt[];
+  hiddenRewards: HiddenReward[];
+  studentRewards: StudentReward[];
+  pendingReward: HiddenReward | null;
+  monthReview: MonthReview | null;
 
   // Actions
   toggleTask: (taskId: string) => Promise<void>;
   saveNote: (content: string) => Promise<void>;
+  saveLessonNote: (taskId: string, content: string) => Promise<void>;
+  submitQuiz: (
+    quizId: string,
+    selections: Record<string, number>
+  ) => Promise<{ score: number; total: number; passed: boolean; answers: { questionId: string; selectedIndex: number; correct: boolean }[] }>;
+  checkRewards: () => Promise<void>;
+  dismissReward: () => void;
   requestDiscount: () => Promise<void>;
   refreshWatchProgress: () => Promise<{
     synced: number;
@@ -72,6 +99,15 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [completions, setCompletions] = useState<StudentTaskCompletion[]>([]);
   const [todayNote, setTodayNote] = useState<DailyNote | null>(null);
   const [discountRequest, setDiscountRequest] = useState<DiscountRequest | null>(null);
+  const [lessonNotes, setLessonNotes] = useState<Record<string, string>>({});
+  const [streak, setStreak] = useState<{ current: number; longest: number }>({ current: 0, longest: 0 });
+  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
+  const [quizQuestions, setQuizQuestions] = useState<Record<string, QuizQuestion[]>>({});
+  const [quizAttempts, setQuizAttempts] = useState<StudentQuizAttempt[]>([]);
+  const [hiddenRewards, setHiddenRewards] = useState<HiddenReward[]>([]);
+  const [studentRewards, setStudentRewards] = useState<StudentReward[]>([]);
+  const [pendingReward, setPendingReward] = useState<HiddenReward | null>(null);
+  const [monthReview, setMonthReview] = useState<MonthReview | null>(null);
   const [loading, setLoading] = useState(true);
 
   // Fetch all data via API route (bypasses RLS)
@@ -101,6 +137,35 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         setCompletions(data.completions);
         setTodayNote(data.todayNote);
         setDiscountRequest(data.discountRequest);
+        setStreak({
+          current: data.student?.current_streak ?? 0,
+          longest: data.student?.longest_streak ?? 0,
+        });
+        // Build lesson notes lookup: taskId → content
+        const notesMap: Record<string, string> = {};
+        for (const note of data.lessonNotes ?? []) {
+          notesMap[note.task_id] = note.content;
+        }
+        setLessonNotes(notesMap);
+
+        // Quiz data
+        setQuizzes(data.quizzes ?? []);
+        setQuizAttempts(data.quizAttempts ?? []);
+        // Group questions by quiz
+        const qMap: Record<string, QuizQuestion[]> = {};
+        for (const q of data.quizQuestions ?? []) {
+          if (!qMap[q.quiz_id]) qMap[q.quiz_id] = [];
+          qMap[q.quiz_id].push(q);
+        }
+        for (const key of Object.keys(qMap)) {
+          qMap[key].sort((a: QuizQuestion, b: QuizQuestion) => a.sort_order - b.sort_order);
+        }
+        setQuizQuestions(qMap);
+
+        // Rewards
+        setHiddenRewards(data.hiddenRewards ?? []);
+        setStudentRewards(data.studentRewards ?? []);
+        setMonthReview(data.monthReview ?? null);
       } catch (err) {
         console.error("Failed to fetch student data:", err);
       }
@@ -165,6 +230,15 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       ap3: ap3Tasks.some((t) => completedTaskIds.has(t.id)),
     };
   }, [tasks, completedTaskIds]);
+
+  // Title: derived from completed checkpoint count
+  const completedCheckpointCount = useMemo(() => {
+    return Object.values(checkpointProgress).filter((p) => p.isComplete).length;
+  }, [checkpointProgress]);
+
+  const currentTitle = useMemo(() => {
+    return getTitleForCheckpoints(completedCheckpointCount).key;
+  }, [completedCheckpointCount]);
 
   // Discount eligibility: all checkpoints up to and including the one marked
   // is_discount_gate must be fully complete.
@@ -292,6 +366,99 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     [student]
   );
 
+  const saveLessonNote = useCallback(
+    async (taskId: string, content: string) => {
+      if (!student) return;
+
+      // Optimistic update
+      setLessonNotes((prev) => ({ ...prev, [taskId]: content }));
+
+      const token = await getAccessToken();
+      if (!token) return;
+
+      try {
+        const res = await fetch("/api/student/save-lesson-note", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ taskId, content }),
+        });
+
+        if (!res.ok) {
+          console.error("Failed to save lesson note");
+        }
+      } catch (err) {
+        console.error("Failed to save lesson note:", err);
+      }
+    },
+    [student]
+  );
+
+  const checkRewards = useCallback(async () => {
+    const token = await getAccessToken();
+    if (!token) return;
+
+    try {
+      const res = await fetch("/api/student/check-rewards", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const newlyUnlocked = data.newlyUnlocked ?? [];
+        if (newlyUnlocked.length > 0) {
+          // Add to local state
+          setStudentRewards((prev) => [
+            ...prev,
+            ...newlyUnlocked.map((r: { unlock: StudentReward }) => r.unlock),
+          ]);
+          // Show the first new reward
+          setPendingReward(newlyUnlocked[0]);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to check rewards:", err);
+    }
+  }, []);
+
+  const dismissReward = useCallback(() => {
+    setPendingReward(null);
+  }, []);
+
+  const submitQuiz = useCallback(
+    async (quizId: string, selections: Record<string, number>) => {
+      const token = await getAccessToken();
+      if (!token) throw new Error("Not authenticated");
+
+      const res = await fetch("/api/student/submit-quiz", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ quizId, selections }),
+      });
+
+      if (!res.ok) throw new Error("Failed to submit quiz");
+
+      const data = await res.json();
+      // Add the attempt to local state
+      if (data.attempt) {
+        setQuizAttempts((prev) => [...prev, data.attempt]);
+      }
+      return {
+        score: data.score,
+        total: data.total,
+        passed: data.passed,
+        answers: data.answers,
+      };
+    },
+    []
+  );
+
   const refreshWatchProgress = useCallback(async () => {
     if (!student) return { synced: 0, message: "Not logged in" };
 
@@ -376,6 +543,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         completions,
         todayNote,
         discountRequest,
+        lessonNotes,
         loading,
         completedTaskIds,
         weekProgress,
@@ -385,8 +553,22 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         discountEligible,
         discountCheckpointsCompleted,
         discountCheckpointsTotal,
+        streak,
+        currentTitle,
+        completedCheckpointCount,
+        quizzes,
+        quizQuestions,
+        quizAttempts,
+        hiddenRewards,
+        studentRewards,
+        pendingReward,
+        monthReview,
         toggleTask,
         saveNote,
+        saveLessonNote,
+        submitQuiz,
+        checkRewards,
+        dismissReward,
         requestDiscount,
         refreshWatchProgress,
       }}

@@ -167,6 +167,144 @@ create policy "Team can manage alerts"
   using (exists (select 1 from team_members where id = auth.uid()));
 
 -- ============================================================
+-- V2 TABLES
+-- ============================================================
+
+-- 8. LESSON NOTES (per-task notes for each student)
+create table if not exists lesson_notes (
+  id         uuid primary key default gen_random_uuid(),
+  student_id uuid not null references students(id) on delete cascade,
+  task_id    text not null references tasks(id) on delete cascade,
+  content    text not null default '',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique(student_id, task_id)
+);
+
+-- 9. QUIZZES (one per checkpoint)
+create table if not exists quizzes (
+  id              text primary key,
+  checkpoint_id   text not null references checkpoints(id) on delete cascade,
+  title           text not null,
+  passing_percent int  not null default 70,
+  sort_order      int  not null default 1,
+  created_at      timestamptz not null default now()
+);
+
+-- 10. QUIZ QUESTIONS
+create table if not exists quiz_questions (
+  id            uuid primary key default gen_random_uuid(),
+  quiz_id       text not null references quizzes(id) on delete cascade,
+  sort_order    int  not null,
+  question      text not null,
+  options       jsonb not null,
+  correct_index int   not null,
+  explanation   text,
+  created_at    timestamptz not null default now()
+);
+
+-- 11. STUDENT QUIZ ATTEMPTS
+create table if not exists student_quiz_attempts (
+  id           uuid primary key default gen_random_uuid(),
+  student_id   uuid not null references students(id) on delete cascade,
+  quiz_id      text not null references quizzes(id) on delete cascade,
+  score        int     not null,
+  total        int     not null,
+  passed       boolean not null,
+  answers      jsonb   not null,
+  completed_at timestamptz not null default now()
+);
+
+-- 12. HIDDEN REWARDS
+create table if not exists hidden_rewards (
+  id            text primary key,
+  trigger_type  text not null,
+  trigger_value jsonb not null,
+  reward_type   text not null,
+  title         text not null,
+  description   text not null,
+  content       text,
+  icon_path     text,
+  sort_order    int  not null default 0,
+  created_at    timestamptz not null default now()
+);
+
+-- 13. STUDENT REWARDS (unlocked loot drops)
+create table if not exists student_rewards (
+  id          uuid primary key default gen_random_uuid(),
+  student_id  uuid not null references students(id) on delete cascade,
+  reward_id   text not null references hidden_rewards(id) on delete cascade,
+  unlocked_at timestamptz not null default now(),
+  seen        boolean not null default false,
+  unique(student_id, reward_id)
+);
+
+-- 14. MONTH REVIEWS (Day 28 frozen snapshot)
+create table if not exists month_reviews (
+  id            uuid primary key default gen_random_uuid(),
+  student_id    uuid not null references students(id) on delete cascade unique,
+  snapshot_data jsonb not null,
+  generated_at  timestamptz not null default now()
+);
+
+-- ============================================================
+-- V2 INDEXES
+-- ============================================================
+create index idx_lesson_notes_student    on lesson_notes(student_id);
+create index idx_lesson_notes_task       on lesson_notes(task_id);
+create index idx_quiz_questions_quiz     on quiz_questions(quiz_id);
+create index idx_quiz_attempts_student   on student_quiz_attempts(student_id);
+create index idx_quiz_attempts_quiz      on student_quiz_attempts(quiz_id);
+create index idx_student_rewards_student on student_rewards(student_id);
+
+-- ============================================================
+-- V2 ROW LEVEL SECURITY
+-- ============================================================
+alter table lesson_notes enable row level security;
+create policy "Students can manage own lesson notes"
+  on lesson_notes for all
+  using (student_id in (select id from students where supabase_user_id = auth.uid()));
+create policy "Team can read all lesson notes"
+  on lesson_notes for select
+  using (public.current_user_is_team());
+
+alter table quizzes enable row level security;
+create policy "Authenticated can read quizzes"
+  on quizzes for select using (auth.uid() is not null);
+
+alter table quiz_questions enable row level security;
+create policy "Authenticated can read quiz questions"
+  on quiz_questions for select using (auth.uid() is not null);
+
+alter table student_quiz_attempts enable row level security;
+create policy "Students can manage own quiz attempts"
+  on student_quiz_attempts for all
+  using (student_id in (select id from students where supabase_user_id = auth.uid()));
+create policy "Team can read all quiz attempts"
+  on student_quiz_attempts for select
+  using (public.current_user_is_team());
+
+alter table hidden_rewards enable row level security;
+create policy "Authenticated can read rewards"
+  on hidden_rewards for select using (auth.uid() is not null);
+
+alter table student_rewards enable row level security;
+create policy "Students can manage own rewards"
+  on student_rewards for all
+  using (student_id in (select id from students where supabase_user_id = auth.uid()));
+create policy "Team can read all student rewards"
+  on student_rewards for select
+  using (public.current_user_is_team());
+
+alter table month_reviews enable row level security;
+create policy "Students can read own review"
+  on month_reviews for select
+  using (student_id in (select id from students where supabase_user_id = auth.uid()));
+create policy "Team can read all reviews"
+  on month_reviews for select
+  using (public.current_user_is_team());
+
+-- ============================================================
 -- TRIGGERS
 -- ============================================================
 
@@ -184,6 +322,10 @@ create trigger students_updated_at
 
 create trigger daily_notes_updated_at
   before update on daily_notes
+  for each row execute function public.set_updated_at();
+
+create trigger lesson_notes_updated_at
+  before update on lesson_notes
   for each row execute function public.set_updated_at();
 
 -- ============================================================

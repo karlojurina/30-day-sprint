@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { updateStudentStreak } from "../_lib/update-streak";
 
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -51,11 +52,7 @@ export async function POST(request: NextRequest) {
       .delete()
       .eq("id", existing.id);
 
-    // Update last_active_at
-    await supabase
-      .from("students")
-      .update({ last_active_at: new Date().toISOString() })
-      .eq("id", student.id);
+    await updateStudentStreak(supabase, student.id);
 
     return NextResponse.json({ action: "unchecked" });
   } else {
@@ -70,11 +67,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Update last_active_at
-    await supabase
-      .from("students")
-      .update({ last_active_at: new Date().toISOString() })
-      .eq("id", student.id);
+    await updateStudentStreak(supabase, student.id);
 
     return NextResponse.json({ action: "checked", completion: data });
   }

@@ -19,6 +19,7 @@ export interface PathLayout {
   nodes: PathNode[];
   totalHeight: number;
   spread: number;
+  totalWidth: number;
 }
 
 export interface PathLayoutOptions {
@@ -28,9 +29,26 @@ export interface PathLayoutOptions {
   firstTopPadding: number; // padding at top of the first checkpoint
   bottomPadding: number;
   wavelength: number; // how many nodes complete one sine cycle
+  mapMode: boolean; // wider 2D layout for the interactive map
 }
 
-export function defaultPathOptions(containerWidth: number): PathLayoutOptions {
+export function defaultPathOptions(containerWidth: number, mapMode = false): PathLayoutOptions {
+  if (mapMode) {
+    // Map mode: wider spread for 2D map feel
+    const spread =
+      containerWidth < 480 ? 120 : containerWidth < 768 ? 200 : 300;
+    return {
+      spread,
+      checkpointHeight: 220,
+      lessonHeight: 85,
+      firstTopPadding: 80,
+      bottomPadding: 120,
+      wavelength: 3.5, // tighter curves for more organic feel
+      mapMode: true,
+    };
+  }
+
+  // Original compact mode
   const spread =
     containerWidth < 480 ? 56 : containerWidth < 768 ? 96 : 140;
   return {
@@ -40,6 +58,7 @@ export function defaultPathOptions(containerWidth: number): PathLayoutOptions {
     firstTopPadding: 40,
     bottomPadding: 80,
     wavelength: 4.5,
+    mapMode: false,
   };
 }
 
@@ -62,8 +81,15 @@ export function computePathLayout(
   // the gate checkpoint's last lesson and the next checkpoint node)
   const DISCOUNT_GATE_SPACE = 280;
 
-  const xForIndex = (i: number) =>
-    Math.sin((i / options.wavelength) * Math.PI) * options.spread;
+  const xForIndex = (i: number) => {
+    if (options.mapMode) {
+      // More organic path: combine two sine waves for natural wandering
+      const primary = Math.sin((i / options.wavelength) * Math.PI) * options.spread;
+      const secondary = Math.sin((i / (options.wavelength * 2.3)) * Math.PI) * (options.spread * 0.3);
+      return primary + secondary;
+    }
+    return Math.sin((i / options.wavelength) * Math.PI) * options.spread;
+  };
 
   for (const cp of checkpoints) {
     nodes.push({
@@ -100,9 +126,18 @@ export function computePathLayout(
     }
   }
 
+  // Compute total width needed (for map container sizing)
+  let minX = 0, maxX = 0;
+  for (const n of nodes) {
+    if (n.x < minX) minX = n.x;
+    if (n.x > maxX) maxX = n.x;
+  }
+  const totalWidth = maxX - minX + 300; // padding for nodes
+
   return {
     nodes,
     totalHeight: y + options.bottomPadding,
     spread: options.spread,
+    totalWidth,
   };
 }

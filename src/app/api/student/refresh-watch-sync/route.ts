@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { refreshWhopTokens } from "@/lib/whop";
 import { syncWatchProgress } from "../_lib/watch-sync";
+import { updateStudentStreak } from "../_lib/update-streak";
 
 /**
  * Authenticated POST. Runs the watch progress sync for the student,
@@ -60,6 +61,9 @@ export async function POST(request: NextRequest) {
   if (student.whop_access_token) {
     try {
       const result = await tryRunSync(student.whop_access_token);
+      if (result.syncedCount > 0) {
+        await updateStudentStreak(supabase, student.id);
+      }
       return NextResponse.json({ ok: true, ...result });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -90,6 +94,9 @@ export async function POST(request: NextRequest) {
         .eq("id", student.id);
 
       const result = await tryRunSync(rotated.access_token);
+      if (result.syncedCount > 0) {
+        await updateStudentStreak(supabase, student.id);
+      }
       return NextResponse.json({ ok: true, ...result });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -7,7 +7,7 @@ interface LessonPillProps {
   task: Task;
   isCompleted: boolean;
   isCurrent: boolean;
-  onClick: () => void;
+  onClick?: () => void;
 }
 
 /**

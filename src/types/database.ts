@@ -6,6 +6,15 @@ export interface TeamMember {
   created_at: string;
 }
 
+export type StudentTitle =
+  | "recruit"
+  | "explorer"
+  | "apprentice"
+  | "ad_creator"
+  | "strategist"
+  | "bounty_hunter"
+  | "ecomtalent_pro";
+
 export interface Student {
   id: string;
   supabase_user_id: string | null;
@@ -23,6 +32,10 @@ export interface Student {
   last_watch_sync_at: string | null;
   whop_last_sync_error: string | null;
   whop_last_sync_error_at: string | null;
+  current_streak: number;
+  longest_streak: number;
+  last_streak_date: string | null;
+  current_title: StudentTitle;
   created_at: string;
   updated_at: string;
 }
@@ -89,6 +102,89 @@ export interface DisengagementAlert {
   dismissed_by: string | null;
   dismissed_at: string | null;
   created_at: string;
+}
+
+// V2 types
+
+export interface LessonNote {
+  id: string;
+  student_id: string;
+  task_id: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Quiz {
+  id: string;
+  checkpoint_id: string;
+  title: string;
+  passing_percent: number;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface QuizQuestion {
+  id: string;
+  quiz_id: string;
+  sort_order: number;
+  question: string;
+  options: string[];
+  correct_index: number;
+  explanation: string | null;
+  created_at: string;
+}
+
+export interface StudentQuizAttempt {
+  id: string;
+  student_id: string;
+  quiz_id: string;
+  score: number;
+  total: number;
+  passed: boolean;
+  answers: { questionId: string; selectedIndex: number; correct: boolean }[];
+  completed_at: string;
+}
+
+export interface HiddenReward {
+  id: string;
+  trigger_type: string;
+  trigger_value: Record<string, unknown>;
+  reward_type: "personal_note" | "exclusive_resource" | "secret_task" | "early_access" | "shoutout";
+  title: string;
+  description: string;
+  content: string | null;
+  icon_path: string | null;
+  sort_order: number;
+  created_at: string;
+}
+
+export interface StudentReward {
+  id: string;
+  student_id: string;
+  reward_id: string;
+  unlocked_at: string;
+  seen: boolean;
+}
+
+export interface MonthReview {
+  id: string;
+  student_id: string;
+  snapshot_data: {
+    tasks_completed: number;
+    tasks_total: number;
+    current_title: StudentTitle;
+    longest_streak: number;
+    current_streak: number;
+    notes_written: number;
+    quizzes_passed: number;
+    quizzes_total: number;
+    rewards_unlocked: number;
+    checkpoints_completed: number;
+    checkpoints_total: number;
+    bounties_submitted: number;
+  };
+  generated_at: string;
 }
 
 // Computed helpers (not stored in DB)

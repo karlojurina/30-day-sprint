@@ -5,6 +5,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { getDayNumber } from "@/types/database";
 import { TOTAL_TASKS } from "@/lib/constants";
+import { NotebookSheet } from "./NotebookSheet";
+import { StreakBadge } from "./StreakBadge";
+import { TitleBadge } from "./TitleBadge";
+import { RewardsDrawer } from "./RewardsDrawer";
 
 export function ProgressHeader() {
   const { student, signOut } = useAuth();
@@ -13,11 +17,17 @@ export function ProgressHeader() {
     discountCheckpointsCompleted,
     discountCheckpointsTotal,
     overallProgress,
+    currentTitle,
+    hiddenRewards,
+    studentRewards,
     refreshWatchProgress,
   } = useStudent();
   const [syncing, setSyncing] = useState(false);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [syncReAuth, setSyncReAuth] = useState(false);
+  const [notebookOpen, setNotebookOpen] = useState(false);
+  const [rewardsOpen, setRewardsOpen] = useState(false);
+  const unreadRewards = studentRewards.filter((r) => !r.seen).length;
 
   if (!student) return null;
 
@@ -69,21 +79,72 @@ export function ProgressHeader() {
               </div>
             )}
             <div className="leading-tight">
-              <p className="text-[14px] font-semibold text-[var(--color-text-primary)]">
-                {firstName ? `Hey, ${firstName}.` : "Welcome back."}
-              </p>
-              <p className="mono-label mt-0.5">
-                Day {String(dayNumber).padStart(2, "0")} / 30
-                {daysLeft > 0 && (
-                  <span className="text-[var(--color-text-quaternary)]">
-                    {" · "}
-                    {daysLeft} left
-                  </span>
-                )}
-              </p>
+              <div className="flex items-center gap-2">
+                <p className="text-[14px] font-semibold text-[var(--color-text-primary)]">
+                  {firstName ? `Hey, ${firstName}.` : "Welcome back."}
+                </p>
+                <TitleBadge title={currentTitle} />
+              </div>
+              <div className="flex items-center gap-2 mt-0.5">
+                <p className="mono-label">
+                  Day {String(dayNumber).padStart(2, "0")} / 30
+                  {daysLeft > 0 && (
+                    <span className="text-[var(--color-text-quaternary)]">
+                      {" · "}
+                      {daysLeft} left
+                    </span>
+                  )}
+                </p>
+                <StreakBadge />
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => setNotebookOpen(true)}
+              className="mono-label flex items-center gap-1.5 hover:text-[var(--color-text-primary)] transition-colors"
+              title="Your notebook"
+            >
+              <svg
+                className="w-3.5 h-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                />
+              </svg>
+              <span className="hidden sm:inline">notes</span>
+            </button>
+            <button
+              onClick={() => setRewardsOpen(true)}
+              className="mono-label flex items-center gap-1.5 hover:text-[var(--color-text-primary)] transition-colors relative"
+              title="Your rewards"
+            >
+              <svg
+                className="w-3.5 h-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z"
+                />
+              </svg>
+              <span className="hidden sm:inline">rewards</span>
+              {unreadRewards > 0 && (
+                <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-[#FFC145] text-[var(--color-bg-primary)] text-[8px] font-bold flex items-center justify-center">
+                  {unreadRewards}
+                </span>
+              )}
+            </button>
             <button
               onClick={onSync}
               disabled={syncing}
@@ -188,6 +249,17 @@ export function ProgressHeader() {
           )}
         </div>
       </div>
+
+      <NotebookSheet
+        open={notebookOpen}
+        onClose={() => setNotebookOpen(false)}
+      />
+      <RewardsDrawer
+        open={rewardsOpen}
+        onClose={() => setRewardsOpen(false)}
+        rewards={hiddenRewards}
+        studentRewards={studentRewards}
+      />
     </header>
   );
 }

@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  TransformWrapper,
+  TransformComponent,
+} from "react-zoom-pan-pinch";
 import { useStudent } from "@/contexts/StudentContext";
 import { CheckpointNode } from "./CheckpointNode";
 import { CheckpointCard } from "./CheckpointCard";
@@ -8,6 +12,10 @@ import { LessonPill } from "./LessonPill";
 import { FlowingPath } from "./FlowingPath";
 import { TaskDetailSheet } from "./TaskDetailSheet";
 import { DiscountGate } from "./DiscountGate";
+import { FogOverlay } from "./FogOverlay";
+import { MapCharacter } from "./MapCharacter";
+import { MapTerrain } from "./MapTerrain";
+import { MapControls } from "./MapControls";
 import {
   computePathLayout,
   defaultPathOptions,
@@ -26,6 +34,7 @@ export function JourneyPath() {
     checkpointProgress,
     discountCheckpointsCompleted,
     discountCheckpointsTotal,
+    currentTitle,
     toggleTask,
   } = useStudent();
 
@@ -92,12 +101,12 @@ export function JourneyPath() {
     return grouped;
   }, [tasks, checkpoints]);
 
-  // Compute path layout (nodes with x,y)
+  // Compute path layout in map mode
   const layout = useMemo(() => {
     if (!containerWidth || checkpoints.length === 0) {
-      return { nodes: [] as PathNode[], totalHeight: 0, spread: 0 };
+      return { nodes: [] as PathNode[], totalHeight: 0, spread: 0, totalWidth: 0 };
     }
-    const opts = defaultPathOptions(containerWidth);
+    const opts = defaultPathOptions(containerWidth, true);
     return computePathLayout(checkpoints, tasksByCheckpoint, opts);
   }, [containerWidth, checkpoints, tasksByCheckpoint]);
 
@@ -120,11 +129,48 @@ export function JourneyPath() {
     [checkpoints]
   );
 
+  // Find the character position — current task or first incomplete node
+  const characterPosition = useMemo(() => {
+    // Place character at current task position
+    if (currentTaskId) {
+      const node = layout.nodes.find((n) => n.id === currentTaskId);
+      if (node) return { x: node.x, y: node.y };
+    }
+    // Fallback: first incomplete checkpoint
+    if (currentCheckpointId) {
+      const node = layout.nodes.find((n) => n.id === currentCheckpointId);
+      if (node) return { x: node.x, y: node.y };
+    }
+    // Fallback: start
+    if (layout.nodes.length > 0) {
+      return { x: layout.nodes[0].x, y: layout.nodes[0].y };
+    }
+    return { x: 0, y: 0 };
+  }, [currentTaskId, currentCheckpointId, layout.nodes]);
+
+  // Determine which checkpoint a node belongs to (for fog locking)
+  const isNodeLocked = useMemo(() => {
+    const lockedSet = new Set<string>();
+    // A node is locked if its checkpoint is NOT the current one and NOT complete
+    for (const n of layout.nodes) {
+      const cpId = n.kind === "checkpoint"
+        ? n.checkpoint?.id
+        : n.task?.checkpoint_id;
+      if (!cpId) continue;
+      const isComplete = checkpointProgress[cpId]?.isComplete;
+      const isCurrent = cpId === currentCheckpointId;
+      if (!isComplete && !isCurrent) {
+        lockedSet.add(n.id);
+      }
+    }
+    return lockedSet;
+  }, [layout.nodes, checkpointProgress, currentCheckpointId]);
+
   if (checkpoints.length === 0) {
     return (
       <div className="py-16 text-center">
         <p className="text-[var(--color-text-tertiary)] text-sm">
-          Loading your journey…
+          Loading your journey&hellip;
         </p>
       </div>
     );
@@ -133,133 +179,180 @@ export function JourneyPath() {
   const centerX = containerWidth / 2;
 
   return (
-    <div ref={scrollRef} className="relative">
-      <div
-        ref={pathContainerRef}
-        className="relative mx-auto w-full"
-        style={{
-          height: layout.totalHeight || 600,
-        }}
-      >
-        {/* Organic flowing path behind the nodes */}
-        {containerWidth > 0 && layout.nodes.length > 1 && (
-          <FlowingPath
-            nodes={layout.nodes}
-            containerWidth={containerWidth}
-            totalHeight={layout.totalHeight}
-            completedThroughIndex={completedThroughIndex}
-            scrollContainerRef={scrollRef}
-          />
-        )}
+    <div ref={scrollRef} className="relative -mx-5 sm:-mx-6">
+      <div ref={pathContainerRef} className="relative w-full">
+        <TransformWrapper
+          initialScale={1}
+          minScale={0.5}
+          maxScale={2}
+          centerOnInit
+          limitToBounds={false}
+          panning={{ velocityDisabled: true }}
+          wheel={{ step: 0.08 }}
+        >
+          <MapControls />
+          <TransformComponent
+            wrapperStyle={{
+              width: "100%",
+              height: `min(${layout.totalHeight}px, 80vh)`,
+              overflow: "hidden",
+            }}
+            contentStyle={{
+              width: containerWidth || "100%",
+              height: layout.totalHeight || 600,
+            }}
+          >
+            {/* Terrain background */}
+            <MapTerrain
+              width={containerWidth}
+              height={layout.totalHeight}
+            />
 
-        {/* Nodes + cards at computed (x, y) */}
-        {layout.nodes.map((n) => {
-          const nodeSize = n.kind === "checkpoint" ? CHECKPOINT_SIZE : LESSON_SIZE;
-          const halfSize = nodeSize / 2;
-          const left = centerX + n.x - halfSize;
-          const top = n.y;
+            {/* Organic flowing path behind the nodes */}
+            {containerWidth > 0 && layout.nodes.length > 1 && (
+              <FlowingPath
+                nodes={layout.nodes}
+                containerWidth={containerWidth}
+                totalHeight={layout.totalHeight}
+                completedThroughIndex={completedThroughIndex}
+                scrollContainerRef={scrollRef}
+              />
+            )}
 
-          if (n.kind === "checkpoint" && n.checkpoint) {
-            const cp = n.checkpoint;
-            const progress = checkpointProgress[cp.id] ?? {
-              completed: 0,
-              total: 0,
-              isComplete: false,
-            };
-            const isCurrent = cp.id === currentCheckpointId && !progress.isComplete;
-            const cardSide: "left" | "right" = n.x > 0 ? "left" : "right";
+            {/* Fog of war overlay */}
+            <FogOverlay
+              nodes={layout.nodes}
+              containerWidth={containerWidth}
+              totalHeight={layout.totalHeight}
+              checkpointProgress={checkpointProgress}
+              currentCheckpointId={currentCheckpointId}
+              discountGateCheckpointId={discountGateCheckpointId}
+            />
 
-            return (
-              <div
-                key={cp.id}
-                className="absolute"
-                style={{
-                  left,
-                  top,
-                  width: nodeSize,
-                  height: nodeSize,
-                  zIndex: 2,
-                }}
-              >
-                <CheckpointNode
-                  checkpoint={cp}
-                  isComplete={progress.isComplete}
-                  isCurrent={isCurrent}
-                />
+            {/* Character avatar */}
+            <MapCharacter
+              x={centerX + characterPosition.x}
+              y={characterPosition.y}
+              title={currentTitle}
+            />
 
-                {/* Side text card — positioned relative to node; hidden on mobile */}
-                <div
-                  className="hidden sm:block absolute top-0 w-[260px]"
-                  style={{
-                    ...(cardSide === "left"
-                      ? { right: `calc(100% + 32px)` }
-                      : { left: `calc(100% + 32px)` }),
-                  }}
-                >
-                  <CheckpointCard
-                    checkpoint={cp}
-                    completed={progress.completed}
-                    total={progress.total}
-                    isComplete={progress.isComplete}
-                    isCurrent={isCurrent}
-                    side={cardSide}
-                  />
-                </div>
+            {/* Nodes + cards at computed (x, y) */}
+            {layout.nodes.map((n) => {
+              const nodeSize = n.kind === "checkpoint" ? CHECKPOINT_SIZE : LESSON_SIZE;
+              const halfSize = nodeSize / 2;
+              const left = centerX + n.x - halfSize;
+              const top = n.y;
+              const locked = isNodeLocked.has(n.id);
 
-                {/* Mobile card — below the node */}
-                <div className="sm:hidden absolute left-1/2 -translate-x-1/2 top-full mt-4 w-[280px] text-center">
-                  <CheckpointCard
-                    checkpoint={cp}
-                    completed={progress.completed}
-                    total={progress.total}
-                    isComplete={progress.isComplete}
-                    isCurrent={isCurrent}
-                    side="right"
-                  />
-                </div>
-              </div>
-            );
-          }
+              if (n.kind === "checkpoint" && n.checkpoint) {
+                const cp = n.checkpoint;
+                const progress = checkpointProgress[cp.id] ?? {
+                  completed: 0,
+                  total: 0,
+                  isComplete: false,
+                };
+                const isCurrent = cp.id === currentCheckpointId && !progress.isComplete;
+                const cardSide: "left" | "right" = n.x > 0 ? "left" : "right";
 
-          if (n.kind === "lesson" && n.task) {
-            const task = n.task;
-            const isCompleted = completedTaskIds.has(task.id);
-            const isCurrent = task.id === currentTaskId;
-            return (
-              <div
-                key={task.id}
-                className="absolute"
-                style={{
-                  left,
-                  top,
-                  width: nodeSize,
-                  height: nodeSize,
-                  zIndex: 2,
-                }}
-              >
-                <LessonPill
-                  task={task}
-                  isCompleted={isCompleted}
-                  isCurrent={isCurrent}
-                  onClick={() => setSelectedTask(task)}
-                />
-              </div>
-            );
-          }
+                return (
+                  <div
+                    key={cp.id}
+                    className="absolute"
+                    style={{
+                      left,
+                      top,
+                      width: nodeSize,
+                      height: nodeSize,
+                      zIndex: 2,
+                      opacity: locked ? 0.35 : undefined,
+                      filter: locked ? "saturate(0.3) blur(0.5px)" : undefined,
+                      transition: "opacity 0.4s, filter 0.4s",
+                    }}
+                  >
+                    <CheckpointNode
+                      checkpoint={cp}
+                      isComplete={progress.isComplete}
+                      isCurrent={isCurrent}
+                    />
 
-          return null;
-        })}
+                    {/* Side text card — positioned relative to node; hidden on mobile */}
+                    <div
+                      className="hidden sm:block absolute top-0 w-[260px]"
+                      style={{
+                        ...(cardSide === "left"
+                          ? { right: `calc(100% + 32px)` }
+                          : { left: `calc(100% + 32px)` }),
+                      }}
+                    >
+                      <CheckpointCard
+                        checkpoint={cp}
+                        completed={progress.completed}
+                        total={progress.total}
+                        isComplete={progress.isComplete}
+                        isCurrent={isCurrent}
+                        side={cardSide}
+                      />
+                    </div>
 
-        {/* Discount gate — inserted at the y-position of the gate checkpoint's end */}
-        {discountGateCheckpointId && (
-          <DiscountGateOverlay
-            gateCheckpointId={discountGateCheckpointId}
-            layout={layout}
-            centerX={centerX}
-            completed={discountCheckpointsCompleted}
-            required={discountCheckpointsTotal}
-          />
-        )}
+                    {/* Mobile card — below the node */}
+                    <div className="sm:hidden absolute left-1/2 -translate-x-1/2 top-full mt-4 w-[280px] text-center">
+                      <CheckpointCard
+                        checkpoint={cp}
+                        completed={progress.completed}
+                        total={progress.total}
+                        isComplete={progress.isComplete}
+                        isCurrent={isCurrent}
+                        side="right"
+                      />
+                    </div>
+                  </div>
+                );
+              }
+
+              if (n.kind === "lesson" && n.task) {
+                const task = n.task;
+                const isCompleted = completedTaskIds.has(task.id);
+                const isCurrent = task.id === currentTaskId;
+                return (
+                  <div
+                    key={task.id}
+                    className="absolute"
+                    style={{
+                      left,
+                      top,
+                      width: nodeSize,
+                      height: nodeSize,
+                      zIndex: 2,
+                      opacity: locked ? 0.25 : undefined,
+                      filter: locked ? "saturate(0.2) blur(0.5px)" : undefined,
+                      transition: "opacity 0.4s, filter 0.4s",
+                    }}
+                  >
+                    <LessonPill
+                      task={task}
+                      isCompleted={isCompleted}
+                      isCurrent={isCurrent}
+                      onClick={locked ? undefined : () => setSelectedTask(task)}
+                    />
+                  </div>
+                );
+              }
+
+              return null;
+            })}
+
+            {/* Discount gate — inserted at the y-position of the gate checkpoint's end */}
+            {discountGateCheckpointId && (
+              <DiscountGateOverlay
+                gateCheckpointId={discountGateCheckpointId}
+                layout={layout}
+                centerX={centerX}
+                completed={discountCheckpointsCompleted}
+                required={discountCheckpointsTotal}
+              />
+            )}
+          </TransformComponent>
+        </TransformWrapper>
       </div>
 
       <TaskDetailSheet

@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useEffect } from "react";
 import type { Task } from "@/types/database";
 import { TASK_TYPE_LABELS } from "@/lib/constants";
+import { LessonNoteInput } from "./LessonNoteInput";
 
 interface TaskDetailSheetProps {
   task: Task | null;
@@ -184,6 +185,9 @@ export function TaskDetailSheet({
                   {isCompleted ? "Undo completion" : "Check it off"}
                 </button>
               )}
+
+              {/* Lesson notes */}
+              <LessonNoteInput taskId={task.id} week={task.week} />
             </div>
           </motion.div>
         </>

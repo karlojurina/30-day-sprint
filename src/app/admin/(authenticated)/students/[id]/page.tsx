@@ -3,9 +3,16 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
-import type { Student, Task, StudentTaskCompletion, DailyNote, DiscountRequest } from "@/types/database";
+import type {
+  Student,
+  Region,
+  Lesson,
+  StudentLessonCompletion,
+  DailyNote,
+  DiscountRequest,
+} from "@/types/database";
 import { getDayNumber } from "@/types/database";
-import { WEEK_TITLES, TASK_TYPE_LABELS } from "@/lib/constants";
+import { LESSON_TYPE_LABELS, TOTAL_LESSONS } from "@/lib/constants";
 import Link from "next/link";
 
 export default function StudentDetailPage() {
@@ -14,38 +21,47 @@ export default function StudentDetailPage() {
   const supabase = createClient();
 
   const [student, setStudent] = useState<Student | null>(null);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [completions, setCompletions] = useState<StudentTaskCompletion[]>([]);
+  const [regions, setRegions] = useState<Region[]>([]);
+  const [lessons, setLessons] = useState<Lesson[]>([]);
+  const [completions, setCompletions] = useState<StudentLessonCompletion[]>([]);
   const [notes, setNotes] = useState<DailyNote[]>([]);
   const [discountRequest, setDiscountRequest] = useState<DiscountRequest | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function fetchStudent() {
-      const [studentRes, tasksRes, completionsRes, notesRes, discountRes] =
-        await Promise.all([
-          supabase.from("students").select("*").eq("id", studentId).single(),
-          supabase.from("tasks").select("*").order("week").order("sort_order"),
-          supabase
-            .from("student_task_completions")
-            .select("*")
-            .eq("student_id", studentId),
-          supabase
-            .from("daily_notes")
-            .select("*")
-            .eq("student_id", studentId)
-            .order("note_date", { ascending: false }),
-          supabase
-            .from("discount_requests")
-            .select("*")
-            .eq("student_id", studentId)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .single(),
-        ]);
+      const [
+        studentRes,
+        regionsRes,
+        lessonsRes,
+        completionsRes,
+        notesRes,
+        discountRes,
+      ] = await Promise.all([
+        supabase.from("students").select("*").eq("id", studentId).single(),
+        supabase.from("regions").select("*").order("order_num"),
+        supabase.from("lessons").select("*").order("day").order("sort_order"),
+        supabase
+          .from("student_lesson_completions")
+          .select("*")
+          .eq("student_id", studentId),
+        supabase
+          .from("daily_notes")
+          .select("*")
+          .eq("student_id", studentId)
+          .order("note_date", { ascending: false }),
+        supabase
+          .from("discount_requests")
+          .select("*")
+          .eq("student_id", studentId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single(),
+      ]);
 
       if (studentRes.data) setStudent(studentRes.data);
-      if (tasksRes.data) setTasks(tasksRes.data);
+      if (regionsRes.data) setRegions(regionsRes.data);
+      if (lessonsRes.data) setLessons(lessonsRes.data);
       if (completionsRes.data) setCompletions(completionsRes.data);
       if (notesRes.data) setNotes(notesRes.data);
       if (discountRes.data) setDiscountRequest(discountRes.data);
@@ -63,31 +79,25 @@ export default function StudentDetailPage() {
     );
   }
 
-  const completedIds = new Set(completions.map((c) => c.task_id));
+  const completedIds = new Set(completions.map((c) => c.lesson_id));
   const dayNumber = getDayNumber(student.joined_at);
-  const overallPercent = Math.round((completedIds.size / 23) * 100);
+  const overallPercent = Math.round((completedIds.size / TOTAL_LESSONS) * 100);
 
-  // Activation points
-  const ap1 = tasks.some((t) => t.activation_point_id === "AP1" && completedIds.has(t.id));
-  const ap2 = tasks.some((t) => t.activation_point_id === "AP2" && completedIds.has(t.id));
-  const ap3 = tasks.some((t) => t.activation_point_id === "AP3" && completedIds.has(t.id));
-
-  // Group tasks by week
-  const tasksByWeek: Record<number, Task[]> = {};
-  for (const task of tasks) {
-    if (!tasksByWeek[task.week]) tasksByWeek[task.week] = [];
-    tasksByWeek[task.week].push(task);
+  // Group lessons by region
+  const lessonsByRegion: Record<string, Lesson[]> = {};
+  for (const lesson of lessons) {
+    if (!lessonsByRegion[lesson.region_id]) lessonsByRegion[lesson.region_id] = [];
+    lessonsByRegion[lesson.region_id].push(lesson);
   }
 
-  // Discount tasks
-  const discountTasks = tasks.filter((t) => t.is_discount_required);
-  const discountCompleted = discountTasks.filter((t) => completedIds.has(t.id)).length;
+  // Discount status
+  const gateCompleted = completedIds.has("l18");
 
   // DM templates
   const dmTemplates = [
     {
       label: "Welcome",
-      text: `Hey ${student.name || "there"}! Welcome to EcomTalent. I'm here to help you get the most out of your first 30 days. Have you checked out your playbook yet? Let me know if you have any questions!`,
+      text: `Hey ${student.name || "there"}! Welcome to EcomTalent. I'm here to help you get the most out of your first 30 days. Have you checked out your expedition map yet? Let me know if you have any questions!`,
     },
     {
       label: "Check-in",
@@ -95,13 +105,12 @@ export default function StudentDetailPage() {
     },
     {
       label: "Encouragement",
-      text: `Hey ${student.name || "there"}! You're making great progress — ${overallPercent}% through your playbook. Keep going! The action items in the next section are where things really click.`,
+      text: `Hey ${student.name || "there"}! You're making great progress — ${overallPercent}% through your expedition. Keep going! The next region is where things really click.`,
     },
   ];
 
   return (
     <div className="p-6 space-y-6">
-      {/* Back link + header */}
       <div className="flex items-center gap-3">
         <Link
           href="/admin/students"
@@ -119,15 +128,14 @@ export default function StudentDetailPage() {
         </div>
       </div>
 
-      {/* Quick stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-bg-card border border-border rounded-xl p-3">
           <p className="text-xs text-text-secondary">Progress</p>
           <p className="text-xl font-bold text-accent-light">{overallPercent}%</p>
         </div>
         <div className="bg-bg-card border border-border rounded-xl p-3">
-          <p className="text-xs text-text-secondary">Discord</p>
-          <p className="text-sm font-medium truncate">{student.discord_username || "—"}</p>
+          <p className="text-xs text-text-secondary">Streak</p>
+          <p className="text-xl font-bold">{student.current_streak ?? 0} days</p>
         </div>
         <div className="bg-bg-card border border-border rounded-xl p-3">
           <p className="text-xs text-text-secondary">Joined</p>
@@ -143,59 +151,36 @@ export default function StudentDetailPage() {
         </div>
       </div>
 
-      {/* Activation Points */}
+      {/* Lesson grid by region */}
       <div className="bg-bg-card border border-border rounded-xl p-4">
-        <h2 className="text-sm font-semibold mb-3">Activation Points</h2>
-        <div className="flex gap-4">
-          {[
-            { label: "AP1: Content", hit: ap1 },
-            { label: "AP2: Ad Review", hit: ap2 },
-            { label: "AP3: Ad Bounty", hit: ap3 },
-          ].map((ap) => (
-            <div key={ap.label} className="flex items-center gap-2">
-              <div
-                className={`w-3 h-3 rounded-full ${
-                  ap.hit ? "bg-success" : "bg-bg-elevated"
-                }`}
-              />
-              <span
-                className={`text-xs ${
-                  ap.hit ? "text-success" : "text-text-tertiary"
-                }`}
-              >
-                {ap.label}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Task grid */}
-      <div className="bg-bg-card border border-border rounded-xl p-4">
-        <h2 className="text-sm font-semibold mb-3">Task Progress</h2>
+        <h2 className="text-sm font-semibold mb-3">Lesson Progress</h2>
         <div className="space-y-4">
-          {[1, 2, 3, 4].map((week) => (
-            <div key={week}>
+          {regions.map((region) => (
+            <div key={region.id}>
               <p className="text-xs text-text-secondary mb-2">
-                Week {week}: {WEEK_TITLES[week]}
+                {region.name} — {region.subtitle} ({region.days_label})
               </p>
               <div className="space-y-1">
-                {(tasksByWeek[week] || []).map((task) => {
-                  const done = completedIds.has(task.id);
+                {(lessonsByRegion[region.id] || []).map((lesson) => {
+                  const done = completedIds.has(lesson.id);
                   return (
                     <div
-                      key={task.id}
+                      key={lesson.id}
                       className="flex items-center gap-2 text-xs"
                     >
                       <div
                         className={`w-3.5 h-3.5 rounded border flex items-center justify-center ${
-                          done
-                            ? "bg-accent border-accent"
-                            : "border-border"
+                          done ? "bg-accent border-accent" : "border-border"
                         }`}
                       >
                         {done && (
-                          <svg className="w-2 h-2 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={4}>
+                          <svg
+                            className="w-2 h-2 text-white"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                            strokeWidth={4}
+                          >
                             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                           </svg>
                         )}
@@ -205,10 +190,10 @@ export default function StudentDetailPage() {
                           done ? "text-text-secondary line-through" : "text-text-primary"
                         }
                       >
-                        {task.title}
+                        Day {lesson.day}: {lesson.title}
                       </span>
                       <span className="text-text-tertiary">
-                        ({TASK_TYPE_LABELS[task.task_type]})
+                        ({LESSON_TYPE_LABELS[lesson.type]})
                       </span>
                     </div>
                   );
@@ -219,11 +204,10 @@ export default function StudentDetailPage() {
         </div>
       </div>
 
-      {/* Discount Status */}
       <div className="bg-bg-card border border-border rounded-xl p-4">
         <h2 className="text-sm font-semibold mb-2">Discount Status</h2>
         <p className="text-xs text-text-secondary mb-2">
-          {discountCompleted}/13 required tasks completed
+          Gate lesson (l18): {gateCompleted ? "completed" : "not yet"}
         </p>
         {discountRequest ? (
           <span
@@ -231,8 +215,8 @@ export default function StudentDetailPage() {
               discountRequest.status === "approved"
                 ? "bg-success/15 text-success"
                 : discountRequest.status === "pending"
-                ? "bg-warning/15 text-warning"
-                : "bg-danger/15 text-danger"
+                  ? "bg-warning/15 text-warning"
+                  : "bg-danger/15 text-danger"
             }`}
           >
             {discountRequest.status}
@@ -243,7 +227,6 @@ export default function StudentDetailPage() {
         )}
       </div>
 
-      {/* DM Templates */}
       <div className="bg-bg-card border border-border rounded-xl p-4">
         <h2 className="text-sm font-semibold mb-3">Quick DM Templates</h2>
         <div className="flex gap-2 flex-wrap">
@@ -262,7 +245,6 @@ export default function StudentDetailPage() {
         </p>
       </div>
 
-      {/* Notes */}
       <div className="bg-bg-card border border-border rounded-xl p-4">
         <h2 className="text-sm font-semibold mb-3">
           Daily Notes ({notes.length})

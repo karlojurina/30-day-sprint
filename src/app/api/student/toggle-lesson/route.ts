@@ -9,10 +9,10 @@ export async function POST(request: NextRequest) {
   }
 
   const token = authHeader.slice(7);
-  const { taskId } = await request.json();
+  const { lessonId } = await request.json();
 
-  if (!taskId) {
-    return NextResponse.json({ error: "Missing taskId" }, { status: 400 });
+  if (!lessonId) {
+    return NextResponse.json({ error: "Missing lessonId" }, { status: 400 });
   }
 
   const supabase = createClient(
@@ -21,7 +21,6 @@ export async function POST(request: NextRequest) {
     { auth: { persistSession: false } }
   );
 
-  // Verify user and get student
   const { data: { user }, error: userError } = await supabase.auth.getUser(token);
   if (userError || !user) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
@@ -37,18 +36,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  // Check if task is already completed
+  // Check if lesson is already completed
   const { data: existing } = await supabase
-    .from("student_task_completions")
+    .from("student_lesson_completions")
     .select("id")
     .eq("student_id", student.id)
-    .eq("task_id", taskId)
+    .eq("lesson_id", lessonId)
     .single();
 
   if (existing) {
-    // Uncheck: delete completion
     await supabase
-      .from("student_task_completions")
+      .from("student_lesson_completions")
       .delete()
       .eq("id", existing.id);
 
@@ -56,10 +54,9 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ action: "unchecked" });
   } else {
-    // Check: insert completion
     const { data, error } = await supabase
-      .from("student_task_completions")
-      .insert({ student_id: student.id, task_id: taskId })
+      .from("student_lesson_completions")
+      .insert({ student_id: student.id, lesson_id: lessonId })
       .select()
       .single();
 

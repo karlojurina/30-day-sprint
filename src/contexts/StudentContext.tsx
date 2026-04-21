@@ -12,9 +12,9 @@ import {
 import { createClient } from "@/lib/supabase-browser";
 import { useAuth } from "./AuthContext";
 import type {
-  Task,
-  Checkpoint,
-  StudentTaskCompletion,
+  Region,
+  Lesson,
+  StudentLessonCompletion,
   DailyNote,
   DiscountRequest,
   LessonNote,
@@ -22,57 +22,56 @@ import type {
   Quiz,
   QuizQuestion,
   StudentQuizAttempt,
-  HiddenReward,
-  StudentReward,
   MonthReview,
 } from "@/types/database";
-import { getTitleForCheckpoints } from "@/lib/titles";
+import { getTitleForRegions } from "@/lib/titles";
 
-export interface CheckpointProgress {
+export interface RegionProgress {
   completed: number;
   total: number;
   isComplete: boolean;
+  isUnlocked: boolean;
 }
 
 interface StudentContextType {
-  tasks: Task[];
-  checkpoints: Checkpoint[];
-  completions: StudentTaskCompletion[];
+  // Raw data
+  regions: Region[];
+  lessons: Lesson[];
+  completions: StudentLessonCompletion[];
   todayNote: DailyNote | null;
   discountRequest: DiscountRequest | null;
-  lessonNotes: Record<string, string>; // taskId → content
+  lessonNotes: Record<string, string>;
+  quizzes: Quiz[];
+  quizQuestions: Record<string, QuizQuestion[]>;
+  quizAttempts: StudentQuizAttempt[];
+  monthReview: MonthReview | null;
   loading: boolean;
 
-  // Derived / direct state
-  completedTaskIds: Set<string>;
-  weekProgress: Record<number, { completed: number; total: number }>;
-  checkpointProgress: Record<string, CheckpointProgress>;
-  overallProgress: number;
-  activationPoints: { ap1: boolean; ap2: boolean; ap3: boolean };
-  discountEligible: boolean;
-  discountCheckpointsCompleted: number;
-  discountCheckpointsTotal: number;
+  // Derived state
+  completedLessonIds: Set<string>;
+  regionProgress: Record<string, RegionProgress>;
+  overallProgress: number;                 // 0-100 across all lessons
+  currentLesson: Lesson | null;            // first incomplete lesson in day order
+  currentRegionId: string | null;
   streak: { current: number; longest: number };
   currentTitle: StudentTitle;
-  completedCheckpointCount: number;
-  quizzes: Quiz[];
-  quizQuestions: Record<string, QuizQuestion[]>; // quizId → questions
-  quizAttempts: StudentQuizAttempt[];
-  hiddenRewards: HiddenReward[];
-  studentRewards: StudentReward[];
-  pendingReward: HiddenReward | null;
-  monthReview: MonthReview | null;
+  completedRegionCount: number;
+  discountEligible: boolean;               // l18 is complete
+  discountUnlockedInRegion: boolean;       // region 2 completed
 
   // Actions
-  toggleTask: (taskId: string) => Promise<void>;
+  toggleLesson: (lessonId: string) => Promise<void>;
   saveNote: (content: string) => Promise<void>;
-  saveLessonNote: (taskId: string, content: string) => Promise<void>;
+  saveLessonNote: (lessonId: string, content: string) => Promise<void>;
   submitQuiz: (
     quizId: string,
     selections: Record<string, number>
-  ) => Promise<{ score: number; total: number; passed: boolean; answers: { questionId: string; selectedIndex: number; correct: boolean }[] }>;
-  checkRewards: () => Promise<void>;
-  dismissReward: () => void;
+  ) => Promise<{
+    score: number;
+    total: number;
+    passed: boolean;
+    answers: { questionId: string; selectedIndex: number; correct: boolean }[];
+  }>;
   requestDiscount: () => Promise<void>;
   refreshWatchProgress: () => Promise<{
     synced: number;
@@ -94,23 +93,22 @@ async function getAccessToken() {
 export function StudentProvider({ children }: { children: ReactNode }) {
   const { student } = useAuth();
 
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [checkpoints, setCheckpoints] = useState<Checkpoint[]>([]);
-  const [completions, setCompletions] = useState<StudentTaskCompletion[]>([]);
+  const [regions, setRegions] = useState<Region[]>([]);
+  const [lessons, setLessons] = useState<Lesson[]>([]);
+  const [completions, setCompletions] = useState<StudentLessonCompletion[]>([]);
   const [todayNote, setTodayNote] = useState<DailyNote | null>(null);
   const [discountRequest, setDiscountRequest] = useState<DiscountRequest | null>(null);
   const [lessonNotes, setLessonNotes] = useState<Record<string, string>>({});
-  const [streak, setStreak] = useState<{ current: number; longest: number }>({ current: 0, longest: 0 });
+  const [streak, setStreak] = useState<{ current: number; longest: number }>({
+    current: 0,
+    longest: 0,
+  });
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [quizQuestions, setQuizQuestions] = useState<Record<string, QuizQuestion[]>>({});
   const [quizAttempts, setQuizAttempts] = useState<StudentQuizAttempt[]>([]);
-  const [hiddenRewards, setHiddenRewards] = useState<HiddenReward[]>([]);
-  const [studentRewards, setStudentRewards] = useState<StudentReward[]>([]);
-  const [pendingReward, setPendingReward] = useState<HiddenReward | null>(null);
   const [monthReview, setMonthReview] = useState<MonthReview | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Fetch all data via API route (bypasses RLS)
   useEffect(() => {
     if (!student) return;
 
@@ -132,39 +130,35 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         }
 
         const data = await res.json();
-        setTasks(data.tasks);
-        setCheckpoints(data.checkpoints ?? []);
-        setCompletions(data.completions);
-        setTodayNote(data.todayNote);
-        setDiscountRequest(data.discountRequest);
+        setRegions(data.regions ?? []);
+        setLessons(data.lessons ?? []);
+        setCompletions(data.completions ?? []);
+        setTodayNote(data.todayNote ?? null);
+        setDiscountRequest(data.discountRequest ?? null);
         setStreak({
           current: data.student?.current_streak ?? 0,
           longest: data.student?.longest_streak ?? 0,
         });
-        // Build lesson notes lookup: taskId → content
+
         const notesMap: Record<string, string> = {};
         for (const note of data.lessonNotes ?? []) {
-          notesMap[note.task_id] = note.content;
+          notesMap[note.lesson_id] = note.content;
         }
         setLessonNotes(notesMap);
 
-        // Quiz data
         setQuizzes(data.quizzes ?? []);
         setQuizAttempts(data.quizAttempts ?? []);
-        // Group questions by quiz
         const qMap: Record<string, QuizQuestion[]> = {};
         for (const q of data.quizQuestions ?? []) {
           if (!qMap[q.quiz_id]) qMap[q.quiz_id] = [];
           qMap[q.quiz_id].push(q);
         }
         for (const key of Object.keys(qMap)) {
-          qMap[key].sort((a: QuizQuestion, b: QuizQuestion) => a.sort_order - b.sort_order);
+          qMap[key].sort(
+            (a: QuizQuestion, b: QuizQuestion) => a.sort_order - b.sort_order
+          );
         }
         setQuizQuestions(qMap);
-
-        // Rewards
-        setHiddenRewards(data.hiddenRewards ?? []);
-        setStudentRewards(data.studentRewards ?? []);
         setMonthReview(data.monthReview ?? null);
       } catch (err) {
         console.error("Failed to fetch student data:", err);
@@ -176,129 +170,115 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   }, [student]);
 
   // Derived state
-  const completedTaskIds = useMemo(
-    () => new Set(completions.map((c) => c.task_id)),
+  const completedLessonIds = useMemo(
+    () => new Set(completions.map((c) => c.lesson_id)),
     [completions]
   );
 
-  const weekProgress = useMemo(() => {
-    const progress: Record<number, { completed: number; total: number }> = {};
-    for (const task of tasks) {
-      if (!progress[task.week]) {
-        progress[task.week] = { completed: 0, total: 0 };
-      }
-      progress[task.week].total++;
-      if (completedTaskIds.has(task.id)) {
-        progress[task.week].completed++;
-      }
+  const regionProgress = useMemo(() => {
+    const progress: Record<string, RegionProgress> = {};
+    // init
+    for (const r of regions) {
+      progress[r.id] = { completed: 0, total: 0, isComplete: false, isUnlocked: false };
     }
-    return progress;
-  }, [tasks, completedTaskIds]);
-
-  const checkpointProgress = useMemo(() => {
-    const progress: Record<string, CheckpointProgress> = {};
-    for (const cp of checkpoints) {
-      progress[cp.id] = { completed: 0, total: 0, isComplete: false };
-    }
-    for (const task of tasks) {
-      if (!progress[task.checkpoint_id]) continue;
-      progress[task.checkpoint_id].total++;
-      if (completedTaskIds.has(task.id)) {
-        progress[task.checkpoint_id].completed++;
+    // count
+    for (const lesson of lessons) {
+      if (!progress[lesson.region_id]) continue;
+      progress[lesson.region_id].total++;
+      if (completedLessonIds.has(lesson.id)) {
+        progress[lesson.region_id].completed++;
       }
     }
+    // mark complete
     for (const id of Object.keys(progress)) {
       progress[id].isComplete =
-        progress[id].total > 0 && progress[id].completed === progress[id].total;
+        progress[id].total > 0 &&
+        progress[id].completed === progress[id].total;
+    }
+    // compute unlock state (sequential: r1 unlocked, each next unlocks when prev complete)
+    const sortedRegions = [...regions].sort((a, b) => a.order_num - b.order_num);
+    for (let i = 0; i < sortedRegions.length; i++) {
+      const r = sortedRegions[i];
+      if (i === 0) {
+        progress[r.id].isUnlocked = true;
+      } else {
+        const prev = sortedRegions[i - 1];
+        progress[r.id].isUnlocked = progress[prev.id]?.isComplete ?? false;
+      }
     }
     return progress;
-  }, [tasks, checkpoints, completedTaskIds]);
+  }, [regions, lessons, completedLessonIds]);
 
   const overallProgress = useMemo(() => {
-    if (tasks.length === 0) return 0;
-    return Math.round((completedTaskIds.size / tasks.length) * 100);
-  }, [tasks, completedTaskIds]);
+    if (lessons.length === 0) return 0;
+    return Math.round((completedLessonIds.size / lessons.length) * 100);
+  }, [lessons, completedLessonIds]);
 
-  const activationPoints = useMemo(() => {
-    const ap1Tasks = tasks.filter((t) => t.activation_point_id === "AP1");
-    const ap2Tasks = tasks.filter((t) => t.activation_point_id === "AP2");
-    const ap3Tasks = tasks.filter((t) => t.activation_point_id === "AP3");
+  // First incomplete lesson in day/sort_order sequence
+  const currentLesson = useMemo(() => {
+    const sorted = [...lessons].sort(
+      (a, b) => a.day - b.day || a.sort_order - b.sort_order
+    );
+    for (const l of sorted) {
+      if (!completedLessonIds.has(l.id)) return l;
+    }
+    return null;
+  }, [lessons, completedLessonIds]);
 
-    return {
-      ap1: ap1Tasks.some((t) => completedTaskIds.has(t.id)),
-      ap2: ap2Tasks.some((t) => completedTaskIds.has(t.id)),
-      ap3: ap3Tasks.some((t) => completedTaskIds.has(t.id)),
-    };
-  }, [tasks, completedTaskIds]);
+  const currentRegionId = currentLesson?.region_id ?? null;
 
-  // Title: derived from completed checkpoint count
-  const completedCheckpointCount = useMemo(() => {
-    return Object.values(checkpointProgress).filter((p) => p.isComplete).length;
-  }, [checkpointProgress]);
+  const completedRegionCount = useMemo(() => {
+    return Object.values(regionProgress).filter((p) => p.isComplete).length;
+  }, [regionProgress]);
 
   const currentTitle = useMemo(() => {
-    return getTitleForCheckpoints(completedCheckpointCount).key;
-  }, [completedCheckpointCount]);
+    return getTitleForRegions(completedRegionCount).key;
+  }, [completedRegionCount]);
 
-  // Discount eligibility: all checkpoints up to and including the one marked
-  // is_discount_gate must be fully complete.
-  const { discountEligible, discountCheckpointsCompleted, discountCheckpointsTotal } = useMemo(() => {
-    const gateCp = checkpoints.find((c) => c.is_discount_gate);
-    if (!gateCp) {
-      return {
-        discountEligible: false,
-        discountCheckpointsCompleted: 0,
-        discountCheckpointsTotal: 0,
-      };
-    }
-    const required = checkpoints.filter(
-      (c) => c.sort_order <= gateCp.sort_order
-    );
-    const done = required.filter(
-      (c) => checkpointProgress[c.id]?.isComplete
-    ).length;
-    return {
-      discountEligible: done === required.length,
-      discountCheckpointsCompleted: done,
-      discountCheckpointsTotal: required.length,
-    };
-  }, [checkpoints, checkpointProgress]);
+  // Discount: l18 is complete (or simpler: region 2 is complete)
+  const discountEligible = useMemo(() => {
+    return completedLessonIds.has("l18");
+  }, [completedLessonIds]);
 
-  // Actions — all via API routes
-  const toggleTask = useCallback(
-    async (taskId: string) => {
+  const discountUnlockedInRegion = useMemo(() => {
+    return regionProgress["r2"]?.isComplete ?? false;
+  }, [regionProgress]);
+
+  // Actions
+
+  const toggleLesson = useCallback(
+    async (lessonId: string) => {
       if (!student) return;
-
       const token = await getAccessToken();
       if (!token) return;
 
-      const isCompleted = completedTaskIds.has(taskId);
+      const isCompleted = completedLessonIds.has(lessonId);
 
       // Optimistic update
       if (isCompleted) {
-        setCompletions((prev) => prev.filter((c) => c.task_id !== taskId));
+        setCompletions((prev) => prev.filter((c) => c.lesson_id !== lessonId));
       } else {
-        const optimistic: StudentTaskCompletion = {
+        const optimistic: StudentLessonCompletion = {
           id: crypto.randomUUID(),
           student_id: student.id,
-          task_id: taskId,
+          lesson_id: lessonId,
           completed_at: new Date().toISOString(),
         };
         setCompletions((prev) => [...prev, optimistic]);
       }
 
       try {
-        const res = await fetch("/api/student/toggle-task", {
+        const res = await fetch("/api/student/toggle-lesson", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ taskId }),
+          body: JSON.stringify({ lessonId }),
         });
 
         if (!res.ok) {
-          // Revert: re-fetch all completions
+          // Revert on error: refetch
           const dataRes = await fetch("/api/student/data", {
             headers: { Authorization: `Bearer ${token}` },
           });
@@ -309,20 +289,15 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         } else {
           const result = await res.json();
           if (result.action === "checked" && result.completion) {
-            // Replace optimistic with real data
             setCompletions((prev) =>
               prev.map((c) =>
-                c.task_id === taskId && !c.id.includes("-")
-                  ? c
-                  : c.task_id === taskId
-                    ? result.completion
-                    : c
+                c.lesson_id === lessonId ? result.completion : c
               )
             );
           }
         }
       } catch {
-        // Revert on network error: re-fetch
+        // Revert on network error
         const token2 = await getAccessToken();
         if (token2) {
           const dataRes = await fetch("/api/student/data", {
@@ -335,13 +310,12 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [student, completedTaskIds]
+    [student, completedLessonIds]
   );
 
   const saveNote = useCallback(
     async (content: string) => {
       if (!student) return;
-
       const token = await getAccessToken();
       if (!token) return;
 
@@ -354,7 +328,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           },
           body: JSON.stringify({ content }),
         });
-
         if (res.ok) {
           const data = await res.json();
           setTodayNote(data.note);
@@ -367,11 +340,10 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   );
 
   const saveLessonNote = useCallback(
-    async (taskId: string, content: string) => {
+    async (lessonId: string, content: string) => {
       if (!student) return;
 
-      // Optimistic update
-      setLessonNotes((prev) => ({ ...prev, [taskId]: content }));
+      setLessonNotes((prev) => ({ ...prev, [lessonId]: content }));
 
       const token = await getAccessToken();
       if (!token) return;
@@ -383,9 +355,8 @@ export function StudentProvider({ children }: { children: ReactNode }) {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ taskId, content }),
+          body: JSON.stringify({ lessonId, content }),
         });
-
         if (!res.ok) {
           console.error("Failed to save lesson note");
         }
@@ -395,38 +366,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     },
     [student]
   );
-
-  const checkRewards = useCallback(async () => {
-    const token = await getAccessToken();
-    if (!token) return;
-
-    try {
-      const res = await fetch("/api/student/check-rewards", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        const newlyUnlocked = data.newlyUnlocked ?? [];
-        if (newlyUnlocked.length > 0) {
-          // Add to local state
-          setStudentRewards((prev) => [
-            ...prev,
-            ...newlyUnlocked.map((r: { unlock: StudentReward }) => r.unlock),
-          ]);
-          // Show the first new reward
-          setPendingReward(newlyUnlocked[0]);
-        }
-      }
-    } catch (err) {
-      console.error("Failed to check rewards:", err);
-    }
-  }, []);
-
-  const dismissReward = useCallback(() => {
-    setPendingReward(null);
-  }, []);
 
   const submitQuiz = useCallback(
     async (quizId: string, selections: Record<string, number>) => {
@@ -445,7 +384,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       if (!res.ok) throw new Error("Failed to submit quiz");
 
       const data = await res.json();
-      // Add the attempt to local state
       if (data.attempt) {
         setQuizAttempts((prev) => [...prev, data.attempt]);
       }
@@ -484,14 +422,13 @@ export function StudentProvider({ children }: { children: ReactNode }) {
 
       const data = await res.json();
 
-      // Re-fetch all student data to pick up the new completions
       const dataRes = await fetch("/api/student/data", {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (dataRes.ok) {
         const fresh = await dataRes.json();
-        setTasks(fresh.tasks);
-        setCheckpoints(fresh.checkpoints ?? []);
+        setLessons(fresh.lessons);
+        setRegions(fresh.regions ?? []);
         setCompletions(fresh.completions);
       }
 
@@ -501,7 +438,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       if (synced > 0) {
         message = `Synced ${synced} lesson${synced === 1 ? "" : "s"} from Whop.`;
       } else if (fetched > 0) {
-        message = `Found ${fetched} completion${fetched === 1 ? "" : "s"} on Whop, but none matched a lesson ID in the app.`;
+        message = `Found ${fetched} completion${fetched === 1 ? "" : "s"} on Whop, but none matched a lesson in the app.`;
       } else {
         message = "All up to date.";
       }
@@ -524,6 +461,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
+        body: JSON.stringify({ studentId: student.id }),
       });
 
       if (res.ok) {
@@ -538,37 +476,31 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   return (
     <StudentContext.Provider
       value={{
-        tasks,
-        checkpoints,
+        regions,
+        lessons,
         completions,
         todayNote,
         discountRequest,
         lessonNotes,
-        loading,
-        completedTaskIds,
-        weekProgress,
-        checkpointProgress,
-        overallProgress,
-        activationPoints,
-        discountEligible,
-        discountCheckpointsCompleted,
-        discountCheckpointsTotal,
-        streak,
-        currentTitle,
-        completedCheckpointCount,
         quizzes,
         quizQuestions,
         quizAttempts,
-        hiddenRewards,
-        studentRewards,
-        pendingReward,
         monthReview,
-        toggleTask,
+        loading,
+        completedLessonIds,
+        regionProgress,
+        overallProgress,
+        currentLesson,
+        currentRegionId,
+        streak,
+        currentTitle,
+        completedRegionCount,
+        discountEligible,
+        discountUnlockedInRegion,
+        toggleLesson,
         saveNote,
         saveLessonNote,
         submitQuiz,
-        checkRewards,
-        dismissReward,
         requestDiscount,
         refreshWatchProgress,
       }}
@@ -585,3 +517,6 @@ export function useStudent() {
   }
   return context;
 }
+
+// Re-export LessonNote for convenience
+export type { LessonNote };

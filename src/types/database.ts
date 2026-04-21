@@ -6,14 +6,13 @@ export interface TeamMember {
   created_at: string;
 }
 
+// V3 title system — 5 ranks based on completed regions (0-4)
 export type StudentTitle =
   | "recruit"
   | "explorer"
-  | "apprentice"
   | "ad_creator"
   | "strategist"
-  | "bounty_hunter"
-  | "ecomtalent_pro";
+  | "et_pro";
 
 export interface Student {
   id: string;
@@ -40,35 +39,47 @@ export interface Student {
   updated_at: string;
 }
 
-export interface Checkpoint {
-  id: string;
-  sort_order: number;
-  title: string;
-  subtitle: string | null;
-  theme_key: string;
+// V3: Regions replace Checkpoints
+export type RegionId = "r1" | "r2" | "r3" | "r4";
+export type Terrain = "shore" | "forest" | "mountains" | "city";
+
+export interface Region {
+  id: RegionId;
+  order_num: 1 | 2 | 3 | 4;
+  name: string;
+  subtitle: string;
+  tagline: string;
+  terrain: Terrain;
+  days_label: string;
+  day_start: number;
+  day_end: number;
   is_discount_gate: boolean;
   created_at: string;
 }
 
-export interface Task {
+// V3: Lessons replace Tasks
+export type LessonType = "watch" | "action" | "setup";
+
+export interface Lesson {
   id: string;
-  week: number;
-  sort_order: number;
+  region_id: RegionId;
+  day: number;
+  type: LessonType;
   title: string;
   description: string | null;
-  task_type: "setup" | "watch" | "action";
-  is_activation_point: boolean;
-  activation_point_id: "AP1" | "AP2" | "AP3" | null;
-  is_discount_required: boolean;
-  checkpoint_id: string;
+  duration_label: string | null;
+  is_gate: boolean;
+  is_boss: boolean;
   whop_lesson_id: string | null;
+  discord_channel: string | null;
+  sort_order: number;
   created_at: string;
 }
 
-export interface StudentTaskCompletion {
+export interface StudentLessonCompletion {
   id: string;
   student_id: string;
-  task_id: string;
+  lesson_id: string;
   completed_at: string;
 }
 
@@ -76,6 +87,16 @@ export interface DailyNote {
   id: string;
   student_id: string;
   note_date: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// V3: lesson_notes now references lessons (lesson_id column)
+export interface LessonNote {
+  id: string;
+  student_id: string;
+  lesson_id: string;
   content: string;
   created_at: string;
   updated_at: string;
@@ -104,20 +125,10 @@ export interface DisengagementAlert {
   created_at: string;
 }
 
-// V2 types
-
-export interface LessonNote {
-  id: string;
-  student_id: string;
-  task_id: string;
-  content: string;
-  created_at: string;
-  updated_at: string;
-}
-
+// V3: Quiz now linked to region (not checkpoint)
 export interface Quiz {
   id: string;
-  checkpoint_id: string;
+  region_id: string;
   title: string;
   passing_percent: number;
   sort_order: number;
@@ -146,42 +157,20 @@ export interface StudentQuizAttempt {
   completed_at: string;
 }
 
-export interface HiddenReward {
-  id: string;
-  trigger_type: string;
-  trigger_value: Record<string, unknown>;
-  reward_type: "personal_note" | "exclusive_resource" | "secret_task" | "early_access" | "shoutout";
-  title: string;
-  description: string;
-  content: string | null;
-  icon_path: string | null;
-  sort_order: number;
-  created_at: string;
-}
-
-export interface StudentReward {
-  id: string;
-  student_id: string;
-  reward_id: string;
-  unlocked_at: string;
-  seen: boolean;
-}
-
 export interface MonthReview {
   id: string;
   student_id: string;
   snapshot_data: {
-    tasks_completed: number;
-    tasks_total: number;
+    lessons_completed: number;
+    lessons_total: number;
     current_title: StudentTitle;
     longest_streak: number;
     current_streak: number;
     notes_written: number;
     quizzes_passed: number;
     quizzes_total: number;
-    rewards_unlocked: number;
-    checkpoints_completed: number;
-    checkpoints_total: number;
+    regions_completed: number;
+    regions_total: number;
     bounties_submitted: number;
   };
   generated_at: string;

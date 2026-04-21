@@ -9,11 +9,11 @@ export async function POST(request: NextRequest) {
   }
 
   const token = authHeader.slice(7);
-  const { taskId, content } = await request.json();
+  const { lessonId, content } = await request.json();
 
-  if (typeof taskId !== "string" || typeof content !== "string") {
+  if (typeof lessonId !== "string" || typeof content !== "string") {
     return NextResponse.json(
-      { error: "Missing taskId or content" },
+      { error: "Missing lessonId or content" },
       { status: 400 }
     );
   }
@@ -45,8 +45,8 @@ export async function POST(request: NextRequest) {
   const { data, error } = await supabase
     .from("lesson_notes")
     .upsert(
-      { student_id: student.id, task_id: taskId, content },
-      { onConflict: "student_id,task_id" }
+      { student_id: student.id, lesson_id: lessonId, content },
+      { onConflict: "student_id,lesson_id" }
     )
     .select()
     .single();

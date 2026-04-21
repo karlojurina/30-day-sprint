@@ -36,7 +36,7 @@ export default function AdminDashboard() {
         recentAlertsRes,
       ] = await Promise.all([
         supabase.from("students").select("*"),
-        supabase.from("student_task_completions").select("student_id"),
+        supabase.from("student_lesson_completions").select("student_id"),
         supabase
           .from("discount_requests")
           .select("id")
@@ -77,7 +77,7 @@ export default function AdminDashboard() {
           ? Math.round(
               activeStudents.reduce(
                 (sum, s) =>
-                  sum + ((completionMap[s.id] || 0) / 23) * 100,
+                  sum + ((completionMap[s.id] || 0) / 33) * 100,
                 0
               ) / activeStudents.length
             )

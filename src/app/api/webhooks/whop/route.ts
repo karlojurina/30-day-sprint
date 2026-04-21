@@ -93,18 +93,17 @@ export async function POST(request: NextRequest) {
     }
 
     case "course_lesson_interaction.completed": {
-      // Student finished a Whop course lesson — mark the matching task
-      // complete in our DB. Idempotent via unique(student_id, task_id).
+      // Student finished a Whop course lesson — mark the matching lesson
+      // complete in our DB. Idempotent via unique(student_id, lesson_id).
       const data = payload.data as WhopLessonInteractionWebhookData;
       const whopUserId = data.user?.id;
-      const lessonId = data.lesson?.id ?? data.lesson_id;
+      const whopLessonId = data.lesson?.id ?? data.lesson_id;
 
-      if (!whopUserId || !lessonId) {
+      if (!whopUserId || !whopLessonId) {
         console.warn("Webhook: lesson.completed missing user or lesson id", data);
         break;
       }
 
-      // Look up the student
       const { data: student } = await supabase
         .from("students")
         .select("id")
@@ -117,23 +116,23 @@ export async function POST(request: NextRequest) {
         break;
       }
 
-      // Look up the task matching this lesson
-      const { data: task } = await supabase
-        .from("tasks")
+      // Look up our lesson matching this Whop lesson
+      const { data: lesson } = await supabase
+        .from("lessons")
         .select("id")
-        .eq("whop_lesson_id", lessonId)
+        .eq("whop_lesson_id", whopLessonId)
         .single();
-      if (!task) {
-        // No task is mapped to this lesson — nothing to do
+      if (!lesson) {
+        // No lesson is mapped to this Whop lesson — nothing to do
         break;
       }
 
       const { error } = await supabase
-        .from("student_task_completions")
+        .from("student_lesson_completions")
         .upsert(
-          { student_id: student.id, task_id: task.id },
+          { student_id: student.id, lesson_id: lesson.id },
           {
-            onConflict: "student_id,task_id",
+            onConflict: "student_id,lesson_id",
             ignoreDuplicates: true,
           }
         );

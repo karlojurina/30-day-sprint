@@ -55,13 +55,13 @@ export async function syncWatchProgress({
       .map((i) => i.lesson?.id)
       .filter((id): id is string => typeof id === "string");
 
-    // 2. Find our tasks that match those lesson IDs
-    const { data: matchedTasks } = await supabase
-      .from("tasks")
+    // 2. Find our lessons that match those Whop lesson IDs
+    const { data: matchedLessons } = await supabase
+      .from("lessons")
       .select("id, whop_lesson_id")
       .in("whop_lesson_id", completedLessonIds);
 
-    const matched = matchedTasks ?? [];
+    const matched = matchedLessons ?? [];
     if (matched.length === 0) {
       await supabase
         .from("students")
@@ -79,15 +79,15 @@ export async function syncWatchProgress({
     }
 
     // 3. Upsert completions (idempotent)
-    const rows = matched.map((t) => ({
+    const rows = matched.map((l) => ({
       student_id: studentId,
-      task_id: t.id,
+      lesson_id: l.id,
     }));
 
     const { error: upsertError } = await supabase
-      .from("student_task_completions")
+      .from("student_lesson_completions")
       .upsert(rows, {
-        onConflict: "student_id,task_id",
+        onConflict: "student_id,lesson_id",
         ignoreDuplicates: true,
       });
 

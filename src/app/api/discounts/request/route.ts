@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
+import { DISCOUNT_GATE_LESSON_ID } from "@/lib/constants";
 
+/**
+ * V3: Discount eligibility = the gate lesson (l18) is complete.
+ * The gate lesson is the final action item of Region 2 (Creative Lab).
+ */
 export async function POST(request: NextRequest) {
   const { studentId } = await request.json();
 
@@ -26,23 +31,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Verify eligibility
-  const { data: discountTasks } = await supabase
-    .from("tasks")
+  // Verify eligibility: gate lesson must be complete
+  const { data: gateCompletion } = await supabase
+    .from("student_lesson_completions")
     .select("id")
-    .eq("is_discount_required", true);
-
-  const taskIds = (discountTasks || []).map((t) => t.id);
-
-  const { count } = await supabase
-    .from("student_task_completions")
-    .select("id", { count: "exact", head: true })
     .eq("student_id", studentId)
-    .in("task_id", taskIds);
+    .eq("lesson_id", DISCOUNT_GATE_LESSON_ID)
+    .single();
 
-  if ((count || 0) < 13) {
+  if (!gateCompletion) {
     return NextResponse.json(
-      { error: "Not all required tasks are completed" },
+      { error: "Discount gate lesson not completed yet" },
       { status: 400 }
     );
   }

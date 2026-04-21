@@ -14,13 +14,11 @@ export async function GET(request: NextRequest) {
     { auth: { persistSession: false } }
   );
 
-  // Verify user
   const { data: { user }, error: userError } = await supabase.auth.getUser(token);
   if (userError || !user) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
 
-  // Get student record
   const { data: student } = await supabase
     .from("students")
     .select("*")
@@ -33,55 +31,59 @@ export async function GET(request: NextRequest) {
 
   const today = new Date().toISOString().split("T")[0];
 
-  // Fetch all student data in parallel
-  const [tasksRes, checkpointsRes, completionsRes, noteRes, discountRes, lessonNotesRes, quizzesRes, quizQuestionsRes, quizAttemptsRes, hiddenRewardsRes, studentRewardsRes, monthReviewRes] =
-    await Promise.all([
-      supabase.from("tasks").select("*").order("week").order("sort_order"),
-      supabase.from("checkpoints").select("*").order("sort_order"),
-      supabase
-        .from("student_task_completions")
-        .select("*")
-        .eq("student_id", student.id),
-      supabase
-        .from("daily_notes")
-        .select("*")
-        .eq("student_id", student.id)
-        .eq("note_date", today)
-        .single(),
-      supabase
-        .from("discount_requests")
-        .select("*")
-        .eq("student_id", student.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single(),
-      supabase
-        .from("lesson_notes")
-        .select("*")
-        .eq("student_id", student.id),
-      supabase.from("quizzes").select("*").order("sort_order"),
-      supabase.from("quiz_questions").select("*").order("sort_order"),
-      supabase
-        .from("student_quiz_attempts")
-        .select("*")
-        .eq("student_id", student.id)
-        .order("completed_at", { ascending: false }),
-      supabase.from("hidden_rewards").select("*").order("sort_order"),
-      supabase
-        .from("student_rewards")
-        .select("*")
-        .eq("student_id", student.id),
-      supabase
-        .from("month_reviews")
-        .select("*")
-        .eq("student_id", student.id)
-        .single(),
-    ]);
+  const [
+    regionsRes,
+    lessonsRes,
+    completionsRes,
+    noteRes,
+    discountRes,
+    lessonNotesRes,
+    quizzesRes,
+    quizQuestionsRes,
+    quizAttemptsRes,
+    monthReviewRes,
+  ] = await Promise.all([
+    supabase.from("regions").select("*").order("order_num"),
+    supabase.from("lessons").select("*").order("day").order("sort_order"),
+    supabase
+      .from("student_lesson_completions")
+      .select("*")
+      .eq("student_id", student.id),
+    supabase
+      .from("daily_notes")
+      .select("*")
+      .eq("student_id", student.id)
+      .eq("note_date", today)
+      .single(),
+    supabase
+      .from("discount_requests")
+      .select("*")
+      .eq("student_id", student.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single(),
+    supabase
+      .from("lesson_notes")
+      .select("*")
+      .eq("student_id", student.id),
+    supabase.from("quizzes").select("*").order("sort_order"),
+    supabase.from("quiz_questions").select("*").order("sort_order"),
+    supabase
+      .from("student_quiz_attempts")
+      .select("*")
+      .eq("student_id", student.id)
+      .order("completed_at", { ascending: false }),
+    supabase
+      .from("month_reviews")
+      .select("*")
+      .eq("student_id", student.id)
+      .single(),
+  ]);
 
   return NextResponse.json({
     student,
-    tasks: tasksRes.data ?? [],
-    checkpoints: checkpointsRes.data ?? [],
+    regions: regionsRes.data ?? [],
+    lessons: lessonsRes.data ?? [],
     completions: completionsRes.data ?? [],
     todayNote: noteRes.data ?? null,
     discountRequest: discountRes.data ?? null,
@@ -89,8 +91,6 @@ export async function GET(request: NextRequest) {
     quizzes: quizzesRes.data ?? [],
     quizQuestions: quizQuestionsRes.data ?? [],
     quizAttempts: quizAttemptsRes.data ?? [],
-    hiddenRewards: hiddenRewardsRes.data ?? [],
-    studentRewards: studentRewardsRes.data ?? [],
     monthReview: monthReviewRes.data ?? null,
   });
 }

@@ -23,7 +23,7 @@ export default function StudentsPage() {
     async function fetchStudents() {
       const [studentsRes, completionsRes] = await Promise.all([
         supabase.from("students").select("*").order("joined_at", { ascending: false }),
-        supabase.from("student_task_completions").select("student_id"),
+        supabase.from("student_lesson_completions").select("student_id"),
       ]);
 
       if (studentsRes.data) setStudents(studentsRes.data);
@@ -179,7 +179,7 @@ export default function StudentsPage() {
               {filtered.map((student) => {
                 const day = getDayNumber(student.joined_at);
                 const completed = completionCounts[student.id] || 0;
-                const percent = Math.round((completed / 23) * 100);
+                const percent = Math.round((completed / 33) * 100);
 
                 return (
                   <tr

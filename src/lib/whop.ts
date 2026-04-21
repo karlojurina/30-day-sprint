@@ -76,6 +76,62 @@ export async function checkActiveMembership(
 }
 
 /**
+ * Fetch the user's Whop membership(s) for our product. We want the
+ * membership's created_at / joined_at so the discount countdown can
+ * be based on their ACTUAL Whop join date, not their first login here.
+ *
+ * Returns the earliest membership's joined_at as an ISO string, or null
+ * if the API call fails. Silent failure — the caller should fall back
+ * to the current timestamp.
+ */
+export async function fetchWhopMembershipJoinDate(
+  accessToken: string
+): Promise<string | null> {
+  try {
+    const productId = process.env.WHOP_PRODUCT_ID;
+    const params = new URLSearchParams({ first: "10" });
+    if (productId) params.set("product_id", productId);
+
+    const res = await fetch(
+      `${WHOP_API_BASE}/me/memberships?${params}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!res.ok) return null;
+
+    const json = await res.json();
+    const list: Array<{
+      created_at?: string | number;
+      joined_at?: string | number;
+      product_id?: string;
+    }> = json?.data ?? [];
+    if (list.length === 0) return null;
+
+    // Prefer memberships matching our product, else earliest
+    const matching = productId
+      ? list.filter((m) => m.product_id === productId)
+      : list;
+    const pool = matching.length > 0 ? matching : list;
+
+    // Find earliest joined_at / created_at
+    const times = pool
+      .map((m) => {
+        const raw = m.joined_at ?? m.created_at;
+        if (raw == null) return null;
+        // Whop sometimes returns UNIX seconds as a number
+        if (typeof raw === "number") return new Date(raw * 1000).toISOString();
+        return raw;
+      })
+      .filter((t): t is string => typeof t === "string");
+    if (times.length === 0) return null;
+    times.sort();
+    return times[0];
+  } catch (err) {
+    console.error("fetchWhopMembershipJoinDate failed:", err);
+    return null;
+  }
+}
+
+/**
  * Generate a deterministic password for a Whop user
  * Used to bridge Whop OAuth to Supabase auth
  */

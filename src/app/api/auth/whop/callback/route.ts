@@ -4,6 +4,7 @@ import {
   exchangeCodeForTokens,
   fetchWhopUserInfo,
   checkActiveMembership,
+  fetchWhopMembershipJoinDate,
   generateStudentPassword,
 } from "@/lib/whop";
 import { unsignState } from "@/lib/pkce";
@@ -108,22 +109,46 @@ export async function GET(request: NextRequest) {
     // 5. Upsert student record using a FRESH service-role client so the
     //    query runs with service-role permissions (bypasses RLS).
     const supabase = createServiceClient();
+
+    // Check if student already exists before upserting, so we can set
+    // joined_at correctly for new students (from their Whop membership)
+    // without overwriting it on returning students.
+    const { data: existing } = await supabase
+      .from("students")
+      .select("id, joined_at")
+      .eq("whop_user_id", userInfo.sub)
+      .single();
+
+    const baseFields = {
+      whop_user_id: userInfo.sub,
+      supabase_user_id: userId,
+      email: userInfo.email,
+      name: userInfo.name,
+      avatar_url: userInfo.picture,
+      discord_username: userInfo.username,
+      last_active_at: new Date().toISOString(),
+      whop_access_token: tokens.access_token ?? null,
+      whop_refresh_token: tokens.refresh_token ?? null,
+    };
+
+    let upsertFields: Record<string, unknown> = baseFields;
+
+    if (!existing) {
+      // New student — fetch actual Whop membership join date so the
+      // 14-day discount window is counted from when they joined Whop,
+      // not from their first login here.
+      const whopJoinDate = await fetchWhopMembershipJoinDate(
+        tokens.access_token
+      );
+      upsertFields = {
+        ...baseFields,
+        joined_at: whopJoinDate ?? new Date().toISOString(),
+      };
+    }
+
     const { data: upsertedStudent, error: upsertError } = await supabase
       .from("students")
-      .upsert(
-        {
-          whop_user_id: userInfo.sub,
-          supabase_user_id: userId,
-          email: userInfo.email,
-          name: userInfo.name,
-          avatar_url: userInfo.picture,
-          discord_username: userInfo.username,
-          last_active_at: new Date().toISOString(),
-          whop_access_token: tokens.access_token ?? null,
-          whop_refresh_token: tokens.refresh_token ?? null,
-        },
-        { onConflict: "whop_user_id" }
-      )
+      .upsert(upsertFields, { onConflict: "whop_user_id" })
       .select("id")
       .single();
 

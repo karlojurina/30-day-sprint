@@ -18,10 +18,20 @@ const GOLD = "#E6C07A";
 const GOLD_HI = "#F0D595";
 const GOLD_DIM = "rgba(230,192,122,0.62)";
 
-/**
- * Top bar: two rows — brand + current-lesson breadcrumb + prominent streak/rank,
- * and the 30-day ruler below with region bands.
- */
+const PILL_HEIGHT = 52; // shared height so every chip/card aligns perfectly
+
+// Shared pill styling used across every topbar chip so they all line up.
+const pillBaseStyle: React.CSSProperties = {
+  height: PILL_HEIGHT,
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  padding: "0 14px",
+  borderRadius: 10,
+  border: "1px solid rgba(230,192,122,0.28)",
+  background: "rgba(16,32,66,0.7)",
+};
+
 export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
   const { student, signOut } = useAuth();
   const {
@@ -57,47 +67,55 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
         borderBottom: "1px solid rgba(230,192,122,0.18)",
       }}
     >
-      {/* Row 1 — brand + breadcrumb + stats */}
-      <div className="flex items-center justify-between px-6 py-4 gap-4">
-        {/* Brand (EcomTalent logo) */}
-        <div className="flex items-center gap-3 shrink-0">
+      {/* Row 1 — fixed pill height, everything vertically centered */}
+      <div className="flex items-center justify-between gap-3 px-6" style={{ height: 84 }}>
+        {/* Brand (logo) — fixed size, no chrome */}
+        <div className="flex items-center shrink-0" style={{ height: PILL_HEIGHT }}>
           <Image
             src="/ecomtalent-logo.png"
             alt="EcomTalent"
-            width={160}
-            height={40}
+            width={560}
+            height={315}
             priority
             style={{
-              height: 28,
+              height: 36,
               width: "auto",
               objectFit: "contain",
             }}
           />
         </div>
 
-        {/* Breadcrumb (current lesson) */}
+        {/* Breadcrumb — same pill height as badges on the right */}
         {currentLesson && currentRegion && (
           <button
             onClick={() => setPanTarget(currentLesson.id)}
-            className="hidden md:flex items-center gap-4 px-5 py-3 rounded-xl transition-colors flex-1 max-w-2xl"
+            className="hidden md:flex items-center gap-3 transition-colors flex-1 min-w-0"
             style={{
-              background: "rgba(16,32,66,0.75)",
-              border: "1px solid rgba(230,192,122,0.3)",
+              ...pillBaseStyle,
+              maxWidth: 560,
+              padding: "0 16px",
             }}
           >
-            <div className="flex-1 min-w-0">
+            <div className="flex-1 min-w-0 text-left leading-tight overflow-hidden">
               <p
-                className="text-[11px] font-mono tracking-widest uppercase text-left mb-1"
-                style={{ color: GOLD_DIM, letterSpacing: "0.18em" }}
+                className="font-mono uppercase tracking-widest truncate"
+                style={{
+                  color: GOLD_DIM,
+                  letterSpacing: "0.18em",
+                  fontSize: 10,
+                  lineHeight: "12px",
+                }}
               >
                 Day {dayNumber} · {currentRegion.name}
               </p>
               <p
-                className="italic text-[20px] leading-tight text-left truncate"
+                className="italic truncate"
                 style={{
                   fontFamily: "Cormorant Garamond, serif",
                   color: "#E6DCC8",
                   fontWeight: 500,
+                  fontSize: 18,
+                  lineHeight: "22px",
                 }}
               >
                 {currentLesson.title}
@@ -105,11 +123,13 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
             </div>
             {currentLesson.duration_label && (
               <span
-                className="font-mono text-[12px] px-3 py-1 rounded shrink-0"
+                className="font-mono shrink-0 rounded"
                 style={{
                   background: "rgba(230,192,122,0.15)",
                   color: GOLD,
+                  fontSize: 11,
                   letterSpacing: "0.08em",
+                  padding: "4px 8px",
                 }}
               >
                 {currentLesson.duration_label}
@@ -118,87 +138,83 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
           </button>
         )}
 
-        {/* Right cluster — Streak, Rank, Actions */}
-        <div className="flex items-center gap-3 shrink-0">
-          {/* STREAK — prominent */}
+        {/* Right cluster — all chips share the same PILL_HEIGHT */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Streak */}
           {streak.current > 0 && (
             <div
-              className="flex items-center gap-2 px-3 py-2 rounded-lg"
               style={{
-                background: "rgba(230,192,122,0.12)",
-                border: "1px solid rgba(230,192,122,0.35)",
+                ...pillBaseStyle,
+                background: "rgba(230,192,122,0.14)",
                 boxShadow:
                   streak.current >= 7
-                    ? "0 0 14px rgba(230,192,122,0.25)"
+                    ? "0 0 16px rgba(230,192,122,0.3)"
                     : "none",
               }}
-              title={`${streak.current}-day streak (longest: ${streak.longest})`}
+              title={`${streak.current}-day streak · longest: ${streak.longest}`}
             >
-              <span style={{ fontSize: 20, lineHeight: 1 }}>🔥</span>
-              <div className="flex flex-col items-start leading-none">
-                <span
-                  className="font-mono text-[16px] font-bold tabular-nums"
-                  style={{ color: GOLD_HI }}
-                >
-                  {streak.current}
-                </span>
-                <span
-                  className="text-[9px] font-mono uppercase mt-0.5"
-                  style={{ color: GOLD_DIM, letterSpacing: "0.12em" }}
-                >
-                  Streak
-                </span>
-              </div>
+              <span style={{ fontSize: 18, lineHeight: 1 }}>🔥</span>
+              <span
+                className="font-mono tabular-nums font-bold"
+                style={{ color: GOLD_HI, fontSize: 16 }}
+              >
+                {streak.current}
+              </span>
             </div>
           )}
 
-          {/* RANK — prominent */}
+          {/* Rank */}
           <div
-            className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-lg"
-            style={{
-              background: "rgba(16,32,66,0.75)",
-              border: "1px solid rgba(230,192,122,0.35)",
-            }}
+            style={pillBaseStyle}
             title={`Current rank: ${getTitleLabel(currentTitle)}`}
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24" fill={GOLD}>
               <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z" />
             </svg>
-            <div className="flex flex-col items-start leading-none">
-              <span
-                className="text-[14px] font-semibold"
-                style={{
-                  fontFamily: "Cormorant Garamond, serif",
-                  fontStyle: "italic",
-                  color: "#E6DCC8",
-                }}
-              >
-                {getTitleLabel(currentTitle)}
-              </span>
-              <span
-                className="text-[9px] font-mono uppercase mt-0.5"
-                style={{ color: GOLD_DIM, letterSpacing: "0.12em" }}
-              >
-                Rank
-              </span>
-            </div>
+            <span
+              className="italic whitespace-nowrap"
+              style={{
+                fontFamily: "Cormorant Garamond, serif",
+                color: "#E6DCC8",
+                fontWeight: 500,
+                fontSize: 16,
+              }}
+            >
+              {getTitleLabel(currentTitle)}
+            </span>
           </div>
 
           {/* Notebook */}
           <button
             onClick={onOpenNotebook}
-            className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors"
             style={{
-              background: "rgba(16,32,66,0.5)",
-              border: "1px solid rgba(230,192,122,0.18)",
-              color: "rgba(230,220,200,0.8)",
+              ...pillBaseStyle,
+              cursor: "pointer",
+              color: "rgba(230,220,200,0.85)",
             }}
             title="Your notebook"
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.background = "rgba(16,32,66,1)")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.background = "rgba(16,32,66,0.7)")
+            }
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.6">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+              />
             </svg>
-            <span className="hidden lg:inline font-mono text-[11px] uppercase tracking-widest" style={{ letterSpacing: "0.14em" }}>
+            <span
+              className="hidden lg:inline font-mono uppercase"
+              style={{
+                fontSize: 11,
+                letterSpacing: "0.16em",
+                color: "rgba(230,220,200,0.85)",
+              }}
+            >
               Notes
             </span>
           </button>
@@ -206,11 +222,30 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
           {/* Sign out */}
           <button
             onClick={signOut}
-            className="font-mono text-[11px] uppercase tracking-widest transition-colors px-2"
-            style={{ color: "rgba(230,220,200,0.48)", letterSpacing: "0.14em" }}
+            style={{
+              ...pillBaseStyle,
+              border: "1px solid rgba(230,192,122,0.12)",
+              background: "transparent",
+              color: "rgba(230,220,200,0.5)",
+              cursor: "pointer",
+              padding: "0 14px",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "#E6DCC8";
+              e.currentTarget.style.borderColor = "rgba(230,192,122,0.28)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "rgba(230,220,200,0.5)";
+              e.currentTarget.style.borderColor = "rgba(230,192,122,0.12)";
+            }}
             title="Sign out"
           >
-            <span className="hover:text-[#E6DCC8]">Sign out</span>
+            <span
+              className="font-mono uppercase"
+              style={{ fontSize: 11, letterSpacing: "0.16em" }}
+            >
+              Sign out
+            </span>
           </button>
         </div>
       </div>
@@ -279,18 +314,20 @@ function DayRuler({
     >
       <div className="flex-shrink-0 hidden md:block">
         <p
-          className="text-[11px] font-mono uppercase tracking-widest"
-          style={{ color: GOLD, letterSpacing: "0.18em" }}
+          className="font-mono uppercase tracking-widest"
+          style={{ color: GOLD, letterSpacing: "0.18em", fontSize: 11 }}
         >
           Hey, {firstName}
         </p>
-        <p className="text-[12px] font-mono mt-0.5" style={{ color: "rgba(230,220,200,0.75)" }}>
+        <p
+          className="font-mono"
+          style={{ color: "rgba(230,220,200,0.75)", fontSize: 12 }}
+        >
           {overallProgress}% charted · {daysLeft} days left
         </p>
       </div>
 
       <div className="flex-1 relative h-8">
-        {/* Region bands */}
         <div className="absolute inset-0 flex rounded-md overflow-hidden">
           {regions.map((r) => {
             const width = ((r.day_end - r.day_start + 1) / TOTAL_DAYS) * 100;
@@ -313,7 +350,6 @@ function DayRuler({
           })}
         </div>
 
-        {/* Tick marks */}
         {Array.from({ length: TOTAL_DAYS }).map((_, i) => {
           const day = i + 1;
           const left = ((day - 0.5) / TOTAL_DAYS) * 100;
@@ -346,19 +382,19 @@ function DayRuler({
               />
               {isMilestone && (
                 <span
-                  className="absolute font-mono text-[10px] mt-1 font-semibold"
+                  className="absolute font-mono font-semibold"
                   style={{
                     top: 14,
                     left: "50%",
                     transform: "translateX(-50%)",
                     color: "rgba(230,220,200,0.62)",
                     letterSpacing: "0.08em",
+                    fontSize: 10,
                   }}
                 >
                   {day}
                 </span>
               )}
-              {/* Current-day pin */}
               {isCurrent && (
                 <div
                   className="absolute pulse-ring"

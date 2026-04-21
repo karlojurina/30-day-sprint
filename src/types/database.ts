@@ -31,6 +31,9 @@ export interface Student {
   last_watch_sync_at: string | null;
   whop_last_sync_error: string | null;
   whop_last_sync_error_at: string | null;
+  whop_last_sync_unmatched: string[] | null;
+  whop_last_sync_fetched_count: number | null;
+  whop_last_sync_matched_count: number | null;
   current_streak: number;
   longest_streak: number;
   last_streak_date: string | null;

@@ -151,6 +151,94 @@ export default function StudentDetailPage() {
         </div>
       </div>
 
+      {/* Whop sync diagnostic */}
+      <div className="bg-bg-card border border-border rounded-xl p-4">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-semibold">Whop Sync</h2>
+          {student.last_watch_sync_at && (
+            <span className="text-[10px] text-text-tertiary font-mono uppercase tracking-widest">
+              Last synced{" "}
+              {new Date(student.last_watch_sync_at).toLocaleString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          )}
+        </div>
+        <div className="grid grid-cols-3 gap-3 mb-3">
+          <div>
+            <p className="text-[10px] text-text-tertiary font-mono uppercase tracking-widest mb-1">
+              Fetched from Whop
+            </p>
+            <p className="text-base font-semibold">
+              {student.whop_last_sync_fetched_count ?? "—"}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] text-text-tertiary font-mono uppercase tracking-widest mb-1">
+              Matched
+            </p>
+            <p className="text-base font-semibold text-accent-light">
+              {student.whop_last_sync_matched_count ?? "—"}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] text-text-tertiary font-mono uppercase tracking-widest mb-1">
+              Unmatched
+            </p>
+            <p
+              className={`text-base font-semibold ${
+                (student.whop_last_sync_unmatched?.length ?? 0) > 0
+                  ? "text-warning"
+                  : "text-text-secondary"
+              }`}
+            >
+              {student.whop_last_sync_unmatched?.length ?? 0}
+            </p>
+          </div>
+        </div>
+
+        {student.whop_last_sync_error && (
+          <div className="mb-3 p-2 rounded bg-danger/10 border border-danger/30 text-xs text-danger">
+            <strong>Last error:</strong> {student.whop_last_sync_error}
+          </div>
+        )}
+
+        {student.whop_last_sync_unmatched &&
+          student.whop_last_sync_unmatched.length > 0 && (
+            <div>
+              <p className="text-xs text-text-secondary mb-2">
+                These Whop lesson IDs were fetched from this student&apos;s watch
+                history but don&apos;t match any lesson in our DB. Map them with{" "}
+                <code className="text-[11px] px-1 py-0.5 rounded bg-bg-elevated">
+                  UPDATE lessons SET whop_lesson_id = &apos;lesn_XXX&apos; WHERE id
+                  = &apos;lYYY&apos;;
+                </code>
+              </p>
+              <div className="p-3 rounded bg-bg-elevated border border-border">
+                <div className="space-y-1 max-h-48 overflow-y-auto">
+                  {student.whop_last_sync_unmatched.map((id) => (
+                    <p
+                      key={id}
+                      className="text-[11px] font-mono text-text-secondary select-all"
+                    >
+                      {id}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+        {student.whop_last_sync_unmatched?.length === 0 && (
+          <p className="text-xs text-success">
+            All Whop lessons this student has watched are mapped. ✓
+          </p>
+        )}
+      </div>
+
       {/* Lesson grid by region */}
       <div className="bg-bg-card border border-border rounded-xl p-4">
         <h2 className="text-sm font-semibold mb-3">Lesson Progress</h2>

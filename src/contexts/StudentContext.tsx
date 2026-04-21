@@ -172,37 +172,59 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     fetchData();
   }, [student]);
 
-  // Auto-sync Whop progress once on mount, silently. Student doesn't need
-  // to click "sync" — watched videos flip to complete on page load.
+  // Auto-sync Whop progress. Silent — no button, no flash.
+  //   - Once on mount (first load after login)
+  //   - Every time the tab regains visibility (student alt-tabs back from
+  //     Whop after watching a lesson), throttled to at most once per 30s
+  const lastSyncAtRef = useRef(0);
+  const runSilentSync = useCallback(async () => {
+    const now = Date.now();
+    if (now - lastSyncAtRef.current < 30_000) return; // throttle
+    lastSyncAtRef.current = now;
+
+    const token = await getAccessToken();
+    if (!token) return;
+
+    try {
+      const res = await fetch("/api/student/refresh-watch-sync", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+
+      const dataRes = await fetch("/api/student/data", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (dataRes.ok) {
+        const fresh = await dataRes.json();
+        setCompletions(fresh.completions);
+      }
+    } catch {
+      // silent — errors are persisted server-side for admin review
+    }
+  }, []);
+
+  // One-shot mount sync
   const hasAutoSyncedRef = useRef(false);
   useEffect(() => {
     if (!student || hasAutoSyncedRef.current) return;
     hasAutoSyncedRef.current = true;
+    runSilentSync();
+  }, [student, runSilentSync]);
 
-    (async () => {
-      const token = await getAccessToken();
-      if (!token) return;
-
-      try {
-        const res = await fetch("/api/student/refresh-watch-sync", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) return;
-
-        // Re-fetch completions so newly-synced lessons show up
-        const dataRes = await fetch("/api/student/data", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (dataRes.ok) {
-          const fresh = await dataRes.json();
-          setCompletions(fresh.completions);
-        }
-      } catch {
-        // silent — sync errors are persisted server-side for admin review
-      }
-    })();
-  }, [student]);
+  // Tab-focus sync: when the student comes back from Whop, we pull updates.
+  useEffect(() => {
+    if (!student) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") runSilentSync();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [student, runSilentSync]);
 
   // Derived state
   const completedLessonIds = useMemo(

@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import type { Lesson } from "@/types/database";
 
 interface LessonNodeProps {
@@ -12,6 +11,8 @@ interface LessonNodeProps {
   isUnlocked: boolean;
   regionLocked: boolean;
   onClick: () => void;
+  onHoverStart?: () => void;
+  onHoverEnd?: () => void;
   peerCount?: number;
 }
 
@@ -20,10 +21,37 @@ const NAVY_ACCENT = "#4DA0D8";
 const GOLD = "#E6C07A";
 const GOLD_HI = "#F0D595";
 const CRIMSON = "#C44A54";
+const NAVY_DARK = "rgba(6,12,26,0.88)";
+
+// 16-point gate star (unlocked discount gate)
+function gatePoints(r: number): string {
+  return Array.from({ length: 16 })
+    .map((_, i) => {
+      const a = (i * Math.PI) / 8 - Math.PI / 2;
+      const rad = i % 2 === 0 ? r : r * 0.68;
+      return `${(Math.cos(a) * rad).toFixed(1)},${(Math.sin(a) * rad).toFixed(1)}`;
+    })
+    .join(" ");
+}
+
+// 8-point boss star
+function bossPoints(r: number): string {
+  return Array.from({ length: 8 })
+    .map((_, i) => {
+      const a = (i * Math.PI) / 4 - Math.PI / 2;
+      const rad = i % 2 === 0 ? r : r * 0.6;
+      return `${(Math.cos(a) * rad).toFixed(1)},${(Math.sin(a) * rad).toFixed(1)}`;
+    })
+    .join(" ");
+}
 
 /**
  * A single lesson pin on the expedition map — handles all 6 states:
  * locked / available / current / completed / gate / boss.
+ *
+ * When the lesson is the student's CURRENT position (and unlocked and not
+ * yet done), the node displays the EcomTalent logo clipped to its own shape,
+ * replacing the default inner mark. A pulsing ring still draws attention.
  */
 export function LessonNode({
   lesson,
@@ -34,9 +62,10 @@ export function LessonNode({
   isUnlocked,
   regionLocked,
   onClick,
+  onHoverStart,
+  onHoverEnd,
   peerCount = 0,
 }: LessonNodeProps) {
-  const [hover, setHover] = useState(false);
   const isWatch = lesson.type === "watch";
   const isGate = lesson.is_gate;
   const isBoss = lesson.is_boss;
@@ -69,23 +98,52 @@ export function LessonNode({
   // Node radius — gate is supersized, boss big, current slightly bigger
   let r: number;
   if (isBoss) r = 28;
-  else if (isGate) r = 44; // supersized so it reads as a key milestone
+  else if (isGate) r = 44;
   else if (isCurrent) r = 22;
   else r = 18;
+
+  // If current-and-unlocked, tint the fill dark so the logo (which has its
+  // own dark content) has contrast behind it. Gate overrides to darker too.
+  const showLogo = isCurrent && isUnlocked && !isDone;
+  const shapeFill = showLogo ? NAVY_DARK : fill;
+
+  // Per-shape clipPath id so the logo respects the node's outline
+  const clipId = `node-clip-${lesson.id}`;
 
   return (
     <g
       data-node
       transform={`translate(${x}, ${y})`}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
       onClick={onClick}
       style={{ cursor: regionLocked ? "not-allowed" : "pointer" }}
     >
+      <defs>
+        <clipPath id={clipId}>
+          {isGate && !isDone ? (
+            <polygon points={gatePoints(r)} />
+          ) : isWatch ? (
+            <circle r={r} />
+          ) : isBoss ? (
+            <polygon points={bossPoints(r)} />
+          ) : (
+            <g transform="rotate(45)">
+              <rect
+                x={-r * 0.8}
+                y={-r * 0.8}
+                width={r * 1.6}
+                height={r * 1.6}
+                rx="3"
+              />
+            </g>
+          )}
+        </clipPath>
+      </defs>
+
       {/* Gate — multi-layer glow + pulsing rings */}
       {isGate && !isDone && !regionLocked && (
         <>
-          {/* Outer soft glow, big */}
           <circle r={r + 46} fill={GOLD_HI} opacity="0.1">
             <animate
               attributeName="opacity"
@@ -94,7 +152,6 @@ export function LessonNode({
               repeatCount="indefinite"
             />
           </circle>
-          {/* Two pulsing rings */}
           <circle r={r + 22} fill="none" stroke={GOLD_HI} strokeWidth="1.8" opacity="0.55">
             <animate
               attributeName="r"
@@ -125,7 +182,6 @@ export function LessonNode({
               repeatCount="indefinite"
             />
           </circle>
-          {/* Inner halo */}
           <circle
             r={r + 8}
             fill="rgba(230,192,122,0.18)"
@@ -135,8 +191,8 @@ export function LessonNode({
         </>
       )}
 
-      {/* Current — pulsing ring */}
-      {isCurrent && (
+      {/* Current-lesson pulsing ring (non-gate) */}
+      {isCurrent && !isGate && (
         <circle r={r + 14} fill="none" stroke={GOLD_HI} strokeWidth="1.5" opacity="0.5">
           <animate
             attributeName="r"
@@ -153,48 +209,16 @@ export function LessonNode({
         </circle>
       )}
 
-      {/* Hover halo */}
-      {hover && !regionLocked && (
-        <circle
-          r={r + 10}
-          fill="rgba(230,192,122,0.14)"
-          stroke="rgba(230,192,122,0.5)"
-          strokeWidth="1"
-        />
-      )}
-
       {/* Shadow */}
       <ellipse cx="0" cy={r + 4} rx={r * 0.85} ry={r * 0.2} fill="rgba(0,0,0,0.45)" />
 
       {/* Body */}
       {isGate && !isDone ? (
-        <polygon
-          points={Array.from({ length: 16 })
-            .map((_, i) => {
-              const a = (i * Math.PI) / 8 - Math.PI / 2;
-              const rad = i % 2 === 0 ? r : r * 0.68;
-              return `${(Math.cos(a) * rad).toFixed(1)},${(Math.sin(a) * rad).toFixed(1)}`;
-            })
-            .join(" ")}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth="2"
-        />
+        <polygon points={gatePoints(r)} fill={shapeFill} stroke={stroke} strokeWidth="2" />
       ) : isWatch ? (
-        <circle r={r} fill={fill} stroke={stroke} strokeWidth="1.8" />
+        <circle r={r} fill={shapeFill} stroke={stroke} strokeWidth="1.8" />
       ) : isBoss ? (
-        <polygon
-          points={Array.from({ length: 8 })
-            .map((_, i) => {
-              const a = (i * Math.PI) / 4 - Math.PI / 2;
-              const rad = i % 2 === 0 ? r : r * 0.6;
-              return `${(Math.cos(a) * rad).toFixed(1)},${(Math.sin(a) * rad).toFixed(1)}`;
-            })
-            .join(" ")}
-          fill={fill}
-          stroke={stroke}
-          strokeWidth="1.8"
-        />
+        <polygon points={bossPoints(r)} fill={shapeFill} stroke={stroke} strokeWidth="1.8" />
       ) : (
         <g transform="rotate(45)">
           <rect
@@ -203,15 +227,25 @@ export function LessonNode({
             width={r * 1.6}
             height={r * 1.6}
             rx="3"
-            fill={fill}
+            fill={shapeFill}
             stroke={stroke}
             strokeWidth="1.8"
           />
         </g>
       )}
 
-      {/* Inner mark */}
-      {isGate && !isDone ? (
+      {/* Inner content — logo for current node, regular mark otherwise */}
+      {showLogo ? (
+        <image
+          href="/ecomtalent-logo.png"
+          x={-r * 0.9}
+          y={-r * 0.9}
+          width={r * 1.8}
+          height={r * 1.8}
+          preserveAspectRatio="xMidYMid meet"
+          clipPath={`url(#${clipId})`}
+        />
+      ) : isGate && !isDone ? (
         <g fill="none" stroke={markColor} strokeWidth="2.2" strokeLinecap="round">
           <circle cx="-5" cy="-5" r="3" />
           <circle cx="5" cy="5" r="3" />
@@ -258,7 +292,7 @@ export function LessonNode({
         </text>
       </g>
 
-      {/* Peer counter (bottom-right) */}
+      {/* Peer counter */}
       {peerCount > 0 && !regionLocked && (
         <g transform={`translate(${r + 2}, ${r - 4})`} opacity="0.6">
           <circle cx="4" cy="0" r="2.5" fill={TEAL} />
@@ -274,7 +308,7 @@ export function LessonNode({
         </g>
       )}
 
-      {/* Gate banner — prominent */}
+      {/* Gate banner */}
       {isGate && !isDone && (
         <g transform={`translate(0, ${-r - 42})`}>
           <rect
@@ -310,148 +344,114 @@ export function LessonNode({
           </text>
         </g>
       )}
-
-      {/* Hover preview card */}
-      {hover && !regionLocked && (
-        <g transform={`translate(0, ${r + 18})`} style={{ pointerEvents: "none" }}>
-          <rect
-            x="-130"
-            y="0"
-            width="260"
-            height={isWatch ? 110 : 82}
-            rx="8"
-            fill="#0A1428"
-            stroke="rgba(230,192,122,0.55)"
-            strokeWidth="1.2"
-          />
-          {isWatch && (
-            <g>
-              <rect
-                x="-120"
-                y="10"
-                width="240"
-                height="54"
-                rx="4"
-                fill="rgba(77,206,196,0.1)"
-                stroke="rgba(77,206,196,0.4)"
-                strokeWidth="0.8"
-              />
-              <circle
-                cx="0"
-                cy="37"
-                r="14"
-                fill="rgba(230,192,122,0.2)"
-                stroke={GOLD}
-                strokeWidth="1.2"
-              />
-              <path d="M -4 31 L 8 37 L -4 43 Z" fill={GOLD} />
-              {lesson.duration_label && (
-                <>
-                  <rect x="78" y="52" width="38" height="10" rx="2" fill="rgba(10,20,40,0.9)" />
-                  <text
-                    x="97"
-                    y="59"
-                    textAnchor="middle"
-                    fontFamily="monospace"
-                    fontSize="8"
-                    fill={GOLD}
-                  >
-                    {lesson.duration_label}
-                  </text>
-                </>
-              )}
-            </g>
-          )}
-          <text
-            x="0"
-            y={isWatch ? 82 : 22}
-            textAnchor="middle"
-            fontFamily="monospace"
-            fontSize="9"
-            fill="rgba(230,192,122,0.9)"
-            letterSpacing="2.5"
-          >
-            {`DAY ${lesson.day}  ·  ${lesson.type.toUpperCase()}${!isWatch && lesson.duration_label ? "  ·  " + lesson.duration_label : ""}`}
-          </text>
-          <text
-            x="0"
-            y={isWatch ? 100 : 48}
-            textAnchor="middle"
-            fontFamily="Cormorant Garamond, serif"
-            fontStyle="italic"
-            fontSize="15"
-            fill="#E6DCC8"
-          >
-            {lesson.title.length > 36 ? lesson.title.slice(0, 34) + "…" : lesson.title}
-          </text>
-          {!isWatch && lesson.description && (
-            <text
-              x="0"
-              y={68}
-              textAnchor="middle"
-              fontFamily="Cormorant Garamond, serif"
-              fontStyle="italic"
-              fontSize="11"
-              fill="rgba(230,220,200,0.6)"
-            >
-              {lesson.description.length > 48
-                ? lesson.description.slice(0, 46) + "…"
-                : lesson.description}
-            </text>
-          )}
-        </g>
-      )}
     </g>
   );
 }
 
 /**
- * "You are here" marker — EcomTalent logo (plain3k, square) inside a gold
- * medallion with a pulsing ring. Square logo fits a circular badge cleanly.
+ * Hover preview card — rendered in MapCanvas as a TOP LAYER after all nodes,
+ * so it's never occluded by a sibling node that renders later in the SVG.
  */
-export function YouAreHere({ x, y }: { x: number; y: number }) {
+export function HoverPreviewCard({
+  lesson,
+  x,
+  y,
+  r,
+}: {
+  lesson: Lesson;
+  x: number;
+  y: number;
+  r: number;
+}) {
+  const isWatch = lesson.type === "watch";
+
   return (
-    <g transform={`translate(${x}, ${y - 48})`} style={{ pointerEvents: "none" }}>
-      {/* Outer glow */}
-      <circle r="36" fill="url(#you-fill)" opacity="0.4" filter="url(#you-glow)" />
-
-      {/* Gold medallion body */}
-      <circle r="24" fill="url(#you-fill)" stroke="#0A1428" strokeWidth="1.8" />
-
-      {/* Inner dark disc to background the logo */}
-      <circle r="19" fill="#0A1428" />
-
-      {/* Clipping mask + logo */}
-      <defs>
-        <clipPath id="here-clip">
-          <circle r="18" />
-        </clipPath>
-      </defs>
-      <image
-        href="/ecomtalent-logo.png"
-        x={-18}
-        y={-18}
-        width={36}
-        height={36}
-        preserveAspectRatio="xMidYMid meet"
-        clipPath="url(#here-clip)"
+    <g transform={`translate(${x}, ${y + r + 18})`} style={{ pointerEvents: "none" }}>
+      <rect
+        x="-130"
+        y="0"
+        width="260"
+        height={isWatch ? 110 : 82}
+        rx="8"
+        fill="#0A1428"
+        stroke="rgba(230,192,122,0.55)"
+        strokeWidth="1.2"
       />
-
-      {/* Pulsing ring */}
-      <circle r="24" fill="none" stroke={GOLD_HI} strokeWidth="1.4" opacity="0.65">
-        <animate
-          attributeName="r"
-          values="20;34;20"
-          dur="2.4s"
-          repeatCount="indefinite"
-        />
-        <animate
-          attributeName="opacity"
-          values="0.8;0;0.8"
-          dur="2.4s"
-          repeatCount="indefinite"
-        />
-      </circle>
+      {isWatch && (
+        <g>
+          <rect
+            x="-120"
+            y="10"
+            width="240"
+            height="54"
+            rx="4"
+            fill="rgba(77,206,196,0.1)"
+            stroke="rgba(77,206,196,0.4)"
+            strokeWidth="0.8"
+          />
+          <circle
+            cx="0"
+            cy="37"
+            r="14"
+            fill="rgba(230,192,122,0.2)"
+            stroke={GOLD}
+            strokeWidth="1.2"
+          />
+          <path d="M -4 31 L 8 37 L -4 43 Z" fill={GOLD} />
+          {lesson.duration_label && (
+            <>
+              <rect x="78" y="52" width="38" height="10" rx="2" fill="rgba(10,20,40,0.9)" />
+              <text
+                x="97"
+                y="59"
+                textAnchor="middle"
+                fontFamily="monospace"
+                fontSize="8"
+                fill={GOLD}
+              >
+                {lesson.duration_label}
+              </text>
+            </>
+          )}
+        </g>
+      )}
+      <text
+        x="0"
+        y={isWatch ? 82 : 22}
+        textAnchor="middle"
+        fontFamily="monospace"
+        fontSize="9"
+        fill="rgba(230,192,122,0.9)"
+        letterSpacing="2.5"
+      >
+        {`DAY ${lesson.day}  ·  ${lesson.type.toUpperCase()}${!isWatch && lesson.duration_label ? "  ·  " + lesson.duration_label : ""}`}
+      </text>
+      <text
+        x="0"
+        y={isWatch ? 100 : 48}
+        textAnchor="middle"
+        fontFamily="Cormorant Garamond, serif"
+        fontStyle="italic"
+        fontSize="15"
+        fill="#E6DCC8"
+      >
+        {lesson.title.length > 36 ? lesson.title.slice(0, 34) + "…" : lesson.title}
+      </text>
+      {!isWatch && lesson.description && (
+        <text
+          x="0"
+          y={68}
+          textAnchor="middle"
+          fontFamily="Cormorant Garamond, serif"
+          fontStyle="italic"
+          fontSize="11"
+          fill="rgba(230,220,200,0.6)"
+        >
+          {lesson.description.length > 48
+            ? lesson.description.slice(0, 46) + "…"
+            : lesson.description}
+        </text>
+      )}
     </g>
   );
 }

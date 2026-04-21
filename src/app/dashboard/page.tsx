@@ -8,6 +8,7 @@ import { MapControls } from "@/components/map/MapControls";
 import { TopBar } from "@/components/map/TopBar";
 import { LessonSheet } from "@/components/map/LessonSheet";
 import { NotebookSheet } from "@/components/map/NotebookSheet";
+import { MapLegend } from "@/components/map/MapLegend";
 
 export default function DashboardPage() {
   const { student } = useAuth();
@@ -17,6 +18,21 @@ export default function DashboardPage() {
   const [panTarget, setPanTarget] = useState<string | null>(null);
   const [lockedRegionId, setLockedRegionId] = useState<string | null>(null);
   const [notebookOpen, setNotebookOpen] = useState(false);
+  const { lessons, completedLessonIds, regions } = useStudent();
+
+  // Given a locked region, find the previous region and its first
+  // incomplete lesson — that's the blocker the student needs to chart.
+  const blockerForRegion = (regionId: string) => {
+    const sorted = [...regions].sort((a, b) => a.order_num - b.order_num);
+    const idx = sorted.findIndex((r) => r.id === regionId);
+    if (idx <= 0) return null;
+    const prev = sorted[idx - 1];
+    const prevLessons = lessons
+      .filter((l) => l.region_id === prev.id)
+      .sort((a, b) => a.day - b.day || a.sort_order - b.sort_order);
+    const firstIncomplete = prevLessons.find((l) => !completedLessonIds.has(l.id));
+    return firstIncomplete?.id ?? prevLessons[0]?.id ?? null;
+  };
 
   if (loading || !student) {
     return (
@@ -54,6 +70,8 @@ export default function DashboardPage() {
 
       <MapControls setPanTarget={setPanTarget} />
 
+      <MapLegend />
+
       <LessonSheet
         lessonId={selectedLessonId}
         onClose={() => setSelectedLessonId(null)}
@@ -70,6 +88,11 @@ export default function DashboardPage() {
         <LockedRegionPrompt
           regionId={lockedRegionId}
           onDismiss={() => setLockedRegionId(null)}
+          onTakeMeThere={() => {
+            const target = blockerForRegion(lockedRegionId);
+            if (target) setPanTarget(target);
+            setLockedRegionId(null);
+          }}
         />
       )}
     </div>
@@ -79,9 +102,11 @@ export default function DashboardPage() {
 function LockedRegionPrompt({
   regionId,
   onDismiss,
+  onTakeMeThere,
 }: {
   regionId: string;
   onDismiss: () => void;
+  onTakeMeThere: () => void;
 }) {
   const { regions, regionProgress } = useStudent();
   const region = regions.find((r) => r.id === regionId);
@@ -91,6 +116,7 @@ function LockedRegionPrompt({
   const idx = sortedRegions.findIndex((r) => r.id === regionId);
   const prev = idx > 0 ? sortedRegions[idx - 1] : null;
   const prevProgress = prev ? regionProgress[prev.id] : null;
+  const hasBlocker = Boolean(prev);
 
   return (
     <div
@@ -125,7 +151,11 @@ function LockedRegionPrompt({
         </div>
         <p
           className="text-[11px] font-mono uppercase tracking-widest mb-2"
-          style={{ color: "rgba(230,192,122,0.85)", letterSpacing: "0.18em" }}
+          style={{
+            color: "rgba(230,192,122,0.85)",
+            letterSpacing: "0.18em",
+            fontFamily: "JetBrains Mono, ui-monospace, monospace",
+          }}
         >
           Region {region.order_num} · Locked
         </p>
@@ -144,16 +174,41 @@ function LockedRegionPrompt({
           }}
         >
           {prev && prevProgress
-            ? `Chart the rest of ${prev.name} to reveal ${region.name}. ${prevProgress.completed}/${prevProgress.total} lessons done.`
+            ? `Chart the rest of ${prev.name} to reveal ${region.name}. ${prevProgress.completed} of ${prevProgress.total} lessons done.`
             : `Complete the previous region to unlock ${region.name}.`}
         </p>
-        <button
-          onClick={onDismiss}
-          className="w-full py-3 rounded-lg font-semibold text-[14px] transition-colors"
-          style={{ background: "#E6C07A", color: "#060C1A" }}
-        >
-          Understood
-        </button>
+        <div className="space-y-2">
+          {hasBlocker && (
+            <button
+              onClick={onTakeMeThere}
+              className="w-full py-3 rounded-lg font-semibold text-[14px] transition-colors"
+              style={{ background: "#E6C07A", color: "#060C1A" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#F0D595")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "#E6C07A")}
+            >
+              Take me to {prev?.name}
+            </button>
+          )}
+          <button
+            onClick={onDismiss}
+            className="w-full py-2.5 rounded-lg text-[13px] transition-colors"
+            style={{
+              background: "transparent",
+              color: "rgba(230,220,200,0.62)",
+              border: "1px solid rgba(230,192,122,0.2)",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "#E6DCC8";
+              e.currentTarget.style.borderColor = "rgba(230,192,122,0.45)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "rgba(230,220,200,0.62)";
+              e.currentTarget.style.borderColor = "rgba(230,192,122,0.2)";
+            }}
+          >
+            {hasBlocker ? "Not yet" : "Understood"}
+          </button>
+        </div>
       </div>
     </div>
   );

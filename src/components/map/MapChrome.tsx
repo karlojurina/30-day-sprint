@@ -79,7 +79,7 @@ export function RegionCartouche({
       <text
         x={-panelW / 2 + 88}
         y={-26}
-        fontFamily="monospace"
+        fontFamily="JetBrains Mono, ui-monospace, monospace"
         fontSize="11"
         fill={state.isUnlocked ? "rgba(230,220,200,0.75)" : "rgba(230,220,200,0.4)"}
         letterSpacing="5"
@@ -118,24 +118,27 @@ export function RegionCartouche({
           <>
             <text
               textAnchor="end"
-              y={-6}
-              fontFamily="monospace"
-              fontSize="11"
-              letterSpacing="2"
+              y={state.isComplete ? 4 : -6}
+              fontFamily="JetBrains Mono, ui-monospace, monospace"
+              fontSize={state.isComplete ? "13" : "11"}
+              letterSpacing={state.isComplete ? "3" : "2"}
+              fontWeight={state.isComplete ? "700" : "500"}
               fill={state.isComplete ? GOLD_HI : "rgba(230,220,200,0.6)"}
             >
               {state.isComplete ? "CHARTED" : `${state.completed}/${state.total}`}
             </text>
-            <text
-              textAnchor="end"
-              y={12}
-              fontFamily="monospace"
-              fontSize="9"
-              letterSpacing="3"
-              fill="rgba(230,220,200,0.4)"
-            >
-              COMPLETE
-            </text>
+            {!state.isComplete && (
+              <text
+                textAnchor="end"
+                y={12}
+                fontFamily="JetBrains Mono, ui-monospace, monospace"
+                fontSize="9"
+                letterSpacing="3"
+                fill="rgba(230,220,200,0.4)"
+              >
+                CHARTED
+              </text>
+            )}
           </>
         ) : (
           <g transform="translate(-8, -10)">

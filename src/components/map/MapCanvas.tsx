@@ -64,6 +64,13 @@ export function MapCanvas({
   const coverScaleRef = useRef(0.5);
   const [hoveredLessonId, setHoveredLessonId] = useState<string | null>(null);
 
+  // Delight: track newly-completed lessons and regions so we can fire a
+  // short pulse / ribbon animation exactly once per new completion.
+  const prevCompletionsRef = useRef<Set<string>>(new Set());
+  const prevCompleteRegionsRef = useRef<Set<string>>(new Set());
+  const [justCompletedLessonIds, setJustCompletedLessonIds] = useState<Set<string>>(new Set());
+  const [justChartedRegionIds, setJustChartedRegionIds] = useState<Set<string>>(new Set());
+
   // Path — stable across renders
   const { pathD, sampled } = useMemo(() => {
     const spine = buildExplorerWaypoints();
@@ -149,12 +156,22 @@ export function MapCanvas({
   }, [fitCover, hasFitted]);
 
   useEffect(() => {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const onResize = () => {
-      const t = fitCover();
-      if (t) setTransform((prev) => clampTransform({ ...prev, scale: Math.max(t.scale, prev.scale) }));
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        const t = fitCover();
+        if (t)
+          setTransform((prev) =>
+            clampTransform({ ...prev, scale: Math.max(t.scale, prev.scale) })
+          );
+      }, 150);
     };
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (timeoutId) clearTimeout(timeoutId);
+    };
   }, [fitCover, clampTransform]);
 
   const animateTo = useCallback(
@@ -229,6 +246,48 @@ export function MapCanvas({
     placedById,
     zoomToPoint,
   ]);
+
+  // Diff completions + region completions against the previous render. Fire
+  // the delight animation ONCE per new completion, then clear it after the
+  // animation duration so the node settles back into its normal "done" state.
+  useEffect(() => {
+    // On first render, seed the "seen" sets so the initial load (with
+    // pre-existing completions) doesn't trigger a pulse on every node.
+    if (prevCompletionsRef.current.size === 0 && completedLessonIds.size > 0) {
+      prevCompletionsRef.current = new Set(completedLessonIds);
+      prevCompleteRegionsRef.current = new Set(
+        regions.filter((r) => regionProgress[r.id]?.isComplete).map((r) => r.id)
+      );
+      return;
+    }
+
+    // Lesson-level: anything in completedLessonIds not in the previous set
+    const newLessons = new Set<string>();
+    for (const id of completedLessonIds) {
+      if (!prevCompletionsRef.current.has(id)) newLessons.add(id);
+    }
+    if (newLessons.size > 0) {
+      setJustCompletedLessonIds(newLessons);
+      window.setTimeout(() => setJustCompletedLessonIds(new Set()), 1100);
+    }
+    prevCompletionsRef.current = new Set(completedLessonIds);
+
+    // Region-level: regions that JUST became complete
+    const newRegions = new Set<string>();
+    for (const r of regions) {
+      const isComplete = regionProgress[r.id]?.isComplete;
+      if (isComplete && !prevCompleteRegionsRef.current.has(r.id)) {
+        newRegions.add(r.id);
+      }
+    }
+    if (newRegions.size > 0) {
+      setJustChartedRegionIds(newRegions);
+      window.setTimeout(() => setJustChartedRegionIds(new Set()), 2200);
+    }
+    prevCompleteRegionsRef.current = new Set(
+      regions.filter((r) => regionProgress[r.id]?.isComplete).map((r) => r.id)
+    );
+  }, [completedLessonIds, regions, regionProgress]);
 
   // Respond to panTarget changes (fired by topbar, map controls, notebook)
   useEffect(() => {
@@ -523,11 +582,20 @@ export function MapCanvas({
               <g
                 key={`lock-${r.id}`}
                 data-locked-region={r.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`${r.name} — region locked, complete the previous region to unlock`}
                 style={{ cursor: "pointer" }}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (wasDragged.current) return;
                   onLockedRegion(r.id);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onLockedRegion(r.id);
+                  }
                 }}
                 transform={`translate(${(s.xStart + s.xEnd) / 2}, ${(s.yTop + s.yBot) / 2})`}
               >
@@ -582,6 +650,7 @@ export function MapCanvas({
                   isCurrent={isCurrent}
                   isUnlocked={isUnlocked}
                   regionLocked={!regionUnlocked}
+                  justCompleted={justCompletedLessonIds.has(n.lessonId)}
                   onClick={() =>
                     regionUnlocked ? onOpenLesson(lesson.id) : onLockedRegion(n.regionId)
                   }
@@ -605,6 +674,68 @@ export function MapCanvas({
               r={hoveredNodeR}
             />
           )}
+
+          {/* Region-charted ribbon — fires once for ~2s when a region's last
+              lesson completes. Positioned above each region cartouche. */}
+          {regions.map((r) => {
+            if (!justChartedRegionIds.has(r.id)) return null;
+            const s = REGION_STRIPS[r.id as keyof RegionStripMap];
+            if (!s) return null;
+            const xMid = (s.xStart + s.xEnd) / 2;
+            const yRibbon = s.yTop - 150;
+            return (
+              <g
+                key={`charted-${r.id}`}
+                transform={`translate(${xMid}, ${yRibbon})`}
+                className="region-charted-ribbon"
+                style={{ pointerEvents: "none" }}
+              >
+                <rect
+                  x={-130}
+                  y={-22}
+                  width={260}
+                  height={44}
+                  rx="6"
+                  fill="#0A1428"
+                  stroke="#F0D595"
+                  strokeWidth="1.8"
+                />
+                <rect
+                  x={-124}
+                  y={-16}
+                  width={248}
+                  height={32}
+                  rx="3"
+                  fill="none"
+                  stroke="rgba(230,192,122,0.45)"
+                  strokeWidth="0.7"
+                />
+                <text
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontFamily="JetBrains Mono, ui-monospace, monospace"
+                  fontSize="11"
+                  fontWeight="700"
+                  fill="#F0D595"
+                  letterSpacing="5"
+                  y={-4}
+                >
+                  REGION CHARTED
+                </text>
+                <text
+                  textAnchor="middle"
+                  dominantBaseline="central"
+                  fontFamily="Cormorant Garamond, serif"
+                  fontStyle="italic"
+                  fontSize="14"
+                  fill="#E6DCC8"
+                  y={13}
+                >
+                  {r.name}
+                </text>
+              </g>
+            );
+          })}
         </svg>
       </div>
     </div>

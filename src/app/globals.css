@@ -266,6 +266,86 @@ body::before {
   }
 }
 
+/* Lesson-completion pulse — SVG-friendly, uses stdDeviation animation instead
+   of transform so we don't fight the node's own translate. Applied via class
+   on the element for ~1000ms. */
+@keyframes lesson-complete-pulse {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  40% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2);
+  }
+}
+.lesson-complete-pulse {
+  animation: lesson-complete-pulse 1s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Region-charted ribbon — slides down + fades out over 2s */
+@keyframes region-charted-ribbon {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -10px);
+  }
+  15% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  85% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -6px);
+  }
+}
+.region-charted-ribbon {
+  animation: region-charted-ribbon 2s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Respect reduced-motion — kill all ambient animation, keep essential state
+   changes readable as instant transitions. Also neutralize SVG SMIL
+   animations, which don't honor the media query natively. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* Stops SVG SMIL <animate> tags inside gate rings, current-node pulse, etc. */
+  svg animate,
+  svg animateMotion,
+  svg animateTransform {
+    display: none;
+  }
+}
+
+/* Focus-visible: keyboard users get a clear gold outline against dark bg.
+   Applies to all interactive elements; mouse clicks don't trigger it. */
+*:focus {
+  outline: none;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
 button {
   font-family: inherit;
 }

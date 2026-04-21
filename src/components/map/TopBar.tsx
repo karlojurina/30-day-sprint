@@ -383,14 +383,20 @@ function DayRuler({
           const isDone = daysComplete.has(day);
           const isCurrent = day === dayNumber;
           return (
-            <div
+            <button
               key={day}
+              type="button"
+              disabled={!hasLesson}
               onClick={() => {
                 const l = lessons.find((lesson) => lesson.day === day);
                 if (l) setPanTarget(l.id);
               }}
-              className="absolute top-1/2 -translate-y-1/2 cursor-pointer group"
-              style={{ left: `${left}%` }}
+              className="absolute top-1/2 -translate-y-1/2 cursor-pointer group bg-transparent border-0 p-0"
+              style={{
+                left: `${left}%`,
+                cursor: hasLesson ? "pointer" : "default",
+              }}
+              aria-label={`Day ${day}${isDone ? ", charted" : hasLesson ? "" : ", no lesson"}`}
             >
               <div
                 style={{
@@ -434,7 +440,7 @@ function DayRuler({
                   }}
                 />
               )}
-            </div>
+            </button>
           );
         })}
       </div>

@@ -10,6 +10,8 @@ interface LessonNodeProps {
   isCurrent: boolean;
   isUnlocked: boolean;
   regionLocked: boolean;
+  /** true for ~1s after the student marks this lesson complete — plays a pulse */
+  justCompleted?: boolean;
   onClick: () => void;
   onHoverStart?: () => void;
   onHoverEnd?: () => void;
@@ -61,6 +63,7 @@ export function LessonNode({
   isCurrent,
   isUnlocked,
   regionLocked,
+  justCompleted = false,
   onClick,
   onHoverStart,
   onHoverEnd,
@@ -110,6 +113,12 @@ export function LessonNode({
   // Per-shape clipPath id so the logo respects the node's outline
   const clipId = `node-clip-${lesson.id}`;
 
+  const a11yLabel = regionLocked
+    ? `${lesson.title} — locked`
+    : isDone
+      ? `${lesson.title} — day ${lesson.day}, completed`
+      : `${lesson.title} — day ${lesson.day}${isGate ? ", discount gate" : isBoss ? ", final reflection" : ""}`;
+
   return (
     <g
       data-node
@@ -117,6 +126,16 @@ export function LessonNode({
       onMouseEnter={onHoverStart}
       onMouseLeave={onHoverEnd}
       onClick={onClick}
+      role="button"
+      tabIndex={regionLocked ? -1 : 0}
+      aria-label={a11yLabel}
+      onKeyDown={(e) => {
+        if (regionLocked) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       style={{ cursor: regionLocked ? "not-allowed" : "pointer" }}
     >
       <defs>
@@ -209,6 +228,18 @@ export function LessonNode({
         </circle>
       )}
 
+      {/* Completion pulse — expanding gold ring, fires once on completion */}
+      {justCompleted && (
+        <circle
+          r={r}
+          fill="none"
+          stroke={GOLD_HI}
+          strokeWidth="2.5"
+          className="lesson-complete-pulse"
+          style={{ transformOrigin: "0 0", transformBox: "fill-box" }}
+        />
+      )}
+
       {/* Shadow */}
       <ellipse cx="0" cy={r + 4} rx={r * 0.85} ry={r * 0.2} fill="rgba(0,0,0,0.45)" />
 
@@ -244,7 +275,10 @@ export function LessonNode({
           height={r * 1.8}
           preserveAspectRatio="xMidYMid meet"
           clipPath={`url(#${clipId})`}
-        />
+          aria-label="You are here"
+        >
+          <title>You are here — EcomTalent</title>
+        </image>
       ) : isGate && !isDone ? (
         <g fill="none" stroke={markColor} strokeWidth="2.2" strokeLinecap="round">
           <circle cx="-5" cy="-5" r="3" />
@@ -283,7 +317,7 @@ export function LessonNode({
         <text
           textAnchor="middle"
           dominantBaseline="central"
-          fontFamily="monospace"
+          fontFamily="JetBrains Mono, ui-monospace, monospace"
           fontSize="10"
           fontWeight="700"
           fill="rgba(230,192,122,0.95)"
@@ -299,7 +333,7 @@ export function LessonNode({
           <text
             x="10"
             y="3.5"
-            fontFamily="monospace"
+            fontFamily="JetBrains Mono, ui-monospace, monospace"
             fontSize="10"
             fill="rgba(230,220,200,0.85)"
           >
@@ -334,7 +368,7 @@ export function LessonNode({
           <text
             textAnchor="middle"
             dominantBaseline="central"
-            fontFamily="monospace"
+            fontFamily="JetBrains Mono, ui-monospace, monospace"
             fontSize="12"
             fontWeight="700"
             fill={GOLD_HI}
@@ -405,7 +439,7 @@ export function HoverPreviewCard({
                 x="97"
                 y="59"
                 textAnchor="middle"
-                fontFamily="monospace"
+                fontFamily="JetBrains Mono, ui-monospace, monospace"
                 fontSize="8"
                 fill={GOLD}
               >
@@ -419,7 +453,7 @@ export function HoverPreviewCard({
         x="0"
         y={isWatch ? 82 : 22}
         textAnchor="middle"
-        fontFamily="monospace"
+        fontFamily="JetBrains Mono, ui-monospace, monospace"
         fontSize="9"
         fill="rgba(230,192,122,0.9)"
         letterSpacing="2.5"

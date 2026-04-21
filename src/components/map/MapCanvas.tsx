@@ -59,6 +59,8 @@ export function MapCanvas({
   const [isDragging, setIsDragging] = useState(false);
   const [hasFitted, setHasFitted] = useState(false);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
+  const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
+  const wasDragged = useRef(false);
   const animRef = useRef<number | null>(null);
 
   // Build path — stable across renders
@@ -182,11 +184,13 @@ export function MapCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panTarget]);
 
-  // Drag panning
+  // Drag panning — starts from anywhere EXCEPT directly on a lesson node.
+  // Locked-region clicks are suppressed by checking wasDragged.
   const onMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest("[data-node]")) return;
-    if (target.closest("[data-locked-region]")) return;
+    wasDragged.current = false;
+    mouseDownPos.current = { x: e.clientX, y: e.clientY };
     setIsDragging(true);
     dragStart.current = { x: e.clientX - transform.x, y: e.clientY - transform.y };
   };
@@ -194,6 +198,11 @@ export function MapCanvas({
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
       if (!isDragging || !dragStart.current) return;
+      if (mouseDownPos.current) {
+        const dx = Math.abs(e.clientX - mouseDownPos.current.x);
+        const dy = Math.abs(e.clientY - mouseDownPos.current.y);
+        if (dx + dy > 5) wasDragged.current = true;
+      }
       setTransform((t) => ({
         ...t,
         x: e.clientX - dragStart.current!.x,
@@ -203,6 +212,11 @@ export function MapCanvas({
     const onUp = () => {
       setIsDragging(false);
       dragStart.current = null;
+      mouseDownPos.current = null;
+      // Keep wasDragged true until the synthetic click fires, then reset.
+      setTimeout(() => {
+        wasDragged.current = false;
+      }, 0);
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
@@ -220,7 +234,8 @@ export function MapCanvas({
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
     const delta = -e.deltaY * 0.0015;
-    const nextScale = Math.max(0.2, Math.min(2, transform.scale * (1 + delta)));
+    // Cap max zoom to 1.2 — region PNGs start pixelating above that.
+    const nextScale = Math.max(0.25, Math.min(1.2, transform.scale * (1 + delta)));
     const factor = nextScale / transform.scale;
     setTransform({
       scale: nextScale,
@@ -310,6 +325,7 @@ export function MapCanvas({
                   filter: st?.isUnlocked ? "none" : "brightness(0.7) saturate(0.8)",
                   opacity: st?.isUnlocked ? 1 : 0.75,
                   transition: "filter 0.8s ease, opacity 0.8s ease",
+                  imageRendering: "auto",
                 }}
               />
             );
@@ -408,9 +424,10 @@ export function MapCanvas({
                 <g
                   key={`veil-${r.id}`}
                   data-locked-region={r.id}
-                  style={{ cursor: "not-allowed" }}
+                  style={{ cursor: "pointer" }}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (wasDragged.current) return;
                     onLockedRegion(r.id);
                   }}
                 >
@@ -429,27 +446,18 @@ export function MapCanvas({
                     fill="url(#lock-hatch)"
                     opacity="0.18"
                   />
+                  {/* Key icon, centered — no "LOCKED" text */}
                   <g
                     transform={`translate(${(s.xStart + s.xEnd) / 2}, ${(s.yTop + s.yBot) / 2})`}
                   >
-                    <circle r="82" fill="rgba(6,12,26,0.8)" stroke="rgba(230,192,122,0.55)" strokeWidth="2" />
-                    <g transform="translate(-28, -32)">
+                    <circle r="72" fill="rgba(6,12,26,0.82)" stroke="rgba(230,192,122,0.55)" strokeWidth="2" />
+                    {/* Padlock, vertically centered inside the 144x144 circle */}
+                    <g transform="translate(-28, -28)">
                       <rect x="0" y="24" width="56" height="44" rx="6" fill="none" stroke="#E6C07A" strokeWidth="4" />
                       <path d="M 10 24 V 14 a 18 18 0 0 1 36 0 V 24" fill="none" stroke="#E6C07A" strokeWidth="4" />
                       <circle cx="28" cy="46" r="5" fill="#E6C07A" />
                       <rect x="26" y="48" width="4" height="12" fill="#E6C07A" />
                     </g>
-                    <text
-                      textAnchor="middle"
-                      y="70"
-                      fontFamily="monospace"
-                      fontSize="14"
-                      fontWeight="700"
-                      fill="#E6C07A"
-                      letterSpacing="4"
-                    >
-                      LOCKED
-                    </text>
                   </g>
                 </g>
               );

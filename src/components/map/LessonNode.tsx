@@ -69,7 +69,7 @@ export function LessonNode({
   // Node radius — gate is supersized, boss big, current slightly bigger
   let r: number;
   if (isBoss) r = 28;
-  else if (isGate) r = 36;
+  else if (isGate) r = 44; // supersized so it reads as a key milestone
   else if (isCurrent) r = 22;
   else r = 18;
 
@@ -82,28 +82,55 @@ export function LessonNode({
       onClick={onClick}
       style={{ cursor: regionLocked ? "not-allowed" : "pointer" }}
     >
-      {/* Gate — extra pulsing ring */}
+      {/* Gate — multi-layer glow + pulsing rings */}
       {isGate && !isDone && !regionLocked && (
         <>
-          <circle r={r + 16} fill="none" stroke={GOLD_HI} strokeWidth="1.5" opacity="0.4">
+          {/* Outer soft glow, big */}
+          <circle r={r + 46} fill={GOLD_HI} opacity="0.1">
+            <animate
+              attributeName="opacity"
+              values="0.08;0.2;0.08"
+              dur="2.8s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          {/* Two pulsing rings */}
+          <circle r={r + 22} fill="none" stroke={GOLD_HI} strokeWidth="1.8" opacity="0.55">
             <animate
               attributeName="r"
-              values={`${r + 8};${r + 22};${r + 8}`}
-              dur="3s"
+              values={`${r + 12};${r + 32};${r + 12}`}
+              dur="2.8s"
               repeatCount="indefinite"
             />
             <animate
               attributeName="opacity"
-              values="0.5;0;0.5"
-              dur="3s"
+              values="0.7;0;0.7"
+              dur="2.8s"
               repeatCount="indefinite"
             />
           </circle>
+          <circle r={r + 14} fill="none" stroke={GOLD_HI} strokeWidth="1.4" opacity="0.4">
+            <animate
+              attributeName="r"
+              values={`${r + 8};${r + 24};${r + 8}`}
+              dur="2.8s"
+              begin="1.4s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0.6;0;0.6"
+              dur="2.8s"
+              begin="1.4s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          {/* Inner halo */}
           <circle
-            r={r + 6}
-            fill="rgba(230,192,122,0.12)"
-            stroke="rgba(230,192,122,0.5)"
-            strokeWidth="1"
+            r={r + 8}
+            fill="rgba(230,192,122,0.18)"
+            stroke="rgba(230,192,122,0.6)"
+            strokeWidth="1.4"
           />
         </>
       )}
@@ -247,24 +274,34 @@ export function LessonNode({
         </g>
       )}
 
-      {/* Gate banner */}
+      {/* Gate banner — prominent */}
       {isGate && !isDone && (
-        <g transform={`translate(0, ${-r - 32})`}>
+        <g transform={`translate(0, ${-r - 42})`}>
           <rect
-            x="-78"
-            y="-13"
-            width="156"
-            height="26"
-            rx="4"
+            x="-100"
+            y="-16"
+            width="200"
+            height="32"
+            rx="5"
             fill="#0A1428"
             stroke={GOLD}
-            strokeWidth="1.4"
+            strokeWidth="1.6"
+          />
+          <rect
+            x="-96"
+            y="-12"
+            width="192"
+            height="24"
+            rx="3"
+            fill="none"
+            stroke="rgba(230,192,122,0.45)"
+            strokeWidth="0.7"
           />
           <text
             textAnchor="middle"
             dominantBaseline="central"
             fontFamily="monospace"
-            fontSize="10"
+            fontSize="12"
             fontWeight="700"
             fill={GOLD_HI}
             letterSpacing="4"
@@ -369,34 +406,44 @@ export function LessonNode({
 }
 
 /**
- * The "you are here" compass star — anchored above the current node.
+ * The "you are here" marker — EcomTalent logo above the current node,
+ * in a golden medallion with a pulsing ring.
  */
 export function YouAreHere({ x, y }: { x: number; y: number }) {
   return (
-    <g transform={`translate(${x}, ${y - 36})`} style={{ pointerEvents: "none" }}>
-      <circle r="26" fill="url(#you-fill)" opacity="0.3" filter="url(#you-glow)" />
-      <polygon
-        points="0,-18 4.5,-4.5 18,0 4.5,4.5 0,18 -4.5,4.5 -18,0 -4.5,-4.5"
-        fill="url(#you-fill)"
-        stroke="#0A1428"
-        strokeWidth="1.4"
+    <g transform={`translate(${x}, ${y - 42})`} style={{ pointerEvents: "none" }}>
+      {/* Soft glow */}
+      <circle r="30" fill="url(#you-fill)" opacity="0.35" filter="url(#you-glow)" />
+
+      {/* Medallion circle */}
+      <circle r="20" fill="url(#you-fill)" stroke="#0A1428" strokeWidth="1.6" />
+      <circle r="15" fill="#0A1428" stroke={GOLD_HI} strokeWidth="1" />
+
+      {/* Embedded logo — clipped to the inner circle */}
+      <clipPath id="logo-clip-current">
+        <circle r="14" />
+      </clipPath>
+      <image
+        href="/ecomtalent-logo.png"
+        x={-13}
+        y={-8}
+        width={26}
+        height={16}
+        preserveAspectRatio="xMidYMid meet"
+        clipPath="url(#logo-clip-current)"
       />
-      <polygon
-        points="0,-10 2.5,-2.5 10,0 2.5,2.5 0,10 -2.5,2.5 -10,0 -2.5,-2.5"
-        fill="#0A1428"
-        opacity="0.35"
-      />
-      <circle r="2.4" fill="#0A1428" />
-      <circle r="14" fill="none" stroke={GOLD_HI} strokeWidth="1" opacity="0.5">
+
+      {/* Pulsing outer ring */}
+      <circle r="18" fill="none" stroke={GOLD_HI} strokeWidth="1.2" opacity="0.55">
         <animate
           attributeName="r"
-          values="12;22;12"
+          values="16;28;16"
           dur="2.4s"
           repeatCount="indefinite"
         />
         <animate
           attributeName="opacity"
-          values="0.6;0;0.6"
+          values="0.7;0;0.7"
           dur="2.4s"
           repeatCount="indefinite"
         />

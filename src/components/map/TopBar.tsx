@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import Image from "next/image";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { getDayNumber } from "@/types/database";
@@ -14,11 +15,12 @@ interface TopBarProps {
 }
 
 const GOLD = "#E6C07A";
-const GOLD_DIM = "rgba(230,192,122,0.5)";
+const GOLD_HI = "#F0D595";
+const GOLD_DIM = "rgba(230,192,122,0.62)";
 
 /**
- * Top bar: two rows — brand + current-lesson breadcrumb on top,
- * day ruler with region bands + current-day pin below.
+ * Top bar: two rows — brand + current-lesson breadcrumb + prominent streak/rank,
+ * and the 30-day ruler below with region bands.
  */
 export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
   const { student, signOut } = useAuth();
@@ -50,66 +52,52 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
     <header
       className="absolute top-0 left-0 right-0 z-30"
       style={{
-        background: "rgba(6,12,26,0.85)",
-        backdropFilter: "blur(12px)",
-        borderBottom: "1px solid rgba(230,192,122,0.12)",
+        background: "rgba(6,12,26,0.9)",
+        backdropFilter: "blur(14px)",
+        borderBottom: "1px solid rgba(230,192,122,0.18)",
       }}
     >
-      {/* Row 1 — brand + breadcrumb + actions */}
-      <div className="flex items-center justify-between px-6 py-3 gap-4">
-        {/* Brand */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <div
-              className="w-8 h-8 rounded-full flex items-center justify-center"
-              style={{
-                background: "rgba(230,192,122,0.12)",
-                border: "1px solid rgba(230,192,122,0.32)",
-              }}
-            >
-              <svg viewBox="0 0 24 24" className="w-4 h-4" fill={GOLD}>
-                <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z" />
-              </svg>
-            </div>
-            <div className="hidden sm:block">
-              <p
-                className="text-[11px] font-mono tracking-widest uppercase"
-                style={{ color: GOLD_DIM }}
-              >
-                EcomTalent
-              </p>
-              <p
-                className="text-[15px] italic font-medium"
-                style={{ fontFamily: "Cormorant Garamond, serif" }}
-              >
-                Expedition
-              </p>
-            </div>
-          </div>
+      {/* Row 1 — brand + breadcrumb + stats */}
+      <div className="flex items-center justify-between px-6 py-4 gap-4">
+        {/* Brand (EcomTalent logo) */}
+        <div className="flex items-center gap-3 shrink-0">
+          <Image
+            src="/ecomtalent-logo.png"
+            alt="EcomTalent"
+            width={160}
+            height={40}
+            priority
+            style={{
+              height: 28,
+              width: "auto",
+              objectFit: "contain",
+            }}
+          />
         </div>
 
         {/* Breadcrumb (current lesson) */}
         {currentLesson && currentRegion && (
           <button
             onClick={() => setPanTarget(currentLesson.id)}
-            className="hidden md:flex items-center gap-3 px-4 py-2 rounded-xl transition-colors"
+            className="hidden md:flex items-center gap-4 px-5 py-3 rounded-xl transition-colors flex-1 max-w-2xl"
             style={{
-              background: "rgba(16,32,66,0.7)",
-              border: "1px solid rgba(230,192,122,0.25)",
+              background: "rgba(16,32,66,0.75)",
+              border: "1px solid rgba(230,192,122,0.3)",
             }}
           >
-            <div>
+            <div className="flex-1 min-w-0">
               <p
-                className="text-[10px] font-mono tracking-widest uppercase text-left"
-                style={{ color: GOLD_DIM }}
+                className="text-[11px] font-mono tracking-widest uppercase text-left mb-1"
+                style={{ color: GOLD_DIM, letterSpacing: "0.18em" }}
               >
-                Day {dayNumber} · {currentRegion.name.toUpperCase()}
+                Day {dayNumber} · {currentRegion.name}
               </p>
               <p
-                className="italic text-[16px] leading-tight text-left"
+                className="italic text-[20px] leading-tight text-left truncate"
                 style={{
                   fontFamily: "Cormorant Garamond, serif",
                   color: "#E6DCC8",
+                  fontWeight: 500,
                 }}
               >
                 {currentLesson.title}
@@ -117,9 +105,9 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
             </div>
             {currentLesson.duration_label && (
               <span
-                className="font-mono text-[10px] px-2 py-0.5 rounded"
+                className="font-mono text-[12px] px-3 py-1 rounded shrink-0"
                 style={{
-                  background: "rgba(230,192,122,0.12)",
+                  background: "rgba(230,192,122,0.15)",
                   color: GOLD,
                   letterSpacing: "0.08em",
                 }}
@@ -130,63 +118,97 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
           </button>
         )}
 
-        {/* Actions */}
-        <div className="flex items-center gap-4">
-          {/* Streak */}
+        {/* Right cluster — Streak, Rank, Actions */}
+        <div className="flex items-center gap-3 shrink-0">
+          {/* STREAK — prominent */}
           {streak.current > 0 && (
             <div
-              className="hidden sm:flex items-center gap-1 px-2 py-1 rounded-md"
+              className="flex items-center gap-2 px-3 py-2 rounded-lg"
               style={{
-                background: "rgba(230,192,122,0.08)",
-                border: "1px solid rgba(230,192,122,0.2)",
+                background: "rgba(230,192,122,0.12)",
+                border: "1px solid rgba(230,192,122,0.35)",
+                boxShadow:
+                  streak.current >= 7
+                    ? "0 0 14px rgba(230,192,122,0.25)"
+                    : "none",
               }}
+              title={`${streak.current}-day streak (longest: ${streak.longest})`}
             >
-              <span className="text-[13px]">🔥</span>
-              <span
-                className="font-mono text-[11px] font-semibold"
-                style={{ color: GOLD }}
-              >
-                {streak.current}
-              </span>
+              <span style={{ fontSize: 20, lineHeight: 1 }}>🔥</span>
+              <div className="flex flex-col items-start leading-none">
+                <span
+                  className="font-mono text-[16px] font-bold tabular-nums"
+                  style={{ color: GOLD_HI }}
+                >
+                  {streak.current}
+                </span>
+                <span
+                  className="text-[9px] font-mono uppercase mt-0.5"
+                  style={{ color: GOLD_DIM, letterSpacing: "0.12em" }}
+                >
+                  Streak
+                </span>
+              </div>
             </div>
           )}
 
-          {/* Title */}
-          <span
-            className="hidden md:inline-flex font-mono text-[10px] font-semibold uppercase tracking-widest px-2 py-0.5 rounded"
+          {/* RANK — prominent */}
+          <div
+            className="hidden sm:flex items-center gap-2 px-3 py-2 rounded-lg"
             style={{
-              color: GOLD,
-              background: "rgba(230,192,122,0.1)",
-              border: "1px solid rgba(230,192,122,0.2)",
-              letterSpacing: "0.14em",
+              background: "rgba(16,32,66,0.75)",
+              border: "1px solid rgba(230,192,122,0.35)",
             }}
+            title={`Current rank: ${getTitleLabel(currentTitle)}`}
           >
-            {getTitleLabel(currentTitle)}
-          </span>
+            <svg className="w-4 h-4" viewBox="0 0 24 24" fill={GOLD}>
+              <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z" />
+            </svg>
+            <div className="flex flex-col items-start leading-none">
+              <span
+                className="text-[14px] font-semibold"
+                style={{
+                  fontFamily: "Cormorant Garamond, serif",
+                  fontStyle: "italic",
+                  color: "#E6DCC8",
+                }}
+              >
+                {getTitleLabel(currentTitle)}
+              </span>
+              <span
+                className="text-[9px] font-mono uppercase mt-0.5"
+                style={{ color: GOLD_DIM, letterSpacing: "0.12em" }}
+              >
+                Rank
+              </span>
+            </div>
+          </div>
 
           {/* Notebook */}
           <button
             onClick={onOpenNotebook}
-            className="font-mono text-[11px] uppercase tracking-widest transition-colors"
-            style={{ color: "rgba(230,220,200,0.62)", letterSpacing: "0.14em" }}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg transition-colors"
+            style={{
+              background: "rgba(16,32,66,0.5)",
+              border: "1px solid rgba(230,192,122,0.18)",
+              color: "rgba(230,220,200,0.8)",
+            }}
             title="Your notebook"
           >
-            <span className="hover:text-[#E6DCC8]">Notes</span>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
+            </svg>
+            <span className="hidden lg:inline font-mono text-[11px] uppercase tracking-widest" style={{ letterSpacing: "0.14em" }}>
+              Notes
+            </span>
           </button>
-
-          {/* Day countdown */}
-          <span
-            className="hidden lg:inline-flex font-mono text-[11px] uppercase tracking-widest"
-            style={{ color: "rgba(230,220,200,0.62)", letterSpacing: "0.14em" }}
-          >
-            {daysLeft} days left
-          </span>
 
           {/* Sign out */}
           <button
             onClick={signOut}
-            className="font-mono text-[11px] uppercase tracking-widest transition-colors"
-            style={{ color: "rgba(230,220,200,0.42)", letterSpacing: "0.14em" }}
+            className="font-mono text-[11px] uppercase tracking-widest transition-colors px-2"
+            style={{ color: "rgba(230,220,200,0.48)", letterSpacing: "0.14em" }}
+            title="Sign out"
           >
             <span className="hover:text-[#E6DCC8]">Sign out</span>
           </button>
@@ -196,6 +218,7 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
       {/* Row 2 — Day ruler */}
       <DayRuler
         dayNumber={dayNumber}
+        daysLeft={daysLeft}
         regions={regions}
         setPanTarget={setPanTarget}
         lessons={lessons}
@@ -209,6 +232,7 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
 
 interface DayRulerProps {
   dayNumber: number;
+  daysLeft: number;
   regions: ReturnType<typeof useStudent>["regions"];
   setPanTarget: Dispatch<SetStateAction<string | null>>;
   lessons: ReturnType<typeof useStudent>["lessons"];
@@ -219,6 +243,7 @@ interface DayRulerProps {
 
 function DayRuler({
   dayNumber,
+  daysLeft,
   regions,
   setPanTarget,
   lessons,
@@ -226,14 +251,12 @@ function DayRuler({
   overallProgress,
   firstName,
 }: DayRulerProps) {
-  // Which day has a lesson?
   const daysWithLessons = useMemo(() => {
     const s = new Set<number>();
     for (const l of lessons) s.add(l.day);
     return s;
   }, [lessons]);
 
-  // Which days are fully complete (all lessons on that day done)?
   const daysComplete = useMemo(() => {
     const byDay: Record<number, string[]> = {};
     for (const l of lessons) {
@@ -251,31 +274,31 @@ function DayRuler({
 
   return (
     <div
-      className="relative px-6 py-2 flex items-center gap-4"
-      style={{ borderTop: "1px solid rgba(230,192,122,0.08)" }}
+      className="relative px-6 py-3 flex items-center gap-6"
+      style={{ borderTop: "1px solid rgba(230,192,122,0.12)" }}
     >
       <div className="flex-shrink-0 hidden md:block">
         <p
-          className="text-[10px] font-mono uppercase tracking-widest"
-          style={{ color: GOLD_DIM, letterSpacing: "0.16em" }}
+          className="text-[11px] font-mono uppercase tracking-widest"
+          style={{ color: GOLD, letterSpacing: "0.18em" }}
         >
           Hey, {firstName}
         </p>
-        <p className="text-[11px] font-mono" style={{ color: "rgba(230,220,200,0.62)" }}>
-          {overallProgress}% charted
+        <p className="text-[12px] font-mono mt-0.5" style={{ color: "rgba(230,220,200,0.75)" }}>
+          {overallProgress}% charted · {daysLeft} days left
         </p>
       </div>
 
-      <div className="flex-1 relative h-6">
+      <div className="flex-1 relative h-8">
         {/* Region bands */}
-        <div className="absolute inset-0 flex">
+        <div className="absolute inset-0 flex rounded-md overflow-hidden">
           {regions.map((r) => {
             const width = ((r.day_end - r.day_start + 1) / TOTAL_DAYS) * 100;
             const colors: Record<string, string> = {
-              shore: "rgba(77,160,216,0.07)",
-              forest: "rgba(77,206,196,0.08)",
-              mountains: "rgba(230,220,200,0.06)",
-              city: "rgba(230,192,122,0.08)",
+              shore: "rgba(77,160,216,0.1)",
+              forest: "rgba(77,206,196,0.12)",
+              mountains: "rgba(230,220,200,0.08)",
+              city: "rgba(230,192,122,0.12)",
             };
             return (
               <div
@@ -312,42 +335,42 @@ function DayRuler({
               <div
                 style={{
                   width: isMilestone ? 2 : 1,
-                  height: isMilestone ? 10 : 6,
+                  height: isMilestone ? 14 : 8,
                   background: isDone
                     ? GOLD
                     : hasLesson
-                      ? "rgba(230,220,200,0.62)"
-                      : "rgba(230,220,200,0.22)",
+                      ? "rgba(230,220,200,0.72)"
+                      : "rgba(230,220,200,0.28)",
                   marginLeft: -1,
                 }}
               />
               {isMilestone && (
                 <span
-                  className="absolute font-mono text-[9px] mt-1"
+                  className="absolute font-mono text-[10px] mt-1 font-semibold"
                   style={{
-                    top: 10,
+                    top: 14,
                     left: "50%",
                     transform: "translateX(-50%)",
-                    color: "rgba(230,220,200,0.42)",
+                    color: "rgba(230,220,200,0.62)",
                     letterSpacing: "0.08em",
                   }}
                 >
                   {day}
                 </span>
               )}
-              {/* Current-day pin (pulsing) */}
+              {/* Current-day pin */}
               {isCurrent && (
                 <div
                   className="absolute pulse-ring"
                   style={{
-                    top: -4,
+                    top: -6,
                     left: 0,
                     transform: "translateX(-50%)",
-                    width: 10,
-                    height: 10,
+                    width: 14,
+                    height: 14,
                     background: GOLD,
                     borderRadius: "50%",
-                    boxShadow: "0 0 10px rgba(230,192,122,0.8)",
+                    boxShadow: "0 0 14px rgba(230,192,122,0.9)",
                   }}
                 />
               )}

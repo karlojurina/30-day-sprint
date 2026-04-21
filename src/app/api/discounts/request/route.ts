@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
-import { DISCOUNT_GATE_LESSON_ID } from "@/lib/constants";
+import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 
 /**
- * V3: Discount eligibility = the gate lesson (l18) is complete.
- * The gate lesson is the final action item of Region 2 (Creative Lab).
+ * V4: Discount = complete ALL Region 1 + Region 2 lessons within
+ * DISCOUNT_WINDOW_DAYS (14) of the student's Whop join date.
+ * Measured server-side. No partial discount, no do-overs.
  */
 export async function POST(request: NextRequest) {
   const { studentId } = await request.json();
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
 
   const supabase = createServiceClient();
 
-  // Check if student already has a pending/approved request
+  // Duplicate check
   const { data: existing } = await supabase
     .from("discount_requests")
     .select("id, status")
@@ -31,17 +32,81 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Verify eligibility: gate lesson must be complete
-  const { data: gateCompletion } = await supabase
-    .from("student_lesson_completions")
-    .select("id")
-    .eq("student_id", studentId)
-    .eq("lesson_id", DISCOUNT_GATE_LESSON_ID)
+  // Student join date (from Whop membership, set at OAuth)
+  const { data: student } = await supabase
+    .from("students")
+    .select("joined_at")
+    .eq("id", studentId)
     .single();
 
-  if (!gateCompletion) {
+  if (!student) {
+    return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
+
+  const joinedAt = new Date(student.joined_at);
+  const deadline = new Date(
+    joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000
+  );
+  const now = new Date();
+
+  if (now > deadline) {
     return NextResponse.json(
-      { error: "Discount gate lesson not completed yet" },
+      {
+        error: `The discount window closed ${Math.floor(
+          (now.getTime() - deadline.getTime()) / 86_400_000
+        )} days ago. The 30% is only for students who finish R1 + R2 inside the first ${DISCOUNT_WINDOW_DAYS} days.`,
+      },
+      { status: 400 }
+    );
+  }
+
+  // Eligibility: every lesson in R1 + R2 must be complete
+  const [{ data: requiredLessons }, { data: completions }] = await Promise.all(
+    [
+      supabase
+        .from("lessons")
+        .select("id")
+        .in("region_id", ["r1", "r2"]),
+      supabase
+        .from("student_lesson_completions")
+        .select("lesson_id, completed_at")
+        .eq("student_id", studentId),
+    ]
+  );
+
+  const requiredIds = new Set((requiredLessons ?? []).map((l) => l.id));
+  const completionMap = new Map<string, string>();
+  for (const c of completions ?? []) {
+    completionMap.set(c.lesson_id, c.completed_at);
+  }
+
+  const missing: string[] = [];
+  let latestCompletion = joinedAt;
+  for (const id of requiredIds) {
+    const at = completionMap.get(id);
+    if (!at) {
+      missing.push(id);
+      continue;
+    }
+    const d = new Date(at);
+    if (d > latestCompletion) latestCompletion = d;
+  }
+
+  if (missing.length > 0) {
+    return NextResponse.json(
+      {
+        error: `Not yet eligible — ${requiredIds.size - missing.length}/${requiredIds.size} required lessons complete.`,
+      },
+      { status: 400 }
+    );
+  }
+
+  // All R1+R2 lessons done — but did they finish them inside the window?
+  if (latestCompletion > deadline) {
+    return NextResponse.json(
+      {
+        error: `You finished after the ${DISCOUNT_WINDOW_DAYS}-day window. The 30% is only for students who complete R1 + R2 within the first ${DISCOUNT_WINDOW_DAYS} days.`,
+      },
       { status: 400 }
     );
   }

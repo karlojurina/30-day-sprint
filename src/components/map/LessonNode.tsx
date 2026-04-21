@@ -406,62 +406,48 @@ export function LessonNode({
 }
 
 /**
- * The "you are here" marker — gold medallion floating above the current
- * node with a bold "YOU" compass badge and a pulsing ring. Simple,
- * readable at any zoom, doesn't rely on a raster logo.
+ * "You are here" marker — EcomTalent logo (plain3k, square) inside a gold
+ * medallion with a pulsing ring. Square logo fits a circular badge cleanly.
  */
 export function YouAreHere({ x, y }: { x: number; y: number }) {
   return (
-    <g transform={`translate(${x}, ${y - 46})`} style={{ pointerEvents: "none" }}>
-      {/* Soft outer glow */}
-      <circle r="34" fill="url(#you-fill)" opacity="0.35" filter="url(#you-glow)" />
+    <g transform={`translate(${x}, ${y - 48})`} style={{ pointerEvents: "none" }}>
+      {/* Outer glow */}
+      <circle r="36" fill="url(#you-fill)" opacity="0.4" filter="url(#you-glow)" />
 
       {/* Gold medallion body */}
-      <circle r="22" fill="url(#you-fill)" stroke="#0A1428" strokeWidth="1.8" />
-      <circle r="18" fill="none" stroke="rgba(10,20,40,0.3)" strokeWidth="0.8" />
+      <circle r="24" fill="url(#you-fill)" stroke="#0A1428" strokeWidth="1.8" />
 
-      {/* Compass star centered inside */}
-      <polygon
-        points="0,-10 2.8,-2.8 10,0 2.8,2.8 0,10 -2.8,2.8 -10,0 -2.8,-2.8"
-        fill="#0A1428"
+      {/* Inner dark disc to background the logo */}
+      <circle r="19" fill="#0A1428" />
+
+      {/* Clipping mask + logo */}
+      <defs>
+        <clipPath id="here-clip">
+          <circle r="18" />
+        </clipPath>
+      </defs>
+      <image
+        href="/ecomtalent-logo.png"
+        x={-18}
+        y={-18}
+        width={36}
+        height={36}
+        preserveAspectRatio="xMidYMid meet"
+        clipPath="url(#here-clip)"
       />
 
-      {/* "HERE" ribbon below */}
-      <g transform="translate(0, 26)">
-        <rect
-          x="-22"
-          y="-8"
-          width="44"
-          height="16"
-          rx="2"
-          fill="#0A1428"
-          stroke={GOLD_HI}
-          strokeWidth="1"
-        />
-        <text
-          textAnchor="middle"
-          dominantBaseline="central"
-          fontFamily="monospace"
-          fontSize="9"
-          fontWeight="700"
-          fill={GOLD_HI}
-          letterSpacing="3"
-        >
-          HERE
-        </text>
-      </g>
-
       {/* Pulsing ring */}
-      <circle r="22" fill="none" stroke={GOLD_HI} strokeWidth="1.4" opacity="0.6">
+      <circle r="24" fill="none" stroke={GOLD_HI} strokeWidth="1.4" opacity="0.65">
         <animate
           attributeName="r"
-          values="18;32;18"
+          values="20;34;20"
           dur="2.4s"
           repeatCount="indefinite"
         />
         <animate
           attributeName="opacity"
-          values="0.75;0;0.75"
+          values="0.8;0;0.8"
           dur="2.4s"
           repeatCount="indefinite"
         />

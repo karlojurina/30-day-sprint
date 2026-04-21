@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { createWhopPromoCode } from "@/lib/whop";
-import { DISCOUNT_GATE_LESSON_ID } from "@/lib/constants";
+import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 
 export async function POST(request: NextRequest) {
   const { requestId } = await request.json();
@@ -30,17 +30,53 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // V3 eligibility: the gate lesson (l18) must be complete
-  const { data: gateCompletion } = await supabase
-    .from("student_lesson_completions")
-    .select("id")
-    .eq("student_id", discountReq.student_id)
-    .eq("lesson_id", DISCOUNT_GATE_LESSON_ID)
+  // V4 eligibility: all R1 + R2 lessons complete within DISCOUNT_WINDOW_DAYS
+  // of the student's Whop join date.
+  const { data: studentRow } = await supabase
+    .from("students")
+    .select("joined_at")
+    .eq("id", discountReq.student_id)
     .single();
 
-  if (!gateCompletion) {
+  if (!studentRow) {
+    return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
+
+  const joinedAt = new Date(studentRow.joined_at);
+  const deadline = new Date(
+    joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000
+  );
+
+  const [{ data: requiredLessons }, { data: completions }] = await Promise.all(
+    [
+      supabase.from("lessons").select("id").in("region_id", ["r1", "r2"]),
+      supabase
+        .from("student_lesson_completions")
+        .select("lesson_id, completed_at")
+        .eq("student_id", discountReq.student_id),
+    ]
+  );
+
+  const requiredIds = new Set((requiredLessons ?? []).map((l) => l.id));
+  const completionMap = new Map<string, string>();
+  for (const c of completions ?? []) completionMap.set(c.lesson_id, c.completed_at);
+
+  let latestCompletion = joinedAt;
+  for (const id of requiredIds) {
+    const at = completionMap.get(id);
+    if (!at) {
+      return NextResponse.json(
+        { error: "Student has not completed all required R1 + R2 lessons" },
+        { status: 400 }
+      );
+    }
+    const d = new Date(at);
+    if (d > latestCompletion) latestCompletion = d;
+  }
+
+  if (latestCompletion > deadline) {
     return NextResponse.json(
-      { error: "Student has not completed the discount gate lesson" },
+      { error: "Student finished R1 + R2 after the discount window closed" },
       { status: 400 }
     );
   }

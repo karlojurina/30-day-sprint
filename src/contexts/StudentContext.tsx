@@ -4,6 +4,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   useCallback,
   useMemo,
@@ -25,6 +26,7 @@ import type {
   MonthReview,
 } from "@/types/database";
 import { getTitleForRegions } from "@/lib/titles";
+import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 
 export interface RegionProgress {
   completed: number;
@@ -56,8 +58,9 @@ interface StudentContextType {
   streak: { current: number; longest: number };
   currentTitle: StudentTitle;
   completedRegionCount: number;
-  discountEligible: boolean;               // l18 is complete
-  discountUnlockedInRegion: boolean;       // region 2 completed
+  discountEligible: boolean;               // all R1+R2 done AND within time window
+  discountMsLeft: number;                  // ms until the discount window closes (negative if expired)
+  discountAllLessonsDone: boolean;         // R1 + R2 fully complete (regardless of time)
 
   // Actions
   toggleLesson: (lessonId: string) => Promise<void>;
@@ -169,6 +172,38 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     fetchData();
   }, [student]);
 
+  // Auto-sync Whop progress once on mount, silently. Student doesn't need
+  // to click "sync" — watched videos flip to complete on page load.
+  const hasAutoSyncedRef = useRef(false);
+  useEffect(() => {
+    if (!student || hasAutoSyncedRef.current) return;
+    hasAutoSyncedRef.current = true;
+
+    (async () => {
+      const token = await getAccessToken();
+      if (!token) return;
+
+      try {
+        const res = await fetch("/api/student/refresh-watch-sync", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+
+        // Re-fetch completions so newly-synced lessons show up
+        const dataRes = await fetch("/api/student/data", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (dataRes.ok) {
+          const fresh = await dataRes.json();
+          setCompletions(fresh.completions);
+        }
+      } catch {
+        // silent — sync errors are persisted server-side for admin review
+      }
+    })();
+  }, [student]);
+
   // Derived state
   const completedLessonIds = useMemo(
     () => new Set(completions.map((c) => c.lesson_id)),
@@ -235,14 +270,24 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     return getTitleForRegions(completedRegionCount).key;
   }, [completedRegionCount]);
 
-  // Discount: l18 is complete (or simpler: region 2 is complete)
-  const discountEligible = useMemo(() => {
-    return completedLessonIds.has("l18");
-  }, [completedLessonIds]);
-
-  const discountUnlockedInRegion = useMemo(() => {
-    return regionProgress["r2"]?.isComplete ?? false;
+  // Discount window: R1 + R2 all complete AND finished within
+  // DISCOUNT_WINDOW_DAYS of the student's Whop join date.
+  const discountAllLessonsDone = useMemo(() => {
+    const r1 = regionProgress["r1"];
+    const r2 = regionProgress["r2"];
+    return Boolean(r1?.isComplete && r2?.isComplete);
   }, [regionProgress]);
+
+  const discountMsLeft = useMemo(() => {
+    if (!student) return 0;
+    const joined = new Date(student.joined_at).getTime();
+    const deadline = joined + DISCOUNT_WINDOW_DAYS * 86_400_000;
+    return deadline - Date.now();
+  }, [student]);
+
+  const discountEligible = useMemo(() => {
+    return discountAllLessonsDone && discountMsLeft > 0;
+  }, [discountAllLessonsDone, discountMsLeft]);
 
   // Actions
 
@@ -496,7 +541,8 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         currentTitle,
         completedRegionCount,
         discountEligible,
-        discountUnlockedInRegion,
+        discountMsLeft,
+        discountAllLessonsDone,
         toggleLesson,
         saveNote,
         saveLessonNote,

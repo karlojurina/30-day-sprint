@@ -69,20 +69,44 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
     >
       {/* Row 1 — fixed pill height, everything vertically centered */}
       <div className="flex items-center justify-between gap-3 px-6" style={{ height: 84 }}>
-        {/* Brand (logo) — fixed size, no chrome */}
-        <div className="flex items-center shrink-0" style={{ height: PILL_HEIGHT }}>
+        {/* Brand — square logo + wordmark */}
+        <div className="flex items-center gap-3 shrink-0" style={{ height: PILL_HEIGHT }}>
           <Image
             src="/ecomtalent-logo.png"
             alt="EcomTalent"
-            width={560}
-            height={315}
+            width={547}
+            height={547}
             priority
             style={{
-              height: 36,
-              width: "auto",
+              height: 40,
+              width: 40,
               objectFit: "contain",
             }}
           />
+          <div className="hidden sm:block leading-tight">
+            <p
+              className="italic"
+              style={{
+                fontFamily: "Cormorant Garamond, serif",
+                color: "#E6DCC8",
+                fontWeight: 500,
+                fontSize: 18,
+                lineHeight: "20px",
+              }}
+            >
+              EcomTalent
+            </p>
+            <p
+              className="font-mono uppercase"
+              style={{
+                color: GOLD_DIM,
+                letterSpacing: "0.2em",
+                fontSize: 9,
+              }}
+            >
+              Expedition
+            </p>
+          </div>
         </div>
 
         {/* Breadcrumb — same pill height as badges on the right */}

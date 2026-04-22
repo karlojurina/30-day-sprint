@@ -209,14 +209,15 @@ export function CloudTransition({
       }}
       aria-hidden
     >
-      {/* White-flash layer — peak brightness behind clouds */}
+      {/* White-flash layer — peak brightness behind clouds. Fully opaque at
+          peak so nothing bleeds through during the scene swap. */}
       <div
         ref={whiteFlashRef}
         style={{
           position: "absolute",
           inset: 0,
           background:
-            "radial-gradient(ellipse at center, rgba(255,250,240,0.98) 0%, rgba(230,220,200,0.85) 100%)",
+            "radial-gradient(ellipse at center, #FFFAF0 0%, #E6DCC8 100%)",
           opacity: 0,
         }}
       />

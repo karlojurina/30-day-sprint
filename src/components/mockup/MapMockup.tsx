@@ -68,26 +68,33 @@ function ellipsePoly(
   return pts;
 }
 
+// Re-traced from the new precise regions.png (2026-04-22):
+//   R1 — port/harbor/dock (bottom-left). Kidney shape around the boats.
+//   R2 — green valley with cabin (center-bottom). Wide horizontal shape.
+//   R3 — waterfall/cliff/bridge (middle-right). Vertical-ish, narrower.
+//   R4 — summit with archway (top). Wide horizontal shape across the peak.
+// These are still ellipse approximations. Use /dashboard-mockup/edit-regions
+// to trace pixel-accurate polygons and replace.
 const REGION_ZONES: Record<RegionId, RegionZone> = {
   r1: {
-    polygon: ellipsePoly(528, 1015, 368, 315, -3),
-    labelX: 528,
-    labelY: 1015,
+    polygon: ellipsePoly(640, 1080, 384, 215, -5),
+    labelX: 640,
+    labelY: 1080,
   },
   r2: {
-    polygon: ellipsePoly(1760, 980, 544, 210, 0),
-    labelX: 1760,
-    labelY: 980,
+    polygon: ellipsePoly(1536, 1106, 480, 196, 0),
+    labelX: 1536,
+    labelY: 1106,
   },
   r3: {
-    polygon: ellipsePoly(2016, 595, 480, 175, -4),
-    labelX: 2016,
-    labelY: 595,
+    polygon: ellipsePoly(2080, 728, 336, 245, 0),
+    labelX: 2080,
+    labelY: 728,
   },
   r4: {
-    polygon: ellipsePoly(2400, 245, 320, 175, 2),
-    labelX: 2400,
-    labelY: 245,
+    polygon: ellipsePoly(2016, 294, 464, 217, 0),
+    labelX: 2016,
+    labelY: 294,
   },
 };
 
@@ -224,6 +231,17 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     setView("overview");
   }, [outerSize.w]);
 
+  // Preload scene images so the cloud-transition scene swap is instant.
+  // Without this, clicking a region fires the cloud animation, but the new
+  // 37 MB scene image is still downloading when the clouds retreat — so the
+  // user sees stale main_image underneath (looks like "fog on the region").
+  useEffect(() => {
+    (Object.values(SCENES) as Scene[]).forEach((scene) => {
+      const img = new window.Image();
+      img.src = scene.image;
+    });
+  }, []);
+
   // Compute target transform for a given view
   const getTargetTransform = (v: View) => {
     const vw = outerSize.w || 1;
@@ -300,6 +318,134 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, outerSize]);
 
+  // ──────────────────────────────────────────────────────────
+  // Pan + zoom (overview only).
+  // - Drag to pan, wheel to zoom (pointer-anchored).
+  // - Scale clamped to [coverScale, coverScale * 1.6] so the viewport is
+  //   always fully covered by the image (no black edges).
+  // - Position clamped so the image always covers the viewport.
+  // - Inside a region scene, pan/zoom is disabled for now.
+  // - Drag with >5px motion also blocks the zone click that would otherwise
+  //   fire on release.
+  // ──────────────────────────────────────────────────────────
+  const dragStartRef = useRef<{
+    cx: number;
+    cy: number;
+    tx: number;
+    ty: number;
+    moved: boolean;
+  } | null>(null);
+  const suppressClickRef = useRef(false);
+
+  const clampTransform = (t: { x: number; y: number; scale: number }) => {
+    const vw = outerSize.w;
+    const vh = outerSize.h;
+    const imgW = MAP_W * t.scale;
+    const imgH = MAP_H * t.scale;
+    // If the image is narrower than the viewport at this scale, center it.
+    const minX = Math.min(0, vw - imgW);
+    const maxX = Math.max(0, vw - imgW);
+    const minY = Math.min(0, vh - imgH);
+    const maxY = Math.max(0, vh - imgH);
+    return {
+      x: Math.max(minX, Math.min(maxX, t.x)),
+      y: Math.max(minY, Math.min(maxY, t.y)),
+      scale: t.scale,
+    };
+  };
+
+  const onMapPointerDown = (e: React.PointerEvent) => {
+    if (view !== "overview") return;
+    // Don't start a pan on right-click / middle-click
+    if (e.button !== 0) return;
+    // Kill any in-flight tween so it doesn't fight manual pan
+    if (tweenRef.current) {
+      tweenRef.current.kill();
+      tweenRef.current = null;
+    }
+    dragStartRef.current = {
+      cx: e.clientX,
+      cy: e.clientY,
+      tx: transformRef.current.x,
+      ty: transformRef.current.y,
+      moved: false,
+    };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const onMapPointerMove = (e: React.PointerEvent) => {
+    const s = dragStartRef.current;
+    if (!s) return;
+    const dx = e.clientX - s.cx;
+    const dy = e.clientY - s.cy;
+    if (!s.moved && Math.hypot(dx, dy) > 5) {
+      s.moved = true;
+    }
+    if (!s.moved) return;
+    const next = clampTransform({
+      x: s.tx + dx,
+      y: s.ty + dy,
+      scale: transformRef.current.scale,
+    });
+    transformRef.current = next;
+    setDisplayTransform(next);
+  };
+
+  const onMapPointerUp = (e: React.PointerEvent) => {
+    const s = dragStartRef.current;
+    if (!s) return;
+    // If the user dragged, suppress the click that would fire on a
+    // child zone polygon so we don't accidentally enter a region.
+    if (s.moved) {
+      suppressClickRef.current = true;
+      // Clear on next tick so later clicks aren't blocked.
+      setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    }
+    dragStartRef.current = null;
+    try {
+      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      // pointer may already be released; ignore
+    }
+  };
+
+  const onMapWheel = (e: React.WheelEvent) => {
+    if (view !== "overview") return;
+    if (outerSize.w === 0) return;
+    e.preventDefault();
+    if (tweenRef.current) {
+      tweenRef.current.kill();
+      tweenRef.current = null;
+    }
+    const coverScale = Math.max(
+      outerSize.w / MAP_W,
+      outerSize.h / MAP_H
+    );
+    const maxScale = coverScale * 1.6;
+    const current = transformRef.current;
+    const zoomFactor = Math.exp(-e.deltaY * 0.0015);
+    const newScale = Math.max(
+      coverScale,
+      Math.min(maxScale, current.scale * zoomFactor)
+    );
+    if (newScale === current.scale) return;
+    // Anchor the zoom to the cursor position
+    const rect = outerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    // Map coord under cursor
+    const mx = (px - current.x) / current.scale;
+    const my = (py - current.y) / current.scale;
+    const nextX = px - mx * newScale;
+    const nextY = py - my * newScale;
+    const next = clampTransform({ x: nextX, y: nextY, scale: newScale });
+    transformRef.current = next;
+    setDisplayTransform(next);
+  };
+
   // Build a lookup for fast lesson-by-id access
   const lessonsById = useMemo(() => {
     const m = new Map<string, Lesson>();
@@ -340,7 +486,9 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       : null;
 
   // Trigger a cloud transition then swap the view at peak coverage.
+  // Blocked while a drag was in progress (pan shouldn't also click a zone).
   const transitionTo = (next: View) => {
+    if (suppressClickRef.current) return;
     if (pendingViewRef.current !== null) return; // already in flight
     pendingViewRef.current = next;
     setTransitionCounter((n) => n + 1);
@@ -350,7 +498,16 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     <div
       ref={outerRef}
       className="absolute inset-0 overflow-hidden"
-      style={{ background: "#060C1A" }}
+      style={{
+        background: "#060C1A",
+        cursor: view === "overview" ? "grab" : "default",
+        touchAction: "none",
+      }}
+      onPointerDown={onMapPointerDown}
+      onPointerMove={onMapPointerMove}
+      onPointerUp={onMapPointerUp}
+      onPointerCancel={onMapPointerUp}
+      onWheel={onMapWheel}
     >
       {/* Map inner — scaled + translated by GSAP (mirrored to React state) */}
       <div

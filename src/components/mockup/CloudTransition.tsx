@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { gsap } from "gsap";
 
 interface CloudTransitionProps {
@@ -8,39 +9,55 @@ interface CloudTransitionProps {
   trigger: number;
   /** Called at the peak (fully covered) so parent can swap scenes. */
   onPeak?: () => void;
-  /** Total duration of the in→peak→out sequence in seconds. */
+  /** Total duration of the in→hold→out sequence in seconds. */
   duration?: number;
 }
 
 /**
- * Clash-of-Clans style cloud/mist transition.
+ * Clash-of-Clans style cloud transition.
  *
- * 8 organic cloud blobs fly in from the edges, scale up, and fully cover the
- * screen. At peak coverage `onPeak` fires so the parent can swap scene. Then
- * the clouds scale down and drift back out, revealing the new scene.
+ * Three layers stack on top of the viewport (z-index 9999):
+ *   1. Solid parchment backdrop — fades in to 100%, holds, fades out.
+ *      This is the reliable full-screen cover; nothing bleeds through.
+ *   2. Cloud SVGs — 12 of them pre-spread across the screen, fade in/out
+ *      with a subtle scale-up for texture on top of the backdrop.
+ *   3. (Scene swap happens in the middle of the hold, while fully covered.)
  *
- * Trigger by bumping the `trigger` number (any changing value works).
- * Respects prefers-reduced-motion — degrades to a quick white fade.
+ * Timeline for duration=2.0s:
+ *   t=0.00 → clouds & backdrop opacity 0, scene = old
+ *   t=0.70 → backdrop & clouds at opacity 1 (fully covered)
+ *   t=0.85 → onPeak fires, parent swaps scene (hidden behind cover)
+ *   t=1.20 → fade out begins
+ *   t=2.00 → fully revealed, scene = new
+ *
+ * Bump `trigger` to replay. Respects prefers-reduced-motion → quick fade.
  */
 export function CloudTransition({
   trigger,
   onPeak,
-  duration = 1.5,
+  duration = 2.0,
 }: CloudTransitionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
   const cloudRefs = useRef<(HTMLDivElement | null)[]>([]);
-  const whiteFlashRef = useRef<HTMLDivElement>(null);
   const prevTrigger = useRef(trigger);
   const timelineRef = useRef<gsap.core.Timeline | null>(null);
+
+  // Portal mount guard — createPortal needs a document.body, which only
+  // exists in the browser. Delay mounting one tick past hydration.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     if (trigger === prevTrigger.current) return;
     prevTrigger.current = trigger;
 
     const container = containerRef.current;
-    if (!container) return;
+    const backdrop = backdropRef.current;
+    if (!container || !backdrop) return;
 
-    // Kill any in-flight timeline
     if (timelineRef.current) {
       timelineRef.current.kill();
       timelineRef.current = null;
@@ -51,20 +68,19 @@ export function CloudTransition({
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     if (reduced) {
-      // Simple flash + swap
       gsap.set(container, { pointerEvents: "auto" });
       gsap.fromTo(
-        whiteFlashRef.current,
+        backdrop,
         { opacity: 0 },
         {
           opacity: 1,
-          duration: 0.18,
+          duration: 0.2,
           ease: "power2.out",
           onComplete: () => {
             onPeak?.();
-            gsap.to(whiteFlashRef.current, {
+            gsap.to(backdrop, {
               opacity: 0,
-              duration: 0.22,
+              duration: 0.25,
               ease: "power2.in",
               onComplete: () => {
                 gsap.set(container, { pointerEvents: "none" });
@@ -76,38 +92,26 @@ export function CloudTransition({
       return;
     }
 
-    const clouds = cloudRefs.current.filter((r): r is HTMLDivElement => r != null);
-    if (clouds.length === 0) return;
+    const clouds = cloudRefs.current.filter(
+      (r): r is HTMLDivElement => r != null
+    );
 
-    const half = duration / 2;
-    const inDur = half * 0.75;
-    const outDur = half * 0.95;
-    const coverageHold = 0.12;
-
-    // Reset clouds to off-screen entry positions
-    const entryPositions = [
-      { x: "-70vw", y: "-30vh", rot: -20 },   // from top-left
-      { x: "70vw",  y: "-35vh", rot: 25 },    // from top-right
-      { x: "-80vw", y: "20vh",  rot: 12 },    // from left
-      { x: "75vw",  y: "-10vh", rot: -15 },   // from right (upper)
-      { x: "80vw",  y: "40vh",  rot: 8 },     // from right (lower)
-      { x: "-60vw", y: "50vh",  rot: -8 },    // from bottom-left
-      { x: "30vw",  y: "75vh",  rot: 14 },    // from bottom
-      { x: "-20vw", y: "75vh",  rot: -6 },    // from bottom
-    ];
-
+    // Initial state — everything invisible, clouds pre-sized down and
+    // lightly rotated for a bit of organic variation.
+    gsap.set(backdrop, { opacity: 0 });
     clouds.forEach((el, i) => {
-      const p = entryPositions[i % entryPositions.length];
       gsap.set(el, {
-        x: p.x,
-        y: p.y,
-        rotation: p.rot,
-        scale: 0.5,
         opacity: 0,
+        scale: 0.7,
+        rotation: (i % 2 === 0 ? 1 : -1) * (2 + (i * 1.7) % 6),
       });
     });
-    gsap.set(whiteFlashRef.current, { opacity: 0 });
     gsap.set(container, { pointerEvents: "auto" });
+
+    // Durations relative to total
+    const fadeInDur = duration * 0.35; // 0 → covered
+    const holdDur = duration * 0.25; //     covered hold (swap happens)
+    const fadeOutDur = duration * 0.4; //    covered → revealed
 
     const tl = gsap.timeline({
       onComplete: () => {
@@ -116,77 +120,62 @@ export function CloudTransition({
       },
     });
 
-    // Phase 1 — clouds rush in
-    clouds.forEach((el, i) => {
-      tl.to(
-        el,
-        {
-          x: `${(i - clouds.length / 2) * 6}vw`, // settle around the center
-          y: `${((i % 3) - 1) * 10}vh`,
-          rotation: 0,
-          scale: 1.6,
-          opacity: 1,
-          duration: inDur,
-          ease: "power3.out",
-        },
-        i * 0.035
-      );
-    });
-
-    // White-flash building up to full coverage
+    // ── Phase 1: fade in to full coverage ────────────────────────
     tl.to(
-      whiteFlashRef.current,
+      backdrop,
       {
         opacity: 1,
-        duration: inDur * 0.7,
-        ease: "power2.in",
+        duration: fadeInDur,
+        ease: "power2.out",
       },
-      inDur * 0.3
+      0
     );
 
-    // Peak hold + scene swap
-    tl.add(() => {
-      onPeak?.();
-    }, inDur + coverageHold * 0.4);
-
-    // Phase 2 — clouds drift out in opposing directions, flash fades
-    const exitPositions = [
-      { x: "80vw",  y: "-30vh", rot: 20 },
-      { x: "-70vw", y: "-25vh", rot: -15 },
-      { x: "70vw",  y: "40vh",  rot: -10 },
-      { x: "-80vw", y: "30vh",  rot: 18 },
-      { x: "-60vw", y: "-30vh", rot: -20 },
-      { x: "80vw",  y: "50vh",  rot: 10 },
-      { x: "-40vw", y: "80vh",  rot: -14 },
-      { x: "60vw",  y: "85vh",  rot: 8 },
-    ];
-
     clouds.forEach((el, i) => {
-      const p = exitPositions[i % exitPositions.length];
       tl.to(
         el,
         {
-          x: p.x,
-          y: p.y,
-          rotation: p.rot,
-          scale: 0.7,
-          opacity: 0,
-          duration: outDur,
-          ease: "power2.in",
+          opacity: 1,
+          scale: 1.15,
+          duration: fadeInDur * 1.05,
+          ease: "power2.out",
         },
-        inDur + coverageHold + i * 0.03
+        i * 0.025
       );
     });
 
+    // ── Phase 2: hold at full coverage, swap scene mid-hold ──────
+    // onPeak fires ~halfway through the hold so the scene is already
+    // in place when clouds start retreating.
+    tl.add(() => {
+      onPeak?.();
+    }, fadeInDur + holdDur * 0.5);
+
+    // ── Phase 3: fade out, reveal new scene ──────────────────────
+    const outStart = fadeInDur + holdDur;
+
     tl.to(
-      whiteFlashRef.current,
+      backdrop,
       {
         opacity: 0,
-        duration: outDur * 0.8,
-        ease: "power2.out",
+        duration: fadeOutDur,
+        ease: "power2.in",
       },
-      inDur + coverageHold
+      outStart
     );
+
+    clouds.forEach((el, i) => {
+      tl.to(
+        el,
+        {
+          opacity: 0,
+          scale: 1.45,
+          duration: fadeOutDur,
+          ease: "power2.in",
+        },
+        outStart + i * 0.02
+      );
+    });
 
     timelineRef.current = tl;
 
@@ -198,32 +187,35 @@ export function CloudTransition({
     };
   }, [trigger, onPeak, duration]);
 
-  return (
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       ref={containerRef}
       className="fixed inset-0"
       style={{
-        zIndex: 60,
+        zIndex: 9999,
         pointerEvents: "none",
         overflow: "hidden",
       }}
       aria-hidden
     >
-      {/* White-flash layer — peak brightness behind clouds. Fully opaque at
-          peak so nothing bleeds through during the scene swap. */}
+      {/* Solid backdrop — reliable full-screen coverage at peak */}
       <div
-        ref={whiteFlashRef}
+        ref={backdropRef}
         style={{
           position: "absolute",
           inset: 0,
           background:
-            "radial-gradient(ellipse at center, #FFFAF0 0%, #E6DCC8 100%)",
+            "radial-gradient(ellipse at center, #FFFAF0 0%, #EFE5D0 45%, #D9CAB0 100%)",
           opacity: 0,
         }}
       />
 
-      {/* Cloud layer */}
-      {Array.from({ length: 8 }).map((_, i) => (
+      {/* 12 cloud SVGs pre-spread across the screen — they're texture
+          on top of the backdrop, not what's providing coverage. Their
+          rough grid positions are staggered so no two look aligned. */}
+      {CLOUD_POSITIONS.map((pos, i) => (
         <div
           key={i}
           ref={(el) => {
@@ -231,11 +223,11 @@ export function CloudTransition({
           }}
           style={{
             position: "absolute",
-            top: "50%",
-            left: "50%",
+            top: pos.top,
+            left: pos.left,
             transform: "translate(-50%, -50%)",
-            width: CLOUD_SIZES[i % CLOUD_SIZES.length],
-            height: CLOUD_SIZES[i % CLOUD_SIZES.length],
+            width: pos.size,
+            height: pos.size,
             opacity: 0,
             willChange: "transform, opacity",
           }}
@@ -243,15 +235,31 @@ export function CloudTransition({
           <Cloud seed={i} />
         </div>
       ))}
-    </div>
+    </div>,
+    document.body
   );
 }
 
-const CLOUD_SIZES = ["80vmax", "70vmax", "75vmax", "85vmax", "65vmax", "72vmax", "78vmax", "68vmax"];
+// Cloud anchor positions — spread across the viewport so once faded in
+// the clouds carpet the whole screen (not just the center). Sizes in
+// vmax so they scale with viewport. Irregular on purpose.
+const CLOUD_POSITIONS = [
+  { top: "15%", left: "12%", size: "55vmax" },
+  { top: "18%", left: "45%", size: "60vmax" },
+  { top: "12%", left: "78%", size: "55vmax" },
+  { top: "42%", left: "22%", size: "55vmax" },
+  { top: "48%", left: "55%", size: "62vmax" },
+  { top: "40%", left: "88%", size: "55vmax" },
+  { top: "72%", left: "15%", size: "58vmax" },
+  { top: "78%", left: "50%", size: "60vmax" },
+  { top: "70%", left: "85%", size: "55vmax" },
+  { top: "28%", left: "65%", size: "50vmax" },
+  { top: "58%", left: "38%", size: "50vmax" },
+  { top: "85%", left: "70%", size: "52vmax" },
+];
 
 /**
- * An organic cloud blob SVG. Uses turbulence + soft edge blur for a
- * believable mist look. Different seed = different turbulence offset.
+ * Organic cloud blob with turbulence + gradient. Seed varies the pattern.
  */
 function Cloud({ seed }: { seed: number }) {
   const filterId = `cloud-fx-${seed}`;
@@ -269,16 +277,16 @@ function Cloud({ seed }: { seed: number }) {
           <feGaussianBlur stdDeviation="2.5" />
         </filter>
         <radialGradient id={`cloud-grad-${seed}`} cx="50%" cy="45%" r="55%">
-          <stop offset="0%" stopColor="rgba(255,252,248,0.98)" />
-          <stop offset="55%" stopColor="rgba(245,238,225,0.9)" />
-          <stop offset="85%" stopColor="rgba(225,210,185,0.45)" />
+          <stop offset="0%" stopColor="rgba(255,252,248,1)" />
+          <stop offset="55%" stopColor="rgba(245,238,225,0.95)" />
+          <stop offset="85%" stopColor="rgba(225,210,185,0.6)" />
           <stop offset="100%" stopColor="rgba(210,190,160,0)" />
         </radialGradient>
       </defs>
       <g filter={`url(#${filterId})`}>
         <ellipse cx="0" cy="0" rx="78" ry="58" fill={`url(#cloud-grad-${seed})`} />
-        <ellipse cx="-15" cy="-10" rx="40" ry="30" fill={`url(#cloud-grad-${seed})`} opacity="0.85" />
-        <ellipse cx="20" cy="10" rx="45" ry="25" fill={`url(#cloud-grad-${seed})`} opacity="0.85" />
+        <ellipse cx="-15" cy="-10" rx="40" ry="30" fill={`url(#cloud-grad-${seed})`} opacity="0.9" />
+        <ellipse cx="20" cy="10" rx="45" ry="25" fill={`url(#cloud-grad-${seed})`} opacity="0.9" />
       </g>
     </svg>
   );

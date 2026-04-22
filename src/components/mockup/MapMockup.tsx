@@ -313,15 +313,14 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       setDisplayTransform(target);
       return;
     }
-    // Short duration because this fires when onPeak hits — clouds are
-    // already covering the screen, so the user doesn't see the tween
-    // itself. The goal is to land at the final position before clouds
-    // retreat (~0.78s after peak), so 0.5s is comfortably inside that.
+    // Fires when onPeak hits (clouds fully covering). Must finish before
+    // clouds retreat (~250ms after peak in a 2s transition). 0.25s lands
+    // exactly when the retreat begins so there's no visible mid-tween.
     tweenRef.current = gsap.to(transformRef.current, {
       x: target.x,
       y: target.y,
       scale: target.scale,
-      duration: 0.5,
+      duration: 0.25,
       ease: "power2.out",
       onUpdate: () => {
         setDisplayTransform({ ...transformRef.current });
@@ -803,7 +802,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       {/* Cloud scene-swap transition — fires at peak coverage */}
       <CloudTransition
         trigger={transitionCounter}
-        duration={1.5}
+        duration={2.0}
         onPeak={() => {
           const next = pendingViewRef.current;
           if (next != null) {

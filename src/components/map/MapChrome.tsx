@@ -22,7 +22,9 @@ export function RegionCartouche({
   state: RegionProgress;
 }) {
   const xMid = (s.xStart + s.xEnd) / 2;
-  const yBase = s.yTop - 70;
+  // Sits 90px inside the top of the region (in the sky area of the painting),
+  // so the cartouche is always on-map and scrolls/zooms with the content.
+  const yBase = s.yTop + 90;
   const accent = state.isComplete
     ? GOLD_HI
     : state.isUnlocked

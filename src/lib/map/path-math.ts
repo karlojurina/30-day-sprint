@@ -19,15 +19,17 @@ export interface RegionStrip {
 
 export type RegionStripMap = Record<"r1" | "r2" | "r3" | "r4", RegionStrip>;
 
-// Strip x-bounds align with the painted regions in the new panoramic mural
-// (public/regions/expedition-map.png). Image reads ~22% sea / 28% forest /
-// 28% mountains / 22% valley left-to-right within the painted area
-// (x=120 to x=3080, total 2960px wide).
+// Strip bounds now fill the entire viewBox (0..MAP_W, 0..MAP_H) so there
+// are no dark gutters around the painted area at any zoom level. The
+// panorama image (public/regions/expedition-map.png) is drawn at left=0,
+// top=0, width=MAP_W, height=MAP_H with backgroundSize: cover.
+//
+// Horizontal split stays 22% sea / 28% forest / 28% mountains / 22% valley.
 export const REGION_STRIPS: RegionStripMap = {
-  r1: { xStart: 120,  xEnd: 770,  yTop: 180, yBot: 1220, image: "/regions/region-sea.png" },
-  r2: { xStart: 770,  xEnd: 1600, yTop: 180, yBot: 1220, image: "/regions/region-forest.png" },
-  r3: { xStart: 1600, xEnd: 2430, yTop: 180, yBot: 1220, image: "/regions/region-mountains.png" },
-  r4: { xStart: 2430, xEnd: 3080, yTop: 180, yBot: 1220, image: "/regions/region-harbor.png" },
+  r1: { xStart: 0,    xEnd: 704,  yTop: 0, yBot: 1400, image: "/regions/region-sea.png" },
+  r2: { xStart: 704,  xEnd: 1600, yTop: 0, yBot: 1400, image: "/regions/region-forest.png" },
+  r3: { xStart: 1600, xEnd: 2496, yTop: 0, yBot: 1400, image: "/regions/region-mountains.png" },
+  r4: { xStart: 2496, xEnd: 3200, yTop: 0, yBot: 1400, image: "/regions/region-harbor.png" },
 };
 
 export interface Point {
@@ -56,53 +58,56 @@ export function buildExplorerWaypoints(): Point[] {
     y: r.yTop + (r.yBot - r.yTop) * ty,
   });
 
+  // Region ty values below are relative to the full 1400px-tall region.
+  // Terrain lives in roughly ty 0.45 .. 0.95 (the lower half of each
+  // region); sky occupies ty 0 .. 0.4 — path should not go there.
+
   // R1 SEA — start near the dock, sweep along the water and shore, climb
-  // the rocks to where the forest begins. Stays in the lower half of the
-  // region (the sky has nothing for a path to do).
-  wp.push(P(r1, 0.10, 0.68));   // dock
-  wp.push(P(r1, 0.22, 0.78));   // along the water
-  wp.push(P(r1, 0.38, 0.86));   // bottom of the bay
-  wp.push(P(r1, 0.55, 0.80));   // curve up around the rocks
-  wp.push(P(r1, 0.72, 0.62));   // climbing the shore
-  wp.push(P(r1, 0.86, 0.48));   // approach the forest line
-  wp.push(P(r1, 0.96, 0.40));   // exit east into the forest
+  // the rocks to where the forest begins.
+  wp.push(P(r1, 0.10, 0.75));   // dock
+  wp.push(P(r1, 0.22, 0.83));   // along the water
+  wp.push(P(r1, 0.38, 0.90));   // bottom of the bay
+  wp.push(P(r1, 0.55, 0.85));   // curve up around the rocks
+  wp.push(P(r1, 0.72, 0.72));   // climbing the shore
+  wp.push(P(r1, 0.86, 0.62));   // approach the forest line
+  wp.push(P(r1, 0.96, 0.55));   // exit east into the forest
 
   // R2 FOREST — wind UP and DOWN through the pine hillside, past the cabins
   // (which sit in the lower-mid third of this region in the painting).
-  wp.push(P(r2, 0.06, 0.36));   // entry from the sea side
-  wp.push(P(r2, 0.18, 0.58));   // descend into trees
-  wp.push(P(r2, 0.28, 0.74));   // bottom of forest near water
-  wp.push(P(r2, 0.42, 0.66));   // pass first cabin cluster
-  wp.push(P(r2, 0.52, 0.45));   // climb back up among trees
-  wp.push(P(r2, 0.62, 0.55));   // back down past the second cabin
-  wp.push(P(r2, 0.74, 0.62));
-  wp.push(P(r2, 0.86, 0.50));   // climb toward the mountain base
-  wp.push(P(r2, 0.96, 0.42));   // exit east into the foothills
+  wp.push(P(r2, 0.06, 0.52));   // entry from the sea side
+  wp.push(P(r2, 0.18, 0.68));   // descend into trees
+  wp.push(P(r2, 0.28, 0.82));   // bottom of forest near water
+  wp.push(P(r2, 0.42, 0.75));   // pass first cabin cluster
+  wp.push(P(r2, 0.52, 0.60));   // climb back up among trees
+  wp.push(P(r2, 0.62, 0.68));   // back down past the second cabin
+  wp.push(P(r2, 0.74, 0.72));
+  wp.push(P(r2, 0.86, 0.62));   // climb toward the mountain base
+  wp.push(P(r2, 0.96, 0.56));   // exit east into the foothills
 
   // R3 MOUNTAINS — follow the visible switchback in the painting. The
   // trail enters low-left, zigzags upward through the rocks, peaks high,
   // then drops down toward the valley on the right.
-  wp.push(P(r3, 0.06, 0.55));   // entry from forest
-  wp.push(P(r3, 0.16, 0.42));   // first switch
-  wp.push(P(r3, 0.08, 0.30));
-  wp.push(P(r3, 0.22, 0.20));   // up the ridge
-  wp.push(P(r3, 0.36, 0.28));
-  wp.push(P(r3, 0.48, 0.12));   // approach the high pass
-  wp.push(P(r3, 0.60, 0.18));   // peak / pass crossing
-  wp.push(P(r3, 0.72, 0.32));   // start descending the far side
-  wp.push(P(r3, 0.82, 0.50));
-  wp.push(P(r3, 0.92, 0.65));   // exit down into the valley
+  wp.push(P(r3, 0.06, 0.65));   // entry from forest
+  wp.push(P(r3, 0.16, 0.55));   // first switch
+  wp.push(P(r3, 0.08, 0.48));
+  wp.push(P(r3, 0.22, 0.40));   // up the ridge
+  wp.push(P(r3, 0.36, 0.46));
+  wp.push(P(r3, 0.48, 0.34));   // approach the high pass
+  wp.push(P(r3, 0.60, 0.38));   // peak / pass crossing
+  wp.push(P(r3, 0.72, 0.50));   // start descending the far side
+  wp.push(P(r3, 0.82, 0.62));
+  wp.push(P(r3, 0.92, 0.72));   // exit down into the valley
 
   // R4 VALLEY — descend from the mountain pass, curve around the lake,
   // end near the small cabin on the water's edge.
-  wp.push(P(r4, 0.06, 0.55));   // entry from mountains
-  wp.push(P(r4, 0.20, 0.68));   // descending into the bowl
-  wp.push(P(r4, 0.34, 0.58));   // crossing the upper valley
-  wp.push(P(r4, 0.46, 0.72));   // approach the lake
-  wp.push(P(r4, 0.58, 0.82));   // along the lake's edge
-  wp.push(P(r4, 0.72, 0.74));   // by the cabin
-  wp.push(P(r4, 0.86, 0.62));   // final waypoint
-  wp.push(P(r4, 0.94, 0.50));
+  wp.push(P(r4, 0.06, 0.65));   // entry from mountains
+  wp.push(P(r4, 0.20, 0.76));   // descending into the bowl
+  wp.push(P(r4, 0.34, 0.68));   // crossing the upper valley
+  wp.push(P(r4, 0.46, 0.80));   // approach the lake
+  wp.push(P(r4, 0.58, 0.88));   // along the lake's edge
+  wp.push(P(r4, 0.72, 0.82));   // by the cabin
+  wp.push(P(r4, 0.86, 0.72));   // final waypoint
+  wp.push(P(r4, 0.94, 0.62));
 
   return wp;
 }

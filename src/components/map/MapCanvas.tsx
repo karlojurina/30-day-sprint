@@ -9,6 +9,7 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
+import { gsap } from "gsap";
 import { useStudent } from "@/contexts/StudentContext";
 import {
   MAP_W,
@@ -30,7 +31,13 @@ interface MapCanvasProps {
   setPanTarget: Dispatch<SetStateAction<string | null>>;
 }
 
-const MAX_ZOOM = 1.4;
+const MAX_ZOOM = 3;
+
+/** Detect `prefers-reduced-motion: reduce` at call time (SSR-safe). */
+function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
 /**
  * The Expedition Map canvas. Pan/zoom with cover-fit bounds so the map
@@ -60,7 +67,13 @@ export function MapCanvas({
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const mouseDownPos = useRef<{ x: number; y: number } | null>(null);
   const wasDragged = useRef(false);
-  const animRef = useRef<number | null>(null);
+  // GSAP-tweenable transform ref (mutated in place by gsap.to). React state
+  // mirrors it on every onUpdate so the DOM transform is kept in sync.
+  const transformRef = useRef({ x: 0, y: 0, scale: 0.6 });
+  const tweenRef = useRef<gsap.core.Tween | null>(null);
+  // Drag velocity tracking — last few pointer samples to compute throw
+  // velocity on release (for inertia).
+  const dragSamplesRef = useRef<{ x: number; y: number; t: number }[]>([]);
   const coverScaleRef = useRef(0.5);
   const [hoveredLessonId, setHoveredLessonId] = useState<string | null>(null);
 
@@ -150,6 +163,7 @@ export function MapCanvas({
     if (hasFitted) return;
     const t = fitCover();
     if (t) {
+      transformRef.current = t;
       setTransform(t);
       setHasFitted(true);
     }
@@ -161,10 +175,14 @@ export function MapCanvas({
       if (timeoutId) clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
         const t = fitCover();
-        if (t)
-          setTransform((prev) =>
-            clampTransform({ ...prev, scale: Math.max(t.scale, prev.scale) })
-          );
+        if (!t) return;
+        const prev = transformRef.current;
+        const next = clampTransform({
+          ...prev,
+          scale: Math.max(t.scale, prev.scale),
+        });
+        transformRef.current = next;
+        setTransform(next);
       }, 150);
     };
     window.addEventListener("resize", onResize);
@@ -174,28 +192,43 @@ export function MapCanvas({
     };
   }, [fitCover, clampTransform]);
 
+  // Core animation primitive — GSAP tweens the ref and we mirror to
+  // React state on each frame for the DOM transform to follow.
+  //
+  // `duration` and `ease` are overridable so drag-release can use a
+  // short power2 throw and scripted pans can use a longer power3 glide.
   const animateTo = useCallback(
-    (target: { x: number; y: number; scale: number }) => {
-      if (animRef.current) cancelAnimationFrame(animRef.current);
+    (
+      target: { x: number; y: number; scale: number },
+      opts: { duration?: number; ease?: string } = {}
+    ) => {
+      if (tweenRef.current) {
+        tweenRef.current.kill();
+        tweenRef.current = null;
+      }
       const clamped = clampTransform(target);
-      const start = { ...transform };
-      const startTime = performance.now();
-      const dur = 800;
-      const ease = (t: number) =>
-        t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
-      const step = (now: number) => {
-        const t = Math.min(1, (now - startTime) / dur);
-        const e = ease(t);
-        setTransform({
-          x: start.x + (clamped.x - start.x) * e,
-          y: start.y + (clamped.y - start.y) * e,
-          scale: start.scale + (clamped.scale - start.scale) * e,
-        });
-        if (t < 1) animRef.current = requestAnimationFrame(step);
-      };
-      animRef.current = requestAnimationFrame(step);
+
+      if (prefersReducedMotion()) {
+        transformRef.current = clamped;
+        setTransform(clamped);
+        return;
+      }
+
+      tweenRef.current = gsap.to(transformRef.current, {
+        x: clamped.x,
+        y: clamped.y,
+        scale: clamped.scale,
+        duration: opts.duration ?? 0.9,
+        ease: opts.ease ?? "power3.out",
+        onUpdate: () => {
+          setTransform({ ...transformRef.current });
+        },
+        onComplete: () => {
+          tweenRef.current = null;
+        },
+      });
     },
-    [transform, clampTransform]
+    [clampTransform]
   );
 
   const zoomToPoint = useCallback(
@@ -306,13 +339,46 @@ export function MapCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panTarget]);
 
+  // ── Drag pan with inertia on release ───────────────────────────────
+  //
+  // On pointer-down we kill any active tween (so the user grabs instantly).
+  // During drag, we set transform directly (no tween) for 1:1 finger tracking.
+  // Pointer samples (clientX/Y + timestamp) are buffered so we can compute
+  // a release velocity from the LAST few samples only (ignoring stale early
+  // ones — matches how iOS / macOS compute throw velocity).
+  // On pointer-up, if release velocity is above a small threshold we tween
+  // with inertia using power2.out; otherwise we stop cleanly.
+
+  const recordSample = (x: number, y: number) => {
+    const now = performance.now();
+    dragSamplesRef.current.push({ x, y, t: now });
+    // Keep only last 100ms of samples
+    const cutoff = now - 100;
+    while (
+      dragSamplesRef.current.length > 1 &&
+      dragSamplesRef.current[0].t < cutoff
+    ) {
+      dragSamplesRef.current.shift();
+    }
+  };
+
   const onMouseDown = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest("[data-node]")) return;
+    // Kill any in-flight tween so the grab is instant.
+    if (tweenRef.current) {
+      tweenRef.current.kill();
+      tweenRef.current = null;
+    }
     wasDragged.current = false;
     mouseDownPos.current = { x: e.clientX, y: e.clientY };
     setIsDragging(true);
-    dragStart.current = { x: e.clientX - transform.x, y: e.clientY - transform.y };
+    dragStart.current = {
+      x: e.clientX - transformRef.current.x,
+      y: e.clientY - transformRef.current.y,
+    };
+    dragSamplesRef.current = [];
+    recordSample(e.clientX, e.clientY);
   };
 
   useEffect(() => {
@@ -323,18 +389,49 @@ export function MapCanvas({
         const dy = Math.abs(e.clientY - mouseDownPos.current.y);
         if (dx + dy > 5) wasDragged.current = true;
       }
-      setTransform((t) =>
-        clampTransform({
-          ...t,
-          x: e.clientX - dragStart.current!.x,
-          y: e.clientY - dragStart.current!.y,
-        })
-      );
+      recordSample(e.clientX, e.clientY);
+      const next = clampTransform({
+        scale: transformRef.current.scale,
+        x: e.clientX - dragStart.current.x,
+        y: e.clientY - dragStart.current.y,
+      });
+      transformRef.current = next;
+      setTransform(next);
     };
     const onUp = () => {
+      if (!isDragging) return;
       setIsDragging(false);
       dragStart.current = null;
       mouseDownPos.current = null;
+
+      // Compute throw velocity from last 60ms of samples
+      const samples = dragSamplesRef.current;
+      dragSamplesRef.current = [];
+      if (!prefersReducedMotion() && samples.length >= 2) {
+        const last = samples[samples.length - 1];
+        const earliest = samples.find((s) => last.t - s.t <= 60) ?? samples[0];
+        const dt = last.t - earliest.t;
+        if (dt > 10) {
+          const vx = (last.x - earliest.x) / dt; // px / ms
+          const vy = (last.y - earliest.y) / dt;
+          const speed = Math.hypot(vx, vy);
+          if (speed > 0.3) {
+            // Inertia: project 350ms of continued motion with ease-out.
+            const throwDistance = 350;
+            const targetX = transformRef.current.x + vx * throwDistance;
+            const targetY = transformRef.current.y + vy * throwDistance;
+            animateTo(
+              {
+                scale: transformRef.current.scale,
+                x: targetX,
+                y: targetY,
+              },
+              { duration: Math.min(1.4, 0.3 + speed * 0.35), ease: "power2.out" }
+            );
+          }
+        }
+      }
+
       setTimeout(() => {
         wasDragged.current = false;
       }, 0);
@@ -345,46 +442,68 @@ export function MapCanvas({
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, [isDragging, clampTransform]);
+  }, [isDragging, clampTransform, animateTo]);
+
+  // ── Wheel zoom ─────────────────────────────────────────────────────
+  //
+  // We accumulate small deltas and apply them directly (no tween) because
+  // trackpad scroll events fire continuously — tweening each one would
+  // produce lag. The pointer-anchored math keeps the feature under the
+  // cursor pinned while zooming.
 
   const onWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     const el = outerRef.current;
     if (!el) return;
+    // Kill any in-flight tween so the wheel gesture starts crisp.
+    if (tweenRef.current) {
+      tweenRef.current.kill();
+      tweenRef.current = null;
+    }
     const rect = el.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-    const delta = -e.deltaY * 0.0015;
+    const delta = -e.deltaY * 0.0018;
+    const current = transformRef.current;
     const coverScale = Math.max(el.clientWidth / MAP_W, el.clientHeight / MAP_H);
     const nextScale = Math.max(
       coverScale,
-      Math.min(MAX_ZOOM, transform.scale * (1 + delta))
+      Math.min(MAX_ZOOM, current.scale * (1 + delta))
     );
-    const factor = nextScale / transform.scale;
-    const next = {
+    const factor = nextScale / current.scale;
+    const next = clampTransform({
       scale: nextScale,
-      x: mx - (mx - transform.x) * factor,
-      y: my - (my - transform.y) * factor,
-    };
-    setTransform(clampTransform(next));
+      x: mx - (mx - current.x) * factor,
+      y: my - (my - current.y) * factor,
+    });
+    transformRef.current = next;
+    setTransform(next);
   };
 
+  // ── Touch (single-finger pan) ──────────────────────────────────────
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const onTouchStart = (e: React.TouchEvent) => {
     if (e.touches.length !== 1) return;
+    if (tweenRef.current) {
+      tweenRef.current.kill();
+      tweenRef.current = null;
+    }
     const t = e.touches[0];
-    touchStart.current = { x: t.clientX - transform.x, y: t.clientY - transform.y };
+    touchStart.current = {
+      x: t.clientX - transformRef.current.x,
+      y: t.clientY - transformRef.current.y,
+    };
   };
   const onTouchMove = (e: React.TouchEvent) => {
     if (e.touches.length !== 1 || !touchStart.current) return;
     const t = e.touches[0];
-    setTransform((prev) =>
-      clampTransform({
-        ...prev,
-        x: t.clientX - touchStart.current!.x,
-        y: t.clientY - touchStart.current!.y,
-      })
-    );
+    const next = clampTransform({
+      scale: transformRef.current.scale,
+      x: t.clientX - touchStart.current.x,
+      y: t.clientY - touchStart.current.y,
+    });
+    transformRef.current = next;
+    setTransform(next);
   };
 
   // Hovered-lesson details for the top-layer preview card
@@ -471,14 +590,16 @@ export function MapCanvas({
             );
           })}
 
-          {/* Layer 2 — panoramic mural (covers the fallbacks when it exists) */}
+          {/* Layer 2 — panoramic mural. Now fills the entire viewBox so
+              there are no dark gutters around the painted area at any
+              zoom level. */}
           <div
             style={{
               position: "absolute",
-              left: 120,                  // r1.xStart
-              top: 180,                   // r1.yTop
-              width: 2960,                // r4.xEnd - r1.xStart
-              height: 1040,               // r1.yBot - r1.yTop
+              left: 0,
+              top: 0,
+              width: MAP_W,
+              height: MAP_H,
               backgroundImage: 'url("/regions/expedition-map.png")',
               backgroundSize: "cover",
               backgroundPosition: "center",

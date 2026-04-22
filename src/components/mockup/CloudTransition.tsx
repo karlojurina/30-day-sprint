@@ -43,6 +43,16 @@ export function CloudTransition({
   const prevTrigger = useRef(trigger);
   const timelineRef = useRef<gsap.core.Timeline | null>(null);
 
+  // Hold onPeak in a ref so the timeline effect doesn't depend on its
+  // identity. Parent usually passes an inline arrow function, which
+  // changes every render — without this ref the effect would re-run (and
+  // its cleanup would kill the timeline) 60× per second during the
+  // zoom-in tween that updates parent state.
+  const onPeakRef = useRef(onPeak);
+  useEffect(() => {
+    onPeakRef.current = onPeak;
+  }, [onPeak]);
+
   // Portal mount guard — createPortal needs a document.body, which only
   // exists in the browser. Delay mounting one tick past hydration.
   const [mounted, setMounted] = useState(false);
@@ -77,7 +87,7 @@ export function CloudTransition({
           duration: 0.2,
           ease: "power2.out",
           onComplete: () => {
-            onPeak?.();
+            onPeakRef.current?.();
             gsap.to(backdrop, {
               opacity: 0,
               duration: 0.25,
@@ -148,7 +158,7 @@ export function CloudTransition({
     // onPeak fires ~halfway through the hold so the scene is already
     // in place when clouds start retreating.
     tl.add(() => {
-      onPeak?.();
+      onPeakRef.current?.();
     }, fadeInDur + holdDur * 0.5);
 
     // ── Phase 3: fade out, reveal new scene ──────────────────────
@@ -185,7 +195,11 @@ export function CloudTransition({
         timelineRef.current = null;
       }
     };
-  }, [trigger, onPeak, duration]);
+    // onPeak intentionally excluded — read via onPeakRef so frequent
+    // parent re-renders (zoom-in tween updating displayTransform at 60fps)
+    // don't kill the in-flight timeline.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trigger, duration]);
 
   if (!mounted) return null;
 

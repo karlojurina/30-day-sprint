@@ -442,15 +442,21 @@ export function MapCanvas({
           willChange: "transform",
         }}
       >
-        {/* Painted region images — HTML layer beneath the SVG */}
+        {/* Painted expedition mural — single panoramic image spanning all
+            regions. HTML layer beneath the SVG.
+            Fallback strategy: we keep the 4 per-region images rendered
+            underneath. When the panorama at /regions/expedition-map.png
+            exists it covers them; until it's generated, the 4 regions
+            still show so the map is never blank. Locked regions get a
+            subtle dimming overlay on top (see "locked region overlays"). */}
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none" }}>
+          {/* Layer 1 — per-region fallback images (always rendered) */}
           {regions.map((r) => {
             const s = REGION_STRIPS[r.id as keyof RegionStripMap];
             if (!s) return null;
-            const st = regionProgress[r.id];
             return (
               <div
-                key={`img-${r.id}`}
+                key={`fallback-${r.id}`}
                 style={{
                   position: "absolute",
                   left: s.xStart,
@@ -460,9 +466,47 @@ export function MapCanvas({
                   backgroundImage: `url("${s.image}")`,
                   backgroundSize: "cover",
                   backgroundPosition: "center",
-                  filter: st?.isUnlocked ? "none" : "brightness(0.7) saturate(0.8)",
-                  opacity: st?.isUnlocked ? 1 : 0.75,
-                  transition: "filter 0.8s ease, opacity 0.8s ease",
+                }}
+              />
+            );
+          })}
+
+          {/* Layer 2 — panoramic mural (covers the fallbacks when it exists) */}
+          <div
+            style={{
+              position: "absolute",
+              left: 120,                  // r1.xStart
+              top: 180,                   // r1.yTop
+              width: 2960,                // r4.xEnd - r1.xStart
+              height: 1040,               // r1.yBot - r1.yTop
+              backgroundImage: 'url("/regions/expedition-map.png")',
+              backgroundSize: "cover",
+              backgroundPosition: "center",
+              backgroundRepeat: "no-repeat",
+            }}
+          />
+
+          {/* Layer 3 — locked region overlays. Subtle muting so locked
+              regions read as "in the fog" without breaking the panorama.
+              The SVG layer above adds the heavier hatch + lock icon. */}
+          {regions.map((r) => {
+            const s = REGION_STRIPS[r.id as keyof RegionStripMap];
+            if (!s) return null;
+            const st = regionProgress[r.id];
+            if (st?.isUnlocked) return null;
+            return (
+              <div
+                key={`dim-${r.id}`}
+                style={{
+                  position: "absolute",
+                  left: s.xStart,
+                  top: s.yTop,
+                  width: s.xEnd - s.xStart,
+                  height: s.yBot - s.yTop,
+                  background: "rgba(6,12,26,0.32)",
+                  backdropFilter: "saturate(0.6) brightness(0.85)",
+                  WebkitBackdropFilter: "saturate(0.6) brightness(0.85)",
+                  transition: "opacity 0.8s ease, backdrop-filter 0.8s ease",
                 }}
               />
             );

@@ -26,35 +26,69 @@ const GOLD_HI = "#F0D595";
 const INK = "#E6DCC8";
 
 /**
- * Puzzle-piece region hit zones — irregular ellipses positioned organically
- * over the main_image.png panorama. Coordinates are in the 3200×1400 map
- * coordinate space (not image pixels).
+ * Puzzle-piece region hit zones — irregular closed polygons positioned over
+ * the main_image.png panorama. Coordinates are in the 3200×1400 map space.
  *
- * The regions are NOT horizontal strips. Each is an ellipse roughly matching
- * its visible feature on the painted panorama:
- *   R1 — harbor / dock / sailboat (bottom-left)
- *   R2 — valley cabin / grass meadow (center, slightly low)
- *   R3 — mountain switchback + waterfall (center-right)
- *   R4 — summit archway + ruins (top-right)
+ * Use `/dashboard-mockup/edit-regions` (the picker tool) to trace accurate
+ * polygons and replace these values. Current placeholders are 16-point
+ * ellipse approximations — close-ish but not precise.
  */
 interface RegionZone {
-  cx: number;
-  cy: number;
-  rx: number;
-  ry: number;
-  /** Tilt in degrees — gives the hit zone an organic, non-axis-aligned feel */
-  rot: number;
-  /** Focal point for the zoomed region view (may differ from cx/cy) */
-  focusX: number;
-  focusY: number;
+  /** Closed polygon outline (last point auto-connects to first) */
+  polygon: Array<{ x: number; y: number }>;
+  /** Label position — usually polygon centroid but can be hand-tuned */
+  labelX: number;
+  labelY: number;
 }
-// Coords hand-traced from /public/regions/precise regions.png.
-// Map coord space is 3200×1400 (the SVG viewBox that the image cover-fits into).
+
+// Helper: build a polygon by sampling N points around an ellipse. Used for
+// initial placeholder values only — real regions are irregular and should be
+// traced with the region picker tool.
+function ellipsePoly(
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  rotDeg: number,
+  n = 16
+): Array<{ x: number; y: number }> {
+  const rot = (rotDeg * Math.PI) / 180;
+  const cs = Math.cos(rot);
+  const sn = Math.sin(rot);
+  const pts: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    const x0 = rx * Math.cos(a);
+    const y0 = ry * Math.sin(a);
+    pts.push({
+      x: Math.round(cx + x0 * cs - y0 * sn),
+      y: Math.round(cy + x0 * sn + y0 * cs),
+    });
+  }
+  return pts;
+}
+
 const REGION_ZONES: Record<RegionId, RegionZone> = {
-  r1: { cx: 528,  cy: 1015, rx: 368, ry: 315, rot: -3, focusX: 528,  focusY: 1015 },
-  r2: { cx: 1760, cy: 980,  rx: 544, ry: 210, rot: 0,  focusX: 1760, focusY: 980  },
-  r3: { cx: 2016, cy: 595,  rx: 480, ry: 175, rot: -4, focusX: 2016, focusY: 595  },
-  r4: { cx: 2400, cy: 245,  rx: 320, ry: 175, rot: 2,  focusX: 2400, focusY: 245  },
+  r1: {
+    polygon: ellipsePoly(528, 1015, 368, 315, -3),
+    labelX: 528,
+    labelY: 1015,
+  },
+  r2: {
+    polygon: ellipsePoly(1760, 980, 544, 210, 0),
+    labelX: 1760,
+    labelY: 980,
+  },
+  r3: {
+    polygon: ellipsePoly(2016, 595, 480, 175, -4),
+    labelX: 2016,
+    labelY: 595,
+  },
+  r4: {
+    polygon: ellipsePoly(2400, 245, 320, 175, 2),
+    labelX: 2400,
+    labelY: 245,
+  },
 };
 
 // ──────────────────────────────────────────────────────────────
@@ -228,8 +262,8 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     const overview = Math.max(sW, sH);
     const scale = overview * 1.9;
     return {
-      x: usableW / 2 - z.focusX * scale,
-      y: vh / 2 - z.focusY * scale,
+      x: usableW / 2 - z.labelX * scale,
+      y: vh / 2 - z.labelY * scale,
       scale,
     };
   };
@@ -402,11 +436,14 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
               const isCurrent = hasCurrent;
               const numeral = ["I", "II", "III", "IV"][r.order_num - 1];
               const stroke = isComplete ? GOLD_HI : GOLD;
+              const pointsStr = z.polygon
+                .map((p) => `${p.x},${p.y}`)
+                .join(" ");
+
               return (
                 <g
                   key={`zone-${r.id}`}
-                  transform={`translate(${z.cx} ${z.cy}) rotate(${z.rot})`}
-                  style={{ cursor: "pointer", pointerEvents: "auto" }}
+                  style={{ cursor: "pointer" }}
                   onClick={() => transitionTo(r.id as RegionId)}
                   onMouseEnter={() => setHoveredZone(r.id as RegionId)}
                   onMouseLeave={() => setHoveredZone(null)}
@@ -420,29 +457,35 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                   role="button"
                   aria-label={`${r.name} — ${completed}/${total} lessons`}
                 >
-                  {/* Outer glow — brightens on hover */}
-                  <ellipse
-                    cx={0}
-                    cy={0}
-                    rx={z.rx}
-                    ry={z.ry}
+                  {/* Invisible hit surface — catches clicks over the whole
+                      polygon regardless of any gradient fill transparency.
+                      pointer-events="all" works even with fill="none". */}
+                  <polygon
+                    points={pointsStr}
+                    fill="rgba(0,0,0,0.001)"
+                    pointerEvents="all"
+                  />
+
+                  {/* Glow fill — no pointer events; hit surface handles those */}
+                  <polygon
+                    points={pointsStr}
                     fill={hot ? "url(#zone-glow-hot)" : "url(#zone-glow)"}
+                    pointerEvents="none"
                     style={{
                       transition: "opacity 0.4s cubic-bezier(0.22,1,0.36,1)",
                     }}
                   />
 
-                  {/* Dashed perimeter — charted regions get solid gold, locked get faint */}
-                  <ellipse
-                    cx={0}
-                    cy={0}
-                    rx={z.rx * 0.92}
-                    ry={z.ry * 0.92}
+                  {/* Dashed outline — visible border */}
+                  <polygon
+                    points={pointsStr}
                     fill="none"
                     stroke={stroke}
                     strokeWidth={hot ? 3 : 2}
                     strokeDasharray={isComplete ? "" : "14 8"}
-                    opacity={hot ? 0.85 : 0.55}
+                    strokeLinejoin="round"
+                    opacity={hot ? 0.9 : 0.6}
+                    pointerEvents="none"
                     style={{
                       transition: "opacity 0.4s, stroke-width 0.4s",
                     }}
@@ -450,41 +493,27 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
 
                   {/* Pulsing ring on the student's current region */}
                   {isCurrent && (
-                    <ellipse
-                      cx={0}
-                      cy={0}
-                      rx={z.rx * 0.98}
-                      ry={z.ry * 0.98}
+                    <polygon
+                      points={pointsStr}
                       fill="none"
                       stroke={GOLD_HI}
                       strokeWidth={2.5}
-                      opacity={0.7}
+                      opacity={0.5}
+                      pointerEvents="none"
                     >
                       <animate
-                        attributeName="rx"
-                        values={`${z.rx * 0.88};${z.rx * 1.04};${z.rx * 0.88}`}
-                        dur="3.2s"
-                        repeatCount="indefinite"
-                      />
-                      <animate
-                        attributeName="ry"
-                        values={`${z.ry * 0.88};${z.ry * 1.04};${z.ry * 0.88}`}
-                        dur="3.2s"
-                        repeatCount="indefinite"
-                      />
-                      <animate
                         attributeName="opacity"
-                        values="0.25;0.75;0.25"
+                        values="0.2;0.65;0.2"
                         dur="3.2s"
                         repeatCount="indefinite"
                       />
-                    </ellipse>
+                    </polygon>
                   )}
 
-                  {/* Center label */}
+                  {/* Center label — positioned at labelX/labelY in map space */}
                   <g
-                    transform={`rotate(${-z.rot})`}
-                    style={{ pointerEvents: "none" }}
+                    transform={`translate(${z.labelX} ${z.labelY})`}
+                    pointerEvents="none"
                   >
                     {/* Numeral plaque */}
                     <circle
@@ -530,7 +559,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       {r.name}
                     </text>
 
-                    {/* Progress / lock */}
+                    {/* Progress */}
                     <text
                       x={0}
                       y={52}

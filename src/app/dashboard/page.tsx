@@ -53,7 +53,7 @@ export default function DashboardPage() {
 
   return (
     <div
-      className="relative w-screen overflow-hidden"
+      className="flex flex-col w-screen overflow-hidden"
       style={{ height: "100vh", background: "#060C1A" }}
     >
       <TopBar
@@ -61,12 +61,17 @@ export default function DashboardPage() {
         onOpenNotebook={() => setNotebookOpen(true)}
       />
 
-      <MapCanvas
-        onOpenLesson={(id) => setSelectedLessonId(id)}
-        onLockedRegion={(id) => setLockedRegionId(id)}
-        panTarget={panTarget}
-        setPanTarget={setPanTarget}
-      />
+      {/* Map fills everything under the topbar. MapCanvas is absolutely
+          positioned inside this flex-1 wrapper, so it can't overlap the
+          topbar any more. */}
+      <div className="relative flex-1 min-h-0">
+        <MapCanvas
+          onOpenLesson={(id) => setSelectedLessonId(id)}
+          onLockedRegion={(id) => setLockedRegionId(id)}
+          panTarget={panTarget}
+          setPanTarget={setPanTarget}
+        />
+      </div>
 
       <MapControls setPanTarget={setPanTarget} />
 

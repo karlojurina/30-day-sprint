@@ -116,8 +116,8 @@ export function LessonNode({
   const a11yLabel = regionLocked
     ? `${lesson.title} — locked`
     : isDone
-      ? `${lesson.title} — day ${lesson.day}, completed`
-      : `${lesson.title} — day ${lesson.day}${isGate ? ", discount gate" : isBoss ? ", final reflection" : ""}`;
+      ? `${lesson.title} — completed`
+      : `${lesson.title}${isGate ? " — discount gate" : isBoss ? " — final reflection" : ""}`;
 
   return (
     <g
@@ -311,21 +311,6 @@ export function LessonNode({
         </g>
       )}
 
-      {/* Day badge (top-left) */}
-      <g transform={`translate(${-r - 6}, ${-r - 6})`}>
-        <circle r="11" fill="rgba(10,20,40,0.92)" stroke="rgba(230,192,122,0.6)" strokeWidth="1" />
-        <text
-          textAnchor="middle"
-          dominantBaseline="central"
-          fontFamily="JetBrains Mono, ui-monospace, monospace"
-          fontSize="10"
-          fontWeight="700"
-          fill="rgba(230,192,122,0.95)"
-        >
-          {lesson.day}
-        </text>
-      </g>
-
       {/* Peer counter */}
       {peerCount > 0 && !regionLocked && (
         <g transform={`translate(${r + 2}, ${r - 4})`} opacity="0.6">
@@ -342,9 +327,21 @@ export function LessonNode({
         </g>
       )}
 
-      {/* Gate banner */}
+      {/* Gate banner — placed far above the node (−90px) with a thin dashed
+          connector so it can't overlap the neighboring lesson on a tight path. */}
       {isGate && !isDone && (
-        <g transform={`translate(0, ${-r - 42})`}>
+        <g transform={`translate(0, ${-r - 90})`}>
+          {/* Connector dashes back to the node */}
+          <line
+            x1="0"
+            y1="20"
+            x2="0"
+            y2={64}
+            stroke={GOLD}
+            strokeWidth="1"
+            strokeDasharray="2 4"
+            opacity="0.55"
+          />
           <rect
             x="-100"
             y="-16"
@@ -458,7 +455,7 @@ export function HoverPreviewCard({
         fill="rgba(230,192,122,0.9)"
         letterSpacing="2.5"
       >
-        {`DAY ${lesson.day}  ·  ${lesson.type.toUpperCase()}${!isWatch && lesson.duration_label ? "  ·  " + lesson.duration_label : ""}`}
+        {`${lesson.type.toUpperCase()}${lesson.duration_label ? "  ·  " + lesson.duration_label : ""}`}
       </text>
       <text
         x="0"

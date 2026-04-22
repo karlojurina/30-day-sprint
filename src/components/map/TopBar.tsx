@@ -60,7 +60,7 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
 
   return (
     <header
-      className="absolute top-0 left-0 right-0 z-30"
+      className="relative shrink-0 z-30"
       style={{
         background: "rgba(6,12,26,0.9)",
         backdropFilter: "blur(14px)",

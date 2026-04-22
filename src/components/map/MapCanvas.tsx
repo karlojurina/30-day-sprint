@@ -572,44 +572,6 @@ export function MapCanvas({
             />
           )}
 
-          {/* Locked-region LOCK ICONS — rendered AFTER the path so they sit on top */}
-          {regions.map((r) => {
-            const s = REGION_STRIPS[r.id as keyof RegionStripMap];
-            if (!s) return null;
-            const st = regionProgress[r.id];
-            if (st?.isUnlocked) return null;
-            return (
-              <g
-                key={`lock-${r.id}`}
-                data-locked-region={r.id}
-                role="button"
-                tabIndex={0}
-                aria-label={`${r.name} — region locked, complete the previous region to unlock`}
-                style={{ cursor: "pointer" }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (wasDragged.current) return;
-                  onLockedRegion(r.id);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    onLockedRegion(r.id);
-                  }
-                }}
-                transform={`translate(${(s.xStart + s.xEnd) / 2}, ${(s.yTop + s.yBot) / 2})`}
-              >
-                <circle r="72" fill="rgba(6,12,26,0.9)" stroke="rgba(230,192,122,0.65)" strokeWidth="2.2" />
-                <g transform="translate(-28, -28)">
-                  <rect x="0" y="24" width="56" height="44" rx="6" fill="none" stroke="#E6C07A" strokeWidth="4" />
-                  <path d="M 10 24 V 14 a 18 18 0 0 1 36 0 V 24" fill="none" stroke="#E6C07A" strokeWidth="4" />
-                  <circle cx="28" cy="46" r="5" fill="#E6C07A" />
-                  <rect x="26" y="48" width="4" height="12" fill="#E6C07A" />
-                </g>
-              </g>
-            );
-          })}
-
           {/* Vignette */}
           <rect
             x="60"
@@ -660,6 +622,45 @@ export function MapCanvas({
                   onHoverEnd={() => setHoveredLessonId(null)}
                   peerCount={0}
                 />
+              </g>
+            );
+          })}
+
+          {/* Lock icons — rendered AFTER the lesson nodes so they sit on top
+              of every node in the locked region. Clicking opens the prompt. */}
+          {regions.map((r) => {
+            const s = REGION_STRIPS[r.id as keyof RegionStripMap];
+            if (!s) return null;
+            const st = regionProgress[r.id];
+            if (st?.isUnlocked) return null;
+            return (
+              <g
+                key={`lock-${r.id}`}
+                data-locked-region={r.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`${r.name} — region locked, complete the previous region to unlock`}
+                style={{ cursor: "pointer" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (wasDragged.current) return;
+                  onLockedRegion(r.id);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onLockedRegion(r.id);
+                  }
+                }}
+                transform={`translate(${(s.xStart + s.xEnd) / 2}, ${(s.yTop + s.yBot) / 2})`}
+              >
+                <circle r="72" fill="rgba(6,12,26,0.92)" stroke="rgba(230,192,122,0.75)" strokeWidth="2.4" />
+                <g transform="translate(-28, -28)">
+                  <rect x="0" y="24" width="56" height="44" rx="6" fill="none" stroke="#E6C07A" strokeWidth="4" />
+                  <path d="M 10 24 V 14 a 18 18 0 0 1 36 0 V 24" fill="none" stroke="#E6C07A" strokeWidth="4" />
+                  <circle cx="28" cy="46" r="5" fill="#E6C07A" />
+                  <rect x="26" y="48" width="4" height="12" fill="#E6C07A" />
+                </g>
               </g>
             );
           })}

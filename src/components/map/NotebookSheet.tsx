@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useStudent } from "@/contexts/StudentContext";
+import { WorkshopCabinet } from "./WorkshopCabinet";
 
 interface NotebookSheetProps {
   open: boolean;
@@ -278,6 +279,9 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
               </div>
             ))
           )}
+
+          {/* Workshop Cabinet — always visible below the notes */}
+          <WorkshopCabinet regions={regions} regionProgress={regionProgress} />
         </div>
       </div>
     </>

@@ -81,15 +81,18 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
         }}
       />
 
-      {/* Centered modal */}
+      {/* Centered modal — a flex wrapper guarantees centering on any viewport.
+          Width clamps to 92vw so it never overflows on smaller screens. */}
       <div
-        className="fixed z-[50] flex flex-col"
+        className="fixed inset-0 z-[50] flex items-center justify-center p-4"
+        style={{ pointerEvents: "none" }}
+      >
+      <div
+        className="flex flex-col"
         style={{
-          top: "4%",
-          bottom: "4%",
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: "min(960px, 94vw)",
+          pointerEvents: "auto",
+          width: "min(840px, 92vw)",
+          maxHeight: "92vh",
           background: "linear-gradient(180deg, #102042 0%, #0A1428 100%)",
           border: "1px solid rgba(230,192,122,0.32)",
           borderRadius: 16,
@@ -162,30 +165,84 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
           className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5"
           style={{ overscrollBehavior: "contain" }}
         >
-          {/* Watch — embedded Whop player */}
+          {/* Watch — "Watch on Whop" card (Whop blocks iframes, so we link out).
+              Clicking opens the video in a new tab; auto-sync picks up the
+              completion when the student tabs back. */}
           {isWatch && hasWhopLesson && (
-            <div
-              className="relative rounded-lg overflow-hidden"
+            <a
+              href={whopUrl!}
+              target="_blank"
+              rel="noopener"
+              className="relative rounded-lg overflow-hidden flex items-center justify-center transition-transform group"
               style={{
                 aspectRatio: "16 / 9",
-                background: "#000",
-                border: "1px solid rgba(230,192,122,0.2)",
+                background:
+                  "radial-gradient(ellipse 50% 55% at 50% 50%, rgba(77,206,196,0.14) 0%, transparent 70%), linear-gradient(135deg, #0A1428 0%, #15294C 100%)",
+                border: "1px solid rgba(230,192,122,0.3)",
+                textDecoration: "none",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = "rgba(230,192,122,0.65)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = "rgba(230,192,122,0.3)";
               }}
             >
-              <iframe
-                src={whopUrl!}
-                title={lesson.title}
-                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                allowFullScreen
+              {/* Subtle scanline texture */}
+              <div
+                className="absolute inset-0 pointer-events-none opacity-30"
                 style={{
-                  position: "absolute",
-                  inset: 0,
-                  width: "100%",
-                  height: "100%",
-                  border: "none",
+                  backgroundImage:
+                    "repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(77,206,196,0.04) 3px, rgba(77,206,196,0.04) 4px)",
                 }}
               />
-            </div>
+              <div className="relative text-center px-6 z-10">
+                <div
+                  className="mx-auto mb-4 w-20 h-20 rounded-full flex items-center justify-center transition-transform"
+                  style={{
+                    background: "rgba(230,192,122,0.22)",
+                    border: "2px solid #E6C07A",
+                    boxShadow: "0 0 40px rgba(230,192,122,0.3)",
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" className="w-9 h-9 ml-1" fill={GOLD_HI}>
+                    <path d="M8 5v14l11-7z" />
+                  </svg>
+                </div>
+                <p
+                  className="font-mono uppercase mb-1"
+                  style={{
+                    color: GOLD,
+                    letterSpacing: "0.22em",
+                    fontSize: 11,
+                  }}
+                >
+                  Watch on Whop
+                </p>
+                <p
+                  className="italic"
+                  style={{
+                    fontFamily: "Cormorant Garamond, serif",
+                    color: "rgba(230,220,200,0.75)",
+                    fontSize: 13,
+                  }}
+                >
+                  Opens in a new tab · auto-syncs when you come back
+                </p>
+              </div>
+              {lesson.duration_label && (
+                <span
+                  className="absolute bottom-3 right-3 font-mono text-[11px] px-2 py-1 rounded"
+                  style={{
+                    background: "rgba(6,12,26,0.9)",
+                    color: GOLD,
+                    letterSpacing: "0.08em",
+                  }}
+                >
+                  {lesson.duration_label}
+                </span>
+              )}
+            </a>
           )}
 
           {/* Watch with no Whop link — placeholder */}
@@ -297,37 +354,6 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
               </button>
             )}
 
-            {/* Secondary/fallback: open in Whop (small button, lower priority) */}
-            {isWatch && whopUrl && (
-              <a
-                href={whopUrl}
-                target="_blank"
-                rel="noopener"
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg transition-colors self-start"
-                style={{
-                  background: "rgba(16,32,66,0.7)",
-                  color: "rgba(230,220,200,0.85)",
-                  border: "1px solid rgba(230,192,122,0.22)",
-                  fontSize: 13,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.borderColor = "rgba(230,192,122,0.5)";
-                  e.currentTarget.style.color = "#E6DCC8";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.borderColor = "rgba(230,192,122,0.22)";
-                  e.currentTarget.style.color = "rgba(230,220,200,0.85)";
-                }}
-                title="Open in a new tab on Whop (fallback if embed fails)"
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                </svg>
-                <span className="font-mono uppercase" style={{ letterSpacing: "0.12em", fontSize: 10 }}>
-                  Open in Whop
-                </span>
-              </a>
-            )}
           </div>
 
           {/* Lesson notes */}
@@ -337,6 +363,7 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
             onSave={saveLessonNote}
           />
         </div>
+      </div>
       </div>
     </>
   );

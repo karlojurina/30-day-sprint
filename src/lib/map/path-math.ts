@@ -1,7 +1,9 @@
 /**
  * Expedition map — path math.
- * Builds the explorer path (waypoints per region), constructs a smooth
- * Catmull-Rom bezier, and samples points along it so lessons can be placed.
+ *
+ * Builds an explorer path that actually USES the whole region rectangle
+ * (corners included), then places lessons on it with variable spacing and
+ * a tiny deterministic jitter so nothing feels algorithmic.
  */
 
 export const MAP_W = 3200;
@@ -17,8 +19,6 @@ export interface RegionStrip {
 
 export type RegionStripMap = Record<"r1" | "r2" | "r3" | "r4", RegionStrip>;
 
-// Region strips — each is a big rectangle the path must fill.
-// No vertical overlap; they tile the chart horizontally.
 export const REGION_STRIPS: RegionStripMap = {
   r1: { xStart: 120,  xEnd: 920,  yTop: 180, yBot: 1220, image: "/regions/region-sea.png" },
   r2: { xStart: 920,  xEnd: 1720, yTop: 180, yBot: 1220, image: "/regions/region-forest.png" },
@@ -36,7 +36,9 @@ export interface SampledPoint extends Point {
 }
 
 /**
- * Build waypoints for the explorer path — each region has its own character.
+ * Build waypoints for the explorer path — each region has its own character
+ * and the path loops, doubles back, touches corners rather than smoothly
+ * sweeping through the middle.
  */
 export function buildExplorerWaypoints(): Point[] {
   const wp: Point[] = [];
@@ -47,51 +49,63 @@ export function buildExplorerWaypoints(): Point[] {
     y: r.yTop + (r.yBot - r.yTop) * ty,
   });
 
-  // R1 SEA — sail across open water with a detour to an island
-  wp.push(P(r1, 0.06, 0.18));
-  wp.push(P(r1, 0.20, 0.42));
-  wp.push(P(r1, 0.38, 0.70));
-  wp.push(P(r1, 0.56, 0.82));
-  wp.push(P(r1, 0.72, 0.62));
-  wp.push(P(r1, 0.82, 0.38));
-  wp.push(P(r1, 0.70, 0.22));
-  wp.push(P(r1, 0.86, 0.14));
+  // R1 SEA — sail along the shoreline, loop around an island, climb to a
+  // lighthouse before heading inland. Touches every quadrant.
+  wp.push(P(r1, 0.08, 0.20));
+  wp.push(P(r1, 0.14, 0.46));
+  wp.push(P(r1, 0.08, 0.68));   // deep south coast
+  wp.push(P(r1, 0.22, 0.85));
+  wp.push(P(r1, 0.42, 0.78));
+  wp.push(P(r1, 0.58, 0.88));   // bottom detour
+  wp.push(P(r1, 0.72, 0.72));
+  wp.push(P(r1, 0.62, 0.52));
+  wp.push(P(r1, 0.80, 0.36));
+  wp.push(P(r1, 0.66, 0.20));
+  wp.push(P(r1, 0.86, 0.12));
 
-  // R2 FOREST — zigzag through trees, reach all four sectors
-  wp.push(P(r2, 0.08, 0.24));
-  wp.push(P(r2, 0.22, 0.62));
-  wp.push(P(r2, 0.36, 0.82));
-  wp.push(P(r2, 0.52, 0.52));
-  wp.push(P(r2, 0.42, 0.28));
-  wp.push(P(r2, 0.62, 0.18));
-  wp.push(P(r2, 0.80, 0.42));
-  wp.push(P(r2, 0.92, 0.72));
+  // R2 FOREST — zigzag up and down through trees, loop a small clearing,
+  // exit southeast.
+  wp.push(P(r2, 0.06, 0.22));
+  wp.push(P(r2, 0.18, 0.48));
+  wp.push(P(r2, 0.10, 0.74));
+  wp.push(P(r2, 0.28, 0.86));
+  wp.push(P(r2, 0.38, 0.62));
+  wp.push(P(r2, 0.28, 0.38));
+  wp.push(P(r2, 0.44, 0.20));
+  wp.push(P(r2, 0.60, 0.32));
+  wp.push(P(r2, 0.54, 0.58));
+  wp.push(P(r2, 0.70, 0.76));
+  wp.push(P(r2, 0.86, 0.62));
+  wp.push(P(r2, 0.78, 0.38));
+  wp.push(P(r2, 0.94, 0.78));   // southeast exit
 
-  // R3 MOUNTAINS — switchbacks climbing up, over a pass, down the far side
-  wp.push(P(r3, 0.06, 0.78));
+  // R3 MOUNTAINS — full switchbacks to the summit and down the far side.
+  wp.push(P(r3, 0.06, 0.80));
   wp.push(P(r3, 0.18, 0.58));
-  wp.push(P(r3, 0.10, 0.38));
-  wp.push(P(r3, 0.28, 0.22));
-  wp.push(P(r3, 0.48, 0.14));
-  wp.push(P(r3, 0.68, 0.28));
-  wp.push(P(r3, 0.82, 0.52));
-  wp.push(P(r3, 0.92, 0.80));
+  wp.push(P(r3, 0.08, 0.38));
+  wp.push(P(r3, 0.22, 0.22));
+  wp.push(P(r3, 0.40, 0.30));
+  wp.push(P(r3, 0.52, 0.12));   // summit pass
+  wp.push(P(r3, 0.66, 0.26));
+  wp.push(P(r3, 0.58, 0.48));
+  wp.push(P(r3, 0.78, 0.58));
+  wp.push(P(r3, 0.70, 0.78));
+  wp.push(P(r3, 0.92, 0.82));
 
-  // R4 HARBOR — sweep down to the docks at sunset
+  // R4 HARBOR — wind through the city down to the docks.
   wp.push(P(r4, 0.10, 0.40));
-  wp.push(P(r4, 0.30, 0.22));
-  wp.push(P(r4, 0.50, 0.36));
-  wp.push(P(r4, 0.40, 0.60));
-  wp.push(P(r4, 0.62, 0.74));
-  wp.push(P(r4, 0.82, 0.58));
-  wp.push(P(r4, 0.92, 0.40));
+  wp.push(P(r4, 0.28, 0.22));
+  wp.push(P(r4, 0.18, 0.52));
+  wp.push(P(r4, 0.42, 0.44));
+  wp.push(P(r4, 0.36, 0.70));
+  wp.push(P(r4, 0.58, 0.82));
+  wp.push(P(r4, 0.68, 0.56));
+  wp.push(P(r4, 0.84, 0.66));
+  wp.push(P(r4, 0.92, 0.42));
 
   return wp;
 }
 
-/**
- * Catmull-Rom spline converted to cubic bezier path string.
- */
 export function catmullRomToBezier(points: Point[]): string {
   if (points.length < 2) return "";
   let d = `M ${points[0].x.toFixed(1)} ${points[0].y.toFixed(1)}`;
@@ -109,9 +123,6 @@ export function catmullRomToBezier(points: Point[]): string {
   return d;
 }
 
-/**
- * Sample N evenly-spaced points along the Catmull-Rom spline of the given waypoints.
- */
 export function samplePath(
   spine: Point[],
   samples = 1400
@@ -177,9 +188,6 @@ export function nodeAt(
   return sampled.points[idx];
 }
 
-/**
- * Place lessons along their region's t-range on the sampled path.
- */
 export interface PlacedLesson {
   lessonId: string;
   regionId: string;
@@ -189,23 +197,45 @@ export interface PlacedLesson {
   indexInRegion: number;
 }
 
+// Tiny, deterministic hash → [0, 1) so jitter is stable per lesson ID.
+function hash01(str: string): number {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+  // unbias to [0, 1)
+  return ((h >>> 0) % 10000) / 10000;
+}
+
+/**
+ * Place lessons along their region's t-range with:
+ *   - uneven spacing — a light ease-in-out so middle nodes breathe and the
+ *     ends feel pinned. No two gaps are identical.
+ *   - perpendicular jitter — a few-pixel nudge off the path axis, derived
+ *     deterministically from the lesson id, so each position looks
+ *     hand-placed but doesn't change between renders.
+ *   - gate breathing room — the discount gate (is_gate) gets extra space
+ *     before AND after it so its banner can't overlap neighboring nodes.
+ */
 export function placeLessons(
   sampled: { points: SampledPoint[] },
-  lessons: { id: string; region_id: string }[]
+  lessons: {
+    id: string;
+    region_id: string;
+    is_gate?: boolean | null;
+    is_boss?: boolean | null;
+  }[]
 ): PlacedLesson[] {
-  type Record = { lessonIds: string[]; tRange: [number, number] | null };
-  const byRegion: globalThis.Record<string, Record> = {};
+  type Rec = {
+    lessons: { id: string; is_gate?: boolean | null; is_boss?: boolean | null }[];
+    tRange: [number, number] | null;
+  };
+  const byRegion: Record<string, Rec> = {};
   const regionIds = ["r1", "r2", "r3", "r4"] as const;
-  for (const id of regionIds) {
-    byRegion[id] = { lessonIds: [], tRange: null };
-  }
+  for (const id of regionIds) byRegion[id] = { lessons: [], tRange: null };
   for (const l of lessons) {
-    if (byRegion[l.region_id]) {
-      byRegion[l.region_id].lessonIds.push(l.id);
-    }
+    if (byRegion[l.region_id]) byRegion[l.region_id].lessons.push(l);
   }
 
-  // Figure out t-range (min/max t) for each region based on path x
+  // Figure out t-range per region
   for (let i = 0; i < sampled.points.length; i++) {
     const p = sampled.points[i];
     let region: string | null = null;
@@ -224,26 +254,74 @@ export function placeLessons(
   }
 
   const result: PlacedLesson[] = [];
+
   for (const rId of regionIds) {
     const rec = byRegion[rId];
-    if (!rec.tRange || rec.lessonIds.length === 0) continue;
+    if (!rec.tRange || rec.lessons.length === 0) continue;
     const [t0, t1] = rec.tRange;
-    const pad = 0.04;
+    const pad = 0.035;
     const tStart = t0 + (t1 - t0) * pad;
     const tEnd = t1 - (t1 - t0) * pad;
-    rec.lessonIds.forEach((lessonId, i) => {
-      const f = rec.lessonIds.length === 1 ? 0.5 : i / (rec.lessonIds.length - 1);
-      const t = tStart + (tEnd - tStart) * f;
-      const pt = nodeAt(sampled, t);
+    const span = tEnd - tStart;
+
+    // Variable-spacing weights — bias toward more spacing around gates.
+    const n = rec.lessons.length;
+    const weights: number[] = rec.lessons.map((_, i) => {
+      // Light ease-in-out so middle nodes have a touch more space
+      const u = n === 1 ? 0.5 : i / (n - 1);
+      const eased = 0.5 - 0.5 * Math.cos(Math.PI * u);
+      // Slight irregular jitter in the spacing so it never lines up too neatly
+      const id = rec.lessons[i].id;
+      const wiggle = 0.85 + hash01(id + "-w") * 0.3;
+      return (0.6 + eased * 0.8) * wiggle;
+    });
+
+    // Extra weight BEFORE and AFTER the gate for breathing room
+    for (let i = 0; i < n; i++) {
+      if (rec.lessons[i].is_gate) {
+        if (i > 0) weights[i - 1] *= 1.8;
+        weights[i] *= 2.2;
+      }
+    }
+
+    const totalW = weights.reduce((a, b) => a + b, 0);
+    let acc = 0;
+
+    rec.lessons.forEach((lesson, i) => {
+      acc += weights[i];
+      const progress = totalW > 0 ? acc / totalW : (i + 1) / n;
+      const t = tStart + span * (progress - weights[i] / (2 * totalW));
+      const pt = nodeAt(sampled, Math.min(Math.max(t, tStart), tEnd));
+
+      // Perpendicular jitter — off-path nudge. Compute the path tangent at
+      // this t, rotate 90°, scale by a hash-driven amount.
+      const tangentT1 = Math.min(1, Math.max(0, t + 0.002));
+      const tangentT0 = Math.min(1, Math.max(0, t - 0.002));
+      const p1 = nodeAt(sampled, tangentT1);
+      const p0 = nodeAt(sampled, tangentT0);
+      const tx = p1.x - p0.x;
+      const ty = p1.y - p0.y;
+      const mag = Math.hypot(tx, ty) || 1;
+      const nx = -ty / mag;
+      const ny = tx / mag;
+
+      // Jitter magnitude: ~0-16px, biased lower for gate/boss so they feel
+      // anchored. Sign is also hashed so jitter can go either side.
+      const jitterMag = lesson.is_gate || lesson.is_boss ? 0 : hash01(lesson.id + "-j") * 16;
+      const jitterSign = hash01(lesson.id + "-s") > 0.5 ? 1 : -1;
+      const dx = nx * jitterMag * jitterSign;
+      const dy = ny * jitterMag * jitterSign;
+
       result.push({
-        lessonId,
+        lessonId: lesson.id,
         regionId: rId,
-        x: pt.x,
-        y: pt.y,
+        x: pt.x + dx,
+        y: pt.y + dy,
         t,
         indexInRegion: i,
       });
     });
   }
+
   return result;
 }

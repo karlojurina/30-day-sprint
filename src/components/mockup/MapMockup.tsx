@@ -41,60 +41,71 @@ interface RegionZone {
   labelY: number;
 }
 
-// Helper: build a polygon by sampling N points around an ellipse. Used for
-// initial placeholder values only — real regions are irregular and should be
-// traced with the region picker tool.
-function ellipsePoly(
-  cx: number,
-  cy: number,
-  rx: number,
-  ry: number,
-  rotDeg: number,
-  n = 16
-): Array<{ x: number; y: number }> {
-  const rot = (rotDeg * Math.PI) / 180;
-  const cs = Math.cos(rot);
-  const sn = Math.sin(rot);
-  const pts: Array<{ x: number; y: number }> = [];
-  for (let i = 0; i < n; i++) {
-    const a = (i / n) * Math.PI * 2;
-    const x0 = rx * Math.cos(a);
-    const y0 = ry * Math.sin(a);
-    pts.push({
-      x: Math.round(cx + x0 * cs - y0 * sn),
-      y: Math.round(cy + x0 * sn + y0 * cs),
-    });
-  }
-  return pts;
-}
-
-// Re-traced from the new precise regions.png (2026-04-22):
-//   R1 — port/harbor/dock (bottom-left). Kidney shape around the boats.
-//   R2 — green valley with cabin (center-bottom). Wide horizontal shape.
-//   R3 — waterfall/cliff/bridge (middle-right). Vertical-ish, narrower.
-//   R4 — summit with archway (top). Wide horizontal shape across the peak.
-// These are still ellipse approximations. Use /dashboard-mockup/edit-regions
-// to trace pixel-accurate polygons and replace.
+// Traced in /dashboard-mockup/edit-regions on 2026-04-22.
+// Pixel-accurate polygons over main_image.png, 3200×1400 coord space.
 const REGION_ZONES: Record<RegionId, RegionZone> = {
   r1: {
-    polygon: ellipsePoly(640, 1080, 384, 215, -5),
-    labelX: 640,
-    labelY: 1080,
+    polygon: [
+      { x: 381, y: 1030 }, { x: 437, y: 1021 }, { x: 475, y: 1011 },
+      { x: 505, y: 1009 }, { x: 535, y: 1002 }, { x: 576, y: 996 },
+      { x: 622, y: 973 },  { x: 658, y: 951 },  { x: 704, y: 946 },
+      { x: 751, y: 941 },  { x: 802, y: 940 },  { x: 847, y: 939 },
+      { x: 903, y: 939 },  { x: 955, y: 939 },  { x: 1025, y: 936 },
+      { x: 1087, y: 953 }, { x: 1126, y: 961 }, { x: 1165, y: 979 },
+      { x: 1206, y: 988 }, { x: 1228, y: 1025 },{ x: 1181, y: 1054 },
+      { x: 1171, y: 1067 },{ x: 1187, y: 1084 },{ x: 1177, y: 1109 },
+      { x: 1156, y: 1124 },{ x: 1103, y: 1128 },{ x: 1074, y: 1142 },
+      { x: 1016, y: 1151 },{ x: 959, y: 1172 }, { x: 909, y: 1192 },
+      { x: 884, y: 1214 }, { x: 862, y: 1246 }, { x: 834, y: 1272 },
+      { x: 820, y: 1280 }, { x: 780, y: 1291 }, { x: 633, y: 1283 },
+      { x: 428, y: 1135 }, { x: 369, y: 1055 }, { x: 380, y: 1035 },
+    ],
+    labelX: 844, labelY: 1064,
   },
   r2: {
-    polygon: ellipsePoly(1536, 1106, 480, 196, 0),
-    labelX: 1536,
-    labelY: 1106,
+    polygon: [
+      { x: 1560, y: 986 }, { x: 1538, y: 990 }, { x: 1528, y: 997 },
+      { x: 1519, y: 1007 },{ x: 1515, y: 1032 },{ x: 1553, y: 1058 },
+      { x: 1564, y: 1133 },{ x: 1569, y: 1153 },{ x: 1603, y: 1184 },
+      { x: 1638, y: 1182 },{ x: 1709, y: 1195 },{ x: 1777, y: 1210 },
+      { x: 1866, y: 1223 },{ x: 1975, y: 1222 },{ x: 2075, y: 1196 },
+      { x: 2123, y: 1166 },{ x: 2221, y: 1108 },{ x: 2286, y: 1079 },
+      { x: 2360, y: 1034 },{ x: 2357, y: 992 }, { x: 2351, y: 972 },
+      { x: 2299, y: 958 }, { x: 2200, y: 969 }, { x: 2158, y: 953 },
+      { x: 2149, y: 909 }, { x: 2162, y: 883 }, { x: 2166, y: 869 },
+      { x: 2148, y: 840 }, { x: 2109, y: 825 }, { x: 2050, y: 825 },
+      { x: 1934, y: 853 }, { x: 1720, y: 912 }, { x: 1567, y: 982 },
+    ],
+    labelX: 1920, labelY: 1027,
   },
   r3: {
-    polygon: ellipsePoly(2080, 728, 336, 245, 0),
-    labelX: 2080,
-    labelY: 728,
+    polygon: [
+      { x: 2051, y: 811 }, { x: 2117, y: 816 }, { x: 2157, y: 834 },
+      { x: 2179, y: 856 }, { x: 2233, y: 857 }, { x: 2291, y: 849 },
+      { x: 2304, y: 824 }, { x: 2279, y: 763 }, { x: 2263, y: 730 },
+      { x: 2231, y: 702 }, { x: 2196, y: 662 }, { x: 2165, y: 630 },
+      { x: 2135, y: 612 }, { x: 2057, y: 589 }, { x: 2045, y: 568 },
+      { x: 2035, y: 542 }, { x: 2021, y: 526 }, { x: 1946, y: 515 },
+      { x: 1869, y: 524 }, { x: 1796, y: 542 }, { x: 1756, y: 563 },
+      { x: 1693, y: 608 }, { x: 1678, y: 638 }, { x: 1752, y: 655 },
+      { x: 1801, y: 658 }, { x: 1860, y: 673 }, { x: 1944, y: 694 },
+      { x: 2009, y: 753 }, { x: 2018, y: 793 }, { x: 2049, y: 810 },
+    ],
+    labelX: 2031, labelY: 687,
   },
   r4: {
-    polygon: ellipsePoly(2016, 294, 464, 217, 0),
-    labelX: 2016,
-    labelY: 294,
+    polygon: [
+      { x: 1831, y: 521 }, { x: 1878, y: 514 }, { x: 1919, y: 510 },
+      { x: 1963, y: 510 }, { x: 2017, y: 518 }, { x: 2046, y: 534 },
+      { x: 2049, y: 553 }, { x: 2062, y: 571 }, { x: 2079, y: 575 },
+      { x: 2147, y: 579 }, { x: 2212, y: 535 }, { x: 2306, y: 493 },
+      { x: 2376, y: 395 }, { x: 2398, y: 337 }, { x: 2391, y: 306 },
+      { x: 2350, y: 274 }, { x: 2247, y: 229 }, { x: 2148, y: 223 },
+      { x: 2028, y: 250 }, { x: 1910, y: 299 }, { x: 1857, y: 343 },
+      { x: 1825, y: 395 }, { x: 1808, y: 471 }, { x: 1802, y: 504 },
+      { x: 1828, y: 517 },
+    ],
+    labelX: 2059, labelY: 438,
   },
 };
 
@@ -302,12 +313,16 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       setDisplayTransform(target);
       return;
     }
+    // Short duration because this fires when onPeak hits — clouds are
+    // already covering the screen, so the user doesn't see the tween
+    // itself. The goal is to land at the final position before clouds
+    // retreat (~0.78s after peak), so 0.5s is comfortably inside that.
     tweenRef.current = gsap.to(transformRef.current, {
       x: target.x,
       y: target.y,
       scale: target.scale,
-      duration: 1.1,
-      ease: "power3.inOut",
+      duration: 0.5,
+      ease: "power2.out",
       onUpdate: () => {
         setDisplayTransform({ ...transformRef.current });
       },
@@ -321,20 +336,13 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   // ──────────────────────────────────────────────────────────
   // Pan + zoom (overview only).
   // - Drag to pan, wheel to zoom (pointer-anchored).
+  // - Uses document-level pointermove/up listeners attached on pointerdown
+  //   so we DON'T setPointerCapture on the outer div — that would steal
+  //   pointerup away from child zone polygons and break their onClick.
   // - Scale clamped to [coverScale, coverScale * 1.6] so the viewport is
-  //   always fully covered by the image (no black edges).
-  // - Position clamped so the image always covers the viewport.
-  // - Inside a region scene, pan/zoom is disabled for now.
-  // - Drag with >5px motion also blocks the zone click that would otherwise
-  //   fire on release.
+  //   always fully covered (no black edges).
+  // - Inside a region scene, pan/zoom is disabled.
   // ──────────────────────────────────────────────────────────
-  const dragStartRef = useRef<{
-    cx: number;
-    cy: number;
-    tx: number;
-    ty: number;
-    moved: boolean;
-  } | null>(null);
   const suppressClickRef = useRef(false);
 
   const clampTransform = (t: { x: number; y: number; scale: number }) => {
@@ -342,7 +350,6 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     const vh = outerSize.h;
     const imgW = MAP_W * t.scale;
     const imgH = MAP_H * t.scale;
-    // If the image is narrower than the viewport at this scale, center it.
     const minX = Math.min(0, vw - imgW);
     const maxX = Math.max(0, vw - imgW);
     const minY = Math.min(0, vh - imgH);
@@ -356,59 +363,48 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
 
   const onMapPointerDown = (e: React.PointerEvent) => {
     if (view !== "overview") return;
-    // Don't start a pan on right-click / middle-click
     if (e.button !== 0) return;
-    // Kill any in-flight tween so it doesn't fight manual pan
+    // Kill any in-flight tween so it doesn't fight the manual pan
     if (tweenRef.current) {
       tweenRef.current.kill();
       tweenRef.current = null;
     }
-    dragStartRef.current = {
-      cx: e.clientX,
-      cy: e.clientY,
-      tx: transformRef.current.x,
-      ty: transformRef.current.y,
-      moved: false,
+    const startCx = e.clientX;
+    const startCy = e.clientY;
+    const startTx = transformRef.current.x;
+    const startTy = transformRef.current.y;
+    let moved = false;
+
+    const onMove = (ev: PointerEvent) => {
+      const dx = ev.clientX - startCx;
+      const dy = ev.clientY - startCy;
+      if (!moved && Math.hypot(dx, dy) > 5) moved = true;
+      if (!moved) return;
+      const next = clampTransform({
+        x: startTx + dx,
+        y: startTy + dy,
+        scale: transformRef.current.scale,
+      });
+      transformRef.current = next;
+      setDisplayTransform(next);
     };
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-  };
 
-  const onMapPointerMove = (e: React.PointerEvent) => {
-    const s = dragStartRef.current;
-    if (!s) return;
-    const dx = e.clientX - s.cx;
-    const dy = e.clientY - s.cy;
-    if (!s.moved && Math.hypot(dx, dy) > 5) {
-      s.moved = true;
-    }
-    if (!s.moved) return;
-    const next = clampTransform({
-      x: s.tx + dx,
-      y: s.ty + dy,
-      scale: transformRef.current.scale,
-    });
-    transformRef.current = next;
-    setDisplayTransform(next);
-  };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+      if (moved) {
+        // Block the click that would otherwise enter a region.
+        suppressClickRef.current = true;
+        setTimeout(() => {
+          suppressClickRef.current = false;
+        }, 0);
+      }
+    };
 
-  const onMapPointerUp = (e: React.PointerEvent) => {
-    const s = dragStartRef.current;
-    if (!s) return;
-    // If the user dragged, suppress the click that would fire on a
-    // child zone polygon so we don't accidentally enter a region.
-    if (s.moved) {
-      suppressClickRef.current = true;
-      // Clear on next tick so later clicks aren't blocked.
-      setTimeout(() => {
-        suppressClickRef.current = false;
-      }, 0);
-    }
-    dragStartRef.current = null;
-    try {
-      (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
-    } catch {
-      // pointer may already be released; ignore
-    }
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
   };
 
   const onMapWheel = (e: React.WheelEvent) => {
@@ -431,12 +427,10 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       Math.min(maxScale, current.scale * zoomFactor)
     );
     if (newScale === current.scale) return;
-    // Anchor the zoom to the cursor position
     const rect = outerRef.current?.getBoundingClientRect();
     if (!rect) return;
     const px = e.clientX - rect.left;
     const py = e.clientY - rect.top;
-    // Map coord under cursor
     const mx = (px - current.x) / current.scale;
     const my = (py - current.y) / current.scale;
     const nextX = px - mx * newScale;
@@ -487,10 +481,38 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
 
   // Trigger a cloud transition then swap the view at peak coverage.
   // Blocked while a drag was in progress (pan shouldn't also click a zone).
+  // When entering a region, we also kick off a small zoom-in toward the
+  // region's label position BEFORE clouds fully cover — so it feels like
+  // you're diving into the region, not just cutting to it.
   const transitionTo = (next: View) => {
     if (suppressClickRef.current) return;
     if (pendingViewRef.current !== null) return; // already in flight
     pendingViewRef.current = next;
+
+    if (
+      next !== "overview" &&
+      REGION_ZONES[next as RegionId] &&
+      outerSize.w > 0
+    ) {
+      const z = REGION_ZONES[next as RegionId];
+      const current = transformRef.current;
+      const targetScale = current.scale * 1.25;
+      const targetX = outerSize.w / 2 - z.labelX * targetScale;
+      const targetY = outerSize.h / 2 - z.labelY * targetScale;
+      if (tweenRef.current) {
+        tweenRef.current.kill();
+        tweenRef.current = null;
+      }
+      tweenRef.current = gsap.to(transformRef.current, {
+        x: targetX,
+        y: targetY,
+        scale: targetScale,
+        duration: 0.6,
+        ease: "power2.in",
+        onUpdate: () => setDisplayTransform({ ...transformRef.current }),
+      });
+    }
+
     setTransitionCounter((n) => n + 1);
   };
 
@@ -504,9 +526,6 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
         touchAction: "none",
       }}
       onPointerDown={onMapPointerDown}
-      onPointerMove={onMapPointerMove}
-      onPointerUp={onMapPointerUp}
-      onPointerCancel={onMapPointerUp}
       onWheel={onMapWheel}
     >
       {/* Map inner — scaled + translated by GSAP (mirrored to React state) */}

@@ -6,11 +6,11 @@ import { useStudent } from "@/contexts/StudentContext";
 import {
   MAP_W,
   MAP_H,
-  REGION_STRIPS,
   type RegionStripMap,
 } from "@/lib/map/path-math";
 import { LESSON_TYPE_LABELS } from "@/lib/constants";
 import type { Lesson } from "@/types/database";
+import { CloudTransition } from "./CloudTransition";
 
 interface MapMockupProps {
   onOpenLesson: (lessonId: string) => void;
@@ -19,12 +19,41 @@ interface MapMockupProps {
 type RegionId = keyof RegionStripMap;
 type View = "overview" | RegionId;
 
-const REGION_ORDER: RegionId[] = ["r1", "r2", "r3", "r4"];
 const SIDE_PANEL_WIDTH = 420;
 
 const GOLD = "#E6C07A";
 const GOLD_HI = "#F0D595";
 const INK = "#E6DCC8";
+
+/**
+ * Puzzle-piece region hit zones — irregular ellipses positioned organically
+ * over the main_image.png panorama. Coordinates are in the 3200×1400 map
+ * coordinate space (not image pixels).
+ *
+ * The regions are NOT horizontal strips. Each is an ellipse roughly matching
+ * its visible feature on the painted panorama:
+ *   R1 — harbor / dock / sailboat (bottom-left)
+ *   R2 — valley cabin / grass meadow (center, slightly low)
+ *   R3 — mountain switchback + waterfall (center-right)
+ *   R4 — summit archway + ruins (top-right)
+ */
+interface RegionZone {
+  cx: number;
+  cy: number;
+  rx: number;
+  ry: number;
+  /** Tilt in degrees — gives the hit zone an organic, non-axis-aligned feel */
+  rot: number;
+  /** Focal point for the zoomed region view (may differ from cx/cy) */
+  focusX: number;
+  focusY: number;
+}
+const REGION_ZONES: Record<RegionId, RegionZone> = {
+  r1: { cx: 480,  cy: 1080, rx: 440, ry: 260, rot: -8,  focusX: 480,  focusY: 1000 },
+  r2: { cx: 1400, cy: 980,  rx: 470, ry: 290, rot: 4,   focusX: 1400, focusY: 900  },
+  r3: { cx: 2100, cy: 720,  rx: 430, ry: 300, rot: -6,  focusX: 2100, focusY: 720  },
+  r4: { cx: 2520, cy: 320,  rx: 400, ry: 260, rot: 10,  focusX: 2520, focusY: 320  },
+};
 
 /**
  * Mockup: region-centric expedition. No 63-node path.
@@ -52,6 +81,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     scale: 1,
   });
 
+  // Cloud-transition orchestration
+  const [transitionCounter, setTransitionCounter] = useState(0);
+  const pendingViewRef = useRef<View | null>(null);
+  const [hoveredZone, setHoveredZone] = useState<RegionId | null>(null);
+
   // Measure outer container
   useEffect(() => {
     const el = outerRef.current;
@@ -64,19 +98,13 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     return () => ro.disconnect();
   }, []);
 
-  // Default view: if student has a current lesson, start zoomed on that region
+  // Default view: always start on the overview. The student opts into a region
+  // by clicking its hit zone (which plays the cloud transition).
   useEffect(() => {
     if (outerSize.w === 0) return;
-    if (currentLesson) {
-      const rid = currentLesson.region_id as RegionId;
-      if (REGION_ORDER.includes(rid)) {
-        setView(rid);
-        return;
-      }
-    }
     setView("overview");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outerSize.w, currentLesson?.id]);
+  }, [outerSize.w]);
 
   // Compute target transform for a given view
   const getTargetTransform = (v: View) => {
@@ -94,19 +122,17 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       };
     }
 
-    // Zoom to region, leaving room on the right for the side panel
-    const s = REGION_STRIPS[v];
+    // Zoom into the region's focal point, leaving room for the side panel.
+    // We target ~1.9× the overview scale so the landmark fills the frame.
+    const z = REGION_ZONES[v];
     const usableW = vw - SIDE_PANEL_WIDTH;
-    const regionW = s.xEnd - s.xStart;
-    const regionH = s.yBot - s.yTop;
-    // Cover-fit the region into the usable area, plus slight overscan
-    const scale =
-      Math.max(usableW / regionW, vh / regionH) * 1.02;
-    const centerX = (s.xStart + s.xEnd) / 2;
-    const centerY = (s.yTop + s.yBot) / 2;
+    const sW = vw / MAP_W;
+    const sH = vh / MAP_H;
+    const overview = Math.max(sW, sH);
+    const scale = overview * 1.9;
     return {
-      x: usableW / 2 - centerX * scale,
-      y: vh / 2 - centerY * scale,
+      x: usableW / 2 - z.focusX * scale,
+      y: vh / 2 - z.focusY * scale,
       scale,
     };
   };
@@ -168,6 +194,13 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       ? sortedRegions[focusedIdx + 1]
       : null;
 
+  // Trigger a cloud transition then swap the view at peak coverage.
+  const transitionTo = (next: View) => {
+    if (pendingViewRef.current !== null) return; // already in flight
+    pendingViewRef.current = next;
+    setTransitionCounter((n) => n + 1);
+  };
+
   return (
     <div
       ref={outerRef}
@@ -187,74 +220,263 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           willChange: "transform",
         }}
       >
-        {/* Base panorama */}
+        {/* Base panorama — the whole website background (below topbar) */}
         <div
           style={{
             position: "absolute",
             inset: 0,
-            backgroundImage: 'url("/regions/expedition-map.png")',
+            backgroundImage: 'url("/regions/main_image.png")',
             backgroundSize: "cover",
             backgroundPosition: "center",
             backgroundRepeat: "no-repeat",
           }}
         />
 
-        {/* Fog of war over locked regions */}
-        {regions.map((r) => {
-          const s = REGION_STRIPS[r.id as RegionId];
-          const st = regionProgress[r.id];
-          if (!s || st?.isUnlocked) return null;
-          return (
-            <div
-              key={`fog-${r.id}`}
-              style={{
-                position: "absolute",
-                left: s.xStart,
-                top: s.yTop,
-                width: s.xEnd - s.xStart,
-                height: s.yBot - s.yTop,
-                background: "rgba(6,12,26,0.45)",
-                backdropFilter: "saturate(0.5) brightness(0.75)",
-                WebkitBackdropFilter: "saturate(0.5) brightness(0.75)",
-              }}
-            />
-          );
-        })}
-
-        {/* Region badges — visible only in overview. Clicking a badge zooms in. */}
+        {/* Dim overlay for locked regions (drawn ABOVE panorama, BELOW SVG) */}
         {view === "overview" &&
-          sortedRegions.map((r) => {
-            const s = REGION_STRIPS[r.id as RegionId];
+          regions.map((r) => {
+            const z = REGION_ZONES[r.id as RegionId];
             const st = regionProgress[r.id];
-            if (!s || !st) return null;
-            const centerX = (s.xStart + s.xEnd) / 2;
-            const centerY = (s.yTop + s.yBot) / 2;
-            const locked = !st.isUnlocked;
+            if (!z || !st || st.isUnlocked) return null;
             return (
-              <button
-                key={r.id}
-                onClick={() => !locked && setView(r.id as RegionId)}
-                disabled={locked}
+              <div
+                key={`fog-${r.id}`}
                 style={{
                   position: "absolute",
-                  left: centerX,
-                  top: centerY,
-                  transform: "translate(-50%, -50%)",
-                  cursor: locked ? "not-allowed" : "pointer",
-                  background: "transparent",
-                  border: "none",
-                  padding: 0,
+                  left: z.cx - z.rx,
+                  top: z.cy - z.ry,
+                  width: z.rx * 2,
+                  height: z.ry * 2,
+                  transform: `rotate(${z.rot}deg)`,
+                  borderRadius: "50%",
+                  background: "rgba(6,12,26,0.55)",
+                  backdropFilter: "saturate(0.5) brightness(0.7)",
+                  WebkitBackdropFilter: "saturate(0.5) brightness(0.7)",
+                  pointerEvents: "none",
                 }}
-                aria-label={`${r.name} — ${st.completed}/${st.total} lessons`}
-              >
-                <RegionBadge
-                  region={r}
-                  progress={st}
-                  locked={locked}
-                />
-              </button>
+              />
             );
           })}
+
+        {/* SVG overlay — ellipse hit zones over the map (overview only) */}
+        {view === "overview" && (
+          <svg
+            viewBox={`0 0 ${MAP_W} ${MAP_H}`}
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              overflow: "visible",
+            }}
+          >
+            <defs>
+              <radialGradient id="zone-glow" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="rgba(230,192,122,0.35)" />
+                <stop offset="60%" stopColor="rgba(230,192,122,0.12)" />
+                <stop offset="100%" stopColor="rgba(230,192,122,0)" />
+              </radialGradient>
+              <radialGradient id="zone-glow-hot" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="rgba(240,213,149,0.55)" />
+                <stop offset="60%" stopColor="rgba(240,213,149,0.2)" />
+                <stop offset="100%" stopColor="rgba(240,213,149,0)" />
+              </radialGradient>
+            </defs>
+
+            {sortedRegions.map((r) => {
+              const z = REGION_ZONES[r.id as RegionId];
+              const st = regionProgress[r.id];
+              if (!z || !st) return null;
+              const locked = !st.isUnlocked;
+              const hot = hoveredZone === r.id;
+              const isCurrent =
+                currentLesson?.region_id === r.id && !locked;
+              const numeral = ["I", "II", "III", "IV"][r.order_num - 1];
+              const stroke = st.isComplete ? GOLD_HI : locked ? "rgba(230,192,122,0.35)" : GOLD;
+              return (
+                <g
+                  key={`zone-${r.id}`}
+                  transform={`translate(${z.cx} ${z.cy}) rotate(${z.rot})`}
+                  style={{
+                    cursor: locked ? "not-allowed" : "pointer",
+                    pointerEvents: "auto",
+                  }}
+                  onClick={() => !locked && transitionTo(r.id as RegionId)}
+                  onMouseEnter={() => !locked && setHoveredZone(r.id as RegionId)}
+                  onMouseLeave={() => setHoveredZone(null)}
+                  onKeyDown={(e) => {
+                    if (locked) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      transitionTo(r.id as RegionId);
+                    }
+                  }}
+                  tabIndex={locked ? -1 : 0}
+                  role="button"
+                  aria-label={`${r.name} — ${st.completed}/${st.total} lessons${locked ? " (locked)" : ""}`}
+                >
+                  {/* Outer glow — brightens on hover */}
+                  <ellipse
+                    cx={0}
+                    cy={0}
+                    rx={z.rx}
+                    ry={z.ry}
+                    fill={hot ? "url(#zone-glow-hot)" : "url(#zone-glow)"}
+                    style={{
+                      transition: "opacity 0.4s cubic-bezier(0.22,1,0.36,1)",
+                      opacity: locked ? 0.35 : 1,
+                    }}
+                  />
+
+                  {/* Dashed perimeter — charted regions get solid gold, locked get faint */}
+                  <ellipse
+                    cx={0}
+                    cy={0}
+                    rx={z.rx * 0.92}
+                    ry={z.ry * 0.92}
+                    fill="none"
+                    stroke={stroke}
+                    strokeWidth={hot ? 3 : 2}
+                    strokeDasharray={locked ? "8 10" : st.isComplete ? "" : "14 8"}
+                    opacity={hot ? 0.85 : 0.55}
+                    style={{
+                      transition: "opacity 0.4s, stroke-width 0.4s",
+                    }}
+                  />
+
+                  {/* Pulsing ring on the student's current region */}
+                  {isCurrent && (
+                    <ellipse
+                      cx={0}
+                      cy={0}
+                      rx={z.rx * 0.98}
+                      ry={z.ry * 0.98}
+                      fill="none"
+                      stroke={GOLD_HI}
+                      strokeWidth={2.5}
+                      opacity={0.7}
+                    >
+                      <animate
+                        attributeName="rx"
+                        values={`${z.rx * 0.88};${z.rx * 1.04};${z.rx * 0.88}`}
+                        dur="3.2s"
+                        repeatCount="indefinite"
+                      />
+                      <animate
+                        attributeName="ry"
+                        values={`${z.ry * 0.88};${z.ry * 1.04};${z.ry * 0.88}`}
+                        dur="3.2s"
+                        repeatCount="indefinite"
+                      />
+                      <animate
+                        attributeName="opacity"
+                        values="0.25;0.75;0.25"
+                        dur="3.2s"
+                        repeatCount="indefinite"
+                      />
+                    </ellipse>
+                  )}
+
+                  {/* Center label */}
+                  <g
+                    transform={`rotate(${-z.rot})`}
+                    style={{ pointerEvents: "none" }}
+                  >
+                    {/* Numeral plaque */}
+                    <circle
+                      cx={0}
+                      cy={-28}
+                      r={26}
+                      fill="rgba(6,12,26,0.85)"
+                      stroke={stroke}
+                      strokeWidth={1.5}
+                    />
+                    <text
+                      x={0}
+                      y={-20}
+                      textAnchor="middle"
+                      style={{
+                        fontFamily: "Cormorant Garamond, serif",
+                        fontStyle: "italic",
+                        fontWeight: 600,
+                        fontSize: 26,
+                        fill: stroke,
+                      }}
+                    >
+                      {numeral}
+                    </text>
+
+                    {/* Region name */}
+                    <text
+                      x={0}
+                      y={24}
+                      textAnchor="middle"
+                      style={{
+                        fontFamily: "Cormorant Garamond, serif",
+                        fontStyle: "italic",
+                        fontWeight: 500,
+                        fontSize: 34,
+                        fill: INK,
+                        paintOrder: "stroke fill",
+                        stroke: "rgba(6,12,26,0.85)",
+                        strokeWidth: 4,
+                        strokeLinejoin: "round",
+                      }}
+                    >
+                      {r.name}
+                    </text>
+
+                    {/* Progress / lock */}
+                    <text
+                      x={0}
+                      y={52}
+                      textAnchor="middle"
+                      style={{
+                        fontFamily: "JetBrains Mono, ui-monospace, monospace",
+                        fontSize: 13,
+                        letterSpacing: "0.22em",
+                        fill: locked ? "rgba(230,220,200,0.55)" : GOLD,
+                        textTransform: "uppercase",
+                        paintOrder: "stroke fill",
+                        stroke: "rgba(6,12,26,0.85)",
+                        strokeWidth: 3,
+                        strokeLinejoin: "round",
+                      }}
+                    >
+                      {locked
+                        ? "· LOCKED ·"
+                        : st.isComplete
+                          ? `CHARTED · ${st.total}`
+                          : `${st.completed} / ${st.total} LESSONS`}
+                    </text>
+
+                    {/* Hover CTA */}
+                    {hot && !locked && (
+                      <text
+                        x={0}
+                        y={76}
+                        textAnchor="middle"
+                        style={{
+                          fontFamily: "JetBrains Mono, ui-monospace, monospace",
+                          fontSize: 11,
+                          letterSpacing: "0.28em",
+                          fill: GOLD_HI,
+                          textTransform: "uppercase",
+                          paintOrder: "stroke fill",
+                          stroke: "rgba(6,12,26,0.85)",
+                          strokeWidth: 3,
+                          strokeLinejoin: "round",
+                        }}
+                      >
+                        ENTER REGION →
+                      </text>
+                    )}
+                  </g>
+                </g>
+              );
+            })}
+          </svg>
+        )}
       </div>
 
       {/* Region side panel */}
@@ -265,158 +487,24 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           completedLessonIds={completedLessonIds}
           currentLessonId={currentLesson?.id ?? null}
           onOpenLesson={onOpenLesson}
-          onBack={() => setView("overview")}
-          onPrev={prevRegion ? () => setView(prevRegion.id as RegionId) : null}
-          onNext={nextRegion ? () => setView(nextRegion.id as RegionId) : null}
+          onBack={() => transitionTo("overview")}
+          onPrev={prevRegion ? () => transitionTo(prevRegion.id as RegionId) : null}
+          onNext={nextRegion ? () => transitionTo(nextRegion.id as RegionId) : null}
         />
       )}
-    </div>
-  );
-}
 
-// ──────────────────────────────────────────────────────────────
-// Region badge (shown in overview)
-// ──────────────────────────────────────────────────────────────
-
-function RegionBadge({
-  region,
-  progress,
-  locked,
-}: {
-  region: ReturnType<typeof useStudent>["regions"][number];
-  progress: { completed: number; total: number; isComplete: boolean };
-  locked: boolean;
-}) {
-  const numeral = ["I", "II", "III", "IV"][region.order_num - 1];
-  const accent = progress.isComplete ? GOLD_HI : locked ? "rgba(230,192,122,0.35)" : GOLD;
-
-  return (
-    <div
-      className="group"
-      style={{
-        width: 320,
-        padding: "22px 26px",
-        background: "rgba(6,12,26,0.78)",
-        border: `1.5px solid ${accent}`,
-        borderRadius: 14,
-        backdropFilter: "blur(8px)",
-        textAlign: "center",
-        transition: "transform 0.35s cubic-bezier(0.22,1,0.36,1), background 0.35s, border-color 0.35s",
-        boxShadow: progress.isComplete
-          ? `0 0 60px rgba(230,192,122,0.25)`
-          : locked
-            ? "none"
-            : `0 0 30px rgba(230,192,122,0.15)`,
-      }}
-      onMouseEnter={(e) => {
-        if (locked) return;
-        e.currentTarget.style.transform = "scale(1.04)";
-        e.currentTarget.style.background = "rgba(16,32,66,0.85)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.transform = "scale(1)";
-        e.currentTarget.style.background = "rgba(6,12,26,0.78)";
-      }}
-    >
-      {/* Numeral disc */}
-      <div
-        style={{
-          width: 44,
-          height: 44,
-          margin: "0 auto 10px",
-          borderRadius: "50%",
-          background: "rgba(10,20,40,0.85)",
-          border: `1.5px solid ${accent}`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily: "Cormorant Garamond, serif",
-          fontStyle: "italic",
-          fontWeight: 600,
-          fontSize: 22,
-          color: accent,
+      {/* Cloud scene-swap transition — fires at peak coverage */}
+      <CloudTransition
+        trigger={transitionCounter}
+        duration={1.5}
+        onPeak={() => {
+          const next = pendingViewRef.current;
+          if (next != null) {
+            setView(next);
+            pendingViewRef.current = null;
+          }
         }}
-      >
-        {numeral}
-      </div>
-
-      {/* Region label */}
-      <p
-        className="font-mono uppercase"
-        style={{
-          color: accent,
-          letterSpacing: "0.2em",
-          fontSize: 10,
-          marginBottom: 4,
-        }}
-      >
-        Region {numeral}
-      </p>
-      <h3
-        className="italic"
-        style={{
-          fontFamily: "Cormorant Garamond, serif",
-          fontWeight: 500,
-          fontSize: 26,
-          color: locked ? "rgba(230,220,200,0.5)" : INK,
-          lineHeight: 1.1,
-          marginBottom: 8,
-        }}
-      >
-        {region.name}
-      </h3>
-      <p
-        className="italic"
-        style={{
-          fontFamily: "Cormorant Garamond, serif",
-          fontStyle: "italic",
-          fontSize: 13,
-          color: "rgba(230,220,200,0.6)",
-          marginBottom: 14,
-          minHeight: 38,
-        }}
-      >
-        {region.tagline}
-      </p>
-
-      {/* Progress */}
-      <div
-        className="font-mono"
-        style={{
-          fontSize: 11,
-          color: progress.isComplete
-            ? GOLD_HI
-            : locked
-              ? "rgba(230,220,200,0.35)"
-              : "rgba(230,220,200,0.7)",
-          letterSpacing: "0.14em",
-          textTransform: "uppercase",
-        }}
-      >
-        {locked
-          ? "Locked"
-          : progress.isComplete
-            ? `Charted · ${progress.total} lessons`
-            : `${progress.completed} / ${progress.total} lessons`}
-      </div>
-
-      {/* Hover CTA */}
-      {!locked && (
-        <div
-          className="font-mono"
-          style={{
-            marginTop: 14,
-            paddingTop: 14,
-            borderTop: "1px solid rgba(230,192,122,0.2)",
-            color: GOLD,
-            fontSize: 11,
-            letterSpacing: "0.2em",
-            textTransform: "uppercase",
-          }}
-        >
-          {progress.isComplete ? "Revisit" : "Enter region →"}
-        </div>
-      )}
+      />
     </div>
   );
 }

@@ -244,8 +244,9 @@ export async function fetchCompletedLessons(
 
     if (!res.ok) {
       const error = await res.text();
+      const authMethod = adminKey ? "admin key" : "user token";
       throw new Error(
-        `Whop lesson interactions fetch failed (${res.status}): ${error}`
+        `Whop lesson interactions fetch failed (${res.status}) [auth=${authMethod}] [user_id=${targetUserId}] [course_id=${courseId}]: ${error}`
       );
     }
 

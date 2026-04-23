@@ -168,27 +168,23 @@ export async function refreshWhopTokens(
 }
 
 /**
- * Fetch all completed course-lesson interactions for the authenticated
- * Whop user. Paginates through results.
+ * Fetch all completed course-lesson interactions for a Whop user.
  *
- * Behavior (confirmed through hard-won debugging):
- * - The correct endpoint for BOTH admin and student tokens is the
- *   un-prefixed `/course_lesson_interactions`. There is no `/me/*`
- *   variant (that returns 404).
- * - Student tokens MUST include `user_id={their own sub}` AND it must
- *   match the subject of the access token exactly. If it doesn't match
- *   (or the param is missing), Whop returns HTTP 400
- *     "You can only access your own course lesson interactions."
- * - Admin / course-creator tokens tolerate any user_id and return that
- *   user's data. Which is why the original code worked when logged in
- *   as the course admin but not for a real student.
+ * Whop's `/course_lesson_interactions` endpoint rejects STUDENT OAuth
+ * tokens with HTTP 400 "you can only access your own course lesson
+ * interactions" regardless of scopes or query params — the endpoint
+ * is effectively admin/creator-only. The original implementation
+ * "worked" for the app's admin account because that token has creator
+ * privileges that bypass the student-side guard.
  *
- * We fetch the subject FRESH from `/oauth/userinfo` at sync time
- * instead of trusting the whop_user_id column on the student row —
- * that way any drift (e.g. if the token got rotated or the row is
- * stale) can never cause the 400. `whopUserIdFromDb` is kept as a
- * defensive cross-check: if it disagrees with the live userinfo we
- * log a warning but still use the live value.
+ * The fix: when a server-side admin API key is configured
+ * (WHOP_API_KEY), use IT for this call instead of the user's token.
+ * The admin key treats `user_id=<student>` as a filter and returns
+ * exactly that student's data.
+ *
+ * Fallback: if no admin key is set, we still try the user's token
+ * (useful when the logged-in user IS the admin, e.g. Karlo testing
+ * against his own account).
  */
 export async function fetchCompletedLessons(
   accessToken: string,
@@ -201,25 +197,32 @@ export async function fetchCompletedLessons(
     );
   }
 
-  // Get the token's actual subject — that's the only user_id Whop
-  // will accept on a student token.
-  let tokenSubject: string;
-  try {
-    const live = await fetchWhopUserInfo(accessToken);
-    tokenSubject = live.sub;
-    if (whopUserIdFromDb && whopUserIdFromDb !== tokenSubject) {
-      console.warn(
-        `[watch-sync] DB whop_user_id (${whopUserIdFromDb}) disagrees with ` +
-          `live token subject (${tokenSubject}); using live.`
+  const adminKey = process.env.WHOP_API_KEY;
+  // With an admin key we can use the stored whop_user_id directly. No
+  // userinfo lookup needed since the admin key isn't tied to one user.
+  // Without an admin key, resolve the token's actual subject live to
+  // guarantee the "must match your own" check passes for a user token.
+  let targetUserId = whopUserIdFromDb;
+  if (!adminKey) {
+    try {
+      const live = await fetchWhopUserInfo(accessToken);
+      targetUserId = live.sub;
+      if (whopUserIdFromDb && whopUserIdFromDb !== live.sub) {
+        console.warn(
+          `[watch-sync] DB whop_user_id (${whopUserIdFromDb}) disagrees with ` +
+            `live token subject (${live.sub}); using live.`
+        );
+      }
+    } catch (err) {
+      throw new Error(
+        `Unable to resolve token subject from /oauth/userinfo: ${
+          err instanceof Error ? err.message : String(err)
+        }`
       );
     }
-  } catch (err) {
-    throw new Error(
-      `Unable to resolve token subject from /oauth/userinfo: ${
-        err instanceof Error ? err.message : String(err)
-      }`
-    );
   }
+
+  const authToken = adminKey ?? accessToken;
 
   const all: WhopLessonInteraction[] = [];
   let cursor: string | undefined;
@@ -227,7 +230,7 @@ export async function fetchCompletedLessons(
     const params = new URLSearchParams({
       completed: "true",
       course_id: courseId,
-      user_id: tokenSubject,
+      user_id: targetUserId,
       first: "100",
     });
     if (cursor) params.set("after", cursor);
@@ -235,7 +238,7 @@ export async function fetchCompletedLessons(
     const res = await fetch(
       `${WHOP_API_BASE}/course_lesson_interactions?${params}`,
       {
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: { Authorization: `Bearer ${authToken}` },
       }
     );
 

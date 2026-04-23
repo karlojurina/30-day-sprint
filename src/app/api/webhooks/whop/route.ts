@@ -24,8 +24,17 @@ export async function POST(request: NextRequest) {
   const body = await request.text();
   const signature = request.headers.get("x-whop-signature");
 
+  // Prefix everything from this handler so Vercel logs are easy to filter.
+  console.info(
+    `[whop-webhook] received body=${body.length}B sig=${signature ? "present" : "MISSING"}`
+  );
+
   // Verify webhook signature
   if (!verifyWebhookSignature(body, signature)) {
+    console.warn(
+      `[whop-webhook] signature mismatch — rejecting. ` +
+        `secret_set=${!!process.env.WHOP_WEBHOOK_SECRET}`
+    );
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
@@ -33,8 +42,15 @@ export async function POST(request: NextRequest) {
   try {
     payload = JSON.parse(body);
   } catch {
+    console.warn("[whop-webhook] invalid JSON body");
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
+
+  console.info(
+    `[whop-webhook] event=${(payload as { event?: unknown }).event} data_keys=${Object.keys(
+      (payload as { data?: Record<string, unknown> }).data ?? {}
+    ).join(",")}`
+  );
 
   const supabase = createServiceClient();
 
@@ -107,11 +123,20 @@ export async function POST(request: NextRequest) {
       // Student finished a Whop course lesson — mark the matching lesson
       // complete in our DB. Idempotent via unique(student_id, lesson_id).
       const data = payload.data as WhopLessonInteractionWebhookData;
+      // Whop's payload shape for this event has drifted across versions;
+      // dump the whole thing once so we can see what fields actually
+      // arrive without leaking too much unrelated data.
+      console.info(
+        `[whop-webhook] lesson-complete payload: ${JSON.stringify(data).slice(0, 500)}`
+      );
+
       const whopUserId = data.user?.id;
       const whopLessonId = data.lesson?.id ?? data.lesson_id;
 
       if (!whopUserId || !whopLessonId) {
-        console.warn("Webhook: lesson.completed missing user or lesson id", data);
+        console.warn(
+          `[whop-webhook] lesson-complete missing ids: user=${whopUserId ?? "null"} lesson=${whopLessonId ?? "null"}`
+        );
         break;
       }
 
@@ -122,7 +147,8 @@ export async function POST(request: NextRequest) {
         .single();
       if (!student) {
         console.warn(
-          `Webhook: lesson.completed for unknown student ${whopUserId}`
+          `[whop-webhook] student not found for whop_user_id=${whopUserId} ` +
+            `(they may not have logged into the app yet)`
         );
         break;
       }
@@ -134,7 +160,10 @@ export async function POST(request: NextRequest) {
         .eq("whop_lesson_id", whopLessonId)
         .single();
       if (!lesson) {
-        // No lesson is mapped to this Whop lesson — nothing to do
+        console.warn(
+          `[whop-webhook] no lesson mapped to whop_lesson_id=${whopLessonId} ` +
+            `(not in seed or mismatched)`
+        );
         break;
       }
 
@@ -149,7 +178,13 @@ export async function POST(request: NextRequest) {
         );
 
       if (error) {
-        console.error("Webhook: lesson completion upsert failed:", error);
+        console.error(
+          `[whop-webhook] completion upsert failed for student=${student.id} lesson=${lesson.id}: ${error.message}`
+        );
+      } else {
+        console.info(
+          `[whop-webhook] completion upserted: student=${student.id} lesson=${lesson.id} (whop_user=${whopUserId}, whop_lesson=${whopLessonId})`
+        );
       }
       break;
     }

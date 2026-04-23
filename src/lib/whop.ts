@@ -168,16 +168,25 @@ export async function refreshWhopTokens(
 }
 
 /**
- * Fetch all completed course-lesson interactions for a given Whop user.
- * Paginates through results. Uses the user's OAuth access token.
+ * Fetch all completed course-lesson interactions for the authenticated
+ * Whop user. Paginates through results. Uses the user's OAuth access
+ * token.
  *
- * Whop's API requires `course_id` (or `lesson_id`) to scope the query.
- * We pass our course ID via WHOP_COURSE_ID env var. user_id still works
- * as an additional filter to return only this student's interactions.
+ * IMPORTANT: we do NOT pass `user_id` as a query param here. Whop's API
+ * scopes the response to the access-token's owner automatically, and
+ * regular student tokens are rejected with HTTP 400 "you can only access
+ * your own course lesson interactions" if `user_id` is included. Admin /
+ * course-creator tokens used to tolerate the extra param, which is why
+ * the original implementation worked for the admin account but broke
+ * for test student accounts.
+ *
+ * The `whopUserId` parameter is kept for signature compatibility and
+ * future cross-check use (e.g. assert the token owner matches what we
+ * expect), but is intentionally unused in the request.
  */
 export async function fetchCompletedLessons(
   accessToken: string,
-  whopUserId: string
+  _whopUserId: string
 ): Promise<WhopLessonInteraction[]> {
   const courseId = process.env.WHOP_COURSE_ID;
   if (!courseId) {
@@ -192,7 +201,6 @@ export async function fetchCompletedLessons(
     const params = new URLSearchParams({
       completed: "true",
       course_id: courseId,
-      user_id: whopUserId,
       first: "100",
     });
     if (cursor) params.set("after", cursor);

@@ -169,29 +169,55 @@ export async function refreshWhopTokens(
 
 /**
  * Fetch all completed course-lesson interactions for the authenticated
- * Whop user. Paginates through results. Uses the user's OAuth access
- * token.
+ * Whop user. Paginates through results.
  *
- * IMPORTANT: we do NOT pass `user_id` as a query param here. Whop's API
- * scopes the response to the access-token's owner automatically, and
- * regular student tokens are rejected with HTTP 400 "you can only access
- * your own course lesson interactions" if `user_id` is included. Admin /
- * course-creator tokens used to tolerate the extra param, which is why
- * the original implementation worked for the admin account but broke
- * for test student accounts.
+ * Behavior (confirmed through hard-won debugging):
+ * - The correct endpoint for BOTH admin and student tokens is the
+ *   un-prefixed `/course_lesson_interactions`. There is no `/me/*`
+ *   variant (that returns 404).
+ * - Student tokens MUST include `user_id={their own sub}` AND it must
+ *   match the subject of the access token exactly. If it doesn't match
+ *   (or the param is missing), Whop returns HTTP 400
+ *     "You can only access your own course lesson interactions."
+ * - Admin / course-creator tokens tolerate any user_id and return that
+ *   user's data. Which is why the original code worked when logged in
+ *   as the course admin but not for a real student.
  *
- * The `whopUserId` parameter is kept for signature compatibility and
- * future cross-check use (e.g. assert the token owner matches what we
- * expect), but is intentionally unused in the request.
+ * We fetch the subject FRESH from `/oauth/userinfo` at sync time
+ * instead of trusting the whop_user_id column on the student row —
+ * that way any drift (e.g. if the token got rotated or the row is
+ * stale) can never cause the 400. `whopUserIdFromDb` is kept as a
+ * defensive cross-check: if it disagrees with the live userinfo we
+ * log a warning but still use the live value.
  */
 export async function fetchCompletedLessons(
   accessToken: string,
-  _whopUserId: string
+  whopUserIdFromDb: string
 ): Promise<WhopLessonInteraction[]> {
   const courseId = process.env.WHOP_COURSE_ID;
   if (!courseId) {
     throw new Error(
       "WHOP_COURSE_ID env var not set — needed to query course_lesson_interactions"
+    );
+  }
+
+  // Get the token's actual subject — that's the only user_id Whop
+  // will accept on a student token.
+  let tokenSubject: string;
+  try {
+    const live = await fetchWhopUserInfo(accessToken);
+    tokenSubject = live.sub;
+    if (whopUserIdFromDb && whopUserIdFromDb !== tokenSubject) {
+      console.warn(
+        `[watch-sync] DB whop_user_id (${whopUserIdFromDb}) disagrees with ` +
+          `live token subject (${tokenSubject}); using live.`
+      );
+    }
+  } catch (err) {
+    throw new Error(
+      `Unable to resolve token subject from /oauth/userinfo: ${
+        err instanceof Error ? err.message : String(err)
+      }`
     );
   }
 
@@ -201,18 +227,13 @@ export async function fetchCompletedLessons(
     const params = new URLSearchParams({
       completed: "true",
       course_id: courseId,
+      user_id: tokenSubject,
       first: "100",
     });
     if (cursor) params.set("after", cursor);
 
-    // /me/course_lesson_interactions is the user-scoped variant. The
-    // un-prefixed /course_lesson_interactions is an admin listing
-    // endpoint that rejects student tokens with
-    //   "you can only access your own course lesson interactions"
-    // even when no user_id param is passed. Same pattern as
-    // /me/has_access and /me/memberships elsewhere in this file.
     const res = await fetch(
-      `${WHOP_API_BASE}/me/course_lesson_interactions?${params}`,
+      `${WHOP_API_BASE}/course_lesson_interactions?${params}`,
       {
         headers: { Authorization: `Bearer ${accessToken}` },
       }

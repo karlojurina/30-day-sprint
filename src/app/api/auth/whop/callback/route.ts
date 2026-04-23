@@ -49,15 +49,27 @@ export async function GET(request: NextRequest) {
     // 2. Fetch user info
     const userInfo = await fetchWhopUserInfo(tokens.access_token);
 
-    // 3. Verify active membership (bypass for whitelisted test users)
-    const bypassUsers = process.env.WHOP_BYPASS_USER_IDS?.split(",") ?? [];
-    const isBypassed = bypassUsers.includes(userInfo.sub);
+    // 3. Verify active membership (bypass for whitelisted test users).
+    //    Two whitelists, both optional, both comma-separated:
+    //      WHOP_BYPASS_USER_IDS — match on whop user id (e.g. user_XYZ…)
+    //      WHOP_BYPASS_EMAILS   — match on the email Whop returns
+    //    Either match skips the active-membership check entirely, so a
+    //    test account without a paid membership can still log in.
+    const bypassUsers = process.env.WHOP_BYPASS_USER_IDS?.split(",")
+      .map((s) => s.trim())
+      .filter(Boolean) ?? [];
+    const bypassEmails = process.env.WHOP_BYPASS_EMAILS?.split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean) ?? [];
+    const isBypassed =
+      bypassUsers.includes(userInfo.sub) ||
+      (userInfo.email && bypassEmails.includes(userInfo.email.toLowerCase()));
 
     if (!isBypassed) {
       const hasAccess = await checkActiveMembership(tokens.access_token);
       if (!hasAccess) {
         return NextResponse.redirect(
-          `${appUrl}/login?error=no_membership&detail=${encodeURIComponent(`Your Whop user ID: ${userInfo.sub}`)}`
+          `${appUrl}/login?error=no_membership&detail=${encodeURIComponent(`Your Whop user ID: ${userInfo.sub} · email: ${userInfo.email ?? "(unknown)"}`)}`
         );
       }
     }

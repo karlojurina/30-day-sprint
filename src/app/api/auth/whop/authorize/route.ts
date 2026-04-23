@@ -22,7 +22,12 @@ export async function GET() {
     response_type: "code",
     client_id: process.env.WHOP_CLIENT_ID!,
     redirect_uri: redirectUri,
-    scope: "openid profile email course_analytics:read",
+    // courses:read is what lets student tokens hit /course_lesson_interactions
+    // with user_id=self. Without it, Whop rejects with HTTP 400
+    //   "You can only access your own course lesson interactions"
+    // even though the token clearly identifies the caller. Admin/creator
+    // tokens get around this by privilege, which hid the bug.
+    scope: "openid profile email courses:read course_analytics:read",
     state,
     nonce,
     code_challenge: codeChallenge,

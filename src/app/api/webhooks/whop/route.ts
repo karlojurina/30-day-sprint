@@ -203,32 +203,54 @@ export async function POST(request: NextRequest) {
         break;
       }
 
-      const { data: student } = await supabase
+      // .maybeSingle() returns null + no error for 0 rows, instead of
+      // .single() which returns a 406 error. Easier to diagnose: error
+      // object will only be non-null on real DB problems.
+      const studentResult = await supabase
         .from("students")
-        .select("id")
+        .select("id, whop_user_id, email")
         .eq("whop_user_id", whopUserId)
-        .single();
-      if (!student) {
-        console.warn(
-          `[whop-webhook] student not found for whop_user_id=${whopUserId} ` +
-            `(they may not have logged into the app yet)`
+        .maybeSingle();
+      if (studentResult.error) {
+        console.error(
+          `[whop-webhook] students lookup errored for whop_user_id=${whopUserId}: ${JSON.stringify(studentResult.error)}`
         );
         break;
       }
+      if (!studentResult.data) {
+        console.warn(
+          `[whop-webhook] student not found for whop_user_id=${whopUserId}. ` +
+            `They need to log into the EcomTalent dashboard at least once ` +
+            `with this Whop account so a row gets created in students.`
+        );
+        break;
+      }
+      const student = studentResult.data;
+      console.info(
+        `[whop-webhook] matched student id=${student.id} email=${student.email} ` +
+          `for whop_user_id=${whopUserId}`
+      );
 
       // Look up our lesson matching this Whop lesson
-      const { data: lesson } = await supabase
+      const lessonResult = await supabase
         .from("lessons")
         .select("id")
         .eq("whop_lesson_id", whopLessonId)
-        .single();
-      if (!lesson) {
+        .maybeSingle();
+      if (lessonResult.error) {
+        console.error(
+          `[whop-webhook] lessons lookup errored for whop_lesson_id=${whopLessonId}: ${JSON.stringify(lessonResult.error)}`
+        );
+        break;
+      }
+      if (!lessonResult.data) {
         console.warn(
           `[whop-webhook] no lesson mapped to whop_lesson_id=${whopLessonId} ` +
             `(not in seed or mismatched)`
         );
         break;
       }
+      const lesson = lessonResult.data;
 
       const { error } = await supabase
         .from("student_lesson_completions")

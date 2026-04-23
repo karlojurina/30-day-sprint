@@ -25,6 +25,8 @@ export function SyncDebugPanel() {
   const [runResult, setRunResult] = useState<{
     ok: boolean;
     message?: string;
+    matchedLessonIds?: string[];
+    fetchedWhopIds?: string[];
     at: number;
   } | null>(null);
 
@@ -169,6 +171,99 @@ export function SyncDebugPanel() {
               value={maskId(s.whopUserId) ?? "—"}
             />
           </div>
+
+          {/* Last run output: which local lessons matched + full Whop list.
+              Only shown after a force sync (not auto-populated on mount,
+              because the data isn't persisted). Lets you scan for whether
+              a specific lesson is currently in the matched set. */}
+          {runResult?.ok && runResult.matchedLessonIds && (
+            <details
+              style={{
+                padding: "8px 14px",
+                borderTop: "1px solid rgba(230,192,122,0.15)",
+                fontSize: 11,
+              }}
+            >
+              <summary
+                style={{
+                  cursor: "pointer",
+                  color: "#4DCEC4",
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                  fontSize: 10,
+                  padding: "2px 0",
+                }}
+              >
+                Matched lessons ({runResult.matchedLessonIds.length})
+              </summary>
+              <div
+                style={{
+                  marginTop: 6,
+                  padding: 8,
+                  background: "rgba(6,12,26,0.5)",
+                  borderRadius: 4,
+                  maxHeight: 180,
+                  overflow: "auto",
+                  fontFamily: "inherit",
+                  fontSize: 11,
+                  color: "rgba(230,220,200,0.85)",
+                  lineHeight: 1.5,
+                }}
+              >
+                {runResult.matchedLessonIds.join(", ")}
+              </div>
+              <p
+                style={{
+                  marginTop: 6,
+                  fontSize: 10,
+                  color: "rgba(230,220,200,0.5)",
+                }}
+              >
+                Look for the lesson you watched. If it&apos;s missing,
+                Whop didn&apos;t register the watch as completed.
+              </p>
+            </details>
+          )}
+          {runResult?.ok && runResult.fetchedWhopIds && (
+            <details
+              style={{
+                padding: "8px 14px",
+                borderTop: "1px solid rgba(230,192,122,0.15)",
+                fontSize: 11,
+              }}
+            >
+              <summary
+                style={{
+                  cursor: "pointer",
+                  color: "rgba(230,220,200,0.6)",
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                  fontSize: 10,
+                  padding: "2px 0",
+                }}
+              >
+                All fetched Whop IDs ({runResult.fetchedWhopIds.length})
+              </summary>
+              <pre
+                style={{
+                  marginTop: 6,
+                  padding: 8,
+                  background: "rgba(6,12,26,0.5)",
+                  borderRadius: 4,
+                  maxHeight: 180,
+                  overflow: "auto",
+                  fontFamily: "inherit",
+                  fontSize: 10,
+                  color: "rgba(230,220,200,0.7)",
+                  lineHeight: 1.5,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-all",
+                }}
+              >
+                {runResult.fetchedWhopIds.join("\n")}
+              </pre>
+            </details>
+          )}
 
           {/* Run button */}
           <div

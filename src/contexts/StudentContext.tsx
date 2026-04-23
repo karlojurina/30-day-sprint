@@ -98,7 +98,14 @@ interface StudentContextType {
 
   // Sync debug — last sync result + a forced (un-throttled) re-run
   syncDiagnostics: SyncDiagnostics;
-  forceSync: () => Promise<{ ok: boolean; message?: string }>;
+  forceSync: () => Promise<{
+    ok: boolean;
+    message?: string;
+    /** Local lesson IDs that matched a Whop completion this run */
+    matchedLessonIds?: string[];
+    /** Full list of Whop lesson IDs returned by the API this run */
+    fetchedWhopIds?: string[];
+  }>;
 }
 
 const StudentContext = createContext<StudentContextType | null>(null);
@@ -257,14 +264,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   }, [refreshFromServer]);
 
   // Forced sync — no throttle, returns the result so the debug panel can
-  // display ok/error inline. Used by the "Run sync now" button.
-  const forceSync = useCallback(async (): Promise<{
-    ok: boolean;
-    message?: string;
-  }> => {
+  // display ok/error + the matched/fetched lesson IDs inline.
+  const forceSync = useCallback(async () => {
     lastSyncAtRef.current = Date.now(); // also reset throttle
     const token = await getAccessToken();
-    if (!token) return { ok: false, message: "Session expired" };
+    if (!token) return { ok: false as const, message: "Session expired" };
     try {
       const res = await fetch("/api/student/refresh-watch-sync", {
         method: "POST",
@@ -276,14 +280,18 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       await refreshFromServer(token);
       if (!res.ok) {
         return {
-          ok: false,
+          ok: false as const,
           message: json?.error ?? `Sync failed (HTTP ${res.status})`,
         };
       }
-      return { ok: true };
+      return {
+        ok: true as const,
+        matchedLessonIds: (json?.matchedLessonIds ?? []) as string[],
+        fetchedWhopIds: (json?.fetchedWhopIds ?? []) as string[],
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return { ok: false, message };
+      return { ok: false as const, message };
     }
   }, [refreshFromServer]);
 

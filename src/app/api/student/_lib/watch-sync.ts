@@ -30,6 +30,10 @@ export async function syncWatchProgress({
   fetchedCount: number;
   matchedCount: number;
   unmatchedLessonIds: string[];
+  /** Local lesson IDs (l001…l063) that matched a Whop completion */
+  matchedLessonIds: string[];
+  /** Full list of Whop lesson IDs returned by the API this run */
+  fetchedWhopIds: string[];
 }> {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -64,6 +68,8 @@ export async function syncWatchProgress({
         fetchedCount: 0,
         matchedCount: 0,
         unmatchedLessonIds: [],
+        matchedLessonIds: [],
+        fetchedWhopIds: [],
       };
     }
 
@@ -118,6 +124,8 @@ export async function syncWatchProgress({
       fetchedCount: interactions.length,
       matchedCount: matched.length,
       unmatchedLessonIds,
+      matchedLessonIds: matched.map((l) => l.id).sort(),
+      fetchedWhopIds: completedLessonIds,
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

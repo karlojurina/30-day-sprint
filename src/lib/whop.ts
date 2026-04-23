@@ -205,8 +205,14 @@ export async function fetchCompletedLessons(
     });
     if (cursor) params.set("after", cursor);
 
+    // /me/course_lesson_interactions is the user-scoped variant. The
+    // un-prefixed /course_lesson_interactions is an admin listing
+    // endpoint that rejects student tokens with
+    //   "you can only access your own course lesson interactions"
+    // even when no user_id param is passed. Same pattern as
+    // /me/has_access and /me/memberships elsewhere in this file.
     const res = await fetch(
-      `${WHOP_API_BASE}/course_lesson_interactions?${params}`,
+      `${WHOP_API_BASE}/me/course_lesson_interactions?${params}`,
       {
         headers: { Authorization: `Bearer ${accessToken}` },
       }

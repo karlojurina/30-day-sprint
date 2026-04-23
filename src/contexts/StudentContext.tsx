@@ -35,6 +35,20 @@ export interface RegionProgress {
   isUnlocked: boolean;
 }
 
+/** Snapshot of the last Whop watch-sync attempt — fed by the diagnostic
+ *  columns on the students row + the masked WHOP_COURSE_ID env var. Read
+ *  by the sync debug panel; updated after every sync run. */
+export interface SyncDiagnostics {
+  lastSyncAt: string | null;
+  fetchedCount: number | null;
+  matchedCount: number | null;
+  unmatchedWhopIds: string[];
+  lastError: string | null;
+  lastErrorAt: string | null;
+  whopUserId: string | null;
+  whopCourseIdMasked: string | null;
+}
+
 interface StudentContextType {
   // Raw data
   regions: Region[];
@@ -81,6 +95,10 @@ interface StudentContextType {
     message: string;
     reAuth?: boolean;
   }>;
+
+  // Sync debug — last sync result + a forced (un-throttled) re-run
+  syncDiagnostics: SyncDiagnostics;
+  forceSync: () => Promise<{ ok: boolean; message?: string }>;
 }
 
 const StudentContext = createContext<StudentContextType | null>(null);
@@ -111,6 +129,16 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [quizAttempts, setQuizAttempts] = useState<StudentQuizAttempt[]>([]);
   const [monthReview, setMonthReview] = useState<MonthReview | null>(null);
   const [loading, setLoading] = useState(true);
+  const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostics>({
+    lastSyncAt: null,
+    fetchedCount: null,
+    matchedCount: null,
+    unmatchedWhopIds: [],
+    lastError: null,
+    lastErrorAt: null,
+    whopUserId: null,
+    whopCourseIdMasked: null,
+  });
 
   useEffect(() => {
     if (!student) return;
@@ -163,6 +191,16 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         }
         setQuizQuestions(qMap);
         setMonthReview(data.monthReview ?? null);
+        setSyncDiagnostics({
+          lastSyncAt: data.student?.last_watch_sync_at ?? null,
+          fetchedCount: data.student?.whop_last_sync_fetched_count ?? null,
+          matchedCount: data.student?.whop_last_sync_matched_count ?? null,
+          unmatchedWhopIds: data.student?.whop_last_sync_unmatched ?? [],
+          lastError: data.student?.whop_last_sync_error ?? null,
+          lastErrorAt: data.student?.whop_last_sync_error_at ?? null,
+          whopUserId: data.student?.whop_user_id ?? null,
+          whopCourseIdMasked: data.whopCourseIdMasked ?? null,
+        });
       } catch (err) {
         console.error("Failed to fetch student data:", err);
       }
@@ -171,6 +209,27 @@ export function StudentProvider({ children }: { children: ReactNode }) {
 
     fetchData();
   }, [student]);
+
+  // Pull /api/student/data and refresh both completions + sync diagnostics.
+  // Used after every sync (silent or forced) so the debug panel stays live.
+  const refreshFromServer = useCallback(async (token: string) => {
+    const dataRes = await fetch("/api/student/data", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!dataRes.ok) return;
+    const fresh = await dataRes.json();
+    setCompletions(fresh.completions ?? []);
+    setSyncDiagnostics({
+      lastSyncAt: fresh.student?.last_watch_sync_at ?? null,
+      fetchedCount: fresh.student?.whop_last_sync_fetched_count ?? null,
+      matchedCount: fresh.student?.whop_last_sync_matched_count ?? null,
+      unmatchedWhopIds: fresh.student?.whop_last_sync_unmatched ?? [],
+      lastError: fresh.student?.whop_last_sync_error ?? null,
+      lastErrorAt: fresh.student?.whop_last_sync_error_at ?? null,
+      whopUserId: fresh.student?.whop_user_id ?? null,
+      whopCourseIdMasked: fresh.whopCourseIdMasked ?? null,
+    });
+  }, []);
 
   // Auto-sync Whop progress. Silent — no button, no flash.
   //   - Once on mount (first load after login)
@@ -191,18 +250,42 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
-
-      const dataRes = await fetch("/api/student/data", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (dataRes.ok) {
-        const fresh = await dataRes.json();
-        setCompletions(fresh.completions);
-      }
+      await refreshFromServer(token);
     } catch {
       // silent — errors are persisted server-side for admin review
     }
-  }, []);
+  }, [refreshFromServer]);
+
+  // Forced sync — no throttle, returns the result so the debug panel can
+  // display ok/error inline. Used by the "Run sync now" button.
+  const forceSync = useCallback(async (): Promise<{
+    ok: boolean;
+    message?: string;
+  }> => {
+    lastSyncAtRef.current = Date.now(); // also reset throttle
+    const token = await getAccessToken();
+    if (!token) return { ok: false, message: "Session expired" };
+    try {
+      const res = await fetch("/api/student/refresh-watch-sync", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json().catch(() => null);
+      // Always re-read the student row so the panel reflects the latest
+      // diagnostic columns even when the sync itself errored.
+      await refreshFromServer(token);
+      if (!res.ok) {
+        return {
+          ok: false,
+          message: json?.error ?? `Sync failed (HTTP ${res.status})`,
+        };
+      }
+      return { ok: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, message };
+    }
+  }, [refreshFromServer]);
 
   // One-shot mount sync
   const hasAutoSyncedRef = useRef(false);
@@ -571,6 +654,8 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         submitQuiz,
         requestDiscount,
         refreshWatchProgress,
+        syncDiagnostics,
+        forceSync,
       }}
     >
       {children}

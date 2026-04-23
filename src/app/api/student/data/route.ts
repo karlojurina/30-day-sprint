@@ -80,6 +80,15 @@ export async function GET(request: NextRequest) {
       .single(),
   ]);
 
+  // Masked course ID for the sync debug panel — enough to verify in the
+  // UI that the right env var is wired without leaking the full ID.
+  const rawCourseId = process.env.WHOP_COURSE_ID ?? "";
+  const courseIdMasked = rawCourseId
+    ? rawCourseId.length > 12
+      ? `${rawCourseId.slice(0, 8)}…${rawCourseId.slice(-4)}`
+      : rawCourseId
+    : null;
+
   return NextResponse.json({
     student,
     regions: regionsRes.data ?? [],
@@ -92,5 +101,6 @@ export async function GET(request: NextRequest) {
     quizQuestions: quizQuestionsRes.data ?? [],
     quizAttempts: quizAttemptsRes.data ?? [],
     monthReview: monthReviewRes.data ?? null,
+    whopCourseIdMasked: courseIdMasked,
   });
 }

@@ -22,19 +22,54 @@ function verifyWebhookSignature(
 
 export async function POST(request: NextRequest) {
   const body = await request.text();
-  const signature = request.headers.get("x-whop-signature");
 
-  // Prefix everything from this handler so Vercel logs are easy to filter.
+  // Dump every header so we can see what Whop actually sends. Common
+  // possibilities for the signature: x-whop-signature, whop-signature,
+  // x-signature, x-whop-signature-v2. Whop may also send the signature
+  // prefixed with "sha256=" or combined with a timestamp.
+  const allHeaders: Record<string, string> = {};
+  request.headers.forEach((value, key) => {
+    allHeaders[key] = value;
+  });
   console.info(
-    `[whop-webhook] received body=${body.length}B sig=${signature ? "present" : "MISSING"}`
+    `[whop-webhook] received body=${body.length}B headers=${JSON.stringify(allHeaders)}`
   );
 
-  // Verify webhook signature
-  if (!verifyWebhookSignature(body, signature)) {
+  // Try every plausible signature header name. Keep going through the
+  // code path even if none are found, so we can see in logs what
+  // event Whop sent and what payload shape arrived — much better debug
+  // signal than a silent 401.
+  const signature =
+    request.headers.get("x-whop-signature") ||
+    request.headers.get("whop-signature") ||
+    request.headers.get("x-signature") ||
+    request.headers.get("x-whop-signature-v2");
+
+  const signatureOk = verifyWebhookSignature(body, signature);
+  if (!signatureOk) {
     console.warn(
-      `[whop-webhook] signature mismatch — rejecting. ` +
-        `secret_set=${!!process.env.WHOP_WEBHOOK_SECRET}`
+      `[whop-webhook] signature check FAILED (sig=${signature ? "present but mismatch" : "header not found"} secret_set=${!!process.env.WHOP_WEBHOOK_SECRET}).`
     );
+
+    // Diagnostic mode: log the event + payload so we can see what Whop
+    // actually sends, then bail WITHOUT processing. This is gated by an
+    // env var so it can't be left on in prod by accident. To use:
+    //   1. Set WHOP_WEBHOOK_DIAGNOSTIC=1 on Vercel
+    //   2. Watch a lesson on Whop to trigger a webhook delivery
+    //   3. Read the Vercel logs to see the event name / payload shape
+    //   4. Fix the signature header or event handling based on what you saw
+    //   5. Unset WHOP_WEBHOOK_DIAGNOSTIC (or set to anything not "1")
+    if (process.env.WHOP_WEBHOOK_DIAGNOSTIC === "1") {
+      try {
+        const parsed = JSON.parse(body);
+        console.info(
+          `[whop-webhook] DIAGNOSTIC payload: ${JSON.stringify(parsed).slice(0, 1000)}`
+        );
+      } catch {
+        console.info(`[whop-webhook] DIAGNOSTIC body not JSON: ${body.slice(0, 400)}`);
+      }
+    }
+
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 

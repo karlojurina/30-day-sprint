@@ -7,69 +7,94 @@ import type {
 } from "@/types/whop";
 import { createHmac } from "crypto";
 
+/**
+ * Verify a Whop webhook using the Standard Webhooks / Svix signature
+ * scheme (https://www.standardwebhooks.com/).
+ *
+ * Required headers on the request:
+ *   webhook-id         — unique message id (e.g. msg_xxx)
+ *   webhook-timestamp  — UNIX seconds when Whop sent it
+ *   webhook-signature  — one or more space-separated values of the form
+ *                        "v1,<base64-of-hmac-sha256>"
+ *
+ * Content that gets signed:
+ *   `${webhook-id}.${webhook-timestamp}.${raw-request-body}`
+ *
+ * Secret handling: Whop's dashboard shows secrets like "ws_xxxxxxxx";
+ * the underlying Standard Webhooks secret is base64-encoded random
+ * bytes. We try both interpretations (decoded bytes + raw string) so
+ * that whichever format the user pasted into WHOP_WEBHOOK_SECRET
+ * works without more config.
+ */
 function verifyWebhookSignature(
   body: string,
-  signature: string | null
+  webhookId: string | null,
+  webhookTimestamp: string | null,
+  webhookSignature: string | null
 ): boolean {
-  if (!signature || !process.env.WHOP_WEBHOOK_SECRET) return false;
+  const secret = process.env.WHOP_WEBHOOK_SECRET;
+  if (!secret || !webhookId || !webhookTimestamp || !webhookSignature) {
+    return false;
+  }
 
-  const expected = createHmac("sha256", process.env.WHOP_WEBHOOK_SECRET)
-    .update(body)
-    .digest("hex");
+  const signedContent = `${webhookId}.${webhookTimestamp}.${body}`;
 
-  return signature === expected;
+  // Whop's secret on the dashboard starts with "ws_". Some providers use
+  // "whsec_" instead. Either way, the part after the prefix is the
+  // base64-encoded raw key bytes. We also try the whole string as a
+  // plain utf-8 HMAC key in case Whop's format differs from Svix's.
+  const withoutPrefix = secret.replace(/^ws_/, "").replace(/^whsec_/, "");
+
+  let decodedBytes: Buffer | null = null;
+  try {
+    decodedBytes = Buffer.from(withoutPrefix, "base64");
+  } catch {
+    decodedBytes = null;
+  }
+
+  const candidateKeys: Buffer[] = [];
+  if (decodedBytes && decodedBytes.length > 0) {
+    candidateKeys.push(decodedBytes);
+  }
+  candidateKeys.push(Buffer.from(withoutPrefix, "utf8"));
+  candidateKeys.push(Buffer.from(secret, "utf8"));
+
+  // Signature header may contain multiple signatures separated by spaces
+  // (Standard Webhooks allows key rotation by emitting v1,<old> v1,<new>).
+  const incoming = webhookSignature
+    .split(" ")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  for (const key of candidateKeys) {
+    const expected =
+      "v1," + createHmac("sha256", key).update(signedContent).digest("base64");
+    if (incoming.includes(expected)) return true;
+  }
+  return false;
 }
 
 export async function POST(request: NextRequest) {
   const body = await request.text();
 
-  // Dump every header so we can see what Whop actually sends. Common
-  // possibilities for the signature: x-whop-signature, whop-signature,
-  // x-signature, x-whop-signature-v2. Whop may also send the signature
-  // prefixed with "sha256=" or combined with a timestamp.
-  const allHeaders: Record<string, string> = {};
-  request.headers.forEach((value, key) => {
-    allHeaders[key] = value;
-  });
+  const webhookId = request.headers.get("webhook-id");
+  const webhookTimestamp = request.headers.get("webhook-timestamp");
+  const webhookSignature = request.headers.get("webhook-signature");
+
   console.info(
-    `[whop-webhook] received body=${body.length}B headers=${JSON.stringify(allHeaders)}`
+    `[whop-webhook] received body=${body.length}B id=${webhookId ?? "missing"} ts=${webhookTimestamp ?? "missing"} sig=${webhookSignature ? "present" : "missing"}`
   );
 
-  // Try every plausible signature header name. Keep going through the
-  // code path even if none are found, so we can see in logs what
-  // event Whop sent and what payload shape arrived — much better debug
-  // signal than a silent 401.
-  const signature =
-    request.headers.get("x-whop-signature") ||
-    request.headers.get("whop-signature") ||
-    request.headers.get("x-signature") ||
-    request.headers.get("x-whop-signature-v2");
-
-  const signatureOk = verifyWebhookSignature(body, signature);
+  const signatureOk = verifyWebhookSignature(
+    body,
+    webhookId,
+    webhookTimestamp,
+    webhookSignature
+  );
   if (!signatureOk) {
     console.warn(
-      `[whop-webhook] signature check FAILED (sig=${signature ? "present but mismatch" : "header not found"} secret_set=${!!process.env.WHOP_WEBHOOK_SECRET}).`
+      `[whop-webhook] signature check FAILED. secret_set=${!!process.env.WHOP_WEBHOOK_SECRET} id=${webhookId} ts=${webhookTimestamp}`
     );
-
-    // Diagnostic mode: log the event + payload so we can see what Whop
-    // actually sends, then bail WITHOUT processing. This is gated by an
-    // env var so it can't be left on in prod by accident. To use:
-    //   1. Set WHOP_WEBHOOK_DIAGNOSTIC=1 on Vercel
-    //   2. Watch a lesson on Whop to trigger a webhook delivery
-    //   3. Read the Vercel logs to see the event name / payload shape
-    //   4. Fix the signature header or event handling based on what you saw
-    //   5. Unset WHOP_WEBHOOK_DIAGNOSTIC (or set to anything not "1")
-    if (process.env.WHOP_WEBHOOK_DIAGNOSTIC === "1") {
-      try {
-        const parsed = JSON.parse(body);
-        console.info(
-          `[whop-webhook] DIAGNOSTIC payload: ${JSON.stringify(parsed).slice(0, 1000)}`
-        );
-      } catch {
-        console.info(`[whop-webhook] DIAGNOSTIC body not JSON: ${body.slice(0, 400)}`);
-      }
-    }
-
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
@@ -81,20 +106,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  // Whop's actual payloads use the field `type` (not `event`) to name
+  // the event, and the value uses dots (e.g. `course_lesson_interaction.completed`).
+  // Read both fields so we're robust to either format.
+  const eventName =
+    (payload as { type?: string }).type ??
+    (payload as { event?: string }).event ??
+    "";
+
   console.info(
-    `[whop-webhook] event=${(payload as { event?: unknown }).event} data_keys=${Object.keys(
+    `[whop-webhook] eventName=${eventName} data_keys=${Object.keys(
       (payload as { data?: Record<string, unknown> }).data ?? {}
     ).join(",")}`
   );
 
   const supabase = createServiceClient();
 
-  // Whop's dashboard displays event names with underscores
-  // (e.g. `membership_activated`, `course_lesson_interaction_completed`)
-  // and that's also what they put in the payload's `event` field. The
-  // dot-separated form seen in older docs is not what's delivered. Match
-  // both forms to be safe against future changes.
-  switch (payload.event) {
+  switch (eventName) {
     case "membership.activated":
     case "membership_activated":
     case "membership.went_valid":
@@ -226,11 +254,8 @@ export async function POST(request: NextRequest) {
 
     default:
       // Unknown event name — log it so we notice if Whop adds or renames
-      // event types without us updating this switch. Event names have
-      // already bitten us once (dot-vs-underscore format).
-      console.info(
-        `[whop-webhook] unhandled event: ${(payload as { event?: unknown }).event}`
-      );
+      // event types without us updating this switch.
+      console.info(`[whop-webhook] unhandled event: ${eventName}`);
       break;
   }
 

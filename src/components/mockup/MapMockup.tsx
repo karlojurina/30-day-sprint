@@ -119,62 +119,106 @@ interface Scene {
   image: string;
   waypoints: { x: number; y: number }[];
 }
+// Waypoints traced in the picker (2026-04-23). Last waypoint in each
+// scene is reserved as the END MARKER (next-region / discount /
+// celebration) — see SCENE_END_MARKERS below.
 const SCENES: Partial<Record<RegionId, Scene>> = {
   r1: {
     image: "/regions/first_location.png",
     waypoints: [
-      { x: 200,  y: 1250 }, // dock tip (bottom-left)
-      { x: 460,  y: 1110 }, // along dock planks
-      { x: 760,  y: 980  }, // dock base / onto land
-      { x: 1100, y: 940  }, // signpost
-      { x: 1500, y: 920  }, // crossing grass
-      { x: 1800, y: 890  }, // near cairn
-      { x: 2100, y: 830  }, // climbing toward forest
-      { x: 2350, y: 700  }, // approach forest
-      { x: 2600, y: 560  }, // forest edge
-      { x: 2850, y: 380  }, // into the trees
-      { x: 3020, y: 230  }, // deep in forest (end)
+      { x: 433, y: 1102 }, { x: 504, y: 1086 }, { x: 576, y: 1070 },
+      { x: 641, y: 1055 }, { x: 702, y: 1041 }, { x: 775, y: 1028 },
+      { x: 843, y: 1013 }, { x: 910, y: 994 },  { x: 963, y: 984 },
+      { x: 1013, y: 974 },{ x: 1057, y: 968 }, { x: 1097, y: 953 },
+      { x: 1153, y: 940 },{ x: 1209, y: 919 }, { x: 1262, y: 905 },
+      { x: 1311, y: 898 },{ x: 1363, y: 886 }, { x: 1400, y: 877 },
+      { x: 1443, y: 866 },{ x: 1495, y: 844 }, { x: 1557, y: 839 },
+      { x: 1618, y: 816 },{ x: 1653, y: 803 }, { x: 1674, y: 794 },
+      { x: 1705, y: 785 },{ x: 1734, y: 779 }, { x: 1763, y: 777 },
+      { x: 1779, y: 776 },{ x: 1802, y: 772 }, { x: 1836, y: 769 },
+      { x: 1905, y: 769 },{ x: 1987, y: 768 }, { x: 2077, y: 764 },
+      { x: 2164, y: 757 },{ x: 2246, y: 747 }, { x: 2333, y: 734 },
+      { x: 2407, y: 714 },{ x: 2465, y: 699 }, { x: 2527, y: 664 },
+      { x: 2580, y: 626 },{ x: 2609, y: 587 }, { x: 2613, y: 555 },
+      { x: 2607, y: 530 },{ x: 2573, y: 513 }, { x: 2536, y: 490 },
+      { x: 2500, y: 473 },{ x: 2485, y: 452 }, { x: 2489, y: 429 },
+      { x: 2518, y: 418 },
     ],
   },
   r2: {
     image: "/regions/second_location.png",
-    // Placeholder diagonal — replace with traced waypoints from the picker.
     waypoints: [
-      { x: 200,  y: 1200 },
-      { x: 800,  y: 1000 },
-      { x: 1600, y: 800  },
-      { x: 2400, y: 500  },
-      { x: 3000, y: 250  },
+      { x: 791, y: 1354 }, { x: 868, y: 1294 }, { x: 929, y: 1253 },
+      { x: 989, y: 1211 }, { x: 1060, y: 1183 },{ x: 1164, y: 1136 },
+      { x: 1264, y: 1110 },{ x: 1315, y: 1098 },{ x: 1405, y: 1082 },
+      { x: 1442, y: 1078 },{ x: 1484, y: 1075 },{ x: 1533, y: 1067 },
+      { x: 1556, y: 1065 },{ x: 1590, y: 1062 },{ x: 1638, y: 1059 },
+      { x: 1692, y: 1054 },{ x: 1753, y: 1045 },{ x: 1815, y: 1035 },
+      { x: 1868, y: 1026 },{ x: 1918, y: 1013 },{ x: 1972, y: 996 },
+      { x: 2008, y: 971 }, { x: 2021, y: 939 }, { x: 2002, y: 920 },
+      { x: 1961, y: 906 }, { x: 1931, y: 898 }, { x: 1898, y: 890 },
+      { x: 1861, y: 883 }, { x: 1818, y: 877 }, { x: 1791, y: 870 },
+      { x: 1760, y: 859 }, { x: 1744, y: 839 }, { x: 1745, y: 814 },
+      { x: 1761, y: 800 }, { x: 1824, y: 789 }, { x: 1880, y: 789 },
+      { x: 1917, y: 795 }, { x: 2213, y: 790 }, { x: 2275, y: 780 },
+      { x: 2312, y: 757 }, { x: 2331, y: 735 }, { x: 2332, y: 705 },
+      { x: 2313, y: 677 }, { x: 2310, y: 651 }, { x: 2320, y: 625 },
+      { x: 2357, y: 609 }, { x: 2404, y: 593 }, { x: 2436, y: 587 },
     ],
   },
   r3: {
     image: "/regions/third_location.png",
     waypoints: [
-      { x: 160,  y: 1275 }, // trail start (bottom-left)
-      { x: 380,  y: 1150 }, // rocky path
-      { x: 640,  y: 1000 }, // near the cross / cairn
-      { x: 920,  y: 950  }, // approaching bridge
-      { x: 1120, y: 985  }, // onto bridge
-      { x: 1450, y: 1050 }, // bridge dip (middle)
-      { x: 1800, y: 1045 }, // past dip
-      { x: 2030, y: 965  }, // end of bridge
-      { x: 2320, y: 870  }, // switchback begin
-      { x: 2620, y: 720  }, // up the switchback
-      { x: 2870, y: 540  }, // higher ledge
-      { x: 3050, y: 380  }, // near archway (end)
+      { x: 360, y: 1345 }, { x: 385, y: 1296 }, { x: 440, y: 1253 },
+      { x: 495, y: 1233 }, { x: 544, y: 1196 }, { x: 613, y: 1167 },
+      { x: 650, y: 1145 }, { x: 758, y: 1118 }, { x: 814, y: 1097 },
+      { x: 874, y: 1083 }, { x: 937, y: 1087 }, { x: 992, y: 1108 },
+      { x: 1026, y: 1130 },{ x: 1083, y: 1145 },{ x: 1170, y: 1150 },
+      { x: 1259, y: 1163 },{ x: 1370, y: 1151 },{ x: 1426, y: 1149 },
+      { x: 1456, y: 1134 },{ x: 1496, y: 1124 },{ x: 1566, y: 1118 },
+      { x: 1652, y: 1118 },{ x: 1722, y: 1110 },{ x: 1789, y: 1099 },
+      { x: 1844, y: 1084 },{ x: 1901, y: 1065 },{ x: 1944, y: 1045 },
+      { x: 1990, y: 1022 },{ x: 2093, y: 976 }, { x: 2148, y: 995 },
+      { x: 2214, y: 1011 },{ x: 2274, y: 1020 },{ x: 2329, y: 1030 },
+      { x: 2394, y: 1042 },{ x: 2494, y: 1035 },{ x: 2578, y: 1014 },
+      { x: 2658, y: 982 }, { x: 2694, y: 950 }, { x: 2703, y: 915 },
+      { x: 2728, y: 900 }, { x: 2755, y: 897 }, { x: 2806, y: 892 },
+      { x: 2938, y: 880 }, { x: 3043, y: 847 }, { x: 3115, y: 809 },
+      { x: 2977, y: 544 }, { x: 2887, y: 532 }, { x: 2789, y: 521 },
+      { x: 2666, y: 496 }, { x: 2569, y: 471 }, { x: 2489, y: 447 },
     ],
   },
   r4: {
     image: "/regions/fourth_location.png",
-    // Placeholder diagonal — replace with traced waypoints from the picker.
     waypoints: [
-      { x: 200,  y: 1200 },
-      { x: 800,  y: 1000 },
-      { x: 1600, y: 800  },
-      { x: 2400, y: 500  },
-      { x: 3000, y: 250  },
+      { x: 825, y: 1328 }, { x: 885, y: 1239 }, { x: 959, y: 1171 },
+      { x: 1032, y: 1125 },{ x: 1119, y: 1088 },{ x: 1236, y: 1030 },
+      { x: 1329, y: 995 }, { x: 1433, y: 953 }, { x: 1522, y: 919 },
+      { x: 1600, y: 892 }, { x: 1686, y: 864 }, { x: 1771, y: 820 },
+      { x: 1826, y: 781 }, { x: 1855, y: 750 }, { x: 1857, y: 711 },
+      { x: 1832, y: 684 }, { x: 1782, y: 652 }, { x: 1738, y: 627 },
+      { x: 1721, y: 603 }, { x: 1729, y: 574 }, { x: 1774, y: 547 },
+      { x: 1829, y: 525 }, { x: 1904, y: 501 }, { x: 1940, y: 479 },
+      { x: 2021, y: 346 },
     ],
   },
+};
+
+// End-of-region marker that sits on the LAST waypoint of each scene.
+// Click → transitionTo nextView. R4 has no next (final region).
+type EndMarkerKind = "onward" | "discount" | "celebration";
+interface SceneEndMarker {
+  kind: EndMarkerKind;
+  label: string;
+  sublabel: string;
+  /** If set, clicking the marker triggers the cloud transition to this view */
+  nextView?: View;
+}
+const SCENE_END_MARKERS: Record<RegionId, SceneEndMarker> = {
+  r1: { kind: "onward", label: "Onward",  sublabel: "to Creative Lab", nextView: "r2" },
+  r2: { kind: "discount", label: "Claim discount", sublabel: "reward unlocked", nextView: "r3" },
+  r3: { kind: "onward", label: "Onward",  sublabel: "to The Summit",  nextView: "r4" },
+  r4: { kind: "celebration", label: "Expedition complete", sublabel: "well charted" },
 };
 
 // ──────────────────────────────────────────────────────────────
@@ -580,7 +624,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           }}
         />
 
-        {/* Inside a region scene — draw the path + lesson nodes */}
+        {/* Inside a region scene — draw the path + lesson nodes + end marker */}
         {view !== "overview" && SCENES[view] && (
           <ScenePathOverlay
             scene={SCENES[view]!}
@@ -588,6 +632,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
             completedLessonIds={completedLessonIds}
             currentLessonId={currentLesson?.id ?? null}
             onOpenLesson={onOpenLesson}
+            endMarker={SCENE_END_MARKERS[view as RegionId]}
+            onEndMarkerClick={() => {
+              const next = SCENE_END_MARKERS[view as RegionId]?.nextView;
+              if (next) transitionTo(next);
+            }}
           />
         )}
 
@@ -1282,6 +1331,8 @@ interface ScenePathOverlayProps {
   completedLessonIds: Set<string>;
   currentLessonId: string | null;
   onOpenLesson: (id: string) => void;
+  endMarker?: SceneEndMarker;
+  onEndMarkerClick?: () => void;
 }
 
 function ScenePathOverlay({
@@ -1290,33 +1341,28 @@ function ScenePathOverlay({
   completedLessonIds,
   currentLessonId,
   onOpenLesson,
+  endMarker,
+  onEndMarkerClick,
 }: ScenePathOverlayProps) {
-  const pathRef = useRef<SVGPathElement>(null);
-  const [nodePositions, setNodePositions] = useState<
-    { x: number; y: number }[]
-  >([]);
   const pathD = useMemo(() => buildSmoothPath(scene.waypoints), [scene]);
 
-  // Lay lessons out at even arc-length increments along the path.
-  // This is a legitimate DOM-measure pattern: we need the rendered path element
-  // to compute getPointAtLength. The extra render is intentional and bounded.
-  // eslint-disable-next-line react-hooks/react-compiler
-  useEffect(() => {
-    const el = pathRef.current;
-    if (!el || lessons.length === 0) {
-      setNodePositions([]);
-      return;
-    }
-    const total = el.getTotalLength();
-    const edgeInset = Math.min(40, total * 0.04);
-    const usable = total - edgeInset * 2;
-    const positions = lessons.map((_, i) => {
-      const t = lessons.length === 1 ? 0.5 : i / (lessons.length - 1);
-      const pt = el.getPointAtLength(edgeInset + usable * t);
-      return { x: pt.x, y: pt.y };
+  // The LAST waypoint is reserved for the end marker (next-region /
+  // discount / celebration). Lessons can sit on any of the remaining
+  // waypoints; we pick N of them by index, evenly distributed.
+  const lessonPositions = useMemo(() => {
+    const usable = scene.waypoints.slice(0, -1);
+    const N = lessons.length;
+    if (N === 0 || usable.length === 0) return [];
+    return lessons.map((_, i) => {
+      const idx =
+        N === 1
+          ? Math.floor(usable.length / 2)
+          : Math.round((i * (usable.length - 1)) / (N - 1));
+      return usable[idx];
     });
-    setNodePositions(positions);
-  }, [lessons, pathD]);
+  }, [scene, lessons]);
+
+  const lastWaypoint = scene.waypoints[scene.waypoints.length - 1];
 
   return (
     <svg
@@ -1346,9 +1392,8 @@ function ScenePathOverlay({
         strokeLinejoin="round"
         filter="url(#path-shadow)"
       />
-      {/* Dashed gold trail — visible path */}
+      {/* Dashed gold trail */}
       <path
-        ref={pathRef}
         d={pathD}
         fill="none"
         stroke={GOLD}
@@ -1359,10 +1404,10 @@ function ScenePathOverlay({
         opacity={0.85}
       />
 
-      {/* Lesson nodes */}
-      {nodePositions.map((pos, i) => {
+      {/* Lesson nodes (skipping the last waypoint) */}
+      {lessonPositions.map((pos, i) => {
         const lesson = lessons[i];
-        if (!lesson) return null;
+        if (!lesson || !pos) return null;
         const isDone = completedLessonIds.has(lesson.id);
         const isCurrent = lesson.id === currentLessonId;
         const isAction = isActionItem(lesson);
@@ -1382,6 +1427,16 @@ function ScenePathOverlay({
           />
         );
       })}
+
+      {/* End marker on the last waypoint */}
+      {endMarker && lastWaypoint && (
+        <EndMarker
+          x={lastWaypoint.x}
+          y={lastWaypoint.y}
+          marker={endMarker}
+          onClick={onEndMarkerClick}
+        />
+      )}
     </svg>
   );
 }
@@ -1546,6 +1601,150 @@ function LessonMarker({
           </text>
         </g>
       )}
+    </g>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
+// End-of-region marker — sits on the last waypoint of a scene's path.
+// Three visual variants:
+//   onward      — gold "Onward →" plaque (advances to next region)
+//   discount    — teal/gold percent badge (R2: claim discount)
+//   celebration — gold trophy/wreath (R4: expedition complete)
+// ──────────────────────────────────────────────────────────
+
+function EndMarker({
+  x,
+  y,
+  marker,
+  onClick,
+}: {
+  x: number;
+  y: number;
+  marker: SceneEndMarker;
+  onClick?: () => void;
+}) {
+  const [hot, setHot] = useState(false);
+  const isClickable = !!onClick;
+  const accent =
+    marker.kind === "discount"
+      ? "#4DCEC4"
+      : marker.kind === "celebration"
+        ? GOLD_HI
+        : GOLD;
+
+  return (
+    <g
+      transform={`translate(${x} ${y})`}
+      style={{
+        cursor: isClickable ? "pointer" : "default",
+        pointerEvents: "auto",
+      }}
+      onClick={onClick}
+      onMouseEnter={() => setHot(true)}
+      onMouseLeave={() => setHot(false)}
+      onKeyDown={(e) => {
+        if (!isClickable) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick?.();
+        }
+      }}
+      tabIndex={isClickable ? 0 : -1}
+      role={isClickable ? "button" : undefined}
+      aria-label={`${marker.label} — ${marker.sublabel}`}
+    >
+      {/* Pulsing aura */}
+      <circle r={42} fill={accent} opacity={0.18}>
+        <animate
+          attributeName="r"
+          values="38;52;38"
+          dur="2.6s"
+          repeatCount="indefinite"
+        />
+        <animate
+          attributeName="opacity"
+          values="0.1;0.28;0.1"
+          dur="2.6s"
+          repeatCount="indefinite"
+        />
+      </circle>
+
+      {/* Outer ring brightens on hover */}
+      <circle
+        r={36}
+        fill="rgba(6,12,26,0.92)"
+        stroke={accent}
+        strokeWidth={hot ? 3.5 : 2.5}
+        style={{ transition: "stroke-width 0.2s" }}
+      />
+
+      {/* Inner glyph */}
+      {marker.kind === "onward" && (
+        <path
+          d="M -10 -8 L 8 0 L -10 8 L -6 0 Z"
+          fill={accent}
+          stroke="none"
+        />
+      )}
+      {marker.kind === "discount" && (
+        <g>
+          {/* Percent symbol */}
+          <circle cx={-7} cy={-7} r={4} fill="none" stroke={accent} strokeWidth={2.5} />
+          <circle cx={7} cy={7} r={4} fill="none" stroke={accent} strokeWidth={2.5} />
+          <line x1={-12} y1={12} x2={12} y2={-12} stroke={accent} strokeWidth={2.5} strokeLinecap="round" />
+        </g>
+      )}
+      {marker.kind === "celebration" && (
+        <g>
+          {/* Stylized trophy */}
+          <path
+            d="M -8 -10 L 8 -10 L 7 4 Q 7 8 0 8 Q -7 8 -7 4 Z"
+            fill={accent}
+            stroke="none"
+          />
+          <line x1={-3} y1={8} x2={3} y2={8} stroke={accent} strokeWidth={3} strokeLinecap="round" />
+          <line x1={-5} y1={11} x2={5} y2={11} stroke={accent} strokeWidth={3} strokeLinecap="round" />
+        </g>
+      )}
+
+      {/* Label below marker */}
+      <g transform="translate(0 60)" pointerEvents="none">
+        <text
+          textAnchor="middle"
+          y={0}
+          style={{
+            fontFamily: "Cormorant Garamond, serif",
+            fontStyle: "italic",
+            fontWeight: 600,
+            fontSize: 26,
+            fill: INK,
+            paintOrder: "stroke fill",
+            stroke: "rgba(6,12,26,0.85)",
+            strokeWidth: 4,
+            strokeLinejoin: "round",
+          }}
+        >
+          {marker.label}
+        </text>
+        <text
+          textAnchor="middle"
+          y={22}
+          style={{
+            fontFamily: "JetBrains Mono, ui-monospace, monospace",
+            fontSize: 11,
+            letterSpacing: "0.22em",
+            textTransform: "uppercase",
+            fill: accent,
+            paintOrder: "stroke fill",
+            stroke: "rgba(6,12,26,0.85)",
+            strokeWidth: 3,
+            strokeLinejoin: "round",
+          }}
+        >
+          {marker.sublabel}
+        </text>
+      </g>
     </g>
   );
 }

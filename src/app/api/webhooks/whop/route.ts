@@ -38,9 +38,16 @@ export async function POST(request: NextRequest) {
 
   const supabase = createServiceClient();
 
+  // Whop's dashboard displays event names with underscores
+  // (e.g. `membership_activated`, `course_lesson_interaction_completed`)
+  // and that's also what they put in the payload's `event` field. The
+  // dot-separated form seen in older docs is not what's delivered. Match
+  // both forms to be safe against future changes.
   switch (payload.event) {
     case "membership.activated":
-    case "membership.went_valid": {
+    case "membership_activated":
+    case "membership.went_valid":
+    case "membership_went_valid": {
       const membership = payload.data as WhopMembership;
       const { error } = await supabase.from("students").upsert(
         {
@@ -66,7 +73,9 @@ export async function POST(request: NextRequest) {
     }
 
     case "membership.deactivated":
-    case "membership.went_invalid": {
+    case "membership_deactivated":
+    case "membership.went_invalid":
+    case "membership_went_invalid": {
       const membership = payload.data as WhopMembership;
       const { error } = await supabase
         .from("students")
@@ -79,7 +88,8 @@ export async function POST(request: NextRequest) {
       break;
     }
 
-    case "payment.succeeded": {
+    case "payment.succeeded":
+    case "payment_succeeded": {
       const membership = payload.data as WhopMembership;
       const { error } = await supabase
         .from("students")
@@ -92,7 +102,8 @@ export async function POST(request: NextRequest) {
       break;
     }
 
-    case "course_lesson_interaction.completed": {
+    case "course_lesson_interaction.completed":
+    case "course_lesson_interaction_completed": {
       // Student finished a Whop course lesson — mark the matching lesson
       // complete in our DB. Idempotent via unique(student_id, lesson_id).
       const data = payload.data as WhopLessonInteractionWebhookData;
@@ -144,7 +155,12 @@ export async function POST(request: NextRequest) {
     }
 
     default:
-      // Unknown event, acknowledge anyway
+      // Unknown event name — log it so we notice if Whop adds or renames
+      // event types without us updating this switch. Event names have
+      // already bitten us once (dot-vs-underscore format).
+      console.info(
+        `[whop-webhook] unhandled event: ${(payload as { event?: unknown }).event}`
+      );
       break;
   }
 

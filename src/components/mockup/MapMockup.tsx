@@ -204,6 +204,29 @@ const SCENES: Partial<Record<RegionId, Scene>> = {
   },
 };
 
+// Catmull-Rom → cubic-Bezier smoothed CLOSED path through a vertex list.
+// Used for the region glow shapes so their edges curve between polygon
+// vertices instead of the hard "boxy" segments you get with <polygon>.
+function smoothClosedPath(pts: Array<{ x: number; y: number }>): string {
+  if (pts.length < 3) {
+    return pts.map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`).join(" ") + " Z";
+  }
+  const n = pts.length;
+  let d = `M ${pts[0].x} ${pts[0].y}`;
+  for (let i = 0; i < n; i++) {
+    const pm1 = pts[(i - 1 + n) % n];
+    const p0 = pts[i];
+    const p1 = pts[(i + 1) % n];
+    const p2 = pts[(i + 2) % n];
+    const c1x = p0.x + (p1.x - pm1.x) / 6;
+    const c1y = p0.y + (p1.y - pm1.y) / 6;
+    const c2x = p1.x - (p2.x - p0.x) / 6;
+    const c2y = p1.y - (p2.y - p0.y) / 6;
+    d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p1.x} ${p1.y}`;
+  }
+  return d + " Z";
+}
+
 // Stack of all scene images mounted from the start (all 5: overview +
 // 4 region scenes). Each is an <img> in the DOM with opacity toggled by
 // the current view. Browser decodes them all on mount, so scene swaps
@@ -695,9 +718,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
               const isCurrent = hasCurrent;
               const numeral = ["I", "II", "III", "IV"][r.order_num - 1];
               const stroke = isComplete ? GOLD_HI : GOLD;
-              const pointsStr = z.polygon
-                .map((p) => `${p.x},${p.y}`)
-                .join(" ");
+              const smoothD = smoothClosedPath(z.polygon);
 
               return (
                 <g
@@ -717,20 +738,20 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                   aria-label={`${r.name} — ${completed}/${total} lessons`}
                 >
                   {/* Invisible hit surface — catches clicks over the whole
-                      polygon regardless of any gradient fill transparency.
+                      smoothed shape regardless of gradient transparency.
                       pointer-events="all" works even with fill="none". */}
-                  <polygon
-                    points={pointsStr}
+                  <path
+                    d={smoothD}
                     fill="rgba(0,0,0,0.001)"
                     pointerEvents="all"
                   />
 
-                  {/* Subtle breathing glow — no outline. Animates between
-                      two opacities so the region "pulses" gently, hinting
-                      it's interactive without an ugly stroke. Hot state
-                      brightens it. */}
-                  <polygon
-                    points={pointsStr}
+                  {/* Subtle breathing glow on the smoothed shape — no
+                      outline. Animates between two opacities so the region
+                      "pulses" gently. Curved edges (via Catmull-Rom) kill
+                      the boxy-polygon look. */}
+                  <path
+                    d={smoothD}
                     fill={hot ? "url(#zone-glow-hot)" : "url(#zone-glow)"}
                     pointerEvents="none"
                     style={{
@@ -745,12 +766,12 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         repeatCount="indefinite"
                       />
                     )}
-                  </polygon>
+                  </path>
 
                   {/* Subtle current-region accent (no harsh outline) */}
                   {isCurrent && (
-                    <polygon
-                      points={pointsStr}
+                    <path
+                      d={smoothD}
                       fill={`url(#zone-glow-hot)`}
                       opacity={0.5}
                       pointerEvents="none"
@@ -761,7 +782,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         dur="3.2s"
                         repeatCount="indefinite"
                       />
-                    </polygon>
+                    </path>
                   )}
 
                   {/* Center label — positioned at labelX/labelY in map space */}
@@ -1356,8 +1377,12 @@ function ScenePathOverlay({
     }
     if (total === 0) return usable.slice(0, N);
 
-    // Inset from each end so nothing sits exactly on the endpoints
-    const edgeInset = Math.min(60, total * 0.04);
+    // Inset from each end so nothing sits near the scene's image edges
+    // (which are often cropped by the viewport's aspect ratio) or crowds
+    // the end marker. 10% of total, capped at 200 map-units — enough to
+    // keep the first lesson off the bottom on R2/R3 and the last lesson
+    // clear of the "Onward" marker on R1.
+    const edgeInset = Math.min(200, total * 0.1);
     const usableLen = total - edgeInset * 2;
 
     return lessons.map((_, i) => {

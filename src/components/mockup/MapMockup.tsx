@@ -204,6 +204,18 @@ const SCENES: Partial<Record<RegionId, Scene>> = {
   },
 };
 
+// Stack of all scene images mounted from the start (all 5: overview +
+// 4 region scenes). Each is an <img> in the DOM with opacity toggled by
+// the current view. Browser decodes them all on mount, so scene swaps
+// have no fetch/decode delay.
+const SCENE_IMAGE_STACK: Array<{ id: View; src: string }> = [
+  { id: "overview", src: "/regions/main_image.png" },
+  { id: "r1",       src: "/regions/first_location.png" },
+  { id: "r2",       src: "/regions/second_location.png" },
+  { id: "r3",       src: "/regions/third_location.png" },
+  { id: "r4",       src: "/regions/fourth_location.png" },
+];
+
 // End-of-region marker that sits on the LAST waypoint of each scene.
 // Click → transitionTo nextView. R4 has no next (final region).
 type EndMarkerKind = "onward" | "discount" | "celebration";
@@ -308,16 +320,9 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     setView("overview");
   }, [outerSize.w]);
 
-  // Preload scene images so the cloud-transition scene swap is instant.
-  // Without this, clicking a region fires the cloud animation, but the new
-  // 37 MB scene image is still downloading when the clouds retreat — so the
-  // user sees stale main_image underneath (looks like "fog on the region").
-  useEffect(() => {
-    (Object.values(SCENES) as Scene[]).forEach((scene) => {
-      const img = new window.Image();
-      img.src = scene.image;
-    });
-  }, []);
+  // (Image preload no longer needed — see SCENE_IMAGE_STACK rendering
+  // below. All scenes are mounted as <img> elements from first paint, so
+  // they're decoded by the time the user clicks a region.)
 
   // Compute target transform for a given view
   const getTargetTransform = (v: View) => {
@@ -606,23 +611,31 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           willChange: "transform",
         }}
       >
-        {/* Scene image — swaps based on current view. Overview shows the full
-            panorama; per-region scenes (R1, R3…) replace it with their own
-            painted location. Regions without a scene fall back to panorama. */}
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            backgroundImage: `url("${
-              view !== "overview" && SCENES[view]
-                ? SCENES[view]!.image
-                : "/regions/main_image.png"
-            }")`,
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-            backgroundRepeat: "no-repeat",
-          }}
-        />
+        {/* Scene images — all 5 mounted from the start as <img> elements,
+            stacked, only the active one at opacity 1. The browser fetches AND
+            decodes each one on initial mount, so scene swap is a pure opacity
+            toggle (no fetch, no decode latency). Costs ~5× memory but kills
+            the 1-2s lag the user was seeing on first scene entry. */}
+        {SCENE_IMAGE_STACK.map(({ id, src }) => (
+          <img
+            key={id}
+            src={src}
+            alt=""
+            decoding="async"
+            draggable={false}
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              objectPosition: "center",
+              opacity: view === id ? 1 : 0,
+              pointerEvents: "none",
+              userSelect: "none",
+            }}
+          />
+        ))}
 
         {/* Inside a region scene — draw the path + lesson nodes + end marker */}
         {view !== "overview" && SCENES[view] && (
@@ -712,7 +725,10 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                     pointerEvents="all"
                   />
 
-                  {/* Glow fill — no pointer events; hit surface handles those */}
+                  {/* Subtle breathing glow — no outline. Animates between
+                      two opacities so the region "pulses" gently, hinting
+                      it's interactive without an ugly stroke. Hot state
+                      brightens it. */}
                   <polygon
                     points={pointsStr}
                     fill={hot ? "url(#zone-glow-hot)" : "url(#zone-glow)"}
@@ -720,36 +736,28 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                     style={{
                       transition: "opacity 0.4s cubic-bezier(0.22,1,0.36,1)",
                     }}
-                  />
+                  >
+                    {!hot && (
+                      <animate
+                        attributeName="opacity"
+                        values="0.55;1;0.55"
+                        dur="4.5s"
+                        repeatCount="indefinite"
+                      />
+                    )}
+                  </polygon>
 
-                  {/* Dashed outline — visible border */}
-                  <polygon
-                    points={pointsStr}
-                    fill="none"
-                    stroke={stroke}
-                    strokeWidth={hot ? 3 : 2}
-                    strokeDasharray={isComplete ? "" : "14 8"}
-                    strokeLinejoin="round"
-                    opacity={hot ? 0.9 : 0.6}
-                    pointerEvents="none"
-                    style={{
-                      transition: "opacity 0.4s, stroke-width 0.4s",
-                    }}
-                  />
-
-                  {/* Pulsing ring on the student's current region */}
+                  {/* Subtle current-region accent (no harsh outline) */}
                   {isCurrent && (
                     <polygon
                       points={pointsStr}
-                      fill="none"
-                      stroke={GOLD_HI}
-                      strokeWidth={2.5}
+                      fill={`url(#zone-glow-hot)`}
                       opacity={0.5}
                       pointerEvents="none"
                     >
                       <animate
                         attributeName="opacity"
-                        values="0.2;0.65;0.2"
+                        values="0.25;0.6;0.25"
                         dur="3.2s"
                         repeatCount="indefinite"
                       />
@@ -1302,28 +1310,9 @@ function RegionSidePanel({
 }
 
 // ──────────────────────────────────────────────────────────────
-// Scene path overlay — draws the red-line path as a dashed gold trail
-// inside a region scene, and places lesson nodes evenly along it.
+// Scene overlay — positions lesson nodes along waypoints (no visible
+// path line per user request) plus an end-of-region marker.
 // ──────────────────────────────────────────────────────────────
-
-function buildSmoothPath(pts: { x: number; y: number }[]): string {
-  if (pts.length === 0) return "";
-  if (pts.length === 1) return `M ${pts[0].x} ${pts[0].y}`;
-  let d = `M ${pts[0].x} ${pts[0].y}`;
-  for (let i = 1; i < pts.length; i++) {
-    const p0 = pts[i - 1];
-    const p1 = pts[i];
-    const pm1 = pts[i - 2] ?? p0;
-    const p2 = pts[i + 1] ?? p1;
-    // Catmull-Rom → cubic Bezier control points (tension = 0.5)
-    const c1x = p0.x + (p1.x - pm1.x) / 6;
-    const c1y = p0.y + (p1.y - pm1.y) / 6;
-    const c2x = p1.x - (p2.x - p0.x) / 6;
-    const c2y = p1.y - (p2.y - p0.y) / 6;
-    d += ` C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p1.x} ${p1.y}`;
-  }
-  return d;
-}
 
 interface ScenePathOverlayProps {
   scene: Scene;
@@ -1344,21 +1333,48 @@ function ScenePathOverlay({
   endMarker,
   onEndMarkerClick,
 }: ScenePathOverlayProps) {
-  const pathD = useMemo(() => buildSmoothPath(scene.waypoints), [scene]);
-
-  // The LAST waypoint is reserved for the end marker (next-region /
-  // discount / celebration). Lessons can sit on any of the remaining
-  // waypoints; we pick N of them by index, evenly distributed.
+  // Lesson positions are distributed by ARC LENGTH along the waypoint
+  // polyline (excluding the last waypoint, reserved for the end marker).
+  // Index-based distribution caused overlaps where the user clicked many
+  // points near turns; arc-length spacing guarantees even visual spacing
+  // regardless of waypoint density.
   const lessonPositions = useMemo(() => {
     const usable = scene.waypoints.slice(0, -1);
     const N = lessons.length;
     if (N === 0 || usable.length === 0) return [];
+    if (usable.length === 1) return Array(N).fill(usable[0]);
+
+    // Cumulative distance along the polyline
+    const cum: number[] = [0];
+    let total = 0;
+    for (let i = 1; i < usable.length; i++) {
+      total += Math.hypot(
+        usable[i].x - usable[i - 1].x,
+        usable[i].y - usable[i - 1].y
+      );
+      cum.push(total);
+    }
+    if (total === 0) return usable.slice(0, N);
+
+    // Inset from each end so nothing sits exactly on the endpoints
+    const edgeInset = Math.min(60, total * 0.04);
+    const usableLen = total - edgeInset * 2;
+
     return lessons.map((_, i) => {
-      const idx =
-        N === 1
-          ? Math.floor(usable.length / 2)
-          : Math.round((i * (usable.length - 1)) / (N - 1));
-      return usable[idx];
+      const t = N === 1 ? 0.5 : i / (N - 1);
+      const target = edgeInset + usableLen * t;
+      // Find the segment containing `target` via linear scan
+      let seg = 0;
+      while (seg < cum.length - 1 && cum[seg + 1] < target) seg++;
+      const segStart = cum[seg];
+      const segEnd = cum[seg + 1] ?? total;
+      const segT = segEnd === segStart ? 0 : (target - segStart) / (segEnd - segStart);
+      const p0 = usable[seg];
+      const p1 = usable[seg + 1] ?? p0;
+      return {
+        x: p0.x + (p1.x - p0.x) * segT,
+        y: p0.y + (p1.y - p0.y) * segT,
+      };
     });
   }, [scene, lessons]);
 
@@ -1376,35 +1392,11 @@ function ScenePathOverlay({
         pointerEvents: "none",
       }}
     >
-      <defs>
-        <filter id="path-shadow" x="-10%" y="-10%" width="120%" height="120%">
-          <feGaussianBlur stdDeviation="3" />
-        </filter>
-      </defs>
+      {/* No path line — just the lesson nodes sitting on the painted trail */}
 
-      {/* Dark underlay — lifts the gold path off the painted scene */}
-      <path
-        d={pathD}
-        fill="none"
-        stroke="rgba(6,12,26,0.55)"
-        strokeWidth={14}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        filter="url(#path-shadow)"
-      />
-      {/* Dashed gold trail */}
-      <path
-        d={pathD}
-        fill="none"
-        stroke={GOLD}
-        strokeWidth={4}
-        strokeDasharray="14 10"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        opacity={0.85}
-      />
-
-      {/* Lesson nodes (skipping the last waypoint) */}
+      {/* Lesson nodes (skipping the last waypoint). Node size scales with
+          y: lessons further up the scene (smaller y, "further away") render
+          smaller to suggest depth. */}
       {lessonPositions.map((pos, i) => {
         const lesson = lessons[i];
         if (!lesson || !pos) return null;
@@ -1413,6 +1405,7 @@ function ScenePathOverlay({
         const isAction = isActionItem(lesson);
         const displayTitle =
           MOCKUP_TITLE_OVERRIDES[lesson.id] ?? lesson.title;
+        const size = perspectiveSize(pos.y);
         return (
           <LessonMarker
             key={lesson.id}
@@ -1423,6 +1416,7 @@ function ScenePathOverlay({
             isCurrent={isCurrent}
             isAction={isAction}
             title={displayTitle}
+            size={size}
             onClick={() => onOpenLesson(lesson.id)}
           />
         );
@@ -1441,6 +1435,16 @@ function ScenePathOverlay({
   );
 }
 
+// Perspective scaling — nodes higher in the scene (smaller y) render
+// smaller. Not strictly linear; the lower half is fairly flat so
+// foreground nodes don't get huge.
+function perspectiveSize(y: number): number {
+  const t = Math.max(0, Math.min(1, y / MAP_H));
+  // 0.65 at top → 1.0 at bottom, with a slight curve favoring the bottom half
+  const eased = 0.65 + 0.35 * Math.pow(t, 0.9);
+  return 26 * eased; // base 26 px (matches previous LessonMarker size)
+}
+
 interface LessonMarkerProps {
   x: number;
   y: number;
@@ -1449,6 +1453,8 @@ interface LessonMarkerProps {
   isCurrent: boolean;
   isAction: boolean;
   title: string;
+  /** Base radius for circle / half-width for diamond. Drives perspective. */
+  size: number;
   onClick: () => void;
 }
 
@@ -1460,6 +1466,7 @@ function LessonMarker({
   isCurrent,
   isAction,
   title,
+  size: baseSize,
   onClick,
 }: LessonMarkerProps) {
   const [hot, setHot] = useState(false);
@@ -1469,7 +1476,8 @@ function LessonMarker({
       ? "rgba(230,192,122,0.25)"
       : "rgba(6,12,26,0.92)";
   const stroke = isCurrent ? GOLD_HI : GOLD;
-  const size = isAction ? 32 : 26;
+  // Action items are visually larger than lessons, proportional to base
+  const size = isAction ? baseSize * 1.23 : baseSize;
 
   return (
     <g

@@ -170,25 +170,28 @@ export async function refreshWhopTokens(
 /**
  * Fetch all completed course-lesson interactions for a Whop user.
  *
- * Whop's `/course_lesson_interactions` endpoint rejects STUDENT OAuth
- * tokens with HTTP 400 "you can only access your own course lesson
- * interactions" regardless of scopes or query params — the endpoint
- * is effectively admin/creator-only. The original implementation
- * "worked" for the app's admin account because that token has creator
- * privileges that bypass the student-side guard.
+ * Uses the user's OAuth access token directly and passes
+ * user_id=<their stored whop_user_id> as a filter. This is the
+ * original implementation that worked for the admin/creator account:
+ * admin OAuth tokens have creator privileges that unlock the endpoint.
  *
- * The fix: when a server-side admin API key is configured
- * (WHOP_API_KEY), use IT for this call instead of the user's token.
- * The admin key treats `user_id=<student>` as a filter and returns
- * exactly that student's data.
+ * Important caveat: regular student OAuth tokens are REJECTED by this
+ * endpoint with HTTP 400 "you can only access your own course lesson
+ * interactions" regardless of scopes — we've confirmed this experimentally.
+ * For real students, rely on the webhook path (Whop → our
+ * /api/webhooks/whop) which writes to student_lesson_completions on
+ * course_lesson_interaction.completed events.
  *
- * Fallback: if no admin key is set, we still try the user's token
- * (useful when the logged-in user IS the admin, e.g. Karlo testing
- * against his own account).
+ * Previous attempts we learned DON'T work:
+ * - Dropping user_id (400)
+ * - /me/course_lesson_interactions (404)
+ * - Student OAuth token with courses:read scope granted (400)
+ * - WHOP_API_KEY admin key — its agent user lacks course_analytics:read
+ *   on the course, so this returned 403
  */
 export async function fetchCompletedLessons(
   accessToken: string,
-  whopUserIdFromDb: string
+  whopUserId: string
 ): Promise<WhopLessonInteraction[]> {
   const courseId = process.env.WHOP_COURSE_ID;
   if (!courseId) {
@@ -197,40 +200,13 @@ export async function fetchCompletedLessons(
     );
   }
 
-  const adminKey = process.env.WHOP_API_KEY;
-  // With an admin key we can use the stored whop_user_id directly. No
-  // userinfo lookup needed since the admin key isn't tied to one user.
-  // Without an admin key, resolve the token's actual subject live to
-  // guarantee the "must match your own" check passes for a user token.
-  let targetUserId = whopUserIdFromDb;
-  if (!adminKey) {
-    try {
-      const live = await fetchWhopUserInfo(accessToken);
-      targetUserId = live.sub;
-      if (whopUserIdFromDb && whopUserIdFromDb !== live.sub) {
-        console.warn(
-          `[watch-sync] DB whop_user_id (${whopUserIdFromDb}) disagrees with ` +
-            `live token subject (${live.sub}); using live.`
-        );
-      }
-    } catch (err) {
-      throw new Error(
-        `Unable to resolve token subject from /oauth/userinfo: ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      );
-    }
-  }
-
-  const authToken = adminKey ?? accessToken;
-
   const all: WhopLessonInteraction[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < 5; page++) {
     const params = new URLSearchParams({
       completed: "true",
       course_id: courseId,
-      user_id: targetUserId,
+      user_id: whopUserId,
       first: "100",
     });
     if (cursor) params.set("after", cursor);
@@ -238,15 +214,14 @@ export async function fetchCompletedLessons(
     const res = await fetch(
       `${WHOP_API_BASE}/course_lesson_interactions?${params}`,
       {
-        headers: { Authorization: `Bearer ${authToken}` },
+        headers: { Authorization: `Bearer ${accessToken}` },
       }
     );
 
     if (!res.ok) {
       const error = await res.text();
-      const authMethod = adminKey ? "admin key" : "user token";
       throw new Error(
-        `Whop lesson interactions fetch failed (${res.status}) [auth=${authMethod}] [user_id=${targetUserId}] [course_id=${courseId}]: ${error}`
+        `Whop lesson interactions fetch failed (${res.status}) [user_id=${whopUserId}] [course_id=${courseId}]: ${error}`
       );
     }
 

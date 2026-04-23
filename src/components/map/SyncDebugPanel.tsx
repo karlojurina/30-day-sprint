@@ -51,14 +51,17 @@ export function SyncDebugPanel() {
   const pillColor = {
     ok: "#4DCEC4",
     partial: "#E6C07A",
-    empty: "#E6C07A",
+    empty: "#4DCEC4", // normal state for student tokens — webhooks handle it
     error: "#C44A54",
   }[pillState];
 
+  // For students whose tokens can't poll Whop, fetched=0 is expected
+  // (completions flow in via webhook). Label that case as "webhook" so
+  // it doesn't read like a failure.
   const pillLabel = {
     ok: s.matchedCount != null ? `Sync · ${s.matchedCount} matched` : "Sync",
     partial: `Sync · ${s.matchedCount}/${s.fetchedCount} matched`,
-    empty: "Sync · 0 from Whop",
+    empty: "Sync · webhook-only",
     error: "Sync · error",
   }[pillState];
 

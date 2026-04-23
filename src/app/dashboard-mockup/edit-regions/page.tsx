@@ -5,11 +5,28 @@ import { useRef, useState } from "react";
 type RegionId = "r1" | "r2" | "r3" | "r4";
 const REGION_IDS: RegionId[] = ["r1", "r2", "r3", "r4"];
 
+type ToolId = "regions" | "path-r1" | "path-r2" | "path-r3" | "path-r4";
+
 const REGION_META: Record<RegionId, { label: string; color: string }> = {
   r1: { label: "R1 — Harbor / Base Camp",       color: "#F0D595" },
   r2: { label: "R2 — Valley / Creative Lab",    color: "#4DCEC4" },
   r3: { label: "R3 — Waterfall / Test Track",   color: "#4DA0D8" },
   r4: { label: "R4 — Summit / The Market",      color: "#C44A54" },
+};
+
+interface ToolMeta {
+  label: string;
+  /** Background image to trace on */
+  image: string;
+  /** Closed polygon (auto-closes last→first) or open polyline */
+  shape: "polygon" | "polyline";
+}
+const TOOL_META: Record<ToolId, ToolMeta> = {
+  "regions": { label: "Region outlines (main_image)",   image: "/regions/main_image.png",      shape: "polygon" },
+  "path-r1": { label: "R1 path (first_location)",       image: "/regions/first_location.png",  shape: "polyline" },
+  "path-r2": { label: "R2 path (second_location)",      image: "/regions/second_location.png", shape: "polyline" },
+  "path-r3": { label: "R3 path (third_location)",       image: "/regions/third_location.png",  shape: "polyline" },
+  "path-r4": { label: "R4 path (fourth_location)",      image: "/regions/fourth_location.png", shape: "polyline" },
 };
 
 // Map coordinate space (matches MapMockup's viewBox)
@@ -31,24 +48,42 @@ function centroid(pts: Point[]): Point | null {
 }
 
 /**
- * Region outline picker.
+ * Coordinate picker — supports two shape kinds:
  *
- * Flow:
- *   1. Select a region (R1/R2/R3/R4) via the tab bar
- *   2. Click along its border on the image to add vertices
- *   3. Polygon fills in live — all 4 regions visible at once so you can
- *      verify relative placement
- *   4. "Copy" emits TypeScript that plugs into MapMockup's REGION_ZONES
+ *   Tool "regions"  — closed polygons over main_image.png. Tabs let you
+ *                     switch between R1/R2/R3/R4. Output is the full
+ *                     REGION_ZONES TypeScript ready for MapMockup.tsx.
  *
- * Coordinates are in the 3200×1400 map space (SVG user units), regardless
- * of viewport size — same coord system MapMockup uses for rendering.
+ *   Tool "path-rN"  — open polylines over a per-region location scene.
+ *                     Just one trace; click points in walking order.
+ *                     Output is a `waypoints: [...]` array ready for
+ *                     SCENES[rN].waypoints in MapMockup.tsx.
+ *
+ * All coordinates are in 3200×1400 SVG user-space, the same coord system
+ * MapMockup renders into. Click any point on the image to add it to the
+ * active trace; lines connect points in click order.
  */
 export default function EditRegionsPage() {
-  const [active, setActive] = useState<RegionId>("r1");
-  const [points, setPoints] = useState<Points>(emptyPoints);
+  const [tool, setTool] = useState<ToolId>("regions");
+  const [activeRegion, setActiveRegion] = useState<RegionId>("r1");
+
+  // Region polygon points (used when tool === "regions")
+  const [regionPoints, setRegionPoints] = useState<Points>(emptyPoints);
+  // Per-scene path points (used when tool === "path-rN")
+  const [pathPoints, setPathPoints] = useState<Points>(emptyPoints);
+
   const [copied, setCopied] = useState(false);
   const [cursor, setCursor] = useState<Point | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+
+  const toolMeta = TOOL_META[tool];
+  const isPathTool = tool !== "regions";
+  // The "active" trace key — for region tool, that's whichever region tab
+  // is selected; for a path tool, it's whichever region's path we're on.
+  const traceKey: RegionId = isPathTool
+    ? (tool.replace("path-", "") as RegionId)
+    : activeRegion;
+  const currentPoints = isPathTool ? pathPoints[traceKey] : regionPoints[traceKey];
 
   const toSvgCoord = (clientX: number, clientY: number): Point | null => {
     const svg = svgRef.current;
@@ -66,27 +101,59 @@ export default function EditRegionsPage() {
   const addPoint = (e: React.MouseEvent<SVGSVGElement>) => {
     const p = toSvgCoord(e.clientX, e.clientY);
     if (!p) return;
-    setPoints((prev) => ({
-      ...prev,
-      [active]: [...prev[active], p],
-    }));
+    if (isPathTool) {
+      setPathPoints((prev) => ({
+        ...prev,
+        [traceKey]: [...prev[traceKey], p],
+      }));
+    } else {
+      setRegionPoints((prev) => ({
+        ...prev,
+        [traceKey]: [...prev[traceKey], p],
+      }));
+    }
   };
 
   const undo = () => {
-    setPoints((prev) => ({
-      ...prev,
-      [active]: prev[active].slice(0, -1),
-    }));
+    if (isPathTool) {
+      setPathPoints((prev) => ({
+        ...prev,
+        [traceKey]: prev[traceKey].slice(0, -1),
+      }));
+    } else {
+      setRegionPoints((prev) => ({
+        ...prev,
+        [traceKey]: prev[traceKey].slice(0, -1),
+      }));
+    }
   };
   const clearActive = () => {
-    setPoints((prev) => ({ ...prev, [active]: [] }));
+    if (isPathTool) {
+      setPathPoints((prev) => ({ ...prev, [traceKey]: [] }));
+    } else {
+      setRegionPoints((prev) => ({ ...prev, [traceKey]: [] }));
+    }
   };
-  const clearAll = () => setPoints(emptyPoints);
 
+  // Output TypeScript for the active tool. For "regions" → full
+  // REGION_ZONES block. For a path → just the waypoints array.
   const tsCode = (() => {
+    if (isPathTool) {
+      const pts = pathPoints[traceKey];
+      const lines = [`waypoints: [`];
+      if (pts.length === 0) {
+        lines.push(`  // empty — trace this path in the picker`);
+      } else {
+        for (const p of pts) {
+          lines.push(`  { x: ${p.x}, y: ${p.y} },`);
+        }
+      }
+      lines.push(`],`);
+      return lines.join("\n");
+    }
     const lines: string[] = ["const REGION_ZONES: Record<RegionId, RegionZone> = {"];
     for (const rid of REGION_IDS) {
-      const pts = points[rid];
+      const pts = regionPoints[rid];
       const c = centroid(pts);
       lines.push(`  ${rid}: {`);
       lines.push(`    polygon: [`);
@@ -111,7 +178,6 @@ export default function EditRegionsPage() {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      // Clipboard API may be unavailable — fall back to showing the code
       setCopied(false);
     }
   };
@@ -127,7 +193,7 @@ export default function EditRegionsPage() {
         fontFamily: "Inter, sans-serif",
       }}
     >
-      {/* Main canvas — SVG with main_image as the base */}
+      {/* Main canvas */}
       <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
         <svg
           ref={svgRef}
@@ -144,8 +210,11 @@ export default function EditRegionsPage() {
             cursor: "crosshair",
           }}
         >
+          {/* Image swaps with selected tool. key forces a fresh load when
+              switching scenes so we don't see the previous image bleed. */}
           <image
-            href="/regions/main_image.png"
+            key={toolMeta.image}
+            href={toolMeta.image}
             x={0}
             y={0}
             width={MAP_W}
@@ -153,79 +222,25 @@ export default function EditRegionsPage() {
             preserveAspectRatio="xMidYMid slice"
           />
 
-          {/* All 4 region polygons — active one bright, others dimmed */}
-          {REGION_IDS.map((rid) => {
-            const pts = points[rid];
-            const { color } = REGION_META[rid];
-            const isActive = rid === active;
-            if (pts.length === 0) return null;
-            const pointsStr = pts.map((p) => `${p.x},${p.y}`).join(" ");
-            return (
-              <g key={rid} opacity={isActive ? 1 : 0.4}>
-                {/* Filled polygon (only if 3+ points) */}
-                {pts.length >= 3 && (
-                  <polygon
-                    points={pointsStr}
-                    fill={color}
-                    fillOpacity={isActive ? 0.18 : 0.08}
-                    stroke="none"
-                  />
-                )}
-                {/* Open polyline connecting the points */}
-                <polyline
-                  points={pointsStr}
-                  fill="none"
-                  stroke={color}
-                  strokeWidth={3}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  opacity={0.9}
-                />
-                {/* Close segment — dashed (only when 3+ points) */}
-                {pts.length >= 3 && (
-                  <line
-                    x1={pts[pts.length - 1].x}
-                    y1={pts[pts.length - 1].y}
-                    x2={pts[0].x}
-                    y2={pts[0].y}
-                    stroke={color}
-                    strokeWidth={2}
-                    strokeDasharray="10 6"
-                    opacity={0.55}
-                  />
-                )}
-                {/* Vertex dots */}
-                {pts.map((p, i) => (
-                  <g key={i} transform={`translate(${p.x} ${p.y})`}>
-                    <circle
-                      r={isActive ? 10 : 6}
-                      fill="#060C1A"
-                      stroke={color}
-                      strokeWidth={2}
-                    />
-                    {isActive && (
-                      <text
-                        y={4}
-                        textAnchor="middle"
-                        style={{
-                          fontFamily:
-                            "JetBrains Mono, ui-monospace, monospace",
-                          fontSize: 11,
-                          fontWeight: 700,
-                          fill: color,
-                        }}
-                      >
-                        {i + 1}
-                      </text>
-                    )}
-                  </g>
-                ))}
-              </g>
-            );
-          })}
+          {isPathTool ? (
+            // Path mode — single open polyline for this scene
+            <PathTrace
+              points={pathPoints[traceKey]}
+              color={REGION_META[traceKey].color}
+            />
+          ) : (
+            // Region mode — all 4 region polygons (active bright, dimmed others)
+            REGION_IDS.map((rid) => (
+              <RegionTrace
+                key={rid}
+                points={regionPoints[rid]}
+                color={REGION_META[rid].color}
+                active={rid === activeRegion}
+              />
+            ))
+          )}
         </svg>
 
-        {/* Crosshair coord readout on hover */}
         {cursor && (
           <div
             style={{
@@ -263,7 +278,7 @@ export default function EditRegionsPage() {
         {/* Header */}
         <div
           style={{
-            padding: "18px 20px",
+            padding: "16px 20px",
             borderBottom: "1px solid rgba(230,192,122,0.14)",
           }}
         >
@@ -271,13 +286,13 @@ export default function EditRegionsPage() {
             style={{
               fontFamily: "Cormorant Garamond, serif",
               fontStyle: "italic",
-              fontSize: 26,
+              fontSize: 24,
               fontWeight: 500,
               margin: 0,
               marginBottom: 4,
             }}
           >
-            Region outline picker
+            Coordinate picker
           </h1>
           <p
             style={{
@@ -287,98 +302,147 @@ export default function EditRegionsPage() {
               lineHeight: 1.4,
             }}
           >
-            Select a region, then click along its border to trace the outline.
-            Coords are in map space (3200×1400).
+            Click points on the image to trace. Coords are in map space
+            (3200×1400) regardless of viewport.
           </p>
         </div>
 
-        {/* Region tabs */}
+        {/* Tool selector */}
         <div
           style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 6,
-            padding: "14px 16px",
+            padding: "12px 16px",
             borderBottom: "1px solid rgba(230,192,122,0.14)",
           }}
         >
-          {REGION_IDS.map((rid) => {
-            const { label, color } = REGION_META[rid];
-            const count = points[rid].length;
-            const isActive = rid === active;
-            return (
-              <button
-                key={rid}
-                onClick={() => setActive(rid)}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 6,
-                  background: isActive
-                    ? `${color}22`
-                    : "rgba(6,12,26,0.5)",
-                  border: `1.5px solid ${isActive ? color : "rgba(230,192,122,0.15)"}`,
-                  color: isActive ? color : "rgba(230,220,200,0.75)",
-                  textAlign: "left",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  transition: "all 0.2s",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 10,
-                    letterSpacing: "0.2em",
-                    textTransform: "uppercase",
-                    fontFamily: "JetBrains Mono, ui-monospace, monospace",
-                    marginBottom: 3,
-                    opacity: 0.8,
-                  }}
-                >
-                  {rid.toUpperCase()}
-                </div>
-                <div style={{ fontSize: 12, fontWeight: 600 }}>
-                  {label.split(" — ")[1]}
-                </div>
-                <div
-                  style={{
-                    fontSize: 10,
-                    marginTop: 4,
-                    opacity: 0.65,
-                    fontFamily: "JetBrains Mono, ui-monospace, monospace",
-                  }}
-                >
-                  {count} point{count === 1 ? "" : "s"}
-                </div>
-              </button>
-            );
-          })}
+          <label
+            style={{
+              display: "block",
+              fontSize: 10,
+              letterSpacing: "0.2em",
+              textTransform: "uppercase",
+              color: "rgba(230,220,200,0.55)",
+              marginBottom: 6,
+              fontFamily: "JetBrains Mono, ui-monospace, monospace",
+            }}
+          >
+            Tool
+          </label>
+          <select
+            value={tool}
+            onChange={(e) => setTool(e.target.value as ToolId)}
+            style={{
+              width: "100%",
+              padding: "8px 10px",
+              borderRadius: 5,
+              background: "rgba(6,12,26,0.85)",
+              border: "1px solid rgba(230,192,122,0.3)",
+              color: "#E6DCC8",
+              fontFamily: "inherit",
+              fontSize: 13,
+              cursor: "pointer",
+            }}
+          >
+            {(Object.keys(TOOL_META) as ToolId[]).map((id) => (
+              <option key={id} value={id} style={{ background: "#0A1428" }}>
+                {TOOL_META[id].label}
+              </option>
+            ))}
+          </select>
+          <p
+            style={{
+              fontSize: 11,
+              color: "rgba(230,220,200,0.45)",
+              marginTop: 6,
+              lineHeight: 1.4,
+              fontFamily: "JetBrains Mono, ui-monospace, monospace",
+            }}
+          >
+            {toolMeta.shape === "polygon"
+              ? "Closed polygon — last point auto-connects to first"
+              : "Open polyline — points in walking order, no auto-close"}
+          </p>
         </div>
+
+        {/* Region tabs (only for region mode) */}
+        {!isPathTool && (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 6,
+              padding: "12px 16px",
+              borderBottom: "1px solid rgba(230,192,122,0.14)",
+            }}
+          >
+            {REGION_IDS.map((rid) => {
+              const { label, color } = REGION_META[rid];
+              const count = regionPoints[rid].length;
+              const isActive = rid === activeRegion;
+              return (
+                <button
+                  key={rid}
+                  onClick={() => setActiveRegion(rid)}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    background: isActive ? `${color}22` : "rgba(6,12,26,0.5)",
+                    border: `1.5px solid ${isActive ? color : "rgba(230,192,122,0.15)"}`,
+                    color: isActive ? color : "rgba(230,220,200,0.75)",
+                    textAlign: "left",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    transition: "all 0.2s",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 10,
+                      letterSpacing: "0.2em",
+                      textTransform: "uppercase",
+                      fontFamily: "JetBrains Mono, ui-monospace, monospace",
+                      marginBottom: 2,
+                      opacity: 0.8,
+                    }}
+                  >
+                    {rid.toUpperCase()}
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 600 }}>
+                    {label.split(" — ")[1]}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 10,
+                      marginTop: 2,
+                      opacity: 0.65,
+                      fontFamily: "JetBrains Mono, ui-monospace, monospace",
+                    }}
+                  >
+                    {count} pt{count === 1 ? "" : "s"}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Action buttons */}
         <div
           style={{
             display: "flex",
             gap: 8,
-            padding: "12px 16px",
+            padding: "10px 16px",
             borderBottom: "1px solid rgba(230,192,122,0.14)",
           }}
         >
-          <ToolButton onClick={undo} disabled={points[active].length === 0}>
+          <ToolButton onClick={undo} disabled={currentPoints.length === 0}>
             Undo
           </ToolButton>
-          <ToolButton onClick={clearActive} disabled={points[active].length === 0}>
-            Clear {active.toUpperCase()}
-          </ToolButton>
-          <ToolButton
-            onClick={clearAll}
-            disabled={REGION_IDS.every((r) => points[r].length === 0)}
-            variant="danger"
-          >
-            Clear all
+          <ToolButton onClick={clearActive} disabled={currentPoints.length === 0}>
+            Clear {traceKey.toUpperCase()}
           </ToolButton>
         </div>
 
-        {/* Point list for active region */}
+        {/* Point list */}
         <div
           style={{
             flex: 1,
@@ -396,9 +460,9 @@ export default function EditRegionsPage() {
               fontFamily: "JetBrains Mono, ui-monospace, monospace",
             }}
           >
-            {active.toUpperCase()} points
+            {isPathTool ? `${traceKey.toUpperCase()} path` : `${traceKey.toUpperCase()} polygon`} · {currentPoints.length} pts
           </div>
-          {points[active].length === 0 ? (
+          {currentPoints.length === 0 ? (
             <div
               style={{
                 fontSize: 13,
@@ -406,7 +470,9 @@ export default function EditRegionsPage() {
                 fontStyle: "italic",
               }}
             >
-              Click along the region border to add points.
+              {isPathTool
+                ? "Click along the path in walking order."
+                : "Click along the region border to add points."}
             </div>
           ) : (
             <ol
@@ -418,11 +484,11 @@ export default function EditRegionsPage() {
                 fontFamily: "JetBrains Mono, ui-monospace, monospace",
               }}
             >
-              {points[active].map((p, i) => (
+              {currentPoints.map((p, i) => (
                 <li
                   key={i}
                   style={{
-                    padding: "4px 0",
+                    padding: "3px 0",
                     color: "rgba(230,220,200,0.8)",
                     display: "flex",
                     justifyContent: "space-between",
@@ -466,7 +532,11 @@ export default function EditRegionsPage() {
               transition: "background 0.2s",
             }}
           >
-            {copied ? "Copied ✓" : "Copy REGION_ZONES"}
+            {copied
+              ? "Copied ✓"
+              : isPathTool
+                ? `Copy ${traceKey.toUpperCase()} waypoints`
+                : "Copy REGION_ZONES"}
           </button>
           <p
             style={{
@@ -477,13 +547,137 @@ export default function EditRegionsPage() {
               fontFamily: "JetBrains Mono, ui-monospace, monospace",
             }}
           >
-            Paste the output into{" "}
-            <code style={{ color: "#E6C07A" }}>MapMockup.tsx</code> to replace
-            the placeholder REGION_ZONES.
+            {isPathTool
+              ? `Paste into SCENES[${traceKey}].waypoints in MapMockup.tsx`
+              : "Paste over the existing REGION_ZONES in MapMockup.tsx"}
           </p>
         </div>
       </aside>
     </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
+// Sub-components
+// ──────────────────────────────────────────────────────────
+
+function RegionTrace({
+  points,
+  color,
+  active,
+}: {
+  points: Point[];
+  color: string;
+  active: boolean;
+}) {
+  if (points.length === 0) return null;
+  const pointsStr = points.map((p) => `${p.x},${p.y}`).join(" ");
+  const last = points[points.length - 1];
+  return (
+    <g opacity={active ? 1 : 0.4}>
+      {points.length >= 3 && (
+        <polygon
+          points={pointsStr}
+          fill={color}
+          fillOpacity={active ? 0.18 : 0.08}
+          stroke="none"
+        />
+      )}
+      <polyline
+        points={pointsStr}
+        fill="none"
+        stroke={color}
+        strokeWidth={3}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={0.9}
+      />
+      {points.length >= 3 && (
+        <line
+          x1={last.x}
+          y1={last.y}
+          x2={points[0].x}
+          y2={points[0].y}
+          stroke={color}
+          strokeWidth={2}
+          strokeDasharray="10 6"
+          opacity={0.55}
+        />
+      )}
+      {points.map((p, i) => (
+        <g key={i} transform={`translate(${p.x} ${p.y})`}>
+          <circle
+            r={active ? 10 : 6}
+            fill="#060C1A"
+            stroke={color}
+            strokeWidth={2}
+          />
+          {active && (
+            <text
+              y={4}
+              textAnchor="middle"
+              style={{
+                fontFamily: "JetBrains Mono, ui-monospace, monospace",
+                fontSize: 11,
+                fontWeight: 700,
+                fill: color,
+              }}
+            >
+              {i + 1}
+            </text>
+          )}
+        </g>
+      ))}
+    </g>
+  );
+}
+
+function PathTrace({ points, color }: { points: Point[]; color: string }) {
+  if (points.length === 0) return null;
+  const pointsStr = points.map((p) => `${p.x},${p.y}`).join(" ");
+  return (
+    <g>
+      {/* Dark underlay so the line is legible on bright scene art */}
+      <polyline
+        points={pointsStr}
+        fill="none"
+        stroke="rgba(6,12,26,0.65)"
+        strokeWidth={10}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <polyline
+        points={pointsStr}
+        fill="none"
+        stroke={color}
+        strokeWidth={4}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        opacity={0.95}
+      />
+      {points.map((p, i) => (
+        <g key={i} transform={`translate(${p.x} ${p.y})`}>
+          <circle
+            r={11}
+            fill="#060C1A"
+            stroke={color}
+            strokeWidth={2.5}
+          />
+          <text
+            y={4}
+            textAnchor="middle"
+            style={{
+              fontFamily: "JetBrains Mono, ui-monospace, monospace",
+              fontSize: 11,
+              fontWeight: 700,
+              fill: color,
+            }}
+          >
+            {i + 1}
+          </text>
+        </g>
+      ))}
+    </g>
   );
 }
 
@@ -531,4 +725,3 @@ function ToolButton({
     </button>
   );
 }
-

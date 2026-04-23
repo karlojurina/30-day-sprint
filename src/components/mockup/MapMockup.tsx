@@ -136,6 +136,17 @@ const SCENES: Partial<Record<RegionId, Scene>> = {
       { x: 3020, y: 230  }, // deep in forest (end)
     ],
   },
+  r2: {
+    image: "/regions/second_location.png",
+    // Placeholder diagonal — replace with traced waypoints from the picker.
+    waypoints: [
+      { x: 200,  y: 1200 },
+      { x: 800,  y: 1000 },
+      { x: 1600, y: 800  },
+      { x: 2400, y: 500  },
+      { x: 3000, y: 250  },
+    ],
+  },
   r3: {
     image: "/regions/third_location.png",
     waypoints: [
@@ -151,6 +162,17 @@ const SCENES: Partial<Record<RegionId, Scene>> = {
       { x: 2620, y: 720  }, // up the switchback
       { x: 2870, y: 540  }, // higher ledge
       { x: 3050, y: 380  }, // near archway (end)
+    ],
+  },
+  r4: {
+    image: "/regions/fourth_location.png",
+    // Placeholder diagonal — replace with traced waypoints from the picker.
+    waypoints: [
+      { x: 200,  y: 1200 },
+      { x: 800,  y: 1000 },
+      { x: 1600, y: 800  },
+      { x: 2400, y: 500  },
+      { x: 3000, y: 250  },
     ],
   },
 };

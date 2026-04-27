@@ -21,12 +21,15 @@ interface ToolMeta {
   /** Closed polygon (auto-closes last→first) or open polyline */
   shape: "polygon" | "polyline";
 }
+// Picker pulls from _originals/ — full-resolution PNGs are kept there for
+// pixel-accurate polygon tracing. Production code uses the optimized .webp
+// counterparts in /regions/ (see SCENE_IMAGE_STACK in MapMockup).
 const TOOL_META: Record<ToolId, ToolMeta> = {
-  "regions": { label: "Region outlines (main_image)",   image: "/regions/main_image.png",      shape: "polygon" },
-  "path-r1": { label: "R1 path (first_location)",       image: "/regions/first_location.png",  shape: "polyline" },
-  "path-r2": { label: "R2 path (second_location)",      image: "/regions/second_location.png", shape: "polyline" },
-  "path-r3": { label: "R3 path (third_location)",       image: "/regions/third_location.png",  shape: "polyline" },
-  "path-r4": { label: "R4 path (fourth_location)",      image: "/regions/fourth_location.png", shape: "polyline" },
+  "regions": { label: "Region outlines (main_image)",   image: "/regions/_originals/main_image.png",      shape: "polygon" },
+  "path-r1": { label: "R1 path (first_location)",       image: "/regions/_originals/first_location.png",  shape: "polyline" },
+  "path-r2": { label: "R2 path (second_location)",      image: "/regions/_originals/second_location.png", shape: "polyline" },
+  "path-r3": { label: "R3 path (third_location)",       image: "/regions/_originals/third_location.png",  shape: "polyline" },
+  "path-r4": { label: "R4 path (fourth_location)",      image: "/regions/_originals/fourth_location.png", shape: "polyline" },
 };
 
 // Map coordinate space (matches MapMockup's viewBox)

@@ -133,7 +133,7 @@ interface Scene {
 // celebration) — see SCENE_END_MARKERS below.
 const SCENES: Partial<Record<RegionId, Scene>> = {
   r1: {
-    image: "/regions/first_location.png",
+    image: "/regions/first_location.webp",
     waypoints: [
       { x: 433, y: 1102 }, { x: 504, y: 1086 }, { x: 576, y: 1070 },
       { x: 641, y: 1055 }, { x: 702, y: 1041 }, { x: 775, y: 1028 },
@@ -155,7 +155,7 @@ const SCENES: Partial<Record<RegionId, Scene>> = {
     ],
   },
   r2: {
-    image: "/regions/second_location.png",
+    image: "/regions/second_location.webp",
     waypoints: [
       { x: 791, y: 1354 }, { x: 868, y: 1294 }, { x: 929, y: 1253 },
       { x: 989, y: 1211 }, { x: 1060, y: 1183 },{ x: 1164, y: 1136 },
@@ -176,7 +176,7 @@ const SCENES: Partial<Record<RegionId, Scene>> = {
     ],
   },
   r3: {
-    image: "/regions/third_location.png",
+    image: "/regions/third_location.webp",
     waypoints: [
       { x: 360, y: 1345 }, { x: 385, y: 1296 }, { x: 440, y: 1253 },
       { x: 495, y: 1233 }, { x: 544, y: 1196 }, { x: 613, y: 1167 },
@@ -198,7 +198,7 @@ const SCENES: Partial<Record<RegionId, Scene>> = {
     ],
   },
   r4: {
-    image: "/regions/fourth_location.png",
+    image: "/regions/fourth_location.webp",
     waypoints: [
       { x: 825, y: 1328 }, { x: 885, y: 1239 }, { x: 959, y: 1171 },
       { x: 1032, y: 1125 },{ x: 1119, y: 1088 },{ x: 1236, y: 1030 },
@@ -236,16 +236,17 @@ function smoothClosedPath(pts: Array<{ x: number; y: number }>): string {
   return d + " Z";
 }
 
-// Stack of all scene images mounted from the start (all 5: overview +
-// 4 region scenes). Each is an <img> in the DOM with opacity toggled by
-// the current view. Browser decodes them all on mount, so scene swaps
-// have no fetch/decode delay.
-const SCENE_IMAGE_STACK: Array<{ id: View; src: string }> = [
-  { id: "overview", src: "/regions/main_image.png" },
-  { id: "r1",       src: "/regions/first_location.png" },
-  { id: "r2",       src: "/regions/second_location.png" },
-  { id: "r3",       src: "/regions/third_location.png" },
-  { id: "r4",       src: "/regions/fourth_location.png" },
+// Scene images. Overview loads eagerly (it's the first paint); region
+// scenes are deferred until after the overview is in front of the user,
+// then mounted in the background so transitions are still instant once
+// the user clicks in. Total payload is ~2.5 MB across all 5 (down from
+// ~170 MB of source PNGs — see scripts/optimize-scene-images.mjs).
+const SCENE_IMAGE_STACK: Array<{ id: View; src: string; eager: boolean }> = [
+  { id: "overview", src: "/regions/main_image.webp",      eager: true  },
+  { id: "r1",       src: "/regions/first_location.webp",  eager: false },
+  { id: "r2",       src: "/regions/second_location.webp", eager: false },
+  { id: "r3",       src: "/regions/third_location.webp",  eager: false },
+  { id: "r4",       src: "/regions/fourth_location.webp", eager: false },
 ];
 
 // End-of-region marker that sits on the LAST waypoint of each scene.
@@ -333,6 +334,12 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   const pendingViewRef = useRef<View | null>(null);
   const [hoveredZone, setHoveredZone] = useState<RegionId | null>(null);
 
+  // Region scenes are mounted lazily — after the overview is in front of
+  // the user. The overview alone is ~330 KB; deferring the four regions
+  // means first paint pays for one image instead of all five. The first
+  // hover/click into a region also force-mounts that one immediately.
+  const [regionsMounted, setRegionsMounted] = useState(false);
+
   // Measure outer container
   useEffect(() => {
     const el = outerRef.current;
@@ -352,9 +359,19 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     setView("overview");
   }, [outerSize.w]);
 
-  // (Image preload no longer needed — see SCENE_IMAGE_STACK rendering
-  // below. All scenes are mounted as <img> elements from first paint, so
-  // they're decoded by the time the user clicks a region.)
+  // Kick off region preload after the browser has had a chance to paint
+  // the overview. requestIdleCallback yields for higher-priority work;
+  // setTimeout fallback covers Safari, which doesn't ship rIC.
+  useEffect(() => {
+    if (regionsMounted) return;
+    const start = () => setRegionsMounted(true);
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(start, { timeout: 2000 });
+      return () => window.cancelIdleCallback?.(id);
+    }
+    const id = window.setTimeout(start, 600);
+    return () => window.clearTimeout(id);
+  }, [regionsMounted]);
 
   const sidePanelWidth = getSidePanelWidth(outerSize.w);
 
@@ -598,6 +615,13 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     if (pendingViewRef.current !== null) return; // already in flight
     pendingViewRef.current = next;
 
+    // If the user is heading into a region, force-mount the deferred scene
+    // stack now. The cloud transition gives us ~2s of cover before the swap
+    // reveals the new view — plenty of headroom for a 600 KB WebP.
+    if (next !== "overview" && !regionsMounted) {
+      setRegionsMounted(true);
+    }
+
     if (
       next !== "overview" &&
       REGION_ZONES[next as RegionId] &&
@@ -637,6 +661,53 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       onPointerDown={onMapPointerDown}
       onWheel={onMapWheel}
     >
+      {/* Ambient backdrop — same scene, cover-fit + heavy blur, fills the
+          viewport so contain-fit letterboxing reads as atmospheric extension
+          (warm haze for the harbor, cool fog for the sea, etc.) instead of
+          dead navy bars. Browsers cache the image bytes, so this layer
+          shares the fetch with the sharp scene above. */}
+      {SCENE_IMAGE_STACK.map(({ id, src, eager }) => {
+        const shouldMount = eager || regionsMounted || view === id;
+        if (!shouldMount) return null;
+        return (
+          <img
+            key={`ambient-${id}`}
+            src={src}
+            alt=""
+            aria-hidden="true"
+            decoding="async"
+            draggable={false}
+            style={{
+              position: "absolute",
+              left: "-6%",
+              top: "-6%",
+              width: "112%",
+              height: "112%",
+              objectFit: "cover",
+              objectPosition: "center",
+              filter: "blur(48px) saturate(1.1)",
+              opacity: view === id ? 0.55 : 0,
+              transition: "opacity 0.5s cubic-bezier(0.22,1,0.36,1)",
+              pointerEvents: "none",
+              userSelect: "none",
+            }}
+          />
+        );
+      })}
+
+      {/* Vignette — gentle inward fade so the sharp image still reads as
+          the focal point against the blurred ambient. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
+          background:
+            "radial-gradient(ellipse 80% 90% at 50% 50%, transparent 35%, rgba(6,12,26,0.55) 100%)",
+        }}
+      />
+
       {/* Map inner — scaled + translated by GSAP (mirrored to React state) */}
       <div
         style={{
@@ -650,31 +721,33 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           willChange: "transform",
         }}
       >
-        {/* Scene images — all 5 mounted from the start as <img> elements,
-            stacked, only the active one at opacity 1. The browser fetches AND
-            decodes each one on initial mount, so scene swap is a pure opacity
-            toggle (no fetch, no decode latency). Costs ~5× memory but kills
-            the 1-2s lag the user was seeing on first scene entry. */}
-        {SCENE_IMAGE_STACK.map(({ id, src }) => (
-          <img
-            key={id}
-            src={src}
-            alt=""
-            decoding="async"
-            draggable={false}
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              objectPosition: "center",
-              opacity: view === id ? 1 : 0,
-              pointerEvents: "none",
-              userSelect: "none",
-            }}
-          />
-        ))}
+        {/* Sharp scene images — overview is mounted eagerly; region scenes
+            are deferred until idle (or until the user heads into one). Once
+            mounted, scene swap is a pure opacity toggle. */}
+        {SCENE_IMAGE_STACK.map(({ id, src, eager }) => {
+          const shouldMount = eager || regionsMounted || view === id;
+          if (!shouldMount) return null;
+          return (
+            <img
+              key={id}
+              src={src}
+              alt=""
+              decoding="async"
+              draggable={false}
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                objectPosition: "center",
+                opacity: view === id ? 1 : 0,
+                pointerEvents: "none",
+                userSelect: "none",
+              }}
+            />
+          );
+        })}
 
         {/* Inside a region scene — draw the path + lesson nodes + end marker */}
         {view !== "overview" && SCENES[view] && (

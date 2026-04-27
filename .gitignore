@@ -42,3 +42,8 @@ next-env.d.ts
 
 # design reference (local only, not committed)
 /design-reference
+
+# Source-of-truth scene PNGs kept for picker accuracy. Production uses the
+# optimized .webp counterparts in public/regions/ — see
+# scripts/optimize-scene-images.mjs.
+/public/regions/_originals/

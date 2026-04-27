@@ -21,8 +21,16 @@ export default function HomePage() {
   }, [isStudent, isTeam, loading, router]);
 
   return (
-    <div className="flex items-center justify-center min-h-screen">
-      <div className="w-8 h-8 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin" />
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex items-center justify-center min-h-screen"
+    >
+      <div
+        aria-hidden="true"
+        className="w-8 h-8 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin"
+      />
+      <span className="sr-only">Loading…</span>
     </div>
   );
 }

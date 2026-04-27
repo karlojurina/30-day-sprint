@@ -20,16 +20,20 @@ export default function DashboardMockupPage() {
   if (loading || !student) {
     return (
       <div
+        role="status"
+        aria-live="polite"
         className="flex items-center justify-center min-h-screen"
-        style={{ background: "#060C1A" }}
+        style={{ background: "var(--color-bg-primary)" }}
       >
         <div
+          aria-hidden="true"
           className="w-8 h-8 rounded-full animate-spin"
           style={{
-            border: "2px solid #E6C07A",
+            border: "2px solid var(--color-gold)",
             borderTopColor: "transparent",
           }}
         />
+        <span className="sr-only">Loading your map…</span>
       </div>
     );
   }
@@ -37,7 +41,7 @@ export default function DashboardMockupPage() {
   return (
     <div
       className="flex flex-col w-screen overflow-hidden"
-      style={{ height: "100vh", background: "#060C1A" }}
+      style={{ height: "100vh", background: "var(--color-bg-primary)" }}
     >
       <TopBar
         setPanTarget={setPanTarget}

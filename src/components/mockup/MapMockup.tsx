@@ -19,7 +19,16 @@ interface MapMockupProps {
 type RegionId = keyof RegionStripMap;
 type View = "overview" | RegionId;
 
-const SIDE_PANEL_WIDTH = 420;
+// Side panel width adapts to viewport so the map keeps useful canvas on
+// laptop and tablet widths (panel was a fixed 420 before — squeezed the
+// scene below ~1280px wide).
+function getSidePanelWidth(viewportW: number): number {
+  if (viewportW >= 1440) return 420;
+  if (viewportW >= 1280) return 380;
+  if (viewportW >= 1024) return 340;
+  if (viewportW >= 768) return 300;
+  return Math.max(260, Math.round(viewportW * 0.42));
+}
 
 const GOLD = "#E6C07A";
 const GOLD_HI = "#F0D595";
@@ -347,15 +356,20 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   // below. All scenes are mounted as <img> elements from first paint, so
   // they're decoded by the time the user clicks a region.)
 
-  // Compute target transform for a given view
+  const sidePanelWidth = getSidePanelWidth(outerSize.w);
+
+  // Compute target transform for a given view.
+  //
+  // Contain-fit (Math.min) — the WHOLE map is always visible at every
+  // viewport size. Letterboxing in the off-axis dimension is fine; the
+  // background is the same deep navy as the map's sky so it reads as
+  // matte rather than empty.
   const getTargetTransform = (v: View) => {
     const vw = outerSize.w || 1;
     const vh = outerSize.h || 1;
 
     if (v === "overview") {
-      const sW = vw / MAP_W;
-      const sH = vh / MAP_H;
-      const scale = Math.max(sW, sH);
+      const scale = Math.min(vw / MAP_W, vh / MAP_H);
       return {
         x: (vw - MAP_W * scale) / 2,
         y: (vh - MAP_H * scale) / 2,
@@ -364,12 +378,10 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     }
 
     // Region view — leaves room on the right for the side panel.
-    const usableW = vw - SIDE_PANEL_WIDTH;
+    const usableW = Math.max(1, vw - sidePanelWidth);
 
-    // If this region has its own scene image, cover-fit the WHOLE image into
-    // the usable area (no zoom beyond fit). This makes the scene be the view.
     if (SCENES[v]) {
-      const scale = Math.max(usableW / MAP_W, vh / MAP_H);
+      const scale = Math.min(usableW / MAP_W, vh / MAP_H);
       return {
         x: (usableW - MAP_W * scale) / 2,
         y: (vh - MAP_H * scale) / 2,
@@ -380,9 +392,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     // Fallback — region has no scene image yet, zoom into its focal point on
     // the overview panorama.
     const z = REGION_ZONES[v];
-    const sW = vw / MAP_W;
-    const sH = vh / MAP_H;
-    const overview = Math.max(sW, sH);
+    const overview = Math.min(vw / MAP_W, vh / MAP_H);
     const scale = overview * 1.9;
     return {
       x: usableW / 2 - z.labelX * scale,
@@ -438,20 +448,24 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   // ──────────────────────────────────────────────────────────
   const suppressClickRef = useRef(false);
 
+  // Clamp pan so the image edges hug the viewport when the image is larger
+  // than the viewport, and the image is centered (letterboxed) when it's
+  // smaller. Without the smaller-than-viewport branch, drag would scoot the
+  // image to one corner and reveal background.
   const clampTransform = (t: { x: number; y: number; scale: number }) => {
     const vw = outerSize.w;
     const vh = outerSize.h;
     const imgW = MAP_W * t.scale;
     const imgH = MAP_H * t.scale;
-    const minX = Math.min(0, vw - imgW);
-    const maxX = Math.max(0, vw - imgW);
-    const minY = Math.min(0, vh - imgH);
-    const maxY = Math.max(0, vh - imgH);
-    return {
-      x: Math.max(minX, Math.min(maxX, t.x)),
-      y: Math.max(minY, Math.min(maxY, t.y)),
-      scale: t.scale,
-    };
+    const x =
+      imgW <= vw
+        ? (vw - imgW) / 2
+        : Math.max(vw - imgW, Math.min(0, t.x));
+    const y =
+      imgH <= vh
+        ? (vh - imgH) / 2
+        : Math.max(vh - imgH, Math.min(0, t.y));
+    return { x, y, scale: t.scale };
   };
 
   const onMapPointerDown = (e: React.PointerEvent) => {
@@ -508,15 +522,17 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       tweenRef.current.kill();
       tweenRef.current = null;
     }
-    const coverScale = Math.max(
+    // Min zoom = contain (whole map fits). Max zoom = 2× that, so users
+    // can wheel in to inspect detail and back out to the full overview.
+    const containScale = Math.min(
       outerSize.w / MAP_W,
       outerSize.h / MAP_H
     );
-    const maxScale = coverScale * 1.6;
+    const maxScale = containScale * 2.4;
     const current = transformRef.current;
     const zoomFactor = Math.exp(-e.deltaY * 0.0015);
     const newScale = Math.max(
-      coverScale,
+      containScale,
       Math.min(maxScale, current.scale * zoomFactor)
     );
     if (newScale === current.scale) return;
@@ -699,6 +715,30 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                 <stop offset="60%" stopColor="rgba(240,213,149,0.2)" />
                 <stop offset="100%" stopColor="rgba(240,213,149,0)" />
               </radialGradient>
+              {/* Feather the polygon glow so vertex-bound edges read as a
+                  soft halo rather than a clipped fill. stdDeviation is in
+                  map-space units (3200×1400 viewBox); the oversized filter
+                  region prevents the blur from clipping at the bbox edge. */}
+              <filter
+                id="zone-feather"
+                x="-25%"
+                y="-25%"
+                width="150%"
+                height="150%"
+                colorInterpolationFilters="sRGB"
+              >
+                <feGaussianBlur stdDeviation="16" />
+              </filter>
+              <filter
+                id="zone-feather-hot"
+                x="-25%"
+                y="-25%"
+                width="150%"
+                height="150%"
+                colorInterpolationFilters="sRGB"
+              >
+                <feGaussianBlur stdDeviation="22" />
+              </filter>
             </defs>
 
             {sortedRegions.map((r) => {
@@ -748,11 +788,13 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
 
                   {/* Subtle breathing glow on the smoothed shape — no
                       outline. Animates between two opacities so the region
-                      "pulses" gently. Curved edges (via Catmull-Rom) kill
-                      the boxy-polygon look. */}
+                      "pulses" gently. The feGaussianBlur filter feathers
+                      the gradient where it clips against polygon vertices,
+                      so edges read as a soft halo, not a hard cutout. */}
                   <path
                     d={smoothD}
                     fill={hot ? "url(#zone-glow-hot)" : "url(#zone-glow)"}
+                    filter={hot ? "url(#zone-feather-hot)" : "url(#zone-feather)"}
                     pointerEvents="none"
                     style={{
                       transition: "opacity 0.4s cubic-bezier(0.22,1,0.36,1)",
@@ -773,6 +815,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                     <path
                       d={smoothD}
                       fill={`url(#zone-glow-hot)`}
+                      filter="url(#zone-feather-hot)"
                       opacity={0.5}
                       pointerEvents="none"
                     >
@@ -896,6 +939,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           onBack={() => transitionTo("overview")}
           onPrev={prevRegion ? () => transitionTo(prevRegion.id as RegionId) : null}
           onNext={nextRegion ? () => transitionTo(nextRegion.id as RegionId) : null}
+          width={sidePanelWidth}
         />
       )}
 
@@ -928,6 +972,7 @@ function RegionSidePanel({
   onBack,
   onPrev,
   onNext,
+  width,
 }: {
   region: ReturnType<typeof useStudent>["regions"][number];
   lessons: Lesson[];
@@ -937,6 +982,7 @@ function RegionSidePanel({
   onBack: () => void;
   onPrev: (() => void) | null;
   onNext: (() => void) | null;
+  width: number;
 }) {
   const numeral = ["I", "II", "III", "IV"][region.order_num - 1];
 
@@ -950,7 +996,7 @@ function RegionSidePanel({
         top: 0,
         right: 0,
         bottom: 0,
-        width: SIDE_PANEL_WIDTH,
+        width,
         background:
           "linear-gradient(180deg, rgba(6,12,26,0.96) 0%, rgba(10,20,40,0.96) 100%)",
         borderLeft: "1px solid rgba(230,192,122,0.25)",
@@ -963,23 +1009,19 @@ function RegionSidePanel({
       {/* Back button */}
       <button
         onClick={onBack}
-        className="flex items-center gap-2 px-6 py-4 transition-colors"
+        className="btn-ghost flex items-center gap-2 px-6 py-4"
         style={{
           background: "transparent",
           border: "none",
           borderBottom: "1px solid rgba(230,192,122,0.12)",
-          color: "rgba(230,220,200,0.75)",
-          fontFamily: "JetBrains Mono, ui-monospace, monospace",
+          color: "var(--color-ink-dim)",
+          fontFamily: "var(--font-mono)",
           fontSize: 11,
           letterSpacing: "0.18em",
           textTransform: "uppercase",
           cursor: "pointer",
           textAlign: "left",
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.color = INK)}
-        onMouseLeave={(e) =>
-          (e.currentTarget.style.color = "rgba(230,220,200,0.75)")
-        }
       >
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.6">
           <path strokeLinecap="round" strokeLinejoin="round" d="M11 17l-5-5m0 0l5-5m-5 5h12" />
@@ -994,7 +1036,7 @@ function RegionSidePanel({
           style={{
             color: GOLD,
             letterSpacing: "0.22em",
-            fontSize: 10,
+            fontSize: 11,
           }}
         >
           Region {numeral}
@@ -1002,7 +1044,7 @@ function RegionSidePanel({
         <h2
           className="italic"
           style={{
-            fontFamily: "Cormorant Garamond, serif",
+            fontFamily: "var(--font-display)",
             fontWeight: 500,
             fontSize: 34,
             color: INK,
@@ -1015,10 +1057,10 @@ function RegionSidePanel({
         <p
           className="italic"
           style={{
-            fontFamily: "Cormorant Garamond, serif",
+            fontFamily: "var(--font-display)",
             fontStyle: "italic",
             fontSize: 14,
-            color: "rgba(230,220,200,0.68)",
+            color: "var(--color-ink-dim)",
             marginBottom: 16,
             lineHeight: 1.4,
           }}
@@ -1033,7 +1075,7 @@ function RegionSidePanel({
               className="font-mono"
               style={{
                 color: GOLD_HI,
-                fontSize: 10,
+                fontSize: 11,
                 letterSpacing: "0.18em",
                 textTransform: "uppercase",
               }}
@@ -1043,8 +1085,8 @@ function RegionSidePanel({
             <span
               className="font-mono"
               style={{
-                color: "rgba(230,220,200,0.5)",
-                fontSize: 10,
+                color: "var(--color-ink-dim)",
+                fontSize: 11,
                 letterSpacing: "0.14em",
                 textTransform: "uppercase",
               }}
@@ -1085,7 +1127,7 @@ function RegionSidePanel({
               <button
                 key={lesson.id}
                 onClick={() => onOpenLesson(lesson.id)}
-                className="w-full flex items-start gap-3 p-3 rounded-lg text-left transition-all"
+                className={`w-full flex items-start gap-3 p-3 rounded-lg text-left ${isCurrent ? "" : "btn-card-lift"}`}
                 style={{
                   background: isCurrent
                     ? "rgba(230,192,122,0.16)"
@@ -1098,18 +1140,6 @@ function RegionSidePanel({
                         : "rgba(230,192,122,0.08)"
                   }`,
                   opacity: isDone && !isCurrent ? 0.7 : 1,
-                }}
-                onMouseEnter={(e) => {
-                  if (isCurrent) return;
-                  e.currentTarget.style.background = "rgba(6,12,26,0.75)";
-                  e.currentTarget.style.borderColor = "rgba(230,192,122,0.32)";
-                }}
-                onMouseLeave={(e) => {
-                  if (isCurrent) return;
-                  e.currentTarget.style.background = "rgba(6,12,26,0.4)";
-                  e.currentTarget.style.borderColor = isDone
-                    ? "rgba(230,192,122,0.2)"
-                    : "rgba(230,192,122,0.08)";
                 }}
               >
                 {/* Status indicator */}
@@ -1126,12 +1156,12 @@ function RegionSidePanel({
                     border: isCurrent
                       ? `1.5px solid ${GOLD_HI}`
                       : !isDone
-                        ? "1px solid rgba(230,220,200,0.22)"
+                        ? "1px solid rgba(230,220,200,0.28)"
                         : "none",
                   }}
                 >
                   {isDone ? (
-                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="#0A1428" strokeWidth="3">
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="var(--color-bg-secondary)" strokeWidth="3" aria-hidden="true">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                     </svg>
                   ) : isCurrent ? (
@@ -1148,8 +1178,8 @@ function RegionSidePanel({
                     <span
                       className="font-mono"
                       style={{
-                        color: "rgba(230,220,200,0.45)",
-                        fontSize: 10,
+                        color: "var(--color-ink-dim)",
+                        fontSize: 11,
                         fontWeight: 600,
                       }}
                     >
@@ -1162,7 +1192,7 @@ function RegionSidePanel({
                 <div className="flex-1 min-w-0">
                   <p
                     style={{
-                      fontFamily: "Cormorant Garamond, serif",
+                      fontFamily: "var(--font-display)",
                       fontStyle: "italic",
                       fontSize: 15,
                       fontWeight: 500,
@@ -1177,25 +1207,25 @@ function RegionSidePanel({
                     <span
                       className="font-mono uppercase"
                       style={{
-                        fontSize: 9,
+                        fontSize: 10,
                         letterSpacing: "0.16em",
                         color: isCurrent
                           ? GOLD
-                          : "rgba(230,220,200,0.42)",
+                          : "var(--color-ink-dim)",
                       }}
                     >
                       {LESSON_TYPE_LABELS[lesson.type]}
                     </span>
                     {lesson.duration_label && (
                       <>
-                        <span style={{ color: "rgba(230,220,200,0.25)", fontSize: 10 }}>
+                        <span style={{ color: "var(--color-ink-faint)", fontSize: 10 }} aria-hidden="true">
                           ·
                         </span>
                         <span
                           className="font-mono"
                           style={{
-                            fontSize: 10,
-                            color: "rgba(230,220,200,0.42)",
+                            fontSize: 11,
+                            color: "var(--color-ink-dim)",
                             letterSpacing: "0.04em",
                           }}
                         >
@@ -1207,7 +1237,7 @@ function RegionSidePanel({
                       <span
                         className="font-mono uppercase"
                         style={{
-                          fontSize: 9,
+                          fontSize: 10,
                           letterSpacing: "0.16em",
                           color: GOLD_HI,
                           background: "rgba(230,192,122,0.12)",
@@ -1222,7 +1252,7 @@ function RegionSidePanel({
                       <span
                         className="font-mono uppercase"
                         style={{
-                          fontSize: 9,
+                          fontSize: 10,
                           letterSpacing: "0.16em",
                           color: "#F0A0A8",
                           background: "rgba(196,74,84,0.18)",
@@ -1249,28 +1279,21 @@ function RegionSidePanel({
         <button
           onClick={onPrev ?? undefined}
           disabled={!onPrev}
-          className="flex-1 px-5 py-4 text-left transition-colors"
+          className={`flex-1 px-5 py-4 text-left ${onPrev ? "btn-tinted" : ""}`}
           style={{
             background: "transparent",
             border: "none",
             borderRight: "1px solid rgba(230,192,122,0.12)",
-            color: onPrev ? "rgba(230,220,200,0.85)" : "rgba(230,220,200,0.3)",
+            color: onPrev ? "var(--color-ink)" : "var(--color-ink-faint)",
             cursor: onPrev ? "pointer" : "default",
-          }}
-          onMouseEnter={(e) => {
-            if (!onPrev) return;
-            e.currentTarget.style.background = "rgba(230,192,122,0.08)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
           }}
         >
           <p
             className="font-mono uppercase"
             style={{
-              fontSize: 9,
+              fontSize: 10,
               letterSpacing: "0.2em",
-              color: "rgba(230,220,200,0.5)",
+              color: "var(--color-ink-dim)",
             }}
           >
             Previous
@@ -1278,7 +1301,7 @@ function RegionSidePanel({
           <p
             className="italic"
             style={{
-              fontFamily: "Cormorant Garamond, serif",
+              fontFamily: "var(--font-display)",
               fontSize: 15,
               fontWeight: 500,
             }}
@@ -1289,27 +1312,20 @@ function RegionSidePanel({
         <button
           onClick={onNext ?? undefined}
           disabled={!onNext}
-          className="flex-1 px-5 py-4 text-right transition-colors"
+          className={`flex-1 px-5 py-4 text-right ${onNext ? "btn-tinted" : ""}`}
           style={{
             background: "transparent",
             border: "none",
-            color: onNext ? "rgba(230,220,200,0.85)" : "rgba(230,220,200,0.3)",
+            color: onNext ? "var(--color-ink)" : "var(--color-ink-faint)",
             cursor: onNext ? "pointer" : "default",
-          }}
-          onMouseEnter={(e) => {
-            if (!onNext) return;
-            e.currentTarget.style.background = "rgba(230,192,122,0.08)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
           }}
         >
           <p
             className="font-mono uppercase"
             style={{
-              fontSize: 9,
+              fontSize: 10,
               letterSpacing: "0.2em",
-              color: "rgba(230,220,200,0.5)",
+              color: "var(--color-ink-dim)",
             }}
           >
             Next region
@@ -1317,7 +1333,7 @@ function RegionSidePanel({
           <p
             className="italic"
             style={{
-              fontFamily: "Cormorant Garamond, serif",
+              fontFamily: "var(--font-display)",
               fontSize: 15,
               fontWeight: 500,
             }}

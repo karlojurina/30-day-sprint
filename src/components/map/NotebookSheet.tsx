@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStudent } from "@/contexts/StudentContext";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 import { WorkshopCabinet } from "./WorkshopCabinet";
 
 interface NotebookSheetProps {
@@ -10,8 +11,6 @@ interface NotebookSheetProps {
   onOpenLesson: (lessonId: string) => void;
 }
 
-const GOLD = "#E6C07A";
-const GOLD_HI = "#F0D595";
 const GOLD_DIM = "rgba(230,192,122,0.6)";
 
 /**
@@ -22,6 +21,8 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
   const { regions, lessons, lessonNotes, regionProgress, completedLessonIds } =
     useStudent();
   const [search, setSearch] = useState("");
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
 
   useEffect(() => {
     if (!open) return;
@@ -81,19 +82,28 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
 
   return (
     <>
-      {/* Backdrop */}
-      <div
+      {/* Backdrop — real button so click-to-close works for keyboard users
+          and screen readers, not just mouse. */}
+      <button
+        type="button"
         onClick={onClose}
-        className="fixed inset-0 z-[45]"
+        aria-label="Close notebook"
+        className="fixed inset-0 z-[45] cursor-default"
         style={{
           background: "rgba(6,12,26,0.75)",
           backdropFilter: "blur(6px)",
           animation: "overlay-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both",
+          border: "none",
+          padding: 0,
         }}
       />
 
       {/* Sheet */}
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="notebook-sheet-title"
         className="fixed z-[50] flex flex-col"
         style={{
           top: "5%",
@@ -101,8 +111,8 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
           left: "50%",
           transform: "translateX(-50%)",
           width: "min(720px, 95vw)",
-          background: "linear-gradient(180deg, #102042 0%, #0A1428 100%)",
-          border: "1px solid rgba(230,192,122,0.32)",
+          background: "linear-gradient(180deg, var(--color-bg-card) 0%, var(--color-bg-secondary) 100%)",
+          border: "1px solid var(--color-border-hover)",
           borderRadius: 16,
           overflow: "hidden",
           boxShadow: "0 40px 80px rgba(0,0,0,0.6)",
@@ -117,15 +127,16 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
           <div>
             <p
               className="text-[11px] font-mono uppercase tracking-widest mb-1"
-              style={{ color: GOLD, letterSpacing: "0.18em" }}
+              style={{ color: "var(--color-gold)", letterSpacing: "0.18em" }}
             >
               Your Workshop
             </p>
             <h2
+              id="notebook-sheet-title"
               className="italic text-[28px] leading-tight"
               style={{
-                fontFamily: "Cormorant Garamond, serif",
-                color: "#E6DCC8",
+                fontFamily: "var(--font-display)",
+                color: "var(--color-ink)",
                 fontWeight: 500,
               }}
             >
@@ -134,7 +145,7 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
             <p
               className="text-[13px] mt-2"
               style={{
-                fontFamily: "Cormorant Garamond, serif",
+                fontFamily: "var(--font-display)",
                 fontStyle: "italic",
                 color: GOLD_DIM,
               }}
@@ -145,16 +156,13 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
           </div>
           <button
             onClick={onClose}
-            className="w-10 h-10 rounded-full flex items-center justify-center transition-colors"
+            className="btn-tinted w-10 h-10 rounded-full flex items-center justify-center"
             style={{
-              color: "rgba(230,220,200,0.62)",
+              color: "rgba(230,220,200,0.7)",
               border: "1px solid rgba(230,192,122,0.2)",
+              background: "transparent",
             }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.background = "rgba(230,192,122,0.08)")
-            }
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            aria-label="Close"
+            aria-label="Close notebook"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -164,8 +172,12 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
 
         {/* Search */}
         <div className="px-6 pt-4">
+          <label htmlFor="notebook-search" className="sr-only">
+            Search notes
+          </label>
           <input
-            type="text"
+            id="notebook-search"
+            type="search"
             placeholder="Search your notes…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -173,8 +185,8 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
             style={{
               background: "rgba(6,12,26,0.6)",
               border: "1px solid rgba(230,192,122,0.2)",
-              color: "#E6DCC8",
-              fontFamily: "Cormorant Garamond, serif",
+              color: "var(--color-ink)",
+              fontFamily: "var(--font-display)",
               fontStyle: "italic",
             }}
           />
@@ -193,8 +205,8 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
                     style={{
                       background: "rgba(230,192,122,0.12)",
                       border: "1px solid rgba(230,192,122,0.32)",
-                      color: GOLD_HI,
-                      fontFamily: "Cormorant Garamond, serif",
+                      color: "var(--color-gold-light)",
+                      fontFamily: "var(--font-display)",
                       fontStyle: "italic",
                       fontSize: 15,
                       fontWeight: 600,
@@ -204,7 +216,7 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
                   </div>
                   <div>
                     <p
-                      className="text-[10px] font-mono uppercase"
+                      className="text-[11px] font-mono uppercase"
                       style={{ color: GOLD_DIM, letterSpacing: "0.16em" }}
                     >
                       Region {region.order_num} · {region.days_label}
@@ -212,8 +224,8 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
                     <h3
                       className="italic text-[20px] leading-tight"
                       style={{
-                        fontFamily: "Cormorant Garamond, serif",
-                        color: "#E6DCC8",
+                        fontFamily: "var(--font-display)",
+                        color: "var(--color-ink)",
                         fontWeight: 500,
                       }}
                     >
@@ -230,26 +242,16 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
                         onOpenLesson(entry.lessonId);
                         onClose();
                       }}
-                      className="w-full text-left p-4 rounded-lg transition-colors"
+                      className="btn-card-lift w-full text-left p-4 rounded-lg"
                       style={{
                         background: "rgba(6,12,26,0.55)",
                         border: "1px solid rgba(230,192,122,0.14)",
                       }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = "rgba(6,12,26,0.8)";
-                        e.currentTarget.style.borderColor =
-                          "rgba(230,192,122,0.32)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = "rgba(6,12,26,0.55)";
-                        e.currentTarget.style.borderColor =
-                          "rgba(230,192,122,0.14)";
-                      }}
                     >
                       <div className="flex items-center gap-2 mb-2">
                         <span
-                          className="font-mono text-[10px] uppercase tracking-widest"
-                          style={{ color: GOLD, letterSpacing: "0.16em" }}
+                          className="font-mono text-[11px] uppercase tracking-widest"
+                          style={{ color: "var(--color-gold)", letterSpacing: "0.16em" }}
                         >
                           Day {entry.day}
                         </span>
@@ -257,9 +259,9 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
                         <span
                           className="text-[14px] truncate"
                           style={{
-                            fontFamily: "Cormorant Garamond, serif",
+                            fontFamily: "var(--font-display)",
                             fontStyle: "italic",
-                            color: "#E6DCC8",
+                            color: "var(--color-ink)",
                           }}
                         >
                           {entry.title}
@@ -267,7 +269,7 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
                       </div>
                       <p
                         className="text-[13px] leading-relaxed whitespace-pre-wrap"
-                        style={{ color: "rgba(230,220,200,0.85)" }}
+                        style={{ color: "rgba(230,220,200,0.88)" }}
                       >
                         {entry.content.length > 240
                           ? entry.content.slice(0, 238) + "…"
@@ -312,7 +314,7 @@ function EmptyState({
           className="w-10 h-10"
           fill="none"
           viewBox="0 0 24 24"
-          stroke={GOLD}
+          stroke="var(--color-gold)"
           strokeWidth="1.2"
         >
           <path
@@ -325,8 +327,8 @@ function EmptyState({
       <h3
         className="italic text-[22px] mb-2"
         style={{
-          fontFamily: "Cormorant Garamond, serif",
-          color: "#E6DCC8",
+          fontFamily: "var(--font-display)",
+          color: "var(--color-ink)",
           fontWeight: 500,
         }}
       >
@@ -335,9 +337,9 @@ function EmptyState({
       <p
         className="text-[14px] max-w-sm mx-auto"
         style={{
-          fontFamily: "Cormorant Garamond, serif",
+          fontFamily: "var(--font-display)",
           fontStyle: "italic",
-          color: "rgba(230,220,200,0.62)",
+          color: "var(--color-ink-dim)",
         }}
       >
         Open any lesson on the map and write down what stood out, what
@@ -352,7 +354,7 @@ function EmptyState({
         }}
       >
         <span
-          className="font-mono text-[10px] uppercase"
+          className="font-mono text-[11px] uppercase"
           style={{ color: GOLD_DIM, letterSpacing: "0.16em" }}
         >
           {completedCount} lessons charted · {unlockedCount}/{regions.length} regions explored

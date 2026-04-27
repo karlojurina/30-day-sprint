@@ -3,14 +3,12 @@
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useStudent } from "@/contexts/StudentContext";
 import { LESSON_TYPE_LABELS } from "@/lib/constants";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 
 interface LessonSheetProps {
   lessonId: string | null;
   onClose: () => void;
 }
-
-const GOLD = "#E6C07A";
-const GOLD_HI = "#F0D595";
 
 const WHOP_LESSON_URL = (lessonId: string) =>
   `https://whop.com/joined/ecomtalent/knowledge-KBhMkENW27qoZB/app/courses/cors_6cYEj5qoUcmbcpSryUrfiR/lessons/${lessonId}/`;
@@ -42,6 +40,9 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
   );
   const isCompleted = lesson ? completedLessonIds.has(lesson.id) : false;
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, lessonId != null);
+
   // Close on Escape
   useEffect(() => {
     if (!lessonId) return;
@@ -70,31 +71,40 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
 
   return (
     <>
-      {/* Backdrop */}
-      <div
+      {/* Backdrop — real button so click-to-close works for keyboard users
+          and screen readers, not just mouse. */}
+      <button
+        type="button"
         onClick={onClose}
-        className="fixed inset-0 z-[45]"
+        aria-label="Close lesson"
+        className="fixed inset-0 z-[45] cursor-default"
         style={{
           background: "rgba(6,12,26,0.78)",
           backdropFilter: "blur(6px)",
           animation: "overlay-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both",
+          border: "none",
+          padding: 0,
         }}
       />
 
-      {/* Centered modal — a flex wrapper guarantees centering on any viewport.
-          Width clamps to 92vw so it never overflows on smaller screens. */}
+      {/* Centered modal — flex wrapper centers on any viewport, width
+          clamps to 92vw so it never overflows on smaller screens. */}
       <div
         className="fixed inset-0 z-[50] flex items-center justify-center p-4"
         style={{ pointerEvents: "none" }}
       >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="lesson-sheet-title"
         className="flex flex-col"
         style={{
           pointerEvents: "auto",
           width: "min(840px, 92vw)",
           maxHeight: "92vh",
-          background: "linear-gradient(180deg, #102042 0%, #0A1428 100%)",
-          border: "1px solid rgba(230,192,122,0.32)",
+          background: "linear-gradient(180deg, var(--color-bg-card) 0%, var(--color-bg-secondary) 100%)",
+          border: "1px solid var(--color-border-hover)",
           borderRadius: 16,
           overflow: "hidden",
           boxShadow: "0 40px 80px rgba(0,0,0,0.6)",
@@ -118,10 +128,11 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
               Day {lesson.day} · {region.name} · {LESSON_TYPE_LABELS[lesson.type]}
             </p>
             <h2
+              id="lesson-sheet-title"
               className="italic leading-tight"
               style={{
-                fontFamily: "Cormorant Garamond, serif",
-                color: "#E6DCC8",
+                fontFamily: "var(--font-display)",
+                color: "var(--color-ink)",
                 fontWeight: 500,
                 fontSize: 28,
               }}
@@ -132,7 +143,7 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
               <p
                 className="font-mono mt-1.5"
                 style={{
-                  color: "rgba(230,220,200,0.5)",
+                  color: "var(--color-ink-dim)",
                   fontSize: 12,
                   letterSpacing: "0.06em",
                 }}
@@ -143,16 +154,13 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
           </div>
           <button
             onClick={onClose}
-            className="w-10 h-10 rounded-full flex items-center justify-center transition-colors shrink-0"
+            className="btn-tinted w-10 h-10 rounded-full flex items-center justify-center shrink-0"
             style={{
-              color: "rgba(230,220,200,0.62)",
+              color: "rgba(230,220,200,0.7)",
               border: "1px solid rgba(230,192,122,0.2)",
+              background: "transparent",
             }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.background = "rgba(230,192,122,0.08)")
-            }
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            aria-label="Close"
+            aria-label="Close lesson"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -173,19 +181,14 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
               href={whopUrl!}
               target="_blank"
               rel="noopener"
-              className="relative rounded-lg overflow-hidden flex items-center justify-center transition-transform group"
+              className="watch-link relative rounded-lg overflow-hidden flex items-center justify-center group"
               style={{
                 aspectRatio: "16 / 9",
                 background:
-                  "radial-gradient(ellipse 50% 55% at 50% 50%, rgba(77,206,196,0.14) 0%, transparent 70%), linear-gradient(135deg, #0A1428 0%, #15294C 100%)",
+                  "radial-gradient(ellipse 50% 55% at 50% 50%, rgba(77,206,196,0.14) 0%, transparent 70%), linear-gradient(135deg, var(--color-bg-secondary) 0%, var(--color-bg-elevated) 100%)",
                 border: "1px solid rgba(230,192,122,0.3)",
                 textDecoration: "none",
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = "rgba(230,192,122,0.65)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = "rgba(230,192,122,0.3)";
+                transition: "border-color 200ms cubic-bezier(0.22,1,0.36,1)",
               }}
             >
               {/* Subtle scanline texture */}
@@ -201,18 +204,18 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
                   className="mx-auto mb-4 w-20 h-20 rounded-full flex items-center justify-center transition-transform"
                   style={{
                     background: "rgba(230,192,122,0.22)",
-                    border: "2px solid #E6C07A",
+                    border: "2px solid var(--color-gold)",
                     boxShadow: "0 0 40px rgba(230,192,122,0.3)",
                   }}
                 >
-                  <svg viewBox="0 0 24 24" className="w-9 h-9 ml-1" fill={GOLD_HI}>
+                  <svg viewBox="0 0 24 24" className="w-9 h-9 ml-1" fill="var(--color-gold-light)">
                     <path d="M8 5v14l11-7z" />
                   </svg>
                 </div>
                 <p
                   className="font-mono uppercase mb-1"
                   style={{
-                    color: GOLD,
+                    color: "var(--color-gold)",
                     letterSpacing: "0.22em",
                     fontSize: 11,
                   }}
@@ -222,8 +225,8 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
                 <p
                   className="italic"
                   style={{
-                    fontFamily: "Cormorant Garamond, serif",
-                    color: "rgba(230,220,200,0.75)",
+                    fontFamily: "var(--font-display)",
+                    color: "var(--color-ink-dim)",
                     fontSize: 13,
                   }}
                 >
@@ -235,7 +238,7 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
                   className="absolute bottom-3 right-3 font-mono text-[11px] px-2 py-1 rounded"
                   style={{
                     background: "rgba(6,12,26,0.9)",
-                    color: GOLD,
+                    color: "var(--color-gold)",
                     letterSpacing: "0.08em",
                   }}
                 >
@@ -263,15 +266,15 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
                     border: "1px solid rgba(230,192,122,0.35)",
                   }}
                 >
-                  <svg viewBox="0 0 24 24" className="w-6 h-6" fill={GOLD}>
+                  <svg viewBox="0 0 24 24" className="w-6 h-6" fill="var(--color-gold)">
                     <path d="M8 5v14l11-7z" />
                   </svg>
                 </div>
                 <p
                   className="italic"
                   style={{
-                    fontFamily: "Cormorant Garamond, serif",
-                    color: "rgba(230,220,200,0.72)",
+                    fontFamily: "var(--font-display)",
+                    color: "var(--color-ink-dim)",
                     fontSize: 14,
                   }}
                 >
@@ -286,9 +289,9 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
             <p
               className="leading-relaxed"
               style={{
-                fontFamily: "Cormorant Garamond, serif",
+                fontFamily: "var(--font-display)",
                 fontStyle: "italic",
-                color: "rgba(230,220,200,0.85)",
+                color: "rgba(230,220,200,0.88)",
                 fontSize: 15,
               }}
             >
@@ -308,21 +311,21 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
               <p
                 className="font-mono uppercase tracking-widest mb-2"
                 style={{
-                  color: GOLD_HI,
+                  color: "var(--color-gold-light)",
                   letterSpacing: "0.18em",
                   fontSize: 11,
                 }}
               >
                 Your mission
               </p>
-              <p style={{ color: "#E6DCC8", fontSize: 14, lineHeight: 1.6 }}>
+              <p style={{ color: "var(--color-ink)", fontSize: 14, lineHeight: 1.6 }}>
                 Finish this on your own, then mark it done below.
                 {lesson.discord_channel
                   ? " Post your work in Discord when you're ready."
                   : ""}
               </p>
               {lesson.discord_channel && (
-                <p className="mt-2 font-mono" style={{ color: GOLD, fontSize: 13 }}>
+                <p className="mt-2 font-mono" style={{ color: "var(--color-gold)", fontSize: 13 }}>
                   #{lesson.discord_channel}
                 </p>
               )}
@@ -344,8 +347,8 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
                         border: "1px solid rgba(230,192,122,0.35)",
                       }
                     : {
-                        background: GOLD,
-                        color: "#060C1A",
+                        background: "var(--color-gold)",
+                        color: "var(--color-bg-primary)",
                         fontSize: 15,
                       }
                 }
@@ -402,6 +405,8 @@ function LessonNotes({ lessonId, initial, onSave }: LessonNotesProps) {
     [lessonId, onSave]
   );
 
+  const notesId = `lesson-notes-${lessonId}`;
+  const statusId = `${notesId}-status`;
   return (
     <div
       className="p-4 rounded-lg"
@@ -411,34 +416,40 @@ function LessonNotes({ lessonId, initial, onSave }: LessonNotesProps) {
       }}
     >
       <div className="flex items-center justify-between mb-2">
-        <p
+        <label
+          htmlFor={notesId}
           className="font-mono uppercase tracking-widest"
           style={{
-            color: "rgba(230,220,200,0.5)",
+            color: "var(--color-ink-dim)",
             letterSpacing: "0.16em",
             fontSize: 11,
           }}
         >
           Your notes
-        </p>
-        {status === "saving" && (
-          <span className="font-mono" style={{ color: "rgba(230,220,200,0.42)", fontSize: 10 }}>
-            saving…
-          </span>
-        )}
-        {status === "saved" && (
-          <span className="font-mono" style={{ color: GOLD, fontSize: 10 }}>
-            saved
-          </span>
-        )}
+        </label>
+        <span
+          id={statusId}
+          role="status"
+          aria-live="polite"
+          className="font-mono"
+          style={{
+            color: status === "saved" ? "var(--color-gold)" : "var(--color-ink-dim)",
+            fontSize: 11,
+            minHeight: 14,
+          }}
+        >
+          {status === "saving" ? "saving…" : status === "saved" ? "saved" : ""}
+        </span>
       </div>
       <textarea
+        id={notesId}
         rows={4}
         value={value}
         onChange={(e) => handleChange(e.target.value)}
         placeholder="Write down what stood out, what you'll try next, or anything to remember."
+        aria-describedby={statusId}
         className="w-full resize-none outline-none bg-transparent leading-relaxed"
-        style={{ color: "#E6DCC8", fontSize: 14 }}
+        style={{ color: "var(--color-ink)", fontSize: 14 }}
       />
     </div>
   );

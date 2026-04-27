@@ -53,8 +53,15 @@ export default function AuthCompletePage() {
           opacity: 0.3,
         }}
       />
-      <div className="relative text-center space-y-3">
-        <div className="w-8 h-8 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin mx-auto" />
+      <div
+        role="status"
+        aria-live="polite"
+        className="relative text-center space-y-3"
+      >
+        <div
+          aria-hidden="true"
+          className="w-8 h-8 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin mx-auto"
+        />
         <p className="mono-label-accent">Signing you in…</p>
       </div>
     </div>

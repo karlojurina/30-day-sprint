@@ -449,6 +449,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     });
   };
 
+  // First-paint flag — we want a long, cinematic camera arrival the first
+  // time the user lands on the map, but a fast tween for subsequent view
+  // changes (those run hidden behind cloud cover).
+  const isFirstPaintRef = useRef(true);
+
   // Animate transform on view change
   useEffect(() => {
     if (outerSize.w === 0) return;
@@ -460,20 +465,38 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     const reduced =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    const isFirst = isFirstPaintRef.current;
+
+    // Cinematic open: start at the bare cover-fit baseline (image fills
+    // the viewport, no extra zoom) and ease into the focus on Base Camp.
+    // Long expo curve so the camera "arrives" rather than snapping.
+    if (isFirst) {
+      isFirstPaintRef.current = false;
+      const cover = Math.max(outerSize.w / MAP_W, outerSize.h / MAP_H);
+      const baseline = {
+        x: (outerSize.w - MAP_W * cover) / 2,
+        y: (outerSize.h - MAP_H * cover) / 2,
+        scale: cover,
+      };
+      transformRef.current = baseline;
+      setDisplayTransform(baseline);
+    }
+
     if (reduced) {
       transformRef.current = target;
       setDisplayTransform(target);
       return;
     }
-    // Fires when onPeak hits (clouds fully covering). Must finish before
-    // clouds retreat (~250ms after peak in a 2s transition). 0.25s lands
-    // exactly when the retreat begins so there's no visible mid-tween.
+
     tweenRef.current = gsap.to(transformRef.current, {
       x: target.x,
       y: target.y,
       scale: target.scale,
-      duration: 0.25,
-      ease: "power2.out",
+      // Cloud-cover swap: 0.25s and the user never sees it.
+      // First paint: slow ease so the camera arrival reads as cinematic.
+      duration: isFirst ? 1.8 : 0.25,
+      ease: isFirst ? "expo.out" : "power2.out",
       onUpdate: () => {
         setDisplayTransform({ ...transformRef.current });
       },
@@ -621,6 +644,26 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     return out as Record<RegionId, Lesson[]>;
   }, [lessonsById]);
 
+  // Sequential region unlock: r1 always open; r(n) opens only when every
+  // lesson in r(1..n-1) is complete. Returns a Set so SVG render and click
+  // handler can both check membership in O(1).
+  const unlockedRegions = useMemo<Set<RegionId>>(() => {
+    const order: RegionId[] = ["r1", "r2", "r3", "r4"];
+    const out = new Set<RegionId>();
+    for (let i = 0; i < order.length; i++) {
+      const rid = order[i];
+      if (i === 0) {
+        out.add(rid);
+        continue;
+      }
+      const prevLessons = lessonsByRegion[order[i - 1]] ?? [];
+      const prevDone = prevLessons.length > 0 && prevLessons.every((l) => completedLessonIds.has(l.id));
+      if (!prevDone) break;
+      out.add(rid);
+    }
+    return out;
+  }, [lessonsByRegion, completedLessonIds]);
+
   const focusedRegion =
     view !== "overview" ? regions.find((r) => r.id === view) : null;
   const focusedLessons: Lesson[] =
@@ -650,6 +693,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   const transitionTo = (next: View) => {
     if (suppressClickRef.current) return;
     if (pendingViewRef.current !== null) return; // already in flight
+    // Sequential lock: clicking a locked region is a no-op. The SVG also
+    // visually communicates the locked state so the click never gets fired
+    // from a deliberate user — but defensive guard handles programmatic /
+    // keyboard activation paths.
+    if (next !== "overview" && !unlockedRegions.has(next as RegionId)) return;
     pendingViewRef.current = next;
 
     // If the user is heading into a region, force-mount the deferred scene
@@ -754,6 +802,14 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                 <stop offset="60%" stopColor="rgba(240,213,149,0.2)" />
                 <stop offset="100%" stopColor="rgba(240,213,149,0)" />
               </radialGradient>
+              {/* Fog-of-war gradient — deep navy, sits over locked regions
+                  so the painted terrain reads as obscured/unknown. Same
+                  shape as the active glow but cool and heavier. */}
+              <radialGradient id="zone-fog" cx="50%" cy="50%" r="55%">
+                <stop offset="0%" stopColor="rgba(10,20,40,0.92)" />
+                <stop offset="55%" stopColor="rgba(10,20,40,0.7)" />
+                <stop offset="100%" stopColor="rgba(10,20,40,0.18)" />
+              </radialGradient>
               {/* Feather the polygon glow so vertex-bound edges read as a
                   soft halo rather than a clipped fill. stdDeviation is in
                   map-space units (3200×1400 viewBox); the oversized filter
@@ -784,84 +840,121 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
               const z = REGION_ZONES[r.id as RegionId];
               const regionLessons = lessonsByRegion[r.id as RegionId] ?? [];
               if (!z) return null;
-              // Mockup is for placement verification — all regions clickable.
               const total = regionLessons.length;
               const completed = regionLessons.filter((l) =>
                 completedLessonIds.has(l.id)
               ).length;
               const isComplete = total > 0 && completed === total;
-              const hot = hoveredZone === r.id;
-              const hasCurrent = regionLessons.some(
-                (l) => l.id === currentLesson?.id
-              );
-              const isCurrent = hasCurrent;
+              const isUnlocked = unlockedRegions.has(r.id as RegionId);
+              const hot = isUnlocked && hoveredZone === r.id;
+              const isCurrent =
+                isUnlocked &&
+                regionLessons.some((l) => l.id === currentLesson?.id);
               const numeral = ["I", "II", "III", "IV"][r.order_num - 1];
               const stroke = isComplete ? GOLD_HI : GOLD;
               const smoothD = smoothClosedPath(z.polygon);
 
+              const ariaLabel = isUnlocked
+                ? `${r.name} — ${completed}/${total} lessons`
+                : `${r.name} — locked, finish previous region first`;
+
               return (
                 <g
                   key={`zone-${r.id}`}
-                  style={{ cursor: "pointer" }}
-                  onClick={() => transitionTo(r.id as RegionId)}
-                  onMouseEnter={() => setHoveredZone(r.id as RegionId)}
-                  onMouseLeave={() => setHoveredZone(null)}
+                  style={{ cursor: isUnlocked ? "pointer" : "not-allowed" }}
+                  onClick={
+                    isUnlocked ? () => transitionTo(r.id as RegionId) : undefined
+                  }
+                  onMouseEnter={
+                    isUnlocked
+                      ? () => setHoveredZone(r.id as RegionId)
+                      : undefined
+                  }
+                  onMouseLeave={
+                    isUnlocked ? () => setHoveredZone(null) : undefined
+                  }
                   onKeyDown={(e) => {
+                    if (!isUnlocked) return;
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
                       transitionTo(r.id as RegionId);
                     }
                   }}
-                  tabIndex={0}
+                  tabIndex={isUnlocked ? 0 : -1}
                   role="button"
-                  aria-label={`${r.name} — ${completed}/${total} lessons`}
+                  aria-disabled={!isUnlocked || undefined}
+                  aria-label={ariaLabel}
                 >
-                  {/* Invisible hit surface — catches clicks over the whole
-                      smoothed shape regardless of gradient transparency.
-                      pointer-events="all" works even with fill="none". */}
+                  {/* Invisible hit surface — catches clicks/taps over the
+                      whole smoothed shape regardless of gradient
+                      transparency. Locked regions still need this so the
+                      cursor changes correctly on hover. */}
                   <path
                     d={smoothD}
                     fill="rgba(0,0,0,0.001)"
                     pointerEvents="all"
                   />
 
-                  {/* Subtle breathing glow on the smoothed shape — no
-                      outline. Animates between two opacities so the region
-                      "pulses" gently. The feGaussianBlur filter feathers
-                      the gradient where it clips against polygon vertices,
-                      so edges read as a soft halo, not a hard cutout. */}
-                  <path
-                    d={smoothD}
-                    fill={hot ? "url(#zone-glow-hot)" : "url(#zone-glow)"}
-                    filter={hot ? "url(#zone-feather-hot)" : "url(#zone-feather)"}
-                    pointerEvents="none"
-                    style={{
-                      transition: "opacity 0.4s cubic-bezier(0.22,1,0.36,1)",
-                    }}
-                  >
-                    {!hot && (
-                      <animate
-                        attributeName="opacity"
-                        values="0.55;1;0.55"
-                        dur="4.5s"
-                        repeatCount="indefinite"
-                      />
-                    )}
-                  </path>
+                  {isUnlocked ? (
+                    <>
+                      {/* Subtle breathing glow on the smoothed shape — no
+                          outline. Animates between two opacities so the
+                          region "pulses" gently. The feGaussianBlur filter
+                          feathers the gradient where it clips against
+                          polygon vertices, so edges read as a soft halo,
+                          not a hard cutout. */}
+                      <path
+                        d={smoothD}
+                        fill={hot ? "url(#zone-glow-hot)" : "url(#zone-glow)"}
+                        filter={hot ? "url(#zone-feather-hot)" : "url(#zone-feather)"}
+                        pointerEvents="none"
+                        style={{
+                          transition: "opacity 0.4s cubic-bezier(0.22,1,0.36,1)",
+                        }}
+                      >
+                        {!hot && (
+                          <animate
+                            attributeName="opacity"
+                            values="0.55;1;0.55"
+                            dur="4.5s"
+                            repeatCount="indefinite"
+                          />
+                        )}
+                      </path>
 
-                  {/* Subtle current-region accent (no harsh outline) */}
-                  {isCurrent && (
+                      {/* Subtle current-region accent (no harsh outline) */}
+                      {isCurrent && (
+                        <path
+                          d={smoothD}
+                          fill="url(#zone-glow-hot)"
+                          filter="url(#zone-feather-hot)"
+                          opacity={0.5}
+                          pointerEvents="none"
+                        >
+                          <animate
+                            attributeName="opacity"
+                            values="0.25;0.6;0.25"
+                            dur="3.2s"
+                            repeatCount="indefinite"
+                          />
+                        </path>
+                      )}
+                    </>
+                  ) : (
+                    /* Locked: persistent fog rolls over the polygon. Same
+                       feathered radial pattern as the hover glow, but cool
+                       deep-navy instead of warm gold so it reads as
+                       obscured terrain — fog of war. */
                     <path
                       d={smoothD}
-                      fill={`url(#zone-glow-hot)`}
-                      filter="url(#zone-feather-hot)"
-                      opacity={0.5}
+                      fill="url(#zone-fog)"
+                      filter="url(#zone-feather)"
                       pointerEvents="none"
                     >
                       <animate
                         attributeName="opacity"
-                        values="0.25;0.6;0.25"
-                        dur="3.2s"
+                        values="0.85;1;0.85"
+                        dur="6s"
                         repeatCount="indefinite"
                       />
                     </path>
@@ -872,29 +965,39 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                     transform={`translate(${z.labelX} ${z.labelY})`}
                     pointerEvents="none"
                   >
-                    {/* Numeral plaque */}
+                    {/* Numeral plaque (or lock plaque when locked) */}
                     <circle
                       cx={0}
                       cy={-28}
                       r={26}
                       fill="rgba(6,12,26,0.85)"
-                      stroke={stroke}
+                      stroke={isUnlocked ? stroke : "rgba(230,220,200,0.4)"}
                       strokeWidth={1.5}
                     />
-                    <text
-                      x={0}
-                      y={-20}
-                      textAnchor="middle"
-                      style={{
-                        fontFamily: "Cormorant Garamond, serif",
-                        fontStyle: "italic",
-                        fontWeight: 600,
-                        fontSize: 26,
-                        fill: stroke,
-                      }}
-                    >
-                      {numeral}
-                    </text>
+                    {isUnlocked ? (
+                      <text
+                        x={0}
+                        y={-20}
+                        textAnchor="middle"
+                        style={{
+                          fontFamily: "Cormorant Garamond, serif",
+                          fontStyle: "italic",
+                          fontWeight: 600,
+                          fontSize: 26,
+                          fill: stroke,
+                        }}
+                      >
+                        {numeral}
+                      </text>
+                    ) : (
+                      /* Padlock icon — drawn as SVG paths so it scales
+                         with the rest of the map without bitmap fuzz. */
+                      <g transform="translate(0 -28)" stroke="rgba(230,220,200,0.78)" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                        <rect x={-9} y={-2} width={18} height={14} rx={2.5} fill="rgba(6,12,26,0.85)" />
+                        <path d="M -6 -2 V -7 a 6 6 0 0 1 12 0 V -2" />
+                        <circle cx={0} cy={5} r={1.4} fill="rgba(230,220,200,0.78)" stroke="none" />
+                      </g>
+                    )}
 
                     {/* Region name */}
                     <text
@@ -906,7 +1009,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         fontStyle: "italic",
                         fontWeight: 500,
                         fontSize: 34,
-                        fill: INK,
+                        fill: isUnlocked ? INK : "rgba(230,220,200,0.7)",
                         paintOrder: "stroke fill",
                         stroke: "rgba(6,12,26,0.85)",
                         strokeWidth: 4,
@@ -916,7 +1019,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       {r.name}
                     </text>
 
-                    {/* Progress */}
+                    {/* Progress / locked sublabel */}
                     <text
                       x={0}
                       y={52}
@@ -925,7 +1028,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         fontFamily: "JetBrains Mono, ui-monospace, monospace",
                         fontSize: 13,
                         letterSpacing: "0.22em",
-                        fill: GOLD,
+                        fill: isUnlocked ? GOLD : "rgba(230,220,200,0.62)",
                         textTransform: "uppercase",
                         paintOrder: "stroke fill",
                         stroke: "rgba(6,12,26,0.85)",
@@ -933,12 +1036,14 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         strokeLinejoin: "round",
                       }}
                     >
-                      {isComplete
-                        ? `CHARTED · ${total}`
-                        : `${completed} / ${total} LESSONS`}
+                      {isUnlocked
+                        ? isComplete
+                          ? `CHARTED · ${total}`
+                          : `${completed} / ${total} LESSONS`
+                        : "LOCKED"}
                     </text>
 
-                    {/* Hover CTA */}
+                    {/* Hover CTA — only shown for unlocked regions */}
                     {hot && (
                       <text
                         x={0}
@@ -973,7 +1078,6 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           region={focusedRegion}
           lessons={focusedLessons}
           completedLessonIds={completedLessonIds}
-          currentLessonId={currentLesson?.id ?? null}
           onOpenLesson={onOpenLesson}
           onBack={() => transitionTo("overview")}
           onPrev={prevRegion ? () => transitionTo(prevRegion.id as RegionId) : null}
@@ -1006,7 +1110,6 @@ function RegionSidePanel({
   region,
   lessons,
   completedLessonIds,
-  currentLessonId,
   onOpenLesson,
   onBack,
   onPrev,
@@ -1016,7 +1119,6 @@ function RegionSidePanel({
   region: ReturnType<typeof useStudent>["regions"][number];
   lessons: Lesson[];
   completedLessonIds: Set<string>;
-  currentLessonId: string | null;
   onOpenLesson: (id: string) => void;
   onBack: () => void;
   onPrev: (() => void) | null;
@@ -1153,7 +1255,10 @@ function RegionSidePanel({
         </div>
       </div>
 
-      {/* Lesson list */}
+      {/* Lesson list — sequential lock model: lesson[k] is the next to do
+          where k = number of completed lessons in this region. Anything
+          past k is locked. The first found "not done" doubles as the
+          current lesson regardless of currentLessonId. */}
       <div
         className="flex-1 overflow-y-auto px-6 py-5"
         style={{ overscrollBehavior: "contain" }}
@@ -1161,12 +1266,22 @@ function RegionSidePanel({
         <div className="space-y-2">
           {lessons.map((lesson, i) => {
             const isDone = completedLessonIds.has(lesson.id);
-            const isCurrent = lesson.id === currentLessonId;
+            // Sequential model — first not-done is the current lesson.
+            // Everything past it is locked until the current one's done.
+            const isCurrent = !isDone && i === completed;
+            const isLocked = !isDone && !isCurrent;
             return (
               <button
                 key={lesson.id}
-                onClick={() => onOpenLesson(lesson.id)}
-                className={`w-full flex items-start gap-3 p-3 rounded-lg text-left ${isCurrent ? "" : "btn-card-lift"}`}
+                onClick={isLocked ? undefined : () => onOpenLesson(lesson.id)}
+                disabled={isLocked}
+                aria-disabled={isLocked || undefined}
+                aria-label={
+                  isLocked
+                    ? `${lesson.title} — locked, finish previous lessons first`
+                    : undefined
+                }
+                className={`w-full flex items-start gap-3 p-3 rounded-lg text-left ${isCurrent || isLocked ? "" : "btn-card-lift"}`}
                 style={{
                   background: isCurrent
                     ? "rgba(230,192,122,0.16)"
@@ -1178,7 +1293,8 @@ function RegionSidePanel({
                         ? "rgba(230,192,122,0.2)"
                         : "rgba(230,192,122,0.08)"
                   }`,
-                  opacity: isDone && !isCurrent ? 0.7 : 1,
+                  opacity: isLocked ? 0.45 : isDone && !isCurrent ? 0.7 : 1,
+                  cursor: isLocked ? "not-allowed" : "pointer",
                 }}
               >
                 {/* Status indicator */}
@@ -1213,6 +1329,11 @@ function RegionSidePanel({
                         background: GOLD_HI,
                       }}
                     />
+                  ) : isLocked ? (
+                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-dim)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="5" y="11" width="14" height="10" rx="2" />
+                      <path d="M8 11 V 7 a 4 4 0 0 1 8 0 V 11" />
+                    </svg>
                   ) : (
                     <span
                       className="font-mono"

@@ -375,47 +375,78 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
 
   const sidePanelWidth = getSidePanelWidth(outerSize.w);
 
+  // Default zoom factor over cover-fit. Cover guarantees the image fills the
+  // viewport (no bars at any aspect ratio); the multiplier zooms in further
+  // so a new student lands focused on Base Camp instead of a wide,
+  // overwhelming map.
+  const OVERVIEW_DEFAULT_ZOOM = 1.7;
+  const REGION_DEFAULT_ZOOM = 1.25;
+
   // Compute target transform for a given view.
   //
-  // Contain-fit (Math.min) — the WHOLE map is always visible at every
-  // viewport size. Letterboxing in the off-axis dimension is fine; the
-  // background is the same deep navy as the map's sky so it reads as
-  // matte rather than empty.
+  // Cover-fit (Math.max) — image always fills the viewport in both axes,
+  // so the user never sees background bars. Default zoom is intentionally
+  // ABOVE cover so the focal region (Base Camp on overview, the labelX/Y
+  // for region scenes) lands prominently in front of the user. Pan + wheel
+  // zoom let them explore further; clampTransform keeps everything inside
+  // the image bounds so bars never appear.
   const getTargetTransform = (v: View) => {
     const vw = outerSize.w || 1;
     const vh = outerSize.h || 1;
 
+    const clampToImage = (t: {
+      x: number;
+      y: number;
+      scale: number;
+      areaW: number;
+    }) => {
+      const imgW = MAP_W * t.scale;
+      const imgH = MAP_H * t.scale;
+      const x = imgW <= t.areaW ? (t.areaW - imgW) / 2 : Math.max(t.areaW - imgW, Math.min(0, t.x));
+      const y = imgH <= vh ? (vh - imgH) / 2 : Math.max(vh - imgH, Math.min(0, t.y));
+      return { x, y, scale: t.scale };
+    };
+
     if (v === "overview") {
-      const scale = Math.min(vw / MAP_W, vh / MAP_H);
-      return {
-        x: (vw - MAP_W * scale) / 2,
-        y: (vh - MAP_H * scale) / 2,
+      const cover = Math.max(vw / MAP_W, vh / MAP_H);
+      const scale = cover * OVERVIEW_DEFAULT_ZOOM;
+      // Center on Base Camp so a new student lands looking at where they
+      // start, not a wide context map.
+      const z = REGION_ZONES.r1;
+      return clampToImage({
+        x: vw / 2 - z.labelX * scale,
+        y: vh / 2 - z.labelY * scale,
         scale,
-      };
+        areaW: vw,
+      });
     }
 
     // Region view — leaves room on the right for the side panel.
     const usableW = Math.max(1, vw - sidePanelWidth);
 
     if (SCENES[v]) {
-      const scale = Math.min(usableW / MAP_W, vh / MAP_H);
-      return {
-        x: (usableW - MAP_W * scale) / 2,
-        y: (vh - MAP_H * scale) / 2,
+      const cover = Math.max(usableW / MAP_W, vh / MAP_H);
+      const scale = cover * REGION_DEFAULT_ZOOM;
+      const z = REGION_ZONES[v as RegionId];
+      return clampToImage({
+        x: usableW / 2 - z.labelX * scale,
+        y: vh / 2 - z.labelY * scale,
         scale,
-      };
+        areaW: usableW,
+      });
     }
 
     // Fallback — region has no scene image yet, zoom into its focal point on
     // the overview panorama.
     const z = REGION_ZONES[v];
-    const overview = Math.min(vw / MAP_W, vh / MAP_H);
-    const scale = overview * 1.9;
-    return {
+    const cover = Math.max(usableW / MAP_W, vh / MAP_H);
+    const scale = cover * 1.9;
+    return clampToImage({
       x: usableW / 2 - z.labelX * scale,
       y: vh / 2 - z.labelY * scale,
       scale,
-    };
+      areaW: usableW,
+    });
   };
 
   // Animate transform on view change
@@ -454,30 +485,37 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   }, [view, outerSize]);
 
   // ──────────────────────────────────────────────────────────
-  // Pan + zoom (overview only).
+  // Pan + zoom — works in BOTH overview and region scenes.
   // - Drag to pan, wheel to zoom (pointer-anchored).
   // - Uses document-level pointermove/up listeners attached on pointerdown
   //   so we DON'T setPointerCapture on the outer div — that would steal
   //   pointerup away from child zone polygons and break their onClick.
-  // - Scale clamped to [coverScale, coverScale * 1.6] so the viewport is
-  //   always fully covered (no black edges).
-  // - Inside a region scene, pan/zoom is disabled.
+  // - Scale clamped to [coverScale, coverScale * 3] so the viewport is
+  //   always fully covered (no bars).
+  // - Region pan area is the side-panel-adjusted usable width.
   // ──────────────────────────────────────────────────────────
   const suppressClickRef = useRef(false);
 
-  // Clamp pan so the image edges hug the viewport when the image is larger
-  // than the viewport, and the image is centered (letterboxed) when it's
-  // smaller. Without the smaller-than-viewport branch, drag would scoot the
-  // image to one corner and reveal background.
+  // The width the image needs to cover. Overview = full viewport; region
+  // view = viewport minus the side panel. The clamp uses this so panning
+  // never reveals the panel area or any background.
+  const getAreaW = () => {
+    if (view === "overview") return outerSize.w;
+    return Math.max(1, outerSize.w - sidePanelWidth);
+  };
+
+  // Clamp pan so the image always covers the visible area. If the image is
+  // somehow smaller than the area (shouldn't happen since min scale is
+  // coverScale, but guard anyway), centre it.
   const clampTransform = (t: { x: number; y: number; scale: number }) => {
-    const vw = outerSize.w;
+    const areaW = getAreaW();
     const vh = outerSize.h;
     const imgW = MAP_W * t.scale;
     const imgH = MAP_H * t.scale;
     const x =
-      imgW <= vw
-        ? (vw - imgW) / 2
-        : Math.max(vw - imgW, Math.min(0, t.x));
+      imgW <= areaW
+        ? (areaW - imgW) / 2
+        : Math.max(areaW - imgW, Math.min(0, t.x));
     const y =
       imgH <= vh
         ? (vh - imgH) / 2
@@ -486,7 +524,6 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   };
 
   const onMapPointerDown = (e: React.PointerEvent) => {
-    if (view !== "overview") return;
     if (e.button !== 0) return;
     // Kill any in-flight tween so it doesn't fight the manual pan
     if (tweenRef.current) {
@@ -532,24 +569,23 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   };
 
   const onMapWheel = (e: React.WheelEvent) => {
-    if (view !== "overview") return;
     if (outerSize.w === 0) return;
     e.preventDefault();
     if (tweenRef.current) {
       tweenRef.current.kill();
       tweenRef.current = null;
     }
-    // Min zoom = contain (whole map fits). Max zoom = 2× that, so users
-    // can wheel in to inspect detail and back out to the full overview.
-    const containScale = Math.min(
-      outerSize.w / MAP_W,
-      outerSize.h / MAP_H
-    );
-    const maxScale = containScale * 2.4;
+    // Min zoom = cover (image fills the visible area, no bars). Max zoom =
+    // 3× cover, plenty for inspecting individual lesson nodes inside a
+    // region. Region view uses the side-panel-adjusted width as the area
+    // to cover.
+    const areaW = getAreaW();
+    const coverScale = Math.max(areaW / MAP_W, outerSize.h / MAP_H);
+    const maxScale = coverScale * 3;
     const current = transformRef.current;
     const zoomFactor = Math.exp(-e.deltaY * 0.0015);
     const newScale = Math.max(
-      containScale,
+      coverScale,
       Math.min(maxScale, current.scale * zoomFactor)
     );
     if (newScale === current.scale) return;
@@ -607,43 +643,20 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
 
   // Trigger a cloud transition then swap the view at peak coverage.
   // Blocked while a drag was in progress (pan shouldn't also click a zone).
-  // When entering a region, we also kick off a small zoom-in toward the
-  // region's label position BEFORE clouds fully cover — so it feels like
-  // you're diving into the region, not just cutting to it.
+  // No pre-zoom — the clouds fully cover the screen at peak, so the camera
+  // doesn't need to "dive in" first. Pre-zoom used to land at a different
+  // scale than the post-swap target, which read as a weird zoom-out as
+  // clouds retreated. Letting the clouds do the work alone is cleaner.
   const transitionTo = (next: View) => {
     if (suppressClickRef.current) return;
     if (pendingViewRef.current !== null) return; // already in flight
     pendingViewRef.current = next;
 
     // If the user is heading into a region, force-mount the deferred scene
-    // stack now. The cloud transition gives us ~2s of cover before the swap
+    // stack now. The cloud transition gives us ~1s of cover before the swap
     // reveals the new view — plenty of headroom for a 600 KB WebP.
     if (next !== "overview" && !regionsMounted) {
       setRegionsMounted(true);
-    }
-
-    if (
-      next !== "overview" &&
-      REGION_ZONES[next as RegionId] &&
-      outerSize.w > 0
-    ) {
-      const z = REGION_ZONES[next as RegionId];
-      const current = transformRef.current;
-      const targetScale = current.scale * 1.25;
-      const targetX = outerSize.w / 2 - z.labelX * targetScale;
-      const targetY = outerSize.h / 2 - z.labelY * targetScale;
-      if (tweenRef.current) {
-        tweenRef.current.kill();
-        tweenRef.current = null;
-      }
-      tweenRef.current = gsap.to(transformRef.current, {
-        x: targetX,
-        y: targetY,
-        scale: targetScale,
-        duration: 0.6,
-        ease: "power2.in",
-        onUpdate: () => setDisplayTransform({ ...transformRef.current }),
-      });
     }
 
     setTransitionCounter((n) => n + 1);
@@ -661,53 +674,6 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       onPointerDown={onMapPointerDown}
       onWheel={onMapWheel}
     >
-      {/* Ambient backdrop — same scene, cover-fit + heavy blur, fills the
-          viewport so contain-fit letterboxing reads as atmospheric extension
-          (warm haze for the harbor, cool fog for the sea, etc.) instead of
-          dead navy bars. Browsers cache the image bytes, so this layer
-          shares the fetch with the sharp scene above. */}
-      {SCENE_IMAGE_STACK.map(({ id, src, eager }) => {
-        const shouldMount = eager || regionsMounted || view === id;
-        if (!shouldMount) return null;
-        return (
-          <img
-            key={`ambient-${id}`}
-            src={src}
-            alt=""
-            aria-hidden="true"
-            decoding="async"
-            draggable={false}
-            style={{
-              position: "absolute",
-              left: "-6%",
-              top: "-6%",
-              width: "112%",
-              height: "112%",
-              objectFit: "cover",
-              objectPosition: "center",
-              filter: "blur(48px) saturate(1.1)",
-              opacity: view === id ? 0.55 : 0,
-              transition: "opacity 0.5s cubic-bezier(0.22,1,0.36,1)",
-              pointerEvents: "none",
-              userSelect: "none",
-            }}
-          />
-        );
-      })}
-
-      {/* Vignette — gentle inward fade so the sharp image still reads as
-          the focal point against the blurred ambient. */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          inset: 0,
-          pointerEvents: "none",
-          background:
-            "radial-gradient(ellipse 80% 90% at 50% 50%, transparent 35%, rgba(6,12,26,0.55) 100%)",
-        }}
-      />
-
       {/* Map inner — scaled + translated by GSAP (mirrored to React state) */}
       <div
         style={{

@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { refreshWhopTokens } from "@/lib/whop";
 import { syncWatchProgress } from "../_lib/watch-sync";
 import { updateStudentStreak } from "../_lib/update-streak";
 
 /**
- * Authenticated POST. Runs the watch progress sync for the student,
- * trying tokens in order:
- *   1. Stored Whop access_token (fast path — no token round-trip)
- *   2. Stored Whop refresh_token → rotate → use new access_token
- *   3. Fail with a "re-auth" message if neither is present
+ * Authenticated POST. Runs the watch progress sync for the signed-in
+ * student. Auth happens server-side using the app's WHOP_API_KEY — the
+ * student's stored Whop tokens are no longer needed for this endpoint.
  *
- * Returns sync counts and the last persisted Whop error (if any) so
- * the UI can surface actual failure reasons instead of swallowing them.
+ * Returns sync counts so the UI can show what changed.
  */
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -36,12 +32,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
 
-  // Load student
+  // Load the student so we can get their whop_user_id (the filter for
+  // the admin-side fetch).
   const { data: student } = await supabase
     .from("students")
-    .select(
-      "id, whop_user_id, whop_access_token, whop_refresh_token, whop_last_sync_error"
-    )
+    .select("id, whop_user_id")
     .eq("supabase_user_id", user.id)
     .single();
 
@@ -49,74 +44,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  const tryRunSync = async (accessToken: string) => {
-    return syncWatchProgress({
+  try {
+    const result = await syncWatchProgress({
       studentId: student.id,
       whopUserId: student.whop_user_id,
-      accessToken,
     });
-  };
-
-  // Path 1: try the stored access_token first (if present)
-  if (student.whop_access_token) {
-    try {
-      const result = await tryRunSync(student.whop_access_token);
-      if (result.syncedCount > 0) {
-        await updateStudentStreak(supabase, student.id);
-      }
-      return NextResponse.json({ ok: true, ...result });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      // If the error looks like auth expired (401), fall through to refresh.
-      // Otherwise return the actual message so the UI can show it.
-      if (!/401|expired|invalid_token/i.test(message)) {
-        return NextResponse.json(
-          { error: `Sync failed: ${message}`, reAuth: false },
-          { status: 500 }
-        );
-      }
-      // access_token might be expired — try refreshing below
+    if (result.syncedCount > 0) {
+      await updateStudentStreak(supabase, student.id);
     }
+    return NextResponse.json({ ok: true, ...result });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json(
+      { error: `Sync failed: ${message}` },
+      { status: 500 }
+    );
   }
-
-  // Path 2: rotate via refresh_token
-  if (student.whop_refresh_token) {
-    try {
-      const rotated = await refreshWhopTokens(student.whop_refresh_token);
-      // Persist new tokens
-      await supabase
-        .from("students")
-        .update({
-          whop_access_token: rotated.access_token,
-          whop_refresh_token:
-            rotated.refresh_token ?? student.whop_refresh_token,
-        })
-        .eq("id", student.id);
-
-      const result = await tryRunSync(rotated.access_token);
-      if (result.syncedCount > 0) {
-        await updateStudentStreak(supabase, student.id);
-      }
-      return NextResponse.json({ ok: true, ...result });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return NextResponse.json(
-        {
-          error: `Sync failed after token refresh: ${message}`,
-          reAuth: true,
-        },
-        { status: 500 }
-      );
-    }
-  }
-
-  // Path 3: no token on file — user must re-authenticate
-  return NextResponse.json(
-    {
-      error:
-        "No Whop token on file. Sign out and back in to reconnect your course progress.",
-      reAuth: true,
-    },
-    { status: 400 }
-  );
 }

@@ -168,43 +168,51 @@ export async function refreshWhopTokens(
 }
 
 /**
- * Fetch all completed course-lesson interactions for a Whop user.
+ * Fetch all completed course-lesson interactions for a Whop user — using
+ * the app's admin API key (`WHOP_API_KEY`).
  *
- * Uses the user's OAuth access token directly and passes
- * user_id=<their stored whop_user_id> as a filter. This is the
- * original implementation that worked for the admin/creator account:
- * admin OAuth tokens have creator privileges that unlock the endpoint.
+ * The 30 Day Sprint app's agent user has the
+ * course_analytics:read / course_lesson_interaction:read / courses:read
+ * scopes granted (Whop dashboard → app → Permissions). With those
+ * scopes, the admin key bypasses the "you can only access your own
+ * course lesson interactions" 400 error that student OAuth tokens hit.
  *
- * Important caveat: regular student OAuth tokens are REJECTED by this
- * endpoint with HTTP 400 "you can only access your own course lesson
- * interactions" regardless of scopes — we've confirmed this experimentally.
- * For real students, rely on the webhook path (Whop → our
- * /api/webhooks/whop) which writes to student_lesson_completions on
- * course_lesson_interaction.completed events.
+ * This is the path used for backfilling historical completions — Whop
+ * webhooks only fire for events going forward, so anything a student
+ * watched before our webhook was wired up would otherwise be invisible.
  *
- * Previous attempts we learned DON'T work:
- * - Dropping user_id (400)
- * - /me/course_lesson_interactions (404)
- * - Student OAuth token with courses:read scope granted (400)
- * - WHOP_API_KEY admin key — its agent user lacks course_analytics:read
- *   on the course, so this returned 403
+ * Things we previously learned DON'T work and which this replaces:
+ * - Student OAuth token + user_id filter → 400 ("only your own…")
+ * - /me/course_lesson_interactions → 404
+ * - Dropping user_id → 400
  */
-export async function fetchCompletedLessons(
-  accessToken: string,
+export async function fetchCompletedLessonsAsAdmin(
   whopUserId: string
-): Promise<WhopLessonInteraction[]> {
+): Promise<{
+  interactions: WhopLessonInteraction[];
+  rawCount: number;
+  completedCount: number;
+}> {
+  const apiKey = process.env.WHOP_API_KEY;
   const courseId = process.env.WHOP_COURSE_ID;
+  if (!apiKey) {
+    throw new Error(
+      "WHOP_API_KEY env var not set — needed to query course_lesson_interactions as admin"
+    );
+  }
   if (!courseId) {
     throw new Error(
       "WHOP_COURSE_ID env var not set — needed to query course_lesson_interactions"
     );
   }
 
-  const all: WhopLessonInteraction[] = [];
+  // Fetch ALL interactions for this user+course (no `completed` filter on
+  // the request — Whop's filter has been observed to silently drop rows).
+  // We filter client-side after.
+  const allRaw: WhopLessonInteraction[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < 5; page++) {
     const params = new URLSearchParams({
-      completed: "true",
       course_id: courseId,
       user_id: whopUserId,
       first: "100",
@@ -214,7 +222,7 @@ export async function fetchCompletedLessons(
     const res = await fetch(
       `${WHOP_API_BASE}/course_lesson_interactions?${params}`,
       {
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: { Authorization: `Bearer ${apiKey}` },
       }
     );
 
@@ -226,13 +234,18 @@ export async function fetchCompletedLessons(
     }
 
     const data = (await res.json()) as WhopLessonInteractionsResponse;
-    all.push(...(data.data ?? []));
+    allRaw.push(...(data.data ?? []));
     if (!data.page_info?.has_next_page) break;
     cursor = data.page_info.end_cursor;
     if (!cursor) break;
   }
 
-  return all;
+  const completed = allRaw.filter((i) => i.completed === true);
+  return {
+    interactions: completed,
+    rawCount: allRaw.length,
+    completedCount: completed.length,
+  };
 }
 
 /**

@@ -175,7 +175,6 @@ export async function GET(request: NextRequest) {
       const syncPromise = syncWatchProgress({
         studentId: upsertedStudent.id,
         whopUserId: userInfo.sub,
-        accessToken: tokens.access_token,
       });
       const timeoutPromise = new Promise<null>((resolve) =>
         setTimeout(() => resolve(null), 2500)

@@ -1,12 +1,20 @@
 import { createClient } from "@supabase/supabase-js";
-import { fetchCompletedLessons } from "@/lib/whop";
+import { fetchCompletedLessonsAsAdmin } from "@/lib/whop";
 
 /**
  * Pull the student's completed Whop course lessons and upsert matching
  * student_lesson_completions rows. Used by:
- *   - the OAuth callback (right after login)
+ *   - the OAuth callback (right after login — backfills historical
+ *     completions that pre-date our webhook integration)
  *   - the /api/student/refresh-watch-sync route
  *   - the client-side visibilitychange listener (tab refocus)
+ *
+ * Auth model: this calls Whop's course_lesson_interactions endpoint
+ * using the app's admin API key (WHOP_API_KEY) plus the student's
+ * whop_user_id as a filter. Student OAuth tokens are rejected by Whop
+ * for this endpoint — admin key with course_analytics:read scope is
+ * the only path that works. The webhook path covers go-forward sync;
+ * this covers historical backfill + on-demand reconciliation.
  *
  * Lessons are matched by lessons.whop_lesson_id → Whop lesson id. Lessons
  * without a whop_lesson_id are silently ignored. The unique constraint on
@@ -19,11 +27,9 @@ import { fetchCompletedLessons } from "@/lib/whop";
 export async function syncWatchProgress({
   studentId,
   whopUserId,
-  accessToken,
 }: {
   studentId: string;
   whopUserId: string;
-  accessToken: string;
 }): Promise<{
   syncedCount: number;
   skippedCount: number;
@@ -42,62 +48,30 @@ export async function syncWatchProgress({
   );
 
   try {
-    // 1. Fetch completed lessons from Whop. Wrapped in a narrower
-    //    try/catch because the endpoint rejects student OAuth tokens
-    //    with HTTP 400 "you can only access your own course lesson
-    //    interactions" — a Whop API limitation that cannot be fixed
-    //    client-side. For those students, completion data flows in via
-    //    the webhook handler (/api/webhooks/whop) instead. Treat the
-    //    error as a silent no-op so the UI doesn't show a permanent
-    //    red error state that nothing the user can do will resolve.
-    let interactions;
-    try {
-      interactions = await fetchCompletedLessons(accessToken, whopUserId);
-    } catch (fetchErr) {
-      const message =
-        fetchErr instanceof Error ? fetchErr.message : String(fetchErr);
-      if (/you can only access your own/i.test(message)) {
-        console.info(
-          `[watch-sync] polling not available for ${whopUserId} — ` +
-            `student token rejected. Completions will sync via webhooks.`
-        );
-        await supabase
-          .from("students")
-          .update({
-            last_watch_sync_at: new Date().toISOString(),
-            whop_last_sync_error: null,
-            whop_last_sync_error_at: null,
-            whop_last_sync_fetched_count: 0,
-            whop_last_sync_matched_count: 0,
-            whop_last_sync_unmatched: [],
-          })
-          .eq("id", studentId);
-        return {
-          syncedCount: 0,
-          skippedCount: 0,
-          fetchedCount: 0,
-          matchedCount: 0,
-          unmatchedLessonIds: [],
-          matchedLessonIds: [],
-          fetchedWhopIds: [],
-        };
-      }
-      throw fetchErr;
-    }
+    // Fetch completed lessons from Whop using the app's admin API key.
+    // Returns BOTH the raw count (all interactions, complete or not) and
+    // the post-filter count (just completed). We persist both so we can
+    // tell whether Whop returned anything at all vs. returned data but
+    // the filter dropped everything.
+    const { interactions, rawCount, completedCount } =
+      await fetchCompletedLessonsAsAdmin(whopUserId);
 
     const completedLessonIds = interactions
       .map((i) => i.lesson?.id)
       .filter((id): id is string => typeof id === "string");
 
-    // Empty result — still write the diagnostic row so stale data clears
+    // Empty completed result — still write the diagnostic row so stale data clears
     if (interactions.length === 0) {
       await supabase
         .from("students")
         .update({
           last_watch_sync_at: new Date().toISOString(),
-          whop_last_sync_error: null,
-          whop_last_sync_error_at: null,
-          whop_last_sync_fetched_count: 0,
+          whop_last_sync_error:
+            rawCount === 0
+              ? "Whop returned 0 total interactions for this user — admin key may not have visibility into this user's progress"
+              : `Whop returned ${rawCount} interactions but 0 marked completed`,
+          whop_last_sync_error_at: new Date().toISOString(),
+          whop_last_sync_fetched_count: rawCount,
           whop_last_sync_matched_count: 0,
           whop_last_sync_unmatched: [],
         })
@@ -105,13 +79,14 @@ export async function syncWatchProgress({
       return {
         syncedCount: 0,
         skippedCount: 0,
-        fetchedCount: 0,
+        fetchedCount: rawCount,
         matchedCount: 0,
         unmatchedLessonIds: [],
         matchedLessonIds: [],
         fetchedWhopIds: [],
       };
     }
+    void completedCount; // surfaced via interactions.length
 
     // 2. Find our lessons that match those Whop lesson IDs
     const { data: matchedLessons } = await supabase

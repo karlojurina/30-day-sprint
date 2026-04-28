@@ -10,6 +10,7 @@ import {
 } from "@/lib/map/path-math";
 import { LESSON_TYPE_LABELS } from "@/lib/constants";
 import type { Lesson } from "@/types/database";
+import { MapAmbience } from "@/components/map/MapAmbience";
 import { CloudTransition } from "./CloudTransition";
 
 interface MapMockupProps {
@@ -878,6 +879,30 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
               overflow: "visible",
             }}
           >
+            {/* Ambient layer — birds + clouds drifting over the painted map.
+                Sits behind the hit-zones and labels so it doesn't intercept
+                clicks. Pure pointer-events:none. */}
+            <MapAmbience
+              currentLessonPosition={
+                currentLesson
+                  ? {
+                      // Approximate the current lesson's region center for
+                      // sparkle placement on the overview. Per-region zoom
+                      // already provides the real lesson position.
+                      x:
+                        currentLesson.region_id === "r1"
+                          ? 350
+                          : currentLesson.region_id === "r2"
+                            ? 1150
+                            : currentLesson.region_id === "r3"
+                              ? 2050
+                              : 2850,
+                      y: 700,
+                    }
+                  : null
+              }
+            />
+
             <defs>
               <radialGradient id="zone-glow" cx="50%" cy="50%" r="50%">
                 <stop offset="0%" stopColor="rgba(230,192,122,0.35)" />

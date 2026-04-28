@@ -108,6 +108,12 @@ body::before {
   background: rgba(230, 192, 122, 0.32);
 }
 
+/* Subtle bird wing flap used by MapAmbience */
+@keyframes ambience-wing-flap {
+  0%   { transform: scaleY(1); }
+  100% { transform: scaleY(0.55); }
+}
+
 /* Selection — parchment gold highlight */
 ::selection {
   background: var(--color-gold);

@@ -23,6 +23,7 @@ import {
 } from "@/lib/map/path-math";
 import { LessonNode, HoverPreviewCard } from "./LessonNode";
 import { RegionCartouche } from "./MapChrome";
+import { MapAmbience } from "./MapAmbience";
 
 interface MapCanvasProps {
   onOpenLesson: (lessonId: string) => void;
@@ -55,9 +56,31 @@ export function MapCanvas({
     regions,
     lessons,
     completedLessonIds,
+    watchedLessonIds,
     currentLesson,
     regionProgress,
   } = useStudent();
+
+  // Camera target — the lesson where the camera should center on first load.
+  //
+  // We can't use `currentLesson` directly because compound lessons (watch +
+  // ship) keep being "incomplete" until both halves are done, so a student
+  // who watched everything in R1 but hasn't shipped two action items would
+  // get camera-pulled back to R1 even though they're working in R3. Instead,
+  // pick the first lesson where NOTHING has been done — that's where the
+  // student is naturally headed next.
+  const cameraTargetLessonId = useMemo(() => {
+    const sorted = [...lessons].sort(
+      (a, b) => a.day - b.day || a.sort_order - b.sort_order
+    );
+    for (const l of sorted) {
+      if (!completedLessonIds.has(l.id) && !watchedLessonIds.has(l.id)) {
+        return l.id;
+      }
+    }
+    // Everything touched — fall back to currentLesson (handles end-game)
+    return currentLesson?.id ?? null;
+  }, [lessons, completedLessonIds, watchedLessonIds, currentLesson]);
 
   const outerRef = useRef<HTMLDivElement>(null);
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 0.6 });
@@ -232,26 +255,40 @@ export function MapCanvas({
   );
 
   const zoomToPoint = useCallback(
-    (x: number, y: number, scale: number) => {
+    (
+      x: number,
+      y: number,
+      scale: number,
+      opts: { duration?: number; ease?: string } = {}
+    ) => {
       const el = outerRef.current;
       if (!el) return;
       const tx = el.clientWidth / 2 - x * scale;
       const ty = el.clientHeight / 2 - y * scale;
-      animateTo({ x: tx, y: ty, scale });
+      animateTo({ x: tx, y: ty, scale }, opts);
     },
     [animateTo]
   );
 
-  // Auto-zoom to current lesson ~900ms after the initial fit, so the student
-  // briefly sees the whole map, then the camera glides to where they are.
+  // Auto-zoom to the camera-target lesson ~900ms after the initial fit.
+  // We use `cameraTargetLessonId` (which skips compound lessons with one
+  // half done) so returning students land in the region where they're
+  // currently working, not on a stale half-finished compound lesson.
+  // Scale + ease are tuned softer than before so the camera glides
+  // gracefully instead of snapping in.
   useEffect(() => {
     if (!hasFitted || hasAutoZoomed || placed.length === 0) return;
-    if (!currentLesson) {
+    if (!cameraTargetLessonId) {
+      setHasAutoZoomed(true);
+      return;
+    }
+    const targetLesson = lessons.find((l) => l.id === cameraTargetLessonId);
+    if (!targetLesson) {
       setHasAutoZoomed(true);
       return;
     }
     // Don't auto-zoom into a locked region
-    const region = regions.find((r) => r.id === currentLesson.region_id);
+    const region = regions.find((r) => r.id === targetLesson.region_id);
     const regionUnlocked = region
       ? regionProgress[region.id]?.isUnlocked
       : false;
@@ -259,20 +296,25 @@ export function MapCanvas({
       setHasAutoZoomed(true);
       return;
     }
-    const n = placedById.get(currentLesson.id);
+    const n = placedById.get(targetLesson.id);
     if (!n) {
       setHasAutoZoomed(true);
       return;
     }
     const id = window.setTimeout(() => {
-      zoomToPoint(n.x, n.y, 1.0);
+      // Softer scale (was 1.0 — felt too aggressive). Longer ease for grace.
+      zoomToPoint(n.x, n.y, 0.78, {
+        duration: 1.6,
+        ease: "power2.inOut",
+      });
       setHasAutoZoomed(true);
-    }, 900);
+    }, 1100);
     return () => window.clearTimeout(id);
   }, [
     hasFitted,
     hasAutoZoomed,
-    currentLesson,
+    cameraTargetLessonId,
+    lessons,
     regions,
     regionProgress,
     placed.length,
@@ -736,6 +778,19 @@ export function MapCanvas({
               strokeLinecap="round"
             />
           )}
+
+          {/* Ambient atmosphere — birds, clouds, sparkles around current lesson.
+              Sits behind nodes so it never intercepts clicks. */}
+          <MapAmbience
+            currentLessonPosition={
+              cameraTargetLessonId
+                ? (() => {
+                    const n = placedById.get(cameraTargetLessonId);
+                    return n ? { x: n.x, y: n.y } : null;
+                  })()
+                : null
+            }
+          />
 
           {/* Vignette */}
           <rect

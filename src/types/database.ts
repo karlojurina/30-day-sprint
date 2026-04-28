@@ -38,6 +38,7 @@ export interface Student {
   longest_streak: number;
   last_streak_date: string | null;
   current_title: StudentTitle;
+  onboarding_completed_at: string | null;
   created_at: string;
   updated_at: string;
 }

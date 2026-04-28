@@ -295,7 +295,8 @@ const MOCKUP_REGION_LESSONS: Record<RegionId, string[]> = {
     "l016", "l017",                          // day 6
     "l018", "l019", "l020",                  // day 7
   ],
-  // R2 = the 5 ex-R1 lessons (l021-l025) + remaining R2 minus deleted
+  // R2 = the 5 ex-R1 lessons (l021-l025) + remaining R2 minus deleted.
+  // R2 ends at l042 — the "Claim discount" transition fires next.
   r2: [
     "l021", "l022", "l023", "l024", "l025",  // moved from R1 in v6
     "l026", "l027", "l028", "l029", "l030", "l031",
@@ -306,9 +307,15 @@ const MOCKUP_REGION_LESSONS: Record<RegionId, string[]> = {
     "l041", "l042",
     // l043 deleted (Ship Your High-Production Ad → folded into l024)
     // l044 deleted (Ship Your VSL → folded into l022)
-    "l045", "l046",
+    // l045 + l046 moved to R3 in v8 (engage feedback + static ad)
   ],
-  r3: Array.from({ length: 10 }, (_, i) => `l0${String(47 + i).padStart(2, "0")}`),
+  // R3 = ex-R2 l045/l046 (engage feedback + static ad, with l046 still
+  // carrying the discount-gate flag) + the existing strategy lessons.
+  r3: [
+    "l045", "l046",
+    "l047", "l048", "l049", "l050", "l051",
+    "l052", "l053", "l054", "l055", "l056",
+  ],
   r4: Array.from({ length: 7 }, (_, i) => `l0${String(57 + i).padStart(2, "0")}`),
 };
 

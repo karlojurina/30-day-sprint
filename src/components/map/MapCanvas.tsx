@@ -57,30 +57,76 @@ export function MapCanvas({
     lessons,
     completedLessonIds,
     watchedLessonIds,
+    completions,
     currentLesson,
     regionProgress,
   } = useStudent();
 
   // Camera target — the lesson where the camera should center on first load.
   //
-  // We can't use `currentLesson` directly because compound lessons (watch +
-  // ship) keep being "incomplete" until both halves are done, so a student
-  // who watched everything in R1 but hasn't shipped two action items would
-  // get camera-pulled back to R1 even though they're working in R3. Instead,
-  // pick the first lesson where NOTHING has been done — that's where the
-  // student is naturally headed next.
+  // The natural mental model is "zoom to where I was last working", not
+  // "first thing I haven't checked off". A student who's deep in R3 but
+  // never manually completed an R1 setup task ("Join Discord") shouldn't
+  // get yanked back to R1 every time they open the map.
+  //
+  // Heuristic:
+  //   1. Find the most recent completion timestamp across all completions
+  //      (either watched_at OR action_completed_at, whichever is later)
+  //   2. Take that lesson's day position as the "current frontier"
+  //   3. Zoom to the next forward lesson the student hasn't done yet,
+  //      starting from that frontier
+  //   4. Fall back to currentLesson, then null, if no completions exist
   const cameraTargetLessonId = useMemo(() => {
     const sorted = [...lessons].sort(
       (a, b) => a.day - b.day || a.sort_order - b.sort_order
     );
-    for (const l of sorted) {
-      if (!completedLessonIds.has(l.id) && !watchedLessonIds.has(l.id)) {
-        return l.id;
+
+    // Find latest completion's lesson + day
+    let latestT: string | null = null;
+    let latestLessonId: string | null = null;
+    for (const c of completions) {
+      const t =
+        c.action_completed_at && c.completed_at
+          ? c.action_completed_at > c.completed_at
+            ? c.action_completed_at
+            : c.completed_at
+          : c.action_completed_at ?? c.completed_at;
+      if (!t) continue;
+      if (!latestT || t > latestT) {
+        latestT = t;
+        latestLessonId = c.lesson_id;
       }
     }
-    // Everything touched — fall back to currentLesson (handles end-game)
-    return currentLesson?.id ?? null;
-  }, [lessons, completedLessonIds, watchedLessonIds, currentLesson]);
+
+    if (latestLessonId) {
+      const latestLesson = sorted.find((l) => l.id === latestLessonId);
+      if (latestLesson) {
+        // Find the next lesson the student hasn't fully completed,
+        // starting AT or AFTER the latest-completion's day
+        for (const l of sorted) {
+          if (l.day < latestLesson.day) continue;
+          if (
+            !completedLessonIds.has(l.id) &&
+            !watchedLessonIds.has(l.id)
+          ) {
+            return l.id;
+          }
+        }
+        // Nothing forward — student is at the end. Zoom to their last
+        // completion's location.
+        return latestLesson.id;
+      }
+    }
+
+    // No completions at all — return the very first lesson
+    return sorted[0]?.id ?? currentLesson?.id ?? null;
+  }, [
+    lessons,
+    completions,
+    completedLessonIds,
+    watchedLessonIds,
+    currentLesson,
+  ]);
 
   const outerRef = useRef<HTMLDivElement>(null);
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 0.6 });

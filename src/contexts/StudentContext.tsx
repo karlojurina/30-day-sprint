@@ -27,6 +27,7 @@ import type {
 } from "@/types/database";
 import { getTitleForRegions } from "@/lib/titles";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
+import { computeNoteArtifacts } from "@/lib/artifacts";
 
 export interface RegionProgress {
   completed: number;
@@ -72,6 +73,8 @@ interface StudentContextType {
   streak: { current: number; longest: number };
   currentTitle: StudentTitle;
   completedRegionCount: number;
+  /** IDs of note-driven artifacts the student has earned (Phase 4) */
+  noteArtifactIds: Set<string>;
   discountEligible: boolean;               // all R1+R2 done AND within time window
   discountMsLeft: number;                  // ms until the discount window closes (negative if expired)
   discountAllLessonsDone: boolean;         // R1 + R2 fully complete (regardless of time)
@@ -143,6 +146,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [quizQuestions, setQuizQuestions] = useState<Record<string, QuizQuestion[]>>({});
   const [quizAttempts, setQuizAttempts] = useState<StudentQuizAttempt[]>([]);
   const [monthReview, setMonthReview] = useState<MonthReview | null>(null);
+  const [dailyNoteDates, setDailyNoteDates] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostics>({
     lastSyncAt: null,
@@ -206,6 +210,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         }
         setQuizQuestions(qMap);
         setMonthReview(data.monthReview ?? null);
+        setDailyNoteDates(data.dailyNoteDates ?? []);
         setSyncDiagnostics({
           lastSyncAt: data.student?.last_watch_sync_at ?? null,
           fetchedCount: data.student?.whop_last_sync_fetched_count ?? null,
@@ -421,6 +426,21 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const completedRegionCount = useMemo(() => {
     return Object.values(regionProgress).filter((p) => p.isComplete).length;
   }, [regionProgress]);
+
+  // Note-driven artifacts (Phase 4 — Workshop redesign).
+  // Pure derivation from existing notes data, no extra state.
+  const noteArtifactIds = useMemo(() => {
+    const lessonsByRegion: Record<string, { id: string }[]> = {};
+    for (const l of lessons) {
+      if (!lessonsByRegion[l.region_id]) lessonsByRegion[l.region_id] = [];
+      lessonsByRegion[l.region_id].push({ id: l.id });
+    }
+    return computeNoteArtifacts({
+      lessonNotes,
+      dailyNoteDates,
+      lessonsByRegion,
+    });
+  }, [lessons, lessonNotes, dailyNoteDates]);
 
   const currentTitle = useMemo(() => {
     return getTitleForRegions(completedRegionCount).key;
@@ -785,6 +805,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         streak,
         currentTitle,
         completedRegionCount,
+        noteArtifactIds,
         discountEligible,
         discountMsLeft,
         discountAllLessonsDone,

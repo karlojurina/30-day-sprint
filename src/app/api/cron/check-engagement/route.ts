@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
+import { postTeamAlert, buildAlertsEmbed } from "@/lib/discord";
 
 /**
  * V3 engagement cron: detect disengaged students and queue alerts for the team.
  * Simplified from V2 since we no longer have activation points or week buckets.
+ *
+ * V10 (2026-04-28): added `no_lessons_3d` (early-warning) plus a Discord
+ * webhook post to DISCORD_TEAM_WEBHOOK_URL with a single embed listing
+ * all NEW alerts produced this run.
  */
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -91,6 +96,16 @@ export async function GET(request: NextRequest) {
             message: `${student.name || "Student"} hasn't completed any lessons in ${daysSinceCompletion} days`,
           });
         }
+      } else if (daysSinceCompletion >= 3) {
+        // Earlier-warning tier — flags slipping before the 7-day mark
+        const key = `${student.id}:no_lessons_3d`;
+        if (!existingAlertSet.has(key)) {
+          alerts.push({
+            student_id: student.id,
+            alert_type: "no_lessons_3d",
+            message: `${student.name || "Student"} hasn't completed a lesson in ${daysSinceCompletion} days (Day ${dayNumber})`,
+          });
+        }
       }
     } else if (dayNumber >= 7 && completedLessonIds.size === 0) {
       const key = `${student.id}:no_tasks_7d`;
@@ -99,6 +114,16 @@ export async function GET(request: NextRequest) {
           student_id: student.id,
           alert_type: "no_tasks_7d",
           message: `${student.name || "Student"} has never completed any lessons (Day ${dayNumber})`,
+        });
+      }
+    } else if (dayNumber >= 3 && completedLessonIds.size === 0) {
+      // Brand-new student who hasn't started anything by day 3
+      const key = `${student.id}:no_lessons_3d`;
+      if (!existingAlertSet.has(key)) {
+        alerts.push({
+          student_id: student.id,
+          alert_type: "no_lessons_3d",
+          message: `${student.name || "Student"} still hasn't started (Day ${dayNumber})`,
         });
       }
     }
@@ -116,6 +141,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  let discordOk: boolean | null = null;
   if (alerts.length > 0) {
     const { error } = await supabase
       .from("disengagement_alerts")
@@ -124,10 +150,28 @@ export async function GET(request: NextRequest) {
     if (error) {
       console.error("Failed to insert alerts:", error);
     }
+
+    // Push a single embed to the team's Discord channel summarizing
+    // these new alerts. Best-effort — no impact on the cron's status.
+    const studentsById = new Map(students.map((s) => [s.id, s]));
+    const baseUrl =
+      process.env.NEXT_PUBLIC_APP_URL ?? "https://30-day-sprint-smkv.vercel.app";
+    const embed = buildAlertsEmbed(
+      alerts.map((a) => ({
+        studentId: a.student_id,
+        studentName: studentsById.get(a.student_id)?.name ?? "Student",
+        alertType: a.alert_type,
+        message: a.message,
+      })),
+      baseUrl
+    );
+    const result = await postTeamAlert([embed]);
+    discordOk = result.ok;
   }
 
   return NextResponse.json({
     checked: students.length,
     alerts: alerts.length,
+    discord_posted: discordOk,
   });
 }

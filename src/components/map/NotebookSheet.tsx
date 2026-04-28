@@ -18,8 +18,14 @@ const GOLD_DIM = "rgba(230,192,122,0.6)";
  * Each entry links back to the lesson so the student can continue writing.
  */
 export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProps) {
-  const { regions, lessons, lessonNotes, regionProgress, completedLessonIds } =
-    useStudent();
+  const {
+    regions,
+    lessons,
+    lessonNotes,
+    regionProgress,
+    completedLessonIds,
+    noteArtifactIds,
+  } = useStudent();
   const [search, setSearch] = useState("");
   const dialogRef = useRef<HTMLDivElement>(null);
   useFocusTrap(dialogRef, open);
@@ -283,7 +289,11 @@ export function NotebookSheet({ open, onClose, onOpenLesson }: NotebookSheetProp
           )}
 
           {/* Workshop Cabinet — always visible below the notes */}
-          <WorkshopCabinet regions={regions} regionProgress={regionProgress} />
+          <WorkshopCabinet
+            regions={regions}
+            regionProgress={regionProgress}
+            noteArtifactIds={noteArtifactIds}
+          />
         </div>
       </div>
     </>

@@ -39,6 +39,13 @@ export interface Student {
   last_streak_date: string | null;
   current_title: StudentTitle;
   onboarding_completed_at: string | null;
+  // Phase 2 celebration flags
+  last_streak_milestone_shown: number;
+  month_review_seen_at: string | null;
+  celebrated_region_ids: string[];
+  // Phase 3 (Discord)
+  day28_dm_sent_at: string | null;
+  discord_user_id: string | null;
   created_at: string;
   updated_at: string;
 }

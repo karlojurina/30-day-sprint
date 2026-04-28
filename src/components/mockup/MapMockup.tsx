@@ -11,6 +11,10 @@ import {
 import { LESSON_TYPE_LABELS } from "@/lib/constants";
 import type { Lesson } from "@/types/database";
 import { MapAmbience } from "@/components/map/MapAmbience";
+import {
+  DiscountClaimCelebration,
+  type DiscountCelebrationMode,
+} from "@/components/map/DiscountClaimCelebration";
 import { CloudTransition } from "./CloudTransition";
 
 interface MapMockupProps {
@@ -344,11 +348,57 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     regions,
     lessons,
     completedLessonIds,
+    completions,
+    watchedLessonIds,
     currentLesson,
     discountRequest,
     discountAllLessonsDone,
     requestDiscount,
   } = useStudent();
+
+  // Camera-target region — where the student was last active.
+  // Uses the LATEST completion (any half) as the anchor. If they have no
+  // completions, fall back to overview. Compound lessons with one half
+  // done count as "touched" so the camera doesn't pull back.
+  const initialRegionId = useMemo<RegionId | "overview">(() => {
+    let latestT: string | null = null;
+    let latestLessonId: string | null = null;
+    for (const c of completions) {
+      const t =
+        c.action_completed_at && c.completed_at
+          ? c.action_completed_at > c.completed_at
+            ? c.action_completed_at
+            : c.completed_at
+          : c.action_completed_at ?? c.completed_at;
+      if (!t) continue;
+      if (!latestT || t > latestT) {
+        latestT = t;
+        latestLessonId = c.lesson_id;
+      }
+    }
+    if (latestLessonId) {
+      const lesson = lessons.find((l) => l.id === latestLessonId);
+      if (lesson) {
+        // Find the next forward lesson the student hasn't done yet
+        const sorted = [...lessons].sort(
+          (a, b) => a.day - b.day || a.sort_order - b.sort_order
+        );
+        for (const l of sorted) {
+          if (l.day < lesson.day) continue;
+          if (
+            !completedLessonIds.has(l.id) &&
+            !watchedLessonIds.has(l.id)
+          ) {
+            return l.region_id as RegionId;
+          }
+        }
+        // No forward lesson — they're at the end. Land in their last
+        // active region.
+        return lesson.region_id as RegionId;
+      }
+    }
+    return "overview";
+  }, [completions, lessons, completedLessonIds, watchedLessonIds]);
 
   const outerRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef({ x: 0, y: 0, scale: 1 });
@@ -356,6 +406,8 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
 
   const [view, setView] = useState<View>("overview");
   const [outerSize, setOuterSize] = useState({ w: 0, h: 0 });
+  const [discountModalMode, setDiscountModalMode] =
+    useState<DiscountCelebrationMode | null>(null);
   const [displayTransform, setDisplayTransform] = useState({
     x: 0,
     y: 0,
@@ -385,12 +437,29 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     return () => ro.disconnect();
   }, []);
 
-  // Default view: always start on the overview. The student opts into a region
-  // by clicking its hit zone (which plays the cloud transition).
+  // Default view: brief overview, then auto-transition into the region
+  // where the student is currently working. Returning students with
+  // progress past R1 land where they left off, not back on the
+  // overview where the wide aspect ratio shows R1 dominantly.
+  // Only applies on first sizing (initialViewSet ref) — manual
+  // navigation later isn't overridden.
+  const initialViewSet = useRef(false);
   useEffect(() => {
     if (outerSize.w === 0) return;
+    if (initialViewSet.current) return;
+    initialViewSet.current = true;
+    if (initialRegionId === "overview") {
+      setView("overview");
+      return;
+    }
+    // Show overview briefly so the student gets context, then glide in
     setView("overview");
-  }, [outerSize.w]);
+    const id = window.setTimeout(() => {
+      transitionTo(initialRegionId);
+    }, 1100);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [outerSize.w, initialRegionId]);
 
   // Kick off region preload after the browser has had a chance to paint
   // the overview. requestIdleCallback yields for higher-priority work;
@@ -836,31 +905,17 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
             }
             onSecondaryMarkerClick={
               view === "r2"
-                ? async () => {
+                ? () => {
+                    // Open the celebration modal in whichever mode applies.
+                    // The actual claim API call is wired through the modal's
+                    // "Claim my 30% discount" button (mode === 'claim').
                     if (discountRequest) {
-                      // Already claimed — show details (status, code if any)
-                      const code = discountRequest.promo_code;
-                      const status = discountRequest.status;
-                      if (status === "approved" && code) {
-                        await navigator.clipboard.writeText(code);
-                        alert(`Promo code copied: ${code}`);
-                      } else if (status === "rejected") {
-                        alert(
-                          discountRequest.rejection_reason ??
-                            "Discount was rejected. Reach out in Discord."
-                        );
-                      } else {
-                        alert("Your discount request is pending review.");
-                      }
-                      return;
+                      setDiscountModalMode("review");
+                    } else if (!discountAllLessonsDone) {
+                      setDiscountModalMode("blocked");
+                    } else {
+                      setDiscountModalMode("claim");
                     }
-                    if (!discountAllLessonsDone) {
-                      alert(
-                        "Finish every lesson in Region 1 and Region 2 first to unlock the discount."
-                      );
-                      return;
-                    }
-                    await requestDiscount();
                   }
                 : undefined
             }
@@ -1209,6 +1264,22 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
             pendingViewRef.current = null;
           }
         }}
+      />
+
+      {/* Discount claim celebration — replaces the old alert() flow.
+          Mode is set when the secondary R2 marker is clicked. The modal
+          renders inline; calling onClaim triggers requestDiscount(). */}
+      <DiscountClaimCelebration
+        open={discountModalMode != null}
+        mode={discountModalMode ?? "claim"}
+        discountRequest={discountRequest}
+        onClaim={async () => {
+          await requestDiscount();
+          // After claiming, switch the modal to "review" so the same
+          // open modal shows the new pending/approved state.
+          setDiscountModalMode("review");
+        }}
+        onDismiss={() => setDiscountModalMode(null)}
       />
     </div>
   );

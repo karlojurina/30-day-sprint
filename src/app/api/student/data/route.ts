@@ -42,6 +42,7 @@ export async function GET(request: NextRequest) {
     quizQuestionsRes,
     quizAttemptsRes,
     monthReviewRes,
+    dailyNoteDatesRes,
   ] = await Promise.all([
     supabase.from("regions").select("*").order("order_num"),
     supabase.from("lessons").select("*").order("day").order("sort_order"),
@@ -78,6 +79,12 @@ export async function GET(request: NextRequest) {
       .select("*")
       .eq("student_id", student.id)
       .single(),
+    // All daily-note dates for the student — needed to compute the
+    // "Daily Habit" note-driven artifact (7 unique days).
+    supabase
+      .from("daily_notes")
+      .select("note_date")
+      .eq("student_id", student.id),
   ]);
 
   // Masked course ID for the sync debug panel — enough to verify in the
@@ -101,6 +108,9 @@ export async function GET(request: NextRequest) {
     quizQuestions: quizQuestionsRes.data ?? [],
     quizAttempts: quizAttemptsRes.data ?? [],
     monthReview: monthReviewRes.data ?? null,
+    dailyNoteDates: (dailyNoteDatesRes.data ?? []).map(
+      (r: { note_date: string }) => r.note_date
+    ),
     whopCourseIdMasked: courseIdMasked,
   });
 }

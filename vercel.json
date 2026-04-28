@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/check-engagement",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/day28-dm",
+      "schedule": "30 9 * * *"
     }
   ]
 }

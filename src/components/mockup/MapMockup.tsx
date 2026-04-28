@@ -261,7 +261,7 @@ interface SceneEndMarker {
 }
 const SCENE_END_MARKERS: Record<RegionId, SceneEndMarker> = {
   r1: { kind: "onward", label: "Onward",  sublabel: "to Creative Lab", nextView: "r2" },
-  r2: { kind: "discount", label: "Claim discount", sublabel: "reward unlocked", nextView: "r3" },
+  r2: { kind: "onward",  label: "Onward",          sublabel: "to Test Track",   nextView: "r3" },
   r3: { kind: "onward", label: "Onward",  sublabel: "to The Summit",  nextView: "r4" },
   r4: { kind: "celebration", label: "Expedition complete", sublabel: "well charted" },
 };
@@ -339,7 +339,15 @@ function isActionItem(lesson: Lesson): boolean {
  *              "Back to map" returns to overview.
  */
 export function MapMockup({ onOpenLesson }: MapMockupProps) {
-  const { regions, lessons, completedLessonIds, currentLesson } = useStudent();
+  const {
+    regions,
+    lessons,
+    completedLessonIds,
+    currentLesson,
+    discountRequest,
+    discountAllLessonsDone,
+    requestDiscount,
+  } = useStudent();
 
   const outerRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef({ x: 0, y: 0, scale: 1 });
@@ -800,6 +808,61 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
               const next = SCENE_END_MARKERS[view as RegionId]?.nextView;
               if (next) transitionTo(next);
             }}
+            // R2 specifically gets a second "Claim discount" marker
+            // stacked above the onward marker. Other regions don't.
+            secondaryMarker={
+              view === "r2"
+                ? {
+                    kind: "discount",
+                    label: discountRequest
+                      ? discountRequest.status === "approved"
+                        ? "Discount approved"
+                        : discountRequest.status === "rejected"
+                          ? "Discount rejected"
+                          : "Discount pending"
+                      : "Claim discount",
+                    sublabel: discountRequest
+                      ? discountRequest.status === "approved"
+                        ? "30% off — see code"
+                        : discountRequest.status === "rejected"
+                          ? "see Discord"
+                          : "review in progress"
+                      : discountAllLessonsDone
+                        ? "reward unlocked"
+                        : "finish R1 + R2 first",
+                  }
+                : undefined
+            }
+            onSecondaryMarkerClick={
+              view === "r2"
+                ? async () => {
+                    if (discountRequest) {
+                      // Already claimed — show details (status, code if any)
+                      const code = discountRequest.promo_code;
+                      const status = discountRequest.status;
+                      if (status === "approved" && code) {
+                        await navigator.clipboard.writeText(code);
+                        alert(`Promo code copied: ${code}`);
+                      } else if (status === "rejected") {
+                        alert(
+                          discountRequest.rejection_reason ??
+                            "Discount was rejected. Reach out in Discord."
+                        );
+                      } else {
+                        alert("Your discount request is pending review.");
+                      }
+                      return;
+                    }
+                    if (!discountAllLessonsDone) {
+                      alert(
+                        "Finish every lesson in Region 1 and Region 2 first to unlock the discount."
+                      );
+                      return;
+                    }
+                    await requestDiscount();
+                  }
+                : undefined
+            }
           />
         )}
 
@@ -1543,6 +1606,11 @@ interface ScenePathOverlayProps {
   onOpenLesson: (id: string) => void;
   endMarker?: SceneEndMarker;
   onEndMarkerClick?: () => void;
+  /** Optional second marker drawn ABOVE the primary endMarker. Used on
+      R2 to surface the discount-claim CTA separately from the onward
+      transition button. */
+  secondaryMarker?: SceneEndMarker;
+  onSecondaryMarkerClick?: () => void;
 }
 
 function ScenePathOverlay({
@@ -1553,6 +1621,8 @@ function ScenePathOverlay({
   onOpenLesson,
   endMarker,
   onEndMarkerClick,
+  secondaryMarker,
+  onSecondaryMarkerClick,
 }: ScenePathOverlayProps) {
   // Lesson positions are distributed by ARC LENGTH along the waypoint
   // polyline (excluding the last waypoint, reserved for the end marker).
@@ -1646,6 +1716,18 @@ function ScenePathOverlay({
           />
         );
       })}
+
+      {/* Secondary marker — drawn slightly ABOVE the primary so the two
+          read as a stack: claim first, then onward. Used on R2 for the
+          discount-claim button alongside the onward transition. */}
+      {secondaryMarker && lastWaypoint && (
+        <EndMarker
+          x={lastWaypoint.x}
+          y={lastWaypoint.y - 130}
+          marker={secondaryMarker}
+          onClick={onSecondaryMarkerClick}
+        />
+      )}
 
       {/* End marker on the last waypoint */}
       {endMarker && lastWaypoint && (

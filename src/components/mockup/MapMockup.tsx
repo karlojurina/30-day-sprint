@@ -269,35 +269,52 @@ const SCENE_END_MARKERS: Record<RegionId, SceneEndMarker> = {
 // ──────────────────────────────────────────────────────────────
 // Mockup lesson redistribution (client-side only — does NOT mutate DB).
 //
-// Per user 2026-04-22:
-//   - R1: L001 → L020 (L006 removed, L012 moved to 2nd position) + L021 shown
-//         as an action marker ("Make UGC Ads")
-//   - R2: L022 → L042
-//   - R3: L043 → L056
-//   - R4: L057 → L063
+// Updated 2026-04-28 to match v6/v7 data model:
+//   - R1 (Base Camp, days 1-7): l001-l020 in day/sort_order
+//     l018 was moved from day 6 → day 7 in v7 so the day-7 cluster is
+//     "Action Item: Organic Ads → UGC → Action Item: UGC Ad"
+//   - R2 (Creative Lab, days 8-15): l021-l025 (moved from R1 in v6) +
+//     l026-l033, l035-l039, l041, l042, l045, l046 (l034, l040, l043,
+//     l044 were deleted in v6 — their function folded into compound
+//     "Action Item:" lessons)
+//   - R3 (Test Track, days 16-23): l047-l056
+//   - R4 (The Market, days 24-30): l057-l063
 //
 // Lessons whose title starts with "Action Item:" are rendered as diamond
-// markers on the path. L021 is re-titled for the mockup to reflect the
-// "Make UGC Action Items" concept the user described.
+// markers on the path.
 // ──────────────────────────────────────────────────────────────
 
 const MOCKUP_REGION_LESSONS: Record<RegionId, string[]> = {
+  // R1 in path order (day, then sort_order)
   r1: [
-    "l001", "l012", // L012 moved to 2nd place
-    "l002", "l003", "l004", "l005", // L006 removed
-    "l007", "l008", "l009", "l010", "l011",
-    "l013", "l014", "l015", "l016", "l017",
-    "l018", "l019", "l020", "l021",
+    "l001", "l002", "l003",                  // day 1
+    "l004", "l005", "l006",                  // day 2
+    "l007", "l008", "l009",                  // day 3
+    "l010", "l011", "l012",                  // day 4
+    "l013", "l014", "l015",                  // day 5
+    "l016", "l017",                          // day 6
+    "l018", "l019", "l020",                  // day 7
   ],
-  r2: Array.from({ length: 21 }, (_, i) => `l0${String(22 + i).padStart(2, "0")}`),
-  r3: Array.from({ length: 14 }, (_, i) => `l0${String(43 + i).padStart(2, "0")}`),
+  // R2 = the 5 ex-R1 lessons (l021-l025) + remaining R2 minus deleted
+  r2: [
+    "l021", "l022", "l023", "l024", "l025",  // moved from R1 in v6
+    "l026", "l027", "l028", "l029", "l030", "l031",
+    "l032", "l033",
+    // l034 deleted (Ship Your Organic Ad → folded into l018)
+    "l035", "l036", "l037", "l038", "l039",
+    // l040 deleted (Ship Your UGC Ad → folded into l020)
+    "l041", "l042",
+    // l043 deleted (Ship Your High-Production Ad → folded into l024)
+    // l044 deleted (Ship Your VSL → folded into l022)
+    "l045", "l046",
+  ],
+  r3: Array.from({ length: 10 }, (_, i) => `l0${String(47 + i).padStart(2, "0")}`),
   r4: Array.from({ length: 7 }, (_, i) => `l0${String(57 + i).padStart(2, "0")}`),
 };
 
-// Titles can be overridden for the mockup (e.g. L021 → "Make UGC Action Items")
-const MOCKUP_TITLE_OVERRIDES: Record<string, string> = {
-  l021: "Action Item: Make UGC Ads",
-};
+// Titles can be overridden for the mockup. Currently empty — l021 is
+// the real "VSLs" lesson in r2, no override needed.
+const MOCKUP_TITLE_OVERRIDES: Record<string, string> = {};
 
 function isActionItem(lesson: Lesson): boolean {
   const title = MOCKUP_TITLE_OVERRIDES[lesson.id] ?? lesson.title;

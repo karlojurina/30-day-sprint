@@ -76,6 +76,15 @@ export interface Lesson {
   whop_lesson_id: string | null;
   discord_channel: string | null;
   sort_order: number;
+  /**
+   * Compound lesson: requires BOTH the briefing video to be watched
+   * (auto-synced via whop_lesson_id) AND the action to be manually
+   * checked off ("I shipped the ad"). Lesson is fully complete only
+   * when both conditions are met.
+   */
+  requires_action: boolean;
+  /** Brief shown in the LessonSheet's "Ship the ad" section */
+  action_brief: string | null;
   created_at: string;
 }
 
@@ -83,7 +92,10 @@ export interface StudentLessonCompletion {
   id: string;
   student_id: string;
   lesson_id: string;
-  completed_at: string;
+  /** Timestamp when the watch part (or non-compound lesson) was completed */
+  completed_at: string | null;
+  /** Timestamp when the manual action was checked off (compound lessons only) */
+  action_completed_at: string | null;
 }
 
 export interface DailyNote {

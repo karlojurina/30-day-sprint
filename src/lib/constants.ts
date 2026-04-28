@@ -3,8 +3,10 @@ export const WHOP_TOKEN_URL = "https://api.whop.com/oauth/token";
 export const WHOP_USERINFO_URL = "https://api.whop.com/oauth/userinfo";
 export const WHOP_API_BASE = "https://api.whop.com/api/v1";
 
-// V4: 63 lessons across 4 regions (30-day sprint, every real Whop video as a node)
-export const TOTAL_LESSONS = 63;
+// V6: 59 lessons across 4 regions. The 4 "Ship Your X" lessons were
+// merged into their corresponding "Action Item" briefings (compound
+// lessons that require BOTH watch + ship).
+export const TOTAL_LESSONS = 59;
 export const TOTAL_DAYS = 30;
 export const TOTAL_REGIONS = 4;
 

@@ -60,42 +60,63 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Eligibility: every lesson in R1 + R2 must be complete
+  // Eligibility: every lesson in R1 + R2 must be FULLY complete.
+  // For compound lessons (requires_action=true), "fully complete" means
+  // both `completed_at` (briefing watched) AND `action_completed_at`
+  // (ad shipped) are set. For other lessons, just `completed_at`.
   const [{ data: requiredLessons }, { data: completions }] = await Promise.all(
     [
       supabase
         .from("lessons")
-        .select("id")
+        .select("id, requires_action")
         .in("region_id", ["r1", "r2"]),
       supabase
         .from("student_lesson_completions")
-        .select("lesson_id, completed_at")
+        .select("lesson_id, completed_at, action_completed_at")
         .eq("student_id", studentId),
     ]
   );
 
-  const requiredIds = new Set((requiredLessons ?? []).map((l) => l.id));
-  const completionMap = new Map<string, string>();
+  const required = requiredLessons ?? [];
+  const completionMap = new Map<
+    string,
+    { completed_at: string | null; action_completed_at: string | null }
+  >();
   for (const c of completions ?? []) {
-    completionMap.set(c.lesson_id, c.completed_at);
+    completionMap.set(c.lesson_id, {
+      completed_at: c.completed_at,
+      action_completed_at: c.action_completed_at,
+    });
   }
 
   const missing: string[] = [];
   let latestCompletion = joinedAt;
-  for (const id of requiredIds) {
-    const at = completionMap.get(id);
-    if (!at) {
-      missing.push(id);
+  for (const lesson of required) {
+    const c = completionMap.get(lesson.id);
+    const watchDone = c?.completed_at != null;
+    const actionDone = c?.action_completed_at != null;
+    const fullyDone = lesson.requires_action
+      ? watchDone && actionDone
+      : watchDone;
+    if (!fullyDone) {
+      missing.push(lesson.id);
       continue;
     }
-    const d = new Date(at);
-    if (d > latestCompletion) latestCompletion = d;
+    // Track the latest of either timestamp for window enforcement
+    if (c?.completed_at) {
+      const d = new Date(c.completed_at);
+      if (d > latestCompletion) latestCompletion = d;
+    }
+    if (c?.action_completed_at) {
+      const d = new Date(c.action_completed_at);
+      if (d > latestCompletion) latestCompletion = d;
+    }
   }
 
   if (missing.length > 0) {
     return NextResponse.json(
       {
-        error: `Not yet eligible — ${requiredIds.size - missing.length}/${requiredIds.size} required lessons complete.`,
+        error: `Not yet eligible — ${required.length - missing.length}/${required.length} required lessons complete.`,
       },
       { status: 400 }
     );

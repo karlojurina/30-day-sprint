@@ -76,8 +76,16 @@ interface StudentContextType {
   discountMsLeft: number;                  // ms until the discount window closes (negative if expired)
   discountAllLessonsDone: boolean;         // R1 + R2 fully complete (regardless of time)
 
+  // Sets exposing fine-grained completion state for compound lessons
+  /** Lessons where the watch/main half is complete (briefing watched OR non-compound finished) */
+  watchedLessonIds: Set<string>;
+  /** Lessons where the manual "I shipped the ad" half is complete (only compound lessons) */
+  actionShippedLessonIds: Set<string>;
+
   // Actions
   toggleLesson: (lessonId: string) => Promise<void>;
+  /** For compound lessons: toggle the manual "shipped" half independent of watch state */
+  toggleLessonAction: (lessonId: string) => Promise<void>;
   saveNote: (content: string) => Promise<void>;
   saveLessonNote: (lessonId: string, content: string) => Promise<void>;
   submitQuiz: (
@@ -317,11 +325,46 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     };
   }, [student, runSilentSync]);
 
-  // Derived state
-  const completedLessonIds = useMemo(
-    () => new Set(completions.map((c) => c.lesson_id)),
-    [completions]
-  );
+  // Derived state.
+  //
+  // For COMPOUND lessons (lessons.requires_action = true) a single
+  // student_lesson_completions row carries TWO timestamps:
+  //   - completed_at         → briefing was watched (auto-synced from Whop)
+  //   - action_completed_at  → student manually checked "I shipped the ad"
+  //
+  // The lesson is only "fully complete" when both are non-null.
+  // We expose three sets so the UI can render partial states cleanly.
+  const lessonsById = useMemo(() => {
+    const m = new Map<string, Lesson>();
+    for (const l of lessons) m.set(l.id, l);
+    return m;
+  }, [lessons]);
+
+  const watchedLessonIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of completions) if (c.completed_at) s.add(c.lesson_id);
+    return s;
+  }, [completions]);
+
+  const actionShippedLessonIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of completions) if (c.action_completed_at) s.add(c.lesson_id);
+    return s;
+  }, [completions]);
+
+  const completedLessonIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of completions) {
+      const lesson = lessonsById.get(c.lesson_id);
+      if (!lesson) continue;
+      if (lesson.requires_action) {
+        if (c.completed_at && c.action_completed_at) s.add(c.lesson_id);
+      } else if (c.completed_at) {
+        s.add(c.lesson_id);
+      }
+    }
+    return s;
+  }, [completions, lessonsById]);
 
   const regionProgress = useMemo(() => {
     const progress: Record<string, RegionProgress> = {};
@@ -421,6 +464,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           student_id: student.id,
           lesson_id: lessonId,
           completed_at: new Date().toISOString(),
+          action_completed_at: null,
         };
         setCompletions((prev) => [...prev, optimistic]);
       }
@@ -469,6 +513,92 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       }
     },
     [student, completedLessonIds]
+  );
+
+  /**
+   * Compound-lesson "I shipped the ad" toggle. Sets/clears the
+   * action_completed_at column on student_lesson_completions without
+   * touching the watch state (which auto-syncs from Whop separately).
+   */
+  const toggleLessonAction = useCallback(
+    async (lessonId: string) => {
+      if (!student) return;
+      const token = await getAccessToken();
+      if (!token) return;
+
+      const isShipped = actionShippedLessonIds.has(lessonId);
+      const optimisticTimestamp = isShipped ? null : new Date().toISOString();
+
+      // Optimistic update — preserve existing watch state
+      setCompletions((prev) => {
+        const existing = prev.find((c) => c.lesson_id === lessonId);
+        if (existing) {
+          return prev.map((c) =>
+            c.lesson_id === lessonId
+              ? { ...c, action_completed_at: optimisticTimestamp }
+              : c
+          );
+        }
+        // No row yet — create one with only the action half set
+        return [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            student_id: student.id,
+            lesson_id: lessonId,
+            completed_at: null,
+            action_completed_at: optimisticTimestamp,
+          },
+        ];
+      });
+
+      try {
+        const res = await fetch("/api/student/mark-action-shipped", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ lessonId, shipped: !isShipped }),
+        });
+
+        if (!res.ok) {
+          // Revert by refetching
+          const dataRes = await fetch("/api/student/data", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (dataRes.ok) {
+            const data = await dataRes.json();
+            setCompletions(data.completions);
+          }
+        } else {
+          const result = await res.json();
+          if (result.completion) {
+            setCompletions((prev) => {
+              const exists = prev.some((c) => c.lesson_id === lessonId);
+              if (exists) {
+                return prev.map((c) =>
+                  c.lesson_id === lessonId ? result.completion : c
+                );
+              }
+              return [...prev, result.completion];
+            });
+          }
+        }
+      } catch {
+        const token2 = await getAccessToken();
+        if (token2) {
+          const dataRes = await fetch("/api/student/data", {
+            headers: { Authorization: `Bearer ${token2}` },
+          });
+          if (dataRes.ok) {
+            const data = await dataRes.json();
+            setCompletions(data.completions);
+          }
+        }
+      }
+    },
+    [student, actionShippedLessonIds]
   );
 
   const saveNote = useCallback(
@@ -646,6 +776,8 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         monthReview,
         loading,
         completedLessonIds,
+        watchedLessonIds,
+        actionShippedLessonIds,
         regionProgress,
         overallProgress,
         currentLesson,
@@ -657,6 +789,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         discountMsLeft,
         discountAllLessonsDone,
         toggleLesson,
+        toggleLessonAction,
         saveNote,
         saveLessonNote,
         submitQuiz,

@@ -132,6 +132,41 @@ export async function fetchWhopMembershipJoinDate(
 }
 
 /**
+ * Look up a Whop member's Discord user ID via the admin API.
+ *
+ * Hits /api/v2/members/{whopUserId} with WHOP_API_KEY (needs the
+ * "Read Members" scope). Returns the Discord snowflake string from
+ * social_accounts where service === "discord", or null if Discord
+ * isn't connected / lookup fails.
+ *
+ * Used by the auth callback to populate students.discord_user_id at
+ * signup time, and by the backfill route for existing students.
+ */
+export async function fetchWhopDiscordId(
+  whopUserId: string
+): Promise<string | null> {
+  const apiKey = process.env.WHOP_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const res = await fetch(
+      `https://api.whop.com/api/v2/members/${whopUserId}`,
+      { headers: { Authorization: `Bearer ${apiKey}` } }
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      social_accounts?: Array<{ service?: string; id?: string }>;
+    };
+    const discord = data.social_accounts?.find(
+      (a) => a.service === "discord"
+    );
+    return discord?.id ?? null;
+  } catch (err) {
+    console.error("fetchWhopDiscordId failed:", err);
+    return null;
+  }
+}
+
+/**
  * Generate a deterministic password for a Whop user
  * Used to bridge Whop OAuth to Supabase auth
  */

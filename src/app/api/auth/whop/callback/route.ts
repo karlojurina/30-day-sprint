@@ -5,6 +5,7 @@ import {
   fetchWhopUserInfo,
   checkActiveMembership,
   fetchWhopMembershipJoinDate,
+  fetchWhopDiscordId,
   generateStudentPassword,
 } from "@/lib/whop";
 import { unsignState } from "@/lib/pkce";
@@ -131,6 +132,10 @@ export async function GET(request: NextRequest) {
       .eq("whop_user_id", userInfo.sub)
       .single();
 
+    // Best-effort Discord ID lookup — null if user hasn't connected
+    // Discord on Whop, or if the API call fails. Doesn't block signup.
+    const discordUserId = await fetchWhopDiscordId(userInfo.sub);
+
     const baseFields = {
       whop_user_id: userInfo.sub,
       supabase_user_id: userId,
@@ -138,6 +143,7 @@ export async function GET(request: NextRequest) {
       name: userInfo.name,
       avatar_url: userInfo.picture,
       discord_username: userInfo.username,
+      discord_user_id: discordUserId,
       last_active_at: new Date().toISOString(),
       whop_access_token: tokens.access_token ?? null,
       whop_refresh_token: tokens.refresh_token ?? null,

@@ -7,12 +7,12 @@
  *   - 3 low-opacity clouds slowly moving left-to-right
  *   - 5 small sparkles near the current lesson (when one exists)
  *
- * All animations use `transform` and `opacity` only. Pause when the
- * tab is hidden. Skip rendering on viewport <640px to keep mobile
- * clean.
+ * All animations use `transform` and `opacity` only. Browsers throttle
+ * rAF when the tab is hidden, so framer-motion loops naturally pause
+ * without us doing anything — no manual visibility tracking.
  *
- * Non-interactive (pointer-events: none) so it never intercepts
- * lesson clicks or pan gestures.
+ * Skip rendering on viewport <640px to keep mobile clean. Non-interactive
+ * (pointer-events: none) so it never intercepts lesson clicks or pan.
  */
 
 import { useEffect, useState, useMemo } from "react";
@@ -109,24 +109,25 @@ interface MapAmbienceProps {
 
 export function MapAmbience({ currentLessonPosition }: MapAmbienceProps) {
   const reducedMotion = useReducedMotion();
-  const [tabVisible, setTabVisible] = useState(true);
   const [enabled, setEnabled] = useState(true);
 
-  // Pause when tab hidden — saves battery and prevents visual catch-up jumps
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    const handler = () => setTabVisible(!document.hidden);
-    document.addEventListener("visibilitychange", handler);
-    return () => document.removeEventListener("visibilitychange", handler);
-  }, []);
-
-  // Skip rendering on small viewports to keep mobile clean
+  // Skip rendering on small viewports to keep mobile clean. Debounced so
+  // resize doesn't thrash the enabled flag during window drag.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const update = () => setEnabled(window.innerWidth >= 640);
-    update();
+    let timer: number | undefined;
+    const update = () => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        setEnabled(window.innerWidth >= 640);
+      }, 200);
+    };
+    setEnabled(window.innerWidth >= 640);
     window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.clearTimeout(timer);
+    };
   }, []);
 
   const sparkleOrigin = useMemo(() => currentLessonPosition, [currentLessonPosition]);
@@ -134,17 +135,13 @@ export function MapAmbience({ currentLessonPosition }: MapAmbienceProps) {
   if (!enabled || reducedMotion) return null;
 
   return (
-    <g
-      aria-hidden
-      style={{ pointerEvents: "none" }}
-      data-ambience-active={tabVisible ? "true" : "false"}
-    >
+    <g aria-hidden style={{ pointerEvents: "none" }}>
       {/* Clouds — drift left to right across the full map width */}
       {CLOUDS.map((c) => (
         <motion.g
           key={c.id}
           initial={{ x: -c.rx * 2 }}
-          animate={tabVisible ? { x: MAP_W + c.rx * 2 } : { x: -c.rx * 2 }}
+          animate={{ x: MAP_W + c.rx * 2 }}
           transition={{
             duration: c.duration,
             delay: c.delay,
@@ -170,19 +167,15 @@ export function MapAmbience({ currentLessonPosition }: MapAmbienceProps) {
         <motion.g
           key={b.id}
           initial={{ x: b.startX, y: b.startY, opacity: 0 }}
-          animate={
-            tabVisible
-              ? {
-                  x: [b.startX, b.endX],
-                  y: [
-                    b.startY,
-                    b.startY + (b.endY - b.startY) * 0.5 - 24, // dip / rise mid-flight
-                    b.endY,
-                  ],
-                  opacity: [0, 0.45, 0.45, 0],
-                }
-              : { x: b.startX, y: b.startY, opacity: 0 }
-          }
+          animate={{
+            x: [b.startX, b.endX],
+            y: [
+              b.startY,
+              b.startY + (b.endY - b.startY) * 0.5 - 24,
+              b.endY,
+            ],
+            opacity: [0, 0.45, 0.45, 0],
+          }}
           transition={{
             duration: b.duration,
             delay: b.delay,
@@ -206,11 +199,7 @@ export function MapAmbience({ currentLessonPosition }: MapAmbienceProps) {
             r={2.2}
             fill="rgba(230, 192, 122, 0.9)"
             initial={{ opacity: 0, scale: 0.4 }}
-            animate={
-              tabVisible
-                ? { opacity: [0, 0.9, 0], scale: [0.4, 1.2, 0.4] }
-                : { opacity: 0, scale: 0.4 }
-            }
+            animate={{ opacity: [0, 0.9, 0], scale: [0.4, 1.2, 0.4] }}
             transition={{
               duration: s.duration,
               delay: s.delay,

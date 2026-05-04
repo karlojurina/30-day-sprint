@@ -375,6 +375,9 @@ function DayRuler({
           const hasLesson = daysWithLessons.has(day);
           const isDone = daysComplete.has(day);
           const isCurrent = day === dayNumber;
+          // On <md viewports each tick collapses below the 40px touch-target
+          // floor, so we mark them inert. Mobile users navigate via lesson
+          // taps instead — desktop remains the primary interaction context.
           return (
             <button
               key={day}
@@ -384,7 +387,7 @@ function DayRuler({
                 const l = lessons.find((lesson) => lesson.day === day);
                 if (l) setPanTarget(l.id);
               }}
-              className="absolute top-0 bottom-0 flex items-center justify-center bg-transparent border-0 p-0"
+              className="day-ruler-tick absolute top-0 bottom-0 flex items-center justify-center bg-transparent border-0 p-0"
               style={{
                 left: `${slotLeft}%`,
                 width: `${slotWidth}%`,

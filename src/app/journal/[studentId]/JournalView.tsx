@@ -412,14 +412,14 @@ const PRINT_CSS = `
   font-weight: 500;
 }
 .lesson-note {
-  margin: 8px 0 0;
-  padding: 10px 14px;
-  background: rgba(160, 140, 80, 0.08);
-  border-left: 3px solid rgba(160, 140, 80, 0.5);
+  margin: 10px 0 0 22px;
+  padding: 12px 16px;
+  background: rgba(160, 140, 80, 0.1);
   font-size: 14px;
   line-height: 1.55;
   color: rgba(26, 20, 16, 0.85);
   white-space: pre-wrap;
+  font-style: italic;
 }
 .daily-list {
   display: flex;

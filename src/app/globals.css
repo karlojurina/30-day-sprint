@@ -193,6 +193,15 @@ body::before {
   animation: pulse-ring 2.4s cubic-bezier(0.22, 1, 0.36, 1) infinite;
 }
 
+/* Day-ruler ticks shrink below the 40px touch-target floor on small
+   viewports. Disable taps there — the ticks remain visible as progress
+   indicators but stop intercepting pointer events. */
+@media (max-width: 767px) {
+  .day-ruler-tick {
+    pointer-events: none;
+  }
+}
+
 @keyframes pulse-ring-svg {
   0%, 100% {
     opacity: 0.6;

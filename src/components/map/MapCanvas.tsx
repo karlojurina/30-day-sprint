@@ -34,6 +34,12 @@ interface MapCanvasProps {
 
 const MAX_ZOOM = 3;
 
+// Spec easing per .impeccable.md: cubic-bezier(0.22, 1, 0.36, 1) (ease-out-quart).
+// GSAP's power3.out IS quartic ease-out — same curve, named differently.
+// Use the in-out variant when a tween needs symmetric acceleration/deceleration.
+const SPEC_EASE = "power3.out";
+const SPEC_EASE_IN_OUT = "power3.inOut";
+
 /** Detect `prefers-reduced-motion: reduce` at call time (SSR-safe). */
 function prefersReducedMotion(): boolean {
   if (typeof window === "undefined") return false;
@@ -288,7 +294,7 @@ export function MapCanvas({
         y: clamped.y,
         scale: clamped.scale,
         duration: opts.duration ?? 0.9,
-        ease: opts.ease ?? "power3.out",
+        ease: opts.ease ?? SPEC_EASE,
         onUpdate: () => {
           setTransform({ ...transformRef.current });
         },
@@ -351,7 +357,7 @@ export function MapCanvas({
       // Softer scale (was 1.0 — felt too aggressive). Longer ease for grace.
       zoomToPoint(n.x, n.y, 0.78, {
         duration: 1.6,
-        ease: "power2.inOut",
+        ease: SPEC_EASE_IN_OUT,
       });
       setHasAutoZoomed(true);
     }, 1100);
@@ -514,7 +520,7 @@ export function MapCanvas({
                 x: targetX,
                 y: targetY,
               },
-              { duration: Math.min(1.4, 0.3 + speed * 0.35), ease: "power2.out" }
+              { duration: Math.min(1.4, 0.3 + speed * 0.35), ease: SPEC_EASE }
             );
           }
         }
@@ -920,8 +926,9 @@ export function MapCanvas({
                 }}
                 transform={`translate(${(s.xStart + s.xEnd) / 2}, ${(s.yTop + s.yBot) / 2})`}
               >
+                <title>{r.name} — region locked</title>
                 <circle r="72" fill="rgba(6,12,26,0.92)" stroke="rgba(230,192,122,0.75)" strokeWidth="2.4" />
-                <g transform="translate(-28, -28)">
+                <g transform="translate(-28, -28)" aria-hidden="true">
                   <rect x="0" y="24" width="56" height="44" rx="6" fill="none" stroke="#E6C07A" strokeWidth="4" />
                   <path d="M 10 24 V 14 a 18 18 0 0 1 36 0 V 24" fill="none" stroke="#E6C07A" strokeWidth="4" />
                   <circle cx="28" cy="46" r="5" fill="#E6C07A" />

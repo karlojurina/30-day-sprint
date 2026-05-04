@@ -18,12 +18,16 @@ interface LessonNodeProps {
   peerCount?: number;
 }
 
-const TEAL = "#4DCEC4";
-const NAVY_ACCENT = "#4DA0D8";
-const GOLD = "#E6C07A";
-const GOLD_HI = "#F0D595";
-const CRIMSON = "#C44A54";
-const NAVY_DARK = "rgba(6,12,26,0.88)";
+// SVG `fill`/`stroke` attributes don't resolve CSS custom properties, so
+// these mirror the canonical tokens in src/app/globals.css. If a color
+// changes in globals.css, mirror the change here. Do NOT introduce a new
+// color here without first adding it to the token system.
+const TEAL = "#4DCEC4"; // --color-teal
+const NAVY_ACCENT = "#4DA0D8"; // --color-sky
+const GOLD = "#E6C07A"; // --color-gold
+const GOLD_HI = "#F0D595"; // --color-gold-light
+const CRIMSON = "#C44A54"; // --color-crimson
+const NAVY_DARK = "rgba(6,12,26,0.88)"; // --color-bg-primary at 88%
 
 // 16-point gate star (unlocked discount gate)
 function gatePoints(r: number): string {

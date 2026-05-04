@@ -31,13 +31,13 @@ const DEFAULT_GOLD = 0xe6c07a;
 export async function postTeamAlert(
   embeds: DiscordEmbed[],
   contentText?: string
-): Promise<{ ok: boolean; status?: number }> {
+): Promise<{ ok: boolean; status?: number; reason?: string }> {
   const url = process.env.DISCORD_TEAM_WEBHOOK_URL;
   if (!url) {
     console.warn(
       "[discord] DISCORD_TEAM_WEBHOOK_URL not set — skipping team alert"
     );
-    return { ok: false };
+    return { ok: false, reason: "env-var-missing" };
   }
   try {
     const res = await fetch(url, {
@@ -51,10 +51,22 @@ export async function postTeamAlert(
         })),
       }),
     });
-    return { ok: res.ok, status: res.status };
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.error(
+        `[discord] webhook post failed (${res.status}): ${body.slice(0, 300)}`
+      );
+      return {
+        ok: false,
+        status: res.status,
+        reason: `discord-${res.status}: ${body.slice(0, 200)}`,
+      };
+    }
+    return { ok: true, status: res.status };
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     console.error("[discord] postTeamAlert failed:", err);
-    return { ok: false };
+    return { ok: false, reason: `exception: ${message.slice(0, 200)}` };
   }
 }
 

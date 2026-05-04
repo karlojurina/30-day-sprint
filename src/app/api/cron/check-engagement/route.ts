@@ -142,6 +142,7 @@ export async function GET(request: NextRequest) {
   }
 
   let discordOk: boolean | null = null;
+  let discordReason: string | null = null;
   if (alerts.length > 0) {
     const { error } = await supabase
       .from("disengagement_alerts")
@@ -167,11 +168,13 @@ export async function GET(request: NextRequest) {
     );
     const result = await postTeamAlert([embed]);
     discordOk = result.ok;
+    discordReason = result.reason ?? null;
   }
 
   return NextResponse.json({
     checked: students.length,
     alerts: alerts.length,
     discord_posted: discordOk,
+    discord_reason: discordReason,
   });
 }

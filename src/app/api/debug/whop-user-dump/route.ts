@@ -36,16 +36,13 @@ export async function GET(request: NextRequest) {
   const headers = { Authorization: `Bearer ${apiKey}` };
 
   const probes: Record<string, string> = {
-    user_v1: `https://api.whop.com/api/v1/users/${whopUserId}`,
-    user_v2: `https://api.whop.com/api/v2/users/${whopUserId}`,
-    user_v5: `https://api.whop.com/v5/users/${whopUserId}`,
-    members_v2_byUser: `https://api.whop.com/api/v2/members?user_id=${whopUserId}`,
-    members_v5_byUser: `https://api.whop.com/v5/members?user_id=${whopUserId}`,
+    member_v2_singular: `https://api.whop.com/api/v2/members/${whopUserId}`,
+    user_social_accounts: `https://api.whop.com/api/v2/users/${whopUserId}/social_accounts`,
+    members_v2_filter_email: `https://api.whop.com/api/v2/members?email=charlieyard109@gmail.com`,
+    members_v2_filter_username: `https://api.whop.com/api/v2/members?username=charlieyard109`,
+    members_v2_filter_search: `https://api.whop.com/api/v2/members?search=charlieyard109`,
+    members_v2_per100: `https://api.whop.com/api/v2/members?per=100`,
   };
-  if (companyId) {
-    probes.company_members_v2 = `https://api.whop.com/api/v2/companies/${companyId}/members?user_id=${whopUserId}`;
-    probes.company_members_v5 = `https://api.whop.com/v5/companies/${companyId}/members?user_id=${whopUserId}`;
-  }
 
   const results: Record<string, unknown> = {};
   await Promise.all(

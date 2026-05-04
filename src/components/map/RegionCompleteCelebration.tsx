@@ -140,14 +140,20 @@ function Content({
             transition={{
               duration: 0.9,
               delay: 0.25,
-              ease: [0.34, 1.56, 0.64, 1],
+              ease: [0.22, 1, 0.36, 1],
             }}
             className="mx-auto mb-6 inline-flex"
           >
             <div
               className="relative px-8 py-3"
               style={{
-                border: "3px solid var(--color-gold)",
+                // Double-line frame — refined ceremonial-stamp treatment.
+                // Inner 1.5px border + outer 1.5px outline at 3px offset
+                // reads as a vintage postal stamp / certificate seal,
+                // not the heavy single-stroke that flags as templated.
+                border: "1.5px solid var(--color-gold)",
+                outline: "1.5px solid var(--color-gold)",
+                outlineOffset: 3,
                 borderRadius: 4,
                 background: "rgba(230,192,122,0.06)",
                 boxShadow: "0 0 50px rgba(230,192,122,0.32)",

@@ -19,6 +19,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { SPEC_EASE } from "@/lib/motion";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 
 interface OnboardingFlowProps {
@@ -93,7 +94,7 @@ export function OnboardingFlow({
           transition={{
             duration: 0.45,
             delay: 0.1,
-            ease: [0.22, 1, 0.36, 1],
+            ease: SPEC_EASE,
           }}
           style={{
             pointerEvents: "auto",

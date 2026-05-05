@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { motion } from "framer-motion";
+import { SPEC_EASE } from "@/lib/motion";
 
 function LoginContent() {
   const searchParams = useSearchParams();
@@ -48,7 +49,7 @@ function LoginContent() {
               hidden: { opacity: 0, y: 8 },
               visible: { opacity: 1, y: 0 },
             }}
-            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.5, ease: SPEC_EASE }}
             className="mono-label-accent mb-3"
           >
             EcomTalent · 30-Day Sprint
@@ -59,7 +60,7 @@ function LoginContent() {
               hidden: { opacity: 0, y: 10 },
               visible: { opacity: 1, y: 0 },
             }}
-            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.6, ease: SPEC_EASE }}
             className="display-heading text-[48px] sm:text-[64px] leading-[0.92] mb-4"
           >
             You&apos;re
@@ -72,7 +73,7 @@ function LoginContent() {
               hidden: { opacity: 0, y: 10 },
               visible: { opacity: 1, y: 0 },
             }}
-            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.6, ease: SPEC_EASE }}
             className="text-[15px] leading-relaxed text-[var(--color-text-secondary)] mb-8 max-w-[360px] mx-auto sm:mx-0"
           >
             Sign in with Whop. Your 30 days start the moment you&apos;re in.
@@ -101,7 +102,7 @@ function LoginContent() {
               hidden: { opacity: 0, y: 10 },
               visible: { opacity: 1, y: 0 },
             }}
-            transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.6, ease: SPEC_EASE }}
           >
             <a
               href="/api/auth/whop/authorize"

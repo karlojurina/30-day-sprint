@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { gsap } from "gsap";
+import { SPEC_EASE_GSAP, SPEC_EASE_GSAP_IN } from "@/lib/motion";
 
 interface CloudTransitionProps {
   /** Bump this number to trigger a fresh transition. */
@@ -85,13 +86,13 @@ export function CloudTransition({
         {
           opacity: 1,
           duration: 0.2,
-          ease: "power2.out",
+          ease: SPEC_EASE_GSAP,
           onComplete: () => {
             onPeakRef.current?.();
             gsap.to(backdrop, {
               opacity: 0,
               duration: 0.25,
-              ease: "power2.in",
+              ease: SPEC_EASE_GSAP_IN,
               onComplete: () => {
                 gsap.set(container, { pointerEvents: "none" });
               },
@@ -136,7 +137,7 @@ export function CloudTransition({
       {
         opacity: 1,
         duration: fadeInDur,
-        ease: "power2.out",
+        ease: SPEC_EASE_GSAP,
       },
       0
     );
@@ -148,7 +149,7 @@ export function CloudTransition({
           opacity: 1,
           scale: 1.15,
           duration: fadeInDur * 1.05,
-          ease: "power2.out",
+          ease: SPEC_EASE_GSAP,
         },
         i * 0.025
       );
@@ -169,7 +170,7 @@ export function CloudTransition({
       {
         opacity: 0,
         duration: fadeOutDur,
-        ease: "power2.in",
+        ease: SPEC_EASE_GSAP_IN,
       },
       outStart
     );
@@ -181,7 +182,7 @@ export function CloudTransition({
           opacity: 0,
           scale: 1.45,
           duration: fadeOutDur,
-          ease: "power2.in",
+          ease: SPEC_EASE_GSAP_IN,
         },
         outStart + i * 0.02
       );

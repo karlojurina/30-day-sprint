@@ -10,6 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 import { gsap } from "gsap";
+import { SPEC_EASE_GSAP, SPEC_EASE_GSAP_INOUT } from "@/lib/motion";
 import { useStudent } from "@/contexts/StudentContext";
 import {
   MAP_W,
@@ -33,12 +34,6 @@ interface MapCanvasProps {
 }
 
 const MAX_ZOOM = 3;
-
-// Spec easing per .impeccable.md: cubic-bezier(0.22, 1, 0.36, 1) (ease-out-quart).
-// GSAP's power3.out IS quartic ease-out — same curve, named differently.
-// Use the in-out variant when a tween needs symmetric acceleration/deceleration.
-const SPEC_EASE = "power3.out";
-const SPEC_EASE_IN_OUT = "power3.inOut";
 
 /** Detect `prefers-reduced-motion: reduce` at call time (SSR-safe). */
 function prefersReducedMotion(): boolean {
@@ -294,7 +289,7 @@ export function MapCanvas({
         y: clamped.y,
         scale: clamped.scale,
         duration: opts.duration ?? 0.9,
-        ease: opts.ease ?? SPEC_EASE,
+        ease: opts.ease ?? SPEC_EASE_GSAP,
         onUpdate: () => {
           setTransform({ ...transformRef.current });
         },
@@ -357,7 +352,7 @@ export function MapCanvas({
       // Softer scale (was 1.0 — felt too aggressive). Longer ease for grace.
       zoomToPoint(n.x, n.y, 0.78, {
         duration: 1.6,
-        ease: SPEC_EASE_IN_OUT,
+        ease: SPEC_EASE_GSAP_INOUT,
       });
       setHasAutoZoomed(true);
     }, 1100);
@@ -520,7 +515,7 @@ export function MapCanvas({
                 x: targetX,
                 y: targetY,
               },
-              { duration: Math.min(1.4, 0.3 + speed * 0.35), ease: SPEC_EASE }
+              { duration: Math.min(1.4, 0.3 + speed * 0.35), ease: SPEC_EASE_GSAP }
             );
           }
         }

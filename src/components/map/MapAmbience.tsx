@@ -17,6 +17,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { motion, useReducedMotion } from "framer-motion";
+import { SPEC_EASE } from "@/lib/motion";
 import { MAP_W } from "@/lib/map/path-math";
 
 interface BirdSpec {
@@ -205,7 +206,7 @@ export function MapAmbience({ currentLessonPosition }: MapAmbienceProps) {
               delay: s.delay,
               repeat: Infinity,
               repeatType: "loop",
-              ease: "easeInOut",
+              ease: SPEC_EASE,
             }}
           />
         ))}

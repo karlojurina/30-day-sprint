@@ -9,6 +9,7 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { useEffect } from "react";
+import { SPEC_EASE } from "@/lib/motion";
 
 interface StreakToastProps {
   milestoneDays: 7 | 14 | 30 | null;
@@ -46,7 +47,7 @@ export function StreakToast({ milestoneDays, onDismiss }: StreakToastProps) {
           initial={{ opacity: 0, y: 24, scale: 0.96 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 12, scale: 0.96 }}
-          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.4, ease: SPEC_EASE }}
           className="fixed bottom-5 right-5 z-[55] pointer-events-auto"
           style={{
             maxWidth: 320,

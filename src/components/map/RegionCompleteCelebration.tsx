@@ -13,6 +13,7 @@
 
 import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { SPEC_EASE } from "@/lib/motion";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import type { Region } from "@/types/database";
 
@@ -129,7 +130,7 @@ function Content({
           initial={{ opacity: 0, y: 20, scale: 0.95 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 8, scale: 0.97 }}
-          transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1], delay: 0.15 }}
+          transition={{ duration: 0.6, ease: SPEC_EASE, delay: 0.15 }}
           className="text-center"
           style={{ pointerEvents: "auto", maxWidth: 480 }}
         >
@@ -140,7 +141,7 @@ function Content({
             transition={{
               duration: 0.9,
               delay: 0.25,
-              ease: [0.22, 1, 0.36, 1],
+              ease: SPEC_EASE,
             }}
             className="mx-auto mb-6 inline-flex"
           >
@@ -194,7 +195,7 @@ function Content({
             transition={{
               duration: 0.6,
               delay: 0.65,
-              ease: [0.22, 1, 0.36, 1],
+              ease: SPEC_EASE,
             }}
             className="italic mb-3"
             style={{

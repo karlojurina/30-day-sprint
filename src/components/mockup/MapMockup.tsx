@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { gsap } from "gsap";
+import { SPEC_EASE_GSAP } from "@/lib/motion";
 import { useStudent } from "@/contexts/StudentContext";
 import {
   MAP_W,
@@ -598,7 +599,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       // Cloud-cover swap: 0.25s and the user never sees it.
       // First paint: slow ease so the camera arrival reads as cinematic.
       duration: isFirst ? 1.8 : 0.25,
-      ease: isFirst ? "expo.out" : "power2.out",
+      ease: SPEC_EASE_GSAP,
       onUpdate: () => {
         setDisplayTransform({ ...transformRef.current });
       },

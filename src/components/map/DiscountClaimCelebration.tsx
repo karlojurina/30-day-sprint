@@ -16,6 +16,7 @@
 
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { SPEC_EASE } from "@/lib/motion";
 import type { DiscountRequest } from "@/types/database";
 
 export type DiscountCelebrationMode =
@@ -99,7 +100,7 @@ export function DiscountClaimCelebration({
               exit={{ opacity: 0, y: 8, scale: 0.97 }}
               transition={{
                 duration: 0.5,
-                ease: [0.22, 1, 0.36, 1],
+                ease: SPEC_EASE,
                 delay: 0.1,
               }}
               style={{
@@ -431,7 +432,7 @@ function CoinBurst() {
               delay: 0.3 + i * 0.04,
               repeat: Infinity,
               repeatDelay: 1.6,
-              ease: "easeOut",
+              ease: SPEC_EASE,
             }}
             style={{
               position: "absolute",

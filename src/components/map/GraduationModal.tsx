@@ -9,6 +9,7 @@
 
 import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { SPEC_EASE } from "@/lib/motion";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 
 interface MonthReview {
@@ -92,7 +93,7 @@ export function GraduationModal({
               strokeWidth={2}
               initial={{ pathLength: 0, opacity: 0 }}
               animate={{ pathLength: 1, opacity: 0.7 }}
-              transition={{ duration: 2.5, delay: 0.4, ease: "easeOut" }}
+              transition={{ duration: 2.5, delay: 0.4, ease: SPEC_EASE }}
             />
           </svg>
 
@@ -111,7 +112,7 @@ export function GraduationModal({
               transition={{
                 duration: 0.7,
                 delay: 0.2,
-                ease: [0.22, 1, 0.36, 1],
+                ease: SPEC_EASE,
               }}
               style={{
                 pointerEvents: "auto",
@@ -148,7 +149,7 @@ export function GraduationModal({
                 transition={{
                   duration: 0.6,
                   delay: 0.8,
-                  ease: [0.22, 1, 0.36, 1],
+                  ease: SPEC_EASE,
                 }}
                 className="italic mb-4"
                 style={{
@@ -274,7 +275,7 @@ function Stat({
         hidden: { opacity: 0, y: 12 },
         visible: { opacity: 1, y: 0 },
       }}
-      transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+      transition={{ duration: 0.45, ease: SPEC_EASE }}
       style={{
         padding: "14px 12px",
         background: highlight

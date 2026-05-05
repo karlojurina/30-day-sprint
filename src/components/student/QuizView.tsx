@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useState } from "react";
+import { SPEC_EASE } from "@/lib/motion";
 import type { Quiz, QuizQuestion } from "@/types/database";
 
 interface QuizViewProps {
@@ -118,7 +119,7 @@ export function QuizView({
             initial={{ opacity: 0, y: 40, scale: 0.98 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.98 }}
-            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.35, ease: SPEC_EASE }}
             className="
               fixed left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2
               z-50 w-[95%] sm:w-[560px] max-h-[85vh] overflow-y-auto

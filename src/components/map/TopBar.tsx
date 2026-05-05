@@ -8,10 +8,17 @@ import { useStudent } from "@/contexts/StudentContext";
 import { getDayNumber } from "@/types/database";
 import { getTitleLabel } from "@/lib/titles";
 import { TOTAL_DAYS } from "@/lib/constants";
+import { SettingsPopover } from "./SettingsPopover";
 
 interface TopBarProps {
   setPanTarget: Dispatch<SetStateAction<string | null>>;
   onOpenNotebook: () => void;
+  /**
+   * When true, renders the settings popover (sound toggle, etc.)
+   * before the sign-out button. Used by the pilot dashboard.
+   * Defaults to false so production /dashboard is unchanged.
+   */
+  showSettings?: boolean;
 }
 
 const GOLD_DIM = "rgba(230,192,122,0.7)";
@@ -30,7 +37,7 @@ const pillBaseStyle: React.CSSProperties = {
   background: "rgba(16,32,66,0.7)",
 };
 
-export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
+export function TopBar({ setPanTarget, onOpenNotebook, showSettings = false }: TopBarProps) {
   const { student, signOut } = useAuth();
   const {
     regions,
@@ -236,6 +243,9 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
               Notes
             </span>
           </button>
+
+          {/* Settings popover — pilot only */}
+          {showSettings && <SettingsPopover />}
 
           {/* Sign out */}
           <button

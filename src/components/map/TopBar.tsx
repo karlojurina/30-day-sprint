@@ -8,6 +8,7 @@ import { useStudent } from "@/contexts/StudentContext";
 import { getDayNumber } from "@/types/database";
 import { getTitleLabel } from "@/lib/titles";
 import { TOTAL_DAYS } from "@/lib/constants";
+import { StreakLantern } from "./StreakLantern";
 
 interface TopBarProps {
   setPanTarget: Dispatch<SetStateAction<string | null>>;
@@ -162,29 +163,10 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
 
         {/* Right cluster — all chips share the same PILL_HEIGHT */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Streak */}
-          {streak.current > 0 && (
-            <div
-              style={{
-                ...pillBaseStyle,
-                background: "rgba(230,192,122,0.14)",
-                boxShadow:
-                  streak.current >= 7
-                    ? "0 0 16px rgba(230,192,122,0.3)"
-                    : "none",
-              }}
-              title={`${streak.current}-day streak · longest: ${streak.longest}`}
-              aria-label={`${streak.current}-day streak, longest ${streak.longest}`}
-            >
-              <span style={{ fontSize: 18, lineHeight: 1 }} aria-hidden="true">🔥</span>
-              <span
-                className="font-mono tabular-nums font-bold"
-                style={{ color: "var(--color-gold-light)", fontSize: 16 }}
-              >
-                {streak.current}
-              </span>
-            </div>
-          )}
+          {/* Streak — lantern lights up at 7/14/30 day milestones,
+              dims when broken. Always rendered so it carries identity
+              even at 0. */}
+          <StreakLantern current={streak.current} longest={streak.longest} />
 
           {/* Rank */}
           <div

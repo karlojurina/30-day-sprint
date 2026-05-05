@@ -7,6 +7,9 @@ import { TopBar } from "@/components/map/TopBar";
 import { LessonSheet } from "@/components/map/LessonSheet";
 import { NotebookSheet } from "@/components/map/NotebookSheet";
 import { MapMockup } from "@/components/mockup/MapMockup";
+import { MapCompass } from "@/components/map/MapCompass";
+import { LessonCompleteEffects } from "@/components/map/LessonCompleteEffects";
+import { RecentActivityRibbon } from "@/components/map/RecentActivityRibbon";
 import { SyncDebugPanel } from "@/components/map/SyncDebugPanel";
 
 export default function DashboardPage() {
@@ -48,13 +51,18 @@ export default function DashboardPage() {
         onOpenNotebook={() => setNotebookOpen(true)}
       />
 
+      <RecentActivityRibbon />
+
       <div className="relative flex-1 min-h-0">
         <MapMockup onOpenLesson={(id) => setSelectedLessonId(id)} />
+        <LessonCompleteEffects />
+        <MapCompass onPointerClick={(id) => setPanTarget(id)} />
       </div>
 
       <LessonSheet
         lessonId={selectedLessonId}
         onClose={() => setSelectedLessonId(null)}
+        onSelectLesson={(id) => setSelectedLessonId(id)}
       />
 
       <NotebookSheet

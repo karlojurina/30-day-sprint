@@ -8,6 +8,13 @@ import { useFocusTrap } from "@/lib/useFocusTrap";
 interface LessonSheetProps {
   lessonId: string | null;
   onClose: () => void;
+  /**
+   * Optional handler that switches the lesson without closing the
+   * sheet. When provided, the header shows ←/→ chevrons and the
+   * sheet listens for arrow keys. Useful for reading lessons
+   * sequentially without bouncing back to the map between each.
+   */
+  onSelectLesson?: (id: string) => void;
 }
 
 const WHOP_LESSON_URL = (lessonId: string) =>
@@ -24,7 +31,7 @@ const WHOP_LESSON_URL = (lessonId: string) =>
  *   requestDiscount().
  * - All types: notes textarea (auto-saving).
  */
-export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
+export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetProps) {
   const {
     lessons,
     regions,
@@ -49,18 +56,73 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
     [regions, lesson]
   );
 
+  // Adjacent lessons for prev/next nav (when onSelectLesson is provided)
+  const { prevLesson, nextLesson } = useMemo(() => {
+    if (!lesson || !onSelectLesson) {
+      return { prevLesson: null, nextLesson: null };
+    }
+    const sorted = [...lessons].sort(
+      (a, b) => a.day - b.day || a.sort_order - b.sort_order
+    );
+    const idx = sorted.findIndex((l) => l.id === lesson.id);
+    return {
+      prevLesson: idx > 0 ? sorted[idx - 1] : null,
+      nextLesson: idx >= 0 && idx < sorted.length - 1 ? sorted[idx + 1] : null,
+    };
+  }, [lessons, lesson, onSelectLesson]);
+
   const dialogRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   useFocusTrap(dialogRef, lessonId != null);
 
-  // Close on Escape
+  // Restore scroll position when reopening a lesson, save on scroll.
+  // Per-lesson key in sessionStorage so positions are remembered for
+  // the duration of the tab but don't persist across full reloads.
+  useEffect(() => {
+    if (!lessonId || typeof window === "undefined") return;
+    const key = `et.lesson-scroll.${lessonId}`;
+    const saved = window.sessionStorage.getItem(key);
+    // Wait one frame for the body to mount + render
+    const restoreId = window.requestAnimationFrame(() => {
+      if (bodyRef.current && saved != null) {
+        bodyRef.current.scrollTop = Number(saved);
+      }
+    });
+
+    const onScroll = () => {
+      if (!bodyRef.current) return;
+      window.sessionStorage.setItem(key, String(bodyRef.current.scrollTop));
+    };
+    const node = bodyRef.current;
+    node?.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.cancelAnimationFrame(restoreId);
+      node?.removeEventListener("scroll", onScroll);
+    };
+  }, [lessonId]);
+
+  // Keyboard: Esc to close, ←/→ to navigate (when handler provided)
   useEffect(() => {
     if (!lessonId) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      // Don't intercept arrows while typing in textarea/input
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "TEXTAREA" || tag === "INPUT") return;
+      if (e.key === "ArrowLeft" && prevLesson && onSelectLesson) {
+        e.preventDefault();
+        onSelectLesson(prevLesson.id);
+      } else if (e.key === "ArrowRight" && nextLesson && onSelectLesson) {
+        e.preventDefault();
+        onSelectLesson(nextLesson.id);
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [lessonId, onClose]);
+  }, [lessonId, onClose, prevLesson, nextLesson, onSelectLesson]);
 
   // Prevent body scroll
   useEffect(() => {
@@ -172,34 +234,105 @@ export function LessonSheet({ lessonId, onClose }: LessonSheetProps) {
                 </p>
               )}
             </div>
-            <button
-              onClick={onClose}
-              className="btn-tinted w-10 h-10 rounded-full flex items-center justify-center shrink-0"
-              style={{
-                color: "rgba(230,220,200,0.7)",
-                border: "1px solid rgba(230,192,122,0.2)",
-                background: "transparent",
-              }}
-              aria-label="Close lesson"
-            >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth="1.8"
+            <div className="flex items-center gap-2 shrink-0">
+              {onSelectLesson && (
+                <>
+                  <button
+                    onClick={() => prevLesson && onSelectLesson(prevLesson.id)}
+                    disabled={!prevLesson}
+                    className="btn-tinted w-10 h-10 rounded-full flex items-center justify-center"
+                    style={{
+                      color: "rgba(230,220,200,0.7)",
+                      border: "1px solid rgba(230,192,122,0.2)",
+                      background: "transparent",
+                      opacity: prevLesson ? 1 : 0.3,
+                      cursor: prevLesson ? "pointer" : "not-allowed",
+                    }}
+                    aria-label={
+                      prevLesson
+                        ? `Previous lesson: ${prevLesson.title}`
+                        : "No previous lesson"
+                    }
+                    title={prevLesson ? `← ${prevLesson.title}` : "Start of expedition"}
+                  >
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M15 19l-7-7 7-7"
+                      />
+                    </svg>
+                  </button>
+                  <button
+                    onClick={() => nextLesson && onSelectLesson(nextLesson.id)}
+                    disabled={!nextLesson}
+                    className="btn-tinted w-10 h-10 rounded-full flex items-center justify-center"
+                    style={{
+                      color: "rgba(230,220,200,0.7)",
+                      border: "1px solid rgba(230,192,122,0.2)",
+                      background: "transparent",
+                      opacity: nextLesson ? 1 : 0.3,
+                      cursor: nextLesson ? "pointer" : "not-allowed",
+                    }}
+                    aria-label={
+                      nextLesson
+                        ? `Next lesson: ${nextLesson.title}`
+                        : "No next lesson"
+                    }
+                    title={nextLesson ? `${nextLesson.title} →` : "End of expedition"}
+                  >
+                    <svg
+                      className="w-5 h-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M9 5l7 7-7 7"
+                      />
+                    </svg>
+                  </button>
+                </>
+              )}
+              <button
+                onClick={onClose}
+                className="btn-tinted w-10 h-10 rounded-full flex items-center justify-center"
+                style={{
+                  color: "rgba(230,220,200,0.7)",
+                  border: "1px solid rgba(230,192,122,0.2)",
+                  background: "transparent",
+                }}
+                aria-label="Close lesson"
               >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {/* Body */}
           <div
+            ref={bodyRef}
             className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5"
             style={{ overscrollBehavior: "contain" }}
           >
@@ -630,26 +763,72 @@ function LessonNotes({ lessonId, initial, onSave }: LessonNotesProps) {
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSaved = useRef(initial);
+  const draftKey = `et.note-draft.${lessonId}`;
 
+  // On mount / lesson change: prefer a localStorage draft if one exists
+  // and differs from the server value. That's an unsaved draft from a
+  // previous session (e.g., API failed or tab closed mid-write).
   useEffect(() => {
-    setValue(initial);
-    lastSaved.current = initial;
-  }, [lessonId, initial]);
+    if (typeof window === "undefined") {
+      setValue(initial);
+      lastSaved.current = initial;
+      return;
+    }
+    const draft = window.localStorage.getItem(draftKey);
+    if (draft != null && draft !== initial) {
+      setValue(draft);
+      lastSaved.current = initial; // server value is the "saved" baseline
+      // Trigger a save attempt so the draft gets synced
+      if (draft.trim() !== initial.trim()) {
+        setStatus("saving");
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(async () => {
+          try {
+            await onSave(lessonId, draft);
+            lastSaved.current = draft;
+            window.localStorage.removeItem(draftKey);
+            setStatus("saved");
+            setTimeout(() => setStatus("idle"), 1600);
+          } catch {
+            // Save failed — keep the draft for next time
+            setStatus("idle");
+          }
+        }, 200);
+      }
+    } else {
+      setValue(initial);
+      lastSaved.current = initial;
+    }
+  }, [lessonId, initial, draftKey, onSave]);
 
   const handleChange = useCallback(
     (v: string) => {
       setValue(v);
+      // Mirror every keystroke to localStorage so an interrupted save
+      // never loses the user's writing.
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(draftKey, v);
+      }
       if (timer.current) clearTimeout(timer.current);
       if (v.trim() === lastSaved.current.trim()) return;
       setStatus("saving");
       timer.current = setTimeout(async () => {
-        await onSave(lessonId, v);
-        lastSaved.current = v;
-        setStatus("saved");
-        setTimeout(() => setStatus("idle"), 1600);
+        try {
+          await onSave(lessonId, v);
+          lastSaved.current = v;
+          // Successfully synced — clear the draft
+          if (typeof window !== "undefined") {
+            window.localStorage.removeItem(draftKey);
+          }
+          setStatus("saved");
+          setTimeout(() => setStatus("idle"), 1600);
+        } catch {
+          // Keep the localStorage draft so the next session can retry
+          setStatus("idle");
+        }
       }, 800);
     },
-    [lessonId, onSave]
+    [lessonId, onSave, draftKey]
   );
 
   const notesId = `lesson-notes-${lessonId}`;

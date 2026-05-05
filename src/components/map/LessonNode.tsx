@@ -399,6 +399,18 @@ export function HoverPreviewCard({
   r: number;
 }) {
   const isWatch = lesson.type === "watch";
+  const hasDescription = Boolean(lesson.description?.trim());
+
+  // Measure the card height based on what we render. Description
+  // gets up to 3 lines (~36 char each) before clamping with ellipsis.
+  const titleH = 28;
+  const descH = hasDescription ? 50 : 0;
+  const watchPlateH = isWatch ? 64 : 0;
+  const metaH = 18;
+  const padding = 18;
+  const cardH = padding + watchPlateH + titleH + descH + metaH;
+
+  let cursor = padding / 2;
 
   return (
     <g transform={`translate(${x}, ${y + r + 18})`} style={{ pointerEvents: "none" }}>
@@ -406,87 +418,111 @@ export function HoverPreviewCard({
         x="-130"
         y="0"
         width="260"
-        height={isWatch ? 110 : 82}
+        height={cardH}
         rx="8"
         fill="#0A1428"
         stroke="rgba(230,192,122,0.55)"
         strokeWidth="1.2"
       />
-      {isWatch && (
-        <g>
-          <rect
-            x="-120"
-            y="10"
-            width="240"
-            height="54"
-            rx="4"
-            fill="rgba(77,206,196,0.1)"
-            stroke="rgba(77,206,196,0.4)"
-            strokeWidth="0.8"
-          />
-          <circle
-            cx="0"
-            cy="37"
-            r="14"
-            fill="rgba(230,192,122,0.2)"
-            stroke={GOLD}
-            strokeWidth="1.2"
-          />
-          <path d="M -4 31 L 8 37 L -4 43 Z" fill={GOLD} />
-          {lesson.duration_label && (
-            <>
-              <rect x="78" y="52" width="38" height="10" rx="2" fill="rgba(10,20,40,0.9)" />
-              <text
-                x="97"
-                y="59"
-                textAnchor="middle"
-                fontFamily="JetBrains Mono, ui-monospace, monospace"
-                fontSize="8"
+
+      {/* Optional watch plate (the play-button affordance for watch lessons) */}
+      {isWatch &&
+        (() => {
+          const plateY = cursor;
+          cursor += watchPlateH;
+          return (
+            <g>
+              <rect
+                x="-120"
+                y={plateY + 4}
+                width="240"
+                height="54"
+                rx="4"
+                fill="rgba(77,206,196,0.1)"
+                stroke="rgba(77,206,196,0.4)"
+                strokeWidth="0.8"
+              />
+              <circle
+                cx="0"
+                cy={plateY + 31}
+                r="14"
+                fill="rgba(230,192,122,0.2)"
+                stroke={GOLD}
+                strokeWidth="1.2"
+              />
+              <path
+                d={`M -4 ${plateY + 25} L 8 ${plateY + 31} L -4 ${plateY + 37} Z`}
                 fill={GOLD}
+              />
+            </g>
+          );
+        })()}
+
+      {/* Mono meta line: TYPE · DURATION */}
+      {(() => {
+        const yMeta = cursor + 12;
+        cursor += metaH;
+        return (
+          <text
+            x="0"
+            y={yMeta}
+            textAnchor="middle"
+            fontFamily="JetBrains Mono, ui-monospace, monospace"
+            fontSize="9"
+            fill="rgba(230,192,122,0.9)"
+            letterSpacing="2.5"
+          >
+            {`${lesson.type.toUpperCase()}${lesson.duration_label ? "  ·  " + lesson.duration_label : ""}`}
+          </text>
+        );
+      })()}
+
+      {/* Italic title */}
+      {(() => {
+        const yTitle = cursor + 18;
+        cursor += titleH;
+        return (
+          <text
+            x="0"
+            y={yTitle}
+            textAnchor="middle"
+            fontFamily="Cormorant Garamond, serif"
+            fontStyle="italic"
+            fontSize="15"
+            fill="#E6DCC8"
+          >
+            {lesson.title.length > 36 ? lesson.title.slice(0, 34) + "…" : lesson.title}
+          </text>
+        );
+      })()}
+
+      {/* Description — always shown when present; uses foreignObject
+          so we get real CSS line-wrapping and -webkit-line-clamp at 2
+          lines. Falls back gracefully on engines without clamp. */}
+      {hasDescription &&
+        (() => {
+          const yDesc = cursor + 4;
+          return (
+            <foreignObject x="-118" y={yDesc} width="236" height={descH - 4}>
+              <div
+                style={{
+                  fontFamily: "Cormorant Garamond, serif",
+                  fontStyle: "italic",
+                  fontSize: 12,
+                  lineHeight: 1.32,
+                  color: "rgba(230,220,200,0.72)",
+                  textAlign: "center",
+                  display: "-webkit-box",
+                  WebkitLineClamp: 3,
+                  WebkitBoxOrient: "vertical",
+                  overflow: "hidden",
+                }}
               >
-                {lesson.duration_label}
-              </text>
-            </>
-          )}
-        </g>
-      )}
-      <text
-        x="0"
-        y={isWatch ? 82 : 22}
-        textAnchor="middle"
-        fontFamily="JetBrains Mono, ui-monospace, monospace"
-        fontSize="9"
-        fill="rgba(230,192,122,0.9)"
-        letterSpacing="2.5"
-      >
-        {`${lesson.type.toUpperCase()}${lesson.duration_label ? "  ·  " + lesson.duration_label : ""}`}
-      </text>
-      <text
-        x="0"
-        y={isWatch ? 100 : 48}
-        textAnchor="middle"
-        fontFamily="Cormorant Garamond, serif"
-        fontStyle="italic"
-        fontSize="15"
-        fill="#E6DCC8"
-      >
-        {lesson.title.length > 36 ? lesson.title.slice(0, 34) + "…" : lesson.title}
-      </text>
-      {!isWatch && lesson.description && (
-        <text
-          x="0"
-          y={68}
-          textAnchor="middle"
-          fontFamily="Cormorant Garamond, serif"
-          fontStyle="italic"
-          fontSize="11"
-          fill="rgba(230,220,200,0.6)"
-        >
-          {lesson.description.length > 48
-            ? lesson.description.slice(0, 46) + "…"
-            : lesson.description}
-        </text>
-      )}
+                {lesson.description}
+              </div>
+            </foreignObject>
+          );
+        })()}
     </g>
   );
 }

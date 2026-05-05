@@ -82,7 +82,7 @@ export default function AlertsPage() {
             type="checkbox"
             checked={showDismissed}
             onChange={(e) => setShowDismissed(e.target.checked)}
-            className="rounded"
+            className="rounded accent-[var(--color-gold)] focus-visible:outline-2 focus-visible:outline-[var(--color-gold)] focus-visible:outline-offset-2"
           />
           Show dismissed
         </label>

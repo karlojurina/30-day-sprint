@@ -62,7 +62,7 @@ export default function TeamLoginPage() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 bg-bg-card border border-border rounded-lg text-text-primary focus:outline-none focus:border-accent focus-visible:outline-2 focus-visible:outline-[var(--color-gold)] focus-visible:outline-offset-2 transition-colors"
+              className="w-full px-3 py-2 min-h-10 bg-bg-card border border-border rounded-lg text-text-primary focus:outline-none focus:border-accent focus-visible:outline-2 focus-visible:outline-[var(--color-gold)] focus-visible:outline-offset-2 transition-colors"
               placeholder="you@ecomtalent.com"
             />
           </div>
@@ -80,7 +80,7 @@ export default function TeamLoginPage() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 bg-bg-card border border-border rounded-lg text-text-primary focus:outline-none focus:border-accent focus-visible:outline-2 focus-visible:outline-[var(--color-gold)] focus-visible:outline-offset-2 transition-colors"
+              className="w-full px-3 py-2 min-h-10 bg-bg-card border border-border rounded-lg text-text-primary focus:outline-none focus:border-accent focus-visible:outline-2 focus-visible:outline-[var(--color-gold)] focus-visible:outline-offset-2 transition-colors"
             />
           </div>
 

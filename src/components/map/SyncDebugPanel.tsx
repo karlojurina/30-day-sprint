@@ -405,8 +405,7 @@ function Row({
             wordBreak: "break-all",
             fontFamily: "inherit",
             lineHeight: 1.4,
-            paddingLeft: 8,
-            borderLeft: "2px solid rgba(230,192,122,0.2)",
+            paddingLeft: 12,
             marginTop: 2,
           }}
         >

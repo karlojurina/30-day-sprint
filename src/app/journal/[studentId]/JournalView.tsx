@@ -351,7 +351,7 @@ const PRINT_CSS = `
   text-transform: uppercase;
   letter-spacing: 0.22em;
   font-size: 11px;
-  color: rgba(26, 20, 16, 0.55);
+  color: rgba(26, 20, 16, 0.7);
   margin-bottom: 8px;
 }
 .region-title {
@@ -388,7 +388,7 @@ const PRINT_CSS = `
   text-transform: uppercase;
   letter-spacing: 0.16em;
   font-size: 10px;
-  color: rgba(26, 20, 16, 0.5);
+  color: rgba(26, 20, 16, 0.7);
 }
 .lesson-status {
   font-family: monospace;

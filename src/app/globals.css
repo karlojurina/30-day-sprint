@@ -237,6 +237,9 @@ body::before {
 .fade-in {
   animation: fade-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+.fade-in-slow {
+  animation: fade-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
 
 @keyframes slide-down {
   from {

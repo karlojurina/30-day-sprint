@@ -81,7 +81,7 @@ export function MapLegend() {
       {/* The legend panel — only mounted after hydration */}
       {mounted && open && (
         <div
-          className="fixed bottom-6 left-6 z-30"
+          className="fade-in-slow fixed bottom-6 left-6 z-30"
           style={{
             width: 320,
             padding: "18px 20px",
@@ -89,7 +89,6 @@ export function MapLegend() {
             border: "1px solid rgba(230,192,122,0.4)",
             borderRadius: 12,
             boxShadow: "0 20px 50px rgba(0,0,0,0.55)",
-            animation: "fade-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both",
           }}
         >
           <div className="flex items-center justify-between mb-3">

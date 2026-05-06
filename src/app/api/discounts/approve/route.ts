@@ -31,15 +31,28 @@ export async function POST(request: NextRequest) {
   }
 
   // V4 eligibility: all R1 + R2 lessons complete within DISCOUNT_WINDOW_DAYS
-  // of the student's Whop join date.
+  // of the student's Whop join date. V12 adds a manual gate:
+  // ad_submissions_verified must be true before the discount can be
+  // approved (admin ticks it after checking the student's Discord
+  // submissions in the ad-review channel).
   const { data: studentRow } = await supabase
     .from("students")
-    .select("joined_at")
+    .select("joined_at, ad_submissions_verified")
     .eq("id", discountReq.student_id)
     .single();
 
   if (!studentRow) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
+
+  if (!studentRow.ad_submissions_verified) {
+    return NextResponse.json(
+      {
+        error:
+          "Ad submissions not verified yet — tick the verification flag on the student's detail page first",
+      },
+      { status: 400 }
+    );
   }
 
   const joinedAt = new Date(studentRow.joined_at);

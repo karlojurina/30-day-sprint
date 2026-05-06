@@ -46,6 +46,11 @@ export interface Student {
   // Phase 3 (Discord)
   day28_dm_sent_at: string | null;
   discord_user_id: string | null;
+  // v12: ad-submissions verification gate (admin tick) — required
+  // before /api/discounts/approve will generate a Whop promo code.
+  ad_submissions_verified: boolean;
+  ad_submissions_verified_at: string | null;
+  ad_submissions_verified_by: string | null;
   created_at: string;
   updated_at: string;
 }

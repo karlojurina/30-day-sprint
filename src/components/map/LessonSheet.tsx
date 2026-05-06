@@ -558,7 +558,7 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
                     fontSize: 15,
                   }}
                 >
-                  Claim my 30% discount
+                  Apply for my 30% discount
                 </button>
               </div>
             )}

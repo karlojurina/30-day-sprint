@@ -152,8 +152,9 @@ export function DiscountClaimCelebration({
                       marginBottom: 22,
                     }}
                   >
-                    R1 + R2 done inside the window. Claim now and the team
-                    will review within 24 hours.
+                    R1 + R2 done inside the window. Apply now and the team
+                    will check your action items in Discord and confirm
+                    within 24 hours.
                   </p>
                   <button
                     onClick={handleClaim}
@@ -166,7 +167,7 @@ export function DiscountClaimCelebration({
                       opacity: claiming ? 0.7 : 1,
                     }}
                   >
-                    {claiming ? "Claiming…" : "Claim my 30% discount"}
+                    {claiming ? "Submitting…" : "Apply for my 30% discount"}
                   </button>
                 </>
               )}
@@ -189,8 +190,8 @@ export function DiscountClaimCelebration({
                     {status === "approved"
                       ? "Discount approved"
                       : status === "rejected"
-                        ? "Discount rejected"
-                        : "Review in progress"}
+                        ? "Application not approved"
+                        : "Pending team review"}
                   </span>
 
                   {status === "approved" && promoCode ? (
@@ -288,18 +289,21 @@ export function DiscountClaimCelebration({
                           fontWeight: 500,
                         }}
                       >
-                        Pending review.
+                        Pending team review.
                       </h2>
                       <p
+                        className="italic"
                         style={{
-                          color: "rgba(230,220,200,0.7)",
-                          fontSize: 14,
+                          fontFamily: "var(--font-display)",
+                          color: "rgba(230,220,200,0.78)",
+                          fontSize: 15,
                           lineHeight: 1.55,
                           marginBottom: 18,
                         }}
                       >
-                        We&rsquo;ll review within 24 hours. Your code shows
-                        up here as soon as it&rsquo;s approved.
+                        We&rsquo;re checking your ad submissions in Discord.
+                        You&rsquo;ll hear back within 24 hours — your promo
+                        code shows up here as soon as it&rsquo;s approved.
                       </p>
                     </>
                   )}

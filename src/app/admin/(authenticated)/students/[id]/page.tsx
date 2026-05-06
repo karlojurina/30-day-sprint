@@ -302,8 +302,53 @@ export default function StudentDetailPage() {
             {discountRequest.promo_code && ` — ${discountRequest.promo_code}`}
           </span>
         ) : (
-          <span className="text-xs text-text-tertiary">No request submitted</span>
+          <span className="text-xs text-text-tertiary">No application submitted</span>
         )}
+
+        {/* Ad-submissions verification toggle. Required for /api/discounts/approve
+            to fire — if false, approval refuses with a clear error. */}
+        <div className="mt-4 pt-4 border-t border-border">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={student.ad_submissions_verified ?? false}
+              onChange={async (e) => {
+                const verified = e.target.checked;
+                const prev = student.ad_submissions_verified ?? false;
+                // Optimistic update
+                setStudent({ ...student, ad_submissions_verified: verified });
+                const {
+                  data: { session },
+                } = await supabase.auth.getSession();
+                const token = session?.access_token;
+                if (!token) return;
+                const res = await fetch("/api/admin/verify-ad-submissions", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                  },
+                  body: JSON.stringify({ studentId: student.id, verified }),
+                });
+                if (!res.ok) {
+                  // Revert on failure
+                  setStudent({ ...student, ad_submissions_verified: prev });
+                }
+              }}
+              className="mt-0.5 rounded accent-[var(--color-gold)] focus-visible:outline-2 focus-visible:outline-[var(--color-gold)] focus-visible:outline-offset-2"
+            />
+            <div className="text-xs">
+              <p className="font-medium text-text-primary">
+                Ad submissions verified
+              </p>
+              <p className="text-text-tertiary mt-0.5">
+                Tick this once you&rsquo;ve confirmed the student submitted
+                all action items in the Discord ad-review channel. Required
+                for discount approval.
+              </p>
+            </div>
+          </label>
+        </div>
       </div>
 
       <div className="bg-bg-card border border-border rounded-xl p-4">

@@ -8,25 +8,25 @@ import { useStudent } from "@/contexts/StudentContext";
 import { getDayNumber } from "@/types/database";
 import { TOTAL_DAYS } from "@/lib/constants";
 import { StreakLantern } from "./StreakLantern";
+import { ProgressDial } from "./ProgressDial";
+import { DiscountCountdown } from "./DiscountCountdown";
 
 interface TopBarProps {
   setPanTarget: Dispatch<SetStateAction<string | null>>;
 }
 
-const GOLD_DIM = "rgba(230,192,122,0.7)";
-
-const PILL_HEIGHT = 52; // shared height so every chip/card aligns perfectly
+const PILL_HEIGHT = 36; // shared height so every topbar pill aligns perfectly
 
 // Shared pill styling used across every topbar chip so they all line up.
 const pillBaseStyle: React.CSSProperties = {
   height: PILL_HEIGHT,
   display: "flex",
   alignItems: "center",
-  gap: 10,
-  padding: "0 14px",
-  borderRadius: 10,
+  gap: 8,
+  padding: "0 12px",
+  borderRadius: 8,
   border: "1px solid rgba(230,192,122,0.28)",
-  background: "rgba(16,32,66,0.7)",
+  background: "rgba(16,32,66,0.6)",
 };
 
 export function TopBar({ setPanTarget }: TopBarProps) {
@@ -63,10 +63,18 @@ export function TopBar({ setPanTarget }: TopBarProps) {
         borderBottom: "1px solid rgba(230,192,122,0.18)",
       }}
     >
-      {/* Row 1 — fixed pill height, everything vertically centered */}
-      <div className="flex items-center justify-between gap-3 px-6" style={{ height: 84 }}>
-        {/* Brand — square logo + wordmark */}
-        <div className="flex items-center gap-3 shrink-0" style={{ height: PILL_HEIGHT }}>
+      {/* Row 1 — slim 64px header. Focal point is the breadcrumb in the
+          middle (next task) flanked by progress + streak. */}
+      <div
+        className="flex items-center justify-between gap-3 px-6"
+        style={{ height: 64 }}
+      >
+        {/* Brand — just the logo. Wordmark dropped; the brand is in
+            the experience, not the chrome. */}
+        <div
+          className="flex items-center shrink-0"
+          style={{ height: PILL_HEIGHT }}
+        >
           <Image
             src="/ecomtalent-logo.png"
             alt="EcomTalent"
@@ -74,82 +82,52 @@ export function TopBar({ setPanTarget }: TopBarProps) {
             height={547}
             priority
             style={{
-              height: 40,
-              width: 40,
+              height: 32,
+              width: 32,
               objectFit: "contain",
             }}
           />
-          <div className="hidden sm:block leading-tight">
-            <p
-              className="italic"
-              style={{
-                fontFamily: "var(--font-display)",
-                color: "var(--color-ink)",
-                fontWeight: 500,
-                fontSize: 18,
-                lineHeight: "20px",
-              }}
-            >
-              EcomTalent
-            </p>
-            <p
-              className="font-mono uppercase"
-              style={{
-                color: GOLD_DIM,
-                letterSpacing: "0.2em",
-                fontSize: 10,
-              }}
-            >
-              Expedition
-            </p>
-          </div>
         </div>
 
-        {/* Breadcrumb — same pill height as badges on the right */}
-        {currentLesson && currentRegion && (
+        {/* Breadcrumb — italic title only. The TopBar is one thing now:
+            "what to do next." */}
+        {currentLesson && (
           <button
             onClick={() => setPanTarget(currentLesson.id)}
-            className="btn-pill-deep hidden md:flex items-center gap-3 flex-1 min-w-0"
+            className="btn-pill-deep hidden md:flex items-center gap-3 flex-1 min-w-0 justify-center"
             style={{
               ...pillBaseStyle,
               maxWidth: 560,
               padding: "0 16px",
+              height: PILL_HEIGHT,
             }}
+            title={
+              currentRegion
+                ? `Day ${dayNumber} · ${currentRegion.name} · ${currentLesson.title}`
+                : currentLesson.title
+            }
           >
-            <div className="flex-1 min-w-0 text-left leading-tight overflow-hidden">
-              <p
-                className="font-mono uppercase tracking-widest truncate"
-                style={{
-                  color: GOLD_DIM,
-                  letterSpacing: "0.18em",
-                  fontSize: 11,
-                  lineHeight: "13px",
-                }}
-              >
-                Day {dayNumber} · {currentRegion.name}
-              </p>
-              <p
-                className="italic truncate"
-                style={{
-                  fontFamily: "var(--font-display)",
-                  color: "var(--color-ink)",
-                  fontWeight: 500,
-                  fontSize: 18,
-                  lineHeight: "22px",
-                }}
-              >
-                {currentLesson.title}
-              </p>
-            </div>
+            <span
+              className="italic truncate text-center"
+              style={{
+                fontFamily: "var(--font-display)",
+                color: "var(--color-ink)",
+                fontWeight: 500,
+                fontSize: 16,
+                lineHeight: 1,
+              }}
+            >
+              {currentLesson.title}
+            </span>
             {currentLesson.duration_label && (
               <span
-                className="font-mono shrink-0 rounded"
+                className="font-mono shrink-0"
                 style={{
-                  background: "rgba(230,192,122,0.15)",
                   color: "var(--color-gold)",
-                  fontSize: 11,
-                  letterSpacing: "0.08em",
-                  padding: "4px 8px",
+                  fontSize: 10,
+                  letterSpacing: "0.12em",
+                  opacity: 0.75,
+                  textTransform: "uppercase",
                 }}
               >
                 {currentLesson.duration_label}
@@ -158,10 +136,12 @@ export function TopBar({ setPanTarget }: TopBarProps) {
           </button>
         )}
 
-        {/* Right cluster — only the streak lantern + sign out remain.
-            Rank chip and Notebook button removed in the strip pass —
-            focal point is the breadcrumb (next task), not pill noise. */}
+        {/* Right cluster — progress dial + discount countdown + streak
+            lantern + sign out. Discount countdown auto-hides when
+            window closes or student has applied. */}
         <div className="flex items-center gap-2 shrink-0">
+          <ProgressDial completed={completedLessonIds.size} size={36} />
+          <DiscountCountdown />
           <StreakLantern current={streak.current} longest={streak.longest} />
 
           {/* Sign out */}
@@ -174,16 +154,26 @@ export function TopBar({ setPanTarget }: TopBarProps) {
               background: "transparent",
               color: "var(--color-ink-dim)",
               cursor: "pointer",
-              padding: "0 14px",
+              padding: "0 12px",
             }}
             title="Sign out"
+            aria-label="Sign out"
           >
-            <span
-              className="font-mono uppercase"
-              style={{ fontSize: 11, letterSpacing: "0.16em" }}
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
             >
-              Sign out
-            </span>
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
           </button>
         </div>
       </div>

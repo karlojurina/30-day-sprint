@@ -60,14 +60,14 @@ export function StreakLantern({ current, longest }: StreakLanternProps) {
   return (
     <div
       style={{
-        height: 52,
+        height: 36,
         display: "flex",
         alignItems: "center",
-        gap: 10,
-        padding: "0 14px",
-        borderRadius: 10,
+        gap: 8,
+        padding: "0 12px",
+        borderRadius: 8,
         border: "1px solid rgba(230,192,122,0.28)",
-        background: isLit ? "rgba(230,192,122,0.14)" : "rgba(16,32,66,0.7)",
+        background: isLit ? "rgba(230,192,122,0.14)" : "rgba(16,32,66,0.6)",
         boxShadow: pillShadow,
         transition: "box-shadow 300ms cubic-bezier(0.22,1,0.36,1), background 300ms cubic-bezier(0.22,1,0.36,1)",
       }}
@@ -81,8 +81,8 @@ export function StreakLantern({ current, longest }: StreakLanternProps) {
       aria-label={ariaLabel}
     >
       <svg
-        width="22"
-        height="28"
+        width="18"
+        height="22"
         viewBox="0 0 22 28"
         fill="none"
         aria-hidden="true"
@@ -181,9 +181,10 @@ export function StreakLantern({ current, longest }: StreakLanternProps) {
         className="font-mono tabular-nums font-bold"
         style={{
           color: isLit ? "var(--color-gold-light)" : "rgba(230,220,200,0.42)",
-          fontSize: 16,
-          minWidth: 18,
+          fontSize: 14,
+          minWidth: 16,
           textAlign: "right",
+          lineHeight: 1,
         }}
       >
         {current}

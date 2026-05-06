@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { gsap } from "gsap";
-import { SPEC_EASE_GSAP } from "@/lib/motion";
+import { SPEC_EASE_GSAP, SPEC_EASE_GSAP_INOUT } from "@/lib/motion";
 import { useStudent } from "@/contexts/StudentContext";
 import {
   MAP_W,
@@ -596,10 +596,14 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       x: target.x,
       y: target.y,
       scale: target.scale,
-      // Cloud-cover swap: 0.25s and the user never sees it.
-      // First paint: slow ease so the camera arrival reads as cinematic.
-      duration: isFirst ? 1.8 : 0.25,
-      ease: SPEC_EASE_GSAP,
+      // First paint: slow expo arrival (cinematic).
+      // Region transitions: 1.4s symmetric zoom so the camera motion
+      // is visibly felt as the clouds clear — no longer a snap-behind.
+      // The cloud cover (~2s total) hides most of the early travel;
+      // the last ~0.4s of the zoom plays in the open as the student
+      // lands in the new region. Reads as "we flew there."
+      duration: isFirst ? 1.8 : 1.4,
+      ease: isFirst ? SPEC_EASE_GSAP : SPEC_EASE_GSAP_INOUT,
       onUpdate: () => {
         setDisplayTransform({ ...transformRef.current });
       },
@@ -1022,6 +1026,15 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
               const stroke = isComplete ? GOLD_HI : GOLD;
               const smoothD = smoothClosedPath(z.polygon);
 
+              // Discount-gate beacon: surface the prize on R2 from the
+              // overview so students always see what they're working
+              // toward. Hidden once the student has applied (the
+              // beacon's job is done at that point).
+              const showDiscountBeacon =
+                r.id === "r2" && !discountRequest;
+              const discountBeaconReady =
+                discountAllLessonsDone && !discountRequest;
+
               const ariaLabel = isUnlocked
                 ? `${r.name} — ${completed}/${total} lessons`
                 : `${r.name} — locked, finish previous region first`;
@@ -1233,6 +1246,92 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       </text>
                     )}
                   </g>
+
+                  {/* Discount-gate beacon — only on R2, the region whose
+                      completion unlocks the discount. Floats above the
+                      region's numeral plaque so the prize is visible from
+                      anywhere in the overview. */}
+                  {showDiscountBeacon && (
+                    <g
+                      transform={`translate(${z.labelX} ${z.labelY - 100})`}
+                      pointerEvents="none"
+                    >
+                      {/* Outer pulsing halo */}
+                      <circle
+                        r={48}
+                        fill={discountBeaconReady ? GOLD : "rgba(230,192,122,0.35)"}
+                        opacity={0.18}
+                      >
+                        <animate
+                          attributeName="r"
+                          values="42;52;42"
+                          dur={discountBeaconReady ? "2.2s" : "3.6s"}
+                          repeatCount="indefinite"
+                        />
+                        <animate
+                          attributeName="opacity"
+                          values="0.1;0.28;0.1"
+                          dur={discountBeaconReady ? "2.2s" : "3.6s"}
+                          repeatCount="indefinite"
+                        />
+                      </circle>
+                      {/* Solid badge */}
+                      <circle
+                        r={26}
+                        fill="rgba(6,12,26,0.92)"
+                        stroke={discountBeaconReady ? GOLD_HI : GOLD}
+                        strokeWidth={1.6}
+                      />
+                      <text
+                        x={0}
+                        y={-3}
+                        textAnchor="middle"
+                        style={{
+                          fontFamily: "Cormorant Garamond, serif",
+                          fontStyle: "italic",
+                          fontWeight: 600,
+                          fontSize: 18,
+                          fill: GOLD_HI,
+                        }}
+                      >
+                        30%
+                      </text>
+                      <text
+                        x={0}
+                        y={11}
+                        textAnchor="middle"
+                        style={{
+                          fontFamily: "JetBrains Mono, ui-monospace, monospace",
+                          fontSize: 7,
+                          letterSpacing: "0.16em",
+                          fill: "rgba(230,192,122,0.85)",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Off
+                      </text>
+                      {/* Inscription beside the badge */}
+                      <text
+                        x={42}
+                        y={5}
+                        textAnchor="start"
+                        style={{
+                          fontFamily: "Cormorant Garamond, serif",
+                          fontStyle: "italic",
+                          fontSize: 16,
+                          fill: discountBeaconReady ? GOLD_HI : "rgba(230,220,200,0.85)",
+                          paintOrder: "stroke fill",
+                          stroke: "rgba(6,12,26,0.85)",
+                          strokeWidth: 3,
+                          strokeLinejoin: "round",
+                        }}
+                      >
+                        {discountBeaconReady
+                          ? "ready to apply"
+                          : "the gate"}
+                      </text>
+                    </g>
+                  )}
                 </g>
               );
             })}

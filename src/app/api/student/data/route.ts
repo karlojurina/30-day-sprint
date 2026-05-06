@@ -29,20 +29,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  const today = new Date().toISOString().split("T")[0];
-
   const [
     regionsRes,
     lessonsRes,
     completionsRes,
-    noteRes,
     discountRes,
-    lessonNotesRes,
     quizzesRes,
     quizQuestionsRes,
     quizAttemptsRes,
     monthReviewRes,
-    dailyNoteDatesRes,
   ] = await Promise.all([
     supabase.from("regions").select("*").order("order_num"),
     supabase.from("lessons").select("*").order("day").order("sort_order"),
@@ -51,22 +46,12 @@ export async function GET(request: NextRequest) {
       .select("*")
       .eq("student_id", student.id),
     supabase
-      .from("daily_notes")
-      .select("*")
-      .eq("student_id", student.id)
-      .eq("note_date", today)
-      .single(),
-    supabase
       .from("discount_requests")
       .select("*")
       .eq("student_id", student.id)
       .order("created_at", { ascending: false })
       .limit(1)
       .single(),
-    supabase
-      .from("lesson_notes")
-      .select("*")
-      .eq("student_id", student.id),
     supabase.from("quizzes").select("*").order("sort_order"),
     supabase.from("quiz_questions").select("*").order("sort_order"),
     supabase
@@ -79,12 +64,6 @@ export async function GET(request: NextRequest) {
       .select("*")
       .eq("student_id", student.id)
       .single(),
-    // All daily-note dates for the student — needed to compute the
-    // "Daily Habit" note-driven artifact (7 unique days).
-    supabase
-      .from("daily_notes")
-      .select("note_date")
-      .eq("student_id", student.id),
   ]);
 
   // Masked course ID for the sync debug panel — enough to verify in the
@@ -101,16 +80,11 @@ export async function GET(request: NextRequest) {
     regions: regionsRes.data ?? [],
     lessons: lessonsRes.data ?? [],
     completions: completionsRes.data ?? [],
-    todayNote: noteRes.data ?? null,
     discountRequest: discountRes.data ?? null,
-    lessonNotes: lessonNotesRes.data ?? [],
     quizzes: quizzesRes.data ?? [],
     quizQuestions: quizQuestionsRes.data ?? [],
     quizAttempts: quizAttemptsRes.data ?? [],
     monthReview: monthReviewRes.data ?? null,
-    dailyNoteDates: (dailyNoteDatesRes.data ?? []).map(
-      (r: { note_date: string }) => r.note_date
-    ),
     whopCourseIdMasked: courseIdMasked,
   });
 }

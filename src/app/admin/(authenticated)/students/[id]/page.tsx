@@ -8,7 +8,6 @@ import type {
   Region,
   Lesson,
   StudentLessonCompletion,
-  DailyNote,
   DiscountRequest,
 } from "@/types/database";
 import { getDayNumber } from "@/types/database";
@@ -24,7 +23,6 @@ export default function StudentDetailPage() {
   const [regions, setRegions] = useState<Region[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [completions, setCompletions] = useState<StudentLessonCompletion[]>([]);
-  const [notes, setNotes] = useState<DailyNote[]>([]);
   const [discountRequest, setDiscountRequest] = useState<DiscountRequest | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -35,7 +33,6 @@ export default function StudentDetailPage() {
         regionsRes,
         lessonsRes,
         completionsRes,
-        notesRes,
         discountRes,
       ] = await Promise.all([
         supabase.from("students").select("*").eq("id", studentId).single(),
@@ -45,11 +42,6 @@ export default function StudentDetailPage() {
           .from("student_lesson_completions")
           .select("*")
           .eq("student_id", studentId),
-        supabase
-          .from("daily_notes")
-          .select("*")
-          .eq("student_id", studentId)
-          .order("note_date", { ascending: false }),
         supabase
           .from("discount_requests")
           .select("*")
@@ -63,7 +55,6 @@ export default function StudentDetailPage() {
       if (regionsRes.data) setRegions(regionsRes.data);
       if (lessonsRes.data) setLessons(lessonsRes.data);
       if (completionsRes.data) setCompletions(completionsRes.data);
-      if (notesRes.data) setNotes(notesRes.data);
       if (discountRes.data) setDiscountRequest(discountRes.data);
       setLoading(false);
     }
@@ -333,31 +324,6 @@ export default function StudentDetailPage() {
         </p>
       </div>
 
-      <div className="bg-bg-card border border-border rounded-xl p-4">
-        <h2 className="text-sm font-semibold mb-3">
-          Daily Notes ({notes.length})
-        </h2>
-        {notes.length === 0 ? (
-          <p className="text-xs text-text-tertiary">No notes yet</p>
-        ) : (
-          <div className="space-y-3 max-h-96 overflow-y-auto">
-            {notes.map((note) => (
-              <div key={note.id} className="border-l-2 border-accent/30 pl-3">
-                <p className="text-[10px] text-text-tertiary">
-                  {new Date(note.note_date).toLocaleDateString("en-US", {
-                    weekday: "short",
-                    month: "short",
-                    day: "numeric",
-                  })}
-                </p>
-                <p className="text-xs text-text-secondary mt-0.5 whitespace-pre-wrap">
-                  {note.content}
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
     </div>
   );
 }

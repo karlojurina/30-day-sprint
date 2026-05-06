@@ -6,7 +6,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { TopBar } from "@/components/map/TopBar";
 import { LessonSheet } from "@/components/map/LessonSheet";
-import { NotebookSheet } from "@/components/map/NotebookSheet";
 import { MapMockup } from "@/components/mockup/MapMockup";
 import { SyncDebugPanel } from "@/components/map/SyncDebugPanel";
 import { OnboardingFlow } from "@/components/map/OnboardingFlow";
@@ -53,7 +52,6 @@ export default function DashboardMockupPage() {
 
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [, setPanTarget] = useState<string | null>(null);
-  const [notebookOpen, setNotebookOpen] = useState(false);
 
   // Onboarding only fires on the very first load.
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
@@ -199,10 +197,7 @@ export default function DashboardMockupPage() {
       className="flex flex-col w-screen overflow-hidden"
       style={{ height: "100vh", background: "var(--color-bg-primary)" }}
     >
-      <TopBar
-        setPanTarget={setPanTarget}
-        onOpenNotebook={() => setNotebookOpen(true)}
-      />
+      <TopBar setPanTarget={setPanTarget} />
 
       <div className="relative flex-1 min-h-0">
         <MapMockup onOpenLesson={(id) => setSelectedLessonId(id)} />
@@ -211,12 +206,6 @@ export default function DashboardMockupPage() {
       <LessonSheet
         lessonId={selectedLessonId}
         onClose={() => setSelectedLessonId(null)}
-      />
-
-      <NotebookSheet
-        open={notebookOpen}
-        onClose={() => setNotebookOpen(false)}
-        onOpenLesson={(id) => setSelectedLessonId(id)}
       />
 
       <SyncDebugPanel />

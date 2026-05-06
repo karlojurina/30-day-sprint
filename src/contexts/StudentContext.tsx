@@ -16,9 +16,7 @@ import type {
   Region,
   Lesson,
   StudentLessonCompletion,
-  DailyNote,
   DiscountRequest,
-  LessonNote,
   StudentTitle,
   Quiz,
   QuizQuestion,
@@ -27,7 +25,6 @@ import type {
 } from "@/types/database";
 import { getTitleForRegions } from "@/lib/titles";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
-import { computeNoteArtifacts } from "@/lib/artifacts";
 
 export interface RegionProgress {
   completed: number;
@@ -55,9 +52,7 @@ interface StudentContextType {
   regions: Region[];
   lessons: Lesson[];
   completions: StudentLessonCompletion[];
-  todayNote: DailyNote | null;
   discountRequest: DiscountRequest | null;
-  lessonNotes: Record<string, string>;
   quizzes: Quiz[];
   quizQuestions: Record<string, QuizQuestion[]>;
   quizAttempts: StudentQuizAttempt[];
@@ -73,8 +68,6 @@ interface StudentContextType {
   streak: { current: number; longest: number };
   currentTitle: StudentTitle;
   completedRegionCount: number;
-  /** IDs of note-driven artifacts the student has earned (Phase 4) */
-  noteArtifactIds: Set<string>;
   discountEligible: boolean;               // all R1+R2 done AND within time window
   discountMsLeft: number;                  // ms until the discount window closes (negative if expired)
   discountAllLessonsDone: boolean;         // R1 + R2 fully complete (regardless of time)
@@ -89,8 +82,6 @@ interface StudentContextType {
   toggleLesson: (lessonId: string) => Promise<void>;
   /** For compound lessons: toggle the manual "shipped" half independent of watch state */
   toggleLessonAction: (lessonId: string) => Promise<void>;
-  saveNote: (content: string) => Promise<void>;
-  saveLessonNote: (lessonId: string, content: string) => Promise<void>;
   submitQuiz: (
     quizId: string,
     selections: Record<string, number>
@@ -135,9 +126,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [regions, setRegions] = useState<Region[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [completions, setCompletions] = useState<StudentLessonCompletion[]>([]);
-  const [todayNote, setTodayNote] = useState<DailyNote | null>(null);
   const [discountRequest, setDiscountRequest] = useState<DiscountRequest | null>(null);
-  const [lessonNotes, setLessonNotes] = useState<Record<string, string>>({});
   const [streak, setStreak] = useState<{ current: number; longest: number }>({
     current: 0,
     longest: 0,
@@ -146,7 +135,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [quizQuestions, setQuizQuestions] = useState<Record<string, QuizQuestion[]>>({});
   const [quizAttempts, setQuizAttempts] = useState<StudentQuizAttempt[]>([]);
   const [monthReview, setMonthReview] = useState<MonthReview | null>(null);
-  const [dailyNoteDates, setDailyNoteDates] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostics>({
     lastSyncAt: null,
@@ -183,18 +171,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         setRegions(data.regions ?? []);
         setLessons(data.lessons ?? []);
         setCompletions(data.completions ?? []);
-        setTodayNote(data.todayNote ?? null);
         setDiscountRequest(data.discountRequest ?? null);
         setStreak({
           current: data.student?.current_streak ?? 0,
           longest: data.student?.longest_streak ?? 0,
         });
-
-        const notesMap: Record<string, string> = {};
-        for (const note of data.lessonNotes ?? []) {
-          notesMap[note.lesson_id] = note.content;
-        }
-        setLessonNotes(notesMap);
 
         setQuizzes(data.quizzes ?? []);
         setQuizAttempts(data.quizAttempts ?? []);
@@ -210,7 +191,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         }
         setQuizQuestions(qMap);
         setMonthReview(data.monthReview ?? null);
-        setDailyNoteDates(data.dailyNoteDates ?? []);
         setSyncDiagnostics({
           lastSyncAt: data.student?.last_watch_sync_at ?? null,
           fetchedCount: data.student?.whop_last_sync_fetched_count ?? null,
@@ -427,21 +407,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     return Object.values(regionProgress).filter((p) => p.isComplete).length;
   }, [regionProgress]);
 
-  // Note-driven artifacts (Phase 4 — Workshop redesign).
-  // Pure derivation from existing notes data, no extra state.
-  const noteArtifactIds = useMemo(() => {
-    const lessonsByRegion: Record<string, { id: string }[]> = {};
-    for (const l of lessons) {
-      if (!lessonsByRegion[l.region_id]) lessonsByRegion[l.region_id] = [];
-      lessonsByRegion[l.region_id].push({ id: l.id });
-    }
-    return computeNoteArtifacts({
-      lessonNotes,
-      dailyNoteDates,
-      lessonsByRegion,
-    });
-  }, [lessons, lessonNotes, dailyNoteDates]);
-
   const currentTitle = useMemo(() => {
     return getTitleForRegions(completedRegionCount).key;
   }, [completedRegionCount]);
@@ -621,60 +586,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     [student, actionShippedLessonIds]
   );
 
-  const saveNote = useCallback(
-    async (content: string) => {
-      if (!student) return;
-      const token = await getAccessToken();
-      if (!token) return;
-
-      try {
-        const res = await fetch("/api/student/save-note", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ content }),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setTodayNote(data.note);
-        }
-      } catch (err) {
-        console.error("Failed to save note:", err);
-      }
-    },
-    [student]
-  );
-
-  const saveLessonNote = useCallback(
-    async (lessonId: string, content: string) => {
-      if (!student) return;
-
-      setLessonNotes((prev) => ({ ...prev, [lessonId]: content }));
-
-      const token = await getAccessToken();
-      if (!token) return;
-
-      try {
-        const res = await fetch("/api/student/save-lesson-note", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ lessonId, content }),
-        });
-        if (!res.ok) {
-          console.error("Failed to save lesson note");
-        }
-      } catch (err) {
-        console.error("Failed to save lesson note:", err);
-      }
-    },
-    [student]
-  );
-
   const submitQuiz = useCallback(
     async (quizId: string, selections: Record<string, number>) => {
       const token = await getAccessToken();
@@ -787,9 +698,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         regions,
         lessons,
         completions,
-        todayNote,
         discountRequest,
-        lessonNotes,
         quizzes,
         quizQuestions,
         quizAttempts,
@@ -805,14 +714,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         streak,
         currentTitle,
         completedRegionCount,
-        noteArtifactIds,
         discountEligible,
         discountMsLeft,
         discountAllLessonsDone,
         toggleLesson,
         toggleLessonAction,
-        saveNote,
-        saveLessonNote,
         submitQuiz,
         requestDiscount,
         refreshWatchProgress,
@@ -833,5 +739,3 @@ export function useStudent() {
   return context;
 }
 
-// Re-export LessonNote for convenience
-export type { LessonNote };

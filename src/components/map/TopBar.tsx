@@ -6,13 +6,11 @@ import Image from "next/image";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { getDayNumber } from "@/types/database";
-import { getTitleLabel } from "@/lib/titles";
 import { TOTAL_DAYS } from "@/lib/constants";
 import { StreakLantern } from "./StreakLantern";
 
 interface TopBarProps {
   setPanTarget: Dispatch<SetStateAction<string | null>>;
-  onOpenNotebook: () => void;
 }
 
 const GOLD_DIM = "rgba(230,192,122,0.7)";
@@ -31,12 +29,11 @@ const pillBaseStyle: React.CSSProperties = {
   background: "rgba(16,32,66,0.7)",
 };
 
-export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
+export function TopBar({ setPanTarget }: TopBarProps) {
   const { student, signOut } = useAuth();
   const {
     regions,
     currentLesson,
-    currentTitle,
     streak,
     overallProgress,
     completedLessonIds,
@@ -161,63 +158,11 @@ export function TopBar({ setPanTarget, onOpenNotebook }: TopBarProps) {
           </button>
         )}
 
-        {/* Right cluster — all chips share the same PILL_HEIGHT */}
+        {/* Right cluster — only the streak lantern + sign out remain.
+            Rank chip and Notebook button removed in the strip pass —
+            focal point is the breadcrumb (next task), not pill noise. */}
         <div className="flex items-center gap-2 shrink-0">
-          {/* Streak — lantern lights up at 7/14/30 day milestones,
-              dims when broken. Always rendered so it carries identity
-              even at 0. */}
           <StreakLantern current={streak.current} longest={streak.longest} />
-
-          {/* Rank */}
-          <div
-            style={pillBaseStyle}
-            title={`Current rank: ${getTitleLabel(currentTitle)}`}
-          >
-            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="var(--color-gold)" aria-hidden="true">
-              <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z" />
-            </svg>
-            <span
-              className="italic whitespace-nowrap"
-              style={{
-                fontFamily: "var(--font-display)",
-                color: "var(--color-ink)",
-                fontWeight: 500,
-                fontSize: 16,
-              }}
-            >
-              {getTitleLabel(currentTitle)}
-            </span>
-          </div>
-
-          {/* Notebook */}
-          <button
-            onClick={onOpenNotebook}
-            className="btn-pill-deep"
-            style={{
-              ...pillBaseStyle,
-              cursor: "pointer",
-              color: "var(--color-ink)",
-            }}
-            title="Your notebook"
-            aria-label="Open notebook"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
-              />
-            </svg>
-            <span
-              className="hidden lg:inline font-mono uppercase"
-              style={{
-                fontSize: 11,
-                letterSpacing: "0.16em",
-              }}
-            >
-              Notes
-            </span>
-          </button>
 
           {/* Sign out */}
           <button

@@ -25,17 +25,6 @@ interface Completion {
   action_completed_at: string | null;
 }
 
-interface LessonNote {
-  lesson_id: string;
-  content: string;
-  updated_at: string;
-}
-
-interface DailyNote {
-  note_date: string;
-  content: string;
-}
-
 interface DiscountRequest {
   status: string;
   promo_code: string | null;
@@ -46,7 +35,6 @@ interface MonthReview {
   total_lessons: number;
   longest_streak: number;
   ad_submissions: number;
-  notes_count: number;
   days_to_finish: number | null;
 }
 
@@ -55,8 +43,6 @@ interface JournalViewProps {
   regions: Region[];
   lessons: Lesson[];
   completions: Completion[];
-  lessonNotes: LessonNote[];
-  dailyNotes: DailyNote[];
   discountRequest: DiscountRequest | null;
   monthReview: MonthReview | null;
 }
@@ -66,8 +52,6 @@ export function JournalView({
   regions,
   lessons,
   completions,
-  lessonNotes,
-  dailyNotes,
   discountRequest,
   monthReview,
 }: JournalViewProps) {
@@ -78,7 +62,6 @@ export function JournalView({
   }, [student.name]);
 
   const startDate = new Date(student.joined_at);
-  const noteByLesson = new Map(lessonNotes.map((n) => [n.lesson_id, n]));
   const completionByLesson = new Map(
     completions.map((c) => [c.lesson_id, c])
   );
@@ -138,12 +121,6 @@ export function JournalView({
               <span className="num">{monthReview.ad_submissions}</span>
               <span className="lbl">ads shipped</span>
             </div>
-            <div>
-              <span className="num">
-                {monthReview.notes_count}
-              </span>
-              <span className="lbl">notes</span>
-            </div>
           </div>
         )}
       </section>
@@ -163,7 +140,6 @@ export function JournalView({
 
             <div className="lesson-list">
               {regionLessons.map((lesson) => {
-                const note = noteByLesson.get(lesson.id);
                 const status = completionStatus(lesson);
                 return (
                   <div className="lesson-row" key={lesson.id}>
@@ -174,11 +150,6 @@ export function JournalView({
                       </span>
                     </div>
                     <h3 className="lesson-title">{lesson.title}</h3>
-                    {note && note.content.trim() && (
-                      <blockquote className="lesson-note">
-                        {note.content}
-                      </blockquote>
-                    )}
                   </div>
                 );
               })}
@@ -186,30 +157,6 @@ export function JournalView({
           </section>
         );
       })}
-
-      {/* Daily notes timeline */}
-      {dailyNotes.length > 0 && (
-        <section className="journal-page daily-notes-page">
-          <h2 className="region-title">Daily Reflections</h2>
-          <p className="region-sub">
-            One entry per day — the running diary of the sprint.
-          </p>
-          <div className="daily-list">
-            {dailyNotes.map((n) => (
-              <div className="daily-entry" key={n.note_date}>
-                <div className="daily-date">
-                  {new Date(n.note_date).toLocaleDateString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    weekday: "short",
-                  })}
-                </div>
-                <div className="daily-content">{n.content}</div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
 
       {/* Closing */}
       <section className="journal-page closing">

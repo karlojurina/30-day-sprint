@@ -5,11 +5,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { TopBar } from "@/components/map/TopBar";
 import { LessonSheet } from "@/components/map/LessonSheet";
-import { NotebookSheet } from "@/components/map/NotebookSheet";
 import { MapMockup } from "@/components/mockup/MapMockup";
-import { MapCompass } from "@/components/map/MapCompass";
 import { LessonCompleteEffects } from "@/components/map/LessonCompleteEffects";
-import { RecentActivityRibbon } from "@/components/map/RecentActivityRibbon";
 import { SyncDebugPanel } from "@/components/map/SyncDebugPanel";
 
 export default function DashboardPage() {
@@ -17,8 +14,7 @@ export default function DashboardPage() {
   const { loading } = useStudent();
 
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
-  const [panTarget, setPanTarget] = useState<string | null>(null);
-  const [notebookOpen, setNotebookOpen] = useState(false);
+  const [, setPanTarget] = useState<string | null>(null);
 
   if (loading || !student) {
     return (
@@ -46,29 +42,17 @@ export default function DashboardPage() {
       className="flex flex-col w-screen overflow-hidden"
       style={{ height: "100vh", background: "var(--color-bg-primary)" }}
     >
-      <TopBar
-        setPanTarget={setPanTarget}
-        onOpenNotebook={() => setNotebookOpen(true)}
-      />
-
-      <RecentActivityRibbon />
+      <TopBar setPanTarget={setPanTarget} />
 
       <div className="relative flex-1 min-h-0">
         <MapMockup onOpenLesson={(id) => setSelectedLessonId(id)} />
         <LessonCompleteEffects />
-        <MapCompass onPointerClick={(id) => setPanTarget(id)} />
       </div>
 
       <LessonSheet
         lessonId={selectedLessonId}
         onClose={() => setSelectedLessonId(null)}
         onSelectLesson={(id) => setSelectedLessonId(id)}
-      />
-
-      <NotebookSheet
-        open={notebookOpen}
-        onClose={() => setNotebookOpen(false)}
-        onOpenLesson={(id) => setSelectedLessonId(id)}
       />
 
       <SyncDebugPanel />

@@ -34,8 +34,6 @@ export default async function JournalPage(props: JournalPageProps) {
     { data: regions },
     { data: lessons },
     { data: completions },
-    { data: lessonNotes },
-    { data: dailyNotes },
     { data: discountReq },
     { data: monthReview },
   ] = await Promise.all([
@@ -45,15 +43,6 @@ export default async function JournalPage(props: JournalPageProps) {
       .from("student_lesson_completions")
       .select("*")
       .eq("student_id", studentId),
-    supabase
-      .from("lesson_notes")
-      .select("lesson_id, content, updated_at")
-      .eq("student_id", studentId),
-    supabase
-      .from("daily_notes")
-      .select("note_date, content")
-      .eq("student_id", studentId)
-      .order("note_date"),
     supabase
       .from("discount_requests")
       .select("status, promo_code")
@@ -74,8 +63,6 @@ export default async function JournalPage(props: JournalPageProps) {
       regions={regions ?? []}
       lessons={lessons ?? []}
       completions={completions ?? []}
-      lessonNotes={lessonNotes ?? []}
-      dailyNotes={dailyNotes ?? []}
       discountRequest={discountReq ?? null}
       monthReview={monthReview ?? null}
     />

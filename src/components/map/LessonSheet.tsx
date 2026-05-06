@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useStudent } from "@/contexts/StudentContext";
 import { LESSON_TYPE_LABELS } from "@/lib/constants";
 import { useFocusTrap } from "@/lib/useFocusTrap";
@@ -40,10 +40,8 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
     actionShippedLessonIds,
     discountAllLessonsDone,
     discountRequest,
-    lessonNotes,
     toggleLesson,
     toggleLessonAction,
-    saveLessonNote,
     requestDiscount,
   } = useStudent();
 
@@ -681,13 +679,6 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
                 </button>
               )}
             </div>
-
-            {/* Lesson notes */}
-            <LessonNotes
-              lessonId={lesson.id}
-              initial={lessonNotes[lesson.id] ?? ""}
-              onSave={saveLessonNote}
-            />
           </div>
         </div>
       </div>
@@ -752,132 +743,3 @@ function CompoundPartHeader({
   );
 }
 
-interface LessonNotesProps {
-  lessonId: string;
-  initial: string;
-  onSave: (lessonId: string, content: string) => Promise<void>;
-}
-
-function LessonNotes({ lessonId, initial, onSave }: LessonNotesProps) {
-  const [value, setValue] = useState(initial);
-  const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastSaved = useRef(initial);
-  const draftKey = `et.note-draft.${lessonId}`;
-
-  // On mount / lesson change: prefer a localStorage draft if one exists
-  // and differs from the server value. That's an unsaved draft from a
-  // previous session (e.g., API failed or tab closed mid-write).
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      setValue(initial);
-      lastSaved.current = initial;
-      return;
-    }
-    const draft = window.localStorage.getItem(draftKey);
-    if (draft != null && draft !== initial) {
-      setValue(draft);
-      lastSaved.current = initial; // server value is the "saved" baseline
-      // Trigger a save attempt so the draft gets synced
-      if (draft.trim() !== initial.trim()) {
-        setStatus("saving");
-        if (timer.current) clearTimeout(timer.current);
-        timer.current = setTimeout(async () => {
-          try {
-            await onSave(lessonId, draft);
-            lastSaved.current = draft;
-            window.localStorage.removeItem(draftKey);
-            setStatus("saved");
-            setTimeout(() => setStatus("idle"), 1600);
-          } catch {
-            // Save failed — keep the draft for next time
-            setStatus("idle");
-          }
-        }, 200);
-      }
-    } else {
-      setValue(initial);
-      lastSaved.current = initial;
-    }
-  }, [lessonId, initial, draftKey, onSave]);
-
-  const handleChange = useCallback(
-    (v: string) => {
-      setValue(v);
-      // Mirror every keystroke to localStorage so an interrupted save
-      // never loses the user's writing.
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(draftKey, v);
-      }
-      if (timer.current) clearTimeout(timer.current);
-      if (v.trim() === lastSaved.current.trim()) return;
-      setStatus("saving");
-      timer.current = setTimeout(async () => {
-        try {
-          await onSave(lessonId, v);
-          lastSaved.current = v;
-          // Successfully synced — clear the draft
-          if (typeof window !== "undefined") {
-            window.localStorage.removeItem(draftKey);
-          }
-          setStatus("saved");
-          setTimeout(() => setStatus("idle"), 1600);
-        } catch {
-          // Keep the localStorage draft so the next session can retry
-          setStatus("idle");
-        }
-      }, 800);
-    },
-    [lessonId, onSave, draftKey]
-  );
-
-  const notesId = `lesson-notes-${lessonId}`;
-  const statusId = `${notesId}-status`;
-  return (
-    <div
-      className="p-4 rounded-lg"
-      style={{
-        background: "rgba(6,12,26,0.55)",
-        border: "1px solid rgba(230,192,122,0.16)",
-      }}
-    >
-      <div className="flex items-center justify-between mb-2">
-        <label
-          htmlFor={notesId}
-          className="font-mono uppercase tracking-widest"
-          style={{
-            color: "var(--color-ink-dim)",
-            letterSpacing: "0.16em",
-            fontSize: 11,
-          }}
-        >
-          Your notes
-        </label>
-        <span
-          id={statusId}
-          role="status"
-          aria-live="polite"
-          className="font-mono"
-          style={{
-            color:
-              status === "saved" ? "var(--color-gold)" : "var(--color-ink-dim)",
-            fontSize: 11,
-            minHeight: 14,
-          }}
-        >
-          {status === "saving" ? "saving…" : status === "saved" ? "saved" : ""}
-        </span>
-      </div>
-      <textarea
-        id={notesId}
-        rows={4}
-        value={value}
-        onChange={(e) => handleChange(e.target.value)}
-        placeholder="Write down what stood out, what you'll try next, or anything to remember."
-        aria-describedby={statusId}
-        className="w-full resize-none outline-none bg-transparent leading-relaxed"
-        style={{ color: "var(--color-ink)", fontSize: 14 }}
-      />
-    </div>
-  );
-}

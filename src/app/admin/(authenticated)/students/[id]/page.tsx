@@ -11,7 +11,7 @@ import type {
   DiscountRequest,
 } from "@/types/database";
 import { getDayNumber } from "@/types/database";
-import { LESSON_TYPE_LABELS, TOTAL_LESSONS } from "@/lib/constants";
+import { LESSON_TYPE_LABELS, progressPercent } from "@/lib/constants";
 import Link from "next/link";
 
 export default function StudentDetailPage() {
@@ -72,7 +72,7 @@ export default function StudentDetailPage() {
 
   const completedIds = new Set(completions.map((c) => c.lesson_id));
   const dayNumber = getDayNumber(student.joined_at);
-  const overallPercent = Math.round((completedIds.size / TOTAL_LESSONS) * 100);
+  const overallPercent = progressPercent(completedIds.size, lessons.length);
 
   // Group lessons by region
   const lessonsByRegion: Record<string, Lesson[]> = {};

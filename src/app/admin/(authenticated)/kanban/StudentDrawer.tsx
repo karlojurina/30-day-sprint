@@ -11,7 +11,7 @@ import type {
   DiscountRequest,
 } from "@/types/database";
 import { getDayNumber } from "@/types/database";
-import { TOTAL_LESSONS } from "@/lib/constants";
+import { TOTAL_LESSONS, progressPercent } from "@/lib/constants";
 
 interface StudentDrawerProps {
   studentId: string | null;
@@ -86,8 +86,11 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
     [completions]
   );
 
+  // Use the live lessons array length when available so the math
+  // tracks actual content (defends against TOTAL_LESSONS drift after
+  // content migrations).
   const overallPercent = student
-    ? Math.round((completedIds.size / TOTAL_LESSONS) * 100)
+    ? progressPercent(completedIds.size, lessons.length || TOTAL_LESSONS)
     : 0;
 
   const dayNumber = student ? getDayNumber(student.joined_at) : 1;

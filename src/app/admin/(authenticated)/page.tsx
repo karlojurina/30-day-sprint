@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import type { Student, DisengagementAlert } from "@/types/database";
 import { getDayNumber } from "@/types/database";
-import { TOTAL_LESSONS } from "@/lib/constants";
+import { TOTAL_LESSONS, progressPercent } from "@/lib/constants";
 import Link from "next/link";
 
 interface DashboardData {
@@ -38,12 +38,19 @@ export default function AdminDashboard() {
       const [
         studentsRes,
         completionsRes,
+        lessonsRes,
         discountsRes,
         alertsRes,
         recentAlertsRes,
       ] = await Promise.all([
-        supabase.from("students").select("*"),
+        // Filter to actual paying students — see /admin/students for rationale.
+        supabase
+          .from("students")
+          .select("*")
+          .not("whop_membership_id", "is", null)
+          .in("membership_status", ["active", "past_due", "canceled"]),
         supabase.from("student_lesson_completions").select("student_id"),
+        supabase.from("lessons").select("id", { count: "exact", head: true }),
         supabase.from("discount_requests").select("id").eq("status", "pending"),
         supabase
           .from("disengagement_alerts")
@@ -59,6 +66,10 @@ export default function AdminDashboard() {
 
       const students = (studentsRes.data || []) as Student[];
       const completions = completionsRes.data || [];
+      const totalLessons =
+        typeof lessonsRes.count === "number" && lessonsRes.count > 0
+          ? lessonsRes.count
+          : TOTAL_LESSONS;
 
       const completionMap: Record<string, number> = {};
       for (const c of completions) {
@@ -81,7 +92,8 @@ export default function AdminDashboard() {
           ? Math.round(
               activeStudents.reduce(
                 (sum, s) =>
-                  sum + ((completionMap[s.id] || 0) / TOTAL_LESSONS) * 100,
+                  sum +
+                  progressPercent(completionMap[s.id] || 0, totalLessons),
                 0
               ) / activeStudents.length
             )

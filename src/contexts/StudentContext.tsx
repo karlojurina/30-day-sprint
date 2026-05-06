@@ -24,7 +24,7 @@ import type {
   MonthReview,
 } from "@/types/database";
 import { getTitleForRegions } from "@/lib/titles";
-import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
+import { DISCOUNT_WINDOW_DAYS, progressPercent } from "@/lib/constants";
 
 export interface RegionProgress {
   completed: number;
@@ -386,8 +386,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   }, [regions, lessons, completedLessonIds]);
 
   const overallProgress = useMemo(() => {
-    if (lessons.length === 0) return 0;
-    return Math.round((completedLessonIds.size / lessons.length) * 100);
+    return progressPercent(completedLessonIds.size, lessons.length);
   }, [lessons, completedLessonIds]);
 
   // First incomplete lesson in day/sort_order sequence

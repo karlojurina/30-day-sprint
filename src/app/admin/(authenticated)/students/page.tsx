@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import type { Student } from "@/types/database";
 import { getDayNumber } from "@/types/database";
+import { progressPercent, TOTAL_LESSONS } from "@/lib/constants";
 import Link from "next/link";
 
 type SortKey = "name" | "joined_at" | "day" | "progress" | "last_active_at";
@@ -12,6 +13,7 @@ type SortDir = "asc" | "desc";
 export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [completionCounts, setCompletionCounts] = useState<Record<string, number>>({});
+  const [totalLessons, setTotalLessons] = useState<number>(TOTAL_LESSONS);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("joined_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -21,9 +23,19 @@ export default function StudentsPage() {
 
   useEffect(() => {
     async function fetchStudents() {
-      const [studentsRes, completionsRes] = await Promise.all([
-        supabase.from("students").select("*").order("joined_at", { ascending: false }),
+      // Filter to actual paying students:
+      //   - whop_membership_id IS NOT NULL: they had a real Whop membership
+      //   - membership_status IN active|past_due|canceled: drop 'expired'
+      //     and any null statuses (free-community joiners who slipped through)
+      const [studentsRes, completionsRes, lessonsRes] = await Promise.all([
+        supabase
+          .from("students")
+          .select("*")
+          .not("whop_membership_id", "is", null)
+          .in("membership_status", ["active", "past_due", "canceled"])
+          .order("joined_at", { ascending: false }),
         supabase.from("student_lesson_completions").select("student_id"),
+        supabase.from("lessons").select("id", { count: "exact", head: true }),
       ]);
 
       if (studentsRes.data) setStudents(studentsRes.data);
@@ -33,6 +45,11 @@ export default function StudentsPage() {
         counts[c.student_id] = (counts[c.student_id] || 0) + 1;
       }
       setCompletionCounts(counts);
+
+      if (typeof lessonsRes.count === "number" && lessonsRes.count > 0) {
+        setTotalLessons(lessonsRes.count);
+      }
+
       setLoading(false);
     }
 
@@ -179,7 +196,7 @@ export default function StudentsPage() {
               {filtered.map((student) => {
                 const day = getDayNumber(student.joined_at);
                 const completed = completionCounts[student.id] || 0;
-                const percent = Math.round((completed / 33) * 100);
+                const percent = progressPercent(completed, totalLessons);
 
                 return (
                   <tr

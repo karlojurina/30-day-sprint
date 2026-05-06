@@ -36,6 +36,10 @@ function getSidePanelWidth(viewportW: number): number {
   return Math.max(260, Math.round(viewportW * 0.42));
 }
 
+// Width of the side panel when collapsed — just enough for the
+// expand button + the region numeral. Map gains the rest as canvas.
+const SIDE_PANEL_COLLAPSED_WIDTH = 56;
+
 const GOLD = "#E6C07A";
 const GOLD_HI = "#F0D595";
 const INK = "#E6DCC8";
@@ -349,57 +353,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     regions,
     lessons,
     completedLessonIds,
-    completions,
-    watchedLessonIds,
     currentLesson,
     discountRequest,
     discountAllLessonsDone,
     requestDiscount,
   } = useStudent();
-
-  // Camera-target region — where the student was last active.
-  // Uses the LATEST completion (any half) as the anchor. If they have no
-  // completions, fall back to overview. Compound lessons with one half
-  // done count as "touched" so the camera doesn't pull back.
-  const initialRegionId = useMemo<RegionId | "overview">(() => {
-    let latestT: string | null = null;
-    let latestLessonId: string | null = null;
-    for (const c of completions) {
-      const t =
-        c.action_completed_at && c.completed_at
-          ? c.action_completed_at > c.completed_at
-            ? c.action_completed_at
-            : c.completed_at
-          : c.action_completed_at ?? c.completed_at;
-      if (!t) continue;
-      if (!latestT || t > latestT) {
-        latestT = t;
-        latestLessonId = c.lesson_id;
-      }
-    }
-    if (latestLessonId) {
-      const lesson = lessons.find((l) => l.id === latestLessonId);
-      if (lesson) {
-        // Find the next forward lesson the student hasn't done yet
-        const sorted = [...lessons].sort(
-          (a, b) => a.day - b.day || a.sort_order - b.sort_order
-        );
-        for (const l of sorted) {
-          if (l.day < lesson.day) continue;
-          if (
-            !completedLessonIds.has(l.id) &&
-            !watchedLessonIds.has(l.id)
-          ) {
-            return l.region_id as RegionId;
-          }
-        }
-        // No forward lesson — they're at the end. Land in their last
-        // active region.
-        return lesson.region_id as RegionId;
-      }
-    }
-    return "overview";
-  }, [completions, lessons, completedLessonIds, watchedLessonIds]);
 
   const outerRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef({ x: 0, y: 0, scale: 1 });
@@ -441,26 +399,19 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   // Default view: brief overview, then auto-transition into the region
   // where the student is currently working. Returning students with
   // progress past R1 land where they left off, not back on the
-  // overview where the wide aspect ratio shows R1 dominantly.
-  // Only applies on first sizing (initialViewSet ref) — manual
-  // navigation later isn't overridden.
+  // First-load behavior: ALWAYS land on the overview. No automatic
+  // zoom-into-a-region — the previous behavior of gliding into the
+  // student's last-active region was overriding their intent on
+  // every reload (especially if they were already on an overview-
+  // style screen). Manual click is the only thing that transitions
+  // into a region now.
   const initialViewSet = useRef(false);
   useEffect(() => {
     if (outerSize.w === 0) return;
     if (initialViewSet.current) return;
     initialViewSet.current = true;
-    if (initialRegionId === "overview") {
-      setView("overview");
-      return;
-    }
-    // Show overview briefly so the student gets context, then glide in
     setView("overview");
-    const id = window.setTimeout(() => {
-      transitionTo(initialRegionId);
-    }, 1100);
-    return () => window.clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outerSize.w, initialRegionId]);
+  }, [outerSize.w]);
 
   // Kick off region preload after the browser has had a chance to paint
   // the overview. requestIdleCallback yields for higher-priority work;
@@ -476,7 +427,10 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     return () => window.clearTimeout(id);
   }, [regionsMounted]);
 
-  const sidePanelWidth = getSidePanelWidth(outerSize.w);
+  const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
+  const sidePanelWidth = sidePanelCollapsed
+    ? SIDE_PANEL_COLLAPSED_WIDTH
+    : getSidePanelWidth(outerSize.w);
 
   // Default zoom factor over cover-fit. Cover guarantees the image fills the
   // viewport (no bars at any aspect ratio); the multiplier zooms in further
@@ -1350,6 +1304,8 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           onPrev={prevRegion ? () => transitionTo(prevRegion.id as RegionId) : null}
           onNext={nextRegion ? () => transitionTo(nextRegion.id as RegionId) : null}
           width={sidePanelWidth}
+          collapsed={sidePanelCollapsed}
+          onToggleCollapsed={() => setSidePanelCollapsed((v) => !v)}
         />
       )}
 
@@ -1398,6 +1354,8 @@ function RegionSidePanel({
   onPrev,
   onNext,
   width,
+  collapsed,
+  onToggleCollapsed,
 }: {
   region: ReturnType<typeof useStudent>["regions"][number];
   lessons: Lesson[];
@@ -1407,14 +1365,81 @@ function RegionSidePanel({
   onPrev: (() => void) | null;
   onNext: (() => void) | null;
   width: number;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
 }) {
   const numeral = ["I", "II", "III", "IV"][region.order_num - 1];
 
   const completed = lessons.filter((l) => completedLessonIds.has(l.id)).length;
   const total = lessons.length;
 
+  // Collapsed mode: render a thin strip with just an expand button
+  // and the region's roman numeral. Map gets the rest of the canvas.
+  if (collapsed) {
+    return (
+      <aside
+        onWheel={(e) => e.stopPropagation()}
+        style={{
+          position: "absolute",
+          top: 0,
+          right: 0,
+          bottom: 0,
+          width,
+          background:
+            "linear-gradient(180deg, rgba(6,12,26,0.96) 0%, rgba(10,20,40,0.96) 100%)",
+          borderLeft: "1px solid rgba(230,192,122,0.25)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          paddingTop: 16,
+          gap: 14,
+          boxShadow: "-30px 0 60px rgba(0,0,0,0.5)",
+        }}
+      >
+        <button
+          onClick={onToggleCollapsed}
+          aria-label="Expand region panel"
+          title="Expand region panel"
+          className="btn-ghost"
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: 8,
+            border: "1px solid rgba(230,192,122,0.25)",
+            background: "transparent",
+            color: "var(--color-ink-dim)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
+        <div
+          className="font-mono"
+          style={{
+            color: "var(--color-gold)",
+            fontSize: 20,
+            fontStyle: "italic",
+            fontFamily: "var(--font-display)",
+            writingMode: "vertical-rl",
+            transform: "rotate(180deg)",
+            letterSpacing: "0.18em",
+            marginTop: 8,
+          }}
+        >
+          {numeral} · {region.name}
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside
+      onWheel={(e) => e.stopPropagation()}
       style={{
         position: "absolute",
         top: 0,
@@ -1430,28 +1455,52 @@ function RegionSidePanel({
         boxShadow: "-30px 0 60px rgba(0,0,0,0.5)",
       }}
     >
-      {/* Back button */}
-      <button
-        onClick={onBack}
-        className="btn-ghost flex items-center gap-2 px-6 py-4"
-        style={{
-          background: "transparent",
-          border: "none",
-          borderBottom: "1px solid rgba(230,192,122,0.12)",
-          color: "var(--color-ink-dim)",
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          letterSpacing: "0.18em",
-          textTransform: "uppercase",
-          cursor: "pointer",
-          textAlign: "left",
-        }}
+      {/* Back button + collapse toggle */}
+      <div
+        className="flex items-center justify-between"
+        style={{ borderBottom: "1px solid rgba(230,192,122,0.12)" }}
       >
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.6">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M11 17l-5-5m0 0l5-5m-5 5h12" />
-        </svg>
-        Back to map
-      </button>
+        <button
+          onClick={onBack}
+          className="btn-ghost flex items-center gap-2 px-6 py-4 flex-1"
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "var(--color-ink-dim)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+            cursor: "pointer",
+            textAlign: "left",
+          }}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.6">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M11 17l-5-5m0 0l5-5m-5 5h12" />
+          </svg>
+          Back to map
+        </button>
+        <button
+          onClick={onToggleCollapsed}
+          aria-label="Collapse region panel"
+          title="Collapse panel"
+          className="btn-ghost"
+          style={{
+            background: "transparent",
+            border: "none",
+            color: "var(--color-ink-dim)",
+            cursor: "pointer",
+            padding: "0 16px",
+            height: "100%",
+            display: "flex",
+            alignItems: "center",
+          }}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+        </button>
+      </div>
 
       {/* Region header */}
       <div className="px-6 py-5" style={{ borderBottom: "1px solid rgba(230,192,122,0.12)" }}>

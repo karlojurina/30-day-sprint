@@ -47,11 +47,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Team only" }, { status: 403 });
   }
 
-  // Pull all students once, do the math in memory. Cohort sizes are
-  // small enough that this is cheap.
+  // Pull all paying students once, do the math in memory. Cohort
+  // sizes are small enough that this is cheap. Filter mirrors the
+  // admin pages: only students with a real Whop membership and a
+  // tracked status (drop 'expired' and null statuses).
   const { data: students } = await supabase
     .from("students")
-    .select("membership_status, joined_at, updated_at");
+    .select("membership_status, joined_at, updated_at")
+    .not("whop_membership_id", "is", null)
+    .in("membership_status", ["active", "past_due", "canceled"]);
 
   const all = students ?? [];
   const now = Date.now();

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import type { Student, StudentLessonCompletion } from "@/types/database";
 import { getDayNumber } from "@/types/database";
-import { TOTAL_LESSONS } from "@/lib/constants";
+import { TOTAL_LESSONS, progressPercent } from "@/lib/constants";
 import { StudentCard } from "./StudentCard";
 import { StudentDrawer } from "./StudentDrawer";
 
@@ -57,17 +57,29 @@ interface StudentWithProgress extends Student {
 export default function KanbanPage() {
   const supabase = createClient();
   const [students, setStudents] = useState<StudentWithProgress[]>([]);
+  const [totalLessons, setTotalLessons] = useState<number>(TOTAL_LESSONS);
   const [loading, setLoading] = useState(true);
   const [drawerStudentId, setDrawerStudentId] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchAll() {
-      const [studentsRes, completionsRes] = await Promise.all([
-        supabase.from("students").select("*").order("joined_at", { ascending: false }),
+      // Filter to actual paying students — see /admin/students for rationale.
+      const [studentsRes, completionsRes, lessonsRes] = await Promise.all([
+        supabase
+          .from("students")
+          .select("*")
+          .not("whop_membership_id", "is", null)
+          .in("membership_status", ["active", "past_due", "canceled"])
+          .order("joined_at", { ascending: false }),
         supabase
           .from("student_lesson_completions")
           .select("student_id, completed_at, action_completed_at"),
+        supabase.from("lessons").select("id", { count: "exact", head: true }),
       ]);
+
+      if (typeof lessonsRes.count === "number" && lessonsRes.count > 0) {
+        setTotalLessons(lessonsRes.count);
+      }
 
       const counts = new Map<string, number>();
       for (const c of (completionsRes.data ?? []) as Pick<
@@ -185,8 +197,9 @@ export default function KanbanPage() {
                       <StudentCard
                         key={s.id}
                         student={s}
-                        progressPercent={Math.round(
-                          (s.completedCount / TOTAL_LESSONS) * 100
+                        progressPercent={progressPercent(
+                          s.completedCount,
+                          totalLessons
                         )}
                         onClick={() => setDrawerStudentId(s.id)}
                       />

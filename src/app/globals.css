@@ -80,7 +80,9 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Paper grain overlay — subtle, warm, over everything */
+/* Paper grain overlay — subtle, warm, over the student-facing app.
+   Skipped on admin (pages that mount .admin-shell) — admin should
+   feel calm/clinical, not editorial. */
 body::before {
   content: "";
   position: fixed;
@@ -90,6 +92,9 @@ body::before {
   background-image: var(--bg-noise);
   opacity: 0.7;
   mix-blend-mode: overlay;
+}
+body:has(.admin-shell)::before {
+  display: none;
 }
 
 /* Scrollbar */

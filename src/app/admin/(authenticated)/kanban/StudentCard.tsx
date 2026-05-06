@@ -43,71 +43,104 @@ export function StudentCard({ student, progressPercent, onClick }: StudentCardPr
     <button
       type="button"
       onClick={onClick}
-      className="w-full text-left rounded-xl bg-bg-card border border-border p-3 hover:border-accent/40 transition-colors"
+      className="w-full text-left surface-resting transition-colors"
+      style={{
+        background: "var(--color-bg-card)",
+        border: "none",
+        borderRadius: 12,
+        padding: 14,
+        cursor: "pointer",
+      }}
     >
       {/* Name + day */}
-      <div className="flex items-baseline justify-between gap-2 mb-2">
-        <p className="text-sm font-medium text-text-primary truncate">
+      <div className="flex items-baseline justify-between gap-2" style={{ marginBottom: 10 }}>
+        <p
+          className="truncate"
+          style={{
+            fontSize: 14,
+            fontWeight: 500,
+            color: "var(--color-text-primary)",
+            letterSpacing: "-0.011em",
+          }}
+        >
           {student.name || "Unnamed student"}
         </p>
         <span
-          className="font-mono tabular-nums shrink-0"
+          className="shrink-0"
           style={{
-            fontSize: 10,
-            letterSpacing: "0.06em",
-            color: "var(--color-ink-dim)",
+            fontSize: 11,
+            color: "var(--color-text-tertiary)",
+            fontVariantNumeric: "tabular-nums",
+            fontWeight: 500,
           }}
         >
-          D{day}
+          Day {day}
         </span>
       </div>
 
       {/* Progress bar */}
       <div
-        className="rounded-full overflow-hidden mb-2"
         style={{
           height: 4,
-          background: "rgba(230,192,122,0.12)",
+          borderRadius: 2,
+          background: "var(--color-fill-secondary, rgba(20,20,24,0.06))",
+          overflow: "hidden",
+          marginBottom: 8,
         }}
       >
         <div
           style={{
             height: "100%",
             width: `${Math.min(100, progressPercent)}%`,
-            background: "var(--color-gold)",
-            transition: "width 400ms cubic-bezier(0.22,1,0.36,1)",
+            background: "var(--color-accent)",
+            transition: "width 250ms cubic-bezier(0.25, 0.1, 0.25, 1)",
           }}
         />
       </div>
-      <div className="flex items-center justify-between text-[10px] text-text-tertiary mb-2 font-mono">
+      <div
+        className="flex items-center justify-between"
+        style={{
+          fontSize: 11,
+          color: "var(--color-text-tertiary)",
+          marginBottom: 12,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
         <span>{progressPercent}% complete</span>
         <span>{lastActiveLabel}</span>
       </div>
 
       {/* SOP chips — Day 1 / 7 / 14 / 21 */}
-      <div className="flex gap-1 flex-wrap">
-        {SOP_TEMPLATES.map((tmpl) => (
-          <button
-            key={tmpl.id}
-            type="button"
-            onClick={(e) => handleSopClick(e, tmpl.id)}
-            className="text-[10px] font-mono uppercase tracking-wider rounded-md px-2 py-1 transition-colors"
-            style={{
-              background:
-                justCopied === tmpl.id
-                  ? "var(--color-gold)"
-                  : "rgba(230,192,122,0.08)",
-              color:
-                justCopied === tmpl.id
-                  ? "var(--color-bg-primary)"
-                  : "var(--color-gold-light)",
-              border: "1px solid rgba(230,192,122,0.2)",
-            }}
-            title={`Copy ${tmpl.label} message to clipboard`}
-          >
-            {justCopied === tmpl.id ? "Copied" : tmpl.label}
-          </button>
-        ))}
+      <div className="flex gap-1.5 flex-wrap">
+        {SOP_TEMPLATES.map((tmpl) => {
+          const copied = justCopied === tmpl.id;
+          return (
+            <button
+              key={tmpl.id}
+              type="button"
+              onClick={(e) => handleSopClick(e, tmpl.id)}
+              className="transition-colors"
+              style={{
+                fontSize: 11,
+                fontWeight: 500,
+                letterSpacing: "-0.005em",
+                padding: "4px 8px",
+                borderRadius: 6,
+                background: copied
+                  ? "var(--color-accent)"
+                  : "var(--color-bg-elevated)",
+                color: copied
+                  ? "#FFFFFF"
+                  : "var(--color-text-secondary)",
+                border: "none",
+                cursor: "pointer",
+              }}
+              title={`Copy ${tmpl.label} message to clipboard`}
+            >
+              {copied ? "Copied" : tmpl.label}
+            </button>
+          );
+        })}
       </div>
     </button>
   );

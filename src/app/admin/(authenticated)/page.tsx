@@ -15,8 +15,6 @@ interface DashboardData {
   canceledThisMonth: number;
   pendingDiscounts: number;
   activeAlerts: number;
-  // The KPI Karlo cares about most: of students who joined more than
-  // 30 days ago, what fraction are still active?
   monthTwoConversionRate: number | null;
   monthTwoCohortSize: number;
 }
@@ -43,7 +41,6 @@ export default function AdminDashboard() {
         alertsRes,
         recentAlertsRes,
       ] = await Promise.all([
-        // Filter to actual paying students — see /admin/students for rationale.
         supabase
           .from("students")
           .select("*")
@@ -99,9 +96,6 @@ export default function AdminDashboard() {
             )
           : 0;
 
-      // Month-2 conversion: of the students whose joined_at is older
-      // than 30 days, what fraction are still 'active'? Single most
-      // important retention number.
       const matureCohort = students.filter(
         (s) => s.joined_at <= thirtyDaysAgo
       );
@@ -135,24 +129,55 @@ export default function AdminDashboard() {
 
   if (loading || !data) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      <div className="flex items-center justify-center h-screen">
+        <div
+          className="rounded-full animate-spin"
+          style={{
+            width: 24,
+            height: 24,
+            border: "2px solid var(--color-accent)",
+            borderTopColor: "transparent",
+          }}
+        />
       </div>
     );
   }
 
   return (
-    <div className="px-8 pt-8 pb-12 space-y-10 max-w-7xl">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="text-sm text-text-secondary mt-1">
+    <div
+      className="px-12 pt-12 pb-16"
+      style={{ maxWidth: 1180, margin: "0 auto" }}
+    >
+      {/* Page header */}
+      <header style={{ marginBottom: 48 }}>
+        <h1
+          style={{
+            fontSize: 32,
+            fontWeight: 600,
+            letterSpacing: "-0.025em",
+            color: "var(--color-text-primary)",
+            lineHeight: 1.15,
+          }}
+        >
+          Dashboard
+        </h1>
+        <p
+          style={{
+            fontSize: 15,
+            color: "var(--color-text-secondary)",
+            marginTop: 4,
+            letterSpacing: "-0.006em",
+          }}
+        >
           The numbers that matter for the next month.
         </p>
-      </div>
+      </header>
 
-      {/* Hero KPI row — the two we actually steer on */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Hero KPIs — the two we steer on */}
+      <section
+        className="grid grid-cols-1 md:grid-cols-2"
+        style={{ gap: 16, marginBottom: 48 }}
+      >
         <BigStat
           label="Month 2 conversion"
           value={
@@ -167,24 +192,30 @@ export default function AdminDashboard() {
                   (data.monthTwoConversionRate ?? 0) * data.monthTwoCohortSize
                 )} of ${data.monthTwoCohortSize} active`
           }
-          accent="gold"
+          accent
         />
         <BigStat
           label="AdValue onboarded"
           value="—"
           sublabel="Pending integration with Zak"
-          accent="muted"
         />
-      </div>
+      </section>
 
-      {/* Supporting KPIs */}
-      <div>
-        <p className="text-xs font-mono uppercase tracking-widest text-text-secondary mb-3">
+      {/* Supporting stats */}
+      <section style={{ marginBottom: 48 }}>
+        <p className="section-label" style={{ marginBottom: 12 }}>
           This week
         </p>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div
+          className="grid grid-cols-2 lg:grid-cols-4"
+          style={{ gap: 12 }}
+        >
           <SmallStat label="Active students" value={data.activeStudents} />
-          <SmallStat label="Joined" value={data.joinedThisWeek} accent="success" />
+          <SmallStat
+            label="Joined"
+            value={data.joinedThisWeek}
+            accent="success"
+          />
           <SmallStat label="Avg progress" value={`${data.avgProgress}%`} />
           <SmallStat
             label="Churned 30d"
@@ -192,61 +223,126 @@ export default function AdminDashboard() {
             accent="danger"
           />
         </div>
-      </div>
+      </section>
 
-      {/* Quick links */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <QuickLink
-          href="/admin/kanban"
-          label="Open Kanban"
-          sublabel="Sweep students by cohort"
-        />
-        <QuickLink
-          href="/admin/discounts"
-          label="Pending discounts"
-          sublabel={`${data.pendingDiscounts} to review`}
-          highlight={data.pendingDiscounts > 0 ? "warm" : "none"}
-        />
-        <QuickLink
-          href="/admin/alerts"
-          label="Active alerts"
-          sublabel={`${data.activeAlerts} unaddressed`}
-          highlight={data.activeAlerts > 0 ? "danger" : "none"}
-        />
-      </div>
+      {/* Quick links — Settings-style list */}
+      <section style={{ marginBottom: 48 }}>
+        <p className="section-label" style={{ marginBottom: 12 }}>
+          Quick actions
+        </p>
+        <div
+          className="surface-resting"
+          style={{
+            background: "var(--color-bg-card)",
+            borderRadius: 12,
+            overflow: "hidden",
+          }}
+        >
+          <ListLink
+            href="/admin/kanban"
+            label="Open Kanban"
+            sublabel="Sweep students by cohort"
+          />
+          <ListLink
+            href="/admin/discounts"
+            label="Pending discounts"
+            sublabel={`${data.pendingDiscounts} to review`}
+            badge={data.pendingDiscounts > 0 ? data.pendingDiscounts : undefined}
+            badgeTone="warm"
+          />
+          <ListLink
+            href="/admin/alerts"
+            label="Active alerts"
+            sublabel={`${data.activeAlerts} unaddressed`}
+            badge={data.activeAlerts > 0 ? data.activeAlerts : undefined}
+            badgeTone="danger"
+          />
+        </div>
+      </section>
 
-      {/* Recent alerts */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold">Recent alerts</h2>
+      {/* Recent alerts — same Settings list pattern */}
+      <section>
+        <div
+          className="flex items-baseline justify-between"
+          style={{ marginBottom: 12 }}
+        >
+          <p className="section-label">Recent alerts</p>
           <Link
             href="/admin/alerts"
-            className="text-xs text-accent-light hover:text-accent transition-colors"
+            style={{
+              fontSize: 13,
+              color: "var(--color-accent-dark)",
+              textDecoration: "none",
+              letterSpacing: "-0.005em",
+            }}
           >
             View all →
           </Link>
         </div>
         {recentAlerts.length === 0 ? (
-          <p className="text-sm text-text-secondary bg-bg-card border border-border rounded-xl p-6">
+          <div
+            className="surface-resting"
+            style={{
+              background: "var(--color-bg-card)",
+              borderRadius: 12,
+              padding: 32,
+              textAlign: "center",
+              fontSize: 14,
+              color: "var(--color-text-secondary)",
+            }}
+          >
             No active alerts. All students are on track.
-          </p>
+          </div>
         ) : (
-          <div className="space-y-2">
+          <div
+            className="surface-resting"
+            style={{
+              background: "var(--color-bg-card)",
+              borderRadius: 12,
+              overflow: "hidden",
+            }}
+          >
             {recentAlerts.map((alert) => (
               <Link
                 key={alert.id}
                 href={`/admin/students/${alert.student_id}`}
-                className="bg-bg-card border border-border rounded-lg p-3 flex items-center justify-between hover:border-accent/40 transition-colors"
+                className="list-row"
+                style={{
+                  textDecoration: "none",
+                  padding: "12px 16px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                }}
               >
                 <div>
-                  <p className="text-sm font-medium">
+                  <p
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 500,
+                      color: "var(--color-text-primary)",
+                      letterSpacing: "-0.011em",
+                    }}
+                  >
                     {alert.student?.name || "Unknown"}
                   </p>
-                  <p className="text-xs text-text-secondary">
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: "var(--color-text-secondary)",
+                      marginTop: 1,
+                    }}
+                  >
                     {alert.message}
                   </p>
                 </div>
-                <span className="text-xs text-text-tertiary font-mono">
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: "var(--color-text-tertiary)",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
                   Day{" "}
                   {alert.student
                     ? getDayNumber(alert.student.joined_at)
@@ -256,7 +352,7 @@ export default function AdminDashboard() {
             ))}
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }
@@ -265,50 +361,61 @@ function BigStat({
   label,
   value,
   sublabel,
-  accent,
+  accent = false,
 }: {
   label: string;
   value: string;
   sublabel: string;
-  accent: "gold" | "muted";
+  accent?: boolean;
 }) {
   return (
     <div
-      className="bg-bg-card border rounded-2xl p-6"
+      className="surface-resting"
       style={{
-        borderColor:
-          accent === "gold"
-            ? "rgba(230,192,122,0.32)"
-            : "var(--color-border)",
+        background: "var(--color-bg-card)",
+        borderRadius: 16,
+        padding: 28,
       }}
     >
       <p
-        className="font-mono uppercase mb-2"
         style={{
-          color:
-            accent === "gold"
-              ? "var(--color-gold)"
-              : "var(--color-ink-dim)",
-          letterSpacing: "0.16em",
-          fontSize: 11,
+          fontSize: 12,
+          fontWeight: 500,
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          color: accent
+            ? "var(--color-accent-dark)"
+            : "var(--color-text-tertiary)",
         }}
       >
         {label}
       </p>
       <p
-        className="font-semibold tabular-nums tracking-tight"
+        className="stat-value"
         style={{
           fontSize: 56,
-          lineHeight: 1,
-          color:
-            accent === "gold"
-              ? "var(--color-gold-light)"
-              : "var(--color-ink-faint)",
+          fontWeight: 600,
+          lineHeight: 1.05,
+          letterSpacing: "-0.025em",
+          color: accent
+            ? "var(--color-accent-dark)"
+            : "var(--color-text-quaternary)",
+          marginTop: 12,
+          fontVariantNumeric: "tabular-nums",
         }}
       >
         {value}
       </p>
-      <p className="text-xs text-text-tertiary mt-3">{sublabel}</p>
+      <p
+        style={{
+          fontSize: 13,
+          color: "var(--color-text-tertiary)",
+          marginTop: 14,
+          letterSpacing: "-0.005em",
+        }}
+      >
+        {sublabel}
+      </p>
     </div>
   );
 }
@@ -327,15 +434,37 @@ function SmallStat({
       ? "var(--color-success)"
       : accent === "danger"
         ? "var(--color-danger)"
-        : "var(--color-ink)";
+        : "var(--color-text-primary)";
   return (
-    <div className="bg-bg-card border border-border rounded-xl p-4">
-      <p className="text-[11px] text-text-tertiary font-mono uppercase tracking-widest">
+    <div
+      className="surface-resting"
+      style={{
+        background: "var(--color-bg-card)",
+        borderRadius: 12,
+        padding: 18,
+      }}
+    >
+      <p
+        style={{
+          fontSize: 11,
+          fontWeight: 500,
+          color: "var(--color-text-tertiary)",
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+        }}
+      >
         {label}
       </p>
       <p
-        className="font-semibold tabular-nums mt-1"
-        style={{ fontSize: 26, color, lineHeight: 1.05 }}
+        style={{
+          fontSize: 28,
+          fontWeight: 600,
+          color,
+          marginTop: 6,
+          letterSpacing: "-0.022em",
+          lineHeight: 1.05,
+          fontVariantNumeric: "tabular-nums",
+        }}
       >
         {value}
       </p>
@@ -343,42 +472,85 @@ function SmallStat({
   );
 }
 
-function QuickLink({
+function ListLink({
   href,
   label,
   sublabel,
-  highlight = "none",
+  badge,
+  badgeTone = "neutral",
 }: {
   href: string;
   label: string;
   sublabel: string;
-  highlight?: "none" | "warm" | "danger";
+  badge?: number;
+  badgeTone?: "neutral" | "warm" | "danger";
 }) {
-  const borderColor =
-    highlight === "warm"
-      ? "rgba(230,192,122,0.4)"
-      : highlight === "danger"
-        ? "rgba(196,74,84,0.45)"
-        : "var(--color-border)";
+  const badgeColor =
+    badgeTone === "warm"
+      ? "var(--color-warning)"
+      : badgeTone === "danger"
+        ? "var(--color-danger)"
+        : "var(--color-text-tertiary)";
   return (
     <Link
       href={href}
-      className="bg-bg-card border rounded-xl p-4 hover:border-accent/40 transition-colors flex items-center justify-between"
-      style={{ borderColor }}
+      className="list-row"
+      style={{ textDecoration: "none" }}
     >
-      <div>
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-text-secondary mt-0.5">{sublabel}</p>
+      <div className="flex-1">
+        <p
+          style={{
+            fontSize: 14,
+            fontWeight: 500,
+            color: "var(--color-text-primary)",
+            letterSpacing: "-0.011em",
+          }}
+        >
+          {label}
+        </p>
+        <p
+          style={{
+            fontSize: 12,
+            color: "var(--color-text-secondary)",
+            marginTop: 1,
+          }}
+        >
+          {sublabel}
+        </p>
       </div>
+      {badge !== undefined && (
+        <span
+          style={{
+            minWidth: 22,
+            height: 22,
+            padding: "0 8px",
+            borderRadius: 11,
+            background: `${badgeColor}1f`,
+            color: badgeColor,
+            fontSize: 12,
+            fontWeight: 600,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontVariantNumeric: "tabular-nums",
+            marginRight: 8,
+          }}
+        >
+          {badge}
+        </span>
+      )}
       <svg
-        className="w-4 h-4 text-text-tertiary"
-        fill="none"
+        width="14"
+        height="14"
         viewBox="0 0 24 24"
-        stroke="currentColor"
-        strokeWidth={1.6}
+        fill="none"
+        stroke="var(--color-text-tertiary)"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
         aria-hidden="true"
       >
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        <path d="M9 5l7 7-7 7" />
       </svg>
     </Link>
   );

@@ -121,56 +121,95 @@ export default function KanbanPage() {
   return (
     <div className="flex flex-col h-screen">
       {/* Header */}
-      <div className="px-8 pt-8 pb-5 border-b border-border">
-        <h1 className="text-2xl font-semibold tracking-tight">Kanban</h1>
-        <p className="text-sm text-text-secondary mt-1">
+      <header
+        style={{
+          padding: "32px 48px 20px",
+          borderBottom: "1px solid var(--color-border)",
+        }}
+      >
+        <h1
+          style={{
+            fontSize: 28,
+            fontWeight: 600,
+            letterSpacing: "-0.025em",
+            lineHeight: 1.15,
+            color: "var(--color-text-primary)",
+          }}
+        >
+          Kanban
+        </h1>
+        <p
+          style={{
+            fontSize: 14,
+            color: "var(--color-text-secondary)",
+            marginTop: 4,
+            letterSpacing: "-0.005em",
+          }}
+        >
           Students flow through columns automatically based on join date and
           membership status. Click a card to open their detail.
         </p>
-      </div>
+      </header>
 
       {/* Columns */}
       <div className="flex-1 overflow-x-auto overflow-y-hidden">
         <div
-          className="flex gap-4 px-8 py-6 h-full"
-          style={{ minWidth: "max-content" }}
+          className="flex h-full"
+          style={{
+            gap: 12,
+            padding: "20px 48px",
+            minWidth: "max-content",
+          }}
         >
           {COLUMNS.map((col) => {
             const items = grouped.get(col.id) ?? [];
+            const labelColor =
+              col.accent === "danger"
+                ? "var(--color-danger)"
+                : col.accent === "success"
+                  ? "var(--color-success)"
+                  : col.accent === "warm"
+                    ? "var(--color-accent-dark)"
+                    : "var(--color-text-secondary)";
             return (
               <div
                 key={col.id}
                 className="flex flex-col h-full shrink-0"
-                style={{ width: 280 }}
+                style={{ width: 288 }}
               >
-                <div className="flex items-baseline justify-between mb-3 px-1">
+                <div
+                  className="flex items-baseline justify-between"
+                  style={{ marginBottom: 10, padding: "0 4px" }}
+                >
                   <div>
                     <p
-                      className="font-mono uppercase tracking-widest"
                       style={{
-                        fontSize: 10,
-                        letterSpacing: "0.18em",
-                        color:
-                          col.accent === "danger"
-                            ? "var(--color-danger)"
-                            : col.accent === "success"
-                              ? "var(--color-success)"
-                              : col.accent === "warm"
-                                ? "var(--color-gold)"
-                                : "var(--color-ink-dim)",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
+                        color: labelColor,
                       }}
                     >
                       {col.label}
                     </p>
-                    <p className="text-[11px] text-text-tertiary mt-0.5">
+                    <p
+                      style={{
+                        fontSize: 11,
+                        color: "var(--color-text-tertiary)",
+                        marginTop: 2,
+                        letterSpacing: "-0.005em",
+                      }}
+                    >
                       {col.description}
                     </p>
                   </div>
                   <span
-                    className="font-mono tabular-nums"
                     style={{
                       fontSize: 12,
-                      color: "var(--color-ink-dim)",
+                      color: "var(--color-text-tertiary)",
+                      fontVariantNumeric: "tabular-nums",
+                      fontWeight: 500,
                     }}
                   >
                     {items.length}
@@ -178,16 +217,24 @@ export default function KanbanPage() {
                 </div>
 
                 <div
-                  className="flex-1 overflow-y-auto space-y-2 pr-1"
-                  style={{ minHeight: 0 }}
+                  className="flex-1 overflow-y-auto"
+                  style={{
+                    minHeight: 0,
+                    paddingRight: 4,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                  }}
                 >
                   {items.length === 0 ? (
                     <div
-                      className="rounded-lg border border-dashed py-8 text-center"
                       style={{
-                        borderColor: "rgba(230,192,122,0.18)",
-                        color: "var(--color-ink-faint)",
+                        padding: "32px 16px",
+                        textAlign: "center",
                         fontSize: 12,
+                        color: "var(--color-text-tertiary)",
+                        background: "var(--color-bg-elevated)",
+                        borderRadius: 12,
                       }}
                     >
                       No students

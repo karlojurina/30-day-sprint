@@ -143,7 +143,7 @@ export function DiscountProgressBar() {
             className="absolute"
             style={{
               left: `${milestonePercent}%`,
-              top: -20,
+              top: -18,
               transform: "translateX(-50%)",
               padding: "2px 8px",
               borderRadius: 999,

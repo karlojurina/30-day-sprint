@@ -2142,17 +2142,37 @@ function ScenePathOverlay({
           />
         )}
 
-      {/* Secondary marker — drawn slightly ABOVE the primary so the two
-          read as a stack: claim first, then onward. Used on R2 for the
-          discount-claim button alongside the onward transition. */}
-      {secondaryMarker && lastWaypoint && (
-        <EndMarker
-          x={lastWaypoint.x}
-          y={lastWaypoint.y - 130}
-          marker={secondaryMarker}
-          onClick={onSecondaryMarkerClick}
-        />
-      )}
+      {/* Secondary marker — sits BEFORE the primary along the path
+          direction so the flow reads sequentially:
+              last lesson → discount → onward
+          Computed by walking back from the last waypoint along the
+          segment from second-to-last → last by SECONDARY_BACK_OFFSET
+          map units. Falls back to a vertical offset if there's only
+          one waypoint. */}
+      {secondaryMarker && lastWaypoint && (() => {
+        const SECONDARY_BACK_OFFSET = 160;
+        const N = scene.waypoints.length;
+        let sx = lastWaypoint.x;
+        let sy = lastWaypoint.y - 130;
+        if (N >= 2) {
+          const prev = scene.waypoints[N - 2];
+          const dx = lastWaypoint.x - prev.x;
+          const dy = lastWaypoint.y - prev.y;
+          const len = Math.hypot(dx, dy);
+          if (len > 0) {
+            sx = lastWaypoint.x - (dx / len) * SECONDARY_BACK_OFFSET;
+            sy = lastWaypoint.y - (dy / len) * SECONDARY_BACK_OFFSET;
+          }
+        }
+        return (
+          <EndMarker
+            x={sx}
+            y={sy}
+            marker={secondaryMarker}
+            onClick={onSecondaryMarkerClick}
+          />
+        );
+      })()}
 
       {/* End marker on the last waypoint */}
       {endMarker && lastWaypoint && (

@@ -141,7 +141,7 @@ export function TopBar({ setPanTarget }: TopBarProps) {
             flame + sign out. Discount countdown auto-hides when window
             closes or student has applied. */}
         <div className="flex items-center gap-2 shrink-0">
-          <ProgressDial completed={completedLessonIds.size} size={32} />
+          <ProgressDial completed={completedLessonIds.size} size={44} />
           <DiscountCountdown />
           <StreakFlame current={streak.current} longest={streak.longest} />
 

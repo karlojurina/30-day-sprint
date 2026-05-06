@@ -77,10 +77,10 @@ export function ProgressDial({
         className="absolute"
         style={{
           color: "var(--color-text-primary)",
-          fontSize: size <= 36 ? 10 : 11,
+          fontSize: size >= 44 ? 11 : size >= 40 ? 10 : 9,
           fontWeight: 600,
           lineHeight: 1,
-          letterSpacing: "-0.005em",
+          letterSpacing: "-0.01em",
           fontVariantNumeric: "tabular-nums",
         }}
       >

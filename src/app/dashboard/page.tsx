@@ -7,7 +7,6 @@ import { TopBar } from "@/components/map/TopBar";
 import { LessonSheet } from "@/components/map/LessonSheet";
 import { MapMockup } from "@/components/mockup/MapMockup";
 import { LessonCompleteEffects } from "@/components/map/LessonCompleteEffects";
-import { SyncDebugPanel } from "@/components/map/SyncDebugPanel";
 
 export default function DashboardPage() {
   const { student } = useAuth();
@@ -54,8 +53,6 @@ export default function DashboardPage() {
         onClose={() => setSelectedLessonId(null)}
         onSelectLesson={(id) => setSelectedLessonId(id)}
       />
-
-      <SyncDebugPanel />
     </div>
   );
 }

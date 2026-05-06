@@ -891,6 +891,8 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
               width: "100%",
               height: "100%",
               overflow: "visible",
+              textRendering: "geometricPrecision",
+              shapeRendering: "geometricPrecision",
             }}
           >
             {/* Ambient layer — birds + clouds drifting over the painted map.
@@ -1115,10 +1117,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         y={-20}
                         textAnchor="middle"
                         style={{
-                          fontFamily: "Cormorant Garamond, serif",
-                          fontStyle: "italic",
+                          fontFamily:
+                            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                           fontWeight: 600,
-                          fontSize: 26,
+                          fontSize: 22,
+                          letterSpacing: "-0.02em",
                           fill: stroke,
                         }}
                       >
@@ -1137,13 +1140,14 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                     {/* Region name */}
                     <text
                       x={0}
-                      y={24}
+                      y={26}
                       textAnchor="middle"
                       style={{
-                        fontFamily: "Cormorant Garamond, serif",
-                        fontStyle: "italic",
-                        fontWeight: 500,
-                        fontSize: 34,
+                        fontFamily:
+                          'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                        fontWeight: 600,
+                        fontSize: 30,
+                        letterSpacing: "-0.022em",
                         fill: isUnlocked ? INK : "rgba(230,220,200,0.7)",
                         paintOrder: "stroke fill",
                         stroke: "rgba(6,12,26,0.85)",
@@ -1160,22 +1164,24 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       y={52}
                       textAnchor="middle"
                       style={{
-                        fontFamily: "JetBrains Mono, ui-monospace, monospace",
+                        fontFamily:
+                          'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                        fontWeight: 500,
                         fontSize: 13,
-                        letterSpacing: "0.22em",
+                        letterSpacing: "-0.005em",
                         fill: isUnlocked ? GOLD : "rgba(230,220,200,0.62)",
-                        textTransform: "uppercase",
                         paintOrder: "stroke fill",
                         stroke: "rgba(6,12,26,0.85)",
                         strokeWidth: 3,
                         strokeLinejoin: "round",
+                        fontVariantNumeric: "tabular-nums",
                       }}
                     >
                       {isUnlocked
                         ? isComplete
-                          ? `COMPLETE · ${total}`
-                          : `${completed} / ${total} LESSONS`
-                        : "LOCKED"}
+                          ? `Complete · ${total}`
+                          : `${completed} / ${total} lessons`
+                        : "Locked"}
                     </text>
 
                     {/* Hover CTA — only shown for unlocked regions */}
@@ -1185,18 +1191,19 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         y={76}
                         textAnchor="middle"
                         style={{
-                          fontFamily: "JetBrains Mono, ui-monospace, monospace",
-                          fontSize: 11,
-                          letterSpacing: "0.28em",
+                          fontFamily:
+                            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                          fontWeight: 500,
+                          fontSize: 12,
+                          letterSpacing: "-0.005em",
                           fill: GOLD_HI,
-                          textTransform: "uppercase",
                           paintOrder: "stroke fill",
                           stroke: "rgba(6,12,26,0.85)",
                           strokeWidth: 3,
                           strokeLinejoin: "round",
                         }}
                       >
-                        ENTER REGION →
+                        Enter region →
                       </text>
                     )}
                   </g>
@@ -1238,14 +1245,16 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       />
                       <text
                         x={0}
-                        y={-3}
+                        y={-2}
                         textAnchor="middle"
                         style={{
-                          fontFamily: "Cormorant Garamond, serif",
-                          fontStyle: "italic",
+                          fontFamily:
+                            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                           fontWeight: 600,
-                          fontSize: 18,
+                          fontSize: 17,
+                          letterSpacing: "-0.02em",
                           fill: GOLD_HI,
+                          fontVariantNumeric: "tabular-nums",
                         }}
                       >
                         30%
@@ -1255,24 +1264,27 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         y={11}
                         textAnchor="middle"
                         style={{
-                          fontFamily: "JetBrains Mono, ui-monospace, monospace",
-                          fontSize: 7,
-                          letterSpacing: "0.16em",
+                          fontFamily:
+                            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                          fontSize: 8,
+                          fontWeight: 500,
+                          letterSpacing: "0.04em",
                           fill: "rgba(230,192,122,0.85)",
-                          textTransform: "uppercase",
                         }}
                       >
-                        Off
+                        OFF
                       </text>
                       {/* Inscription beside the badge */}
                       <text
                         x={42}
-                        y={5}
+                        y={4}
                         textAnchor="start"
                         style={{
-                          fontFamily: "Cormorant Garamond, serif",
-                          fontStyle: "italic",
-                          fontSize: 16,
+                          fontFamily:
+                            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                          fontWeight: 500,
+                          fontSize: 14,
+                          letterSpacing: "-0.012em",
                           fill: discountBeaconReady ? GOLD_HI : "rgba(230,220,200,0.85)",
                           paintOrder: "stroke fill",
                           stroke: "rgba(6,12,26,0.85)",
@@ -1281,8 +1293,8 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         }}
                       >
                         {discountBeaconReady
-                          ? "ready to apply"
-                          : "the gate"}
+                          ? "Ready to apply"
+                          : "The gate"}
                       </text>
                     </g>
                   )}
@@ -1419,15 +1431,13 @@ function RegionSidePanel({
           </svg>
         </button>
         <div
-          className="font-mono"
           style={{
             color: "var(--color-gold)",
-            fontSize: 20,
-            fontStyle: "italic",
-            fontFamily: "var(--font-display)",
+            fontSize: 14,
+            fontWeight: 600,
+            letterSpacing: "-0.005em",
             writingMode: "vertical-rl",
             transform: "rotate(180deg)",
-            letterSpacing: "0.18em",
             marginTop: 8,
           }}
         >
@@ -1467,10 +1477,9 @@ function RegionSidePanel({
             background: "transparent",
             border: "none",
             color: "var(--color-ink-dim)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            letterSpacing: "0.18em",
-            textTransform: "uppercase",
+            fontSize: 13,
+            fontWeight: 500,
+            letterSpacing: "-0.005em",
             cursor: "pointer",
             textAlign: "left",
           }}
@@ -1503,39 +1512,38 @@ function RegionSidePanel({
       </div>
 
       {/* Region header */}
-      <div className="px-6 py-5" style={{ borderBottom: "1px solid rgba(230,192,122,0.12)" }}>
+      <div className="px-6 py-6" style={{ borderBottom: "1px solid rgba(230,192,122,0.12)" }}>
         <p
-          className="font-mono uppercase mb-1"
           style={{
             color: GOLD,
-            letterSpacing: "0.22em",
-            fontSize: 11,
+            letterSpacing: "0.04em",
+            fontSize: 12,
+            fontWeight: 500,
+            marginBottom: 6,
           }}
         >
           Region {numeral}
         </p>
         <h2
-          className="italic"
           style={{
-            fontFamily: "var(--font-display)",
-            fontWeight: 500,
-            fontSize: 34,
+            fontWeight: 600,
+            fontSize: 30,
+            letterSpacing: "-0.022em",
             color: INK,
-            lineHeight: 1,
-            marginBottom: 10,
+            lineHeight: 1.05,
+            marginBottom: 8,
           }}
         >
           {region.name}
         </h2>
         <p
-          className="italic"
           style={{
-            fontFamily: "var(--font-display)",
-            fontStyle: "italic",
-            fontSize: 14,
+            fontSize: 15,
+            fontWeight: 400,
             color: "var(--color-ink-dim)",
-            marginBottom: 16,
-            lineHeight: 1.4,
+            marginBottom: 20,
+            lineHeight: 1.5,
+            letterSpacing: "-0.005em",
           }}
         >
           {region.tagline}
@@ -1545,23 +1553,22 @@ function RegionSidePanel({
         <div>
           <div className="flex items-center justify-between mb-2">
             <span
-              className="font-mono"
               style={{
                 color: GOLD_HI,
-                fontSize: 11,
-                letterSpacing: "0.18em",
-                textTransform: "uppercase",
+                fontSize: 13,
+                fontWeight: 600,
+                letterSpacing: "-0.005em",
+                fontVariantNumeric: "tabular-nums",
               }}
             >
               {completed} / {total} complete
             </span>
             <span
-              className="font-mono"
               style={{
                 color: "var(--color-ink-dim)",
-                fontSize: 11,
-                letterSpacing: "0.14em",
-                textTransform: "uppercase",
+                fontSize: 13,
+                fontWeight: 500,
+                letterSpacing: "-0.005em",
               }}
             >
               {region.days_label}
@@ -1569,7 +1576,7 @@ function RegionSidePanel({
           </div>
           <div
             style={{
-              height: 3,
+              height: 4,
               background: "rgba(230,192,122,0.12)",
               borderRadius: 2,
               overflow: "hidden",
@@ -1684,41 +1691,39 @@ function RegionSidePanel({
                 <div className="flex-1 min-w-0">
                   <p
                     style={{
-                      fontFamily: "var(--font-display)",
-                      fontStyle: "italic",
                       fontSize: 15,
                       fontWeight: 500,
+                      letterSpacing: "-0.011em",
                       color: INK,
-                      lineHeight: 1.25,
-                      marginBottom: 3,
+                      lineHeight: 1.3,
+                      marginBottom: 4,
                     }}
                   >
                     {MOCKUP_TITLE_OVERRIDES[lesson.id] ?? lesson.title}
                   </p>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span
-                      className="font-mono uppercase"
                       style={{
-                        fontSize: 10,
-                        letterSpacing: "0.16em",
-                        color: isCurrent
-                          ? GOLD
-                          : "var(--color-ink-dim)",
+                        fontSize: 12,
+                        fontWeight: 500,
+                        letterSpacing: "-0.005em",
+                        color: isCurrent ? GOLD : "var(--color-ink-dim)",
                       }}
                     >
                       {LESSON_TYPE_LABELS[lesson.type]}
                     </span>
                     {lesson.duration_label && (
                       <>
-                        <span style={{ color: "var(--color-ink-faint)", fontSize: 10 }} aria-hidden="true">
+                        <span style={{ color: "var(--color-ink-faint)", fontSize: 12 }} aria-hidden="true">
                           ·
                         </span>
                         <span
-                          className="font-mono"
                           style={{
-                            fontSize: 11,
+                            fontSize: 12,
+                            fontWeight: 500,
                             color: "var(--color-ink-dim)",
-                            letterSpacing: "0.04em",
+                            letterSpacing: "-0.005em",
+                            fontVariantNumeric: "tabular-nums",
                           }}
                         >
                           {lesson.duration_label}
@@ -1727,14 +1732,14 @@ function RegionSidePanel({
                     )}
                     {lesson.is_gate && (
                       <span
-                        className="font-mono uppercase"
                         style={{
-                          fontSize: 10,
-                          letterSpacing: "0.16em",
+                          fontSize: 11,
+                          fontWeight: 500,
+                          letterSpacing: "-0.005em",
                           color: GOLD_HI,
                           background: "rgba(230,192,122,0.12)",
-                          padding: "2px 6px",
-                          borderRadius: 3,
+                          padding: "2px 8px",
+                          borderRadius: 4,
                         }}
                       >
                         Discount
@@ -1742,14 +1747,14 @@ function RegionSidePanel({
                     )}
                     {lesson.is_boss && (
                       <span
-                        className="font-mono uppercase"
                         style={{
-                          fontSize: 10,
-                          letterSpacing: "0.16em",
+                          fontSize: 11,
+                          fontWeight: 500,
+                          letterSpacing: "-0.005em",
                           color: "#F0A0A8",
                           background: "rgba(196,74,84,0.18)",
-                          padding: "2px 6px",
-                          borderRadius: 3,
+                          padding: "2px 8px",
+                          borderRadius: 4,
                         }}
                       >
                         Final
@@ -1781,21 +1786,22 @@ function RegionSidePanel({
           }}
         >
           <p
-            className="font-mono uppercase"
             style={{
-              fontSize: 10,
-              letterSpacing: "0.2em",
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
               color: "var(--color-ink-dim)",
+              marginBottom: 2,
             }}
           >
             Previous
           </p>
           <p
-            className="italic"
             style={{
-              fontFamily: "var(--font-display)",
-              fontSize: 15,
+              fontSize: 14,
               fontWeight: 500,
+              letterSpacing: "-0.011em",
             }}
           >
             ← {onPrev ? "Go back" : "—"}
@@ -1813,21 +1819,22 @@ function RegionSidePanel({
           }}
         >
           <p
-            className="font-mono uppercase"
             style={{
-              fontSize: 10,
-              letterSpacing: "0.2em",
+              fontSize: 11,
+              fontWeight: 500,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
               color: "var(--color-ink-dim)",
+              marginBottom: 2,
             }}
           >
             Next region
           </p>
           <p
-            className="italic"
             style={{
-              fontFamily: "var(--font-display)",
-              fontSize: 15,
+              fontSize: 14,
               fontWeight: 500,
+              letterSpacing: "-0.011em",
             }}
           >
             {onNext ? "Onward" : "—"} →
@@ -1869,6 +1876,11 @@ function ScenePathOverlay({
   secondaryMarker,
   onSecondaryMarkerClick,
 }: ScenePathOverlayProps) {
+  // Lifted hover state — child markers report up so the hover label
+  // can render once at the END of the SVG, on top of every other
+  // node. SVG paint order = source order, so anything that draws
+  // last wins z-index.
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   // Lesson positions are distributed by ARC LENGTH along the waypoint
   // polyline (excluding the last waypoint, reserved for the end marker).
   // Index-based distribution caused overlaps where the user clicked many
@@ -1930,6 +1942,8 @@ function ScenePathOverlay({
         height: "100%",
         overflow: "visible",
         pointerEvents: "none",
+        textRendering: "geometricPrecision",
+        shapeRendering: "geometricPrecision",
       }}
     >
       {/* No path line — just the lesson nodes sitting on the painted trail */}
@@ -1957,10 +1971,33 @@ function ScenePathOverlay({
             isAction={isAction}
             title={displayTitle}
             size={size}
+            isHovered={hoveredIdx === i}
+            onHoverChange={(hovered) =>
+              setHoveredIdx(hovered ? i : (prev) => (prev === i ? null : prev))
+            }
             onClick={() => onOpenLesson(lesson.id)}
           />
         );
       })}
+
+      {/* Hover label — rendered at the END of the SVG so it's always
+          on top of other lesson markers. Source order = paint order. */}
+      {hoveredIdx != null &&
+        lessonPositions[hoveredIdx] &&
+        lessons[hoveredIdx] && (
+          <HoverLabel
+            x={lessonPositions[hoveredIdx].x}
+            y={
+              lessonPositions[hoveredIdx].y -
+              perspectiveSize(lessonPositions[hoveredIdx].y) -
+              18
+            }
+            title={
+              MOCKUP_TITLE_OVERRIDES[lessons[hoveredIdx].id] ??
+              lessons[hoveredIdx].title
+            }
+          />
+        )}
 
       {/* Secondary marker — drawn slightly ABOVE the primary so the two
           read as a stack: claim first, then onward. Used on R2 for the
@@ -2007,6 +2044,8 @@ interface LessonMarkerProps {
   title: string;
   /** Base radius for circle / half-width for diamond. Drives perspective. */
   size: number;
+  isHovered: boolean;
+  onHoverChange: (hovered: boolean) => void;
   onClick: () => void;
 }
 
@@ -2019,9 +2058,12 @@ function LessonMarker({
   isAction,
   title,
   size: baseSize,
+  isHovered,
+  onHoverChange,
   onClick,
 }: LessonMarkerProps) {
-  const [hot, setHot] = useState(false);
+  const hot = isHovered;
+  void title;
   const fill = isDone
     ? GOLD
     : isCurrent
@@ -2036,8 +2078,8 @@ function LessonMarker({
       transform={`translate(${x} ${y})`}
       style={{ cursor: "pointer", pointerEvents: "auto" }}
       onClick={onClick}
-      onMouseEnter={() => setHot(true)}
-      onMouseLeave={() => setHot(false)}
+      onMouseEnter={() => onHoverChange(true)}
+      onMouseLeave={() => onHoverChange(false)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -2124,9 +2166,12 @@ function LessonMarker({
           y={6}
           textAnchor="middle"
           style={{
-            fontFamily: "JetBrains Mono, ui-monospace, monospace",
-            fontSize: 16,
+            fontFamily:
+              'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            fontSize: 15,
             fontWeight: 600,
+            letterSpacing: "-0.018em",
+            fontVariantNumeric: "tabular-nums",
             fill: isCurrent ? GOLD_HI : GOLD,
           }}
         >
@@ -2134,33 +2179,52 @@ function LessonMarker({
         </text>
       )}
 
-      {/* Hover label */}
-      {hot && (
-        <g transform={`translate(0 ${-(size + 18)})`} pointerEvents="none">
-          <rect
-            x={-120}
-            y={-22}
-            width={240}
-            height={28}
-            rx={4}
-            fill="rgba(6,12,26,0.92)"
-            stroke="rgba(230,192,122,0.3)"
-            strokeWidth={1}
-          />
-          <text
-            y={-3}
-            textAnchor="middle"
-            style={{
-              fontFamily: "Cormorant Garamond, serif",
-              fontStyle: "italic",
-              fontSize: 16,
-              fill: INK,
-            }}
-          >
-            {title.length > 36 ? title.slice(0, 33) + "…" : title}
-          </text>
-        </g>
-      )}
+    </g>
+  );
+}
+
+// Hover label — rendered as a sibling of LessonMarker (after them all)
+// so SVG paint order keeps it on top regardless of which marker is hot.
+function HoverLabel({
+  x,
+  y,
+  title,
+}: {
+  x: number;
+  y: number;
+  title: string;
+}) {
+  const display = title.length > 36 ? title.slice(0, 33) + "…" : title;
+  return (
+    <g
+      transform={`translate(${x} ${y})`}
+      pointerEvents="none"
+      style={{ textRendering: "geometricPrecision" }}
+    >
+      <rect
+        x={-128}
+        y={-22}
+        width={256}
+        height={28}
+        rx={6}
+        fill="rgba(15,17,21,0.96)"
+        stroke="rgba(255,247,235,0.18)"
+        strokeWidth={1}
+      />
+      <text
+        y={-3}
+        textAnchor="middle"
+        style={{
+          fontFamily:
+            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          fontSize: 13,
+          fontWeight: 500,
+          letterSpacing: "-0.005em",
+          fill: "rgba(255,247,235,0.92)",
+        }}
+      >
+        {display}
+      </text>
     </g>
   );
 }
@@ -2274,10 +2338,11 @@ function EndMarker({
           textAnchor="middle"
           y={0}
           style={{
-            fontFamily: "Cormorant Garamond, serif",
-            fontStyle: "italic",
+            fontFamily:
+              'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
             fontWeight: 600,
-            fontSize: 26,
+            fontSize: 22,
+            letterSpacing: "-0.022em",
             fill: INK,
             paintOrder: "stroke fill",
             stroke: "rgba(6,12,26,0.85)",
@@ -2291,10 +2356,11 @@ function EndMarker({
           textAnchor="middle"
           y={22}
           style={{
-            fontFamily: "JetBrains Mono, ui-monospace, monospace",
-            fontSize: 11,
-            letterSpacing: "0.22em",
-            textTransform: "uppercase",
+            fontFamily:
+              'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            fontWeight: 500,
+            fontSize: 12,
+            letterSpacing: "-0.005em",
             fill: accent,
             paintOrder: "stroke fill",
             stroke: "rgba(6,12,26,0.85)",

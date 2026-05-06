@@ -30,16 +30,21 @@ export function StreakFlame({ current, longest }: StreakFlameProps) {
   return (
     <div
       style={{
-        height: 32,
+        height: 44,
         display: "flex",
         alignItems: "center",
-        gap: 6,
-        padding: "0 10px",
-        borderRadius: 8,
-        border: "1px solid var(--color-border)",
+        gap: 8,
+        padding: "0 14px",
+        borderRadius: 10,
+        border: isLit
+          ? "1px solid rgba(255,140,60,0.32)"
+          : "1px solid var(--color-border)",
         background: isLit
-          ? "rgba(255, 140, 60, 0.08)"
+          ? "rgba(255, 140, 60, 0.10)"
           : "var(--color-fill-secondary)",
+        boxShadow: isLit
+          ? "0 0 0 1px rgba(255,140,60,0.05) inset, 0 1px 0 rgba(255,140,60,0.08)"
+          : "none",
         transition:
           "background 250ms cubic-bezier(0.25, 0.1, 0.25, 1), border-color 250ms cubic-bezier(0.25, 0.1, 0.25, 1)",
       }}
@@ -60,13 +65,13 @@ export function StreakFlame({ current, longest }: StreakFlameProps) {
               ? "#FFB868"
               : "#FF9A55"
             : "var(--color-text-tertiary)",
-          fontSize: 13,
-          minWidth: 14,
+          fontSize: 16,
+          minWidth: 16,
           textAlign: "right",
           lineHeight: 1,
           fontWeight: 600,
           fontVariantNumeric: "tabular-nums",
-          letterSpacing: "-0.005em",
+          letterSpacing: "-0.012em",
         }}
       >
         {current}
@@ -77,7 +82,7 @@ export function StreakFlame({ current, longest }: StreakFlameProps) {
 
 function FlameSvg({ lit, hot }: { lit: boolean; hot: boolean }) {
   return (
-    <svg width="20" height="22" viewBox="0 0 24 28" aria-hidden="true">
+    <svg width="24" height="26" viewBox="0 0 24 28" aria-hidden="true">
       {/* Outer flame body */}
       <path
         d="M12 2 C 9 7, 5 10, 5 16 a 7 7 0 0 0 14 0 C 19 12, 16 10, 14 6 C 13 9, 11 9, 12 2 Z"

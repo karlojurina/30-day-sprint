@@ -55,7 +55,7 @@ export function TopBar({ setPanTarget }: TopBarProps) {
     >
       <div
         className="flex items-center gap-4 px-6"
-        style={{ minHeight: 78, paddingTop: 24, paddingBottom: 12 }}
+        style={{ minHeight: 76, paddingTop: 12, paddingBottom: 16 }}
       >
         {/* Brand — just the logo */}
         <div className="flex items-center shrink-0" style={{ height: PILL_HEIGHT }}>

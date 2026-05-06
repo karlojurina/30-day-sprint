@@ -373,21 +373,23 @@ function BigStat({
   sublabel: string;
   accent?: boolean;
 }) {
+  // apple.com hero stat: tracked lowercase eyebrow + display-tier numeral
+  // + sentence-case secondary line. No uppercase on the eyebrow — Apple
+  // doesn't yell at you to read it.
   return (
     <div
       className="surface-resting"
       style={{
         background: "var(--color-bg-card)",
         borderRadius: 16,
-        padding: 28,
+        padding: 32,
       }}
     >
       <p
         style={{
-          fontSize: 12,
+          fontSize: 13,
           fontWeight: 500,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
+          letterSpacing: "-0.005em",
           color: accent
             ? "var(--color-accent-dark)"
             : "var(--color-text-tertiary)",
@@ -398,14 +400,14 @@ function BigStat({
       <p
         className="stat-value"
         style={{
-          fontSize: 56,
+          fontSize: 64,
           fontWeight: 600,
-          lineHeight: 1.05,
-          letterSpacing: "-0.025em",
+          lineHeight: 1.0,
+          letterSpacing: "-0.028em",
           color: accent
             ? "var(--color-accent-dark)"
-            : "var(--color-text-quaternary)",
-          marginTop: 12,
+            : "var(--color-text-primary)",
+          marginTop: 16,
           fontVariantNumeric: "tabular-nums",
         }}
       >
@@ -413,10 +415,11 @@ function BigStat({
       </p>
       <p
         style={{
-          fontSize: 13,
-          color: "var(--color-text-tertiary)",
-          marginTop: 14,
-          letterSpacing: "-0.005em",
+          fontSize: 14,
+          color: "var(--color-text-secondary)",
+          marginTop: 16,
+          letterSpacing: "-0.006em",
+          lineHeight: 1.4,
         }}
       >
         {sublabel}
@@ -446,28 +449,27 @@ function SmallStat({
       style={{
         background: "var(--color-bg-card)",
         borderRadius: 12,
-        padding: 18,
+        padding: 20,
       }}
     >
       <p
         style={{
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: 500,
           color: "var(--color-text-tertiary)",
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
+          letterSpacing: "-0.005em",
         }}
       >
         {label}
       </p>
       <p
         style={{
-          fontSize: 28,
+          fontSize: 30,
           fontWeight: 600,
           color,
-          marginTop: 6,
-          letterSpacing: "-0.022em",
-          lineHeight: 1.05,
+          marginTop: 8,
+          letterSpacing: "-0.024em",
+          lineHeight: 1.0,
           fontVariantNumeric: "tabular-nums",
         }}
       >

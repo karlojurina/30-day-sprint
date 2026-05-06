@@ -238,13 +238,15 @@ body:has(.admin-shell)::before {
   border-bottom: none;
 }
 
-/* Section header — tiny, secondary, all-caps NOT tracked */
+/* Admin section header — sentence case with tight tracking. Apple-clean
+   utility surfaces don't shout in uppercase; they whisper through size +
+   weight + opacity. */
 .admin-shell .section-label {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--color-text-tertiary);
+  text-transform: none;
+  letter-spacing: -0.005em;
+  color: var(--color-text-secondary);
 }
 
 /* Apple-style negative tracking for the admin's Inter type */

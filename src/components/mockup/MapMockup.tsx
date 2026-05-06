@@ -1315,61 +1315,69 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                     )}
                   </g>
 
-                  {/* Discount-gate beacon — only on R2, the region whose
-                      completion unlocks the discount. Bigger and more
-                      explanatory than the previous "30% OFF" disc — the
-                      goal is that a brand-new student understands what
-                      this is in one second.
-                      Sits above the numeral plaque so the prize is
-                      visible from anywhere in the overview. */}
+                  {/* Discount-gate beacon — only on R2. Apple-restraint
+                      pass: ONE soft halo + ONE clean badge + ONE legible
+                      inscription. No outer ring, no "OFF MONTH 2"
+                      sub-caption inside the badge — the inscription
+                      carries the meaning. Floats above the numeral
+                      plaque so the prize is visible from any zoom. */}
                   {showDiscountBeacon && (
                     <g
-                      transform={`translate(${z.labelX} ${z.labelY - 130})`}
+                      transform={`translate(${z.labelX} ${z.labelY - 140})`}
                       pointerEvents="none"
                     >
-                      {/* Outer pulsing halo */}
+                      {/* Soft halo — single layer, slow breath */}
                       <circle
-                        r={70}
-                        fill={discountBeaconReady ? GOLD : "rgba(230,192,122,0.4)"}
-                        opacity={0.2}
+                        r={60}
+                        fill={discountBeaconReady ? GOLD : "rgba(230,192,122,0.45)"}
+                        opacity={0.16}
                       >
                         <animate
                           attributeName="r"
-                          values="60;78;60"
-                          dur={discountBeaconReady ? "2.2s" : "3.6s"}
+                          values="54;66;54"
+                          dur="3.2s"
                           repeatCount="indefinite"
                         />
                         <animate
                           attributeName="opacity"
-                          values="0.12;0.32;0.12"
-                          dur={discountBeaconReady ? "2.2s" : "3.6s"}
+                          values="0.10;0.22;0.10"
+                          dur="3.2s"
                           repeatCount="indefinite"
                         />
                       </circle>
-                      {/* Outer ring */}
+
+                      {/* Badge body — gradient fill + hairline gold stroke,
+                          no double-ring. Diameter reduced from 80 → 68. */}
+                      <defs>
+                        <radialGradient id="beacon-fill" cx="50%" cy="40%" r="65%">
+                          <stop offset="0%" stopColor="rgba(230,192,122,0.28)" />
+                          <stop offset="55%" stopColor="rgba(10,18,36,0.96)" />
+                          <stop offset="100%" stopColor="rgba(6,12,26,0.98)" />
+                        </radialGradient>
+                      </defs>
                       <circle
-                        r={48}
-                        fill="none"
+                        r={34}
+                        fill="url(#beacon-fill)"
                         stroke={discountBeaconReady ? GOLD_HI : GOLD}
                         strokeWidth={1.5}
-                        opacity={0.7}
                       />
-                      {/* Solid badge */}
-                      <circle
-                        r={40}
-                        fill="rgba(6,12,26,0.94)"
-                        stroke={discountBeaconReady ? GOLD_HI : GOLD}
-                        strokeWidth={2}
+                      {/* Specular top highlight — turns disc into sphere */}
+                      <path
+                        d="M -22 -16 A 28 28 0 0 1 22 -16"
+                        fill="none"
+                        stroke="rgba(255,247,235,0.32)"
+                        strokeWidth={1}
+                        strokeLinecap="round"
                       />
                       <text
                         x={0}
-                        y={-2}
+                        y={8}
                         textAnchor="middle"
                         style={{
                           fontFamily:
                             'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
                           fontWeight: 700,
-                          fontSize: 28,
+                          fontSize: 24,
                           letterSpacing: "-0.025em",
                           fill: GOLD_HI,
                           fontVariantNumeric: "tabular-nums",
@@ -1377,27 +1385,12 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       >
                         30%
                       </text>
+
+                      {/* Inscription — single 17px line, no two-tier copy.
+                          Tracks left of the badge so it doesn't overlap. */}
                       <text
-                        x={0}
-                        y={16}
-                        textAnchor="middle"
-                        style={{
-                          fontFamily:
-                            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                          fontSize: 9,
-                          fontWeight: 600,
-                          letterSpacing: "0.06em",
-                          fill: "rgba(230,192,122,0.92)",
-                        }}
-                      >
-                        OFF MONTH 2
-                      </text>
-                      {/* Inscription beside the badge — clearer copy
-                          so a new student understands the discount
-                          without needing to be told what "the gate" is. */}
-                      <text
-                        x={56}
-                        y={-4}
+                        x={48}
+                        y={6}
                         textAnchor="start"
                         style={{
                           fontFamily:
@@ -1405,37 +1398,18 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                           fontWeight: 600,
                           fontSize: 17,
                           letterSpacing: "-0.018em",
-                          fill: discountBeaconReady ? GOLD_HI : "rgba(230,220,200,0.95)",
+                          fill: discountBeaconReady
+                            ? GOLD_HI
+                            : "rgba(255,247,235,0.96)",
                           paintOrder: "stroke fill",
-                          stroke: "rgba(6,12,26,0.85)",
-                          strokeWidth: 3,
+                          stroke: "rgba(6,12,26,0.78)",
+                          strokeWidth: 2.5,
                           strokeLinejoin: "round",
                         }}
                       >
                         {discountBeaconReady
                           ? "Ready to apply"
-                          : "Discount checkpoint"}
-                      </text>
-                      <text
-                        x={56}
-                        y={16}
-                        textAnchor="start"
-                        style={{
-                          fontFamily:
-                            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                          fontWeight: 500,
-                          fontSize: 12,
-                          letterSpacing: "-0.005em",
-                          fill: "rgba(230,220,200,0.7)",
-                          paintOrder: "stroke fill",
-                          stroke: "rgba(6,12,26,0.85)",
-                          strokeWidth: 3,
-                          strokeLinejoin: "round",
-                        }}
-                      >
-                        {discountBeaconReady
-                          ? "Claim your 30% off"
-                          : "Finish R1 + R2 to unlock"}
+                          : "30% off your second month"}
                       </text>
                     </g>
                   )}
@@ -2045,17 +2019,19 @@ function ScenePathOverlay({
     }
     if (total === 0) return usable.slice(0, N);
 
-    // Inset from each end so nothing sits near the scene's image edges
-    // (which are often cropped by the viewport's aspect ratio) or crowds
-    // the end marker. 10% of total, capped at 200 map-units — enough to
-    // keep the first lesson off the bottom on R2/R3 and the last lesson
-    // clear of the "Onward" marker on R1.
-    const edgeInset = Math.min(200, total * 0.1);
-    const usableLen = total - edgeInset * 2;
+    // Asymmetric insets: the END needs more room because the discount
+    // marker (R2) and the Onward marker live there. The START only
+    // needs to clear the scene's image edge. With the breakdowns
+    // collapsed to a single group node, R2 has plenty of total
+    // horizontal room — bias the lessons toward the start so the
+    // discount + Onward have space to breathe.
+    const edgeInsetStart = Math.min(120, total * 0.06);
+    const edgeInsetEnd = Math.min(280, total * 0.16);
+    const usableLen = total - edgeInsetStart - edgeInsetEnd;
 
     return lessons.map((_, i) => {
       const t = N === 1 ? 0.5 : i / (N - 1);
-      const target = edgeInset + usableLen * t;
+      const target = edgeInsetStart + usableLen * t;
       // Find the segment containing `target` via linear scan
       let seg = 0;
       while (seg < cum.length - 1 && cum[seg + 1] < target) seg++;
@@ -2123,25 +2099,6 @@ function ScenePathOverlay({
         );
       })}
 
-      {/* Hover label — rendered at the END of the SVG so it's always
-          on top of other lesson markers. Source order = paint order. */}
-      {hoveredIdx != null &&
-        lessonPositions[hoveredIdx] &&
-        lessons[hoveredIdx] && (
-          <HoverLabel
-            x={lessonPositions[hoveredIdx].x}
-            y={
-              lessonPositions[hoveredIdx].y -
-              perspectiveSize(lessonPositions[hoveredIdx].y) -
-              18
-            }
-            title={
-              MOCKUP_TITLE_OVERRIDES[lessons[hoveredIdx].id] ??
-              lessons[hoveredIdx].title
-            }
-          />
-        )}
-
       {/* Secondary marker — sits BEFORE the primary along the path
           direction so the flow reads sequentially:
               last lesson → discount → onward
@@ -2183,6 +2140,26 @@ function ScenePathOverlay({
           onClick={onEndMarkerClick}
         />
       )}
+
+      {/* Hover label — rendered LAST in the SVG so it sits above every
+          other marker (lesson, group, secondary, end). Source order =
+          paint order in SVG. */}
+      {hoveredIdx != null &&
+        lessonPositions[hoveredIdx] &&
+        lessons[hoveredIdx] && (
+          <HoverLabel
+            x={lessonPositions[hoveredIdx].x}
+            y={
+              lessonPositions[hoveredIdx].y -
+              perspectiveSize(lessonPositions[hoveredIdx].y) -
+              18
+            }
+            title={
+              MOCKUP_TITLE_OVERRIDES[lessons[hoveredIdx].id] ??
+              lessons[hoveredIdx].title
+            }
+          />
+        )}
     </svg>
   );
 }
@@ -2298,32 +2275,6 @@ function LessonMarker({
         />
       )}
 
-      {/* Group stack — two faded silver rings BEHIND the main shape so
-          the group node visually reads "more inside". Shifted right and
-          down so the eye sees a small stack of cards. */}
-      {isGroup && (
-        <>
-          <circle
-            r={size}
-            cx={6}
-            cy={5}
-            fill="rgba(10,18,36,0.85)"
-            stroke={SILVER}
-            strokeWidth={1}
-            opacity={0.45}
-          />
-          <circle
-            r={size}
-            cx={3}
-            cy={2.5}
-            fill="rgba(10,18,36,0.92)"
-            stroke={SILVER}
-            strokeWidth={1.2}
-            opacity={0.7}
-          />
-        </>
-      )}
-
       {/* Hairline drop shadow under the marker */}
       {isAction ? (
         <rect
@@ -2366,6 +2317,22 @@ function LessonMarker({
           fill={isCurrent ? fill : `url(#marker-fill-${index})`}
           stroke={stroke}
           strokeWidth={isCurrent ? 2 : 1.5}
+        />
+      )}
+
+      {/* Specular top-light arc — subtle white highlight along the
+          upper rim that turns the disc into a sphere. Apple-design
+          "materials beat borders" — this is what differentiates a
+          rendered checkpoint from a flat sticker. Only on circle
+          (lesson + group), not action diamond. */}
+      {!isAction && (
+        <path
+          d={`M ${-size * 0.7} ${-size * 0.5} A ${size * 0.95} ${size * 0.95} 0 0 1 ${size * 0.7} ${-size * 0.5}`}
+          fill="none"
+          stroke={isDone ? "rgba(255,255,255,0.45)" : "rgba(214,222,235,0.30)"}
+          strokeWidth={1}
+          strokeLinecap="round"
+          opacity={0.85}
         />
       )}
 

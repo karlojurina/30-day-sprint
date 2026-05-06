@@ -94,11 +94,9 @@ export function DiscountProgressBar() {
   return (
     <div className="flex items-center gap-4 w-full min-w-0">
       <div className="flex-1 min-w-0">
-        {/* Bar with milestone marker. Reserved height keeps the floating
-            badge from shifting layout above. */}
+        {/* Bar */}
         <div
           className="relative"
-          style={{ height: 22, display: "flex", alignItems: "center" }}
           aria-label={`${overallPercent}% complete · 30% discount milestone at ${Math.round(milestonePercent)}%`}
         >
           <div
@@ -122,14 +120,16 @@ export function DiscountProgressBar() {
             />
           </div>
 
-          {/* Milestone tick across the bar */}
+          {/* Milestone tick — extends slightly above and below the bar
+              so the eye reads it as a single line that the badge below
+              hangs off of. */}
           <div
             aria-hidden="true"
             style={{
               position: "absolute",
               left: `${milestonePercent}%`,
-              top: 0,
-              bottom: 0,
+              top: -3,
+              height: 12,
               width: 2,
               background: milestoneReached
                 ? "var(--color-gold-light)"
@@ -138,12 +138,14 @@ export function DiscountProgressBar() {
             }}
           />
 
-          {/* 30% badge floating above the milestone */}
+          {/* 30% badge BELOW the bar at the milestone position. Hangs
+              off the milestone tick. Apple-style: pill with hairline
+              border, no shadow, accent color tinted not full-bleed. */}
           <div
             className="absolute"
             style={{
               left: `${milestonePercent}%`,
-              top: -18,
+              top: 12,
               transform: "translateX(-50%)",
               padding: "2px 8px",
               borderRadius: 999,
@@ -158,6 +160,7 @@ export function DiscountProgressBar() {
               gap: 4,
               whiteSpace: "nowrap",
               pointerEvents: "none",
+              lineHeight: 1,
             }}
             title="30% off your next month — finish R1 + R2 within 14 days of joining"
           >
@@ -194,12 +197,13 @@ export function DiscountProgressBar() {
           </div>
         </div>
 
-        {/* Inline explainer */}
+        {/* Inline explainer — sits below the bar+badge cluster, with
+            enough gap that the badge doesn't crash into it. */}
         <p
           style={{
             fontSize: 12,
             lineHeight: 1.4,
-            marginTop: 4,
+            marginTop: 22,
             letterSpacing: "-0.005em",
           }}
         >

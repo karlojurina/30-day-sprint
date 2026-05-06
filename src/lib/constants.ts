@@ -32,6 +32,12 @@ export const DISCOUNT_GATE_LESSON_ID = "l046";
 // this many days of joining Whop. Measured server-side at claim time.
 export const DISCOUNT_WINDOW_DAYS = 14;
 
+// Hard cutoff for admin list views — only show students who joined
+// on or after this date. Pre-cutoff records are pre-May-2026 test
+// accounts and old free-community joiners we don't want in the team's
+// daily working surface.
+export const ADMIN_STUDENT_JOIN_CUTOFF = "2026-05-01T00:00:00.000Z";
+
 export const LESSON_TYPE_LABELS: Record<string, string> = {
   setup: "Setup",
   watch: "Watch",

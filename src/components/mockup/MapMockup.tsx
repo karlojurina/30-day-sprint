@@ -43,6 +43,10 @@ const SIDE_PANEL_COLLAPSED_WIDTH = 56;
 const GOLD = "#E6C07A";
 const GOLD_HI = "#F0D595";
 const INK = "#E6DCC8";
+// Silver palette for lesson nodes — cooler than gold so the gold
+// is reserved for milestones (region numerals, discount gate, end markers).
+const SILVER = "#B8C5D6";
+const SILVER_HI = "#D6DEEB";
 
 /**
  * Puzzle-piece region hit zones — irregular closed polygons positioned over
@@ -2065,11 +2069,11 @@ function LessonMarker({
   const hot = isHovered;
   void title;
   const fill = isDone
-    ? GOLD
+    ? SILVER
     : isCurrent
-      ? "rgba(230,192,122,0.25)"
-      : "rgba(6,12,26,0.92)";
-  const stroke = isCurrent ? GOLD_HI : GOLD;
+      ? "rgba(184,197,214,0.18)"
+      : "rgba(10,18,36,0.92)";
+  const stroke = isCurrent ? SILVER_HI : SILVER;
   // Action items are visually larger than lessons, proportional to base
   const size = isAction ? baseSize * 1.23 : baseSize;
 
@@ -2095,8 +2099,8 @@ function LessonMarker({
         <circle
           r={size + 6}
           fill="none"
-          stroke={GOLD_HI}
-          strokeWidth={2}
+          stroke={SILVER_HI}
+          strokeWidth={1.5}
           opacity={0.6}
         >
           <animate
@@ -2107,20 +2111,35 @@ function LessonMarker({
           />
           <animate
             attributeName="opacity"
-            values="0.15;0.7;0.15"
+            values="0.12;0.55;0.12"
             dur="2.4s"
             repeatCount="indefinite"
           />
         </circle>
       )}
 
-      {/* Hover glow */}
+      {/* Hover glow — soft silver wash */}
       {hot && (
         <circle
           r={size + 4}
-          fill="rgba(240,213,149,0.25)"
+          fill="rgba(214,222,235,0.18)"
           style={{ transition: "opacity 0.2s" }}
         />
+      )}
+
+      {/* Hairline drop shadow under the marker */}
+      {isAction ? (
+        <rect
+          x={-size * 0.75 + 0.6}
+          y={-size * 0.75 + 0.6}
+          width={size * 1.5}
+          height={size * 1.5}
+          transform="rotate(45)"
+          fill="rgba(0,0,0,0.32)"
+          stroke="none"
+        />
+      ) : (
+        <circle r={size} cx={0.5} cy={0.5} fill="rgba(0,0,0,0.28)" stroke="none" />
       )}
 
       {/* Marker shape — circle for lessons, diamond for action items */}
@@ -2133,14 +2152,14 @@ function LessonMarker({
           transform="rotate(45)"
           fill={fill}
           stroke={stroke}
-          strokeWidth={2.5}
+          strokeWidth={isCurrent ? 2 : 1.5}
         />
       ) : (
         <circle
           r={size}
           fill={fill}
           stroke={stroke}
-          strokeWidth={isCurrent ? 3 : 2}
+          strokeWidth={isCurrent ? 2 : 1.5}
         />
       )}
 
@@ -2150,7 +2169,7 @@ function LessonMarker({
           d="M -9 0 L -2 7 L 10 -7"
           fill="none"
           stroke="#0A1428"
-          strokeWidth={3.5}
+          strokeWidth={3}
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -2158,7 +2177,7 @@ function LessonMarker({
         // Small lightning / action glyph
         <path
           d="M -5 -9 L 3 -2 L -1 -2 L 5 9 L -3 2 L 1 2 Z"
-          fill={isCurrent ? GOLD_HI : GOLD}
+          fill={isCurrent ? SILVER_HI : SILVER}
           stroke="none"
         />
       ) : (
@@ -2172,7 +2191,7 @@ function LessonMarker({
             fontWeight: 600,
             letterSpacing: "-0.018em",
             fontVariantNumeric: "tabular-nums",
-            fill: isCurrent ? GOLD_HI : GOLD,
+            fill: isCurrent ? SILVER_HI : SILVER,
           }}
         >
           {index}

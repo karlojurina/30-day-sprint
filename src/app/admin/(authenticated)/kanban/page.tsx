@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import type { Student, StudentLessonCompletion } from "@/types/database";
 import { getDayNumber } from "@/types/database";
-import { TOTAL_LESSONS, progressPercent } from "@/lib/constants";
+import {
+  TOTAL_LESSONS,
+  progressPercent,
+  ADMIN_STUDENT_JOIN_CUTOFF,
+} from "@/lib/constants";
 import { StudentCard } from "./StudentCard";
 import { StudentDrawer } from "./StudentDrawer";
 
@@ -70,6 +74,7 @@ export default function KanbanPage() {
           .select("*")
           .not("whop_membership_id", "is", null)
           .in("membership_status", ["active", "past_due", "canceled"])
+          .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
           .order("joined_at", { ascending: false }),
         supabase
           .from("student_lesson_completions")

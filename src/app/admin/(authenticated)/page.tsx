@@ -4,7 +4,11 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import type { Student, DisengagementAlert } from "@/types/database";
 import { getDayNumber } from "@/types/database";
-import { TOTAL_LESSONS, progressPercent } from "@/lib/constants";
+import {
+  TOTAL_LESSONS,
+  progressPercent,
+  ADMIN_STUDENT_JOIN_CUTOFF,
+} from "@/lib/constants";
 import Link from "next/link";
 
 interface DashboardData {
@@ -45,7 +49,8 @@ export default function AdminDashboard() {
           .from("students")
           .select("*")
           .not("whop_membership_id", "is", null)
-          .in("membership_status", ["active", "past_due", "canceled"]),
+          .in("membership_status", ["active", "past_due", "canceled"])
+          .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF),
         supabase.from("student_lesson_completions").select("student_id"),
         supabase.from("lessons").select("id", { count: "exact", head: true }),
         supabase.from("discount_requests").select("id").eq("status", "pending"),

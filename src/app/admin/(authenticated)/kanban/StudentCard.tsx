@@ -46,7 +46,6 @@ export function StudentCard({ student, progressPercent, onClick }: StudentCardPr
       className="w-full text-left surface-resting transition-colors"
       style={{
         background: "var(--color-bg-card)",
-        border: "none",
         borderRadius: 12,
         padding: 14,
         cursor: "pointer",

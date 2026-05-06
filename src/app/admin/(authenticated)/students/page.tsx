@@ -4,7 +4,11 @@ import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import type { Student } from "@/types/database";
 import { getDayNumber } from "@/types/database";
-import { progressPercent, TOTAL_LESSONS } from "@/lib/constants";
+import {
+  progressPercent,
+  TOTAL_LESSONS,
+  ADMIN_STUDENT_JOIN_CUTOFF,
+} from "@/lib/constants";
 import Link from "next/link";
 
 type SortKey = "name" | "joined_at" | "day" | "progress" | "last_active_at";
@@ -23,16 +27,16 @@ export default function StudentsPage() {
 
   useEffect(() => {
     async function fetchStudents() {
-      // Filter to actual paying students:
-      //   - whop_membership_id IS NOT NULL: they had a real Whop membership
-      //   - membership_status IN active|past_due|canceled: drop 'expired'
-      //     and any null statuses (free-community joiners who slipped through)
+      // Filter to actual paying students who joined on/after the
+      // cutoff (May 1, 2026). Older records are pre-cutover test
+      // accounts + free joiners we don't want in the working surface.
       const [studentsRes, completionsRes, lessonsRes] = await Promise.all([
         supabase
           .from("students")
           .select("*")
           .not("whop_membership_id", "is", null)
           .in("membership_status", ["active", "past_due", "canceled"])
+          .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
           .order("joined_at", { ascending: false }),
         supabase.from("student_lesson_completions").select("student_id"),
         supabase.from("lessons").select("id", { count: "exact", head: true }),
@@ -265,16 +269,16 @@ export default function StudentsPage() {
               Discord
             </span>
           </div>
-          <div style={{ width: 60 }}>
+          <div style={{ width: 60, flexShrink: 0 }}>
             <SortHeader label="Day" sortKeyName="day" />
           </div>
-          <div style={{ width: 140 }}>
+          <div style={{ width: 160, flexShrink: 0 }}>
             <SortHeader label="Progress" sortKeyName="progress" />
           </div>
-          <div className="hidden lg:block" style={{ width: 110 }}>
+          <div className="hidden lg:block" style={{ width: 110, flexShrink: 0 }}>
             <SortHeader label="Last active" sortKeyName="last_active_at" />
           </div>
-          <div style={{ width: 90 }}>
+          <div style={{ width: 90, flexShrink: 0 }}>
             <span
               style={{
                 fontSize: 11,
@@ -376,7 +380,7 @@ export default function StudentsPage() {
                     {student.discord_username || "—"}
                   </span>
                 </div>
-                <div style={{ width: 60 }}>
+                <div style={{ width: 60, flexShrink: 0 }}>
                   <span
                     style={{
                       fontSize: 14,
@@ -388,11 +392,18 @@ export default function StudentsPage() {
                     {day}
                   </span>
                 </div>
-                <div style={{ width: 140 }}>
-                  <div className="flex items-center gap-2">
+                <div
+                  style={{
+                    width: 160,
+                    flexShrink: 0,
+                    paddingRight: 12,
+                  }}
+                >
+                  <div className="flex items-center" style={{ gap: 10 }}>
                     <div
                       style={{
                         flex: 1,
+                        minWidth: 0,
                         height: 4,
                         borderRadius: 2,
                         background: "var(--color-fill-secondary, rgba(20,20,24,0.06))",
@@ -413,7 +424,8 @@ export default function StudentsPage() {
                         fontSize: 12,
                         color: "var(--color-text-secondary)",
                         fontVariantNumeric: "tabular-nums",
-                        minWidth: 30,
+                        flexShrink: 0,
+                        minWidth: 36,
                         textAlign: "right",
                       }}
                     >
@@ -421,7 +433,7 @@ export default function StudentsPage() {
                     </span>
                   </div>
                 </div>
-                <div className="hidden lg:block" style={{ width: 110 }}>
+                <div className="hidden lg:block" style={{ width: 110, flexShrink: 0 }}>
                   <span
                     style={{
                       fontSize: 12,
@@ -431,7 +443,7 @@ export default function StudentsPage() {
                     {relativeTime(student.last_active_at)}
                   </span>
                 </div>
-                <div style={{ width: 90 }}>
+                <div style={{ width: 90, flexShrink: 0 }}>
                   <StatusPill status={student.membership_status} />
                 </div>
               </Link>

@@ -102,7 +102,8 @@ export async function syncWatchProgress({
       (id) => !matchedWhopIds.has(id)
     );
 
-    // 3. Upsert completions (idempotent). Skip if nothing to insert.
+    // 3. Insert NEW completions (idempotent — existing rows are left
+    //    untouched so we don't reset old completed_at timestamps).
     if (matched.length > 0) {
       const rows = matched.map((l) => ({
         student_id: studentId,
@@ -118,6 +119,24 @@ export async function syncWatchProgress({
 
       if (upsertError) {
         throw new Error(`Upsert failed: ${upsertError.message}`);
+      }
+
+      // 3b. Promote any prior SKIP to a WATCH for the lessons the
+      //     student now has on Whop. Doesn't touch already-watched
+      //     rows (completed_at IS NULL filter).
+      const lessonIds = matched.map((l) => l.id);
+      const { error: promoteError } = await supabase
+        .from("student_lesson_completions")
+        .update({
+          completed_at: new Date().toISOString(),
+          skipped_at: null,
+        })
+        .eq("student_id", studentId)
+        .in("lesson_id", lessonIds)
+        .is("completed_at", null);
+
+      if (promoteError) {
+        throw new Error(`Skip→watch promotion failed: ${promoteError.message}`);
       }
     }
 

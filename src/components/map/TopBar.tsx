@@ -1,47 +1,33 @@
 "use client";
 
-import { useMemo } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import Image from "next/image";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
-import { getDayNumber } from "@/types/database";
+import { LESSON_GROUPS, lessonGroupOf } from "@/lib/constants";
 import { StreakFlame } from "./StreakFlame";
-import { ProgressDial } from "./ProgressDial";
-import { DiscountCountdown } from "./DiscountCountdown";
 import { DiscountProgressBar } from "./DiscountProgressBar";
 
 interface TopBarProps {
   setPanTarget: Dispatch<SetStateAction<string | null>>;
 }
 
-const PILL_HEIGHT = 36; // shared height so every topbar pill aligns perfectly
+const PILL_HEIGHT = 36;
 
-// Shared pill styling used across every topbar chip so they all line up.
-const pillBaseStyle: React.CSSProperties = {
-  height: PILL_HEIGHT,
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  padding: "0 12px",
-  borderRadius: 8,
-  border: "1px solid rgba(230,192,122,0.28)",
-  background: "rgba(16,32,66,0.6)",
-};
-
+/**
+ * Single-row top bar. Was two rows (breadcrumb + progress dial pill +
+ * countdown pill on row 1, progress bar on row 2). Now everything
+ * collapses around the bar so there's exactly one focal point:
+ *   brand · current lesson · discount progress bar · streak · signout
+ *
+ * Dropped:
+ *   - "Hey {name}" greeting (streak is a better personal anchor)
+ *   - ProgressDial (the bar already shows progress)
+ *   - DiscountCountdown pill (countdown lives in the bar's status line)
+ */
 export function TopBar({ setPanTarget }: TopBarProps) {
   const { student, signOut } = useAuth();
-  const {
-    regions,
-    currentLesson,
-    streak,
-    completedLessonIds,
-  } = useStudent();
-
-  const dayNumber = useMemo(
-    () => (student ? getDayNumber(student.joined_at) : 1),
-    [student]
-  );
+  const { regions, currentLesson, streak } = useStudent();
 
   if (!student) return null;
 
@@ -49,7 +35,13 @@ export function TopBar({ setPanTarget }: TopBarProps) {
     ? regions.find((r) => r.id === currentLesson.region_id)
     : null;
 
-  const firstName = student.name?.split(" ")[0] || "Explorer";
+  // If the current lesson belongs to a group, show the group's title
+  // in the breadcrumb so it matches what the student sees on the map.
+  const currentGroupId = currentLesson ? lessonGroupOf(currentLesson.id) : null;
+  const breadcrumbTitle = currentGroupId
+    ? LESSON_GROUPS[currentGroupId]?.title ?? currentLesson?.title
+    : currentLesson?.title;
+  const breadcrumbDuration = currentGroupId ? null : currentLesson?.duration_label;
 
   return (
     <header
@@ -61,41 +53,33 @@ export function TopBar({ setPanTarget }: TopBarProps) {
         borderBottom: "1px solid var(--color-border)",
       }}
     >
-      {/* Row 1 — 60px header. Focal point is the breadcrumb in the
-          middle (next task), flanked by progress + streak. */}
       <div
-        className="flex items-center justify-between gap-4 px-6"
-        style={{ height: 60 }}
+        className="flex items-center gap-4 px-6"
+        style={{ minHeight: 64, paddingTop: 12, paddingBottom: 10 }}
       >
-        {/* Brand — just the logo. */}
-        <div
-          className="flex items-center shrink-0"
-          style={{ height: PILL_HEIGHT }}
-        >
+        {/* Brand — just the logo */}
+        <div className="flex items-center shrink-0" style={{ height: PILL_HEIGHT }}>
           <Image
             src="/ecomtalent-logo.png"
             alt="EcomTalent"
             width={547}
             height={547}
             priority
-            style={{
-              height: 28,
-              width: 28,
-              objectFit: "contain",
-            }}
+            style={{ height: 28, width: 28, objectFit: "contain" }}
           />
         </div>
 
-        {/* Breadcrumb — Inter title. The TopBar is one thing now:
-            'what to do next.' Italic Cormorant retired. */}
+        {/* Current lesson breadcrumb — narrower than before so the bar
+            gets the room. Hidden on tablet to save horizontal space. */}
         {currentLesson && (
           <button
             onClick={() => setPanTarget(currentLesson.id)}
-            className="hidden md:flex items-center flex-1 min-w-0 justify-center transition-colors"
+            className="hidden lg:flex items-center shrink-0 transition-colors"
             style={{
-              gap: 10,
-              maxWidth: 560,
-              padding: "0 14px",
+              gap: 8,
+              maxWidth: 320,
+              minWidth: 0,
+              padding: "0 12px",
               height: PILL_HEIGHT,
               borderRadius: 10,
               border: "1px solid var(--color-border)",
@@ -104,8 +88,8 @@ export function TopBar({ setPanTarget }: TopBarProps) {
             }}
             title={
               currentRegion
-                ? `Day ${dayNumber} · ${currentRegion.name} · ${currentLesson.title}`
-                : currentLesson.title
+                ? `${currentRegion.name} · ${breadcrumbTitle}`
+                : breadcrumbTitle
             }
           >
             <span
@@ -113,14 +97,14 @@ export function TopBar({ setPanTarget }: TopBarProps) {
               style={{
                 color: "var(--color-text-primary)",
                 fontWeight: 600,
-                fontSize: 14,
+                fontSize: 13,
                 letterSpacing: "-0.011em",
                 lineHeight: 1,
               }}
             >
-              {currentLesson.title}
+              {breadcrumbTitle}
             </span>
-            {currentLesson.duration_label && (
+            {breadcrumbDuration && (
               <span
                 className="shrink-0"
                 style={{
@@ -131,31 +115,36 @@ export function TopBar({ setPanTarget }: TopBarProps) {
                   fontWeight: 500,
                 }}
               >
-                {currentLesson.duration_label}
+                {breadcrumbDuration}
               </span>
             )}
           </button>
         )}
 
-        {/* Right cluster — progress dial + discount countdown + streak
-            flame + sign out. Discount countdown auto-hides when window
-            closes or student has applied. */}
-        <div className="flex items-center gap-2 shrink-0">
-          <ProgressDial completed={completedLessonIds.size} size={44} />
-          <DiscountCountdown />
-          <StreakFlame current={streak.current} longest={streak.longest} />
+        {/* Focal element — the discount progress bar takes the rest of
+            the width. Internal layout (label, milestone, countdown) is
+            handled inside the component. */}
+        <div className="flex-1 min-w-0">
+          <DiscountProgressBar />
+        </div>
 
-          {/* Sign out */}
+        {/* Right cluster — streak + signout. Compact pair. */}
+        <div className="flex items-center gap-2 shrink-0">
+          <StreakFlame current={streak.current} longest={streak.longest} />
           <button
             onClick={signOut}
             style={{
-              ...pillBaseStyle,
+              height: PILL_HEIGHT,
+              padding: "0 10px",
+              borderRadius: 8,
               border: "1px solid var(--color-border)",
               background: "transparent",
               color: "var(--color-text-tertiary)",
               cursor: "pointer",
-              padding: "0 10px",
               transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
             }}
             title="Sign out"
             aria-label="Sign out"
@@ -178,10 +167,6 @@ export function TopBar({ setPanTarget }: TopBarProps) {
           </button>
         </div>
       </div>
-
-      {/* Row 2 — single horizontal bar to the discount checkpoint */}
-      <DiscountProgressBar firstName={firstName} />
     </header>
   );
 }
-

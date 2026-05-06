@@ -4,22 +4,22 @@ import { useMemo } from "react";
 import { useStudent } from "@/contexts/StudentContext";
 import { progressPercent } from "@/lib/constants";
 
-interface DiscountProgressBarProps {
-  firstName: string;
-}
-
 /**
- * The TopBar's secondary row. Single horizontal bar showing total
- * progress through all 30 days, with the 30% discount sitting as a
- * milestone marker at the R1 + R2 boundary (not the endpoint).
+ * Focal element of the (now single-row) TopBar. Horizontal bar showing
+ * progress through every lesson, with the 30% discount marker sitting
+ * at the R1+R2 boundary (the "gate"). The milestone has an inline
+ * explanation directly underneath so a brand-new student understands
+ * what the badge means at a glance.
  *
- * Filled portion = lessons completed across the whole program.
- * Milestone marker = the discount gate, positioned at the % of total
- * lessons covered by R1 + R2.
- *
- * Status line below switches with state.
+ * State machine for the status line:
+ *   - Pre-eligible:  "30% off month 2 · finish R1 + R2 within Nd"
+ *   - Eligible:      "Ready to apply for your 30% discount"
+ *   - Pending:       "Application under review"
+ *   - Approved:      "Your 30% code is ready · CODE"
+ *   - Rejected:      "Application not approved · DM the team in Discord"
+ *   - Window closed: "Discount window closed"
  */
-export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
+export function DiscountProgressBar() {
   const {
     lessons,
     completedLessonIds,
@@ -55,7 +55,8 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
   if (discountRequest?.status === "approved") {
     statusLine = (
       <span style={{ color: "var(--color-gold-light)" }}>
-        Your 30% code is ready{discountRequest.promo_code ? ` · ${discountRequest.promo_code}` : ""}
+        Your 30% code is ready
+        {discountRequest.promo_code ? ` · ${discountRequest.promo_code}` : ""}
       </span>
     );
   } else if (discountRequest?.status === "pending") {
@@ -85,57 +86,20 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
   } else {
     statusLine = (
       <span style={{ color: "var(--color-ink-dim)" }}>
-        Foundation + Strategy unlock the gate · {daysLeft}d left
+        30% off month 2 · finish R1 + R2 within {daysLeft}d
       </span>
     );
   }
 
   return (
-    <div
-      className="px-6 flex items-center gap-5"
-      style={{
-        borderTop: "1px solid var(--color-border)",
-        paddingTop: 18,
-        paddingBottom: 12,
-      }}
-    >
-      <div className="flex-shrink-0 hidden md:block">
-        <p
-          style={{
-            color: "var(--color-text-primary)",
-            fontSize: 13,
-            fontWeight: 500,
-            lineHeight: 1.2,
-            letterSpacing: "-0.005em",
-          }}
-        >
-          Hey, {firstName}
-        </p>
-        <p
-          style={{
-            color: "var(--color-text-tertiary)",
-            fontSize: 11,
-            lineHeight: 1.2,
-            fontVariantNumeric: "tabular-nums",
-            letterSpacing: "-0.005em",
-            marginTop: 2,
-          }}
-        >
-          {overallCompleted} of {overallTotal} lessons
-        </p>
-      </div>
-
-      <div className="flex-1">
-        {/* Bar with milestone marker. The marker is positioned absolutely
-            at milestonePercent so it sits ON the bar, not at the end. */}
+    <div className="flex items-center gap-4 w-full min-w-0">
+      <div className="flex-1 min-w-0">
+        {/* Bar with milestone marker. Reserved height keeps the floating
+            badge from shifting layout above. */}
         <div
           className="relative"
-          style={{
-            height: 24,
-            display: "flex",
-            alignItems: "center",
-          }}
-          aria-label={`${overallPercent}% of the way through the program; 30% discount milestone at ${Math.round(milestonePercent)}%`}
+          style={{ height: 22, display: "flex", alignItems: "center" }}
+          aria-label={`${overallPercent}% complete · 30% discount milestone at ${Math.round(milestonePercent)}%`}
         >
           <div
             className="relative w-full overflow-hidden"
@@ -145,7 +109,6 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
               background: "var(--color-fill-secondary)",
             }}
           >
-            {/* Fill */}
             <div
               style={{
                 position: "absolute",
@@ -153,12 +116,13 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
                 width: `${overallPercent}%`,
                 background: "var(--color-gold)",
                 borderRadius: "inherit",
-                transition: "width 400ms cubic-bezier(0.25, 0.1, 0.25, 1)",
+                transition:
+                  "width 400ms cubic-bezier(0.25, 0.1, 0.25, 1)",
               }}
             />
           </div>
 
-          {/* Milestone tick — extends slightly above & below the bar */}
+          {/* Milestone tick across the bar */}
           <div
             aria-hidden="true"
             style={{
@@ -174,12 +138,12 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
             }}
           />
 
-          {/* 30% badge floats above the milestone tick */}
+          {/* 30% badge floating above the milestone */}
           <div
             className="absolute"
             style={{
               left: `${milestonePercent}%`,
-              top: -22,
+              top: -20,
               transform: "translateX(-50%)",
               padding: "2px 8px",
               borderRadius: 999,
@@ -193,8 +157,9 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
               alignItems: "center",
               gap: 4,
               whiteSpace: "nowrap",
+              pointerEvents: "none",
             }}
-            title="The 30% discount gate — finish R1 + R2 to reach it"
+            title="30% off your next month — finish R1 + R2 within 14 days of joining"
           >
             <svg
               width="9"
@@ -228,6 +193,8 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
             </span>
           </div>
         </div>
+
+        {/* Inline explainer */}
         <p
           style={{
             fontSize: 12,
@@ -237,6 +204,40 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
           }}
         >
           {statusLine}
+        </p>
+      </div>
+
+      {/* Compact lesson counter on the right of the bar */}
+      <div
+        className="shrink-0 hidden md:flex flex-col"
+        style={{ alignItems: "flex-end" }}
+      >
+        <p
+          style={{
+            color: "var(--color-text-primary)",
+            fontSize: 13,
+            fontWeight: 600,
+            lineHeight: 1.2,
+            letterSpacing: "-0.011em",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {overallCompleted}
+          <span style={{ color: "var(--color-text-tertiary)", fontWeight: 500 }}>
+            {" / "}
+            {overallTotal}
+          </span>
+        </p>
+        <p
+          style={{
+            color: "var(--color-text-tertiary)",
+            fontSize: 11,
+            lineHeight: 1.2,
+            letterSpacing: "-0.005em",
+            marginTop: 2,
+          }}
+        >
+          lessons
         </p>
       </div>
     </div>

@@ -9,8 +9,93 @@ import {
   MAP_H,
   type RegionStripMap,
 } from "@/lib/map/path-math";
-import { LESSON_TYPE_LABELS } from "@/lib/constants";
+import { LESSON_TYPE_LABELS, LESSON_GROUPS } from "@/lib/constants";
 import type { Lesson } from "@/types/database";
+
+/** Synthetic id prefix for the virtual lesson representing a group on the map. */
+const GROUP_ID_PREFIX = "group:";
+
+/** Build a synthetic Lesson for the map node that stands in for a group. */
+function makeVirtualGroupLesson(groupId: string, anchor: Lesson): Lesson {
+  const g = LESSON_GROUPS[groupId];
+  return {
+    ...anchor,
+    id: GROUP_ID_PREFIX + groupId,
+    title: g?.title ?? "Group",
+    description: g?.description ?? null,
+    duration_label: null,
+    requires_action: false,
+    action_brief: null,
+    is_gate: false,
+    is_boss: false,
+    whop_lesson_id: null,
+    discord_channel: null,
+    lesson_group_id: null,
+  };
+}
+
+/**
+ * Collapse grouped sub-lessons into one virtual group lesson per group,
+ * preserving the day/sort_order position of the FIRST sub-lesson so the
+ * group marker sits where the sub-lessons used to start. The full
+ * sub-lesson set is still available via LESSON_GROUPS for the lesson
+ * sheet's group view.
+ */
+function collapseLessonGroups(lessons: Lesson[]): Lesson[] {
+  const groupedIds = new Set<string>();
+  for (const g of Object.values(LESSON_GROUPS)) {
+    for (const id of g.lessonIds) groupedIds.add(id);
+  }
+  const out: Lesson[] = [];
+  const seenGroups = new Set<string>();
+  for (const l of lessons) {
+    const groupId = (l as Lesson & { lesson_group_id?: string | null })
+      .lesson_group_id;
+    if (!groupId && !groupedIds.has(l.id)) {
+      out.push(l);
+      continue;
+    }
+    // Determine the group id (prefer column, fallback to membership lookup)
+    const resolvedGroupId =
+      groupId ??
+      Object.values(LESSON_GROUPS).find((g) => g.lessonIds.includes(l.id))?.id;
+    if (!resolvedGroupId) {
+      out.push(l);
+      continue;
+    }
+    if (seenGroups.has(resolvedGroupId)) continue;
+    seenGroups.add(resolvedGroupId);
+    out.push(makeVirtualGroupLesson(resolvedGroupId, l));
+  }
+  return out;
+}
+
+/**
+ * Whether a virtual group lesson should be considered "complete" on the
+ * map. True when EVERY sub-lesson is in completedLessonIds (which already
+ * counts skipped lessons).
+ */
+function isGroupComplete(
+  groupId: string,
+  completedLessonIds: Set<string>
+): boolean {
+  const g = LESSON_GROUPS[groupId];
+  if (!g) return false;
+  return g.lessonIds.every((id) => completedLessonIds.has(id));
+}
+
+/**
+ * If `currentLessonId` is one of a group's sub-lessons, return the
+ * virtual group id so the map can highlight the group marker as
+ * "current". Otherwise return the original id.
+ */
+function virtualizeCurrentLessonId(currentLessonId: string | null): string | null {
+  if (!currentLessonId) return null;
+  for (const g of Object.values(LESSON_GROUPS)) {
+    if (g.lessonIds.includes(currentLessonId)) return GROUP_ID_PREFIX + g.id;
+  }
+  return currentLessonId;
+}
 import { MapAmbience } from "@/components/map/MapAmbience";
 import {
   DiscountClaimCelebration,
@@ -731,8 +816,26 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
 
   const focusedRegion =
     view !== "overview" ? regions.find((r) => r.id === view) : null;
+  // Real (sub-)lesson list — used by the side panel + lesson sheet.
   const focusedLessons: Lesson[] =
     focusedRegion ? lessonsByRegion[focusedRegion.id as RegionId] ?? [] : [];
+  // Map-only lesson list — group sub-lessons collapsed into a single
+  // virtual lesson so the path doesn't get crowded.
+  const focusedMapLessons = useMemo<Lesson[]>(
+    () => collapseLessonGroups(focusedLessons),
+    [focusedLessons]
+  );
+  // Augment completedLessonIds with virtual group ids so the map's
+  // LessonMarker can render the group as done when all sub-lessons are.
+  const completedLessonIdsForMap = useMemo<Set<string>>(() => {
+    const s = new Set(completedLessonIds);
+    for (const g of Object.values(LESSON_GROUPS)) {
+      if (isGroupComplete(g.id, completedLessonIds)) {
+        s.add(GROUP_ID_PREFIX + g.id);
+      }
+    }
+    return s;
+  }, [completedLessonIds]);
 
   const sortedRegions = useMemo(
     () => [...regions].sort((a, b) => a.order_num - b.order_num),
@@ -832,9 +935,9 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
         {view !== "overview" && SCENES[view] && (
           <ScenePathOverlay
             scene={SCENES[view]!}
-            lessons={focusedLessons}
-            completedLessonIds={completedLessonIds}
-            currentLessonId={currentLesson?.id ?? null}
+            lessons={focusedMapLessons}
+            completedLessonIds={completedLessonIdsForMap}
+            currentLessonId={virtualizeCurrentLessonId(currentLesson?.id ?? null)}
             onOpenLesson={onOpenLesson}
             endMarker={SCENE_END_MARKERS[view as RegionId]}
             onEndMarkerClick={() => {
@@ -1213,39 +1316,50 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                   </g>
 
                   {/* Discount-gate beacon — only on R2, the region whose
-                      completion unlocks the discount. Floats above the
-                      region's numeral plaque so the prize is visible from
-                      anywhere in the overview. */}
+                      completion unlocks the discount. Bigger and more
+                      explanatory than the previous "30% OFF" disc — the
+                      goal is that a brand-new student understands what
+                      this is in one second.
+                      Sits above the numeral plaque so the prize is
+                      visible from anywhere in the overview. */}
                   {showDiscountBeacon && (
                     <g
-                      transform={`translate(${z.labelX} ${z.labelY - 100})`}
+                      transform={`translate(${z.labelX} ${z.labelY - 130})`}
                       pointerEvents="none"
                     >
                       {/* Outer pulsing halo */}
                       <circle
-                        r={48}
-                        fill={discountBeaconReady ? GOLD : "rgba(230,192,122,0.35)"}
-                        opacity={0.18}
+                        r={70}
+                        fill={discountBeaconReady ? GOLD : "rgba(230,192,122,0.4)"}
+                        opacity={0.2}
                       >
                         <animate
                           attributeName="r"
-                          values="42;52;42"
+                          values="60;78;60"
                           dur={discountBeaconReady ? "2.2s" : "3.6s"}
                           repeatCount="indefinite"
                         />
                         <animate
                           attributeName="opacity"
-                          values="0.1;0.28;0.1"
+                          values="0.12;0.32;0.12"
                           dur={discountBeaconReady ? "2.2s" : "3.6s"}
                           repeatCount="indefinite"
                         />
                       </circle>
+                      {/* Outer ring */}
+                      <circle
+                        r={48}
+                        fill="none"
+                        stroke={discountBeaconReady ? GOLD_HI : GOLD}
+                        strokeWidth={1.5}
+                        opacity={0.7}
+                      />
                       {/* Solid badge */}
                       <circle
-                        r={26}
-                        fill="rgba(6,12,26,0.92)"
+                        r={40}
+                        fill="rgba(6,12,26,0.94)"
                         stroke={discountBeaconReady ? GOLD_HI : GOLD}
-                        strokeWidth={1.6}
+                        strokeWidth={2}
                       />
                       <text
                         x={0}
@@ -1254,9 +1368,9 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         style={{
                           fontFamily:
                             'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                          fontWeight: 600,
-                          fontSize: 17,
-                          letterSpacing: "-0.02em",
+                          fontWeight: 700,
+                          fontSize: 28,
+                          letterSpacing: "-0.025em",
                           fill: GOLD_HI,
                           fontVariantNumeric: "tabular-nums",
                         }}
@@ -1265,31 +1379,33 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       </text>
                       <text
                         x={0}
-                        y={11}
+                        y={16}
                         textAnchor="middle"
                         style={{
                           fontFamily:
                             'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                          fontSize: 8,
-                          fontWeight: 500,
-                          letterSpacing: "0.04em",
-                          fill: "rgba(230,192,122,0.85)",
+                          fontSize: 9,
+                          fontWeight: 600,
+                          letterSpacing: "0.06em",
+                          fill: "rgba(230,192,122,0.92)",
                         }}
                       >
-                        OFF
+                        OFF MONTH 2
                       </text>
-                      {/* Inscription beside the badge */}
+                      {/* Inscription beside the badge — clearer copy
+                          so a new student understands the discount
+                          without needing to be told what "the gate" is. */}
                       <text
-                        x={42}
-                        y={4}
+                        x={56}
+                        y={-4}
                         textAnchor="start"
                         style={{
                           fontFamily:
                             'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                          fontWeight: 500,
-                          fontSize: 14,
-                          letterSpacing: "-0.012em",
-                          fill: discountBeaconReady ? GOLD_HI : "rgba(230,220,200,0.85)",
+                          fontWeight: 600,
+                          fontSize: 17,
+                          letterSpacing: "-0.018em",
+                          fill: discountBeaconReady ? GOLD_HI : "rgba(230,220,200,0.95)",
                           paintOrder: "stroke fill",
                           stroke: "rgba(6,12,26,0.85)",
                           strokeWidth: 3,
@@ -1298,7 +1414,28 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       >
                         {discountBeaconReady
                           ? "Ready to apply"
-                          : "The gate"}
+                          : "Discount checkpoint"}
+                      </text>
+                      <text
+                        x={56}
+                        y={16}
+                        textAnchor="start"
+                        style={{
+                          fontFamily:
+                            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                          fontWeight: 500,
+                          fontSize: 12,
+                          letterSpacing: "-0.005em",
+                          fill: "rgba(230,220,200,0.7)",
+                          paintOrder: "stroke fill",
+                          stroke: "rgba(6,12,26,0.85)",
+                          strokeWidth: 3,
+                          strokeLinejoin: "round",
+                        }}
+                      >
+                        {discountBeaconReady
+                          ? "Claim your 30% off"
+                          : "Finish R1 + R2 to unlock"}
                       </text>
                     </g>
                   )}
@@ -1961,6 +2098,7 @@ function ScenePathOverlay({
         const isDone = completedLessonIds.has(lesson.id);
         const isCurrent = lesson.id === currentLessonId;
         const isAction = isActionItem(lesson);
+        const isGroup = lesson.id.startsWith(GROUP_ID_PREFIX);
         const displayTitle =
           MOCKUP_TITLE_OVERRIDES[lesson.id] ?? lesson.title;
         const size = perspectiveSize(pos.y);
@@ -1973,6 +2111,7 @@ function ScenePathOverlay({
             isDone={isDone}
             isCurrent={isCurrent}
             isAction={isAction}
+            isGroup={isGroup}
             title={displayTitle}
             size={size}
             isHovered={hoveredIdx === i}
@@ -2045,6 +2184,9 @@ interface LessonMarkerProps {
   isDone: boolean;
   isCurrent: boolean;
   isAction: boolean;
+  /** True for the virtual group marker (collapsed sub-lessons). Renders
+   * with a stacked badge so it visually reads as "more inside". */
+  isGroup?: boolean;
   title: string;
   /** Base radius for circle / half-width for diamond. Drives perspective. */
   size: number;
@@ -2060,6 +2202,7 @@ function LessonMarker({
   isDone,
   isCurrent,
   isAction,
+  isGroup = false,
   title,
   size: baseSize,
   isHovered,
@@ -2068,14 +2211,22 @@ function LessonMarker({
 }: LessonMarkerProps) {
   const hot = isHovered;
   void title;
+  // Action items larger than lessons; group node larger still.
+  const size = isAction
+    ? baseSize * 1.23
+    : isGroup
+      ? baseSize * 1.18
+      : baseSize;
+  // Premium fills:
+  //   - done   → solid silver disc (light), checkmark in deep navy
+  //   - current → translucent silver wash with bright stroke
+  //   - default → deep navy fill with hairline silver stroke
   const fill = isDone
     ? SILVER
     : isCurrent
-      ? "rgba(184,197,214,0.18)"
+      ? "rgba(184,197,214,0.20)"
       : "rgba(10,18,36,0.92)";
   const stroke = isCurrent ? SILVER_HI : SILVER;
-  // Action items are visually larger than lessons, proportional to base
-  const size = isAction ? baseSize * 1.23 : baseSize;
 
   return (
     <g
@@ -2127,6 +2278,32 @@ function LessonMarker({
         />
       )}
 
+      {/* Group stack — two faded silver rings BEHIND the main shape so
+          the group node visually reads "more inside". Shifted right and
+          down so the eye sees a small stack of cards. */}
+      {isGroup && (
+        <>
+          <circle
+            r={size}
+            cx={6}
+            cy={5}
+            fill="rgba(10,18,36,0.85)"
+            stroke={SILVER}
+            strokeWidth={1}
+            opacity={0.45}
+          />
+          <circle
+            r={size}
+            cx={3}
+            cy={2.5}
+            fill="rgba(10,18,36,0.92)"
+            stroke={SILVER}
+            strokeWidth={1.2}
+            opacity={0.7}
+          />
+        </>
+      )}
+
       {/* Hairline drop shadow under the marker */}
       {isAction ? (
         <rect
@@ -2142,7 +2319,16 @@ function LessonMarker({
         <circle r={size} cx={0.5} cy={0.5} fill="rgba(0,0,0,0.28)" stroke="none" />
       )}
 
-      {/* Marker shape — circle for lessons, diamond for action items */}
+      {/* Marker shape — circle for lessons, diamond for action items.
+          A subtle inner gradient lifts the disc off the painted map
+          without going full glass. */}
+      <defs>
+        <radialGradient id={`marker-fill-${index}`} cx="50%" cy="40%" r="65%">
+          <stop offset="0%" stopColor={isDone ? "#E8EFF7" : "rgba(184,197,214,0.20)"} />
+          <stop offset="60%" stopColor={isDone ? SILVER : "rgba(10,18,36,0.92)"} />
+          <stop offset="100%" stopColor={isDone ? "#9DAEC4" : "rgba(8,14,28,0.96)"} />
+        </radialGradient>
+      </defs>
       {isAction ? (
         <rect
           x={-size * 0.75}
@@ -2150,14 +2336,14 @@ function LessonMarker({
           width={size * 1.5}
           height={size * 1.5}
           transform="rotate(45)"
-          fill={fill}
+          fill={isCurrent ? fill : `url(#marker-fill-${index})`}
           stroke={stroke}
           strokeWidth={isCurrent ? 2 : 1.5}
         />
       ) : (
         <circle
           r={size}
-          fill={fill}
+          fill={isCurrent ? fill : `url(#marker-fill-${index})`}
           stroke={stroke}
           strokeWidth={isCurrent ? 2 : 1.5}
         />
@@ -2173,6 +2359,17 @@ function LessonMarker({
           strokeLinecap="round"
           strokeLinejoin="round"
         />
+      ) : isGroup ? (
+        // Three short horizontal lines = "list of items inside"
+        <g
+          stroke={isCurrent ? SILVER_HI : SILVER}
+          strokeWidth={2}
+          strokeLinecap="round"
+        >
+          <line x1={-7} y1={-6} x2={7} y2={-6} />
+          <line x1={-7} y1={0} x2={7} y2={0} />
+          <line x1={-7} y1={6} x2={7} y2={6} />
+        </g>
       ) : isAction ? (
         // Small lightning / action glyph
         <path
@@ -2269,12 +2466,14 @@ function EndMarker({
 }) {
   const [hot, setHot] = useState(false);
   const isClickable = !!onClick;
-  const accent =
-    marker.kind === "discount"
-      ? "#4DCEC4"
-      : marker.kind === "celebration"
-        ? GOLD_HI
-        : GOLD;
+  // All EndMarkers live in the same family as LessonMarker now —
+  // silver-on-navy core. Discount + celebration get a thin gold accent
+  // ring around the silver to read as "milestone" without changing
+  // family. Onward = pure silver, no gold (it's just a navigator).
+  const isMilestone = marker.kind !== "onward";
+  const innerStroke = SILVER_HI;
+  const milestoneAccent = GOLD_HI;
+  const auraColor = isMilestone ? GOLD_HI : SILVER_HI;
 
   return (
     <g
@@ -2298,7 +2497,7 @@ function EndMarker({
       aria-label={`${marker.label} — ${marker.sublabel}`}
     >
       {/* Pulsing aura */}
-      <circle r={42} fill={accent} opacity={0.18}>
+      <circle r={42} fill={auraColor} opacity={isMilestone ? 0.22 : 0.16}>
         <animate
           attributeName="r"
           values="38;52;38"
@@ -2307,47 +2506,73 @@ function EndMarker({
         />
         <animate
           attributeName="opacity"
-          values="0.1;0.28;0.1"
+          values={
+            isMilestone
+              ? "0.14;0.34;0.14"
+              : "0.10;0.24;0.10"
+          }
           dur="2.6s"
           repeatCount="indefinite"
         />
       </circle>
 
-      {/* Outer ring brightens on hover */}
+      {/* Hairline drop shadow */}
+      <circle r={36} cx={1} cy={1} fill="rgba(0,0,0,0.32)" stroke="none" />
+
+      {/* Outer milestone ring — only on discount + celebration. Sits
+          OUTSIDE the silver core so it reads as a frame around the
+          checkpoint, not a replacement for it. */}
+      {isMilestone && (
+        <circle
+          r={42}
+          fill="none"
+          stroke={milestoneAccent}
+          strokeWidth={1.5}
+          opacity={0.7}
+        />
+      )}
+
+      {/* Core disc — silver family, matching LessonMarker */}
+      <defs>
+        <radialGradient id={`endmarker-fill-${marker.kind}`} cx="50%" cy="40%" r="65%">
+          <stop offset="0%" stopColor="rgba(184,197,214,0.18)" />
+          <stop offset="60%" stopColor="rgba(10,18,36,0.94)" />
+          <stop offset="100%" stopColor="rgba(8,14,28,0.96)" />
+        </radialGradient>
+      </defs>
       <circle
         r={36}
-        fill="rgba(6,12,26,0.92)"
-        stroke={accent}
-        strokeWidth={hot ? 3.5 : 2.5}
+        fill={`url(#endmarker-fill-${marker.kind})`}
+        stroke={innerStroke}
+        strokeWidth={hot ? 2.5 : 1.8}
         style={{ transition: "stroke-width 0.2s" }}
       />
 
-      {/* Inner glyph */}
+      {/* Inner glyph — silver for onward, gold for milestones to keep
+          the family consistent but signal "this one matters more". */}
       {marker.kind === "onward" && (
         <path
           d="M -10 -8 L 8 0 L -10 8 L -6 0 Z"
-          fill={accent}
+          fill={SILVER_HI}
           stroke="none"
         />
       )}
       {marker.kind === "discount" && (
         <g>
-          {/* Percent symbol */}
-          <circle cx={-7} cy={-7} r={4} fill="none" stroke={accent} strokeWidth={2.5} />
-          <circle cx={7} cy={7} r={4} fill="none" stroke={accent} strokeWidth={2.5} />
-          <line x1={-12} y1={12} x2={12} y2={-12} stroke={accent} strokeWidth={2.5} strokeLinecap="round" />
+          <circle cx={-7} cy={-7} r={4} fill="none" stroke={milestoneAccent} strokeWidth={2.2} />
+          <circle cx={7} cy={7} r={4} fill="none" stroke={milestoneAccent} strokeWidth={2.2} />
+          <line x1={-12} y1={12} x2={12} y2={-12} stroke={milestoneAccent} strokeWidth={2.2} strokeLinecap="round" />
         </g>
       )}
       {marker.kind === "celebration" && (
         <g>
-          {/* Stylized trophy */}
           <path
             d="M -8 -10 L 8 -10 L 7 4 Q 7 8 0 8 Q -7 8 -7 4 Z"
-            fill={accent}
+            fill={milestoneAccent}
             stroke="none"
           />
-          <line x1={-3} y1={8} x2={3} y2={8} stroke={accent} strokeWidth={3} strokeLinecap="round" />
-          <line x1={-5} y1={11} x2={5} y2={11} stroke={accent} strokeWidth={3} strokeLinecap="round" />
+          <line x1={-3} y1={8} x2={3} y2={8} stroke={milestoneAccent} strokeWidth={3} strokeLinecap="round" />
+          <line x1={-5} y1={11} x2={5} y2={11} stroke={milestoneAccent} strokeWidth={3} strokeLinecap="round" />
         </g>
       )}
 
@@ -2380,7 +2605,7 @@ function EndMarker({
             fontWeight: 500,
             fontSize: 12,
             letterSpacing: "-0.005em",
-            fill: accent,
+            fill: isMilestone ? milestoneAccent : SILVER_HI,
             paintOrder: "stroke fill",
             stroke: "rgba(6,12,26,0.85)",
             strokeWidth: 3,

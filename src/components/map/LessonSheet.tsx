@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import { useStudent } from "@/contexts/StudentContext";
-import { LESSON_TYPE_LABELS } from "@/lib/constants";
+import { LESSON_TYPE_LABELS, LESSON_GROUPS } from "@/lib/constants";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 
 interface LessonSheetProps {
@@ -16,6 +16,8 @@ interface LessonSheetProps {
    */
   onSelectLesson?: (id: string) => void;
 }
+
+const GROUP_ID_PREFIX = "group:";
 
 const WHOP_LESSON_URL = (lessonId: string) =>
   `https://whop.com/joined/ecomtalent/knowledge-KBhMkENW27qoZB/app/courses/cors_6cYEj5qoUcmbcpSryUrfiR/lessons/${lessonId}/`;
@@ -32,6 +34,18 @@ const WHOP_LESSON_URL = (lessonId: string) =>
  * - All types: notes textarea (auto-saving).
  */
 export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetProps) {
+  // Group sheet has its own scaffolding (no compound logic, no
+  // single-lesson scroll memory). Branch out early.
+  if (lessonId && lessonId.startsWith(GROUP_ID_PREFIX)) {
+    return (
+      <GroupSheet groupId={lessonId.slice(GROUP_ID_PREFIX.length)} onClose={onClose} />
+    );
+  }
+
+  return <SingleLessonSheet lessonId={lessonId} onClose={onClose} onSelectLesson={onSelectLesson} />;
+}
+
+function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetProps) {
   const {
     lessons,
     regions,
@@ -762,3 +776,344 @@ function CompoundPartHeader({
   );
 }
 
+/**
+ * Group sheet — shown when LessonSheet receives a `group:<id>` lessonId.
+ * Lists every sub-lesson in the group with two actions per row:
+ *   - Watch  → opens that lesson on Whop in a new tab
+ *   - Skip   → marks it skipped (counts toward path; flagged separately)
+ * Already-watched lessons show a "Watched" pill; already-skipped show
+ * "Skipped" with an undo affordance.
+ */
+function GroupSheet({
+  groupId,
+  onClose,
+}: {
+  groupId: string;
+  onClose: () => void;
+}) {
+  const {
+    lessons,
+    watchedLessonIds,
+    skippedLessonIds,
+    completedLessonIds,
+    skipLesson,
+  } = useStudent();
+
+  const group = LESSON_GROUPS[groupId];
+
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, true);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", handler);
+      document.body.style.overflow = "";
+    };
+  }, [onClose]);
+
+  const subLessons = useMemo(() => {
+    if (!group) return [];
+    const byId = new Map(lessons.map((l) => [l.id, l]));
+    return group.lessonIds
+      .map((id) => byId.get(id))
+      .filter((l): l is NonNullable<typeof l> => l != null);
+  }, [group, lessons]);
+
+  const totalCount = subLessons.length;
+  const decidedCount = subLessons.filter(
+    (l) => completedLessonIds.has(l.id)
+  ).length;
+
+  if (!group) return null;
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="Close group"
+        className="fixed inset-0 z-[45] cursor-default"
+        style={{
+          background: "rgba(6,12,26,0.78)",
+          backdropFilter: "blur(6px)",
+          animation: "overlay-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both",
+          border: "none",
+          padding: 0,
+        }}
+      />
+
+      <div
+        className="fixed inset-0 z-[50] flex items-center justify-center p-4"
+        style={{ pointerEvents: "none" }}
+      >
+        <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="group-sheet-title"
+          className="flex flex-col"
+          style={{
+            pointerEvents: "auto",
+            width: "min(720px, 92vw)",
+            maxHeight: "92vh",
+            background:
+              "linear-gradient(180deg, var(--color-bg-card) 0%, var(--color-bg-secondary) 100%)",
+            border: "1px solid var(--color-border-hover)",
+            borderRadius: 16,
+            overflow: "hidden",
+            boxShadow: "0 40px 80px rgba(0,0,0,0.6)",
+            animation: "fade-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both",
+          }}
+        >
+          {/* Header */}
+          <div
+            className="flex items-start justify-between p-5 sm:p-6 shrink-0"
+            style={{ borderBottom: "1px solid var(--color-border)" }}
+          >
+            <div className="min-w-0">
+              <p
+                style={{
+                  color: "var(--color-text-tertiary)",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  marginBottom: 6,
+                  letterSpacing: "-0.005em",
+                }}
+              >
+                Optional · {totalCount} parts · {decidedCount} of {totalCount} decided
+              </p>
+              <h2
+                id="group-sheet-title"
+                style={{
+                  color: "var(--color-text-primary)",
+                  fontWeight: 600,
+                  fontSize: 24,
+                  lineHeight: 1.2,
+                  letterSpacing: "-0.022em",
+                }}
+              >
+                {group.title}
+              </h2>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "var(--color-text-tertiary)",
+                cursor: "pointer",
+                fontSize: 20,
+                lineHeight: 1,
+                padding: 6,
+              }}
+            >
+              ×
+            </button>
+          </div>
+
+          {/* Body */}
+          <div
+            ref={bodyRef}
+            className="px-5 sm:px-6 py-5 overflow-y-auto"
+            style={{ flex: 1 }}
+          >
+            {group.description && (
+              <p
+                style={{
+                  color: "var(--color-text-secondary)",
+                  fontSize: 14,
+                  lineHeight: 1.55,
+                  letterSpacing: "-0.005em",
+                  marginBottom: 20,
+                }}
+              >
+                {group.description}
+              </p>
+            )}
+
+            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              {subLessons.map((sub, i) => {
+                const watched = watchedLessonIds.has(sub.id);
+                // Watched wins over skipped if both timestamps exist
+                const skipped = !watched && skippedLessonIds.has(sub.id);
+                const decided = watched || skipped;
+                const whopUrl = sub.whop_lesson_id
+                  ? WHOP_LESSON_URL(sub.whop_lesson_id)
+                  : null;
+
+                return (
+                  <li
+                    key={sub.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 12,
+                      padding: "12px 0",
+                      borderBottom:
+                        i < subLessons.length - 1
+                          ? "1px solid var(--color-border)"
+                          : "none",
+                    }}
+                  >
+                    {/* Status indicator */}
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        width: 24,
+                        height: 24,
+                        borderRadius: "50%",
+                        flexShrink: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: watched
+                          ? "var(--color-gold)"
+                          : skipped
+                            ? "rgba(255,247,235,0.06)"
+                            : "transparent",
+                        border: watched
+                          ? "1px solid var(--color-gold)"
+                          : "1px solid var(--color-border-hover)",
+                        color: watched
+                          ? "var(--color-bg-primary)"
+                          : "var(--color-text-tertiary)",
+                        fontSize: 11,
+                        fontWeight: 600,
+                      }}
+                    >
+                      {watched ? (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={3} aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                      ) : skipped ? (
+                        "→"
+                      ) : (
+                        i + 1
+                      )}
+                    </div>
+
+                    {/* Title + meta */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p
+                        style={{
+                          color: decided
+                            ? "var(--color-text-secondary)"
+                            : "var(--color-text-primary)",
+                          fontSize: 15,
+                          fontWeight: 500,
+                          letterSpacing: "-0.011em",
+                          lineHeight: 1.3,
+                          marginBottom: 2,
+                          textDecoration: skipped ? "line-through" : "none",
+                          textDecorationColor: "var(--color-text-quaternary)",
+                        }}
+                      >
+                        {sub.title}
+                      </p>
+                      <p
+                        style={{
+                          color: "var(--color-text-tertiary)",
+                          fontSize: 12,
+                          letterSpacing: "-0.005em",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {sub.duration_label ?? "—"}
+                        {watched && " · Watched"}
+                        {skipped && " · Skipped"}
+                      </p>
+                    </div>
+
+                    {/* Per-part actions */}
+                    <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                      {!watched && (
+                        <a
+                          href={whopUrl ?? "#"}
+                          target={whopUrl ? "_blank" : undefined}
+                          rel={whopUrl ? "noopener noreferrer" : undefined}
+                          aria-disabled={!whopUrl}
+                          style={{
+                            padding: "8px 14px",
+                            borderRadius: 8,
+                            background: "var(--color-gold)",
+                            color: "var(--color-bg-primary)",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            letterSpacing: "-0.005em",
+                            textDecoration: "none",
+                            cursor: whopUrl ? "pointer" : "not-allowed",
+                            opacity: whopUrl ? 1 : 0.5,
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          Watch
+                        </a>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => skipLesson(sub.id)}
+                        disabled={watched}
+                        style={{
+                          padding: "8px 14px",
+                          borderRadius: 8,
+                          background: skipped
+                            ? "rgba(255,247,235,0.10)"
+                            : "transparent",
+                          color: watched
+                            ? "var(--color-text-quaternary)"
+                            : skipped
+                              ? "var(--color-text-secondary)"
+                              : "var(--color-text-secondary)",
+                          border: "1px solid var(--color-border-hover)",
+                          fontSize: 12,
+                          fontWeight: 500,
+                          letterSpacing: "-0.005em",
+                          cursor: watched ? "not-allowed" : "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                        aria-label={
+                          skipped
+                            ? `Un-skip ${sub.title}`
+                            : `Skip ${sub.title}`
+                        }
+                      >
+                        {skipped ? "Un-skip" : "Skip"}
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+
+          {/* Footer */}
+          <div
+            className="px-5 sm:px-6 py-4 shrink-0"
+            style={{ borderTop: "1px solid var(--color-border)" }}
+          >
+            <p
+              style={{
+                color: "var(--color-text-tertiary)",
+                fontSize: 12,
+                lineHeight: 1.5,
+                letterSpacing: "-0.005em",
+              }}
+            >
+              Watched and skipped both count toward path progress, so the
+              region unlocks once you&rsquo;ve made a call on each part.
+              You can come back and watch any skipped video later.
+            </p>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}

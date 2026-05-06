@@ -98,6 +98,12 @@ export interface Lesson {
   requires_action: boolean;
   /** Brief shown in the LessonSheet's "Ship the ad" section */
   action_brief: string | null;
+  /**
+   * Group id for collapsing this lesson into a shared map node. Used
+   * for the optional "Editing Breakdowns" set in R2 — see
+   * src/lib/constants.ts:LESSON_GROUPS. Null = standalone.
+   */
+  lesson_group_id: string | null;
   created_at: string;
 }
 
@@ -109,6 +115,13 @@ export interface StudentLessonCompletion {
   completed_at: string | null;
   /** Timestamp when the manual action was checked off (compound lessons only) */
   action_completed_at: string | null;
+  /**
+   * Timestamp when the student deliberately *skipped* this lesson
+   * (only meaningful for grouped/optional lessons). A skipped lesson
+   * counts toward path progression so the student can keep moving,
+   * but it's flagged so the journal/workshop can show it differently.
+   */
+  skipped_at: string | null;
 }
 
 export interface DailyNote {

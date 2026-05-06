@@ -77,11 +77,15 @@ interface StudentContextType {
   watchedLessonIds: Set<string>;
   /** Lessons where the manual "I shipped the ad" half is complete (only compound lessons) */
   actionShippedLessonIds: Set<string>;
+  /** Lessons the student deliberately skipped (count toward path, flagged separately) */
+  skippedLessonIds: Set<string>;
 
   // Actions
   toggleLesson: (lessonId: string) => Promise<void>;
   /** For compound lessons: toggle the manual "shipped" half independent of watch state */
   toggleLessonAction: (lessonId: string) => Promise<void>;
+  /** Mark a grouped/optional lesson as skipped (or un-skip if it's already skipped) */
+  skipLesson: (lessonId: string) => Promise<void>;
   submitQuiz: (
     quizId: string,
     selections: Record<string, number>
@@ -337,11 +341,24 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     return s;
   }, [completions]);
 
+  const skippedLessonIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of completions) if (c.skipped_at) s.add(c.lesson_id);
+    return s;
+  }, [completions]);
+
   const completedLessonIds = useMemo(() => {
     const s = new Set<string>();
     for (const c of completions) {
       const lesson = lessonsById.get(c.lesson_id);
       if (!lesson) continue;
+      // Skipped lessons count toward path progression so the student
+      // can keep moving past optional content. Journal/workshop tell
+      // skipped from watched via skippedLessonIds.
+      if (c.skipped_at) {
+        s.add(c.lesson_id);
+        continue;
+      }
       if (lesson.requires_action) {
         if (c.completed_at && c.action_completed_at) s.add(c.lesson_id);
       } else if (c.completed_at) {
@@ -449,6 +466,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           lesson_id: lessonId,
           completed_at: new Date().toISOString(),
           action_completed_at: null,
+          skipped_at: null,
         };
         setCompletions((prev) => [...prev, optimistic]);
       }
@@ -532,6 +550,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
             lesson_id: lessonId,
             completed_at: null,
             action_completed_at: optimisticTimestamp,
+            skipped_at: null,
           },
         ];
       });
@@ -583,6 +602,80 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       }
     },
     [student, actionShippedLessonIds]
+  );
+
+  const skipLesson = useCallback(
+    async (lessonId: string) => {
+      if (!student) return;
+      const token = await getAccessToken();
+      if (!token) return;
+
+      const isSkipped = skippedLessonIds.has(lessonId);
+      const isWatched = watchedLessonIds.has(lessonId);
+      // Don't trample a watched row.
+      if (isWatched) return;
+
+      // Optimistic update
+      if (isSkipped) {
+        setCompletions((prev) => prev.filter((c) => c.lesson_id !== lessonId));
+      } else {
+        const optimistic: StudentLessonCompletion = {
+          id: crypto.randomUUID(),
+          student_id: student.id,
+          lesson_id: lessonId,
+          completed_at: null,
+          action_completed_at: null,
+          skipped_at: new Date().toISOString(),
+        };
+        setCompletions((prev) => [...prev, optimistic]);
+      }
+
+      try {
+        const res = await fetch("/api/student/skip-lesson", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ lessonId }),
+        });
+
+        if (!res.ok) {
+          const dataRes = await fetch("/api/student/data", {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (dataRes.ok) {
+            const data = await dataRes.json();
+            setCompletions(data.completions);
+          }
+        } else {
+          const result = await res.json();
+          if (result.action === "skipped" && result.completion) {
+            setCompletions((prev) => {
+              const exists = prev.some((c) => c.lesson_id === lessonId);
+              if (exists) {
+                return prev.map((c) =>
+                  c.lesson_id === lessonId ? result.completion : c
+                );
+              }
+              return [...prev, result.completion];
+            });
+          }
+        }
+      } catch {
+        const token2 = await getAccessToken();
+        if (token2) {
+          const dataRes = await fetch("/api/student/data", {
+            headers: { Authorization: `Bearer ${token2}` },
+          });
+          if (dataRes.ok) {
+            const data = await dataRes.json();
+            setCompletions(data.completions);
+          }
+        }
+      }
+    },
+    [student, skippedLessonIds, watchedLessonIds]
   );
 
   const submitQuiz = useCallback(
@@ -706,6 +799,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         completedLessonIds,
         watchedLessonIds,
         actionShippedLessonIds,
+        skippedLessonIds,
         regionProgress,
         overallProgress,
         currentLesson,
@@ -718,6 +812,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         discountAllLessonsDone,
         toggleLesson,
         toggleLessonAction,
+        skipLesson,
         submitQuiz,
         requestDiscount,
         refreshWatchProgress,

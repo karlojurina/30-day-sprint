@@ -192,15 +192,16 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
           {/* Header */}
           <div
             className="flex items-start justify-between p-5 sm:p-6 shrink-0"
-            style={{ borderBottom: "1px solid rgba(230,192,122,0.18)" }}
+            style={{ borderBottom: "1px solid var(--color-border)" }}
           >
             <div className="min-w-0">
               <p
-                className="font-mono uppercase tracking-widest mb-1"
                 style={{
-                  color: "rgba(230,192,122,0.85)",
-                  letterSpacing: "0.18em",
-                  fontSize: 11,
+                  color: "var(--color-text-tertiary)",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  marginBottom: 6,
+                  letterSpacing: "-0.005em",
                 }}
               >
                 Day {lesson.day} · {region.name} · {LESSON_TYPE_LABELS[lesson.type]}
@@ -209,23 +210,24 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
               </p>
               <h2
                 id="lesson-sheet-title"
-                className="italic leading-tight"
                 style={{
-                  fontFamily: "var(--font-display)",
-                  color: "var(--color-ink)",
-                  fontWeight: 500,
-                  fontSize: 28,
+                  color: "var(--color-text-primary)",
+                  fontWeight: 600,
+                  fontSize: 24,
+                  lineHeight: 1.2,
+                  letterSpacing: "-0.022em",
                 }}
               >
                 {lesson.title}
               </h2>
               {lesson.duration_label && (
                 <p
-                  className="font-mono mt-1.5"
                   style={{
-                    color: "var(--color-ink-dim)",
-                    fontSize: 12,
-                    letterSpacing: "0.06em",
+                    color: "var(--color-text-tertiary)",
+                    fontSize: 13,
+                    marginTop: 6,
+                    letterSpacing: "-0.005em",
+                    fontVariantNumeric: "tabular-nums",
                   }}
                 >
                   Duration · {lesson.duration_label}
@@ -337,12 +339,11 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
             {/* Description (plain) */}
             {lesson.description && !isCompound && (
               <p
-                className="leading-relaxed"
                 style={{
-                  fontFamily: "var(--font-display)",
-                  fontStyle: "italic",
-                  color: "rgba(230,220,200,0.88)",
+                  color: "var(--color-text-secondary)",
                   fontSize: 15,
+                  lineHeight: 1.55,
+                  letterSpacing: "-0.006em",
                 }}
               >
                 {lesson.description}
@@ -399,21 +400,21 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
                     </svg>
                   </div>
                   <p
-                    className="font-mono uppercase mb-1"
                     style={{
-                      color: "var(--color-gold)",
-                      letterSpacing: "0.22em",
-                      fontSize: 11,
+                      color: "var(--color-text-primary)",
+                      fontWeight: 600,
+                      fontSize: 14,
+                      marginBottom: 4,
+                      letterSpacing: "-0.011em",
                     }}
                   >
                     Watch on Whop
                   </p>
                   <p
-                    className="italic"
                     style={{
-                      fontFamily: "var(--font-display)",
-                      color: "var(--color-ink-dim)",
+                      color: "var(--color-text-tertiary)",
                       fontSize: 13,
+                      letterSpacing: "-0.005em",
                     }}
                   >
                     Opens in a new tab · auto-syncs when you come back
@@ -421,11 +422,14 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
                 </div>
                 {lesson.duration_label && (
                   <span
-                    className="absolute bottom-3 right-3 font-mono text-[11px] px-2 py-1 rounded"
+                    className="absolute bottom-3 right-3 px-2 py-1 rounded"
                     style={{
-                      background: "rgba(6,12,26,0.9)",
+                      background: "rgba(15,17,21,0.9)",
                       color: "var(--color-gold)",
-                      letterSpacing: "0.08em",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      fontVariantNumeric: "tabular-nums",
+                      letterSpacing: "-0.005em",
                     }}
                   >
                     {lesson.duration_label}
@@ -439,17 +443,16 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
                 className="relative rounded-lg overflow-hidden flex items-center justify-center"
                 style={{
                   aspectRatio: "16 / 9",
-                  background: "rgba(6,12,26,0.9)",
-                  border: "1px solid rgba(230,192,122,0.2)",
+                  background: "var(--color-fill-secondary)",
+                  border: "1px solid var(--color-border)",
                 }}
               >
                 <div className="text-center px-6">
                   <p
-                    className="italic"
                     style={{
-                      fontFamily: "var(--font-display)",
-                      color: "var(--color-ink-dim)",
+                      color: "var(--color-text-tertiary)",
                       fontSize: 14,
+                      letterSpacing: "-0.005em",
                     }}
                   >
                     Video content coming soon.
@@ -470,27 +473,24 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
             {/* Mission block — for any non-watch OR compound lesson */}
             {showMissionBlock && (
               <div
-                className="p-4 rounded-lg"
                 style={{
-                  background: "rgba(6,12,26,0.55)",
-                  border: "1px solid rgba(230,192,122,0.16)",
+                  padding: 16,
+                  borderRadius: 12,
+                  background: "var(--color-fill-secondary)",
                 }}
               >
                 <p
-                  className="font-mono uppercase tracking-widest mb-2"
-                  style={{
-                    color: "var(--color-gold-light)",
-                    letterSpacing: "0.18em",
-                    fontSize: 11,
-                  }}
+                  className="section-label"
+                  style={{ marginBottom: 8 }}
                 >
                   {isCompound ? "Your action item" : "Your mission"}
                 </p>
                 <p
                   style={{
-                    color: "var(--color-ink)",
+                    color: "var(--color-text-primary)",
                     fontSize: 14,
-                    lineHeight: 1.6,
+                    lineHeight: 1.55,
+                    letterSpacing: "-0.006em",
                   }}
                 >
                   {isCompound
@@ -501,8 +501,13 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
                 </p>
                 {lesson.discord_channel && (
                   <p
-                    className="mt-2 font-mono"
-                    style={{ color: "var(--color-gold)", fontSize: 13 }}
+                    style={{
+                      marginTop: 8,
+                      color: "var(--color-gold)",
+                      fontSize: 13,
+                      fontWeight: 500,
+                      letterSpacing: "-0.005em",
+                    }}
                   >
                     #{lesson.discord_channel}
                   </p>
@@ -513,49 +518,53 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
             {/* === Discount gate special CTA === */}
             {isGate && canClaimDiscount && (
               <div
-                className="p-5 rounded-lg"
                 style={{
-                  background:
-                    "linear-gradient(135deg, rgba(230,192,122,0.18), rgba(230,192,122,0.06))",
-                  border: "1px solid var(--color-gold)",
-                  boxShadow: "0 0 30px rgba(230,192,122,0.18)",
+                  padding: 20,
+                  borderRadius: 12,
+                  background: "rgba(200, 157, 85, 0.10)",
+                  border: "1px solid rgba(200, 157, 85, 0.30)",
                 }}
               >
                 <p
-                  className="font-mono uppercase tracking-widest mb-2"
+                  className="section-label"
                   style={{
-                    color: "var(--color-gold)",
-                    letterSpacing: "0.2em",
-                    fontSize: 11,
+                    color: "var(--color-gold-light)",
+                    marginBottom: 8,
                   }}
                 >
                   Discount unlocked
                 </p>
                 <p
-                  className="italic mb-4"
                   style={{
-                    fontFamily: "var(--font-display)",
-                    color: "var(--color-ink)",
-                    fontSize: 18,
-                    lineHeight: 1.4,
+                    color: "var(--color-text-primary)",
+                    fontSize: 16,
+                    lineHeight: 1.45,
+                    marginBottom: 16,
+                    fontWeight: 500,
+                    letterSpacing: "-0.011em",
                   }}
                 >
-                  R1 and R2 done. You earned it. Claim your 30% off the
-                  next month before the window closes.
+                  R1 and R2 done. Apply for your 30% off the next month
+                  before the window closes.
                 </p>
                 <button
                   onClick={async () => {
                     await requestDiscount();
-                    // Auto-mark the gate lesson complete on claim
                     if (!isFullyCompleted) {
                       await toggleLesson(lesson.id);
                     }
                   }}
-                  className="w-full px-6 py-3.5 rounded-lg font-semibold transition-colors"
+                  className="w-full transition-colors"
                   style={{
+                    height: 44,
+                    borderRadius: 10,
+                    border: "none",
                     background: "var(--color-gold)",
-                    color: "var(--color-bg-primary)",
-                    fontSize: 15,
+                    color: "#0F1115",
+                    fontSize: 14,
+                    fontWeight: 600,
+                    letterSpacing: "-0.011em",
+                    cursor: "pointer",
                   }}
                 >
                   Apply for my 30% discount
@@ -572,11 +581,10 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
                 }}
               >
                 <p
-                  className="font-mono uppercase tracking-widest mb-2"
+                  className="section-label"
                   style={{
-                    color: "var(--color-gold)",
-                    letterSpacing: "0.2em",
-                    fontSize: 11,
+                    color: "var(--color-gold-light)",
+                    marginBottom: 8,
                   }}
                 >
                   {discountRequest.status === "approved"
@@ -587,13 +595,18 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
                 </p>
                 {discountRequest.status === "approved" &&
                 discountRequest.promo_code ? (
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
                     <code
-                      className="px-3 py-2 rounded font-mono text-sm flex-1"
+                      className="flex-1"
                       style={{
-                        background: "rgba(230,192,122,0.12)",
+                        padding: "8px 12px",
+                        borderRadius: 8,
+                        background: "rgba(200, 157, 85, 0.12)",
                         color: "var(--color-gold-light)",
-                        letterSpacing: "0.08em",
+                        fontSize: 14,
+                        fontFamily: "var(--font-mono)",
+                        fontWeight: 600,
+                        letterSpacing: "0.04em",
                       }}
                     >
                       {discountRequest.promo_code}
@@ -604,10 +617,16 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
                           discountRequest.promo_code ?? ""
                         )
                       }
-                      className="px-3 py-2 rounded font-mono text-xs"
                       style={{
+                        padding: "8px 14px",
+                        borderRadius: 8,
+                        border: "none",
                         background: "var(--color-gold)",
-                        color: "var(--color-bg-primary)",
+                        color: "#0F1115",
+                        fontSize: 13,
+                        fontWeight: 600,
+                        letterSpacing: "-0.005em",
+                        cursor: "pointer",
                       }}
                     >
                       Copy
@@ -615,11 +634,11 @@ export function LessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPr
                   </div>
                 ) : (
                   <p
-                    className="italic"
                     style={{
-                      fontFamily: "var(--font-display)",
-                      color: "var(--color-ink-dim)",
+                      color: "var(--color-text-secondary)",
                       fontSize: 14,
+                      lineHeight: 1.5,
+                      letterSpacing: "-0.005em",
                     }}
                   >
                     {discountRequest.status === "rejected"
@@ -730,11 +749,11 @@ function CompoundPartHeader({
         )}
       </span>
       <h3
-        className="font-mono uppercase tracking-widest"
         style={{
-          color: done ? "var(--color-gold)" : "var(--color-ink-dim)",
-          letterSpacing: "0.16em",
-          fontSize: 12,
+          color: done ? "var(--color-gold)" : "var(--color-text-primary)",
+          fontSize: 14,
+          fontWeight: 600,
+          letterSpacing: "-0.011em",
         }}
       >
         Part {index} · {title}

@@ -74,13 +74,14 @@ export function ProgressDial({
         />
       </svg>
       <span
-        className="absolute font-mono tabular-nums"
+        className="absolute"
         style={{
-          color: "var(--color-ink)",
+          color: "var(--color-text-primary)",
           fontSize: size <= 36 ? 10 : 11,
-          letterSpacing: "0.02em",
-          fontWeight: 500,
+          fontWeight: 600,
           lineHeight: 1,
+          letterSpacing: "-0.005em",
+          fontVariantNumeric: "tabular-nums",
         }}
       >
         {completed}/{total}

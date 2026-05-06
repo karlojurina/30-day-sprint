@@ -2,47 +2,51 @@
 
 @theme inline {
   /* ────────────────────────────────────────────────────────────
-     V3 Expedition Map — Design Tokens
-     Deep sea navy + parchment gold + teal
+     Student-side dark theme — refined.
+     Less navy, more neutral. Less saturated gold. Warm bone text
+     via opacity (Apple-style). Borders are hairlines, not gold.
      ──────────────────────────────────────────────────────────── */
 
-  /* Backgrounds — deep sea navy */
-  --color-bg-primary: #060C1A;
-  --color-bg-secondary: #0A1428;
-  --color-bg-card: #102042;
-  --color-bg-elevated: #15294C;
+  /* Backgrounds — refined neutral dark, less blue than the old navy */
+  --color-bg-primary: #0F1115;
+  --color-bg-secondary: #181B22;
+  --color-bg-card: #1F232B;
+  --color-bg-elevated: #2A2F38;
 
-  /* Parchment gold — primary accent, "you are here", completed */
-  --color-gold: #E6C07A;
-  --color-gold-light: #F0D595;
-  --color-gold-deep: #C89A4A;
-  --color-gold-glow: rgba(230, 192, 122, 0.4);
+  /* Refined gold — desaturated, premium, single accent */
+  --color-gold: #C89D55;
+  --color-gold-light: #D4B070;
+  --color-gold-deep: #A37B38;
+  --color-gold-glow: rgba(200, 157, 85, 0.32);
 
-  /* Teal — EcomTalent brand, milestones, peer presence */
+  /* Teal — peer presence + watch-type (kept, less saturated) */
   --color-teal: #4DCEC4;
   --color-teal-light: #7DDFDA;
-  --color-teal-glow: rgba(77, 206, 196, 0.35);
+  --color-teal-glow: rgba(77, 206, 196, 0.28);
 
-  /* Sky blue — secondary, info/data */
+  /* Sky — secondary info (kept, less saturated) */
   --color-sky: #4DA0D8;
   --color-sky-light: #7DBDE4;
 
-  /* Warm crimson — BOSS node ONLY */
-  --color-crimson: #C44A54;
-  --color-crimson-deep: #8C2B35;
+  /* Crimson — BOSS only (Apple-system red, muted) */
+  --color-crimson: #FF453A;
+  --color-crimson-deep: #C8392F;
 
-  /* Bone + ink (text) */
-  --color-ink: #E6DCC8;
-  --color-ink-dim: rgba(230, 220, 200, 0.68);
-  --color-ink-faint: rgba(230, 220, 200, 0.42);
-  --color-ink-ghost: rgba(230, 220, 200, 0.22);
+  /* Text via opacity on warm bone — Apple-style hierarchy */
+  --color-ink: rgba(255, 247, 235, 0.92);
+  --color-ink-dim: rgba(255, 247, 235, 0.58);
+  --color-ink-faint: rgba(255, 247, 235, 0.34);
+  --color-ink-ghost: rgba(255, 247, 235, 0.18);
 
-  /* Borders (gold-derived, subtle) */
-  --color-border: rgba(230, 192, 122, 0.14);
-  --color-border-hover: rgba(230, 192, 122, 0.32);
-  --color-border-strong: rgba(230, 192, 122, 0.42);
+  /* Hairlines — neutral, not gold */
+  --color-border: rgba(255, 247, 235, 0.08);
+  --color-border-hover: rgba(255, 247, 235, 0.16);
+  --color-border-strong: rgba(255, 247, 235, 0.24);
 
-  /* Legacy aliases — existing code referencing these should still work */
+  /* Subtle tinted fill for inputs, secondary surfaces */
+  --color-fill-secondary: rgba(255, 247, 235, 0.05);
+
+  /* Legacy aliases */
   --color-accent: var(--color-gold);
   --color-accent-light: var(--color-gold-light);
   --color-accent-dark: var(--color-gold-deep);
@@ -57,13 +61,24 @@
   --color-text-tertiary: var(--color-ink-faint);
   --color-text-quaternary: var(--color-ink-ghost);
 
-  /* Typography — serif display, sans body, mono details */
+  /* Typography — Inter for everything UI; Cormorant kept for the
+     occasional ceremonial moment (region names on the chart);
+     mono kept for code/IDs only. */
   --font-display: "Cormorant Garamond", Georgia, "Times New Roman", serif;
-  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont,
+    "SF Pro Display", "SF Pro Text", sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, "SF Mono",
+    Menlo, monospace;
 
-  /* Paper grain noise (warm parchment tone) */
-  --bg-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.9 0 0 0 0 0.86 0 0 0 0 0.78 0 0 0 0.06 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  /* Apple motion — used wherever we don't already have SPEC_EASE */
+  --ease-default: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-quick: 150ms;
+  --duration-default: 250ms;
+  --duration-complex: 350ms;
+
+  /* Paper grain noise — kept for the chart canvas only */
+  --bg-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.9 0 0 0 0 0.86 0 0 0 0 0.78 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 * {
@@ -77,7 +92,50 @@ body {
   background: var(--color-bg-primary);
   color: var(--color-ink);
   font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  letter-spacing: -0.005em;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Apple-style negative tracking on headings — defines the system
+   feel even before any typography classes get applied. */
+h1, h2, h3 {
+  letter-spacing: -0.018em;
+}
+
+/* Reusable section label — replaces the old mono-uppercase 0.18em
+   tracked treatment. Used across student + admin surfaces. */
+.section-label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-tertiary);
+}
+
+/* Soft Apple shadow scale for student-side surfaces. */
+.surface-resting {
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    0 4px 16px rgba(0, 0, 0, 0.22);
+}
+.surface-elevated {
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.20),
+    0 12px 32px rgba(0, 0, 0, 0.30);
+}
+
+/* macOS Settings list rows — also used outside admin */
+.list-row {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+.list-row:last-child {
+  border-bottom: none;
 }
 
 /* Paper grain overlay — subtle, warm, over the student-facing app.
@@ -253,32 +311,32 @@ body:has(.admin-shell)::before {
   color: var(--color-ink);
 }
 
-/* Legacy mono-label utilities — kept so any remaining references still work */
+/* Refined mono-label (legacy class kept) — Apple-style restraint:
+   normal Inter at 11px / weight 500 / 0.04em tracking. Drops the
+   font-mono + 0.16em "vintage tech terminal" treatment. */
 .mono-label {
-  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--color-ink-faint);
+  color: var(--color-text-tertiary);
 }
 .mono-label-accent {
-  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--color-gold);
 }
 
-/* Display heading — legacy alias */
+/* Display heading (legacy alias) — now Inter semibold with negative
+   tracking. The italic Cormorant style retired across student-side. */
 .display-heading {
-  font-family: var(--font-display);
-  font-weight: 500;
-  font-style: italic;
-  letter-spacing: 0;
-  line-height: 1.02;
-  color: var(--color-ink);
+  font-weight: 600;
+  font-style: normal;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  color: var(--color-text-primary);
 }
 
 /* ────────────────────────────────────────────────────────────

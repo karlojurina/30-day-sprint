@@ -151,13 +151,13 @@ export function GraduationModal({
                   delay: 0.8,
                   ease: SPEC_EASE,
                 }}
-                className="italic mb-4"
                 style={{
-                  fontFamily: "var(--font-display)",
-                  color: "var(--color-ink)",
+                  color: "var(--color-text-primary)",
                   fontSize: 44,
-                  fontWeight: 500,
+                  fontWeight: 600,
                   lineHeight: 1.05,
+                  letterSpacing: "-0.025em",
+                  marginBottom: 16,
                 }}
               >
                 You finished{studentName ? `, ${studentName}` : ""}.

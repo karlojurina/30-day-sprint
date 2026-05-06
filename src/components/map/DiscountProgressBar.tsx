@@ -97,30 +97,32 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
   return (
     <div
       className="px-6 py-3 flex items-center gap-5"
-      style={{ borderTop: "1px solid rgba(230,192,122,0.12)" }}
+      style={{ borderTop: "1px solid var(--color-border)" }}
     >
       {/* Greeting (md+ only) */}
       <div className="flex-shrink-0 hidden md:block">
         <p
-          className="font-mono uppercase"
           style={{
-            color: "var(--color-gold)",
-            letterSpacing: "0.16em",
-            fontSize: 10,
+            color: "var(--color-text-primary)",
+            fontSize: 13,
+            fontWeight: 500,
             lineHeight: 1.2,
+            letterSpacing: "-0.005em",
           }}
         >
           Hey, {firstName}
         </p>
         <p
-          className="font-mono tabular-nums"
           style={{
-            color: "var(--color-ink-dim)",
+            color: "var(--color-text-tertiary)",
             fontSize: 11,
             lineHeight: 1.2,
+            fontVariantNumeric: "tabular-nums",
+            letterSpacing: "-0.005em",
+            marginTop: 2,
           }}
         >
-          {completedGateLessons} / {totalGateLessons} to discount
+          {completedGateLessons} of {totalGateLessons} to discount
         </p>
       </div>
 
@@ -128,11 +130,11 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
       <div className="flex-1">
         <div className="flex items-center gap-3">
           <div
-            className="relative flex-1 rounded-full overflow-hidden"
+            className="relative flex-1 overflow-hidden"
             style={{
-              height: 8,
-              background: "rgba(230,192,122,0.12)",
-              border: "1px solid rgba(230,192,122,0.18)",
+              height: 6,
+              borderRadius: 3,
+              background: "var(--color-fill-secondary)",
             }}
             aria-label={`${gatePercent}% of the way to the discount gate`}
           >
@@ -142,13 +144,10 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
                 position: "absolute",
                 inset: 0,
                 width: `${gatePercent}%`,
-                background:
-                  gatePercent >= 100
-                    ? "linear-gradient(90deg, var(--color-gold-deep), var(--color-gold-light))"
-                    : "var(--color-gold)",
+                background: "var(--color-gold)",
                 borderRadius: "inherit",
                 transition:
-                  "width 600ms cubic-bezier(0.22, 1, 0.36, 1)",
+                  "width 400ms cubic-bezier(0.25, 0.1, 0.25, 1)",
               }}
             />
           </div>
@@ -159,11 +158,11 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
               padding: "3px 9px",
               borderRadius: 999,
               background: discountAllLessonsDone
-                ? "rgba(230,192,122,0.18)"
-                : "rgba(16,32,66,0.6)",
+                ? "rgba(200, 157, 85, 0.18)"
+                : "var(--color-fill-secondary)",
               border: discountAllLessonsDone
-                ? "1px solid rgba(230,192,122,0.5)"
-                : "1px solid rgba(230,192,122,0.22)",
+                ? "1px solid rgba(200, 157, 85, 0.45)"
+                : "1px solid var(--color-border)",
             }}
             title="The 30% discount gate"
           >
@@ -199,8 +198,12 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
           </div>
         </div>
         <p
-          className="mt-1.5"
-          style={{ fontSize: 11, lineHeight: 1.3 }}
+          style={{
+            fontSize: 12,
+            lineHeight: 1.4,
+            marginTop: 6,
+            letterSpacing: "-0.005em",
+          }}
         >
           {statusLine}
         </p>

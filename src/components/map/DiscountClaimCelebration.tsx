@@ -133,16 +133,16 @@ export function DiscountClaimCelebration({
                   </span>
                   <h2
                     id="discount-celebration-title"
-                    className="italic mb-3"
                     style={{
-                      fontFamily: "var(--font-display)",
-                      color: "var(--color-ink)",
-                      fontSize: 36,
-                      fontWeight: 500,
-                      lineHeight: 1.05,
+                      color: "var(--color-text-primary)",
+                      fontSize: 32,
+                      fontWeight: 600,
+                      lineHeight: 1.1,
+                      letterSpacing: "-0.025em",
+                      marginBottom: 12,
                     }}
                   >
-                    30% off your next month.
+                    30% off your next month
                   </h2>
                   <p
                     style={{
@@ -198,16 +198,16 @@ export function DiscountClaimCelebration({
                     <>
                       <h2
                         id="discount-celebration-title"
-                        className="italic mb-2"
                         style={{
-                          fontFamily: "var(--font-display)",
-                          color: "var(--color-ink)",
-                          fontSize: 28,
-                          fontWeight: 500,
-                          lineHeight: 1.1,
+                          color: "var(--color-text-primary)",
+                          fontSize: 26,
+                          fontWeight: 600,
+                          lineHeight: 1.15,
+                          letterSpacing: "-0.022em",
+                          marginBottom: 8,
                         }}
                       >
-                        Your code is ready.
+                        Your code is ready
                       </h2>
                       <p
                         style={{
@@ -255,15 +255,16 @@ export function DiscountClaimCelebration({
                     <>
                       <h2
                         id="discount-celebration-title"
-                        className="italic mb-3"
                         style={{
-                          fontFamily: "var(--font-display)",
-                          color: "var(--color-ink)",
-                          fontSize: 28,
-                          fontWeight: 500,
+                          color: "var(--color-text-primary)",
+                          fontSize: 26,
+                          fontWeight: 600,
+                          lineHeight: 1.15,
+                          letterSpacing: "-0.022em",
+                          marginBottom: 12,
                         }}
                       >
-                        The team flagged this one.
+                        The team flagged this one
                       </h2>
                       <p
                         style={{
@@ -281,24 +282,24 @@ export function DiscountClaimCelebration({
                     <>
                       <h2
                         id="discount-celebration-title"
-                        className="italic mb-3"
                         style={{
-                          fontFamily: "var(--font-display)",
-                          color: "var(--color-ink)",
-                          fontSize: 28,
-                          fontWeight: 500,
+                          color: "var(--color-text-primary)",
+                          fontSize: 26,
+                          fontWeight: 600,
+                          lineHeight: 1.15,
+                          letterSpacing: "-0.022em",
+                          marginBottom: 12,
                         }}
                       >
-                        Pending team review.
+                        Pending team review
                       </h2>
                       <p
-                        className="italic"
                         style={{
-                          fontFamily: "var(--font-display)",
-                          color: "rgba(230,220,200,0.78)",
+                          color: "var(--color-text-secondary)",
                           fontSize: 15,
                           lineHeight: 1.55,
                           marginBottom: 18,
+                          letterSpacing: "-0.006em",
                         }}
                       >
                         We&rsquo;re checking your ad submissions in Discord.

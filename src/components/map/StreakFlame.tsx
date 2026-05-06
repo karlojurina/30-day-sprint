@@ -30,17 +30,18 @@ export function StreakFlame({ current, longest }: StreakFlameProps) {
   return (
     <div
       style={{
-        height: 36,
+        height: 32,
         display: "flex",
         alignItems: "center",
         gap: 6,
-        padding: "0 12px",
+        padding: "0 10px",
         borderRadius: 8,
-        border: isLit
-          ? "1px solid rgba(255,140,60,0.45)"
-          : "1px solid rgba(230,220,200,0.18)",
-        background: isLit ? "rgba(255,140,60,0.10)" : "rgba(16,32,66,0.6)",
-        transition: "background 250ms cubic-bezier(0.22,1,0.36,1)",
+        border: "1px solid var(--color-border)",
+        background: isLit
+          ? "rgba(255, 140, 60, 0.08)"
+          : "var(--color-fill-secondary)",
+        transition:
+          "background 250ms cubic-bezier(0.25, 0.1, 0.25, 1), border-color 250ms cubic-bezier(0.25, 0.1, 0.25, 1)",
       }}
       title={
         isLit
@@ -53,17 +54,19 @@ export function StreakFlame({ current, longest }: StreakFlameProps) {
     >
       <FlameSvg lit={isLit} hot={isHot} />
       <span
-        className="font-mono tabular-nums font-bold"
         style={{
           color: isLit
             ? isHot
               ? "#FFB868"
-              : "#FF8C3C"
-            : "rgba(230,220,200,0.42)",
-          fontSize: 15,
-          minWidth: 16,
+              : "#FF9A55"
+            : "var(--color-text-tertiary)",
+          fontSize: 13,
+          minWidth: 14,
           textAlign: "right",
           lineHeight: 1,
+          fontWeight: 600,
+          fontVariantNumeric: "tabular-nums",
+          letterSpacing: "-0.005em",
         }}
       >
         {current}

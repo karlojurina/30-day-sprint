@@ -112,22 +112,26 @@ export function OnboardingFlow({
           {/* Step indicator */}
           <div className="flex items-center justify-between p-5 sm:p-6">
             <span
-              className="font-mono uppercase"
               style={{
                 color: "var(--color-gold)",
-                letterSpacing: "0.22em",
-                fontSize: 11,
+                fontSize: 12,
+                fontWeight: 600,
+                fontVariantNumeric: "tabular-nums",
+                letterSpacing: "-0.005em",
               }}
             >
-              {step + 1} / 3
+              {step + 1} of 3
             </span>
             <button
               onClick={onDismiss}
-              className="font-mono uppercase"
               style={{
-                color: "rgba(230,220,200,0.45)",
-                letterSpacing: "0.16em",
-                fontSize: 10,
+                color: "var(--color-text-tertiary)",
+                fontSize: 13,
+                fontWeight: 500,
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                letterSpacing: "-0.005em",
               }}
             >
               Skip
@@ -147,12 +151,13 @@ export function OnboardingFlow({
                 >
                   <h2
                     id="onboarding-title"
-                    className="italic leading-tight mb-3"
                     style={{
-                      fontFamily: "var(--font-display)",
-                      color: "var(--color-ink)",
-                      fontWeight: 500,
-                      fontSize: 36,
+                      color: "var(--color-text-primary)",
+                      fontWeight: 600,
+                      fontSize: 32,
+                      lineHeight: 1.1,
+                      letterSpacing: "-0.025em",
+                      marginBottom: 12,
                     }}
                   >
                     {studentFirstName ? `${studentFirstName}, ` : ""}you&rsquo;re in.
@@ -203,11 +208,10 @@ export function OnboardingFlow({
                       }}
                     >
                       <p
-                        className="italic"
                         style={{
-                          fontFamily: "var(--font-display)",
-                          color: "rgba(230,220,200,0.45)",
+                          color: "var(--color-text-tertiary)",
                           fontSize: 14,
+                          letterSpacing: "-0.005em",
                         }}
                       >
                         Karlo&rsquo;s welcome video drops here soon
@@ -226,15 +230,16 @@ export function OnboardingFlow({
                   transition={{ duration: 0.25 }}
                 >
                   <h2
-                    className="italic leading-tight mb-5"
                     style={{
-                      fontFamily: "var(--font-display)",
-                      color: "var(--color-ink)",
-                      fontWeight: 500,
-                      fontSize: 32,
+                      color: "var(--color-text-primary)",
+                      fontWeight: 600,
+                      fontSize: 28,
+                      lineHeight: 1.1,
+                      letterSpacing: "-0.022em",
+                      marginBottom: 20,
                     }}
                   >
-                    How it works.
+                    How it works
                   </h2>
                   <ul className="space-y-4">
                     <Step
@@ -286,12 +291,13 @@ export function OnboardingFlow({
                     </span>
                   </div>
                   <h2
-                    className="italic leading-tight mb-3"
                     style={{
-                      fontFamily: "var(--font-display)",
-                      color: "var(--color-ink)",
-                      fontWeight: 500,
-                      fontSize: 36,
+                      color: "var(--color-text-primary)",
+                      fontWeight: 600,
+                      fontSize: 32,
+                      lineHeight: 1.1,
+                      letterSpacing: "-0.025em",
+                      marginBottom: 12,
                     }}
                   >
                     Day 1 starts here.
@@ -319,11 +325,14 @@ export function OnboardingFlow({
             {step > 0 ? (
               <button
                 onClick={back}
-                className="font-mono uppercase"
                 style={{
-                  color: "rgba(230,220,200,0.6)",
-                  letterSpacing: "0.16em",
-                  fontSize: 11,
+                  color: "var(--color-text-secondary)",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  letterSpacing: "-0.005em",
                 }}
               >
                 ← Back
@@ -375,11 +384,12 @@ function Step({
       </span>
       <div>
         <h3
-          className="italic mb-1"
           style={{
-            fontFamily: "var(--font-display)",
-            color: "var(--color-ink)",
-            fontSize: 18,
+            color: "var(--color-text-primary)",
+            fontSize: 16,
+            fontWeight: 600,
+            letterSpacing: "-0.014em",
+            marginBottom: 4,
           }}
         >
           {title}

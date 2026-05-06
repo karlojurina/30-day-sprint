@@ -55,19 +55,19 @@ export function TopBar({ setPanTarget }: TopBarProps) {
     <header
       className="relative shrink-0 z-30"
       style={{
-        background: "rgba(6,12,26,0.9)",
-        backdropFilter: "blur(14px)",
-        borderBottom: "1px solid rgba(230,192,122,0.18)",
+        background: "rgba(15, 17, 21, 0.85)",
+        backdropFilter: "blur(20px) saturate(140%)",
+        WebkitBackdropFilter: "blur(20px) saturate(140%)",
+        borderBottom: "1px solid var(--color-border)",
       }}
     >
-      {/* Row 1 — slim 64px header. Focal point is the breadcrumb in the
-          middle (next task) flanked by progress + streak. */}
+      {/* Row 1 — 60px header. Focal point is the breadcrumb in the
+          middle (next task), flanked by progress + streak. */}
       <div
-        className="flex items-center justify-between gap-3 px-6"
-        style={{ height: 64 }}
+        className="flex items-center justify-between gap-4 px-6"
+        style={{ height: 60 }}
       >
-        {/* Brand — just the logo. Wordmark dropped; the brand is in
-            the experience, not the chrome. */}
+        {/* Brand — just the logo. */}
         <div
           className="flex items-center shrink-0"
           style={{ height: PILL_HEIGHT }}
@@ -79,24 +79,28 @@ export function TopBar({ setPanTarget }: TopBarProps) {
             height={547}
             priority
             style={{
-              height: 32,
-              width: 32,
+              height: 28,
+              width: 28,
               objectFit: "contain",
             }}
           />
         </div>
 
-        {/* Breadcrumb — italic title only. The TopBar is one thing now:
-            "what to do next." */}
+        {/* Breadcrumb — Inter title. The TopBar is one thing now:
+            'what to do next.' Italic Cormorant retired. */}
         {currentLesson && (
           <button
             onClick={() => setPanTarget(currentLesson.id)}
-            className="btn-pill-deep hidden md:flex items-center gap-3 flex-1 min-w-0 justify-center"
+            className="hidden md:flex items-center flex-1 min-w-0 justify-center transition-colors"
             style={{
-              ...pillBaseStyle,
+              gap: 10,
               maxWidth: 560,
-              padding: "0 16px",
+              padding: "0 14px",
               height: PILL_HEIGHT,
+              borderRadius: 10,
+              border: "1px solid var(--color-border)",
+              background: "var(--color-fill-secondary)",
+              cursor: "pointer",
             }}
             title={
               currentRegion
@@ -105,12 +109,12 @@ export function TopBar({ setPanTarget }: TopBarProps) {
             }
           >
             <span
-              className="italic truncate text-center"
+              className="truncate"
               style={{
-                fontFamily: "var(--font-display)",
-                color: "var(--color-ink)",
-                fontWeight: 500,
-                fontSize: 16,
+                color: "var(--color-text-primary)",
+                fontWeight: 600,
+                fontSize: 14,
+                letterSpacing: "-0.011em",
                 lineHeight: 1,
               }}
             >
@@ -118,13 +122,13 @@ export function TopBar({ setPanTarget }: TopBarProps) {
             </span>
             {currentLesson.duration_label && (
               <span
-                className="font-mono shrink-0"
+                className="shrink-0"
                 style={{
-                  color: "var(--color-gold)",
-                  fontSize: 10,
-                  letterSpacing: "0.12em",
-                  opacity: 0.75,
-                  textTransform: "uppercase",
+                  color: "var(--color-text-tertiary)",
+                  fontSize: 12,
+                  fontVariantNumeric: "tabular-nums",
+                  letterSpacing: "-0.005em",
+                  fontWeight: 500,
                 }}
               >
                 {currentLesson.duration_label}
@@ -134,24 +138,24 @@ export function TopBar({ setPanTarget }: TopBarProps) {
         )}
 
         {/* Right cluster — progress dial + discount countdown + streak
-            lantern + sign out. Discount countdown auto-hides when
-            window closes or student has applied. */}
+            flame + sign out. Discount countdown auto-hides when window
+            closes or student has applied. */}
         <div className="flex items-center gap-2 shrink-0">
-          <ProgressDial completed={completedLessonIds.size} size={36} />
+          <ProgressDial completed={completedLessonIds.size} size={32} />
           <DiscountCountdown />
           <StreakFlame current={streak.current} longest={streak.longest} />
 
           {/* Sign out */}
           <button
             onClick={signOut}
-            className="btn-ghost"
             style={{
               ...pillBaseStyle,
-              border: "1px solid rgba(230,192,122,0.18)",
+              border: "1px solid var(--color-border)",
               background: "transparent",
-              color: "var(--color-ink-dim)",
+              color: "var(--color-text-tertiary)",
               cursor: "pointer",
-              padding: "0 12px",
+              padding: "0 10px",
+              transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
             }}
             title="Sign out"
             aria-label="Sign out"
@@ -162,7 +166,7 @@ export function TopBar({ setPanTarget }: TopBarProps) {
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
-              strokeWidth="1.6"
+              strokeWidth="1.7"
               strokeLinecap="round"
               strokeLinejoin="round"
               aria-hidden="true"

@@ -33,43 +33,42 @@ export function DiscountCountdown() {
     <div
       className="flex items-center gap-2 shrink-0"
       style={{
-        height: 36,
-        padding: "0 12px",
+        height: 32,
+        padding: "0 10px",
         borderRadius: 8,
-        border: urgent
-          ? "1px solid rgba(200,154,74,0.55)"
-          : "1px solid rgba(230,192,122,0.28)",
+        border: "1px solid var(--color-border)",
         background: urgent
-          ? "rgba(200,154,74,0.12)"
-          : "rgba(16,32,66,0.6)",
-        transition: "all 300ms cubic-bezier(0.22,1,0.36,1)",
+          ? "rgba(200, 157, 85, 0.12)"
+          : "var(--color-fill-secondary)",
+        transition: "all 250ms cubic-bezier(0.25, 0.1, 0.25, 1)",
       }}
       title={`${daysLeft} day${daysLeft === 1 ? "" : "s"} left to apply for the 30% discount`}
       aria-label={`${daysLeft} day${daysLeft === 1 ? "" : "s"} left in discount window`}
     >
       <span
-        className="font-mono tabular-nums"
         style={{
-          color: urgent ? "var(--color-gold-deep)" : "var(--color-gold-light)",
-          fontSize: 14,
+          color: urgent
+            ? "var(--color-gold-light)"
+            : "var(--color-gold)",
+          fontSize: 13,
           fontWeight: 600,
           lineHeight: 1,
+          fontVariantNumeric: "tabular-nums",
+          letterSpacing: "-0.005em",
         }}
       >
         {daysLeft}d
       </span>
       <span
-        className="font-mono uppercase"
         style={{
-          color: urgent
-            ? "var(--color-gold-deep)"
-            : "rgba(230,192,122,0.7)",
-          fontSize: 9,
-          letterSpacing: "0.18em",
+          color: "var(--color-text-tertiary)",
+          fontSize: 12,
+          fontWeight: 500,
           lineHeight: 1,
+          letterSpacing: "-0.005em",
         }}
       >
-        Discount
+        discount
       </span>
     </div>
   );

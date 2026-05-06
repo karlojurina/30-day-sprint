@@ -197,13 +197,13 @@ function Content({
               delay: 0.65,
               ease: SPEC_EASE,
             }}
-            className="italic mb-3"
             style={{
-              fontFamily: "var(--font-display)",
-              color: "var(--color-ink)",
-              fontWeight: 500,
-              fontSize: 48,
+              color: "var(--color-text-primary)",
+              fontWeight: 600,
+              fontSize: 44,
               lineHeight: 1.05,
+              letterSpacing: "-0.025em",
+              marginBottom: 12,
             }}
           >
             {region.name}
@@ -214,13 +214,13 @@ function Content({
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.78 }}
-              className="italic mb-7"
               style={{
-                fontFamily: "var(--font-display)",
-                color: "rgba(230,220,200,0.65)",
+                color: "var(--color-text-secondary)",
                 fontSize: 16,
                 maxWidth: 380,
                 margin: "0 auto 28px",
+                letterSpacing: "-0.011em",
+                lineHeight: 1.4,
               }}
             >
               {region.tagline}

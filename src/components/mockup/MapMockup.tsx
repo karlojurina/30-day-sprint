@@ -273,7 +273,7 @@ const SCENE_END_MARKERS: Record<RegionId, SceneEndMarker> = {
   r1: { kind: "onward", label: "Onward",  sublabel: "to Creative Lab", nextView: "r2" },
   r2: { kind: "onward",  label: "Onward",          sublabel: "to Test Track",   nextView: "r3" },
   r3: { kind: "onward", label: "Onward",  sublabel: "to The Summit",  nextView: "r4" },
-  r4: { kind: "celebration", label: "Expedition complete", sublabel: "well charted" },
+  r4: { kind: "celebration", label: "Program complete", sublabel: "the work continues" },
 };
 
 // ──────────────────────────────────────────────────────────────
@@ -1173,7 +1173,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                     >
                       {isUnlocked
                         ? isComplete
-                          ? `CHARTED · ${total}`
+                          ? `COMPLETE · ${total}`
                           : `${completed} / ${total} LESSONS`
                         : "LOCKED"}
                     </text>
@@ -1553,7 +1553,7 @@ function RegionSidePanel({
                 textTransform: "uppercase",
               }}
             >
-              {completed} / {total} charted
+              {completed} / {total} complete
             </span>
             <span
               className="font-mono"

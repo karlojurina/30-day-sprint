@@ -36,8 +36,8 @@ export function ProgressDial({
     <div
       className="flex items-center justify-center shrink-0"
       style={{ width: size, height: size, position: "relative" }}
-      title={`${completed} of ${total} lessons charted`}
-      aria-label={`${completed} of ${total} lessons charted`}
+      title={`${completed} of ${total} lessons complete`}
+      aria-label={`${completed} of ${total} lessons complete`}
       role="img"
     >
       <svg

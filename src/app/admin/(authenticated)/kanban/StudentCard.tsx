@@ -80,7 +80,7 @@ export function StudentCard({ student, progressPercent, onClick }: StudentCardPr
         />
       </div>
       <div className="flex items-center justify-between text-[10px] text-text-tertiary mb-2 font-mono">
-        <span>{progressPercent}% charted</span>
+        <span>{progressPercent}% complete</span>
         <span>{lastActiveLabel}</span>
       </div>
 

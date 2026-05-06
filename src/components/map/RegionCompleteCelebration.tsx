@@ -169,7 +169,7 @@ function Content({
                   fontWeight: 700,
                 }}
               >
-                Charted
+                Complete
               </span>
             </div>
           </motion.div>

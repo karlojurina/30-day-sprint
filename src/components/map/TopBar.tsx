@@ -6,10 +6,10 @@ import Image from "next/image";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { getDayNumber } from "@/types/database";
-import { TOTAL_DAYS } from "@/lib/constants";
-import { StreakLantern } from "./StreakLantern";
+import { StreakFlame } from "./StreakFlame";
 import { ProgressDial } from "./ProgressDial";
 import { DiscountCountdown } from "./DiscountCountdown";
+import { DiscountProgressBar } from "./DiscountProgressBar";
 
 interface TopBarProps {
   setPanTarget: Dispatch<SetStateAction<string | null>>;
@@ -35,16 +35,13 @@ export function TopBar({ setPanTarget }: TopBarProps) {
     regions,
     currentLesson,
     streak,
-    overallProgress,
     completedLessonIds,
-    lessons,
   } = useStudent();
 
   const dayNumber = useMemo(
     () => (student ? getDayNumber(student.joined_at) : 1),
     [student]
   );
-  const daysLeft = Math.max(0, TOTAL_DAYS - dayNumber);
 
   if (!student) return null;
 
@@ -142,7 +139,7 @@ export function TopBar({ setPanTarget }: TopBarProps) {
         <div className="flex items-center gap-2 shrink-0">
           <ProgressDial completed={completedLessonIds.size} size={36} />
           <DiscountCountdown />
-          <StreakLantern current={streak.current} longest={streak.longest} />
+          <StreakFlame current={streak.current} longest={streak.longest} />
 
           {/* Sign out */}
           <button
@@ -178,191 +175,9 @@ export function TopBar({ setPanTarget }: TopBarProps) {
         </div>
       </div>
 
-      {/* Row 2 — Day ruler */}
-      <DayRuler
-        dayNumber={dayNumber}
-        daysLeft={daysLeft}
-        regions={regions}
-        setPanTarget={setPanTarget}
-        lessons={lessons}
-        completedLessonIds={completedLessonIds}
-        overallProgress={overallProgress}
-        firstName={firstName}
-      />
+      {/* Row 2 — single horizontal bar to the discount checkpoint */}
+      <DiscountProgressBar firstName={firstName} />
     </header>
   );
 }
 
-interface DayRulerProps {
-  dayNumber: number;
-  daysLeft: number;
-  regions: ReturnType<typeof useStudent>["regions"];
-  setPanTarget: Dispatch<SetStateAction<string | null>>;
-  lessons: ReturnType<typeof useStudent>["lessons"];
-  completedLessonIds: ReturnType<typeof useStudent>["completedLessonIds"];
-  overallProgress: number;
-  firstName: string;
-}
-
-function DayRuler({
-  dayNumber,
-  daysLeft,
-  regions,
-  setPanTarget,
-  lessons,
-  completedLessonIds,
-  overallProgress,
-  firstName,
-}: DayRulerProps) {
-  const daysWithLessons = useMemo(() => {
-    const s = new Set<number>();
-    for (const l of lessons) s.add(l.day);
-    return s;
-  }, [lessons]);
-
-  const daysComplete = useMemo(() => {
-    const byDay: Record<number, string[]> = {};
-    for (const l of lessons) {
-      if (!byDay[l.day]) byDay[l.day] = [];
-      byDay[l.day].push(l.id);
-    }
-    const s = new Set<number>();
-    for (const [day, ids] of Object.entries(byDay)) {
-      if (ids.every((id) => completedLessonIds.has(id))) {
-        s.add(Number(day));
-      }
-    }
-    return s;
-  }, [lessons, completedLessonIds]);
-
-  // Each day owns 1/TOTAL_DAYS of the ruler width as an invisible click slot,
-  // so the 1–2 px tick has a usable hit area on both mouse and touch (the
-  // slot widens on bigger viewports, narrows on smaller ones — never below
-  // tick-width).
-  const slotWidth = 100 / TOTAL_DAYS;
-
-  return (
-    <div
-      className="relative px-6 py-3 flex items-center gap-6"
-      style={{ borderTop: "1px solid rgba(230,192,122,0.12)" }}
-    >
-      <div className="flex-shrink-0 hidden md:block">
-        <p
-          className="font-mono uppercase tracking-widest"
-          style={{ color: "var(--color-gold)", letterSpacing: "0.18em", fontSize: 11 }}
-        >
-          Hey, {firstName}
-        </p>
-        <p
-          className="font-mono"
-          style={{ color: "var(--color-ink-dim)", fontSize: 12 }}
-        >
-          {overallProgress}% charted · {daysLeft} days left
-        </p>
-      </div>
-
-      <div className="flex-1 relative h-8">
-        <div className="absolute inset-0 flex rounded-md overflow-hidden" aria-hidden="true">
-          {regions.map((r) => {
-            const width = ((r.day_end - r.day_start + 1) / TOTAL_DAYS) * 100;
-            const colors: Record<string, string> = {
-              shore: "rgba(77,160,216,0.1)",
-              forest: "rgba(77,206,196,0.12)",
-              mountains: "rgba(230,220,200,0.08)",
-              city: "rgba(230,192,122,0.12)",
-            };
-            return (
-              <div
-                key={r.id}
-                style={{
-                  width: `${width}%`,
-                  background: colors[r.terrain] ?? "transparent",
-                }}
-                title={r.name}
-              />
-            );
-          })}
-        </div>
-
-        {Array.from({ length: TOTAL_DAYS }).map((_, i) => {
-          const day = i + 1;
-          const slotLeft = i * slotWidth;
-          const isMilestone =
-            day === 1 || day === 8 || day === 15 || day === 23 || day === 30;
-          const hasLesson = daysWithLessons.has(day);
-          const isDone = daysComplete.has(day);
-          const isCurrent = day === dayNumber;
-          // On <md viewports each tick collapses below the 40px touch-target
-          // floor, so we mark them inert. Mobile users navigate via lesson
-          // taps instead — desktop remains the primary interaction context.
-          return (
-            <button
-              key={day}
-              type="button"
-              disabled={!hasLesson}
-              onClick={() => {
-                const l = lessons.find((lesson) => lesson.day === day);
-                if (l) setPanTarget(l.id);
-              }}
-              className="day-ruler-tick absolute top-0 bottom-0 flex items-center justify-center bg-transparent border-0 p-0"
-              style={{
-                left: `${slotLeft}%`,
-                width: `${slotWidth}%`,
-                cursor: hasLesson ? "pointer" : "default",
-              }}
-              aria-label={`Day ${day}${isDone ? ", charted" : hasLesson ? "" : ", no lesson"}`}
-            >
-              <span className="relative inline-flex items-center justify-center">
-                <span
-                  aria-hidden="true"
-                  style={{
-                    display: "block",
-                    width: isMilestone ? 2 : 1,
-                    height: isMilestone ? 14 : 8,
-                    background: isDone
-                      ? "var(--color-gold)"
-                      : hasLesson
-                        ? "rgba(230,220,200,0.78)"
-                        : "rgba(230,220,200,0.32)",
-                  }}
-                />
-                {isMilestone && (
-                  <span
-                    aria-hidden="true"
-                    className="absolute font-mono font-semibold"
-                    style={{
-                      top: 14,
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      color: "var(--color-ink-dim)",
-                      letterSpacing: "0.08em",
-                      fontSize: 11,
-                    }}
-                  >
-                    {day}
-                  </span>
-                )}
-                {isCurrent && (
-                  <span
-                    aria-hidden="true"
-                    className="absolute pulse-ring"
-                    style={{
-                      top: -6,
-                      left: "50%",
-                      transform: "translateX(-50%)",
-                      width: 14,
-                      height: 14,
-                      background: "var(--color-gold)",
-                      borderRadius: "50%",
-                      boxShadow: "0 0 14px rgba(230,192,122,0.9)",
-                    }}
-                  />
-                )}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}

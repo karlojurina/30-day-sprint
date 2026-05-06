@@ -72,7 +72,7 @@ export function WorkshopCabinet({
           }}
         >
           {unlockedAll} / {totalAll} collected ·{" "}
-          {unlockedCount} of {regions.length} regions charted
+          {unlockedCount} of {regions.length} regions complete
         </p>
       </div>
 

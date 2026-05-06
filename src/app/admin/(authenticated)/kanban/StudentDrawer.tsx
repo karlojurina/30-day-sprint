@@ -127,16 +127,16 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Backdrop — Apple-style soft scrim */}
       <button
         type="button"
         onClick={onClose}
         aria-label="Close drawer"
         className="fixed inset-0 z-40"
         style={{
-          background: "rgba(6,12,26,0.55)",
+          background: "rgba(20, 20, 24, 0.30)",
           backdropFilter: "blur(2px)",
-          animation: "overlay-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both",
+          animation: "overlay-in 0.25s cubic-bezier(0.25, 0.1, 0.25, 1) both",
           border: "none",
           padding: 0,
         }}
@@ -151,44 +151,84 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
         style={{
           width: "min(520px, 92vw)",
           background: "var(--color-bg-secondary)",
-          borderLeft: "1px solid var(--color-border-hover)",
-          boxShadow: "-24px 0 48px rgba(0,0,0,0.5)",
-          animation: "slide-in-right 0.32s cubic-bezier(0.22, 1, 0.36, 1) both",
+          borderLeft: "1px solid var(--color-border)",
+          boxShadow: "-24px 0 64px rgba(20,20,24,0.18), -2px 0 8px rgba(20,20,24,0.06)",
+          animation: "slide-in-right 0.32s cubic-bezier(0.25, 0.1, 0.25, 1) both",
         }}
       >
         {loading || !student ? (
           <div className="flex items-center justify-center h-full">
-            <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+            <div
+              className="rounded-full animate-spin"
+              style={{
+                width: 22,
+                height: 22,
+                border: "2px solid var(--color-accent)",
+                borderTopColor: "transparent",
+              }}
+            />
           </div>
         ) : (
-          <div className="p-6 space-y-5">
+          <div style={{ padding: 24 }}>
             {/* Header */}
-            <div className="flex items-start justify-between gap-3">
+            <div
+              className="flex items-start justify-between"
+              style={{ gap: 12, marginBottom: 24 }}
+            >
               <div className="min-w-0">
                 <h2
                   id="drawer-student-name"
-                  className="text-lg font-semibold text-text-primary truncate"
+                  className="truncate"
+                  style={{
+                    fontSize: 20,
+                    fontWeight: 600,
+                    color: "var(--color-text-primary)",
+                    letterSpacing: "-0.019em",
+                  }}
                 >
                   {student.name || "Unnamed student"}
                 </h2>
-                <p className="text-xs text-text-secondary truncate">
+                <p
+                  className="truncate"
+                  style={{
+                    fontSize: 13,
+                    color: "var(--color-text-secondary)",
+                    marginTop: 2,
+                    letterSpacing: "-0.005em",
+                  }}
+                >
                   {student.email} · Day {dayNumber} · {student.membership_status}
                 </p>
               </div>
               <button
                 onClick={onClose}
                 aria-label="Close drawer"
-                className="text-text-tertiary hover:text-text-primary p-1 -m-1"
+                style={{
+                  width: 28,
+                  height: 28,
+                  borderRadius: 8,
+                  background: "var(--color-bg-elevated)",
+                  border: "none",
+                  color: "var(--color-text-tertiary)",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
               >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
 
             {/* Stat cards */}
-            <div className="grid grid-cols-2 gap-2">
-              <Stat label="Progress" value={`${overallPercent}%`} />
+            <div
+              className="grid grid-cols-2"
+              style={{ gap: 8, marginBottom: 24 }}
+            >
+              <Stat label="Progress" value={`${overallPercent}%`} accent />
               <Stat label="Streak" value={`${student.current_streak ?? 0}d`} />
               <Stat
                 label="Joined"
@@ -201,11 +241,14 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
             </div>
 
             {/* Region breakdown */}
-            <section>
-              <h3 className="text-xs font-mono uppercase tracking-widest text-text-secondary mb-2">
+            <section style={{ marginBottom: 24 }}>
+              <p
+                className="section-label"
+                style={{ marginBottom: 10 }}
+              >
                 Lessons by region
-              </h3>
-              <div className="space-y-1.5">
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {regions.map((r) => {
                   const regionLessons = lessons.filter((l) => l.region_id === r.id);
                   const total = regionLessons.length;
@@ -214,26 +257,49 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
                   ).length;
                   const pct = total ? Math.round((done / total) * 100) : 0;
                   return (
-                    <div key={r.id} className="flex items-center gap-3">
-                      <span className="text-xs text-text-secondary w-32 truncate">
+                    <div
+                      key={r.id}
+                      className="flex items-center"
+                      style={{ gap: 12 }}
+                    >
+                      <span
+                        className="truncate"
+                        style={{
+                          fontSize: 13,
+                          color: "var(--color-text-secondary)",
+                          width: 120,
+                          letterSpacing: "-0.005em",
+                        }}
+                      >
                         {r.name}
                       </span>
                       <div
-                        className="flex-1 rounded-full overflow-hidden"
+                        className="flex-1 overflow-hidden"
                         style={{
                           height: 4,
-                          background: "rgba(230,192,122,0.12)",
+                          borderRadius: 2,
+                          background: "var(--color-fill-secondary, rgba(20,20,24,0.06))",
                         }}
                       >
                         <div
                           style={{
                             height: "100%",
                             width: `${pct}%`,
-                            background: "var(--color-gold)",
+                            background: "var(--color-accent)",
+                            transition:
+                              "width 250ms cubic-bezier(0.25, 0.1, 0.25, 1)",
                           }}
                         />
                       </div>
-                      <span className="text-[10px] font-mono tabular-nums text-text-tertiary w-12 text-right">
+                      <span
+                        style={{
+                          fontSize: 12,
+                          color: "var(--color-text-tertiary)",
+                          fontVariantNumeric: "tabular-nums",
+                          width: 48,
+                          textAlign: "right",
+                        }}
+                      >
                         {done}/{total}
                       </span>
                     </div>
@@ -242,29 +308,63 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
               </div>
             </section>
 
-            {/* Discount + verification toggle */}
-            <section className="bg-bg-card border border-border rounded-xl p-3">
-              <h3 className="text-xs font-mono uppercase tracking-widest text-text-secondary mb-2">
+            {/* Discount + verification */}
+            <section
+              className="surface-resting"
+              style={{
+                background: "var(--color-bg-card)",
+                borderRadius: 12,
+                padding: 16,
+                marginBottom: 24,
+              }}
+            >
+              <p
+                className="section-label"
+                style={{ marginBottom: 8 }}
+              >
                 Discount
-              </h3>
-              <p className="text-xs text-text-secondary mb-2">
+              </p>
+              <p
+                style={{
+                  fontSize: 13,
+                  color: "var(--color-text-secondary)",
+                  marginBottom: 14,
+                  letterSpacing: "-0.005em",
+                }}
+              >
                 {discountRequest
-                  ? `Application: ${discountRequest.status}${discountRequest.promo_code ? ` — ${discountRequest.promo_code}` : ""}`
+                  ? `Application: ${discountRequest.status}${discountRequest.promo_code ? ` · ${discountRequest.promo_code}` : ""}`
                   : "No application submitted"}
               </p>
-              <label className="flex items-start gap-3 cursor-pointer">
+              <label
+                className="flex items-start cursor-pointer"
+                style={{ gap: 10 }}
+              >
                 <input
                   type="checkbox"
                   checked={student.ad_submissions_verified ?? false}
                   disabled={savingVerification}
                   onChange={(e) => toggleAdSubmissionsVerified(e.target.checked)}
-                  className="mt-0.5 rounded accent-[var(--color-gold)] focus-visible:outline-2 focus-visible:outline-[var(--color-gold)] focus-visible:outline-offset-2"
+                  className="rounded accent-[var(--color-accent)]"
+                  style={{ marginTop: 2 }}
                 />
-                <span className="text-xs">
-                  <span className="font-medium text-text-primary block">
+                <span style={{ fontSize: 13 }}>
+                  <span
+                    style={{
+                      display: "block",
+                      fontWeight: 500,
+                      color: "var(--color-text-primary)",
+                      letterSpacing: "-0.005em",
+                    }}
+                  >
                     Ad submissions verified
                   </span>
-                  <span className="text-text-tertiary">
+                  <span
+                    style={{
+                      color: "var(--color-text-tertiary)",
+                      fontSize: 12,
+                    }}
+                  >
                     Required before discount approval. Tick after confirming
                     submissions in Discord.
                   </span>
@@ -273,14 +373,26 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
             </section>
 
             {/* Footer link to full detail */}
-            <div className="pt-2 border-t border-border">
+            <div
+              style={{
+                paddingTop: 16,
+                borderTop: "1px solid var(--color-border)",
+              }}
+            >
               <Link
                 href={`/admin/students/${student.id}`}
-                className="text-xs text-accent-light hover:text-accent transition-colors inline-flex items-center gap-1.5"
+                className="inline-flex items-center"
+                style={{
+                  gap: 6,
+                  fontSize: 13,
+                  color: "var(--color-accent-dark)",
+                  textDecoration: "none",
+                  letterSpacing: "-0.005em",
+                }}
               >
                 Open full detail page
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 5l7 7m0 0l-7 7m7-7H3" />
                 </svg>
               </Link>
             </div>
@@ -291,13 +403,48 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+}) {
   return (
-    <div className="bg-bg-card border border-border rounded-lg p-2.5">
-      <p className="text-[10px] font-mono uppercase tracking-widest text-text-tertiary">
+    <div
+      className="surface-resting"
+      style={{
+        background: "var(--color-bg-card)",
+        borderRadius: 10,
+        padding: 12,
+      }}
+    >
+      <p
+        style={{
+          fontSize: 10,
+          fontWeight: 500,
+          color: "var(--color-text-tertiary)",
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+        }}
+      >
         {label}
       </p>
-      <p className="text-base font-medium text-text-primary tabular-nums mt-0.5">
+      <p
+        style={{
+          fontSize: 18,
+          fontWeight: 600,
+          color: accent
+            ? "var(--color-accent-dark)"
+            : "var(--color-text-primary)",
+          marginTop: 4,
+          fontVariantNumeric: "tabular-nums",
+          letterSpacing: "-0.018em",
+          lineHeight: 1.05,
+        }}
+      >
         {value}
       </p>
     </div>

@@ -84,26 +84,85 @@ export default function DiscountsPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+        <div
+          className="rounded-full animate-spin"
+          style={{
+            width: 24,
+            height: 24,
+            border: "2px solid var(--color-accent)",
+            borderTopColor: "transparent",
+          }}
+        />
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-4">
-      <h1 className="text-xl font-bold">Discount Requests</h1>
+    <div
+      className="px-12 pt-12 pb-16"
+      style={{ maxWidth: 1180, margin: "0 auto" }}
+    >
+      <header style={{ marginBottom: 24 }}>
+        <h1
+          style={{
+            fontSize: 32,
+            fontWeight: 600,
+            letterSpacing: "-0.025em",
+            lineHeight: 1.15,
+            color: "var(--color-text-primary)",
+          }}
+        >
+          Discount applications
+        </h1>
+        <p
+          style={{
+            fontSize: 14,
+            color: "var(--color-text-secondary)",
+            marginTop: 4,
+            letterSpacing: "-0.005em",
+          }}
+        >
+          Review applications. Approval requires the student&rsquo;s ad
+          submissions to be verified on their detail page first.
+        </p>
+      </header>
 
-      {/* Filter tabs */}
-      <div className="flex gap-1 bg-bg-card border border-border rounded-lg p-1 w-fit">
-        {["pending", "approved", "rejected", "all"].map((f) => (
+      {/* Segmented filter */}
+      <div
+        style={{
+          display: "inline-flex",
+          background: "var(--color-bg-elevated)",
+          borderRadius: 10,
+          padding: 3,
+          marginBottom: 24,
+          gap: 1,
+        }}
+      >
+        {(["pending", "approved", "rejected", "all"] as const).map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors capitalize ${
-              filter === f
-                ? "bg-accent text-white"
-                : "text-text-secondary hover:text-text-primary"
-            }`}
+            style={{
+              padding: "5px 12px",
+              borderRadius: 7,
+              border: "none",
+              background: filter === f ? "var(--color-bg-card)" : "transparent",
+              color:
+                filter === f
+                  ? "var(--color-text-primary)"
+                  : "var(--color-text-secondary)",
+              fontSize: 13,
+              fontWeight: filter === f ? 600 : 500,
+              letterSpacing: "-0.005em",
+              textTransform: "capitalize",
+              cursor: "pointer",
+              boxShadow:
+                filter === f
+                  ? "0 1px 2px rgba(20,20,24,0.06), 0 0 0 0.5px rgba(20,20,24,0.04)"
+                  : "none",
+              transition:
+                "background 150ms cubic-bezier(0.25,0.1,0.25,1), color 150ms cubic-bezier(0.25,0.1,0.25,1)",
+            }}
           >
             {f}
           </button>
@@ -111,50 +170,89 @@ export default function DiscountsPage() {
       </div>
 
       {requests.length === 0 ? (
-        <p className="text-sm text-text-secondary bg-bg-card border border-border rounded-xl p-8 text-center">
-          No {filter === "all" ? "" : filter} requests
-        </p>
+        <div
+          className="surface-resting"
+          style={{
+            background: "var(--color-bg-card)",
+            borderRadius: 12,
+            padding: 48,
+            textAlign: "center",
+            fontSize: 14,
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          No {filter === "all" ? "" : filter} applications.
+        </div>
       ) : (
-        <div className="space-y-3">
+        <div
+          className="surface-resting"
+          style={{
+            background: "var(--color-bg-card)",
+            borderRadius: 12,
+            overflow: "hidden",
+          }}
+        >
           {requests.map((req) => (
             <div
               key={req.id}
-              className="bg-bg-card border border-border rounded-xl p-4 space-y-3"
+              className="list-row"
+              style={{
+                padding: "16px",
+                alignItems: "flex-start",
+                gap: 12,
+                flexDirection: "column",
+              }}
             >
-              <div className="flex items-start justify-between">
-                <div>
+              <div className="flex items-start justify-between w-full">
+                <div className="min-w-0">
                   <Link
                     href={`/admin/students/${req.student_id}`}
-                    className="text-sm font-medium hover:text-accent-light transition-colors"
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 500,
+                      color: "var(--color-text-primary)",
+                      letterSpacing: "-0.011em",
+                      textDecoration: "none",
+                    }}
                   >
                     {req.student?.name || "Unknown"}
                   </Link>
-                  <p className="text-xs text-text-secondary mt-0.5">
-                    Requested{" "}
-                    {new Date(req.created_at).toLocaleDateString()}
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: "var(--color-text-secondary)",
+                      marginTop: 2,
+                    }}
+                  >
+                    Applied {new Date(req.created_at).toLocaleDateString()}
                   </p>
                 </div>
-                <span
-                  className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ${
-                    req.status === "approved"
-                      ? "bg-success/15 text-success"
-                      : req.status === "pending"
-                      ? "bg-warning/15 text-warning"
-                      : "bg-danger/15 text-danger"
-                  }`}
-                >
-                  {req.status}
-                </span>
+                <StatusPill status={req.status} />
               </div>
 
               {req.promo_code && (
-                <p className="text-sm font-mono font-bold text-success">
-                  Code: {req.promo_code}
-                </p>
+                <div
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 13,
+                    color: "var(--color-success)",
+                    background: "rgba(46,139,87,0.10)",
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    fontWeight: 600,
+                  }}
+                >
+                  {req.promo_code}
+                </div>
               )}
 
               {req.rejection_reason && (
-                <p className="text-xs text-danger">
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: "var(--color-danger)",
+                  }}
+                >
                   Reason: {req.rejection_reason}
                 </p>
               )}
@@ -164,14 +262,42 @@ export default function DiscountsPage() {
                   <button
                     onClick={() => handleApprove(req.id)}
                     disabled={processing === req.id}
-                    className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-success/15 text-success hover:bg-success/25 transition-colors disabled:opacity-50"
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "var(--color-accent)",
+                      color: "#FFFFFF",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      letterSpacing: "-0.005em",
+                      cursor:
+                        processing === req.id ? "default" : "pointer",
+                      opacity: processing === req.id ? 0.6 : 1,
+                      transition:
+                        "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+                    }}
                   >
-                    {processing === req.id ? "Processing..." : "Approve"}
+                    {processing === req.id ? "Processing…" : "Approve"}
                   </button>
                   <button
                     onClick={() => handleReject(req.id)}
                     disabled={processing === req.id}
-                    className="px-4 py-1.5 text-xs font-semibold rounded-lg bg-danger/15 text-danger hover:bg-danger/25 transition-colors disabled:opacity-50"
+                    style={{
+                      padding: "6px 14px",
+                      borderRadius: 8,
+                      border: "1px solid var(--color-border)",
+                      background: "transparent",
+                      color: "var(--color-text-secondary)",
+                      fontSize: 13,
+                      fontWeight: 500,
+                      letterSpacing: "-0.005em",
+                      cursor:
+                        processing === req.id ? "default" : "pointer",
+                      opacity: processing === req.id ? 0.6 : 1,
+                      transition:
+                        "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+                    }}
                   >
                     Reject
                   </button>
@@ -182,5 +308,31 @@ export default function DiscountsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function StatusPill({ status }: { status: string }) {
+  const tone =
+    status === "approved"
+      ? { color: "var(--color-success)", bg: "rgba(46,139,87,0.10)" }
+      : status === "pending"
+        ? { color: "var(--color-warning)", bg: "rgba(212,162,76,0.12)" }
+        : { color: "var(--color-danger)", bg: "rgba(200,74,74,0.10)" };
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: 999,
+        fontSize: 11,
+        fontWeight: 500,
+        color: tone.color,
+        background: tone.bg,
+        letterSpacing: "-0.005em",
+        textTransform: "capitalize",
+      }}
+    >
+      {status}
+    </span>
   );
 }

@@ -11,6 +11,7 @@ export default function TeamLoginPage() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const supabase = createClient();
+  void router;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -28,80 +29,185 @@ export default function TeamLoginPage() {
       return;
     }
 
-    // Hard reload — AuthContext will use /api/auth/me to verify team membership
     window.location.href = "/admin";
   }
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen px-4">
-      <div className="w-full max-w-md space-y-8">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold tracking-tight">Team Login</h1>
-          <p className="mt-2 text-text-secondary text-sm">
+    <div
+      className="admin-shell flex flex-col items-center justify-center min-h-screen px-4"
+      style={{ background: "var(--color-bg-primary)" }}
+    >
+      <div className="w-full" style={{ maxWidth: 380 }}>
+        <header style={{ marginBottom: 32, textAlign: "center" }}>
+          <h1
+            style={{
+              fontSize: 26,
+              fontWeight: 600,
+              letterSpacing: "-0.022em",
+              color: "var(--color-text-primary)",
+              lineHeight: 1.15,
+            }}
+          >
+            Team
+          </h1>
+          <p
+            style={{
+              fontSize: 14,
+              color: "var(--color-text-secondary)",
+              marginTop: 4,
+              letterSpacing: "-0.005em",
+            }}
+          >
             EcomTalent internal dashboard
           </p>
-        </div>
+        </header>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form
+          onSubmit={handleSubmit}
+          className="surface-resting"
+          style={{
+            background: "var(--color-bg-card)",
+            borderRadius: 16,
+            padding: 24,
+            display: "flex",
+            flexDirection: "column",
+            gap: 16,
+          }}
+        >
           {error && (
-            <div className="bg-danger/10 border border-danger/20 rounded-lg px-4 py-3 text-sm text-danger">
+            <div
+              style={{
+                background: "rgba(200,74,74,0.08)",
+                borderRadius: 8,
+                padding: "10px 12px",
+                fontSize: 13,
+                color: "var(--color-danger)",
+              }}
+            >
               {error}
             </div>
           )}
 
-          <div>
-            <label
-              htmlFor="email"
-              className="block text-sm font-medium text-text-secondary mb-1"
-            >
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-3 py-2 min-h-10 bg-bg-card border border-border rounded-lg text-text-primary focus:outline-none focus:border-accent focus-visible:outline-2 focus-visible:outline-[var(--color-gold)] focus-visible:outline-offset-2 transition-colors"
-              placeholder="you@ecomtalent.com"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="password"
-              className="block text-sm font-medium text-text-secondary mb-1"
-            >
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-3 py-2 min-h-10 bg-bg-card border border-border rounded-lg text-text-primary focus:outline-none focus:border-accent focus-visible:outline-2 focus-visible:outline-[var(--color-gold)] focus-visible:outline-offset-2 transition-colors"
-            />
-          </div>
+          <FormField
+            id="email"
+            label="Email"
+            type="email"
+            value={email}
+            onChange={setEmail}
+            placeholder="you@ecomtalent.com"
+          />
+          <FormField
+            id="password"
+            label="Password"
+            type="password"
+            value={password}
+            onChange={setPassword}
+          />
 
           <button
             type="submit"
             disabled={loading}
-            className="w-full px-6 py-3 text-base font-semibold rounded-lg bg-accent hover:bg-accent-dark transition-colors disabled:opacity-50"
+            style={{
+              height: 40,
+              borderRadius: 10,
+              border: "none",
+              background: loading
+                ? "var(--color-accent-dark)"
+                : "var(--color-accent)",
+              color: "#FFFFFF",
+              fontSize: 14,
+              fontWeight: 600,
+              letterSpacing: "-0.011em",
+              cursor: loading ? "default" : "pointer",
+              opacity: loading ? 0.7 : 1,
+              transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+              marginTop: 4,
+            }}
           >
-            {loading ? "Signing in..." : "Sign in"}
+            {loading ? "Signing in…" : "Sign in"}
           </button>
         </form>
 
-        <p className="text-center text-sm text-text-tertiary">
+        <p
+          style={{
+            textAlign: "center",
+            marginTop: 20,
+            fontSize: 13,
+            color: "var(--color-text-tertiary)",
+          }}
+        >
           <a
             href="/login"
-            className="hover:text-text-secondary transition-colors underline"
+            style={{
+              color: "var(--color-accent-dark)",
+              textDecoration: "none",
+            }}
           >
-            Student login
+            Student login →
           </a>
         </p>
       </div>
+    </div>
+  );
+}
+
+function FormField({
+  id,
+  label,
+  type,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  label: string;
+  type: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div>
+      <label
+        htmlFor={id}
+        style={{
+          display: "block",
+          fontSize: 13,
+          fontWeight: 500,
+          color: "var(--color-text-secondary)",
+          marginBottom: 6,
+          letterSpacing: "-0.005em",
+        }}
+      >
+        {label}
+      </label>
+      <input
+        id={id}
+        type={type}
+        required
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        style={{
+          width: "100%",
+          height: 40,
+          padding: "0 12px",
+          background: "var(--color-bg-elevated)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 10,
+          fontSize: 14,
+          color: "var(--color-text-primary)",
+          letterSpacing: "-0.006em",
+          outline: "none",
+          transition: "border-color 150ms cubic-bezier(0.25,0.1,0.25,1)",
+        }}
+        onFocus={(e) =>
+          (e.currentTarget.style.borderColor = "var(--color-accent)")
+        }
+        onBlur={(e) =>
+          (e.currentTarget.style.borderColor = "var(--color-border)")
+        }
+      />
     </div>
   );
 }

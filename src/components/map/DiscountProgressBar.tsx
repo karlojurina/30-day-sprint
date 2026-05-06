@@ -9,23 +9,15 @@ interface DiscountProgressBarProps {
 }
 
 /**
- * The TopBar's secondary row. Single horizontal bar showing how
- * close the student is to unlocking the 30% discount, which lives
- * at the end of Region 2.
+ * The TopBar's secondary row. Single horizontal bar showing total
+ * progress through all 30 days, with the 30% discount sitting as a
+ * milestone marker at the R1 + R2 boundary (not the endpoint).
  *
- * Filled portion = lessons completed across R1 + R2.
- * Marker at the far right = the discount gate.
+ * Filled portion = lessons completed across the whole program.
+ * Milestone marker = the discount gate, positioned at the % of total
+ * lessons covered by R1 + R2.
  *
- * Replaces the old 30-day tick ruler. One bar, one milestone, one
- * focal point — much clearer than 30 ticks the student had to
- * decode.
- *
- * Below the bar: a single line that switches based on state:
- *   - Not eligible yet:  "Foundation + Strategy unlock the gate · N days left"
- *   - Eligible:          "Ready to apply for your 30% discount"
- *   - Applied (pending): "Application under review"
- *   - Approved:          "Your 30% code is ready"
- *   - Window closed:     "Discount window closed"
+ * Status line below switches with state.
  */
 export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
   const {
@@ -36,25 +28,29 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
     discountRequest,
   } = useStudent();
 
-  const { gatePercent, totalGateLessons, completedGateLessons } = useMemo(() => {
-    const gateLessons = lessons.filter(
+  const {
+    overallPercent,
+    overallCompleted,
+    overallTotal,
+    milestonePercent,
+  } = useMemo(() => {
+    const total = lessons.length;
+    const completed = lessons.filter((l) => completedLessonIds.has(l.id)).length;
+    const gateTotal = lessons.filter(
       (l) => l.region_id === "r1" || l.region_id === "r2"
-    );
-    const total = gateLessons.length;
-    const completed = gateLessons.filter((l) =>
-      completedLessonIds.has(l.id)
     ).length;
     return {
-      gatePercent: progressPercent(completed, total),
-      totalGateLessons: total,
-      completedGateLessons: completed,
+      overallPercent: progressPercent(completed, total),
+      overallCompleted: completed,
+      overallTotal: total,
+      milestonePercent: total > 0 ? (gateTotal / total) * 100 : 0,
     };
   }, [lessons, completedLessonIds]);
 
   const daysLeft = Math.max(0, Math.ceil(discountMsLeft / 86_400_000));
   const windowClosed = discountMsLeft <= 0 && !discountRequest;
+  const milestoneReached = overallPercent >= milestonePercent;
 
-  // Status line state machine
   let statusLine: React.ReactNode;
   if (discountRequest?.status === "approved") {
     statusLine = (
@@ -96,10 +92,13 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
 
   return (
     <div
-      className="px-6 py-3 flex items-center gap-5"
-      style={{ borderTop: "1px solid var(--color-border)" }}
+      className="px-6 flex items-center gap-5"
+      style={{
+        borderTop: "1px solid var(--color-border)",
+        paddingTop: 18,
+        paddingBottom: 12,
+      }}
     >
-      {/* Greeting (md+ only) */}
       <div className="flex-shrink-0 hidden md:block">
         <p
           style={{
@@ -122,57 +121,88 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
             marginTop: 2,
           }}
         >
-          {completedGateLessons} of {totalGateLessons} to discount
+          {overallCompleted} of {overallTotal} lessons
         </p>
       </div>
 
-      {/* The bar */}
       <div className="flex-1">
-        <div className="flex items-center gap-3">
+        {/* Bar with milestone marker. The marker is positioned absolutely
+            at milestonePercent so it sits ON the bar, not at the end. */}
+        <div
+          className="relative"
+          style={{
+            height: 24,
+            display: "flex",
+            alignItems: "center",
+          }}
+          aria-label={`${overallPercent}% of the way through the program; 30% discount milestone at ${Math.round(milestonePercent)}%`}
+        >
           <div
-            className="relative flex-1 overflow-hidden"
+            className="relative w-full overflow-hidden"
             style={{
               height: 6,
               borderRadius: 3,
               background: "var(--color-fill-secondary)",
             }}
-            aria-label={`${gatePercent}% of the way to the discount gate`}
           >
             {/* Fill */}
             <div
               style={{
                 position: "absolute",
                 inset: 0,
-                width: `${gatePercent}%`,
+                width: `${overallPercent}%`,
                 background: "var(--color-gold)",
                 borderRadius: "inherit",
-                transition:
-                  "width 400ms cubic-bezier(0.25, 0.1, 0.25, 1)",
+                transition: "width 400ms cubic-bezier(0.25, 0.1, 0.25, 1)",
               }}
             />
           </div>
-          {/* End-of-bar checkpoint marker */}
+
+          {/* Milestone tick — extends slightly above & below the bar */}
           <div
-            className="flex items-center gap-1.5 shrink-0"
+            aria-hidden="true"
             style={{
-              padding: "3px 9px",
+              position: "absolute",
+              left: `${milestonePercent}%`,
+              top: 0,
+              bottom: 0,
+              width: 2,
+              background: milestoneReached
+                ? "var(--color-gold-light)"
+                : "rgba(200, 157, 85, 0.55)",
+              transform: "translateX(-1px)",
+            }}
+          />
+
+          {/* 30% badge floats above the milestone tick */}
+          <div
+            className="absolute"
+            style={{
+              left: `${milestonePercent}%`,
+              top: -22,
+              transform: "translateX(-50%)",
+              padding: "2px 8px",
               borderRadius: 999,
-              background: discountAllLessonsDone
+              background: milestoneReached
                 ? "rgba(200, 157, 85, 0.18)"
                 : "var(--color-fill-secondary)",
-              border: discountAllLessonsDone
-                ? "1px solid rgba(200, 157, 85, 0.45)"
+              border: milestoneReached
+                ? "1px solid rgba(200, 157, 85, 0.55)"
                 : "1px solid var(--color-border)",
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              whiteSpace: "nowrap",
             }}
-            title="The 30% discount gate"
+            title="The 30% discount gate — finish R1 + R2 to reach it"
           >
             <svg
-              width="10"
-              height="10"
+              width="9"
+              height="9"
               viewBox="0 0 24 24"
               fill="none"
               stroke={
-                discountAllLessonsDone
+                milestoneReached
                   ? "var(--color-gold-light)"
                   : "var(--color-gold)"
               }
@@ -184,13 +214,14 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
               <path d="M12 2 L4 6 v6 c0 5 4 9 8 10 4-1 8-5 8-10 V6 z" />
             </svg>
             <span
-              className="font-mono tabular-nums font-semibold"
+              className="tabular-nums"
               style={{
-                color: discountAllLessonsDone
+                color: milestoneReached
                   ? "var(--color-gold-light)"
                   : "var(--color-gold)",
-                fontSize: 11,
-                letterSpacing: "0.04em",
+                fontSize: 10,
+                fontWeight: 600,
+                letterSpacing: "-0.005em",
               }}
             >
               30%
@@ -201,7 +232,7 @@ export function DiscountProgressBar({ firstName }: DiscountProgressBarProps) {
           style={{
             fontSize: 12,
             lineHeight: 1.4,
-            marginTop: 6,
+            marginTop: 4,
             letterSpacing: "-0.005em",
           }}
         >

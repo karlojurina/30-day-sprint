@@ -9,6 +9,7 @@ import { MapMockup } from "@/components/mockup/MapMockup";
 import { LessonCompleteEffects } from "@/components/map/LessonCompleteEffects";
 import { DiscountUrgencyBanner } from "@/components/map/DiscountUrgencyBanner";
 import { StreakCelebration } from "@/components/map/StreakCelebration";
+import { DevTestPanel } from "@/components/dev/DevTestPanel";
 
 const STREAK_LAST_SEEN_KEY = "et.streak.lastSeen";
 
@@ -47,6 +48,17 @@ export default function DashboardPage() {
       window.localStorage.setItem(STREAK_LAST_SEEN_KEY, String(streak.current));
     }
   }, [streak.current, loading]);
+
+  // Dev test panel listener — manually fire the streak celebration
+  // with any value (no API call, no streak mutation).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<number>;
+      if (typeof ce.detail === "number") setStreakCelebration(ce.detail);
+    };
+    window.addEventListener("et:test:streak", handler);
+    return () => window.removeEventListener("et:test:streak", handler);
+  }, []);
 
   if (loading || !student) {
     return (
@@ -92,6 +104,8 @@ export default function DashboardPage() {
         streak={streakCelebration}
         onDismiss={() => setStreakCelebration(null)}
       />
+
+      <DevTestPanel />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
+import type { BannerOverride } from "@/components/dev/DevTestPanel";
 
 /**
  * Permanent banner under the TopBar that shows the discount state at
@@ -33,20 +34,44 @@ export function DiscountUrgencyBanner() {
 
   const [copied, setCopied] = useState(false);
 
+  // Dev test panel override — when set, displays the override state
+  // instead of the natural one.
+  const [override, setOverride] = useState<BannerOverride | null>(null);
+  useEffect(() => {
+    const onSet = (e: Event) => {
+      const ce = e as CustomEvent<BannerOverride>;
+      setOverride(ce.detail);
+    };
+    const onClear = () => setOverride(null);
+    window.addEventListener("et:test:banner", onSet);
+    window.addEventListener("et:test:banner-clear", onClear);
+    return () => {
+      window.removeEventListener("et:test:banner", onSet);
+      window.removeEventListener("et:test:banner-clear", onClear);
+    };
+  }, []);
+
   // Compute LIVE ms remaining from joined_at + window. Re-evaluated
   // every render (the tick above forces re-renders every second).
-  const discountMsLeft = (() => {
+  const naturalMsLeft = (() => {
     if (!student) return 0;
     const joined = new Date(student.joined_at).getTime();
     const deadline = joined + DISCOUNT_WINDOW_DAYS * 86_400_000;
     return deadline - Date.now();
   })();
+  // If the test override is a countdown, use its synthetic ms.
+  const discountMsLeft =
+    override?.state === "countdown"
+      ? Math.max(0, override.days * 86_400_000)
+      : naturalMsLeft;
 
-  // Determine state
-  let state: "countdown" | "eligible" | "pending" | "approved" | "rejected" | "hidden" =
-    "hidden";
-
-  if (discountRequest?.status === "approved") {
+  // Determine state — override wins if present.
+  let state: "countdown" | "eligible" | "pending" | "approved" | "rejected" | "hidden";
+  let overrideCode: string | null = null;
+  if (override) {
+    state = override.state;
+    if (override.state === "approved") overrideCode = override.code;
+  } else if (discountRequest?.status === "approved") {
     state = "approved";
   } else if (discountRequest?.status === "pending") {
     state = "pending";
@@ -111,8 +136,9 @@ export function DiscountUrgencyBanner() {
           };
 
   function handleCopyCode() {
-    if (state !== "approved" || !discountRequest?.promo_code) return;
-    navigator.clipboard.writeText(discountRequest.promo_code).then(() => {
+    const code = overrideCode ?? discountRequest?.promo_code;
+    if (state !== "approved" || !code) return;
+    navigator.clipboard.writeText(code).then(() => {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
     });
@@ -150,7 +176,7 @@ export function DiscountUrgencyBanner() {
         state={state}
         accent={palette.accent}
         remaining={formatRemaining(discountMsLeft)}
-        code={discountRequest?.promo_code}
+        code={overrideCode ?? discountRequest?.promo_code}
         copied={copied}
         onCopy={handleCopyCode}
       />

@@ -978,6 +978,19 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     return;
   };
 
+  // Dev test panel listener — lets the developer trigger any
+  // region transition without clicking a region zone.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<View>;
+      if (ce.detail) transitionTo(ce.detail);
+    };
+    window.addEventListener("et:test:transition", handler);
+    return () => window.removeEventListener("et:test:transition", handler);
+    // transitionTo identity changes each render; use a fresh handler.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  });
+
   return (
     <div
       ref={outerRef}

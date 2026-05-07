@@ -8,48 +8,36 @@ import { SPEC_EASE_GSAP, SPEC_EASE_GSAP_IN } from "@/lib/motion";
 interface CinematicDiveProps {
   /** Bump this number to trigger a fresh transition. */
   trigger: number;
-  /** Called at the peak (fully covered) so parent can swap scenes. */
+  /** Called at peak (fully covered) so parent can swap scenes. */
   onPeak?: () => void;
   /** Total duration in seconds. */
   duration?: number;
 }
 
 /**
- * Cinematic dive transition — replaces the cloud cover.
+ * Minimal fade-through-dark transition. The classic film cut: source
+ * fades to black, scene swaps under cover, destination fades up.
+ * Zero gimmicks — just a single black overlay.
  *
- * Three stacked layers, all in a portal at z-index 9999:
- *   1. Vignette layer — full-screen dark radial gradient that fades in
- *      from transparent edges, providing peak coverage during the swap.
- *   2. Warm flash — a soft golden-hour gradient that flashes through
- *      the middle of the dive, giving a "camera caught the light"
- *      feel that matches the painted scenes' palette.
- *   3. Speed streaks — radial lines emanating from center, briefly
- *      visible during the dive-in to suggest forward motion.
+ * Timeline for duration=0.7s:
+ *   0.00 → overlay opacity 0, scene = old
+ *   0.28 → opacity 1 (fully covered)
+ *   0.35 → onPeak fires, parent swaps scene
+ *   0.42 → fade out begins
+ *   0.70 → opacity 0, scene = new
  *
- * Timeline for duration=1.0s (default):
- *   0.00 → all layers at 0%, scene = old
- *   0.40 → vignette + flash at peak (fully covered + warm flash hot)
- *   0.50 → onPeak fires, parent swaps scene under cover
- *   0.55 → flash starts retreating
- *   1.00 → fully revealed, all layers at 0%, scene = new
- *
- * Reads as "we flew through a portal of warm light" rather than "we
- * waited for clouds to clear." Fits the explorer/expedition voice.
+ * Bump `trigger` to replay. prefers-reduced-motion → quick fade only.
  */
 export function CinematicDive({
   trigger,
   onPeak,
-  duration = 1.0,
+  duration = 0.7,
 }: CinematicDiveProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const vignetteRef = useRef<HTMLDivElement>(null);
-  const flashRef = useRef<HTMLDivElement>(null);
-  const streaksRef = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const prevTrigger = useRef(trigger);
   const timelineRef = useRef<gsap.core.Timeline | null>(null);
 
-  // Stable ref for onPeak so re-renders during the parent's camera
-  // tween don't restart the timeline.
   const onPeakRef = useRef(onPeak);
   useEffect(() => {
     onPeakRef.current = onPeak;
@@ -65,10 +53,8 @@ export function CinematicDive({
     prevTrigger.current = trigger;
 
     const container = containerRef.current;
-    const vignette = vignetteRef.current;
-    const flash = flashRef.current;
-    const streaks = streaksRef.current;
-    if (!container || !vignette || !flash || !streaks) return;
+    const overlay = overlayRef.current;
+    if (!container || !overlay) return;
 
     if (timelineRef.current) {
       timelineRef.current.kill();
@@ -82,17 +68,17 @@ export function CinematicDive({
     if (reduced) {
       gsap.set(container, { pointerEvents: "auto" });
       gsap.fromTo(
-        vignette,
+        overlay,
         { opacity: 0 },
         {
           opacity: 1,
-          duration: 0.18,
+          duration: 0.12,
           ease: SPEC_EASE_GSAP,
           onComplete: () => {
             onPeakRef.current?.();
-            gsap.to(vignette, {
+            gsap.to(overlay, {
               opacity: 0,
-              duration: 0.22,
+              duration: 0.16,
               ease: SPEC_EASE_GSAP_IN,
               onComplete: () => {
                 gsap.set(container, { pointerEvents: "none" });
@@ -104,17 +90,12 @@ export function CinematicDive({
       return;
     }
 
-    // Initial state — invisible everything, slight scale on layers so
-    // the dive-in feels like it's pushing outward toward the camera.
-    gsap.set(vignette, { opacity: 0, scale: 0.92 });
-    gsap.set(flash, { opacity: 0, scale: 0.85 });
-    gsap.set(streaks, { opacity: 0, scale: 0.7, rotation: 0 });
+    gsap.set(overlay, { opacity: 0 });
     gsap.set(container, { pointerEvents: "auto" });
 
-    const inDur = duration * 0.40; // 0.0 → 0.40 fade in
-    const peakAt = duration * 0.50; // scene swap moment
-    const outStart = duration * 0.55; // 0.55 → 1.00 fade out
-    const outDur = duration - outStart;
+    const fadeIn = duration * 0.4;
+    const hold = duration * 0.2;
+    const fadeOut = duration * 0.4;
 
     const tl = gsap.timeline({
       onComplete: () => {
@@ -123,78 +104,31 @@ export function CinematicDive({
       },
     });
 
-    // ── Phase 1: dive in ─────────────────────────────────────────
-    // Vignette darkens edges → middle.
+    // Fade in to full black
     tl.to(
-      vignette,
+      overlay,
       {
         opacity: 1,
-        scale: 1.05,
-        duration: inDur,
+        duration: fadeIn,
         ease: SPEC_EASE_GSAP,
       },
       0
-    );
-    // Warm flash hits its peak just past mid-dive.
-    tl.to(
-      flash,
-      {
-        opacity: 1,
-        scale: 1.15,
-        duration: inDur * 1.05,
-        ease: SPEC_EASE_GSAP,
-      },
-      0
-    );
-    // Speed streaks visible during the first 60% of the dive only.
-    tl.to(
-      streaks,
-      {
-        opacity: 0.55,
-        scale: 1.4,
-        rotation: 8,
-        duration: inDur * 0.85,
-        ease: "power2.out",
-      },
-      0
-    );
-    tl.to(
-      streaks,
-      {
-        opacity: 0,
-        scale: 1.7,
-        rotation: 14,
-        duration: peakAt - inDur * 0.85,
-        ease: "power2.in",
-      },
-      inDur * 0.85
     );
 
-    // ── Phase 2: peak — swap scene under full cover ──────────────
+    // Peak — swap scene mid-hold
     tl.add(() => {
       onPeakRef.current?.();
-    }, peakAt);
+    }, fadeIn + hold * 0.5);
 
-    // ── Phase 3: emerge ──────────────────────────────────────────
+    // Fade out reveal
     tl.to(
-      vignette,
+      overlay,
       {
         opacity: 0,
-        scale: 1.18,
-        duration: outDur,
+        duration: fadeOut,
         ease: SPEC_EASE_GSAP_IN,
       },
-      outStart
-    );
-    tl.to(
-      flash,
-      {
-        opacity: 0,
-        scale: 1.32,
-        duration: outDur * 0.95,
-        ease: SPEC_EASE_GSAP_IN,
-      },
-      outStart
+      fadeIn + hold
     );
 
     timelineRef.current = tl;
@@ -223,85 +157,16 @@ export function CinematicDive({
       }}
       aria-hidden
     >
-      {/* Layer 1 — vignette. Dark edges, transparent center → grows
-          to fully dark at peak, providing the actual coverage.
-          opacity: 0 in inline style so the layer is hidden until the
-          timeline first runs (gsap.set runs only on trigger change;
-          without inline opacity 0 the layer would render visible on
-          initial mount). */}
       <div
-        ref={vignetteRef}
-        style={{
-          position: "absolute",
-          inset: "-10%",
-          background:
-            "radial-gradient(ellipse at center, rgba(8,12,22,0.20) 0%, rgba(8,12,22,0.85) 45%, rgba(4,8,16,0.98) 80%, rgba(0,0,0,1) 100%)",
-          opacity: 0,
-          willChange: "transform, opacity",
-        }}
-      />
-
-      {/* Layer 2 — warm flash. A soft golden-hour radial that catches
-          the camera at peak. Fits the painted scene palette. */}
-      <div
-        ref={flashRef}
-        style={{
-          position: "absolute",
-          inset: "-10%",
-          background:
-            "radial-gradient(ellipse at center, rgba(255,231,178,0.55) 0%, rgba(220,184,118,0.35) 25%, rgba(160,118,62,0.12) 55%, transparent 80%)",
-          mixBlendMode: "screen",
-          opacity: 0,
-          willChange: "transform, opacity",
-        }}
-      />
-
-      {/* Layer 3 — speed streaks. Pure SVG radial lines fading from
-          center outward, suggesting forward motion. Briefly visible
-          during dive-in. */}
-      <div
-        ref={streaksRef}
+        ref={overlayRef}
         style={{
           position: "absolute",
           inset: 0,
+          background: "#000000",
           opacity: 0,
-          willChange: "transform, opacity",
+          willChange: "opacity",
         }}
-      >
-        <svg
-          viewBox="-100 -100 200 200"
-          preserveAspectRatio="xMidYMid slice"
-          style={{ width: "100%", height: "100%" }}
-        >
-          <defs>
-            <radialGradient id="streak-fade" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="rgba(255,231,178,0)" />
-              <stop offset="35%" stopColor="rgba(255,231,178,0)" />
-              <stop offset="60%" stopColor="rgba(255,247,220,0.85)" />
-              <stop offset="100%" stopColor="rgba(255,247,220,0)" />
-            </radialGradient>
-          </defs>
-          {/* 24 radial streaks emanating from center, evenly spaced */}
-          {Array.from({ length: 24 }).map((_, i) => {
-            const angle = (i * 360) / 24;
-            const rad = (angle * Math.PI) / 180;
-            const x = Math.cos(rad) * 90;
-            const y = Math.sin(rad) * 90;
-            return (
-              <line
-                key={i}
-                x1={Math.cos(rad) * 30}
-                y1={Math.sin(rad) * 30}
-                x2={x}
-                y2={y}
-                stroke="url(#streak-fade)"
-                strokeWidth={0.7 + (i % 3) * 0.4}
-                strokeLinecap="round"
-              />
-            );
-          })}
-        </svg>
-      </div>
+      />
     </div>,
     document.body
   );

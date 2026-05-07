@@ -12,29 +12,43 @@ interface CinematicDiveProps {
   onPeak?: () => void;
   /** Total duration in seconds. */
   duration?: number;
+  /**
+   * Title card content shown during the dark moment. Pass null to
+   * just do a plain fade with no card (e.g. region → overview).
+   */
+  title?: { numeral: string; label: string } | null;
 }
 
 /**
- * Minimal fade-through-dark transition. The classic film cut: source
- * fades to black, scene swaps under cover, destination fades up.
- * Zero gimmicks — just a single black overlay.
+ * Fade-through-dark transition with an optional title card during
+ * the dark moment. Reads as a film chapter card — the destination's
+ * Roman numeral + name fades in over the dark backdrop, holds, then
+ * fades out as the new scene reveals.
  *
- * Timeline for duration=0.7s:
- *   0.00 → overlay opacity 0, scene = old
- *   0.28 → opacity 1 (fully covered)
- *   0.35 → onPeak fires, parent swaps scene
- *   0.42 → fade out begins
- *   0.70 → opacity 0, scene = new
+ * Timeline (duration=1.2s):
+ *   0.00s  overlay opacity 0, scene = old
+ *   0.48s  overlay opacity 1 (fully covered), title card 0%
+ *   0.36s  title card starts fading in (slightly before peak so the
+ *          card is already settling when the swap happens)
+ *   0.55s  title card at full opacity
+ *   0.60s  onPeak fires — parent swaps scene under cover
+ *   0.78s  title card starts fading out
+ *   0.72s  overlay starts fading out
+ *   0.96s  title card fully invisible
+ *   1.20s  overlay fully invisible, scene = new
  *
- * Bump `trigger` to replay. prefers-reduced-motion → quick fade only.
+ * The overlay is a slightly warm-dark gradient (not pure black) so
+ * the moment doesn't read as a hard cut — feels atmospheric.
  */
 export function CinematicDive({
   trigger,
   onPeak,
-  duration = 0.7,
+  duration = 1.2,
+  title = null,
 }: CinematicDiveProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLDivElement>(null);
   const prevTrigger = useRef(trigger);
   const timelineRef = useRef<gsap.core.Timeline | null>(null);
 
@@ -42,6 +56,14 @@ export function CinematicDive({
   useEffect(() => {
     onPeakRef.current = onPeak;
   }, [onPeak]);
+
+  // Hold the title in a ref so it's always the latest at peak — if the
+  // user triggers another transition mid-flight, the parent re-renders
+  // with new title props before the timeline reads them.
+  const titleHoldRef = useRef(title);
+  useEffect(() => {
+    titleHoldRef.current = title;
+  }, [title]);
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -54,6 +76,7 @@ export function CinematicDive({
 
     const container = containerRef.current;
     const overlay = overlayRef.current;
+    const titleEl = titleRef.current;
     if (!container || !overlay) return;
 
     if (timelineRef.current) {
@@ -72,13 +95,13 @@ export function CinematicDive({
         { opacity: 0 },
         {
           opacity: 1,
-          duration: 0.12,
+          duration: 0.16,
           ease: SPEC_EASE_GSAP,
           onComplete: () => {
             onPeakRef.current?.();
             gsap.to(overlay, {
               opacity: 0,
-              duration: 0.16,
+              duration: 0.18,
               ease: SPEC_EASE_GSAP_IN,
               onComplete: () => {
                 gsap.set(container, { pointerEvents: "none" });
@@ -91,11 +114,13 @@ export function CinematicDive({
     }
 
     gsap.set(overlay, { opacity: 0 });
+    if (titleEl) gsap.set(titleEl, { opacity: 0, y: 12 });
     gsap.set(container, { pointerEvents: "auto" });
 
-    const fadeIn = duration * 0.4;
-    const hold = duration * 0.2;
-    const fadeOut = duration * 0.4;
+    const fadeInDur = duration * 0.40;
+    const holdDur = duration * 0.20;
+    const fadeOutDur = duration * 0.40;
+    const peakAt = fadeInDur + holdDur * 0.5;
 
     const tl = gsap.timeline({
       onComplete: () => {
@@ -104,31 +129,60 @@ export function CinematicDive({
       },
     });
 
-    // Fade in to full black
+    // Overlay fade in
     tl.to(
       overlay,
       {
         opacity: 1,
-        duration: fadeIn,
+        duration: fadeInDur,
         ease: SPEC_EASE_GSAP,
       },
       0
     );
 
-    // Peak — swap scene mid-hold
+    // Title card fades in just before peak coverage, holds, fades out
+    if (titleEl && titleHoldRef.current) {
+      const titleInStart = fadeInDur * 0.65;
+      const titleInDur = fadeInDur * 0.45 + holdDur * 0.5;
+      const titleHold = holdDur * 0.5 + fadeOutDur * 0.4;
+      const titleOutDur = fadeOutDur * 0.45;
+
+      tl.to(
+        titleEl,
+        {
+          opacity: 1,
+          y: 0,
+          duration: titleInDur,
+          ease: SPEC_EASE_GSAP,
+        },
+        titleInStart
+      );
+      tl.to(
+        titleEl,
+        {
+          opacity: 0,
+          y: -8,
+          duration: titleOutDur,
+          ease: SPEC_EASE_GSAP_IN,
+        },
+        titleInStart + titleInDur + titleHold
+      );
+    }
+
+    // Peak — swap scene under cover
     tl.add(() => {
       onPeakRef.current?.();
-    }, fadeIn + hold * 0.5);
+    }, peakAt);
 
-    // Fade out reveal
+    // Overlay fade out
     tl.to(
       overlay,
       {
         opacity: 0,
-        duration: fadeOut,
+        duration: fadeOutDur,
         ease: SPEC_EASE_GSAP_IN,
       },
-      fadeIn + hold
+      fadeInDur + holdDur
     );
 
     timelineRef.current = tl;
@@ -139,8 +193,7 @@ export function CinematicDive({
         timelineRef.current = null;
       }
     };
-    // onPeak intentionally excluded — read via onPeakRef so frequent
-    // parent re-renders don't kill the in-flight timeline.
+    // onPeak intentionally excluded — read via onPeakRef.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trigger, duration]);
 
@@ -157,16 +210,78 @@ export function CinematicDive({
       }}
       aria-hidden
     >
+      {/* Slightly warm-dark backdrop. NOT pure black — a faint warm
+          radial keeps the moment atmospheric instead of feeling like
+          a hard cut to nothing. */}
       <div
         ref={overlayRef}
         style={{
           position: "absolute",
           inset: 0,
-          background: "#000000",
+          background:
+            "radial-gradient(ellipse at center, rgba(18, 12, 6, 0.97) 0%, rgba(8, 6, 4, 1) 70%, rgba(0, 0, 0, 1) 100%)",
           opacity: 0,
           willChange: "opacity",
         }}
       />
+
+      {/* Title card — rendered on top of overlay, only visible when
+          title prop is set. Stamp layout: numeral large, hairline gold
+          rule, region name tracked below. */}
+      {title && (
+        <div
+          ref={titleRef}
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: 0,
+            willChange: "opacity, transform",
+          }}
+        >
+          <div
+            style={{
+              fontFamily:
+                'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              fontWeight: 600,
+              fontSize: 88,
+              letterSpacing: "-0.045em",
+              lineHeight: 1,
+              color: "#F0D595",
+              fontFeatureSettings: '"cv11", "ss01"',
+              textShadow: "0 0 60px rgba(230, 192, 122, 0.32)",
+            }}
+          >
+            {title.numeral}
+          </div>
+          <div
+            aria-hidden="true"
+            style={{
+              width: 56,
+              height: 1,
+              background:
+                "linear-gradient(90deg, transparent 0%, rgba(230,192,122,0.5) 50%, transparent 100%)",
+              margin: "20px 0 16px",
+            }}
+          />
+          <div
+            style={{
+              fontFamily:
+                'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              fontWeight: 500,
+              fontSize: 14,
+              letterSpacing: "0.22em",
+              textTransform: "uppercase",
+              color: "rgba(255, 247, 235, 0.82)",
+            }}
+          >
+            {title.label}
+          </div>
+        </div>
+      )}
     </div>,
     document.body
   );

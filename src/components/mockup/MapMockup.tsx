@@ -667,11 +667,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       y: target.y,
       scale: target.scale,
       // First paint: slow expo arrival (cinematic).
-      // Region transitions: timed against the fade-through-dark
-      // overlay (0.7s total, peak at 0.35s). Camera tween at 0.5s
-      // so the camera mostly settles during the fade-out, landing
-      // on the new scene as the dark clears.
-      duration: isFirst ? 1.8 : 0.5,
+      // Region transitions: timed against the title-card fade
+      // overlay (1.2s total, peak at 0.6s). Camera tween at 0.55s
+      // so the bulk of camera travel happens during the dark hold +
+      // first half of the fade-out, landing as the title card clears.
+      duration: isFirst ? 1.8 : 0.55,
       ease: isFirst ? SPEC_EASE_GSAP : SPEC_EASE_GSAP_INOUT,
       onUpdate: () => {
         setDisplayTransform({ ...transformRef.current });
@@ -878,12 +878,56 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       ? sortedRegions[focusedIdx + 1]
       : null;
 
-  // Trigger a cloud transition then swap the view at peak coverage.
-  // Blocked while a drag was in progress (pan shouldn't also click a zone).
-  // No pre-zoom — the clouds fully cover the screen at peak, so the camera
-  // doesn't need to "dive in" first. Pre-zoom used to land at a different
-  // scale than the post-swap target, which read as a weird zoom-out as
-  // clouds retreated. Letting the clouds do the work alone is cleaner.
+  // Compute a "pre-zoom" target that's a slight push-in toward the
+  // destination, used as a brief tween BEFORE the fade triggers. Reads
+  // as the camera "leaning in" before the cut. Two cases:
+  //   overview → region: zoom in 1.20x on the clicked region's center
+  //                      (still in overview view, just camera moving)
+  //   region → overview: zoom in 1.10x on current region's view
+  //                      (push-in on what we're leaving)
+  const getPreZoomTarget = (from: View, to: View) => {
+    const vw = outerSize.w || 1;
+    const vh = outerSize.h || 1;
+    const cover = Math.max(vw / MAP_W, vh / MAP_H);
+
+    const clampToImage = (t: {
+      x: number;
+      y: number;
+      scale: number;
+      areaW: number;
+    }) => {
+      const imgW = MAP_W * t.scale;
+      const imgH = MAP_H * t.scale;
+      const x = imgW <= t.areaW ? (t.areaW - imgW) / 2 : Math.max(t.areaW - imgW, Math.min(0, t.x));
+      const y = imgH <= vh ? (vh - imgH) / 2 : Math.max(vh - imgH, Math.min(0, t.y));
+      return { x, y, scale: t.scale };
+    };
+
+    if (from === "overview" && to !== "overview") {
+      // Zoom in toward the clicked region's anchor point on the
+      // overview map. ~1.20x more than overview default.
+      const z = REGION_ZONES[to as RegionId];
+      const scale = cover * OVERVIEW_DEFAULT_ZOOM * 1.20;
+      return clampToImage({
+        x: vw / 2 - z.labelX * scale,
+        y: vh / 2 - z.labelY * scale,
+        scale,
+        areaW: vw,
+      });
+    }
+
+    // Region → overview: small forward push on the current camera
+    // position. Same x/y, scale up 1.10x.
+    const current = transformRef.current;
+    return {
+      x: current.x,
+      y: current.y,
+      scale: current.scale * 1.10,
+    };
+  };
+
+  // Click → pre-zoom (300ms small push-in) → fade transition →
+  // scene swap behind the dark → emerge into destination.
   const transitionTo = (next: View) => {
     if (suppressClickRef.current) return;
     if (pendingViewRef.current !== null) return; // already in flight
@@ -894,14 +938,39 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     if (next !== "overview" && !unlockedRegions.has(next as RegionId)) return;
     pendingViewRef.current = next;
 
-    // If the user is heading into a region, force-mount the deferred scene
-    // stack now. The cloud transition gives us ~1s of cover before the swap
-    // reveals the new view — plenty of headroom for a 600 KB WebP.
+    // Force-mount deferred scene stack if heading into a region.
     if (next !== "overview" && !regionsMounted) {
       setRegionsMounted(true);
     }
 
-    setTransitionCounter((n) => n + 1);
+    // Pre-zoom: short camera tween toward the destination BEFORE the
+    // fade triggers. Skipped if outerSize isn't ready yet (initial
+    // mount edge case).
+    if (outerSize.w === 0) {
+      setTransitionCounter((n) => n + 1);
+      return;
+    }
+
+    const preTarget = getPreZoomTarget(view, next);
+    if (tweenRef.current) {
+      tweenRef.current.kill();
+      tweenRef.current = null;
+    }
+    tweenRef.current = gsap.to(transformRef.current, {
+      x: preTarget.x,
+      y: preTarget.y,
+      scale: preTarget.scale,
+      duration: 0.32,
+      ease: SPEC_EASE_GSAP,
+      onUpdate: () => {
+        setDisplayTransform({ ...transformRef.current });
+      },
+      onComplete: () => {
+        tweenRef.current = null;
+        setTransitionCounter((n) => n + 1);
+      },
+    });
+    return;
   };
 
   return (
@@ -1409,10 +1478,21 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
         />
       )}
 
-      {/* Minimal fade-through-dark transition — fires at peak coverage */}
+      {/* Fade-through-dark with destination title card overlaid during
+          the dark moment. Shows numeral + region name when entering a
+          region; plain fade when going back to overview. */}
       <CinematicDive
         trigger={transitionCounter}
-        duration={0.7}
+        duration={1.2}
+        title={(() => {
+          const next = pendingViewRef.current;
+          if (next == null || next === "overview") return null;
+          const region = regions.find((r) => r.id === next);
+          if (!region) return null;
+          const numeral =
+            ["I", "II", "III", "IV"][(region.order_num ?? 1) - 1] ?? "";
+          return { numeral, label: region.name };
+        })()}
         onPeak={() => {
           const next = pendingViewRef.current;
           if (next != null) {

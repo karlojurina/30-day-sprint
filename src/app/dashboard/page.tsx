@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { TopBar } from "@/components/map/TopBar";
@@ -8,12 +8,45 @@ import { LessonSheet } from "@/components/map/LessonSheet";
 import { MapMockup } from "@/components/mockup/MapMockup";
 import { LessonCompleteEffects } from "@/components/map/LessonCompleteEffects";
 import { DiscountUrgencyBanner } from "@/components/map/DiscountUrgencyBanner";
+import { StreakCelebration } from "@/components/map/StreakCelebration";
+
+const STREAK_LAST_SEEN_KEY = "et.streak.lastSeen";
 
 export default function DashboardPage() {
   const { student } = useAuth();
-  const { loading } = useStudent();
+  const { loading, streak } = useStudent();
 
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
+  const [streakCelebration, setStreakCelebration] = useState<number | null>(null);
+
+  // Detect streak increment vs the last-seen value in localStorage.
+  // Fires the celebration when current > lastSeen AND > 0. Persists
+  // the new value immediately so a refresh doesn't double-fire.
+  const initialised = useRef(false);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (loading) return;
+    if (streak.current <= 0) return;
+
+    const lastSeenRaw = window.localStorage.getItem(STREAK_LAST_SEEN_KEY);
+    const lastSeen = lastSeenRaw ? parseInt(lastSeenRaw, 10) : 0;
+
+    // First load after server fetch — record current as baseline,
+    // don't fire (we don't want to celebrate on every page load).
+    if (!initialised.current) {
+      initialised.current = true;
+      if (Number.isNaN(lastSeen) || lastSeen < streak.current) {
+        // If localStorage is behind server, sync without firing.
+        window.localStorage.setItem(STREAK_LAST_SEEN_KEY, String(streak.current));
+      }
+      return;
+    }
+
+    if (streak.current > lastSeen) {
+      setStreakCelebration(streak.current);
+      window.localStorage.setItem(STREAK_LAST_SEEN_KEY, String(streak.current));
+    }
+  }, [streak.current, loading]);
 
   if (loading || !student) {
     return (
@@ -53,6 +86,11 @@ export default function DashboardPage() {
         lessonId={selectedLessonId}
         onClose={() => setSelectedLessonId(null)}
         onSelectLesson={(id) => setSelectedLessonId(id)}
+      />
+
+      <StreakCelebration
+        streak={streakCelebration}
+        onDismiss={() => setStreakCelebration(null)}
       />
     </div>
   );

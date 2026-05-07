@@ -128,10 +128,20 @@ const SIDE_PANEL_COLLAPSED_WIDTH = 56;
 const GOLD = "#E6C07A";
 const GOLD_HI = "#F0D595";
 const INK = "#E6DCC8";
-// Silver palette for lesson nodes — cooler than gold so the gold
-// is reserved for milestones (region numerals, discount gate, end markers).
-const SILVER = "#B8C5D6";
-const SILVER_HI = "#D6DEEB";
+// Lesson-node palette — warm pearl/champagne so the markers sit IN the
+// painted golden-hour scenes instead of stamped on top. Distinct from
+// the milestone gold (GOLD/GOLD_HI) which is reserved for end markers
+// and region numerals.
+//   PEARL    — done state fill (soft warm cream with cool undertone)
+//   PEARL_HI — bright rim/highlight on current state
+//   PEARL_LO — outer rim / shadow tone
+const PEARL = "#D9D2C2";
+const PEARL_HI = "#F0EAD8";
+const PEARL_LO = "#9E9586";
+// Legacy aliases retained so we don't have to update every reference.
+const SILVER = PEARL;
+const SILVER_HI = PEARL_HI;
+void PEARL_LO;
 
 /**
  * Puzzle-piece region hit zones — irregular closed polygons positioned over
@@ -2171,7 +2181,10 @@ function perspectiveSize(y: number): number {
   const t = Math.max(0, Math.min(1, y / MAP_H));
   // 0.65 at top → 1.0 at bottom, with a slight curve favoring the bottom half
   const eased = 0.65 + 0.35 * Math.pow(t, 0.9);
-  return 26 * eased; // base 26 px (matches previous LessonMarker size)
+  // Bumped 26 → 32 so the markers carry visible weight in the
+  // painted scenes — the previous size read as small stickers
+  // on top of the landscape rather than waypoints inside it.
+  return 32 * eased;
 }
 
 interface LessonMarkerProps {
@@ -2214,16 +2227,16 @@ function LessonMarker({
     : isGroup
       ? baseSize * 1.18
       : baseSize;
-  // Premium fills:
-  //   - done   → solid silver disc (light), checkmark in deep navy
-  //   - current → translucent silver wash with bright stroke
-  //   - default → deep navy fill with hairline silver stroke
+  // Premium fills (warm pearl palette so markers sit IN the painted scene):
+  //   - done   → pearl disc with cream highlight, dark navy checkmark
+  //   - current → warm pearl wash with bright rim
+  //   - default → deep navy fill with hairline pearl stroke
   const fill = isDone
-    ? SILVER
+    ? PEARL
     : isCurrent
-      ? "rgba(184,197,214,0.20)"
+      ? "rgba(217,210,194,0.22)"
       : "rgba(10,18,36,0.92)";
-  const stroke = isCurrent ? SILVER_HI : SILVER;
+  const stroke = isCurrent ? PEARL_HI : PEARL;
 
   return (
     <g
@@ -2242,62 +2255,90 @@ function LessonMarker({
       role="button"
       aria-label={title}
     >
-      {/* Pulsing ring for current */}
+      {/* Pulsing rim — current waypoint draws a warm pearl halo */}
       {isCurrent && (
         <circle
-          r={size + 6}
+          r={size + 7}
           fill="none"
-          stroke={SILVER_HI}
+          stroke={PEARL_HI}
           strokeWidth={1.5}
           opacity={0.6}
         >
           <animate
             attributeName="r"
-            values={`${size + 2};${size + 14};${size + 2}`}
+            values={`${size + 3};${size + 16};${size + 3}`}
             dur="2.4s"
             repeatCount="indefinite"
           />
           <animate
             attributeName="opacity"
-            values="0.12;0.55;0.12"
+            values="0.14;0.6;0.14"
             dur="2.4s"
             repeatCount="indefinite"
           />
         </circle>
       )}
 
-      {/* Hover glow — soft silver wash */}
+      {/* Hover glow — warm wash that picks up scene's golden light */}
       {hot && (
         <circle
-          r={size + 4}
-          fill="rgba(214,222,235,0.18)"
+          r={size + 5}
+          fill="rgba(240,234,216,0.22)"
           style={{ transition: "opacity 0.2s" }}
         />
       )}
 
-      {/* Hairline drop shadow under the marker */}
+      {/* Soft contact shadow — grounds the marker in the painted scene
+          rather than floating it on top. Larger + softer than before. */}
       {isAction ? (
         <rect
-          x={-size * 0.75 + 0.6}
-          y={-size * 0.75 + 0.6}
+          x={-size * 0.75 + 1}
+          y={-size * 0.75 + 2}
           width={size * 1.5}
           height={size * 1.5}
           transform="rotate(45)"
-          fill="rgba(0,0,0,0.32)"
+          fill="rgba(0,0,0,0.30)"
           stroke="none"
+          opacity={0.7}
         />
       ) : (
-        <circle r={size} cx={0.5} cy={0.5} fill="rgba(0,0,0,0.28)" stroke="none" />
+        <ellipse
+          cx={1.5}
+          cy={size * 0.85}
+          rx={size * 0.85}
+          ry={size * 0.18}
+          fill="rgba(0,0,0,0.35)"
+          stroke="none"
+        />
+      )}
+      {/* Hairline drop shadow directly under disc for crispness */}
+      {!isAction && (
+        <circle r={size} cx={0.5} cy={1} fill="rgba(0,0,0,0.40)" stroke="none" />
       )}
 
-      {/* Marker shape — circle for lessons, diamond for action items.
-          A subtle inner gradient lifts the disc off the painted map
-          without going full glass. */}
+      {/* Marker fill — three-stop radial gradient (bright crown,
+          mid pearl, deep rim) gives a glassy/3D read instead of flat. */}
       <defs>
-        <radialGradient id={`marker-fill-${index}`} cx="50%" cy="40%" r="65%">
-          <stop offset="0%" stopColor={isDone ? "#E8EFF7" : "rgba(184,197,214,0.20)"} />
-          <stop offset="60%" stopColor={isDone ? SILVER : "rgba(10,18,36,0.92)"} />
-          <stop offset="100%" stopColor={isDone ? "#9DAEC4" : "rgba(8,14,28,0.96)"} />
+        <radialGradient id={`marker-fill-${index}`} cx="40%" cy="32%" r="75%">
+          {isDone ? (
+            <>
+              <stop offset="0%" stopColor="#FFF7E6" />
+              <stop offset="35%" stopColor={PEARL_HI} />
+              <stop offset="80%" stopColor={PEARL} />
+              <stop offset="100%" stopColor={PEARL_LO} />
+            </>
+          ) : (
+            <>
+              <stop offset="0%" stopColor="rgba(217,210,194,0.18)" />
+              <stop offset="55%" stopColor="rgba(14,22,40,0.96)" />
+              <stop offset="100%" stopColor="rgba(6,12,26,0.98)" />
+            </>
+          )}
+        </radialGradient>
+        {/* Inner shadow for incomplete state — adds depth at bottom */}
+        <radialGradient id={`marker-inner-shade-${index}`} cx="50%" cy="100%" r="60%">
+          <stop offset="0%" stopColor="rgba(0,0,0,0.4)" />
+          <stop offset="100%" stopColor="rgba(0,0,0,0)" />
         </radialGradient>
       </defs>
       {isAction ? (
@@ -2312,28 +2353,47 @@ function LessonMarker({
           strokeWidth={isCurrent ? 2 : 1.5}
         />
       ) : (
-        <circle
-          r={size}
-          fill={isCurrent ? fill : `url(#marker-fill-${index})`}
-          stroke={stroke}
-          strokeWidth={isCurrent ? 2 : 1.5}
-        />
+        <>
+          <circle
+            r={size}
+            fill={isCurrent ? fill : `url(#marker-fill-${index})`}
+            stroke={stroke}
+            strokeWidth={isCurrent ? 2 : 1.4}
+          />
+          {/* Inner bottom shade only on non-done states for depth */}
+          {!isDone && (
+            <circle
+              r={size}
+              fill={`url(#marker-inner-shade-${index})`}
+              stroke="none"
+              opacity={0.5}
+            />
+          )}
+        </>
       )}
 
-      {/* Specular top-light arc — subtle white highlight along the
-          upper rim that turns the disc into a sphere. Apple-design
-          "materials beat borders" — this is what differentiates a
-          rendered checkpoint from a flat sticker. Only on circle
-          (lesson + group), not action diamond. */}
+      {/* Specular highlight — bright crescent at top-left suggests a
+          glassy/pearl finish catching the scene's overhead light.
+          Two-stroke approach: a wider soft crescent for diffuse glow,
+          then a tight bright arc for the actual hot spot. */}
       {!isAction && (
-        <path
-          d={`M ${-size * 0.7} ${-size * 0.5} A ${size * 0.95} ${size * 0.95} 0 0 1 ${size * 0.7} ${-size * 0.5}`}
-          fill="none"
-          stroke={isDone ? "rgba(255,255,255,0.45)" : "rgba(214,222,235,0.30)"}
-          strokeWidth={1}
-          strokeLinecap="round"
-          opacity={0.85}
-        />
+        <>
+          <path
+            d={`M ${-size * 0.78} ${-size * 0.42} A ${size * 0.95} ${size * 0.95} 0 0 1 ${size * 0.55} ${-size * 0.65}`}
+            fill="none"
+            stroke={isDone ? "rgba(255,253,245,0.7)" : "rgba(240,234,216,0.42)"}
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            opacity={0.55}
+          />
+          <path
+            d={`M ${-size * 0.55} ${-size * 0.6} A ${size * 0.78} ${size * 0.78} 0 0 1 ${size * 0.2} ${-size * 0.78}`}
+            fill="none"
+            stroke={isDone ? "rgba(255,255,250,0.95)" : "rgba(255,253,245,0.55)"}
+            strokeWidth={1.2}
+            strokeLinecap="round"
+          />
+        </>
       )}
 
       {/* Inner glyph */}

@@ -4,7 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import Image from "next/image";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
-import { LESSON_GROUPS, lessonGroupOf } from "@/lib/constants";
+import { getDayNumber } from "@/types/database";
 import { StreakFlame } from "./StreakFlame";
 import { DiscountProgressBar } from "./DiscountProgressBar";
 
@@ -15,33 +15,27 @@ interface TopBarProps {
 const PILL_HEIGHT = 36;
 
 /**
- * Single-row top bar. Was two rows (breadcrumb + progress dial pill +
- * countdown pill on row 1, progress bar on row 2). Now everything
- * collapses around the bar so there's exactly one focal point:
- *   brand · current lesson · discount progress bar · streak · signout
+ * Single-row top bar. The discount progress bar is the focal element,
+ * centered in the available width. Left/right clusters mirror in
+ * weight so the bar reads as the page's center of gravity.
  *
- * Dropped:
- *   - "Hey {name}" greeting (streak is a better personal anchor)
- *   - ProgressDial (the bar already shows progress)
- *   - DiscountCountdown pill (countdown lives in the bar's status line)
+ * Left cluster:  brand + Day-of-program chip
+ * Center:        discount progress bar (focal)
+ * Right cluster: streak + signout
+ *
+ * The current-lesson breadcrumb pill was retired — the bar's status
+ * line and the highlighted current lesson on the map already
+ * communicate "what to do next." Two surfaces saying the same thing
+ * created visual competition and pushed the bar off-center.
  */
 export function TopBar({ setPanTarget }: TopBarProps) {
+  void setPanTarget;
   const { student, signOut } = useAuth();
-  const { regions, currentLesson, streak } = useStudent();
+  const { streak } = useStudent();
 
   if (!student) return null;
 
-  const currentRegion = currentLesson
-    ? regions.find((r) => r.id === currentLesson.region_id)
-    : null;
-
-  // If the current lesson belongs to a group, show the group's title
-  // in the breadcrumb so it matches what the student sees on the map.
-  const currentGroupId = currentLesson ? lessonGroupOf(currentLesson.id) : null;
-  const breadcrumbTitle = currentGroupId
-    ? LESSON_GROUPS[currentGroupId]?.title ?? currentLesson?.title
-    : currentLesson?.title;
-  const breadcrumbDuration = currentGroupId ? null : currentLesson?.duration_label;
+  const dayNumber = getDayNumber(student.joined_at);
 
   return (
     <header
@@ -57,8 +51,8 @@ export function TopBar({ setPanTarget }: TopBarProps) {
         className="flex items-center gap-4 px-6"
         style={{ minHeight: 76, paddingTop: 12, paddingBottom: 16 }}
       >
-        {/* Brand — just the logo */}
-        <div className="flex items-center shrink-0" style={{ height: PILL_HEIGHT }}>
+        {/* Left cluster — brand + Day chip */}
+        <div className="flex items-center shrink-0" style={{ gap: 12 }}>
           <Image
             src="/ecomtalent-logo.png"
             alt="EcomTalent"
@@ -67,68 +61,52 @@ export function TopBar({ setPanTarget }: TopBarProps) {
             priority
             style={{ height: 28, width: 28, objectFit: "contain" }}
           />
-        </div>
-
-        {/* Current lesson breadcrumb — narrower than before so the bar
-            gets the room. Hidden on tablet to save horizontal space. */}
-        {currentLesson && (
-          <button
-            onClick={() => setPanTarget(currentLesson.id)}
-            className="hidden lg:flex items-center shrink-0 transition-colors"
+          <div
+            className="hidden md:flex items-center"
             style={{
-              gap: 8,
-              maxWidth: 320,
-              minWidth: 0,
-              padding: "0 12px",
               height: PILL_HEIGHT,
-              borderRadius: 10,
+              padding: "0 12px",
+              borderRadius: 999,
               border: "1px solid var(--color-border)",
               background: "var(--color-fill-secondary)",
-              cursor: "pointer",
+              gap: 6,
             }}
-            title={
-              currentRegion
-                ? `${currentRegion.name} · ${breadcrumbTitle}`
-                : breadcrumbTitle
-            }
+            title={`Day ${dayNumber} of 30`}
+            aria-label={`Day ${dayNumber} of 30`}
           >
             <span
-              className="truncate"
               style={{
-                color: "var(--color-text-primary)",
-                fontWeight: 600,
-                fontSize: 13,
-                letterSpacing: "-0.011em",
-                lineHeight: 1,
+                color: "var(--color-text-tertiary)",
+                fontSize: 11,
+                fontWeight: 500,
+                letterSpacing: "-0.005em",
               }}
             >
-              {breadcrumbTitle}
+              Day
             </span>
-            {breadcrumbDuration && (
-              <span
-                className="shrink-0"
-                style={{
-                  color: "var(--color-text-tertiary)",
-                  fontSize: 12,
-                  fontVariantNumeric: "tabular-nums",
-                  letterSpacing: "-0.005em",
-                  fontWeight: 500,
-                }}
-              >
-                {breadcrumbDuration}
+            <span
+              className="tabular-nums"
+              style={{
+                color: "var(--color-text-primary)",
+                fontSize: 13,
+                fontWeight: 600,
+                letterSpacing: "-0.011em",
+              }}
+            >
+              {dayNumber}
+              <span style={{ color: "var(--color-text-tertiary)", fontWeight: 500 }}>
+                {" / 30"}
               </span>
-            )}
-          </button>
-        )}
+            </span>
+          </div>
+        </div>
 
-        {/* Focal element — the discount progress bar takes the rest of
-            the width. Internal layout (label, milestone, countdown) is
-            handled inside the component. */}
+        {/* Focal element — discount progress bar */}
         <div className="flex-1 min-w-0">
           <DiscountProgressBar />
         </div>
 
-        {/* Right cluster — streak + signout. Compact pair. */}
+        {/* Right cluster — streak + signout */}
         <div className="flex items-center gap-2 shrink-0">
           <StreakFlame current={streak.current} longest={streak.longest} />
           <button

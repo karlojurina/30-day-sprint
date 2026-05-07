@@ -94,16 +94,24 @@ function AdminSidebar() {
               href={item.href}
               className="flex items-center gap-3 px-3 transition-colors"
               style={{
-                height: 36,
-                borderRadius: 8,
+                height: 40,
+                borderRadius: 10,
                 fontSize: 14,
                 fontWeight: isActive ? 600 : 500,
                 letterSpacing: "-0.011em",
                 color: isActive
                   ? "var(--color-accent-dark)"
                   : "var(--color-text-secondary)",
-                background: isActive ? "var(--color-accent-glow)" : "transparent",
-                marginBottom: 2,
+                background: isActive
+                  ? "rgba(200, 157, 85, 0.14)"
+                  : "transparent",
+                border: isActive
+                  ? "1px solid rgba(200, 157, 85, 0.28)"
+                  : "1px solid transparent",
+                boxShadow: isActive
+                  ? "0 1px 2px rgba(20, 20, 24, 0.04)"
+                  : "none",
+                marginBottom: 4,
               }}
             >
               <svg

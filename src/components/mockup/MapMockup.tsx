@@ -1099,14 +1099,13 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
               const stroke = isComplete ? GOLD_HI : GOLD;
               const smoothD = smoothClosedPath(z.polygon);
 
-              // Discount-gate beacon: surface the prize on R2 from the
-              // overview so students always see what they're working
-              // toward. Hidden once the student has applied (the
-              // beacon's job is done at that point).
-              const showDiscountBeacon =
+              // Surface the discount on R2 directly inside the region
+              // label (instead of a separate floating beacon). One
+              // gold line — quiet, always visible, doesn't compete
+              // with the painted scene. Hidden once the student has
+              // already applied.
+              const showDiscountLine =
                 r.id === "r2" && !discountRequest;
-              const discountBeaconReady =
-                discountAllLessonsDone && !discountRequest;
 
               const ariaLabel = isUnlocked
                 ? `${r.name} — ${completed}/${total} lessons`
@@ -1301,11 +1300,36 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         : "Locked"}
                     </text>
 
+                    {/* Discount line — only on R2, sits directly below
+                        the progress / "Locked" sublabel. Single quiet
+                        gold line, no badge, no halo. */}
+                    {showDiscountLine && (
+                      <text
+                        x={0}
+                        y={isUnlocked ? 76 : 76}
+                        textAnchor="middle"
+                        style={{
+                          fontFamily:
+                            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                          fontWeight: 600,
+                          fontSize: 14,
+                          letterSpacing: "-0.012em",
+                          fill: GOLD_HI,
+                          paintOrder: "stroke fill",
+                          stroke: "rgba(6,12,26,0.85)",
+                          strokeWidth: 3,
+                          strokeLinejoin: "round",
+                        }}
+                      >
+                        30% off your second month
+                      </text>
+                    )}
+
                     {/* Hover CTA — only shown for unlocked regions */}
                     {hot && (
                       <text
                         x={0}
-                        y={76}
+                        y={showDiscountLine ? 100 : 76}
                         textAnchor="middle"
                         style={{
                           fontFamily:
@@ -1324,105 +1348,6 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       </text>
                     )}
                   </g>
-
-                  {/* Discount-gate beacon — only on R2. Apple-restraint
-                      pass: ONE soft halo + ONE clean badge + ONE legible
-                      inscription. No outer ring, no "OFF MONTH 2"
-                      sub-caption inside the badge — the inscription
-                      carries the meaning. Floats above the numeral
-                      plaque so the prize is visible from any zoom. */}
-                  {showDiscountBeacon && (
-                    <g
-                      transform={`translate(${z.labelX} ${z.labelY - 140})`}
-                      pointerEvents="none"
-                    >
-                      {/* Soft halo — single layer, slow breath */}
-                      <circle
-                        r={60}
-                        fill={discountBeaconReady ? GOLD : "rgba(230,192,122,0.45)"}
-                        opacity={0.16}
-                      >
-                        <animate
-                          attributeName="r"
-                          values="54;66;54"
-                          dur="3.2s"
-                          repeatCount="indefinite"
-                        />
-                        <animate
-                          attributeName="opacity"
-                          values="0.10;0.22;0.10"
-                          dur="3.2s"
-                          repeatCount="indefinite"
-                        />
-                      </circle>
-
-                      {/* Badge body — gradient fill + hairline gold stroke,
-                          no double-ring. Diameter reduced from 80 → 68. */}
-                      <defs>
-                        <radialGradient id="beacon-fill" cx="50%" cy="40%" r="65%">
-                          <stop offset="0%" stopColor="rgba(230,192,122,0.28)" />
-                          <stop offset="55%" stopColor="rgba(10,18,36,0.96)" />
-                          <stop offset="100%" stopColor="rgba(6,12,26,0.98)" />
-                        </radialGradient>
-                      </defs>
-                      <circle
-                        r={34}
-                        fill="url(#beacon-fill)"
-                        stroke={discountBeaconReady ? GOLD_HI : GOLD}
-                        strokeWidth={1.5}
-                      />
-                      {/* Specular top highlight — turns disc into sphere */}
-                      <path
-                        d="M -22 -16 A 28 28 0 0 1 22 -16"
-                        fill="none"
-                        stroke="rgba(255,247,235,0.32)"
-                        strokeWidth={1}
-                        strokeLinecap="round"
-                      />
-                      <text
-                        x={0}
-                        y={8}
-                        textAnchor="middle"
-                        style={{
-                          fontFamily:
-                            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                          fontWeight: 700,
-                          fontSize: 24,
-                          letterSpacing: "-0.025em",
-                          fill: GOLD_HI,
-                          fontVariantNumeric: "tabular-nums",
-                        }}
-                      >
-                        30%
-                      </text>
-
-                      {/* Inscription — single 17px line, no two-tier copy.
-                          Tracks left of the badge so it doesn't overlap. */}
-                      <text
-                        x={48}
-                        y={6}
-                        textAnchor="start"
-                        style={{
-                          fontFamily:
-                            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                          fontWeight: 600,
-                          fontSize: 17,
-                          letterSpacing: "-0.018em",
-                          fill: discountBeaconReady
-                            ? GOLD_HI
-                            : "rgba(255,247,235,0.96)",
-                          paintOrder: "stroke fill",
-                          stroke: "rgba(6,12,26,0.78)",
-                          strokeWidth: 2.5,
-                          strokeLinejoin: "round",
-                        }}
-                      >
-                        {discountBeaconReady
-                          ? "Ready to apply"
-                          : "30% off your second month"}
-                      </text>
-                    </g>
-                  )}
                 </g>
               );
             })}

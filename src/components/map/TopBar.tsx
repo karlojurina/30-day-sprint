@@ -4,7 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import Image from "next/image";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
-import { getDayNumber } from "@/types/database";
+import { LESSON_GROUPS, lessonGroupOf } from "@/lib/constants";
 import { StreakFlame } from "./StreakFlame";
 import { DiscountProgressBar } from "./DiscountProgressBar";
 
@@ -15,27 +15,31 @@ interface TopBarProps {
 const PILL_HEIGHT = 36;
 
 /**
- * Single-row top bar. The discount progress bar is the focal element,
- * centered in the available width. Left/right clusters mirror in
- * weight so the bar reads as the page's center of gravity.
+ * Single-row top bar. Layout (left-to-right):
+ *   brand · current-lesson breadcrumb · [progress bar — focal] · streak · signout
  *
- * Left cluster:  brand + Day-of-program chip
- * Center:        discount progress bar (focal)
- * Right cluster: streak + signout
- *
- * The current-lesson breadcrumb pill was retired — the bar's status
- * line and the highlighted current lesson on the map already
- * communicate "what to do next." Two surfaces saying the same thing
- * created visual competition and pushed the bar off-center.
+ * The progress bar takes flex-1 so it fills the center. The 30%
+ * milestone badge hangs BELOW the bar from the milestone tick, with
+ * the status line beneath. The breadcrumb pill on the left + the
+ * streak/signout cluster on the right balance the bar's weight so
+ * it sits visually centered.
  */
 export function TopBar({ setPanTarget }: TopBarProps) {
-  void setPanTarget;
   const { student, signOut } = useAuth();
-  const { streak } = useStudent();
+  const { regions, currentLesson, streak } = useStudent();
 
   if (!student) return null;
 
-  const dayNumber = getDayNumber(student.joined_at);
+  const currentRegion = currentLesson
+    ? regions.find((r) => r.id === currentLesson.region_id)
+    : null;
+
+  // If the current lesson is part of a group, show the group title.
+  const currentGroupId = currentLesson ? lessonGroupOf(currentLesson.id) : null;
+  const breadcrumbTitle = currentGroupId
+    ? LESSON_GROUPS[currentGroupId]?.title ?? currentLesson?.title
+    : currentLesson?.title;
+  const breadcrumbDuration = currentGroupId ? null : currentLesson?.duration_label;
 
   return (
     <header
@@ -51,8 +55,8 @@ export function TopBar({ setPanTarget }: TopBarProps) {
         className="flex items-center gap-4 px-6"
         style={{ minHeight: 76, paddingTop: 12, paddingBottom: 16 }}
       >
-        {/* Left cluster — brand + Day chip */}
-        <div className="flex items-center shrink-0" style={{ gap: 12 }}>
+        {/* Brand */}
+        <div className="flex items-center shrink-0" style={{ height: PILL_HEIGHT }}>
           <Image
             src="/ecomtalent-logo.png"
             alt="EcomTalent"
@@ -61,47 +65,60 @@ export function TopBar({ setPanTarget }: TopBarProps) {
             priority
             style={{ height: 28, width: 28, objectFit: "contain" }}
           />
-          <div
-            className="hidden md:flex items-center"
-            style={{
-              height: PILL_HEIGHT,
-              padding: "0 12px",
-              borderRadius: 999,
-              border: "1px solid var(--color-border)",
-              background: "var(--color-fill-secondary)",
-              gap: 6,
-            }}
-            title={`Day ${dayNumber} of 30`}
-            aria-label={`Day ${dayNumber} of 30`}
-          >
-            <span
-              style={{
-                color: "var(--color-text-tertiary)",
-                fontSize: 11,
-                fontWeight: 500,
-                letterSpacing: "-0.005em",
-              }}
-            >
-              Day
-            </span>
-            <span
-              className="tabular-nums"
-              style={{
-                color: "var(--color-text-primary)",
-                fontSize: 13,
-                fontWeight: 600,
-                letterSpacing: "-0.011em",
-              }}
-            >
-              {dayNumber}
-              <span style={{ color: "var(--color-text-tertiary)", fontWeight: 500 }}>
-                {" / 30"}
-              </span>
-            </span>
-          </div>
         </div>
 
-        {/* Focal element — discount progress bar */}
+        {/* Current lesson breadcrumb pill */}
+        {currentLesson && (
+          <button
+            onClick={() => setPanTarget(currentLesson.id)}
+            className="hidden lg:flex items-center shrink-0 transition-colors"
+            style={{
+              gap: 8,
+              maxWidth: 320,
+              minWidth: 0,
+              padding: "0 12px",
+              height: PILL_HEIGHT,
+              borderRadius: 10,
+              border: "1px solid var(--color-border)",
+              background: "var(--color-fill-secondary)",
+              cursor: "pointer",
+            }}
+            title={
+              currentRegion
+                ? `${currentRegion.name} · ${breadcrumbTitle}`
+                : breadcrumbTitle
+            }
+          >
+            <span
+              className="truncate"
+              style={{
+                color: "var(--color-text-primary)",
+                fontWeight: 600,
+                fontSize: 13,
+                letterSpacing: "-0.011em",
+                lineHeight: 1,
+              }}
+            >
+              {breadcrumbTitle}
+            </span>
+            {breadcrumbDuration && (
+              <span
+                className="shrink-0"
+                style={{
+                  color: "var(--color-text-tertiary)",
+                  fontSize: 12,
+                  fontVariantNumeric: "tabular-nums",
+                  letterSpacing: "-0.005em",
+                  fontWeight: 500,
+                }}
+              >
+                {breadcrumbDuration}
+              </span>
+            )}
+          </button>
+        )}
+
+        {/* Focal element — discount progress bar takes the rest */}
         <div className="flex-1 min-w-0">
           <DiscountProgressBar />
         </div>

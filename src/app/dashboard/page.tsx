@@ -7,6 +7,7 @@ import { TopBar } from "@/components/map/TopBar";
 import { LessonSheet } from "@/components/map/LessonSheet";
 import { MapMockup } from "@/components/mockup/MapMockup";
 import { LessonCompleteEffects } from "@/components/map/LessonCompleteEffects";
+import { DiscountUrgencyBanner } from "@/components/map/DiscountUrgencyBanner";
 
 export default function DashboardPage() {
   const { student } = useAuth();
@@ -45,6 +46,7 @@ export default function DashboardPage() {
       <div className="relative flex-1 min-h-0">
         <MapMockup onOpenLesson={(id) => setSelectedLessonId(id)} />
         <LessonCompleteEffects />
+        <DiscountUrgencyBanner />
       </div>
 
       <LessonSheet

@@ -1323,36 +1323,6 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         quieter "your second month" subline beneath. */}
                     {showDiscountLine && (
                       <g>
-                        {/* Pulsing aura — soft gold ellipse breathing
-                            behind the headline, same energy as the
-                            Onward marker's halo */}
-                        <ellipse
-                          cx={0}
-                          cy={78}
-                          rx={88}
-                          ry={26}
-                          fill={GOLD_HI}
-                          opacity={0.18}
-                        >
-                          <animate
-                            attributeName="rx"
-                            values="76;100;76"
-                            dur="2.6s"
-                            repeatCount="indefinite"
-                          />
-                          <animate
-                            attributeName="ry"
-                            values="22;30;22"
-                            dur="2.6s"
-                            repeatCount="indefinite"
-                          />
-                          <animate
-                            attributeName="opacity"
-                            values="0.10;0.32;0.10"
-                            dur="2.6s"
-                            repeatCount="indefinite"
-                          />
-                        </ellipse>
                         <text
                           x={0}
                           y={84}
@@ -1370,12 +1340,6 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                             strokeLinejoin: "round",
                           }}
                         >
-                          <animate
-                            attributeName="opacity"
-                            values="0.85;1;0.85"
-                            dur="2.6s"
-                            repeatCount="indefinite"
-                          />
                           30% OFF
                         </text>
                         <text

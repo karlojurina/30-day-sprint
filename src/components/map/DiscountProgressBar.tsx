@@ -51,7 +51,12 @@ export function DiscountProgressBar() {
   const windowClosed = discountMsLeft <= 0 && !discountRequest;
   const milestoneReached = overallPercent >= milestonePercent;
 
-  let statusLine: React.ReactNode;
+  // Status line only appears for STATE-changing events (approved /
+  // pending / rejected / window-closed / ready-to-apply). The
+  // routine "Nd left to earn discount" copy is now carried by the
+  // dismissable banner on page load — duplicating it here just
+  // crowds the topbar.
+  let statusLine: React.ReactNode = null;
   if (discountRequest?.status === "approved") {
     statusLine = (
       <span style={{ color: "var(--color-gold-light)" }}>
@@ -83,13 +88,9 @@ export function DiscountProgressBar() {
         Ready to apply for your 30% discount
       </span>
     );
-  } else {
-    statusLine = (
-      <span style={{ color: "var(--color-ink-dim)" }}>
-        30% off month 2 · finish R1 + R2 within {daysLeft}d
-      </span>
-    );
   }
+  // Suppress eslint unused warning during pre-eligible state
+  void daysLeft;
 
   return (
     <div
@@ -201,23 +202,28 @@ export function DiscountProgressBar() {
           </div>
       </div>
 
-      {/* Status text + lesson counter — absolute-positioned BELOW the
-          bar wrapper. Hangs into the topbar's bottom padding without
-          changing the bar's vertical center. */}
+      {/* Below-bar row — absolute-positioned. Lesson counter on the
+          right always renders; status text on the left only renders
+          for state-changing events (approved / pending / rejected /
+          ready-to-apply / closed). */}
       <div
         className="absolute left-0 right-0 flex items-baseline justify-between gap-4"
         style={{ top: "calc(50% + 14px)", pointerEvents: "none" }}
       >
-        <p
-          className="min-w-0 truncate"
-          style={{
-            fontSize: 12,
-            lineHeight: 1.4,
-            letterSpacing: "-0.005em",
-          }}
-        >
-          {statusLine}
-        </p>
+        {statusLine ? (
+          <p
+            className="min-w-0 truncate"
+            style={{
+              fontSize: 12,
+              lineHeight: 1.4,
+              letterSpacing: "-0.005em",
+            }}
+          >
+            {statusLine}
+          </p>
+        ) : (
+          <span />
+        )}
         <p
           className="shrink-0 hidden md:block"
           style={{

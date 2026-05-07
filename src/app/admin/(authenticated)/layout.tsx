@@ -103,10 +103,10 @@ function AdminSidebar() {
                   ? "var(--color-accent-dark)"
                   : "var(--color-text-secondary)",
                 background: isActive
-                  ? "rgba(200, 157, 85, 0.14)"
+                  ? "rgba(140, 140, 130, 0.14)"
                   : "transparent",
                 border: isActive
-                  ? "1px solid rgba(200, 157, 85, 0.28)"
+                  ? "1px solid rgba(140, 140, 130, 0.28)"
                   : "1px solid transparent",
                 boxShadow: isActive
                   ? "0 1px 2px rgba(20, 20, 24, 0.04)"

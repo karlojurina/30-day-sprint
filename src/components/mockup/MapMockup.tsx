@@ -125,30 +125,35 @@ function getSidePanelWidth(viewportW: number): number {
 // expand button + the region numeral. Map gains the rest as canvas.
 const SIDE_PANEL_COLLAPSED_WIDTH = 56;
 
-const GOLD = "#E6C07A";
-const GOLD_HI = "#F0D595";
-const INK = "#E6DCC8";
+// Palette swapped from gold/brass to clean pearl-white per user
+// feedback. Same MULTI-STOP material treatment (gradient + bevel +
+// specular) — just a polished-silver hue instead of polished-gold.
+const GOLD = "#F0F0EA";    // was #E6C07A — used for accent text/strokes
+const GOLD_HI = "#FFFFFF"; // was #F0D595 — bright accent
+const INK = "#F5F5F2";     // was #E6DCC8 — primary on-dark text
 
 // ───────────────────────────────────────────────────────────────────
-// Brass medallion palette — for lesson waypoints. Reads as polished
-// brass / antique gold with proper material depth. Distinct from the
-// LIT milestone gold above so milestones still outrank waypoints.
+// Pearl medallion palette — for lesson waypoints + EndMarkers.
+// Reads as polished silver/pearl with proper material depth.
 //
-//   BRASS_GLINT  — tightest specular hot-spot (near white)
+//   BRASS_GLINT  — tightest specular hot-spot (pure white)
 //   BRASS_HI     — diffuse upper-left highlight
-//   BRASS_LIGHT  — lit polished gold
-//   BRASS_MID    — base brass
-//   BRASS_BASE   — antique brass (incomplete state mid)
+//   BRASS_LIGHT  — lit polished pearl
+//   BRASS_MID    — base pearl
+//   BRASS_BASE   — antique pearl (incomplete state mid)
 //   BRASS_DEEP   — rim shadow
 //   BRASS_DARK   — engraving / inset shadow
+//
+// Variable names retained as BRASS_* so existing references
+// don't churn — they're now silver tones, not gold.
 // ───────────────────────────────────────────────────────────────────
-const BRASS_GLINT = "#FFF5DD";
-const BRASS_HI = "#F2DDA8";
-const BRASS_LIGHT = "#DCBE7E";
-const BRASS_MID = "#C9A872";
-const BRASS_BASE = "#A8895C";
-const BRASS_DEEP = "#6B5536";
-const BRASS_DARK = "#2A1F12";
+const BRASS_GLINT = "#FFFFFF";
+const BRASS_HI = "#F5F5F0";
+const BRASS_LIGHT = "#DDDDD5";
+const BRASS_MID = "#B8B8AE";
+const BRASS_BASE = "#8E8E84";
+const BRASS_DEEP = "#5C5C53";
+const BRASS_DARK = "#1F1E1A";
 
 // Legacy aliases — keep so older references compile.
 const SILVER = BRASS_LIGHT;
@@ -1123,9 +1128,9 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
 
             <defs>
               <radialGradient id="zone-glow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="rgba(230,192,122,0.35)" />
-                <stop offset="60%" stopColor="rgba(230,192,122,0.12)" />
-                <stop offset="100%" stopColor="rgba(230,192,122,0)" />
+                <stop offset="0%" stopColor="rgba(245,245,240,0.35)" />
+                <stop offset="60%" stopColor="rgba(245,245,240,0.12)" />
+                <stop offset="100%" stopColor="rgba(245,245,240,0)" />
               </radialGradient>
               <radialGradient id="zone-glow-hot" cx="50%" cy="50%" r="50%">
                 <stop offset="0%" stopColor="rgba(240,213,149,0.55)" />
@@ -1567,7 +1572,7 @@ function RegionSidePanel({
           width,
           background:
             "linear-gradient(180deg, rgba(6,12,26,0.96) 0%, rgba(10,20,40,0.96) 100%)",
-          borderLeft: "1px solid rgba(230,192,122,0.25)",
+          borderLeft: "1px solid rgba(245,245,240,0.25)",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -1585,7 +1590,7 @@ function RegionSidePanel({
             width: 36,
             height: 36,
             borderRadius: 8,
-            border: "1px solid rgba(230,192,122,0.25)",
+            border: "1px solid rgba(245,245,240,0.25)",
             background: "transparent",
             color: "var(--color-ink-dim)",
             cursor: "pointer",
@@ -1626,7 +1631,7 @@ function RegionSidePanel({
         width,
         background:
           "linear-gradient(180deg, rgba(6,12,26,0.96) 0%, rgba(10,20,40,0.96) 100%)",
-        borderLeft: "1px solid rgba(230,192,122,0.25)",
+        borderLeft: "1px solid rgba(245,245,240,0.25)",
         display: "flex",
         flexDirection: "column",
         animation: "slide-in-right 0.6s cubic-bezier(0.22,1,0.36,1) both",
@@ -1636,7 +1641,7 @@ function RegionSidePanel({
       {/* Back button + collapse toggle */}
       <div
         className="flex items-center justify-between"
-        style={{ borderBottom: "1px solid rgba(230,192,122,0.12)" }}
+        style={{ borderBottom: "1px solid rgba(245,245,240,0.12)" }}
       >
         <button
           onClick={onBack}
@@ -1680,7 +1685,7 @@ function RegionSidePanel({
       </div>
 
       {/* Region header */}
-      <div className="px-6 py-6" style={{ borderBottom: "1px solid rgba(230,192,122,0.12)" }}>
+      <div className="px-6 py-6" style={{ borderBottom: "1px solid rgba(245,245,240,0.12)" }}>
         <p
           style={{
             color: GOLD,
@@ -1745,7 +1750,7 @@ function RegionSidePanel({
           <div
             style={{
               height: 4,
-              background: "rgba(230,192,122,0.12)",
+              background: "rgba(245,245,240,0.12)",
               borderRadius: 2,
               overflow: "hidden",
             }}
@@ -1791,14 +1796,14 @@ function RegionSidePanel({
                 className={`w-full flex items-start gap-3 p-3 rounded-lg text-left ${isCurrent || isLocked ? "" : "btn-card-lift"}`}
                 style={{
                   background: isCurrent
-                    ? "rgba(230,192,122,0.16)"
+                    ? "rgba(245,245,240,0.16)"
                     : "rgba(6,12,26,0.4)",
                   border: `1px solid ${
                     isCurrent
-                      ? "rgba(230,192,122,0.55)"
+                      ? "rgba(245,245,240,0.55)"
                       : isDone
-                        ? "rgba(230,192,122,0.2)"
-                        : "rgba(230,192,122,0.08)"
+                        ? "rgba(245,245,240,0.2)"
+                        : "rgba(245,245,240,0.08)"
                   }`,
                   opacity: isLocked ? 0.45 : isDone && !isCurrent ? 0.7 : 1,
                   cursor: isLocked ? "not-allowed" : "pointer",
@@ -1813,7 +1818,7 @@ function RegionSidePanel({
                     background: isDone
                       ? GOLD
                       : isCurrent
-                        ? "rgba(230,192,122,0.2)"
+                        ? "rgba(245,245,240,0.2)"
                         : "transparent",
                     border: isCurrent
                       ? `1.5px solid ${GOLD_HI}`
@@ -1905,7 +1910,7 @@ function RegionSidePanel({
                           fontWeight: 500,
                           letterSpacing: "-0.005em",
                           color: GOLD_HI,
-                          background: "rgba(230,192,122,0.12)",
+                          background: "rgba(245,245,240,0.12)",
                           padding: "2px 8px",
                           borderRadius: 4,
                         }}
@@ -1939,7 +1944,7 @@ function RegionSidePanel({
       {/* Prev / Next region footer */}
       <div
         className="flex"
-        style={{ borderTop: "1px solid rgba(230,192,122,0.15)" }}
+        style={{ borderTop: "1px solid rgba(245,245,240,0.15)" }}
       >
         <button
           onClick={onPrev ?? undefined}
@@ -1948,7 +1953,7 @@ function RegionSidePanel({
           style={{
             background: "transparent",
             border: "none",
-            borderRight: "1px solid rgba(230,192,122,0.12)",
+            borderRight: "1px solid rgba(245,245,240,0.12)",
             color: onPrev ? "var(--color-ink)" : "var(--color-ink-faint)",
             cursor: onPrev ? "pointer" : "default",
           }}

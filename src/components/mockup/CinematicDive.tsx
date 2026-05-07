@@ -219,16 +219,15 @@ export function CinematicDive({
       }}
       aria-hidden
     >
-      {/* Warm-dark backdrop. The "warm" comes from COLOR variation
-          across the gradient — every stop is alpha=1, so coverage at
-          peak is fully opaque (no map bleeding through behind text). */}
+      {/* Neutral-dark backdrop. Slight gradient variation for depth,
+          all stops alpha=1 so coverage is fully opaque at peak. */}
       <div
         ref={overlayRef}
         style={{
           position: "absolute",
           inset: 0,
           background:
-            "radial-gradient(ellipse at center, rgb(18, 12, 6) 0%, rgb(10, 6, 3) 50%, rgb(0, 0, 0) 100%)",
+            "radial-gradient(ellipse at center, rgb(20, 22, 26) 0%, rgb(10, 12, 16) 50%, rgb(0, 0, 0) 100%)",
           opacity: 0,
           willChange: "opacity",
         }}
@@ -259,9 +258,9 @@ export function CinematicDive({
               fontSize: 88,
               letterSpacing: "-0.045em",
               lineHeight: 1,
-              color: "#F0D595",
+              color: "#FFFFFF",
               fontFeatureSettings: '"cv11", "ss01"',
-              textShadow: "0 0 60px rgba(230, 192, 122, 0.32)",
+              textShadow: "0 0 60px rgba(255, 255, 255, 0.28)",
             }}
           >
             {title.numeral}
@@ -272,7 +271,7 @@ export function CinematicDive({
               width: 56,
               height: 1,
               background:
-                "linear-gradient(90deg, transparent 0%, rgba(230,192,122,0.5) 50%, transparent 100%)",
+                "linear-gradient(90deg, transparent 0%, rgba(245,245,240,0.5) 50%, transparent 100%)",
               margin: "20px 0 16px",
             }}
           />

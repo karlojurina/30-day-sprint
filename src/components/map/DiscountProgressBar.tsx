@@ -28,12 +28,7 @@ export function DiscountProgressBar() {
     discountRequest,
   } = useStudent();
 
-  const {
-    overallPercent,
-    overallCompleted,
-    overallTotal,
-    milestonePercent,
-  } = useMemo(() => {
+  const { overallPercent, milestonePercent } = useMemo(() => {
     const total = lessons.length;
     const completed = lessons.filter((l) => completedLessonIds.has(l.id)).length;
     const gateTotal = lessons.filter(
@@ -41,56 +36,18 @@ export function DiscountProgressBar() {
     ).length;
     return {
       overallPercent: progressPercent(completed, total),
-      overallCompleted: completed,
-      overallTotal: total,
       milestonePercent: total > 0 ? (gateTotal / total) * 100 : 0,
     };
   }, [lessons, completedLessonIds]);
 
-  const daysLeft = Math.max(0, Math.ceil(discountMsLeft / 86_400_000));
-  const windowClosed = discountMsLeft <= 0 && !discountRequest;
   const milestoneReached = overallPercent >= milestonePercent;
 
-  // Status line only appears for STATE-changing events (approved /
-  // pending / rejected / window-closed / ready-to-apply). The
-  // routine "Nd left to earn discount" copy is now carried by the
-  // dismissable banner on page load — duplicating it here just
-  // crowds the topbar.
-  let statusLine: React.ReactNode = null;
-  if (discountRequest?.status === "approved") {
-    statusLine = (
-      <span style={{ color: "var(--color-gold-light)" }}>
-        Your 30% code is ready
-        {discountRequest.promo_code ? ` · ${discountRequest.promo_code}` : ""}
-      </span>
-    );
-  } else if (discountRequest?.status === "pending") {
-    statusLine = (
-      <span style={{ color: "var(--color-ink-dim)" }}>
-        Application under review
-      </span>
-    );
-  } else if (discountRequest?.status === "rejected") {
-    statusLine = (
-      <span style={{ color: "var(--color-danger)" }}>
-        Application not approved · DM the team in Discord
-      </span>
-    );
-  } else if (windowClosed) {
-    statusLine = (
-      <span style={{ color: "var(--color-ink-faint)" }}>
-        Discount window closed
-      </span>
-    );
-  } else if (discountAllLessonsDone) {
-    statusLine = (
-      <span style={{ color: "var(--color-gold-light)" }}>
-        Ready to apply for your 30% discount
-      </span>
-    );
-  }
-  // Suppress eslint unused warning during pre-eligible state
-  void daysLeft;
+  // Status copy lives in the permanent banner under the TopBar now,
+  // so we don't render it here. Variables preserved (discountMsLeft,
+  // etc.) only if their values change layout above the bar.
+  void discountMsLeft;
+  void discountRequest;
+  void discountAllLessonsDone;
 
   return (
     <div
@@ -138,7 +95,7 @@ export function DiscountProgressBar() {
               width: 2,
               background: milestoneReached
                 ? "var(--color-gold-light)"
-                : "rgba(200, 157, 85, 0.55)",
+                : "rgba(140, 140, 130, 0.55)",
               transform: "translateX(-1px)",
             }}
           />
@@ -155,10 +112,10 @@ export function DiscountProgressBar() {
               padding: "2px 8px",
               borderRadius: 999,
               background: milestoneReached
-                ? "rgba(200, 157, 85, 0.18)"
+                ? "rgba(140, 140, 130, 0.18)"
                 : "var(--color-fill-secondary)",
               border: milestoneReached
-                ? "1px solid rgba(200, 157, 85, 0.55)"
+                ? "1px solid rgba(140, 140, 130, 0.55)"
                 : "1px solid var(--color-border)",
               display: "flex",
               alignItems: "center",
@@ -202,45 +159,8 @@ export function DiscountProgressBar() {
           </div>
       </div>
 
-      {/* Below-bar row — absolute-positioned. Lesson counter on the
-          right always renders; status text on the left only renders
-          for state-changing events (approved / pending / rejected /
-          ready-to-apply / closed). */}
-      <div
-        className="absolute left-0 right-0 flex items-baseline justify-between gap-4"
-        style={{ top: "calc(50% + 14px)", pointerEvents: "none" }}
-      >
-        {statusLine ? (
-          <p
-            className="min-w-0 truncate"
-            style={{
-              fontSize: 12,
-              lineHeight: 1.4,
-              letterSpacing: "-0.005em",
-            }}
-          >
-            {statusLine}
-          </p>
-        ) : (
-          <span />
-        )}
-        <p
-          className="shrink-0 hidden md:block"
-          style={{
-            color: "var(--color-text-tertiary)",
-            fontSize: 12,
-            fontWeight: 500,
-            letterSpacing: "-0.005em",
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          <span style={{ color: "var(--color-text-primary)", fontWeight: 600 }}>
-            {overallCompleted}
-          </span>
-          {" / "}
-          {overallTotal} lessons
-        </p>
-      </div>
+      {/* Below-bar row removed per user spec — discount status copy
+          now lives in the permanent banner under the TopBar. */}
     </div>
   );
 }

@@ -108,12 +108,12 @@ export function DiscountClaimCelebration({
                 maxWidth: 480,
                 width: "min(480px, 92vw)",
                 background:
-                  "linear-gradient(180deg, rgba(230,192,122,0.08) 0%, var(--color-bg-card) 50%, var(--color-bg-secondary) 100%)",
+                  "linear-gradient(180deg, rgba(245,245,240,0.08) 0%, var(--color-bg-card) 50%, var(--color-bg-secondary) 100%)",
                 border: "1px solid var(--color-gold)",
                 borderRadius: 18,
                 padding: "32px 28px 28px",
                 boxShadow:
-                  "0 40px 80px rgba(0,0,0,0.6), 0 0 60px rgba(230,192,122,0.18)",
+                  "0 40px 80px rgba(0,0,0,0.6), 0 0 60px rgba(245,245,240,0.18)",
               }}
               className="text-center"
             >
@@ -223,7 +223,7 @@ export function DiscountClaimCelebration({
                         style={{
                           padding: "12px 14px",
                           background: "rgba(6,12,26,0.55)",
-                          border: "1px solid rgba(230,192,122,0.4)",
+                          border: "1px solid rgba(245,245,240,0.4)",
                           borderRadius: 10,
                         }}
                       >
@@ -313,9 +313,9 @@ export function DiscountClaimCelebration({
                     onClick={onDismiss}
                     className="px-5 py-2.5 rounded-lg font-mono uppercase"
                     style={{
-                      background: "rgba(230,192,122,0.1)",
+                      background: "rgba(245,245,240,0.1)",
                       color: "rgba(230,220,200,0.78)",
-                      border: "1px solid rgba(230,192,122,0.28)",
+                      border: "1px solid rgba(245,245,240,0.28)",
                       fontSize: 11,
                       letterSpacing: "0.16em",
                     }}
@@ -330,7 +330,7 @@ export function DiscountClaimCelebration({
                   <span
                     className="font-mono uppercase block mb-2"
                     style={{
-                      color: "rgba(230,192,122,0.7)",
+                      color: "rgba(245,245,240,0.7)",
                       letterSpacing: "0.22em",
                       fontSize: 11,
                     }}
@@ -404,8 +404,8 @@ function CoinBurst() {
           margin: "auto",
           borderRadius: "50%",
           background:
-            "radial-gradient(circle, var(--color-gold) 0%, var(--color-gold-light) 60%, rgba(230,192,122,0.2) 100%)",
-          boxShadow: "0 0 30px rgba(230,192,122,0.5)",
+            "radial-gradient(circle, var(--color-gold) 0%, var(--color-gold-light) 60%, rgba(245,245,240,0.2) 100%)",
+          boxShadow: "0 0 30px rgba(245,245,240,0.5)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -449,7 +449,7 @@ function CoinBurst() {
               marginTop: -3,
               borderRadius: "50%",
               background: "var(--color-gold-light)",
-              boxShadow: "0 0 8px rgba(230,192,122,0.8)",
+              boxShadow: "0 0 8px rgba(245,245,240,0.8)",
             }}
           />
         );

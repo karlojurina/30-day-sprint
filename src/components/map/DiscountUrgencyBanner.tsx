@@ -1,90 +1,132 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
+import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 
 /**
- * Single-line urgency banner that slides down from beneath the TopBar
- * on every page load, sits for 5 seconds, then slides away. Frames
- * the discount window as a deadline so the student feels it without
- * needing to read the small print under the progress bar.
+ * Permanent banner under the TopBar that shows the discount state at
+ * all times — replaces the previous auto-dismissing 5s urgency strip
+ * AND the now-removed status text under the progress bar.
  *
- * Visibility rules:
- *   - Only fires when there's an active, unredeemed discount window
- *     (no request yet, days remaining > 0, R1 + R2 not all done — i.e.
- *     the student still has work to do AND still has time to do it)
- *   - Auto-dismisses after 5s with a slide-up + fade out
- *   - Click dismisses early
+ * Five visible states (everything else hides the banner):
+ *   - countdown:  "12d 5h 23m 4s left to earn your 30% discount"
+ *   - eligible:   "Ready to apply for your 30% discount"
+ *   - pending:    "Application under review · usually within 24h"
+ *   - approved:   "Your 30% code · ECOM30-XXX  [copy]"
+ *   - rejected:   "Application not approved · DM the team in Discord"
  *
- * Color escalates as the deadline approaches:
- *   - >7 days   → calm gold
- *   - 3-7 days  → warmer gold (gentle nudge)
- *   - ≤2 days   → crimson tinge (real urgency)
+ * The countdown ticks once per second so the seconds change live.
  */
 export function DiscountUrgencyBanner() {
-  const { discountMsLeft, discountRequest, discountAllLessonsDone } = useStudent();
-  const [visible, setVisible] = useState(false);
+  const { student } = useAuth();
+  const { discountRequest, discountAllLessonsDone } = useStudent();
 
-  const daysLeft = Math.max(0, Math.ceil(discountMsLeft / 86_400_000));
-  const isActive =
-    !discountRequest && !discountAllLessonsDone && discountMsLeft > 0;
-
-  // Show on mount when active, then auto-hide after 5s.
+  // Tick once a second so the live countdown updates without forcing
+  // the whole student context to re-render.
+  const [, setTick] = useState(0);
   useEffect(() => {
-    if (!isActive) return;
-    setVisible(true);
-    const t = window.setTimeout(() => setVisible(false), 5000);
-    return () => window.clearTimeout(t);
-  }, [isActive]);
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, []);
 
-  if (!isActive) return null;
+  const [copied, setCopied] = useState(false);
 
+  // Compute LIVE ms remaining from joined_at + window. Re-evaluated
+  // every render (the tick above forces re-renders every second).
+  const discountMsLeft = (() => {
+    if (!student) return 0;
+    const joined = new Date(student.joined_at).getTime();
+    const deadline = joined + DISCOUNT_WINDOW_DAYS * 86_400_000;
+    return deadline - Date.now();
+  })();
+
+  // Determine state
+  let state: "countdown" | "eligible" | "pending" | "approved" | "rejected" | "hidden" =
+    "hidden";
+
+  if (discountRequest?.status === "approved") {
+    state = "approved";
+  } else if (discountRequest?.status === "pending") {
+    state = "pending";
+  } else if (discountRequest?.status === "rejected") {
+    state = "rejected";
+  } else if (discountAllLessonsDone) {
+    state = "eligible";
+  } else if (discountMsLeft > 0) {
+    state = "countdown";
+  } else {
+    state = "hidden";
+  }
+
+  if (state === "hidden") return null;
+
+  // Format remaining time as "Xd Yh Zm Ws" (drop leading zero units).
+  function formatRemaining(ms: number): string {
+    const totalSec = Math.max(0, Math.floor(ms / 1000));
+    const d = Math.floor(totalSec / 86_400);
+    const h = Math.floor((totalSec % 86_400) / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const parts: string[] = [];
+    if (d > 0) parts.push(`${d}d`);
+    if (h > 0 || d > 0) parts.push(`${h}h`);
+    if (m > 0 || h > 0 || d > 0) parts.push(`${m}m`);
+    parts.push(`${s}s`);
+    return parts.join(" ");
+  }
+
+  // Tone — drives accent + border + bg colors
+  const daysLeft = Math.max(0, Math.ceil(discountMsLeft / 86_400_000));
   const tone =
-    daysLeft <= 2
-      ? "crimson"
-      : daysLeft <= 7
-        ? "warm"
-        : "calm";
+    state === "rejected"
+      ? "danger"
+      : state === "approved"
+        ? "success"
+        : state === "countdown" && daysLeft <= 2
+          ? "danger"
+          : "neutral";
 
-  // Tone palette — all gold-family except crimson which signals "real"
-  // urgency for the final 48 hours.
   const palette =
-    tone === "crimson"
+    tone === "danger"
       ? {
-          bg: "rgba(180, 64, 60, 0.18)",
-          border: "rgba(220, 96, 96, 0.42)",
-          text: "rgba(255, 220, 220, 0.92)",
+          bg: "rgba(180, 64, 60, 0.16)",
+          border: "rgba(220, 96, 96, 0.40)",
+          text: "rgba(255, 220, 220, 0.94)",
           accent: "#F08080",
         }
-      : tone === "warm"
+      : tone === "success"
         ? {
-            bg: "rgba(212, 162, 76, 0.16)",
-            border: "rgba(230, 192, 122, 0.40)",
-            text: "rgba(255, 240, 210, 0.94)",
-            accent: "var(--color-gold-light)",
+            bg: "rgba(255, 255, 255, 0.10)",
+            border: "rgba(255, 255, 255, 0.28)",
+            text: "rgba(255, 255, 255, 0.96)",
+            accent: "#FFFFFF",
           }
         : {
-            bg: "rgba(200, 157, 85, 0.10)",
-            border: "rgba(200, 157, 85, 0.28)",
-            text: "rgba(255, 247, 235, 0.88)",
-            accent: "var(--color-gold)",
+            bg: "rgba(255, 255, 255, 0.06)",
+            border: "rgba(255, 255, 255, 0.18)",
+            text: "rgba(255, 247, 235, 0.90)",
+            accent: "#F5F5F0",
           };
+
+  function handleCopyCode() {
+    if (state !== "approved" || !discountRequest?.promo_code) return;
+    navigator.clipboard.writeText(discountRequest.promo_code).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    });
+  }
 
   return (
     <div
-      onClick={() => setVisible(false)}
       role="status"
       aria-live="polite"
       style={{
         position: "absolute",
         top: 0,
         left: "50%",
-        transform: visible
-          ? "translate(-50%, 0)"
-          : "translate(-50%, -120%)",
-        transition:
-          "transform 480ms cubic-bezier(0.22, 1, 0.36, 1), opacity 480ms cubic-bezier(0.22, 1, 0.36, 1)",
-        opacity: visible ? 1 : 0,
+        transform: "translate(-50%, 0)",
         zIndex: 25,
         marginTop: 12,
         padding: "10px 22px",
@@ -96,7 +138,6 @@ export function DiscountUrgencyBanner() {
         boxShadow:
           "0 8px 24px rgba(0,0,0,0.32), 0 1px 0 rgba(255,255,255,0.04) inset",
         color: palette.text,
-        cursor: "pointer",
         userSelect: "none",
         whiteSpace: "nowrap",
         display: "flex",
@@ -104,36 +145,167 @@ export function DiscountUrgencyBanner() {
         gap: 10,
       }}
     >
+      <BannerIcon state={state} accent={palette.accent} />
+      <BannerText
+        state={state}
+        accent={palette.accent}
+        remaining={formatRemaining(discountMsLeft)}
+        code={discountRequest?.promo_code}
+        copied={copied}
+        onCopy={handleCopyCode}
+      />
+    </div>
+  );
+}
+
+function BannerIcon({
+  state,
+  accent,
+}: {
+  state: "countdown" | "eligible" | "pending" | "approved" | "rejected";
+  accent: string;
+}) {
+  if (state === "approved") {
+    return (
       <svg
         width="14"
         height="14"
         viewBox="0 0 24 24"
         fill="none"
-        stroke={palette.accent}
-        strokeWidth="2"
+        stroke={accent}
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+    );
+  }
+  if (state === "rejected") {
+    return (
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={accent}
+        strokeWidth="2.2"
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden="true"
       >
         <circle cx="12" cy="12" r="9" />
-        <polyline points="12 7 12 12 15 15" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
       </svg>
-      <span
-        style={{
-          fontSize: 14,
-          fontWeight: 500,
-          letterSpacing: "-0.011em",
-        }}
-      >
-        <span
-          className="tabular-nums"
-          style={{ color: palette.accent, fontWeight: 700 }}
-        >
-          {daysLeft} {daysLeft === 1 ? "day" : "days"} left
+    );
+  }
+  // countdown / eligible / pending all show the clock
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke={accent}
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15 15" />
+    </svg>
+  );
+}
+
+function BannerText({
+  state,
+  accent,
+  remaining,
+  code,
+  copied,
+  onCopy,
+}: {
+  state: "countdown" | "eligible" | "pending" | "approved" | "rejected";
+  accent: string;
+  remaining: string;
+  code: string | null | undefined;
+  copied: boolean;
+  onCopy: () => void;
+}) {
+  const baseStyle: React.CSSProperties = {
+    fontSize: 14,
+    fontWeight: 500,
+    letterSpacing: "-0.011em",
+  };
+  const accentStyle: React.CSSProperties = {
+    color: accent,
+    fontWeight: 700,
+  };
+
+  if (state === "countdown") {
+    return (
+      <span style={baseStyle}>
+        <span className="tabular-nums" style={accentStyle}>
+          {remaining}
         </span>
-        {" "}to earn your{" "}
-        <span style={{ color: palette.accent, fontWeight: 700 }}>30% discount</span>
+        {" "}left to earn your{" "}
+        <span style={accentStyle}>30% discount</span>
       </span>
-    </div>
+    );
+  }
+  if (state === "eligible") {
+    return (
+      <span style={baseStyle}>
+        <span style={accentStyle}>Ready to apply</span> for your 30% discount
+      </span>
+    );
+  }
+  if (state === "pending") {
+    return (
+      <span style={baseStyle}>
+        <span style={accentStyle}>Application under review</span>
+        {" "}· usually within 24h
+      </span>
+    );
+  }
+  if (state === "rejected") {
+    return (
+      <span style={baseStyle}>
+        Application not approved · DM the team in Discord
+      </span>
+    );
+  }
+  // approved
+  return (
+    <span style={baseStyle} className="flex items-center" >
+      Your 30% code:{" "}
+      <span className="tabular-nums" style={{ ...accentStyle, marginLeft: 6 }}>
+        {code ?? "—"}
+      </span>
+      {code && (
+        <button
+          type="button"
+          onClick={onCopy}
+          aria-label="Copy code"
+          style={{
+            marginLeft: 8,
+            padding: "2px 8px",
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "-0.005em",
+            color: accent,
+            background: "rgba(255, 255, 255, 0.10)",
+            border: "1px solid rgba(255, 255, 255, 0.20)",
+            borderRadius: 999,
+            cursor: "pointer",
+          }}
+        >
+          {copied ? "Copied" : "Copy"}
+        </button>
+      )}
+    </span>
   );
 }

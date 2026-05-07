@@ -13,11 +13,13 @@
   --color-bg-card: #1F232B;
   --color-bg-elevated: #2A2F38;
 
-  /* Refined gold — desaturated, premium, single accent */
-  --color-gold: #C89D55;
-  --color-gold-light: #D4B070;
-  --color-gold-deep: #A37B38;
-  --color-gold-glow: rgba(200, 157, 85, 0.32);
+  /* Accent — was refined gold, now polished pearl/silver. Variable
+     names retained as gold-* so existing references compile without
+     churn; values are pure neutrals + warm-tinted off-whites. */
+  --color-gold: #DDDDD5;
+  --color-gold-light: #FFFFFF;
+  --color-gold-deep: #8E8E84;
+  --color-gold-glow: rgba(245, 245, 240, 0.30);
 
   /* Teal — peer presence + watch-type (kept, less saturated) */
   --color-teal: #4DCEC4;
@@ -192,11 +194,13 @@ body:has(.admin-shell)::before {
   --color-border-hover: rgba(20, 20, 24, 0.16);
   --color-border-strong: rgba(20, 20, 24, 0.24);
 
-  /* Refined gold — less saturated than student-side */
-  --color-gold: #C89D55;
-  --color-gold-light: #D4B070;
-  --color-gold-deep: #A37B38;
-  --color-gold-glow: rgba(200, 157, 85, 0.16);
+  /* Accent on light face — pearl/silver, replacing the previous gold.
+     Slightly cooler / darker than student-side so it still reads on
+     the warm cream canvas. */
+  --color-gold: #8E8E84;
+  --color-gold-light: #B8B8AE;
+  --color-gold-deep: #5C5C53;
+  --color-gold-glow: rgba(140, 140, 130, 0.16);
 
   /* Status colors — Apple-system red/green/orange, muted */
   --color-success: #2E8B57;
@@ -268,7 +272,7 @@ body:has(.admin-shell)::before {
 .admin-shell .pill-tone-accent {
   background: var(--color-accent-glow);
   color: var(--color-accent-dark);
-  border: 1px solid rgba(200, 157, 85, 0.30);
+  border: 1px solid rgba(140, 140, 130, 0.30);
 }
 .admin-shell .pill-tone-neutral {
   background: rgba(20, 20, 24, 0.05);
@@ -321,11 +325,11 @@ body:has(.admin-shell)::before {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(230, 192, 122, 0.14);
+  background: rgba(245, 245, 240, 0.14);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(230, 192, 122, 0.32);
+  background: rgba(245, 245, 240, 0.32);
 }
 
 /* Subtle bird wing flap used by MapAmbience */
@@ -405,7 +409,7 @@ body:has(.admin-shell)::before {
     transform: scale(1);
   }
   50% {
-    box-shadow: 0 0 0 10px rgba(230, 192, 122, 0), 0 0 40px 4px var(--color-gold-glow);
+    box-shadow: 0 0 0 10px rgba(245, 245, 240, 0), 0 0 40px 4px var(--color-gold-glow);
     transform: scale(1.03);
   }
 }
@@ -612,7 +616,7 @@ select:focus-visible,
 }
 .btn-tinted:hover,
 .btn-tinted:focus-visible {
-  background: rgba(230, 192, 122, 0.08);
+  background: rgba(245, 245, 240, 0.08);
 }
 
 .btn-pill-deep {
@@ -640,12 +644,12 @@ select:focus-visible,
 .btn-card-lift:hover,
 .btn-card-lift:focus-visible {
   background: rgba(6, 12, 26, 0.8);
-  border-color: rgba(230, 192, 122, 0.32);
+  border-color: rgba(245, 245, 240, 0.32);
 }
 
 .watch-link:hover,
 .watch-link:focus-visible {
-  border-color: rgba(230, 192, 122, 0.65);
+  border-color: rgba(245, 245, 240, 0.65);
 }
 
 button {

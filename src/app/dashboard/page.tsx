@@ -13,7 +13,6 @@ export default function DashboardPage() {
   const { loading } = useStudent();
 
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
-  const [, setPanTarget] = useState<string | null>(null);
 
   if (loading || !student) {
     return (
@@ -41,7 +40,7 @@ export default function DashboardPage() {
       className="flex flex-col w-screen overflow-hidden"
       style={{ height: "100vh", background: "var(--color-bg-primary)" }}
     >
-      <TopBar setPanTarget={setPanTarget} />
+      <TopBar onOpenLesson={(id) => setSelectedLessonId(id)} />
 
       <div className="relative flex-1 min-h-0">
         <MapMockup onOpenLesson={(id) => setSelectedLessonId(id)} />

@@ -1,6 +1,5 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
 import Image from "next/image";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
@@ -9,7 +8,12 @@ import { StreakFlame } from "./StreakFlame";
 import { DiscountProgressBar } from "./DiscountProgressBar";
 
 interface TopBarProps {
-  setPanTarget: Dispatch<SetStateAction<string | null>>;
+  /**
+   * Called when the breadcrumb pill is clicked — opens the current
+   * lesson's sheet directly. Replaces the previous setPanTarget
+   * which set state nothing was reading.
+   */
+  onOpenLesson?: (lessonId: string) => void;
 }
 
 const PILL_HEIGHT = 36;
@@ -25,7 +29,7 @@ const PILL_HEIGHT = 36;
  * bar's centerline off the row's centerline. Bottom padding on the
  * row reserves space for that overflow.
  */
-export function TopBar({ setPanTarget }: TopBarProps) {
+export function TopBar({ onOpenLesson }: TopBarProps) {
   const { student, signOut } = useAuth();
   const { regions, currentLesson, streak } = useStudent();
 
@@ -53,7 +57,7 @@ export function TopBar({ setPanTarget }: TopBarProps) {
     >
       <div
         className="flex items-center gap-4 px-6"
-        style={{ paddingTop: 12, paddingBottom: 36 }}
+        style={{ paddingTop: 10, paddingBottom: 22 }}
       >
         {/* Brand */}
         <div
@@ -73,7 +77,7 @@ export function TopBar({ setPanTarget }: TopBarProps) {
         {/* Current-lesson breadcrumb */}
         {currentLesson && (
           <button
-            onClick={() => setPanTarget(currentLesson.id)}
+            onClick={() => onOpenLesson?.(currentLesson.id)}
             className="hidden md:flex items-center shrink-0 transition-colors"
             style={{
               gap: 8,

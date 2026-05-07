@@ -579,9 +579,13 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     if (v === "overview") {
       const cover = Math.max(vw / MAP_W, vh / MAP_H);
       const scale = cover * OVERVIEW_DEFAULT_ZOOM;
-      // Center on Base Camp so a new student lands looking at where they
-      // start, not a wide context map.
-      const z = REGION_ZONES.r1;
+      // Center on the student's CURRENT region (the one their next
+      // lesson lives in), not always r1. A returning student lands
+      // looking at where they actually are. Falls back to r1 only
+      // when there's no current lesson (e.g., student finished
+      // everything — though that's rare and r1 is a fine default).
+      const focusRegion = (currentLesson?.region_id as RegionId) ?? "r1";
+      const z = REGION_ZONES[focusRegion] ?? REGION_ZONES.r1;
       return clampToImage({
         x: vw / 2 - z.labelX * scale,
         y: vh / 2 - z.labelY * scale,
@@ -1315,10 +1319,40 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
 
                     {/* Discount line — only on R2, sits directly below
                         the progress / "Locked" sublabel. Two lines:
-                        bold "30% OFF" pulsing gold + quieter
-                        "your second month" subline beneath. */}
+                        bold "30% OFF" with a pulsing gold halo +
+                        quieter "your second month" subline beneath. */}
                     {showDiscountLine && (
                       <g>
+                        {/* Pulsing aura — soft gold ellipse breathing
+                            behind the headline, same energy as the
+                            Onward marker's halo */}
+                        <ellipse
+                          cx={0}
+                          cy={78}
+                          rx={88}
+                          ry={26}
+                          fill={GOLD_HI}
+                          opacity={0.18}
+                        >
+                          <animate
+                            attributeName="rx"
+                            values="76;100;76"
+                            dur="2.6s"
+                            repeatCount="indefinite"
+                          />
+                          <animate
+                            attributeName="ry"
+                            values="22;30;22"
+                            dur="2.6s"
+                            repeatCount="indefinite"
+                          />
+                          <animate
+                            attributeName="opacity"
+                            values="0.10;0.32;0.10"
+                            dur="2.6s"
+                            repeatCount="indefinite"
+                          />
+                        </ellipse>
                         <text
                           x={0}
                           y={84}
@@ -1338,7 +1372,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         >
                           <animate
                             attributeName="opacity"
-                            values="0.78;1;0.78"
+                            values="0.85;1;0.85"
                             dur="2.6s"
                             repeatCount="indefinite"
                           />

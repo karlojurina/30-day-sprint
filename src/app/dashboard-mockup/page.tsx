@@ -51,7 +51,6 @@ export default function DashboardMockupPage() {
   } = useStudent();
 
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
-  const [, setPanTarget] = useState<string | null>(null);
 
   // Onboarding only fires on the very first load.
   const [showOnboarding, setShowOnboarding] = useState<boolean | null>(null);
@@ -197,7 +196,7 @@ export default function DashboardMockupPage() {
       className="flex flex-col w-screen overflow-hidden"
       style={{ height: "100vh", background: "var(--color-bg-primary)" }}
     >
-      <TopBar setPanTarget={setPanTarget} />
+      <TopBar onOpenLesson={(id) => setSelectedLessonId(id)} />
 
       <div className="relative flex-1 min-h-0">
         <MapMockup onOpenLesson={(id) => setSelectedLessonId(id)} />

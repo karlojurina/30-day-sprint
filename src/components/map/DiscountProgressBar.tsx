@@ -92,12 +92,16 @@ export function DiscountProgressBar() {
   }
 
   return (
-    <div className="w-full min-w-0">
-      {/* Bar — takes the full row width, so its midpoint is the page
-          midpoint (no side clusters squeeze it off-center). */}
+    <div
+      className="relative w-full min-w-0 flex items-center"
+      style={{ height: "100%" }}
+      aria-label={`${overallPercent}% complete · 30% discount milestone at ${Math.round(milestonePercent)}%`}
+    >
+      {/* Bar wrapper — flex-aligned to the vertical center of its
+          parent (the 36px shell in TopBar). Badge + status text below
+          are absolute-positioned so they don't pull the bar off-center. */}
       <div
-        className="relative"
-        aria-label={`${overallPercent}% complete · 30% discount milestone at ${Math.round(milestonePercent)}%`}
+        className="relative w-full"
       >
           <div
             className="relative w-full overflow-hidden"
@@ -197,12 +201,12 @@ export function DiscountProgressBar() {
           </div>
       </div>
 
-      {/* Row beneath the bar: status text on the left, lesson counter
-          on the right. Both sit DIRECTLY below the bar (extra top
-          margin to clear the floating 30% badge). */}
+      {/* Status text + lesson counter — absolute-positioned BELOW the
+          bar wrapper. Hangs into the topbar's bottom padding without
+          changing the bar's vertical center. */}
       <div
-        className="flex items-baseline justify-between gap-4"
-        style={{ marginTop: 22 }}
+        className="absolute left-0 right-0 flex items-baseline justify-between gap-4"
+        style={{ top: "calc(50% + 14px)", pointerEvents: "none" }}
       >
         <p
           className="min-w-0 truncate"

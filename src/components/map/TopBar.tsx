@@ -15,13 +15,15 @@ interface TopBarProps {
 const PILL_HEIGHT = 36;
 
 /**
- * Two-row top bar. Row 1 = controls (brand + breadcrumb on left,
- * streak + signout on right). Row 2 = the focal progress bar at full
- * width inside the page padding, with the status text directly below.
+ * Single-row top bar. Layout (left → right):
+ *   brand · current-lesson breadcrumb · [progress bar] · streak · signout
  *
- * The bar is centered by definition: it occupies the entire row's
- * width minus left/right padding, so its midpoint sits exactly at the
- * page midpoint regardless of what's in row 1.
+ * The progress bar wrapper is exactly PILL_HEIGHT (36px) tall so it
+ * vertically aligns with every other pill. The bar itself sits at
+ * the wrapper's vertical center; the milestone badge + status text
+ * are absolute-positioned BELOW the wrapper so they don't pull the
+ * bar's centerline off the row's centerline. Bottom padding on the
+ * row reserves space for that overflow.
  */
 export function TopBar({ setPanTarget }: TopBarProps) {
   const { student, signOut } = useAuth();
@@ -49,13 +51,15 @@ export function TopBar({ setPanTarget }: TopBarProps) {
         borderBottom: "1px solid var(--color-border)",
       }}
     >
-      {/* Row 1 — controls. Brand + breadcrumb on the left mirror the
-          weight of streak + signout on the right. */}
       <div
-        className="flex items-center justify-between gap-4 px-6"
-        style={{ height: 56 }}
+        className="flex items-center gap-4 px-6"
+        style={{ paddingTop: 12, paddingBottom: 36 }}
       >
-        <div className="flex items-center shrink-0" style={{ gap: 12 }}>
+        {/* Brand */}
+        <div
+          className="flex items-center shrink-0"
+          style={{ height: PILL_HEIGHT }}
+        >
           <Image
             src="/ecomtalent-logo.png"
             alt="EcomTalent"
@@ -64,107 +68,104 @@ export function TopBar({ setPanTarget }: TopBarProps) {
             priority
             style={{ height: 28, width: 28, objectFit: "contain" }}
           />
-          {currentLesson && (
-            <button
-              onClick={() => setPanTarget(currentLesson.id)}
-              className="hidden md:flex items-center transition-colors"
+        </div>
+
+        {/* Current-lesson breadcrumb */}
+        {currentLesson && (
+          <button
+            onClick={() => setPanTarget(currentLesson.id)}
+            className="hidden md:flex items-center shrink-0 transition-colors"
+            style={{
+              gap: 8,
+              maxWidth: 320,
+              minWidth: 0,
+              padding: "0 12px",
+              height: PILL_HEIGHT,
+              borderRadius: 10,
+              border: "1px solid var(--color-border)",
+              background: "var(--color-fill-secondary)",
+              cursor: "pointer",
+            }}
+            title={
+              currentRegion
+                ? `${currentRegion.name} · ${breadcrumbTitle}`
+                : breadcrumbTitle
+            }
+          >
+            <span
+              className="truncate"
               style={{
-                gap: 8,
-                maxWidth: 360,
-                minWidth: 0,
-                padding: "0 12px",
-                height: PILL_HEIGHT,
-                borderRadius: 10,
-                border: "1px solid var(--color-border)",
-                background: "var(--color-fill-secondary)",
-                cursor: "pointer",
+                color: "var(--color-text-primary)",
+                fontWeight: 600,
+                fontSize: 13,
+                letterSpacing: "-0.011em",
+                lineHeight: 1,
               }}
-              title={
-                currentRegion
-                  ? `${currentRegion.name} · ${breadcrumbTitle}`
-                  : breadcrumbTitle
-              }
             >
+              {breadcrumbTitle}
+            </span>
+            {breadcrumbDuration && (
               <span
-                className="truncate"
+                className="shrink-0"
                 style={{
-                  color: "var(--color-text-primary)",
-                  fontWeight: 600,
-                  fontSize: 13,
-                  letterSpacing: "-0.011em",
-                  lineHeight: 1,
+                  color: "var(--color-text-tertiary)",
+                  fontSize: 12,
+                  fontVariantNumeric: "tabular-nums",
+                  letterSpacing: "-0.005em",
+                  fontWeight: 500,
                 }}
               >
-                {breadcrumbTitle}
+                {breadcrumbDuration}
               </span>
-              {breadcrumbDuration && (
-                <span
-                  className="shrink-0"
-                  style={{
-                    color: "var(--color-text-tertiary)",
-                    fontSize: 12,
-                    fontVariantNumeric: "tabular-nums",
-                    letterSpacing: "-0.005em",
-                    fontWeight: 500,
-                  }}
-                >
-                  {breadcrumbDuration}
-                </span>
-              )}
-            </button>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <StreakFlame current={streak.current} longest={streak.longest} />
-          <button
-            onClick={signOut}
-            style={{
-              height: PILL_HEIGHT,
-              padding: "0 10px",
-              borderRadius: 8,
-              border: "1px solid var(--color-border)",
-              background: "transparent",
-              color: "var(--color-text-tertiary)",
-              cursor: "pointer",
-              transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-            title="Sign out"
-            aria-label="Sign out"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.7"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
+            )}
           </button>
-        </div>
-      </div>
+        )}
 
-      {/* Row 2 — focal progress bar. Full-width within page padding so
-          the bar is genuinely centered. */}
-      <div
-        className="px-6"
-        style={{
-          paddingTop: 12,
-          paddingBottom: 14,
-          borderTop: "1px solid var(--color-border)",
-        }}
-      >
-        <DiscountProgressBar />
+        {/* Progress bar — flex-1 with its 30% badge + status text
+            absolute-positioned BELOW. The wrapper is PILL_HEIGHT tall
+            so the bar's center matches every other pill's center. */}
+        <div className="flex-1 min-w-0" style={{ height: PILL_HEIGHT }}>
+          <DiscountProgressBar />
+        </div>
+
+        {/* Streak */}
+        <StreakFlame current={streak.current} longest={streak.longest} />
+
+        {/* Sign out */}
+        <button
+          onClick={signOut}
+          style={{
+            height: PILL_HEIGHT,
+            padding: "0 10px",
+            borderRadius: 8,
+            border: "1px solid var(--color-border)",
+            background: "transparent",
+            color: "var(--color-text-tertiary)",
+            cursor: "pointer",
+            transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}
+          title="Sign out"
+          aria-label="Sign out"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+        </button>
       </div>
     </header>
   );

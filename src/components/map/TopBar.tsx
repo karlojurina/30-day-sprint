@@ -15,14 +15,13 @@ interface TopBarProps {
 const PILL_HEIGHT = 36;
 
 /**
- * Single-row top bar. Layout (left-to-right):
- *   brand · current-lesson breadcrumb · [progress bar — focal] · streak · signout
+ * Two-row top bar. Row 1 = controls (brand + breadcrumb on left,
+ * streak + signout on right). Row 2 = the focal progress bar at full
+ * width inside the page padding, with the status text directly below.
  *
- * The progress bar takes flex-1 so it fills the center. The 30%
- * milestone badge hangs BELOW the bar from the milestone tick, with
- * the status line beneath. The breadcrumb pill on the left + the
- * streak/signout cluster on the right balance the bar's weight so
- * it sits visually centered.
+ * The bar is centered by definition: it occupies the entire row's
+ * width minus left/right padding, so its midpoint sits exactly at the
+ * page midpoint regardless of what's in row 1.
  */
 export function TopBar({ setPanTarget }: TopBarProps) {
   const { student, signOut } = useAuth();
@@ -34,7 +33,6 @@ export function TopBar({ setPanTarget }: TopBarProps) {
     ? regions.find((r) => r.id === currentLesson.region_id)
     : null;
 
-  // If the current lesson is part of a group, show the group title.
   const currentGroupId = currentLesson ? lessonGroupOf(currentLesson.id) : null;
   const breadcrumbTitle = currentGroupId
     ? LESSON_GROUPS[currentGroupId]?.title ?? currentLesson?.title
@@ -51,12 +49,13 @@ export function TopBar({ setPanTarget }: TopBarProps) {
         borderBottom: "1px solid var(--color-border)",
       }}
     >
+      {/* Row 1 — controls. Brand + breadcrumb on the left mirror the
+          weight of streak + signout on the right. */}
       <div
-        className="flex items-center gap-4 px-6"
-        style={{ minHeight: 76, paddingTop: 12, paddingBottom: 16 }}
+        className="flex items-center justify-between gap-4 px-6"
+        style={{ height: 56 }}
       >
-        {/* Brand */}
-        <div className="flex items-center shrink-0" style={{ height: PILL_HEIGHT }}>
+        <div className="flex items-center shrink-0" style={{ gap: 12 }}>
           <Image
             src="/ecomtalent-logo.png"
             alt="EcomTalent"
@@ -65,65 +64,57 @@ export function TopBar({ setPanTarget }: TopBarProps) {
             priority
             style={{ height: 28, width: 28, objectFit: "contain" }}
           />
-        </div>
-
-        {/* Current lesson breadcrumb pill */}
-        {currentLesson && (
-          <button
-            onClick={() => setPanTarget(currentLesson.id)}
-            className="hidden lg:flex items-center shrink-0 transition-colors"
-            style={{
-              gap: 8,
-              maxWidth: 320,
-              minWidth: 0,
-              padding: "0 12px",
-              height: PILL_HEIGHT,
-              borderRadius: 10,
-              border: "1px solid var(--color-border)",
-              background: "var(--color-fill-secondary)",
-              cursor: "pointer",
-            }}
-            title={
-              currentRegion
-                ? `${currentRegion.name} · ${breadcrumbTitle}`
-                : breadcrumbTitle
-            }
-          >
-            <span
-              className="truncate"
+          {currentLesson && (
+            <button
+              onClick={() => setPanTarget(currentLesson.id)}
+              className="hidden md:flex items-center transition-colors"
               style={{
-                color: "var(--color-text-primary)",
-                fontWeight: 600,
-                fontSize: 13,
-                letterSpacing: "-0.011em",
-                lineHeight: 1,
+                gap: 8,
+                maxWidth: 360,
+                minWidth: 0,
+                padding: "0 12px",
+                height: PILL_HEIGHT,
+                borderRadius: 10,
+                border: "1px solid var(--color-border)",
+                background: "var(--color-fill-secondary)",
+                cursor: "pointer",
               }}
+              title={
+                currentRegion
+                  ? `${currentRegion.name} · ${breadcrumbTitle}`
+                  : breadcrumbTitle
+              }
             >
-              {breadcrumbTitle}
-            </span>
-            {breadcrumbDuration && (
               <span
-                className="shrink-0"
+                className="truncate"
                 style={{
-                  color: "var(--color-text-tertiary)",
-                  fontSize: 12,
-                  fontVariantNumeric: "tabular-nums",
-                  letterSpacing: "-0.005em",
-                  fontWeight: 500,
+                  color: "var(--color-text-primary)",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  letterSpacing: "-0.011em",
+                  lineHeight: 1,
                 }}
               >
-                {breadcrumbDuration}
+                {breadcrumbTitle}
               </span>
-            )}
-          </button>
-        )}
-
-        {/* Focal element — discount progress bar takes the rest */}
-        <div className="flex-1 min-w-0">
-          <DiscountProgressBar />
+              {breadcrumbDuration && (
+                <span
+                  className="shrink-0"
+                  style={{
+                    color: "var(--color-text-tertiary)",
+                    fontSize: 12,
+                    fontVariantNumeric: "tabular-nums",
+                    letterSpacing: "-0.005em",
+                    fontWeight: 500,
+                  }}
+                >
+                  {breadcrumbDuration}
+                </span>
+              )}
+            </button>
+          )}
         </div>
 
-        {/* Right cluster — streak + signout */}
         <div className="flex items-center gap-2 shrink-0">
           <StreakFlame current={streak.current} longest={streak.longest} />
           <button
@@ -161,6 +152,19 @@ export function TopBar({ setPanTarget }: TopBarProps) {
             </svg>
           </button>
         </div>
+      </div>
+
+      {/* Row 2 — focal progress bar. Full-width within page padding so
+          the bar is genuinely centered. */}
+      <div
+        className="px-6"
+        style={{
+          paddingTop: 12,
+          paddingBottom: 14,
+          borderTop: "1px solid var(--color-border)",
+        }}
+      >
+        <DiscountProgressBar />
       </div>
     </header>
   );

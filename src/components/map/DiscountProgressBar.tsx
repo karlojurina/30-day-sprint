@@ -92,13 +92,13 @@ export function DiscountProgressBar() {
   }
 
   return (
-    <div className="flex items-center gap-4 w-full min-w-0">
-      <div className="flex-1 min-w-0">
-        {/* Bar */}
-        <div
-          className="relative"
-          aria-label={`${overallPercent}% complete · 30% discount milestone at ${Math.round(milestonePercent)}%`}
-        >
+    <div className="w-full min-w-0">
+      {/* Bar — takes the full row width, so its midpoint is the page
+          midpoint (no side clusters squeeze it off-center). */}
+      <div
+        className="relative"
+        aria-label={`${overallPercent}% complete · 30% discount milestone at ${Math.round(milestonePercent)}%`}
+      >
           <div
             className="relative w-full overflow-hidden"
             style={{
@@ -195,53 +195,40 @@ export function DiscountProgressBar() {
               30%
             </span>
           </div>
-        </div>
+      </div>
 
-        {/* Inline explainer — sits below the bar+badge cluster, with
-            enough gap that the badge doesn't crash into it. */}
+      {/* Row beneath the bar: status text on the left, lesson counter
+          on the right. Both sit DIRECTLY below the bar (extra top
+          margin to clear the floating 30% badge). */}
+      <div
+        className="flex items-baseline justify-between gap-4"
+        style={{ marginTop: 22 }}
+      >
         <p
+          className="min-w-0 truncate"
           style={{
             fontSize: 12,
             lineHeight: 1.4,
-            marginTop: 22,
             letterSpacing: "-0.005em",
           }}
         >
           {statusLine}
         </p>
-      </div>
-
-      {/* Compact lesson counter on the right of the bar */}
-      <div
-        className="shrink-0 hidden md:flex flex-col"
-        style={{ alignItems: "flex-end" }}
-      >
         <p
+          className="shrink-0 hidden md:block"
           style={{
-            color: "var(--color-text-primary)",
-            fontSize: 13,
-            fontWeight: 600,
-            lineHeight: 1.2,
-            letterSpacing: "-0.011em",
+            color: "var(--color-text-tertiary)",
+            fontSize: 12,
+            fontWeight: 500,
+            letterSpacing: "-0.005em",
             fontVariantNumeric: "tabular-nums",
           }}
         >
-          {overallCompleted}
-          <span style={{ color: "var(--color-text-tertiary)", fontWeight: 500 }}>
-            {" / "}
-            {overallTotal}
+          <span style={{ color: "var(--color-text-primary)", fontWeight: 600 }}>
+            {overallCompleted}
           </span>
-        </p>
-        <p
-          style={{
-            color: "var(--color-text-tertiary)",
-            fontSize: 11,
-            lineHeight: 1.2,
-            letterSpacing: "-0.005em",
-            marginTop: 2,
-          }}
-        >
-          lessons
+          {" / "}
+          {overallTotal} lessons
         </p>
       </div>
     </div>

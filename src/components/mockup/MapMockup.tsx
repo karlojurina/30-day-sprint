@@ -1314,35 +1314,63 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                     </text>
 
                     {/* Discount line — only on R2, sits directly below
-                        the progress / "Locked" sublabel. Single quiet
-                        gold line, no badge, no halo. */}
+                        the progress / "Locked" sublabel. Two lines:
+                        bold "30% OFF" pulsing gold + quieter
+                        "your second month" subline beneath. */}
                     {showDiscountLine && (
-                      <text
-                        x={0}
-                        y={isUnlocked ? 76 : 76}
-                        textAnchor="middle"
-                        style={{
-                          fontFamily:
-                            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                          fontWeight: 600,
-                          fontSize: 14,
-                          letterSpacing: "-0.012em",
-                          fill: GOLD_HI,
-                          paintOrder: "stroke fill",
-                          stroke: "rgba(6,12,26,0.85)",
-                          strokeWidth: 3,
-                          strokeLinejoin: "round",
-                        }}
-                      >
-                        30% off your second month
-                      </text>
+                      <g>
+                        <text
+                          x={0}
+                          y={84}
+                          textAnchor="middle"
+                          style={{
+                            fontFamily:
+                              'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                            fontWeight: 700,
+                            fontSize: 22,
+                            letterSpacing: "-0.022em",
+                            fill: GOLD_HI,
+                            paintOrder: "stroke fill",
+                            stroke: "rgba(6,12,26,0.88)",
+                            strokeWidth: 4,
+                            strokeLinejoin: "round",
+                          }}
+                        >
+                          <animate
+                            attributeName="opacity"
+                            values="0.78;1;0.78"
+                            dur="2.6s"
+                            repeatCount="indefinite"
+                          />
+                          30% OFF
+                        </text>
+                        <text
+                          x={0}
+                          y={106}
+                          textAnchor="middle"
+                          style={{
+                            fontFamily:
+                              'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                            fontWeight: 500,
+                            fontSize: 13,
+                            letterSpacing: "-0.005em",
+                            fill: "rgba(230,220,200,0.78)",
+                            paintOrder: "stroke fill",
+                            stroke: "rgba(6,12,26,0.85)",
+                            strokeWidth: 3,
+                            strokeLinejoin: "round",
+                          }}
+                        >
+                          your second month
+                        </text>
+                      </g>
                     )}
 
                     {/* Hover CTA — only shown for unlocked regions */}
                     {hot && (
                       <text
                         x={0}
-                        y={showDiscountLine ? 100 : 76}
+                        y={showDiscountLine ? 130 : 76}
                         textAnchor="middle"
                         style={{
                           fontFamily:

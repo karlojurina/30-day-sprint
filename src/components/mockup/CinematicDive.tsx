@@ -224,7 +224,11 @@ export function CinematicDive({
       aria-hidden
     >
       {/* Layer 1 — vignette. Dark edges, transparent center → grows
-          to fully dark at peak, providing the actual coverage. */}
+          to fully dark at peak, providing the actual coverage.
+          opacity: 0 in inline style so the layer is hidden until the
+          timeline first runs (gsap.set runs only on trigger change;
+          without inline opacity 0 the layer would render visible on
+          initial mount). */}
       <div
         ref={vignetteRef}
         style={{
@@ -232,6 +236,7 @@ export function CinematicDive({
           inset: "-10%",
           background:
             "radial-gradient(ellipse at center, rgba(8,12,22,0.20) 0%, rgba(8,12,22,0.85) 45%, rgba(4,8,16,0.98) 80%, rgba(0,0,0,1) 100%)",
+          opacity: 0,
           willChange: "transform, opacity",
         }}
       />
@@ -246,6 +251,7 @@ export function CinematicDive({
           background:
             "radial-gradient(ellipse at center, rgba(255,231,178,0.55) 0%, rgba(220,184,118,0.35) 25%, rgba(160,118,62,0.12) 55%, transparent 80%)",
           mixBlendMode: "screen",
+          opacity: 0,
           willChange: "transform, opacity",
         }}
       />
@@ -258,6 +264,7 @@ export function CinematicDive({
         style={{
           position: "absolute",
           inset: 0,
+          opacity: 0,
           willChange: "transform, opacity",
         }}
       >

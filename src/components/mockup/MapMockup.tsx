@@ -128,20 +128,33 @@ const SIDE_PANEL_COLLAPSED_WIDTH = 56;
 const GOLD = "#E6C07A";
 const GOLD_HI = "#F0D595";
 const INK = "#E6DCC8";
-// Lesson-node palette — warm pearl/champagne so the markers sit IN the
-// painted golden-hour scenes instead of stamped on top. Distinct from
-// the milestone gold (GOLD/GOLD_HI) which is reserved for end markers
-// and region numerals.
-//   PEARL    — done state fill (soft warm cream with cool undertone)
-//   PEARL_HI — bright rim/highlight on current state
-//   PEARL_LO — outer rim / shadow tone
-const PEARL = "#D9D2C2";
-const PEARL_HI = "#F0EAD8";
-const PEARL_LO = "#9E9586";
-// Legacy aliases retained so we don't have to update every reference.
-const SILVER = PEARL;
-const SILVER_HI = PEARL_HI;
-void PEARL_LO;
+
+// ───────────────────────────────────────────────────────────────────
+// Brass medallion palette — for lesson waypoints. Reads as polished
+// brass / antique gold with proper material depth. Distinct from the
+// LIT milestone gold above so milestones still outrank waypoints.
+//
+//   BRASS_GLINT  — tightest specular hot-spot (near white)
+//   BRASS_HI     — diffuse upper-left highlight
+//   BRASS_LIGHT  — lit polished gold
+//   BRASS_MID    — base brass
+//   BRASS_BASE   — antique brass (incomplete state mid)
+//   BRASS_DEEP   — rim shadow
+//   BRASS_DARK   — engraving / inset shadow
+// ───────────────────────────────────────────────────────────────────
+const BRASS_GLINT = "#FFF5DD";
+const BRASS_HI = "#F2DDA8";
+const BRASS_LIGHT = "#DCBE7E";
+const BRASS_MID = "#C9A872";
+const BRASS_BASE = "#A8895C";
+const BRASS_DEEP = "#6B5536";
+const BRASS_DARK = "#2A1F12";
+
+// Legacy aliases — keep so older references compile.
+const SILVER = BRASS_LIGHT;
+const SILVER_HI = BRASS_HI;
+void BRASS_BASE;
+void BRASS_DARK;
 
 /**
  * Puzzle-piece region hit zones — irregular closed polygons positioned over
@@ -2152,16 +2165,14 @@ function LessonMarker({
     : isGroup
       ? baseSize * 1.18
       : baseSize;
-  // Premium fills (warm pearl palette so markers sit IN the painted scene):
-  //   - done   → pearl disc with cream highlight, dark navy checkmark
-  //   - current → warm pearl wash with bright rim
-  //   - default → deep navy fill with hairline pearl stroke
-  const fill = isDone
-    ? PEARL
-    : isCurrent
-      ? "rgba(217,210,194,0.22)"
-      : "rgba(10,18,36,0.92)";
-  const stroke = isCurrent ? PEARL_HI : PEARL;
+  // Brass medallion: done = polished lit disc, incomplete = antique
+  // brass with engraved feel. Both share the same material family;
+  // only luminance / saturation differs.
+  // Outer ring stroke is darker than fill — simulates metal edge depth.
+  const stroke = isDone ? BRASS_DEEP : "rgba(42, 31, 18, 0.95)";
+  const fill = isCurrent
+    ? "rgba(168, 137, 92, 0.30)"
+    : "rgba(20, 14, 6, 0.94)";
 
   return (
     <g
@@ -2180,12 +2191,12 @@ function LessonMarker({
       role="button"
       aria-label={title}
     >
-      {/* Pulsing rim — current waypoint draws a warm pearl halo */}
+      {/* Pulsing rim — current waypoint draws a warm gold halo */}
       {isCurrent && (
         <circle
           r={size + 7}
           fill="none"
-          stroke={PEARL_HI}
+          stroke={BRASS_HI}
           strokeWidth={1.5}
           opacity={0.6}
         >
@@ -2204,17 +2215,18 @@ function LessonMarker({
         </circle>
       )}
 
-      {/* Hover glow — warm wash that picks up scene's golden light */}
+      {/* Hover glow — warm wash picking up the scene's golden light */}
       {hot && (
         <circle
           r={size + 5}
-          fill="rgba(240,234,216,0.22)"
+          fill="rgba(242, 221, 168, 0.20)"
           style={{ transition: "opacity 0.2s" }}
         />
       )}
 
-      {/* Soft contact shadow — grounds the marker in the painted scene
-          rather than floating it on top. Larger + softer than before. */}
+      {/* Soft warm contact shadow — grounds the medallion in the painted
+          scene. Slightly warm-tinted (not pure black) to match the brass
+          + the golden-hour palette. */}
       {isAction ? (
         <rect
           x={-size * 0.75 + 1}
@@ -2222,119 +2234,175 @@ function LessonMarker({
           width={size * 1.5}
           height={size * 1.5}
           transform="rotate(45)"
-          fill="rgba(0,0,0,0.30)"
+          fill="rgba(20, 14, 6, 0.35)"
           stroke="none"
           opacity={0.7}
         />
       ) : (
         <ellipse
           cx={1.5}
-          cy={size * 0.85}
-          rx={size * 0.85}
-          ry={size * 0.18}
-          fill="rgba(0,0,0,0.35)"
+          cy={size * 0.88}
+          rx={size * 0.88}
+          ry={size * 0.20}
+          fill="rgba(20, 14, 6, 0.42)"
           stroke="none"
         />
       )}
       {/* Hairline drop shadow directly under disc for crispness */}
       {!isAction && (
-        <circle r={size} cx={0.5} cy={1} fill="rgba(0,0,0,0.40)" stroke="none" />
+        <circle r={size} cx={0.5} cy={1.5} fill="rgba(20, 14, 6, 0.5)" stroke="none" />
       )}
 
-      {/* Marker fill — three-stop radial gradient (bright crown,
-          mid pearl, deep rim) gives a glassy/3D read instead of flat. */}
+      {/* Brass medallion fill — multi-stop radial gradient with light
+          source from upper-left (matches scene's overhead golden-hour
+          lighting). Done = polished lit gold; incomplete = antique
+          brass; current = lit gold a notch dimmer than done. */}
       <defs>
-        <radialGradient id={`marker-fill-${index}`} cx="40%" cy="32%" r="75%">
+        <radialGradient id={`marker-fill-${index}`} cx="36%" cy="28%" r="80%">
           {isDone ? (
             <>
-              <stop offset="0%" stopColor="#FFF7E6" />
-              <stop offset="35%" stopColor={PEARL_HI} />
-              <stop offset="80%" stopColor={PEARL} />
-              <stop offset="100%" stopColor={PEARL_LO} />
+              <stop offset="0%" stopColor={BRASS_GLINT} />
+              <stop offset="18%" stopColor={BRASS_HI} />
+              <stop offset="55%" stopColor={BRASS_LIGHT} />
+              <stop offset="85%" stopColor={BRASS_MID} />
+              <stop offset="100%" stopColor={BRASS_DEEP} />
+            </>
+          ) : isCurrent ? (
+            <>
+              <stop offset="0%" stopColor={BRASS_HI} />
+              <stop offset="35%" stopColor={BRASS_MID} />
+              <stop offset="80%" stopColor={BRASS_BASE} />
+              <stop offset="100%" stopColor={BRASS_DEEP} />
             </>
           ) : (
             <>
-              <stop offset="0%" stopColor="rgba(217,210,194,0.18)" />
-              <stop offset="55%" stopColor="rgba(14,22,40,0.96)" />
-              <stop offset="100%" stopColor="rgba(6,12,26,0.98)" />
+              {/* Antique brass — dark with a subtle warm glint at top */}
+              <stop offset="0%" stopColor="rgba(220, 190, 126, 0.28)" />
+              <stop offset="40%" stopColor="rgba(74, 56, 30, 0.96)" />
+              <stop offset="100%" stopColor="rgba(28, 20, 10, 0.98)" />
             </>
           )}
         </radialGradient>
-        {/* Inner shadow for incomplete state — adds depth at bottom */}
-        <radialGradient id={`marker-inner-shade-${index}`} cx="50%" cy="100%" r="60%">
-          <stop offset="0%" stopColor="rgba(0,0,0,0.4)" />
+        {/* Inner shadow at bottom — adds dimensional recess */}
+        <radialGradient id={`marker-inner-shade-${index}`} cx="50%" cy="100%" r="55%">
+          <stop offset="0%" stopColor="rgba(0,0,0,0.45)" />
           <stop offset="100%" stopColor="rgba(0,0,0,0)" />
         </radialGradient>
+        {/* Bevel ring — a thin INNER stroke just inside the outer
+            stroke creates a beveled-rim "minted coin" look. */}
       </defs>
+
       {isAction ? (
-        <rect
-          x={-size * 0.75}
-          y={-size * 0.75}
-          width={size * 1.5}
-          height={size * 1.5}
-          transform="rotate(45)"
-          fill={isCurrent ? fill : `url(#marker-fill-${index})`}
-          stroke={stroke}
-          strokeWidth={isCurrent ? 2 : 1.5}
-        />
+        <>
+          <rect
+            x={-size * 0.75}
+            y={-size * 0.75}
+            width={size * 1.5}
+            height={size * 1.5}
+            transform="rotate(45)"
+            fill={`url(#marker-fill-${index})`}
+            stroke={stroke}
+            strokeWidth={isCurrent ? 2 : 1.5}
+          />
+          {/* Inner beveled rim — bright thin line just inside the
+              outer stroke, simulating a minted coin's inner edge */}
+          <rect
+            x={-size * 0.75 + 2}
+            y={-size * 0.75 + 2}
+            width={size * 1.5 - 4}
+            height={size * 1.5 - 4}
+            transform="rotate(45)"
+            fill="none"
+            stroke={isDone ? BRASS_HI : isCurrent ? BRASS_LIGHT : BRASS_BASE}
+            strokeWidth={0.7}
+            opacity={isDone ? 0.85 : 0.55}
+          />
+        </>
       ) : (
         <>
           <circle
             r={size}
-            fill={isCurrent ? fill : `url(#marker-fill-${index})`}
+            fill={`url(#marker-fill-${index})`}
             stroke={stroke}
-            strokeWidth={isCurrent ? 2 : 1.4}
+            strokeWidth={isCurrent ? 2 : 1.5}
           />
-          {/* Inner bottom shade only on non-done states for depth */}
+          {/* Inner beveled rim — thin highlight ring 2px inside the
+              outer edge. Cardinal "minted medallion" detail. */}
+          <circle
+            r={size - 2}
+            fill="none"
+            stroke={isDone ? BRASS_HI : isCurrent ? BRASS_LIGHT : BRASS_BASE}
+            strokeWidth={0.7}
+            opacity={isDone ? 0.85 : 0.5}
+          />
+          {/* Inner bottom shade for depth on non-done states */}
           {!isDone && (
             <circle
-              r={size}
+              r={size - 1}
               fill={`url(#marker-inner-shade-${index})`}
               stroke="none"
-              opacity={0.5}
+              opacity={0.55}
             />
           )}
         </>
       )}
 
-      {/* Specular highlight — bright crescent at top-left suggests a
-          glassy/pearl finish catching the scene's overhead light.
-          Two-stroke approach: a wider soft crescent for diffuse glow,
-          then a tight bright arc for the actual hot spot. */}
+      {/* Specular highlight — TWO layered crescents at top-left simulate
+          a polished metal surface catching the scene's overhead light.
+          Wide diffuse stroke + tight bright glint = "lit metal." */}
       {!isAction && (
         <>
+          {/* Wide diffuse highlight */}
           <path
-            d={`M ${-size * 0.78} ${-size * 0.42} A ${size * 0.95} ${size * 0.95} 0 0 1 ${size * 0.55} ${-size * 0.65}`}
+            d={`M ${-size * 0.78} ${-size * 0.38} A ${size * 0.92} ${size * 0.92} 0 0 1 ${size * 0.55} ${-size * 0.66}`}
             fill="none"
-            stroke={isDone ? "rgba(255,253,245,0.7)" : "rgba(240,234,216,0.42)"}
-            strokeWidth={2.5}
+            stroke={isDone ? BRASS_HI : "rgba(220,190,126,0.40)"}
+            strokeWidth={3}
             strokeLinecap="round"
-            opacity={0.55}
+            opacity={isDone ? 0.55 : 0.35}
           />
+          {/* Tight bright glint */}
           <path
-            d={`M ${-size * 0.55} ${-size * 0.6} A ${size * 0.78} ${size * 0.78} 0 0 1 ${size * 0.2} ${-size * 0.78}`}
+            d={`M ${-size * 0.5} ${-size * 0.62} A ${size * 0.74} ${size * 0.74} 0 0 1 ${size * 0.18} ${-size * 0.78}`}
             fill="none"
-            stroke={isDone ? "rgba(255,255,250,0.95)" : "rgba(255,253,245,0.55)"}
+            stroke={isDone ? BRASS_GLINT : "rgba(255,245,221,0.65)"}
             strokeWidth={1.2}
             strokeLinecap="round"
+            opacity={isDone ? 0.95 : 0.6}
           />
         </>
       )}
 
-      {/* Inner glyph */}
+      {/* Inner glyph — engraved (deep brass) on lit medallion,
+          embossed (highlight) on antique medallion. */}
       {isDone ? (
-        <path
-          d="M -9 0 L -2 7 L 10 -7"
-          fill="none"
-          stroke="#0A1428"
-          strokeWidth={3}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
+        <>
+          {/* Engraved checkmark — drawn TWICE: a darker shadow path
+              offset 1px down for "cut into metal" depth, then the
+              actual glyph in deep brass dark. */}
+          <path
+            d="M -9 0 L -2 7 L 10 -7"
+            fill="none"
+            stroke="rgba(255, 245, 221, 0.35)"
+            strokeWidth={3}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            transform="translate(0 1)"
+          />
+          <path
+            d="M -9 0 L -2 7 L 10 -7"
+            fill="none"
+            stroke={BRASS_DARK}
+            strokeWidth={2.6}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </>
       ) : isGroup ? (
-        // Three short horizontal lines = "list of items inside"
+        // Embossed three-line group glyph — lighter color rises from
+        // the dark antique surface
         <g
-          stroke={isCurrent ? SILVER_HI : SILVER}
+          stroke={isCurrent ? BRASS_HI : BRASS_LIGHT}
           strokeWidth={2}
           strokeLinecap="round"
         >
@@ -2343,28 +2411,46 @@ function LessonMarker({
           <line x1={-7} y1={6} x2={7} y2={6} />
         </g>
       ) : isAction ? (
-        // Small lightning / action glyph
+        // Embossed lightning glyph
         <path
           d="M -5 -9 L 3 -2 L -1 -2 L 5 9 L -3 2 L 1 2 Z"
-          fill={isCurrent ? SILVER_HI : SILVER}
+          fill={isCurrent ? BRASS_HI : BRASS_LIGHT}
           stroke="none"
         />
       ) : (
-        <text
-          y={6}
-          textAnchor="middle"
-          style={{
-            fontFamily:
-              'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-            fontSize: 15,
-            fontWeight: 600,
-            letterSpacing: "-0.018em",
-            fontVariantNumeric: "tabular-nums",
-            fill: isCurrent ? SILVER_HI : SILVER,
-          }}
-        >
-          {index}
-        </text>
+        // Embossed numeral — slight shadow underneath for raised feel
+        <>
+          <text
+            y={7}
+            textAnchor="middle"
+            style={{
+              fontFamily:
+                'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              fontSize: 15,
+              fontWeight: 700,
+              letterSpacing: "-0.018em",
+              fontVariantNumeric: "tabular-nums",
+              fill: "rgba(0,0,0,0.55)",
+            }}
+          >
+            {index}
+          </text>
+          <text
+            y={6}
+            textAnchor="middle"
+            style={{
+              fontFamily:
+                'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              fontSize: 15,
+              fontWeight: 700,
+              letterSpacing: "-0.018em",
+              fontVariantNumeric: "tabular-nums",
+              fill: isCurrent ? BRASS_HI : BRASS_LIGHT,
+            }}
+          >
+            {index}
+          </text>
+        </>
       )}
 
     </g>
@@ -2438,14 +2524,11 @@ function EndMarker({
 }) {
   const [hot, setHot] = useState(false);
   const isClickable = !!onClick;
-  // All EndMarkers live in the same family as LessonMarker now —
-  // silver-on-navy core. Discount + celebration get a thin gold accent
-  // ring around the silver to read as "milestone" without changing
-  // family. Onward = pure silver, no gold (it's just a navigator).
+  // All EndMarkers + LessonMarkers share the brass medallion family.
+  // Discount + celebration are LIT (polished/bright) milestones with
+  // an extra outer halo. Onward is a brass medallion at "lit" tier
+  // but slightly subdued vs discount/celebration.
   const isMilestone = marker.kind !== "onward";
-  const innerStroke = SILVER_HI;
-  const milestoneAccent = GOLD_HI;
-  const auraColor = isMilestone ? GOLD_HI : SILVER_HI;
 
   return (
     <g
@@ -2468,11 +2551,11 @@ function EndMarker({
       role={isClickable ? "button" : undefined}
       aria-label={`${marker.label} — ${marker.sublabel}`}
     >
-      {/* Pulsing aura */}
-      <circle r={42} fill={auraColor} opacity={isMilestone ? 0.22 : 0.16}>
+      {/* Pulsing aura — warm gold halo */}
+      <circle r={44} fill={BRASS_HI} opacity={isMilestone ? 0.24 : 0.18}>
         <animate
           attributeName="r"
-          values="38;52;38"
+          values="40;54;40"
           dur="2.6s"
           repeatCount="indefinite"
         />
@@ -2480,71 +2563,114 @@ function EndMarker({
           attributeName="opacity"
           values={
             isMilestone
-              ? "0.14;0.34;0.14"
-              : "0.10;0.24;0.10"
+              ? "0.16;0.36;0.16"
+              : "0.10;0.22;0.10"
           }
           dur="2.6s"
           repeatCount="indefinite"
         />
       </circle>
 
+      {/* Soft warm contact shadow */}
+      <ellipse
+        cx={1.5}
+        cy={32}
+        rx={32}
+        ry={6}
+        fill="rgba(20, 14, 6, 0.40)"
+        stroke="none"
+      />
       {/* Hairline drop shadow */}
-      <circle r={36} cx={1} cy={1} fill="rgba(0,0,0,0.32)" stroke="none" />
+      <circle r={36} cx={1} cy={1.5} fill="rgba(20, 14, 6, 0.50)" stroke="none" />
 
-      {/* Outer milestone ring — only on discount + celebration. Sits
-          OUTSIDE the silver core so it reads as a frame around the
-          checkpoint, not a replacement for it. */}
+      {/* Outer milestone ring — only on discount + celebration. Bright
+          gold rim signals "lit" / "claimed" rank above an Onward. */}
       {isMilestone && (
         <circle
-          r={42}
+          r={44}
           fill="none"
-          stroke={milestoneAccent}
-          strokeWidth={1.5}
-          opacity={0.7}
+          stroke={BRASS_GLINT}
+          strokeWidth={1.2}
+          opacity={0.55}
         />
       )}
 
-      {/* Core disc — silver family, matching LessonMarker */}
+      {/* Core medallion — polished brass radial gradient */}
       <defs>
-        <radialGradient id={`endmarker-fill-${marker.kind}`} cx="50%" cy="40%" r="65%">
-          <stop offset="0%" stopColor="rgba(184,197,214,0.18)" />
-          <stop offset="60%" stopColor="rgba(10,18,36,0.94)" />
-          <stop offset="100%" stopColor="rgba(8,14,28,0.96)" />
+        <radialGradient id={`endmarker-fill-${marker.kind}`} cx="36%" cy="28%" r="80%">
+          <stop offset="0%" stopColor={BRASS_GLINT} />
+          <stop offset="18%" stopColor={BRASS_HI} />
+          <stop offset="55%" stopColor={BRASS_LIGHT} />
+          <stop offset="85%" stopColor={BRASS_MID} />
+          <stop offset="100%" stopColor={BRASS_DEEP} />
         </radialGradient>
       </defs>
       <circle
         r={36}
         fill={`url(#endmarker-fill-${marker.kind})`}
-        stroke={innerStroke}
+        stroke={BRASS_DEEP}
         strokeWidth={hot ? 2.5 : 1.8}
         style={{ transition: "stroke-width 0.2s" }}
       />
+      {/* Inner beveled rim */}
+      <circle
+        r={33}
+        fill="none"
+        stroke={BRASS_HI}
+        strokeWidth={0.8}
+        opacity={0.85}
+      />
 
-      {/* Inner glyph — silver for onward, gold for milestones to keep
-          the family consistent but signal "this one matters more". */}
+      {/* Specular highlight — same two-stroke approach as LessonMarker */}
+      <path
+        d="M -28 -14 A 34 34 0 0 1 20 -24"
+        fill="none"
+        stroke={BRASS_HI}
+        strokeWidth={3}
+        strokeLinecap="round"
+        opacity={0.55}
+      />
+      <path
+        d="M -18 -22 A 28 28 0 0 1 7 -29"
+        fill="none"
+        stroke={BRASS_GLINT}
+        strokeWidth={1.4}
+        strokeLinecap="round"
+        opacity={0.95}
+      />
+
+      {/* Inner glyph — engraved into the brass (dark deep tone) */}
       {marker.kind === "onward" && (
-        <path
-          d="M -10 -8 L 8 0 L -10 8 L -6 0 Z"
-          fill={SILVER_HI}
-          stroke="none"
-        />
+        <>
+          <path
+            d="M -10 -8 L 8 0 L -10 8 L -6 0 Z"
+            fill="rgba(255, 245, 221, 0.35)"
+            stroke="none"
+            transform="translate(0 1)"
+          />
+          <path
+            d="M -10 -8 L 8 0 L -10 8 L -6 0 Z"
+            fill={BRASS_DARK}
+            stroke="none"
+          />
+        </>
       )}
       {marker.kind === "discount" && (
         <g>
-          <circle cx={-7} cy={-7} r={4} fill="none" stroke={milestoneAccent} strokeWidth={2.2} />
-          <circle cx={7} cy={7} r={4} fill="none" stroke={milestoneAccent} strokeWidth={2.2} />
-          <line x1={-12} y1={12} x2={12} y2={-12} stroke={milestoneAccent} strokeWidth={2.2} strokeLinecap="round" />
+          <circle cx={-7} cy={-7} r={4} fill="none" stroke={BRASS_DARK} strokeWidth={2.2} />
+          <circle cx={7} cy={7} r={4} fill="none" stroke={BRASS_DARK} strokeWidth={2.2} />
+          <line x1={-12} y1={12} x2={12} y2={-12} stroke={BRASS_DARK} strokeWidth={2.4} strokeLinecap="round" />
         </g>
       )}
       {marker.kind === "celebration" && (
         <g>
           <path
             d="M -8 -10 L 8 -10 L 7 4 Q 7 8 0 8 Q -7 8 -7 4 Z"
-            fill={milestoneAccent}
+            fill={BRASS_DARK}
             stroke="none"
           />
-          <line x1={-3} y1={8} x2={3} y2={8} stroke={milestoneAccent} strokeWidth={3} strokeLinecap="round" />
-          <line x1={-5} y1={11} x2={5} y2={11} stroke={milestoneAccent} strokeWidth={3} strokeLinecap="round" />
+          <line x1={-3} y1={8} x2={3} y2={8} stroke={BRASS_DARK} strokeWidth={3} strokeLinecap="round" />
+          <line x1={-5} y1={11} x2={5} y2={11} stroke={BRASS_DARK} strokeWidth={3} strokeLinecap="round" />
         </g>
       )}
 
@@ -2577,7 +2703,7 @@ function EndMarker({
             fontWeight: 500,
             fontSize: 12,
             letterSpacing: "-0.005em",
-            fill: isMilestone ? milestoneAccent : SILVER_HI,
+            fill: isMilestone ? BRASS_HI : "rgba(220, 190, 126, 0.92)",
             paintOrder: "stroke fill",
             stroke: "rgba(6,12,26,0.85)",
             strokeWidth: 3,

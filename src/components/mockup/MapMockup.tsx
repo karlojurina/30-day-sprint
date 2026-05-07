@@ -668,10 +668,10 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       scale: target.scale,
       // First paint: slow expo arrival (cinematic).
       // Region transitions: timed against the title-card fade
-      // overlay (1.2s total, peak at 0.6s). Camera tween at 0.55s
-      // so the bulk of camera travel happens during the dark hold +
-      // first half of the fade-out, landing as the title card clears.
-      duration: isFirst ? 1.8 : 0.55,
+      // overlay (2.0s total, peak at 0.25s when fully covered).
+      // Camera tween at 0.7s so it completes during the dark hold,
+      // well before the overlay starts revealing the new scene.
+      duration: isFirst ? 1.8 : 0.7,
       ease: isFirst ? SPEC_EASE_GSAP : SPEC_EASE_GSAP_INOUT,
       onUpdate: () => {
         setDisplayTransform({ ...transformRef.current });
@@ -1483,7 +1483,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           region; plain fade when going back to overview. */}
       <CinematicDive
         trigger={transitionCounter}
-        duration={1.2}
+        duration={2.0}
         title={(() => {
           const next = pendingViewRef.current;
           if (next == null || next === "overview") return null;

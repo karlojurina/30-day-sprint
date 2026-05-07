@@ -21,29 +21,29 @@ interface CinematicDiveProps {
 
 /**
  * Fade-through-dark transition with an optional title card during
- * the dark moment. Reads as a film chapter card — the destination's
- * Roman numeral + name fades in over the dark backdrop, holds, then
- * fades out as the new scene reveals.
+ * the dark moment. The destination's Roman numeral + name fades in
+ * AFTER the overlay reaches full coverage, holds for ~1s of read
+ * time, then fades out as the scene reveals.
  *
- * Timeline (duration=1.2s):
+ * Timeline (duration=2.0s):
  *   0.00s  overlay opacity 0, scene = old
- *   0.48s  overlay opacity 1 (fully covered), title card 0%
- *   0.36s  title card starts fading in (slightly before peak so the
- *          card is already settling when the swap happens)
- *   0.55s  title card at full opacity
- *   0.60s  onPeak fires — parent swaps scene under cover
- *   0.78s  title card starts fading out
- *   0.72s  overlay starts fading out
- *   0.96s  title card fully invisible
- *   1.20s  overlay fully invisible, scene = new
+ *   0.25s  overlay opacity 1 (fully covered) — fast fade-in so the
+ *          map is hidden before the title card shows
+ *   0.25s  onPeak fires — parent swaps scene under cover
+ *   0.30s  title card starts fading in (no overlap with visible map)
+ *   0.45s  title card at full opacity
+ *   1.45s  title card starts fading out (~1s of read time)
+ *   1.50s  overlay starts fading out
+ *   1.65s  title card fully invisible
+ *   2.00s  overlay fully invisible, scene = new
  *
- * The overlay is a slightly warm-dark gradient (not pure black) so
- * the moment doesn't read as a hard cut — feels atmospheric.
+ * The overlay is a fully-opaque warm-dark radial (alpha=1 at every
+ * stop). The "warm" comes from color variation, not transparency.
  */
 export function CinematicDive({
   trigger,
   onPeak,
-  duration = 1.2,
+  duration = 2.0,
   title = null,
 }: CinematicDiveProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -114,13 +114,18 @@ export function CinematicDive({
     }
 
     gsap.set(overlay, { opacity: 0 });
-    if (titleEl) gsap.set(titleEl, { opacity: 0, y: 12 });
+    if (titleEl) gsap.set(titleEl, { opacity: 0, y: 10 });
     gsap.set(container, { pointerEvents: "auto" });
 
-    const fadeInDur = duration * 0.40;
-    const holdDur = duration * 0.20;
-    const fadeOutDur = duration * 0.40;
-    const peakAt = fadeInDur + holdDur * 0.5;
+    // Fixed timing — fade-in is intentionally short so the overlay
+    // hits 100% before any title text appears (no map bleed-through
+    // behind text). Hold is variable to fit the requested total
+    // duration; fade-out is generous so the destination scene
+    // reveals smoothly.
+    const fadeInDur = 0.25;
+    const fadeOutDur = 0.50;
+    const holdDur = Math.max(0.4, duration - fadeInDur - fadeOutDur);
+    const peakAt = fadeInDur; // peak = exactly when fully covered
 
     const tl = gsap.timeline({
       onComplete: () => {
@@ -129,7 +134,7 @@ export function CinematicDive({
       },
     });
 
-    // Overlay fade in
+    // Overlay fade IN — fast, hits 100% by peakAt
     tl.to(
       overlay,
       {
@@ -140,12 +145,21 @@ export function CinematicDive({
       0
     );
 
-    // Title card fades in just before peak coverage, holds, fades out
+    // Peak — swap scene under cover. Fires at the START of the hold
+    // (not in the middle) so the new scene is in place from t=peakAt.
+    tl.add(() => {
+      onPeakRef.current?.();
+    }, peakAt);
+
+    // Title card — fades in shortly after peak (so overlay is fully
+    // opaque first), holds for ~1s of read time, fades out before
+    // the overlay starts revealing the destination.
     if (titleEl && titleHoldRef.current) {
-      const titleInStart = fadeInDur * 0.65;
-      const titleInDur = fadeInDur * 0.45 + holdDur * 0.5;
-      const titleHold = holdDur * 0.5 + fadeOutDur * 0.4;
-      const titleOutDur = fadeOutDur * 0.45;
+      const titleInDelay = 0.05;       // tiny breath after peak
+      const titleInDur = 0.15;          // snappy fade-in
+      const titleOutDur = 0.20;         // fade out before overlay reveals
+      const titleInStart = peakAt + titleInDelay;
+      const titleOutStart = peakAt + holdDur - 0.05;
 
       tl.to(
         titleEl,
@@ -161,20 +175,15 @@ export function CinematicDive({
         titleEl,
         {
           opacity: 0,
-          y: -8,
+          y: -6,
           duration: titleOutDur,
           ease: SPEC_EASE_GSAP_IN,
         },
-        titleInStart + titleInDur + titleHold
+        titleOutStart
       );
     }
 
-    // Peak — swap scene under cover
-    tl.add(() => {
-      onPeakRef.current?.();
-    }, peakAt);
-
-    // Overlay fade out
+    // Overlay fade OUT — starts at end of hold
     tl.to(
       overlay,
       {
@@ -182,7 +191,7 @@ export function CinematicDive({
         duration: fadeOutDur,
         ease: SPEC_EASE_GSAP_IN,
       },
-      fadeInDur + holdDur
+      peakAt + holdDur
     );
 
     timelineRef.current = tl;
@@ -210,16 +219,16 @@ export function CinematicDive({
       }}
       aria-hidden
     >
-      {/* Slightly warm-dark backdrop. NOT pure black — a faint warm
-          radial keeps the moment atmospheric instead of feeling like
-          a hard cut to nothing. */}
+      {/* Warm-dark backdrop. The "warm" comes from COLOR variation
+          across the gradient — every stop is alpha=1, so coverage at
+          peak is fully opaque (no map bleeding through behind text). */}
       <div
         ref={overlayRef}
         style={{
           position: "absolute",
           inset: 0,
           background:
-            "radial-gradient(ellipse at center, rgba(18, 12, 6, 0.97) 0%, rgba(8, 6, 4, 1) 70%, rgba(0, 0, 0, 1) 100%)",
+            "radial-gradient(ellipse at center, rgb(18, 12, 6) 0%, rgb(10, 6, 3) 50%, rgb(0, 0, 0) 100%)",
           opacity: 0,
           willChange: "opacity",
         }}

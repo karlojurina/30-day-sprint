@@ -101,7 +101,7 @@ import {
   DiscountClaimCelebration,
   type DiscountCelebrationMode,
 } from "@/components/map/DiscountClaimCelebration";
-import { CloudTransition } from "./CloudTransition";
+import { CinematicDive } from "./CinematicDive";
 
 interface MapMockupProps {
   onOpenLesson: (lessonId: string) => void;
@@ -667,12 +667,12 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       y: target.y,
       scale: target.scale,
       // First paint: slow expo arrival (cinematic).
-      // Region transitions: 1.4s symmetric zoom so the camera motion
-      // is visibly felt as the clouds clear — no longer a snap-behind.
-      // The cloud cover (~2s total) hides most of the early travel;
-      // the last ~0.4s of the zoom plays in the open as the student
-      // lands in the new region. Reads as "we flew there."
-      duration: isFirst ? 1.8 : 1.4,
+      // Region transitions: timed against the CinematicDive overlay
+      // (~1.0s total). Camera tween at 0.85s so the bulk of the
+      // travel happens behind the dark vignette, with a brief tail
+      // playing in the open as the new scene fades up — reads as
+      // "we flew through and emerged here."
+      duration: isFirst ? 1.8 : 0.85,
       ease: isFirst ? SPEC_EASE_GSAP : SPEC_EASE_GSAP_INOUT,
       onUpdate: () => {
         setDisplayTransform({ ...transformRef.current });
@@ -1410,10 +1410,10 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
         />
       )}
 
-      {/* Cloud scene-swap transition — fires at peak coverage */}
-      <CloudTransition
+      {/* Cinematic scene-swap transition — fires at peak coverage */}
+      <CinematicDive
         trigger={transitionCounter}
-        duration={2.0}
+        duration={1.0}
         onPeak={() => {
           const next = pendingViewRef.current;
           if (next != null) {

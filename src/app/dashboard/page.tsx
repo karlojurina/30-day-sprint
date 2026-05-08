@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { TopBar } from "@/components/map/TopBar";
@@ -20,10 +20,19 @@ export default function DashboardPage() {
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [streakCelebration, setStreakCelebration] = useState<number | null>(null);
 
-  // Detect streak increment vs the last-seen value in localStorage.
-  // Fires the celebration when current > lastSeen AND > 0. Persists
-  // the new value immediately so a refresh doesn't double-fire.
-  const initialised = useRef(false);
+  // Detect streak increment vs the last value we already celebrated
+  // (stored in localStorage). Fire whenever the SERVER says the
+  // streak is higher than what we last celebrated — covers all the
+  // cases:
+  //   - Student completes a lesson on the site (toggleLesson refreshes
+  //     student data → streak.current bumps → fires)
+  //   - Student watches on Whop, then returns to the site (silent
+  //     watch-sync on visibility → streak.current bumps → fires)
+  //   - Student opens app on a new device with a streak earned
+  //     elsewhere (lastSeen=0 in localStorage, streak.current>0,
+  //     fires once and records)
+  // The localStorage key is what we LAST CELEBRATED, not what we
+  // last saw — so reload doesn't refire (current==lastSeen → skip).
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (loading) return;
@@ -31,17 +40,7 @@ export default function DashboardPage() {
 
     const lastSeenRaw = window.localStorage.getItem(STREAK_LAST_SEEN_KEY);
     const lastSeen = lastSeenRaw ? parseInt(lastSeenRaw, 10) : 0;
-
-    // First load after server fetch — record current as baseline,
-    // don't fire (we don't want to celebrate on every page load).
-    if (!initialised.current) {
-      initialised.current = true;
-      if (Number.isNaN(lastSeen) || lastSeen < streak.current) {
-        // If localStorage is behind server, sync without firing.
-        window.localStorage.setItem(STREAK_LAST_SEEN_KEY, String(streak.current));
-      }
-      return;
-    }
+    if (Number.isNaN(lastSeen)) return;
 
     if (streak.current > lastSeen) {
       setStreakCelebration(streak.current);

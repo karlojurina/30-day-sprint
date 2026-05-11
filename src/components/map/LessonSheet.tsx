@@ -52,10 +52,12 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
     completedLessonIds,
     watchedLessonIds,
     actionShippedLessonIds,
+    skippedLessonIds,
     discountAllLessonsDone,
     discountRequest,
     toggleLesson,
     toggleLessonAction,
+    skipLesson,
     requestDiscount,
   } = useStudent();
 
@@ -221,6 +223,7 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                 Day {lesson.day} · {region.name} · {LESSON_TYPE_LABELS[lesson.type]}
                 {isCompound && " · 2 parts"}
                 {isGate && " · Discount gate"}
+                {lesson.is_optional && " · Optional"}
               </p>
               <h2
                 id="lesson-sheet-title"
@@ -709,6 +712,30 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                   }
                 >
                   {isFullyCompleted ? "Undo completion" : "Mark complete"}
+                </button>
+              )}
+
+              {/* Optional lesson: SKIP button so the student can bypass
+                  it without forfeiting path progress. Skipped lessons
+                  still count toward unlock via skipped_at. Only shows
+                  when the lesson is flagged is_optional AND the
+                  student hasn't already completed/skipped it. */}
+              {lesson.is_optional && !isFullyCompleted && (
+                <button
+                  onClick={() => skipLesson(lesson.id)}
+                  className="px-6 py-3.5 rounded-lg font-medium transition-colors"
+                  style={{
+                    background: skippedLessonIds.has(lesson.id)
+                      ? "rgba(255,255,255,0.08)"
+                      : "transparent",
+                    color: "var(--color-text-secondary)",
+                    border: "1px solid var(--color-border-hover)",
+                    fontSize: 14,
+                    letterSpacing: "-0.005em",
+                  }}
+                  title="This lesson is optional — skip without losing progress."
+                >
+                  {skippedLessonIds.has(lesson.id) ? "Un-skip" : "Skip — it's optional"}
                 </button>
               )}
             </div>

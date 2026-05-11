@@ -99,6 +99,16 @@ export interface Lesson {
   /** Brief shown in the LessonSheet's "Ship the ad" section */
   action_brief: string | null;
   /**
+   * Solo-optional lesson — the LessonSheet renders a "Skip" button
+   * alongside the normal watch/complete actions. Skipping still
+   * counts toward path advancement (via the skipped_at column),
+   * letting students bypass non-essential content without forfeiting
+   * progress. Distinct from group-collapsed lessons (lesson_group_id):
+   * those render as a single map node; is_optional lessons render
+   * individually.
+   */
+  is_optional: boolean;
+  /**
    * Group id for collapsing this lesson into a shared map node. Used
    * for the optional "Editing Breakdowns" set in R2 — see
    * src/lib/constants.ts:LESSON_GROUPS. Null = standalone.

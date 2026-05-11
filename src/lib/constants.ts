@@ -27,7 +27,10 @@ export function progressPercent(completed: number, total: number): number {
 }
 
 // The discount unlocks on the final lesson of Region 2 (l046, day 15)
-export const DISCOUNT_GATE_LESSON_ID = "l046";
+// v17 moved the gate from l046 (now "Static Ad Safezone Guidelines",
+// a 3m info video) → l049 ("Action Item: Static Ads"), the natural
+// "you've shipped your static ad, here's your discount" moment.
+export const DISCOUNT_GATE_LESSON_ID = "l049";
 
 // Time window for the 30% discount: complete all of R1 + R2 within
 // this many days of joining Whop. Measured server-side at claim time.

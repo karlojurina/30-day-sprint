@@ -3,11 +3,9 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
-import { TopBar } from "@/components/map/TopBar";
 import { LessonSheet } from "@/components/map/LessonSheet";
 import { MapMockup } from "@/components/mockup/MapMockup";
 import { LessonCompleteEffects } from "@/components/map/LessonCompleteEffects";
-import { DiscountUrgencyBanner } from "@/components/map/DiscountUrgencyBanner";
 import { StreakCelebration } from "@/components/map/StreakCelebration";
 import { DevTestPanel } from "@/components/dev/DevTestPanel";
 
@@ -85,12 +83,9 @@ export default function DashboardPage() {
       className="flex flex-col w-screen overflow-hidden"
       style={{ height: "100vh", background: "var(--color-bg-primary)" }}
     >
-      <TopBar onOpenLesson={(id) => setSelectedLessonId(id)} />
-
       <div className="relative flex-1 min-h-0">
         <MapMockup onOpenLesson={(id) => setSelectedLessonId(id)} />
         <LessonCompleteEffects />
-        <DiscountUrgencyBanner />
       </div>
 
       <LessonSheet

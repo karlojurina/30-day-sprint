@@ -102,6 +102,7 @@ import {
   type DiscountCelebrationMode,
 } from "@/components/map/DiscountClaimCelebration";
 import { CinematicDive } from "./CinematicDive";
+import { StatsWidget } from "@/components/map/StatsWidget";
 
 interface MapMockupProps {
   onOpenLesson: (lessonId: string) => void;
@@ -950,10 +951,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     if (next !== "overview" && !unlockedRegions.has(next as RegionId)) return;
     pendingViewRef.current = next;
 
-    // Snapshot title for the destination region (or null for back-to-
-    // overview). Stored in state so the title card stays mounted past
-    // peak — pendingViewRef gets cleared in onPeak, but state lives
-    // until the next transition overwrites it.
+    // Snapshot title for the destination. Stored in state so it
+    // stays mounted past peak — pendingViewRef gets cleared in
+    // onPeak, but state lives until the next transition overwrites
+    // it. For back-to-overview we use a generic "Map" title (no
+    // numeral) so the transition has the same visual treatment.
     if (next !== "overview") {
       const region = regions.find((r) => r.id === next);
       if (region) {
@@ -963,7 +965,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
         setTransitionTitle(null);
       }
     } else {
-      setTransitionTitle(null);
+      setTransitionTitle({ numeral: "✦", label: "The Map" });
     }
 
     // Force-mount deferred scene stack if heading into a region.
@@ -1517,6 +1519,70 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           collapsed={sidePanelCollapsed}
           onToggleCollapsed={() => setSidePanelCollapsed((v) => !v)}
         />
+      )}
+
+      {/* StatsWidget — visible ONLY on overview. Replaces the old
+          TopBar. Hosts welcome, progress, streak, next lesson,
+          discount countdown, and signout. */}
+      {view === "overview" && (
+        <StatsWidget onOpenLesson={onOpenLesson} />
+      )}
+
+      {/* Back-to-map button — visible ONLY when zoomed into a region.
+          Small floating pill in the top-left. */}
+      {view !== "overview" && (
+        <button
+          type="button"
+          onClick={() => transitionTo("overview")}
+          aria-label="Back to map"
+          style={{
+            position: "absolute",
+            top: 16,
+            left: 16,
+            zIndex: 35,
+            height: 32,
+            padding: "0 14px 0 10px",
+            borderRadius: 999,
+            background: "rgba(15, 17, 21, 0.62)",
+            border: "1px solid rgba(255, 255, 255, 0.16)",
+            backdropFilter: "blur(20px) saturate(140%)",
+            WebkitBackdropFilter: "blur(20px) saturate(140%)",
+            color: "rgba(255, 255, 255, 0.92)",
+            fontSize: 12,
+            fontWeight: 500,
+            letterSpacing: "-0.005em",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            boxShadow: "0 6px 16px rgba(0,0,0,0.32)",
+            transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(15, 17, 21, 0.78)";
+            e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.28)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "rgba(15, 17, 21, 0.62)";
+            e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.16)";
+          }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <line x1="19" y1="12" x2="5" y2="12" />
+            <polyline points="12 19 5 12 12 5" />
+          </svg>
+          Map
+        </button>
       )}
 
       {/* Fade-through-dark with destination title card overlaid during

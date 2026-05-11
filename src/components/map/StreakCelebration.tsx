@@ -96,7 +96,10 @@ export function StreakCelebration({ streak, onDismiss }: StreakCelebrationProps)
             className="flex flex-col items-center"
             style={{ pointerEvents: "none" }}
           >
-            {/* Flame — larger, animated version of the topbar streak */}
+            {/* Flame — larger, animated version of the topbar streak.
+                Wrapped with a DOM-level warm glow that's unbounded
+                (no SVG viewBox to clip it), so the flame reads as
+                catching the room rather than sitting in a frame. */}
             <motion.div
               initial={{ scale: 0.5 }}
               animate={{ scale: 1 }}
@@ -106,8 +109,27 @@ export function StreakCelebration({ streak, onDismiss }: StreakCelebrationProps)
                 damping: 14,
                 delay: 0.1,
               }}
-              style={{ marginBottom: 28 }}
+              style={{
+                marginBottom: 28,
+                position: "relative",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
             >
+              {/* Soft warm radial glow behind the flame */}
+              <div
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  inset: -60,
+                  borderRadius: "50%",
+                  background:
+                    "radial-gradient(circle, rgba(255, 200, 100, 0.32) 0%, rgba(255, 140, 60, 0.14) 35%, rgba(255, 100, 40, 0) 65%)",
+                  pointerEvents: "none",
+                  filter: "blur(8px)",
+                }}
+              />
               <BigFlame />
             </motion.div>
 
@@ -203,38 +225,27 @@ export function StreakCelebration({ streak, onDismiss }: StreakCelebrationProps)
 }
 
 /** Big flame at hero scale. Uses the same SVG paths as StreakFlame
- *  so the icon family stays consistent. Animated breath via SVG. */
+ *  so the icon family stays consistent. The radial glow is rendered
+ *  as a separate full-screen DOM layer (see StreakCelebration body)
+ *  rather than inside the SVG, so the SVG viewBox doesn't clip it.
+ *  `overflow: visible` keeps the soft outer glow from being cropped
+ *  if the flame ever grows past its bounding box. */
 function BigFlame() {
   return (
-    <svg width="120" height="140" viewBox="0 0 24 28" aria-hidden="true">
+    <svg
+      width="160"
+      height="180"
+      viewBox="-2 -2 28 32"
+      aria-hidden="true"
+      style={{ overflow: "visible" }}
+    >
       <defs>
         <linearGradient id="big-flame-grad" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="#FF4500" />
           <stop offset="55%" stopColor="#FF8C3C" />
           <stop offset="100%" stopColor="#FFE9B0" />
         </linearGradient>
-        <radialGradient id="big-flame-glow" cx="50%" cy="60%" r="55%">
-          <stop offset="0%" stopColor="rgba(255, 200, 100, 0.6)" />
-          <stop offset="60%" stopColor="rgba(255, 140, 60, 0.25)" />
-          <stop offset="100%" stopColor="rgba(255, 100, 40, 0)" />
-        </radialGradient>
       </defs>
-
-      {/* Soft warm glow behind the flame */}
-      <ellipse cx="12" cy="14" rx="14" ry="16" fill="url(#big-flame-glow)">
-        <animate
-          attributeName="rx"
-          values="13;16;13"
-          dur="2.2s"
-          repeatCount="indefinite"
-        />
-        <animate
-          attributeName="ry"
-          values="15;18;15"
-          dur="2.2s"
-          repeatCount="indefinite"
-        />
-      </ellipse>
 
       {/* Outer flame body */}
       <path

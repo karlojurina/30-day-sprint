@@ -7,16 +7,40 @@ import { LessonSheet } from "@/components/map/LessonSheet";
 import { MapMockup } from "@/components/mockup/MapMockup";
 import { LessonCompleteEffects } from "@/components/map/LessonCompleteEffects";
 import { StreakCelebration } from "@/components/map/StreakCelebration";
+import { DiscountApprovedCelebration } from "@/components/map/DiscountApprovedCelebration";
 import { DevTestPanel } from "@/components/dev/DevTestPanel";
+
+const DISCOUNT_APPROVED_LAST_SEEN_KEY = "et.discountApproved.lastSeen";
 
 const STREAK_LAST_SEEN_KEY = "et.streak.lastSeen";
 
 export default function DashboardPage() {
   const { student } = useAuth();
-  const { loading, streak } = useStudent();
+  const { loading, streak, discountRequest } = useStudent();
 
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [streakCelebration, setStreakCelebration] = useState<number | null>(null);
+  const [discountCelebration, setDiscountCelebration] = useState<string | null>(null);
+
+  // Fire the discount-approved celebration ONCE per code. When the
+  // admin approves a request, discountRequest.promo_code becomes set;
+  // we compare against the last code we celebrated (stored in
+  // localStorage) and fire if different. Reload doesn't refire.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (loading) return;
+    if (discountRequest?.status !== "approved") return;
+    const code = discountRequest.promo_code;
+    if (!code) return;
+
+    const lastSeen = window.localStorage.getItem(
+      DISCOUNT_APPROVED_LAST_SEEN_KEY,
+    );
+    if (lastSeen === code) return;
+
+    setDiscountCelebration(code);
+    window.localStorage.setItem(DISCOUNT_APPROVED_LAST_SEEN_KEY, code);
+  }, [discountRequest?.status, discountRequest?.promo_code, loading]);
 
   // Detect streak increment vs the last value we already celebrated
   // (stored in localStorage). Fire whenever the SERVER says the
@@ -55,6 +79,18 @@ export default function DashboardPage() {
     };
     window.addEventListener("et:test:streak", handler);
     return () => window.removeEventListener("et:test:streak", handler);
+  }, []);
+
+  // Dev test panel listener — manually fire the discount-approved
+  // celebration with any code (no API call).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<string>;
+      if (typeof ce.detail === "string") setDiscountCelebration(ce.detail);
+    };
+    window.addEventListener("et:test:discount-approved", handler);
+    return () =>
+      window.removeEventListener("et:test:discount-approved", handler);
   }, []);
 
   if (loading || !student) {
@@ -97,6 +133,11 @@ export default function DashboardPage() {
       <StreakCelebration
         streak={streakCelebration}
         onDismiss={() => setStreakCelebration(null)}
+      />
+
+      <DiscountApprovedCelebration
+        code={discountCelebration}
+        onDismiss={() => setDiscountCelebration(null)}
       />
 
       <DevTestPanel />

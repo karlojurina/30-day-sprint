@@ -233,6 +233,12 @@ export function DevTestPanel() {
         <Btn onClick={() => fire("banner-clear")}>Clear override</Btn>
       </Section>
 
+      <Section title="Discount approval celebration">
+        <Btn onClick={() => fire("discount-approved", bannerCode)}>
+          Fire with current code
+        </Btn>
+      </Section>
+
       <p
         style={{
           fontSize: 10,

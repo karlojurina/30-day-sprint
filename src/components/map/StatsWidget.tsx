@@ -35,8 +35,22 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
     streak,
     discountRequest,
     discountAllLessonsDone,
+    discountEligible,
     regionProgress,
+    requestDiscount,
   } = useStudent();
+
+  const [applying, setApplying] = useState(false);
+
+  async function handleApply() {
+    if (!discountEligible || applying) return;
+    setApplying(true);
+    try {
+      await requestDiscount();
+    } finally {
+      setApplying(false);
+    }
+  }
 
   // Tick the live discount countdown once per second.
   const [, setTick] = useState(0);
@@ -84,7 +98,7 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
   // Discount status line — one of:
   //   • code (approved)
   //   • status (pending / rejected)
-  //   • ready (eligible)
+  //   • eligible — show Apply button
   //   • live countdown
   //   • nothing (window closed)
   const discountInfo = (() => {
@@ -103,6 +117,9 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         kind: "status" as const,
         text: "Application not approved · DM in Discord",
       };
+    }
+    if (discountAllLessonsDone && discountEligible) {
+      return { kind: "eligible" as const };
     }
     if (discountAllLessonsDone) {
       return { kind: "status" as const, text: "Ready to apply for 30% off" };
@@ -536,6 +553,40 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
             <span style={{ color: "rgba(255,255,255,0.80)" }}>
               {discountInfo.text}
             </span>
+          )}
+          {discountInfo.kind === "eligible" && (
+            <>
+              <span style={{ color: "rgba(255,255,255,0.85)", flex: 1 }}>
+                Ready for your{" "}
+                <span style={{ color: "#FFFFFF", fontWeight: 700 }}>
+                  30% off
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={handleApply}
+                disabled={applying}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: 999,
+                  background: applying
+                    ? "rgba(255, 255, 255, 0.16)"
+                    : "rgba(255, 255, 255, 0.92)",
+                  border: "1px solid rgba(255, 255, 255, 0.92)",
+                  color: applying
+                    ? "rgba(255, 255, 255, 0.55)"
+                    : "rgba(15, 17, 21, 0.92)",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  letterSpacing: "-0.005em",
+                  cursor: applying ? "wait" : "pointer",
+                  transition: "all 150ms cubic-bezier(0.25, 0.1, 0.25, 1)",
+                  flexShrink: 0,
+                }}
+              >
+                {applying ? "Applying…" : "Apply"}
+              </button>
+            </>
           )}
         </div>
       )}

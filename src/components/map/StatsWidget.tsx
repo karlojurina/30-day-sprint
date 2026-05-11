@@ -29,11 +29,13 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
   const { student, signOut } = useAuth();
   const {
     lessons,
+    regions,
     completedLessonIds,
     currentLesson,
     streak,
     discountRequest,
     discountAllLessonsDone,
+    regionProgress,
   } = useStudent();
 
   // Tick the live discount countdown once per second.
@@ -50,6 +52,22 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
   const totalLessons = lessons.length;
   const completed = completedLessonIds.size;
   const percent = progressPercent(completed, totalLessons);
+
+  // Current region — the one their next lesson lives in (falls back
+  // to the first incomplete region if no current lesson).
+  const currentRegionId = currentLesson?.region_id ?? null;
+  const currentRegion = currentRegionId
+    ? regions.find((r) => r.id === currentRegionId)
+    : null;
+  const regionInfo = currentRegion
+    ? {
+        name: currentRegion.name,
+        numeral:
+          ["I", "II", "III", "IV"][(currentRegion.order_num ?? 1) - 1] ?? "",
+        completed: regionProgress[currentRegion.id]?.completed ?? 0,
+        total: regionProgress[currentRegion.id]?.total ?? 0,
+      }
+    : null;
 
   // Live discount ms remaining
   const joined = new Date(student.joined_at).getTime();
@@ -113,18 +131,18 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
     <div
       style={{
         position: "absolute",
-        top: 16,
-        left: 16,
+        top: 20,
+        left: 20,
         zIndex: 30,
-        width: 320,
-        padding: "16px 18px",
-        borderRadius: 16,
+        width: 380,
+        padding: "20px 22px",
+        borderRadius: 18,
         background: "rgba(15, 17, 21, 0.62)",
-        border: "1px solid rgba(255, 255, 255, 0.12)",
+        border: "1px solid rgba(255, 255, 255, 0.14)",
         backdropFilter: "blur(24px) saturate(140%)",
         WebkitBackdropFilter: "blur(24px) saturate(140%)",
         boxShadow:
-          "0 12px 32px rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.04) inset",
+          "0 14px 40px rgba(0,0,0,0.50), 0 1px 0 rgba(255,255,255,0.05) inset",
         color: "rgba(255, 255, 255, 0.94)",
         fontSize: 13,
         letterSpacing: "-0.005em",
@@ -135,8 +153,8 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
-          marginBottom: 16,
+          gap: 14,
+          marginBottom: 18,
         }}
       >
         <Image
@@ -145,27 +163,27 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
           width={547}
           height={547}
           priority
-          style={{ height: 28, width: 28, objectFit: "contain", flexShrink: 0 }}
+          style={{ height: 34, width: 34, objectFit: "contain", flexShrink: 0 }}
         />
         <div style={{ flex: 1, minWidth: 0 }}>
           <p
             style={{
-              fontSize: 13,
+              fontSize: 16,
               fontWeight: 600,
               color: "rgba(255,255,255,0.96)",
               lineHeight: 1.2,
-              letterSpacing: "-0.011em",
+              letterSpacing: "-0.018em",
             }}
           >
             Hey {firstName},
           </p>
           <p
             style={{
-              fontSize: 12,
+              fontSize: 13,
               fontWeight: 400,
               color: "rgba(255,255,255,0.55)",
               lineHeight: 1.2,
-              marginTop: 1,
+              marginTop: 2,
             }}
           >
             welcome back
@@ -177,12 +195,12 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
           aria-label="Sign out"
           title="Sign out"
           style={{
-            width: 28,
-            height: 28,
-            borderRadius: 8,
+            width: 34,
+            height: 34,
+            borderRadius: 10,
             background: "transparent",
-            border: "1px solid rgba(255,255,255,0.14)",
-            color: "rgba(255,255,255,0.55)",
+            border: "1px solid rgba(255,255,255,0.16)",
+            color: "rgba(255,255,255,0.65)",
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
@@ -192,8 +210,8 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
           }}
         >
           <svg
-            width="14"
-            height="14"
+            width="16"
+            height="16"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -209,11 +227,11 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         </button>
       </div>
 
-      {/* Progress bar — overall lessons */}
-      <div style={{ marginBottom: 14 }}>
+      {/* Overall progress bar */}
+      <div style={{ marginBottom: 18 }}>
         <div
           style={{
-            height: 5,
+            height: 6,
             borderRadius: 3,
             background: "rgba(255,255,255,0.10)",
             overflow: "hidden",
@@ -223,7 +241,7 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
             style={{
               height: "100%",
               width: `${percent}%`,
-              background: "rgba(255,255,255,0.92)",
+              background: "rgba(255,255,255,0.94)",
               borderRadius: "inherit",
               transition: "width 400ms cubic-bezier(0.25, 0.1, 0.25, 1)",
             }}
@@ -233,31 +251,107 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
           style={{
             display: "flex",
             justifyContent: "space-between",
-            fontSize: 11,
+            fontSize: 12,
             color: "rgba(255,255,255,0.55)",
-            marginTop: 6,
+            marginTop: 8,
             fontVariantNumeric: "tabular-nums",
             letterSpacing: "-0.005em",
           }}
         >
           <span>
-            <span style={{ color: "rgba(255,255,255,0.92)", fontWeight: 600 }}>
+            <span style={{ color: "rgba(255,255,255,0.94)", fontWeight: 600 }}>
               {completed}
             </span>
             {" / "}
             {totalLessons} lessons
           </span>
-          <span>{percent}%</span>
+          <span style={{ color: "rgba(255,255,255,0.94)", fontWeight: 600 }}>
+            {percent}%
+          </span>
         </p>
       </div>
 
-      {/* Stats row — streak + day */}
+      {/* Current region — line above the stat row showing where they are */}
+      {regionInfo && (
+        <div
+          style={{
+            padding: "10px 14px",
+            borderRadius: 10,
+            background: "rgba(255,255,255,0.05)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            marginBottom: 14,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+          }}
+        >
+          <div
+            aria-hidden="true"
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: "50%",
+              background: "rgba(255,255,255,0.10)",
+              border: "1px solid rgba(255,255,255,0.18)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: 12,
+              fontWeight: 600,
+              color: "rgba(255,255,255,0.96)",
+              letterSpacing: "-0.018em",
+              flexShrink: 0,
+            }}
+          >
+            {regionInfo.numeral}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p
+              style={{
+                fontSize: 10,
+                fontWeight: 500,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                color: "rgba(255,255,255,0.50)",
+                marginBottom: 2,
+              }}
+            >
+              You&rsquo;re in
+            </p>
+            <p
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: "rgba(255,255,255,0.96)",
+                letterSpacing: "-0.014em",
+                lineHeight: 1.2,
+              }}
+            >
+              {regionInfo.name}
+            </p>
+          </div>
+          <p
+            className="tabular-nums"
+            style={{
+              fontSize: 12,
+              fontWeight: 500,
+              color: "rgba(255,255,255,0.65)",
+              flexShrink: 0,
+              letterSpacing: "-0.005em",
+            }}
+          >
+            {regionInfo.completed} / {regionInfo.total}
+          </p>
+        </div>
+      )}
+
+      {/* Stats row — streak (current + longest) + day */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 12,
-          marginBottom: 14,
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: 10,
+          marginBottom: 16,
         }}
       >
         <Stat
@@ -265,8 +359,8 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
           value={streak.current === 0 ? "—" : `${streak.current}d`}
           icon={
             <svg
-              width="12"
-              height="14"
+              width="14"
+              height="16"
               viewBox="0 0 24 28"
               aria-hidden="true"
               style={{ overflow: "visible" }}
@@ -279,9 +373,10 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
           }
         />
         <Stat
-          label="Day"
-          value={`${dayNumber} / 30`}
+          label="Best"
+          value={streak.longest === 0 ? "—" : `${streak.longest}d`}
         />
+        <Stat label="Day" value={`${dayNumber}/30`} />
       </div>
 
       {/* Next lesson — clickable card */}
@@ -292,52 +387,76 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
           style={{
             display: "block",
             width: "100%",
-            padding: "10px 12px",
-            borderRadius: 10,
-            background: "rgba(255,255,255,0.06)",
-            border: "1px solid rgba(255,255,255,0.14)",
+            padding: "14px 16px",
+            borderRadius: 12,
+            background: "rgba(255,255,255,0.07)",
+            border: "1px solid rgba(255,255,255,0.16)",
             color: "inherit",
             textAlign: "left",
             cursor: "pointer",
-            marginBottom: discountInfo ? 14 : 0,
+            marginBottom: discountInfo ? 16 : 0,
             transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(255,255,255,0.10)";
-            e.currentTarget.style.borderColor = "rgba(255,255,255,0.22)";
+            e.currentTarget.style.background = "rgba(255,255,255,0.12)";
+            e.currentTarget.style.borderColor = "rgba(255,255,255,0.26)";
+            e.currentTarget.style.transform = "translateY(-1px)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "rgba(255,255,255,0.06)";
-            e.currentTarget.style.borderColor = "rgba(255,255,255,0.14)";
+            e.currentTarget.style.background = "rgba(255,255,255,0.07)";
+            e.currentTarget.style.borderColor = "rgba(255,255,255,0.16)";
+            e.currentTarget.style.transform = "translateY(0)";
           }}
         >
-          <p
+          <div
             style={{
-              fontSize: 10,
-              fontWeight: 500,
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              color: "rgba(255,255,255,0.50)",
-              marginBottom: 4,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              marginBottom: 6,
             }}
           >
-            Next up
-          </p>
+            <p
+              style={{
+                fontSize: 11,
+                fontWeight: 500,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                color: "rgba(255,255,255,0.55)",
+              }}
+            >
+              Next up
+            </p>
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="rgba(255,255,255,0.45)"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <line x1="5" y1="12" x2="19" y2="12" />
+              <polyline points="12 5 19 12 12 19" />
+            </svg>
+          </div>
           <div
             style={{
               display: "flex",
               alignItems: "baseline",
-              gap: 8,
+              gap: 10,
               minWidth: 0,
             }}
           >
             <span
               className="truncate"
               style={{
-                fontSize: 13,
+                fontSize: 15,
                 fontWeight: 600,
-                color: "rgba(255,255,255,0.95)",
-                letterSpacing: "-0.011em",
+                color: "rgba(255,255,255,0.96)",
+                letterSpacing: "-0.014em",
                 flex: 1,
                 minWidth: 0,
                 overflow: "hidden",
@@ -350,10 +469,11 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
             {nextDuration && (
               <span
                 style={{
-                  fontSize: 11,
+                  fontSize: 12,
                   color: "rgba(255,255,255,0.55)",
                   fontVariantNumeric: "tabular-nums",
                   flexShrink: 0,
+                  fontWeight: 500,
                 }}
               >
                 {nextDuration}
@@ -367,33 +487,34 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
       {discountInfo && (
         <div
           style={{
-            paddingTop: 12,
-            borderTop: "1px solid rgba(255,255,255,0.08)",
-            fontSize: 12,
+            paddingTop: 14,
+            borderTop: "1px solid rgba(255,255,255,0.10)",
+            fontSize: 13,
             display: "flex",
             alignItems: "center",
-            gap: 8,
+            gap: 10,
           }}
         >
           <svg
-            width="13"
-            height="13"
+            width="15"
+            height="15"
             viewBox="0 0 24 24"
             fill="none"
-            stroke="rgba(255,255,255,0.45)"
+            stroke="rgba(255,255,255,0.55)"
             strokeWidth="2"
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden="true"
+            style={{ flexShrink: 0 }}
           >
             <circle cx="12" cy="12" r="9" />
             <polyline points="12 7 12 12 15 15" />
           </svg>
           {discountInfo.kind === "countdown" && (
-            <span style={{ color: "rgba(255,255,255,0.78)" }}>
+            <span style={{ color: "rgba(255,255,255,0.80)" }}>
               <span
                 className="tabular-nums"
-                style={{ color: "rgba(255,255,255,0.96)", fontWeight: 600 }}
+                style={{ color: "rgba(255,255,255,0.96)", fontWeight: 700 }}
               >
                 {discountInfo.text}
               </span>{" "}
@@ -401,18 +522,18 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
             </span>
           )}
           {discountInfo.kind === "code" && (
-            <span style={{ color: "rgba(255,255,255,0.78)" }}>
+            <span style={{ color: "rgba(255,255,255,0.80)" }}>
               {discountInfo.prefix}{" "}
               <span
                 className="tabular-nums"
-                style={{ color: "rgba(255,255,255,0.96)", fontWeight: 600 }}
+                style={{ color: "rgba(255,255,255,0.96)", fontWeight: 700 }}
               >
                 {discountInfo.text}
               </span>
             </span>
           )}
           {discountInfo.kind === "status" && (
-            <span style={{ color: "rgba(255,255,255,0.78)" }}>
+            <span style={{ color: "rgba(255,255,255,0.80)" }}>
               {discountInfo.text}
             </span>
           )}
@@ -434,10 +555,10 @@ function Stat({
   return (
     <div
       style={{
-        padding: "10px 12px",
-        borderRadius: 10,
-        background: "rgba(255,255,255,0.04)",
-        border: "1px solid rgba(255,255,255,0.08)",
+        padding: "12px 14px",
+        borderRadius: 12,
+        background: "rgba(255,255,255,0.05)",
+        border: "1px solid rgba(255,255,255,0.10)",
       }}
     >
       <p
@@ -446,22 +567,23 @@ function Stat({
           fontWeight: 500,
           letterSpacing: "0.06em",
           textTransform: "uppercase",
-          color: "rgba(255,255,255,0.50)",
+          color: "rgba(255,255,255,0.55)",
         }}
       >
         {label}
       </p>
       <p
         style={{
-          fontSize: 16,
-          fontWeight: 600,
+          fontSize: 18,
+          fontWeight: 700,
           color: "rgba(255,255,255,0.96)",
-          marginTop: 3,
+          marginTop: 4,
           fontVariantNumeric: "tabular-nums",
-          letterSpacing: "-0.018em",
+          letterSpacing: "-0.022em",
           display: "flex",
           alignItems: "center",
           gap: 6,
+          lineHeight: 1,
         }}
       >
         {icon}

@@ -1529,7 +1529,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       )}
 
       {/* Back-to-map button — visible ONLY when zoomed into a region.
-          Small floating pill in the top-left. */}
+          Floating pill in the top-left; sized so it reads at a glance. */}
       {view !== "overview" && (
         <button
           type="button"
@@ -1537,43 +1537,46 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           aria-label="Back to map"
           style={{
             position: "absolute",
-            top: 16,
-            left: 16,
+            top: 20,
+            left: 20,
             zIndex: 35,
-            height: 32,
-            padding: "0 14px 0 10px",
+            height: 48,
+            padding: "0 22px 0 18px",
             borderRadius: 999,
-            background: "rgba(15, 17, 21, 0.62)",
-            border: "1px solid rgba(255, 255, 255, 0.16)",
-            backdropFilter: "blur(20px) saturate(140%)",
-            WebkitBackdropFilter: "blur(20px) saturate(140%)",
-            color: "rgba(255, 255, 255, 0.92)",
-            fontSize: 12,
-            fontWeight: 500,
-            letterSpacing: "-0.005em",
+            background: "rgba(15, 17, 21, 0.65)",
+            border: "1px solid rgba(255, 255, 255, 0.20)",
+            backdropFilter: "blur(24px) saturate(140%)",
+            WebkitBackdropFilter: "blur(24px) saturate(140%)",
+            color: "rgba(255, 255, 255, 0.96)",
+            fontSize: 15,
+            fontWeight: 600,
+            letterSpacing: "-0.011em",
             cursor: "pointer",
             display: "flex",
             alignItems: "center",
-            gap: 6,
-            boxShadow: "0 6px 16px rgba(0,0,0,0.32)",
+            gap: 10,
+            boxShadow:
+              "0 10px 28px rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.06) inset",
             transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(15, 17, 21, 0.78)";
-            e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.28)";
+            e.currentTarget.style.background = "rgba(15, 17, 21, 0.80)";
+            e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.32)";
+            e.currentTarget.style.transform = "translateX(-2px)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "rgba(15, 17, 21, 0.62)";
-            e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.16)";
+            e.currentTarget.style.background = "rgba(15, 17, 21, 0.65)";
+            e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.20)";
+            e.currentTarget.style.transform = "translateX(0)";
           }}
         >
           <svg
-            width="14"
-            height="14"
+            width="18"
+            height="18"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2"
+            strokeWidth="2.2"
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden="true"
@@ -1581,7 +1584,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
             <line x1="19" y1="12" x2="5" y2="12" />
             <polyline points="12 19 5 12 12 5" />
           </svg>
-          Map
+          Back to map
         </button>
       )}
 

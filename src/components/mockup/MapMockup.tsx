@@ -474,8 +474,21 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     currentLesson,
     discountRequest,
     discountAllLessonsDone,
+    regionProgress,
     requestDiscount,
   } = useStudent();
+
+  // Toast for the "you haven't completed all lessons" message when
+  // the student tries to advance from a locked Onward marker.
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+  function showToast(msg: string) {
+    setToast(msg);
+    if (toastTimerRef.current != null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 3000);
+  }
 
   const outerRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef({ x: 0, y: 0, scale: 1 });
@@ -1078,7 +1091,22 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
             currentLessonId={virtualizeCurrentLessonId(currentLesson?.id ?? null)}
             onOpenLesson={onOpenLesson}
             endMarker={SCENE_END_MARKERS[view as RegionId]}
+            endMarkerLocked={
+              !(regionProgress[view as RegionId]?.isComplete ?? false)
+            }
             onEndMarkerClick={() => {
+              const progress = regionProgress[view as RegionId];
+              const isComplete = progress?.isComplete ?? false;
+              if (!isComplete) {
+                const remaining =
+                  (progress?.total ?? 0) - (progress?.completed ?? 0);
+                showToast(
+                  remaining === 1
+                    ? "You haven't completed the last lesson"
+                    : `${remaining} lessons left to unlock Onward`,
+                );
+                return;
+              }
               const next = SCENE_END_MARKERS[view as RegionId]?.nextView;
               if (next) transitionTo(next);
             }}
@@ -1428,14 +1456,55 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         : "Locked"}
                     </text>
 
-                    {/* Discount line — only on R2, sits directly below
-                        the progress / "Locked" sublabel. Two lines:
-                        bold "30% OFF" with a pulsing gold halo +
-                        quieter "your second month" subline beneath. */}
+                    {/* Discount line — only on R2. Pulsing green dot +
+                        bold "30% OFF" + quieter "your second month"
+                        subline beneath. */}
                     {showDiscountLine && (
                       <g>
+                        {/* Green pulse dot — manually placed left of
+                            "30% OFF" text. Text width ~92px, dot offset
+                            is rough but reads as adjacent. */}
+                        <circle
+                          cx={-56}
+                          cy={77}
+                          r={5}
+                          fill="#22C55E"
+                        >
+                          <animate
+                            attributeName="opacity"
+                            values="0.6;1;0.6"
+                            dur="1.6s"
+                            repeatCount="indefinite"
+                          />
+                          <animate
+                            attributeName="r"
+                            values="4.5;6;4.5"
+                            dur="1.6s"
+                            repeatCount="indefinite"
+                          />
+                        </circle>
+                        {/* Outer glow ring around the dot */}
+                        <circle
+                          cx={-56}
+                          cy={77}
+                          r={9}
+                          fill="rgba(34, 197, 94, 0.25)"
+                        >
+                          <animate
+                            attributeName="r"
+                            values="7;12;7"
+                            dur="1.6s"
+                            repeatCount="indefinite"
+                          />
+                          <animate
+                            attributeName="opacity"
+                            values="0.18;0.45;0.18"
+                            dur="1.6s"
+                            repeatCount="indefinite"
+                          />
+                        </circle>
                         <text
-                          x={0}
+                          x={6}
                           y={84}
                           textAnchor="middle"
                           style={{
@@ -1514,7 +1583,29 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           onOpenLesson={onOpenLesson}
           onBack={() => transitionTo("overview")}
           onPrev={prevRegion ? () => transitionTo(prevRegion.id as RegionId) : null}
-          onNext={nextRegion ? () => transitionTo(nextRegion.id as RegionId) : null}
+          onNext={
+            nextRegion
+              ? () => {
+                  const progress = regionProgress[focusedRegion.id];
+                  const isComplete = progress?.isComplete ?? false;
+                  if (!isComplete) {
+                    const remaining =
+                      (progress?.total ?? 0) - (progress?.completed ?? 0);
+                    showToast(
+                      remaining === 1
+                        ? "You haven't completed the last lesson"
+                        : `${remaining} lessons left to unlock Onward`,
+                    );
+                    return;
+                  }
+                  transitionTo(nextRegion.id as RegionId);
+                }
+              : null
+          }
+          nextLocked={
+            nextRegion != null &&
+            !(regionProgress[focusedRegion.id]?.isComplete ?? false)
+          }
           width={sidePanelWidth}
           collapsed={sidePanelCollapsed}
           onToggleCollapsed={() => setSidePanelCollapsed((v) => !v)}
@@ -1619,6 +1710,58 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
         }}
         onDismiss={() => setDiscountModalMode(null)}
       />
+
+      {/* Toast — single transient message at the bottom center.
+          Used for "Onward locked" notifications. Auto-dismisses
+          after 3s via the showToast helper. */}
+      {toast && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: "absolute",
+            left: "50%",
+            bottom: 32,
+            transform: "translateX(-50%)",
+            zIndex: 50,
+            padding: "12px 22px",
+            borderRadius: 999,
+            background: "rgba(15, 17, 21, 0.92)",
+            border: "1px solid rgba(255, 255, 255, 0.18)",
+            backdropFilter: "blur(20px) saturate(140%)",
+            WebkitBackdropFilter: "blur(20px) saturate(140%)",
+            color: "rgba(255, 255, 255, 0.96)",
+            fontSize: 13,
+            fontWeight: 500,
+            letterSpacing: "-0.005em",
+            boxShadow: "0 12px 32px rgba(0, 0, 0, 0.5)",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            animation:
+              "fade-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both",
+            pointerEvents: "none",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            style={{ opacity: 0.6, flexShrink: 0 }}
+          >
+            <rect x="3" y="11" width="18" height="11" rx="2" />
+            <path d="M7 11 V7 a5 5 0 0 1 10 0 V11" />
+          </svg>
+          {toast}
+        </div>
+      )}
     </div>
   );
 }
@@ -1635,6 +1778,7 @@ function RegionSidePanel({
   onBack,
   onPrev,
   onNext,
+  nextLocked = false,
   width,
   collapsed,
   onToggleCollapsed,
@@ -1646,6 +1790,9 @@ function RegionSidePanel({
   onBack: () => void;
   onPrev: (() => void) | null;
   onNext: (() => void) | null;
+  /** When true, the "Onward" footer button still fires onNext (parent
+   *  will show a toast), but it renders dimmed with a lock affordance. */
+  nextLocked?: boolean;
   width: number;
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -2080,12 +2227,15 @@ function RegionSidePanel({
         <button
           onClick={onNext ?? undefined}
           disabled={!onNext}
-          className={`flex-1 px-5 py-4 text-right ${onNext ? "btn-tinted" : ""}`}
+          className={`flex-1 px-5 py-4 text-right ${onNext && !nextLocked ? "btn-tinted" : ""}`}
           style={{
             background: "transparent",
             border: "none",
-            color: onNext ? "var(--color-ink)" : "var(--color-ink-faint)",
+            color: !onNext || nextLocked
+              ? "var(--color-ink-faint)"
+              : "var(--color-ink)",
             cursor: onNext ? "pointer" : "default",
+            opacity: nextLocked ? 0.6 : 1,
           }}
         >
           <p
@@ -2105,9 +2255,30 @@ function RegionSidePanel({
               fontSize: 14,
               fontWeight: 500,
               letterSpacing: "-0.011em",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              justifyContent: "flex-end",
+              width: "100%",
             }}
           >
-            {onNext ? "Onward" : "—"} →
+            {nextLocked && (
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="3" y="11" width="18" height="11" rx="2" />
+                <path d="M7 11 V7 a5 5 0 0 1 10 0 V11" />
+              </svg>
+            )}
+            {onNext ? (nextLocked ? "Locked" : "Onward →") : "—"}
           </p>
         </button>
       </div>
@@ -2128,6 +2299,10 @@ interface ScenePathOverlayProps {
   onOpenLesson: (id: string) => void;
   endMarker?: SceneEndMarker;
   onEndMarkerClick?: () => void;
+  /** When true, the end marker renders in a "locked" treatment
+   *  (dim + lock icon) and the click handler should typically show
+   *  a notification instead of transitioning. */
+  endMarkerLocked?: boolean;
   /** Optional second marker drawn ABOVE the primary endMarker. Used on
       R2 to surface the discount-claim CTA separately from the onward
       transition button. */
@@ -2143,6 +2318,7 @@ function ScenePathOverlay({
   onOpenLesson,
   endMarker,
   onEndMarkerClick,
+  endMarkerLocked = false,
   secondaryMarker,
   onSecondaryMarkerClick,
 }: ScenePathOverlayProps) {
@@ -2293,6 +2469,7 @@ function ScenePathOverlay({
           y={lastWaypoint.y}
           marker={endMarker}
           onClick={onEndMarkerClick}
+          locked={endMarkerLocked}
         />
       )}
 
@@ -2595,11 +2772,16 @@ function EndMarker({
   y,
   marker,
   onClick,
+  locked = false,
 }: {
   x: number;
   y: number;
   marker: SceneEndMarker;
   onClick?: () => void;
+  /** When true, the marker renders dim with a lock glyph and the
+   *  pulsing aura is suppressed. Click still fires onClick (parent
+   *  decides whether to show a notification instead of navigating). */
+  locked?: boolean;
 }) {
   const [hot, setHot] = useState(false);
   const isClickable = !!onClick;
@@ -2614,6 +2796,8 @@ function EndMarker({
       style={{
         cursor: isClickable ? "pointer" : "default",
         pointerEvents: "auto",
+        opacity: locked ? 0.5 : 1,
+        transition: "opacity 200ms cubic-bezier(0.25,0.1,0.25,1)",
       }}
       onClick={onClick}
       onMouseEnter={() => setHot(true)}
@@ -2629,11 +2813,12 @@ function EndMarker({
       role={isClickable ? "button" : undefined}
       aria-label={`${marker.label} — ${marker.sublabel}`}
     >
-      {/* Pulsing aura — soft white halo */}
+      {/* Pulsing aura — soft white halo. Suppressed when locked so
+          the marker reads as inactive. */}
       <circle
         r={44}
         fill="rgba(255, 255, 255, 0.18)"
-        opacity={isMilestone ? 0.24 : 0.18}
+        opacity={locked ? 0 : isMilestone ? 0.24 : 0.18}
       >
         <animate
           attributeName="r"
@@ -2644,9 +2829,11 @@ function EndMarker({
         <animate
           attributeName="opacity"
           values={
-            isMilestone
-              ? "0.18;0.40;0.18"
-              : "0.10;0.24;0.10"
+            locked
+              ? "0;0;0"
+              : isMilestone
+                ? "0.18;0.40;0.18"
+                : "0.10;0.24;0.10"
           }
           dur="2.6s"
           repeatCount="indefinite"
@@ -2683,13 +2870,20 @@ function EndMarker({
         style={{ transition: "stroke-width 0.2s" }}
       />
 
-      {/* Inner glyph — flat dark navy on white. */}
-      {marker.kind === "onward" && (
+      {/* Inner glyph — flat dark navy on white. When locked, replace
+          the arrow with a padlock icon to communicate the gate. */}
+      {marker.kind === "onward" && !locked && (
         <path
           d="M -10 -8 L 8 0 L -10 8 L -6 0 Z"
           fill="rgba(15, 17, 21, 0.92)"
           stroke="none"
         />
+      )}
+      {marker.kind === "onward" && locked && (
+        <g stroke="rgba(15, 17, 21, 0.92)" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" fill="none">
+          <rect x={-7} y={-2} width={14} height={12} rx={2} fill="rgba(15, 17, 21, 0.92)" />
+          <path d="M -5 -2 V -7 a 5 5 0 0 1 10 0 V -2" />
+        </g>
       )}
       {marker.kind === "discount" && (
         <g>

@@ -500,93 +500,166 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         </button>
       )}
 
-      {/* Discount line — countdown / code / status */}
+      {/* Discount block — centered headline for countdown/eligible
+          states (with pulsing green dot), inline row for code/status. */}
       {discountInfo && (
         <div
           style={{
             paddingTop: 14,
             borderTop: "1px solid rgba(255,255,255,0.10)",
-            fontSize: 13,
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
           }}
         >
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="rgba(255,255,255,0.55)"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-            style={{ flexShrink: 0 }}
-          >
-            <circle cx="12" cy="12" r="9" />
-            <polyline points="12 7 12 12 15 15" />
-          </svg>
           {discountInfo.kind === "countdown" && (
-            <span style={{ color: "rgba(255,255,255,0.80)" }}>
-              <span
-                className="tabular-nums"
-                style={{ color: "rgba(255,255,255,0.96)", fontWeight: 700 }}
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                }}
               >
-                {discountInfo.text}
-              </span>{" "}
-              {discountInfo.suffix}
-            </span>
-          )}
-          {discountInfo.kind === "code" && (
-            <span style={{ color: "rgba(255,255,255,0.80)" }}>
-              {discountInfo.prefix}{" "}
-              <span
-                className="tabular-nums"
-                style={{ color: "rgba(255,255,255,0.96)", fontWeight: 700 }}
-              >
-                {discountInfo.text}
-              </span>
-            </span>
-          )}
-          {discountInfo.kind === "status" && (
-            <span style={{ color: "rgba(255,255,255,0.80)" }}>
-              {discountInfo.text}
-            </span>
-          )}
-          {discountInfo.kind === "eligible" && (
-            <>
-              <span style={{ color: "rgba(255,255,255,0.85)", flex: 1 }}>
-                Ready for your{" "}
-                <span style={{ color: "#FFFFFF", fontWeight: 700 }}>
-                  30% off
+                <GreenPulseDot />
+                <span
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 700,
+                    letterSpacing: "-0.022em",
+                    color: "rgba(255, 255, 255, 0.96)",
+                    lineHeight: 1.05,
+                  }}
+                >
+                  30% OFF
                 </span>
-              </span>
+              </div>
+              <p
+                className="tabular-nums"
+                style={{
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: "rgba(255, 255, 255, 0.60)",
+                  letterSpacing: "-0.005em",
+                  textAlign: "center",
+                }}
+              >
+                {discountInfo.text} {discountInfo.suffix}
+              </p>
+            </div>
+          )}
+
+          {discountInfo.kind === "eligible" && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                }}
+              >
+                <GreenPulseDot />
+                <span
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 700,
+                    letterSpacing: "-0.022em",
+                    color: "rgba(255, 255, 255, 0.96)",
+                  }}
+                >
+                  30% OFF
+                </span>
+              </div>
               <button
                 type="button"
                 onClick={handleApply}
                 disabled={applying}
                 style={{
-                  padding: "6px 14px",
+                  padding: "8px 22px",
                   borderRadius: 999,
                   background: applying
                     ? "rgba(255, 255, 255, 0.16)"
-                    : "rgba(255, 255, 255, 0.92)",
+                    : "rgba(255, 255, 255, 0.94)",
                   border: "1px solid rgba(255, 255, 255, 0.92)",
                   color: applying
                     ? "rgba(255, 255, 255, 0.55)"
                     : "rgba(15, 17, 21, 0.92)",
-                  fontSize: 12,
+                  fontSize: 13,
                   fontWeight: 700,
                   letterSpacing: "-0.005em",
                   cursor: applying ? "wait" : "pointer",
                   transition: "all 150ms cubic-bezier(0.25, 0.1, 0.25, 1)",
-                  flexShrink: 0,
                 }}
               >
-                {applying ? "Applying…" : "Apply"}
+                {applying ? "Applying…" : "Apply for your discount"}
               </button>
-            </>
+            </div>
+          )}
+
+          {(discountInfo.kind === "code" || discountInfo.kind === "status") && (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <svg
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="rgba(255,255,255,0.55)"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                style={{ flexShrink: 0 }}
+              >
+                <circle cx="12" cy="12" r="9" />
+                <polyline points="12 7 12 12 15 15" />
+              </svg>
+              {discountInfo.kind === "code" && (
+                <span
+                  style={{
+                    fontSize: 13,
+                    color: "rgba(255,255,255,0.80)",
+                  }}
+                >
+                  {discountInfo.prefix}{" "}
+                  <span
+                    className="tabular-nums"
+                    style={{
+                      color: "rgba(255,255,255,0.96)",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {discountInfo.text}
+                  </span>
+                </span>
+              )}
+              {discountInfo.kind === "status" && (
+                <span
+                  style={{
+                    fontSize: 13,
+                    color: "rgba(255,255,255,0.80)",
+                  }}
+                >
+                  {discountInfo.text}
+                </span>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -641,5 +714,26 @@ function Stat({
         {value}
       </p>
     </div>
+  );
+}
+
+/** Pulsing green status dot — used to draw attention to active
+ *  discount state (window open or eligible). Reused in the map
+ *  region label as well via an SVG sibling. */
+function GreenPulseDot() {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        display: "inline-block",
+        width: 10,
+        height: 10,
+        borderRadius: "50%",
+        background: "#22C55E",
+        boxShadow: "0 0 12px rgba(34, 197, 94, 0.65)",
+        animation: "pulse-dot 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite",
+        flexShrink: 0,
+      }}
+    />
   );
 }

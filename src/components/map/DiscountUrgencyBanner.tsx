@@ -32,8 +32,6 @@ export function DiscountUrgencyBanner() {
     return () => window.clearInterval(id);
   }, []);
 
-  const [copied, setCopied] = useState(false);
-
   // Dev test panel override — when set, displays the override state
   // instead of the natural one.
   const [override, setOverride] = useState<BannerOverride | null>(null);
@@ -67,10 +65,8 @@ export function DiscountUrgencyBanner() {
 
   // Determine state — override wins if present.
   let state: "countdown" | "eligible" | "pending" | "approved" | "rejected" | "hidden";
-  let overrideCode: string | null = null;
   if (override) {
     state = override.state;
-    if (override.state === "approved") overrideCode = override.code;
   } else if (discountRequest?.status === "approved") {
     state = "approved";
   } else if (discountRequest?.status === "pending") {
@@ -135,15 +131,6 @@ export function DiscountUrgencyBanner() {
             accent: "#F5F5F0",
           };
 
-  function handleCopyCode() {
-    const code = overrideCode ?? discountRequest?.promo_code;
-    if (state !== "approved" || !code) return;
-    navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    });
-  }
-
   return (
     <div
       role="status"
@@ -176,9 +163,6 @@ export function DiscountUrgencyBanner() {
         state={state}
         accent={palette.accent}
         remaining={formatRemaining(discountMsLeft)}
-        code={overrideCode ?? discountRequest?.promo_code}
-        copied={copied}
-        onCopy={handleCopyCode}
       />
     </div>
   );
@@ -250,16 +234,10 @@ function BannerText({
   state,
   accent,
   remaining,
-  code,
-  copied,
-  onCopy,
 }: {
   state: "countdown" | "eligible" | "pending" | "approved" | "rejected";
   accent: string;
   remaining: string;
-  code: string | null | undefined;
-  copied: boolean;
-  onCopy: () => void;
 }) {
   const baseStyle: React.CSSProperties = {
     fontSize: 14,
@@ -306,32 +284,9 @@ function BannerText({
   }
   // approved
   return (
-    <span style={baseStyle} className="flex items-center" >
-      Your 30% code:{" "}
-      <span className="tabular-nums" style={{ ...accentStyle, marginLeft: 6 }}>
-        {code ?? "—"}
-      </span>
-      {code && (
-        <button
-          type="button"
-          onClick={onCopy}
-          aria-label="Copy code"
-          style={{
-            marginLeft: 8,
-            padding: "2px 8px",
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "-0.005em",
-            color: accent,
-            background: "rgba(255, 255, 255, 0.10)",
-            border: "1px solid rgba(255, 255, 255, 0.20)",
-            borderRadius: 999,
-            cursor: "pointer",
-          }}
-        >
-          {copied ? "Copied" : "Copy"}
-        </button>
-      )}
+    <span style={baseStyle} className="flex items-center">
+      <span style={accentStyle}>30% off</span>
+      {" "}applied to your Whop subscription
     </span>
   );
 }

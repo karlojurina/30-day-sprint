@@ -1,10 +1,33 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
-import { createWhopPromoCode } from "@/lib/whop";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 
+/**
+ * Approve a pending discount request.
+ *
+ * As of the manual-application workflow change, this route NO LONGER
+ * auto-generates a Whop promo code. The admin applies a pre-created
+ * coupon directly to the student's Whop subscription via the Whop
+ * dashboard, then calls this endpoint to mark our row done.
+ *
+ * Body:
+ *   requestId      — id of the discount_requests row (required)
+ *   appliedCode    — optional text reference for the code the admin
+ *                    applied. Stored in promo_code for our audit
+ *                    trail; student never sees it.
+ *   notes          — optional internal note
+ *
+ * Eligibility guards remain (R1+R2 complete within window, ad
+ * submissions verified) so a misclick can't approve someone who
+ * doesn't actually qualify.
+ */
 export async function POST(request: NextRequest) {
-  const { requestId } = await request.json();
+  const body = await request.json();
+  const { requestId, appliedCode, notes } = body as {
+    requestId?: string;
+    appliedCode?: string;
+    notes?: string;
+  };
 
   if (!requestId) {
     return NextResponse.json({ error: "Missing requestId" }, { status: 400 });
@@ -30,11 +53,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // V4 eligibility: all R1 + R2 lessons complete within DISCOUNT_WINDOW_DAYS
-  // of the student's Whop join date. V12 adds a manual gate:
-  // ad_submissions_verified must be true before the discount can be
-  // approved (admin ticks it after checking the student's Discord
-  // submissions in the ad-review channel).
+  // Eligibility checks — same as before.
   const { data: studentRow } = await supabase
     .from("students")
     .select("joined_at, ad_submissions_verified")
@@ -94,59 +113,32 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Generate a unique promo code
-  const code = `ECOM30-${discountReq.student_id.slice(0, 6).toUpperCase()}`;
-
-  try {
-    // Create promo code on Whop
-    const promoResult = await createWhopPromoCode({
-      code,
-      amount_off: 30,
-      promo_type: "percentage",
-      base_currency: "usd",
-      new_users_only: false,
-      one_per_customer: true,
-      stock: 1,
-      promo_duration_months: 1,
-    });
-
-    // Update the discount request
-    const { error: updateError } = await supabase
-      .from("discount_requests")
-      .update({
-        status: "approved",
-        promo_code: code,
-        whop_promo_id: promoResult.id,
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq("id", requestId);
-
-    if (updateError) {
-      console.error("Failed to update discount request:", updateError);
-      return NextResponse.json(
-        { error: "Failed to update request" },
-        { status: 500 }
-      );
-    }
-
-    return NextResponse.json({ success: true, code });
-  } catch (err) {
-    console.error("Whop promo code creation failed:", err);
-
-    // Still approve with manual code entry
-    await supabase
-      .from("discount_requests")
-      .update({
-        status: "approved",
-        promo_code: `MANUAL-${code}`,
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq("id", requestId);
-
-    return NextResponse.json({
-      success: true,
-      code: `MANUAL-${code}`,
-      warning: "Whop API failed — code needs to be created manually in Whop",
-    });
+  // Mark approved. Store the applied code for our audit trail but
+  // the student never sees it — the celebration just confirms the
+  // discount was applied to their Whop account.
+  const update: Record<string, unknown> = {
+    status: "approved",
+    reviewed_at: new Date().toISOString(),
+  };
+  if (appliedCode && appliedCode.trim().length > 0) {
+    update.promo_code = appliedCode.trim();
   }
+  if (notes && notes.trim().length > 0) {
+    update.rejection_reason = notes.trim(); // reusing column for any admin note
+  }
+
+  const { error: updateError } = await supabase
+    .from("discount_requests")
+    .update(update)
+    .eq("id", requestId);
+
+  if (updateError) {
+    console.error("Failed to update discount request:", updateError);
+    return NextResponse.json(
+      { error: "Failed to update request" },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ success: true });
 }

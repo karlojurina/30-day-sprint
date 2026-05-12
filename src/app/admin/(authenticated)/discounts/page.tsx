@@ -37,24 +37,34 @@ export default function DiscountsPage() {
   }
 
   async function handleApprove(requestId: string) {
+    // Prompt for the code the admin applied in Whop. Optional but
+    // recommended for audit-trail. Cancel aborts the approval.
+    const appliedCode = window.prompt(
+      "Paste the promo code you applied in the Whop dashboard (optional, stored for our records — the student never sees it):",
+      "",
+    );
+    if (appliedCode === null) return; // cancelled
+
     setProcessing(requestId);
 
     try {
-      // Call our API route to create the Whop promo code
       const res = await fetch("/api/discounts/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId }),
+        body: JSON.stringify({
+          requestId,
+          appliedCode: appliedCode.trim() || undefined,
+        }),
       });
 
       if (res.ok) {
         fetchRequests();
       } else {
         const data = await res.json();
-        alert(`Failed to approve: ${data.error || "Unknown error"}`);
+        alert(`Failed to mark approved: ${data.error || "Unknown error"}`);
       }
     } catch {
-      alert("Failed to approve discount");
+      alert("Failed to mark approved");
     }
 
     setProcessing(null);

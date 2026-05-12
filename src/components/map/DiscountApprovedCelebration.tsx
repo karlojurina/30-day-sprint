@@ -5,62 +5,54 @@ import { motion, AnimatePresence } from "framer-motion";
 import { SPEC_EASE } from "@/lib/motion";
 
 interface DiscountApprovedCelebrationProps {
-  /** Promo code to celebrate. Null = no celebration showing. */
-  code: string | null;
+  /** True = show the celebration. Null/false = no celebration. */
+  show: boolean;
   onDismiss: () => void;
 }
 
 /**
- * Full-screen celebration that fires once when the admin manually
- * approves the student's 30% discount and a Whop promo code is
- * minted. Tracked via localStorage so reload doesn't refire.
+ * Full-screen celebration that fires once when the team approves the
+ * student's 30% discount. The team applies the promo code directly to
+ * the student's Whop subscription in the Whop dashboard, so the
+ * student never sees a code — only the confirmation that the
+ * discount has landed on their account.
+ *
+ * Tracked from the dashboard via localStorage so reload doesn't
+ * refire.
  *
  * Sequence (~1.5s before becoming dismissable):
  *   0.0  Backdrop fades in
- *   0.1  Big "30% OFF" pill springs up
+ *   0.1  Big "30% OFF" springs up
  *   0.4  Eyebrow "Discount approved" fades in
- *   0.5  Promo code reveals
- *   0.7  Subtitle + Copy button
+ *   0.7  Subtitle explainer
  *   1.5  "Click anywhere to continue" prompt
  *   5.0s safety net auto-dismiss
  */
 export function DiscountApprovedCelebration({
-  code,
+  show,
   onDismiss,
 }: DiscountApprovedCelebrationProps) {
   const [visible, setVisible] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    if (code == null) {
+    if (!show) {
       setVisible(false);
       return;
     }
     setVisible(true);
     const t = window.setTimeout(() => setVisible(false), 5000);
     return () => window.clearTimeout(t);
-  }, [code]);
+  }, [show]);
 
   function handleAnimationComplete() {
     if (!visible) onDismiss();
   }
 
-  function handleClick(e: React.MouseEvent) {
-    // Don't dismiss when clicking the Copy button
-    if ((e.target as HTMLElement).closest("button")) return;
+  function handleClick() {
     setVisible(false);
   }
 
-  function handleCopy(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (!code) return;
-    navigator.clipboard.writeText(code).then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    });
-  }
-
-  if (code == null) return null;
+  if (!show) return null;
 
   return (
     <AnimatePresence onExitComplete={handleAnimationComplete}>
@@ -147,87 +139,29 @@ export function DiscountApprovedCelebration({
                 letterSpacing: "0.04em",
                 textTransform: "uppercase",
                 color: "rgba(255, 255, 255, 0.65)",
-                marginBottom: 12,
+                marginBottom: 18,
               }}
             >
               Discount approved
             </motion.p>
 
-            {/* Promo code with Copy button */}
-            <motion.div
-              initial={{ opacity: 0, y: 12, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              transition={{
-                duration: 0.55,
-                delay: 0.5,
-                ease: SPEC_EASE,
-              }}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "12px 20px",
-                borderRadius: 14,
-                background: "rgba(255, 255, 255, 0.08)",
-                border: "1px solid rgba(255, 255, 255, 0.22)",
-                backdropFilter: "blur(20px)",
-                marginBottom: 18,
-              }}
-            >
-              <span
-                className="tabular-nums"
-                style={{
-                  fontSize: 22,
-                  fontWeight: 700,
-                  letterSpacing: "0.04em",
-                  color: "rgba(255, 255, 255, 0.96)",
-                  fontFamily:
-                    'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
-                }}
-              >
-                {code}
-              </span>
-              <button
-                type="button"
-                onClick={handleCopy}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: 999,
-                  background: copied
-                    ? "rgba(255, 255, 255, 0.92)"
-                    : "rgba(255, 255, 255, 0.16)",
-                  border: "1px solid rgba(255, 255, 255, 0.28)",
-                  color: copied
-                    ? "rgba(15, 17, 21, 0.92)"
-                    : "rgba(255, 255, 255, 0.92)",
-                  fontSize: 12,
-                  fontWeight: 600,
-                  letterSpacing: "-0.005em",
-                  cursor: "pointer",
-                  transition: "all 150ms cubic-bezier(0.25, 0.1, 0.25, 1)",
-                }}
-              >
-                {copied ? "Copied" : "Copy"}
-              </button>
-            </motion.div>
-
             <motion.p
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.7, ease: SPEC_EASE }}
+              transition={{ duration: 0.55, delay: 0.7, ease: SPEC_EASE }}
               style={{
-                fontSize: 14,
+                fontSize: 16,
                 fontWeight: 500,
-                letterSpacing: "-0.005em",
-                color: "rgba(255, 255, 255, 0.65)",
-                marginTop: 4,
-                maxWidth: 380,
+                letterSpacing: "-0.011em",
+                color: "rgba(255, 255, 255, 0.85)",
+                maxWidth: 420,
                 textAlign: "center",
                 lineHeight: 1.5,
               }}
             >
-              Apply this code in your Whop billing portal and the
-              discount lands on your next renewal — no need to cancel.
+              Our team has applied the 30% discount to your
+              subscription. You&rsquo;ll see it on your next Whop
+              renewal — nothing else to do.
             </motion.p>
 
             <motion.p

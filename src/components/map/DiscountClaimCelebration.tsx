@@ -44,10 +44,8 @@ export function DiscountClaimCelebration({
   blockerReason,
 }: Props) {
   const [claiming, setClaiming] = useState(false);
-  const [copied, setCopied] = useState(false);
 
   const status = discountRequest?.status ?? null;
-  const promoCode = discountRequest?.promo_code ?? null;
 
   const handleClaim = async () => {
     if (claiming) return;
@@ -57,13 +55,6 @@ export function DiscountClaimCelebration({
     } finally {
       setClaiming(false);
     }
-  };
-
-  const handleCopy = async () => {
-    if (!promoCode) return;
-    await navigator.clipboard.writeText(promoCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
   };
 
   return (
@@ -194,7 +185,7 @@ export function DiscountClaimCelebration({
                         : "Pending team review"}
                   </span>
 
-                  {status === "approved" && promoCode ? (
+                  {status === "approved" ? (
                     <>
                       <h2
                         id="discount-celebration-title"
@@ -204,52 +195,23 @@ export function DiscountClaimCelebration({
                           fontWeight: 600,
                           lineHeight: 1.15,
                           letterSpacing: "-0.022em",
-                          marginBottom: 8,
+                          marginBottom: 12,
                         }}
                       >
-                        Your code is ready
+                        30% off · applied
                       </h2>
                       <p
                         style={{
-                          color: "rgba(230,220,200,0.62)",
-                          fontSize: 13,
-                          marginBottom: 18,
+                          color: "rgba(230,220,200,0.78)",
+                          fontSize: 14,
+                          lineHeight: 1.55,
+                          marginBottom: 22,
                         }}
                       >
-                        Apply at checkout for 30% off the next month.
+                        Our team has applied your discount directly to
+                        your Whop subscription. You&rsquo;ll see it on
+                        your next renewal — nothing else to do.
                       </p>
-                      <div
-                        className="flex items-center gap-2 mb-5"
-                        style={{
-                          padding: "12px 14px",
-                          background: "rgba(6,12,26,0.55)",
-                          border: "1px solid rgba(245,245,240,0.4)",
-                          borderRadius: 10,
-                        }}
-                      >
-                        <code
-                          className="flex-1 font-mono text-left"
-                          style={{
-                            color: "var(--color-gold-light)",
-                            fontSize: 16,
-                            letterSpacing: "0.06em",
-                          }}
-                        >
-                          {promoCode}
-                        </code>
-                        <button
-                          onClick={handleCopy}
-                          className="font-mono uppercase px-3 py-1.5 rounded"
-                          style={{
-                            background: "var(--color-gold)",
-                            color: "var(--color-bg-primary)",
-                            fontSize: 11,
-                            letterSpacing: "0.12em",
-                          }}
-                        >
-                          {copied ? "Copied" : "Copy"}
-                        </button>
-                      </div>
                     </>
                   ) : status === "rejected" ? (
                     <>
@@ -303,8 +265,9 @@ export function DiscountClaimCelebration({
                         }}
                       >
                         We&rsquo;re checking your ad submissions in Discord.
-                        You&rsquo;ll hear back within 24 hours — your promo
-                        code shows up here as soon as it&rsquo;s approved.
+                        You&rsquo;ll hear back within 24 hours, and the
+                        team will apply the discount straight to your
+                        Whop subscription.
                       </p>
                     </>
                   )}

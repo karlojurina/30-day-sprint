@@ -610,60 +610,21 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                       ? "Discount rejected"
                       : "Discount pending review"}
                 </p>
-                {discountRequest.status === "approved" &&
-                discountRequest.promo_code ? (
-                  <div className="flex items-center gap-2">
-                    <code
-                      className="flex-1"
-                      style={{
-                        padding: "8px 12px",
-                        borderRadius: 8,
-                        background: "rgba(200, 157, 85, 0.12)",
-                        color: "var(--color-gold-light)",
-                        fontSize: 14,
-                        fontFamily: "var(--font-mono)",
-                        fontWeight: 600,
-                        letterSpacing: "0.04em",
-                      }}
-                    >
-                      {discountRequest.promo_code}
-                    </code>
-                    <button
-                      onClick={() =>
-                        navigator.clipboard.writeText(
-                          discountRequest.promo_code ?? ""
-                        )
-                      }
-                      style={{
-                        padding: "8px 14px",
-                        borderRadius: 8,
-                        border: "none",
-                        background: "var(--color-gold)",
-                        color: "#0F1115",
-                        fontSize: 13,
-                        fontWeight: 600,
-                        letterSpacing: "-0.005em",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Copy
-                    </button>
-                  </div>
-                ) : (
-                  <p
-                    style={{
-                      color: "var(--color-text-secondary)",
-                      fontSize: 14,
-                      lineHeight: 1.5,
-                      letterSpacing: "-0.005em",
-                    }}
-                  >
-                    {discountRequest.status === "rejected"
+                <p
+                  style={{
+                    color: "var(--color-text-secondary)",
+                    fontSize: 14,
+                    lineHeight: 1.5,
+                    letterSpacing: "-0.005em",
+                  }}
+                >
+                  {discountRequest.status === "approved"
+                    ? "Our team has applied the 30% discount to your Whop subscription. You'll see it on your next renewal — nothing else to do."
+                    : discountRequest.status === "rejected"
                       ? discountRequest.rejection_reason ||
                         "The team didn't approve this — reach out in Discord."
-                      : "We'll review it within 24 hours and your code will appear here."}
-                  </p>
-                )}
+                      : "Thanks for applying — our team will review it within 24 hours and apply your discount directly to your Whop subscription."}
+                </p>
               </div>
             )}
 

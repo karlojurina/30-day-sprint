@@ -167,13 +167,12 @@ export function JournalView({
               ? "30 days. Discount earned."
               : "30 days. Receipts in hand."}
           </h2>
-          {discountRequest?.status === "approved" &&
-            discountRequest.promo_code && (
-              <div className="closing-promo">
-                <span className="lbl">Your promo code</span>
-                <code>{discountRequest.promo_code}</code>
-              </div>
-            )}
+          {discountRequest?.status === "approved" && (
+            <div className="closing-promo">
+              <span className="lbl">30% discount</span>
+              <span>Applied to your Whop subscription</span>
+            </div>
+          )}
           <p className="closing-body">
             This journal is the receipt of the work you put in. Take it,
             keep going, and earn the next 30 days louder than this one.

@@ -234,8 +234,8 @@ export function DevTestPanel() {
       </Section>
 
       <Section title="Discount approval celebration">
-        <Btn onClick={() => fire("discount-approved", bannerCode)}>
-          Fire with current code
+        <Btn onClick={() => fire("discount-approved", true)}>
+          Fire celebration
         </Btn>
       </Section>
 

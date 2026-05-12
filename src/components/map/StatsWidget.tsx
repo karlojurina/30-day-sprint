@@ -96,7 +96,7 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
   const nextDuration = currentGroupId ? null : currentLesson?.duration_label;
 
   // Discount status line — one of:
-  //   • code (approved)
+  //   • applied (approved — student never sees the code)
   //   • status (pending / rejected)
   //   • eligible — show Apply button
   //   • live countdown
@@ -104,13 +104,15 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
   const discountInfo = (() => {
     if (discountRequest?.status === "approved") {
       return {
-        kind: "code" as const,
-        text: discountRequest.promo_code ?? "—",
-        prefix: "30% code",
+        kind: "applied" as const,
+        text: "30% off applied to your account",
       };
     }
     if (discountRequest?.status === "pending") {
-      return { kind: "status" as const, text: "Discount under review" };
+      return {
+        kind: "status" as const,
+        text: "Thanks — our team is reviewing your application",
+      };
     }
     if (discountRequest?.status === "rejected") {
       return {
@@ -579,7 +581,7 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
             </>
           )}
 
-          {discountInfo.kind === "code" && (
+          {discountInfo.kind === "applied" && (
             <span
               style={{
                 fontSize: 14,
@@ -588,13 +590,10 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
                 letterSpacing: "-0.011em",
               }}
             >
-              {discountInfo.prefix}{" "}
-              <span
-                className="tabular-nums"
-                style={{ color: "rgba(255,255,255,0.96)", fontWeight: 700 }}
-              >
-                {discountInfo.text}
-              </span>
+              <span style={{ color: "#FFFFFF", fontWeight: 700 }}>
+                30% off
+              </span>{" "}
+              applied to your account
             </span>
           )}
 

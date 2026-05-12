@@ -20,27 +20,27 @@ export default function DashboardPage() {
 
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [streakCelebration, setStreakCelebration] = useState<number | null>(null);
-  const [discountCelebration, setDiscountCelebration] = useState<string | null>(null);
+  const [discountCelebration, setDiscountCelebration] = useState<boolean>(false);
 
-  // Fire the discount-approved celebration ONCE per code. When the
-  // admin approves a request, discountRequest.promo_code becomes set;
-  // we compare against the last code we celebrated (stored in
-  // localStorage) and fire if different. Reload doesn't refire.
+  // Fire the discount-approved celebration ONCE per approval. The
+  // student never sees a promo code — the team applies it directly
+  // in Whop — so we track approvals by request id. Reload doesn't
+  // refire because we record the celebrated id in localStorage.
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (loading) return;
     if (discountRequest?.status !== "approved") return;
-    const code = discountRequest.promo_code;
-    if (!code) return;
+    const id = discountRequest.id;
+    if (!id) return;
 
     const lastSeen = window.localStorage.getItem(
       DISCOUNT_APPROVED_LAST_SEEN_KEY,
     );
-    if (lastSeen === code) return;
+    if (lastSeen === id) return;
 
-    setDiscountCelebration(code);
-    window.localStorage.setItem(DISCOUNT_APPROVED_LAST_SEEN_KEY, code);
-  }, [discountRequest?.status, discountRequest?.promo_code, loading]);
+    setDiscountCelebration(true);
+    window.localStorage.setItem(DISCOUNT_APPROVED_LAST_SEEN_KEY, id);
+  }, [discountRequest?.status, discountRequest?.id, loading]);
 
   // Detect streak increment vs the last value we already celebrated
   // (stored in localStorage). Fire whenever the SERVER says the
@@ -82,12 +82,9 @@ export default function DashboardPage() {
   }, []);
 
   // Dev test panel listener — manually fire the discount-approved
-  // celebration with any code (no API call).
+  // celebration (no API call).
   useEffect(() => {
-    const handler = (e: Event) => {
-      const ce = e as CustomEvent<string>;
-      if (typeof ce.detail === "string") setDiscountCelebration(ce.detail);
-    };
+    const handler = () => setDiscountCelebration(true);
     window.addEventListener("et:test:discount-approved", handler);
     return () =>
       window.removeEventListener("et:test:discount-approved", handler);
@@ -136,8 +133,8 @@ export default function DashboardPage() {
       />
 
       <DiscountApprovedCelebration
-        code={discountCelebration}
-        onDismiss={() => setDiscountCelebration(null)}
+        show={discountCelebration}
+        onDismiss={() => setDiscountCelebration(false)}
       />
 
       <DevTestPanel />

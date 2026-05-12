@@ -1711,42 +1711,46 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
         onDismiss={() => setDiscountModalMode(null)}
       />
 
-      {/* Toast — single transient message at the bottom center.
+      {/* Toast — single transient message dead-center on screen.
           Used for "Onward locked" notifications. Auto-dismisses
-          after 3s via the showToast helper. */}
+          after 3s via the showToast helper. Fixed positioning so
+          it ignores the side panel and lands at the viewport's
+          true visual center. */}
       {toast && (
         <div
           role="status"
           aria-live="polite"
           style={{
-            position: "absolute",
+            position: "fixed",
+            top: "50%",
             left: "50%",
-            bottom: 32,
-            transform: "translateX(-50%)",
-            zIndex: 50,
-            padding: "12px 22px",
+            transform: "translate(-50%, -50%)",
+            zIndex: 100,
+            padding: "16px 28px",
             borderRadius: 999,
-            background: "rgba(15, 17, 21, 0.92)",
-            border: "1px solid rgba(255, 255, 255, 0.18)",
-            backdropFilter: "blur(20px) saturate(140%)",
-            WebkitBackdropFilter: "blur(20px) saturate(140%)",
+            background: "rgba(15, 17, 21, 0.94)",
+            border: "1px solid rgba(255, 255, 255, 0.22)",
+            backdropFilter: "blur(24px) saturate(140%)",
+            WebkitBackdropFilter: "blur(24px) saturate(140%)",
             color: "rgba(255, 255, 255, 0.96)",
-            fontSize: 13,
+            fontSize: 15,
             fontWeight: 500,
-            letterSpacing: "-0.005em",
-            boxShadow: "0 12px 32px rgba(0, 0, 0, 0.5)",
+            letterSpacing: "-0.011em",
+            boxShadow: "0 24px 56px rgba(0, 0, 0, 0.65)",
             display: "flex",
             alignItems: "center",
-            gap: 8,
+            gap: 10,
             animation:
               "fade-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) both",
             pointerEvents: "none",
             whiteSpace: "nowrap",
+            maxWidth: "min(90vw, 480px)",
+            textAlign: "center",
           }}
         >
           <svg
-            width="14"
-            height="14"
+            width="16"
+            height="16"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -1754,7 +1758,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden="true"
-            style={{ opacity: 0.6, flexShrink: 0 }}
+            style={{ opacity: 0.65, flexShrink: 0 }}
           >
             <rect x="3" y="11" width="18" height="11" rx="2" />
             <path d="M7 11 V7 a5 5 0 0 1 10 0 V11" />

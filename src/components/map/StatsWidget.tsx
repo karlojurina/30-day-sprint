@@ -500,93 +500,64 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         </button>
       )}
 
-      {/* Discount block — centered headline for countdown/eligible
-          states (with pulsing green dot), inline row for code/status. */}
+      {/* Discount line — inline row: green pulse dot + text. Bigger
+          font than before so it reads as the focal status item. */}
       {discountInfo && (
         <div
           style={{
             paddingTop: 14,
             borderTop: "1px solid rgba(255,255,255,0.10)",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
           }}
         >
+          <GreenPulseDot />
           {discountInfo.kind === "countdown" && (
-            <div
+            <span
               style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 4,
+                fontSize: 14,
+                fontWeight: 500,
+                color: "rgba(255, 255, 255, 0.85)",
+                letterSpacing: "-0.011em",
+                flex: 1,
               }}
             >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                }}
-              >
-                <GreenPulseDot />
-                <span
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 700,
-                    letterSpacing: "-0.022em",
-                    color: "rgba(255, 255, 255, 0.96)",
-                    lineHeight: 1.05,
-                  }}
-                >
-                  30% OFF
-                </span>
-              </div>
-              <p
+              <span
                 className="tabular-nums"
-                style={{
-                  fontSize: 12,
-                  fontWeight: 500,
-                  color: "rgba(255, 255, 255, 0.60)",
-                  letterSpacing: "-0.005em",
-                  textAlign: "center",
-                }}
+                style={{ color: "rgba(255,255,255,0.96)", fontWeight: 700 }}
               >
-                {discountInfo.text} {discountInfo.suffix}
-              </p>
-            </div>
+                {discountInfo.text}
+              </span>{" "}
+              left to earn your{" "}
+              <span style={{ color: "#FFFFFF", fontWeight: 700 }}>
+                30% off
+              </span>
+            </span>
           )}
 
           {discountInfo.kind === "eligible" && (
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: 10,
-              }}
-            >
-              <div
+            <>
+              <span
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: "rgba(255, 255, 255, 0.85)",
+                  letterSpacing: "-0.011em",
+                  flex: 1,
                 }}
               >
-                <GreenPulseDot />
-                <span
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 700,
-                    letterSpacing: "-0.022em",
-                    color: "rgba(255, 255, 255, 0.96)",
-                  }}
-                >
-                  30% OFF
+                Ready for your{" "}
+                <span style={{ color: "#FFFFFF", fontWeight: 700 }}>
+                  30% off
                 </span>
-              </div>
+              </span>
               <button
                 type="button"
                 onClick={handleApply}
                 disabled={applying}
                 style={{
-                  padding: "8px 22px",
+                  padding: "6px 14px",
                   borderRadius: 999,
                   background: applying
                     ? "rgba(255, 255, 255, 0.16)"
@@ -595,71 +566,49 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
                   color: applying
                     ? "rgba(255, 255, 255, 0.55)"
                     : "rgba(15, 17, 21, 0.92)",
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: 700,
                   letterSpacing: "-0.005em",
                   cursor: applying ? "wait" : "pointer",
                   transition: "all 150ms cubic-bezier(0.25, 0.1, 0.25, 1)",
+                  flexShrink: 0,
                 }}
               >
-                {applying ? "Applying…" : "Apply for your discount"}
+                {applying ? "Applying…" : "Apply"}
               </button>
-            </div>
+            </>
           )}
 
-          {(discountInfo.kind === "code" || discountInfo.kind === "status") && (
-            <div
+          {discountInfo.kind === "code" && (
+            <span
               style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
+                fontSize: 14,
+                fontWeight: 500,
+                color: "rgba(255, 255, 255, 0.85)",
+                letterSpacing: "-0.011em",
               }}
             >
-              <svg
-                width="15"
-                height="15"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="rgba(255,255,255,0.55)"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-                style={{ flexShrink: 0 }}
+              {discountInfo.prefix}{" "}
+              <span
+                className="tabular-nums"
+                style={{ color: "rgba(255,255,255,0.96)", fontWeight: 700 }}
               >
-                <circle cx="12" cy="12" r="9" />
-                <polyline points="12 7 12 12 15 15" />
-              </svg>
-              {discountInfo.kind === "code" && (
-                <span
-                  style={{
-                    fontSize: 13,
-                    color: "rgba(255,255,255,0.80)",
-                  }}
-                >
-                  {discountInfo.prefix}{" "}
-                  <span
-                    className="tabular-nums"
-                    style={{
-                      color: "rgba(255,255,255,0.96)",
-                      fontWeight: 700,
-                    }}
-                  >
-                    {discountInfo.text}
-                  </span>
-                </span>
-              )}
-              {discountInfo.kind === "status" && (
-                <span
-                  style={{
-                    fontSize: 13,
-                    color: "rgba(255,255,255,0.80)",
-                  }}
-                >
-                  {discountInfo.text}
-                </span>
-              )}
-            </div>
+                {discountInfo.text}
+              </span>
+            </span>
+          )}
+
+          {discountInfo.kind === "status" && (
+            <span
+              style={{
+                fontSize: 14,
+                fontWeight: 500,
+                color: "rgba(255, 255, 255, 0.85)",
+                letterSpacing: "-0.011em",
+              }}
+            >
+              {discountInfo.text}
+            </span>
           )}
         </div>
       )}

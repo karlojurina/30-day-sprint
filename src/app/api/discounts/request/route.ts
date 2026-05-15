@@ -60,10 +60,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Eligibility: every lesson in R1 + R2 must be FULLY complete.
-  // For compound lessons (requires_action=true), "fully complete" means
-  // both `completed_at` (briefing watched) AND `action_completed_at`
-  // (ad shipped) are set. For other lessons, just `completed_at`.
+  // Eligibility: every lesson in R1 + R2 must be "done" on the path.
+  // Definition matches what the map shows the student:
+  //   - Compound action items (requires_action=true): need BOTH
+  //     completed_at (briefing watched) AND action_completed_at (ad shipped).
+  //     These are real work and can't be skipped.
+  //   - All other lessons: completed_at OR skipped_at is set. Skipped rows
+  //     count toward path progression so the student's region progress bar
+  //     and the server's eligibility check stay in sync.
   const [{ data: requiredLessons }, { data: completions }] = await Promise.all(
     [
       supabase
@@ -72,7 +76,7 @@ export async function POST(request: NextRequest) {
         .in("region_id", ["r1", "r2"]),
       supabase
         .from("student_lesson_completions")
-        .select("lesson_id, completed_at, action_completed_at")
+        .select("lesson_id, completed_at, action_completed_at, skipped_at")
         .eq("student_id", studentId),
     ]
   );
@@ -80,12 +84,17 @@ export async function POST(request: NextRequest) {
   const required = requiredLessons ?? [];
   const completionMap = new Map<
     string,
-    { completed_at: string | null; action_completed_at: string | null }
+    {
+      completed_at: string | null;
+      action_completed_at: string | null;
+      skipped_at: string | null;
+    }
   >();
   for (const c of completions ?? []) {
     completionMap.set(c.lesson_id, {
       completed_at: c.completed_at,
       action_completed_at: c.action_completed_at,
+      skipped_at: c.skipped_at,
     });
   }
 
@@ -95,21 +104,20 @@ export async function POST(request: NextRequest) {
     const c = completionMap.get(lesson.id);
     const watchDone = c?.completed_at != null;
     const actionDone = c?.action_completed_at != null;
+    const skipped = c?.skipped_at != null;
     const fullyDone = lesson.requires_action
       ? watchDone && actionDone
-      : watchDone;
+      : watchDone || skipped;
     if (!fullyDone) {
       missing.push(lesson.id);
       continue;
     }
-    // Track the latest of either timestamp for window enforcement
-    if (c?.completed_at) {
-      const d = new Date(c.completed_at);
-      if (d > latestCompletion) latestCompletion = d;
-    }
-    if (c?.action_completed_at) {
-      const d = new Date(c.action_completed_at);
-      if (d > latestCompletion) latestCompletion = d;
+    // Track the latest of any timestamp for window enforcement
+    for (const ts of [c?.completed_at, c?.action_completed_at, c?.skipped_at]) {
+      if (ts) {
+        const d = new Date(ts);
+        if (d > latestCompletion) latestCompletion = d;
+      }
     }
   }
 

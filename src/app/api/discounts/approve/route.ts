@@ -80,31 +80,59 @@ export async function POST(request: NextRequest) {
     joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000
   );
 
+  // Eligibility re-check (server-side, same rule as /api/discounts/request):
+  //   - Compound action items (requires_action=true): need BOTH
+  //     completed_at AND action_completed_at.
+  //   - Other lessons: completed_at OR skipped_at counts as done.
   const [{ data: requiredLessons }, { data: completions }] = await Promise.all([
-    supabase.from("lessons").select("id").in("region_id", ["r1", "r2"]),
+    supabase
+      .from("lessons")
+      .select("id, requires_action")
+      .in("region_id", ["r1", "r2"]),
     supabase
       .from("student_lesson_completions")
-      .select("lesson_id, completed_at")
+      .select("lesson_id, completed_at, action_completed_at, skipped_at")
       .eq("student_id", discountReq.student_id),
   ]);
 
-  const requiredIds = new Set((requiredLessons ?? []).map((l) => l.id));
-  const completionMap = new Map<string, string>();
+  const required = requiredLessons ?? [];
+  const completionMap = new Map<
+    string,
+    {
+      completed_at: string | null;
+      action_completed_at: string | null;
+      skipped_at: string | null;
+    }
+  >();
   for (const c of completions ?? []) {
-    if (c.completed_at) completionMap.set(c.lesson_id, c.completed_at);
+    completionMap.set(c.lesson_id, {
+      completed_at: c.completed_at,
+      action_completed_at: c.action_completed_at,
+      skipped_at: c.skipped_at,
+    });
   }
 
   let latestCompletion = joinedAt;
-  for (const id of requiredIds) {
-    const at = completionMap.get(id);
-    if (!at) {
+  for (const lesson of required) {
+    const c = completionMap.get(lesson.id);
+    const watchDone = c?.completed_at != null;
+    const actionDone = c?.action_completed_at != null;
+    const skipped = c?.skipped_at != null;
+    const fullyDone = lesson.requires_action
+      ? watchDone && actionDone
+      : watchDone || skipped;
+    if (!fullyDone) {
       return NextResponse.json(
         { error: "Student has not completed all required R1 + R2 lessons" },
         { status: 400 }
       );
     }
-    const d = new Date(at);
-    if (d > latestCompletion) latestCompletion = d;
+    for (const ts of [c?.completed_at, c?.action_completed_at, c?.skipped_at]) {
+      if (ts) {
+        const d = new Date(ts);
+        if (d > latestCompletion) latestCompletion = d;
+      }
+    }
   }
 
   if (latestCompletion > deadline) {

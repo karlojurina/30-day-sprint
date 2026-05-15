@@ -778,9 +778,21 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       if (res.ok) {
         const data = await res.json();
         setDiscountRequest(data);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        const msg = data?.error || `Request failed (HTTP ${res.status})`;
+        console.error("Discount request rejected:", msg);
+        if (typeof window !== "undefined") {
+          window.alert(`Couldn't submit your discount application:\n\n${msg}`);
+        }
       }
     } catch (err) {
       console.error("Failed to request discount:", err);
+      if (typeof window !== "undefined") {
+        window.alert(
+          "Couldn't reach our servers to submit your discount application. Try again in a moment."
+        );
+      }
     }
   }, [student, discountEligible]);
 

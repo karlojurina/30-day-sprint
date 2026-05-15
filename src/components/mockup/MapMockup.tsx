@@ -255,6 +255,15 @@ const REGION_ZONES: Record<RegionId, RegionZone> = {
 interface Scene {
   image: string;
   waypoints: { x: number; y: number }[];
+  /**
+   * Optional easing exponent for lesson placement.
+   *   1.0 → uniform arc-length distribution (default)
+   *   > 1 → bias lessons toward the START of the path so later lessons
+   *         get more visual breathing room. Useful when the painted
+   *         trail has a switchback / hairpin in its later half that
+   *         consumes arc length without adding visual space.
+   */
+  placementEase?: number;
 }
 // Waypoints traced in the picker (2026-04-23). Last waypoint in each
 // scene is reserved as the END MARKER (next-region / discount /
@@ -331,6 +340,13 @@ const SCENES: Partial<Record<RegionId, Scene>> = {
     // refreshed fourth_location.webp. 37 path waypoints + the 38th
     // reserved as the "Program complete" end marker (see
     // SCENE_END_MARKERS[r4]).
+    //
+    // placementEase = 1.55 because the painted trail has a switchback
+    // in its upper third (waypoints ~24-32 loop left before climbing
+    // to the summit). Without easing, that switchback eats arc length
+    // and bunches the last 7-8 markers against the summit. With
+    // ease > 1 the later lessons spread out more visually.
+    placementEase: 1.55,
     waypoints: [
       { x: 819, y: 1339 }, { x: 838, y: 1291 }, { x: 866, y: 1249 },
       { x: 903, y: 1200 }, { x: 949, y: 1171 }, { x: 999, y: 1141 },
@@ -2321,9 +2337,13 @@ function ScenePathOverlay({
     const edgeInsetStart = Math.min(120, total * 0.06);
     const edgeInsetEnd = Math.min(280, total * 0.16);
     const usableLen = total - edgeInsetStart - edgeInsetEnd;
+    const ease = scene.placementEase ?? 1;
 
     return lessons.map((_, i) => {
-      const t = N === 1 ? 0.5 : i / (N - 1);
+      const tLinear = N === 1 ? 0.5 : i / (N - 1);
+      // ease > 1 biases lessons toward the start (more space at the end);
+      // ease < 1 biases toward the end. ease === 1 is uniform arc-length.
+      const t = ease === 1 ? tLinear : Math.pow(tLinear, ease);
       const target = edgeInsetStart + usableLen * t;
       // Find the segment containing `target` via linear scan
       let seg = 0;

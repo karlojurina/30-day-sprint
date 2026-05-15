@@ -59,20 +59,39 @@ export async function fetchWhopUserInfo(
 }
 
 /**
- * Check if user has an active membership for our product
+ * Check if the user has access to any of the IDs configured in
+ * WHOP_PRODUCT_ID. The env var accepts one or more comma-separated
+ * IDs — each can be a product ID (prod_…) OR a plan ID (plan_…).
+ * Whop's /me/has_access endpoint resolves both.
+ *
+ * Use cases:
+ *   single product:        WHOP_PRODUCT_ID=prod_XXX
+ *   multiple products:     WHOP_PRODUCT_ID=prod_A,prod_B
+ *   specific plans only:   WHOP_PRODUCT_ID=plan_A,plan_B
+ *   mix:                   WHOP_PRODUCT_ID=prod_A,plan_B
+ *
+ * Returns true if ANY id matches.
  */
 export async function checkActiveMembership(
   accessToken: string
 ): Promise<boolean> {
-  const productId = process.env.WHOP_PRODUCT_ID!;
-  const res = await fetch(`${WHOP_API_BASE}/me/has_access/${productId}`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
+  const raw = process.env.WHOP_PRODUCT_ID ?? "";
+  const ids = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 
-  if (!res.ok) return false;
+  if (ids.length === 0) return false;
 
-  const data = await res.json();
-  return data.has_access === true;
+  for (const id of ids) {
+    const res = await fetch(`${WHOP_API_BASE}/me/has_access/${id}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) continue;
+    const data = await res.json();
+    if (data.has_access === true) return true;
+  }
+  return false;
 }
 
 /**
@@ -88,9 +107,24 @@ export async function fetchWhopMembershipJoinDate(
   accessToken: string
 ): Promise<string | null> {
   try {
-    const productId = process.env.WHOP_PRODUCT_ID;
+    // WHOP_PRODUCT_ID can be comma-separated (mix of plan + product IDs).
+    // Whop's memberships endpoint filters by product_id only — passing a
+    // plan_id there returns nothing. So: if all configured IDs look like
+    // product IDs we filter server-side; otherwise we fetch all the user's
+    // memberships and filter client-side by matching plan_id OR product_id.
+    const raw = process.env.WHOP_PRODUCT_ID ?? "";
+    const allIds = raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const productIds = allIds.filter((id) => id.startsWith("prod_"));
+    const planIds = allIds.filter((id) => id.startsWith("plan_"));
+    const allLookProductLike = allIds.length > 0 && productIds.length === allIds.length;
+
     const params = new URLSearchParams({ first: "10" });
-    if (productId) params.set("product_id", productId);
+    if (allLookProductLike && productIds.length === 1) {
+      params.set("product_id", productIds[0]);
+    }
 
     const res = await fetch(
       `${WHOP_API_BASE}/me/memberships?${params}`,
@@ -103,13 +137,20 @@ export async function fetchWhopMembershipJoinDate(
       created_at?: string | number;
       joined_at?: string | number;
       product_id?: string;
+      plan_id?: string;
     }> = json?.data ?? [];
     if (list.length === 0) return null;
 
-    // Prefer memberships matching our product, else earliest
-    const matching = productId
-      ? list.filter((m) => m.product_id === productId)
-      : list;
+    // Filter to memberships matching one of our configured IDs (plan or product).
+    // If nothing matches, fall back to the earliest of all (safer than nothing).
+    const matching =
+      allIds.length > 0
+        ? list.filter(
+            (m) =>
+              (m.product_id && productIds.includes(m.product_id)) ||
+              (m.plan_id && planIds.includes(m.plan_id))
+          )
+        : list;
     const pool = matching.length > 0 ? matching : list;
 
     // Find earliest joined_at / created_at

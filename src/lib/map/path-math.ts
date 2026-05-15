@@ -98,16 +98,22 @@ export function buildExplorerWaypoints(): Point[] {
   wp.push(P(r3, 0.82, 0.62));
   wp.push(P(r3, 0.92, 0.72));   // exit down into the valley
 
-  // R4 VALLEY — descend from the mountain pass, curve around the lake,
-  // end near the small cabin on the water's edge.
-  wp.push(P(r4, 0.06, 0.65));   // entry from mountains
-  wp.push(P(r4, 0.20, 0.76));   // descending into the bowl
-  wp.push(P(r4, 0.34, 0.68));   // crossing the upper valley
-  wp.push(P(r4, 0.46, 0.80));   // approach the lake
-  wp.push(P(r4, 0.58, 0.88));   // along the lake's edge
-  wp.push(P(r4, 0.72, 0.82));   // by the cabin
-  wp.push(P(r4, 0.86, 0.72));   // final waypoint
-  wp.push(P(r4, 0.94, 0.62));
+  // R4 VALLEY — descend from the mountain pass, weave through the
+  // valley with deliberate up-down zigzag (the path doubles back gently
+  // around the lake/cabin), end near the small cabin on the water's
+  // edge. Extra waypoints give R4 more path length so its 16 nodes
+  // breathe along the curve instead of bunching up.
+  wp.push(P(r4, 0.04, 0.62));   // entry from mountains
+  wp.push(P(r4, 0.14, 0.78));   // dive into the upper bowl
+  wp.push(P(r4, 0.24, 0.66));   // climb back up the side
+  wp.push(P(r4, 0.34, 0.82));   // descend toward the valley floor
+  wp.push(P(r4, 0.44, 0.68));   // climb a small ridge
+  wp.push(P(r4, 0.54, 0.86));   // along the lake's edge
+  wp.push(P(r4, 0.64, 0.72));   // climb past the first cabin
+  wp.push(P(r4, 0.74, 0.84));   // dip back down to the water
+  wp.push(P(r4, 0.84, 0.70));   // rise past the second cabin
+  wp.push(P(r4, 0.92, 0.80));   // last dip
+  wp.push(P(r4, 0.97, 0.64));   // exit waypoint
 
   return wp;
 }

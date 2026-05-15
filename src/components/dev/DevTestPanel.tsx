@@ -245,10 +245,10 @@ export function DevTestPanel() {
         <Btn
           onClick={() =>
             fire("graduation", {
-              total_lessons_completed: 70,
-              total_lessons: 70,
+              total_lessons_completed: 66,
+              total_lessons: 66,
               longest_streak: 24,
-              ad_submissions: 7,
+              ad_submissions: 5,
               discount_earned: true,
               notes_count: 18,
               days_to_finish: 27,
@@ -260,10 +260,10 @@ export function DevTestPanel() {
         <Btn
           onClick={() =>
             fire("graduation", {
-              total_lessons_completed: 52,
-              total_lessons: 70,
+              total_lessons_completed: 50,
+              total_lessons: 66,
               longest_streak: 11,
-              ad_submissions: 4,
+              ad_submissions: 3,
               discount_earned: true,
               notes_count: 6,
               days_to_finish: 30,

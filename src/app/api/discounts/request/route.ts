@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     .from("discount_requests")
     .select("id, status")
     .eq("student_id", studentId)
-    .in("status", ["pending", "approved"])
+    .in("status", ["pending", "approved", "applied"])
     .limit(1)
     .single();
 

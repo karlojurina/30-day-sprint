@@ -1117,15 +1117,15 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                 ? {
                     kind: "discount",
                     label: discountRequest
-                      ? discountRequest.status === "approved"
+                      ? discountRequest.status === "approved" || discountRequest.status === "applied"
                         ? "Discount approved"
                         : discountRequest.status === "rejected"
                           ? "Discount rejected"
                           : "Discount pending"
                       : "Claim discount",
                     sublabel: discountRequest
-                      ? discountRequest.status === "approved"
-                        ? "30% off — see code"
+                      ? discountRequest.status === "approved" || discountRequest.status === "applied"
+                        ? "30% off — applied by team"
                         : discountRequest.status === "rejected"
                           ? "see Discord"
                           : "review in progress"

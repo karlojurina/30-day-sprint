@@ -7,17 +7,20 @@ import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
 
 type RequestWithStudent = DiscountRequest & { student: Student };
+type FilterValue = "pending" | "approved" | "applied" | "rejected" | "all";
 
 export default function DiscountsPage() {
   const [requests, setRequests] = useState<RequestWithStudent[]>([]);
-  const [filter, setFilter] = useState<string>("pending");
+  const [filter, setFilter] = useState<FilterValue>("pending");
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<string | null>(null);
+  const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const supabase = createClient();
   const { teamMember } = useAuth();
 
   useEffect(() => {
     fetchRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filter]);
 
   async function fetchRequests() {
@@ -37,36 +40,50 @@ export default function DiscountsPage() {
   }
 
   async function handleApprove(requestId: string) {
-    // Prompt for the code the admin applied in Whop. Optional but
-    // recommended for audit-trail. Cancel aborts the approval.
-    const appliedCode = window.prompt(
-      "Paste the promo code you applied in the Whop dashboard (optional, stored for our records — the student never sees it):",
-      "",
-    );
-    if (appliedCode === null) return; // cancelled
-
     setProcessing(requestId);
-
     try {
       const res = await fetch("/api/discounts/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           requestId,
-          appliedCode: appliedCode.trim() || undefined,
+          reviewerId: teamMember?.id,
         }),
       });
 
+      const data = await res.json();
       if (res.ok) {
         fetchRequests();
       } else {
-        const data = await res.json();
-        alert(`Failed to mark approved: ${data.error || "Unknown error"}`);
+        alert(`Approve failed: ${data.error || "Unknown error"}`);
       }
-    } catch {
-      alert("Failed to mark approved");
+    } catch (err) {
+      alert(`Approve failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+    setProcessing(null);
+  }
 
+  async function handleMarkApplied(requestId: string) {
+    setProcessing(requestId);
+    try {
+      const res = await fetch("/api/discounts/mark-applied", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requestId,
+          appliedBy: teamMember?.id,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        fetchRequests();
+      } else {
+        alert(`Mark applied failed: ${data.error || "Unknown error"}`);
+      }
+    } catch (err) {
+      alert(`Mark applied failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
     setProcessing(null);
   }
 
@@ -89,6 +106,16 @@ export default function DiscountsPage() {
     }
 
     setProcessing(null);
+  }
+
+  async function copyCode(code: string) {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopiedCode(code);
+      setTimeout(() => setCopiedCode((c) => (c === code ? null : c)), 1500);
+    } catch {
+      // ignore
+    }
   }
 
   if (loading) {
@@ -133,7 +160,9 @@ export default function DiscountsPage() {
           }}
         >
           Review applications. Approval requires the student&rsquo;s ad
-          submissions to be verified on their detail page first.
+          submissions to be verified on their detail page first. Approve
+          generates the Whop promo code; copy it, attach it to the student&rsquo;s
+          subscription in the Whop dashboard, then click <em>Mark applied</em>.
         </p>
       </header>
 
@@ -148,7 +177,7 @@ export default function DiscountsPage() {
           gap: 1,
         }}
       >
-        {(["pending", "approved", "rejected", "all"] as const).map((f) => (
+        {(["pending", "approved", "applied", "rejected", "all"] as const).map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
@@ -235,24 +264,61 @@ export default function DiscountsPage() {
                     }}
                   >
                     Applied {new Date(req.created_at).toLocaleDateString()}
+                    {req.applied_at && (
+                      <>
+                        {" · "}
+                        Applied {new Date(req.applied_at).toLocaleDateString()}
+                      </>
+                    )}
                   </p>
                 </div>
                 <StatusPill status={req.status} />
               </div>
 
               {req.promo_code && (
-                <div
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 13,
-                    color: "var(--color-success)",
-                    background: "rgba(46,139,87,0.10)",
-                    padding: "6px 10px",
-                    borderRadius: 8,
-                    fontWeight: 600,
-                  }}
-                >
-                  {req.promo_code}
+                <div className="flex items-center gap-2 w-full" style={{ flexWrap: "wrap" }}>
+                  <code
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 13,
+                      color: req.status === "applied" ? "var(--color-text-secondary)" : "var(--color-success)",
+                      background:
+                        req.status === "applied"
+                          ? "var(--color-bg-elevated)"
+                          : "rgba(46,139,87,0.10)",
+                      padding: "6px 10px",
+                      borderRadius: 8,
+                      fontWeight: 600,
+                      letterSpacing: "0.01em",
+                    }}
+                  >
+                    {req.promo_code}
+                  </code>
+                  <button
+                    onClick={() => copyCode(req.promo_code!)}
+                    style={{
+                      padding: "5px 10px",
+                      borderRadius: 7,
+                      border: "1px solid var(--color-border)",
+                      background: "transparent",
+                      color: "var(--color-text-secondary)",
+                      fontSize: 12,
+                      fontWeight: 500,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {copiedCode === req.promo_code ? "Copied" : "Copy"}
+                  </button>
+                  {req.status === "approved" && (
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: "var(--color-text-secondary)",
+                      }}
+                    >
+                      Attach this to the student&rsquo;s subscription in Whop, then mark applied →
+                    </span>
+                  )}
                 </div>
               )}
 
@@ -272,44 +338,28 @@ export default function DiscountsPage() {
                   <button
                     onClick={() => handleApprove(req.id)}
                     disabled={processing === req.id}
-                    style={{
-                      padding: "6px 14px",
-                      borderRadius: 8,
-                      border: "none",
-                      background: "var(--color-accent)",
-                      color: "#FFFFFF",
-                      fontSize: 13,
-                      fontWeight: 600,
-                      letterSpacing: "-0.005em",
-                      cursor:
-                        processing === req.id ? "default" : "pointer",
-                      opacity: processing === req.id ? 0.6 : 1,
-                      transition:
-                        "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
-                    }}
+                    style={primaryBtnStyle(processing === req.id)}
                   >
-                    {processing === req.id ? "Processing…" : "Approve"}
+                    {processing === req.id ? "Generating code…" : "Approve & generate code"}
                   </button>
                   <button
                     onClick={() => handleReject(req.id)}
                     disabled={processing === req.id}
-                    style={{
-                      padding: "6px 14px",
-                      borderRadius: 8,
-                      border: "1px solid var(--color-border)",
-                      background: "transparent",
-                      color: "var(--color-text-secondary)",
-                      fontSize: 13,
-                      fontWeight: 500,
-                      letterSpacing: "-0.005em",
-                      cursor:
-                        processing === req.id ? "default" : "pointer",
-                      opacity: processing === req.id ? 0.6 : 1,
-                      transition:
-                        "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
-                    }}
+                    style={secondaryBtnStyle(processing === req.id)}
                   >
                     Reject
+                  </button>
+                </div>
+              )}
+
+              {req.status === "approved" && (
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleMarkApplied(req.id)}
+                    disabled={processing === req.id}
+                    style={primaryBtnStyle(processing === req.id)}
+                  >
+                    {processing === req.id ? "Marking…" : "Mark applied"}
                   </button>
                 </div>
               )}
@@ -321,13 +371,47 @@ export default function DiscountsPage() {
   );
 }
 
+function primaryBtnStyle(disabled: boolean): React.CSSProperties {
+  return {
+    padding: "6px 14px",
+    borderRadius: 8,
+    border: "none",
+    background: "var(--color-accent)",
+    color: "#FFFFFF",
+    fontSize: 13,
+    fontWeight: 600,
+    letterSpacing: "-0.005em",
+    cursor: disabled ? "default" : "pointer",
+    opacity: disabled ? 0.6 : 1,
+    transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+  };
+}
+
+function secondaryBtnStyle(disabled: boolean): React.CSSProperties {
+  return {
+    padding: "6px 14px",
+    borderRadius: 8,
+    border: "1px solid var(--color-border)",
+    background: "transparent",
+    color: "var(--color-text-secondary)",
+    fontSize: 13,
+    fontWeight: 500,
+    letterSpacing: "-0.005em",
+    cursor: disabled ? "default" : "pointer",
+    opacity: disabled ? 0.6 : 1,
+    transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+  };
+}
+
 function StatusPill({ status }: { status: string }) {
   const tone =
-    status === "approved"
-      ? { color: "var(--color-success)", bg: "rgba(46,139,87,0.10)" }
-      : status === "pending"
-        ? { color: "var(--color-warning)", bg: "rgba(212,162,76,0.12)" }
-        : { color: "var(--color-danger)", bg: "rgba(200,74,74,0.10)" };
+    status === "applied"
+      ? { color: "var(--color-text-secondary)", bg: "var(--color-bg-elevated)" }
+      : status === "approved"
+        ? { color: "var(--color-success)", bg: "rgba(46,139,87,0.10)" }
+        : status === "pending"
+          ? { color: "var(--color-warning)", bg: "rgba(212,162,76,0.12)" }
+          : { color: "var(--color-danger)", bg: "rgba(200,74,74,0.10)" };
   return (
     <span
       style={{

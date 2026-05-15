@@ -604,7 +604,7 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                     marginBottom: 8,
                   }}
                 >
-                  {discountRequest.status === "approved"
+                  {discountRequest.status === "approved" || discountRequest.status === "applied"
                     ? "Discount approved"
                     : discountRequest.status === "rejected"
                       ? "Discount rejected"
@@ -618,7 +618,7 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                     letterSpacing: "-0.005em",
                   }}
                 >
-                  {discountRequest.status === "approved"
+                  {discountRequest.status === "approved" || discountRequest.status === "applied"
                     ? "Our team has applied the 30% discount to your Whop subscription. You'll see it on your next renewal — nothing else to do."
                     : discountRequest.status === "rejected"
                       ? discountRequest.rejection_reason ||

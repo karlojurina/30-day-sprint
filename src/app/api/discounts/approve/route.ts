@@ -1,32 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
+import { createWhopPromoCode } from "@/lib/whop";
 
 /**
  * Approve a pending discount request.
  *
- * As of the manual-application workflow change, this route NO LONGER
- * auto-generates a Whop promo code. The admin applies a pre-created
- * coupon directly to the student's Whop subscription via the Whop
- * dashboard, then calls this endpoint to mark our row done.
+ * Flow (one click for Astrid):
+ *   1. Validate eligibility (R1+R2 done within window, ad submissions verified)
+ *   2. Call Whop API to generate a 30%-off, 1-month, single-use promo code
+ *   3. Store promo_code + whop_promo_id + status='approved' on our row
+ *   4. Return the code so the admin UI can show it for copy-paste
+ *
+ * If Whop API generation fails, we DO NOT mark the row approved —
+ * Astrid retries. Better than approving without a code.
+ *
+ * After this returns, Astrid manually attaches the code to the
+ * student's Whop subscription in the Whop dashboard, then calls
+ * POST /api/discounts/mark-applied to close the loop.
+ *
+ * The student never sees the code.
  *
  * Body:
- *   requestId      — id of the discount_requests row (required)
- *   appliedCode    — optional text reference for the code the admin
- *                    applied. Stored in promo_code for our audit
- *                    trail; student never sees it.
- *   notes          — optional internal note
- *
- * Eligibility guards remain (R1+R2 complete within window, ad
- * submissions verified) so a misclick can't approve someone who
- * doesn't actually qualify.
+ *   requestId  — id of the discount_requests row (required)
+ *   reviewerId — id of the team_member approving (optional, audit only)
  */
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const { requestId, appliedCode, notes } = body as {
+  const { requestId, reviewerId } = body as {
     requestId?: string;
-    appliedCode?: string;
-    notes?: string;
+    reviewerId?: string;
   };
 
   if (!requestId) {
@@ -35,10 +38,9 @@ export async function POST(request: NextRequest) {
 
   const supabase = createServiceClient();
 
-  // Fetch the discount request
   const { data: discountReq, error: fetchError } = await supabase
     .from("discount_requests")
-    .select("*, student:students(*)")
+    .select("*")
     .eq("id", requestId)
     .single();
 
@@ -53,10 +55,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Eligibility checks — same as before.
   const { data: studentRow } = await supabase
     .from("students")
-    .select("joined_at, ad_submissions_verified")
+    .select("id, joined_at, ad_submissions_verified")
     .eq("id", discountReq.student_id)
     .single();
 
@@ -79,19 +80,19 @@ export async function POST(request: NextRequest) {
     joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000
   );
 
-  const [{ data: requiredLessons }, { data: completions }] = await Promise.all(
-    [
-      supabase.from("lessons").select("id").in("region_id", ["r1", "r2"]),
-      supabase
-        .from("student_lesson_completions")
-        .select("lesson_id, completed_at")
-        .eq("student_id", discountReq.student_id),
-    ]
-  );
+  const [{ data: requiredLessons }, { data: completions }] = await Promise.all([
+    supabase.from("lessons").select("id").in("region_id", ["r1", "r2"]),
+    supabase
+      .from("student_lesson_completions")
+      .select("lesson_id, completed_at")
+      .eq("student_id", discountReq.student_id),
+  ]);
 
   const requiredIds = new Set((requiredLessons ?? []).map((l) => l.id));
   const completionMap = new Map<string, string>();
-  for (const c of completions ?? []) completionMap.set(c.lesson_id, c.completed_at);
+  for (const c of completions ?? []) {
+    if (c.completed_at) completionMap.set(c.lesson_id, c.completed_at);
+  }
 
   let latestCompletion = joinedAt;
   for (const id of requiredIds) {
@@ -113,32 +114,64 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Mark approved. Store the applied code for our audit trail but
-  // the student never sees it — the celebration just confirms the
-  // discount was applied to their Whop account.
-  const update: Record<string, unknown> = {
-    status: "approved",
-    reviewed_at: new Date().toISOString(),
-  };
-  if (appliedCode && appliedCode.trim().length > 0) {
-    update.promo_code = appliedCode.trim();
-  }
-  if (notes && notes.trim().length > 0) {
-    update.rejection_reason = notes.trim(); // reusing column for any admin note
+  // Generate the code via Whop API.
+  // Format: ECOM30-{first 6 chars of student id, uppercased}. Stable
+  // per-student so a re-run would collide on Whop's side rather than
+  // silently mint a duplicate.
+  const code = `ECOM30-${studentRow.id.slice(0, 6).toUpperCase()}`;
+
+  // Optional plan scoping. If WHOP_DISCOUNT_PLAN_IDS is set, the code
+  // only works on those specific plans (comma-separated plan IDs).
+  // If unset, Whop's default is "all plans on the company" — which
+  // covers the real student plan + Karlo's $1 test plan automatically.
+  const planIds = process.env.WHOP_DISCOUNT_PLAN_IDS
+    ?.split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  let whopPromoId: string | null = null;
+  try {
+    const whopRes = await createWhopPromoCode({
+      code,
+      amount_off: 30,
+      promo_type: "percentage",
+      base_currency: "usd",
+      new_users_only: false,
+      one_per_customer: true,
+      stock: 1,
+      promo_duration_months: 1,
+      ...(planIds && planIds.length > 0 ? { plan_ids: planIds } : {}),
+    });
+    whopPromoId = whopRes.id;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("Whop promo code creation failed:", message);
+    return NextResponse.json(
+      {
+        error: `Couldn't create the promo code on Whop. The request is still pending. Details: ${message}`,
+      },
+      { status: 502 }
+    );
   }
 
   const { error: updateError } = await supabase
     .from("discount_requests")
-    .update(update)
+    .update({
+      status: "approved",
+      promo_code: code,
+      whop_promo_id: whopPromoId,
+      reviewed_at: new Date().toISOString(),
+      reviewed_by: reviewerId ?? null,
+    })
     .eq("id", requestId);
 
   if (updateError) {
     console.error("Failed to update discount request:", updateError);
     return NextResponse.json(
-      { error: "Failed to update request" },
+      { error: "Code was created on Whop but the DB update failed. Check the discount_requests row and reconcile manually." },
       { status: 500 }
     );
   }
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({ success: true, promoCode: code, whopPromoId });
 }

@@ -156,12 +156,14 @@ export interface LessonNote {
 export interface DiscountRequest {
   id: string;
   student_id: string;
-  status: "pending" | "approved" | "rejected";
+  status: "pending" | "approved" | "rejected" | "applied";
   promo_code: string | null;
   whop_promo_id: string | null;
   reviewed_by: string | null;
   reviewed_at: string | null;
   rejection_reason: string | null;
+  applied_at: string | null;
+  applied_by: string | null;
   created_at: string;
 }
 

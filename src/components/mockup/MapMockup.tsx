@@ -264,6 +264,13 @@ interface Scene {
    *         consumes arc length without adding visual space.
    */
   placementEase?: number;
+  /**
+   * Fraction of total arc length reserved at the end of the path for
+   * the end marker. Default 0.16 (suits R2 which stacks "discount" +
+   * "Onward"). Override to a smaller value when the scene only has a
+   * single end marker and you want lessons to use more of the path.
+   */
+  edgeInsetEndFrac?: number;
 }
 // Waypoints traced in the picker (2026-04-23). Last waypoint in each
 // scene is reserved as the END MARKER (next-region / discount /
@@ -341,13 +348,13 @@ const SCENES: Partial<Record<RegionId, Scene>> = {
     // reserved as the "Program complete" end marker (see
     // SCENE_END_MARKERS[r4]).
     //
-    // placementEase = 1.1 — gentle bias toward the start of the path so
-    // the upper switchback (waypoints ~24-32) doesn't bunch the tail
-    // markers. With 1.1 the first-gap arc length stays ≥ 65 (just over
-    // the foreground marker diameter of 64) so nothing collides, while
-    // the tail gap grows from a uniform 90 to ~99. 1.2 and 1.55 were
-    // too aggressive and caused the first 3-4 markers to overlap.
-    placementEase: 1.1,
+    // The global edgeInsetEnd (0.16) was tuned for R2's stacked
+    // discount + Onward markers. R4 only has the "Program complete"
+    // marker, so it can use a much smaller reserve — otherwise the
+    // last 5-6 waypoints (everything past the switchback) never get
+    // a lesson on them. 0.04 lets lessons extend up through
+    // ~waypoint 35.
+    edgeInsetEndFrac: 0.04,
     waypoints: [
       { x: 819, y: 1339 }, { x: 838, y: 1291 }, { x: 866, y: 1249 },
       { x: 903, y: 1200 }, { x: 949, y: 1171 }, { x: 999, y: 1141 },
@@ -2336,7 +2343,8 @@ function ScenePathOverlay({
     // horizontal room — bias the lessons toward the start so the
     // discount + Onward have space to breathe.
     const edgeInsetStart = Math.min(120, total * 0.06);
-    const edgeInsetEnd = Math.min(280, total * 0.16);
+    const endFrac = scene.edgeInsetEndFrac ?? 0.16;
+    const edgeInsetEnd = Math.min(280, total * endFrac);
     const usableLen = total - edgeInsetStart - edgeInsetEnd;
     const ease = scene.placementEase ?? 1;
 

@@ -69,25 +69,27 @@ export async function GET(request: NextRequest) {
     if (!isBypassed) {
       const diagnostic = await checkActiveMembershipDiagnostic(tokens.access_token);
       if (!diagnostic.hasAccess) {
-        // Surface what Whop's has_access actually returned for each
-        // configured id so we can debug from the error page itself
-        // instead of needing Vercel logs.
-        console.error("has_access check failed", {
+        console.error("membership check failed", {
           user: userInfo.sub,
           email: userInfo.email,
           configured: diagnostic.configured,
-          attempts: diagnostic.attempts,
+          fetchStatus: diagnostic.fetchStatus,
+          fetchError: diagnostic.fetchError,
+          memberships: diagnostic.memberships,
         });
-        const summary = diagnostic.attempts
-          .map((a) => {
-            const accessFlag =
-              a.body && typeof a.body === "object"
-                ? String((a.body as { has_access?: unknown }).has_access ?? "—")
-                : "—";
-            return `${a.id}: HTTP ${a.httpStatus}, has_access=${accessFlag}`;
-          })
-          .join(" | ");
-        const detail = `user=${userInfo.sub} email=${userInfo.email ?? "(unknown)"} configured=[${diagnostic.configured.join(",")}] ${summary || "(no ids configured)"}`;
+        const summary = diagnostic.memberships.length
+          ? diagnostic.memberships
+              .map(
+                (m) =>
+                  `${m.id ?? "?"}(status=${m.status ?? "?"},valid=${String(
+                    m.valid
+                  )},product=${m.product_id ?? "—"},plan=${m.plan_id ?? "—"})`
+              )
+              .join(" | ")
+          : `no memberships (fetch ${diagnostic.fetchStatus}${
+              diagnostic.fetchError ? `, ${diagnostic.fetchError}` : ""
+            })`;
+        const detail = `user=${userInfo.sub} email=${userInfo.email ?? "(unknown)"} configured=[${diagnostic.configured.join(",")}] memberships=[${summary}]`;
         return NextResponse.redirect(
           `${appUrl}/login?error=no_membership&detail=${encodeURIComponent(detail)}`
         );

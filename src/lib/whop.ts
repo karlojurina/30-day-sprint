@@ -88,13 +88,31 @@ export async function checkActiveMembership(
 export interface MembershipCheckDiagnostic {
   hasAccess: boolean;
   configured: string[];
-  attempts: Array<{
-    id: string;
-    httpStatus: number;
-    body: unknown;
+  memberships: Array<{
+    id?: string;
+    status?: string;
+    valid?: boolean;
+    product_id?: string;
+    plan_id?: string;
   }>;
+  fetchStatus: number | null;
+  fetchError: string | null;
 }
 
+/**
+ * Check whether the user has an active membership matching any of the
+ * IDs configured in WHOP_PRODUCT_ID.
+ *
+ * Instead of the (id-format-fussy) /me/has_access endpoint, we list the
+ * user's memberships via /me/memberships and match by product_id OR
+ * plan_id. Whop returns every membership with both IDs attached, so
+ * the env var can hold a mix of prod_ and plan_ values and we'll match
+ * whichever is set.
+ *
+ * Returns rich diagnostic so the caller can surface useful errors when
+ * a check fails — including the actual membership IDs Whop reported,
+ * which is the quickest way to discover what the right env value is.
+ */
 export async function checkActiveMembershipDiagnostic(
   accessToken: string
 ): Promise<MembershipCheckDiagnostic> {
@@ -104,31 +122,62 @@ export async function checkActiveMembershipDiagnostic(
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const attempts: MembershipCheckDiagnostic["attempts"] = [];
+  const res = await fetch(`${WHOP_API_BASE}/me/memberships?first=20`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
 
-  if (ids.length === 0) {
-    return { hasAccess: false, configured: ids, attempts };
+  let memberships: MembershipCheckDiagnostic["memberships"] = [];
+  let fetchError: string | null = null;
+
+  if (!res.ok) {
+    fetchError = `HTTP ${res.status}`;
+    return {
+      hasAccess: false,
+      configured: ids,
+      memberships,
+      fetchStatus: res.status,
+      fetchError,
+    };
   }
 
-  let hasAccess = false;
-  for (const id of ids) {
-    const res = await fetch(`${WHOP_API_BASE}/me/has_access/${id}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    let body: unknown = null;
-    try {
-      body = await res.json();
-    } catch {
-      body = null;
-    }
-    attempts.push({ id, httpStatus: res.status, body });
-    if (res.ok && body && typeof body === "object" && (body as { has_access?: boolean }).has_access === true) {
-      hasAccess = true;
-      break;
-    }
+  try {
+    const json = (await res.json()) as {
+      data?: Array<{
+        id?: string;
+        status?: string;
+        valid?: boolean;
+        product_id?: string;
+        plan_id?: string;
+      }>;
+    };
+    memberships = (json.data ?? []).map((m) => ({
+      id: m.id,
+      status: m.status,
+      valid: m.valid,
+      product_id: m.product_id,
+      plan_id: m.plan_id,
+    }));
+  } catch (err) {
+    fetchError = err instanceof Error ? err.message : String(err);
   }
 
-  return { hasAccess, configured: ids, attempts };
+  const hasAccess = memberships.some((m) => {
+    const isActive = m.valid === true || m.status === "active";
+    if (!isActive) return false;
+    if (ids.length === 0) return false;
+    return (
+      (m.product_id && ids.includes(m.product_id)) ||
+      (m.plan_id && ids.includes(m.plan_id))
+    );
+  });
+
+  return {
+    hasAccess,
+    configured: ids,
+    memberships,
+    fetchStatus: res.status,
+    fetchError,
+  };
 }
 
 /**

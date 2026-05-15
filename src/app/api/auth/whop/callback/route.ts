@@ -67,17 +67,43 @@ export async function GET(request: NextRequest) {
       (userInfo.email && bypassEmails.includes(userInfo.email.toLowerCase()));
 
     if (!isBypassed) {
-      const diagnostic = await checkActiveMembershipDiagnostic(tokens.access_token);
-      if (!diagnostic.hasAccess) {
-        console.error("membership check failed", {
+      // DB-first check. The Whop membership webhook upserts a row with
+      // membership_status whenever a subscription activates / cancels,
+      // so our table is the freshest source of truth — and it's
+      // independent of Whop's API endpoint quirks.
+      const supabaseAdmin = createServiceClient();
+      const { data: existingStudent } = await supabaseAdmin
+        .from("students")
+        .select("membership_status")
+        .eq("whop_user_id", userInfo.sub)
+        .maybeSingle();
+
+      const dbHasActive =
+        existingStudent?.membership_status === "active" ||
+        existingStudent?.membership_status === "past_due";
+
+      let dbStatus = existingStudent?.membership_status ?? "(no row)";
+
+      // Only hit Whop's API if the DB doesn't already say active. This
+      // handles the rare race where a brand-new student tries to log
+      // in before their webhook has fired.
+      let whopHasAccess = false;
+      let whopSummary = "(skipped — db said active)";
+      if (!dbHasActive) {
+        const diagnostic = await checkActiveMembershipDiagnostic(
+          tokens.access_token
+        );
+        whopHasAccess = diagnostic.hasAccess;
+        console.error("membership check (Whop fallback)", {
           user: userInfo.sub,
           email: userInfo.email,
+          dbStatus,
           configured: diagnostic.configured,
           fetchStatus: diagnostic.fetchStatus,
           fetchError: diagnostic.fetchError,
           memberships: diagnostic.memberships,
         });
-        const summary = diagnostic.memberships.length
+        whopSummary = diagnostic.memberships.length
           ? diagnostic.memberships
               .map(
                 (m) =>
@@ -89,7 +115,10 @@ export async function GET(request: NextRequest) {
           : `no memberships (fetch ${diagnostic.fetchStatus}${
               diagnostic.fetchError ? `, ${diagnostic.fetchError}` : ""
             })`;
-        const detail = `user=${userInfo.sub} email=${userInfo.email ?? "(unknown)"} configured=[${diagnostic.configured.join(",")}] memberships=[${summary}]`;
+      }
+
+      if (!dbHasActive && !whopHasAccess) {
+        const detail = `user=${userInfo.sub} email=${userInfo.email ?? "(unknown)"} db_status=${dbStatus} whop=[${whopSummary}]`;
         return NextResponse.redirect(
           `${appUrl}/login?error=no_membership&detail=${encodeURIComponent(detail)}`
         );

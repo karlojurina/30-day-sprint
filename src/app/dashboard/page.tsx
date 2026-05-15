@@ -8,7 +8,18 @@ import { MapMockup } from "@/components/mockup/MapMockup";
 import { LessonCompleteEffects } from "@/components/map/LessonCompleteEffects";
 import { StreakCelebration } from "@/components/map/StreakCelebration";
 import { DiscountApprovedCelebration } from "@/components/map/DiscountApprovedCelebration";
+import { GraduationModal } from "@/components/map/GraduationModal";
 import { DevTestPanel } from "@/components/dev/DevTestPanel";
+
+interface MockMonthReview {
+  total_lessons_completed: number;
+  total_lessons: number;
+  longest_streak: number;
+  ad_submissions: number;
+  discount_earned: boolean;
+  notes_count: number;
+  days_to_finish: number | null;
+}
 
 const DISCOUNT_APPROVED_LAST_SEEN_KEY = "et.discountApproved.lastSeen";
 
@@ -21,6 +32,7 @@ export default function DashboardPage() {
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [streakCelebration, setStreakCelebration] = useState<number | null>(null);
   const [discountCelebration, setDiscountCelebration] = useState<boolean>(false);
+  const [graduationReview, setGraduationReview] = useState<MockMonthReview | null>(null);
 
   // Fire the discount-approved celebration ONCE per approval. The
   // student never sees a promo code — the team applies it directly
@@ -90,6 +102,20 @@ export default function DashboardPage() {
       window.removeEventListener("et:test:discount-approved", handler);
   }, []);
 
+  // Dev test panel listener — manually fire the graduation modal with a
+  // mock month-review payload. Auto-fire on real completion still TODO
+  // (needs a backend job to write the month_reviews row when a student
+  // hits 100% — without that the GraduationModal stays hidden because
+  // it requires monthReview to be non-null).
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const ce = e as CustomEvent<MockMonthReview>;
+      if (ce.detail) setGraduationReview(ce.detail);
+    };
+    window.addEventListener("et:test:graduation", handler);
+    return () => window.removeEventListener("et:test:graduation", handler);
+  }, []);
+
   if (loading || !student) {
     return (
       <div
@@ -135,6 +161,13 @@ export default function DashboardPage() {
       <DiscountApprovedCelebration
         show={discountCelebration}
         onDismiss={() => setDiscountCelebration(false)}
+      />
+
+      <GraduationModal
+        open={graduationReview != null}
+        studentName={student.name?.split(" ")[0] ?? ""}
+        monthReview={graduationReview}
+        onDismiss={() => setGraduationReview(null)}
       />
 
       <DevTestPanel />

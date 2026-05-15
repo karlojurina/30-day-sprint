@@ -265,7 +265,10 @@ export function placeLessons(
     const rec = byRegion[rId];
     if (!rec.tRange || rec.lessons.length === 0) continue;
     const [t0, t1] = rec.tRange;
-    const pad = 0.035;
+    // Region-specific padding. R4 is dense (20 lessons in the smallest
+    // horizontal strip) so it gets less padding and uses more of its
+    // t-range — gives nodes visible breathing room.
+    const pad = rId === "r4" ? 0.012 : 0.035;
     const tStart = t0 + (t1 - t0) * pad;
     const tEnd = t1 - (t1 - t0) * pad;
     const span = tEnd - tStart;

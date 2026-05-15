@@ -13,10 +13,12 @@ import { useEffect, useState } from "react";
  * event and updates its visual state. No API calls, no DB writes.
  *
  * Listeners:
- *   et:test:transition   → MapMockup transitions to detail.target
- *   et:test:streak       → DashboardPage shows StreakCelebration with detail
- *   et:test:banner       → DiscountUrgencyBanner overrides its state
- *   et:test:banner-clear → clears any banner override
+ *   et:test:transition         → MapMockup transitions to detail.target
+ *   et:test:streak             → DashboardPage shows StreakCelebration with detail
+ *   et:test:banner             → DiscountUrgencyBanner overrides its state
+ *   et:test:banner-clear       → clears any banner override
+ *   et:test:discount-approved  → DashboardPage shows DiscountApprovedCelebration
+ *   et:test:graduation         → DashboardPage shows GraduationModal with mock detail
  */
 export function DevTestPanel() {
   const [open, setOpen] = useState(false);
@@ -236,6 +238,39 @@ export function DevTestPanel() {
       <Section title="Discount approval celebration">
         <Btn onClick={() => fire("discount-approved", true)}>
           Fire celebration
+        </Btn>
+      </Section>
+
+      <Section title="Graduation modal (all-complete celebration)">
+        <Btn
+          onClick={() =>
+            fire("graduation", {
+              total_lessons_completed: 70,
+              total_lessons: 70,
+              longest_streak: 24,
+              ad_submissions: 7,
+              discount_earned: true,
+              notes_count: 18,
+              days_to_finish: 27,
+            })
+          }
+        >
+          Fire — full house (100%)
+        </Btn>
+        <Btn
+          onClick={() =>
+            fire("graduation", {
+              total_lessons_completed: 52,
+              total_lessons: 70,
+              longest_streak: 11,
+              ad_submissions: 4,
+              discount_earned: true,
+              notes_count: 6,
+              days_to_finish: 30,
+            })
+          }
+        >
+          Fire — partial finish
         </Btn>
       </Section>
 

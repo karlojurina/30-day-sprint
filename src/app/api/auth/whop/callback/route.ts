@@ -3,7 +3,7 @@ import { createServiceClient } from "@/lib/supabase-server";
 import {
   exchangeCodeForTokens,
   fetchWhopUserInfo,
-  checkActiveMembership,
+  checkActiveMembershipDiagnostic,
   fetchWhopMembershipJoinDate,
   fetchWhopDiscordId,
   generateStudentPassword,
@@ -67,10 +67,29 @@ export async function GET(request: NextRequest) {
       (userInfo.email && bypassEmails.includes(userInfo.email.toLowerCase()));
 
     if (!isBypassed) {
-      const hasAccess = await checkActiveMembership(tokens.access_token);
-      if (!hasAccess) {
+      const diagnostic = await checkActiveMembershipDiagnostic(tokens.access_token);
+      if (!diagnostic.hasAccess) {
+        // Surface what Whop's has_access actually returned for each
+        // configured id so we can debug from the error page itself
+        // instead of needing Vercel logs.
+        console.error("has_access check failed", {
+          user: userInfo.sub,
+          email: userInfo.email,
+          configured: diagnostic.configured,
+          attempts: diagnostic.attempts,
+        });
+        const summary = diagnostic.attempts
+          .map((a) => {
+            const accessFlag =
+              a.body && typeof a.body === "object"
+                ? String((a.body as { has_access?: unknown }).has_access ?? "—")
+                : "—";
+            return `${a.id}: HTTP ${a.httpStatus}, has_access=${accessFlag}`;
+          })
+          .join(" | ");
+        const detail = `user=${userInfo.sub} email=${userInfo.email ?? "(unknown)"} configured=[${diagnostic.configured.join(",")}] ${summary || "(no ids configured)"}`;
         return NextResponse.redirect(
-          `${appUrl}/login?error=no_membership&detail=${encodeURIComponent(`Your Whop user ID: ${userInfo.sub} · email: ${userInfo.email ?? "(unknown)"}`)}`
+          `${appUrl}/login?error=no_membership&detail=${encodeURIComponent(detail)}`
         );
       }
     }

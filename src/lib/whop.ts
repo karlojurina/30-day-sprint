@@ -75,23 +75,60 @@ export async function fetchWhopUserInfo(
 export async function checkActiveMembership(
   accessToken: string
 ): Promise<boolean> {
+  const result = await checkActiveMembershipDiagnostic(accessToken);
+  return result.hasAccess;
+}
+
+/**
+ * Diagnostic variant — returns the response from each id Whop was checked
+ * against, so we can surface meaningful errors to the login page when a
+ * membership check fails. Public so the callback can call it directly
+ * when it wants the extra detail.
+ */
+export interface MembershipCheckDiagnostic {
+  hasAccess: boolean;
+  configured: string[];
+  attempts: Array<{
+    id: string;
+    httpStatus: number;
+    body: unknown;
+  }>;
+}
+
+export async function checkActiveMembershipDiagnostic(
+  accessToken: string
+): Promise<MembershipCheckDiagnostic> {
   const raw = process.env.WHOP_PRODUCT_ID ?? "";
   const ids = raw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
 
-  if (ids.length === 0) return false;
+  const attempts: MembershipCheckDiagnostic["attempts"] = [];
 
+  if (ids.length === 0) {
+    return { hasAccess: false, configured: ids, attempts };
+  }
+
+  let hasAccess = false;
   for (const id of ids) {
     const res = await fetch(`${WHOP_API_BASE}/me/has_access/${id}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!res.ok) continue;
-    const data = await res.json();
-    if (data.has_access === true) return true;
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    attempts.push({ id, httpStatus: res.status, body });
+    if (res.ok && body && typeof body === "object" && (body as { has_access?: boolean }).has_access === true) {
+      hasAccess = true;
+      break;
+    }
   }
-  return false;
+
+  return { hasAccess, configured: ids, attempts };
 }
 
 /**

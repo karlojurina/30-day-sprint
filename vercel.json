@@ -5,6 +5,10 @@
       "schedule": "0 9 * * *"
     },
     {
+      "path": "/api/cron/check-csm-tasks",
+      "schedule": "15 9 * * *"
+    },
+    {
       "path": "/api/cron/day28-dm",
       "schedule": "30 9 * * *"
     }

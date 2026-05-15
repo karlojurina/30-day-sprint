@@ -5,11 +5,16 @@ import { dmStudent, postTeamAlert } from "@/lib/discord";
 /**
  * Day-28 student summary DM cron.
  *
- * Runs daily. Picks students whose `joined_at` is between 28 and 30
- * days ago AND whose `day28_dm_sent_at` is null. For each, builds a
- * personal stats payload and tries to DM them via the Discord bot.
- * Falls back to a public team-channel post if the DM fails (no
- * discord_user_id, DMs disabled, bot not mutual, etc.).
+ * Runs daily. Picks students whose `joined_at` is exactly 28 days ago
+ * (1 day window, midnight-to-midnight UTC) AND whose `day28_dm_sent_at`
+ * is null. For each, builds a personal stats payload and tries to DM
+ * them via the Discord bot. Falls back to a public team-channel post
+ * if the DM fails (no discord_user_id, DMs disabled, bot not mutual,
+ * etc.).
+ *
+ * Tightened from a 28–30d window to exactly Day 28 per the CSM brief
+ * (06-open-questions.md §3): firing later than Day 28 loses the punch
+ * because the student is already at the Day 30 fork.
  *
  * Idempotent — stamps `day28_dm_sent_at` on success or fallback so
  * the same student isn't messaged twice.
@@ -22,8 +27,11 @@ export async function GET(request: NextRequest) {
 
   const supabase = createServiceClient();
   const now = new Date();
-  const minJoined = new Date(now.getTime() - 30 * 86_400_000); // ≥30d ago
-  const maxJoined = new Date(now.getTime() - 28 * 86_400_000); // ≤28d ago
+  // Exactly Day 28 — window is the 24-hour band 28 to 29 days after join.
+  // A student joined exactly 28d ago at this moment satisfies
+  //   joined_at <= (now - 28d)  AND  joined_at > (now - 29d)
+  const minJoined = new Date(now.getTime() - 29 * 86_400_000); // > 29d ago is OUT
+  const maxJoined = new Date(now.getTime() - 28 * 86_400_000); // ≤ 28d ago is IN
 
   const { data: candidates } = await supabase
     .from("students")
@@ -32,7 +40,7 @@ export async function GET(request: NextRequest) {
     )
     .eq("membership_status", "active")
     .is("day28_dm_sent_at", null)
-    .gte("joined_at", minJoined.toISOString())
+    .gt("joined_at", minJoined.toISOString())
     .lte("joined_at", maxJoined.toISOString());
 
   if (!candidates || candidates.length === 0) {

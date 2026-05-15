@@ -229,6 +229,61 @@ export interface MonthReview {
   generated_at: string;
 }
 
+// CSM layer (v27) — Astrid's task queue + DM templates + admin config
+
+export type TemplateBucket =
+  | "crushing"
+  | "on_track"
+  | "at_risk"
+  | "cancel_path"
+  | "event"
+  | "admin";
+
+export type TemplateWeek = "D1" | "W1" | "W2" | "W3" | "W4" | "X" | null;
+
+export interface Template {
+  id: string;
+  scenario_id: string;
+  bucket: TemplateBucket;
+  week: TemplateWeek;
+  title: string;
+  trigger_description: string;
+  intent: string | null;
+  tone: string | null;
+  variables: string[];
+  body: string;
+  word_count: number | null;
+  is_active: boolean;
+  is_admin_only: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type TaskStatus = "open" | "completed" | "dismissed";
+
+export interface Task {
+  id: string;
+  student_id: string;
+  scenario_id: string;
+  template_id: string | null;
+  status: TaskStatus;
+  behavior_summary: string | null;
+  created_at: string;
+  completed_at: string | null;
+  completed_by: string | null;
+  dismissed_at: string | null;
+  dismissed_by: string | null;
+  notes: string | null;
+}
+
+export interface AdminConfigRow {
+  key: string;
+  value: string;
+  description: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
 // Computed helpers (not stored in DB)
 export function getDayNumber(joinedAt: string): number {
   const joined = new Date(joinedAt);

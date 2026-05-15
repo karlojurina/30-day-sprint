@@ -158,13 +158,38 @@ export async function POST(request: NextRequest) {
     case "membership.went_invalid":
     case "membership_went_invalid": {
       const membership = payload.data as WhopMembership;
-      const { error } = await supabase
+      const { data: updated, error } = await supabase
         .from("students")
         .update({ membership_status: "canceled" })
-        .eq("whop_user_id", membership.user.id);
+        .eq("whop_user_id", membership.user.id)
+        .select("id, name")
+        .single();
 
       if (error) {
         console.error("Webhook: student update failed:", error);
+        break;
+      }
+
+      // CSM W4.4 — Churned. Insert a task for Astrid's final touch-back
+      // DM. Best-effort: any failure here doesn't fail the webhook.
+      if (updated) {
+        const { data: tpl } = await supabase
+          .from("templates")
+          .select("id")
+          .eq("scenario_id", "W4.4")
+          .single();
+        if (tpl) {
+          const { error: taskErr } = await supabase.from("tasks").insert({
+            student_id: updated.id,
+            scenario_id: "W4.4",
+            template_id: tpl.id,
+            status: "open",
+            behavior_summary: `${updated.name ?? "Student"} membership canceled via Whop webhook.`,
+          });
+          if (taskErr && (taskErr as { code?: string }).code !== "23505") {
+            console.error("Webhook: W4.4 task insert failed:", taskErr);
+          }
+        }
       }
       break;
     }

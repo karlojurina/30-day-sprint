@@ -220,9 +220,8 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                   letterSpacing: "-0.005em",
                 }}
               >
-                Day {lesson.day} · {region.name} · {LESSON_TYPE_LABELS[lesson.type]}
+                {region.name} · {LESSON_TYPE_LABELS[lesson.type]}
                 {isCompound && " · 2 parts"}
-                {isGate && " · Discount gate"}
                 {lesson.is_optional && " · Optional"}
               </p>
               <h2

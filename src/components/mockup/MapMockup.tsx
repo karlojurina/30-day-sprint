@@ -394,58 +394,9 @@ const SCENE_END_MARKERS: Record<RegionId, SceneEndMarker> = {
   r4: { kind: "celebration", label: "Program complete", sublabel: "the work continues" },
 };
 
-// ──────────────────────────────────────────────────────────────
-// Mockup lesson redistribution (client-side only — does NOT mutate DB).
-//
-// Updated 2026-04-28 to match v6/v7 data model:
-//   - R1 (Base Camp, days 1-7): l001-l020 in day/sort_order
-//     l018 was moved from day 6 → day 7 in v7 so the day-7 cluster is
-//     "Action Item: Organic Ads → UGC → Action Item: UGC Ad"
-//   - R2 (Creative Lab, days 8-15): l021-l025 (moved from R1 in v6) +
-//     l026-l033, l035-l039, l041, l042, l045, l046 (l034, l040, l043,
-//     l044 were deleted in v6 — their function folded into compound
-//     "Action Item:" lessons)
-//   - R3 (Test Track, days 16-23): l047-l056
-//   - R4 (The Market, days 24-30): l057-l063
-//
-// Lessons whose title starts with "Action Item:" are rendered as diamond
-// markers on the path.
-// ──────────────────────────────────────────────────────────────
-
-const MOCKUP_REGION_LESSONS: Record<RegionId, string[]> = {
-  // R1 in path order (day, then sort_order)
-  r1: [
-    "l001", "l002", "l003",                  // day 1
-    "l004", "l005", "l006",                  // day 2
-    "l007", "l008", "l009",                  // day 3
-    "l010", "l011", "l012",                  // day 4
-    "l013", "l014", "l015",                  // day 5
-    "l016", "l017",                          // day 6
-    "l018", "l019", "l020",                  // day 7
-  ],
-  // R2 = the 5 ex-R1 lessons (l021-l025) + remaining R2 minus deleted.
-  // R2 ends at l042 — the "Claim discount" transition fires next.
-  r2: [
-    "l021", "l022", "l023", "l024", "l025",  // moved from R1 in v6
-    "l026", "l027", "l028", "l029", "l030", "l031",
-    "l032", "l033",
-    // l034 deleted (Ship Your Organic Ad → folded into l018)
-    "l035", "l036", "l037", "l038", "l039",
-    // l040 deleted (Ship Your UGC Ad → folded into l020)
-    "l041", "l042",
-    // l043 deleted (Ship Your High-Production Ad → folded into l024)
-    // l044 deleted (Ship Your VSL → folded into l022)
-    // l045 + l046 moved to R3 in v8 (engage feedback + static ad)
-  ],
-  // R3 = ex-R2 l045/l046 (engage feedback + static ad, with l046 still
-  // carrying the discount-gate flag) + the existing strategy lessons.
-  r3: [
-    "l045", "l046",
-    "l047", "l048", "l049", "l050", "l051",
-    "l052", "l053", "l054", "l055", "l056",
-  ],
-  r4: Array.from({ length: 7 }, (_, i) => `l0${String(57 + i).padStart(2, "0")}`),
-};
+// Action Items: lessons whose title starts with "Action Item:" render as
+// diamond markers on the path. Region membership and order now come
+// straight from the DB (lessons.region_id + sort by day, sort_order).
 
 // Titles can be overridden for the mockup. Currently empty — l021 is
 // the real "VSLs" lesson in r2, no override needed.
@@ -827,24 +778,23 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     setDisplayTransform(next);
   };
 
-  // Build a lookup for fast lesson-by-id access
-  const lessonsById = useMemo(() => {
-    const m = new Map<string, Lesson>();
-    lessons.forEach((l) => m.set(l.id, l));
-    return m;
-  }, [lessons]);
-
-  // Lessons for each region are redistributed per MOCKUP_REGION_LESSONS
-  // (mockup-only client-side override — DB region_id is ignored).
+  // Lessons for each region come straight from the DB — group by
+  // region_id, then sort by (day, sort_order). This means migrations
+  // (e.g. v24 moving l064 from R4 to R3, adding l065–l078, removing
+  // l051) reflect on the map automatically with no UI edit needed.
   const lessonsByRegion = useMemo(() => {
-    const out: Partial<Record<RegionId, Lesson[]>> = {};
-    (Object.keys(MOCKUP_REGION_LESSONS) as RegionId[]).forEach((rid) => {
-      out[rid] = MOCKUP_REGION_LESSONS[rid]
-        .map((id) => lessonsById.get(id))
-        .filter((l): l is Lesson => l != null);
-    });
-    return out as Record<RegionId, Lesson[]>;
-  }, [lessonsById]);
+    const out: Record<RegionId, Lesson[]> = { r1: [], r2: [], r3: [], r4: [] };
+    for (const l of lessons) {
+      const rid = l.region_id as RegionId;
+      if (out[rid]) out[rid].push(l);
+    }
+    for (const rid of Object.keys(out) as RegionId[]) {
+      out[rid].sort(
+        (a, b) => a.day - b.day || a.sort_order - b.sort_order,
+      );
+    }
+    return out;
+  }, [lessons]);
 
   // Sequential region unlock: r1 always open; r(n) opens only when every
   // lesson in r(1..n-1) is complete. Returns a Set so SVG render and click

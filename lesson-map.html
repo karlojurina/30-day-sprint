@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>EcomTalent — Lesson × Region Map</title>
+<style>
+  :root {
+    --bg: #0b0d10;
+    --panel: #11151a;
+    --panel-2: #161b22;
+    --border: #1f2630;
+    --text: #e7ecf2;
+    --muted: #8a96a6;
+    --accent-r1: #f5b14b;
+    --accent-r2: #6aa8ff;
+    --accent-r3: #c084fc;
+    --accent-r4: #ef6262;
+    --gate: #ffb84d;
+    --boss: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1400px; margin: 0 auto; padding: 48px 32px 64px; }
+  .header { display: flex; flex-direction: column; gap: 10px; margin-bottom: 40px; }
+  .eyebrow { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-size: 34px; letter-spacing: -0.02em; font-weight: 700; }
+  .sub { color: var(--muted); font-size: 15px; max-width: 760px; line-height: 1.55; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 18px;
+    font-size: 12px; color: var(--muted); }
+  .legend .item { display: inline-flex; align-items: center; gap: 8px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .gate-icon { color: var(--gate); font-weight: 700; }
+  .boss-icon { color: var(--boss); font-weight: 700; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+  @media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 640px)  { .grid { grid-template-columns: 1fr; } }
+
+  .region {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px; padding: 22px; position: relative; overflow: hidden;
+  }
+  .region::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 4px;
+    background: var(--accent);
+  }
+  .r1 { --accent: var(--accent-r1); }
+  .r2 { --accent: var(--accent-r2); }
+  .r3 { --accent: var(--accent-r3); }
+  .r4 { --accent: var(--accent-r4); }
+
+  .r-head { display: flex; flex-direction: column; gap: 6px; padding-bottom: 14px;
+    border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+  .r-tag { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--accent); font-weight: 600; }
+  .r-name { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
+  .r-meta { font-size: 12px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap; }
+  .r-meta b { color: var(--text); font-weight: 600; }
+  .r-blurb { font-size: 12.5px; color: var(--muted); line-height: 1.5; margin-top: 4px; }
+
+  .day-group { margin-top: 14px; }
+  .day-label { font-size: 11px; letter-spacing: 0.06em; color: var(--muted);
+    text-transform: uppercase; margin-bottom: 6px; font-weight: 600; }
+  .lessons { display: flex; flex-direction: column; gap: 4px; }
+  .lesson { display: flex; gap: 10px; align-items: baseline; padding: 6px 8px;
+    border-radius: 6px; background: var(--panel-2); font-size: 12.5px;
+    border: 1px solid transparent; }
+  .lesson.action { border-color: rgba(255,255,255,0.06); }
+  .lesson.gate { border-color: var(--gate); background: rgba(255,184,77,0.07); }
+  .lesson.boss { border-color: var(--boss); background: rgba(220,38,38,0.08); }
+  .lid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--muted); font-size: 11.5px; min-width: 36px; }
+  .ltitle { flex: 1; color: var(--text); line-height: 1.35; }
+  .ltype { font-size: 10.5px; color: var(--muted); padding: 1px 6px;
+    border: 1px solid var(--border); border-radius: 4px; white-space: nowrap;
+    align-self: center; }
+  .ltype.action { color: #ffb84d; border-color: rgba(255,184,77,0.4); }
+  .ltype.setup  { color: #6aa8ff; border-color: rgba(106,168,255,0.4); }
+  .lesson.gate .ltitle::after { content: " ★ GATE"; color: var(--gate); font-weight: 700; font-size: 10px; letter-spacing: 0.1em; }
+  .lesson.boss .ltitle::after { content: " ★ BOSS"; color: var(--boss); font-weight: 700; font-size: 10px; letter-spacing: 0.1em; }
+
+  .group-box { border: 1px dashed var(--border); border-radius: 6px;
+    padding: 8px 10px; margin-top: 6px; background: rgba(255,255,255,0.015); }
+  .group-title { font-size: 11.5px; color: var(--muted); margin-bottom: 6px;
+    font-weight: 600; letter-spacing: 0.04em; }
+  .group-box .lesson { background: transparent; padding: 3px 0; }
+
+  .footer { margin-top: 36px; padding-top: 24px; border-top: 1px solid var(--border);
+    display: flex; gap: 32px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+  .footer b { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="header">
+    <span class="eyebrow">EcomTalent · 30-Day Sprint</span>
+    <h1>Lesson × Region Map</h1>
+    <div class="sub">71 lessons across 4 regions. R3 now closes with the Creative Strategy core + Deep Market Research. R4 leads with the AI/strategy block and ends on the bounty arc. Discount gate: <b style="color:var(--gate)">l049</b>. Boss: <b style="color:var(--boss)">l063</b>. Day labels are stale — checkpoint model coming.</div>
+    <div class="legend">
+      <span class="item"><span class="dot" style="background: var(--accent-r1)"></span> R1 Foundation</span>
+      <span class="item"><span class="dot" style="background: var(--accent-r2)"></span> R2 Strategy</span>
+      <span class="item"><span class="dot" style="background: var(--accent-r3)"></span> R3 Production</span>
+      <span class="item"><span class="dot" style="background: var(--accent-r4)"></span> R4 Gate of Possibilities</span>
+      <span class="item"><span class="gate-icon">★</span> Discount gate</span>
+      <span class="item"><span class="boss-icon">★</span> Boss / Final reflection</span>
+    </div>
+  </div>
+
+  <div class="grid">
+
+    <!-- R1 -->
+    <section class="region r1">
+      <div class="r-head">
+        <div class="r-tag">R1</div>
+        <div class="r-name">Foundation</div>
+        <div class="r-meta"><span>Days <b>1–7</b></span><span><b>18</b> lessons</span></div>
+        <div class="r-blurb">Welcome, mindset, fundamentals. Ends with first 2 shipped ads (organic + UGC).</div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Day 1 · Welcome + mindset</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l001</span><span class="ltitle">Join Discord + Confirm Access</span><span class="ltype setup">setup</span></div>
+          <div class="lesson"><span class="lid">l002</span><span class="ltitle">My Goal Is To Change Your Life</span></div>
+          <div class="lesson"><span class="lid">l003</span><span class="ltitle">How You Will Turn Into a Top 5%</span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Day 2 · Proof + the plan</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l004</span><span class="ltitle">Proof This Works &amp; What You Can Expect</span></div>
+          <div class="lesson"><span class="lid">l005</span><span class="ltitle">Your First 30 Days Here (Game Plan)</span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Day 3 · How ads work</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l007</span><span class="ltitle">Course Overview</span></div>
+          <div class="lesson"><span class="lid">l008</span><span class="ltitle">How Do Ads Work?</span></div>
+          <div class="lesson"><span class="lid">l009</span><span class="ltitle">Direct Response Advertising</span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Day 4 · The customer</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l010</span><span class="ltitle">Understanding Your Customer</span></div>
+          <div class="lesson"><span class="lid">l011</span><span class="ltitle">Buying Psychology</span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Day 5 · Ad creation process</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l013</span><span class="ltitle">Ad Creation Process</span></div>
+          <div class="lesson"><span class="lid">l014</span><span class="ltitle">Ad Inspiration System</span></div>
+          <div class="lesson"><span class="lid">l015</span><span class="ltitle">Video Ads Master — Introduction</span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Day 6 · Organic fundamentals</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l016</span><span class="ltitle">Organic Ads</span></div>
+          <div class="lesson"><span class="lid">l017</span><span class="ltitle">Video Ad Safezone Guidelines</span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Day 7 · First action items</div>
+        <div class="lessons">
+          <div class="lesson action"><span class="lid">l018</span><span class="ltitle">Action Item: Organic Ads</span><span class="ltype action">ship</span></div>
+          <div class="lesson"><span class="lid">l019</span><span class="ltitle">UGC</span></div>
+          <div class="lesson action"><span class="lid">l020</span><span class="ltitle">Action Item: UGC Ad</span><span class="ltype action">ship</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- R2 -->
+    <section class="region r2">
+      <div class="r-head">
+        <div class="r-tag">R2</div>
+        <div class="r-name">Strategy</div>
+        <div class="r-meta"><span>Days <b>8–14</b></span><span><b>20</b> lessons</span></div>
+        <div class="r-blurb">The skill stack: VSL, High-Prod, hooks, retention, tech, AI, and the 9 Editing Breakdowns (grouped node).</div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Day 8 · VSL + High-Prod</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l021</span><span class="ltitle">VSLs</span></div>
+          <div class="lesson action"><span class="lid">l022</span><span class="ltitle">Action Item: VSL Ad</span><span class="ltype action">ship</span></div>
+          <div class="lesson"><span class="lid">l023</span><span class="ltitle">High-Production Ads</span></div>
+          <div class="lesson action"><span class="lid">l024</span><span class="ltitle">Action Item: High-Production Ad</span><span class="ltype action">ship</span></div>
+          <div class="lesson"><span class="lid">l025</span><span class="ltitle">Video Hooks</span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Day 9 · Retention + assets + sound</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l026</span><span class="ltitle">Mr. Beast Retention Techniques</span></div>
+          <div class="lesson"><span class="lid">l027</span><span class="ltitle">Asset Management</span></div>
+          <div class="lesson"><span class="lid">l028</span><span class="ltitle">Music &amp; SFX</span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Day 10 · Tech + AI</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l029</span><span class="ltitle">My Tech Stack For Editing Video Ads</span></div>
+          <div class="lesson"><span class="lid">l030</span><span class="ltitle">AI Content Upscaling</span></div>
+          <div class="lesson"><span class="lid">l031</span><span class="ltitle">AI Voiceovers</span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Days 11–14 · Editing Breakdowns (grouped node)</div>
+        <div class="group-box">
+          <div class="group-title">All 9 collapse into one map node — Watch or Skip per part</div>
+          <div class="lessons">
+            <div class="lesson"><span class="lid">l032</span><span class="ltitle">Editing Breakdowns — Intro</span></div>
+            <div class="lesson"><span class="lid">l033</span><span class="ltitle">LIVE Example: Editing a Video Ad</span></div>
+            <div class="lesson"><span class="lid">l035</span><span class="ltitle">Editing Breakdown — Part 1</span></div>
+            <div class="lesson"><span class="lid">l036</span><span class="ltitle">Editing Breakdown — Part 1 (cont.)</span></div>
+            <div class="lesson"><span class="lid">l037</span><span class="ltitle">Editing Breakdown — Part 1 (final)</span></div>
+            <div class="lesson"><span class="lid">l038</span><span class="ltitle">Editing Breakdown — Part 2</span></div>
+            <div class="lesson"><span class="lid">l039</span><span class="ltitle">Editing Breakdown — Part 3</span></div>
+            <div class="lesson"><span class="lid">l041</span><span class="ltitle">Editing Breakdown — Part 4</span></div>
+            <div class="lesson"><span class="lid">l042</span><span class="ltitle">Editing Breakdown — Part 5 (VSL)</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- R3 -->
+    <section class="region r3">
+      <div class="r-head">
+        <div class="r-tag">R3 · contains the gate</div>
+        <div class="r-name">Production</div>
+        <div class="r-meta"><span><b>12</b> lessons</span></div>
+        <div class="r-blurb">Static Ads, the Money-Making methods, and the Creative Strategy core. The discount gate sits on l049.</div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Static Ads ★ gate</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l045</span><span class="ltitle">The Art Of 1 Frame</span></div>
+          <div class="lesson"><span class="lid">l046</span><span class="ltitle">Static Ad Safezone Guidelines</span></div>
+          <div class="lesson"><span class="lid">l047</span><span class="ltitle">My Tech Stack For Doing Static Ads</span></div>
+          <div class="lesson"><span class="lid">l048</span><span class="ltitle">Static Ad Templates + LIVE Example</span></div>
+          <div class="lesson gate"><span class="lid">l049</span><span class="ltitle">Action Item: Static Ads</span><span class="ltype action">ship</span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Money Making</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l050</span><span class="ltitle">The Karlo Method</span></div>
+          <div class="lesson"><span class="lid">l052</span><span class="ltitle">Private Marketplace Cheat</span></div>
+          <div class="lesson"><span class="lid">l053</span><span class="ltitle">Ad Bounties (Insane Passive Income)</span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Creative Strategy</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l054</span><span class="ltitle">Overview (Creative Strategy Workflow)</span></div>
+          <div class="lesson"><span class="lid">l055</span><span class="ltitle">Market Awareness</span></div>
+          <div class="lesson"><span class="lid">l056</span><span class="ltitle">Market Sophistication</span></div>
+          <div class="lesson"><span class="lid">l064</span><span class="ltitle">How To Do Deep Market Research (With AI) <em style="color:var(--muted);font-style:normal;font-size:10.5px">· 1h 11m</em></span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- R4 -->
+    <section class="region r4">
+      <div class="r-head">
+        <div class="r-tag">R4 · content then action</div>
+        <div class="r-name">Gate of Possibilities</div>
+        <div class="r-meta"><span><b>21</b> lessons</span><span>14 content + 7 action</span></div>
+        <div class="r-blurb">The rest of the Creative Strategy module — Claude/AI setup, the Ad Ideas 101 trilogy, AI copy/scripts, prompt engineering, feedback loops, ad teardowns, creator mindset — then the bounty arc: onboarding, 3 shipped bounties, performance review, weekly call, final reflection.</div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">AI setup + brand</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l065</span><span class="ltitle">How To Give Claude Access To Browse The Internet <em style="color:var(--muted);font-style:normal;font-size:10.5px">· 9m</em></span></div>
+          <div class="lesson"><span class="lid">l066</span><span class="ltitle">How To Build "BRAND AI" <em style="color:var(--muted);font-style:normal;font-size:10.5px">· 34m</em></span></div>
+          <div class="lesson"><span class="lid">l067</span><span class="ltitle">Setting Up Growth Guide + Explanation <em style="color:var(--muted);font-style:normal;font-size:10.5px">· 6m 47s</em></span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Ad Ideas 101 (trilogy)</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l068</span><span class="ltitle">Ad Ideas 101: IMITATION <em style="color:var(--muted);font-style:normal;font-size:10.5px">· 31m 39s</em></span></div>
+          <div class="lesson"><span class="lid">l069</span><span class="ltitle">Ad Ideas 101: IDEATION <em style="color:var(--muted);font-style:normal;font-size:10.5px">· 41m</em></span></div>
+          <div class="lesson"><span class="lid">l070</span><span class="ltitle">Ad Ideas 101: ITERATION <em style="color:var(--muted);font-style:normal;font-size:10.5px">· 14m 28s</em></span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Writing with AI + iteration</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l071</span><span class="ltitle">How To Write Copy For Static Ads (With AI) <em style="color:var(--muted);font-style:normal;font-size:10.5px">· 23m 57s</em></span></div>
+          <div class="lesson"><span class="lid">l072</span><span class="ltitle">How To Write Scripts For Video Ads (With AI) <em style="color:var(--muted);font-style:normal;font-size:10.5px">· 23m 48s</em></span></div>
+          <div class="lesson"><span class="lid">l073</span><span class="ltitle">Prompt Engineering (How to communicate with AI) <em style="color:var(--muted);font-style:normal;font-size:10.5px">· 33m 56s</em></span></div>
+          <div class="lesson"><span class="lid">l074</span><span class="ltitle">The Feedback Loop (Ad Learnings) <em style="color:var(--muted);font-style:normal;font-size:10.5px">· 19m 24s</em></span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Teardowns + creator mindset</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l075</span><span class="ltitle">Breaking Down Winning Ads: PART 1 <em style="color:var(--muted);font-style:normal;font-size:10.5px">· 22m 20s</em></span></div>
+          <div class="lesson"><span class="lid">l076</span><span class="ltitle">How I Turned A Losing Ad Into A Winning Ad <em style="color:var(--muted);font-style:normal;font-size:10.5px">· 55m 42s</em></span></div>
+          <div class="lesson"><span class="lid">l077</span><span class="ltitle">How Our Brain Works <em style="color:var(--muted);font-style:normal;font-size:10.5px">· duration TBD</em></span></div>
+          <div class="lesson"><span class="lid">l078</span><span class="ltitle">How I Approach Research / Coming Up With Ad Ideas <em style="color:var(--muted);font-style:normal;font-size:10.5px">· duration TBD</em></span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Bounty onboarding</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l057</span><span class="ltitle">Complete Ad Bounty Onboarding</span><span class="ltype setup">setup</span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Bounties shipped</div>
+        <div class="lessons">
+          <div class="lesson action"><span class="lid">l058</span><span class="ltitle">Submit Your First Ad Bounty</span><span class="ltype action">ship</span></div>
+          <div class="lesson action"><span class="lid">l059</span><span class="ltitle">Submit Ad Bounty #2</span><span class="ltype action">ship</span></div>
+          <div class="lesson action"><span class="lid">l060</span><span class="ltitle">Submit Ad Bounty #3</span><span class="ltype action">ship</span></div>
+        </div>
+      </div>
+
+      <div class="day-group">
+        <div class="day-label">Review + reflect</div>
+        <div class="lessons">
+          <div class="lesson"><span class="lid">l061</span><span class="ltitle">Check Ad Performance Dashboard</span></div>
+          <div class="lesson"><span class="lid">l062</span><span class="ltitle">Attend Weekly Call</span></div>
+          <div class="lesson boss"><span class="lid">l063</span><span class="ltitle">The Final Reflection</span></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <div class="footer">
+    <div><b>Total</b> · 71 lessons (R1:18 · R2:20 · R3:12 · R4:21)</div>
+    <div><b>Action items</b> · 5 (l018, l020, l022, l024, l049)</div>
+    <div><b>Grouped node</b> · 9 Editing Breakdowns (l032–l042)</div>
+    <div><b>Pending</b> · durations for l077, l078</div>
+    <div><b>Retired IDs</b> · l006, l012, l034, l040, l043, l044, l051</div>
+  </div>
+
+</div>
+</body>
+</html>

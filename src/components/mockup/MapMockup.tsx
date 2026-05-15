@@ -341,12 +341,13 @@ const SCENES: Partial<Record<RegionId, Scene>> = {
     // reserved as the "Program complete" end marker (see
     // SCENE_END_MARKERS[r4]).
     //
-    // placementEase = 1.55 because the painted trail has a switchback
+    // placementEase = 1.2 because the painted trail has a switchback
     // in its upper third (waypoints ~24-32 loop left before climbing
     // to the summit). Without easing, that switchback eats arc length
-    // and bunches the last 7-8 markers against the summit. With
-    // ease > 1 the later lessons spread out more visually.
-    placementEase: 1.55,
+    // and bunches the last markers against the summit. 1.55 was too
+    // aggressive (early markers overlapped). 1.2 spreads the tail
+    // without crunching the start.
+    placementEase: 1.2,
     waypoints: [
       { x: 819, y: 1339 }, { x: 838, y: 1291 }, { x: 866, y: 1249 },
       { x: 903, y: 1200 }, { x: 949, y: 1171 }, { x: 999, y: 1141 },

@@ -8,10 +8,10 @@ const REGION_IDS: RegionId[] = ["r1", "r2", "r3", "r4"];
 type ToolId = "regions" | "path-r1" | "path-r2" | "path-r3" | "path-r4";
 
 const REGION_META: Record<RegionId, { label: string; color: string }> = {
-  r1: { label: "R1 — Harbor / Base Camp",       color: "#F0D595" },
-  r2: { label: "R2 — Valley / Creative Lab",    color: "#4DCEC4" },
-  r3: { label: "R3 — Waterfall / Test Track",   color: "#4DA0D8" },
-  r4: { label: "R4 — Summit / The Market",      color: "#C44A54" },
+  r1: { label: "R1 — Foundation",            color: "#F0D595" },
+  r2: { label: "R2 — Strategy",              color: "#4DCEC4" },
+  r3: { label: "R3 — Production",            color: "#4DA0D8" },
+  r4: { label: "R4 — Gate of Possibilities", color: "#C44A54" },
 };
 
 interface ToolMeta {
@@ -21,15 +21,16 @@ interface ToolMeta {
   /** Closed polygon (auto-closes last→first) or open polyline */
   shape: "polygon" | "polyline";
 }
-// Picker pulls from _originals/ — full-resolution PNGs are kept there for
-// pixel-accurate polygon tracing. Production code uses the optimized .webp
-// counterparts in /regions/ (see SCENE_IMAGE_STACK in MapMockup).
+// Picker pulls the SAME .webp images that production uses (see
+// SCENE_IMAGE_STACK + SCENES in MapMockup). Previous version loaded
+// _originals/*.png which had been left stale when the art was repainted —
+// polygons traced on the old PNG no longer matched the new webp.
 const TOOL_META: Record<ToolId, ToolMeta> = {
-  "regions": { label: "Region outlines (main_image)",   image: "/regions/_originals/main_image.png",      shape: "polygon" },
-  "path-r1": { label: "R1 path (first_location)",       image: "/regions/_originals/first_location.png",  shape: "polyline" },
-  "path-r2": { label: "R2 path (second_location)",      image: "/regions/_originals/second_location.png", shape: "polyline" },
-  "path-r3": { label: "R3 path (third_location)",       image: "/regions/_originals/third_location.png",  shape: "polyline" },
-  "path-r4": { label: "R4 path (fourth_location)",      image: "/regions/_originals/fourth_location.png", shape: "polyline" },
+  "regions": { label: "Region outlines (overview)",     image: "/regions/main_image.webp",      shape: "polygon" },
+  "path-r1": { label: "R1 path (Foundation scene)",     image: "/regions/first_location.webp",  shape: "polyline" },
+  "path-r2": { label: "R2 path (Strategy scene)",       image: "/regions/second_location.webp", shape: "polyline" },
+  "path-r3": { label: "R3 path (Production scene)",     image: "/regions/third_location.webp",  shape: "polyline" },
+  "path-r4": { label: "R4 path (Gate of Possibilities)",image: "/regions/fourth_location.webp", shape: "polyline" },
 };
 
 // Map coordinate space (matches MapMockup's viewBox)

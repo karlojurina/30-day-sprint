@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/sync-whop",
+      "schedule": "0 0 * * *"
+    },
+    {
       "path": "/api/cron/snapshot-progress",
       "schedule": "30 0 * * *"
     },

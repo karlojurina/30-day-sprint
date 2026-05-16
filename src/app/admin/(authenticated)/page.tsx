@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import type { Student } from "@/types/database";
 import {
@@ -208,33 +208,26 @@ export default function AdminDashboard() {
             The numbers that matter for the next month.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap">
           {lastRefreshed && (
             <span
               style={{
                 fontSize: 11,
                 color: "var(--color-text-tertiary)",
                 fontVariantNumeric: "tabular-nums",
+                marginRight: 4,
               }}
             >
               Updated {lastRefreshed.toLocaleTimeString()}
             </span>
           )}
+          <SyncButton onSynced={() => void fetchDashboard(true)} />
+          <RebuildButton onRebuilt={() => void fetchDashboard(true)} />
           <button
             type="button"
             onClick={() => void fetchDashboard(true)}
             disabled={refreshing}
-            style={{
-              padding: "8px 14px",
-              fontSize: 12,
-              fontWeight: 600,
-              borderRadius: 8,
-              background: "var(--color-bg-elevated)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-text-primary)",
-              cursor: refreshing ? "wait" : "pointer",
-              opacity: refreshing ? 0.6 : 1,
-            }}
+            style={refreshBtnStyle(refreshing)}
           >
             {refreshing ? "Refreshing…" : "↻ Refresh"}
           </button>
@@ -666,6 +659,146 @@ function SparklineTile({
         </p>
       )}
     </Link>
+  );
+}
+
+// Shared style for the small toolbar buttons in the page header.
+// Mirrors the resting / hover states of buttons elsewhere in admin.
+function refreshBtnStyle(busy: boolean): React.CSSProperties {
+  return {
+    fontSize: 12,
+    fontWeight: 500,
+    color: "var(--color-text-secondary)",
+    background: "var(--color-bg-card)",
+    border: "1px solid var(--color-border)",
+    borderRadius: 8,
+    padding: "6px 12px",
+    cursor: busy ? "default" : "pointer",
+    opacity: busy ? 0.6 : 1,
+    fontVariantNumeric: "tabular-nums",
+    letterSpacing: "-0.005em",
+  };
+}
+
+/**
+ * Pulls the full Whop community into our students table. Imported
+ * rows arrive with supabase_user_id = null — OAuth fills that in
+ * later. Safe to re-run; existing rows get refreshed.
+ */
+function SyncButton({ onSynced }: { onSynced: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const run = async () => {
+    if (busy) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/sync-whop", { method: "POST" });
+      const json = await res.json();
+      if (!res.ok) {
+        setMsg(`Sync failed: ${json.error ?? res.statusText}`);
+      } else {
+        setMsg(
+          `Synced ${json.fetched} · +${json.inserted} new · ${json.updated} updated`,
+        );
+        onSynced();
+      }
+    } catch (e) {
+      setMsg(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+      // Auto-clear the toast so it doesn't sit there forever.
+      setTimeout(() => setMsg(null), 8000);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => void run()}
+        disabled={busy}
+        style={refreshBtnStyle(busy)}
+        title="Pull the full Whop community into our students table"
+      >
+        {busy ? "Syncing…" : "↓ Sync Whop"}
+      </button>
+      {msg && (
+        <span
+          style={{
+            fontSize: 11,
+            color: msg.startsWith("Sync failed")
+              ? "var(--color-danger)"
+              : "var(--color-text-tertiary)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {msg}
+        </span>
+      )}
+    </>
+  );
+}
+
+/**
+ * Rebuilds daily_progress_snapshots from 2026-01-01 forward using the
+ * current students + completions data. Run this once after a Whop
+ * sync so the trend reflects the full community, not just the slice
+ * we had at the time the snapshots were taken.
+ */
+function RebuildButton({ onRebuilt }: { onRebuilt: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const run = async () => {
+    if (busy) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await fetch("/api/admin/rebuild-snapshots", {
+        method: "POST",
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setMsg(`Rebuild failed: ${json.error ?? res.statusText}`);
+      } else {
+        setMsg(`Rebuilt ${json.rows} snapshot rows`);
+        onRebuilt();
+      }
+    } catch (e) {
+      setMsg(`Rebuild failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setBusy(false);
+      setTimeout(() => setMsg(null), 8000);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => void run()}
+        disabled={busy}
+        style={refreshBtnStyle(busy)}
+        title="Recompute daily snapshots from current data (run after a Sync)"
+      >
+        {busy ? "Rebuilding…" : "↺ Rebuild trends"}
+      </button>
+      {msg && (
+        <span
+          style={{
+            fontSize: 11,
+            color: msg.startsWith("Rebuild failed")
+              ? "var(--color-danger)"
+              : "var(--color-text-tertiary)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {msg}
+        </span>
+      )}
+    </>
   );
 }
 

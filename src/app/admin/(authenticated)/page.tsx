@@ -219,9 +219,13 @@ export default function AdminDashboard() {
           className="grid grid-cols-2 lg:grid-cols-4"
           style={{ gap: 12 }}
         >
-          <SmallStat label="Active students" value={data.activeStudents} />
           <SmallStat
-            label="Joined"
+            label="Active on platform"
+            value={data.activeStudents}
+            sublabel="Sprint signups, post-launch"
+          />
+          <SmallStat
+            label="Joined this week"
             value={data.joinedThisWeek}
             accent="success"
           />
@@ -344,10 +348,12 @@ function SmallStat({
   label,
   value,
   accent,
+  sublabel,
 }: {
   label: string;
   value: string | number;
   accent?: "success" | "danger";
+  sublabel?: string;
 }) {
   const color =
     accent === "success"
@@ -387,6 +393,17 @@ function SmallStat({
       >
         {value}
       </p>
+      {sublabel && (
+        <p
+          style={{
+            fontSize: 11,
+            color: "var(--color-text-tertiary)",
+            marginTop: 6,
+          }}
+        >
+          {sublabel}
+        </p>
+      )}
     </div>
   );
 }

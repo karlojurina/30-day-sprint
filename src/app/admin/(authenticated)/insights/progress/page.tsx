@@ -1,12 +1,19 @@
 "use client";
 
 /**
- * /admin/insights/progress — average-progress trend over time.
+ * /admin/insights/progress — admin metrics trend dashboard.
  *
- * Data comes from daily_progress_snapshots, written nightly by the
- * /api/cron/snapshot-progress cron. Karlo's ask: see whether the
- * avg-progress number is climbing or sliding over time so we know
- * if the program is helping students or stalling them.
+ * Four charts side-by-side, fed by daily_progress_snapshots:
+ *   - Avg progress (%)
+ *   - Active students
+ *   - Joined per day
+ *   - Churned per day
+ *
+ * Data sources: nightly cron at /api/cron/snapshot-progress writes one
+ * row per day. Migrations v31 + v32 seeded the first 14 days from
+ * existing student rows.
+ *
+ * Time-range selector: 7 / 30 / 90 / 365 days.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -17,6 +24,9 @@ interface SnapshotRow {
   active_students: number;
   total_completions: number;
   avg_progress: number;
+  active_count: number | null;
+  joined_count: number | null;
+  churned_count: number | null;
 }
 
 type RangeKey = "7" | "30" | "90" | "365";
@@ -25,6 +35,49 @@ const RANGE_LABELS: Record<RangeKey, string> = {
   "30": "Last 30 days",
   "90": "Last 90 days",
   "365": "Last year",
+};
+
+type MetricKey = "avg_progress" | "active_count" | "joined_count" | "churned_count";
+
+interface MetricDef {
+  label: string;
+  description: string;
+  suffix: string;
+  color: string;
+  /** "running" = current value is the latest snapshot (e.g. active count).
+   *  "flow"    = sum across the window (joined / churned per day). */
+  mode: "running" | "flow";
+}
+
+const METRICS: Record<MetricKey, MetricDef> = {
+  avg_progress: {
+    label: "Avg progress",
+    description: "Average completion % across active students.",
+    suffix: "%",
+    color: "var(--color-accent-dark)",
+    mode: "running",
+  },
+  active_count: {
+    label: "Active students",
+    description: "Students with active sprint membership (post-cutoff cohort).",
+    suffix: "",
+    color: "#5bb88e",
+    mode: "running",
+  },
+  joined_count: {
+    label: "Joined",
+    description: "New students per day.",
+    suffix: "",
+    color: "#7d8be8",
+    mode: "flow",
+  },
+  churned_count: {
+    label: "Churned",
+    description: "Memberships canceled per day.",
+    suffix: "",
+    color: "var(--color-danger)",
+    mode: "flow",
+  },
 };
 
 export default function ProgressInsightsPage() {
@@ -54,6 +107,10 @@ export default function ProgressInsightsPage() {
           avg_progress: Number(r.avg_progress),
           active_students: Number(r.active_students),
           total_completions: Number(r.total_completions),
+          active_count: r.active_count == null ? null : Number(r.active_count),
+          joined_count: r.joined_count == null ? null : Number(r.joined_count),
+          churned_count:
+            r.churned_count == null ? null : Number(r.churned_count),
         })),
       );
     } catch (e) {
@@ -66,24 +123,31 @@ export default function ProgressInsightsPage() {
     void fetchData();
   }, [fetchData]);
 
-  const stats = useMemo(() => {
+  const summary = useMemo(() => {
     if (points.length === 0) return null;
-    const first = points[0];
     const last = points[points.length - 1];
-    const max = points.reduce(
-      (m, p) => (p.avg_progress > m.avg_progress ? p : m),
-      points[0],
-    );
+    const first = points[0];
+    function metric(key: MetricKey, mode: "running" | "flow") {
+      if (mode === "running") {
+        const lastV = (last[key] as number | null) ?? null;
+        const firstV = (first[key] as number | null) ?? null;
+        const delta = lastV != null && firstV != null ? lastV - firstV : null;
+        return { current: lastV, delta };
+      }
+      // flow: sum
+      const total = points.reduce((sum, p) => sum + ((p[key] as number | null) ?? 0), 0);
+      return { current: total, delta: null };
+    }
     return {
-      first,
-      last,
-      max,
-      delta: Math.round((last.avg_progress - first.avg_progress) * 100) / 100,
-    };
+      avg_progress: metric("avg_progress", "running"),
+      active_count: metric("active_count", "running"),
+      joined_count: metric("joined_count", "flow"),
+      churned_count: metric("churned_count", "flow"),
+    } as Record<MetricKey, { current: number | null; delta: number | null }>;
   }, [points]);
 
   return (
-    <div className="p-8 max-w-6xl">
+    <div className="p-8 max-w-7xl">
       <header className="mb-6">
         <h1
           style={{
@@ -94,15 +158,15 @@ export default function ProgressInsightsPage() {
             marginBottom: 4,
           }}
         >
-          Average progress
+          Insights
         </h1>
         <p style={{ fontSize: 13, color: "var(--color-text-tertiary)" }}>
-          Nightly snapshot of avg lesson-completion % across active
-          students. The cron writes one row per day at 00:30 UTC.
+          Daily snapshots of platform health. Cron writes one row at
+          00:30 UTC; ranges past the backfilled 14 days will be sparse
+          until more data accumulates.
         </p>
       </header>
 
-      {/* Range selector */}
       <div className="flex gap-2 mb-6 flex-wrap">
         {(Object.keys(RANGE_LABELS) as RangeKey[]).map((k) => (
           <button
@@ -160,150 +224,197 @@ export default function ProgressInsightsPage() {
           />
         </div>
       ) : points.length === 0 ? (
-        <div
-          className="surface-resting"
-          style={{
-            background: "var(--color-bg-card)",
-            borderRadius: 12,
-            padding: 40,
-            textAlign: "center",
-            color: "var(--color-text-tertiary)",
-          }}
-        >
-          <p style={{ fontSize: 14, marginBottom: 4 }}>
-            No snapshots in this window yet.
-          </p>
-          <p style={{ fontSize: 12 }}>
-            The nightly cron runs at 00:30 UTC. The migration backfilled
-            the last 14 days at install — pick a shorter window if you
-            don&rsquo;t see data here.
-          </p>
-        </div>
+        <EmptyHint />
       ) : (
-        <>
-          {/* Summary cards */}
-          {stats && (
-            <div
-              className="grid grid-cols-3 gap-3 mb-6"
-              style={{ maxWidth: 640 }}
-            >
-              <Stat label="Today" value={`${stats.last.avg_progress}%`} />
-              <Stat
-                label="Δ vs start of range"
-                value={`${stats.delta > 0 ? "+" : ""}${stats.delta}%`}
-                tone={
-                  stats.delta > 0
-                    ? "good"
-                    : stats.delta < 0
-                      ? "bad"
-                      : "neutral"
-                }
-              />
-              <Stat
-                label="Peak in window"
-                value={`${stats.max.avg_progress}%`}
-                sub={stats.max.snapshot_date}
-              />
-            </div>
-          )}
-
-          {/* Chart */}
-          <ProgressChart points={points} />
-        </>
+        <div
+          className="grid gap-4"
+          style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}
+        >
+          {(Object.keys(METRICS) as MetricKey[]).map((key) => (
+            <MetricCard
+              key={key}
+              def={METRICS[key]}
+              points={points}
+              valueKey={key}
+              summary={summary?.[key]}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
 }
 
-function Stat({
-  label,
-  value,
-  sub,
-  tone = "neutral",
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  tone?: "good" | "bad" | "neutral";
-}) {
-  const color =
-    tone === "good"
-      ? "var(--color-success)"
-      : tone === "bad"
-        ? "var(--color-danger)"
-        : "var(--color-text-primary)";
+function EmptyHint() {
   return (
     <div
+      className="surface-resting"
       style={{
         background: "var(--color-bg-card)",
-        borderRadius: 10,
-        padding: "12px 16px",
+        borderRadius: 12,
+        padding: 40,
+        textAlign: "center",
+        color: "var(--color-text-tertiary)",
       }}
     >
+      <p style={{ fontSize: 14, marginBottom: 4 }}>
+        No snapshots in this window yet.
+      </p>
+      <p style={{ fontSize: 12 }}>
+        Migrations v31 + v32 backfill the last 14 days; the nightly cron at
+        00:30 UTC takes over from there.
+      </p>
+    </div>
+  );
+}
+
+function MetricCard({
+  def,
+  points,
+  valueKey,
+  summary,
+}: {
+  def: MetricDef;
+  points: SnapshotRow[];
+  valueKey: MetricKey;
+  summary: { current: number | null; delta: number | null } | undefined;
+}) {
+  const current = summary?.current;
+  const delta = summary?.delta;
+  return (
+    <section
+      style={{
+        background: "var(--color-bg-card)",
+        borderRadius: 12,
+        padding: 16,
+        border: "1px solid var(--color-border)",
+      }}
+    >
+      <div className="flex items-baseline justify-between gap-2 mb-1">
+        <h3
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: "var(--color-text-primary)",
+            letterSpacing: "-0.012em",
+          }}
+        >
+          {def.label}
+        </h3>
+        {current != null && (
+          <p
+            style={{
+              fontSize: 18,
+              fontWeight: 600,
+              color: "var(--color-text-primary)",
+              fontVariantNumeric: "tabular-nums",
+              letterSpacing: "-0.018em",
+            }}
+          >
+            {def.mode === "running"
+              ? `${current}${def.suffix}`
+              : `${current} total`}
+          </p>
+        )}
+      </div>
+
       <p
         style={{
-          fontSize: 10,
-          fontWeight: 500,
+          fontSize: 11,
           color: "var(--color-text-tertiary)",
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
+          marginBottom: 4,
         }}
       >
-        {label}
+        {def.description}
       </p>
-      <p
-        style={{
-          fontSize: 20,
-          fontWeight: 600,
-          color,
-          fontVariantNumeric: "tabular-nums",
-          letterSpacing: "-0.018em",
-          marginTop: 4,
-        }}
-      >
-        {value}
-      </p>
-      {sub && (
+
+      {def.mode === "running" && delta != null && (
+        <p
+          style={{
+            fontSize: 11,
+            color:
+              (valueKey === "churned_count" ? -delta : delta) > 0
+                ? "var(--color-success)"
+                : (valueKey === "churned_count" ? -delta : delta) < 0
+                  ? "var(--color-danger)"
+                  : "var(--color-text-tertiary)",
+            fontVariantNumeric: "tabular-nums",
+            marginBottom: 10,
+          }}
+        >
+          {delta > 0 ? "↑ +" : delta < 0 ? "↓ " : "→ "}
+          {Math.abs(delta).toFixed(valueKey === "avg_progress" ? 1 : 0)}
+          {def.suffix} vs start of range
+        </p>
+      )}
+      {def.mode === "flow" && (
         <p
           style={{
             fontSize: 11,
             color: "var(--color-text-tertiary)",
-            marginTop: 2,
+            marginBottom: 10,
           }}
         >
-          {sub}
+          Daily counts shown below; total above is the window sum.
         </p>
       )}
-    </div>
+
+      <Chart
+        points={points}
+        valueKey={valueKey}
+        color={def.color}
+        suffix={def.suffix}
+        mode={def.mode}
+      />
+    </section>
   );
 }
 
-function ProgressChart({ points }: { points: SnapshotRow[] }) {
-  const W = 900;
-  const H = 280;
-  const PAD = 40;
-  if (points.length < 2) {
+function Chart({
+  points,
+  valueKey,
+  color,
+  suffix,
+  mode,
+}: {
+  points: SnapshotRow[];
+  valueKey: MetricKey;
+  color: string;
+  suffix: string;
+  mode: "running" | "flow";
+}) {
+  const W = 600;
+  const H = 180;
+  const PAD = 32;
+
+  const series = points
+    .map((p) => ({
+      date: p.snapshot_date,
+      v: (p[valueKey] as number | null) ?? 0,
+    }))
+    .filter((p) => p.v != null);
+
+  if (series.length < 2) {
     return (
       <div
-        className="surface-resting"
         style={{
-          background: "var(--color-bg-card)",
-          borderRadius: 12,
-          padding: 40,
+          padding: 24,
           textAlign: "center",
-          fontSize: 13,
+          fontSize: 12,
           color: "var(--color-text-tertiary)",
+          fontStyle: "italic",
         }}
       >
-        Need at least 2 days of data to draw a line.
+        Not enough data points yet.
       </div>
     );
   }
-  const ys = points.map((p) => p.avg_progress);
-  const minY = Math.max(0, Math.floor(Math.min(...ys) - 2));
-  const maxY = Math.min(100, Math.ceil(Math.max(...ys) + 2));
+
+  const ys = series.map((p) => p.v);
+  const minY = Math.max(0, Math.min(...ys) - 1);
+  const maxY = Math.max(...ys);
   const rangeY = Math.max(1, maxY - minY);
-  const stepX = (W - PAD * 2) / (points.length - 1);
+  const stepX = (W - PAD * 2) / (series.length - 1);
 
   const toXY = (i: number, v: number) => {
     const x = PAD + i * stepX;
@@ -311,7 +422,7 @@ function ProgressChart({ points }: { points: SnapshotRow[] }) {
     return { x, y };
   };
 
-  const pathPts = points.map((p, i) => toXY(i, p.avg_progress));
+  const pathPts = series.map((p, i) => toXY(i, p.v));
   const linePath = pathPts
     .map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`))
     .join(" ");
@@ -320,109 +431,99 @@ function ProgressChart({ points }: { points: SnapshotRow[] }) {
     pathPts.map((p) => `L ${p.x} ${p.y}`).join(" ") +
     ` L ${pathPts[pathPts.length - 1].x} ${H - PAD} Z`;
 
-  // Y-axis ticks
-  const ticks = [minY, Math.round((minY + maxY) / 2), maxY];
-
-  // X-axis labels (first, middle, last)
-  const xLabels = [
-    { i: 0, label: points[0].snapshot_date },
-    {
-      i: Math.floor((points.length - 1) / 2),
-      label: points[Math.floor((points.length - 1) / 2)].snapshot_date,
-    },
-    {
-      i: points.length - 1,
-      label: points[points.length - 1].snapshot_date,
-    },
+  const ticks = [
+    minY,
+    Math.round(((minY + maxY) / 2) * 10) / 10,
+    maxY,
   ];
 
   return (
-    <div
-      className="surface-resting"
-      style={{
-        background: "var(--color-bg-card)",
-        borderRadius: 12,
-        padding: 20,
-        overflowX: "auto",
-      }}
-    >
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        style={{ width: "100%", height: "auto", maxHeight: 360 }}
-      >
-        {/* Grid lines */}
-        {ticks.map((t) => {
-          const y = H - PAD - ((t - minY) / rangeY) * (H - PAD * 2);
-          return (
-            <g key={t}>
-              <line
-                x1={PAD}
-                x2={W - PAD}
-                y1={y}
-                y2={y}
-                stroke="var(--color-border)"
-                strokeWidth={0.5}
-              />
-              <text
-                x={PAD - 6}
-                y={y + 3}
-                fontSize={10}
-                fill="var(--color-text-tertiary)"
-                textAnchor="end"
-                fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
-              >
-                {t}%
-              </text>
-            </g>
-          );
-        })}
-
-        {/* Area fill */}
-        <path
-          d={areaPath}
-          fill="var(--color-accent-dark)"
-          fillOpacity={0.10}
-        />
-
-        {/* Line */}
-        <path
-          d={linePath}
-          fill="none"
-          stroke="var(--color-accent-dark)"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-
-        {/* Dots */}
-        {pathPts.map((p, i) => (
-          <circle
-            key={i}
-            cx={p.x}
-            cy={p.y}
-            r={2.5}
-            fill="var(--color-accent-dark)"
-          />
-        ))}
-
-        {/* X-axis labels */}
-        {xLabels.map((x, idx) => {
-          const px = PAD + x.i * stepX;
-          return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }}>
+      {ticks.map((t) => {
+        const y = H - PAD - ((t - minY) / rangeY) * (H - PAD * 2);
+        return (
+          <g key={t}>
+            <line
+              x1={PAD}
+              x2={W - PAD}
+              y1={y}
+              y2={y}
+              stroke="var(--color-border)"
+              strokeWidth={0.5}
+            />
             <text
-              key={idx}
-              x={px}
-              y={H - PAD + 16}
-              fontSize={10}
+              x={PAD - 6}
+              y={y + 3}
+              fontSize={9}
               fill="var(--color-text-tertiary)"
-              textAnchor={idx === 0 ? "start" : idx === 2 ? "end" : "middle"}
+              textAnchor="end"
               fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
             >
-              {x.label.slice(5)}
+              {Math.round(t)}
+              {suffix}
             </text>
+          </g>
+        );
+      })}
+
+      {mode === "flow" ? (
+        // Bar chart for flow metrics (joined/churned per day)
+        series.map((p, i) => {
+          const { x, y } = toXY(i, p.v);
+          const w = Math.max(1, stepX * 0.7);
+          return (
+            <rect
+              key={i}
+              x={x - w / 2}
+              y={y}
+              width={w}
+              height={H - PAD - y}
+              fill={color}
+              opacity={0.7}
+            />
           );
-        })}
-      </svg>
-    </div>
+        })
+      ) : (
+        <>
+          <path d={areaPath} fill={color} fillOpacity={0.10} />
+          <path
+            d={linePath}
+            fill="none"
+            stroke={color}
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          {pathPts.map((p, i) => (
+            <circle key={i} cx={p.x} cy={p.y} r={2.2} fill={color} />
+          ))}
+        </>
+      )}
+
+      {/* X-axis: first / mid / last */}
+      {[
+        { i: 0, anchor: "start" as const },
+        {
+          i: Math.floor((series.length - 1) / 2),
+          anchor: "middle" as const,
+        },
+        { i: series.length - 1, anchor: "end" as const },
+      ].map((x) => {
+        const px = PAD + x.i * stepX;
+        return (
+          <text
+            key={x.i}
+            x={px}
+            y={H - PAD + 14}
+            fontSize={9}
+            fill="var(--color-text-tertiary)"
+            textAnchor={x.anchor}
+            fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+          >
+            {series[x.i].date.slice(5)}
+          </text>
+        );
+      })}
+    </svg>
   );
 }

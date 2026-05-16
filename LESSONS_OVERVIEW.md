@@ -58,7 +58,7 @@ Which lesson sits in which region, in canonical order. Days are not relevant —
 - l046 — Static Ad Safezone Guidelines
 - l047 — My Tech Stack For Doing Static Ads
 - l048 — Static Ad Templates + LIVE Example
-- l049 — Action Item: Static Ads *(discount gate)*
+- l049 — Action Item: Static Ads
 - l050 — The Karlo Method
 - l052 — Private Marketplace Cheat
 - l053 — Ad Bounties (Insane Passive Income)
@@ -87,11 +87,19 @@ Which lesson sits in which region, in canonical order. Days are not relevant —
 - l078 — How I Approach Research / Coming Up With Ad Ideas
 - l057 — Complete Ad Bounty Onboarding
 - l058 — Submit Your First Ad Bounty
-- l059 — Submit Ad Bounty #2
-- l060 — Submit Ad Bounty #3
-- l061 — Check Ad Performance Dashboard
-- l062 — Attend Weekly Call
-- l063 — The Final Reflection *(boss)*
+
+---
+
+## Retired
+
+- l006, l012, l034, l040, l043, l044 — early playbook deletions (compound action items folded into the matching watch lesson)
+- l051 — "Become an Affiliate" *(removed in v24)*
+- l059, l060 — Submit Ad Bounty #2, #3 *(removed in v26)*
+- l061 — Check Ad Performance Dashboard *(removed in v26)*
+- l062 — Attend Weekly Call *(removed in v26)*
+- l063 — The Final Reflection *(boss, removed in v25)*
+
+Total live lessons: **66** (R1: 18 · R2: 20 · R3: 12 · R4: 16).
 
 ---
 

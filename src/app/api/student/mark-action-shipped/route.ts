@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { updateStudentStreak } from "../_lib/update-streak";
+import { checkR2CompoundsShipped, onLessonCompleted } from "@/lib/csm-events";
 
 /**
  * POST /api/student/mark-action-shipped
@@ -128,6 +129,13 @@ export async function POST(request: NextRequest) {
     result.action_completed_at
   ) {
     await updateStudentStreak(supabase, student.id);
+  }
+
+  // CSM event hooks (best-effort — failures here never break the
+  // student-facing response):
+  if (shipped && result?.action_completed_at) {
+    await checkR2CompoundsShipped(supabase, student.id, lessonId);
+    await onLessonCompleted(supabase, student.id);
   }
 
   return NextResponse.json({ completion: result });

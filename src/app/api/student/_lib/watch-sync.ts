@@ -1,5 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { fetchCompletedLessonsAsAdmin } from "@/lib/whop";
+import { onLessonCompleted } from "@/lib/csm-events";
 
 /**
  * Pull the student's completed Whop course lessons and upsert matching
@@ -151,6 +152,12 @@ export async function syncWatchProgress({
         whop_last_sync_unmatched: unmatchedLessonIds,
       })
       .eq("id", studentId);
+
+    // X.1 reactivation check — only when we actually newly-completed
+    // something. Best-effort; failures never break the sync.
+    if (matched.length > 0) {
+      await onLessonCompleted(supabase, studentId);
+    }
 
     return {
       syncedCount: matched.length,

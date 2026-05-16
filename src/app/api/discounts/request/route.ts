@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
+import { onDiscountRequested } from "@/lib/csm-events";
 
 /**
  * V4: Discount = complete ALL Region 1 + Region 2 lessons within
@@ -149,6 +150,9 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: "Failed to create request" }, { status: 500 });
   }
+
+  // CSM W2.6 admin task (best-effort).
+  await onDiscountRequested(supabase, studentId);
 
   return NextResponse.json(data);
 }

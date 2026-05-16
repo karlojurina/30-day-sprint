@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { updateStudentStreak } from "../_lib/update-streak";
+import { onLessonCompleted } from "@/lib/csm-events";
 
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -65,6 +66,9 @@ export async function POST(request: NextRequest) {
     }
 
     await updateStudentStreak(supabase, student.id);
+
+    // X.1 reactivation check (best-effort).
+    await onLessonCompleted(supabase, student.id);
 
     return NextResponse.json({ action: "checked", completion: data });
   }

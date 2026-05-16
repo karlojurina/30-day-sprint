@@ -65,12 +65,10 @@ export default function AdminDashboard() {
           .not("whop_membership_id", "is", null)
           .in("membership_status", ["active", "past_due", "canceled"])
           .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF),
-        // completed_at filter so skipped / action-only rows don't
-        // inflate the avg-progress denominator.
-        supabase
-          .from("student_lesson_completions")
-          .select("student_id")
-          .not("completed_at", "is", null),
+        // Count any completion row — skipped + action-only still
+        // count toward a student's lesson progress. Matches the
+        // /admin/students/[id] detail view.
+        supabase.from("student_lesson_completions").select("student_id"),
         supabase.from("lessons").select("id", { count: "exact", head: true }),
         supabase.from("discount_requests").select("id").eq("status", "pending"),
         supabase.from("tasks").select("id").eq("status", "open"),
@@ -694,7 +692,15 @@ function SyncButton({ onSynced }: { onSynced: () => void }) {
     setBusy(true);
     setMsg(null);
     try {
-      const res = await fetch("/api/admin/sync-whop", { method: "POST" });
+      const supabase = createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/admin/sync-whop", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const json = await res.json();
       if (!res.ok) {
         setMsg(`Sync failed: ${json.error ?? res.statusText}`);
@@ -756,8 +762,14 @@ function RebuildButton({ onRebuilt }: { onRebuilt: () => void }) {
     setBusy(true);
     setMsg(null);
     try {
+      const supabase = createClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
       const res = await fetch("/api/admin/rebuild-snapshots", {
         method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
       if (!res.ok) {

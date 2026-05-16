@@ -1,14 +1,17 @@
 "use client";
 
 /**
- * /admin/tasks — Astrid's task queue.
+ * /admin/tasks — Astrid's task Kanban.
  *
- * - List of open tasks (filterable). At-risk + cancel-path bubble to the
- *   top via BUCKET_PRIORITY.
- * - Each row shows: real name, Discord username (prominent), day, scenario
- *   title, concrete behavior summary, template preview, Copy DM / Dismiss.
- * - Copy DM grabs the rendered body, copies to clipboard, marks completed.
- * - Dismiss requires a free-text reason (audited via tasks.notes).
+ * Three columns mapping to the existing tasks.status states:
+ *   To do      → status = 'open'      (cron fired, need to send)
+ *   Sent       → status = 'completed' (Astrid copied + presumably sent the DM)
+ *   Dismissed  → status = 'dismissed' (Astrid decided no action)
+ *
+ * Refresh is manual via the button at the top (per Karlo 2026-05-16 —
+ * cheap, ok for testing).
+ *
+ * Replaces the old list view at this URL.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -18,7 +21,6 @@ import type { Student, Task, Template } from "@/types/database";
 import { getDayNumber } from "@/types/database";
 import {
   BUCKET_GLYPH,
-  BUCKET_LABEL,
   BUCKET_PRIORITY,
   loadAdminConfig,
   renderTemplate,
@@ -41,18 +43,23 @@ type TaskRow = Task & {
     | null;
 };
 
-type StatusFilter = "open" | "completed" | "dismissed" | "all";
+type ColumnKey = "open" | "completed" | "dismissed";
 
-export default function AdminTasksPage() {
+const COLUMNS: Array<{ key: ColumnKey; label: string }> = [
+  { key: "open", label: "To do" },
+  { key: "completed", label: "Sent" },
+  { key: "dismissed", label: "Dismissed" },
+];
+
+export default function AdminTasksKanban() {
   const supabase = createClient();
   const { teamMember } = useAuth();
 
   const [rows, setRows] = useState<TaskRow[]>([]);
-  const [filter, setFilter] = useState<StatusFilter>("open");
   const [bucketFilter, setBucketFilter] = useState<string>("");
-  const [weekFilter, setWeekFilter] = useState<string>("");
   const [studentSearch, setStudentSearch] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -73,35 +80,42 @@ export default function AdminTasksPage() {
     | undefined
   >(undefined);
 
-  const fetchTasks = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      const params = new URLSearchParams();
-      params.set("status", filter);
-      if (bucketFilter) params.set("bucket", bucketFilter);
-      if (weekFilter) params.set("week", weekFilter);
-      if (studentSearch.trim()) params.set("student", studentSearch.trim());
+  const fetchTasks = useCallback(
+    async (silent = false) => {
+      if (silent) setRefreshing(true);
+      else setLoading(true);
+      setError(null);
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        const params = new URLSearchParams();
+        // Pull every status — we split into columns client-side.
+        params.set("status", "all");
+        if (bucketFilter) params.set("bucket", bucketFilter);
+        if (studentSearch.trim()) params.set("student", studentSearch.trim());
+        // Limit each render to a sane batch.
+        params.set("limit", "500");
 
-      const res = await fetch(`/api/admin/tasks?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error ?? `HTTP ${res.status}`);
+        const res = await fetch(`/api/admin/tasks?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.error ?? `HTTP ${res.status}`);
+        }
+        const { tasks } = await res.json();
+        setRows(tasks as TaskRow[]);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
       }
-      const { tasks } = await res.json();
-      setRows(tasks as TaskRow[]);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-    setLoading(false);
-  }, [filter, bucketFilter, weekFilter, studentSearch, supabase]);
+      setLoading(false);
+      setRefreshing(false);
+    },
+    [bucketFilter, studentSearch, supabase],
+  );
 
   useEffect(() => {
-    void fetchTasks();
+    void fetchTasks(false);
   }, [fetchTasks]);
 
   useEffect(() => {
@@ -111,9 +125,26 @@ export default function AdminTasksPage() {
     })();
   }, [supabase]);
 
-  // Sort: bucket priority first, then created_at desc.
-  const sorted = useMemo(() => {
-    return [...rows].sort((a, b) => {
+  // Split rows into columns and sort within each.
+  const grouped = useMemo(() => {
+    const buckets: Record<ColumnKey, TaskRow[]> = {
+      open: [],
+      completed: [],
+      dismissed: [],
+    };
+    for (const r of rows) {
+      const col = (
+        r.status === "open"
+          ? "open"
+          : r.status === "completed"
+            ? "completed"
+            : r.status === "dismissed"
+              ? "dismissed"
+              : null
+      ) as ColumnKey | null;
+      if (col) buckets[col].push(r);
+    }
+    buckets.open.sort((a, b) => {
       const pa = BUCKET_PRIORITY[a.template?.bucket ?? ""] ?? 99;
       const pb = BUCKET_PRIORITY[b.template?.bucket ?? ""] ?? 99;
       if (pa !== pb) return pa - pb;
@@ -121,19 +152,18 @@ export default function AdminTasksPage() {
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
     });
-  }, [rows]);
-
-  // Counts (status totals, for the header)
-  const counts = useMemo(() => {
-    let open = 0,
-      done = 0,
-      dismissed = 0;
-    for (const r of rows) {
-      if (r.status === "open") open++;
-      else if (r.status === "completed") done++;
-      else if (r.status === "dismissed") dismissed++;
-    }
-    return { open, done, dismissed };
+    // Sent + Dismissed: most-recent-first.
+    buckets.completed.sort(
+      (a, b) =>
+        new Date(b.completed_at ?? b.created_at).getTime() -
+        new Date(a.completed_at ?? a.created_at).getTime(),
+    );
+    buckets.dismissed.sort(
+      (a, b) =>
+        new Date(b.dismissed_at ?? b.created_at).getTime() -
+        new Date(a.dismissed_at ?? a.created_at).getTime(),
+    );
+    return buckets;
   }, [rows]);
 
   async function copyTask(row: TaskRow) {
@@ -161,10 +191,10 @@ export default function AdminTasksPage() {
         throw new Error(j.error ?? `HTTP ${res.status}`);
       }
       setToast(
-        `DM copied — ${row.student.name?.split(" ")[0] ?? "task"}'s task closed.`,
+        `DM copied for ${row.student.name?.split(" ")[0] ?? "task"} → moved to Sent.`,
       );
       setTimeout(() => setToast(null), 2500);
-      await fetchTasks();
+      await fetchTasks(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -175,7 +205,7 @@ export default function AdminTasksPage() {
     if (!dismissModal) return;
     const note = dismissNote.trim();
     if (!note) {
-      setError("Please add a short reason — it helps us tune the triggers.");
+      setError("Add a short reason — helps us tune the triggers.");
       return;
     }
     setBusyId(dismissModal.id);
@@ -197,7 +227,7 @@ export default function AdminTasksPage() {
       }
       setDismissModal(null);
       setDismissNote("");
-      await fetchTasks();
+      await fetchTasks(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -205,53 +235,55 @@ export default function AdminTasksPage() {
   }
 
   return (
-    <div className="p-8 max-w-6xl">
-      <h1
-        style={{
-          fontSize: 24,
-          fontWeight: 700,
-          letterSpacing: "-0.022em",
-          color: "var(--color-text-primary)",
-          marginBottom: 4,
-        }}
-      >
-        Tasks Queue
-      </h1>
-      <p
-        style={{
-          fontSize: 13,
-          color: "var(--color-text-tertiary)",
-          marginBottom: 16,
-        }}
-      >
-        Auto-created when the platform detects scenario triggers. Copy →
-        paste into Discord → task closes.
-        {teamMember?.full_name ? ` Signed in as ${teamMember.full_name}.` : ""}
-      </p>
-
-      {/* Counts */}
-      <div
-        className="flex gap-4 mb-4"
-        style={{ fontSize: 13, color: "var(--color-text-secondary)" }}
-      >
-        <span>
-          Open:{" "}
-          <strong style={{ color: "var(--color-text-primary)" }}>
-            {counts.open}
-          </strong>
-        </span>
-        <span>·</span>
-        <span>
-          Completed: <strong>{counts.done}</strong>
-        </span>
-        <span>·</span>
-        <span>
-          Dismissed: <strong>{counts.dismissed}</strong>
-        </span>
+    <div className="p-6 lg:p-8">
+      <div className="flex items-baseline justify-between gap-4 flex-wrap mb-2">
+        <div>
+          <h1
+            style={{
+              fontSize: 24,
+              fontWeight: 700,
+              letterSpacing: "-0.022em",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            Task queue
+          </h1>
+          <p
+            style={{
+              fontSize: 13,
+              color: "var(--color-text-tertiary)",
+              marginTop: 2,
+            }}
+          >
+            Auto-created from student behavior. Copy → paste in Discord →
+            card moves to <em>Sent</em>.
+            {teamMember?.full_name
+              ? ` Signed in as ${teamMember.full_name}.`
+              : ""}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => fetchTasks(true)}
+          disabled={refreshing}
+          style={{
+            padding: "8px 14px",
+            fontSize: 12,
+            fontWeight: 600,
+            borderRadius: 8,
+            background: "var(--color-bg-elevated)",
+            border: "1px solid var(--color-border)",
+            color: "var(--color-text-primary)",
+            cursor: refreshing ? "wait" : "pointer",
+            opacity: refreshing ? 0.6 : 1,
+          }}
+        >
+          {refreshing ? "Refreshing…" : "↻ Refresh"}
+        </button>
       </div>
 
       {/* Filters */}
-      <div className="flex gap-2 mb-6 flex-wrap items-center">
+      <div className="flex gap-2 mb-5 flex-wrap items-center">
         <select
           value={bucketFilter}
           onChange={(e) => setBucketFilter(e.target.value)}
@@ -263,60 +295,15 @@ export default function AdminTasksPage() {
           <option value="crushing">★ Crushing</option>
           <option value="event">⚡ Event</option>
           <option value="admin">⚙ Admin</option>
-          <option value="on_track">✓ On track</option>
-        </select>
-        <select
-          value={weekFilter}
-          onChange={(e) => setWeekFilter(e.target.value)}
-          style={selectStyle()}
-        >
-          <option value="">All weeks</option>
-          <option value="D1">Day 1 SOP</option>
-          <option value="W1">Week 1</option>
-          <option value="W2">Week 2</option>
-          <option value="W3">Week 3</option>
-          <option value="W4">Week 4</option>
-          <option value="X">Cross-week</option>
         </select>
         <input
           type="text"
-          placeholder="Search student name / email / @discord"
+          placeholder="Search name / email / @discord"
           value={studentSearch}
           onChange={(e) => setStudentSearch(e.target.value)}
-          style={{ ...selectStyle(), minWidth: 280 }}
+          onKeyDown={(e) => e.key === "Enter" && void fetchTasks(true)}
+          style={{ ...selectStyle(), minWidth: 240 }}
         />
-        <div className="flex gap-1 ml-auto">
-          {(["open", "completed", "dismissed", "all"] as StatusFilter[]).map(
-            (s) => (
-              <button
-                key={s}
-                onClick={() => setFilter(s)}
-                style={{
-                  padding: "6px 12px",
-                  fontSize: 12,
-                  fontWeight: filter === s ? 600 : 500,
-                  borderRadius: 6,
-                  background:
-                    filter === s
-                      ? "var(--color-bg-elevated)"
-                      : "transparent",
-                  border:
-                    filter === s
-                      ? "1px solid var(--color-accent-dark)"
-                      : "1px solid var(--color-border)",
-                  color:
-                    filter === s
-                      ? "var(--color-text-primary)"
-                      : "var(--color-text-tertiary)",
-                  cursor: "pointer",
-                  textTransform: "capitalize",
-                }}
-              >
-                {s}
-              </button>
-            ),
-          )}
-        </div>
       </div>
 
       {error && (
@@ -345,24 +332,39 @@ export default function AdminTasksPage() {
             }}
           />
         </div>
-      ) : sorted.length === 0 ? (
-        <EmptyState filter={filter} />
       ) : (
-        <div className="flex flex-col gap-3">
-          {sorted.map((row) => (
-            <TaskCard
-              key={row.id}
-              row={row}
-              busy={busyId === row.id}
-              config={config}
-              onCopy={() => copyTask(row)}
-              onDismiss={() =>
-                setDismissModal({
-                  id: row.id,
-                  name: row.student?.name ?? "this student",
-                })
-              }
-            />
+        <div
+          className="grid gap-4"
+          style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}
+        >
+          {COLUMNS.map((col) => (
+            <Column
+              key={col.key}
+              label={col.label}
+              count={grouped[col.key].length}
+              tone={col.key}
+            >
+              {grouped[col.key].length === 0 ? (
+                <EmptyColumn col={col.key} />
+              ) : (
+                grouped[col.key].map((row) => (
+                  <TaskCard
+                    key={row.id}
+                    row={row}
+                    busy={busyId === row.id}
+                    config={config}
+                    compact={col.key !== "open"}
+                    onCopy={() => copyTask(row)}
+                    onDismiss={() =>
+                      setDismissModal({
+                        id: row.id,
+                        name: row.student?.name ?? "this student",
+                      })
+                    }
+                  />
+                ))
+              )}
+            </Column>
           ))}
         </div>
       )}
@@ -432,7 +434,7 @@ export default function AdminTasksPage() {
                 marginBottom: 12,
               }}
             >
-              A short reason helps us tune the triggers over time.
+              A short reason helps tune the triggers over time.
             </p>
             <textarea
               autoFocus
@@ -480,10 +482,95 @@ export default function AdminTasksPage() {
   );
 }
 
+function Column({
+  label,
+  count,
+  tone,
+  children,
+}: {
+  label: string;
+  count: number;
+  tone: ColumnKey;
+  children: React.ReactNode;
+}) {
+  const accent =
+    tone === "open"
+      ? "var(--color-warning)"
+      : tone === "completed"
+        ? "var(--color-accent-dark)"
+        : "var(--color-text-tertiary)";
+  return (
+    <section
+      style={{
+        background: "var(--color-bg-card)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 12,
+        padding: 12,
+        minHeight: 280,
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
+      }}
+    >
+      <header
+        className="flex items-baseline justify-between"
+        style={{ paddingBottom: 8, borderBottom: "1px solid var(--color-border)" }}
+      >
+        <p
+          style={{
+            fontSize: 11,
+            fontWeight: 600,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            color: accent,
+          }}
+        >
+          {label}
+        </p>
+        <span
+          style={{
+            fontSize: 11,
+            color: "var(--color-text-tertiary)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {count}
+        </span>
+      </header>
+      <div className="flex flex-col gap-2 overflow-y-auto" style={{ maxHeight: "70vh" }}>
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function EmptyColumn({ col }: { col: ColumnKey }) {
+  const msg =
+    col === "open"
+      ? "No tasks waiting. All students on track."
+      : col === "completed"
+        ? "Nothing sent yet."
+        : "Nothing dismissed.";
+  return (
+    <div
+      style={{
+        padding: 24,
+        textAlign: "center",
+        fontSize: 12,
+        color: "var(--color-text-tertiary)",
+        fontStyle: "italic",
+      }}
+    >
+      {msg}
+    </div>
+  );
+}
+
 function TaskCard({
   row,
   busy,
   config,
+  compact,
   onCopy,
   onDismiss,
 }: {
@@ -499,6 +586,7 @@ function TaskCard({
         >
       >
     | undefined;
+  compact: boolean;
   onCopy: () => void;
   onDismiss: () => void;
 }) {
@@ -516,7 +604,7 @@ function TaskCard({
   const firstLine =
     preview?.body.split("\n").find((l) => l.trim().length > 0) ?? "";
   const truncated =
-    firstLine.length > 90 ? `${firstLine.slice(0, 87)}…` : firstLine;
+    firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine;
 
   const glyph = template ? BUCKET_GLYPH[template.bucket] ?? "·" : "·";
   const bucketColor =
@@ -530,33 +618,33 @@ function TaskCard({
 
   return (
     <div
-      className="p-4 rounded"
+      className="rounded"
       style={{
         background: "var(--color-bg-elevated)",
         border: "1px solid var(--color-border)",
-        opacity: row.status === "open" ? 1 : 0.55,
+        padding: 10,
       }}
     >
-      <div className="flex items-start gap-3 mb-2">
-        {/* Avatar */}
+      {/* Header row */}
+      <div className="flex items-start gap-2 mb-1">
         <div
           style={{
-            width: 36,
-            height: 36,
+            width: 28,
+            height: 28,
             borderRadius: "50%",
+            flexShrink: 0,
             background: student?.avatar_url
               ? `url(${student.avatar_url}) center/cover`
               : "rgba(140,140,130,0.18)",
-            flexShrink: 0,
           }}
         />
-
         <div className="flex-1 min-w-0">
           <div
-            className="flex items-center gap-2 flex-wrap"
-            style={{ fontSize: 14 }}
+            className="flex items-center gap-1.5 flex-wrap"
+            style={{ fontSize: 13 }}
           >
             <strong
+              className="truncate"
               style={{
                 color: "var(--color-text-primary)",
                 fontWeight: 600,
@@ -564,137 +652,92 @@ function TaskCard({
             >
               {student?.name ?? "—"}
             </strong>
-            {student?.discord_username ? (
-              <span
-                style={{
-                  fontSize: 11,
-                  padding: "2px 8px",
-                  borderRadius: 4,
-                  background: "rgba(88,101,242,0.14)",
-                  color: "#7d8be8",
-                  fontFamily:
-                    "ui-monospace, SFMono-Regular, Menlo, monospace",
-                  fontWeight: 600,
-                }}
-              >
-                @{student.discord_username}
-              </span>
-            ) : (
-              <span
-                style={{
-                  fontSize: 11,
-                  padding: "2px 8px",
-                  borderRadius: 4,
-                  background: "rgba(212,162,76,0.10)",
-                  color: "var(--color-warning)",
-                  fontWeight: 500,
-                }}
-              >
-                Discord ⚠ not connected
-              </span>
-            )}
             {dayNumber !== null && (
               <span
                 style={{
-                  fontSize: 12,
+                  fontSize: 11,
                   color: "var(--color-text-tertiary)",
                 }}
               >
-                Day {dayNumber}
+                · Day {dayNumber}
               </span>
             )}
+          </div>
+          {student?.discord_username ? (
             <span
               style={{
-                fontSize: 11,
-                padding: "2px 8px",
+                fontSize: 10,
+                padding: "1px 6px",
                 borderRadius: 4,
-                background:
-                  student?.membership_status === "canceled"
-                    ? "rgba(200,74,74,0.12)"
-                    : "rgba(70,180,120,0.12)",
-                color:
-                  student?.membership_status === "canceled"
-                    ? "var(--color-danger)"
-                    : "#5bb88e",
-                textTransform: "capitalize",
+                background: "rgba(88,101,242,0.14)",
+                color: "#7d8be8",
+                fontFamily:
+                  "ui-monospace, SFMono-Regular, Menlo, monospace",
+                fontWeight: 600,
+                display: "inline-block",
+                marginTop: 2,
               }}
             >
-              {student?.membership_status ?? "—"}
+              @{student.discord_username}
             </span>
-          </div>
-
-          {/* Bucket + scenario title */}
-          <div
-            className="flex items-center gap-2 mt-1"
-            style={{ fontSize: 13 }}
-          >
-            <span style={{ color: bucketColor, fontSize: 14 }}>{glyph}</span>
+          ) : (
             <span
               style={{
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                fontSize: 11,
-                color: "var(--color-text-tertiary)",
-              }}
-            >
-              {row.scenario_id}
-            </span>
-            <span
-              style={{
-                color: "var(--color-text-secondary)",
+                fontSize: 10,
+                padding: "1px 6px",
+                borderRadius: 4,
+                background: "rgba(212,162,76,0.10)",
+                color: "var(--color-warning)",
                 fontWeight: 500,
+                display: "inline-block",
+                marginTop: 2,
               }}
             >
-              {template?.title ?? "(template not found)"}
+              Discord ⚠ not connected
             </span>
-            {template &&
-              BUCKET_LABEL[template.bucket] && (
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: "var(--color-text-tertiary)",
-                  }}
-                >
-                  · {BUCKET_LABEL[template.bucket]}
-                </span>
-              )}
-          </div>
+          )}
         </div>
       </div>
 
-      {/* Behavior summary */}
-      {row.behavior_summary && (
-        <div
-          className="mb-2 p-2 rounded"
+      {/* Scenario title */}
+      <div
+        className="flex items-baseline gap-2 mt-2"
+        style={{ fontSize: 12 }}
+      >
+        <span style={{ color: bucketColor, fontSize: 13 }}>{glyph}</span>
+        <span
           style={{
-            background: "var(--color-bg-primary)",
-            border: "1px solid var(--color-border)",
-            fontSize: 12,
+            color: "var(--color-text-secondary)",
+            fontWeight: 500,
+            lineHeight: 1.35,
+          }}
+        >
+          {template?.title ?? "(template not found)"}
+        </span>
+      </div>
+
+      {/* Behavior summary */}
+      {!compact && row.behavior_summary && (
+        <p
+          className="mt-1.5"
+          style={{
+            fontSize: 11,
             color: "var(--color-text-secondary)",
             lineHeight: 1.45,
           }}
         >
-          <span
-            style={{
-              fontSize: 10,
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-              color: "var(--color-text-tertiary)",
-            }}
-          >
-            Why this fired
-          </span>
-          <div style={{ marginTop: 2 }}>{row.behavior_summary}</div>
-        </div>
+          {row.behavior_summary}
+        </p>
       )}
 
-      {/* Template preview (non-admin) */}
-      {!isAdminOnly && truncated && (
+      {/* Template preview (only for To do) */}
+      {!compact && !isAdminOnly && truncated && (
         <p
           style={{
-            fontSize: 12,
+            fontSize: 11,
             color: "var(--color-text-tertiary)",
             fontStyle: "italic",
-            marginBottom: 8,
+            marginTop: 6,
           }}
         >
           “{truncated}”
@@ -703,13 +746,10 @@ function TaskCard({
 
       {/* Actions */}
       {row.status === "open" && (
-        <div className="flex gap-2 mt-2 flex-wrap">
+        <div className="flex gap-1.5 mt-2 flex-wrap">
           {isAdminOnly ? (
-            <a
-              href="/admin/discounts"
-              style={primaryBtnStyle()}
-            >
-              Open discount request →
+            <a href="/admin/discounts" style={primaryBtnStyle()}>
+              Open discount →
             </a>
           ) : (
             <button
@@ -719,59 +759,60 @@ function TaskCard({
                 ...primaryBtnStyle(),
                 opacity: busy ? 0.6 : 1,
                 cursor: busy ? "wait" : "pointer",
+                fontSize: 11,
+                padding: "5px 9px",
               }}
             >
-              {busy ? "Copying…" : "Copy DM to clipboard"}
+              {busy ? "…" : "Copy DM"}
             </button>
           )}
-          <button onClick={onDismiss} style={ghostBtnStyle()}>
+          <button
+            onClick={onDismiss}
+            style={{ ...ghostBtnStyle(), fontSize: 11, padding: "5px 9px" }}
+          >
             Dismiss
           </button>
         </div>
       )}
 
       {row.status === "completed" && (
-        <p style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>
-          Closed{" "}
-          {row.completed_at
-            ? new Date(row.completed_at).toLocaleString()
-            : ""}
+        <p
+          style={{
+            fontSize: 10,
+            color: "var(--color-text-tertiary)",
+            marginTop: 6,
+          }}
+        >
+          Sent {relTime(row.completed_at)}
         </p>
       )}
       {row.status === "dismissed" && (
-        <p style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>
-          Dismissed{" "}
-          {row.dismissed_at
-            ? new Date(row.dismissed_at).toLocaleString()
-            : ""}
-          {row.notes ? ` — ${row.notes}` : ""}
+        <p
+          style={{
+            fontSize: 10,
+            color: "var(--color-text-tertiary)",
+            marginTop: 6,
+          }}
+          title={row.notes ?? ""}
+        >
+          Dismissed {relTime(row.dismissed_at)}
+          {row.notes ? ` — ${row.notes.slice(0, 60)}` : ""}
         </p>
       )}
     </div>
   );
 }
 
-function EmptyState({ filter }: { filter: StatusFilter }) {
-  return (
-    <div
-      className="p-12 text-center rounded"
-      style={{
-        background: "var(--color-bg-elevated)",
-        border: "1px solid var(--color-border)",
-        color: "var(--color-text-tertiary)",
-      }}
-    >
-      <div style={{ fontSize: 32, marginBottom: 8 }}>🌱</div>
-      <p style={{ fontSize: 14 }}>
-        {filter === "open"
-          ? "No open tasks. All students are on track."
-          : `No ${filter} tasks.`}
-      </p>
-      <p style={{ fontSize: 12, marginTop: 4 }}>
-        Check back after the next cron run (09:15 UTC daily).
-      </p>
-    </div>
-  );
+function relTime(iso: string | null): string {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60_000) return "just now";
+  const min = Math.floor(diff / 60_000);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  return `${day}d ago`;
 }
 
 function selectStyle(): React.CSSProperties {

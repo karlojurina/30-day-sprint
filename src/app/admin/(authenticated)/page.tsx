@@ -229,21 +229,12 @@ export default function AdminDashboard() {
             href="/admin/tasks"
             label="Open task queue"
             sublabel={
-              data.openTasks != null
-                ? `${data.openTasks} open${data.openTasks === 1 ? "" : ""}`
-                : "Astrid's CSM queue"
+              data.openTasks > 0
+                ? `${data.openTasks} waiting in To do`
+                : "All caught up"
             }
-            badge={
-              data.openTasks && data.openTasks > 0
-                ? data.openTasks
-                : undefined
-            }
+            badge={data.openTasks > 0 ? data.openTasks : undefined}
             badgeTone="warm"
-          />
-          <ListLink
-            href="/admin/kanban"
-            label="Open Kanban"
-            sublabel="Sweep students by cohort"
           />
           <ListLink
             href="/admin/discounts"

@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import type { Student, DisengagementAlert } from "@/types/database";
-import { getDayNumber } from "@/types/database";
+import type { Student } from "@/types/database";
 import {
   TOTAL_LESSONS,
   progressPercent,
@@ -18,16 +17,13 @@ interface DashboardData {
   avgProgress: number;
   canceledThisMonth: number;
   pendingDiscounts: number;
-  activeAlerts: number;
+  openTasks: number;
   monthTwoConversionRate: number | null;
   monthTwoCohortSize: number;
 }
 
 export default function AdminDashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
-  const [recentAlerts, setRecentAlerts] = useState<
-    (DisengagementAlert & { student: Student })[]
-  >([]);
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
 
@@ -42,8 +38,7 @@ export default function AdminDashboard() {
         completionsRes,
         lessonsRes,
         discountsRes,
-        alertsRes,
-        recentAlertsRes,
+        tasksRes,
       ] = await Promise.all([
         supabase
           .from("students")
@@ -54,16 +49,7 @@ export default function AdminDashboard() {
         supabase.from("student_lesson_completions").select("student_id"),
         supabase.from("lessons").select("id", { count: "exact", head: true }),
         supabase.from("discount_requests").select("id").eq("status", "pending"),
-        supabase
-          .from("disengagement_alerts")
-          .select("id")
-          .eq("is_dismissed", false),
-        supabase
-          .from("disengagement_alerts")
-          .select("*, student:students(*)")
-          .eq("is_dismissed", false)
-          .order("created_at", { ascending: false })
-          .limit(5),
+        supabase.from("tasks").select("id").eq("status", "open"),
       ]);
 
       const students = (studentsRes.data || []) as Student[];
@@ -117,15 +103,11 @@ export default function AdminDashboard() {
         avgProgress,
         canceledThisMonth,
         pendingDiscounts: discountsRes.data?.length || 0,
-        activeAlerts: alertsRes.data?.length || 0,
+        openTasks: tasksRes.data?.length || 0,
         monthTwoConversionRate,
         monthTwoCohortSize: matureCohort.length,
       });
 
-      setRecentAlerts(
-        (recentAlertsRes.data as (DisengagementAlert & { student: Student })[]) ||
-          []
-      );
       setLoading(false);
     }
 
@@ -244,6 +226,21 @@ export default function AdminDashboard() {
           }}
         >
           <ListLink
+            href="/admin/tasks"
+            label="Open task queue"
+            sublabel={
+              data.openTasks != null
+                ? `${data.openTasks} open${data.openTasks === 1 ? "" : ""}`
+                : "Astrid's CSM queue"
+            }
+            badge={
+              data.openTasks && data.openTasks > 0
+                ? data.openTasks
+                : undefined
+            }
+            badgeTone="warm"
+          />
+          <ListLink
             href="/admin/kanban"
             label="Open Kanban"
             sublabel="Sweep students by cohort"
@@ -255,108 +252,7 @@ export default function AdminDashboard() {
             badge={data.pendingDiscounts > 0 ? data.pendingDiscounts : undefined}
             badgeTone="warm"
           />
-          <ListLink
-            href="/admin/alerts"
-            label="Active alerts"
-            sublabel={`${data.activeAlerts} unaddressed`}
-            badge={data.activeAlerts > 0 ? data.activeAlerts : undefined}
-            badgeTone="danger"
-          />
         </div>
-      </section>
-
-      {/* Recent alerts — same Settings list pattern */}
-      <section>
-        <div
-          className="flex items-baseline justify-between"
-          style={{ marginBottom: 12 }}
-        >
-          <p className="section-label">Recent alerts</p>
-          <Link
-            href="/admin/alerts"
-            style={{
-              fontSize: 13,
-              color: "var(--color-accent-dark)",
-              textDecoration: "none",
-              letterSpacing: "-0.005em",
-            }}
-          >
-            View all →
-          </Link>
-        </div>
-        {recentAlerts.length === 0 ? (
-          <div
-            className="surface-resting"
-            style={{
-              background: "var(--color-bg-card)",
-              borderRadius: 12,
-              padding: 32,
-              textAlign: "center",
-              fontSize: 14,
-              color: "var(--color-text-secondary)",
-            }}
-          >
-            No active alerts. All students are on track.
-          </div>
-        ) : (
-          <div
-            className="surface-resting"
-            style={{
-              background: "var(--color-bg-card)",
-              borderRadius: 12,
-              overflow: "hidden",
-            }}
-          >
-            {recentAlerts.map((alert) => (
-              <Link
-                key={alert.id}
-                href={`/admin/students/${alert.student_id}`}
-                className="list-row"
-                style={{
-                  textDecoration: "none",
-                  padding: "12px 16px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                }}
-              >
-                <div>
-                  <p
-                    style={{
-                      fontSize: 14,
-                      fontWeight: 500,
-                      color: "var(--color-text-primary)",
-                      letterSpacing: "-0.011em",
-                    }}
-                  >
-                    {alert.student?.name || "Unknown"}
-                  </p>
-                  <p
-                    style={{
-                      fontSize: 12,
-                      color: "var(--color-text-secondary)",
-                      marginTop: 1,
-                    }}
-                  >
-                    {alert.message}
-                  </p>
-                </div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: "var(--color-text-tertiary)",
-                    fontVariantNumeric: "tabular-nums",
-                  }}
-                >
-                  Day{" "}
-                  {alert.student
-                    ? getDayNumber(alert.student.joined_at)
-                    : "?"}
-                </span>
-              </Link>
-            ))}
-          </div>
-        )}
       </section>
     </div>
   );

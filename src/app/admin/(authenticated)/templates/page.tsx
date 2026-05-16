@@ -15,13 +15,22 @@ import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase-browser";
 import type { Template } from "@/types/database";
-import {
-  BUCKET_GLYPH,
-  BUCKET_LABEL,
-  renderTemplate,
-} from "@/lib/templates";
+import { BUCKET_GLYPH, renderTemplate } from "@/lib/templates";
 
 const WEEK_ORDER = ["D1", "W1", "W2", "W3", "W4", "X"];
+
+/**
+ * Friendlier labels for the internal week buckets. Karlo's not thinking
+ * in days anymore (templates speak region/task language, not day numbers).
+ */
+const GROUP_LABEL: Record<string, string> = {
+  D1: "Onboarding (manual DM)",
+  W1: "Foundation region",
+  W2: "Strategy region",
+  W3: "Production region",
+  W4: "Scale region",
+  X: "Other",
+};
 
 function weekRank(w: string | null): number {
   if (!w) return 99;
@@ -182,9 +191,8 @@ export default function AdminTemplatesPage() {
           marginBottom: 24,
         }}
       >
-        The 20 Discord DMs Astrid sends + the 1 admin-only scenario (W2.6).
-        Edits land in the <code>templates</code> table and the next task copy
-        uses the new text immediately.
+        Every Discord DM the team can send. Edits save immediately and the
+        next task copies the updated text.
       </p>
 
       {!canEdit && (
@@ -229,11 +237,7 @@ export default function AdminTemplatesPage() {
                 marginBottom: 8,
               }}
             >
-              {weekKey === "D1"
-                ? "Day 1 SOP"
-                : weekKey === "X"
-                  ? "Cross-week"
-                  : `Week ${weekKey.replace("W", "")}`}
+              {GROUP_LABEL[weekKey] ?? weekKey}
             </h2>
 
             <div className="flex flex-col gap-2">
@@ -261,7 +265,6 @@ export default function AdminTemplatesPage() {
                     })
                   : null;
                 const glyph = BUCKET_GLYPH[t.bucket] ?? "·";
-                const bucketLabel = BUCKET_LABEL[t.bucket] ?? t.bucket;
 
                 return (
                   <div
@@ -286,18 +289,7 @@ export default function AdminTemplatesPage() {
                       }}
                     >
                       <span
-                        style={{
-                          fontFamily:
-                            "ui-monospace, SFMono-Regular, Menlo, monospace",
-                          fontSize: 11,
-                          color: "var(--color-text-tertiary)",
-                          minWidth: 48,
-                        }}
-                      >
-                        {t.scenario_id}
-                      </span>
-                      <span
-                        title={bucketLabel}
+                        title={t.bucket}
                         style={{
                           fontSize: 14,
                           color:
@@ -365,98 +357,50 @@ export default function AdminTemplatesPage() {
                         className="px-4 pb-4"
                         style={{ borderTop: "1px solid var(--color-border)" }}
                       >
-                        {/* Read-only meta */}
-                        <div
-                          className="mt-3 mb-4 grid grid-cols-2 gap-3 text-xs"
-                          style={{ color: "var(--color-text-tertiary)" }}
-                        >
-                          <div>
-                            <strong>Bucket:</strong>{" "}
-                            <span style={{ color: "var(--color-text-secondary)" }}>
-                              {bucketLabel} ({t.bucket})
-                            </span>
-                          </div>
-                          <div>
-                            <strong>Week:</strong>{" "}
-                            <span style={{ color: "var(--color-text-secondary)" }}>
-                              {t.week ?? "(none)"}
-                            </span>
-                          </div>
-                          <div>
-                            <strong>Variables:</strong>{" "}
-                            <span
-                              style={{
-                                color: "var(--color-text-secondary)",
-                                fontFamily:
-                                  "ui-monospace, SFMono-Regular, Menlo, monospace",
-                              }}
-                            >
-                              {Array.isArray(t.variables) && t.variables.length > 0
-                                ? t.variables.map((v) => `{${v}}`).join(" · ")
-                                : "(none)"}
-                            </span>
-                          </div>
-                          <div>
-                            <strong>Word count:</strong>{" "}
-                            <span style={{ color: "var(--color-text-secondary)" }}>
-                              {t.word_count ?? "—"}
-                            </span>
-                          </div>
-                        </div>
-
                         {/* Editable fields */}
-                        <Field label="Title">
-                          <input
-                            type="text"
-                            disabled={!canEdit}
-                            value={draft.title}
-                            onChange={(e) =>
-                              updateDraft(t.id, "title", e.target.value)
-                            }
-                            style={fieldStyle()}
-                          />
-                        </Field>
-                        <Field label="Trigger">
-                          <textarea
-                            disabled={!canEdit}
-                            rows={2}
-                            value={draft.trigger_description}
-                            onChange={(e) =>
-                              updateDraft(
-                                t.id,
-                                "trigger_description",
-                                e.target.value,
-                              )
-                            }
-                            style={fieldStyle()}
-                          />
-                        </Field>
-                        <Field label="Intent">
-                          <textarea
-                            disabled={!canEdit}
-                            rows={2}
-                            value={draft.intent}
-                            onChange={(e) =>
-                              updateDraft(t.id, "intent", e.target.value)
-                            }
-                            style={fieldStyle()}
-                          />
-                        </Field>
-                        <Field label="Tone">
-                          <input
-                            type="text"
-                            disabled={!canEdit}
-                            value={draft.tone}
-                            onChange={(e) =>
-                              updateDraft(t.id, "tone", e.target.value)
-                            }
-                            style={fieldStyle()}
-                          />
-                        </Field>
+                        <div style={{ marginTop: 14 }}>
+                          <Field label="Title">
+                            <input
+                              type="text"
+                              disabled={!canEdit}
+                              value={draft.title}
+                              onChange={(e) =>
+                                updateDraft(t.id, "title", e.target.value)
+                              }
+                              style={fieldStyle()}
+                            />
+                          </Field>
+                          <Field label="When this fires (trigger)">
+                            <textarea
+                              disabled={!canEdit}
+                              rows={2}
+                              value={draft.trigger_description}
+                              onChange={(e) =>
+                                updateDraft(
+                                  t.id,
+                                  "trigger_description",
+                                  e.target.value,
+                                )
+                              }
+                              style={fieldStyle()}
+                            />
+                          </Field>
+                          <Field label="Intent (what the DM is trying to do)">
+                            <textarea
+                              disabled={!canEdit}
+                              rows={2}
+                              value={draft.intent}
+                              onChange={(e) =>
+                                updateDraft(t.id, "intent", e.target.value)
+                              }
+                              style={fieldStyle()}
+                            />
+                          </Field>
+                        </div>
 
                         {/* Body — the actual DM */}
                         {!t.is_admin_only && (
-                          <Field label="DM body (the text Astrid copies)">
+                          <Field label="DM body">
                             <textarea
                               disabled={!canEdit}
                               rows={Math.max(8, Math.min(24, draft.body.split("\n").length + 1))}

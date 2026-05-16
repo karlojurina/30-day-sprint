@@ -35,6 +35,13 @@ const navItems: { href: string; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    href: "/admin/insights/progress",
+    label: "Insights",
+    icon: (
+      <path d="M3 3v18h18M7 14l3-3 3 3 5-5" />
+    ),
+  },
+  {
     href: "/admin/templates",
     label: "Templates",
     icon: (

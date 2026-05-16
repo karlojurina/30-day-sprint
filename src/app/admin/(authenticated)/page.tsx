@@ -10,6 +10,11 @@ import {
 } from "@/lib/constants";
 import Link from "next/link";
 
+interface ProgressPoint {
+  snapshot_date: string;
+  avg_progress: number;
+}
+
 interface DashboardData {
   totalStudents: number;
   activeStudents: number;
@@ -20,6 +25,8 @@ interface DashboardData {
   openTasks: number;
   monthTwoConversionRate: number | null;
   monthTwoCohortSize: number;
+  /** Last 14 days of nightly progress snapshots (oldest first). */
+  progressTrend: ProgressPoint[];
 }
 
 export default function AdminDashboard() {
@@ -33,12 +40,16 @@ export default function AdminDashboard() {
       const weekAgo = new Date(now - 7 * 86_400_000).toISOString();
       const thirtyDaysAgo = new Date(now - 30 * 86_400_000).toISOString();
 
+      const fourteenDaysAgo = new Date(now - 14 * 86_400_000)
+        .toISOString()
+        .slice(0, 10);
       const [
         studentsRes,
         completionsRes,
         lessonsRes,
         discountsRes,
         tasksRes,
+        snapshotsRes,
       ] = await Promise.all([
         supabase
           .from("students")
@@ -50,6 +61,11 @@ export default function AdminDashboard() {
         supabase.from("lessons").select("id", { count: "exact", head: true }),
         supabase.from("discount_requests").select("id").eq("status", "pending"),
         supabase.from("tasks").select("id").eq("status", "open"),
+        supabase
+          .from("daily_progress_snapshots")
+          .select("snapshot_date, avg_progress")
+          .gte("snapshot_date", fourteenDaysAgo)
+          .order("snapshot_date", { ascending: true }),
       ]);
 
       const students = (studentsRes.data || []) as Student[];
@@ -96,6 +112,11 @@ export default function AdminDashboard() {
       const monthTwoConversionRate =
         matureCohort.length > 0 ? matureActive / matureCohort.length : null;
 
+      const trend = (snapshotsRes.data ?? []).map((r) => ({
+        snapshot_date: r.snapshot_date as string,
+        avg_progress: Number(r.avg_progress),
+      }));
+
       setData({
         totalStudents: students.length,
         activeStudents: activeStudents.length,
@@ -106,6 +127,7 @@ export default function AdminDashboard() {
         openTasks: tasksRes.data?.length || 0,
         monthTwoConversionRate,
         monthTwoCohortSize: matureCohort.length,
+        progressTrend: trend,
       });
 
       setLoading(false);
@@ -203,7 +225,10 @@ export default function AdminDashboard() {
             value={data.joinedThisWeek}
             accent="success"
           />
-          <SmallStat label="Avg progress" value={`${data.avgProgress}%`} />
+          <AvgProgressTile
+            avgProgress={data.avgProgress}
+            trend={data.progressTrend}
+          />
           <SmallStat
             label="Churned 30d"
             value={data.canceledThisMonth}
@@ -449,3 +474,137 @@ function ListLink({
     </Link>
   );
 }
+
+/**
+ * Sparkline tile for average progress — clicks through to the full
+ * /admin/insights/progress detail page. Shows the last 14 days of
+ * nightly snapshots as a small line.
+ */
+function AvgProgressTile({
+  avgProgress,
+  trend,
+}: {
+  avgProgress: number;
+  trend: ProgressPoint[];
+}) {
+  const w = 88;
+  const h = 28;
+  const pad = 2;
+  const last = trend[trend.length - 1];
+  const first = trend[0];
+  const delta =
+    first && last ? Math.round(last.avg_progress - first.avg_progress) : null;
+  return (
+    <Link
+      href="/admin/insights/progress"
+      className="surface-resting transition-colors"
+      style={{
+        background: "var(--color-bg-card)",
+        borderRadius: 10,
+        padding: "12px 16px",
+        textDecoration: "none",
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+        cursor: "pointer",
+      }}
+      title="Open avg-progress trend"
+    >
+      <p
+        style={{
+          fontSize: 11,
+          fontWeight: 500,
+          color: "var(--color-text-tertiary)",
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+        }}
+      >
+        Avg progress
+      </p>
+      <div className="flex items-baseline justify-between gap-3">
+        <p
+          style={{
+            fontSize: 18,
+            fontWeight: 600,
+            color: "var(--color-text-primary)",
+            fontVariantNumeric: "tabular-nums",
+            letterSpacing: "-0.018em",
+            lineHeight: 1.05,
+          }}
+        >
+          {avgProgress}%
+        </p>
+        <Sparkline points={trend} width={w} height={h} pad={pad} />
+      </div>
+      {delta !== null && (
+        <p
+          style={{
+            fontSize: 11,
+            color:
+              delta > 0
+                ? "var(--color-success)"
+                : delta < 0
+                  ? "var(--color-danger)"
+                  : "var(--color-text-tertiary)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {delta > 0 ? "↑ " : delta < 0 ? "↓ " : "→ "}
+          {Math.abs(delta)}% vs {trend.length}d ago
+        </p>
+      )}
+    </Link>
+  );
+}
+
+function Sparkline({
+  points,
+  width,
+  height,
+  pad,
+}: {
+  points: ProgressPoint[];
+  width: number;
+  height: number;
+  pad: number;
+}) {
+  if (points.length < 2) {
+    return (
+      <span
+        style={{
+          fontSize: 10,
+          color: "var(--color-text-tertiary)",
+          fontStyle: "italic",
+        }}
+      >
+        not enough data
+      </span>
+    );
+  }
+  const ys = points.map((p) => p.avg_progress);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const range = Math.max(1, maxY - minY);
+  const stepX = (width - pad * 2) / Math.max(1, points.length - 1);
+  const coords = points.map((p, i) => {
+    const x = pad + i * stepX;
+    const y = height - pad - ((p.avg_progress - minY) / range) * (height - pad * 2);
+    return [x, y] as const;
+  });
+  const path = coords
+    .map(([x, y], i) => (i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`))
+    .join(" ");
+  return (
+    <svg width={width} height={height} aria-hidden="true">
+      <path
+        d={path}
+        fill="none"
+        stroke="var(--color-accent-dark)"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+

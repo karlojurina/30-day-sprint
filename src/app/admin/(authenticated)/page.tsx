@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import type { Student } from "@/types/database";
 import {
@@ -10,9 +10,12 @@ import {
 } from "@/lib/constants";
 import Link from "next/link";
 
-interface ProgressPoint {
+interface MetricPoint {
   snapshot_date: string;
   avg_progress: number;
+  active_count: number;
+  joined_count: number;
+  churned_count: number;
 }
 
 interface DashboardData {
@@ -25,17 +28,22 @@ interface DashboardData {
   openTasks: number;
   monthTwoConversionRate: number | null;
   monthTwoCohortSize: number;
-  /** Last 14 days of nightly progress snapshots (oldest first). */
-  progressTrend: ProgressPoint[];
+  /** Last 14 days of nightly snapshots (oldest first) — feeds the sparkline tiles. */
+  trend: MetricPoint[];
 }
 
 export default function AdminDashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const supabase = createClient();
 
-  useEffect(() => {
-    async function fetchDashboard() {
+  const fetchDashboard = useCallback(
+    async (silent = false) => {
+      if (silent) setRefreshing(true);
+      else setLoading(true);
+
       const now = Date.now();
       const weekAgo = new Date(now - 7 * 86_400_000).toISOString();
       const thirtyDaysAgo = new Date(now - 30 * 86_400_000).toISOString();
@@ -63,7 +71,9 @@ export default function AdminDashboard() {
         supabase.from("tasks").select("id").eq("status", "open"),
         supabase
           .from("daily_progress_snapshots")
-          .select("snapshot_date, avg_progress")
+          .select(
+            "snapshot_date, avg_progress, active_count, joined_count, churned_count",
+          )
           .gte("snapshot_date", fourteenDaysAgo)
           .order("snapshot_date", { ascending: true }),
       ]);
@@ -81,14 +91,14 @@ export default function AdminDashboard() {
       }
 
       const activeStudents = students.filter(
-        (s) => s.membership_status === "active"
+        (s) => s.membership_status === "active",
       );
       const joinedThisWeek = students.filter(
-        (s) => s.joined_at >= weekAgo
+        (s) => s.joined_at >= weekAgo,
       ).length;
       const canceledThisMonth = students.filter(
         (s) =>
-          s.membership_status === "canceled" && s.updated_at >= thirtyDaysAgo
+          s.membership_status === "canceled" && s.updated_at >= thirtyDaysAgo,
       ).length;
 
       const avgProgress =
@@ -98,16 +108,16 @@ export default function AdminDashboard() {
                 (sum, s) =>
                   sum +
                   progressPercent(completionMap[s.id] || 0, totalLessons),
-                0
-              ) / activeStudents.length
+                0,
+              ) / activeStudents.length,
             )
           : 0;
 
       const matureCohort = students.filter(
-        (s) => s.joined_at <= thirtyDaysAgo
+        (s) => s.joined_at <= thirtyDaysAgo,
       );
       const matureActive = matureCohort.filter(
-        (s) => s.membership_status === "active"
+        (s) => s.membership_status === "active",
       ).length;
       const monthTwoConversionRate =
         matureCohort.length > 0 ? matureActive / matureCohort.length : null;
@@ -115,6 +125,9 @@ export default function AdminDashboard() {
       const trend = (snapshotsRes.data ?? []).map((r) => ({
         snapshot_date: r.snapshot_date as string,
         avg_progress: Number(r.avg_progress),
+        active_count: Number(r.active_count ?? 0),
+        joined_count: Number(r.joined_count ?? 0),
+        churned_count: Number(r.churned_count ?? 0),
       }));
 
       setData({
@@ -127,14 +140,19 @@ export default function AdminDashboard() {
         openTasks: tasksRes.data?.length || 0,
         monthTwoConversionRate,
         monthTwoCohortSize: matureCohort.length,
-        progressTrend: trend,
+        trend,
       });
 
+      setLastRefreshed(new Date());
       setLoading(false);
-    }
+      setRefreshing(false);
+    },
+    [supabase],
+  );
 
-    fetchDashboard();
-  }, [supabase]);
+  useEffect(() => {
+    void fetchDashboard(false);
+  }, [fetchDashboard]);
 
   if (loading || !data) {
     return (
@@ -158,28 +176,64 @@ export default function AdminDashboard() {
       style={{ maxWidth: 1180, margin: "0 auto" }}
     >
       {/* Page header */}
-      <header style={{ marginBottom: 48 }}>
-        <h1
-          style={{
-            fontSize: 32,
-            fontWeight: 600,
-            letterSpacing: "-0.025em",
-            color: "var(--color-text-primary)",
-            lineHeight: 1.15,
-          }}
-        >
-          Dashboard
-        </h1>
-        <p
-          style={{
-            fontSize: 15,
-            color: "var(--color-text-secondary)",
-            marginTop: 4,
-            letterSpacing: "-0.006em",
-          }}
-        >
-          The numbers that matter for the next month.
-        </p>
+      <header
+        className="flex items-start justify-between gap-4 flex-wrap"
+        style={{ marginBottom: 48 }}
+      >
+        <div>
+          <h1
+            style={{
+              fontSize: 32,
+              fontWeight: 600,
+              letterSpacing: "-0.025em",
+              color: "var(--color-text-primary)",
+              lineHeight: 1.15,
+            }}
+          >
+            Dashboard
+          </h1>
+          <p
+            style={{
+              fontSize: 15,
+              color: "var(--color-text-secondary)",
+              marginTop: 4,
+              letterSpacing: "-0.006em",
+            }}
+          >
+            The numbers that matter for the next month.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {lastRefreshed && (
+            <span
+              style={{
+                fontSize: 11,
+                color: "var(--color-text-tertiary)",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              Updated {lastRefreshed.toLocaleTimeString()}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => void fetchDashboard(true)}
+            disabled={refreshing}
+            style={{
+              padding: "8px 14px",
+              fontSize: 12,
+              fontWeight: 600,
+              borderRadius: 8,
+              background: "var(--color-bg-elevated)",
+              border: "1px solid var(--color-border)",
+              color: "var(--color-text-primary)",
+              cursor: refreshing ? "wait" : "pointer",
+              opacity: refreshing ? 0.6 : 1,
+            }}
+          >
+            {refreshing ? "Refreshing…" : "↻ Refresh"}
+          </button>
+        </div>
       </header>
 
       {/* Hero KPIs — the two we steer on */}
@@ -210,33 +264,49 @@ export default function AdminDashboard() {
         />
       </section>
 
-      {/* Supporting stats */}
+      {/* Supporting stats — four sparkline tiles. Click any → Insights. */}
       <section style={{ marginBottom: 48 }}>
         <p className="section-label" style={{ marginBottom: 12 }}>
-          This week
+          Trends · last 14 days
         </p>
         <div
           className="grid grid-cols-2 lg:grid-cols-4"
           style={{ gap: 12 }}
         >
-          <SmallStat
+          <SparklineTile
             label="Active on platform"
-            value={data.activeStudents}
-            sublabel="Sprint signups, post-launch"
+            current={data.activeStudents}
+            metric="active_count"
+            mode="running"
+            trend={data.trend}
+            color="#5bb88e"
           />
-          <SmallStat
-            label="Joined this week"
-            value={data.joinedThisWeek}
-            accent="success"
+          <SparklineTile
+            label="Joined"
+            current={data.trend.reduce((s, p) => s + p.joined_count, 0)}
+            currentSuffix=" / 14d"
+            metric="joined_count"
+            mode="flow"
+            trend={data.trend}
+            color="#7d8be8"
           />
-          <AvgProgressTile
-            avgProgress={data.avgProgress}
-            trend={data.progressTrend}
+          <SparklineTile
+            label="Churned"
+            current={data.trend.reduce((s, p) => s + p.churned_count, 0)}
+            currentSuffix=" / 14d"
+            metric="churned_count"
+            mode="flow"
+            trend={data.trend}
+            color="var(--color-danger)"
           />
-          <SmallStat
-            label="Churned 30d"
-            value={data.canceledThisMonth}
-            accent="danger"
+          <SparklineTile
+            label="Avg progress"
+            current={data.avgProgress}
+            currentSuffix="%"
+            metric="avg_progress"
+            mode="running"
+            trend={data.trend}
+            color="var(--color-accent-dark)"
           />
         </div>
       </section>
@@ -493,24 +563,39 @@ function ListLink({
 }
 
 /**
- * Sparkline tile for average progress — clicks through to the full
- * /admin/insights/progress detail page. Shows the last 14 days of
- * nightly snapshots as a small line.
+ * Sparkline tile shown on the dashboard for each daily-snapshot
+ * metric. Clicks through to /admin/insights/progress.
+ *
+ *   metric    — column key in MetricPoint to chart
+ *   mode      — "running" draws a line (good for active count / avg %);
+ *               "flow"    draws bars (good for joined/churned per day)
+ *   current   — big number shown on the left
+ *   color     — stroke / bar color
  */
-function AvgProgressTile({
-  avgProgress,
+function SparklineTile({
+  label,
+  current,
+  currentSuffix,
+  metric,
+  mode,
   trend,
+  color,
 }: {
-  avgProgress: number;
-  trend: ProgressPoint[];
+  label: string;
+  current: number;
+  currentSuffix?: string;
+  metric: "avg_progress" | "active_count" | "joined_count" | "churned_count";
+  mode: "running" | "flow";
+  trend: MetricPoint[];
+  color: string;
 }) {
-  const w = 88;
-  const h = 28;
-  const pad = 2;
-  const last = trend[trend.length - 1];
-  const first = trend[0];
+  const points = trend.map((p) => p[metric] as number);
+  const last = points[points.length - 1];
+  const first = points[0];
   const delta =
-    first && last ? Math.round(last.avg_progress - first.avg_progress) : null;
+    mode === "running" && first != null && last != null
+      ? Math.round((last - first) * 10) / 10
+      : null;
   return (
     <Link
       href="/admin/insights/progress"
@@ -525,7 +610,6 @@ function AvgProgressTile({
         gap: 4,
         cursor: "pointer",
       }}
-      title="Open avg-progress trend"
     >
       <p
         style={{
@@ -536,7 +620,7 @@ function AvgProgressTile({
           letterSpacing: "0.04em",
         }}
       >
-        Avg progress
+        {label}
       </p>
       <div className="flex items-baseline justify-between gap-3">
         <p
@@ -549,9 +633,10 @@ function AvgProgressTile({
             lineHeight: 1.05,
           }}
         >
-          {avgProgress}%
+          {current}
+          {currentSuffix ?? ""}
         </p>
-        <Sparkline points={trend} width={w} height={h} pad={pad} />
+        <SparklineSVG points={points} mode={mode} color={color} />
       </div>
       {delta !== null && (
         <p
@@ -559,32 +644,38 @@ function AvgProgressTile({
             fontSize: 11,
             color:
               delta > 0
-                ? "var(--color-success)"
-                : delta < 0
+                ? metric === "churned_count"
                   ? "var(--color-danger)"
+                  : "var(--color-success)"
+                : delta < 0
+                  ? metric === "churned_count"
+                    ? "var(--color-success)"
+                    : "var(--color-danger)"
                   : "var(--color-text-tertiary)",
             fontVariantNumeric: "tabular-nums",
           }}
         >
           {delta > 0 ? "↑ " : delta < 0 ? "↓ " : "→ "}
-          {Math.abs(delta)}% vs {trend.length}d ago
+          {Math.abs(delta)}
+          {metric === "avg_progress" ? "%" : ""} vs 14d ago
         </p>
       )}
     </Link>
   );
 }
 
-function Sparkline({
+function SparklineSVG({
   points,
-  width,
-  height,
-  pad,
+  mode,
+  color,
 }: {
-  points: ProgressPoint[];
-  width: number;
-  height: number;
-  pad: number;
+  points: number[];
+  mode: "running" | "flow";
+  color: string;
 }) {
+  const W = 88;
+  const H = 28;
+  const PAD = 2;
   if (points.length < 2) {
     return (
       <span
@@ -594,29 +685,55 @@ function Sparkline({
           fontStyle: "italic",
         }}
       >
-        not enough data
+        no data yet
       </span>
     );
   }
-  const ys = points.map((p) => p.avg_progress);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
+  const minY = Math.min(...points);
+  const maxY = Math.max(...points);
   const range = Math.max(1, maxY - minY);
-  const stepX = (width - pad * 2) / Math.max(1, points.length - 1);
-  const coords = points.map((p, i) => {
-    const x = pad + i * stepX;
-    const y = height - pad - ((p.avg_progress - minY) / range) * (height - pad * 2);
-    return [x, y] as const;
-  });
-  const path = coords
-    .map(([x, y], i) => (i === 0 ? `M ${x} ${y}` : `L ${x} ${y}`))
+  const stepX = (W - PAD * 2) / Math.max(1, points.length - 1);
+  const ys = points.map(
+    (v) => H - PAD - ((v - minY) / range) * (H - PAD * 2),
+  );
+
+  if (mode === "flow") {
+    // Bar mode for joined/churned per day. Baseline = bottom of svg.
+    const bw = Math.max(1, stepX * 0.7);
+    const baseline = H - PAD;
+    return (
+      <svg width={W} height={H} aria-hidden="true">
+        {points.map((v, i) => {
+          const x = PAD + i * stepX;
+          const yTop = ys[i];
+          const h = Math.max(0, baseline - yTop);
+          if (v === 0) return null;
+          return (
+            <rect
+              key={i}
+              x={x - bw / 2}
+              y={yTop}
+              width={bw}
+              height={h}
+              fill={color}
+              opacity={0.7}
+            />
+          );
+        })}
+      </svg>
+    );
+  }
+
+  // Running mode = line
+  const path = points
+    .map((_, i) => `${i === 0 ? "M" : "L"} ${PAD + i * stepX} ${ys[i]}`)
     .join(" ");
   return (
-    <svg width={width} height={height} aria-hidden="true">
+    <svg width={W} height={H} aria-hidden="true">
       <path
         d={path}
         fill="none"
-        stroke="var(--color-accent-dark)"
+        stroke={color}
         strokeWidth={1.5}
         strokeLinecap="round"
         strokeLinejoin="round"

@@ -37,10 +37,10 @@ export const DISCOUNT_GATE_LESSON_ID = "l049";
 export const DISCOUNT_WINDOW_DAYS = 14;
 
 // Hard cutoff for admin list views — only show students who joined
-// on or after this date. Pre-cutoff records are pre-May-2026 test
-// accounts and old free-community joiners we don't want in the team's
-// daily working surface.
-export const ADMIN_STUDENT_JOIN_CUTOFF = "2026-05-01T00:00:00.000Z";
+// on or after this date. Karlo moved this from 2026-05-01 → 2026-01-01
+// on 2026-05-16 so the full year-to-date EcomTalent cohort shows up
+// in the admin surface.
+export const ADMIN_STUDENT_JOIN_CUTOFF = "2026-01-01T00:00:00.000Z";
 
 // The "editing breakdowns" group: 9 R2 lessons that collapse into a
 // single map node. The student opens the group and chooses Watch or

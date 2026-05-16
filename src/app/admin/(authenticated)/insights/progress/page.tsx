@@ -226,22 +226,121 @@ export default function ProgressInsightsPage() {
       ) : points.length === 0 ? (
         <EmptyHint />
       ) : (
-        <div
-          className="grid gap-4"
-          style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}
-        >
-          {(Object.keys(METRICS) as MetricKey[]).map((key) => (
-            <MetricCard
-              key={key}
-              def={METRICS[key]}
-              points={points}
-              valueKey={key}
-              summary={summary?.[key]}
-            />
-          ))}
-        </div>
+        <>
+          <div
+            className="grid gap-4"
+            style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}
+          >
+            {(Object.keys(METRICS) as MetricKey[]).map((key) => (
+              <MetricCard
+                key={key}
+                def={METRICS[key]}
+                points={points}
+                valueKey={key}
+                summary={summary?.[key]}
+              />
+            ))}
+          </div>
+
+          <CalcTransparency />
+        </>
       )}
     </div>
+  );
+}
+
+/**
+ * Explains exactly what each chart is measuring + the caveats Karlo
+ * should know about. Mirrors the comments in the v31–v33 migrations.
+ */
+function CalcTransparency() {
+  return (
+    <details
+      className="surface-resting mt-6"
+      style={{
+        background: "var(--color-bg-card)",
+        borderRadius: 12,
+        padding: 16,
+        border: "1px solid var(--color-border)",
+      }}
+    >
+      <summary
+        style={{
+          fontSize: 13,
+          fontWeight: 600,
+          color: "var(--color-text-primary)",
+          cursor: "pointer",
+        }}
+      >
+        How are these numbers calculated?
+      </summary>
+      <div
+        style={{
+          marginTop: 12,
+          fontSize: 12,
+          color: "var(--color-text-secondary)",
+          lineHeight: 1.6,
+        }}
+      >
+        <p className="mb-3">
+          One row is written into{" "}
+          <code style={{ color: "var(--color-text-primary)" }}>
+            daily_progress_snapshots
+          </code>{" "}
+          every night at <strong>00:30 UTC</strong>. The cron uses the same
+          formulas the dashboard tiles use:
+        </p>
+        <ul
+          style={{
+            paddingLeft: 16,
+            marginBottom: 12,
+            listStyle: "disc",
+          }}
+        >
+          <li>
+            <strong style={{ color: "var(--color-text-primary)" }}>
+              Avg progress
+            </strong>{" "}
+            = total lessons completed by active students ÷ (active count ×
+            total lessons in the curriculum) × 100. Active students =
+            membership_status = &lsquo;active&rsquo;.
+          </li>
+          <li>
+            <strong style={{ color: "var(--color-text-primary)" }}>
+              Active students
+            </strong>{" "}
+            = count of students with{" "}
+            <code style={{ color: "var(--color-text-primary)" }}>
+              membership_status = &lsquo;active&rsquo;
+            </code>{" "}
+            and joined_at on or before this day. Restricted to the admin
+            cutoff (currently <strong>2026-01-01</strong>).
+          </li>
+          <li>
+            <strong style={{ color: "var(--color-text-primary)" }}>
+              Joined
+            </strong>{" "}
+            = students whose <code>joined_at::date</code> equals this day.
+          </li>
+          <li>
+            <strong style={{ color: "var(--color-text-primary)" }}>
+              Churned
+            </strong>{" "}
+            = students with status &lsquo;canceled&rsquo; whose{" "}
+            <code>updated_at::date</code> equals this day. This is the
+            best proxy without a status-change audit log —{" "}
+            <code>updated_at</code> also fires on other column changes, so
+            the count can be slightly noisy.
+          </li>
+        </ul>
+        <p>
+          The first 14 days were backfilled at install (migrations v31 +
+          v32) and everything since Jan 1 was backfilled by v33. From the
+          install date forward, the cron writes the canonical row each
+          night and never overwrites a manually-edited one.
+        </p>
+      </div>
+    </details>
   );
 }
 
@@ -500,15 +599,22 @@ function Chart({
         </>
       )}
 
-      {/* X-axis: first / mid / last */}
-      {[
-        { i: 0, anchor: "start" as const },
-        {
-          i: Math.floor((series.length - 1) / 2),
-          anchor: "middle" as const,
-        },
-        { i: series.length - 1, anchor: "end" as const },
-      ].map((x) => {
+      {/* X-axis: first / mid / last (dedupe when series is tiny so the
+          labels don't pile on top of each other) */}
+      {(() => {
+        const lastIdx = series.length - 1;
+        const midIdx = Math.floor(lastIdx / 2);
+        const unique = Array.from(new Set([0, midIdx, lastIdx]));
+        const slots: Array<{ i: number; anchor: "start" | "middle" | "end" }> =
+          [];
+        for (let k = 0; k < unique.length; k++) {
+          const i = unique[k];
+          const anchor: "start" | "middle" | "end" =
+            i === 0 ? "start" : i === lastIdx ? "end" : "middle";
+          slots.push({ i, anchor });
+        }
+        return slots;
+      })().map((x) => {
         const px = PAD + x.i * stepX;
         return (
           <text

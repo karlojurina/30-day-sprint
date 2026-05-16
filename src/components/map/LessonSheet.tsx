@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useStudent } from "@/contexts/StudentContext";
 import { LESSON_TYPE_LABELS, LESSON_GROUPS } from "@/lib/constants";
 import { useFocusTrap } from "@/lib/useFocusTrap";
@@ -49,6 +49,7 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
   const {
     lessons,
     regions,
+    completions,
     completedLessonIds,
     watchedLessonIds,
     actionShippedLessonIds,
@@ -57,6 +58,7 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
     discountRequest,
     toggleLesson,
     toggleLessonAction,
+    saveDiscordLink,
     skipLesson,
     requestDiscount,
   } = useStudent();
@@ -160,6 +162,14 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
   const isFullyCompleted = completedLessonIds.has(lesson.id);
   const isWatched = watchedLessonIds.has(lesson.id);
   const isShipped = actionShippedLessonIds.has(lesson.id);
+  // Pure action lessons (l049 "Action Item: Static Ads") are marked
+  // complete via the single "Mark complete" button. Compound lessons
+  // (l018/l020/l022/l024) need the "shipped" half. Either way, the
+  // Discord link block appears once the action has been recorded.
+  const isActionType = lesson.type === "action";
+  const actionRecorded = isCompound ? isShipped : isActionType && isFullyCompleted;
+  const completionRow = completions.find((c) => c.lesson_id === lesson.id);
+  const savedDiscordLink = completionRow?.discord_message_link ?? null;
 
   // Discount gate special case
   const isGate = lesson.is_gate === true;
@@ -699,10 +709,227 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                 </button>
               )}
             </div>
+
+            {/* Discord message link capture — shown for compound or pure
+                action lessons after the action half is recorded. The link
+                surfaces on the admin student card and on the discount
+                review queue so the team doesn't have to scroll #ad-review. */}
+            {(isCompound || isActionType) && actionRecorded && (
+              <DiscordLinkBlock
+                lessonId={lesson.id}
+                savedLink={savedDiscordLink}
+                onSave={(link) => saveDiscordLink(lesson.id, link)}
+              />
+            )}
           </div>
         </div>
       </div>
     </>
+  );
+}
+
+/**
+ * Inline form letting the student paste the Discord #ad-review message
+ * link after they shipped their ad. See lovro-brief/04-link-capture.md.
+ */
+function DiscordLinkBlock({
+  lessonId,
+  savedLink,
+  onSave,
+}: {
+  lessonId: string;
+  savedLink: string | null;
+  onSave: (link: string | null) => Promise<string | null>;
+}) {
+  const [editing, setEditing] = useState(!savedLink);
+  const [draft, setDraft] = useState(savedLink ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+
+  // Reset when lesson changes
+  useEffect(() => {
+    setDraft(savedLink ?? "");
+    setEditing(!savedLink);
+    setError(null);
+  }, [lessonId, savedLink]);
+
+  const saved = savedLink != null && savedLink.length > 0;
+
+  async function handleSave() {
+    setError(null);
+    setSaving(true);
+    const trimmed = draft.trim();
+    const result = await onSave(trimmed.length === 0 ? null : trimmed);
+    setSaving(false);
+    if (result) {
+      setError(result);
+    } else {
+      setEditing(false);
+    }
+  }
+
+  return (
+    <div
+      style={{
+        padding: 16,
+        borderRadius: 12,
+        background: "var(--color-fill-secondary)",
+        marginTop: 4,
+      }}
+    >
+      <p className="section-label" style={{ marginBottom: 6 }}>
+        Discord submission link
+      </p>
+
+      {saved && !editing ? (
+        <div className="flex items-center gap-2 flex-wrap">
+          <a
+            href={savedLink ?? "#"}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              color: "var(--color-gold-light)",
+              fontSize: 13,
+              fontWeight: 500,
+              textDecoration: "underline",
+              wordBreak: "break-all",
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            ✓ Link saved · open in Discord
+          </a>
+          <button
+            onClick={() => {
+              setEditing(true);
+              setDraft(savedLink ?? "");
+            }}
+            style={{
+              fontSize: 12,
+              padding: "6px 12px",
+              background: "transparent",
+              border: "1px solid var(--color-border-hover)",
+              borderRadius: 6,
+              color: "var(--color-text-secondary)",
+              cursor: "pointer",
+            }}
+          >
+            Edit link
+          </button>
+        </div>
+      ) : (
+        <>
+          <p
+            style={{
+              fontSize: 12,
+              color: "var(--color-text-secondary)",
+              marginBottom: 8,
+              lineHeight: 1.4,
+            }}
+          >
+            Paste the link to your message in #ad-review so the team can
+            find your submission without scrolling.{" "}
+            <button
+              onClick={() => setShowHelp((s) => !s)}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                color: "var(--color-gold-light)",
+                fontSize: 12,
+                cursor: "pointer",
+                textDecoration: "underline",
+              }}
+            >
+              {showHelp ? "Hide steps" : "How do I get the link?"}
+            </button>
+          </p>
+          {showHelp && (
+            <ol
+              style={{
+                margin: "0 0 8px 16px",
+                padding: 0,
+                fontSize: 12,
+                color: "var(--color-text-secondary)",
+                lineHeight: 1.55,
+              }}
+            >
+              <li>Right-click (or long-press on mobile) your message in #ad-review</li>
+              <li>Click &quot;Copy Message Link&quot;</li>
+              <li>Paste it below and hit Save</li>
+            </ol>
+          )}
+          <div className="flex gap-2 flex-wrap">
+            <input
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="https://discord.com/channels/…"
+              style={{
+                flex: 1,
+                minWidth: 200,
+                padding: "8px 10px",
+                fontSize: 12.5,
+                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                background: "var(--color-bg-primary)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 6,
+                color: "var(--color-text-primary)",
+              }}
+            />
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              style={{
+                padding: "8px 14px",
+                fontSize: 13,
+                fontWeight: 600,
+                borderRadius: 6,
+                background: "var(--color-gold)",
+                border: "none",
+                color: "var(--color-bg-primary)",
+                cursor: saving ? "wait" : "pointer",
+                opacity: saving ? 0.6 : 1,
+              }}
+            >
+              {saving ? "Saving…" : "Save link"}
+            </button>
+            {saved && editing && (
+              <button
+                onClick={() => {
+                  setDraft(savedLink ?? "");
+                  setEditing(false);
+                  setError(null);
+                }}
+                style={{
+                  padding: "8px 12px",
+                  fontSize: 12,
+                  background: "transparent",
+                  border: "1px solid var(--color-border-hover)",
+                  borderRadius: 6,
+                  color: "var(--color-text-tertiary)",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+          {error && (
+            <p
+              style={{
+                marginTop: 8,
+                fontSize: 12,
+                color: "var(--color-danger, #c84a4a)",
+              }}
+            >
+              {error}
+            </p>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 

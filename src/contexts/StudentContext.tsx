@@ -84,6 +84,12 @@ interface StudentContextType {
   toggleLesson: (lessonId: string) => Promise<void>;
   /** For compound lessons: toggle the manual "shipped" half independent of watch state */
   toggleLessonAction: (lessonId: string) => Promise<void>;
+  /**
+   * Save the Discord message link the student pastes after shipping an
+   * action-item ad to #ad-review. Pass `null` (or empty string) to clear.
+   * Resolves to a friendly error message string if the API rejects it.
+   */
+  saveDiscordLink: (lessonId: string, link: string | null) => Promise<string | null>;
   /** Mark a grouped/optional lesson as skipped (or un-skip if it's already skipped) */
   skipLesson: (lessonId: string) => Promise<void>;
   submitQuiz: (
@@ -467,6 +473,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           completed_at: new Date().toISOString(),
           action_completed_at: null,
           skipped_at: null,
+          discord_message_link: null,
         };
         setCompletions((prev) => [...prev, optimistic]);
       }
@@ -551,6 +558,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
             completed_at: null,
             action_completed_at: optimisticTimestamp,
             skipped_at: null,
+            discord_message_link: null,
           },
         ];
       });
@@ -604,6 +612,63 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     [student, actionShippedLessonIds]
   );
 
+  /**
+   * Save (or clear) the Discord message link the student pasted on an
+   * action-item lesson sheet. Returns null on success, or an error
+   * string on failure so the calling UI can surface it.
+   */
+  const saveDiscordLink = useCallback(
+    async (lessonId: string, link: string | null): Promise<string | null> => {
+      if (!student) return "Not signed in";
+      const token = await getAccessToken();
+      if (!token) return "Not signed in";
+
+      const normalized = link && link.trim().length > 0 ? link.trim() : null;
+
+      // Optimistic update
+      setCompletions((prev) =>
+        prev.map((c) =>
+          c.lesson_id === lessonId
+            ? { ...c, discord_message_link: normalized }
+            : c,
+        ),
+      );
+
+      const res = await fetch("/api/student/save-action-link", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ lessonId, link: normalized }),
+      });
+
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        // Revert by refetching to be safe.
+        const dataRes = await fetch("/api/student/data", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (dataRes.ok) {
+          const data = await dataRes.json();
+          setCompletions(data.completions ?? []);
+        }
+        return typeof body.error === "string"
+          ? body.error
+          : `Save failed (${res.status})`;
+      }
+
+      const { completion } = await res.json();
+      if (completion) {
+        setCompletions((prev) =>
+          prev.map((c) => (c.lesson_id === lessonId ? completion : c)),
+        );
+      }
+      return null;
+    },
+    [student],
+  );
+
   const skipLesson = useCallback(
     async (lessonId: string) => {
       if (!student) return;
@@ -626,6 +691,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           completed_at: null,
           action_completed_at: null,
           skipped_at: new Date().toISOString(),
+          discord_message_link: null,
         };
         setCompletions((prev) => [...prev, optimistic]);
       }
@@ -824,6 +890,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         discountAllLessonsDone,
         toggleLesson,
         toggleLessonAction,
+        saveDiscordLink,
         skipLesson,
         submitQuiz,
         requestDiscount,

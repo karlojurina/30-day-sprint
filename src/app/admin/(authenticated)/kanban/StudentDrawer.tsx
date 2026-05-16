@@ -308,6 +308,14 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
               </div>
             </section>
 
+            {/* Action-item submissions — Discord links the student
+                pasted on each action lesson. Lets Astrid verify shipping
+                without scrolling #ad-review. */}
+            <ActionSubmissionsSection
+              lessons={lessons}
+              completions={completions}
+            />
+
             {/* Discount + verification */}
             <section
               className="surface-resting"
@@ -448,5 +456,130 @@ function Stat({
         {value}
       </p>
     </div>
+  );
+}
+
+/**
+ * Shows every action-item lesson the student has interacted with,
+ * the ship state, and the Discord message link they pasted on each
+ * (if any). Astrid uses this to verify submissions inline before
+ * ticking ad_submissions_verified.
+ */
+function ActionSubmissionsSection({
+  lessons,
+  completions,
+}: {
+  lessons: Lesson[];
+  completions: StudentLessonCompletion[];
+}) {
+  const actionLessons = useMemo(
+    () =>
+      lessons
+        .filter((l) => l.requires_action || l.type === "action")
+        .sort(
+          (a, b) => a.day - b.day || a.sort_order - b.sort_order,
+        ),
+    [lessons],
+  );
+  const compById = useMemo(() => {
+    const m = new Map<string, StudentLessonCompletion>();
+    for (const c of completions) m.set(c.lesson_id, c);
+    return m;
+  }, [completions]);
+
+  if (actionLessons.length === 0) return null;
+
+  return (
+    <section
+      className="surface-resting"
+      style={{
+        background: "var(--color-bg-card)",
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 24,
+      }}
+    >
+      <p className="section-label" style={{ marginBottom: 10 }}>
+        Action-item submissions
+      </p>
+      <div className="flex flex-col gap-2">
+        {actionLessons.map((lesson) => {
+          const c = compById.get(lesson.id);
+          const shipped = Boolean(c?.action_completed_at) || Boolean(c?.completed_at && lesson.type === "action");
+          const link = c?.discord_message_link ?? null;
+          return (
+            <div
+              key={lesson.id}
+              className="flex items-center gap-2"
+              style={{ fontSize: 12.5 }}
+            >
+              <span
+                style={{
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                  color: "var(--color-text-tertiary)",
+                  minWidth: 36,
+                }}
+              >
+                {lesson.id}
+              </span>
+              <span
+                style={{
+                  flex: 1,
+                  color: shipped
+                    ? "var(--color-text-primary)"
+                    : "var(--color-text-tertiary)",
+                }}
+              >
+                {lesson.title}
+              </span>
+              <span
+                style={{
+                  fontSize: 11,
+                  color: shipped
+                    ? "var(--color-accent-dark)"
+                    : "var(--color-text-tertiary)",
+                  fontWeight: shipped ? 600 : 400,
+                  minWidth: 64,
+                  textAlign: "right",
+                }}
+              >
+                {shipped ? "shipped" : "—"}
+              </span>
+              {link ? (
+                <a
+                  href={link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontSize: 11,
+                    padding: "3px 8px",
+                    borderRadius: 4,
+                    background: "rgba(88,101,242,0.12)",
+                    color: "#7d8be8",
+                    textDecoration: "none",
+                    fontWeight: 600,
+                  }}
+                  title={link}
+                >
+                  🔗 Discord
+                </a>
+              ) : shipped ? (
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--color-text-tertiary)",
+                    fontStyle: "italic",
+                  }}
+                >
+                  no link
+                </span>
+              ) : (
+                <span style={{ width: 64 }} />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }

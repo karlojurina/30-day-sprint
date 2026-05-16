@@ -132,6 +132,14 @@ export interface StudentLessonCompletion {
    * but it's flagged so the journal/workshop can show it differently.
    */
   skipped_at: string | null;
+  /**
+   * Discord message URL the student pastes after shipping an action item
+   * to #ad-review. Only meaningful for action-item lessons (l018, l020,
+   * l022, l024, l049). Format:
+   *   https://discord.com/channels/<guild>/<channel>/<message>
+   * Validated by the DB CHECK constraint added in v28.
+   */
+  discord_message_link: string | null;
 }
 
 export interface DailyNote {

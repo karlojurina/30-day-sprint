@@ -2,12 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import type { DiscountRequest, Student } from "@/types/database";
+import type {
+  DiscountRequest,
+  Student,
+  StudentLessonCompletion,
+  Lesson,
+} from "@/types/database";
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
 
 type RequestWithStudent = DiscountRequest & { student: Student };
 type FilterValue = "pending" | "approved" | "applied" | "rejected" | "all";
+
+interface ActionSubmission {
+  lessonId: string;
+  title: string;
+  shipped: boolean;
+  link: string | null;
+}
 
 export default function DiscountsPage() {
   const [requests, setRequests] = useState<RequestWithStudent[]>([]);
@@ -15,6 +27,12 @@ export default function DiscountsPage() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  // Per-student action submissions (lesson_id → link). Only fetched
+  // for students whose request is currently rendered, so we don't pull
+  // the whole completions table on every visit.
+  const [submissionsByStudent, setSubmissionsByStudent] = useState<
+    Record<string, ActionSubmission[]>
+  >({});
   const supabase = createClient();
   const { teamMember } = useAuth();
 
@@ -35,8 +53,55 @@ export default function DiscountsPage() {
     }
 
     const { data } = await query;
-    setRequests((data as RequestWithStudent[]) || []);
+    const rows = (data as RequestWithStudent[]) || [];
+    setRequests(rows);
     setLoading(false);
+
+    // Bulk-fetch action submissions for these students.
+    const studentIds = rows.map((r) => r.student_id).filter(Boolean);
+    if (studentIds.length > 0) {
+      const [lessonsRes, completionsRes] = await Promise.all([
+        supabase
+          .from("lessons")
+          .select("id, title, requires_action, type")
+          .or("requires_action.eq.true,type.eq.action"),
+        supabase
+          .from("student_lesson_completions")
+          .select("student_id, lesson_id, completed_at, action_completed_at, discord_message_link")
+          .in("student_id", studentIds),
+      ]);
+      const actionLessons = (lessonsRes.data ?? []) as Array<
+        Pick<Lesson, "id" | "title" | "requires_action" | "type">
+      >;
+      const allComps = (completionsRes.data ?? []) as Array<
+        Pick<
+          StudentLessonCompletion,
+          "student_id" | "lesson_id" | "completed_at" | "action_completed_at" | "discord_message_link"
+        >
+      >;
+      const map: Record<string, ActionSubmission[]> = {};
+      for (const sid of studentIds) map[sid] = [];
+      for (const lesson of actionLessons) {
+        for (const sid of studentIds) {
+          const c = allComps.find(
+            (x) => x.student_id === sid && x.lesson_id === lesson.id,
+          );
+          const shipped = lesson.requires_action
+            ? Boolean(c?.action_completed_at)
+            : Boolean(c?.completed_at);
+          if (!c && !shipped) continue;
+          map[sid].push({
+            lessonId: lesson.id,
+            title: lesson.title,
+            shipped,
+            link: c?.discord_message_link ?? null,
+          });
+        }
+      }
+      setSubmissionsByStudent(map);
+    } else {
+      setSubmissionsByStudent({});
+    }
   }
 
   async function handleApprove(requestId: string) {
@@ -332,6 +397,98 @@ export default function DiscountsPage() {
                   Reason: {req.rejection_reason}
                 </p>
               )}
+
+              {req.status === "pending" &&
+                (submissionsByStudent[req.student_id]?.length ?? 0) > 0 && (
+                  <div
+                    style={{
+                      padding: 10,
+                      borderRadius: 8,
+                      background: "var(--color-fill-secondary)",
+                      marginBottom: 8,
+                    }}
+                  >
+                    <p
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                        color: "var(--color-text-tertiary)",
+                        marginBottom: 6,
+                      }}
+                    >
+                      Action submissions
+                    </p>
+                    <div className="flex flex-col gap-1">
+                      {submissionsByStudent[req.student_id]!.map((s) => (
+                        <div
+                          key={s.lessonId}
+                          className="flex items-center gap-2"
+                          style={{ fontSize: 12 }}
+                        >
+                          <span
+                            style={{
+                              fontFamily:
+                                "ui-monospace, SFMono-Regular, Menlo, monospace",
+                              color: "var(--color-text-tertiary)",
+                              minWidth: 36,
+                            }}
+                          >
+                            {s.lessonId}
+                          </span>
+                          <span
+                            style={{
+                              flex: 1,
+                              color: s.shipped
+                                ? "var(--color-text-primary)"
+                                : "var(--color-text-tertiary)",
+                            }}
+                          >
+                            {s.title}
+                          </span>
+                          {s.link ? (
+                            <a
+                              href={s.link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              style={{
+                                fontSize: 11,
+                                padding: "2px 8px",
+                                borderRadius: 4,
+                                background: "rgba(88,101,242,0.12)",
+                                color: "#7d8be8",
+                                textDecoration: "none",
+                                fontWeight: 600,
+                              }}
+                            >
+                              🔗 link
+                            </a>
+                          ) : s.shipped ? (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                color: "var(--color-text-tertiary)",
+                                fontStyle: "italic",
+                              }}
+                            >
+                              no link
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                fontSize: 11,
+                                color: "var(--color-text-tertiary)",
+                              }}
+                            >
+                              not shipped
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
               {req.status === "pending" && (
                 <div className="flex gap-2">

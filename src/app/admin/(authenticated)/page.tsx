@@ -250,10 +250,10 @@ export default function AdminDashboard() {
           }
           sublabel={
             data.monthTwoConversionRate == null
-              ? "No cohort past 30 days yet"
+              ? "No platform cohort past 30 days yet"
               : `${Math.round(
                   (data.monthTwoConversionRate ?? 0) * data.monthTwoCohortSize
-                )} of ${data.monthTwoCohortSize} active`
+                )} of ${data.monthTwoCohortSize} platform signups past day 30 still active. Whop-wide churn not yet counted.`
           }
           accent
         />

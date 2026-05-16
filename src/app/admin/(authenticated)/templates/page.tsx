@@ -19,7 +19,11 @@ import type {
   TemplateBucket,
   TriggerConfig,
 } from "@/types/database";
-import { BUCKET_GLYPH, renderTemplate } from "@/lib/templates";
+import {
+  BUCKET_GLYPH,
+  renderTemplate,
+  stripBucketGlyph,
+} from "@/lib/templates";
 import { TriggerBuilder } from "@/components/admin/TriggerBuilder";
 
 const WEEK_ORDER = ["D1", "W1", "W2", "W3", "W4", "X", "CUSTOM"];
@@ -65,36 +69,16 @@ interface DraftFields {
 
 const EMPTY_TRIGGER: TriggerConfig = { all: [] };
 
-function isDraftId(id: string): boolean {
-  return id.startsWith("new-");
-}
 
-/** Local-only draft template before it's persisted. The frontend
- *  shoehorns this into the same `Template` rendering by giving it
- *  reasonable placeholder values. */
-type DraftTemplate = Template & { _draft: true };
-
-function makeDraft(): DraftTemplate {
-  const tempId = `new-${Math.random().toString(36).slice(2, 8)}`;
+function emptyDraft(): DraftFields {
   return {
-    id: tempId,
-    scenario_id: "(unsaved)",
-    bucket: "at_risk",
-    week: "X",
     title: "",
     trigger_description: "",
     intent: "",
     tone: "",
-    variables: [],
     body: "",
-    word_count: null,
-    is_active: true,
-    is_admin_only: false,
-    is_custom: true,
+    bucket: "at_risk",
     trigger_config: { all: [] },
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
-    _draft: true,
   };
 }
 
@@ -109,6 +93,10 @@ export default function AdminTemplatesPage() {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // "New custom template" modal state.
+  const [newModalOpen, setNewModalOpen] = useState(false);
+  const [newDraft, setNewDraft] = useState<DraftFields>(emptyDraft());
+  const [creating, setCreating] = useState(false);
 
   const canEdit =
     teamMember?.role === "founder" || teamMember?.role === "admin";
@@ -148,34 +136,75 @@ export default function AdminTemplatesPage() {
     setLoading(false);
   }
 
-  /** Create a fresh draft template and slot it into the list. */
+  /** Open the New Custom Template modal with a fresh draft. */
   function startNewTemplate() {
-    const draft = makeDraft();
-    setRows((prev) => [draft, ...prev]);
-    setDrafts((prev) => ({
-      ...prev,
-      [draft.id]: {
-        title: "",
-        trigger_description: "",
-        intent: "",
-        tone: "",
-        body: "",
-        bucket: "at_risk",
-        trigger_config: { all: [] },
-      },
-    }));
-    setExpanded(draft.id);
+    setNewDraft(emptyDraft());
+    setNewModalOpen(true);
+    setError(null);
   }
 
-  /** Discard a draft that hasn't been saved yet. */
-  function cancelDraft(id: string) {
-    setRows((prev) => prev.filter((r) => r.id !== id));
-    setDrafts((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    setExpanded((cur) => (cur === id ? null : cur));
+  function closeNewTemplate() {
+    setNewModalOpen(false);
+    setNewDraft(emptyDraft());
+  }
+
+  async function createTemplate() {
+    setError(null);
+    if (!newDraft.title.trim()) {
+      setError("Add a title before saving.");
+      return;
+    }
+    if (!newDraft.body.trim()) {
+      setError("Add the DM body before saving.");
+      return;
+    }
+    if (newDraft.trigger_config.all.length === 0) {
+      setError("Add at least one trigger condition.");
+      return;
+    }
+    setCreating(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/admin/templates", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          title: newDraft.title,
+          intent: newDraft.intent,
+          trigger_description: "",
+          body: newDraft.body,
+          bucket: newDraft.bucket,
+          trigger_config: newDraft.trigger_config,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      const { template } = await res.json();
+      setRows((prev) => [template, ...prev]);
+      setDrafts((prev) => ({
+        ...prev,
+        [template.id]: {
+          title: template.title,
+          trigger_description: template.trigger_description,
+          intent: template.intent ?? "",
+          tone: template.tone ?? "",
+          body: template.body,
+          bucket: template.bucket,
+          trigger_config: template.trigger_config ?? EMPTY_TRIGGER,
+        },
+      }));
+      setExpanded(template.id);
+      closeNewTemplate();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setCreating(false);
   }
 
   async function deleteTemplate(id: string) {
@@ -214,13 +243,6 @@ export default function AdminTemplatesPage() {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       const draft = drafts[id];
-      const isNew = isDraftId(id);
-      const url = isNew
-        ? "/api/admin/templates"
-        : `/api/admin/templates/${id}`;
-      const method = isNew ? "POST" : "PUT";
-      // Built-in templates can't change bucket / trigger_config — strip
-      // those fields from the PUT body when the row isn't custom.
       const existing = rows.find((r) => r.id === id);
       const payload: Record<string, unknown> = {
         title: draft.title,
@@ -229,12 +251,13 @@ export default function AdminTemplatesPage() {
         tone: draft.tone,
         body: draft.body,
       };
-      if (isNew || (existing && existing.is_custom)) {
+      // Built-ins can't change bucket / trigger_config; customs can.
+      if (existing?.is_custom) {
         payload.bucket = draft.bucket;
         payload.trigger_config = draft.trigger_config;
       }
-      const res = await fetch(url, {
-        method,
+      const res = await fetch(`/api/admin/templates/${id}`, {
+        method: "PUT",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
@@ -246,27 +269,7 @@ export default function AdminTemplatesPage() {
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
       const { template } = await res.json();
-      if (isNew) {
-        // Swap the draft row out for the persisted one.
-        setRows((prev) => prev.map((r) => (r.id === id ? template : r)));
-        setDrafts((prev) => {
-          const next = { ...prev };
-          delete next[id];
-          next[template.id] = {
-            title: template.title,
-            trigger_description: template.trigger_description,
-            intent: template.intent ?? "",
-            tone: template.tone ?? "",
-            body: template.body,
-            bucket: template.bucket,
-            trigger_config: template.trigger_config ?? EMPTY_TRIGGER,
-          };
-          return next;
-        });
-        setExpanded(template.id);
-      } else {
-        setRows((prev) => prev.map((r) => (r.id === id ? template : r)));
-      }
+      setRows((prev) => prev.map((r) => (r.id === id ? template : r)));
       setSavedId(template.id);
       setTimeout(
         () => setSavedId((cur) => (cur === template.id ? null : cur)),
@@ -290,7 +293,6 @@ export default function AdminTemplatesPage() {
   }
 
   function isDirty(t: Template): boolean {
-    if (isDraftId(t.id)) return true; // always dirty until saved
     const d = drafts[t.id];
     if (!d) return false;
     const baseDirty =
@@ -502,7 +504,7 @@ export default function AdminTemplatesPage() {
                           color: "var(--color-text-primary)",
                         }}
                       >
-                        {t.title}
+                        {stripBucketGlyph(t.title)}
                       </span>
                       {t.is_admin_only && (
                         <span
@@ -680,7 +682,7 @@ export default function AdminTemplatesPage() {
                             >
                               {isPreview ? "Hide preview" : "Show preview"}
                             </button>
-                            {t.is_custom && !isDraftId(t.id) && (
+                            {t.is_custom && (
                               <button
                                 type="button"
                                 disabled={!canEdit || saving === t.id}
@@ -696,15 +698,6 @@ export default function AdminTemplatesPage() {
                               </button>
                             )}
                             <div className="flex-1" />
-                            {isDraftId(t.id) && (
-                              <button
-                                type="button"
-                                onClick={() => cancelDraft(t.id)}
-                                style={ghostBtnStyle()}
-                              >
-                                Cancel
-                              </button>
-                            )}
                             <button
                               type="button"
                               disabled={!canEdit || !dirty || saving === t.id}
@@ -725,9 +718,7 @@ export default function AdminTemplatesPage() {
                                 ? "Saving…"
                                 : savedId === t.id
                                   ? "Saved ✓"
-                                  : isDraftId(t.id)
-                                    ? "Create template"
-                                    : "Save"}
+                                  : "Save"}
                             </button>
                           </div>
                         )}
@@ -782,6 +773,17 @@ export default function AdminTemplatesPage() {
           </section>
         ))}
       </div>
+
+      {newModalOpen && (
+        <NewTemplateModal
+          draft={newDraft}
+          onChange={setNewDraft}
+          onClose={closeNewTemplate}
+          onCreate={() => void createTemplate()}
+          creating={creating}
+          error={error}
+        />
+      )}
     </div>
   );
 }
@@ -851,5 +853,183 @@ function ghostBtnStyle(): React.CSSProperties {
     color: "var(--color-text-secondary)",
     cursor: "pointer",
   };
+}
+
+/* ──────────────────────── New Template Modal ──────────────────────── */
+
+function NewTemplateModal({
+  draft,
+  onChange,
+  onClose,
+  onCreate,
+  creating,
+  error,
+}: {
+  draft: DraftFields;
+  onChange: (next: DraftFields) => void;
+  onClose: () => void;
+  onCreate: () => void;
+  creating: boolean;
+  error: string | null;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="new-template-title"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 100,
+        background: "rgba(0, 0, 0, 0.55)",
+        backdropFilter: "blur(8px)",
+        WebkitBackdropFilter: "blur(8px)",
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "center",
+        padding: 32,
+        overflowY: "auto",
+      }}
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 720,
+          background: "var(--color-bg-card)",
+          border: "1px solid var(--color-border-hover)",
+          borderRadius: 14,
+          boxShadow: "0 24px 60px rgba(0,0,0,0.45)",
+          padding: 24,
+        }}
+      >
+        <header
+          className="flex items-baseline justify-between"
+          style={{
+            paddingBottom: 12,
+            borderBottom: "1px solid var(--color-border)",
+            marginBottom: 14,
+          }}
+        >
+          <h2
+            id="new-template-title"
+            style={{
+              fontSize: 18,
+              fontWeight: 600,
+              color: "var(--color-text-primary)",
+              letterSpacing: "-0.018em",
+            }}
+          >
+            New custom template
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              fontSize: 22,
+              color: "var(--color-text-tertiary)",
+              padding: 0,
+              width: 28,
+              height: 28,
+              lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </header>
+
+        <Field label="Title">
+          <input
+            type="text"
+            value={draft.title}
+            onChange={(e) => onChange({ ...draft, title: e.target.value })}
+            placeholder='e.g. "Push to start when day 5 hits with nothing watched"'
+            style={fieldStyle()}
+            autoFocus
+          />
+        </Field>
+        <Field label="Bucket (what kind of moment this is)">
+          <select
+            value={draft.bucket}
+            onChange={(e) =>
+              onChange({ ...draft, bucket: e.target.value as TemplateBucket })
+            }
+            style={fieldStyle()}
+          >
+            {BUCKET_OPTIONS.map((b) => (
+              <option key={b.value} value={b.value}>
+                {b.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <div style={{ marginBottom: 12 }}>
+          <TriggerBuilder
+            value={draft.trigger_config}
+            onChange={(next) => onChange({ ...draft, trigger_config: next })}
+          />
+        </div>
+        <Field label="Intent (what the DM is trying to do — optional)">
+          <textarea
+            rows={2}
+            value={draft.intent}
+            onChange={(e) => onChange({ ...draft, intent: e.target.value })}
+            style={fieldStyle()}
+          />
+        </Field>
+        <Field label="DM body">
+          <textarea
+            rows={Math.max(6, Math.min(18, draft.body.split("\n").length + 2))}
+            value={draft.body}
+            onChange={(e) => onChange({ ...draft, body: e.target.value })}
+            placeholder={"Hey {firstName}!\n\n…"}
+            style={{
+              ...fieldStyle(),
+              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+              fontSize: 13,
+              lineHeight: 1.55,
+            }}
+          />
+        </Field>
+
+        {error && (
+          <div
+            className="mt-2 mb-3 p-3 rounded"
+            style={{
+              background: "rgba(200,74,74,0.10)",
+              border: "1px solid rgba(200,74,74,0.30)",
+              fontSize: 13,
+              color: "var(--color-danger)",
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 mt-4">
+          <button type="button" onClick={onClose} style={ghostBtnStyle()}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onCreate}
+            disabled={creating}
+            style={{
+              ...primaryBtnStyle(),
+              opacity: creating ? 0.6 : 1,
+              cursor: creating ? "wait" : "pointer",
+            }}
+          >
+            {creating ? "Creating…" : "Create template"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 

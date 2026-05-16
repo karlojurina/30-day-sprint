@@ -122,6 +122,18 @@ export async function loadAdminConfig(
   return map;
 }
 
+/**
+ * Strip a leading bucket-style glyph (and the whitespace after it)
+ * from a template title. The Templates page + Task Kanban render the
+ * bucket icon in its own column, so a glyph embedded in the title
+ * shows up twice. Built-in titles were seeded with the prefix in v27;
+ * migration v35 cleans the DB but we keep this defense for any rows
+ * that still have it OR for titles users hand-type with an emoji.
+ */
+export function stripBucketGlyph(title: string): string {
+  return title.replace(/^[★✓⚠✗⚡⚙🔁]\s*/u, "");
+}
+
 /** Truthy IDs for the bucket prefix glyphs used in the UI. */
 export const BUCKET_GLYPH: Record<string, string> = {
   crushing: "★",

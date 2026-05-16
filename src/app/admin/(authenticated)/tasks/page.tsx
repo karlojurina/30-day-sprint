@@ -25,6 +25,7 @@ import { getDayNumber } from "@/types/database";
 import {
   BUCKET_GLYPH,
   BUCKET_PRIORITY,
+  stripBucketGlyph,
   loadAdminConfig,
   renderTemplate,
 } from "@/lib/templates";
@@ -613,7 +614,7 @@ function TaskCard({
             lineHeight: 1.35,
           }}
         >
-          {template?.title ?? "(template not found)"}
+          {template?.title ? stripBucketGlyph(template.title) : "(template not found)"}
         </span>
       </div>
 
@@ -834,7 +835,7 @@ function TaskDetailModal({
                 letterSpacing: "-0.012em",
               }}
             >
-              {template?.title ?? "—"}
+              {template?.title ? stripBucketGlyph(template.title) : "—"}
             </h3>
           </div>
           {template?.trigger_description && (

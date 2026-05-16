@@ -510,18 +510,27 @@ function Chart({
   }
 
   const ys = series.map((p) => p.v);
-  const minY = Math.max(0, Math.min(...ys) - 1);
-  const maxY = Math.max(...ys);
+  const minY = 0; // always anchor counts/percentages to 0 so bars + lines look right
+  const maxY = Math.max(...ys, 1); // never collapse to a zero-height chart
   const rangeY = Math.max(1, maxY - minY);
-  const stepX = (W - PAD * 2) / (series.length - 1);
+  // Line points span the full inner width (first at PAD, last at W-PAD).
+  const lineStepX = (W - PAD * 2) / Math.max(1, series.length - 1);
+  // Bar slots divide the inner width into N equal columns; each bar is
+  // centered in its slot so they never collide with the y-axis labels
+  // (which sit in the left gutter at x < PAD).
+  const slotW = (W - PAD * 2) / series.length;
+  const barW = Math.min(slotW * 0.6, 32);
 
-  const toXY = (i: number, v: number) => {
-    const x = PAD + i * stepX;
-    const y = H - PAD - ((v - minY) / rangeY) * (H - PAD * 2);
-    return { x, y };
-  };
+  const linePoint = (i: number, v: number) => ({
+    x: PAD + i * lineStepX,
+    y: H - PAD - ((v - minY) / rangeY) * (H - PAD * 2),
+  });
+  const barPoint = (i: number, v: number) => ({
+    x: PAD + (i + 0.5) * slotW - barW / 2,
+    y: H - PAD - ((v - minY) / rangeY) * (H - PAD * 2),
+  });
 
-  const pathPts = series.map((p, i) => toXY(i, p.v));
+  const pathPts = series.map((p, i) => linePoint(i, p.v));
   const linePath = pathPts
     .map((p, i) => (i === 0 ? `M ${p.x} ${p.y}` : `L ${p.x} ${p.y}`))
     .join(" ");
@@ -566,17 +575,21 @@ function Chart({
       })}
 
       {mode === "flow" ? (
-        // Bar chart for flow metrics (joined/churned per day)
+        // Bar chart for flow metrics (joined/churned per day). Each bar
+        // lives in its own slot so they never extend into the y-axis
+        // label gutter on the left.
         series.map((p, i) => {
-          const { x, y } = toXY(i, p.v);
-          const w = Math.max(1, stepX * 0.7);
+          const { x, y } = barPoint(i, p.v);
+          const h = Math.max(0, H - PAD - y);
+          if (p.v === 0) return null;
           return (
             <rect
               key={i}
-              x={x - w / 2}
+              x={x}
               y={y}
-              width={w}
-              height={H - PAD - y}
+              width={barW}
+              height={h}
+              rx={2}
               fill={color}
               opacity={0.7}
             />
@@ -615,7 +628,12 @@ function Chart({
         }
         return slots;
       })().map((x) => {
-        const px = PAD + x.i * stepX;
+        // Match the chart's coordinate system: line points are anchored
+        // at the endpoints (lineStepX), bars at the slot centers (slotW).
+        const px =
+          mode === "flow"
+            ? PAD + (x.i + 0.5) * slotW
+            : PAD + x.i * lineStepX;
         return (
           <text
             key={x.i}

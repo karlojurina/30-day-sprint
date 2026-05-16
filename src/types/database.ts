@@ -263,8 +263,80 @@ export interface Template {
   word_count: number | null;
   is_active: boolean;
   is_admin_only: boolean;
+  /** True for templates Karlo created via /admin/templates. Built-ins
+   *  (W1.1, W1.2, …, D1.A, etc.) have this set to false. */
+  is_custom: boolean;
+  /** DSL the CSM cron evaluates. Null for built-ins (hardcoded). */
+  trigger_config: TriggerConfig | null;
   created_at: string;
   updated_at: string;
+}
+
+/* ───────── Custom-trigger DSL (v34) ─────────
+ *
+ * Flat AND of conditions. The UI on /admin/templates exposes this
+ * as plain-English: "Send this DM when ALL of these are true:".
+ * If Karlo needs OR logic, the workaround is to create a second
+ * template with the alternative condition set.
+ */
+
+/** Operators presented to the user as plain-English chips. */
+export type ConditionOp =
+  | "is"          // = (number/enum) or true (boolean)
+  | "is_not"      // ≠ (number/enum) or false (boolean)
+  | "at_least"    // ≥
+  | "more_than"   // >
+  | "at_most"     // ≤
+  | "less_than";  // <
+
+export type ConditionMetric =
+  | "day_number"
+  | "total_lessons_watched"
+  | "region_lessons_watched"
+  | "region_completion_pct"
+  | "region_complete"
+  | "lesson_shipped"
+  | "lesson_watched"
+  | "days_since_last_completion"
+  | "days_since_last_login"
+  | "membership_status";
+
+/** Numeric / boolean / enum conditions all share the discriminator
+ *  but have different shapes. Keep them as one union and let the
+ *  evaluator pick based on metric type. */
+export type Condition =
+  | {
+      metric: "day_number"
+        | "total_lessons_watched"
+        | "days_since_last_completion"
+        | "days_since_last_login";
+      op: ConditionOp;
+      value: number;
+    }
+  | {
+      metric: "region_lessons_watched" | "region_completion_pct";
+      region: RegionId;
+      op: ConditionOp;
+      value: number;
+    }
+  | {
+      metric: "region_complete";
+      region: RegionId;
+      op: "is" | "is_not";
+    }
+  | {
+      metric: "lesson_shipped" | "lesson_watched";
+      lesson_id: string;
+      op: "is" | "is_not";
+    }
+  | {
+      metric: "membership_status";
+      op: "is" | "is_not";
+      value: "active" | "canceled" | "past_due" | "expired";
+    };
+
+export interface TriggerConfig {
+  all: Condition[];
 }
 
 export type TaskStatus = "open" | "completed" | "dismissed";

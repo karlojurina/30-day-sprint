@@ -14,10 +14,23 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase-browser";
-import type { Template } from "@/types/database";
+import type {
+  Template,
+  TemplateBucket,
+  TriggerConfig,
+} from "@/types/database";
 import { BUCKET_GLYPH, renderTemplate } from "@/lib/templates";
+import { TriggerBuilder } from "@/components/admin/TriggerBuilder";
 
-const WEEK_ORDER = ["D1", "W1", "W2", "W3", "W4", "X"];
+const WEEK_ORDER = ["D1", "W1", "W2", "W3", "W4", "X", "CUSTOM"];
+
+const BUCKET_OPTIONS: Array<{ value: TemplateBucket; label: string }> = [
+  { value: "crushing", label: "★ Crushing it" },
+  { value: "on_track", label: "✓ On track" },
+  { value: "at_risk", label: "⚠ At risk" },
+  { value: "cancel_path", label: "✗ Cancel path" },
+  { value: "event", label: "⚡ Event" },
+];
 
 /**
  * Friendlier labels for the internal week buckets. Karlo's not thinking
@@ -30,6 +43,7 @@ const GROUP_LABEL: Record<string, string> = {
   W3: "Production region",
   W4: "Scale region",
   X: "Other",
+  CUSTOM: "Your custom templates",
 };
 
 function weekRank(w: string | null): number {
@@ -44,6 +58,44 @@ interface DraftFields {
   intent: string;
   tone: string;
   body: string;
+  /** Only meaningful for custom templates. Built-ins ignore these two. */
+  bucket: TemplateBucket;
+  trigger_config: TriggerConfig;
+}
+
+const EMPTY_TRIGGER: TriggerConfig = { all: [] };
+
+function isDraftId(id: string): boolean {
+  return id.startsWith("new-");
+}
+
+/** Local-only draft template before it's persisted. The frontend
+ *  shoehorns this into the same `Template` rendering by giving it
+ *  reasonable placeholder values. */
+type DraftTemplate = Template & { _draft: true };
+
+function makeDraft(): DraftTemplate {
+  const tempId = `new-${Math.random().toString(36).slice(2, 8)}`;
+  return {
+    id: tempId,
+    scenario_id: "(unsaved)",
+    bucket: "at_risk",
+    week: "X",
+    title: "",
+    trigger_description: "",
+    intent: "",
+    tone: "",
+    variables: [],
+    body: "",
+    word_count: null,
+    is_active: true,
+    is_admin_only: false,
+    is_custom: true,
+    trigger_config: { all: [] },
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    _draft: true,
+  };
 }
 
 export default function AdminTemplatesPage() {
@@ -87,11 +139,72 @@ export default function AdminTemplatesPage() {
             intent: t.intent ?? "",
             tone: t.tone ?? "",
             body: t.body,
+            bucket: t.bucket,
+            trigger_config: t.trigger_config ?? EMPTY_TRIGGER,
           },
         ]),
       ),
     );
     setLoading(false);
+  }
+
+  /** Create a fresh draft template and slot it into the list. */
+  function startNewTemplate() {
+    const draft = makeDraft();
+    setRows((prev) => [draft, ...prev]);
+    setDrafts((prev) => ({
+      ...prev,
+      [draft.id]: {
+        title: "",
+        trigger_description: "",
+        intent: "",
+        tone: "",
+        body: "",
+        bucket: "at_risk",
+        trigger_config: { all: [] },
+      },
+    }));
+    setExpanded(draft.id);
+  }
+
+  /** Discard a draft that hasn't been saved yet. */
+  function cancelDraft(id: string) {
+    setRows((prev) => prev.filter((r) => r.id !== id));
+    setDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setExpanded((cur) => (cur === id ? null : cur));
+  }
+
+  async function deleteTemplate(id: string) {
+    if (!confirm("Delete this custom template? This can't be undone.")) {
+      return;
+    }
+    setSaving(id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch(`/api/admin/templates/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      setRows((prev) => prev.filter((r) => r.id !== id));
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      setExpanded((cur) => (cur === id ? null : cur));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setSaving(null);
   }
 
   async function save(id: string) {
@@ -101,29 +214,75 @@ export default function AdminTemplatesPage() {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token;
       const draft = drafts[id];
-      const res = await fetch(`/api/admin/templates/${id}`, {
-        method: "PUT",
+      const isNew = isDraftId(id);
+      const url = isNew
+        ? "/api/admin/templates"
+        : `/api/admin/templates/${id}`;
+      const method = isNew ? "POST" : "PUT";
+      // Built-in templates can't change bucket / trigger_config — strip
+      // those fields from the PUT body when the row isn't custom.
+      const existing = rows.find((r) => r.id === id);
+      const payload: Record<string, unknown> = {
+        title: draft.title,
+        trigger_description: draft.trigger_description,
+        intent: draft.intent,
+        tone: draft.tone,
+        body: draft.body,
+      };
+      if (isNew || (existing && existing.is_custom)) {
+        payload.bucket = draft.bucket;
+        payload.trigger_config = draft.trigger_config;
+      }
+      const res = await fetch(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(draft),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
       const { template } = await res.json();
-      setRows((prev) => prev.map((r) => (r.id === id ? template : r)));
-      setSavedId(id);
-      setTimeout(() => setSavedId((cur) => (cur === id ? null : cur)), 1500);
+      if (isNew) {
+        // Swap the draft row out for the persisted one.
+        setRows((prev) => prev.map((r) => (r.id === id ? template : r)));
+        setDrafts((prev) => {
+          const next = { ...prev };
+          delete next[id];
+          next[template.id] = {
+            title: template.title,
+            trigger_description: template.trigger_description,
+            intent: template.intent ?? "",
+            tone: template.tone ?? "",
+            body: template.body,
+            bucket: template.bucket,
+            trigger_config: template.trigger_config ?? EMPTY_TRIGGER,
+          };
+          return next;
+        });
+        setExpanded(template.id);
+      } else {
+        setRows((prev) => prev.map((r) => (r.id === id ? template : r)));
+      }
+      setSavedId(template.id);
+      setTimeout(
+        () => setSavedId((cur) => (cur === template.id ? null : cur)),
+        1500,
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
     setSaving(null);
   }
 
-  function updateDraft(id: string, field: keyof DraftFields, value: string) {
+  function updateDraft(
+    id: string,
+    field: keyof DraftFields,
+    value: string | TriggerConfig | TemplateBucket,
+  ) {
     setDrafts((prev) => ({
       ...prev,
       [id]: { ...prev[id], [field]: value },
@@ -131,22 +290,30 @@ export default function AdminTemplatesPage() {
   }
 
   function isDirty(t: Template): boolean {
+    if (isDraftId(t.id)) return true; // always dirty until saved
     const d = drafts[t.id];
     if (!d) return false;
-    return (
+    const baseDirty =
       d.title !== t.title ||
       d.trigger_description !== t.trigger_description ||
       d.intent !== (t.intent ?? "") ||
       d.tone !== (t.tone ?? "") ||
-      d.body !== t.body
+      d.body !== t.body;
+    if (!t.is_custom) return baseDirty;
+    return (
+      baseDirty ||
+      d.bucket !== t.bucket ||
+      JSON.stringify(d.trigger_config) !==
+        JSON.stringify(t.trigger_config ?? EMPTY_TRIGGER)
     );
   }
 
-  // Group templates by week for display
+  // Group templates by week, with custom templates rolled into their
+  // own "CUSTOM" group regardless of the stored week value.
   const groupedRows = useMemo(() => {
     const groups: Record<string, Template[]> = {};
     for (const r of rows) {
-      const key = r.week ?? "(other)";
+      const key = r.is_custom ? "CUSTOM" : r.week ?? "(other)";
       if (!groups[key]) groups[key] = [];
       groups[key].push(r);
     }
@@ -188,12 +355,34 @@ export default function AdminTemplatesPage() {
         style={{
           fontSize: 13,
           color: "var(--color-text-tertiary)",
-          marginBottom: 24,
+          marginBottom: 16,
         }}
       >
         Every Discord DM the team can send. Edits save immediately and the
-        next task copies the updated text.
+        next task copies the updated text. The built-ins below are seeded;
+        custom templates have their own trigger you control.
       </p>
+
+      {canEdit && (
+        <div className="mb-6">
+          <button
+            type="button"
+            onClick={startNewTemplate}
+            style={{
+              padding: "8px 14px",
+              fontSize: 12,
+              fontWeight: 600,
+              borderRadius: 6,
+              background: "var(--color-accent)",
+              border: "none",
+              color: "var(--color-bg-primary)",
+              cursor: "pointer",
+            }}
+          >
+            + New custom template
+          </button>
+        </div>
+      )}
 
       {!canEdit && (
         <div
@@ -367,24 +556,68 @@ export default function AdminTemplatesPage() {
                               onChange={(e) =>
                                 updateDraft(t.id, "title", e.target.value)
                               }
-                              style={fieldStyle()}
-                            />
-                          </Field>
-                          <Field label="When this fires (trigger)">
-                            <textarea
-                              disabled={!canEdit}
-                              rows={2}
-                              value={draft.trigger_description}
-                              onChange={(e) =>
-                                updateDraft(
-                                  t.id,
-                                  "trigger_description",
-                                  e.target.value,
-                                )
+                              placeholder={
+                                t.is_custom
+                                  ? "Short, descriptive — e.g. \"Slow start, no action by day 4\""
+                                  : undefined
                               }
                               style={fieldStyle()}
                             />
                           </Field>
+
+                          {/* Custom templates: bucket + visual trigger builder */}
+                          {t.is_custom && (
+                            <>
+                              <Field label="Bucket (what kind of moment this is)">
+                                <select
+                                  disabled={!canEdit}
+                                  value={draft.bucket}
+                                  onChange={(e) =>
+                                    updateDraft(
+                                      t.id,
+                                      "bucket",
+                                      e.target.value as TemplateBucket,
+                                    )
+                                  }
+                                  style={fieldStyle()}
+                                >
+                                  {BUCKET_OPTIONS.map((b) => (
+                                    <option key={b.value} value={b.value}>
+                                      {b.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </Field>
+                              <div style={{ marginBottom: 12 }}>
+                                <TriggerBuilder
+                                  value={draft.trigger_config}
+                                  disabled={!canEdit}
+                                  onChange={(next) =>
+                                    updateDraft(t.id, "trigger_config", next)
+                                  }
+                                />
+                              </div>
+                            </>
+                          )}
+
+                          {/* Built-ins keep the freeform trigger description */}
+                          {!t.is_custom && (
+                            <Field label="When this fires (trigger)">
+                              <textarea
+                                disabled={!canEdit}
+                                rows={2}
+                                value={draft.trigger_description}
+                                onChange={(e) =>
+                                  updateDraft(
+                                    t.id,
+                                    "trigger_description",
+                                    e.target.value,
+                                  )
+                                }
+                                style={fieldStyle()}
+                              />
+                            </Field>
+                          )}
                           <Field label="Intent (what the DM is trying to do)">
                             <textarea
                               disabled={!canEdit}
@@ -432,9 +665,9 @@ export default function AdminTemplatesPage() {
                           </p>
                         )}
 
-                        {/* Preview + Save */}
+                        {/* Preview + Save / Delete row */}
                         {!t.is_admin_only && (
-                          <div className="flex items-start gap-3 mt-3">
+                          <div className="flex items-start gap-2 mt-3 flex-wrap">
                             <button
                               type="button"
                               onClick={() =>
@@ -447,7 +680,31 @@ export default function AdminTemplatesPage() {
                             >
                               {isPreview ? "Hide preview" : "Show preview"}
                             </button>
+                            {t.is_custom && !isDraftId(t.id) && (
+                              <button
+                                type="button"
+                                disabled={!canEdit || saving === t.id}
+                                onClick={() => void deleteTemplate(t.id)}
+                                style={{
+                                  ...ghostBtnStyle(),
+                                  color: "var(--color-danger)",
+                                  borderColor:
+                                    "rgba(200,74,74,0.30)",
+                                }}
+                              >
+                                Delete template
+                              </button>
+                            )}
                             <div className="flex-1" />
+                            {isDraftId(t.id) && (
+                              <button
+                                type="button"
+                                onClick={() => cancelDraft(t.id)}
+                                style={ghostBtnStyle()}
+                              >
+                                Cancel
+                              </button>
+                            )}
                             <button
                               type="button"
                               disabled={!canEdit || !dirty || saving === t.id}
@@ -468,7 +725,9 @@ export default function AdminTemplatesPage() {
                                 ? "Saving…"
                                 : savedId === t.id
                                   ? "Saved ✓"
-                                  : "Save"}
+                                  : isDraftId(t.id)
+                                    ? "Create template"
+                                    : "Save"}
                             </button>
                           </div>
                         )}

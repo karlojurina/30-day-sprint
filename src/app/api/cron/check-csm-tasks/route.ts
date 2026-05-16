@@ -37,9 +37,10 @@ import { postTeamAlert } from "@/lib/discord";
 import {
   buildStudentSnapshot,
   triggers,
+  evaluateCustomTrigger,
   SCENARIO_BUCKET,
 } from "@/lib/csm-triggers";
-import type { Student } from "@/types/database";
+import type { Student, TriggerConfig } from "@/types/database";
 
 interface AlertRow {
   id: string;
@@ -107,7 +108,9 @@ export async function GET(request: NextRequest) {
       .from("tasks")
       .select("student_id, scenario_id, status")
       .in("status", ["open", "completed"]),
-    supabase.from("templates").select("id, scenario_id"),
+    supabase
+      .from("templates")
+      .select("id, scenario_id, bucket, is_custom, is_active, trigger_config"),
     supabase
       .from("disengagement_alerts")
       .select("id, student_id, alert_type, message, created_at")
@@ -148,11 +151,20 @@ export async function GET(request: NextRequest) {
     completionsByStudent.set(c.student_id, arr);
   }
 
+  type TemplateRow = {
+    id: string;
+    scenario_id: string;
+    bucket: string;
+    is_custom: boolean;
+    is_active: boolean;
+    trigger_config: TriggerConfig | null;
+  };
   const templateBy = new Map<string, string>(
-    templates.map((t: { id: string; scenario_id: string }) => [
-      t.scenario_id,
-      t.id,
-    ]),
+    (templates as TemplateRow[]).map((t) => [t.scenario_id, t.id]),
+  );
+  /** Custom templates the cron should evaluate. */
+  const customTemplates = (templates as TemplateRow[]).filter(
+    (t) => t.is_custom && t.is_active && t.trigger_config != null,
   );
 
   // Allow scenarios to fire even if a recently-COMPLETED task exists, but
@@ -207,6 +219,7 @@ export async function GET(request: NextRequest) {
       existingByStudent.get(student.id) ?? [],
     );
 
+    // 2a. Built-in scenarios (W1.1, W1.2, …).
     for (const [scenarioId, check] of Object.entries(triggers)) {
       const result = check(snap);
       if (!result) continue;
@@ -217,6 +230,21 @@ export async function GET(request: NextRequest) {
         scenario_id: scenarioId,
         template_id: templateId,
         behavior_summary: result,
+      });
+    }
+
+    // 2b. Custom triggers created via /admin/templates (v34).
+    //     Same dedupe logic — skip if a task for this scenario already
+    //     exists for the student (open or completed).
+    for (const tpl of customTemplates) {
+      if (snap.recentTaskScenarios.has(tpl.scenario_id)) continue;
+      const result = evaluateCustomTrigger(snap, tpl.trigger_config!);
+      if (!result.match) continue;
+      toInsert.push({
+        student_id: student.id,
+        scenario_id: tpl.scenario_id,
+        template_id: tpl.id,
+        behavior_summary: result.summary,
       });
     }
   }

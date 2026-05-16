@@ -20,7 +20,12 @@
  * region/task language, never "Day N" (see lovro-brief/context/templates.md).
  */
 
-import type { Student } from "@/types/database";
+import type {
+  Student,
+  Condition,
+  ConditionOp,
+  TriggerConfig,
+} from "@/types/database";
 
 // ───────── Inputs ─────────
 
@@ -64,6 +69,11 @@ export interface StudentSnapshot {
   /** Per-action-lesson ship state, keyed by lesson_id. */
   shipped: Record<string, boolean>;
 
+  /** Watched state for every lesson (true if completed_at is set),
+   *  keyed by lesson_id. Used by the custom-trigger lesson_watched
+   *  condition. */
+  watched: Record<string, boolean>;
+
   /** Days since last completion (rounded down). null if no completion exists. */
   daysSinceLastCompletion: number | null;
   /** Days since last_active_at. */
@@ -94,6 +104,7 @@ export function buildStudentSnapshot(
   }
 
   const shipped: Record<string, boolean> = {};
+  const watched: Record<string, boolean> = {};
   let latestCompletionAt: number | null = null;
 
   for (const c of completions) {
@@ -104,6 +115,7 @@ export function buildStudentSnapshot(
 
     if (c.completed_at) {
       region.watchedComplete += 1;
+      watched[c.lesson_id] = true;
       const t = new Date(c.completed_at).getTime();
       if (latestCompletionAt === null || t > latestCompletionAt) {
         latestCompletionAt = t;
@@ -145,6 +157,7 @@ export function buildStudentSnapshot(
     day,
     regions,
     shipped,
+    watched,
     daysSinceLastCompletion,
     daysSinceLastActive,
     recentTaskScenarios,
@@ -270,6 +283,304 @@ export const triggers: Record<string, TriggerCheck> = {
     return `Day 30 · R4 ${s.regions.r4.fullyComplete}/${s.regions.r4.total} — sprint incomplete but still paying.`;
   },
 };
+
+/* ─────────────────────────────────────────────────────────────────
+ * Custom triggers (v34) — built from the JSON DSL Karlo edits via
+ * /admin/templates. The metric registry below is the single source
+ * of truth for which metrics exist + what their labels look like.
+ * Frontend imports it for the dropdown options; backend imports it
+ * to evaluate conditions.
+ * ──────────────────────────────────────────────────────────────── */
+
+export type MetricInputType = "number" | "boolean" | "enum" | "param-number" | "param-boolean";
+
+export interface MetricDef {
+  /** Stable internal id — what lands in the trigger_config JSON. */
+  id: import("@/types/database").ConditionMetric;
+  /** What the user sees in the metric dropdown. */
+  label: string;
+  /** "number" → numeric input + the six numeric ops.
+   *  "param-number" → also has a sub-param (region/lesson).
+   *  "boolean" → only "is" / "is not", value implied (true/false).
+   *  "param-boolean" → boolean + a sub-param (region/lesson).
+   *  "enum" → "is" / "is not" + a value dropdown. */
+  input: "number" | "boolean" | "enum";
+  /** When the metric has a sub-param like region or lesson_id. */
+  param?: "region" | "lesson";
+  /** For enum metrics — list of allowed values. */
+  enumValues?: ReadonlyArray<string>;
+  /** Suffix shown next to numeric inputs (e.g. "%"). */
+  unit?: string;
+  /** Compact natural-language renderer used in behavior summaries +
+   *  the live preview line on the template editor. */
+  describe: (cond: Condition) => string;
+}
+
+/** Friendly labels for region ids — keep in sync with the v20 region names. */
+export const REGION_LABEL: Record<string, string> = {
+  r1: "Region 1 (Foundation)",
+  r2: "Region 2 (Strategy)",
+  r3: "Region 3 (Production)",
+  r4: "Region 4 (Gate of Possibilities)",
+};
+
+/** Lessons that students explicitly ship an ad for. Used by the
+ *  lesson_shipped dropdown in the condition builder. */
+export const ACTION_LESSONS: Array<{ id: string; label: string }> = [
+  { id: "l018", label: "Organic Ad (l018)" },
+  { id: "l020", label: "UGC Ad (l020)" },
+  { id: "l022", label: "VSL Ad (l022)" },
+  { id: "l024", label: "High-Production Ad (l024)" },
+  { id: "l049", label: "Static Ads (l049)" },
+];
+
+const opPhrase: Record<ConditionOp, string> = {
+  is: "is",
+  is_not: "is not",
+  at_least: "is at least",
+  more_than: "is more than",
+  at_most: "is at most",
+  less_than: "is less than",
+};
+
+function describeNumeric(label: string, c: Condition, unit = ""): string {
+  if ("value" in c && typeof c.value === "number") {
+    return `${label} ${opPhrase[c.op]} ${c.value}${unit}`;
+  }
+  return label;
+}
+
+function describeBoolean(label: string, c: Condition, posVerb = "is"): string {
+  return `${label} ${c.op === "is" ? posVerb : `is not ${posVerb.replace(/^is\s+/, "")}`}`.trim();
+}
+
+export const METRICS: Record<import("@/types/database").ConditionMetric, MetricDef> = {
+  day_number: {
+    id: "day_number",
+    label: "Day in the program",
+    input: "number",
+    describe: (c) => describeNumeric("Day in the program", c),
+  },
+  total_lessons_watched: {
+    id: "total_lessons_watched",
+    label: "Total lessons watched",
+    input: "number",
+    describe: (c) => describeNumeric("Total lessons watched", c),
+  },
+  region_lessons_watched: {
+    id: "region_lessons_watched",
+    label: "Lessons watched in a region",
+    input: "number",
+    param: "region",
+    describe: (c) => {
+      if ("region" in c) {
+        return describeNumeric(
+          `Lessons watched in ${REGION_LABEL[c.region] ?? c.region}`,
+          c,
+        );
+      }
+      return "Lessons watched in a region";
+    },
+  },
+  region_completion_pct: {
+    id: "region_completion_pct",
+    label: "Region completion %",
+    input: "number",
+    param: "region",
+    unit: "%",
+    describe: (c) => {
+      if ("region" in c) {
+        return describeNumeric(
+          `${REGION_LABEL[c.region] ?? c.region} completion`,
+          c,
+          "%",
+        );
+      }
+      return "Region completion %";
+    },
+  },
+  region_complete: {
+    id: "region_complete",
+    label: "Region is fully complete",
+    input: "boolean",
+    param: "region",
+    describe: (c) => {
+      if ("region" in c) {
+        return c.op === "is"
+          ? `${REGION_LABEL[c.region] ?? c.region} is complete`
+          : `${REGION_LABEL[c.region] ?? c.region} is not complete`;
+      }
+      return "Region completion";
+    },
+  },
+  lesson_shipped: {
+    id: "lesson_shipped",
+    label: "Shipped action item",
+    input: "boolean",
+    param: "lesson",
+    describe: (c) => {
+      if ("lesson_id" in c) {
+        const lesson =
+          ACTION_LESSONS.find((l) => l.id === c.lesson_id)?.label ?? c.lesson_id;
+        return c.op === "is"
+          ? `Shipped: ${lesson}`
+          : `Not shipped: ${lesson}`;
+      }
+      return "Action item shipped";
+    },
+  },
+  lesson_watched: {
+    id: "lesson_watched",
+    label: "Watched a specific lesson",
+    input: "boolean",
+    param: "lesson",
+    describe: (c) => {
+      if ("lesson_id" in c) {
+        const lesson =
+          ACTION_LESSONS.find((l) => l.id === c.lesson_id)?.label ?? c.lesson_id;
+        return c.op === "is"
+          ? `Watched lesson ${lesson}`
+          : `Did not watch lesson ${lesson}`;
+      }
+      return "Lesson watched";
+    },
+  },
+  days_since_last_completion: {
+    id: "days_since_last_completion",
+    label: "Days since last lesson",
+    input: "number",
+    describe: (c) => describeNumeric("Days since last lesson", c),
+  },
+  days_since_last_login: {
+    id: "days_since_last_login",
+    label: "Days since last login",
+    input: "number",
+    describe: (c) => describeNumeric("Days since last login", c),
+  },
+  membership_status: {
+    id: "membership_status",
+    label: "Subscription status",
+    input: "enum",
+    enumValues: ["active", "canceled", "past_due", "expired"] as const,
+    describe: (c) => {
+      if ("value" in c && typeof c.value === "string") {
+        return `Subscription status ${c.op === "is" ? "is" : "is not"} ${c.value}`;
+      }
+      return "Subscription status";
+    },
+  },
+};
+
+/* ─────────────────────────────────────────────────────────────────
+ * Condition evaluation. Pulls the value out of the snapshot, then
+ * compares against the user-set value using the user-chosen op.
+ * ──────────────────────────────────────────────────────────────── */
+
+function compareNumber(actual: number, op: ConditionOp, target: number): boolean {
+  switch (op) {
+    case "is":
+      return actual === target;
+    case "is_not":
+      return actual !== target;
+    case "at_least":
+      return actual >= target;
+    case "more_than":
+      return actual > target;
+    case "at_most":
+      return actual <= target;
+    case "less_than":
+      return actual < target;
+    default:
+      return false;
+  }
+}
+
+function getNumericValue(snap: StudentSnapshot, c: Condition): number | null {
+  switch (c.metric) {
+    case "day_number":
+      return snap.day;
+    case "total_lessons_watched":
+      return Object.values(snap.regions).reduce(
+        (sum, r) => sum + r.watchedComplete,
+        0,
+      );
+    case "region_lessons_watched":
+      return "region" in c
+        ? snap.regions[c.region]?.watchedComplete ?? 0
+        : null;
+    case "region_completion_pct":
+      if ("region" in c) {
+        const r = snap.regions[c.region];
+        if (!r || r.total === 0) return 0;
+        return Math.round((r.fullyComplete / r.total) * 100);
+      }
+      return null;
+    case "days_since_last_completion":
+      return snap.daysSinceLastCompletion ?? 999;
+    case "days_since_last_login":
+      return snap.daysSinceLastActive;
+    default:
+      return null;
+  }
+}
+
+function evalCondition(snap: StudentSnapshot, c: Condition): boolean {
+  switch (c.metric) {
+    case "region_complete":
+      if (!("region" in c)) return false;
+      {
+        const r = snap.regions[c.region];
+        const complete = r ? r.fullyComplete >= r.total && r.total > 0 : false;
+        return c.op === "is" ? complete : !complete;
+      }
+    case "lesson_shipped":
+      if (!("lesson_id" in c)) return false;
+      {
+        const shipped = Boolean(snap.shipped[c.lesson_id]);
+        return c.op === "is" ? shipped : !shipped;
+      }
+    case "lesson_watched":
+      if (!("lesson_id" in c)) return false;
+      {
+        const watched = Boolean(snap.watched[c.lesson_id]);
+        return c.op === "is" ? watched : !watched;
+      }
+    case "membership_status":
+      if (!("value" in c) || typeof c.value !== "string") return false;
+      return c.op === "is"
+        ? snap.student.membership_status === c.value
+        : snap.student.membership_status !== c.value;
+    default: {
+      const actual = getNumericValue(snap, c);
+      if (actual == null) return false;
+      const target =
+        "value" in c && typeof c.value === "number" ? c.value : 0;
+      return compareNumber(actual, c.op, target);
+    }
+  }
+}
+
+/**
+ * Evaluate a TriggerConfig against a student snapshot.
+ *
+ * Returns:
+ *   match   — true when EVERY condition in `config.all` passes
+ *   summary — concrete behavior summary for tasks.behavior_summary,
+ *             e.g. "Day 7 · 12 R1 lessons watched · l018 not shipped"
+ */
+export function evaluateCustomTrigger(
+  snap: StudentSnapshot,
+  config: TriggerConfig,
+): { match: boolean; summary: string } {
+  if (!Array.isArray(config?.all) || config.all.length === 0) {
+    return { match: false, summary: "" };
+  }
+  for (const c of config.all) {
+    if (!evalCondition(snap, c)) return { match: false, summary: "" };
+  }
+  const pieces = config.all.map((c) => METRICS[c.metric].describe(c));
+  return { match: true, summary: pieces.join(" · ") };
+}
 
 /** Bucket label used in the cron's Discord summary. */
 export const SCENARIO_BUCKET: Record<string, string> = {

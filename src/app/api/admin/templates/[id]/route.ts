@@ -54,6 +54,11 @@ export async function PUT(request: NextRequest, ctx: RouteContext) {
   }
   if (typeof body.is_active === "boolean") update.is_active = body.is_active;
   if (typeof body.word_count === "number") update.word_count = body.word_count;
+  if (typeof body.bucket === "string") update.bucket = body.bucket;
+  if (body.trigger_config !== undefined) {
+    // null clears, object replaces.
+    update.trigger_config = body.trigger_config;
+  }
 
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "No editable fields provided" }, { status: 400 });
@@ -74,4 +79,41 @@ export async function PUT(request: NextRequest, ctx: RouteContext) {
   }
 
   return NextResponse.json({ template: data });
+}
+
+/**
+ * DELETE /api/admin/templates/:id — delete a CUSTOM template
+ * (built-ins are protected; they came from the seed).
+ *
+ * Cascading: tasks.template_id has ON DELETE SET NULL, so historical
+ * task rows survive but lose the link.
+ */
+export async function DELETE(request: NextRequest, ctx: RouteContext) {
+  const auth = await requireTeam(request, ["founder", "admin"]);
+  if (isAuthFailure(auth)) return auth.error;
+  const { id } = await ctx.params;
+
+  const { data: existing } = await auth.supabase
+    .from("templates")
+    .select("id, is_custom")
+    .eq("id", id)
+    .single();
+  if (!existing) {
+    return NextResponse.json({ error: "Template not found" }, { status: 404 });
+  }
+  if (!existing.is_custom) {
+    return NextResponse.json(
+      { error: "Built-in templates can't be deleted — toggle is_active instead." },
+      { status: 400 },
+    );
+  }
+
+  const { error } = await auth.supabase
+    .from("templates")
+    .delete()
+    .eq("id", id);
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true });
 }

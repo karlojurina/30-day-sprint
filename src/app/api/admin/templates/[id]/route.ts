@@ -82,31 +82,22 @@ export async function PUT(request: NextRequest, ctx: RouteContext) {
 }
 
 /**
- * DELETE /api/admin/templates/:id — delete a CUSTOM template
- * (built-ins are protected; they came from the seed).
+ * DELETE /api/admin/templates/:id — delete any template.
  *
- * Cascading: tasks.template_id has ON DELETE SET NULL, so historical
- * task rows survive but lose the link.
+ * Built-ins used to be protected, but Karlo wants full control over
+ * which scenarios fire. Deleting a built-in is non-destructive:
+ *   - tasks.template_id has ON DELETE SET NULL, so historical tasks
+ *     keep their row + behavior_summary but lose the link.
+ *   - The CSM cron `if (!templateId) continue;` guard means built-in
+ *     scenarios whose template is missing just stop creating new tasks.
+ *
+ * Re-seeding the deleted template = re-running v27's seed insert (with
+ * the matching scenario_id and ON CONFLICT DO NOTHING removed).
  */
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const auth = await requireTeam(request, ["founder", "admin"]);
   if (isAuthFailure(auth)) return auth.error;
   const { id } = await ctx.params;
-
-  const { data: existing } = await auth.supabase
-    .from("templates")
-    .select("id, is_custom")
-    .eq("id", id)
-    .single();
-  if (!existing) {
-    return NextResponse.json({ error: "Template not found" }, { status: 404 });
-  }
-  if (!existing.is_custom) {
-    return NextResponse.json(
-      { error: "Built-in templates can't be deleted — toggle is_active instead." },
-      { status: 400 },
-    );
-  }
 
   const { error } = await auth.supabase
     .from("templates")

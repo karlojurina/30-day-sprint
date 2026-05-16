@@ -65,7 +65,12 @@ export default function AdminDashboard() {
           .not("whop_membership_id", "is", null)
           .in("membership_status", ["active", "past_due", "canceled"])
           .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF),
-        supabase.from("student_lesson_completions").select("student_id"),
+        // completed_at filter so skipped / action-only rows don't
+        // inflate the avg-progress denominator.
+        supabase
+          .from("student_lesson_completions")
+          .select("student_id")
+          .not("completed_at", "is", null),
         supabase.from("lessons").select("id", { count: "exact", head: true }),
         supabase.from("discount_requests").select("id").eq("status", "pending"),
         supabase.from("tasks").select("id").eq("status", "open"),

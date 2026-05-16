@@ -208,7 +208,11 @@ export default function AdminTemplatesPage() {
   }
 
   async function deleteTemplate(id: string) {
-    if (!confirm("Delete this custom template? This can't be undone.")) {
+    if (
+      !confirm(
+        "Delete this template? This can't be undone. Existing tasks that referenced it will remain visible but lose the link.",
+      )
+    ) {
       return;
     }
     setSaving(id);
@@ -353,17 +357,7 @@ export default function AdminTemplatesPage() {
       >
         Templates
       </h1>
-      <p
-        style={{
-          fontSize: 13,
-          color: "var(--color-text-tertiary)",
-          marginBottom: 16,
-        }}
-      >
-        Every Discord DM the team can send. Edits save immediately and the
-        next task copies the updated text. The built-ins below are seeded;
-        custom templates have their own trigger you control.
-      </p>
+      <BucketLegend />
 
       {canEdit && (
         <div className="mb-6">
@@ -682,21 +676,18 @@ export default function AdminTemplatesPage() {
                             >
                               {isPreview ? "Hide preview" : "Show preview"}
                             </button>
-                            {t.is_custom && (
-                              <button
-                                type="button"
-                                disabled={!canEdit || saving === t.id}
-                                onClick={() => void deleteTemplate(t.id)}
-                                style={{
-                                  ...ghostBtnStyle(),
-                                  color: "var(--color-danger)",
-                                  borderColor:
-                                    "rgba(200,74,74,0.30)",
-                                }}
-                              >
-                                Delete template
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              disabled={!canEdit || saving === t.id}
+                              onClick={() => void deleteTemplate(t.id)}
+                              style={{
+                                ...ghostBtnStyle(),
+                                color: "var(--color-danger)",
+                                borderColor: "rgba(200,74,74,0.30)",
+                              }}
+                            >
+                              Delete template
+                            </button>
                             <div className="flex-1" />
                             <button
                               type="button"
@@ -853,6 +844,114 @@ function ghostBtnStyle(): React.CSSProperties {
     color: "var(--color-text-secondary)",
     cursor: "pointer",
   };
+}
+
+/** Compact key card explaining the five bucket icons. Sits at the top
+ *  of the Templates page so the glyphs on each row are self-documenting. */
+function BucketLegend() {
+  const items: Array<{
+    glyph: string;
+    label: string;
+    desc: string;
+    color: string;
+  }> = [
+    {
+      glyph: "★",
+      label: "Crushing it",
+      desc: "Student hit a milestone — celebrate the win.",
+      color: "var(--color-accent)",
+    },
+    {
+      glyph: "✓",
+      label: "On track",
+      desc: "Default healthy state — light check-in to keep momentum.",
+      color: "var(--color-text-tertiary)",
+    },
+    {
+      glyph: "⚠",
+      label: "At risk",
+      desc: "Red flags before they slip — intervene early.",
+      color: "var(--color-warning)",
+    },
+    {
+      glyph: "✗",
+      label: "Cancel path",
+      desc: "Inactive / disengaged — last-chance re-engagement.",
+      color: "var(--color-danger)",
+    },
+    {
+      glyph: "⚡",
+      label: "Event",
+      desc: "Triggered by a specific moment (discount apply, reactivation, etc).",
+      color: "var(--color-text-secondary)",
+    },
+  ];
+  return (
+    <div
+      className="mb-6"
+      style={{
+        padding: 14,
+        borderRadius: 10,
+        background: "var(--color-fill-secondary)",
+        border: "1px solid var(--color-border)",
+      }}
+    >
+      <p
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--color-text-tertiary)",
+          marginBottom: 8,
+        }}
+      >
+        Bucket legend
+      </p>
+      <div
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5"
+        style={{ gap: 10 }}
+      >
+        {items.map((it) => (
+          <div key={it.glyph} className="flex items-start gap-2">
+            <span
+              aria-hidden
+              style={{
+                color: it.color,
+                fontSize: 14,
+                lineHeight: 1,
+                marginTop: 2,
+              }}
+            >
+              {it.glyph}
+            </span>
+            <div>
+              <p
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--color-text-primary)",
+                  lineHeight: 1.3,
+                }}
+              >
+                {it.label}
+              </p>
+              <p
+                style={{
+                  fontSize: 11,
+                  color: "var(--color-text-tertiary)",
+                  lineHeight: 1.4,
+                  marginTop: 2,
+                }}
+              >
+                {it.desc}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /* ──────────────────────── New Template Modal ──────────────────────── */

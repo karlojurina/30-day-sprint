@@ -38,7 +38,13 @@ export default function StudentsPage() {
           .in("membership_status", ["active", "past_due", "canceled"])
           .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
           .order("joined_at", { ascending: false }),
-        supabase.from("student_lesson_completions").select("student_id"),
+        // Only count rows where the watch half completed. Skipped /
+        // action-only rows shouldn't inflate the per-row progress %.
+        // Matches what the StudentDrawer detail view shows.
+        supabase
+          .from("student_lesson_completions")
+          .select("student_id")
+          .not("completed_at", "is", null),
         supabase.from("lessons").select("id", { count: "exact", head: true }),
       ]);
 

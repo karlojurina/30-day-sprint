@@ -60,7 +60,7 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
     toggleLessonAction,
     saveDiscordLink,
     skipLesson,
-    requestDiscount,
+    openDiscountFeedback,
   } = useStudent();
 
   const lesson = useMemo(
@@ -574,10 +574,14 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                   before the window closes.
                 </p>
                 <button
-                  onClick={async () => {
-                    await requestDiscount();
+                  onClick={() => {
+                    // Open the 6-question feedback form. The form's submit
+                    // path creates the discount_requests row atomically
+                    // with the responses — clicking Apply alone no longer
+                    // creates a row.
+                    openDiscountFeedback();
                     if (!isFullyCompleted) {
-                      await toggleLesson(lesson.id);
+                      void toggleLesson(lesson.id);
                     }
                   }}
                   className="w-full transition-colors"

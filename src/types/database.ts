@@ -292,6 +292,41 @@ export interface AdminConfigRow {
   updated_by: string | null;
 }
 
+// Discount feedback form (v29)
+
+export type FeedbackQuestionType = "scale" | "multi_choice" | "open_text";
+
+export interface DiscountFeedbackQuestion {
+  id: string;
+  order_num: number;
+  question_text: string;
+  question_type: FeedbackQuestionType;
+  options: string[] | null;
+  scale_min: number | null;
+  scale_max: number | null;
+  is_required: boolean;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface DiscountFeedbackResponse {
+  id: string;
+  discount_request_id: string;
+  question_id: string;
+  answer_scale: number | null;
+  answer_choice: string | null;
+  answer_text: string | null;
+  created_at: string;
+}
+
+/** Input shape sent to the submit-feedback endpoint. */
+export interface DiscountFeedbackAnswer {
+  question_id: string;
+  answer_scale?: number | null;
+  answer_choice?: string | null;
+  answer_text?: string | null;
+}
+
 // Computed helpers (not stored in DB)
 export function getDayNumber(joinedAt: string): number {
   const joined = new Date(joinedAt);

@@ -7,6 +7,8 @@ import type {
   Student,
   StudentLessonCompletion,
   Lesson,
+  DiscountFeedbackQuestion,
+  DiscountFeedbackResponse,
 } from "@/types/database";
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
@@ -33,6 +35,13 @@ export default function DiscountsPage() {
   const [submissionsByStudent, setSubmissionsByStudent] = useState<
     Record<string, ActionSubmission[]>
   >({});
+  // Discount feedback responses keyed by discount_request_id.
+  const [feedbackByRequest, setFeedbackByRequest] = useState<
+    Record<string, DiscountFeedbackResponse[]>
+  >({});
+  const [feedbackQuestions, setFeedbackQuestions] = useState<
+    DiscountFeedbackQuestion[]
+  >([]);
   const supabase = createClient();
   const { teamMember } = useAuth();
 
@@ -101,6 +110,31 @@ export default function DiscountsPage() {
       setSubmissionsByStudent(map);
     } else {
       setSubmissionsByStudent({});
+    }
+
+    // Feedback responses for every visible request.
+    const requestIds = rows.map((r) => r.id);
+    if (requestIds.length > 0) {
+      const [qRes, rRes] = await Promise.all([
+        supabase
+          .from("discount_feedback_questions")
+          .select("*")
+          .order("order_num"),
+        supabase
+          .from("discount_feedback_responses")
+          .select("*")
+          .in("discount_request_id", requestIds),
+      ]);
+      setFeedbackQuestions((qRes.data ?? []) as DiscountFeedbackQuestion[]);
+      const byReq: Record<string, DiscountFeedbackResponse[]> = {};
+      for (const r of (rRes.data ?? []) as DiscountFeedbackResponse[]) {
+        if (!byReq[r.discount_request_id])
+          byReq[r.discount_request_id] = [];
+        byReq[r.discount_request_id].push(r);
+      }
+      setFeedbackByRequest(byReq);
+    } else {
+      setFeedbackByRequest({});
     }
   }
 
@@ -490,6 +524,13 @@ export default function DiscountsPage() {
                   </div>
                 )}
 
+              {(feedbackByRequest[req.id]?.length ?? 0) > 0 && (
+                <FeedbackResponses
+                  responses={feedbackByRequest[req.id]!}
+                  questions={feedbackQuestions}
+                />
+              )}
+
               {req.status === "pending" && (
                 <div className="flex gap-2">
                   <button
@@ -558,6 +599,101 @@ function secondaryBtnStyle(disabled: boolean): React.CSSProperties {
     opacity: disabled ? 0.6 : 1,
     transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
   };
+}
+
+function FeedbackResponses({
+  responses,
+  questions,
+}: {
+  responses: DiscountFeedbackResponse[];
+  questions: DiscountFeedbackQuestion[];
+}) {
+  const byId = new Map<string, DiscountFeedbackResponse>();
+  for (const r of responses) byId.set(r.question_id, r);
+  const sortedQs = [...questions].sort((a, b) => a.order_num - b.order_num);
+  return (
+    <div
+      style={{
+        padding: 12,
+        borderRadius: 8,
+        background: "var(--color-fill-secondary)",
+        marginBottom: 12,
+      }}
+    >
+      <p
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--color-text-tertiary)",
+          marginBottom: 8,
+        }}
+      >
+        Feedback responses
+      </p>
+      <div className="flex flex-col gap-3">
+        {sortedQs.map((q) => {
+          const r = byId.get(q.id);
+          if (!r) return null;
+          let valueNode: React.ReactNode;
+          if (q.question_type === "scale" && r.answer_scale != null) {
+            valueNode = (
+              <strong
+                style={{
+                  fontVariantNumeric: "tabular-nums",
+                  color: "var(--color-text-primary)",
+                }}
+              >
+                {r.answer_scale}
+              </strong>
+            );
+          } else if (q.question_type === "multi_choice" && r.answer_choice) {
+            valueNode = (
+              <span style={{ color: "var(--color-text-primary)" }}>
+                {r.answer_choice}
+              </span>
+            );
+          } else if (r.answer_text && r.answer_text.trim().length > 0) {
+            valueNode = (
+              <span
+                style={{
+                  color: "var(--color-text-primary)",
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                &ldquo;{r.answer_text}&rdquo;
+              </span>
+            );
+          } else {
+            valueNode = (
+              <span
+                style={{
+                  color: "var(--color-text-tertiary)",
+                  fontStyle: "italic",
+                }}
+              >
+                (no answer)
+              </span>
+            );
+          }
+          return (
+            <div key={q.id} style={{ fontSize: 12, lineHeight: 1.5 }}>
+              <div
+                style={{
+                  color: "var(--color-text-tertiary)",
+                  marginBottom: 2,
+                }}
+              >
+                {q.question_text}
+              </div>
+              <div>{valueNode}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function StatusPill({ status }: { status: string }) {

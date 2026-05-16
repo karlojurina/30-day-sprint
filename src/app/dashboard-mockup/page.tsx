@@ -12,6 +12,7 @@ import { OnboardingFlow } from "@/components/map/OnboardingFlow";
 import { RegionCompleteCelebration } from "@/components/map/RegionCompleteCelebration";
 import { StreakToast } from "@/components/map/StreakToast";
 import { GraduationModal } from "@/components/map/GraduationModal";
+import { DiscountFeedbackModal } from "@/components/map/DiscountFeedbackModal";
 import { createClient } from "@/lib/supabase-browser";
 import { getDayNumber } from "@/types/database";
 
@@ -219,6 +220,8 @@ export default function DashboardMockupPage() {
         milestoneDays={streakToastMilestone}
         onDismiss={() => setStreakToastMilestone(null)}
       />
+
+      <DiscountFeedbackModal />
 
       <GraduationModal
         open={showGraduation}

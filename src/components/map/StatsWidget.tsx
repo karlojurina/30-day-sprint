@@ -37,19 +37,19 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
     discountAllLessonsDone,
     discountEligible,
     regionProgress,
-    requestDiscount,
+    openDiscountFeedback,
   } = useStudent();
 
   const [applying, setApplying] = useState(false);
 
-  async function handleApply() {
+  function handleApply() {
     if (!discountEligible || applying) return;
+    // Opens the 6-question feedback form — submit there creates the row.
     setApplying(true);
-    try {
-      await requestDiscount();
-    } finally {
-      setApplying(false);
-    }
+    openDiscountFeedback();
+    // Reset the applying state quickly so the button is interactive again
+    // once the modal mounts. (The actual submission lives inside the modal.)
+    setTimeout(() => setApplying(false), 400);
   }
 
   // Tick the live discount countdown once per second.

@@ -8,6 +8,7 @@ import { MapMockup } from "@/components/mockup/MapMockup";
 import { LessonCompleteEffects } from "@/components/map/LessonCompleteEffects";
 import { StreakCelebration } from "@/components/map/StreakCelebration";
 import { DiscountApprovedCelebration } from "@/components/map/DiscountApprovedCelebration";
+import { DiscountFeedbackModal } from "@/components/map/DiscountFeedbackModal";
 import { GraduationModal } from "@/components/map/GraduationModal";
 import { DevTestPanel } from "@/components/dev/DevTestPanel";
 
@@ -162,6 +163,8 @@ export default function DashboardPage() {
         show={discountCelebration}
         onDismiss={() => setDiscountCelebration(false)}
       />
+
+      <DiscountFeedbackModal />
 
       <GraduationModal
         open={graduationReview != null}

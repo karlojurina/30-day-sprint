@@ -22,6 +22,8 @@ import type {
   QuizQuestion,
   StudentQuizAttempt,
   MonthReview,
+  DiscountFeedbackQuestion,
+  DiscountFeedbackAnswer,
 } from "@/types/database";
 import { getTitleForRegions } from "@/lib/titles";
 import { DISCOUNT_WINDOW_DAYS, progressPercent } from "@/lib/constants";
@@ -102,6 +104,17 @@ interface StudentContextType {
     answers: { questionId: string; selectedIndex: number; correct: boolean }[];
   }>;
   requestDiscount: () => Promise<void>;
+
+  // Discount feedback form (v29) — Apply button now opens a 6-question
+  // form that's submitted atomically with the discount_requests row.
+  discountFeedbackQuestions: DiscountFeedbackQuestion[];
+  discountFeedbackOpen: boolean;
+  openDiscountFeedback: () => void;
+  closeDiscountFeedback: () => void;
+  /** Returns null on success, or an error string on failure. */
+  submitDiscountFeedback: (
+    answers: DiscountFeedbackAnswer[],
+  ) => Promise<string | null>;
   refreshWatchProgress: () => Promise<{
     synced: number;
     message: string;
@@ -145,6 +158,10 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [quizQuestions, setQuizQuestions] = useState<Record<string, QuizQuestion[]>>({});
   const [quizAttempts, setQuizAttempts] = useState<StudentQuizAttempt[]>([]);
   const [monthReview, setMonthReview] = useState<MonthReview | null>(null);
+  const [discountFeedbackQuestions, setDiscountFeedbackQuestions] = useState<
+    DiscountFeedbackQuestion[]
+  >([]);
+  const [discountFeedbackOpen, setDiscountFeedbackOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostics>({
     lastSyncAt: null,
@@ -201,6 +218,17 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         }
         setQuizQuestions(qMap);
         setMonthReview(data.monthReview ?? null);
+        // Discount feedback form questions — fetched separately via the
+        // browser client + RLS (only active rows visible to students).
+        const sbForQuestions = createClient();
+        const { data: questions } = await sbForQuestions
+          .from("discount_feedback_questions")
+          .select("*")
+          .eq("is_active", true)
+          .order("order_num");
+        setDiscountFeedbackQuestions(
+          (questions as DiscountFeedbackQuestion[] | null) ?? [],
+        );
         setSyncDiagnostics({
           lastSyncAt: data.student?.last_watch_sync_at ?? null,
           fetchedCount: data.student?.whop_last_sync_fetched_count ?? null,
@@ -862,6 +890,57 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     }
   }, [student, discountEligible]);
 
+  const openDiscountFeedback = useCallback(() => {
+    setDiscountFeedbackOpen(true);
+  }, []);
+  const closeDiscountFeedback = useCallback(() => {
+    setDiscountFeedbackOpen(false);
+  }, []);
+
+  /**
+   * Atomic discount-request + feedback responses submit. Closes the
+   * modal + refreshes student data on success. Returns null on success,
+   * or a user-facing error string on failure.
+   */
+  const submitDiscountFeedback = useCallback(
+    async (answers: DiscountFeedbackAnswer[]): Promise<string | null> => {
+      if (!student) return "Not signed in";
+
+      try {
+        const res = await fetch("/api/discounts/submit-feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            studentId: student.id,
+            answers,
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          return data?.error || `Submit failed (HTTP ${res.status})`;
+        }
+
+        // Refetch the discount_request row so the dashboard widget
+        // flips into the "pending review" state.
+        const sb = createClient();
+        const { data: fresh } = await sb
+          .from("discount_requests")
+          .select("*")
+          .eq("student_id", student.id)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single();
+        if (fresh) setDiscountRequest(fresh as DiscountRequest);
+
+        setDiscountFeedbackOpen(false);
+        return null;
+      } catch (err) {
+        return err instanceof Error ? err.message : "Network error";
+      }
+    },
+    [student],
+  );
+
   return (
     <StudentContext.Provider
       value={{
@@ -892,6 +971,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         toggleLessonAction,
         saveDiscordLink,
         skipLesson,
+        discountFeedbackQuestions,
+        discountFeedbackOpen,
+        openDiscountFeedback,
+        closeDiscountFeedback,
+        submitDiscountFeedback,
         submitQuiz,
         requestDiscount,
         refreshWatchProgress,

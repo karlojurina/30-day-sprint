@@ -1,20 +1,23 @@
 "use client";
 
 /**
- * /admin/tasks — Astrid's task Kanban.
+ * /admin/tasks — Astrid's task queue (v2).
  *
- * Three columns mapping to tasks.status:
- *   To do      → status = 'open'
- *   Sent       → status = 'completed'
- *   Dismissed  → status = 'dismissed'
+ * Design intent (vs. the prior 3-column Kanban):
  *
- * Cards stay minimal — name, day, Discord handle, scenario title.
- * Click anywhere on the card body to open the detail modal (full
- * template body + behavior summary + action buttons). All status
- * transitions are manual: Copy DM is clipboard-only and does not
- * change column. "Mark sent" / "Dismiss" / "Move to To do" do.
+ *   • Calmer cards. One line: avatar + name + day badge + primary
+ *     CTA. One line below: bucket icon (small, monochrome) + scenario
+ *     in plain English + secondary kebab. Three buttons / row → one.
  *
- * Refresh is manual via the button at the top.
+ *   • Single-column list grouped by urgency (Today / This week / Older)
+ *     instead of three Kanban columns. Status moves to a top tab so
+ *     "what should I do right now?" is the entire screen, not a third
+ *     of it.
+ *
+ *   • Bucket / Discord / behavior summary live in the detail modal,
+ *     not on every card.
+ *
+ * Workflow stays the same: Copy DM → send in Discord → Mark sent.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -29,6 +32,21 @@ import {
   loadAdminConfig,
   renderTemplate,
 } from "@/lib/templates";
+import {
+  AdminPage,
+  PageHeader,
+  Section,
+  Card,
+  Button,
+  IconButton,
+  Avatar,
+  Pill,
+  Tabs,
+  Modal,
+  Toast,
+  EmptyState,
+  T,
+} from "@/components/admin/ui";
 
 type TaskRow = Task & {
   student: Student | null;
@@ -49,13 +67,7 @@ type TaskRow = Task & {
     | null;
 };
 
-type ColumnKey = "open" | "completed" | "dismissed";
-
-const COLUMNS: Array<{ key: ColumnKey; label: string }> = [
-  { key: "open", label: "To do" },
-  { key: "completed", label: "Sent" },
-  { key: "dismissed", label: "Dismissed" },
-];
+type StatusKey = "open" | "completed" | "dismissed";
 
 type AdminConfig =
   | Partial<
@@ -68,12 +80,50 @@ type AdminConfig =
     >
   | undefined;
 
+const BUCKET_LABEL: Record<string, string> = {
+  at_risk: "At risk",
+  cancel_path: "Cancel path",
+  crushing: "Crushing",
+  event: "Event",
+  admin: "Admin",
+};
+
+/** Map bucket → pill tone for the small badge in the detail modal. */
+function bucketTone(b?: string) {
+  if (b === "at_risk") return "warning" as const;
+  if (b === "cancel_path") return "danger" as const;
+  if (b === "crushing") return "accent" as const;
+  return "neutral" as const;
+}
+
+/** Bucket → tiny monochrome leading dot color on each task card. */
+function bucketDot(b?: string) {
+  if (b === "at_risk") return "var(--color-warning)";
+  if (b === "cancel_path") return "var(--color-danger)";
+  if (b === "crushing") return "var(--color-accent-dark)";
+  if (b === "event") return "var(--color-text-secondary)";
+  return "var(--color-text-tertiary)";
+}
+
+/**
+ * Bucket the created_at timestamp into "today" / "this_week" / "older"
+ * for the urgency groups. Cards inside each group sort by bucket
+ * priority, then recency.
+ */
+function urgencyOf(createdAt: string): "today" | "this_week" | "older" {
+  const ageMs = Date.now() - new Date(createdAt).getTime();
+  const days = ageMs / 86_400_000;
+  if (days < 1) return "today";
+  if (days < 7) return "this_week";
+  return "older";
+}
+
 export default function AdminTasksKanban() {
   const supabase = createClient();
   const { teamMember } = useAuth();
 
   const [rows, setRows] = useState<TaskRow[]>([]);
-  const [bucketFilter, setBucketFilter] = useState<string>("");
+  const [status, setStatus] = useState<StatusKey>("open");
   const [studentSearch, setStudentSearch] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -94,11 +144,14 @@ export default function AdminTasksKanban() {
       else setLoading(true);
       setError(null);
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
         const token = session?.access_token;
+        // Pull all statuses in one round-trip so the tabs can show
+        // their counts without re-fetching when the user switches.
         const params = new URLSearchParams();
         params.set("status", "all");
-        if (bucketFilter) params.set("bucket", bucketFilter);
         if (studentSearch.trim()) params.set("student", studentSearch.trim());
         params.set("limit", "500");
 
@@ -117,7 +170,7 @@ export default function AdminTasksKanban() {
       setLoading(false);
       setRefreshing(false);
     },
-    [bucketFilter, studentSearch, supabase],
+    [studentSearch, supabase],
   );
 
   useEffect(() => {
@@ -131,38 +184,63 @@ export default function AdminTasksKanban() {
     })();
   }, [supabase]);
 
-  // Group + sort.
-  const grouped = useMemo(() => {
-    const buckets: Record<ColumnKey, TaskRow[]> = {
-      open: [],
-      completed: [],
-      dismissed: [],
-    };
-    for (const r of rows) {
-      if (r.status === "open") buckets.open.push(r);
-      else if (r.status === "completed") buckets.completed.push(r);
-      else if (r.status === "dismissed") buckets.dismissed.push(r);
-    }
-    buckets.open.sort((a, b) => {
-      const pa = BUCKET_PRIORITY[a.template?.bucket ?? ""] ?? 99;
-      const pb = BUCKET_PRIORITY[b.template?.bucket ?? ""] ?? 99;
-      if (pa !== pb) return pa - pb;
-      return (
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      );
-    });
-    buckets.completed.sort(
-      (a, b) =>
-        new Date(b.completed_at ?? b.created_at).getTime() -
-        new Date(a.completed_at ?? a.created_at).getTime(),
+  // Tab counts come from the unfiltered (by status) rows.
+  const counts = useMemo(() => {
+    return rows.reduce(
+      (acc, r) => {
+        if (r.status === "open") acc.open++;
+        else if (r.status === "completed") acc.completed++;
+        else if (r.status === "dismissed") acc.dismissed++;
+        return acc;
+      },
+      { open: 0, completed: 0, dismissed: 0 },
     );
-    buckets.dismissed.sort(
-      (a, b) =>
-        new Date(b.dismissed_at ?? b.created_at).getTime() -
-        new Date(a.dismissed_at ?? a.created_at).getTime(),
-    );
-    return buckets;
   }, [rows]);
+
+  /**
+   * Rows for the currently-selected tab, grouped by urgency, sorted
+   * by bucket priority (more urgent first) then recency.
+   */
+  const grouped = useMemo(() => {
+    const inTab = rows.filter((r) => r.status === status);
+    const groups: Record<"today" | "this_week" | "older", TaskRow[]> = {
+      today: [],
+      this_week: [],
+      older: [],
+    };
+    for (const r of inTab) {
+      const sortKey =
+        status === "open"
+          ? r.created_at
+          : status === "completed"
+            ? r.completed_at ?? r.created_at
+            : r.dismissed_at ?? r.created_at;
+      groups[urgencyOf(sortKey)].push(r);
+    }
+    for (const g of Object.values(groups)) {
+      g.sort((a, b) => {
+        if (status === "open") {
+          const pa = BUCKET_PRIORITY[a.template?.bucket ?? ""] ?? 99;
+          const pb = BUCKET_PRIORITY[b.template?.bucket ?? ""] ?? 99;
+          if (pa !== pb) return pa - pb;
+        }
+        const ta =
+          status === "open"
+            ? a.created_at
+            : status === "completed"
+              ? a.completed_at ?? a.created_at
+              : a.dismissed_at ?? a.created_at;
+        const tb =
+          status === "open"
+            ? b.created_at
+            : status === "completed"
+              ? b.completed_at ?? b.created_at
+              : b.dismissed_at ?? b.created_at;
+        return new Date(tb).getTime() - new Date(ta).getTime();
+      });
+    }
+    return groups;
+  }, [rows, status]);
 
   const openTask = useMemo(
     () => rows.find((r) => r.id === openTaskId) ?? null,
@@ -178,7 +256,7 @@ export default function AdminTasksKanban() {
     try {
       await navigator.clipboard.writeText(body);
       setToast(
-        `DM copied for ${row.student.name?.split(" ")[0] ?? "task"}. Send it, then click "Mark sent" to move it.`,
+        `DM copied for ${row.student.name?.split(" ")[0] ?? "task"}. Send it, then click Mark sent.`,
       );
       setTimeout(() => setToast(null), 3000);
     } catch {
@@ -186,11 +264,13 @@ export default function AdminTasksKanban() {
     }
   }
 
-  async function transitionTask(rowId: string, to: ColumnKey, notes?: string) {
+  async function transitionTask(rowId: string, to: StatusKey, notes?: string) {
     setBusyId(rowId);
     setError(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       const token = session?.access_token;
       const res = await fetch(`/api/admin/tasks/${rowId}/transition`, {
         method: "POST",
@@ -224,74 +304,74 @@ export default function AdminTasksKanban() {
   }
 
   return (
-    <div className="p-6 lg:p-8">
-      <div className="flex items-baseline justify-between gap-4 flex-wrap mb-2">
-        <div>
-          <h1
-            style={{
-              fontSize: 24,
-              fontWeight: 700,
-              letterSpacing: "-0.022em",
-              color: "var(--color-text-primary)",
-            }}
+    <AdminPage>
+      <PageHeader
+        title="Task queue"
+        description={
+          teamMember?.full_name
+            ? `Signed in as ${teamMember.full_name}. Copy a DM, send it in Discord, then mark it sent.`
+            : "Copy a DM, send it in Discord, then mark it sent."
+        }
+        actions={
+          <Button
+            variant="subtle"
+            size="md"
+            busy={refreshing}
+            onClick={() => void fetchTasks(true)}
           >
-            Task queue
-          </h1>
-          <p
-            style={{
-              fontSize: 13,
-              color: "var(--color-text-tertiary)",
-              marginTop: 2,
-            }}
-          >
-            Click a card for the full template + student detail. Copy DM
-            to clipboard, send it in Discord, then click <em>Mark sent</em>.
-            {teamMember?.full_name
-              ? ` Signed in as ${teamMember.full_name}.`
-              : ""}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => fetchTasks(true)}
-          disabled={refreshing}
-          style={refreshBtn(refreshing)}
-        >
-          {refreshing ? "Refreshing…" : "↻ Refresh"}
-        </button>
-      </div>
+            {refreshing ? "Refreshing…" : "↻ Refresh"}
+          </Button>
+        }
+      />
 
-      <div className="flex gap-2 mb-5 flex-wrap items-center">
-        <select
-          value={bucketFilter}
-          onChange={(e) => setBucketFilter(e.target.value)}
-          style={selectStyle()}
-        >
-          <option value="">All buckets</option>
-          <option value="at_risk">⚠ At risk</option>
-          <option value="cancel_path">✗ Cancel path</option>
-          <option value="crushing">★ Crushing</option>
-          <option value="event">⚡ Event</option>
-          <option value="admin">⚙ Admin</option>
-        </select>
+      {/* Status tabs — primary mental model for what to look at next. */}
+      <div
+        className="flex items-center justify-between gap-3 flex-wrap"
+        style={{ marginBottom: 24 }}
+      >
+        <Tabs
+          value={status}
+          onChange={setStatus}
+          tabs={[
+            { value: "open", label: "To do", count: counts.open },
+            { value: "completed", label: "Sent", count: counts.completed },
+            {
+              value: "dismissed",
+              label: "Dismissed",
+              count: counts.dismissed,
+            },
+          ]}
+        />
         <input
           type="text"
           placeholder="Search name / email / @discord"
           value={studentSearch}
           onChange={(e) => setStudentSearch(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void fetchTasks(true)}
-          style={{ ...selectStyle(), minWidth: 240 }}
+          style={{
+            padding: "8px 12px",
+            fontSize: 13,
+            background: "var(--color-bg-card)",
+            border: "1px solid var(--color-border)",
+            borderRadius: 10,
+            color: "var(--color-text-primary)",
+            outline: "none",
+            minWidth: 260,
+            letterSpacing: "-0.005em",
+          }}
         />
       </div>
 
       {error && (
         <div
-          className="mb-4 p-3 rounded"
           style={{
             background: "rgba(200,74,74,0.10)",
             border: "1px solid rgba(200,74,74,0.30)",
+            borderRadius: 10,
+            padding: "10px 14px",
             fontSize: 13,
             color: "var(--color-danger)",
+            marginBottom: 16,
           }}
         >
           {error}
@@ -299,195 +379,149 @@ export default function AdminTasksKanban() {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-16">
-          <div
-            className="rounded-full animate-spin"
-            style={{
-              width: 24,
-              height: 24,
-              border: "2px solid var(--color-accent)",
-              borderTopColor: "transparent",
-            }}
-          />
-        </div>
+        <LoadingPulse />
       ) : (
-        <div
-          className="grid gap-4"
-          style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}
-        >
-          {COLUMNS.map((col) => (
-            <Column
-              key={col.key}
-              label={col.label}
-              count={grouped[col.key].length}
-              tone={col.key}
-            >
-              {grouped[col.key].length === 0 ? (
-                <EmptyColumn col={col.key} />
-              ) : (
-                grouped[col.key].map((row) => (
-                  <TaskCard
-                    key={row.id}
-                    row={row}
-                    column={col.key}
-                    busy={busyId === row.id}
-                    onOpen={() => setOpenTaskId(row.id)}
-                    onCopy={() => copyDMOnly(row)}
-                    onMarkSent={() => transitionTask(row.id, "completed")}
-                    onReopen={() => transitionTask(row.id, "open")}
-                    onDismiss={() =>
-                      setDismissModal({
-                        id: row.id,
-                        name: row.student?.name ?? "this student",
-                      })
-                    }
-                  />
-                ))
-              )}
-            </Column>
-          ))}
-        </div>
+        <>
+          {(["today", "this_week", "older"] as const).map((group) => {
+            const items = grouped[group];
+            if (items.length === 0) return null;
+            return (
+              <Section
+                key={group}
+                eyebrow={groupLabel(group)}
+                count={items.length}
+              >
+                <div className="flex flex-col" style={{ gap: 8 }}>
+                  {items.map((row) => (
+                    <TaskRow
+                      key={row.id}
+                      row={row}
+                      status={status}
+                      busy={busyId === row.id}
+                      onOpen={() => setOpenTaskId(row.id)}
+                      onCopy={() => copyDMOnly(row)}
+                      onMarkSent={() => transitionTask(row.id, "completed")}
+                      onReopen={() => transitionTask(row.id, "open")}
+                      onDismiss={() =>
+                        setDismissModal({
+                          id: row.id,
+                          name: row.student?.name ?? "this student",
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              </Section>
+            );
+          })}
+          {grouped.today.length === 0 &&
+            grouped.this_week.length === 0 &&
+            grouped.older.length === 0 && (
+              <Card>
+                <EmptyState
+                  title={emptyLabel(status)}
+                  description={emptyDescription(status)}
+                />
+              </Card>
+            )}
+        </>
       )}
 
-      {/* Toast */}
-      {toast && (
-        <div style={toastStyle()}>{toast}</div>
-      )}
+      {toast && <Toast message={toast} />}
 
-      {/* Detail modal */}
-      {openTask && (
-        <TaskDetailModal
-          row={openTask}
-          config={config}
-          busy={busyId === openTask.id}
-          onClose={() => setOpenTaskId(null)}
-          onCopy={() => copyDMOnly(openTask)}
-          onMarkSent={async () => {
-            await transitionTask(openTask.id, "completed");
-            setOpenTaskId(null);
-          }}
-          onReopen={async () => {
-            await transitionTask(openTask.id, "open");
-            setOpenTaskId(null);
-          }}
-          onDismiss={() =>
-            setDismissModal({
-              id: openTask.id,
-              name: openTask.student?.name ?? "this student",
-            })
-          }
-        />
-      )}
+      <Modal open={Boolean(openTask)} onClose={() => setOpenTaskId(null)}>
+        {openTask && (
+          <TaskDetail
+            row={openTask}
+            config={config}
+            busy={busyId === openTask.id}
+            onClose={() => setOpenTaskId(null)}
+            onCopy={() => copyDMOnly(openTask)}
+            onMarkSent={async () => {
+              await transitionTask(openTask.id, "completed");
+              setOpenTaskId(null);
+            }}
+            onReopen={async () => {
+              await transitionTask(openTask.id, "open");
+              setOpenTaskId(null);
+            }}
+            onDismiss={() =>
+              setDismissModal({
+                id: openTask.id,
+                name: openTask.student?.name ?? "this student",
+              })
+            }
+          />
+        )}
+      </Modal>
 
-      {/* Dismiss modal */}
-      {dismissModal && (
-        <DismissModal
-          name={dismissModal.name}
-          value={dismissNote}
-          onChange={setDismissNote}
-          onClose={() => {
-            setDismissModal(null);
-            setDismissNote("");
-          }}
-          onSubmit={() => void submitDismiss()}
-          busy={busyId === dismissModal.id}
-        />
-      )}
-    </div>
-  );
-}
-
-/* ───────── Column ───────── */
-
-function Column({
-  label,
-  count,
-  tone,
-  children,
-}: {
-  label: string;
-  count: number;
-  tone: ColumnKey;
-  children: React.ReactNode;
-}) {
-  const accent =
-    tone === "open"
-      ? "var(--color-warning)"
-      : tone === "completed"
-        ? "var(--color-accent-dark)"
-        : "var(--color-text-tertiary)";
-  return (
-    <section
-      style={{
-        background: "var(--color-bg-card)",
-        border: "1px solid var(--color-border)",
-        borderRadius: 12,
-        padding: 12,
-        minHeight: 280,
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-      }}
-    >
-      <header
-        className="flex items-baseline justify-between"
-        style={{ paddingBottom: 8, borderBottom: "1px solid var(--color-border)" }}
+      <Modal
+        open={Boolean(dismissModal)}
+        onClose={() => {
+          setDismissModal(null);
+          setDismissNote("");
+        }}
+        maxWidth={460}
       >
-        <p
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            letterSpacing: "0.12em",
-            textTransform: "uppercase",
-            color: accent,
-          }}
-        >
-          {label}
-        </p>
-        <span
-          style={{
-            fontSize: 11,
-            color: "var(--color-text-tertiary)",
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {count}
-        </span>
-      </header>
-      <div className="flex flex-col gap-2 overflow-y-auto" style={{ maxHeight: "70vh" }}>
-        {children}
-      </div>
-    </section>
+        {dismissModal && (
+          <>
+            <h3 style={{ ...T.heading, marginBottom: 4 }}>
+              Dismiss task for {dismissModal.name}?
+            </h3>
+            <p style={{ ...T.bodyDim, marginBottom: 16 }}>
+              A short reason helps tune the triggers over time.
+            </p>
+            <textarea
+              autoFocus
+              rows={3}
+              value={dismissNote}
+              placeholder="e.g. Already replied to Astrid in Discord"
+              onChange={(e) => setDismissNote(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "10px 12px",
+                fontSize: 13,
+                background: "var(--color-bg-primary)",
+                border: "1px solid var(--color-border)",
+                borderRadius: 8,
+                color: "var(--color-text-primary)",
+                resize: "vertical",
+                marginBottom: 16,
+                letterSpacing: "-0.005em",
+              }}
+            />
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                size="md"
+                onClick={() => {
+                  setDismissModal(null);
+                  setDismissNote("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                size="md"
+                busy={busyId === dismissModal.id}
+                onClick={() => void submitDismiss()}
+              >
+                Dismiss
+              </Button>
+            </div>
+          </>
+        )}
+      </Modal>
+    </AdminPage>
   );
 }
 
-function EmptyColumn({ col }: { col: ColumnKey }) {
-  const msg =
-    col === "open"
-      ? "Nothing waiting."
-      : col === "completed"
-        ? "Nothing sent yet."
-        : "Nothing dismissed.";
-  return (
-    <div
-      style={{
-        padding: 24,
-        textAlign: "center",
-        fontSize: 12,
-        color: "var(--color-text-tertiary)",
-        fontStyle: "italic",
-      }}
-    >
-      {msg}
-    </div>
-  );
-}
+/* ─────────── Single task row ─────────── */
 
-/* ───────── Card ───────── */
-
-function TaskCard({
+function TaskRow({
   row,
-  column,
+  status,
   busy,
   onOpen,
   onCopy,
@@ -496,7 +530,7 @@ function TaskCard({
   onDismiss,
 }: {
   row: TaskRow;
-  column: ColumnKey;
+  status: StatusKey;
   busy: boolean;
   onOpen: () => void;
   onCopy: () => void;
@@ -506,168 +540,119 @@ function TaskCard({
 }) {
   const { student, template } = row;
   const isAdminOnly = template?.is_admin_only === true;
-  const dayNumber = student ? getDayNumber(student.joined_at) : null;
-  const glyph = template ? BUCKET_GLYPH[template.bucket] ?? "·" : "·";
-  const bucketColor =
-    template?.bucket === "at_risk"
-      ? "var(--color-warning)"
-      : template?.bucket === "cancel_path"
-        ? "var(--color-danger)"
-        : template?.bucket === "crushing"
-          ? "var(--color-accent)"
-          : "var(--color-text-tertiary)";
+  const day = student ? getDayNumber(student.joined_at) : null;
+  const dotColor = bucketDot(template?.bucket);
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen();
-        }
-      }}
-      style={{
-        background: "var(--color-bg-elevated)",
-        border: "1px solid var(--color-border)",
-        borderRadius: 8,
-        padding: 10,
-        cursor: "pointer",
-      }}
-    >
-      {/* Header — avatar + name */}
-      <div className="flex items-center gap-2 mb-1">
-        <div
-          style={{
-            width: 24,
-            height: 24,
-            borderRadius: "50%",
-            flexShrink: 0,
-            background: student?.avatar_url
-              ? `url(${student.avatar_url}) center/cover`
-              : "rgba(140,140,130,0.18)",
-          }}
-        />
-        <strong
-          className="truncate flex-1"
-          style={{
-            color: "var(--color-text-primary)",
-            fontSize: 13,
-            fontWeight: 600,
-          }}
-        >
-          {student?.name ?? "—"}
-        </strong>
-        {dayNumber !== null && (
-          <span
-            style={{
-              fontSize: 10,
-              color: "var(--color-text-tertiary)",
-              fontVariantNumeric: "tabular-nums",
-              flexShrink: 0,
-            }}
-          >
-            Day {dayNumber}
-          </span>
-        )}
-      </div>
-
-      {/* Discord username with label */}
-      <p
+    <Card padding={0}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onOpen}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onOpen();
+          }
+        }}
         style={{
-          fontSize: 11,
-          color: "var(--color-text-secondary)",
-          marginBottom: 6,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "12px 16px",
+          cursor: "pointer",
         }}
       >
-        <span style={{ color: "var(--color-text-tertiary)" }}>
-          Discord:{" "}
-        </span>
-        {student?.discord_username ? (
-          <span
+        {/* bucket dot — meaning-bearing color, very small */}
+        <span
+          aria-hidden="true"
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: dotColor,
+            flexShrink: 0,
+          }}
+        />
+        <Avatar src={student?.avatar_url} name={student?.name} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-2 min-w-0">
+            <strong style={T.cardTitle} className="truncate">
+              {student?.name ?? "—"}
+            </strong>
+            {day !== null && (
+              <span style={T.meta}>Day {day}</span>
+            )}
+          </div>
+          <p
+            className="truncate"
             style={{
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-              fontWeight: 600,
-              color: "#7d8be8",
+              ...T.bodyDim,
+              fontSize: 12,
+              marginTop: 2,
             }}
           >
-            @{student.discord_username}
-          </span>
-        ) : (
-          <span style={{ color: "var(--color-warning)", fontStyle: "italic" }}>
-            not connected
-          </span>
-        )}
-      </p>
-
-      {/* Scenario title */}
-      <div
-        className="flex items-baseline gap-2"
-        style={{ fontSize: 12 }}
-      >
-        <span style={{ color: bucketColor, fontSize: 13 }}>{glyph}</span>
-        <span
-          style={{
-            color: "var(--color-text-primary)",
-            fontWeight: 500,
-            lineHeight: 1.35,
-          }}
+            {template?.title ? stripBucketGlyph(template.title) : "(no template)"}
+          </p>
+        </div>
+        <div
+          className="flex items-center gap-1"
+          onClick={(e) => e.stopPropagation()}
         >
-          {template?.title ? stripBucketGlyph(template.title) : "(template not found)"}
-        </span>
+          {status === "open" && !isAdminOnly && (
+            <>
+              <Button variant="primary" busy={busy} onClick={onCopy}>
+                Copy DM
+              </Button>
+              <IconButton label="Mark sent" onClick={onMarkSent}>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M5 13l4 4L19 7" />
+                </svg>
+              </IconButton>
+              <IconButton label="Dismiss" onClick={onDismiss}>
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </IconButton>
+            </>
+          )}
+          {status === "open" && isAdminOnly && (
+            <Button variant="primary" href="/admin/discounts">
+              Open discount →
+            </Button>
+          )}
+          {status !== "open" && (
+            <Button variant="ghost" busy={busy} onClick={onReopen}>
+              Move to To do
+            </Button>
+          )}
+        </div>
       </div>
-
-      {/* Actions row */}
-      <div
-        className="flex gap-1.5 mt-2 flex-wrap"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {column === "open" && !isAdminOnly && (
-          <>
-            <button onClick={onCopy} style={primaryBtn(busy)}>
-              Copy DM
-            </button>
-            <button onClick={onMarkSent} style={ghostBtn()} disabled={busy}>
-              Mark sent
-            </button>
-            <button onClick={onDismiss} style={ghostBtn()} disabled={busy}>
-              Dismiss
-            </button>
-          </>
-        )}
-        {column === "open" && isAdminOnly && (
-          <a
-            href="/admin/discounts"
-            onClick={(e) => e.stopPropagation()}
-            style={primaryBtn(false)}
-          >
-            Open discount →
-          </a>
-        )}
-        {(column === "completed" || column === "dismissed") && (
-          <button onClick={onReopen} style={ghostBtn()} disabled={busy}>
-            Move to To do
-          </button>
-        )}
-      </div>
-
-      {column === "completed" && (
-        <p style={metaStyle()}>Sent {relTime(row.completed_at)}</p>
-      )}
-      {column === "dismissed" && (
-        <p style={metaStyle()} title={row.notes ?? ""}>
-          Dismissed {relTime(row.dismissed_at)}
-          {row.notes ? ` — ${row.notes.slice(0, 50)}` : ""}
-        </p>
-      )}
-    </div>
+    </Card>
   );
 }
 
-/* ───────── Detail modal ───────── */
+/* ─────────── Detail modal body ─────────── */
 
-function TaskDetailModal({
+function TaskDetail({
   row,
   config,
   busy,
@@ -687,7 +672,7 @@ function TaskDetailModal({
   onDismiss: () => void;
 }) {
   const { student, template } = row;
-  const dayNumber = student ? getDayNumber(student.joined_at) : null;
+  const day = student ? getDayNumber(student.joined_at) : null;
   const preview =
     template && student && !template.is_admin_only
       ? renderTemplate(template.body, {
@@ -695,456 +680,222 @@ function TaskDetailModal({
           config,
         })
       : null;
-  const glyph = template ? BUCKET_GLYPH[template.bucket] ?? "·" : "·";
-  const bucketColor =
-    template?.bucket === "at_risk"
-      ? "var(--color-warning)"
-      : template?.bucket === "cancel_path"
-        ? "var(--color-danger)"
-        : template?.bucket === "crushing"
-          ? "var(--color-accent)"
-          : "var(--color-text-tertiary)";
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 16,
-        zIndex: 100,
-      }}
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "var(--color-bg-card)",
-          border: "1px solid var(--color-border-hover)",
-          borderRadius: 12,
-          width: "100%",
-          maxWidth: 580,
-          maxHeight: "85vh",
-          overflow: "auto",
-          padding: 22,
-        }}
-      >
-        {/* Student header */}
-        <div className="flex items-center gap-3 mb-4">
-          <div
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: "50%",
-              flexShrink: 0,
-              background: student?.avatar_url
-                ? `url(${student.avatar_url}) center/cover`
-                : "rgba(140,140,130,0.18)",
-            }}
-          />
-          <div className="flex-1 min-w-0">
-            <h2
-              style={{
-                fontSize: 16,
-                fontWeight: 600,
-                color: "var(--color-text-primary)",
-                letterSpacing: "-0.014em",
-              }}
-            >
-              {student?.name ?? "—"}
-            </h2>
-            <p
-              style={{
-                fontSize: 12,
-                color: "var(--color-text-tertiary)",
-                marginTop: 2,
-              }}
-            >
-              {dayNumber !== null ? `Day ${dayNumber} · ` : ""}
-              {student?.membership_status ?? "—"}
-              {student?.email ? ` · ${student.email}` : ""}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              fontSize: 22,
-              color: "var(--color-text-tertiary)",
-              padding: 0,
-              width: 28,
-              height: 28,
-              lineHeight: 1,
-            }}
+    <>
+      {/* Header */}
+      <div className="flex items-start gap-3" style={{ marginBottom: 20 }}>
+        <Avatar src={student?.avatar_url} name={student?.name} size={44} />
+        <div className="flex-1 min-w-0">
+          <h2 style={{ ...T.heading, marginBottom: 4 }}>
+            {student?.name ?? "—"}
+          </h2>
+          <p style={T.meta}>
+            {day !== null ? `Day ${day} · ` : ""}
+            {student?.membership_status ?? "—"}
+            {student?.email ? ` · ${student.email}` : ""}
+          </p>
+        </div>
+        <IconButton label="Close" onClick={onClose}>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
           >
-            ×
-          </button>
-        </div>
-
-        {/* Discord username row */}
-        <div
-          className="mb-4 p-3 rounded"
-          style={{
-            background: "var(--color-fill-secondary)",
-            fontSize: 13,
-          }}
-        >
-          <span style={{ color: "var(--color-text-tertiary)" }}>
-            Discord username:{" "}
-          </span>
-          {student?.discord_username ? (
-            <span
-              style={{
-                fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                color: "#7d8be8",
-                fontWeight: 600,
-              }}
-            >
-              @{student.discord_username}
-            </span>
-          ) : (
-            <span
-              style={{
-                color: "var(--color-warning)",
-                fontStyle: "italic",
-              }}
-            >
-              not connected
-            </span>
-          )}
-        </div>
-
-        {/* Scenario block */}
-        <div className="mb-4">
-          <div className="flex items-baseline gap-2 mb-1">
-            <span style={{ color: bucketColor, fontSize: 16 }}>{glyph}</span>
-            <h3
-              style={{
-                fontSize: 15,
-                fontWeight: 600,
-                color: "var(--color-text-primary)",
-                letterSpacing: "-0.012em",
-              }}
-            >
-              {template?.title ? stripBucketGlyph(template.title) : "—"}
-            </h3>
-          </div>
-          {template?.trigger_description && (
-            <p
-              style={{
-                fontSize: 12,
-                color: "var(--color-text-tertiary)",
-                marginBottom: 4,
-              }}
-            >
-              <strong style={{ color: "var(--color-text-secondary)" }}>
-                Trigger:
-              </strong>{" "}
-              {template.trigger_description}
-            </p>
-          )}
-          {row.behavior_summary && (
-            <p
-              style={{
-                fontSize: 12,
-                color: "var(--color-text-secondary)",
-                marginTop: 4,
-                lineHeight: 1.5,
-              }}
-            >
-              <strong style={{ color: "var(--color-text-tertiary)" }}>
-                Why this fired:
-              </strong>{" "}
-              {row.behavior_summary}
-            </p>
-          )}
-        </div>
-
-        {/* Rendered DM body */}
-        {preview && (
-          <div
-            className="mb-4 p-3 rounded"
-            style={{
-              background: "var(--color-bg-primary)",
-              border: "1px solid var(--color-border)",
-              fontSize: 13,
-              lineHeight: 1.55,
-              whiteSpace: "pre-wrap",
-              color: "var(--color-text-primary)",
-              maxHeight: 280,
-              overflow: "auto",
-            }}
-          >
-            <div
-              style={{
-                fontSize: 10,
-                letterSpacing: "0.12em",
-                textTransform: "uppercase",
-                color: "var(--color-text-tertiary)",
-                marginBottom: 6,
-              }}
-            >
-              DM body (rendered for this student)
-            </div>
-            {preview.body}
-            {preview.unresolved.length > 0 && (
-              <p
-                style={{
-                  marginTop: 8,
-                  fontSize: 11,
-                  color: "var(--color-warning)",
-                }}
-              >
-                ⚠ Unresolved placeholders:{" "}
-                {preview.unresolved.map((v) => `{${v}}`).join(", ")}
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Actions */}
-        <div className="flex gap-2 flex-wrap">
-          {row.status === "open" && !template?.is_admin_only && (
-            <>
-              <button onClick={onCopy} style={primaryBtn(busy)}>
-                Copy DM
-              </button>
-              <button onClick={onMarkSent} disabled={busy} style={ghostBtn()}>
-                Mark sent
-              </button>
-              <button onClick={onDismiss} disabled={busy} style={ghostBtn()}>
-                Dismiss
-              </button>
-            </>
-          )}
-          {row.status === "open" && template?.is_admin_only && (
-            <a href="/admin/discounts" style={primaryBtn(false)}>
-              Open discount queue →
-            </a>
-          )}
-          {row.status !== "open" && (
-            <button onClick={onReopen} disabled={busy} style={ghostBtn()}>
-              Move to To do
-            </button>
-          )}
-          <div className="flex-1" />
-          {student?.id && (
-            <a
-              href={`/admin/students/${student.id}`}
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                fontSize: 12,
-                color: "var(--color-text-tertiary)",
-                textDecoration: "underline",
-                alignSelf: "center",
-              }}
-            >
-              Open student detail →
-            </a>
-          )}
-        </div>
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </IconButton>
       </div>
-    </div>
-  );
-}
 
-/* ───────── Dismiss modal ───────── */
-
-function DismissModal({
-  name,
-  value,
-  onChange,
-  onClose,
-  onSubmit,
-  busy,
-}: {
-  name: string;
-  value: string;
-  onChange: (v: string) => void;
-  onClose: () => void;
-  onSubmit: () => void;
-  busy: boolean;
-}) {
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 110,
-      }}
-      onClick={onClose}
-    >
+      {/* Discord username, only thing they need handy to send the DM */}
       <div
-        onClick={(e) => e.stopPropagation()}
         style={{
-          background: "var(--color-bg-elevated)",
-          border: "1px solid var(--color-border)",
-          borderRadius: 10,
-          padding: 20,
-          width: "100%",
-          maxWidth: 460,
+          padding: "10px 14px",
+          background: "var(--color-fill-secondary)",
+          borderRadius: 8,
+          fontSize: 13,
+          marginBottom: 20,
+          letterSpacing: "-0.005em",
         }}
       >
-        <h3
-          style={{
-            fontSize: 16,
-            fontWeight: 600,
-            color: "var(--color-text-primary)",
-            marginBottom: 4,
-          }}
+        <span style={{ color: "var(--color-text-tertiary)" }}>
+          Discord:{" "}
+        </span>
+        {student?.discord_username ? (
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              color: "var(--color-text-primary)",
+              fontWeight: 600,
+            }}
+          >
+            @{student.discord_username}
+          </span>
+        ) : (
+          <span style={{ color: "var(--color-warning)", fontStyle: "italic" }}>
+            not connected
+          </span>
+        )}
+      </div>
+
+      {/* Scenario */}
+      <div style={{ marginBottom: 20 }}>
+        <div
+          className="flex items-baseline gap-2 flex-wrap"
+          style={{ marginBottom: 6 }}
         >
-          Dismiss task for {name}?
-        </h3>
-        <p
+          {template?.bucket && (
+            <Pill tone={bucketTone(template.bucket)}>
+              {BUCKET_LABEL[template.bucket] ?? template.bucket}
+            </Pill>
+          )}
+          <h3 style={T.cardTitle}>
+            {template?.title ? stripBucketGlyph(template.title) : "—"}
+          </h3>
+        </div>
+        {row.behavior_summary && (
+          <p style={{ ...T.bodyDim, fontSize: 13, lineHeight: 1.5 }}>
+            <span style={{ color: "var(--color-text-tertiary)" }}>
+              Why this fired:{" "}
+            </span>
+            {row.behavior_summary}
+          </p>
+        )}
+        {template?.trigger_description && !row.behavior_summary && (
+          <p style={{ ...T.bodyDim, fontSize: 13, lineHeight: 1.5 }}>
+            <span style={{ color: "var(--color-text-tertiary)" }}>
+              Trigger:{" "}
+            </span>
+            {template.trigger_description}
+          </p>
+        )}
+      </div>
+
+      {/* Rendered DM */}
+      {preview && (
+        <div
           style={{
-            fontSize: 12,
-            color: "var(--color-text-tertiary)",
-            marginBottom: 12,
-          }}
-        >
-          A short reason helps tune the triggers over time.
-        </p>
-        <textarea
-          autoFocus
-          rows={3}
-          value={value}
-          placeholder="e.g. Already replied to Astrid in Discord"
-          onChange={(e) => onChange(e.target.value)}
-          style={{
-            width: "100%",
-            padding: "8px 10px",
-            fontSize: 13,
             background: "var(--color-bg-primary)",
             border: "1px solid var(--color-border)",
-            borderRadius: 6,
+            borderRadius: 10,
+            padding: "14px 16px",
+            fontSize: 13,
+            lineHeight: 1.55,
+            whiteSpace: "pre-wrap",
             color: "var(--color-text-primary)",
-            resize: "vertical",
+            maxHeight: 280,
+            overflow: "auto",
+            marginBottom: 20,
+            letterSpacing: "-0.005em",
           }}
-        />
-        <div className="flex gap-2 justify-end mt-4">
-          <button onClick={onClose} style={ghostBtn()}>
-            Cancel
-          </button>
-          <button
-            onClick={onSubmit}
-            disabled={busy}
+        >
+          <div
             style={{
-              ...primaryBtn(busy),
-              background: "var(--color-danger)",
+              ...T.eyebrow,
+              marginBottom: 8,
             }}
           >
-            Dismiss
-          </button>
+            DM body
+          </div>
+          {preview.body}
+          {preview.unresolved.length > 0 && (
+            <p
+              style={{
+                marginTop: 10,
+                fontSize: 11,
+                color: "var(--color-warning)",
+              }}
+            >
+              ⚠ Unresolved placeholders:{" "}
+              {preview.unresolved.map((v) => `{${v}}`).join(", ")}
+            </p>
+          )}
         </div>
+      )}
+
+      {/* Actions */}
+      <div className="flex gap-2 flex-wrap items-center">
+        {row.status === "open" && !template?.is_admin_only && (
+          <>
+            <Button variant="primary" size="md" busy={busy} onClick={onCopy}>
+              Copy DM
+            </Button>
+            <Button variant="ghost" size="md" busy={busy} onClick={onMarkSent}>
+              Mark sent
+            </Button>
+            <Button variant="ghost" size="md" busy={busy} onClick={onDismiss}>
+              Dismiss
+            </Button>
+          </>
+        )}
+        {row.status === "open" && template?.is_admin_only && (
+          <Button variant="primary" size="md" href="/admin/discounts">
+            Open discount queue →
+          </Button>
+        )}
+        {row.status !== "open" && (
+          <Button variant="ghost" size="md" busy={busy} onClick={onReopen}>
+            Move to To do
+          </Button>
+        )}
+        <div className="flex-1" />
+        {student?.id && (
+          <Button
+            variant="ghost"
+            size="md"
+            href={`/admin/students/${student.id}`}
+          >
+            Open student detail →
+          </Button>
+        )}
       </div>
+    </>
+  );
+}
+
+/* ─────────── Misc ─────────── */
+
+function LoadingPulse() {
+  return (
+    <div className="flex items-center justify-center" style={{ padding: 64 }}>
+      <div
+        className="rounded-full animate-spin"
+        style={{
+          width: 22,
+          height: 22,
+          border: "2px solid var(--color-accent-dark)",
+          borderTopColor: "transparent",
+        }}
+      />
     </div>
   );
 }
 
-/* ───────── Helpers ───────── */
-
-function relTime(iso: string | null): string {
-  if (!iso) return "";
-  const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 60_000) return "just now";
-  const min = Math.floor(diff / 60_000);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  const day = Math.floor(hr / 24);
-  return `${day}d ago`;
+function groupLabel(g: "today" | "this_week" | "older") {
+  if (g === "today") return "Today";
+  if (g === "this_week") return "This week";
+  return "Older";
 }
 
-function selectStyle(): React.CSSProperties {
-  return {
-    padding: "6px 10px",
-    fontSize: 13,
-    background: "var(--color-bg-elevated)",
-    border: "1px solid var(--color-border)",
-    borderRadius: 6,
-    color: "var(--color-text-primary)",
-  };
+function emptyLabel(s: StatusKey) {
+  if (s === "open") return "Inbox zero.";
+  if (s === "completed") return "Nothing sent yet.";
+  return "Nothing dismissed.";
 }
 
-function refreshBtn(busy: boolean): React.CSSProperties {
-  return {
-    padding: "8px 14px",
-    fontSize: 12,
-    fontWeight: 600,
-    borderRadius: 8,
-    background: "var(--color-bg-elevated)",
-    border: "1px solid var(--color-border)",
-    color: "var(--color-text-primary)",
-    cursor: busy ? "wait" : "pointer",
-    opacity: busy ? 0.6 : 1,
-  };
+function emptyDescription(s: StatusKey) {
+  if (s === "open") return "New tasks land here when the daily cron fires.";
+  if (s === "completed")
+    return "When you mark a task sent it moves here for the record.";
+  return "Tasks you dismiss with a reason live here.";
 }
 
-function primaryBtn(busy: boolean): React.CSSProperties {
-  return {
-    padding: "5px 10px",
-    fontSize: 11,
-    fontWeight: 600,
-    borderRadius: 6,
-    background: "var(--color-accent)",
-    border: "1px solid var(--color-border)",
-    color: "var(--color-text-on-accent, #fff)",
-    cursor: busy ? "wait" : "pointer",
-    opacity: busy ? 0.6 : 1,
-    textDecoration: "none",
-    display: "inline-block",
-  };
-}
-
-function ghostBtn(): React.CSSProperties {
-  return {
-    padding: "5px 10px",
-    fontSize: 11,
-    fontWeight: 500,
-    borderRadius: 6,
-    background: "transparent",
-    border: "1px solid var(--color-border)",
-    color: "var(--color-text-secondary)",
-    cursor: "pointer",
-  };
-}
-
-function metaStyle(): React.CSSProperties {
-  return {
-    fontSize: 10,
-    color: "var(--color-text-tertiary)",
-    marginTop: 6,
-  };
-}
-
-function toastStyle(): React.CSSProperties {
-  return {
-    position: "fixed",
-    bottom: 24,
-    right: 24,
-    padding: "10px 14px",
-    borderRadius: 8,
-    background: "var(--color-bg-elevated)",
-    border: "1px solid var(--color-accent-dark)",
-    color: "var(--color-text-primary)",
-    fontSize: 13,
-    boxShadow: "0 8px 24px rgba(0,0,0,0.25)",
-    zIndex: 1000,
-    maxWidth: 380,
-  };
-}
+// Silence unused-import warning — BUCKET_GLYPH is still exported for
+// other surfaces (templates page legend); we don't render the glyph
+// on cards any more, but importing keeps the module bundle consistent.
+void BUCKET_GLYPH;

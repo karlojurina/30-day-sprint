@@ -11,7 +11,12 @@
  * pagination shapes Whop uses across endpoints.
  */
 
-import { WHOP_API_BASE } from "./constants";
+// /api/v2/memberships is the admin endpoint for listing memberships
+// across the company. /api/v1/memberships?product_id=… returns
+// "not authorized" for company admin keys — v1 was the user-scoped
+// endpoint. We use v2 explicitly here even though WHOP_API_BASE
+// elsewhere still points at v1.
+const WHOP_MEMBERSHIPS_BASE = "https://api.whop.com/api/v2";
 
 export interface WhopMembershipRow {
   id: string;
@@ -81,7 +86,7 @@ export async function* listMembershipsForProduct(
 
   let page = 1;
   while (page <= maxPages) {
-    const url = `${WHOP_API_BASE}/memberships?product_id=${encodeURIComponent(
+    const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?product_id=${encodeURIComponent(
       productId,
     )}&page=${page}&per_page=${perPage}`;
     const res = await fetch(url, {

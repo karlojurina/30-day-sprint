@@ -298,6 +298,46 @@ export function Pill({
   return <span className={`pill-tone pill-tone-${tone}`}>{children}</span>;
 }
 
+/**
+ * Pace pill — student progress relative to expected pace for their
+ * day. Admin-only signal that lives next to the student's name on
+ * /admin/students and on task cards.
+ *
+ *   label = "behind"  -> red
+ *   label = "on_pace" -> neutral
+ *   label = "ahead"   -> green
+ *
+ * Pass `compact` to render just the icon (no label) — useful inside
+ * very dense rows like task cards.
+ */
+export function PacePill({
+  label,
+  compact = false,
+}: {
+  label: "behind" | "on_pace" | "ahead";
+  compact?: boolean;
+}) {
+  const tone: PillTone =
+    label === "behind"
+      ? "danger"
+      : label === "ahead"
+        ? "success"
+        : "neutral";
+  const icon = label === "behind" ? "↓" : label === "ahead" ? "↑" : "→";
+  const text =
+    label === "behind"
+      ? "Behind"
+      : label === "ahead"
+        ? "Ahead"
+        : "On pace";
+  return (
+    <Pill tone={tone}>
+      <span aria-hidden="true">{icon}</span>
+      {!compact && <span>{text}</span>}
+    </Pill>
+  );
+}
+
 /* ─── Buttons ─── */
 
 type ButtonVariant = "primary" | "ghost" | "danger" | "subtle";

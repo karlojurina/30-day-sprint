@@ -64,6 +64,17 @@ function dayNumber(joinedAt: string): number {
   );
 }
 
+/**
+ * Bucket → priority for the one-open-negative-task-per-student cap.
+ * Lower number = fires first / wins the slot. Cancel-path beats
+ * at-risk; everything else doesn't go through the slot.
+ */
+function priorityFor(bucket: string): number {
+  if (bucket === "cancel_path") return 1;
+  if (bucket === "at_risk") return 2;
+  return 99;
+}
+
 function pickExistingAlertScenario(
   alertType: string,
   day: number,
@@ -190,6 +201,34 @@ export async function GET(request: NextRequest) {
     existingByStudent.set(t.student_id, arr);
   }
 
+  // Build all snapshots up front so the alert mapping can apply the
+  // progress gate too (cancel_path alerts only fire if the student is
+  // actually behind).
+  const snapByStudent = new Map<string, ReturnType<typeof buildStudentSnapshot>>();
+  for (const student of students) {
+    snapByStudent.set(
+      student.id,
+      buildStudentSnapshot(
+        student,
+        completionsByStudent.get(student.id) ?? [],
+        lessons,
+        regionTotals,
+        existingByStudent.get(student.id) ?? [],
+      ),
+    );
+  }
+
+  // Resolve any scenario_id to a bucket — combines the built-in
+  // SCENARIO_BUCKET map with custom templates' bucket column.
+  const bucketByScenario = new Map<string, string>(
+    Object.entries(SCENARIO_BUCKET),
+  );
+  for (const t of templates as TemplateRow[]) {
+    if (!bucketByScenario.has(t.scenario_id)) {
+      bucketByScenario.set(t.scenario_id, t.bucket);
+    }
+  }
+
   // ─── 1. Existing-alert → task mapping ─────────────────────
 
   const toInsert: Array<{
@@ -198,10 +237,12 @@ export async function GET(request: NextRequest) {
     template_id: string;
     behavior_summary: string;
   }> = [];
-  const studentNamesById = new Map<string, string>();
-  for (const s of students) {
-    studentNamesById.set(s.id, s.name ?? "Student");
-  }
+
+  /** Cancel-path alerts only fire if the student is genuinely
+   *  behind. Skips when progressRatio >= 0.6 — a Day-7 student who
+   *  watched 8 lessons in one weekend is fine even if they haven't
+   *  logged in for five days. */
+  const CANCEL_PATH_PROGRESS_GATE = 0.6;
 
   for (const alert of alerts) {
     const student = students.find((s) => s.id === alert.student_id);
@@ -211,27 +252,25 @@ export async function GET(request: NextRequest) {
     if (!scenarioId) continue;
     const templateId = templateBy.get(scenarioId);
     if (!templateId) continue;
-    // Plain-English summary — Astrid never needs to see the
-    // internal alert_type key.
+
+    // Progress gate — all four mapped scenarios are cancel_path.
+    const snap = snapByStudent.get(student.id);
+    if (snap && snap.progressRatio >= CANCEL_PATH_PROGRESS_GATE) continue;
+
     const label = ALERT_LABEL[alert.alert_type] ?? alert.message;
     toInsert.push({
       student_id: student.id,
       scenario_id: scenarioId,
       template_id: templateId,
-      behavior_summary: `Day ${day} · ${label}.`,
+      behavior_summary: `Day ${day} · ${label} · pace ${snap?.progressRatio.toFixed(2) ?? "?"}.`,
     });
   }
 
   // ─── 2. State-derived triggers ────────────────────────────
 
   for (const student of students) {
-    const snap = buildStudentSnapshot(
-      student,
-      completionsByStudent.get(student.id) ?? [],
-      lessons,
-      regionTotals,
-      existingByStudent.get(student.id) ?? [],
-    );
+    const snap = snapByStudent.get(student.id);
+    if (!snap) continue;
 
     // 2a. Built-in scenarios (W1.1, W1.2, …).
     for (const [scenarioId, check] of Object.entries(triggers)) {
@@ -263,12 +302,96 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // ─── 3. Insert (idempotent via partial unique index) ──────
+  // ─── 3. Per-student priority cap ──────────────────────────
+  //
+  // One open negative task per student. cancel_path beats at_risk;
+  // celebrations (crushing / event) and admin tasks fire freely.
+  // Existing open negative tasks held by the student count against
+  // the slot; if a higher-priority new task comes in, the existing
+  // one gets dismissed with a note and the new one takes its place.
+
+  // Fetch open tasks with their bucket to know who currently holds
+  // each student's negative slot.
+  const { data: openTasksWithBucket } = await supabase
+    .from("tasks")
+    .select("id, student_id, scenario_id, template:templates(bucket)")
+    .eq("status", "open");
+
+  type OpenSlot = { id: string; bucket: string };
+  const negativeSlot = new Map<string, OpenSlot>();
+  // Supabase's relational select can return the joined row as either a
+  // single object or an array, depending on inferred shape — normalize.
+  type OpenTaskRow = {
+    id: string;
+    student_id: string;
+    scenario_id: string;
+    template: { bucket: string } | { bucket: string }[] | null;
+  };
+  for (const t of (openTasksWithBucket ?? []) as unknown as OpenTaskRow[]) {
+    const tpl = Array.isArray(t.template) ? t.template[0] : t.template;
+    const bucket = tpl?.bucket ?? bucketByScenario.get(t.scenario_id) ?? "";
+    if (bucket === "cancel_path" || bucket === "at_risk") {
+      // If a student somehow has more than one negative open (shouldn't
+      // happen post-cap but safe), keep the higher-priority one in the
+      // slot so we don't accidentally let two coexist.
+      const existing = negativeSlot.get(t.student_id);
+      if (!existing || priorityFor(bucket) < priorityFor(existing.bucket)) {
+        negativeSlot.set(t.student_id, { id: t.id, bucket });
+      }
+    }
+  }
+
+  // Sort candidates so highest priority is processed first per student.
+  // Within the same priority, keep insertion order.
+  toInsert.sort((a, b) => {
+    const pa = priorityFor(bucketByScenario.get(a.scenario_id) ?? "");
+    const pb = priorityFor(bucketByScenario.get(b.scenario_id) ?? "");
+    return pa - pb;
+  });
+
+  const finalToInsert: typeof toInsert = [];
+  const toDismiss: string[] = [];
+
+  for (const c of toInsert) {
+    const bucket = bucketByScenario.get(c.scenario_id) ?? "";
+    if (bucket !== "cancel_path" && bucket !== "at_risk") {
+      // Celebrations / events / admin always pass.
+      finalToInsert.push(c);
+      continue;
+    }
+    const slot = negativeSlot.get(c.student_id);
+    if (!slot) {
+      finalToInsert.push(c);
+      negativeSlot.set(c.student_id, { id: "(pending)", bucket });
+      continue;
+    }
+    if (priorityFor(bucket) < priorityFor(slot.bucket)) {
+      // Higher priority — supersede the slot's current task.
+      if (slot.id !== "(pending)") toDismiss.push(slot.id);
+      finalToInsert.push(c);
+      negativeSlot.set(c.student_id, { id: "(pending)", bucket });
+    }
+    // else: slot taken by equal or higher priority — drop this candidate.
+  }
+
+  // Dismiss superseded tasks.
+  for (const id of toDismiss) {
+    await supabase
+      .from("tasks")
+      .update({
+        status: "dismissed",
+        dismissed_at: new Date().toISOString(),
+        notes: "Superseded by a higher-priority CSM task.",
+      })
+      .eq("id", id);
+  }
+
+  // ─── 4. Insert (idempotent via partial unique index) ──────
 
   let createdCount = 0;
   const perBucket: Record<string, number> = {};
 
-  for (const row of toInsert) {
+  for (const row of finalToInsert) {
     const { error } = await supabase.from("tasks").insert({
       ...row,
       status: "open",
@@ -285,7 +408,7 @@ export async function GET(request: NextRequest) {
       continue;
     }
     createdCount++;
-    const bucket = SCENARIO_BUCKET[row.scenario_id] ?? "event";
+    const bucket = bucketByScenario.get(row.scenario_id) ?? "event";
     perBucket[bucket] = (perBucket[bucket] ?? 0) + 1;
   }
 

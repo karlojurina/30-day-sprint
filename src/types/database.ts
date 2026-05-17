@@ -302,7 +302,11 @@ export type ConditionMetric =
   | "lesson_watched"
   | "days_since_last_completion"
   | "days_since_last_login"
-  | "membership_status";
+  | "membership_status"
+  // v39: pace metrics — completed-vs-expected.
+  | "progress_ratio"
+  | "progress_label"
+  | "region_pace";
 
 /** Numeric / boolean / enum conditions all share the discriminator
  *  but have different shapes. Keep them as one union and let the
@@ -312,7 +316,8 @@ export type Condition =
       metric: "day_number"
         | "total_lessons_watched"
         | "days_since_last_completion"
-        | "days_since_last_login";
+        | "days_since_last_login"
+        | "progress_ratio";
       op: ConditionOp;
       value: number;
     }
@@ -336,6 +341,11 @@ export type Condition =
       metric: "membership_status";
       op: "is" | "is_not";
       value: "active" | "canceled" | "past_due" | "expired";
+    }
+  | {
+      metric: "progress_label" | "region_pace";
+      op: "is" | "is_not";
+      value: "behind" | "on_pace" | "ahead";
     };
 
 export interface TriggerConfig {

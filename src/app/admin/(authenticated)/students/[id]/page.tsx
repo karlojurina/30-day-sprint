@@ -19,10 +19,13 @@ import {
   Card,
   Stat,
   Pill,
+  PacePill,
   Avatar,
   T,
   type PillTone,
 } from "@/components/admin/ui";
+import { buildPaceSummary } from "@/lib/csm-triggers";
+import type { RegionId } from "@/types/database";
 
 export default function StudentDetailPage() {
   const params = useParams();
@@ -83,6 +86,23 @@ export default function StudentDetailPage() {
   const completedIds = new Set(completions.map((c) => c.lesson_id));
   const dayNumber = getDayNumber(student.joined_at);
   const overallPercent = progressPercent(completedIds.size, lessons.length);
+
+  // Highest region with any completion — drives the region-pace pill.
+  const lessonRegion = new Map(lessons.map((l) => [l.id, l.region_id]));
+  const REGION_ORDER: RegionId[] = ["r1", "r2", "r3", "r4"];
+  let currentRegion: RegionId = "r1";
+  for (const lessonId of completedIds) {
+    const rid = lessonRegion.get(lessonId) as RegionId | undefined;
+    if (rid && REGION_ORDER.indexOf(rid) > REGION_ORDER.indexOf(currentRegion)) {
+      currentRegion = rid;
+    }
+  }
+  const pace = buildPaceSummary(
+    student.joined_at,
+    completedIds.size,
+    lessons.length,
+    currentRegion,
+  );
 
   // Group lessons by region
   const lessonsByRegion: Record<string, Lesson[]> = {};
@@ -159,11 +179,24 @@ export default function StudentDetailPage() {
             {student.email ?? "—"} · Day {dayNumber}
           </p>
         </div>
-        <Pill tone={statusTone(student.membership_status)}>
-          <span style={{ textTransform: "capitalize" }}>
-            {student.membership_status.replace("_", " ")}
-          </span>
-        </Pill>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Pill tone={statusTone(student.membership_status)}>
+            <span style={{ textTransform: "capitalize" }}>
+              {student.membership_status.replace("_", " ")}
+            </span>
+          </Pill>
+          <PacePill label={pace.progressLabel} />
+          {pace.regionPace !== "on_pace" && (
+            <Pill tone={pace.regionPace === "behind" ? "warning" : "accent"}>
+              <span>
+                Region{" "}
+                {pace.regionPace === "behind"
+                  ? `behind · in ${pace.currentRegion.toUpperCase()}, expected ${pace.expectedRegion.toUpperCase()}`
+                  : `ahead · in ${pace.currentRegion.toUpperCase()}, expected ${pace.expectedRegion.toUpperCase()}`}
+              </span>
+            </Pill>
+          )}
+        </div>
       </div>
 
       {/* Stat row */}

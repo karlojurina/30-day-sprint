@@ -24,8 +24,13 @@ import type {
   Student,
   Condition,
   ConditionOp,
+  RegionId,
   TriggerConfig,
 } from "@/types/database";
+
+// Re-export RegionId for callers that already import from this module —
+// keeps existing import paths working without adding new modules.
+export type { RegionId };
 
 // ───────── Inputs ─────────
 
@@ -49,6 +54,8 @@ interface ExistingTask {
 }
 
 // ───────── Snapshot ─────────
+
+export type PaceLabel = "behind" | "on_pace" | "ahead";
 
 export interface StudentSnapshot {
   student: Pick<
@@ -80,6 +87,59 @@ export interface StudentSnapshot {
   daysSinceLastActive: number;
   /** Set of scenarios with an OPEN or recently-COMPLETED task — used by X.1 reactivation. */
   recentTaskScenarios: Set<string>;
+
+  // ───── Pace (added 2026-05-17) ─────
+  //
+  // Linear pacing model: expected = day × (totalLessons / 30). The
+  // ratio tells us how a student is doing relative to a uniform 30-day
+  // glide path. Below 0.5 = behind, 0.5–1.5 = on pace, above 1.5 = ahead.
+  // Region pace is a second axis — "where they are vs where Day N
+  // students should be in the curriculum" — because progressRatio
+  // alone can't tell us if a Day-14 student is in R2 (good) or R4
+  // (way ahead).
+
+  /** Total lessons across all regions (the curriculum denominator). */
+  totalLessonsInCurriculum: number;
+  /** Total fully-complete lessons by this student (sum across regions). */
+  completedLessons: number;
+  /** Expected completions by day N under the linear model. */
+  expectedLessons: number;
+  /** completedLessons / expectedLessons. Capped at 0 minimum. */
+  progressRatio: number;
+  /** Quantized version of progressRatio for UI pills + filters. */
+  progressLabel: PaceLabel;
+
+  /** Highest region the student has any progress in. R1 if nothing. */
+  currentRegion: RegionId;
+  /** Region the student should be in by Day N under the linear model. */
+  expectedRegion: RegionId;
+  /** Compares currentRegion vs expectedRegion. */
+  regionPace: PaceLabel;
+}
+
+/** Day N → expected region under the linear model. */
+function expectedRegionForDay(day: number): RegionId {
+  if (day <= 7) return "r1";
+  if (day <= 14) return "r2";
+  if (day <= 21) return "r3";
+  return "r4";
+}
+
+/** Map ratio to label using the 0.5 / 1.5 breakpoints. */
+function paceLabelFromRatio(ratio: number): PaceLabel {
+  if (ratio < 0.5) return "behind";
+  if (ratio > 1.5) return "ahead";
+  return "on_pace";
+}
+
+/** Compare two region ids by order. r1 < r2 < r3 < r4. */
+const REGION_ORDER: RegionId[] = ["r1", "r2", "r3", "r4"];
+function regionPaceLabel(current: RegionId, expected: RegionId): PaceLabel {
+  const c = REGION_ORDER.indexOf(current);
+  const e = REGION_ORDER.indexOf(expected);
+  if (c < e) return "behind";
+  if (c > e) return "ahead";
+  return "on_pace";
 }
 
 export function buildStudentSnapshot(
@@ -146,6 +206,31 @@ export function buildStudentSnapshot(
       .map((t) => t.scenario_id),
   );
 
+  // ───── Pace calculation ─────
+  const totalLessonsInCurriculum = Object.values(regions).reduce(
+    (sum, r) => sum + r.total,
+    0,
+  );
+  const completedLessons = Object.values(regions).reduce(
+    (sum, r) => sum + r.fullyComplete,
+    0,
+  );
+  const lessonsPerDay =
+    totalLessonsInCurriculum > 0 ? totalLessonsInCurriculum / 30 : 0;
+  const expectedLessons = Math.max(0, day * lessonsPerDay);
+  const progressRatio =
+    expectedLessons > 0 ? completedLessons / expectedLessons : 0;
+  const progressLabel = paceLabelFromRatio(progressRatio);
+
+  // Highest region with any fully-completed lesson. If none, R1 (they
+  // haven't started anything).
+  let currentRegion: RegionId = "r1";
+  for (const rid of REGION_ORDER) {
+    if ((regions[rid]?.fullyComplete ?? 0) > 0) currentRegion = rid;
+  }
+  const expectedRegion = expectedRegionForDay(day);
+  const regionPace = regionPaceLabel(currentRegion, expectedRegion);
+
   return {
     student: {
       id: student.id,
@@ -161,6 +246,58 @@ export function buildStudentSnapshot(
     daysSinceLastCompletion,
     daysSinceLastActive,
     recentTaskScenarios,
+    totalLessonsInCurriculum,
+    completedLessons,
+    expectedLessons,
+    progressRatio,
+    progressLabel,
+    currentRegion,
+    expectedRegion,
+    regionPace,
+  };
+}
+
+/**
+ * Lightweight per-student snapshot for UI surfaces (students list,
+ * student detail header, task cards). Same math as the cron's
+ * StudentSnapshot but without the existing-tasks join — UIs don't
+ * need recentTaskScenarios.
+ */
+export interface PaceSummary {
+  day: number;
+  completedLessons: number;
+  expectedLessons: number;
+  progressRatio: number;
+  progressLabel: PaceLabel;
+  currentRegion: RegionId;
+  expectedRegion: RegionId;
+  regionPace: PaceLabel;
+}
+
+export function buildPaceSummary(
+  joinedAt: string,
+  completedLessons: number,
+  totalLessons: number,
+  currentRegion: RegionId,
+): PaceSummary {
+  const day = Math.max(
+    1,
+    Math.ceil((Date.now() - new Date(joinedAt).getTime()) / 86_400_000),
+  );
+  const lessonsPerDay = totalLessons > 0 ? totalLessons / 30 : 0;
+  const expectedLessons = Math.max(0, day * lessonsPerDay);
+  const progressRatio =
+    expectedLessons > 0 ? completedLessons / expectedLessons : 0;
+  const expectedRegion = expectedRegionForDay(day);
+  return {
+    day,
+    completedLessons,
+    expectedLessons,
+    progressRatio,
+    progressLabel: paceLabelFromRatio(progressRatio),
+    currentRegion,
+    expectedRegion,
+    regionPace: regionPaceLabel(currentRegion, expectedRegion),
   };
 }
 
@@ -176,6 +313,22 @@ function regionIncomplete(snap: StudentSnapshot, rid: string): boolean {
   const r = snap.regions[rid];
   if (!r || r.total === 0) return false;
   return r.fullyComplete < r.total;
+}
+
+/**
+ * True when the region's fullyComplete ratio is below `threshold`.
+ * Replaces the binary regionIncomplete for triggers that should fire
+ * only when a student is meaningfully behind, not when they're one
+ * lesson away from finishing.
+ */
+function regionBelow(
+  snap: StudentSnapshot,
+  rid: string,
+  threshold: number,
+): boolean {
+  const r = snap.regions[rid];
+  if (!r || r.total === 0) return false;
+  return r.fullyComplete / r.total < threshold;
 }
 
 function totalCompletedAcrossRegions(snap: StudentSnapshot): number {
@@ -201,18 +354,21 @@ export const triggers: Record<string, TriggerCheck> = {
     return `Day ${s.day} · R1 complete (${s.regions.r1.fullyComplete}/${s.regions.r1.total} lessons, both action items shipped).`;
   },
 
-  // W1.2 — Watched ≥10 R1 lessons but l018 + l020 not shipped, Day 7-8.
+  // W1.2 — Watched ≥10 R1 lessons but l018 + l020 not shipped.
+  // Widened from Day 7-8 to Day 7-10 (4-day window) so a cron miss
+  // doesn't drop the trigger entirely.
   "W1.2": (s) => {
-    if (s.day < 7 || s.day > 8) return null;
+    if (s.day < 7 || s.day > 10) return null;
     if (s.regions.r1.watchedComplete < 10) return null;
     if (s.shipped["l018"] || s.shipped["l020"]) return null;
     if (s.recentTaskScenarios.has("W1.2")) return null;
     return `Day ${s.day} · ${s.regions.r1.watchedComplete} R1 lessons watched but neither l018 (Organic) nor l020 (UGC) shipped.`;
   },
 
-  // W1.3 — Slow start: <3 lessons completed by Day 4-5.
+  // W1.3 — Slow start: <3 lessons completed.
+  // Widened from Day 4-5 to Day 4-7.
   "W1.3": (s) => {
-    if (s.day < 4 || s.day > 5) return null;
+    if (s.day < 4 || s.day > 7) return null;
     if (totalCompletedAcrossRegions(s) >= 3) return null;
     if (s.recentTaskScenarios.has("W1.3")) return null;
     const count = totalCompletedAcrossRegions(s);
@@ -226,29 +382,34 @@ export const triggers: Record<string, TriggerCheck> = {
     return `Day ${s.day} · R2 complete (${s.regions.r2.fullyComplete}/${s.regions.r2.total}) — discount widget unlocked.`;
   },
 
-  // W2.3 — Day 10-11, ≥5 R2 lessons watched, l022 + l024 not shipped.
+  // W2.3 — ≥5 R2 lessons watched, l022 + l024 not shipped.
+  // Widened from Day 10-11 to Day 10-13.
   "W2.3": (s) => {
-    if (s.day < 10 || s.day > 11) return null;
+    if (s.day < 10 || s.day > 13) return null;
     if (s.regions.r2.watchedComplete < 5) return null;
     if (s.shipped["l022"] || s.shipped["l024"]) return null;
     if (s.recentTaskScenarios.has("W2.3")) return null;
     return `Day ${s.day} · ${s.regions.r2.watchedComplete} R2 lessons watched but neither l022 (VSL) nor l024 (High-Prod) shipped.`;
   },
 
-  // W2.4 — Behind pace: R1 < 100% on Day 9-11.
+  // W2.4 — Behind pace: R1 < 85% on Day 9-12.
+  // Gated by progress ratio so 17/18 doesn't fire — only genuinely
+  // behind students hit this.
   "W2.4": (s) => {
-    if (s.day < 9 || s.day > 11) return null;
-    if (!regionIncomplete(s, "r1")) return null;
+    if (s.day < 9 || s.day > 12) return null;
+    if (!regionBelow(s, "r1", 0.85)) return null;
+    if (s.progressRatio >= 0.85) return null;
     if (s.recentTaskScenarios.has("W2.4")) return null;
-    return `Day ${s.day} · R1 still incomplete (${s.regions.r1.fullyComplete}/${s.regions.r1.total}).`;
+    return `Day ${s.day} · R1 ${s.regions.r1.fullyComplete}/${s.regions.r1.total} (pace ${s.progressRatio.toFixed(2)}).`;
   },
 
-  // W2.5 — Day 12-14, R1 still incomplete (winning-mindset reframe).
+  // W2.5 — Day 12-14, R1 < 85% (winning-mindset reframe).
   "W2.5": (s) => {
     if (s.day < 12 || s.day > 14) return null;
-    if (!regionIncomplete(s, "r1")) return null;
+    if (!regionBelow(s, "r1", 0.85)) return null;
+    if (s.progressRatio >= 0.85) return null;
     if (s.recentTaskScenarios.has("W2.5")) return null;
-    return `Day ${s.day} · R1 still incomplete (${s.regions.r1.fullyComplete}/${s.regions.r1.total}) — discount window approaching.`;
+    return `Day ${s.day} · R1 ${s.regions.r1.fullyComplete}/${s.regions.r1.total} (pace ${s.progressRatio.toFixed(2)}) — discount window approaching.`;
   },
 
   // W3.1 — R3 complete.
@@ -258,20 +419,22 @@ export const triggers: Record<string, TriggerCheck> = {
     return `Day ${s.day} · R3 complete (${s.regions.r3.fullyComplete}/${s.regions.r3.total}).`;
   },
 
-  // W3.2 — Day 21-23, R2 still incomplete.
+  // W3.2 — Day 21-23, R2 < 85%.
   "W3.2": (s) => {
     if (s.day < 21 || s.day > 23) return null;
-    if (!regionIncomplete(s, "r2")) return null;
+    if (!regionBelow(s, "r2", 0.85)) return null;
+    if (s.progressRatio >= 0.85) return null;
     if (s.recentTaskScenarios.has("W3.2")) return null;
-    return `Day ${s.day} · R2 still incomplete (${s.regions.r2.fullyComplete}/${s.regions.r2.total}) — significant intervention.`;
+    return `Day ${s.day} · R2 ${s.regions.r2.fullyComplete}/${s.regions.r2.total} (pace ${s.progressRatio.toFixed(2)}) — significant intervention.`;
   },
 
-  // W4.1 — Day 25-30, R3 still incomplete.
+  // W4.1 — Day 25-30, R3 < 85%.
   "W4.1": (s) => {
     if (s.day < 25 || s.day > 30) return null;
-    if (!regionIncomplete(s, "r3")) return null;
+    if (!regionBelow(s, "r3", 0.85)) return null;
+    if (s.progressRatio >= 0.85) return null;
     if (s.recentTaskScenarios.has("W4.1")) return null;
-    return `Day ${s.day} · R3 still incomplete (${s.regions.r3.fullyComplete}/${s.regions.r3.total}) — last stretch before R4.`;
+    return `Day ${s.day} · R3 ${s.regions.r3.fullyComplete}/${s.regions.r3.total} (pace ${s.progressRatio.toFixed(2)}) — last stretch before R4.`;
   },
 
   // W4.2 — Day 30 exactly, R4 incomplete, still active.
@@ -469,6 +632,39 @@ export const METRICS: Record<import("@/types/database").ConditionMetric, MetricD
       return "Subscription status";
     },
   },
+  // ─── Pace metrics ───
+  // progress_ratio: numeric, 1.0 = on the linear glide path.
+  // progress_label / region_pace: enum, three states.
+  progress_ratio: {
+    id: "progress_ratio",
+    label: "Progress vs expected (ratio)",
+    input: "number",
+    describe: (c) => describeNumeric("Progress vs expected", c),
+  },
+  progress_label: {
+    id: "progress_label",
+    label: "Progress pace",
+    input: "enum",
+    enumValues: ["behind", "on_pace", "ahead"] as const,
+    describe: (c) => {
+      if ("value" in c && typeof c.value === "string") {
+        return `Progress pace ${c.op === "is" ? "is" : "is not"} ${c.value.replace("_", " ")}`;
+      }
+      return "Progress pace";
+    },
+  },
+  region_pace: {
+    id: "region_pace",
+    label: "Region pace (where they are vs where Day N expects)",
+    input: "enum",
+    enumValues: ["behind", "on_pace", "ahead"] as const,
+    describe: (c) => {
+      if ("value" in c && typeof c.value === "string") {
+        return `Region pace ${c.op === "is" ? "is" : "is not"} ${c.value.replace("_", " ")}`;
+      }
+      return "Region pace";
+    },
+  },
 };
 
 /* ─────────────────────────────────────────────────────────────────
@@ -519,6 +715,8 @@ function getNumericValue(snap: StudentSnapshot, c: Condition): number | null {
       return snap.daysSinceLastCompletion ?? 999;
     case "days_since_last_login":
       return snap.daysSinceLastActive;
+    case "progress_ratio":
+      return Math.round(snap.progressRatio * 100) / 100;
     default:
       return null;
   }
@@ -550,6 +748,16 @@ function evalCondition(snap: StudentSnapshot, c: Condition): boolean {
       return c.op === "is"
         ? snap.student.membership_status === c.value
         : snap.student.membership_status !== c.value;
+    case "progress_label":
+      if (!("value" in c) || typeof c.value !== "string") return false;
+      return c.op === "is"
+        ? snap.progressLabel === c.value
+        : snap.progressLabel !== c.value;
+    case "region_pace":
+      if (!("value" in c) || typeof c.value !== "string") return false;
+      return c.op === "is"
+        ? snap.regionPace === c.value
+        : snap.regionPace !== c.value;
     default: {
       const actual = getNumericValue(snap, c);
       if (actual == null) return false;

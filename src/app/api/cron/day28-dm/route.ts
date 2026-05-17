@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { dmStudent, postTeamAlert } from "@/lib/discord";
+import { buildDay28Embed } from "@/lib/day28-embed";
 
 /**
  * Day-28 student summary DM cron.
@@ -110,36 +111,15 @@ export async function GET(request: NextRequest) {
       (n) => n.student_id === student.id
     ).length;
 
-    const firstName = student.name?.split(" ")[0] ?? "there";
-    const embed = {
-      title: `🎯 Your 30 days, ${firstName}`,
-      description: `Here's the receipt for the last month — keep going from here.\n\n[Open your map](${baseUrl}/dashboard-mockup)`,
-      color: 0xe6c07a,
-      fields: [
-        {
-          name: "Lessons completed",
-          value: `${lessonsDone} / ${totalLessons}`,
-          inline: true,
-        },
-        {
-          name: "Longest streak",
-          value: `${student.longest_streak ?? 0} days`,
-          inline: true,
-        },
-        {
-          name: "Notes written",
-          value: `${notesCount}`,
-          inline: true,
-        },
-        {
-          name: "Discount",
-          value: discountState,
-          inline: false,
-        },
-      ],
-      footer: { text: "EcomTalent · 30-day sprint" },
-      timestamp: new Date().toISOString(),
-    };
+    const embed = buildDay28Embed({
+      studentName: student.name,
+      lessonsDone,
+      totalLessons,
+      longestStreak: student.longest_streak ?? 0,
+      notesCount,
+      discountState,
+      baseUrl,
+    });
 
     let delivered = false;
     if (student.discord_user_id) {

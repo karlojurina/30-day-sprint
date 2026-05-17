@@ -15,11 +15,13 @@ import {
   PageHeader,
   Card,
   Pill,
+  PacePill,
   Avatar,
   EmptyState,
   T,
   type PillTone,
 } from "@/components/admin/ui";
+import { buildPaceSummary } from "@/lib/csm-triggers";
 
 type SortKey = "name" | "joined_at" | "day" | "progress" | "last_active_at";
 type SortDir = "asc" | "desc";
@@ -250,6 +252,9 @@ export default function StudentsPage() {
           <div style={{ width: 60, flexShrink: 0 }}>
             <SortHeader label="Day" sortKeyName="day" />
           </div>
+          <div style={{ width: 100, flexShrink: 0 }}>
+            <span style={T.eyebrow}>Pace</span>
+          </div>
           <div style={{ width: 160, flexShrink: 0 }}>
             <SortHeader label="Progress" sortKeyName="progress" />
           </div>
@@ -338,6 +343,18 @@ export default function StudentsPage() {
                   >
                     {day}
                   </span>
+                </div>
+                <div style={{ width: 100, flexShrink: 0 }}>
+                  <PacePill
+                    label={
+                      buildPaceSummary(
+                        student.joined_at,
+                        completed,
+                        totalLessons,
+                        "r1",
+                      ).progressLabel
+                    }
+                  />
                 </div>
                 <div
                   style={{ width: 160, flexShrink: 0, paddingRight: 12 }}

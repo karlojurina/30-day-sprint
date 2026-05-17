@@ -38,18 +38,21 @@ export default function StudentsPage() {
           .in("membership_status", ["active", "past_due", "canceled"])
           .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
           .order("joined_at", { ascending: false }),
-        // Count every completion row — skipped + action-only still
-        // count toward progress. Matches the /admin/students/[id]
-        // detail view so list % == detail %.
-        supabase.from("student_lesson_completions").select("student_id"),
+        // Pre-aggregated per-student counts via a view. Querying
+        // student_lesson_completions directly returns one row per
+        // completion and silently truncates at the 1000-row cap once
+        // the community is large.
+        supabase
+          .from("student_progress_counts")
+          .select("student_id, completed_count"),
         supabase.from("lessons").select("id", { count: "exact", head: true }),
       ]);
 
       if (studentsRes.data) setStudents(studentsRes.data);
 
       const counts: Record<string, number> = {};
-      for (const c of completionsRes.data || []) {
-        counts[c.student_id] = (counts[c.student_id] || 0) + 1;
+      for (const r of completionsRes.data || []) {
+        counts[r.student_id] = r.completed_count;
       }
       setCompletionCounts(counts);
 

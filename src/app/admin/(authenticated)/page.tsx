@@ -65,10 +65,12 @@ export default function AdminDashboard() {
           .not("whop_membership_id", "is", null)
           .in("membership_status", ["active", "past_due", "canceled"])
           .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF),
-        // Count any completion row — skipped + action-only still
-        // count toward a student's lesson progress. Matches the
-        // /admin/students/[id] detail view.
-        supabase.from("student_lesson_completions").select("student_id"),
+        // Per-student counts via a pre-aggregated view. Querying
+        // student_lesson_completions directly truncates at the
+        // 1000-row PostgREST cap once the community is large.
+        supabase
+          .from("student_progress_counts")
+          .select("student_id, completed_count"),
         supabase.from("lessons").select("id", { count: "exact", head: true }),
         supabase.from("discount_requests").select("id").eq("status", "pending"),
         supabase.from("tasks").select("id").eq("status", "open"),
@@ -89,8 +91,8 @@ export default function AdminDashboard() {
           : TOTAL_LESSONS;
 
       const completionMap: Record<string, number> = {};
-      for (const c of completions) {
-        completionMap[c.student_id] = (completionMap[c.student_id] || 0) + 1;
+      for (const r of completions) {
+        completionMap[r.student_id] = r.completed_count;
       }
 
       const activeStudents = students.filter(

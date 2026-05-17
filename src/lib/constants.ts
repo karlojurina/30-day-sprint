@@ -45,6 +45,13 @@ export const DISCOUNT_WINDOW_DAYS = 14;
 // separately — it stays intact and shows pre-May trend history.
 export const ADMIN_STUDENT_JOIN_CUTOFF = "2026-05-01T00:00:00.000Z";
 
+// Cutoff used ONLY by the CSM task pipeline (task generation cron
+// + /api/admin/tasks read filter + dashboard "Open tasks" count).
+// Set to the launch date so Astrid's queue starts clean on day one
+// and isn't polluted by pre-launch students. Bump this whenever the
+// real launch date shifts.
+export const TASKS_STUDENT_JOIN_CUTOFF = "2026-05-18T00:00:00.000Z";
+
 // The "editing breakdowns" group: 9 R2 lessons that collapse into a
 // single map node. The student opens the group and chooses Watch or
 // Skip per part. Both Watch + Skip count toward path progression so

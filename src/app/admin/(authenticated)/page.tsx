@@ -22,6 +22,7 @@ import {
   TOTAL_LESSONS,
   progressPercent,
   ADMIN_STUDENT_JOIN_CUTOFF,
+  TASKS_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
 import Link from "next/link";
 import {
@@ -94,7 +95,19 @@ export default function AdminDashboard() {
           .select("student_id, completed_count"),
         supabase.from("lessons").select("id", { count: "exact", head: true }),
         supabase.from("discount_requests").select("id").eq("status", "pending"),
-        supabase.from("tasks").select("id").eq("status", "open"),
+        // Mirror /api/admin/tasks filtering exactly so the dashboard
+        // count and the Tasks page count agree. !inner forces the
+        // join; the eq + gte on the joined columns hides tasks for
+        // csm_exempt students and pre-launch joiners.
+        supabase
+          .from("tasks")
+          .select(
+            "id, student:students!inner(csm_exempt, joined_at)",
+            { count: "exact", head: true },
+          )
+          .eq("status", "open")
+          .eq("student.csm_exempt", false)
+          .gte("student.joined_at", TASKS_STUDENT_JOIN_CUTOFF),
         supabase
           .from("daily_progress_snapshots")
           .select(
@@ -163,7 +176,7 @@ export default function AdminDashboard() {
         avgProgress,
         canceledThisMonth,
         pendingDiscounts: discountsRes.data?.length || 0,
-        openTasks: tasksRes.data?.length || 0,
+        openTasks: tasksRes.count ?? 0,
         monthTwoConversionRate,
         monthTwoCohortSize: matureCohort.length,
         trend,
@@ -212,51 +225,35 @@ export default function AdminDashboard() {
         }
       />
 
-      {/* ─── Hero ─── */}
+      {/* ─── Hero: Month 2 conversion + AdValue placeholder ─── */}
       <Section>
-        <Card padding={32}>
-          <p
-            style={{
-              ...T.eyebrow,
-              color: "var(--color-accent-dark)",
-              textTransform: "none",
-              letterSpacing: "-0.005em",
-              fontSize: 13,
-            }}
-          >
-            Month 2 conversion
-          </p>
-          <p
-            className="stat-value"
-            style={{
-              fontSize: 56,
-              fontWeight: 600,
-              lineHeight: 1.0,
-              letterSpacing: "-0.028em",
-              color: "var(--color-accent-dark)",
-              marginTop: 12,
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {data.monthTwoConversionRate == null
-              ? "—"
-              : `${Math.round(data.monthTwoConversionRate * 100)}%`}
-          </p>
-          <p
-            style={{
-              ...T.bodyDim,
-              marginTop: 14,
-              lineHeight: 1.4,
-              maxWidth: 540,
-            }}
-          >
-            {data.monthTwoConversionRate == null
-              ? "No platform cohort past 30 days yet."
-              : `${Math.round(
-                  (data.monthTwoConversionRate ?? 0) * data.monthTwoCohortSize,
-                )} of ${data.monthTwoCohortSize} platform signups past day 30 still active. Whop-wide churn not yet counted.`}
-          </p>
-        </Card>
+        <div
+          className="grid grid-cols-1 md:grid-cols-2"
+          style={{ gap: 16 }}
+        >
+          <HeroStat
+            label="Month 2 conversion"
+            value={
+              data.monthTwoConversionRate == null
+                ? "—"
+                : `${Math.round(data.monthTwoConversionRate * 100)}%`
+            }
+            sublabel={
+              data.monthTwoConversionRate == null
+                ? "No platform cohort past 30 days yet."
+                : `${Math.round(
+                    (data.monthTwoConversionRate ?? 0) *
+                      data.monthTwoCohortSize,
+                  )} of ${data.monthTwoCohortSize} platform signups past day 30 still active. Whop-wide churn not yet counted.`
+            }
+            accent
+          />
+          <HeroStat
+            label="AdValue onboarded"
+            value="—"
+            sublabel="Pending integration with Zak."
+          />
+        </div>
       </Section>
 
       {/* ─── Today — what's waiting ─── */}
@@ -301,7 +298,7 @@ export default function AdminDashboard() {
             current={data.trend.reduce((s, p) => s + p.joined_count, 0)}
             currentSuffix=" / 14d"
             metric="joined_count"
-            mode="flow"
+            mode="running"
             trend={data.trend}
             color="var(--color-accent-dark)"
           />
@@ -310,7 +307,7 @@ export default function AdminDashboard() {
             current={data.trend.reduce((s, p) => s + p.churned_count, 0)}
             currentSuffix=" / 14d"
             metric="churned_count"
-            mode="flow"
+            mode="running"
             trend={data.trend}
             color="var(--color-danger)"
           />
@@ -326,6 +323,68 @@ export default function AdminDashboard() {
         </div>
       </Section>
     </AdminPage>
+  );
+}
+
+/* ─── Hero stat (full-card) ─── */
+
+/**
+ * Big display-tier hero stat used in the dashboard's top section.
+ * Two of these sit side-by-side in the hero row. `accent` paints
+ * the label + value in the brand sage so the primary KPI carries
+ * a touch more visual weight than its neighbour.
+ */
+function HeroStat({
+  label,
+  value,
+  sublabel,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  sublabel: string;
+  accent?: boolean;
+}) {
+  return (
+    <Card padding={32}>
+      <p
+        style={{
+          fontSize: 13,
+          fontWeight: 500,
+          letterSpacing: "-0.005em",
+          color: accent
+            ? "var(--color-accent-dark)"
+            : "var(--color-text-tertiary)",
+        }}
+      >
+        {label}
+      </p>
+      <p
+        className="stat-value"
+        style={{
+          fontSize: 56,
+          fontWeight: 600,
+          lineHeight: 1.0,
+          letterSpacing: "-0.028em",
+          color: accent
+            ? "var(--color-accent-dark)"
+            : "var(--color-text-primary)",
+          marginTop: 12,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {value}
+      </p>
+      <p
+        style={{
+          ...T.bodyDim,
+          marginTop: 14,
+          lineHeight: 1.4,
+        }}
+      >
+        {sublabel}
+      </p>
+    </Card>
   );
 }
 

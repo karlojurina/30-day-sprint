@@ -40,7 +40,7 @@ import {
   evaluateCustomTrigger,
   SCENARIO_BUCKET,
 } from "@/lib/csm-triggers";
-import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+import { TASKS_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 import type { Student, TriggerConfig } from "@/types/database";
 
 /** Plain-English label for each disengagement_alerts.alert_type. */
@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
     alertsRes,
   ] = await Promise.all([
     // Limit to actual paying students who joined on/after the
-    // platform cutoff. csm_exempt = test accounts we never DM.
+    // tasks cutoff. csm_exempt = test accounts we never DM.
     supabase
       .from("students")
       .select(
@@ -110,7 +110,7 @@ export async function GET(request: NextRequest) {
       )
       .eq("membership_status", "active")
       .eq("csm_exempt", false)
-      .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF),
+      .gte("joined_at", TASKS_STUDENT_JOIN_CUTOFF),
     supabase
       .from("student_lesson_completions")
       .select("student_id, lesson_id, completed_at, action_completed_at"),

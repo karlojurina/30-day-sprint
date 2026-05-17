@@ -16,7 +16,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
-import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+import { TASKS_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 
 export async function GET(request: NextRequest) {
   const auth = await requireTeam(request);
@@ -47,11 +47,12 @@ export async function GET(request: NextRequest) {
   if (status !== "all") q = q.eq("status", status);
 
   // Hide tasks for csm_exempt accounts (team's own dummy students)
-  // and pre-cutoff joiners — old tasks from before May 1 shouldn't
-  // resurface in the live queue.
+  // and pre-launch joiners — only show tasks for students who
+  // joined on/after the dedicated tasks cutoff. Decoupled from the
+  // wider ADMIN cutoff so we can launch CSM later than the rest.
   q = q
     .eq("student.csm_exempt", false)
-    .gte("student.joined_at", ADMIN_STUDENT_JOIN_CUTOFF);
+    .gte("student.joined_at", TASKS_STUDENT_JOIN_CUTOFF);
 
   // Bucket/week filters apply to the joined template — Supabase supports
   // filtering on FK columns via the `template.column` path.

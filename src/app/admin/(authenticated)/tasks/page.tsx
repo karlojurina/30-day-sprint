@@ -596,7 +596,7 @@ function TaskRow({
           </p>
         </div>
         <div
-          className="flex items-center gap-1"
+          className="flex items-center gap-2"
           onClick={(e) => e.stopPropagation()}
         >
           {status === "open" && !isAdminOnly && (
@@ -604,34 +604,46 @@ function TaskRow({
               <Button variant="primary" busy={busy} onClick={onCopy}>
                 Copy DM
               </Button>
-              <IconButton label="Mark sent" onClick={onMarkSent}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onMarkSent}
+                title="Mark sent"
+              >
                 <svg
-                  width="14"
-                  height="14"
+                  width="16"
+                  height="16"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth={2}
+                  strokeWidth={2.2}
                   strokeLinecap="round"
                   strokeLinejoin="round"
+                  aria-hidden="true"
                 >
                   <path d="M5 13l4 4L19 7" />
                 </svg>
-              </IconButton>
-              <IconButton label="Dismiss" onClick={onDismiss}>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onDismiss}
+                title="Dismiss"
+              >
                 <svg
-                  width="14"
-                  height="14"
+                  width="16"
+                  height="16"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
-                  strokeWidth={2}
+                  strokeWidth={2.2}
                   strokeLinecap="round"
                   strokeLinejoin="round"
+                  aria-hidden="true"
                 >
                   <path d="M18 6L6 18M6 6l12 12" />
                 </svg>
-              </IconButton>
+              </Button>
             </>
           )}
           {status === "open" && isAdminOnly && (

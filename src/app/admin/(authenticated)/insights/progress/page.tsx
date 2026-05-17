@@ -51,9 +51,14 @@ interface MetricDef {
   description: string;
   suffix: string;
   color: string;
-  /** "running" = current value is the latest snapshot (e.g. active count).
-   *  "flow"    = sum across the window (joined / churned per day). */
+  /** Drives the top-right summary: "running" = latest snapshot value;
+   *  "flow" = sum across the window. */
   mode: "running" | "flow";
+  /** Optional override for the chart rendering style only. When unset,
+   *  the chart follows `mode`. We use this for joined/churned so the
+   *  summary still shows the window total but the chart draws as a
+   *  line (matching the dashboard sparklines). */
+  chartMode?: "running" | "flow";
 }
 
 const METRICS: Record<MetricKey, MetricDef> = {
@@ -75,8 +80,9 @@ const METRICS: Record<MetricKey, MetricDef> = {
     label: "Joined",
     description: "New students per day.",
     suffix: "",
-    color: "#7d8be8",
+    color: "var(--color-accent-dark)",
     mode: "flow",
+    chartMode: "running",
   },
   churned_count: {
     label: "Churned",
@@ -84,6 +90,7 @@ const METRICS: Record<MetricKey, MetricDef> = {
     suffix: "",
     color: "var(--color-danger)",
     mode: "flow",
+    chartMode: "running",
   },
 };
 
@@ -421,7 +428,7 @@ function MetricCard({
         valueKey={valueKey}
         color={def.color}
         suffix={def.suffix}
-        mode={def.mode}
+        mode={def.chartMode ?? def.mode}
       />
     </section>
   );

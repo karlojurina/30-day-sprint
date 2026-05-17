@@ -13,6 +13,16 @@ import type {
 import { getDayNumber } from "@/types/database";
 import { LESSON_TYPE_LABELS, progressPercent } from "@/lib/constants";
 import Link from "next/link";
+import {
+  AdminPage,
+  Section,
+  Card,
+  Stat,
+  Pill,
+  Avatar,
+  T,
+  type PillTone,
+} from "@/components/admin/ui";
 
 export default function StudentDetailPage() {
   const params = useParams();
@@ -101,14 +111,11 @@ export default function StudentDetailPage() {
   ];
 
   return (
-    <div
-      className="px-12 pt-12 pb-16"
-      style={{ maxWidth: 1180, margin: "0 auto" }}
-    >
-      {/* Header */}
+    <AdminPage>
+      {/* Header — back button + name + membership pill in line */}
       <div
-        className="flex items-center"
-        style={{ gap: 12, marginBottom: 32 }}
+        className="flex items-center gap-3 flex-wrap"
+        style={{ marginBottom: 24 }}
       >
         <Link
           href="/admin/students"
@@ -122,36 +129,41 @@ export default function StudentDetailPage() {
             width: 32,
             height: 32,
             borderRadius: 8,
-            transition: "background 150ms cubic-bezier(0.25,0.1,0.25,1)",
           }}
         >
-          <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="18"
+            height="18"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M15 19l-7-7 7-7" />
           </svg>
         </Link>
-        <div>
+        <Avatar src={student.avatar_url} name={student.name} size={36} />
+        <div className="flex-1 min-w-0">
           <h1
             style={{
-              fontSize: 26,
-              fontWeight: 600,
+              ...T.display,
+              fontSize: 24,
               letterSpacing: "-0.022em",
-              lineHeight: 1.15,
-              color: "var(--color-text-primary)",
             }}
           >
             {student.name || "Student"}
           </h1>
-          <p
-            style={{
-              fontSize: 13,
-              color: "var(--color-text-secondary)",
-              marginTop: 2,
-              letterSpacing: "-0.005em",
-            }}
-          >
-            {student.email} · Day {dayNumber} · {student.membership_status}
+          <p style={{ ...T.meta, marginTop: 2 }}>
+            {student.email ?? "—"} · Day {dayNumber}
           </p>
         </div>
+        <Pill tone={statusTone(student.membership_status)}>
+          <span style={{ textTransform: "capitalize" }}>
+            {student.membership_status.replace("_", " ")}
+          </span>
+        </Pill>
       </div>
 
       {/* Stat row */}
@@ -159,11 +171,8 @@ export default function StudentDetailPage() {
         className="grid grid-cols-2 lg:grid-cols-4"
         style={{ gap: 12, marginBottom: 16 }}
       >
-        <Stat label="Progress" value={`${overallPercent}%`} accent />
-        <Stat
-          label="Streak"
-          value={`${student.current_streak ?? 0}d`}
-        />
+        <Stat label="Progress" value={`${overallPercent}%`} tone="accent" />
+        <Stat label="Streak" value={`${student.current_streak ?? 0}d`} />
         <Stat
           label="Joined"
           value={new Date(student.joined_at).toLocaleDateString()}
@@ -176,77 +185,49 @@ export default function StudentDetailPage() {
 
       {/* CSM exempt — flip to hide a dummy / team test account from
           task generation + Day-28 DM. */}
-      <label
-        className="surface-resting flex items-center"
+      <Card
+        padding={14}
         style={{
+          marginBottom: 32,
           background: student.csm_exempt
             ? "rgba(212,162,76,0.10)"
             : "var(--color-bg-card)",
-          borderRadius: 10,
-          padding: "10px 14px",
-          marginBottom: 32,
-          gap: 10,
-          cursor: "pointer",
-          fontSize: 13,
-          color: "var(--color-text-secondary)",
-          letterSpacing: "-0.006em",
         }}
       >
-        <input
-          type="checkbox"
-          checked={student.csm_exempt}
-          onChange={async (e) => {
-            const next = e.currentTarget.checked;
-            const { error } = await supabase
-              .from("students")
-              .update({ csm_exempt: next })
-              .eq("id", student.id);
-            if (!error) setStudent({ ...student, csm_exempt: next });
-          }}
-        />
-        <span>
-          <strong style={{ color: "var(--color-text-primary)" }}>
-            Exempt from CSM
-          </strong>
-          {" — "}
-          {student.csm_exempt
-            ? "Hidden from task queue + skipped by Day-28 DM."
-            : "Mark this account as a team test / dummy."}
-        </span>
-      </label>
+        <label
+          className="flex items-center"
+          style={{ gap: 10, cursor: "pointer" }}
+        >
+          <input
+            type="checkbox"
+            checked={student.csm_exempt}
+            onChange={async (e) => {
+              const next = e.currentTarget.checked;
+              const { error } = await supabase
+                .from("students")
+                .update({ csm_exempt: next })
+                .eq("id", student.id);
+              if (!error) setStudent({ ...student, csm_exempt: next });
+            }}
+          />
+          <span style={T.bodyDim}>
+            <strong style={{ color: "var(--color-text-primary)" }}>
+              Exempt from CSM
+            </strong>
+            {" — "}
+            {student.csm_exempt
+              ? "Hidden from task queue + skipped by Day-28 DM."
+              : "Mark this account as a team test / dummy."}
+          </span>
+        </label>
+      </Card>
 
       {/* Whop sync diagnostic */}
-      <div
-        className="surface-resting"
-        style={{
-          background: "var(--color-bg-card)",
-          borderRadius: 12,
-          padding: 20,
-          marginBottom: 16,
-        }}
-      >
-        <div
-          className="flex items-center justify-between"
-          style={{ marginBottom: 14 }}
-        >
-          <h2
-            style={{
-              fontSize: 14,
-              fontWeight: 600,
-              color: "var(--color-text-primary)",
-              letterSpacing: "-0.011em",
-            }}
-          >
-            Whop sync
-          </h2>
-          {student.last_watch_sync_at && (
-            <span
-              style={{
-                fontSize: 11,
-                color: "var(--color-text-tertiary)",
-                letterSpacing: "-0.005em",
-              }}
-            >
+      <Section
+        eyebrow="Whop sync"
+        action={
+          student.last_watch_sync_at ? (
+            <span style={T.meta}>
               Last synced{" "}
               {new Date(student.last_watch_sync_at).toLocaleString(undefined, {
                 month: "short",
@@ -255,395 +236,276 @@ export default function StudentDetailPage() {
                 minute: "2-digit",
               })}
             </span>
-          )}
-        </div>
-        <div className="grid grid-cols-3" style={{ gap: 16, marginBottom: 14 }}>
-          <SyncStat label="Fetched" value={student.whop_last_sync_fetched_count} />
-          <SyncStat
-            label="Matched"
-            value={student.whop_last_sync_matched_count}
-            accent
-          />
-          <SyncStat
-            label="Unmatched"
-            value={student.whop_last_sync_unmatched?.length ?? 0}
-            warn={(student.whop_last_sync_unmatched?.length ?? 0) > 0}
-          />
-        </div>
-
-        {student.whop_last_sync_error && (
+          ) : undefined
+        }
+      >
+        <Card padding={20}>
           <div
-            style={{
-              padding: "8px 10px",
-              borderRadius: 8,
-              background: "rgba(200,74,74,0.08)",
-              fontSize: 12,
-              color: "var(--color-danger)",
-              marginBottom: 10,
-            }}
+            className="grid grid-cols-3"
+            style={{ gap: 16, marginBottom: 14 }}
           >
-            <strong>Last error:</strong> {student.whop_last_sync_error}
-          </div>
-        )}
-
-        {student.whop_last_sync_unmatched &&
-          student.whop_last_sync_unmatched.length > 0 && (
-            <div>
-              <p
-                style={{
-                  fontSize: 12,
-                  color: "var(--color-text-secondary)",
-                  marginBottom: 8,
-                }}
-              >
-                These Whop lesson IDs were fetched from this student&apos;s watch
-                history but don&apos;t match any lesson in our DB.
-              </p>
-              <div
-                style={{
-                  padding: 12,
-                  borderRadius: 8,
-                  background: "var(--color-bg-elevated)",
-                  maxHeight: 192,
-                  overflowY: "auto",
-                }}
-              >
-                {student.whop_last_sync_unmatched.map((id) => (
-                  <p
-                    key={id}
-                    className="select-all"
-                    style={{
-                      fontSize: 11,
-                      fontFamily: "var(--font-mono)",
-                      color: "var(--color-text-secondary)",
-                    }}
-                  >
-                    {id}
-                  </p>
-                ))}
-              </div>
-            </div>
-          )}
-
-        {student.whop_last_sync_unmatched?.length === 0 && (
-          <p
-            style={{
-              fontSize: 12,
-              color: "var(--color-success)",
-              letterSpacing: "-0.005em",
-            }}
-          >
-            All Whop lessons this student has watched are mapped. ✓
-          </p>
-        )}
-      </div>
-
-      {/* Lesson grid by region */}
-      <div
-        className="surface-resting"
-        style={{
-          background: "var(--color-bg-card)",
-          borderRadius: 12,
-          padding: 20,
-          marginBottom: 16,
-        }}
-      >
-        <h2
-          style={{
-            fontSize: 14,
-            fontWeight: 600,
-            color: "var(--color-text-primary)",
-            letterSpacing: "-0.011em",
-            marginBottom: 14,
-          }}
-        >
-          Lesson progress
-        </h2>
-        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          {regions.map((region) => (
-            <div key={region.id}>
-              <p
-                style={{
-                  fontSize: 12,
-                  color: "var(--color-text-secondary)",
-                  marginBottom: 8,
-                  letterSpacing: "-0.005em",
-                }}
-              >
-                {region.name} — {region.subtitle} ({region.days_label})
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {(lessonsByRegion[region.id] || []).map((lesson) => {
-                  const done = completedIds.has(lesson.id);
-                  return (
-                    <div
-                      key={lesson.id}
-                      className="flex items-center"
-                      style={{ gap: 8, fontSize: 13 }}
-                    >
-                      <div
-                        className="flex items-center justify-center"
-                        style={{
-                          width: 14,
-                          height: 14,
-                          borderRadius: 4,
-                          border: done
-                            ? "1px solid var(--color-accent)"
-                            : "1px solid var(--color-border-strong)",
-                          background: done
-                            ? "var(--color-accent)"
-                            : "transparent",
-                          flexShrink: 0,
-                        }}
-                      >
-                        {done && (
-                          <svg
-                            width="9"
-                            height="9"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="#FFFFFF"
-                            strokeWidth={4}
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M5 13l4 4L19 7" />
-                          </svg>
-                        )}
-                      </div>
-                      <span
-                        style={{
-                          color: done
-                            ? "var(--color-text-tertiary)"
-                            : "var(--color-text-primary)",
-                          textDecoration: done ? "line-through" : "none",
-                          letterSpacing: "-0.005em",
-                        }}
-                      >
-                        Day {lesson.day}: {lesson.title}
-                      </span>
-                      <span
-                        style={{
-                          color: "var(--color-text-tertiary)",
-                          fontSize: 12,
-                        }}
-                      >
-                        ({LESSON_TYPE_LABELS[lesson.type]})
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div
-        className="surface-resting"
-        style={{
-          background: "var(--color-bg-card)",
-          borderRadius: 12,
-          padding: 20,
-          marginBottom: 16,
-        }}
-      >
-        <h2
-          style={{
-            fontSize: 14,
-            fontWeight: 600,
-            color: "var(--color-text-primary)",
-            letterSpacing: "-0.011em",
-            marginBottom: 14,
-          }}
-        >
-          Discount
-        </h2>
-        <p
-          style={{
-            fontSize: 12,
-            color: "var(--color-text-secondary)",
-            marginBottom: 12,
-          }}
-        >
-          Gate lesson (l18): {gateCompleted ? "completed" : "not yet"}
-        </p>
-        {discountRequest ? (
-          <DiscountStatusPill
-            status={discountRequest.status}
-            promoCode={discountRequest.promo_code ?? undefined}
-          />
-        ) : (
-          <span style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>
-            No application submitted
-          </span>
-        )}
-
-        <div
-          style={{
-            marginTop: 16,
-            paddingTop: 16,
-            borderTop: "1px solid var(--color-border)",
-          }}
-        >
-          <label className="flex items-start cursor-pointer" style={{ gap: 12 }}>
-            <input
-              type="checkbox"
-              checked={student.ad_submissions_verified ?? false}
-              onChange={async (e) => {
-                const verified = e.target.checked;
-                const prev = student.ad_submissions_verified ?? false;
-                setStudent({ ...student, ad_submissions_verified: verified });
-                const {
-                  data: { session },
-                } = await supabase.auth.getSession();
-                const token = session?.access_token;
-                if (!token) return;
-                const res = await fetch("/api/admin/verify-ad-submissions", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                  body: JSON.stringify({ studentId: student.id, verified }),
-                });
-                if (!res.ok) {
-                  setStudent({ ...student, ad_submissions_verified: prev });
-                }
-              }}
-              className="rounded accent-[var(--color-accent)]"
-              style={{ marginTop: 2 }}
+            <SyncStat
+              label="Fetched"
+              value={student.whop_last_sync_fetched_count}
             />
-            <div>
-              <p
-                style={{
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: "var(--color-text-primary)",
-                  letterSpacing: "-0.005em",
-                }}
-              >
-                Ad submissions verified
-              </p>
-              <p
-                style={{
-                  fontSize: 12,
-                  color: "var(--color-text-tertiary)",
-                  marginTop: 2,
-                }}
-              >
-                Tick this once you&rsquo;ve confirmed the student submitted
-                all action items in the Discord ad-review channel. Required
-                for discount approval.
-              </p>
-            </div>
-          </label>
-        </div>
-      </div>
+            <SyncStat
+              label="Matched"
+              value={student.whop_last_sync_matched_count}
+              accent
+            />
+            <SyncStat
+              label="Unmatched"
+              value={student.whop_last_sync_unmatched?.length ?? 0}
+              warn={(student.whop_last_sync_unmatched?.length ?? 0) > 0}
+            />
+          </div>
 
-      {/* Quick DM templates */}
-      <div
-        className="surface-resting"
-        style={{
-          background: "var(--color-bg-card)",
-          borderRadius: 12,
-          padding: 20,
-        }}
-      >
-        <h2
-          style={{
-            fontSize: 14,
-            fontWeight: 600,
-            color: "var(--color-text-primary)",
-            letterSpacing: "-0.011em",
-            marginBottom: 12,
-          }}
-        >
-          Quick DM templates
-        </h2>
-        <div className="flex flex-wrap" style={{ gap: 6 }}>
-          {dmTemplates.map((tmpl) => (
-            <button
-              key={tmpl.label}
-              onClick={() => navigator.clipboard.writeText(tmpl.text)}
+          {student.whop_last_sync_error && (
+            <div
               style={{
-                padding: "5px 12px",
-                borderRadius: 7,
-                border: "none",
-                background: "var(--color-bg-elevated)",
-                color: "var(--color-text-secondary)",
-                fontSize: 13,
-                fontWeight: 500,
-                letterSpacing: "-0.005em",
-                cursor: "pointer",
-                transition:
-                  "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+                padding: "8px 10px",
+                borderRadius: 8,
+                background: "rgba(200,74,74,0.08)",
+                fontSize: 12,
+                color: "var(--color-danger)",
+                marginBottom: 10,
               }}
             >
-              {tmpl.label}
-            </button>
-          ))}
-        </div>
-        <p
-          style={{
-            fontSize: 11,
-            color: "var(--color-text-tertiary)",
-            marginTop: 10,
-          }}
-        >
-          Click to copy message to clipboard
-        </p>
-      </div>
-    </div>
+              <strong>Last error:</strong> {student.whop_last_sync_error}
+            </div>
+          )}
+
+          {student.whop_last_sync_unmatched &&
+            student.whop_last_sync_unmatched.length > 0 && (
+              <div>
+                <p style={{ ...T.bodyDim, fontSize: 12, marginBottom: 8 }}>
+                  These Whop lesson IDs were fetched from this student&apos;s
+                  watch history but don&apos;t match any lesson in our DB.
+                </p>
+                <div
+                  style={{
+                    padding: 12,
+                    borderRadius: 8,
+                    background: "var(--color-bg-elevated)",
+                    maxHeight: 192,
+                    overflowY: "auto",
+                  }}
+                >
+                  {student.whop_last_sync_unmatched.map((id) => (
+                    <p
+                      key={id}
+                      className="select-all"
+                      style={{
+                        fontSize: 11,
+                        fontFamily: "var(--font-mono)",
+                        color: "var(--color-text-secondary)",
+                      }}
+                    >
+                      {id}
+                    </p>
+                  ))}
+                </div>
+              </div>
+            )}
+
+          {student.whop_last_sync_unmatched?.length === 0 && (
+            <p style={{ fontSize: 12, color: "var(--color-success)" }}>
+              All Whop lessons this student has watched are mapped. ✓
+            </p>
+          )}
+        </Card>
+      </Section>
+
+      {/* Lesson grid by region */}
+      <Section eyebrow="Lesson progress">
+        <Card padding={20}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+            {regions.map((region) => (
+              <div key={region.id}>
+                <p style={{ ...T.bodyDim, fontSize: 12, marginBottom: 8 }}>
+                  {region.name} — {region.subtitle} ({region.days_label})
+                </p>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                  }}
+                >
+                  {(lessonsByRegion[region.id] || []).map((lesson) => {
+                    const done = completedIds.has(lesson.id);
+                    return (
+                      <div
+                        key={lesson.id}
+                        className="flex items-center"
+                        style={{ gap: 8, fontSize: 13 }}
+                      >
+                        <div
+                          className="flex items-center justify-center"
+                          style={{
+                            width: 14,
+                            height: 14,
+                            borderRadius: 4,
+                            border: done
+                              ? "1px solid var(--color-accent-dark)"
+                              : "1px solid var(--color-border-strong)",
+                            background: done
+                              ? "var(--color-accent-dark)"
+                              : "transparent",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {done && (
+                            <svg
+                              width="9"
+                              height="9"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="#FFFFFF"
+                              strokeWidth={4}
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </div>
+                        <span
+                          style={{
+                            color: done
+                              ? "var(--color-text-tertiary)"
+                              : "var(--color-text-primary)",
+                            textDecoration: done ? "line-through" : "none",
+                            letterSpacing: "-0.005em",
+                          }}
+                        >
+                          Day {lesson.day}: {lesson.title}
+                        </span>
+                        <span style={T.meta}>
+                          ({LESSON_TYPE_LABELS[lesson.type]})
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </Section>
+
+      <Section eyebrow="Discount">
+        <Card padding={20}>
+          <p style={{ ...T.bodyDim, fontSize: 12, marginBottom: 12 }}>
+            Gate lesson (l18): {gateCompleted ? "completed" : "not yet"}
+          </p>
+          {discountRequest ? (
+            <DiscountStatusPill
+              status={discountRequest.status}
+              promoCode={discountRequest.promo_code ?? undefined}
+            />
+          ) : (
+            <span style={T.meta}>No application submitted</span>
+          )}
+
+          <div
+            style={{
+              marginTop: 16,
+              paddingTop: 16,
+              borderTop: "1px solid var(--color-border)",
+            }}
+          >
+            <label
+              className="flex items-start cursor-pointer"
+              style={{ gap: 12 }}
+            >
+              <input
+                type="checkbox"
+                checked={student.ad_submissions_verified ?? false}
+                onChange={async (e) => {
+                  const verified = e.target.checked;
+                  const prev = student.ad_submissions_verified ?? false;
+                  setStudent({
+                    ...student,
+                    ad_submissions_verified: verified,
+                  });
+                  const {
+                    data: { session },
+                  } = await supabase.auth.getSession();
+                  const token = session?.access_token;
+                  if (!token) return;
+                  const res = await fetch("/api/admin/verify-ad-submissions", {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                      studentId: student.id,
+                      verified,
+                    }),
+                  });
+                  if (!res.ok) {
+                    setStudent({
+                      ...student,
+                      ad_submissions_verified: prev,
+                    });
+                  }
+                }}
+                style={{ marginTop: 2 }}
+              />
+              <div>
+                <p style={{ ...T.body, fontWeight: 500 }}>
+                  Ad submissions verified
+                </p>
+                <p style={{ ...T.meta, marginTop: 2 }}>
+                  Tick this once you&rsquo;ve confirmed the student submitted
+                  all action items in the Discord ad-review channel. Required
+                  for discount approval.
+                </p>
+              </div>
+            </label>
+          </div>
+        </Card>
+      </Section>
+
+      <Section eyebrow="Quick DM templates">
+        <Card padding={20}>
+          <div className="flex flex-wrap" style={{ gap: 8 }}>
+            {dmTemplates.map((tmpl) => (
+              <button
+                key={tmpl.label}
+                onClick={() => navigator.clipboard.writeText(tmpl.text)}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: 8,
+                  border: "1px solid var(--color-border)",
+                  background: "var(--color-bg-elevated)",
+                  color: "var(--color-text-primary)",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  letterSpacing: "-0.005em",
+                  cursor: "pointer",
+                }}
+              >
+                {tmpl.label}
+              </button>
+            ))}
+          </div>
+          <p style={{ ...T.meta, marginTop: 10 }}>
+            Click to copy message to clipboard
+          </p>
+        </Card>
+      </Section>
+    </AdminPage>
   );
 }
 
-function Stat({
-  label,
-  value,
-  accent = false,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-}) {
-  return (
-    <div
-      className="surface-resting"
-      style={{
-        background: "var(--color-bg-card)",
-        borderRadius: 12,
-        padding: 16,
-      }}
-    >
-      <p
-        style={{
-          fontSize: 11,
-          fontWeight: 500,
-          color: "var(--color-text-tertiary)",
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-        }}
-      >
-        {label}
-      </p>
-      <p
-        style={{
-          fontSize: 22,
-          fontWeight: 600,
-          color: accent
-            ? "var(--color-accent-dark)"
-            : "var(--color-text-primary)",
-          marginTop: 4,
-          letterSpacing: "-0.022em",
-          lineHeight: 1.05,
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {value}
-      </p>
-    </div>
-  );
+function statusTone(status: Student["membership_status"]): PillTone {
+  if (status === "active") return "success";
+  if (status === "canceled") return "danger";
+  if (status === "past_due") return "warning";
+  return "neutral";
 }
 
 function SyncStat({
@@ -698,28 +560,18 @@ function DiscountStatusPill({
   status: string;
   promoCode?: string;
 }) {
-  const tone =
+  const tone: PillTone =
     status === "approved"
-      ? { color: "var(--color-success)", bg: "rgba(46,139,87,0.10)" }
+      ? "success"
       : status === "pending"
-        ? { color: "var(--color-warning)", bg: "rgba(212,162,76,0.12)" }
-        : { color: "var(--color-danger)", bg: "rgba(200,74,74,0.10)" };
+        ? "warning"
+        : "danger";
   return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "4px 10px",
-        borderRadius: 999,
-        fontSize: 12,
-        fontWeight: 500,
-        color: tone.color,
-        background: tone.bg,
-        letterSpacing: "-0.005em",
-        textTransform: "capitalize",
-      }}
-    >
-      {status}
-      {promoCode && ` · ${promoCode}`}
-    </span>
+    <Pill tone={tone}>
+      <span style={{ textTransform: "capitalize" }}>
+        {status}
+        {promoCode && ` · ${promoCode}`}
+      </span>
+    </Pill>
   );
 }

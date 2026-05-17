@@ -10,6 +10,16 @@ import {
   ADMIN_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
 import Link from "next/link";
+import {
+  AdminPage,
+  PageHeader,
+  Card,
+  Pill,
+  Avatar,
+  EmptyState,
+  T,
+  type PillTone,
+} from "@/components/admin/ui";
 
 type SortKey = "name" | "joined_at" | "day" | "progress" | "last_active_at";
 type SortDir = "asc" | "desc";
@@ -166,38 +176,16 @@ export default function StudentsPage() {
   }
 
   return (
-    <div
-      className="px-12 pt-12 pb-16"
-      style={{ maxWidth: 1180, margin: "0 auto" }}
-    >
-      <header style={{ marginBottom: 32 }}>
-        <h1
-          style={{
-            fontSize: 32,
-            fontWeight: 600,
-            letterSpacing: "-0.025em",
-            lineHeight: 1.15,
-            color: "var(--color-text-primary)",
-          }}
-        >
-          Students
-        </h1>
-        <p
-          style={{
-            fontSize: 14,
-            color: "var(--color-text-secondary)",
-            marginTop: 4,
-            letterSpacing: "-0.005em",
-          }}
-        >
-          {filtered.length} {filtered.length === 1 ? "student" : "students"}
-        </p>
-      </header>
+    <AdminPage>
+      <PageHeader
+        title="Students"
+        description={`${filtered.length} ${filtered.length === 1 ? "student" : "students"}`}
+      />
 
       {/* Filters */}
       <div
         className="flex items-center gap-2"
-        style={{ marginBottom: 24 }}
+        style={{ marginBottom: 16 }}
       >
         <input
           type="text"
@@ -206,14 +194,14 @@ export default function StudentsPage() {
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 transition-colors"
           style={{
-            height: 36,
+            height: 38,
             padding: "0 12px",
             background: "var(--color-bg-card)",
             border: "1px solid var(--color-border)",
-            borderRadius: 8,
-            fontSize: 14,
+            borderRadius: 10,
+            fontSize: 13,
             color: "var(--color-text-primary)",
-            letterSpacing: "-0.006em",
+            letterSpacing: "-0.005em",
             outline: "none",
           }}
         />
@@ -222,14 +210,14 @@ export default function StudentsPage() {
           onChange={(e) => setStatusFilter(e.target.value)}
           className="transition-colors"
           style={{
-            height: 36,
+            height: 38,
             padding: "0 28px 0 12px",
             background: "var(--color-bg-card)",
             border: "1px solid var(--color-border)",
-            borderRadius: 8,
-            fontSize: 14,
+            borderRadius: 10,
+            fontSize: 13,
             color: "var(--color-text-primary)",
-            letterSpacing: "-0.006em",
+            letterSpacing: "-0.005em",
             outline: "none",
           }}
         >
@@ -240,40 +228,24 @@ export default function StudentsPage() {
         </select>
       </div>
 
-      {/* List — Settings-style hairline rows */}
-      <div
-        className="surface-resting"
-        style={{
-          background: "var(--color-bg-card)",
-          borderRadius: 12,
-          overflow: "hidden",
-        }}
-      >
+      <Card padding={0}>
         {/* Header row */}
         <div
           className="flex items-center"
           style={{
-            height: 36,
+            height: 40,
             padding: "0 16px",
             borderBottom: "1px solid var(--color-border)",
             background: "var(--color-bg-elevated)",
+            borderTopLeftRadius: 10,
+            borderTopRightRadius: 10,
           }}
         >
           <div style={{ flex: "2 1 0", minWidth: 0 }}>
             <SortHeader label="Name" sortKeyName="name" />
           </div>
           <div className="hidden md:block" style={{ flex: "1 1 0", minWidth: 0 }}>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 500,
-                color: "var(--color-text-tertiary)",
-                textTransform: "uppercase",
-                letterSpacing: "0.04em",
-              }}
-            >
-              Discord
-            </span>
+            <span style={T.eyebrow}>Discord</span>
           </div>
           <div style={{ width: 60, flexShrink: 0 }}>
             <SortHeader label="Day" sortKeyName="day" />
@@ -281,36 +253,22 @@ export default function StudentsPage() {
           <div style={{ width: 160, flexShrink: 0 }}>
             <SortHeader label="Progress" sortKeyName="progress" />
           </div>
-          <div className="hidden lg:block" style={{ width: 110, flexShrink: 0 }}>
+          <div
+            className="hidden lg:block"
+            style={{ width: 110, flexShrink: 0 }}
+          >
             <SortHeader label="Last active" sortKeyName="last_active_at" />
           </div>
           <div style={{ width: 90, flexShrink: 0 }}>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 500,
-                color: "var(--color-text-tertiary)",
-                textTransform: "uppercase",
-                letterSpacing: "0.04em",
-              }}
-            >
-              Status
-            </span>
+            <span style={T.eyebrow}>Status</span>
           </div>
         </div>
 
-        {/* Rows */}
         {filtered.length === 0 ? (
-          <div
-            style={{
-              padding: 48,
-              textAlign: "center",
-              color: "var(--color-text-secondary)",
-              fontSize: 14,
-            }}
-          >
-            No students found
-          </div>
+          <EmptyState
+            title="No students match these filters"
+            description="Try clearing the search or status filter."
+          />
         ) : (
           filtered.map((student) => {
             const day = getDayNumber(student.joined_at);
@@ -330,27 +288,16 @@ export default function StudentsPage() {
                 className="list-row transition-colors"
                 style={{ textDecoration: "none" }}
               >
-                <div className="flex items-center gap-3" style={{ flex: "2 1 0", minWidth: 0 }}>
-                  <div
-                    className="rounded-full flex items-center justify-center shrink-0"
-                    style={{
-                      width: 28,
-                      height: 28,
-                      background: "var(--color-accent-glow)",
-                      color: "var(--color-accent-dark)",
-                      fontSize: 12,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {(student.name || "?")[0].toUpperCase()}
-                  </div>
+                <div
+                  className="flex items-center gap-3"
+                  style={{ flex: "2 1 0", minWidth: 0 }}
+                >
+                  <Avatar src={student.avatar_url} name={student.name} />
                   <div className="min-w-0">
                     <p
                       style={{
-                        fontSize: 14,
+                        ...T.body,
                         fontWeight: 500,
-                        color: "var(--color-text-primary)",
-                        letterSpacing: "-0.011em",
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
@@ -361,8 +308,8 @@ export default function StudentsPage() {
                     <p
                       className="hidden sm:block"
                       style={{
-                        fontSize: 12,
-                        color: "var(--color-text-tertiary)",
+                        ...T.meta,
+                        marginTop: 1,
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
@@ -376,20 +323,14 @@ export default function StudentsPage() {
                   className="hidden md:block"
                   style={{ flex: "1 1 0", minWidth: 0 }}
                 >
-                  <span
-                    style={{
-                      fontSize: 13,
-                      color: "var(--color-text-secondary)",
-                      letterSpacing: "-0.005em",
-                    }}
-                  >
+                  <span style={T.bodyDim}>
                     {student.discord_username || "—"}
                   </span>
                 </div>
                 <div style={{ width: 60, flexShrink: 0 }}>
                   <span
                     style={{
-                      fontSize: 14,
+                      fontSize: 13,
                       fontWeight: 500,
                       color: dayColor,
                       fontVariantNumeric: "tabular-nums",
@@ -399,11 +340,7 @@ export default function StudentsPage() {
                   </span>
                 </div>
                 <div
-                  style={{
-                    width: 160,
-                    flexShrink: 0,
-                    paddingRight: 12,
-                  }}
+                  style={{ width: 160, flexShrink: 0, paddingRight: 12 }}
                 >
                   <div className="flex items-center" style={{ gap: 10 }}>
                     <div
@@ -412,7 +349,7 @@ export default function StudentsPage() {
                         minWidth: 0,
                         height: 4,
                         borderRadius: 2,
-                        background: "var(--color-fill-secondary, rgba(20,20,24,0.06))",
+                        background: "rgba(20,20,24,0.06)",
                         overflow: "hidden",
                       }}
                     >
@@ -420,16 +357,15 @@ export default function StudentsPage() {
                         style={{
                           height: "100%",
                           width: `${percent}%`,
-                          background: "var(--color-accent)",
-                          transition: "width 250ms cubic-bezier(0.25, 0.1, 0.25, 1)",
+                          background: "var(--color-accent-dark)",
+                          transition:
+                            "width 250ms cubic-bezier(0.25,0.1,0.25,1)",
                         }}
                       />
                     </div>
                     <span
                       style={{
-                        fontSize: 12,
-                        color: "var(--color-text-secondary)",
-                        fontVariantNumeric: "tabular-nums",
+                        ...T.meta,
                         flexShrink: 0,
                         minWidth: 36,
                         textAlign: "right",
@@ -439,13 +375,11 @@ export default function StudentsPage() {
                     </span>
                   </div>
                 </div>
-                <div className="hidden lg:block" style={{ width: 110, flexShrink: 0 }}>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: "var(--color-text-secondary)",
-                    }}
-                  >
+                <div
+                  className="hidden lg:block"
+                  style={{ width: 110, flexShrink: 0 }}
+                >
+                  <span style={T.meta}>
                     {relativeTime(student.last_active_at)}
                   </span>
                 </div>
@@ -456,38 +390,24 @@ export default function StudentsPage() {
             );
           })
         )}
-      </div>
-    </div>
+      </Card>
+    </AdminPage>
   );
 }
 
+function STATUS_TONE(status: Student["membership_status"]): PillTone {
+  if (status === "active") return "success";
+  if (status === "canceled") return "danger";
+  if (status === "past_due") return "warning";
+  return "neutral";
+}
+
 function StatusPill({ status }: { status: Student["membership_status"] }) {
-  const tone =
-    status === "active"
-      ? { color: "var(--color-success)", bg: "rgba(46,139,87,0.10)" }
-      : status === "canceled"
-        ? { color: "var(--color-danger)", bg: "rgba(200,74,74,0.10)" }
-        : status === "past_due"
-          ? { color: "var(--color-warning)", bg: "rgba(212,162,76,0.12)" }
-          : {
-              color: "var(--color-text-tertiary)",
-              bg: "rgba(20,20,24,0.06)",
-            };
   return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 8px",
-        borderRadius: 999,
-        fontSize: 11,
-        fontWeight: 500,
-        color: tone.color,
-        background: tone.bg,
-        letterSpacing: "-0.005em",
-        textTransform: "capitalize",
-      }}
-    >
-      {status.replace("_", " ")}
-    </span>
+    <Pill tone={STATUS_TONE(status)}>
+      <span style={{ textTransform: "capitalize" }}>
+        {status.replace("_", " ")}
+      </span>
+    </Pill>
   );
 }

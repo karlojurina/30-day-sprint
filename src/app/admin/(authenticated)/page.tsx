@@ -1,6 +1,21 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+/**
+ * /admin — top-level dashboard.
+ *
+ * Stacks three sections in priority order:
+ *   1. North-star KPI: Month 2 conversion (Karlo's headline number).
+ *   2. Today: count tiles for open tasks + pending discounts — the
+ *      two things that actually demand attention right now.
+ *   3. Trends · last 14 days: four sparkline tiles fed by the
+ *      daily_progress_snapshots table.
+ *
+ * Refresh button runs Whop sync + snapshot rebuild + dashboard
+ * reload in sequence; partial failures surface inline but don't
+ * block the other steps.
+ */
+
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import type { Student } from "@/types/database";
 import {
@@ -9,6 +24,14 @@ import {
   ADMIN_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
 import Link from "next/link";
+import {
+  AdminPage,
+  PageHeader,
+  Section,
+  Card,
+  Button,
+  T,
+} from "@/components/admin/ui";
 
 interface MetricPoint {
   snapshot_date: string;
@@ -162,9 +185,9 @@ export default function AdminDashboard() {
         <div
           className="rounded-full animate-spin"
           style={{
-            width: 24,
-            height: 24,
-            border: "2px solid var(--color-accent)",
+            width: 22,
+            height: 22,
+            border: "2px solid var(--color-accent-dark)",
             borderTopColor: "transparent",
           }}
         />
@@ -173,88 +196,94 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div
-      className="px-12 pt-12 pb-16"
-      style={{ maxWidth: 1180, margin: "0 auto" }}
-    >
-      {/* Page header */}
-      <header
-        className="flex items-start justify-between gap-4 flex-wrap"
-        style={{ marginBottom: 48 }}
-      >
-        <div>
-          <h1
-            style={{
-              fontSize: 32,
-              fontWeight: 600,
-              letterSpacing: "-0.025em",
-              color: "var(--color-text-primary)",
-              lineHeight: 1.15,
-            }}
-          >
-            Dashboard
-          </h1>
+    <AdminPage>
+      <PageHeader
+        title="Dashboard"
+        description="The numbers that matter for the next month."
+        actions={
+          <>
+            {lastRefreshed && (
+              <span style={{ ...T.meta, marginRight: 4 }}>
+                Updated {lastRefreshed.toLocaleTimeString()}
+              </span>
+            )}
+            <RefreshEverything onDone={() => void fetchDashboard(true)} />
+          </>
+        }
+      />
+
+      {/* ─── Hero ─── */}
+      <Section>
+        <Card padding={32}>
           <p
             style={{
-              fontSize: 15,
-              color: "var(--color-text-secondary)",
-              marginTop: 4,
-              letterSpacing: "-0.006em",
+              ...T.eyebrow,
+              color: "var(--color-accent-dark)",
+              textTransform: "none",
+              letterSpacing: "-0.005em",
+              fontSize: 13,
             }}
           >
-            The numbers that matter for the next month.
+            Month 2 conversion
           </p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          {lastRefreshed && (
-            <span
-              style={{
-                fontSize: 11,
-                color: "var(--color-text-tertiary)",
-                fontVariantNumeric: "tabular-nums",
-                marginRight: 4,
-              }}
-            >
-              Updated {lastRefreshed.toLocaleTimeString()}
-            </span>
-          )}
-          <RefreshEverything onDone={() => void fetchDashboard(true)} />
-        </div>
-      </header>
-
-      {/* Hero KPIs — the two we steer on */}
-      <section
-        className="grid grid-cols-1 md:grid-cols-2"
-        style={{ gap: 16, marginBottom: 48 }}
-      >
-        <BigStat
-          label="Month 2 conversion"
-          value={
-            data.monthTwoConversionRate == null
+          <p
+            className="stat-value"
+            style={{
+              fontSize: 56,
+              fontWeight: 600,
+              lineHeight: 1.0,
+              letterSpacing: "-0.028em",
+              color: "var(--color-accent-dark)",
+              marginTop: 12,
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {data.monthTwoConversionRate == null
               ? "—"
-              : `${Math.round(data.monthTwoConversionRate * 100)}%`
-          }
-          sublabel={
-            data.monthTwoConversionRate == null
-              ? "No platform cohort past 30 days yet"
+              : `${Math.round(data.monthTwoConversionRate * 100)}%`}
+          </p>
+          <p
+            style={{
+              ...T.bodyDim,
+              marginTop: 14,
+              lineHeight: 1.4,
+              maxWidth: 540,
+            }}
+          >
+            {data.monthTwoConversionRate == null
+              ? "No platform cohort past 30 days yet."
               : `${Math.round(
-                  (data.monthTwoConversionRate ?? 0) * data.monthTwoCohortSize
-                )} of ${data.monthTwoCohortSize} platform signups past day 30 still active. Whop-wide churn not yet counted.`
-          }
-          accent
-        />
-        <BigStat
-          label="AdValue onboarded"
-          value="—"
-          sublabel="Pending integration with Zak"
-        />
-      </section>
+                  (data.monthTwoConversionRate ?? 0) * data.monthTwoCohortSize,
+                )} of ${data.monthTwoCohortSize} platform signups past day 30 still active. Whop-wide churn not yet counted.`}
+          </p>
+        </Card>
+      </Section>
 
-      {/* Supporting stats — four sparkline tiles. Click any → Insights. */}
-      <section style={{ marginBottom: 48 }}>
-        <p className="section-label" style={{ marginBottom: 12 }}>
-          Trends · last 14 days
-        </p>
+      {/* ─── Today — what's waiting ─── */}
+      <Section eyebrow="Today">
+        <div
+          className="grid grid-cols-1 sm:grid-cols-2"
+          style={{ gap: 12 }}
+        >
+          <AttentionTile
+            href="/admin/tasks"
+            label="Open tasks"
+            count={data.openTasks}
+            zeroLabel="All caught up"
+            actionLabel="Open queue"
+          />
+          <AttentionTile
+            href="/admin/discounts"
+            label="Pending discounts"
+            count={data.pendingDiscounts}
+            zeroLabel="None to review"
+            actionLabel="Open queue"
+          />
+        </div>
+      </Section>
+
+      {/* ─── Trends · last 14 days ─── */}
+      <Section eyebrow="Trends · last 14 days">
         <div
           className="grid grid-cols-2 lg:grid-cols-4"
           style={{ gap: 12 }}
@@ -265,7 +294,7 @@ export default function AdminDashboard() {
             metric="active_count"
             mode="running"
             trend={data.trend}
-            color="#5bb88e"
+            color="var(--color-success)"
           />
           <SparklineTile
             label="Joined"
@@ -274,7 +303,7 @@ export default function AdminDashboard() {
             metric="joined_count"
             mode="flow"
             trend={data.trend}
-            color="#7d8be8"
+            color="var(--color-accent-dark)"
           />
           <SparklineTile
             label="Churned"
@@ -295,205 +324,78 @@ export default function AdminDashboard() {
             color="var(--color-accent-dark)"
           />
         </div>
-      </section>
-
-      {/* Quick links — Settings-style list */}
-      <section style={{ marginBottom: 48 }}>
-        <p className="section-label" style={{ marginBottom: 12 }}>
-          Quick actions
-        </p>
-        <div
-          className="surface-resting"
-          style={{
-            background: "var(--color-bg-card)",
-            borderRadius: 12,
-            overflow: "hidden",
-          }}
-        >
-          <ListLink
-            href="/admin/tasks"
-            label="Open task queue"
-            sublabel={
-              data.openTasks > 0
-                ? `${data.openTasks} waiting in To do`
-                : "All caught up"
-            }
-            badge={data.openTasks > 0 ? data.openTasks : undefined}
-            badgeTone="warm"
-          />
-          <ListLink
-            href="/admin/discounts"
-            label="Pending discounts"
-            sublabel={`${data.pendingDiscounts} to review`}
-            badge={data.pendingDiscounts > 0 ? data.pendingDiscounts : undefined}
-            badgeTone="warm"
-          />
-        </div>
-      </section>
-    </div>
+      </Section>
+    </AdminPage>
   );
 }
 
-function BigStat({
-  label,
-  value,
-  sublabel,
-  accent = false,
-}: {
-  label: string;
-  value: string;
-  sublabel: string;
-  accent?: boolean;
-}) {
-  // apple.com hero stat: tracked lowercase eyebrow + display-tier numeral
-  // + sentence-case secondary line. No uppercase on the eyebrow — Apple
-  // doesn't yell at you to read it.
-  return (
-    <div
-      className="surface-resting"
-      style={{
-        background: "var(--color-bg-card)",
-        borderRadius: 16,
-        padding: 32,
-      }}
-    >
-      <p
-        style={{
-          fontSize: 13,
-          fontWeight: 500,
-          letterSpacing: "-0.005em",
-          color: accent
-            ? "var(--color-accent-dark)"
-            : "var(--color-text-tertiary)",
-        }}
-      >
-        {label}
-      </p>
-      <p
-        className="stat-value"
-        style={{
-          fontSize: 64,
-          fontWeight: 600,
-          lineHeight: 1.0,
-          letterSpacing: "-0.028em",
-          color: accent
-            ? "var(--color-accent-dark)"
-            : "var(--color-text-primary)",
-          marginTop: 16,
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {value}
-      </p>
-      <p
-        style={{
-          fontSize: 14,
-          color: "var(--color-text-secondary)",
-          marginTop: 16,
-          letterSpacing: "-0.006em",
-          lineHeight: 1.4,
-        }}
-      >
-        {sublabel}
-      </p>
-    </div>
-  );
-}
+/* ─── Attention tile ─── */
 
-function ListLink({
+/**
+ * Big count tile that doubles as a call-to-action card. When the
+ * count is zero we soften the visual (no warm pill) so the eye
+ * doesn't get pulled to nothing.
+ */
+function AttentionTile({
   href,
   label,
-  sublabel,
-  badge,
-  badgeTone = "neutral",
+  count,
+  zeroLabel,
+  actionLabel,
 }: {
   href: string;
   label: string;
-  sublabel: string;
-  badge?: number;
-  badgeTone?: "neutral" | "warm" | "danger";
+  count: number;
+  zeroLabel: string;
+  actionLabel: string;
 }) {
-  const badgeColor =
-    badgeTone === "warm"
-      ? "var(--color-warning)"
-      : badgeTone === "danger"
-        ? "var(--color-danger)"
-        : "var(--color-text-tertiary)";
+  const isPositive = count > 0;
   return (
-    <Link
-      href={href}
-      className="list-row"
-      style={{ textDecoration: "none" }}
-    >
-      <div className="flex-1">
-        <p
-          style={{
-            fontSize: 14,
-            fontWeight: 500,
-            color: "var(--color-text-primary)",
-            letterSpacing: "-0.011em",
-          }}
+    <Card href={href} padding={20}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p style={T.eyebrow}>{label}</p>
+          <p
+            className="stat-value"
+            style={{
+              fontSize: 36,
+              fontWeight: 600,
+              letterSpacing: "-0.024em",
+              lineHeight: 1.0,
+              marginTop: 10,
+              color: isPositive
+                ? "var(--color-text-primary)"
+                : "var(--color-text-tertiary)",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {count}
+          </p>
+          <p style={{ ...T.bodyDim, fontSize: 12, marginTop: 8 }}>
+            {isPositive ? actionLabel : zeroLabel}
+          </p>
+        </div>
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="var(--color-text-tertiary)"
+          strokeWidth={1.8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          style={{ marginTop: 4, flexShrink: 0 }}
         >
-          {label}
-        </p>
-        <p
-          style={{
-            fontSize: 12,
-            color: "var(--color-text-secondary)",
-            marginTop: 1,
-          }}
-        >
-          {sublabel}
-        </p>
+          <path d="M9 5l7 7-7 7" />
+        </svg>
       </div>
-      {badge !== undefined && (
-        <span
-          style={{
-            minWidth: 22,
-            height: 22,
-            padding: "0 8px",
-            borderRadius: 11,
-            background: `${badgeColor}1f`,
-            color: badgeColor,
-            fontSize: 12,
-            fontWeight: 600,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontVariantNumeric: "tabular-nums",
-            marginRight: 8,
-          }}
-        >
-          {badge}
-        </span>
-      )}
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="var(--color-text-tertiary)"
-        strokeWidth={1.8}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-      >
-        <path d="M9 5l7 7-7 7" />
-      </svg>
-    </Link>
+    </Card>
   );
 }
 
-/**
- * Sparkline tile shown on the dashboard for each daily-snapshot
- * metric. Clicks through to /admin/insights/progress.
- *
- *   metric    — column key in MetricPoint to chart
- *   mode      — "running" draws a line (good for active count / avg %);
- *               "flow"    draws bars (good for joined/churned per day)
- *   current   — big number shown on the left
- *   color     — stroke / bar color
- */
+/* ─── Sparkline tile ─── */
+
 function SparklineTile({
   label,
   current,
@@ -525,33 +427,23 @@ function SparklineTile({
       style={{
         background: "var(--color-bg-card)",
         borderRadius: 10,
-        padding: "12px 16px",
+        padding: "14px 16px",
         textDecoration: "none",
         display: "flex",
         flexDirection: "column",
-        gap: 4,
+        gap: 6,
         cursor: "pointer",
       }}
     >
-      <p
-        style={{
-          fontSize: 11,
-          fontWeight: 500,
-          color: "var(--color-text-tertiary)",
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-        }}
-      >
-        {label}
-      </p>
+      <p style={T.eyebrow}>{label}</p>
       <div className="flex items-baseline justify-between gap-3">
         <p
           style={{
-            fontSize: 18,
+            fontSize: 22,
             fontWeight: 600,
             color: "var(--color-text-primary)",
             fontVariantNumeric: "tabular-nums",
-            letterSpacing: "-0.018em",
+            letterSpacing: "-0.022em",
             lineHeight: 1.05,
           }}
         >
@@ -583,131 +475,6 @@ function SparklineTile({
         </p>
       )}
     </Link>
-  );
-}
-
-function refreshBtnStyle(busy: boolean): React.CSSProperties {
-  return {
-    fontSize: 12,
-    fontWeight: 500,
-    color: "var(--color-text-secondary)",
-    background: "var(--color-bg-card)",
-    border: "1px solid var(--color-border)",
-    borderRadius: 8,
-    padding: "6px 12px",
-    cursor: busy ? "default" : "pointer",
-    opacity: busy ? 0.6 : 1,
-    fontVariantNumeric: "tabular-nums",
-    letterSpacing: "-0.005em",
-  };
-}
-
-/**
- * One button to rule them all. Runs the Whop community sync, then
- * rebuilds the snapshot trend table, then reloads dashboard data.
- * A failure in any one step is surfaced inline but doesn't block
- * the rest — so the dashboard still refreshes even if Whop is down.
- */
-function RefreshEverything({ onDone }: { onDone: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [phase, setPhase] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [msgTone, setMsgTone] = useState<"ok" | "warn" | "err">("ok");
-
-  const run = async () => {
-    if (busy) return;
-    setBusy(true);
-    setMsg(null);
-
-    const supabase = createClient();
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    const token = session?.access_token;
-    const auth = { Authorization: `Bearer ${token}` };
-
-    const parts: string[] = [];
-    let worst: "ok" | "warn" | "err" = "ok";
-
-    // 1. Whop community sync.
-    setPhase("Syncing Whop…");
-    try {
-      const res = await fetch("/api/admin/sync-whop", {
-        method: "POST",
-        headers: auth,
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        parts.push(`Whop: ${json.error ?? res.statusText}`);
-        worst = "warn";
-      } else {
-        parts.push(
-          `Whop +${json.inserted}/${json.updated} (${json.fetched})`,
-        );
-      }
-    } catch (e) {
-      parts.push(`Whop: ${e instanceof Error ? e.message : String(e)}`);
-      worst = "warn";
-    }
-
-    // 2. Snapshot rebuild.
-    setPhase("Rebuilding trends…");
-    try {
-      const res = await fetch("/api/admin/rebuild-snapshots", {
-        method: "POST",
-        headers: auth,
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        parts.push(`Trends: ${json.error ?? res.statusText}`);
-        worst = "err";
-      } else {
-        parts.push(`Trends ${json.rows} rows`);
-      }
-    } catch (e) {
-      parts.push(`Trends: ${e instanceof Error ? e.message : String(e)}`);
-      worst = "err";
-    }
-
-    // 3. Reload dashboard data — always runs, even if 1 or 2 failed.
-    setPhase("Reloading…");
-    onDone();
-
-    setMsg(parts.join(" · "));
-    setMsgTone(worst);
-    setPhase(null);
-    setBusy(false);
-    setTimeout(() => setMsg(null), 10_000);
-  };
-
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => void run()}
-        disabled={busy}
-        style={refreshBtnStyle(busy)}
-        title="Re-pull Whop community, rebuild trend snapshots, reload data"
-      >
-        {busy ? phase ?? "Refreshing…" : "↻ Refresh"}
-      </button>
-      {msg && (
-        <span
-          style={{
-            fontSize: 11,
-            color:
-              msgTone === "err"
-                ? "var(--color-danger)"
-                : msgTone === "warn"
-                  ? "var(--color-warning)"
-                  : "var(--color-text-tertiary)",
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {msg}
-        </span>
-      )}
-    </>
   );
 }
 
@@ -745,7 +512,6 @@ function SparklineSVG({
   );
 
   if (mode === "flow") {
-    // Bar mode for joined/churned per day. Baseline = bottom of svg.
     const bw = Math.max(1, stepX * 0.7);
     const baseline = H - PAD;
     return (
@@ -771,7 +537,6 @@ function SparklineSVG({
     );
   }
 
-  // Running mode = line
   const path = points
     .map((_, i) => `${i === 0 ? "M" : "L"} ${PAD + i * stepX} ${ys[i]}`)
     .join(" ");
@@ -789,3 +554,108 @@ function SparklineSVG({
   );
 }
 
+/* ─── Refresh-everything button ─── */
+
+/**
+ * One button to rule them all. Runs the Whop community sync, then
+ * rebuilds the snapshot trend table, then reloads dashboard data.
+ * A failure in any one step is surfaced inline but doesn't block
+ * the rest — so the dashboard still refreshes even if Whop is down.
+ */
+function RefreshEverything({ onDone }: { onDone: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [msgTone, setMsgTone] = useState<"ok" | "warn" | "err">("ok");
+
+  const run = async () => {
+    if (busy) return;
+    setBusy(true);
+    setMsg(null);
+
+    const supabase = createClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const auth = { Authorization: `Bearer ${token}` };
+
+    const parts: string[] = [];
+    let worst: "ok" | "warn" | "err" = "ok";
+
+    setPhase("Syncing Whop…");
+    try {
+      const res = await fetch("/api/admin/sync-whop", {
+        method: "POST",
+        headers: auth,
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        parts.push(`Whop: ${json.error ?? res.statusText}`);
+        worst = "warn";
+      } else {
+        parts.push(`Whop +${json.inserted}/${json.updated} (${json.fetched})`);
+      }
+    } catch (e) {
+      parts.push(`Whop: ${e instanceof Error ? e.message : String(e)}`);
+      worst = "warn";
+    }
+
+    setPhase("Rebuilding trends…");
+    try {
+      const res = await fetch("/api/admin/rebuild-snapshots", {
+        method: "POST",
+        headers: auth,
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        parts.push(`Trends: ${json.error ?? res.statusText}`);
+        worst = "err";
+      } else {
+        parts.push(`Trends ${json.rows} rows`);
+      }
+    } catch (e) {
+      parts.push(`Trends: ${e instanceof Error ? e.message : String(e)}`);
+      worst = "err";
+    }
+
+    setPhase("Reloading…");
+    onDone();
+
+    setMsg(parts.join(" · "));
+    setMsgTone(worst);
+    setPhase(null);
+    setBusy(false);
+    setTimeout(() => setMsg(null), 10_000);
+  };
+
+  return (
+    <>
+      <Button
+        variant="subtle"
+        size="md"
+        busy={busy}
+        onClick={() => void run()}
+        title="Re-pull Whop community, rebuild trend snapshots, reload data"
+      >
+        {busy ? phase ?? "Refreshing…" : "↻ Refresh"}
+      </Button>
+      {msg && (
+        <span
+          style={{
+            fontSize: 11,
+            color:
+              msgTone === "err"
+                ? "var(--color-danger)"
+                : msgTone === "warn"
+                  ? "var(--color-warning)"
+                  : "var(--color-text-tertiary)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {msg}
+        </span>
+      )}
+    </>
+  );
+}

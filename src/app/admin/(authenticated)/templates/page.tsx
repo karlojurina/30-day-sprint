@@ -25,6 +25,7 @@ import {
   stripBucketGlyph,
 } from "@/lib/templates";
 import { TriggerBuilder } from "@/components/admin/TriggerBuilder";
+import { AdminPage, PageHeader, Button, T } from "@/components/admin/ui";
 
 const WEEK_ORDER = ["D1", "W1", "W2", "W3", "W4", "X", "CUSTOM"];
 
@@ -345,49 +346,29 @@ export default function AdminTemplatesPage() {
   }
 
   return (
-    <div className="p-8 max-w-5xl">
-      <h1
-        style={{
-          fontSize: 24,
-          fontWeight: 700,
-          letterSpacing: "-0.022em",
-          color: "var(--color-text-primary)",
-          marginBottom: 4,
-        }}
-      >
-        Templates
-      </h1>
+    <AdminPage>
+      <PageHeader
+        title="Templates"
+        actions={
+          canEdit ? (
+            <Button variant="primary" size="md" onClick={startNewTemplate}>
+              + New custom template
+            </Button>
+          ) : undefined
+        }
+      />
       <BucketLegend />
-
-      {canEdit && (
-        <div className="mb-6">
-          <button
-            type="button"
-            onClick={startNewTemplate}
-            style={{
-              padding: "8px 14px",
-              fontSize: 12,
-              fontWeight: 600,
-              borderRadius: 6,
-              background: "var(--color-accent)",
-              border: "none",
-              color: "var(--color-bg-primary)",
-              cursor: "pointer",
-            }}
-          >
-            + New custom template
-          </button>
-        </div>
-      )}
 
       {!canEdit && (
         <div
-          className="mb-6 p-3 rounded"
           style={{
             background: "rgba(212,162,76,0.10)",
             border: "1px solid rgba(212,162,76,0.30)",
+            borderRadius: 10,
+            padding: "10px 14px",
             fontSize: 13,
             color: "var(--color-warning)",
+            marginBottom: 16,
           }}
         >
           You&apos;re signed in as <strong>{teamMember?.role}</strong>. Only
@@ -397,12 +378,14 @@ export default function AdminTemplatesPage() {
 
       {error && (
         <div
-          className="mb-6 p-3 rounded"
           style={{
             background: "rgba(200,74,74,0.10)",
             border: "1px solid rgba(200,74,74,0.30)",
+            borderRadius: 10,
+            padding: "10px 14px",
             fontSize: 13,
             color: "var(--color-danger)",
+            marginBottom: 16,
           }}
         >
           {error}
@@ -412,16 +395,7 @@ export default function AdminTemplatesPage() {
       <div className="flex flex-col gap-6">
         {groupedRows.map(([weekKey, group]) => (
           <section key={weekKey}>
-            <h2
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: "0.16em",
-                textTransform: "uppercase",
-                color: "var(--color-text-tertiary)",
-                marginBottom: 8,
-              }}
-            >
+            <h2 style={{ ...T.eyebrow, marginBottom: 8 }}>
               {GROUP_LABEL[weekKey] ?? weekKey}
             </h2>
 
@@ -775,7 +749,7 @@ export default function AdminTemplatesPage() {
           error={error}
         />
       )}
-    </div>
+    </AdminPage>
   );
 }
 

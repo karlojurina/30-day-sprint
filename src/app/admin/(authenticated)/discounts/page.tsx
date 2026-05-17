@@ -12,6 +12,13 @@ import type {
 } from "@/types/database";
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
+import {
+  AdminPage,
+  PageHeader,
+  Card,
+  EmptyState,
+  Tabs,
+} from "@/components/admin/ui";
 
 type RequestWithStudent = DiscountRequest & { student: Student };
 type FilterValue = "pending" | "approved" | "applied" | "rejected" | "all";
@@ -234,102 +241,34 @@ export default function DiscountsPage() {
   }
 
   return (
-    <div
-      className="px-12 pt-12 pb-16"
-      style={{ maxWidth: 1180, margin: "0 auto" }}
-    >
-      <header style={{ marginBottom: 24 }}>
-        <h1
-          style={{
-            fontSize: 32,
-            fontWeight: 600,
-            letterSpacing: "-0.025em",
-            lineHeight: 1.15,
-            color: "var(--color-text-primary)",
-          }}
-        >
-          Discount applications
-        </h1>
-        <p
-          style={{
-            fontSize: 14,
-            color: "var(--color-text-secondary)",
-            marginTop: 4,
-            letterSpacing: "-0.005em",
-          }}
-        >
-          Review applications. Approval requires the student&rsquo;s ad
-          submissions to be verified on their detail page first. Approve
-          generates the Whop promo code; copy it, attach it to the student&rsquo;s
-          subscription in the Whop dashboard, then click <em>Mark applied</em>.
-        </p>
-      </header>
+    <AdminPage>
+      <PageHeader
+        title="Discount applications"
+        description="Approve, copy the generated Whop promo code, attach it to the student in the Whop dashboard, then click Mark applied."
+      />
 
-      {/* Segmented filter */}
-      <div
-        style={{
-          display: "inline-flex",
-          background: "var(--color-bg-elevated)",
-          borderRadius: 10,
-          padding: 3,
-          marginBottom: 24,
-          gap: 1,
-        }}
-      >
-        {(["pending", "approved", "applied", "rejected", "all"] as const).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            style={{
-              padding: "5px 12px",
-              borderRadius: 7,
-              border: "none",
-              background: filter === f ? "var(--color-bg-card)" : "transparent",
-              color:
-                filter === f
-                  ? "var(--color-text-primary)"
-                  : "var(--color-text-secondary)",
-              fontSize: 13,
-              fontWeight: filter === f ? 600 : 500,
-              letterSpacing: "-0.005em",
-              textTransform: "capitalize",
-              cursor: "pointer",
-              boxShadow:
-                filter === f
-                  ? "0 1px 2px rgba(20,20,24,0.06), 0 0 0 0.5px rgba(20,20,24,0.04)"
-                  : "none",
-              transition:
-                "background 150ms cubic-bezier(0.25,0.1,0.25,1), color 150ms cubic-bezier(0.25,0.1,0.25,1)",
-            }}
-          >
-            {f}
-          </button>
-        ))}
+      <div style={{ marginBottom: 24 }}>
+        <Tabs
+          value={filter}
+          onChange={(v) => setFilter(v)}
+          tabs={[
+            { value: "pending", label: "Pending" },
+            { value: "approved", label: "Approved" },
+            { value: "applied", label: "Applied" },
+            { value: "rejected", label: "Rejected" },
+            { value: "all", label: "All" },
+          ]}
+        />
       </div>
 
       {requests.length === 0 ? (
-        <div
-          className="surface-resting"
-          style={{
-            background: "var(--color-bg-card)",
-            borderRadius: 12,
-            padding: 48,
-            textAlign: "center",
-            fontSize: 14,
-            color: "var(--color-text-secondary)",
-          }}
-        >
-          No {filter === "all" ? "" : filter} applications.
-        </div>
+        <Card>
+          <EmptyState
+            title={`No ${filter === "all" ? "" : filter} applications.`}
+          />
+        </Card>
       ) : (
-        <div
-          className="surface-resting"
-          style={{
-            background: "var(--color-bg-card)",
-            borderRadius: 12,
-            overflow: "hidden",
-          }}
-        >
+        <Card padding={0}>
           {requests.map((req) => (
             <div
               key={req.id}
@@ -563,9 +502,9 @@ export default function DiscountsPage() {
               )}
             </div>
           ))}
-        </div>
+        </Card>
       )}
-    </div>
+    </AdminPage>
   );
 }
 

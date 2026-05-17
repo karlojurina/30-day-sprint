@@ -18,6 +18,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import {
+  AdminPage,
+  PageHeader,
+  Card,
+  Tabs,
+  EmptyState,
+} from "@/components/admin/ui";
 
 interface SnapshotRow {
   snapshot_date: string;
@@ -147,64 +154,33 @@ export default function ProgressInsightsPage() {
   }, [points]);
 
   return (
-    <div className="p-8 max-w-7xl">
-      <header className="mb-6">
-        <h1
-          style={{
-            fontSize: 24,
-            fontWeight: 700,
-            letterSpacing: "-0.022em",
-            color: "var(--color-text-primary)",
-            marginBottom: 4,
-          }}
-        >
-          Insights
-        </h1>
-        <p style={{ fontSize: 13, color: "var(--color-text-tertiary)" }}>
-          Daily snapshots of platform health. Cron writes one row at
-          00:30 UTC; ranges past the backfilled 14 days will be sparse
-          until more data accumulates.
-        </p>
-      </header>
+    <AdminPage>
+      <PageHeader
+        title="Insights"
+        description="Daily snapshots of platform health. Cron writes one row at 00:30 UTC; long ranges will be sparse until more data accumulates."
+      />
 
-      <div className="flex gap-2 mb-6 flex-wrap">
-        {(Object.keys(RANGE_LABELS) as RangeKey[]).map((k) => (
-          <button
-            key={k}
-            onClick={() => setRange(k)}
-            style={{
-              padding: "6px 14px",
-              fontSize: 12,
-              fontWeight: range === k ? 600 : 500,
-              borderRadius: 8,
-              background:
-                range === k
-                  ? "var(--color-bg-elevated)"
-                  : "transparent",
-              border:
-                range === k
-                  ? "1px solid var(--color-accent-dark)"
-                  : "1px solid var(--color-border)",
-              color:
-                range === k
-                  ? "var(--color-text-primary)"
-                  : "var(--color-text-tertiary)",
-              cursor: "pointer",
-            }}
-          >
-            {RANGE_LABELS[k]}
-          </button>
-        ))}
+      <div style={{ marginBottom: 24 }}>
+        <Tabs
+          value={range}
+          onChange={(v) => setRange(v)}
+          tabs={(Object.keys(RANGE_LABELS) as RangeKey[]).map((k) => ({
+            value: k,
+            label: RANGE_LABELS[k],
+          }))}
+        />
       </div>
 
       {error && (
         <div
-          className="mb-4 p-3 rounded"
           style={{
             background: "rgba(200,74,74,0.10)",
             border: "1px solid rgba(200,74,74,0.30)",
+            borderRadius: 10,
+            padding: "10px 14px",
             fontSize: 13,
             color: "var(--color-danger)",
+            marginBottom: 16,
           }}
         >
           {error}
@@ -212,19 +188,24 @@ export default function ProgressInsightsPage() {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center py-16">
+        <div className="flex items-center justify-center" style={{ padding: 64 }}>
           <div
             className="rounded-full animate-spin"
             style={{
-              width: 24,
-              height: 24,
-              border: "2px solid var(--color-accent)",
+              width: 22,
+              height: 22,
+              border: "2px solid var(--color-accent-dark)",
               borderTopColor: "transparent",
             }}
           />
         </div>
       ) : points.length === 0 ? (
-        <EmptyHint />
+        <Card>
+          <EmptyState
+            title="No snapshots yet."
+            description="Once the nightly cron writes a few rows you'll see trends here."
+          />
+        </Card>
       ) : (
         <>
           <div
@@ -245,7 +226,7 @@ export default function ProgressInsightsPage() {
           <CalcTransparency />
         </>
       )}
-    </div>
+    </AdminPage>
   );
 }
 
@@ -341,29 +322,6 @@ function CalcTransparency() {
         </p>
       </div>
     </details>
-  );
-}
-
-function EmptyHint() {
-  return (
-    <div
-      className="surface-resting"
-      style={{
-        background: "var(--color-bg-card)",
-        borderRadius: 12,
-        padding: 40,
-        textAlign: "center",
-        color: "var(--color-text-tertiary)",
-      }}
-    >
-      <p style={{ fontSize: 14, marginBottom: 4 }}>
-        No snapshots in this window yet.
-      </p>
-      <p style={{ fontSize: 12 }}>
-        Migrations v31 + v32 backfill the last 14 days; the nightly cron at
-        00:30 UTC takes over from there.
-      </p>
-    </div>
   );
 }
 

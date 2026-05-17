@@ -51,6 +51,9 @@ export interface Student {
   ad_submissions_verified: boolean;
   ad_submissions_verified_at: string | null;
   ad_submissions_verified_by: string | null;
+  // v38: exclude this student from CSM task generation + Day-28 DM.
+  // Use for the team's own dummy accounts.
+  csm_exempt: boolean;
   created_at: string;
   updated_at: string;
 }

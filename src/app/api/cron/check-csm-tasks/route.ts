@@ -40,7 +40,14 @@ import {
   evaluateCustomTrigger,
   SCENARIO_BUCKET,
 } from "@/lib/csm-triggers";
+import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 import type { Student, TriggerConfig } from "@/types/database";
+
+/** Plain-English label for each disengagement_alerts.alert_type. */
+const ALERT_LABEL: Record<string, string> = {
+  no_login_5d: "no platform login in 5 days",
+  no_lessons_7d: "no lessons completed in 7 days",
+};
 
 interface AlertRow {
   id: string;
@@ -94,12 +101,16 @@ export async function GET(request: NextRequest) {
     templatesRes,
     alertsRes,
   ] = await Promise.all([
+    // Limit to actual paying students who joined on/after the
+    // platform cutoff. csm_exempt = test accounts we never DM.
     supabase
       .from("students")
       .select(
         "id, name, joined_at, membership_status, last_active_at, discord_username",
       )
-      .eq("membership_status", "active"),
+      .eq("membership_status", "active")
+      .eq("csm_exempt", false)
+      .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF),
     supabase
       .from("student_lesson_completions")
       .select("student_id, lesson_id, completed_at, action_completed_at"),
@@ -200,11 +211,14 @@ export async function GET(request: NextRequest) {
     if (!scenarioId) continue;
     const templateId = templateBy.get(scenarioId);
     if (!templateId) continue;
+    // Plain-English summary — Astrid never needs to see the
+    // internal alert_type key.
+    const label = ALERT_LABEL[alert.alert_type] ?? alert.message;
     toInsert.push({
       student_id: student.id,
       scenario_id: scenarioId,
       template_id: templateId,
-      behavior_summary: `Day ${day} · alert "${alert.alert_type}" · ${alert.message}`,
+      behavior_summary: `Day ${day} · ${label}.`,
     });
   }
 

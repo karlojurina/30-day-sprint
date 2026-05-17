@@ -157,7 +157,7 @@ export default function StudentDetailPage() {
       {/* Stat row */}
       <div
         className="grid grid-cols-2 lg:grid-cols-4"
-        style={{ gap: 12, marginBottom: 32 }}
+        style={{ gap: 12, marginBottom: 16 }}
       >
         <Stat label="Progress" value={`${overallPercent}%`} accent />
         <Stat
@@ -173,6 +173,47 @@ export default function StudentDetailPage() {
           value={new Date(student.last_active_at).toLocaleDateString()}
         />
       </div>
+
+      {/* CSM exempt — flip to hide a dummy / team test account from
+          task generation + Day-28 DM. */}
+      <label
+        className="surface-resting flex items-center"
+        style={{
+          background: student.csm_exempt
+            ? "rgba(212,162,76,0.10)"
+            : "var(--color-bg-card)",
+          borderRadius: 10,
+          padding: "10px 14px",
+          marginBottom: 32,
+          gap: 10,
+          cursor: "pointer",
+          fontSize: 13,
+          color: "var(--color-text-secondary)",
+          letterSpacing: "-0.006em",
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={student.csm_exempt}
+          onChange={async (e) => {
+            const next = e.currentTarget.checked;
+            const { error } = await supabase
+              .from("students")
+              .update({ csm_exempt: next })
+              .eq("id", student.id);
+            if (!error) setStudent({ ...student, csm_exempt: next });
+          }}
+        />
+        <span>
+          <strong style={{ color: "var(--color-text-primary)" }}>
+            Exempt from CSM
+          </strong>
+          {" — "}
+          {student.csm_exempt
+            ? "Hidden from task queue + skipped by Day-28 DM."
+            : "Mark this account as a team test / dummy."}
+        </span>
+      </label>
 
       {/* Whop sync diagnostic */}
       <div

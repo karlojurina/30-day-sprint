@@ -939,7 +939,7 @@ function TaskDetailModal({
           <div className="flex-1" />
           {student?.id && (
             <a
-              href={`/admin/students`}
+              href={`/admin/students/${student.id}`}
               onClick={(e) => e.stopPropagation()}
               style={{
                 fontSize: 12,

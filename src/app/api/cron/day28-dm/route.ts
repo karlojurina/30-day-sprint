@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
       "id, name, joined_at, current_streak, longest_streak, discord_user_id, day28_dm_sent_at"
     )
     .eq("membership_status", "active")
+    .eq("csm_exempt", false)
     .is("day28_dm_sent_at", null)
     .gt("joined_at", minJoined.toISOString())
     .lte("joined_at", maxJoined.toISOString());

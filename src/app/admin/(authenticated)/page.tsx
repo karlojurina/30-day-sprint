@@ -35,14 +35,12 @@ interface DashboardData {
 export default function AdminDashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const supabase = createClient();
 
   const fetchDashboard = useCallback(
     async (silent = false) => {
-      if (silent) setRefreshing(true);
-      else setLoading(true);
+      if (!silent) setLoading(true);
 
       const now = Date.now();
       const weekAgo = new Date(now - 7 * 86_400_000).toISOString();
@@ -150,7 +148,6 @@ export default function AdminDashboard() {
 
       setLastRefreshed(new Date());
       setLoading(false);
-      setRefreshing(false);
     },
     [supabase],
   );
@@ -221,16 +218,7 @@ export default function AdminDashboard() {
               Updated {lastRefreshed.toLocaleTimeString()}
             </span>
           )}
-          <SyncButton onSynced={() => void fetchDashboard(true)} />
-          <RebuildButton onRebuilt={() => void fetchDashboard(true)} />
-          <button
-            type="button"
-            onClick={() => void fetchDashboard(true)}
-            disabled={refreshing}
-            style={refreshBtnStyle(refreshing)}
-          >
-            {refreshing ? "Refreshing…" : "↻ Refresh"}
-          </button>
+          <RefreshEverything onDone={() => void fetchDashboard(true)} />
         </div>
       </header>
 
@@ -408,70 +396,6 @@ function BigStat({
       >
         {sublabel}
       </p>
-    </div>
-  );
-}
-
-function SmallStat({
-  label,
-  value,
-  accent,
-  sublabel,
-}: {
-  label: string;
-  value: string | number;
-  accent?: "success" | "danger";
-  sublabel?: string;
-}) {
-  const color =
-    accent === "success"
-      ? "var(--color-success)"
-      : accent === "danger"
-        ? "var(--color-danger)"
-        : "var(--color-text-primary)";
-  return (
-    <div
-      className="surface-resting"
-      style={{
-        background: "var(--color-bg-card)",
-        borderRadius: 12,
-        padding: 20,
-      }}
-    >
-      <p
-        style={{
-          fontSize: 12,
-          fontWeight: 500,
-          color: "var(--color-text-tertiary)",
-          letterSpacing: "-0.005em",
-        }}
-      >
-        {label}
-      </p>
-      <p
-        style={{
-          fontSize: 30,
-          fontWeight: 600,
-          color,
-          marginTop: 8,
-          letterSpacing: "-0.024em",
-          lineHeight: 1.0,
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
-        {value}
-      </p>
-      {sublabel && (
-        <p
-          style={{
-            fontSize: 11,
-            color: "var(--color-text-tertiary)",
-            marginTop: 6,
-          }}
-        >
-          {sublabel}
-        </p>
-      )}
     </div>
   );
 }
@@ -662,8 +586,6 @@ function SparklineTile({
   );
 }
 
-// Shared style for the small toolbar buttons in the page header.
-// Mirrors the resting / hover states of buttons elsewhere in admin.
 function refreshBtnStyle(busy: boolean): React.CSSProperties {
   return {
     fontSize: 12,
@@ -681,111 +603,81 @@ function refreshBtnStyle(busy: boolean): React.CSSProperties {
 }
 
 /**
- * Pulls the full Whop community into our students table. Imported
- * rows arrive with supabase_user_id = null — OAuth fills that in
- * later. Safe to re-run; existing rows get refreshed.
+ * One button to rule them all. Runs the Whop community sync, then
+ * rebuilds the snapshot trend table, then reloads dashboard data.
+ * A failure in any one step is surfaced inline but doesn't block
+ * the rest — so the dashboard still refreshes even if Whop is down.
  */
-function SyncButton({ onSynced }: { onSynced: () => void }) {
+function RefreshEverything({ onDone }: { onDone: () => void }) {
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [msgTone, setMsgTone] = useState<"ok" | "warn" | "err">("ok");
 
   const run = async () => {
     if (busy) return;
     setBusy(true);
     setMsg(null);
+
+    const supabase = createClient();
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const auth = { Authorization: `Bearer ${token}` };
+
+    const parts: string[] = [];
+    let worst: "ok" | "warn" | "err" = "ok";
+
+    // 1. Whop community sync.
+    setPhase("Syncing Whop…");
     try {
-      const supabase = createClient();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const token = session?.access_token;
       const res = await fetch("/api/admin/sync-whop", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: auth,
       });
       const json = await res.json();
       if (!res.ok) {
-        setMsg(`Sync failed: ${json.error ?? res.statusText}`);
+        parts.push(`Whop: ${json.error ?? res.statusText}`);
+        worst = "warn";
       } else {
-        setMsg(
-          `Synced ${json.fetched} · +${json.inserted} new · ${json.updated} updated`,
+        parts.push(
+          `Whop +${json.inserted}/${json.updated} (${json.fetched})`,
         );
-        onSynced();
       }
     } catch (e) {
-      setMsg(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setBusy(false);
-      // Auto-clear the toast so it doesn't sit there forever.
-      setTimeout(() => setMsg(null), 8000);
+      parts.push(`Whop: ${e instanceof Error ? e.message : String(e)}`);
+      worst = "warn";
     }
-  };
 
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => void run()}
-        disabled={busy}
-        style={refreshBtnStyle(busy)}
-        title="Pull the full Whop community into our students table"
-      >
-        {busy ? "Syncing…" : "↓ Sync Whop"}
-      </button>
-      {msg && (
-        <span
-          style={{
-            fontSize: 11,
-            color: msg.startsWith("Sync failed")
-              ? "var(--color-danger)"
-              : "var(--color-text-tertiary)",
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {msg}
-        </span>
-      )}
-    </>
-  );
-}
-
-/**
- * Rebuilds daily_progress_snapshots from 2026-01-01 forward using the
- * current students + completions data. Run this once after a Whop
- * sync so the trend reflects the full community, not just the slice
- * we had at the time the snapshots were taken.
- */
-function RebuildButton({ onRebuilt }: { onRebuilt: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-
-  const run = async () => {
-    if (busy) return;
-    setBusy(true);
-    setMsg(null);
+    // 2. Snapshot rebuild.
+    setPhase("Rebuilding trends…");
     try {
-      const supabase = createClient();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const token = session?.access_token;
       const res = await fetch("/api/admin/rebuild-snapshots", {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: auth,
       });
       const json = await res.json();
       if (!res.ok) {
-        setMsg(`Rebuild failed: ${json.error ?? res.statusText}`);
+        parts.push(`Trends: ${json.error ?? res.statusText}`);
+        worst = "err";
       } else {
-        setMsg(`Rebuilt ${json.rows} snapshot rows`);
-        onRebuilt();
+        parts.push(`Trends ${json.rows} rows`);
       }
     } catch (e) {
-      setMsg(`Rebuild failed: ${e instanceof Error ? e.message : String(e)}`);
-    } finally {
-      setBusy(false);
-      setTimeout(() => setMsg(null), 8000);
+      parts.push(`Trends: ${e instanceof Error ? e.message : String(e)}`);
+      worst = "err";
     }
+
+    // 3. Reload dashboard data — always runs, even if 1 or 2 failed.
+    setPhase("Reloading…");
+    onDone();
+
+    setMsg(parts.join(" · "));
+    setMsgTone(worst);
+    setPhase(null);
+    setBusy(false);
+    setTimeout(() => setMsg(null), 10_000);
   };
 
   return (
@@ -795,17 +687,20 @@ function RebuildButton({ onRebuilt }: { onRebuilt: () => void }) {
         onClick={() => void run()}
         disabled={busy}
         style={refreshBtnStyle(busy)}
-        title="Recompute daily snapshots from current data (run after a Sync)"
+        title="Re-pull Whop community, rebuild trend snapshots, reload data"
       >
-        {busy ? "Rebuilding…" : "↺ Rebuild trends"}
+        {busy ? phase ?? "Refreshing…" : "↻ Refresh"}
       </button>
       {msg && (
         <span
           style={{
             fontSize: 11,
-            color: msg.startsWith("Rebuild failed")
-              ? "var(--color-danger)"
-              : "var(--color-text-tertiary)",
+            color:
+              msgTone === "err"
+                ? "var(--color-danger)"
+                : msgTone === "warn"
+                  ? "var(--color-warning)"
+                  : "var(--color-text-tertiary)",
             fontVariantNumeric: "tabular-nums",
           }}
         >

@@ -653,11 +653,11 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                   }}
                 >
                   {discountRequest.status === "approved" || discountRequest.status === "applied"
-                    ? "Our team has applied the 30% discount to your Whop subscription. You'll see it on your next renewal — nothing else to do."
+                    ? "Our team has applied the 30% discount to your Whop subscription. You'll see it on your next renewal, nothing else to do."
                     : discountRequest.status === "rejected"
                       ? discountRequest.rejection_reason ||
-                        "The team didn't approve this — reach out in Discord."
-                      : "Thanks for applying — our team will review it within 24 hours and apply your discount directly to your Whop subscription."}
+                        "The team didn't approve this. Reach out in Discord."
+                      : "Thanks for applying. Our team will review it within 24 hours and apply your discount directly to your Whop subscription."}
                 </p>
               </div>
             )}
@@ -756,7 +756,7 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                       year: "numeric",
                     },
                   )}
-                  . You&apos;re in the program — head into Discord and pick
+                  . You&apos;re in the program. Head into Discord and pick
                   your first bounty when you&apos;re ready.
                 </p>
               </div>
@@ -799,7 +799,7 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                 >
                   {/* TODO(karlo): final sub-copy */}
                   You shipped your first bounty. There&apos;s nothing left
-                  on this map — when you&apos;re ready, cross over.
+                  on this map. When you&apos;re ready, cross over.
                 </p>
                 <button
                   onClick={() => {
@@ -855,7 +855,7 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                     day: "numeric",
                     year: "numeric",
                   })}
-                  . The Playbook is your home now — lessons are still here
+                  . The Playbook is your home now. Lessons are still here
                   whenever you want a reference.
                 </p>
               </div>
@@ -929,9 +929,9 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                     fontSize: 14,
                     letterSpacing: "-0.005em",
                   }}
-                  title="This lesson is optional — skip without losing progress."
+                  title="This lesson is optional - skip without losing progress."
                 >
-                  {skippedLessonIds.has(lesson.id) ? "Un-skip" : "Skip — it's optional"}
+                  {skippedLessonIds.has(lesson.id) ? "Un-skip" : "Skip - it's optional"}
                 </button>
               )}
             </div>
@@ -1466,7 +1466,7 @@ function GroupSheet({
                           fontVariantNumeric: "tabular-nums",
                         }}
                       >
-                        {sub.duration_label ?? "—"}
+                        {sub.duration_label ?? "-"}
                         {watched && " · Watched"}
                         {skipped && " · Skipped"}
                       </p>

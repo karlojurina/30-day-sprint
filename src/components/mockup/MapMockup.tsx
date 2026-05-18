@@ -1119,7 +1119,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       : "Claim discount",
                     sublabel: discountRequest
                       ? discountRequest.status === "approved" || discountRequest.status === "applied"
-                        ? "30% off — applied by team"
+                        ? "30% off - applied by team"
                         : discountRequest.status === "rejected"
                           ? "see Discord"
                           : "review in progress"
@@ -2531,15 +2531,13 @@ function ScenePathOverlay({
         const displayTitle =
           MOCKUP_TITLE_OVERRIDES[lesson.id] ?? lesson.title;
         const size = perspectiveSize(pos.y);
-        // The two headline claim moments — l049 (R3 discount) and
-        // l057 (R4 bounty access). LessonMarker renders these with a
-        // dedicated star + banner treatment so they read as the
-        // main events of their region.
-        const claim: "discount" | "bounty" | null = lesson.is_gate
-          ? "discount"
-          : lesson.id === "l057"
-            ? "bounty"
-            : null;
+        // Headline claim marker — only l057 (bounty access) gets
+        // it on the lesson node itself. The 30% discount UI lives
+        // on R2's secondary end-marker, so l049 (the lesson) stays
+        // a regular action-item diamond. Two parallel "discount"
+        // visuals were redundant.
+        const claim: "discount" | "bounty" | null =
+          lesson.id === "l057" ? "bounty" : null;
         return (
           <LessonMarker
             key={lesson.id}
@@ -3062,12 +3060,15 @@ function ClaimMarker({
           </g>
         ))}
       {isDone && (
-        // Big check
+        // Centered check — bounding box (-r*0.28, -r*0.18) to
+        // (r*0.28, r*0.18) so midpoint sits at (0, 0). Smaller +
+        // tighter stroke than before; the previous version
+        // overpowered the star body.
         <path
-          d={`M ${-r * 0.35} 0 L ${-r * 0.1} ${r * 0.3} L ${r * 0.45} ${-r * 0.35}`}
+          d={`M ${-r * 0.28} ${-r * 0.02} L ${-r * 0.05} ${r * 0.18} L ${r * 0.28} ${-r * 0.18}`}
           fill="none"
           stroke="rgba(15,17,21,0.92)"
-          strokeWidth={r * 0.12}
+          strokeWidth={r * 0.085}
           strokeLinecap="round"
           strokeLinejoin="round"
         />
@@ -3248,15 +3249,20 @@ function EndMarker({
         />
       </circle>
 
-      {/* Soft contact shadow */}
-      <ellipse
-        cx={1.5}
-        cy={32}
-        rx={32}
-        ry={6}
-        fill="rgba(0, 0, 0, 0.40)"
-        stroke="none"
-      />
+      {/* Soft contact shadow — suppressed for the discount marker
+          because the gold star body extends past the ellipse and
+          the dark band reads as a smudge under the gem. White-disc
+          markers keep the shadow for grounding. */}
+      {marker.kind !== "discount" && (
+        <ellipse
+          cx={1.5}
+          cy={32}
+          rx={32}
+          ry={6}
+          fill="rgba(0, 0, 0, 0.40)"
+          stroke="none"
+        />
+      )}
 
       {/* Outer milestone ring — only on discount + celebration */}
       {isMilestone && (

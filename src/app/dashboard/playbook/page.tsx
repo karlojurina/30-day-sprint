@@ -259,7 +259,7 @@ export default function PlaybookPage() {
                     undefined,
                     { month: "long", day: "numeric", year: "numeric" },
                   )}
-                  . The promise of the program — delivered.
+                  . The promise of the program, delivered.
                 </p>
               </div>
             ) : (

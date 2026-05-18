@@ -101,7 +101,7 @@ export function PlaybookWelcomeOverlay({ open, onDismiss }: Props) {
                 }}
               >
                 {/* TODO(karlo): final sub-copy */}
-                This is where you put the skill to work — bounty by
+                This is where you put the skill to work. Bounty by
                 bounty, brand by brand. Four activities sit on this
                 hub, always open. Rotate through them until the income
                 is real.

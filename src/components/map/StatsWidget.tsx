@@ -114,7 +114,7 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
     if (discountRequest?.status === "pending") {
       return {
         kind: "status" as const,
-        text: "Thanks — our team is reviewing your application",
+        text: "Thanks - our team is reviewing your application",
       };
     }
     if (discountRequest?.status === "rejected") {
@@ -239,7 +239,7 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
                 <circle cx="-2.6" cy="1.5" r="1.6" fill="#4ADE80" />
                 <circle cx="2.6" cy="1.5" r="1.6" fill="#4ADE80" />
               </svg>
-              Bounty Hunter
+              Bounty Apprentice
             </span>
           )}
         </div>
@@ -410,7 +410,7 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
       >
         <Stat
           label="Streak"
-          value={streak.current === 0 ? "—" : `${streak.current}d`}
+          value={streak.current === 0 ? "-" : `${streak.current}d`}
           icon={
             <svg
               width="14"
@@ -428,7 +428,7 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         />
         <Stat
           label="Best"
-          value={streak.longest === 0 ? "—" : `${streak.longest}d`}
+          value={streak.longest === 0 ? "-" : `${streak.longest}d`}
         />
         <Stat label="Day" value={`${dayNumber}/30`} />
       </div>

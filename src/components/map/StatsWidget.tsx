@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import Image from "next/image";
+import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { getDayNumber } from "@/types/database";
@@ -17,10 +17,11 @@ interface StatsWidgetProps {
 }
 
 /**
- * Floating top-left widget that replaces the old TopBar. Hosts a
- * personal welcome, progress, streak, the next lesson, the discount
- * countdown / code, and sign-out — all in a single transparent
- * card that sits ON the map.
+ * Top-left floating widget that sits over the map. Redesigned for v2:
+ * tighter width (300 vs 380), less ornament, no "welcome back" filler,
+ * sign-out moved behind a kebab menu. New: "Open the Playbook" CTA
+ * at the bottom whenever sprint_completed_at is set so the path
+ * forward isn't trapped on the l058 sheet.
  *
  * Visibility: always rendered (overview AND region views).
  * Position: absolute top-left of its parent (the map container).
@@ -41,14 +42,24 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
   } = useStudent();
 
   const [applying, setApplying] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuWrapRef = useRef<HTMLDivElement | null>(null);
+
+  // Close kebab on outside click.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      if (!menuWrapRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, [menuOpen]);
 
   function handleApply() {
     if (!discountEligible || applying) return;
-    // Opens the 6-question feedback form — submit there creates the row.
+    // Opens the 6-question feedback form. Submit there creates the row.
     setApplying(true);
     openDiscountFeedback();
-    // Reset the applying state quickly so the button is interactive again
-    // once the modal mounts. (The actual submission lives inside the modal.)
     setTimeout(() => setApplying(false), 400);
   }
 
@@ -62,13 +73,12 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
   if (!student) return null;
 
   const firstName = student.name?.split(" ")[0] || "Explorer";
+  const initial = firstName[0]?.toUpperCase() ?? "?";
   const dayNumber = getDayNumber(student.joined_at);
   const totalLessons = lessons.length;
   const completed = completedLessonIds.size;
   const percent = progressPercent(completed, totalLessons);
 
-  // Current region — the one their next lesson lives in (falls back
-  // to the first incomplete region if no current lesson).
   const currentRegionId = currentLesson?.region_id ?? null;
   const currentRegion = currentRegionId
     ? regions.find((r) => r.id === currentRegionId)
@@ -83,24 +93,18 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
       }
     : null;
 
-  // Live discount ms remaining
   const joined = new Date(student.joined_at).getTime();
   const deadline = joined + DISCOUNT_WINDOW_DAYS * 86_400_000;
   const msLeft = Math.max(0, deadline - Date.now());
 
-  // Current / next lesson — show the group title if it's part of one.
   const currentGroupId = currentLesson ? lessonGroupOf(currentLesson.id) : null;
   const nextTitle = currentGroupId
     ? LESSON_GROUPS[currentGroupId]?.title ?? currentLesson?.title
     : currentLesson?.title;
   const nextDuration = currentGroupId ? null : currentLesson?.duration_label;
 
-  // Discount status line — one of:
-  //   • applied (approved — student never sees the code)
-  //   • status (pending / rejected)
-  //   • eligible — show Apply button
-  //   • live countdown
-  //   • nothing (window closed)
+  // Discount status — one of:
+  //   applied / status (pending / rejected) / eligible / countdown / null
   const discountInfo = (() => {
     if (
       discountRequest?.status === "approved" ||
@@ -143,11 +147,13 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
       return {
         kind: "countdown" as const,
         text: parts.join(" "),
-        suffix: "left for 30% off",
       };
     }
     return null;
   })();
+
+  const sprintFinished = Boolean(student.sprint_completed_at);
+  const hasBountyAccess = Boolean(student.bounty_access_claimed_at);
 
   return (
     <div
@@ -156,137 +162,232 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         top: 20,
         left: 20,
         zIndex: 30,
-        width: 380,
-        padding: "20px 22px",
-        borderRadius: 18,
-        background: "rgba(15, 17, 21, 0.62)",
-        border: "1px solid rgba(255, 255, 255, 0.14)",
-        backdropFilter: "blur(24px) saturate(140%)",
-        WebkitBackdropFilter: "blur(24px) saturate(140%)",
-        boxShadow:
-          "0 14px 40px rgba(0,0,0,0.50), 0 1px 0 rgba(255,255,255,0.05) inset",
+        width: 300,
+        padding: "16px 18px",
+        borderRadius: 14,
+        background: "rgba(15, 17, 21, 0.72)",
+        border: "1px solid rgba(255, 255, 255, 0.10)",
+        backdropFilter: "blur(20px) saturate(140%)",
+        WebkitBackdropFilter: "blur(20px) saturate(140%)",
+        boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
         color: "rgba(255, 255, 255, 0.94)",
         fontSize: 13,
         letterSpacing: "-0.005em",
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
       }}
     >
-      {/* Header — brand + welcome + signout */}
+      {/* Identity row: initial + name + Day chip + kebab */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 14,
-          marginBottom: 18,
+          gap: 10,
         }}
       >
-        <Image
-          src="/ecomtalent-logo.png"
-          alt="EcomTalent"
-          width={547}
-          height={547}
-          priority
-          style={{ height: 34, width: 34, objectFit: "contain", flexShrink: 0 }}
-        />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p
-            style={{
-              fontSize: 16,
-              fontWeight: 600,
-              color: "rgba(255,255,255,0.96)",
-              lineHeight: 1.2,
-              letterSpacing: "-0.018em",
-            }}
-          >
-            Hey {firstName},
-          </p>
-          <p
-            style={{
-              fontSize: 13,
-              fontWeight: 400,
-              color: "rgba(255,255,255,0.55)",
-              lineHeight: 1.2,
-              marginTop: 2,
-            }}
-          >
-            welcome back
-          </p>
-          {/* v42 (v2): "Bounty Hunter" badge — surfaces persistently
-              once the student claims bounty access on l057. Placement
-              is intentionally small + earned-looking (green accent
-              chip), not loud. TODO(karlo): visual direction. */}
-          {student.bounty_access_claimed_at && (
-            <span
-              title="Claimed Bounty Access"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 4,
-                marginTop: 6,
-                padding: "2px 8px",
-                borderRadius: 999,
-                background: "rgba(34, 197, 94, 0.12)",
-                border: "1px solid rgba(34, 197, 94, 0.45)",
-                color: "#4ADE80",
-                fontSize: 11,
-                fontWeight: 600,
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
-              }}
-            >
-              {/* tiny three-dot coin mark to echo the in-region marker */}
-              <svg width="9" height="9" viewBox="-6 -6 12 12" aria-hidden="true">
-                <circle cx="0" cy="-3" r="1.6" fill="#4ADE80" />
-                <circle cx="-2.6" cy="1.5" r="1.6" fill="#4ADE80" />
-                <circle cx="2.6" cy="1.5" r="1.6" fill="#4ADE80" />
-              </svg>
-              Bounty Apprentice
-            </span>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={signOut}
-          aria-label="Sign out"
-          title="Sign out"
+        <div
+          aria-hidden="true"
           style={{
-            width: 34,
-            height: 34,
-            borderRadius: 10,
-            background: "transparent",
+            width: 32,
+            height: 32,
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.10)",
             border: "1px solid rgba(255,255,255,0.16)",
-            color: "rgba(255,255,255,0.65)",
-            cursor: "pointer",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            fontSize: 13,
+            fontWeight: 700,
+            color: "rgba(255,255,255,0.94)",
+            letterSpacing: "-0.018em",
             flexShrink: 0,
-            transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
           }}
         >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.8"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
+          {initial}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: "rgba(255,255,255,0.96)",
+              lineHeight: 1.2,
+              letterSpacing: "-0.014em",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
           >
-            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-            <polyline points="16 17 21 12 16 7" />
-            <line x1="21" y1="12" x2="9" y2="12" />
-          </svg>
-        </button>
+            {firstName}
+          </p>
+          <p
+            style={{
+              fontSize: 11,
+              fontWeight: 500,
+              color: "rgba(255,255,255,0.5)",
+              lineHeight: 1.2,
+              marginTop: 1,
+              letterSpacing: "0.01em",
+            }}
+          >
+            Day {dayNumber} / 30
+          </p>
+        </div>
+        <div ref={menuWrapRef} style={{ position: "relative" }}>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="Menu"
+            aria-expanded={menuOpen}
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.10)",
+              color: "rgba(255,255,255,0.65)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              padding: 0,
+            }}
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="5" r="1.6" />
+              <circle cx="12" cy="12" r="1.6" />
+              <circle cx="12" cy="19" r="1.6" />
+            </svg>
+          </button>
+          {menuOpen && (
+            <div
+              role="menu"
+              style={{
+                position: "absolute",
+                top: "100%",
+                right: 0,
+                marginTop: 6,
+                minWidth: 140,
+                padding: 4,
+                borderRadius: 10,
+                background: "rgba(20, 22, 28, 0.95)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                boxShadow: "0 12px 30px rgba(0,0,0,0.5)",
+                backdropFilter: "blur(20px)",
+                zIndex: 40,
+              }}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMenuOpen(false);
+                  void signOut();
+                }}
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  background: "transparent",
+                  border: "none",
+                  color: "rgba(255,255,255,0.85)",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  textAlign: "left",
+                  cursor: "pointer",
+                  borderRadius: 6,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                }}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                Sign out
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Overall progress bar */}
-      <div style={{ marginBottom: 18 }}>
+      {/* Bounty Apprentice chip - only when claimed, full width row */}
+      {hasBountyAccess && (
+        <div>
+          <span
+            title="Claimed Bounty Access"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              padding: "3px 9px",
+              borderRadius: 999,
+              background: "rgba(34, 197, 94, 0.12)",
+              border: "1px solid rgba(34, 197, 94, 0.40)",
+              color: "#4ADE80",
+              fontSize: 10,
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+            }}
+          >
+            <svg width="9" height="9" viewBox="-6 -6 12 12" aria-hidden="true">
+              <circle cx="0" cy="-3" r="1.6" fill="#4ADE80" />
+              <circle cx="-2.6" cy="1.5" r="1.6" fill="#4ADE80" />
+              <circle cx="2.6" cy="1.5" r="1.6" fill="#4ADE80" />
+            </svg>
+            Bounty Apprentice
+          </span>
+        </div>
+      )}
+
+      {/* Progress block */}
+      <div>
         <div
           style={{
-            height: 6,
-            borderRadius: 3,
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            marginBottom: 6,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", letterSpacing: "0.04em", textTransform: "uppercase" }}>
+            Progress
+          </span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "rgba(255,255,255,0.96)" }}>
+            {percent}%
+          </span>
+        </div>
+        <div
+          style={{
+            height: 4,
+            borderRadius: 999,
             background: "rgba(255,255,255,0.10)",
             overflow: "hidden",
           }}
@@ -295,65 +396,51 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
             style={{
               height: "100%",
               width: `${percent}%`,
-              background: "rgba(255,255,255,0.94)",
-              borderRadius: "inherit",
-              transition: "width 400ms cubic-bezier(0.25, 0.1, 0.25, 1)",
+              background:
+                "linear-gradient(90deg, rgba(255,255,255,0.96), rgba(255,255,255,0.78))",
+              transition: "width 400ms cubic-bezier(0.25,0.1,0.25,1)",
             }}
           />
         </div>
         <p
           style={{
-            display: "flex",
-            justifyContent: "space-between",
-            fontSize: 12,
-            color: "rgba(255,255,255,0.55)",
-            marginTop: 8,
+            marginTop: 6,
+            fontSize: 11,
+            color: "rgba(255,255,255,0.5)",
             fontVariantNumeric: "tabular-nums",
-            letterSpacing: "-0.005em",
           }}
         >
-          <span>
-            <span style={{ color: "rgba(255,255,255,0.94)", fontWeight: 600 }}>
-              {completed}
-            </span>
-            {" / "}
-            {totalLessons} lessons
-          </span>
-          <span style={{ color: "rgba(255,255,255,0.94)", fontWeight: 600 }}>
-            {percent}%
-          </span>
+          {completed} / {totalLessons} lessons completed
         </p>
       </div>
 
-      {/* Current region — line above the stat row showing where they are */}
+      {/* Current region */}
       {regionInfo && (
         <div
           style={{
-            padding: "10px 14px",
-            borderRadius: 10,
-            background: "rgba(255,255,255,0.05)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            marginBottom: 14,
             display: "flex",
             alignItems: "center",
-            gap: 12,
+            gap: 10,
+            padding: "10px 12px",
+            borderRadius: 10,
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
           }}
         >
           <div
             aria-hidden="true"
             style={{
-              width: 32,
-              height: 32,
+              width: 26,
+              height: 26,
               borderRadius: "50%",
-              background: "rgba(255,255,255,0.10)",
-              border: "1px solid rgba(255,255,255,0.18)",
+              background: "rgba(255,255,255,0.08)",
+              border: "1px solid rgba(255,255,255,0.14)",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              fontSize: 12,
-              fontWeight: 600,
-              color: "rgba(255,255,255,0.96)",
-              letterSpacing: "-0.018em",
+              fontSize: 11,
+              fontWeight: 700,
+              color: "rgba(255,255,255,0.92)",
               flexShrink: 0,
             }}
           >
@@ -366,32 +453,33 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
                 fontWeight: 500,
                 letterSpacing: "0.06em",
                 textTransform: "uppercase",
-                color: "rgba(255,255,255,0.50)",
-                marginBottom: 2,
+                color: "rgba(255,255,255,0.45)",
               }}
             >
-              You&rsquo;re in
+              In progress
             </p>
             <p
               style={{
-                fontSize: 14,
+                fontSize: 13,
                 fontWeight: 600,
-                color: "rgba(255,255,255,0.96)",
-                letterSpacing: "-0.014em",
+                color: "rgba(255,255,255,0.94)",
+                letterSpacing: "-0.011em",
                 lineHeight: 1.2,
+                marginTop: 1,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
               }}
             >
               {regionInfo.name}
             </p>
           </div>
           <p
-            className="tabular-nums"
             style={{
-              fontSize: 12,
-              fontWeight: 500,
-              color: "rgba(255,255,255,0.65)",
+              fontSize: 11,
+              color: "rgba(255,255,255,0.55)",
+              fontVariantNumeric: "tabular-nums",
               flexShrink: 0,
-              letterSpacing: "-0.005em",
             }}
           >
             {regionInfo.completed} / {regionInfo.total}
@@ -399,41 +487,7 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         </div>
       )}
 
-      {/* Stats row — streak (current + longest) + day */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr",
-          gap: 10,
-          marginBottom: 16,
-        }}
-      >
-        <Stat
-          label="Streak"
-          value={streak.current === 0 ? "-" : `${streak.current}d`}
-          icon={
-            <svg
-              width="14"
-              height="16"
-              viewBox="0 0 24 28"
-              aria-hidden="true"
-              style={{ overflow: "visible" }}
-            >
-              <path
-                d="M12 2 C 9 7, 5 10, 5 16 a 7 7 0 0 0 14 0 C 19 12, 16 10, 14 6 C 13 9, 11 9, 12 2 Z"
-                fill={streak.current > 0 ? "#FF8C3C" : "rgba(255,255,255,0.25)"}
-              />
-            </svg>
-          }
-        />
-        <Stat
-          label="Best"
-          value={streak.longest === 0 ? "-" : `${streak.longest}d`}
-        />
-        <Stat label="Day" value={`${dayNumber}/30`} />
-      </div>
-
-      {/* Next lesson — clickable card */}
+      {/* Next lesson */}
       {currentLesson && (
         <button
           type="button"
@@ -441,61 +495,36 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
           style={{
             display: "block",
             width: "100%",
-            padding: "14px 16px",
-            borderRadius: 12,
-            background: "rgba(255,255,255,0.07)",
-            border: "1px solid rgba(255,255,255,0.16)",
+            padding: "12px 14px",
+            borderRadius: 10,
+            background: "rgba(255,255,255,0.06)",
+            border: "1px solid rgba(255,255,255,0.14)",
             color: "inherit",
             textAlign: "left",
             cursor: "pointer",
-            marginBottom: discountInfo ? 16 : 0,
             transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.background = "rgba(255,255,255,0.12)";
-            e.currentTarget.style.borderColor = "rgba(255,255,255,0.26)";
-            e.currentTarget.style.transform = "translateY(-1px)";
+            e.currentTarget.style.background = "rgba(255,255,255,0.10)";
+            e.currentTarget.style.borderColor = "rgba(255,255,255,0.22)";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.background = "rgba(255,255,255,0.07)";
-            e.currentTarget.style.borderColor = "rgba(255,255,255,0.16)";
-            e.currentTarget.style.transform = "translateY(0)";
+            e.currentTarget.style.background = "rgba(255,255,255,0.06)";
+            e.currentTarget.style.borderColor = "rgba(255,255,255,0.14)";
           }}
         >
-          <div
+          <p
             style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              marginBottom: 6,
+              fontSize: 10,
+              fontWeight: 500,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              color: "rgba(255,255,255,0.45)",
+              marginBottom: 4,
             }}
           >
-            <p
-              style={{
-                fontSize: 11,
-                fontWeight: 500,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
-                color: "rgba(255,255,255,0.55)",
-              }}
-            >
-              Next up
-            </p>
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="rgba(255,255,255,0.45)"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <line x1="5" y1="12" x2="19" y2="12" />
-              <polyline points="12 5 19 12 12 19" />
-            </svg>
-          </div>
+            Next up
+          </p>
           <div
             style={{
               display: "flex",
@@ -505,12 +534,11 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
             }}
           >
             <span
-              className="truncate"
               style={{
-                fontSize: 15,
+                fontSize: 13,
                 fontWeight: 600,
-                color: "rgba(255,255,255,0.96)",
-                letterSpacing: "-0.014em",
+                color: "rgba(255,255,255,0.94)",
+                letterSpacing: "-0.011em",
                 flex: 1,
                 minWidth: 0,
                 overflow: "hidden",
@@ -523,8 +551,8 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
             {nextDuration && (
               <span
                 style={{
-                  fontSize: 12,
-                  color: "rgba(255,255,255,0.55)",
+                  fontSize: 11,
+                  color: "rgba(255,255,255,0.5)",
                   fontVariantNumeric: "tabular-nums",
                   flexShrink: 0,
                   fontWeight: 500,
@@ -537,183 +565,202 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         </button>
       )}
 
-      {/* Discount line — inline row: green pulse dot + text. Bigger
-          font than before so it reads as the focal status item. */}
+      {/* Streak chips row */}
+      <div style={{ display: "flex", gap: 8 }}>
+        <StreakChip
+          label="Streak"
+          value={streak.current === 0 ? "-" : `${streak.current}d`}
+          active={streak.current > 0}
+        />
+        <StreakChip
+          label="Best"
+          value={streak.longest === 0 ? "-" : `${streak.longest}d`}
+        />
+      </div>
+
+      {/* Discount status */}
       {discountInfo && (
         <div
           style={{
-            paddingTop: 14,
-            borderTop: "1px solid rgba(255,255,255,0.10)",
             display: "flex",
             alignItems: "center",
-            gap: 10,
+            gap: 8,
+            padding: "8px 12px",
+            borderRadius: 10,
+            background: "rgba(34, 197, 94, 0.08)",
+            border: "1px solid rgba(34, 197, 94, 0.25)",
           }}
         >
           <GreenPulseDot />
           {discountInfo.kind === "countdown" && (
             <span
               style={{
-                fontSize: 14,
+                fontSize: 12,
                 fontWeight: 500,
-                color: "rgba(255, 255, 255, 0.85)",
-                letterSpacing: "-0.011em",
+                color: "rgba(255,255,255,0.85)",
                 flex: 1,
               }}
             >
-              <span
-                className="tabular-nums"
-                style={{ color: "rgba(255,255,255,0.96)", fontWeight: 700 }}
-              >
+              <span style={{ color: "#FFFFFF", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>
                 {discountInfo.text}
               </span>{" "}
-              left to earn your{" "}
-              <span style={{ color: "#FFFFFF", fontWeight: 700 }}>
-                30% off
-              </span>
+              left to earn 30% off
             </span>
           )}
-
           {discountInfo.kind === "eligible" && (
             <>
-              <span
-                style={{
-                  fontSize: 14,
-                  fontWeight: 500,
-                  color: "rgba(255, 255, 255, 0.85)",
-                  letterSpacing: "-0.011em",
-                  flex: 1,
-                }}
-              >
-                Ready for your{" "}
-                <span style={{ color: "#FFFFFF", fontWeight: 700 }}>
-                  30% off
-                </span>
+              <span style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.85)", flex: 1 }}>
+                Ready for 30% off
               </span>
               <button
                 type="button"
                 onClick={handleApply}
                 disabled={applying}
                 style={{
-                  padding: "6px 14px",
+                  padding: "4px 12px",
                   borderRadius: 999,
-                  background: applying
-                    ? "rgba(255, 255, 255, 0.16)"
-                    : "rgba(255, 255, 255, 0.94)",
-                  border: "1px solid rgba(255, 255, 255, 0.92)",
-                  color: applying
-                    ? "rgba(255, 255, 255, 0.55)"
-                    : "rgba(15, 17, 21, 0.92)",
-                  fontSize: 12,
+                  background: applying ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.94)",
+                  border: "none",
+                  color: applying ? "rgba(255,255,255,0.55)" : "rgba(15,17,21,0.92)",
+                  fontSize: 11,
                   fontWeight: 700,
-                  letterSpacing: "-0.005em",
                   cursor: applying ? "wait" : "pointer",
-                  transition: "all 150ms cubic-bezier(0.25, 0.1, 0.25, 1)",
                   flexShrink: 0,
                 }}
               >
-                {applying ? "Applying…" : "Apply"}
+                {applying ? "..." : "Apply"}
               </button>
             </>
           )}
-
-          {discountInfo.kind === "applied" && (
-            <span
-              style={{
-                fontSize: 14,
-                fontWeight: 500,
-                color: "rgba(255, 255, 255, 0.85)",
-                letterSpacing: "-0.011em",
-              }}
-            >
-              <span style={{ color: "#FFFFFF", fontWeight: 700 }}>
-                30% off
-              </span>{" "}
-              applied to your account
-            </span>
-          )}
-
-          {discountInfo.kind === "status" && (
-            <span
-              style={{
-                fontSize: 14,
-                fontWeight: 500,
-                color: "rgba(255, 255, 255, 0.85)",
-                letterSpacing: "-0.011em",
-              }}
-            >
+          {(discountInfo.kind === "applied" || discountInfo.kind === "status") && (
+            <span style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.85)" }}>
               {discountInfo.text}
             </span>
           )}
         </div>
       )}
+
+      {/* v42 (v2): Map 2 CTA - shows once the student has clicked
+          Finish Program on l058. Without this, the only way to reach
+          Map 2 was via the l058 sheet, which is annoying once the
+          claim was already made. */}
+      {sprintFinished && (
+        <Link
+          href="/dashboard/playbook"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            padding: "12px 16px",
+            borderRadius: 10,
+            background: "var(--color-gold)",
+            color: "var(--color-bg-primary)",
+            fontSize: 13,
+            fontWeight: 700,
+            letterSpacing: "-0.011em",
+            textDecoration: "none",
+            border: "1px solid var(--color-gold-light)",
+          }}
+        >
+          Open the Playbook
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M5 12h14M13 5l7 7-7 7" />
+          </svg>
+        </Link>
+      )}
     </div>
   );
 }
 
-function Stat({
+function StreakChip({
   label,
   value,
-  icon,
+  active = false,
 }: {
   label: string;
   value: string;
-  icon?: React.ReactNode;
+  active?: boolean;
 }) {
   return (
     <div
       style={{
-        padding: "12px 14px",
-        borderRadius: 12,
-        background: "rgba(255,255,255,0.05)",
-        border: "1px solid rgba(255,255,255,0.10)",
+        flex: 1,
+        padding: "8px 12px",
+        borderRadius: 10,
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.08)",
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
       }}
     >
-      <p
-        style={{
-          fontSize: 10,
-          fontWeight: 500,
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-          color: "rgba(255,255,255,0.55)",
-        }}
-      >
-        {label}
-      </p>
-      <p
-        style={{
-          fontSize: 18,
-          fontWeight: 700,
-          color: "rgba(255,255,255,0.96)",
-          marginTop: 4,
-          fontVariantNumeric: "tabular-nums",
-          letterSpacing: "-0.022em",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          lineHeight: 1,
-        }}
-      >
-        {icon}
-        {value}
-      </p>
+      {label === "Streak" && (
+        <svg
+          width="12"
+          height="14"
+          viewBox="0 0 24 28"
+          aria-hidden="true"
+          style={{ flexShrink: 0, overflow: "visible" }}
+        >
+          <path
+            d="M12 2 C 9 7, 5 10, 5 16 a 7 7 0 0 0 14 0 C 19 12, 16 10, 14 6 C 13 9, 11 9, 12 2 Z"
+            fill={active ? "#FF8C3C" : "rgba(255,255,255,0.25)"}
+          />
+        </svg>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 500,
+            letterSpacing: "0.06em",
+            textTransform: "uppercase",
+            color: "rgba(255,255,255,0.45)",
+          }}
+        >
+          {label}
+        </span>
+        <span
+          style={{
+            fontSize: 15,
+            fontWeight: 700,
+            color: "rgba(255,255,255,0.96)",
+            fontVariantNumeric: "tabular-nums",
+            letterSpacing: "-0.018em",
+            marginTop: 2,
+          }}
+        >
+          {value}
+        </span>
+      </div>
     </div>
   );
 }
 
-/** Pulsing green status dot — used to draw attention to active
- *  discount state (window open or eligible). Reused in the map
- *  region label as well via an SVG sibling. */
+/** Pulsing green status dot - used to draw attention to active
+ *  discount state (window open or eligible). */
 function GreenPulseDot() {
   return (
     <span
       aria-hidden="true"
       style={{
         display: "inline-block",
-        width: 10,
-        height: 10,
+        width: 8,
+        height: 8,
         borderRadius: "50%",
         background: "#22C55E",
-        boxShadow: "0 0 12px rgba(34, 197, 94, 0.65)",
+        boxShadow: "0 0 10px rgba(34, 197, 94, 0.6)",
         animation: "pulse-dot 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite",
         flexShrink: 0,
       }}

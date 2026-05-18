@@ -1034,6 +1034,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           transform: `translate(${displayTransform.x}px, ${displayTransform.y}px) scale(${displayTransform.scale})`,
           transformOrigin: "0 0",
           willChange: "transform",
+          // Block accidental text highlighting when the user drags
+          // around the map. Scoped to the map container — lesson
+          // sheets / modals outside this tree stay selectable.
+          userSelect: "none",
+          WebkitUserSelect: "none",
         }}
       >
         {/* Sharp scene images — overview is mounted eagerly; region scenes
@@ -1148,6 +1153,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
               overflow: "visible",
               textRendering: "geometricPrecision",
               shapeRendering: "geometricPrecision",
+              // Stop the map text from highlighting when the user
+              // drag-scrolls or pans. Lesson-sheet text remains
+              // selectable — this style is scoped to the SVG only.
+              userSelect: "none",
+              WebkitUserSelect: "none",
             }}
           >
             {/* Ambient layer — birds + clouds drifting over the painted map.

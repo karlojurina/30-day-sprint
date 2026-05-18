@@ -115,10 +115,11 @@ export function LessonNode({
     markColor = "rgba(230,220,200,0.3)";
   }
 
-  // Node radius — gate is supersized, boss big, current slightly bigger
+  // Node radius — claim nodes are the headline moments on the map,
+  // so they outscale everything else by ~3x.
   let r: number;
   if (isBoss) r = 28;
-  else if (isClaim) r = 44;
+  else if (isClaim) r = 60;
   else if (isCurrent) r = 22;
   else r = 18;
 
@@ -352,18 +353,25 @@ export function LessonNode({
           <title>You are here — EcomTalent</title>
         </image>
       ) : isGate && !isDone ? (
-        <g fill="none" stroke={markColor} strokeWidth="2.2" strokeLinecap="round">
+        // Percent-sign mark, scaled up to fill the larger claim node.
+        <g
+          fill="none"
+          stroke={markColor}
+          strokeWidth="3"
+          strokeLinecap="round"
+          transform="scale(1.5)"
+        >
           <circle cx="-5" cy="-5" r="3" />
           <circle cx="5" cy="5" r="3" />
           <line x1="-8" y1="8" x2="8" y2="-8" />
         </g>
       ) : isBountyClaim && !isDone ? (
-        // Bounty mark — three small dots arranged like a money / coin
-        // stack. Distinct from the gate's percent-sign mark.
-        <g fill={markColor}>
-          <circle cx="0" cy="-6" r="3" />
-          <circle cx="-5" cy="3" r="3" />
-          <circle cx="5" cy="3" r="3" />
+        // Three-dot coin cluster — scaled up so the icon reads at
+        // the larger claim-node size.
+        <g fill={markColor} transform="scale(1.5)">
+          <circle cx="0" cy="-6" r="3.2" />
+          <circle cx="-5" cy="3" r="3.2" />
+          <circle cx="5" cy="3" r="3.2" />
         </g>
       ) : isDone ? (
         <path

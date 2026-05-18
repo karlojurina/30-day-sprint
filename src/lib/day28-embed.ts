@@ -86,23 +86,12 @@ export function buildDay28Embed(input: Day28EmbedInput): DiscordEmbed {
   const completedAll = input.lessonsDone >= input.totalLessons * 0.95;
   const shipsDone = input.actionShips.filter((a) => a.shipped).length;
 
-  // Pace line — "↑ Ahead by 6" / "→ On pace" / "↓ Behind by 4"
-  const paceLine =
-    input.paceLabel === "ahead"
-      ? `↑ Ahead by ${Math.abs(input.paceDelta)}`
-      : input.paceLabel === "behind"
-        ? `↓ Behind by ${Math.abs(input.paceDelta)}`
-        : "→ On pace";
-
-  // Region line — show what they fully completed, fall back to where
-  // they are if nothing's fully done. Whop-side video watching no
-  // longer inflates this — we count shipped actions too.
-  let regionLine = "";
-  if (input.furthestRegionCompleted) {
-    regionLine = `Furthest region completed: **${REGION_LABEL[input.furthestRegionCompleted]}**`;
-  } else if (input.currentRegion && input.currentRegionTotal > 0) {
-    regionLine = `Working through: **${REGION_LABEL[input.currentRegion]}** (${input.currentRegionDone}/${input.currentRegionTotal})`;
-  }
+  // Region line — only shown when at least one region is fully done.
+  // We don't surface "Working through: X" when nothing's complete —
+  // partial progress isn't a milestone worth calling out at Day 28.
+  const regionLine = input.furthestRegionCompleted
+    ? `Furthest region completed: **${REGION_LABEL[input.furthestRegionCompleted]}**`
+    : "";
 
   // Action ships row — visual checklist
   const shipsLine = input.actionShips
@@ -113,7 +102,7 @@ export function buildDay28Embed(input: Day28EmbedInput): DiscordEmbed {
   const fields: { name: string; value: string; inline?: boolean }[] = [
     {
       name: "🏔️ The climb",
-      value: `**${input.lessonsDone} / ${input.totalLessons}** lessons (${completionPct}%) · ${paceLine}${regionLine ? `\n${regionLine}` : ""}`,
+      value: `**${input.lessonsDone} / ${input.totalLessons}** lessons (${completionPct}%)${regionLine ? `\n${regionLine}` : ""}`,
       inline: false,
     },
     {

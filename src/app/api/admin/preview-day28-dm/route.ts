@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
       total_lessons: input.totalLessons,
       longest_streak: input.longestStreak,
       notes: input.notesCount,
-      discount: input.discountState,
+      discount: input.discountClaimed ? "Claimed" : "Not claimed",
     },
   });
 }

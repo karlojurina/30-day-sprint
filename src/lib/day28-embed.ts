@@ -43,25 +43,27 @@ const REGION_LABEL: Record<RegionId, string> = {
 
 export interface Day28EmbedInput {
   studentName: string | null;
-  /** Day number at fire time (28 normally, 29 if the cron caught a slip). */
-  dayNumber: number;
   lessonsDone: number;
   totalLessons: number;
   longestStreak: number;
   notesCount: number;
-  /** Pre-formatted string: "✅ CODE" / "⏳ pending review" / "❌ rejected" / "—" */
-  discountState: string;
+  /** Binary state: "Claimed" or "Not claimed". */
+  discountClaimed: boolean;
   /** Each action item flagged shipped or not. */
   actionShips: { label: string; shipped: boolean }[];
-  /** Highest region with at least one fully-complete lesson. */
-  furthestRegion: RegionId;
+  /** Highest region the student has FULLY completed (all watch +
+   *  required actions done). Null if no region is fully complete. */
+  furthestRegionCompleted: RegionId | null;
+  /** Region currently in progress (any completion but not all). Used
+   *  for the "Working through" line when no region is fully done. */
+  currentRegion: RegionId | null;
+  currentRegionDone: number;
+  currentRegionTotal: number;
   /** "behind" / "on_pace" / "ahead" from buildPaceSummary. */
   paceLabel: "behind" | "on_pace" | "ahead";
   /** Lesson delta from expected pace, rounded. Positive = ahead. */
   paceDelta: number;
-  /** Best single day's completion count + ISO date, null if zero data. */
-  bestDay: { date: string; count: number } | null;
-  /** Percentile (0–100) within ±7-day cohort, null if cohort too small. */
+  /** Percentile (0–100) within ±7-day cohort, null if too small. */
   cohortPercentile: number | null;
   /** Total students in the cohort comparison. */
   cohortSize: number;
@@ -70,6 +72,11 @@ export interface Day28EmbedInput {
 
 /**
  * Pure function: same inputs always produce the same embed.
+ *
+ * Field-level hiding rules:
+ *   • Locked in: hidden if longestStreak is 0
+ *   • Notes: hidden if notesCount is 0
+ *   • vs your week: hidden if cohort is < 3 students
  */
 export function buildDay28Embed(input: Day28EmbedInput): DiscordEmbed {
   const firstName = input.studentName?.split(" ")[0] ?? "there";
@@ -87,103 +94,120 @@ export function buildDay28Embed(input: Day28EmbedInput): DiscordEmbed {
         ? `↓ Behind by ${Math.abs(input.paceDelta)}`
         : "→ On pace";
 
+  // Region line — show what they fully completed, fall back to where
+  // they are if nothing's fully done. Whop-side video watching no
+  // longer inflates this — we count shipped actions too.
+  let regionLine = "";
+  if (input.furthestRegionCompleted) {
+    regionLine = `Furthest region completed: **${REGION_LABEL[input.furthestRegionCompleted]}**`;
+  } else if (input.currentRegion && input.currentRegionTotal > 0) {
+    regionLine = `Working through: **${REGION_LABEL[input.currentRegion]}** (${input.currentRegionDone}/${input.currentRegionTotal})`;
+  }
+
   // Action ships row — visual checklist
   const shipsLine = input.actionShips
     .map((a) => `${a.shipped ? "✓" : "○"} ${a.label}`)
     .join(" · ");
 
-  // Best day formatted
-  const bestDayLine = input.bestDay
-    ? `best day: ${input.bestDay.count} lesson${input.bestDay.count === 1 ? "" : "s"} on ${formatDate(input.bestDay.date)}`
-    : "no streak yet";
+  // Build fields conditionally so empty / awkward states don't ship.
+  const fields: { name: string; value: string; inline?: boolean }[] = [
+    {
+      name: "🏔️ The climb",
+      value: `**${input.lessonsDone} / ${input.totalLessons}** lessons (${completionPct}%) · ${paceLine}${regionLine ? `\n${regionLine}` : ""}`,
+      inline: false,
+    },
+    {
+      name: "🎬 Ads shipped",
+      value: `${shipsLine}  ·  **${shipsDone}/${input.actionShips.length}**`,
+      inline: false,
+    },
+  ];
 
-  // Cohort line
-  const cohortLine =
-    input.cohortPercentile != null && input.cohortSize >= 3
-      ? `ahead of ${input.cohortPercentile}% of students who joined the same week (n=${input.cohortSize})`
-      : `cohort too small to rank (n=${input.cohortSize})`;
+  if (input.longestStreak > 0) {
+    fields.push({
+      name: "🔥 Locked in",
+      value: `${input.longestStreak}-day longest streak`,
+      inline: false,
+    });
+  }
+
+  if (input.notesCount > 0) {
+    fields.push({
+      name: "📓 Notes",
+      value: `${input.notesCount} written`,
+      inline: false,
+    });
+  }
+
+  if (input.cohortPercentile != null && input.cohortSize >= 3) {
+    fields.push({
+      name: "📊 vs your week",
+      value: `Ahead of **${input.cohortPercentile}%** of the ${input.cohortSize} students who joined the same week as you.`,
+      inline: false,
+    });
+  }
+
+  fields.push(
+    {
+      name: "🎁 Discount",
+      value: input.discountClaimed ? "Claimed" : "Not claimed",
+      inline: false,
+    },
+    {
+      name: "💛 What's next",
+      value: closingLine({
+        completedAll,
+        paceLabel: input.paceLabel,
+        shipsDone,
+        totalShips: input.actionShips.length,
+      }),
+      inline: false,
+    },
+  );
 
   return {
     title: `🎯 Your 30 days, ${firstName}`,
     description: heroLine({
-      firstName,
       completedAll,
       paceLabel: input.paceLabel,
       shipsDone,
-      furthestRegion: input.furthestRegion,
+      lessonsDone: input.lessonsDone,
     }),
     color: 0xe6c07a,
-    fields: [
-      {
-        name: "🏔️ The climb",
-        value: `**${input.lessonsDone} / ${input.totalLessons}** lessons (${completionPct}%) · ${paceLine}\nFurthest region: **${REGION_LABEL[input.furthestRegion]}**`,
-        inline: false,
-      },
-      {
-        name: "🎬 Ads shipped",
-        value: `${shipsLine}  ·  **${shipsDone}/${input.actionShips.length}**`,
-        inline: false,
-      },
-      {
-        name: "🔥 Locked in",
-        value: `${input.longestStreak}-day longest streak · ${bestDayLine}`,
-        inline: true,
-      },
-      {
-        name: "📓 Notes",
-        value: `${input.notesCount} written`,
-        inline: true,
-      },
-      {
-        name: "📊 vs your cohort",
-        value: cohortLine,
-        inline: false,
-      },
-      {
-        name: "🎁 Discount",
-        value: input.discountState,
-        inline: false,
-      },
-      {
-        name: "💛 What's next",
-        value: closingLine({
-          completedAll,
-          paceLabel: input.paceLabel,
-          shipsDone,
-          totalShips: input.actionShips.length,
-        }),
-        inline: false,
-      },
-    ],
-    footer: { text: `EcomTalent · Day ${input.dayNumber}` },
+    fields,
+    footer: { text: "EcomTalent · 30-day sprint" },
     timestamp: new Date().toISOString(),
   };
 }
 
 /**
  * Hero one-liner under the title. Voice-aligned to "what they became,"
- * varied by their state at fire time.
+ * varied by their state at fire time. No "receipt," no "let's talk
+ * about," none of the banned-phrase register per the brief.
  */
 function heroLine(args: {
-  firstName: string;
   completedAll: boolean;
   paceLabel: "behind" | "on_pace" | "ahead";
   shipsDone: number;
-  furthestRegion: RegionId;
+  lessonsDone: number;
 }): string {
   if (args.completedAll) {
     return "30 days ago you were a beginner. Today you've climbed the whole map.";
   }
   if (args.shipsDone >= 4) {
-    return `You walked in a beginner. Right now you've shipped ${args.shipsDone} ad formats.`;
+    return `You walked in a beginner. You've shipped ${args.shipsDone} ad formats — that's a portfolio.`;
   }
   if (args.shipsDone >= 2) {
-    return "You walked in a beginner. You've shipped real ads.";
+    return "You walked in a beginner. You've shipped real ads. That's the part that matters.";
+  }
+  if (args.lessonsDone >= 20 && args.shipsDone === 0) {
+    // The most coachable state — lots of watching, no shipping.
+    return `${args.lessonsDone} lessons in. Watching is half — the work starts the moment you ship.`;
   }
   if (args.paceLabel === "behind") {
-    return "Quick check-in — here's where you stand at the 30-day mark.";
+    return "Quick look at where you stand at the 30-day mark.";
   }
-  return "Here's the receipt for the last month — keep going from here.";
+  return "Where you started, where you stand now.";
 }
 
 function closingLine(args: {
@@ -206,13 +230,6 @@ function closingLine(args: {
     return "You shipped real work even though the pace slipped. That counts. Pick the next lesson and go.";
   }
   return "Behind is fine. The lessons are right where you left them — one at a time is enough.";
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
 }
 
 /**
@@ -276,27 +293,51 @@ export async function loadDay28EmbedInput(
   });
   const lessonsDone = completedRows.length;
 
-  // Furthest region — highest region order with any fully-complete lesson.
+  // Per-region totals + fully-complete counts. Used for both the
+  // "furthest region completed" and "working through" lines.
   const REGION_ORDER: RegionId[] = ["r1", "r2", "r3", "r4"];
-  let furthestRegion: RegionId = "r1";
+  const regionTotals = new Map<RegionId, number>();
+  for (const l of lessonsTable ?? []) {
+    const rid = l.region_id as RegionId;
+    regionTotals.set(rid, (regionTotals.get(rid) ?? 0) + 1);
+  }
+  const regionDone = new Map<RegionId, number>();
   for (const row of completedRows) {
     const rid = lessonRegion.get(row.lesson_id);
-    if (
-      rid &&
-      REGION_ORDER.indexOf(rid) > REGION_ORDER.indexOf(furthestRegion)
-    ) {
-      furthestRegion = rid;
-    }
+    if (rid) regionDone.set(rid, (regionDone.get(rid) ?? 0) + 1);
   }
 
-  // Pace
+  // Furthest fully-completed region — highest in order where every
+  // lesson is done (watched + shipped where required).
+  let furthestRegionCompleted: RegionId | null = null;
+  for (const rid of REGION_ORDER) {
+    const total = regionTotals.get(rid) ?? 0;
+    const done = regionDone.get(rid) ?? 0;
+    if (total > 0 && done >= total) furthestRegionCompleted = rid;
+  }
+
+  // Region they're currently working through — highest region with
+  // partial progress (some done, not all). Skips fully-complete ones.
+  let currentRegion: RegionId | null = null;
+  for (const rid of REGION_ORDER) {
+    const total = regionTotals.get(rid) ?? 0;
+    const done = regionDone.get(rid) ?? 0;
+    if (done > 0 && done < total) currentRegion = rid;
+  }
+  const currentRegionTotal = currentRegion
+    ? (regionTotals.get(currentRegion) ?? 0)
+    : 0;
+  const currentRegionDone = currentRegion
+    ? (regionDone.get(currentRegion) ?? 0)
+    : 0;
+
+  // Pace — use the furthest-completed (or current) as the region anchor.
   const pace = buildPaceSummary(
     student.joined_at as string,
     lessonsDone,
     totalLessons,
-    furthestRegion,
+    furthestRegionCompleted ?? currentRegion ?? "r1",
   );
-  // Delta = actual completed − expected, rounded to whole lessons.
   const paceDelta = Math.round(pace.completedLessons - pace.expectedLessons);
 
   // Action ships — for each of the five Map-1 action items, did they
@@ -310,21 +351,9 @@ export async function loadDay28EmbedInput(
     shipped: shippedMap.get(a.id) === true,
   }));
 
-  // Best day — group completed_at timestamps by date, pick max count.
-  const dateCounts = new Map<string, number>();
-  for (const c of completedRows) {
-    if (!c.completed_at) continue;
-    const d = (c.completed_at as string).slice(0, 10);
-    dateCounts.set(d, (dateCounts.get(d) ?? 0) + 1);
-  }
-  let bestDay: { date: string; count: number } | null = null;
-  for (const [d, n] of dateCounts) {
-    if (!bestDay || n > bestDay.count) bestDay = { date: d, count: n };
-  }
-
   // Cohort percentile — students who joined within ±7 days. We compare
   // against the COUNT of their student_progress_counts row (the
-  // pre-aggregated view we built earlier — no 1000-row truncation).
+  // pre-aggregated view — no 1000-row truncation).
   let cohortPercentile: number | null = null;
   let cohortSize = 0;
   {
@@ -364,32 +393,26 @@ export async function loadDay28EmbedInput(
     }
   }
 
-  const discountState =
-    discountReq?.status === "approved"
-      ? `✅ ${discountReq.promo_code ?? "approved"}`
-      : discountReq?.status === "applied"
-        ? `✅ applied`
-        : discountReq?.status === "pending"
-          ? "⏳ pending review"
-          : discountReq?.status === "rejected"
-            ? "❌ rejected"
-            : "—";
-
-  const dayNumber = pace.day;
+  // Binary discount state: claimed = approved or applied. Everything
+  // else (pending / rejected / no request) reads as "Not claimed."
+  const discountClaimed =
+    discountReq?.status === "approved" ||
+    discountReq?.status === "applied";
 
   return {
     studentName: student.name as string | null,
-    dayNumber,
     lessonsDone,
     totalLessons,
     longestStreak: Number(student.longest_streak ?? 0),
     notesCount: notesCount ?? 0,
-    discountState,
+    discountClaimed,
     actionShips,
-    furthestRegion,
+    furthestRegionCompleted,
+    currentRegion,
+    currentRegionDone,
+    currentRegionTotal,
     paceLabel: pace.progressLabel,
     paceDelta,
-    bestDay,
     cohortPercentile,
     cohortSize,
     baseUrl,

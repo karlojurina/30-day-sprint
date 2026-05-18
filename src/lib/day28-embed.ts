@@ -36,8 +36,8 @@ const ACTION_ITEMS: { id: string; label: string }[] = [
 
 const REGION_LABEL: Record<RegionId, string> = {
   r1: "Foundation",
-  r2: "Strategy",
-  r3: "Production",
+  r2: "Production",
+  r3: "Strategy",
   r4: "Gate of Possibilities",
 };
 

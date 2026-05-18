@@ -1245,6 +1245,16 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
               const showDiscountLine =
                 r.id === "r2" && !discountRequest;
 
+              // Same pattern for R4 — tease the bounty access claim
+              // that lives at l057. Hidden once l057 is completed
+              // (proxy for "bounty access claimed" until the v2
+              // schema lands the dedicated bounty_access_claimed_at
+              // field). Copy mirrors the v2 brief's panel-headline
+              // placeholder.
+              const showBountyLine =
+                r.id === "r4" &&
+                !completedLessonIds.has("l057");
+
               const ariaLabel = isUnlocked
                 ? `${r.name} — ${completed}/${total} lessons`
                 : `${r.name} — locked, finish previous region first`;
@@ -1526,11 +1536,95 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       </g>
                     )}
 
+                    {/* Bounty line — only on R4. Same shape as the
+                        discount line but copy mirrors the v2 brief's
+                        l057 panel ("Bounty Access opens here"). */}
+                    {showBountyLine && (
+                      <g>
+                        <circle
+                          cx={-66}
+                          cy={77}
+                          r={5}
+                          fill="#22C55E"
+                        >
+                          <animate
+                            attributeName="opacity"
+                            values="0.6;1;0.6"
+                            dur="1.6s"
+                            repeatCount="indefinite"
+                          />
+                          <animate
+                            attributeName="r"
+                            values="4.5;6;4.5"
+                            dur="1.6s"
+                            repeatCount="indefinite"
+                          />
+                        </circle>
+                        <circle
+                          cx={-66}
+                          cy={77}
+                          r={9}
+                          fill="rgba(34, 197, 94, 0.25)"
+                        >
+                          <animate
+                            attributeName="r"
+                            values="7;12;7"
+                            dur="1.6s"
+                            repeatCount="indefinite"
+                          />
+                          <animate
+                            attributeName="opacity"
+                            values="0.18;0.45;0.18"
+                            dur="1.6s"
+                            repeatCount="indefinite"
+                          />
+                        </circle>
+                        <text
+                          x={6}
+                          y={84}
+                          textAnchor="middle"
+                          style={{
+                            fontFamily:
+                              'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                            fontWeight: 700,
+                            fontSize: 22,
+                            letterSpacing: "-0.022em",
+                            fill: GOLD_HI,
+                            paintOrder: "stroke fill",
+                            stroke: "rgba(6,12,26,0.88)",
+                            strokeWidth: 4,
+                            strokeLinejoin: "round",
+                          }}
+                        >
+                          BOUNTY ACCESS
+                        </text>
+                        <text
+                          x={0}
+                          y={106}
+                          textAnchor="middle"
+                          style={{
+                            fontFamily:
+                              'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                            fontWeight: 500,
+                            fontSize: 13,
+                            letterSpacing: "-0.005em",
+                            fill: "rgba(230,220,200,0.78)",
+                            paintOrder: "stroke fill",
+                            stroke: "rgba(6,12,26,0.85)",
+                            strokeWidth: 3,
+                            strokeLinejoin: "round",
+                          }}
+                        >
+                          claim your spot at the end
+                        </text>
+                      </g>
+                    )}
+
                     {/* Hover CTA — only shown for unlocked regions */}
                     {hot && (
                       <text
                         x={0}
-                        y={showDiscountLine ? 130 : 76}
+                        y={showDiscountLine || showBountyLine ? 130 : 76}
                         textAnchor="middle"
                         style={{
                           fontFamily:

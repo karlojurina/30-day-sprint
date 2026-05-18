@@ -9,8 +9,8 @@ type ToolId = "regions" | "path-r1" | "path-r2" | "path-r3" | "path-r4";
 
 const REGION_META: Record<RegionId, { label: string; color: string }> = {
   r1: { label: "R1 — Foundation",            color: "#F0D595" },
-  r2: { label: "R2 — Strategy",              color: "#4DCEC4" },
-  r3: { label: "R3 — Production",            color: "#4DA0D8" },
+  r2: { label: "R2 — Production",            color: "#4DCEC4" },
+  r3: { label: "R3 — Strategy",              color: "#4DA0D8" },
   r4: { label: "R4 — Gate of Possibilities", color: "#C44A54" },
 };
 
@@ -28,8 +28,8 @@ interface ToolMeta {
 const TOOL_META: Record<ToolId, ToolMeta> = {
   "regions": { label: "Region outlines (overview)",     image: "/regions/main_image.webp",      shape: "polygon" },
   "path-r1": { label: "R1 path (Foundation scene)",     image: "/regions/first_location.webp",  shape: "polyline" },
-  "path-r2": { label: "R2 path (Strategy scene)",       image: "/regions/second_location.webp", shape: "polyline" },
-  "path-r3": { label: "R3 path (Production scene)",     image: "/regions/third_location.webp",  shape: "polyline" },
+  "path-r2": { label: "R2 path (Production scene)",     image: "/regions/second_location.webp", shape: "polyline" },
+  "path-r3": { label: "R3 path (Strategy scene)",       image: "/regions/third_location.webp",  shape: "polyline" },
   "path-r4": { label: "R4 path (Gate of Possibilities)",image: "/regions/fourth_location.webp", shape: "polyline" },
 };
 

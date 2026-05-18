@@ -482,8 +482,8 @@ export interface MetricDef {
 /** Friendly labels for region ids — keep in sync with the v20 region names. */
 export const REGION_LABEL: Record<string, string> = {
   r1: "Region 1 (Foundation)",
-  r2: "Region 2 (Strategy)",
-  r3: "Region 3 (Production)",
+  r2: "Region 2 (Production)",
+  r3: "Region 3 (Strategy)",
   r4: "Region 4 (Gate of Possibilities)",
 };
 

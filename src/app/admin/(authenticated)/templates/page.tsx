@@ -44,8 +44,8 @@ const BUCKET_OPTIONS: Array<{ value: TemplateBucket; label: string }> = [
 const GROUP_LABEL: Record<string, string> = {
   D1: "Onboarding (manual DM)",
   W1: "Foundation region",
-  W2: "Strategy region",
-  W3: "Production region",
+  W2: "Production region",
+  W3: "Strategy region",
   W4: "Scale region",
   X: "Other",
   CUSTOM: "Your custom templates",

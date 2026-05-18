@@ -2506,6 +2506,15 @@ function ScenePathOverlay({
         const displayTitle =
           MOCKUP_TITLE_OVERRIDES[lesson.id] ?? lesson.title;
         const size = perspectiveSize(pos.y);
+        // The two headline claim moments — l049 (R3 discount) and
+        // l057 (R4 bounty access). LessonMarker renders these with a
+        // dedicated star + banner treatment so they read as the
+        // main events of their region.
+        const claim: "discount" | "bounty" | null = lesson.is_gate
+          ? "discount"
+          : lesson.id === "l057"
+            ? "bounty"
+            : null;
         return (
           <LessonMarker
             key={lesson.id}
@@ -2516,6 +2525,7 @@ function ScenePathOverlay({
             isCurrent={isCurrent}
             isAction={isAction}
             isGroup={isGroup}
+            claim={claim}
             title={displayTitle}
             size={size}
             isHovered={hoveredIdx === i}
@@ -2616,6 +2626,10 @@ interface LessonMarkerProps {
   /** True for the virtual group marker (collapsed sub-lessons). Renders
    * with a stacked badge so it visually reads as "more inside". */
   isGroup?: boolean;
+  /** "discount" → l049 — gold star + 30% DISCOUNT banner.
+   *  "bounty"   → l057 — green star + BOUNTY ACCESS banner.
+   *  Both render at ~3x normal size with glow + halo rings. */
+  claim?: "discount" | "bounty" | null;
   title: string;
   /** Base radius for circle / half-width for diamond. Drives perspective. */
   size: number;
@@ -2632,6 +2646,7 @@ function LessonMarker({
   isCurrent,
   isAction,
   isGroup = false,
+  claim = null,
   title,
   size: baseSize,
   isHovered,
@@ -2640,6 +2655,26 @@ function LessonMarker({
 }: LessonMarkerProps) {
   const hot = isHovered;
   void title;
+
+  // Claim nodes (l049 discount + l057 bounty) take a totally separate
+  // rendering path — gold/green 16-point star, glow rings, banner.
+  // They render at ~3x the size of a regular lesson so they read as
+  // the headline moments of their region.
+  if (claim) {
+    return (
+      <ClaimMarker
+        x={x}
+        y={y}
+        baseSize={baseSize}
+        isDone={isDone}
+        isHovered={hot}
+        variant={claim}
+        onHoverChange={onHoverChange}
+        onClick={onClick}
+      />
+    );
+  }
+
   // Action items larger than lessons; group node larger still.
   const size = isAction
     ? baseSize * 1.23
@@ -2806,6 +2841,254 @@ function LessonMarker({
           {index}
         </text>
       )}
+    </g>
+  );
+}
+
+/* ─────────────── ClaimMarker ───────────────
+ *
+ * The big gold/green 16-point star used for the two headline claim
+ * moments on Map 1 — l049 (30% discount) and l057 (Bounty Access).
+ *
+ * Renders at ~3x the size of a regular lesson, with multi-layer
+ * glow rings, a star body, an inner icon, and a banner above the
+ * star spelling out what the claim is. The two variants share
+ * everything except color + banner text.
+ */
+
+const GATE_GOLD = "#E6C07A";
+const GATE_GOLD_HI = "#F0D595";
+const BOUNTY_GREEN = "#22C55E";
+const BOUNTY_GREEN_HI = "#4ADE80";
+
+function gateStarPoints(r: number): string {
+  return Array.from({ length: 16 })
+    .map((_, i) => {
+      const a = (i * Math.PI) / 8 - Math.PI / 2;
+      const rad = i % 2 === 0 ? r : r * 0.68;
+      return `${(Math.cos(a) * rad).toFixed(1)},${(Math.sin(a) * rad).toFixed(1)}`;
+    })
+    .join(" ");
+}
+
+function ClaimMarker({
+  x,
+  y,
+  baseSize,
+  isDone,
+  isHovered,
+  variant,
+  onHoverChange,
+  onClick,
+}: {
+  x: number;
+  y: number;
+  baseSize: number;
+  isDone: boolean;
+  isHovered: boolean;
+  variant: "discount" | "bounty";
+  onHoverChange: (hovered: boolean) => void;
+  onClick: () => void;
+}) {
+  // Claim nodes outscale regular lessons by ~3x.
+  const r = baseSize * 3;
+
+  const palette =
+    variant === "discount"
+      ? {
+          star: GATE_GOLD_HI,
+          starFill: "rgba(230,192,122,0.22)",
+          starFillDone: GATE_GOLD,
+          glow: GATE_GOLD_HI,
+          glowFill: "rgba(230,192,122,0.18)",
+          glowStroke: "rgba(230,192,122,0.6)",
+          banner: "30% DISCOUNT",
+          bannerStroke: GATE_GOLD,
+          bannerInner: "rgba(230,192,122,0.45)",
+          bannerText: GATE_GOLD_HI,
+        }
+      : {
+          star: BOUNTY_GREEN_HI,
+          starFill: "rgba(34,197,94,0.18)",
+          starFillDone: BOUNTY_GREEN,
+          glow: BOUNTY_GREEN_HI,
+          glowFill: "rgba(34,197,94,0.18)",
+          glowStroke: "rgba(34,197,94,0.6)",
+          banner: "BOUNTY ACCESS",
+          bannerStroke: BOUNTY_GREEN,
+          bannerInner: "rgba(34,197,94,0.45)",
+          bannerText: BOUNTY_GREEN_HI,
+        };
+
+  const starFill = isDone ? palette.starFillDone : palette.starFill;
+
+  return (
+    <g
+      transform={`translate(${x} ${y})`}
+      style={{ cursor: "pointer", pointerEvents: "auto" }}
+      onClick={onClick}
+      onMouseEnter={() => onHoverChange(true)}
+      onMouseLeave={() => onHoverChange(false)}
+      tabIndex={0}
+      role="button"
+      aria-label={
+        variant === "discount" ? "30% discount claim" : "Bounty access claim"
+      }
+    >
+      {/* Multi-layer glow — only when active (not yet claimed). */}
+      {!isDone && (
+        <>
+          <circle r={r + 46} fill={palette.glow} opacity={0.1}>
+            <animate
+              attributeName="opacity"
+              values="0.08;0.2;0.08"
+              dur="2.8s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          <circle
+            r={r + 22}
+            fill="none"
+            stroke={palette.glow}
+            strokeWidth={1.8}
+            opacity={0.55}
+          >
+            <animate
+              attributeName="r"
+              values={`${r + 12};${r + 32};${r + 12}`}
+              dur="2.8s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0.7;0;0.7"
+              dur="2.8s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          <circle
+            r={r + 14}
+            fill="none"
+            stroke={palette.glow}
+            strokeWidth={1.4}
+            opacity={0.4}
+          >
+            <animate
+              attributeName="r"
+              values={`${r + 8};${r + 24};${r + 8}`}
+              dur="2.8s"
+              begin="1.4s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0.6;0;0.6"
+              dur="2.8s"
+              begin="1.4s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          <circle
+            r={r + 8}
+            fill={palette.glowFill}
+            stroke={palette.glowStroke}
+            strokeWidth={1.4}
+          />
+        </>
+      )}
+
+      {/* Hover wash */}
+      {isHovered && !isDone && (
+        <circle r={r + 12} fill="rgba(255,255,255,0.08)" />
+      )}
+
+      {/* Star body */}
+      <polygon
+        points={gateStarPoints(r)}
+        fill={starFill}
+        stroke={palette.star}
+        strokeWidth={2.2}
+      />
+
+      {/* Inner icon — claim-specific glyph, scaled with r. */}
+      {!isDone &&
+        (variant === "discount" ? (
+          // Percent sign
+          <g
+            fill="none"
+            stroke={palette.star}
+            strokeWidth={3}
+            strokeLinecap="round"
+            transform={`scale(${r / 18})`}
+          >
+            <circle cx={-5} cy={-5} r={3} />
+            <circle cx={5} cy={5} r={3} />
+            <line x1={-8} y1={8} x2={8} y2={-8} />
+          </g>
+        ) : (
+          // Three-dot coin cluster
+          <g fill={palette.star} transform={`scale(${r / 18})`}>
+            <circle cx={0} cy={-6} r={3.2} />
+            <circle cx={-5} cy={3} r={3.2} />
+            <circle cx={5} cy={3} r={3.2} />
+          </g>
+        ))}
+      {isDone && (
+        // Big check
+        <path
+          d={`M ${-r * 0.35} 0 L ${-r * 0.1} ${r * 0.3} L ${r * 0.45} ${-r * 0.35}`}
+          fill="none"
+          stroke="rgba(15,17,21,0.92)"
+          strokeWidth={r * 0.12}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+
+      {/* Banner above the star */}
+      <g transform={`translate(0, ${-r - 60})`}>
+        <line
+          x1={0}
+          y1={20}
+          x2={0}
+          y2={50}
+          stroke={palette.bannerStroke}
+          strokeWidth={1}
+          strokeDasharray="2 4"
+          opacity={0.55}
+        />
+        <rect
+          x={-110}
+          y={-16}
+          width={220}
+          height={32}
+          rx={5}
+          fill="#0A1428"
+          stroke={palette.bannerStroke}
+          strokeWidth={1.6}
+        />
+        <rect
+          x={-106}
+          y={-12}
+          width={212}
+          height={24}
+          rx={3}
+          fill="none"
+          stroke={palette.bannerInner}
+          strokeWidth={0.7}
+        />
+        <text
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontFamily="JetBrains Mono, ui-monospace, monospace"
+          fontSize={13}
+          fontWeight={700}
+          fill={palette.bannerText}
+          letterSpacing={4}
+        >
+          {palette.banner}
+        </text>
+      </g>
     </g>
   );
 }

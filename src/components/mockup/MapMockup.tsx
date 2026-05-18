@@ -1914,10 +1914,17 @@ function RegionSidePanel({
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
+  // onPrev is still accepted as a prop (parent passes it for
+  // backward compat) but unused in the new footer - "Back to map"
+  // in the top nav covers that direction now.
+  void onPrev;
+
   const numeral = ["I", "II", "III", "IV"][region.order_num - 1];
 
   const completed = lessons.filter((l) => completedLessonIds.has(l.id)).length;
   const total = lessons.length;
+  // En-dash in days_label ("Days 1–8") -> hyphen. Karlo's voice rule.
+  const daysLabel = (region.days_label ?? "").replace(/[–—]/g, "-");
 
   // Collapsed mode: render a thin strip with just an expand button
   // and the region's roman numeral. Map gets the rest of the canvas.
@@ -1990,128 +1997,120 @@ function RegionSidePanel({
         right: 0,
         bottom: 0,
         width,
-        background:
-          "linear-gradient(180deg, rgba(6,12,26,0.96) 0%, rgba(10,20,40,0.96) 100%)",
-        borderLeft: "1px solid rgba(245,245,240,0.25)",
+        background: "rgba(10, 14, 22, 0.96)",
+        borderLeft: "1px solid rgba(255,255,255,0.08)",
         display: "flex",
         flexDirection: "column",
-        animation: "slide-in-right 0.6s cubic-bezier(0.22,1,0.36,1) both",
-        boxShadow: "-30px 0 60px rgba(0,0,0,0.5)",
+        animation: "slide-in-right 0.5s cubic-bezier(0.22,1,0.36,1) both",
+        boxShadow: "-20px 0 40px rgba(0,0,0,0.45)",
       }}
     >
-      {/* Back button + collapse toggle */}
+      {/* Top nav: back to map + collapse */}
       <div
-        className="flex items-center justify-between"
-        style={{ borderBottom: "1px solid rgba(245,245,240,0.12)" }}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "12px 18px",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+        }}
       >
         <button
           onClick={onBack}
-          className="btn-ghost flex items-center gap-2 px-6 py-4 flex-1"
           style={{
             background: "transparent",
             border: "none",
-            color: "var(--color-ink-dim)",
+            color: "rgba(255,255,255,0.70)",
             fontSize: 13,
             fontWeight: 500,
             letterSpacing: "-0.005em",
             cursor: "pointer",
-            textAlign: "left",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            padding: 0,
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.color = "rgba(255,255,255,0.96)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.color = "rgba(255,255,255,0.70)";
           }}
         >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.6">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M11 17l-5-5m0 0l5-5m-5 5h12" />
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M11 17l-5-5m0 0l5-5m-5 5h12" />
           </svg>
           Back to map
         </button>
         <button
           onClick={onToggleCollapsed}
-          aria-label="Collapse region panel"
+          aria-label="Collapse panel"
           title="Collapse panel"
-          className="btn-ghost"
           style={{
             background: "transparent",
-            border: "none",
-            color: "var(--color-ink-dim)",
+            border: "1px solid rgba(255,255,255,0.10)",
+            borderRadius: 8,
+            color: "rgba(255,255,255,0.55)",
             cursor: "pointer",
-            padding: "0 16px",
-            height: "100%",
+            width: 28,
+            height: 28,
             display: "flex",
             alignItems: "center",
+            justifyContent: "center",
+            padding: 0,
           }}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M9 18l6-6-6-6" />
           </svg>
         </button>
       </div>
 
-      {/* Region header */}
-      <div className="px-6 py-6" style={{ borderBottom: "1px solid rgba(245,245,240,0.12)" }}>
+      {/* Region header - tighter than before */}
+      <div
+        style={{
+          padding: "18px 18px 16px",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+        }}
+      >
         <p
           style={{
-            color: GOLD,
-            letterSpacing: "0.04em",
-            fontSize: 12,
-            fontWeight: 500,
-            marginBottom: 6,
+            fontSize: 11,
+            fontWeight: 600,
+            color: "rgba(255,255,255,0.45)",
+            letterSpacing: "0.10em",
+            textTransform: "uppercase",
+            marginBottom: 8,
           }}
         >
-          Region {numeral}
+          Region {numeral} · {daysLabel}
         </p>
         <h2
           style={{
+            fontSize: 24,
             fontWeight: 600,
-            fontSize: 30,
             letterSpacing: "-0.022em",
-            color: INK,
-            lineHeight: 1.05,
-            marginBottom: 8,
+            color: "rgba(255,255,255,0.96)",
+            lineHeight: 1.1,
+            marginBottom: 14,
           }}
         >
           {region.name}
         </h2>
-        <p
+
+        {/* Inline progress: bar + count side by side */}
+        <div
           style={{
-            fontSize: 15,
-            fontWeight: 400,
-            color: "var(--color-ink-dim)",
-            marginBottom: 20,
-            lineHeight: 1.5,
-            letterSpacing: "-0.005em",
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
           }}
         >
-          {region.tagline}
-        </p>
-
-        {/* Progress bar */}
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <span
-              style={{
-                color: GOLD_HI,
-                fontSize: 13,
-                fontWeight: 600,
-                letterSpacing: "-0.005em",
-                fontVariantNumeric: "tabular-nums",
-              }}
-            >
-              {completed} / {total} complete
-            </span>
-            <span
-              style={{
-                color: "var(--color-ink-dim)",
-                fontSize: 13,
-                fontWeight: 500,
-                letterSpacing: "-0.005em",
-              }}
-            >
-              {region.days_label}
-            </span>
-          </div>
           <div
             style={{
+              flex: 1,
               height: 4,
-              background: "rgba(245,245,240,0.12)",
+              background: "rgba(255,255,255,0.08)",
               borderRadius: 2,
               overflow: "hidden",
             }}
@@ -2120,285 +2119,315 @@ function RegionSidePanel({
               style={{
                 width: total > 0 ? `${(completed / total) * 100}%` : "0%",
                 height: "100%",
-                background: `linear-gradient(90deg, ${GOLD} 0%, ${GOLD_HI} 100%)`,
+                background: "rgba(255,255,255,0.85)",
                 transition: "width 0.6s cubic-bezier(0.22,1,0.36,1)",
               }}
             />
           </div>
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: "rgba(255,255,255,0.85)",
+              fontVariantNumeric: "tabular-nums",
+              letterSpacing: "-0.005em",
+              flexShrink: 0,
+            }}
+          >
+            {completed} / {total}
+          </span>
         </div>
       </div>
 
-      {/* Lesson list — sequential lock model: lesson[k] is the next to do
-          where k = number of completed lessons in this region. Anything
-          past k is locked. The first found "not done" doubles as the
-          current lesson regardless of currentLessonId. */}
+      {/* Lesson list - sequential lock model: lesson[k] is the next
+          to do where k = number of completed lessons in this region.
+          Tighter cards than before; only the current lesson gets a
+          strong highlight, done lessons mute, locked lessons ghost. */}
       <div
-        className="flex-1 overflow-y-auto px-6 py-5"
-        style={{ overscrollBehavior: "contain" }}
+        className="flex-1 overflow-y-auto"
+        style={{
+          padding: "12px 14px",
+          overscrollBehavior: "contain",
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+        }}
       >
-        <div className="space-y-2">
-          {lessons.map((lesson, i) => {
-            const isDone = completedLessonIds.has(lesson.id);
-            // Sequential model — first not-done is the current lesson.
-            // Everything past it is locked until the current one's done.
-            const isCurrent = !isDone && i === completed;
-            const isLocked = !isDone && !isCurrent;
-            return (
-              <button
-                key={lesson.id}
-                onClick={isLocked ? undefined : () => onOpenLesson(lesson.id)}
-                disabled={isLocked}
-                aria-disabled={isLocked || undefined}
-                aria-label={
-                  isLocked
-                    ? `${lesson.title} — locked, finish previous lessons first`
-                    : undefined
-                }
-                className={`w-full flex items-start gap-3 p-3 rounded-lg text-left ${isCurrent || isLocked ? "" : "btn-card-lift"}`}
+        {lessons.map((lesson, i) => {
+          const isDone = completedLessonIds.has(lesson.id);
+          // Sequential model - first not-done is the current lesson.
+          // Everything past it is locked until the current one's done.
+          const isCurrent = !isDone && i === completed;
+          const isLocked = !isDone && !isCurrent;
+
+          // Display title: replace em-dashes coming from DB-driven
+          // lesson titles (e.g. "Video Ads Master — Introduction")
+          // with hyphens per Karlo's voice rule.
+          const rawTitle =
+            MOCKUP_TITLE_OVERRIDES[lesson.id] ?? lesson.title;
+          const displayTitle = rawTitle.replace(/[–—]/g, "-");
+          const displayDuration =
+            lesson.duration_label?.replace(/[–—]/g, "-");
+
+          return (
+            <button
+              key={lesson.id}
+              onClick={isLocked ? undefined : () => onOpenLesson(lesson.id)}
+              disabled={isLocked}
+              aria-disabled={isLocked || undefined}
+              aria-label={
+                isLocked
+                  ? `${displayTitle} - locked, finish previous lessons first`
+                  : undefined
+              }
+              style={{
+                width: "100%",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "10px 12px",
+                borderRadius: 10,
+                background: isCurrent
+                  ? "rgba(255,255,255,0.10)"
+                  : "transparent",
+                border: isCurrent
+                  ? "1px solid rgba(255,255,255,0.30)"
+                  : "1px solid transparent",
+                textAlign: "left",
+                cursor: isLocked ? "not-allowed" : "pointer",
+                opacity: isLocked ? 0.35 : isDone && !isCurrent ? 0.55 : 1,
+                transition: "background 150ms ease, border-color 150ms ease",
+              }}
+              onMouseEnter={(e) => {
+                if (isLocked || isCurrent) return;
+                e.currentTarget.style.background = "rgba(255,255,255,0.05)";
+              }}
+              onMouseLeave={(e) => {
+                if (isLocked || isCurrent) return;
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              {/* Status indicator - 22px circle, simpler than before */}
+              <div
                 style={{
-                  background: isCurrent
-                    ? "rgba(245,245,240,0.16)"
-                    : "rgba(6,12,26,0.4)",
-                  border: `1px solid ${
-                    isCurrent
-                      ? "rgba(245,245,240,0.55)"
-                      : isDone
-                        ? "rgba(245,245,240,0.2)"
-                        : "rgba(245,245,240,0.08)"
-                  }`,
-                  opacity: isLocked ? 0.45 : isDone && !isCurrent ? 0.7 : 1,
-                  cursor: isLocked ? "not-allowed" : "pointer",
+                  flexShrink: 0,
+                  width: 22,
+                  height: 22,
+                  borderRadius: "50%",
+                  background: isDone
+                    ? "rgba(255,255,255,0.92)"
+                    : isCurrent
+                      ? "rgba(255,255,255,0.16)"
+                      : "transparent",
+                  border: isCurrent
+                    ? "1.5px solid rgba(255,255,255,0.85)"
+                    : !isDone
+                      ? "1px solid rgba(255,255,255,0.18)"
+                      : "none",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
                 }}
               >
-                {/* Status indicator */}
-                <div
-                  className="flex-shrink-0 rounded-full flex items-center justify-center mt-0.5"
+                {isDone ? (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(15,17,21,0.92)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : isCurrent ? (
+                  <div
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: "50%",
+                      background: "rgba(255,255,255,0.95)",
+                    }}
+                  />
+                ) : isLocked ? (
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.35)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="5" y="11" width="14" height="10" rx="2" />
+                    <path d="M8 11 V 7 a 4 4 0 0 1 8 0 V 11" />
+                  </svg>
+                ) : (
+                  <span
+                    style={{
+                      color: "rgba(255,255,255,0.45)",
+                      fontSize: 11,
+                      fontWeight: 600,
+                      fontFamily: "var(--font-mono)",
+                    }}
+                  >
+                    {i + 1}
+                  </span>
+                )}
+              </div>
+
+              {/* Lesson title + meta */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p
                   style={{
-                    width: 24,
-                    height: 24,
-                    background: isDone
-                      ? GOLD
-                      : isCurrent
-                        ? "rgba(245,245,240,0.2)"
-                        : "transparent",
-                    border: isCurrent
-                      ? `1.5px solid ${GOLD_HI}`
-                      : !isDone
-                        ? "1px solid rgba(230,220,200,0.28)"
-                        : "none",
+                    fontSize: 14,
+                    fontWeight: 500,
+                    letterSpacing: "-0.011em",
+                    color: "rgba(255,255,255,0.92)",
+                    lineHeight: 1.25,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
                   }}
                 >
-                  {isDone ? (
-                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="var(--color-bg-secondary)" strokeWidth="3" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : isCurrent ? (
-                    <div
-                      className="pulse-ring"
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: "50%",
-                        background: GOLD_HI,
-                      }}
-                    />
-                  ) : isLocked ? (
-                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-dim)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <rect x="5" y="11" width="14" height="10" rx="2" />
-                      <path d="M8 11 V 7 a 4 4 0 0 1 8 0 V 11" />
-                    </svg>
-                  ) : (
+                  {displayTitle}
+                </p>
+                <div
+                  style={{
+                    marginTop: 2,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 500,
+                      letterSpacing: "-0.005em",
+                      color: "rgba(255,255,255,0.50)",
+                    }}
+                  >
+                    {LESSON_TYPE_LABELS[lesson.type]}
+                  </span>
+                  {displayDuration && (
+                    <>
+                      <span style={{ color: "rgba(255,255,255,0.25)", fontSize: 11 }} aria-hidden="true">
+                        ·
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 500,
+                          color: "rgba(255,255,255,0.50)",
+                          letterSpacing: "-0.005em",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {displayDuration}
+                      </span>
+                    </>
+                  )}
+                  {lesson.is_gate && (
                     <span
-                      className="font-mono"
                       style={{
-                        color: "var(--color-ink-dim)",
-                        fontSize: 11,
+                        fontSize: 10,
                         fontWeight: 600,
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
+                        color: GOLD_HI,
+                        background: "rgba(245,245,240,0.10)",
+                        border: "1px solid rgba(245,245,240,0.20)",
+                        padding: "1px 6px",
+                        borderRadius: 4,
                       }}
                     >
-                      {i + 1}
+                      Discount
+                    </span>
+                  )}
+                  {lesson.id === "l057" && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
+                        color: "#4ADE80",
+                        background: "rgba(34, 197, 94, 0.12)",
+                        border: "1px solid rgba(34, 197, 94, 0.32)",
+                        padding: "1px 6px",
+                        borderRadius: 4,
+                      }}
+                    >
+                      Bounty
+                    </span>
+                  )}
+                  {lesson.is_boss && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 600,
+                        letterSpacing: "0.04em",
+                        textTransform: "uppercase",
+                        color: "#F0A0A8",
+                        background: "rgba(196,74,84,0.12)",
+                        border: "1px solid rgba(196,74,84,0.32)",
+                        padding: "1px 6px",
+                        borderRadius: 4,
+                      }}
+                    >
+                      Final
                     </span>
                   )}
                 </div>
-
-                {/* Lesson title + meta */}
-                <div className="flex-1 min-w-0">
-                  <p
-                    style={{
-                      fontSize: 15,
-                      fontWeight: 500,
-                      letterSpacing: "-0.011em",
-                      color: INK,
-                      lineHeight: 1.3,
-                      marginBottom: 4,
-                    }}
-                  >
-                    {MOCKUP_TITLE_OVERRIDES[lesson.id] ?? lesson.title}
-                  </p>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 500,
-                        letterSpacing: "-0.005em",
-                        color: isCurrent ? GOLD : "var(--color-ink-dim)",
-                      }}
-                    >
-                      {LESSON_TYPE_LABELS[lesson.type]}
-                    </span>
-                    {lesson.duration_label && (
-                      <>
-                        <span style={{ color: "var(--color-ink-faint)", fontSize: 12 }} aria-hidden="true">
-                          ·
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 12,
-                            fontWeight: 500,
-                            color: "var(--color-ink-dim)",
-                            letterSpacing: "-0.005em",
-                            fontVariantNumeric: "tabular-nums",
-                          }}
-                        >
-                          {lesson.duration_label}
-                        </span>
-                      </>
-                    )}
-                    {lesson.is_gate && (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 500,
-                          letterSpacing: "-0.005em",
-                          color: GOLD_HI,
-                          background: "rgba(245,245,240,0.12)",
-                          padding: "2px 8px",
-                          borderRadius: 4,
-                        }}
-                      >
-                        Discount
-                      </span>
-                    )}
-                    {lesson.is_boss && (
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 500,
-                          letterSpacing: "-0.005em",
-                          color: "#F0A0A8",
-                          background: "rgba(196,74,84,0.18)",
-                          padding: "2px 8px",
-                          borderRadius: 4,
-                        }}
-                      >
-                        Final
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Prev / Next region footer */}
-      <div
-        className="flex"
-        style={{ borderTop: "1px solid rgba(245,245,240,0.15)" }}
-      >
-        <button
-          onClick={onPrev ?? undefined}
-          disabled={!onPrev}
-          className={`flex-1 px-5 py-4 text-left ${onPrev ? "btn-tinted" : ""}`}
+      {/* Footer - single full-width Onward button when a next
+          region exists. "Back to map" in the top nav already covers
+          the previous direction, so the dual-button footer was
+          mostly boilerplate. */}
+      {onNext && (
+        <div
           style={{
-            background: "transparent",
-            border: "none",
-            borderRight: "1px solid rgba(245,245,240,0.12)",
-            color: onPrev ? "var(--color-ink)" : "var(--color-ink-faint)",
-            cursor: onPrev ? "pointer" : "default",
+            padding: 14,
+            borderTop: "1px solid rgba(255,255,255,0.06)",
           }}
         >
-          <p
+          <button
+            onClick={onNext}
+            disabled={nextLocked}
             style={{
-              fontSize: 11,
-              fontWeight: 500,
-              letterSpacing: "0.04em",
-              textTransform: "uppercase",
-              color: "var(--color-ink-dim)",
-              marginBottom: 2,
-            }}
-          >
-            Previous
-          </p>
-          <p
-            style={{
-              fontSize: 14,
-              fontWeight: 500,
-              letterSpacing: "-0.011em",
-            }}
-          >
-            ← {onPrev ? "Go back" : "—"}
-          </p>
-        </button>
-        <button
-          onClick={onNext ?? undefined}
-          disabled={!onNext}
-          className={`flex-1 px-5 py-4 text-right ${onNext && !nextLocked ? "btn-tinted" : ""}`}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: !onNext || nextLocked
-              ? "var(--color-ink-faint)"
-              : "var(--color-ink)",
-            cursor: onNext ? "pointer" : "default",
-            opacity: nextLocked ? 0.6 : 1,
-          }}
-        >
-          <p
-            style={{
-              fontSize: 11,
-              fontWeight: 500,
-              letterSpacing: "0.04em",
-              textTransform: "uppercase",
-              color: "var(--color-ink-dim)",
-              marginBottom: 2,
-            }}
-          >
-            Next region
-          </p>
-          <p
-            style={{
-              fontSize: 14,
-              fontWeight: 500,
-              letterSpacing: "-0.011em",
+              width: "100%",
+              padding: "12px 16px",
+              borderRadius: 10,
+              background: nextLocked
+                ? "rgba(255,255,255,0.06)"
+                : "rgba(255,255,255,0.94)",
+              border: nextLocked
+                ? "1px solid rgba(255,255,255,0.10)"
+                : "none",
+              color: nextLocked
+                ? "rgba(255,255,255,0.45)"
+                : "rgba(15,17,21,0.92)",
+              fontSize: 13,
+              fontWeight: 600,
+              letterSpacing: "-0.005em",
+              cursor: nextLocked ? "not-allowed" : "pointer",
               display: "inline-flex",
               alignItems: "center",
-              gap: 6,
-              justifyContent: "flex-end",
-              width: "100%",
+              justifyContent: "center",
+              gap: 8,
             }}
           >
-            {nextLocked && (
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <rect x="3" y="11" width="18" height="11" rx="2" />
-                <path d="M7 11 V7 a5 5 0 0 1 10 0 V11" />
-              </svg>
+            {nextLocked ? (
+              <>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="3" y="11" width="18" height="11" rx="2" />
+                  <path d="M7 11 V7 a5 5 0 0 1 10 0 V11" />
+                </svg>
+                Finish this region first
+              </>
+            ) : (
+              <>
+                Onward
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M5 12h14M13 5l7 7-7 7" />
+                </svg>
+              </>
             )}
-            {onNext ? (nextLocked ? "Locked" : "Onward →") : "—"}
-          </p>
-        </button>
-      </div>
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

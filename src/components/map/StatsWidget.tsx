@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
@@ -42,18 +43,6 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
   } = useStudent();
 
   const [applying, setApplying] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuWrapRef = useRef<HTMLDivElement | null>(null);
-
-  // Close kebab on outside click.
-  useEffect(() => {
-    if (!menuOpen) return;
-    const onClick = (e: MouseEvent) => {
-      if (!menuWrapRef.current?.contains(e.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, [menuOpen]);
 
   function handleApply() {
     if (!discountEligible || applying) return;
@@ -73,7 +62,6 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
   if (!student) return null;
 
   const firstName = student.name?.split(" ")[0] || "Explorer";
-  const initial = firstName[0]?.toUpperCase() ?? "?";
   const dayNumber = getDayNumber(student.joined_at);
   const totalLessons = lessons.length;
   const completed = completedLessonIds.size;
@@ -162,178 +150,107 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         top: 20,
         left: 20,
         zIndex: 30,
-        width: 300,
-        padding: "16px 18px",
-        borderRadius: 14,
-        background: "rgba(15, 17, 21, 0.72)",
-        border: "1px solid rgba(255, 255, 255, 0.10)",
-        backdropFilter: "blur(20px) saturate(140%)",
-        WebkitBackdropFilter: "blur(20px) saturate(140%)",
-        boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
+        width: 380,
+        padding: "20px 22px",
+        borderRadius: 18,
+        background: "rgba(15, 17, 21, 0.62)",
+        border: "1px solid rgba(255, 255, 255, 0.14)",
+        backdropFilter: "blur(24px) saturate(140%)",
+        WebkitBackdropFilter: "blur(24px) saturate(140%)",
+        boxShadow:
+          "0 14px 40px rgba(0,0,0,0.50), 0 1px 0 rgba(255,255,255,0.05) inset",
         color: "rgba(255, 255, 255, 0.94)",
         fontSize: 13,
         letterSpacing: "-0.005em",
         display: "flex",
         flexDirection: "column",
-        gap: 14,
+        gap: 16,
       }}
     >
-      {/* Identity row: initial + name + Day chip + kebab */}
+      {/* Header - brand logo + welcome + signout */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 10,
+          gap: 14,
         }}
       >
-        <div
-          aria-hidden="true"
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
-            background: "rgba(255,255,255,0.10)",
-            border: "1px solid rgba(255,255,255,0.16)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 13,
-            fontWeight: 700,
-            color: "rgba(255,255,255,0.94)",
-            letterSpacing: "-0.018em",
-            flexShrink: 0,
-          }}
-        >
-          {initial}
-        </div>
+        <Image
+          src="/ecomtalent-logo.png"
+          alt="EcomTalent"
+          width={547}
+          height={547}
+          priority
+          style={{ height: 34, width: 34, objectFit: "contain", flexShrink: 0 }}
+        />
         <div style={{ flex: 1, minWidth: 0 }}>
           <p
             style={{
-              fontSize: 14,
+              fontSize: 16,
               fontWeight: 600,
               color: "rgba(255,255,255,0.96)",
               lineHeight: 1.2,
-              letterSpacing: "-0.014em",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
+              letterSpacing: "-0.018em",
             }}
           >
-            {firstName}
+            Hey {firstName},
           </p>
           <p
             style={{
-              fontSize: 11,
-              fontWeight: 500,
-              color: "rgba(255,255,255,0.5)",
+              fontSize: 13,
+              fontWeight: 400,
+              color: "rgba(255,255,255,0.55)",
               lineHeight: 1.2,
-              marginTop: 1,
-              letterSpacing: "0.01em",
+              marginTop: 2,
             }}
           >
-            Day {dayNumber} / 30
+            welcome back
           </p>
         </div>
-        <div ref={menuWrapRef} style={{ position: "relative" }}>
-          <button
-            type="button"
-            onClick={() => setMenuOpen((v) => !v)}
-            aria-label="Menu"
-            aria-expanded={menuOpen}
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              background: "transparent",
-              border: "1px solid rgba(255,255,255,0.10)",
-              color: "rgba(255,255,255,0.65)",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              padding: 0,
-            }}
+        <button
+          type="button"
+          onClick={signOut}
+          aria-label="Sign out"
+          title="Sign out"
+          style={{
+            width: 34,
+            height: 34,
+            borderRadius: 10,
+            background: "transparent",
+            border: "1px solid rgba(255,255,255,0.16)",
+            color: "rgba(255,255,255,0.65)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "rgba(255,255,255,0.08)";
+            e.currentTarget.style.color = "rgba(255,255,255,0.92)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "transparent";
+            e.currentTarget.style.color = "rgba(255,255,255,0.65)";
+          }}
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
           >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="5" r="1.6" />
-              <circle cx="12" cy="12" r="1.6" />
-              <circle cx="12" cy="19" r="1.6" />
-            </svg>
-          </button>
-          {menuOpen && (
-            <div
-              role="menu"
-              style={{
-                position: "absolute",
-                top: "100%",
-                right: 0,
-                marginTop: 6,
-                minWidth: 140,
-                padding: 4,
-                borderRadius: 10,
-                background: "rgba(20, 22, 28, 0.95)",
-                border: "1px solid rgba(255,255,255,0.12)",
-                boxShadow: "0 12px 30px rgba(0,0,0,0.5)",
-                backdropFilter: "blur(20px)",
-                zIndex: 40,
-              }}
-            >
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setMenuOpen(false);
-                  void signOut();
-                }}
-                style={{
-                  width: "100%",
-                  padding: "8px 10px",
-                  background: "transparent",
-                  border: "none",
-                  color: "rgba(255,255,255,0.85)",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  textAlign: "left",
-                  cursor: "pointer",
-                  borderRadius: 6,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "rgba(255,255,255,0.06)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                }}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                  <polyline points="16 17 21 12 16 7" />
-                  <line x1="21" y1="12" x2="9" y2="12" />
-                </svg>
-                Sign out
-              </button>
-            </div>
-          )}
-        </div>
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+        </button>
       </div>
 
       {/* Bounty Apprentice chip - only when claimed, full width row */}
@@ -565,7 +482,7 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         </button>
       )}
 
-      {/* Streak chips row */}
+      {/* Streak / Best / Day chips */}
       <div style={{ display: "flex", gap: 8 }}>
         <StreakChip
           label="Streak"
@@ -575,6 +492,10 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         <StreakChip
           label="Best"
           value={streak.longest === 0 ? "-" : `${streak.longest}d`}
+        />
+        <StreakChip
+          label="Day"
+          value={`${dayNumber}/30`}
         />
       </div>
 

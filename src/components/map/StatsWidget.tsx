@@ -210,6 +210,38 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
           >
             welcome back
           </p>
+          {/* v42 (v2): "Bounty Hunter" badge — surfaces persistently
+              once the student claims bounty access on l057. Placement
+              is intentionally small + earned-looking (green accent
+              chip), not loud. TODO(karlo): visual direction. */}
+          {student.bounty_access_claimed_at && (
+            <span
+              title="Claimed Bounty Access"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                marginTop: 6,
+                padding: "2px 8px",
+                borderRadius: 999,
+                background: "rgba(34, 197, 94, 0.12)",
+                border: "1px solid rgba(34, 197, 94, 0.45)",
+                color: "#4ADE80",
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+              }}
+            >
+              {/* tiny three-dot coin mark to echo the in-region marker */}
+              <svg width="9" height="9" viewBox="-6 -6 12 12" aria-hidden="true">
+                <circle cx="0" cy="-3" r="1.6" fill="#4ADE80" />
+                <circle cx="-2.6" cy="1.5" r="1.6" fill="#4ADE80" />
+                <circle cx="2.6" cy="1.5" r="1.6" fill="#4ADE80" />
+              </svg>
+              Bounty Hunter
+            </span>
+          )}
         </div>
         <button
           type="button"

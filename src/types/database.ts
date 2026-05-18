@@ -54,6 +54,41 @@ export interface Student {
   // v38: exclude this student from CSM task generation + Day-28 DM.
   // Use for the team's own dummy accounts.
   csm_exempt: boolean;
+  // v42 (v2 data model): three event-triggered timestamps + a flag
+  // for the one-time Map 2 welcome overlay.
+  //   bounty_access_claimed_at  — set when student clicks Claim
+  //                                Bounty Access on l057.
+  //   sprint_completed_at       — set when student clicks Finish
+  //                                Program after l058. Drives the
+  //                                conditional Map 2 default surface.
+  //   first_client_landed_at    — set when student self-reports the
+  //                                Land Your First Client milestone
+  //                                on Map 2.
+  //   playbook_welcome_seen_at  — set the first time a student lands
+  //                                on Map 2 (dismisses the intro overlay).
+  bounty_access_claimed_at: string | null;
+  sprint_completed_at: string | null;
+  first_client_landed_at: string | null;
+  playbook_welcome_seen_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * v42: One row per always-on node on Map 2 (the Playbook hub). Four
+ * rows seeded: pb_submit_bounties, pb_build_portfolio,
+ * pb_apply_job_board, pb_land_first_client. Only pb_land_first_client
+ * has is_milestone = true — it's the only node with a completion
+ * action (sets students.first_client_landed_at).
+ */
+export interface PlaybookNode {
+  id: string;
+  position: number;
+  title: string;
+  subtitle: string | null;
+  doc_content: string;
+  video_url: string | null;
+  is_milestone: boolean;
   created_at: string;
   updated_at: string;
 }

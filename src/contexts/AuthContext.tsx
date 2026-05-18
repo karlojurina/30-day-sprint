@@ -16,6 +16,10 @@ interface AuthState {
   user: User | null;
   session: Session | null;
   student: Student | null;
+  /** Patch the student row locally without refetching from the API.
+   *  Used by StudentContext after actions that mutate students.*
+   *  fields (e.g. claim-bounty-access flips bounty_access_claimed_at). */
+  setStudent: (s: Student | null) => void;
   teamMember: TeamMember | null;
   isStudent: boolean;
   isTeam: boolean;
@@ -110,6 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         user,
         session,
         student,
+        setStudent,
         teamMember,
         isStudent: !!student,
         isTeam: !!teamMember,

@@ -97,6 +97,8 @@ function virtualizeCurrentLessonId(currentLessonId: string | null): string | nul
   return currentLessonId;
 }
 import { MapAmbience } from "@/components/map/MapAmbience";
+import { BountyAccessClaimCelebration } from "@/components/map/BountyAccessClaimCelebration";
+import { FirstBountySubmittedCelebration } from "@/components/map/FirstBountySubmittedCelebration";
 import {
   DiscountClaimCelebration,
   type DiscountCelebrationMode,
@@ -459,6 +461,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     discountAllLessonsDone,
     regionProgress,
     requestDiscount,
+    // v42 (v2)
+    bountyAccessJustClaimed,
+    dismissBountyClaim,
+    firstBountyJustSubmitted,
+    dismissFirstBountyCelebration,
   } = useStudent();
 
   // Toast for the "you haven't completed all lessons" message when
@@ -1797,6 +1804,24 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           setDiscountModalMode("review");
         }}
         onDismiss={() => setDiscountModalMode(null)}
+      />
+
+      {/* v42 — Bounty Access claim celebration. Fires from the l057
+          lesson sheet's claim button via StudentContext, which raises
+          bountyAccessJustClaimed = true and the takeover renders here. */}
+      <BountyAccessClaimCelebration
+        open={bountyAccessJustClaimed}
+        onDismiss={dismissBountyClaim}
+      />
+
+      {/* v42 — First bounty submitted celebration. Raised by
+          toggleLesson('l058') the moment the standard mark-complete
+          flips l058 from incomplete → complete. Dismiss → student
+          returns to the sheet where the Finish Program CTA is
+          waiting. */}
+      <FirstBountySubmittedCelebration
+        open={firstBountyJustSubmitted}
+        onDismiss={dismissFirstBountyCelebration}
       />
 
       {/* Toast — single transient message dead-center on screen.

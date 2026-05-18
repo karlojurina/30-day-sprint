@@ -105,6 +105,40 @@ interface StudentContextType {
   }>;
   requestDiscount: () => Promise<void>;
 
+  // v42 (v2): bounty access claim — l057's one-time "claim my Bounty
+  // spot" button. claimBountyAccess() flips bounty_access_claimed_at,
+  // marks l057 complete, and surfaces the celebration. The boolean
+  // is the celebration takeover flag; clear it via dismissBountyClaim.
+  bountyAccessClaimedAt: string | null;
+  bountyAccessJustClaimed: boolean;
+  claimBountyAccess: () => Promise<void>;
+  dismissBountyClaim: () => void;
+
+  // v42 (v2): l058 first-bounty-submitted celebration + Finish
+  // Program flow. firstBountyJustSubmitted is raised the moment
+  // toggleLesson('l058') flips it from incomplete → complete.
+  // finishProgram() then sets sprint_completed_at and unlocks Map 2.
+  sprintCompletedAt: string | null;
+  firstBountyJustSubmitted: boolean;
+  finishProgram: () => Promise<void>;
+  dismissFirstBountyCelebration: () => void;
+
+  // v42 (v2): one-time Map 2 welcome overlay. playbookWelcomeSeenAt
+  // is the stamp; if null the overlay shows on first visit. Action
+  // sets the stamp so it doesn't re-fire on the next load.
+  playbookWelcomeSeenAt: string | null;
+  dismissPlaybookWelcome: () => Promise<void>;
+
+  // v42 (v2): "Land Your First Client" milestone on Map 2. Single
+  // self-report. firstClientLandedAt is the stamp; firstClientJust
+  // Landed is the celebration takeover flag set the moment the
+  // markFirstClient API call resolves (and the timestamp wasn't
+  // already set server-side).
+  firstClientLandedAt: string | null;
+  firstClientJustLanded: boolean;
+  markFirstClient: () => Promise<void>;
+  dismissFirstClientCelebration: () => void;
+
   // Discount feedback form (v29) — Apply button now opens a 6-question
   // form that's submitted atomically with the discount_requests row.
   discountFeedbackQuestions: DiscountFeedbackQuestion[];
@@ -144,12 +178,23 @@ async function getAccessToken() {
 }
 
 export function StudentProvider({ children }: { children: ReactNode }) {
-  const { student } = useAuth();
+  const { student, setStudent } = useAuth();
 
   const [regions, setRegions] = useState<Region[]>([]);
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [completions, setCompletions] = useState<StudentLessonCompletion[]>([]);
   const [discountRequest, setDiscountRequest] = useState<DiscountRequest | null>(null);
+  // v42 (v2): celebration takeover state for the l057 bounty claim.
+  // True from the moment the claim API resolves until the celebration
+  // is dismissed. The bounty_access_claimed_at timestamp itself lives
+  // on the student row in AuthContext.
+  const [bountyAccessJustClaimed, setBountyAccessJustClaimed] = useState(false);
+  // v42 (v2): same pattern for l058 → first bounty submitted. Raised
+  // by toggleLesson when it sees l058 flip incomplete → complete.
+  const [firstBountyJustSubmitted, setFirstBountyJustSubmitted] = useState(false);
+  // v42 (v2): crowned-celebration takeover for the Map 2 milestone.
+  // Set on markFirstClient() success when it wasn't a duplicate.
+  const [firstClientJustLanded, setFirstClientJustLanded] = useState(false);
   const [streak, setStreak] = useState<{ current: number; longest: number }>({
     current: 0,
     longest: 0,
@@ -264,6 +309,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     // applied) from /admin/discounts. Refresh it here so the student
     // sees the new state when they switch back to their tab.
     setDiscountRequest(fresh.discountRequest ?? null);
+    // v42: also push the fresh student row up to AuthContext so any
+    // student-row field that can change server-side (csm_exempt,
+    // bounty_access_claimed_at, sprint_completed_at, etc.) flows
+    // through to consumers without a hard reload.
+    if (fresh.student) setStudent(fresh.student);
     setSyncDiagnostics({
       lastSyncAt: fresh.student?.last_watch_sync_at ?? null,
       fetchedCount: fresh.student?.whop_last_sync_fetched_count ?? null,
@@ -274,7 +324,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       whopUserId: fresh.student?.whop_user_id ?? null,
       whopCourseIdMasked: fresh.whopCourseIdMasked ?? null,
     });
-  }, []);
+  }, [setStudent]);
 
   // Auto-sync Whop progress. Silent — no button, no flash.
   //   - Once on mount (first load after login)
@@ -505,6 +555,18 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       if (!token) return;
 
       const isCompleted = completedLessonIds.has(lessonId);
+
+      // v42 (v2): l058 — first bounty submitted. Raise the
+      // celebration flag the moment the student marks it complete
+      // (NOT when they uncheck). One-shot: don't re-fire if the
+      // sprint is already marked finished.
+      if (
+        !isCompleted &&
+        lessonId === "l058" &&
+        !student.sprint_completed_at
+      ) {
+        setFirstBountyJustSubmitted(true);
+      }
 
       // Optimistic update
       if (isCompleted) {
@@ -869,6 +931,152 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     }
   }, [student]);
 
+  /**
+   * v42 — l057 "Claim my Bounty spot" handler. Calls
+   * /api/student/claim-bounty-access which atomically flips the
+   * student's bounty_access_claimed_at and marks l057 complete.
+   * On success, patches the local student row + adds l057 to the
+   * completions list + raises the celebration takeover flag.
+   */
+  const claimBountyAccess = useCallback(async () => {
+    if (!student || student.bounty_access_claimed_at) return;
+
+    const token = await getAccessToken();
+    if (!token) return;
+
+    const res = await fetch("/api/student/claim-bounty-access", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      console.error("Claim bounty access failed:", res.status);
+      return;
+    }
+    const data = await res.json();
+    if (!data.ok) return;
+
+    // Patch the student row locally so any UI reading
+    // student.bounty_access_claimed_at flips instantly.
+    setStudent({
+      ...student,
+      bounty_access_claimed_at: data.bounty_access_claimed_at,
+    });
+    // Add l057 to completions if it's not there yet — the API
+    // upserts the row server-side; mirror it client-side so the
+    // map node + sheet flip without waiting for a refetch.
+    setCompletions((prev) => {
+      if (prev.some((c) => c.lesson_id === "l057")) return prev;
+      return [
+        ...prev,
+        {
+          id: `local-l057-${student.id}`,
+          student_id: student.id,
+          lesson_id: "l057",
+          completed_at: data.bounty_access_claimed_at,
+          action_completed_at: null,
+          skipped_at: null,
+          discord_message_link: null,
+        } as StudentLessonCompletion,
+      ];
+    });
+    // Fire the celebration unless this was a duplicate click.
+    if (!data.already_claimed) setBountyAccessJustClaimed(true);
+  }, [student, setStudent]);
+
+  const dismissBountyClaim = useCallback(() => {
+    setBountyAccessJustClaimed(false);
+  }, []);
+
+  /**
+   * v42 — l058 "Finish Program" handler. Calls
+   * /api/student/finish-program which sets sprint_completed_at on
+   * the student row (with NULL guard). Patches the local student
+   * row so the LessonSheet swap + the eventual Map 2 redirect see
+   * the new state immediately.
+   */
+  const finishProgram = useCallback(async () => {
+    if (!student || student.sprint_completed_at) return;
+
+    const token = await getAccessToken();
+    if (!token) return;
+
+    const res = await fetch("/api/student/finish-program", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      console.error("Finish program failed:", res.status);
+      return;
+    }
+    const data = await res.json();
+    if (!data.ok) return;
+
+    setStudent({
+      ...student,
+      sprint_completed_at: data.sprint_completed_at,
+    });
+  }, [student, setStudent]);
+
+  const dismissFirstBountyCelebration = useCallback(() => {
+    setFirstBountyJustSubmitted(false);
+  }, []);
+
+  /**
+   * v42 — "I just landed my first client" handler. Single
+   * self-report on Map 2's milestone node sheet. POST flips
+   * students.first_client_landed_at; on a fresh land (not a
+   * duplicate), raises the crowned-celebration flag.
+   */
+  const markFirstClient = useCallback(async () => {
+    if (!student || student.first_client_landed_at) return;
+    const token = await getAccessToken();
+    if (!token) return;
+
+    const res = await fetch("/api/student/mark-first-client", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      console.error("Mark first client failed:", res.status);
+      return;
+    }
+    const data = await res.json();
+    if (!data.ok) return;
+
+    setStudent({
+      ...student,
+      first_client_landed_at: data.first_client_landed_at,
+    });
+    if (!data.already_landed) setFirstClientJustLanded(true);
+  }, [student, setStudent]);
+
+  const dismissFirstClientCelebration = useCallback(() => {
+    setFirstClientJustLanded(false);
+  }, []);
+
+  /**
+   * v42 — one-shot dismiss for the Map 2 welcome overlay. Sets
+   * students.playbook_welcome_seen_at and patches the local row.
+   */
+  const dismissPlaybookWelcome = useCallback(async () => {
+    if (!student || student.playbook_welcome_seen_at) return;
+    const token = await getAccessToken();
+    if (!token) return;
+
+    const res = await fetch("/api/student/dismiss-playbook-welcome", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.ok) return;
+
+    setStudent({
+      ...student,
+      playbook_welcome_seen_at: data.playbook_welcome_seen_at,
+    });
+  }, [student, setStudent]);
+
   const requestDiscount = useCallback(async () => {
     if (!student || !discountEligible) return;
 
@@ -994,6 +1202,24 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         submitDiscountFeedback,
         submitQuiz,
         requestDiscount,
+        // v42 (v2): bounty access claim
+        bountyAccessClaimedAt: student?.bounty_access_claimed_at ?? null,
+        bountyAccessJustClaimed,
+        claimBountyAccess,
+        dismissBountyClaim,
+        // v42 (v2): l058 Finish Program flow
+        sprintCompletedAt: student?.sprint_completed_at ?? null,
+        firstBountyJustSubmitted,
+        finishProgram,
+        dismissFirstBountyCelebration,
+        // v42 (v2): Map 2 welcome overlay
+        playbookWelcomeSeenAt: student?.playbook_welcome_seen_at ?? null,
+        dismissPlaybookWelcome,
+        // v42 (v2): first-client landed milestone
+        firstClientLandedAt: student?.first_client_landed_at ?? null,
+        firstClientJustLanded,
+        markFirstClient,
+        dismissFirstClientCelebration,
         refreshWatchProgress,
         syncDiagnostics,
         forceSync,

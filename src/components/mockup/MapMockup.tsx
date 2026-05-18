@@ -2890,8 +2890,11 @@ function ClaimMarker({
   onHoverChange: (hovered: boolean) => void;
   onClick: () => void;
 }) {
-  // Claim nodes outscale regular lessons by ~3x.
-  const r = baseSize * 3;
+  // Claim nodes outscale regular lessons by ~1.6x. (Previously 3x —
+  // that swallowed half the visible scene.) The glow halo around them
+  // doubles the visible footprint, so 1.6x on the body lands at a
+  // reasonable focal-point size.
+  const r = baseSize * 1.6;
 
   const palette =
     variant === "discount"
@@ -3193,11 +3196,11 @@ function EndMarker({
       role={isClickable ? "button" : undefined}
       aria-label={`${marker.label} — ${marker.sublabel}`}
     >
-      {/* Pulsing aura — soft white halo. Suppressed when locked so
-          the marker reads as inactive. */}
+      {/* Pulsing aura — gold halo on discount marker (matches the
+          new claim treatment), soft white on the others. */}
       <circle
         r={44}
-        fill="rgba(255, 255, 255, 0.18)"
+        fill={marker.kind === "discount" ? GATE_GOLD_HI : "rgba(255, 255, 255, 0.18)"}
         opacity={locked ? 0 : isMilestone ? 0.24 : 0.18}
       >
         <animate
@@ -3235,20 +3238,36 @@ function EndMarker({
         <circle
           r={44}
           fill="none"
-          stroke="rgba(255, 255, 255, 0.55)"
+          stroke={
+            marker.kind === "discount"
+              ? GATE_GOLD_HI
+              : "rgba(255, 255, 255, 0.55)"
+          }
           strokeWidth={1.2}
           opacity={0.7}
         />
       )}
 
-      {/* Core disc — flat white fill, hairline stroke */}
-      <circle
-        r={36}
-        fill="rgba(255, 255, 255, 0.96)"
-        stroke="rgba(255, 255, 255, 0.96)"
-        strokeWidth={hot ? 2 : 1.4}
-        style={{ transition: "stroke-width 0.2s" }}
-      />
+      {/* Body — 16-point gold star on the discount marker so it
+          matches the bounty marker's claim treatment. Other kinds
+          keep the white disc. */}
+      {marker.kind === "discount" ? (
+        <polygon
+          points={gateStarPoints(36)}
+          fill="rgba(230,192,122,0.22)"
+          stroke={GATE_GOLD_HI}
+          strokeWidth={hot ? 2.6 : 2.2}
+          style={{ transition: "stroke-width 0.2s" }}
+        />
+      ) : (
+        <circle
+          r={36}
+          fill="rgba(255, 255, 255, 0.96)"
+          stroke="rgba(255, 255, 255, 0.96)"
+          strokeWidth={hot ? 2 : 1.4}
+          style={{ transition: "stroke-width 0.2s" }}
+        />
+      )}
 
       {/* Inner glyph — flat dark navy on white. When locked, replace
           the arrow with a padlock icon to communicate the gate. */}
@@ -3267,9 +3286,9 @@ function EndMarker({
       )}
       {marker.kind === "discount" && (
         <g>
-          <circle cx={-7} cy={-7} r={4} fill="none" stroke="rgba(15, 17, 21, 0.92)" strokeWidth={2.2} />
-          <circle cx={7} cy={7} r={4} fill="none" stroke="rgba(15, 17, 21, 0.92)" strokeWidth={2.2} />
-          <line x1={-12} y1={12} x2={12} y2={-12} stroke="rgba(15, 17, 21, 0.92)" strokeWidth={2.4} strokeLinecap="round" />
+          <circle cx={-7} cy={-7} r={4} fill="none" stroke={GATE_GOLD_HI} strokeWidth={2.6} />
+          <circle cx={7} cy={7} r={4} fill="none" stroke={GATE_GOLD_HI} strokeWidth={2.6} />
+          <line x1={-12} y1={12} x2={12} y2={-12} stroke={GATE_GOLD_HI} strokeWidth={2.6} strokeLinecap="round" />
         </g>
       )}
       {marker.kind === "celebration" && (

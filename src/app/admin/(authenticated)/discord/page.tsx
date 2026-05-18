@@ -12,7 +12,7 @@
  * per message type.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import type { Student } from "@/types/database";
 import {
@@ -24,6 +24,7 @@ import {
   T,
 } from "@/components/admin/ui";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+import type { DmToggleKey } from "@/lib/dm-toggles";
 
 interface PreviewResponse {
   ok: boolean;
@@ -104,9 +105,11 @@ export default function AdminDiscordPage() {
   return (
     <AdminPage>
       <PageHeader
-        title="Discord test"
-        description="Fire test DMs to DISCORD_TEST_DM_RECIPIENT (set on Vercel). Lets us preview embed formatting without waiting for the real trigger."
+        title="Discord"
+        description="Pause / resume every automated Discord send, and fire test DMs to your own ID for formatting preview."
       />
+
+      <DmSettingsSection />
 
       <Section eyebrow="Day-28 summary DM">
         <Card padding={20}>
@@ -200,5 +203,269 @@ export default function AdminDiscordPage() {
         </Card>
       </Section>
     </AdminPage>
+  );
+}
+
+/* ─────────────── DM settings ─────────────── */
+
+interface ToggleRowSpec {
+  key: Exclude<DmToggleKey, "dms_master_enabled">;
+  title: string;
+  description: string;
+}
+
+const TOGGLE_ROWS: ToggleRowSpec[] = [
+  {
+    key: "day28_dm_enabled",
+    title: "Day-28 summary DM",
+    description:
+      "Per-student DM (or team-channel fallback) sent 28 days after join. Cron runs 09:30 UTC.",
+  },
+  {
+    key: "engagement_alerts_enabled",
+    title: "Disengagement alerts",
+    description:
+      "Team-channel embed listing flagged students. Cron runs 09:00 UTC.",
+  },
+  {
+    key: "csm_task_summary_enabled",
+    title: "CSM task queue summary",
+    description:
+      "Team-channel embed with a count of new tasks. Task generation runs regardless — only the public post is gated.",
+  },
+];
+
+function DmSettingsSection() {
+  const [toggles, setToggles] = useState<Record<DmToggleKey, boolean> | null>(
+    null,
+  );
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const supabase = useMemo(() => createClient(), []);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/admin/dm-toggles", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      setToggles(json.toggles);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function setToggle(key: DmToggleKey, value: boolean) {
+    setBusyKey(key);
+    setError(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/admin/dm-toggles", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ key, value }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error ?? `HTTP ${res.status}`);
+      } else {
+        setToggles(json.toggles);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  const masterOn = toggles?.dms_master_enabled === true;
+
+  return (
+    <Section eyebrow="DM settings">
+      <Card padding={20}>
+        {/* Big status banner */}
+        <div
+          style={{
+            padding: "12px 16px",
+            borderRadius: 10,
+            marginBottom: 20,
+            background: masterOn
+              ? "rgba(46,139,87,0.08)"
+              : "rgba(200,74,74,0.08)",
+            border: `1px solid ${
+              masterOn ? "rgba(46,139,87,0.30)" : "rgba(200,74,74,0.30)"
+            }`,
+          }}
+        >
+          <p
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: masterOn ? "var(--color-success)" : "var(--color-danger)",
+              letterSpacing: "-0.005em",
+            }}
+          >
+            {masterOn
+              ? "✓ Automated Discord sends are LIVE"
+              : "✕ All automated Discord sends are PAUSED"}
+          </p>
+          <p
+            style={{
+              ...T.bodyDim,
+              fontSize: 12,
+              marginTop: 4,
+              lineHeight: 1.5,
+            }}
+          >
+            {masterOn
+              ? "Per-message toggles below control which crons actually fire. Manual previews from this page are not affected by these switches."
+              : "No cron will post to Discord while the master is off, regardless of the per-message switches below. Flip this on once you're in production."}
+          </p>
+        </div>
+
+        {error && (
+          <div
+            style={{
+              padding: "10px 14px",
+              borderRadius: 10,
+              background: "rgba(200,74,74,0.10)",
+              border: "1px solid rgba(200,74,74,0.30)",
+              fontSize: 13,
+              color: "var(--color-danger)",
+              marginBottom: 16,
+            }}
+          >
+            {error}
+          </div>
+        )}
+
+        {/* Master switch row */}
+        <ToggleRow
+          title="Master switch"
+          description="Global kill switch. When off, no automated Discord send happens — full stop."
+          checked={masterOn}
+          busy={busyKey === "dms_master_enabled"}
+          onChange={(v) => void setToggle("dms_master_enabled", v)}
+          loading={toggles === null}
+        />
+
+        <div
+          style={{
+            borderTop: "1px solid var(--color-border)",
+            margin: "16px 0",
+          }}
+        />
+
+        {/* Per-message rows */}
+        {TOGGLE_ROWS.map((row) => (
+          <ToggleRow
+            key={row.key}
+            title={row.title}
+            description={row.description}
+            checked={Boolean(toggles?.[row.key])}
+            busy={busyKey === row.key}
+            onChange={(v) => void setToggle(row.key, v)}
+            disabled={!masterOn}
+            loading={toggles === null}
+          />
+        ))}
+      </Card>
+    </Section>
+  );
+}
+
+function ToggleRow({
+  title,
+  description,
+  checked,
+  busy,
+  onChange,
+  disabled = false,
+  loading = false,
+}: {
+  title: string;
+  description: string;
+  checked: boolean;
+  busy: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  loading?: boolean;
+}) {
+  return (
+    <div
+      className="flex items-start justify-between gap-4"
+      style={{ padding: "10px 0", opacity: disabled ? 0.45 : 1 }}
+    >
+      <div className="flex-1 min-w-0">
+        <p
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: "var(--color-text-primary)",
+            letterSpacing: "-0.011em",
+          }}
+        >
+          {title}
+        </p>
+        <p style={{ ...T.bodyDim, fontSize: 12, marginTop: 2, lineHeight: 1.5 }}>
+          {description}
+        </p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        disabled={disabled || busy || loading}
+        onClick={() => onChange(!checked)}
+        style={{
+          width: 44,
+          height: 26,
+          borderRadius: 13,
+          border: "none",
+          cursor: disabled || busy || loading ? "default" : "pointer",
+          background: checked
+            ? "var(--color-success)"
+            : "rgba(20,20,24,0.18)",
+          position: "relative",
+          transition: "background 200ms var(--ease-default)",
+          flexShrink: 0,
+          padding: 0,
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            top: 3,
+            left: checked ? 21 : 3,
+            width: 20,
+            height: 20,
+            borderRadius: "50%",
+            background: "#FFFFFF",
+            boxShadow: "0 1px 2px rgba(20,20,24,0.18)",
+            transition: "left 200ms var(--ease-default)",
+          }}
+        />
+      </button>
+    </div>
   );
 }

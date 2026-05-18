@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { postTeamAlert, buildAlertsEmbed } from "@/lib/discord";
+import { isDmEnabled } from "@/lib/dm-toggles";
 
 /**
  * V3 engagement cron: detect disengaged students and queue alerts for the team.
@@ -154,21 +155,27 @@ export async function GET(request: NextRequest) {
 
     // Push a single embed to the team's Discord channel summarizing
     // these new alerts. Best-effort — no impact on the cron's status.
-    const studentsById = new Map(students.map((s) => [s.id, s]));
-    const baseUrl =
-      process.env.NEXT_PUBLIC_APP_URL ?? "https://30-day-sprint-smkv.vercel.app";
-    const embed = buildAlertsEmbed(
-      alerts.map((a) => ({
-        studentId: a.student_id,
-        studentName: studentsById.get(a.student_id)?.name ?? "Student",
-        alertType: a.alert_type,
-        message: a.message,
-      })),
-      baseUrl
-    );
-    const result = await postTeamAlert([embed]);
-    discordOk = result.ok;
-    discordReason = result.reason ?? null;
+    // Gated by /admin/discord toggle; default off until launch.
+    if (await isDmEnabled(supabase, "engagement_alerts_enabled")) {
+      const studentsById = new Map(students.map((s) => [s.id, s]));
+      const baseUrl =
+        process.env.NEXT_PUBLIC_APP_URL ?? "https://30-day-sprint-smkv.vercel.app";
+      const embed = buildAlertsEmbed(
+        alerts.map((a) => ({
+          studentId: a.student_id,
+          studentName: studentsById.get(a.student_id)?.name ?? "Student",
+          alertType: a.alert_type,
+          message: a.message,
+        })),
+        baseUrl,
+      );
+      const result = await postTeamAlert([embed]);
+      discordOk = result.ok;
+      discordReason = result.reason ?? null;
+    } else {
+      discordOk = false;
+      discordReason = "paused-by-toggle";
+    }
   }
 
   return NextResponse.json({

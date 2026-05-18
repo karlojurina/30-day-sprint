@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { dmStudent, postTeamAlert } from "@/lib/discord";
 import { buildDay28Embed } from "@/lib/day28-embed";
+import { isDmEnabled } from "@/lib/dm-toggles";
 
 /**
  * Day-28 student summary DM cron.
@@ -27,6 +28,12 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = createServiceClient();
+
+  // Pause gate — controlled from /admin/discord. Default off.
+  if (!(await isDmEnabled(supabase, "day28_dm_enabled"))) {
+    return NextResponse.json({ paused: true, checked: 0, sent: 0 });
+  }
+
   const now = new Date();
   // Exactly Day 28 — window is the 24-hour band 28 to 29 days after join.
   // A student joined exactly 28d ago at this moment satisfies

@@ -34,6 +34,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { postTeamAlert } from "@/lib/discord";
+import { isDmEnabled } from "@/lib/dm-toggles";
 import {
   buildStudentSnapshot,
   triggers,
@@ -413,24 +414,30 @@ export async function GET(request: NextRequest) {
   }
 
   // ─── 4. Team Discord summary ──────────────────────────────
+  // Task generation above always runs (writes to DB only). Only the
+  // public summary post is gated — controlled from /admin/discord.
 
   let discordPosted: boolean | null = null;
   if (createdCount > 0) {
-    const baseUrl =
-      process.env.NEXT_PUBLIC_APP_URL ??
-      "https://30-day-sprint-smkv.vercel.app";
-    const lines = Object.entries(perBucket)
-      .sort()
-      .map(([bucket, count]) => `• ${count} ${bucket.replace("_", " ")}`);
-    const result = await postTeamAlert([
-      {
-        title: "📋 Astrid Task Queue update",
-        description:
-          `**${createdCount}** new task${createdCount === 1 ? "" : "s"} today:\n` +
-          `${lines.join("\n")}\n\n→ ${baseUrl}/admin/tasks`,
-      },
-    ]);
-    discordPosted = result.ok;
+    if (await isDmEnabled(supabase, "csm_task_summary_enabled")) {
+      const baseUrl =
+        process.env.NEXT_PUBLIC_APP_URL ??
+        "https://30-day-sprint-smkv.vercel.app";
+      const lines = Object.entries(perBucket)
+        .sort()
+        .map(([bucket, count]) => `• ${count} ${bucket.replace("_", " ")}`);
+      const result = await postTeamAlert([
+        {
+          title: "📋 Astrid Task Queue update",
+          description:
+            `**${createdCount}** new task${createdCount === 1 ? "" : "s"} today:\n` +
+            `${lines.join("\n")}\n\n→ ${baseUrl}/admin/tasks`,
+        },
+      ]);
+      discordPosted = result.ok;
+    } else {
+      discordPosted = false;
+    }
   }
 
   return NextResponse.json({

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { dmStudent, postTeamAlert } from "@/lib/discord";
-import { buildDay28Embed } from "@/lib/day28-embed";
+import { buildDay28Embed, loadDay28EmbedInput } from "@/lib/day28-embed";
 import { isDmEnabled } from "@/lib/dm-toggles";
 
 /**
@@ -43,9 +43,7 @@ export async function GET(request: NextRequest) {
 
   const { data: candidates } = await supabase
     .from("students")
-    .select(
-      "id, name, joined_at, current_streak, longest_streak, discord_user_id, day28_dm_sent_at"
-    )
+    .select("id, name, discord_user_id")
     .eq("membership_status", "active")
     .eq("csm_exempt", false)
     .is("day28_dm_sent_at", null)
@@ -56,77 +54,23 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ checked: 0, sent: 0 });
   }
 
-  // Per-student lesson counts and discount status — fetched in batch
-  const studentIds = candidates.map((s) => s.id);
-
-  const [
-    { data: completions },
-    { data: discountReqs },
-    { data: notes },
-  ] = await Promise.all([
-    supabase
-      .from("student_lesson_completions")
-      .select("student_id, lesson_id, completed_at, action_completed_at")
-      .in("student_id", studentIds),
-    supabase
-      .from("discount_requests")
-      .select("student_id, status, promo_code")
-      .in("student_id", studentIds),
-    supabase
-      .from("lesson_notes")
-      .select("student_id")
-      .in("student_id", studentIds),
-  ]);
-
-  // Need lesson totals + region grouping for the embed
-  const { data: lessonsTable } = await supabase
-    .from("lessons")
-    .select("id, region_id, requires_action");
-
-  const totalLessons = lessonsTable?.length ?? 0;
+  const baseUrl =
+    process.env.NEXT_PUBLIC_APP_URL ?? "https://30-day-sprint-smkv.vercel.app";
 
   let sent = 0;
   let fallback = 0;
   let failed = 0;
-  const baseUrl =
-    process.env.NEXT_PUBLIC_APP_URL ?? "https://30-day-sprint-smkv.vercel.app";
 
   for (const student of candidates) {
-    const studentCompletions = (completions ?? []).filter(
-      (c) => c.student_id === student.id
-    );
-    const lessonsDone = studentCompletions.filter((c) => {
-      const lesson = lessonsTable?.find((l) => l.id === c.lesson_id);
-      if (!lesson) return false;
-      if (lesson.requires_action) {
-        return c.completed_at != null && c.action_completed_at != null;
-      }
-      return c.completed_at != null;
-    }).length;
-
-    const discountReq = discountReqs?.find((d) => d.student_id === student.id);
-    const discountState =
-      discountReq?.status === "approved"
-        ? `✅ ${discountReq.promo_code ?? "approved"}`
-        : discountReq?.status === "pending"
-          ? "⏳ pending review"
-          : discountReq?.status === "rejected"
-            ? "❌ rejected"
-            : "—";
-
-    const notesCount = (notes ?? []).filter(
-      (n) => n.student_id === student.id
-    ).length;
-
-    const embed = buildDay28Embed({
-      studentName: student.name,
-      lessonsDone,
-      totalLessons,
-      longestStreak: student.longest_streak ?? 0,
-      notesCount,
-      discountState,
-      baseUrl,
-    });
+    // Shared loader: pulls everything the embed needs (completions,
+    // cohort, action ships, best day, pace). One round trip per
+    // student — at most ~5 students hit Day 28 per cron run.
+    const input = await loadDay28EmbedInput(supabase, student.id, baseUrl);
+    if ("error" in input) {
+      failed++;
+      continue;
+    }
+    const embed = buildDay28Embed(input);
 
     let delivered = false;
     if (student.discord_user_id) {
@@ -136,7 +80,7 @@ export async function GET(request: NextRequest) {
         sent++;
       } else {
         console.warn(
-          `[day28-dm] DM failed for ${student.id}: ${result.reason}`
+          `[day28-dm] DM failed for ${student.id}: ${result.reason}`,
         );
       }
     }

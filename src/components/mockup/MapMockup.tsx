@@ -1538,11 +1538,13 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
 
                     {/* Bounty line — only on R4. Same shape as the
                         discount line but copy mirrors the v2 brief's
-                        l057 panel ("Bounty Access opens here"). */}
+                        l057 panel ("Bounty Access opens here").
+                        Dot sits ~15px left of the wider text (BOUNTY
+                        ACCESS is roughly 60px wider than "30% OFF"). */}
                     {showBountyLine && (
                       <g>
                         <circle
-                          cx={-66}
+                          cx={-100}
                           cy={77}
                           r={5}
                           fill="#22C55E"
@@ -1561,7 +1563,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                           />
                         </circle>
                         <circle
-                          cx={-66}
+                          cx={-100}
                           cy={77}
                           r={9}
                           fill="rgba(34, 197, 94, 0.25)"

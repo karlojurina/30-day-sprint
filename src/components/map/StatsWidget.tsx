@@ -102,7 +102,10 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
   //   • live countdown
   //   • nothing (window closed)
   const discountInfo = (() => {
-    if (discountRequest?.status === "approved") {
+    if (
+      discountRequest?.status === "approved" ||
+      discountRequest?.status === "applied"
+    ) {
       return {
         kind: "applied" as const,
         text: "30% off applied to your account",

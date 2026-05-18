@@ -248,8 +248,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     fetchData();
   }, [student]);
 
-  // Pull /api/student/data and refresh both completions + sync diagnostics.
-  // Used after every sync (silent or forced) so the debug panel stays live.
+  // Pull /api/student/data and refresh completions + sync diagnostics
+  // + the discount request. Used after every sync (silent or forced)
+  // so the debug panel stays live AND so an admin-side discount
+  // approval picks up on the next tab-refocus instead of going stale
+  // until full page refresh.
   const refreshFromServer = useCallback(async (token: string) => {
     const dataRes = await fetch("/api/student/data", {
       headers: { Authorization: `Bearer ${token}` },
@@ -257,6 +260,10 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     if (!dataRes.ok) return;
     const fresh = await dataRes.json();
     setCompletions(fresh.completions ?? []);
+    // Admin can change discount_requests.status (pending → approved →
+    // applied) from /admin/discounts. Refresh it here so the student
+    // sees the new state when they switch back to their tab.
+    setDiscountRequest(fresh.discountRequest ?? null);
     setSyncDiagnostics({
       lastSyncAt: fresh.student?.last_watch_sync_at ?? null,
       fetchedCount: fresh.student?.whop_last_sync_fetched_count ?? null,
@@ -334,11 +341,20 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     runSilentSync();
   }, [student, runSilentSync]);
 
-  // Tab-focus sync: when the student comes back from Whop, we pull updates.
+  // Tab-focus sync: when the student comes back from Whop, we pull
+  // updates. Two things happen here:
+  //   1. runSilentSync() — Whop watch-history pull, throttled to 30s
+  //      because it's an external API call.
+  //   2. refreshFromServer() — local DB refetch, NOT throttled. Cheap,
+  //      and catches admin-side state changes (discount approvals)
+  //      between the silent-sync throttle windows.
   useEffect(() => {
     if (!student) return;
-    const onVisible = () => {
-      if (document.visibilityState === "visible") runSilentSync();
+    const onVisible = async () => {
+      if (document.visibilityState !== "visible") return;
+      runSilentSync();
+      const token = await getAccessToken();
+      if (token) await refreshFromServer(token);
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
@@ -346,7 +362,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onVisible);
     };
-  }, [student, runSilentSync]);
+  }, [student, runSilentSync, refreshFromServer]);
 
   // Derived state.
   //

@@ -76,6 +76,14 @@ export function LessonNode({
   const isWatch = lesson.type === "watch";
   const isGate = lesson.is_gate;
   const isBoss = lesson.is_boss;
+  // v2 placeholder: l057 is the Bounty Access claim. Same gate-star
+  // visual family as l049 but green-tinted so the two distinct
+  // "claim something" moments don't read identically.
+  const isBountyClaim = lesson.id === "l057";
+  const isClaim = isGate || isBountyClaim;
+  // Green pulled from the bounty-line dot on the region card.
+  const BOUNTY = "#22C55E";
+  const BOUNTY_HI = "#4ADE80";
 
   let fill = "rgba(20,36,68,0.92)";
   let stroke = "rgba(230,220,200,0.6)";
@@ -96,6 +104,11 @@ export function LessonNode({
     fill = "rgba(230,192,122,0.22)";
     markColor = GOLD_HI;
   }
+  if (isBountyClaim && !isDone) {
+    stroke = BOUNTY_HI;
+    fill = "rgba(34, 197, 94, 0.18)";
+    markColor = BOUNTY_HI;
+  }
   if (regionLocked || !isUnlocked) {
     fill = "rgba(20,36,68,0.55)";
     stroke = "rgba(230,220,200,0.25)";
@@ -105,7 +118,7 @@ export function LessonNode({
   // Node radius — gate is supersized, boss big, current slightly bigger
   let r: number;
   if (isBoss) r = 28;
-  else if (isGate) r = 44;
+  else if (isClaim) r = 44;
   else if (isCurrent) r = 22;
   else r = 18;
 
@@ -144,7 +157,7 @@ export function LessonNode({
     >
       <defs>
         <clipPath id={clipId}>
-          {isGate && !isDone ? (
+          {isClaim && !isDone ? (
             <polygon points={gatePoints(r)} />
           ) : isWatch ? (
             <circle r={r} />
@@ -163,6 +176,58 @@ export function LessonNode({
           )}
         </clipPath>
       </defs>
+
+      {/* Bounty claim — green-tinted multi-layer glow, mirrors the
+          gate treatment so both "claim something" nodes feel like
+          one visual family. */}
+      {isBountyClaim && !isDone && !regionLocked && (
+        <>
+          <circle r={r + 46} fill={BOUNTY_HI} opacity="0.1">
+            <animate
+              attributeName="opacity"
+              values="0.08;0.2;0.08"
+              dur="2.8s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          <circle r={r + 22} fill="none" stroke={BOUNTY_HI} strokeWidth="1.8" opacity="0.55">
+            <animate
+              attributeName="r"
+              values={`${r + 12};${r + 32};${r + 12}`}
+              dur="2.8s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0.7;0;0.7"
+              dur="2.8s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          <circle r={r + 14} fill="none" stroke={BOUNTY_HI} strokeWidth="1.4" opacity="0.4">
+            <animate
+              attributeName="r"
+              values={`${r + 8};${r + 24};${r + 8}`}
+              dur="2.8s"
+              begin="1.4s"
+              repeatCount="indefinite"
+            />
+            <animate
+              attributeName="opacity"
+              values="0.6;0;0.6"
+              dur="2.8s"
+              begin="1.4s"
+              repeatCount="indefinite"
+            />
+          </circle>
+          <circle
+            r={r + 8}
+            fill="rgba(34, 197, 94, 0.18)"
+            stroke="rgba(34, 197, 94, 0.6)"
+            strokeWidth="1.4"
+          />
+        </>
+      )}
 
       {/* Gate — multi-layer glow + pulsing rings */}
       {isGate && !isDone && !regionLocked && (
@@ -214,8 +279,9 @@ export function LessonNode({
         </>
       )}
 
-      {/* Current-lesson pulsing ring (non-gate) */}
-      {isCurrent && !isGate && (
+      {/* Current-lesson pulsing ring (non-claim — claim nodes have
+          their own dedicated glow already). */}
+      {isCurrent && !isClaim && (
         <circle r={r + 14} fill="none" stroke={GOLD_HI} strokeWidth="1.5" opacity="0.5">
           <animate
             attributeName="r"
@@ -247,8 +313,10 @@ export function LessonNode({
       {/* Shadow */}
       <ellipse cx="0" cy={r + 4} rx={r * 0.85} ry={r * 0.2} fill="rgba(0,0,0,0.45)" />
 
-      {/* Body */}
-      {isGate && !isDone ? (
+      {/* Body — both gate (discount) and bounty claim use the
+          16-point star; color comes from the resolved `stroke` /
+          `shapeFill` above. */}
+      {isClaim && !isDone ? (
         <polygon points={gatePoints(r)} fill={shapeFill} stroke={stroke} strokeWidth="2" />
       ) : isWatch ? (
         <circle r={r} fill={shapeFill} stroke={stroke} strokeWidth="1.8" />
@@ -288,6 +356,14 @@ export function LessonNode({
           <circle cx="-5" cy="-5" r="3" />
           <circle cx="5" cy="5" r="3" />
           <line x1="-8" y1="8" x2="8" y2="-8" />
+        </g>
+      ) : isBountyClaim && !isDone ? (
+        // Bounty mark — three small dots arranged like a money / coin
+        // stack. Distinct from the gate's percent-sign mark.
+        <g fill={markColor}>
+          <circle cx="0" cy="-6" r="3" />
+          <circle cx="-5" cy="3" r="3" />
+          <circle cx="5" cy="3" r="3" />
         </g>
       ) : isDone ? (
         <path
@@ -376,6 +452,53 @@ export function LessonNode({
             letterSpacing="4"
           >
             30% DISCOUNT
+          </text>
+        </g>
+      )}
+
+      {/* Bounty banner — same shape as the gate banner but green. */}
+      {isBountyClaim && !isDone && (
+        <g transform={`translate(0, ${-r - 90})`}>
+          <line
+            x1="0"
+            y1="20"
+            x2="0"
+            y2={64}
+            stroke={BOUNTY}
+            strokeWidth="1"
+            strokeDasharray="2 4"
+            opacity="0.55"
+          />
+          <rect
+            x="-100"
+            y="-16"
+            width="200"
+            height="32"
+            rx="5"
+            fill="#0A1428"
+            stroke={BOUNTY}
+            strokeWidth="1.6"
+          />
+          <rect
+            x="-96"
+            y="-12"
+            width="192"
+            height="24"
+            rx="3"
+            fill="none"
+            stroke="rgba(34, 197, 94, 0.45)"
+            strokeWidth="0.7"
+          />
+          <text
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontFamily="JetBrains Mono, ui-monospace, monospace"
+            fontSize="12"
+            fontWeight="700"
+            fill={BOUNTY_HI}
+            letterSpacing="4"
+          >
+            BOUNTY ACCESS
           </text>
         </g>
       )}

@@ -67,7 +67,10 @@ export function DiscountUrgencyBanner() {
   let state: "countdown" | "eligible" | "pending" | "approved" | "rejected" | "hidden";
   if (override) {
     state = override.state;
-  } else if (discountRequest?.status === "approved") {
+  } else if (
+    discountRequest?.status === "approved" ||
+    discountRequest?.status === "applied"
+  ) {
     state = "approved";
   } else if (discountRequest?.status === "pending") {
     state = "pending";

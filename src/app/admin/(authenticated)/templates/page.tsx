@@ -256,11 +256,11 @@ export default function AdminTemplatesPage() {
         tone: draft.tone,
         body: draft.body,
       };
-      // Built-ins can't change bucket / trigger_config; customs can.
-      if (existing?.is_custom) {
-        payload.bucket = draft.bucket;
-        payload.trigger_config = draft.trigger_config;
-      }
+      // Karlo wants full control over when each template fires —
+      // built-ins are no longer locked out of bucket / trigger_config
+      // changes. The backend API accepts both fields for any template.
+      payload.bucket = draft.bucket;
+      payload.trigger_config = draft.trigger_config;
       const res = await fetch(`/api/admin/templates/${id}`, {
         method: "PUT",
         headers: {
@@ -300,15 +300,12 @@ export default function AdminTemplatesPage() {
   function isDirty(t: Template): boolean {
     const d = drafts[t.id];
     if (!d) return false;
-    const baseDirty =
+    return (
       d.title !== t.title ||
       d.trigger_description !== t.trigger_description ||
       d.intent !== (t.intent ?? "") ||
       d.tone !== (t.tone ?? "") ||
-      d.body !== t.body;
-    if (!t.is_custom) return baseDirty;
-    return (
-      baseDirty ||
+      d.body !== t.body ||
       d.bucket !== t.bucket ||
       JSON.stringify(d.trigger_config) !==
         JSON.stringify(t.trigger_config ?? EMPTY_TRIGGER)
@@ -535,44 +532,46 @@ export default function AdminTemplatesPage() {
                             />
                           </Field>
 
-                          {/* Custom templates: bucket + visual trigger builder */}
-                          {t.is_custom && (
-                            <>
-                              <Field label="Bucket (what kind of moment this is)">
-                                <select
-                                  disabled={!canEdit}
-                                  value={draft.bucket}
-                                  onChange={(e) =>
-                                    updateDraft(
-                                      t.id,
-                                      "bucket",
-                                      e.target.value as TemplateBucket,
-                                    )
-                                  }
-                                  style={fieldStyle()}
-                                >
-                                  {BUCKET_OPTIONS.map((b) => (
-                                    <option key={b.value} value={b.value}>
-                                      {b.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              </Field>
-                              <div style={{ marginBottom: 12 }}>
-                                <TriggerBuilder
-                                  value={draft.trigger_config}
-                                  disabled={!canEdit}
-                                  onChange={(next) =>
-                                    updateDraft(t.id, "trigger_config", next)
-                                  }
-                                />
-                              </div>
-                            </>
-                          )}
+                          {/* Bucket + visual trigger builder. Shown for
+                              ALL templates now — Karlo wants to be able
+                              to retune the structural conditions for
+                              built-ins too, not just the body copy. */}
+                          <Field label="Bucket (what kind of moment this is)">
+                            <select
+                              disabled={!canEdit}
+                              value={draft.bucket}
+                              onChange={(e) =>
+                                updateDraft(
+                                  t.id,
+                                  "bucket",
+                                  e.target.value as TemplateBucket,
+                                )
+                              }
+                              style={fieldStyle()}
+                            >
+                              {BUCKET_OPTIONS.map((b) => (
+                                <option key={b.value} value={b.value}>
+                                  {b.label}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                          <div style={{ marginBottom: 12 }}>
+                            <TriggerBuilder
+                              value={draft.trigger_config}
+                              disabled={!canEdit}
+                              onChange={(next) =>
+                                updateDraft(t.id, "trigger_config", next)
+                              }
+                            />
+                          </div>
 
-                          {/* Built-ins keep the freeform trigger description */}
+                          {/* Built-ins also carry a human-readable trigger
+                              note from the seed. Keep it editable as a
+                              supplemental description (the TriggerBuilder
+                              above is the source of truth for evaluation). */}
                           {!t.is_custom && (
-                            <Field label="When this fires (trigger)">
+                            <Field label="Trigger note (human description, optional)">
                               <textarea
                                 disabled={!canEdit}
                                 rows={2}

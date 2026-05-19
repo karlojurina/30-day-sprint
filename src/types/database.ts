@@ -26,6 +26,10 @@ export interface Student {
   membership_status: "active" | "canceled" | "past_due" | "expired";
   joined_at: string;
   last_active_at: string;
+  /** v44 — stamped on first Whop OAuth callback in this app. null = the
+   *  student exists (likely created by Whop webhook on membership.activated)
+   *  but has never actually authenticated into the sprint app. */
+  first_sprint_login_at: string | null;
   whop_access_token: string | null;
   whop_refresh_token: string | null;
   last_watch_sync_at: string | null;
@@ -341,7 +345,12 @@ export type ConditionMetric =
   // v39: pace metrics — completed-vs-expected.
   | "progress_ratio"
   | "progress_label"
-  | "region_pace";
+  | "region_pace"
+  // v44: has the student authenticated into the sprint app at all?
+  // Distinguishes "bought on Whop but never showed up" from "actually
+  // came over and logged in." Stored as students.first_sprint_login_at;
+  // truthy = condition is true.
+  | "has_logged_into_app";
 
 /** Numeric / boolean / enum conditions all share the discriminator
  *  but have different shapes. Keep them as one union and let the
@@ -381,6 +390,11 @@ export type Condition =
       metric: "progress_label" | "region_pace";
       op: "is" | "is_not";
       value: "behind" | "on_pace" | "ahead";
+    }
+  | {
+      // v44 — boolean: has the student ever authed into the sprint app?
+      metric: "has_logged_into_app";
+      op: "is" | "is_not";
     };
 
 export interface TriggerConfig {

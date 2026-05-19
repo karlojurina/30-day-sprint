@@ -227,7 +227,8 @@ function ConditionRow({
           op: "is",
         } as Condition);
       } else {
-        onChange({ metric: newId, op: "is", value: 0 } as Condition);
+        // Plain boolean (no param) — has_logged_into_app and similar.
+        onChange({ metric: newId, op: "is" } as Condition);
       }
     } else if (newDef.input === "enum") {
       onChange({

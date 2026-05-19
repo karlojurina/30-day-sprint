@@ -60,7 +60,7 @@ export type PaceLabel = "behind" | "on_pace" | "ahead";
 export interface StudentSnapshot {
   student: Pick<
     Student,
-    "id" | "name" | "joined_at" | "membership_status" | "last_active_at"
+    "id" | "name" | "joined_at" | "membership_status" | "last_active_at" | "first_sprint_login_at"
   >;
   /** Day counter, 1-indexed, computed from joined_at. */
   day: number;
@@ -238,6 +238,7 @@ export function buildStudentSnapshot(
       joined_at: student.joined_at,
       membership_status: student.membership_status,
       last_active_at: student.last_active_at,
+      first_sprint_login_at: student.first_sprint_login_at,
     },
     day,
     regions,
@@ -665,6 +666,15 @@ export const METRICS: Record<import("@/types/database").ConditionMetric, MetricD
       return "Region pace";
     },
   },
+  has_logged_into_app: {
+    id: "has_logged_into_app",
+    label: "Has logged into the sprint app",
+    input: "boolean",
+    describe: (c) =>
+      c.op === "is"
+        ? "Has logged into the sprint app"
+        : "Has NOT logged into the sprint app",
+  },
 };
 
 /* ─────────────────────────────────────────────────────────────────
@@ -758,6 +768,11 @@ function evalCondition(snap: StudentSnapshot, c: Condition): boolean {
       return c.op === "is"
         ? snap.regionPace === c.value
         : snap.regionPace !== c.value;
+    case "has_logged_into_app": {
+      // True when first_sprint_login_at is stamped (non-null).
+      const loggedIn = Boolean(snap.student.first_sprint_login_at);
+      return c.op === "is" ? loggedIn : !loggedIn;
+    }
     default: {
       const actual = getNumericValue(snap, c);
       if (actual == null) return false;

@@ -178,7 +178,7 @@ export async function GET(request: NextRequest) {
     // without overwriting it on returning students.
     const { data: existing } = await supabase
       .from("students")
-      .select("id, joined_at")
+      .select("id, joined_at, first_sprint_login_at")
       .eq("whop_user_id", userInfo.sub)
       .single();
 
@@ -186,6 +186,7 @@ export async function GET(request: NextRequest) {
     // Discord on Whop, or if the API call fails. Doesn't block signup.
     const discordUserId = await fetchWhopDiscordId(userInfo.sub);
 
+    const now = new Date().toISOString();
     const baseFields = {
       whop_user_id: userInfo.sub,
       supabase_user_id: userId,
@@ -194,9 +195,14 @@ export async function GET(request: NextRequest) {
       avatar_url: userInfo.picture,
       discord_username: userInfo.username,
       discord_user_id: discordUserId,
-      last_active_at: new Date().toISOString(),
+      last_active_at: now,
       whop_access_token: tokens.access_token ?? null,
       whop_refresh_token: tokens.refresh_token ?? null,
+      // first_sprint_login_at: stamp on the first successful callback
+      // and never again. Powers the "Has logged into the app" template
+      // trigger condition — distinguishes "bought on Whop but never
+      // showed up" from "actually authed at least once."
+      first_sprint_login_at: existing?.first_sprint_login_at ?? now,
     };
 
     let upsertFields: Record<string, unknown> = baseFields;

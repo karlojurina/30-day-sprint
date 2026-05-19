@@ -185,9 +185,30 @@ export async function GET(request: NextRequest) {
   const templateBy = new Map<string, string>(
     (templates as TemplateRow[]).map((t) => [t.scenario_id, t.id]),
   );
-  /** Custom templates the cron should evaluate. */
-  const customTemplates = (templates as TemplateRow[]).filter(
-    (t) => t.is_custom && t.is_active && t.trigger_config != null,
+  /** Templates the cron evaluates via trigger_config. Includes
+   *  custom templates (always) and built-in templates that have
+   *  been given an explicit trigger_config in /admin/templates
+   *  (treated as an override of the hardcoded scenario).
+   *
+   *  A built-in with NO trigger_config (or an empty all[]) still
+   *  fires through its hardcoded scenario in step 2a. Once Karlo
+   *  configures conditions on a built-in, the hardcoded scenario is
+   *  bypassed for that template and the trigger_config becomes the
+   *  source of truth — so "edit the conditions" actually does what
+   *  the UI suggests. */
+  const triggerConfigTemplates = (templates as TemplateRow[]).filter(
+    (t) =>
+      t.is_active &&
+      t.trigger_config != null &&
+      t.trigger_config.all.length > 0,
+  );
+  /** Scenarios whose built-in (hardcoded) trigger should be skipped
+   *  because the matching template has an explicit trigger_config
+   *  override in place. */
+  const overriddenScenarios = new Set<string>(
+    triggerConfigTemplates
+      .filter((t) => !t.is_custom)
+      .map((t) => t.scenario_id),
   );
 
   // Allow scenarios to fire even if a recently-COMPLETED task exists, but
@@ -273,8 +294,11 @@ export async function GET(request: NextRequest) {
     const snap = snapByStudent.get(student.id);
     if (!snap) continue;
 
-    // 2a. Built-in scenarios (W1.1, W1.2, …).
+    // 2a. Built-in scenarios (W1.1, W1.2, …). Skip any scenario whose
+    //     template has an explicit trigger_config override — that one
+    //     gets evaluated via the trigger_config path in 2b instead.
     for (const [scenarioId, check] of Object.entries(triggers)) {
+      if (overriddenScenarios.has(scenarioId)) continue;
       const result = check(snap);
       if (!result) continue;
       const templateId = templateBy.get(scenarioId);
@@ -287,10 +311,11 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 2b. Custom triggers created via /admin/templates (v34).
-    //     Same dedupe logic — skip if a task for this scenario already
-    //     exists for the student (open or completed).
-    for (const tpl of customTemplates) {
+    // 2b. trigger_config-driven evaluations. Includes:
+    //   - custom templates (Karlo created them in /admin/templates)
+    //   - built-in templates that Karlo gave a trigger_config override
+    //     for (treated as a full replacement of the hardcoded check)
+    for (const tpl of triggerConfigTemplates) {
       if (snap.recentTaskScenarios.has(tpl.scenario_id)) continue;
       const result = evaluateCustomTrigger(snap, tpl.trigger_config!);
       if (!result.match) continue;

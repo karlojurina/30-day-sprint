@@ -491,16 +491,28 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   const transformRef = useRef({ x: 0, y: 0, scale: 1 });
   const tweenRef = useRef<gsap.core.Tween | null>(null);
 
-  // Apply a new transform: source of truth lives in transformRef + the
-  // DOM, no React state. Called from drag, wheel, GSAP onUpdate, and
-  // baseline seeding. Bypassing React state is the whole reason touch
-  // pans aren't laggy.
-  const applyTransform = (t: { x: number; y: number; scale: number }) => {
-    transformRef.current = t;
-    const el = mapInnerRef.current;
-    if (el) {
-      el.style.transform = `translate(${t.x}px, ${t.y}px) scale(${t.scale})`;
+  // Sync the inner div's CSS transform from transformRef.current.
+  //
+  // If `t` is passed, we MUTATE the existing transformRef object's
+  // properties in place (we do NOT replace the object). GSAP tweens
+  // capture a reference to whatever transformRef.current pointed at
+  // when the tween started — if we ever swapped that reference for a
+  // new object mid-tween (the previous version did), GSAP kept
+  // animating the orphaned object and the DOM read a stale frozen
+  // copy. That's what was breaking the cinematic transitions.
+  //
+  // Callers: pan, wheel, baseline, panel re-fit (pass `t`); GSAP
+  // onUpdate (no arg — just sync DOM from the in-place ref).
+  const applyTransform = (t?: { x: number; y: number; scale: number }) => {
+    if (t) {
+      transformRef.current.x = t.x;
+      transformRef.current.y = t.y;
+      transformRef.current.scale = t.scale;
     }
+    const el = mapInnerRef.current;
+    if (!el) return;
+    const r = transformRef.current;
+    el.style.transform = `translate(${r.x}px, ${r.y}px) scale(${r.scale})`;
   };
 
   const [view, setView] = useState<View>("overview");
@@ -708,8 +720,10 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       duration: isFirst ? 1.8 : 0.7,
       ease: isFirst ? SPEC_EASE_GSAP : SPEC_EASE_GSAP_INOUT,
       onUpdate: () => {
-        // GSAP mutates transformRef.current in place; mirror to DOM.
-        applyTransform({ ...transformRef.current });
+        // GSAP mutates transformRef.current's props in place. Just
+        // sync the DOM — DON'T pass a copy back into applyTransform
+        // or we'd replace the ref GSAP is animating.
+        applyTransform();
       },
       onComplete: () => {
         tweenRef.current = null;
@@ -1053,7 +1067,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       duration: 0.32,
       ease: SPEC_EASE_GSAP,
       onUpdate: () => {
-        applyTransform({ ...transformRef.current });
+        applyTransform();
       },
       onComplete: () => {
         tweenRef.current = null;

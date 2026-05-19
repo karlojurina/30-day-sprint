@@ -603,10 +603,11 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
             gap: 8,
             padding: "8px 12px",
             borderRadius: 999,
-            background: "rgba(15, 17, 21, 0.78)",
+            // Solid bg (no backdrop-filter) on phone. blur() over a
+            // moving map underneath was forcing the GPU to re-blur on
+            // every frame and tanking pan smoothness.
+            background: "rgba(15, 17, 21, 0.96)",
             border: "1px solid rgba(255, 255, 255, 0.16)",
-            backdropFilter: "blur(20px) saturate(140%)",
-            WebkitBackdropFilter: "blur(20px) saturate(140%)",
             boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
             color: "rgba(255, 255, 255, 0.94)",
             fontSize: 12,

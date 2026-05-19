@@ -1069,11 +1069,17 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           WebkitUserSelect: "none",
         }}
       >
-        {/* Sharp scene images — overview is mounted eagerly; region scenes
-            are deferred until idle (or until the user heads into one). Once
-            mounted, scene swap is a pure opacity toggle. */}
+        {/* Sharp scene images — overview is mounted eagerly; region
+            scenes pre-mount on desktop so swaps are an instant opacity
+            toggle. On phone we only mount the active scene (each scene
+            is a 3200×1400 composited layer, and stacking five of them
+            costs serious GPU memory + makes pans crawl on lower-end
+            devices). The transition flow already has cloud cover so a
+            single-frame mount on entry is invisible. */}
         {SCENE_IMAGE_STACK.map(({ id, src, eager }) => {
-          const shouldMount = eager || regionsMounted || view === id;
+          const shouldMount = isPhone
+            ? view === id
+            : eager || regionsMounted || view === id;
           if (!shouldMount) return null;
           return (
             <img
@@ -1969,7 +1975,9 @@ function RegionSidePanel({
           gap: 10,
           padding: "10px 16px",
           borderRadius: 999,
-          background: "rgba(15, 17, 21, 0.92)",
+          // Solid bg, no backdrop-filter. Blur over a panning map kills
+          // phone GPU. See sibling note in StatsWidget phone pill.
+          background: "rgba(15, 17, 21, 0.96)",
           border: "1px solid rgba(255, 255, 255, 0.18)",
           color: "rgba(255, 255, 255, 0.94)",
           fontSize: 12,
@@ -1977,8 +1985,6 @@ function RegionSidePanel({
           letterSpacing: "-0.005em",
           cursor: "pointer",
           boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
-          backdropFilter: "blur(16px) saturate(140%)",
-          WebkitBackdropFilter: "blur(16px) saturate(140%)",
         }}
       >
         <span style={{ color: "var(--color-gold)" }}>{numeral}</span>

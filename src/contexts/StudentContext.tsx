@@ -638,13 +638,13 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const toggleLessonAction = useCallback(
     async (lessonId: string) => {
       if (!student) return;
-      const token = await getAccessToken();
-      if (!token) return;
 
+      // Run the optimistic update IMMEDIATELY before any awaits — the
+      // earlier version awaited getAccessToken() first, which made the
+      // button feel laggy ("glitch back to Shipped") because Supabase
+      // session lookups can take 100-300ms on a cold tab.
       const isShipped = actionShippedLessonIds.has(lessonId);
       const optimisticTimestamp = isShipped ? null : new Date().toISOString();
-
-      // Optimistic update — preserve existing watch state
       setCompletions((prev) => {
         const existing = prev.find((c) => c.lesson_id === lessonId);
         if (existing) {
@@ -654,7 +654,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
               : c
           );
         }
-        // No row yet — create one with only the action half set
         return [
           ...prev,
           {
@@ -668,6 +667,9 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           },
         ];
       });
+
+      const token = await getAccessToken();
+      if (!token) return;
 
       try {
         const res = await fetch("/api/student/mark-action-shipped", {

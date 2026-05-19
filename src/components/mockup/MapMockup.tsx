@@ -630,9 +630,8 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       });
     }
 
-    // Region view — outerSize.w (which we read into vw above) is already
-    // the panel-adjusted area thanks to the flex layout.
-    const usableW = vw;
+    // Region view — leaves room on the right for the side panel.
+    const usableW = Math.max(1, vw - sidePanelWidth);
 
     if (SCENES[v]) {
       const cover = Math.max(usableW / MAP_W, vh / MAP_H);
@@ -719,6 +718,46 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, outerSize]);
 
+  // Re-fit on panel collapse/expand — preserves the user's pan
+  // position. If the current zoom is enough to cover the new visible
+  // area, we just re-clamp (the camera doesn't move, the image
+  // "follows" the panel). If the zoom is too low (rare — only happens
+  // when panel collapse widens the area beyond what the current scale
+  // covers), we bump scale up to the new cover and recenter the
+  // re-clamped position. Skips first render so the initial paint
+  // sequence (view + outerSize effect above) stays in charge.
+  const sidePanelInitRef = useRef(true);
+  useEffect(() => {
+    if (sidePanelInitRef.current) {
+      sidePanelInitRef.current = false;
+      return;
+    }
+    if (outerSize.w === 0) return;
+    const t = transformRef.current;
+    const areaW = getAreaW();
+    const vh = outerSize.h;
+    const cover = Math.max(areaW / MAP_W, vh / MAP_H);
+    if (t.scale + 0.001 < cover) {
+      // Need to bump scale to fill new wider area. Snap (no tween) so
+      // the camera tracks the panel motion 1:1.
+      const next = {
+        ...t,
+        scale: cover,
+      };
+      // Re-clamp the new position so we don't expose background.
+      const imgW = MAP_W * next.scale;
+      const imgH = MAP_H * next.scale;
+      next.x = imgW <= areaW ? (areaW - imgW) / 2 : Math.max(areaW - imgW, Math.min(0, next.x));
+      next.y = imgH <= vh ? (vh - imgH) / 2 : Math.max(vh - imgH, Math.min(0, next.y));
+      applyTransform(next);
+    } else {
+      // Scale already covers the new area. Just re-clamp position —
+      // user's pan stays. This is the "image follows the panel" feel.
+      applyTransform(clampTransform(t));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sidePanelWidth]);
+
   // ──────────────────────────────────────────────────────────
   // Pan + zoom — works in BOTH overview and region scenes.
   // - Drag to pan, wheel to zoom (pointer-anchored).
@@ -731,10 +770,14 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   // ──────────────────────────────────────────────────────────
   const suppressClickRef = useRef(false);
 
-  // The width the image needs to cover. With the flex layout, outerSize.w
-  // is already the map area's actual width (panel is a sibling, not an
-  // overlay — flex-1 gives us viewport minus panel). So we just use it.
-  const getAreaW = () => outerSize.w;
+  // The width the image needs to cover. Overview = full viewport; region
+  // view = viewport minus the side panel (panel is an overlay, so the
+  // map's DOM container is still the full viewport but visually the
+  // panel covers the right edge).
+  const getAreaW = () => {
+    if (view === "overview") return outerSize.w;
+    return Math.max(1, outerSize.w - sidePanelWidth);
+  };
 
   // Clamp pan so the image always covers the visible area. If the image is
   // somehow smaller than the area (shouldn't happen since min scale is
@@ -1034,10 +1077,9 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   });
 
   return (
-    <div className="absolute inset-0 flex">
     <div
       ref={outerRef}
-      className="relative flex-1 min-w-0 overflow-hidden"
+      className="absolute inset-0 overflow-hidden"
       style={{
         background: "#060C1A",
         cursor: view === "overview" ? "grab" : "default",
@@ -1873,19 +1915,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           {toast}
         </div>
       )}
-    </div>
 
-    {/* Region side panel — DESKTOP: rendered as a flex sibling so the
-        map container above (flex-1) physically shrinks/grows with the
-        panel. ResizeObserver on the map then drives the camera re-fit
-        through the standard [view, outerSize] layout effect — no
-        imperative override needed.
-
-        PHONE: panel renders inside the same flex container; it uses
-        its own absolute bottom-sheet positioning so flex flow doesn't
-        matter. */}
-    {focusedRegion && (
-      isPhone ? (
+      {/* Region side panel — sits as an absolute overlay over the map.
+          When sidePanelWidth changes (collapse / expand), the imperative
+          re-fit effect below preserves the user's pan position. */}
+      {focusedRegion && (
         <RegionSidePanel
           region={focusedRegion}
           lessons={focusedLessons}
@@ -1919,50 +1953,9 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           width={sidePanelWidth}
           collapsed={sidePanelCollapsed}
           onToggleCollapsed={() => setSidePanelCollapsed((v) => !v)}
-          isPhone
+          isPhone={isPhone}
         />
-      ) : (
-        <div
-          className="relative shrink-0"
-          style={{ width: sidePanelWidth }}
-        >
-          <RegionSidePanel
-            region={focusedRegion}
-            lessons={focusedLessons}
-            completedLessonIds={completedLessonIds}
-            onOpenLesson={onOpenLesson}
-            onBack={() => transitionTo("overview")}
-            onPrev={prevRegion ? () => transitionTo(prevRegion.id as RegionId) : null}
-            onNext={
-              nextRegion
-                ? () => {
-                    const progress = regionProgress[focusedRegion.id];
-                    const isComplete = progress?.isComplete ?? false;
-                    if (!isComplete) {
-                      const remaining =
-                        (progress?.total ?? 0) - (progress?.completed ?? 0);
-                      showToast(
-                        remaining === 1
-                          ? "You haven't completed the last lesson"
-                          : `${remaining} lessons left to unlock Onward`,
-                      );
-                      return;
-                    }
-                    transitionTo(nextRegion.id as RegionId);
-                  }
-                : null
-            }
-            nextLocked={
-              nextRegion != null &&
-              !(regionProgress[focusedRegion.id]?.isComplete ?? false)
-            }
-            width={sidePanelWidth}
-            collapsed={sidePanelCollapsed}
-            onToggleCollapsed={() => setSidePanelCollapsed((v) => !v)}
-          />
-        </div>
-      )
-    )}
+      )}
     </div>
   );
 }

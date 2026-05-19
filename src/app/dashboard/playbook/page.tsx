@@ -109,11 +109,12 @@ export default function PlaybookPage() {
     >
       {/* Top bar — Back to the climb (left) + page label (center) */}
       <header
+        className="px-5 py-4 sm:px-8 sm:py-5"
         style={{
-          padding: "20px 32px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
+          gap: 12,
           borderBottom: "1px solid rgba(255,255,255,0.06)",
         }}
       >
@@ -161,32 +162,28 @@ export default function PlaybookPage() {
           The Playbook
         </p>
 
-        {/* Spacer to balance the back-link width — keeps the page
-            label centered without a second nav item. */}
-        <div style={{ width: 180 }} />
+        {/* Spacer to balance the back-link width on desktop — keeps the
+            page label centered without a second nav item. Hidden on
+            phone to avoid eating space. */}
+        <div className="hidden sm:block" style={{ width: 180 }} />
       </header>
 
       {/* Hub — 4 cards */}
       <main
+        className="py-8 sm:py-12"
         style={{
           flex: 1,
           display: "flex",
           flexDirection: "column",
           justifyContent: "center",
-          paddingTop: 48,
-          paddingBottom: 48,
         }}
       >
         <div
-          style={{
-            textAlign: "center",
-            marginBottom: 40,
-            padding: "0 32px",
-          }}
+          className="text-center mb-8 sm:mb-10 px-5 sm:px-8"
         >
           <h1
+            className="text-[26px] sm:text-4xl"
             style={{
-              fontSize: 36,
               fontWeight: 600,
               letterSpacing: "-0.028em",
               lineHeight: 1.1,
@@ -198,8 +195,8 @@ export default function PlaybookPage() {
             You&rsquo;re a marketer now.
           </h1>
           <p
+            className="text-[14px] sm:text-base"
             style={{
-              fontSize: 16,
               color: "rgba(255,255,255,0.62)",
               maxWidth: 640,
               margin: "0 auto",

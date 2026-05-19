@@ -12,6 +12,7 @@ import {
   lessonGroupOf,
   progressPercent,
 } from "@/lib/constants";
+import { useIsPhone } from "@/lib/useMediaQuery";
 
 interface StatsWidgetProps {
   onOpenLesson?: (lessonId: string) => void;
@@ -28,6 +29,9 @@ interface StatsWidgetProps {
  * Position: absolute top-left of its parent (the map container).
  */
 export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
+  const isPhone = useIsPhone();
+  const [phoneOpen, setPhoneOpen] = useState(false);
+
   const { student, signOut } = useAuth();
   const {
     lessons,
@@ -143,30 +147,8 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
   const sprintFinished = Boolean(student.sprint_completed_at);
   const hasBountyAccess = Boolean(student.bounty_access_claimed_at);
 
-  return (
-    <div
-      style={{
-        position: "absolute",
-        top: 20,
-        left: 20,
-        zIndex: 30,
-        width: 380,
-        padding: "20px 22px",
-        borderRadius: 18,
-        background: "rgba(15, 17, 21, 0.62)",
-        border: "1px solid rgba(255, 255, 255, 0.14)",
-        backdropFilter: "blur(24px) saturate(140%)",
-        WebkitBackdropFilter: "blur(24px) saturate(140%)",
-        boxShadow:
-          "0 14px 40px rgba(0,0,0,0.50), 0 1px 0 rgba(255,255,255,0.05) inset",
-        color: "rgba(255, 255, 255, 0.94)",
-        fontSize: 13,
-        letterSpacing: "-0.005em",
-        display: "flex",
-        flexDirection: "column",
-        gap: 16,
-      }}
-    >
+  const body = (
+    <>
       {/* Header - brand logo + welcome + signout */}
       <div
         style={{
@@ -600,6 +582,166 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
           </svg>
         </Link>
       )}
+    </>
+  );
+
+  // Phone: compact pill at top-left + bottom-sheet on tap.
+  if (isPhone) {
+    return (
+      <>
+        <button
+          type="button"
+          onClick={() => setPhoneOpen(true)}
+          aria-label="Open progress panel"
+          style={{
+            position: "absolute",
+            top: 12,
+            left: 12,
+            zIndex: 30,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 12px",
+            borderRadius: 999,
+            background: "rgba(15, 17, 21, 0.78)",
+            border: "1px solid rgba(255, 255, 255, 0.16)",
+            backdropFilter: "blur(20px) saturate(140%)",
+            WebkitBackdropFilter: "blur(20px) saturate(140%)",
+            boxShadow: "0 10px 30px rgba(0,0,0,0.45)",
+            color: "rgba(255, 255, 255, 0.94)",
+            fontSize: 12,
+            fontWeight: 600,
+            letterSpacing: "-0.005em",
+            cursor: "pointer",
+          }}
+        >
+          <Image
+            src="/ecomtalent-logo.png"
+            alt=""
+            width={547}
+            height={547}
+            priority
+            style={{ height: 22, width: 22, objectFit: "contain", flexShrink: 0 }}
+          />
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>
+            Day {dayNumber} · {percent}%
+          </span>
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            style={{ opacity: 0.7 }}
+          >
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
+
+        {phoneOpen && (
+          <>
+            <div
+              onClick={() => setPhoneOpen(false)}
+              aria-hidden="true"
+              style={{
+                position: "fixed",
+                inset: 0,
+                zIndex: 60,
+                background: "rgba(6, 12, 26, 0.72)",
+                backdropFilter: "blur(8px)",
+                WebkitBackdropFilter: "blur(8px)",
+              }}
+            />
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label="Progress panel"
+              style={{
+                position: "fixed",
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 70,
+                maxHeight: "85vh",
+                overflowY: "auto",
+                padding: "20px 18px 28px",
+                borderTopLeftRadius: 22,
+                borderTopRightRadius: 22,
+                background: "rgba(15, 17, 21, 0.96)",
+                borderTop: "1px solid rgba(255, 255, 255, 0.14)",
+                color: "rgba(255, 255, 255, 0.94)",
+                fontSize: 13,
+                letterSpacing: "-0.005em",
+                display: "flex",
+                flexDirection: "column",
+                gap: 16,
+                boxShadow: "0 -20px 60px rgba(0,0,0,0.6)",
+              }}
+            >
+              {/* Drag handle */}
+              <div
+                aria-hidden="true"
+                style={{
+                  width: 38,
+                  height: 4,
+                  borderRadius: 999,
+                  background: "rgba(255,255,255,0.18)",
+                  margin: "-6px auto 4px",
+                }}
+              />
+              <div
+                onClick={(e) => {
+                  // Close the sheet when a primary action (Next Up,
+                  // Open Playbook) is taken so the map shows under it.
+                  const target = e.target as HTMLElement;
+                  if (
+                    target.closest("a") ||
+                    target.closest('button[aria-label="Sign out"]') ||
+                    target.closest('button[type="button"]')?.getAttribute("data-sheet-close") === "true"
+                  ) {
+                    setPhoneOpen(false);
+                  }
+                }}
+                style={{ display: "flex", flexDirection: "column", gap: 16 }}
+              >
+                {body}
+              </div>
+            </div>
+          </>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 20,
+        left: 20,
+        zIndex: 30,
+        width: 380,
+        padding: "20px 22px",
+        borderRadius: 18,
+        background: "rgba(15, 17, 21, 0.62)",
+        border: "1px solid rgba(255, 255, 255, 0.14)",
+        backdropFilter: "blur(24px) saturate(140%)",
+        WebkitBackdropFilter: "blur(24px) saturate(140%)",
+        boxShadow:
+          "0 14px 40px rgba(0,0,0,0.50), 0 1px 0 rgba(255,255,255,0.05) inset",
+        color: "rgba(255, 255, 255, 0.94)",
+        fontSize: 13,
+        letterSpacing: "-0.005em",
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+      }}
+    >
+      {body}
     </div>
   );
 }

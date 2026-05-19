@@ -10,6 +10,7 @@ import {
   type RegionStripMap,
 } from "@/lib/map/path-math";
 import { LESSON_TYPE_LABELS, LESSON_GROUPS } from "@/lib/constants";
+import { useIsPhone } from "@/lib/useMediaQuery";
 import type { Lesson } from "@/types/database";
 
 /** Synthetic id prefix for the virtual lesson representing a group on the map. */
@@ -555,10 +556,16 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     return () => window.clearTimeout(id);
   }, [regionsMounted]);
 
+  const isPhone = useIsPhone();
   const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
-  const sidePanelWidth = sidePanelCollapsed
-    ? SIDE_PANEL_COLLAPSED_WIDTH
-    : getSidePanelWidth(outerSize.w);
+  // On phone, the side panel renders as a bottom-sheet overlay - it
+  // does NOT take horizontal space in the layout. So we report 0 to
+  // anything that uses sidePanelWidth for canvas sizing.
+  const sidePanelWidth = isPhone
+    ? 0
+    : sidePanelCollapsed
+      ? SIDE_PANEL_COLLAPSED_WIDTH
+      : getSidePanelWidth(outerSize.w);
 
   // Default zoom factor over cover-fit. Cover guarantees the image fills the
   // viewport (no bars at any aspect ratio); the multiplier zooms in further
@@ -1704,6 +1711,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
           width={sidePanelWidth}
           collapsed={sidePanelCollapsed}
           onToggleCollapsed={() => setSidePanelCollapsed((v) => !v)}
+          isPhone={isPhone}
         />
       )}
 
@@ -1899,6 +1907,7 @@ function RegionSidePanel({
   width,
   collapsed,
   onToggleCollapsed,
+  isPhone = false,
 }: {
   region: ReturnType<typeof useStudent>["regions"][number];
   lessons: Lesson[];
@@ -1913,6 +1922,9 @@ function RegionSidePanel({
   width: number;
   collapsed: boolean;
   onToggleCollapsed: () => void;
+  /** On phone, the panel renders as a bottom-sheet overlay rather than
+   *  a right-rail aside. Toggle button becomes a floating tab. */
+  isPhone?: boolean;
 }) {
   // onPrev is still accepted as a prop (parent passes it for
   // backward compat) but unused in the new footer - "Back to map"
@@ -1926,7 +1938,47 @@ function RegionSidePanel({
   // En-dash in days_label ("Days 1–8") -> hyphen. Karlo's voice rule.
   const daysLabel = (region.days_label ?? "").replace(/[–—]/g, "-");
 
-  // Collapsed mode: render a thin strip with just an expand button
+  // Phone collapsed: a floating bottom tab. Tap to expand the sheet.
+  if (isPhone && collapsed) {
+    return (
+      <button
+        onClick={onToggleCollapsed}
+        aria-label="Expand region lessons"
+        style={{
+          position: "absolute",
+          left: "50%",
+          transform: "translateX(-50%)",
+          bottom: 16,
+          zIndex: 30,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "10px 16px",
+          borderRadius: 999,
+          background: "rgba(15, 17, 21, 0.92)",
+          border: "1px solid rgba(255, 255, 255, 0.18)",
+          color: "rgba(255, 255, 255, 0.94)",
+          fontSize: 12,
+          fontWeight: 600,
+          letterSpacing: "-0.005em",
+          cursor: "pointer",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.5)",
+          backdropFilter: "blur(16px) saturate(140%)",
+          WebkitBackdropFilter: "blur(16px) saturate(140%)",
+        }}
+      >
+        <span style={{ color: "var(--color-gold)" }}>{numeral}</span>
+        <span style={{ fontVariantNumeric: "tabular-nums" }}>
+          {completed} / {total}
+        </span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M18 15l-6-6-6 6" />
+        </svg>
+      </button>
+    );
+  }
+
+  // Desktop collapsed: thin strip with just an expand button
   // and the region's roman numeral. Map gets the rest of the canvas.
   if (collapsed) {
     return (
@@ -1988,10 +2040,24 @@ function RegionSidePanel({
     );
   }
 
-  return (
-    <aside
-      onWheel={(e) => e.stopPropagation()}
-      style={{
+  const asideStyle: React.CSSProperties = isPhone
+    ? {
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        maxHeight: "85vh",
+        zIndex: 35,
+        background: "rgba(10, 14, 22, 0.97)",
+        borderTop: "1px solid rgba(255,255,255,0.10)",
+        borderTopLeftRadius: 22,
+        borderTopRightRadius: 22,
+        display: "flex",
+        flexDirection: "column",
+        animation: "slide-in-up 0.45s cubic-bezier(0.22,1,0.36,1) both",
+        boxShadow: "0 -20px 60px rgba(0,0,0,0.55)",
+      }
+    : {
         position: "absolute",
         top: 0,
         right: 0,
@@ -2003,7 +2069,12 @@ function RegionSidePanel({
         flexDirection: "column",
         animation: "slide-in-right 0.5s cubic-bezier(0.22,1,0.36,1) both",
         boxShadow: "-20px 0 40px rgba(0,0,0,0.45)",
-      }}
+      };
+
+  return (
+    <aside
+      onWheel={(e) => e.stopPropagation()}
+      style={asideStyle}
     >
       {/* Top nav: back to map + collapse */}
       <div
@@ -2044,8 +2115,8 @@ function RegionSidePanel({
         </button>
         <button
           onClick={onToggleCollapsed}
-          aria-label="Collapse panel"
-          title="Collapse panel"
+          aria-label={isPhone ? "Close panel" : "Collapse panel"}
+          title={isPhone ? "Close panel" : "Collapse panel"}
           style={{
             background: "transparent",
             border: "1px solid rgba(255,255,255,0.10)",
@@ -2061,7 +2132,8 @@ function RegionSidePanel({
           }}
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M9 18l6-6-6-6" />
+            {/* Phone: down chevron (close sheet). Desktop: right chevron (collapse rail). */}
+            <path d={isPhone ? "M6 9l6 6 6-6" : "M9 18l6-6-6-6"} />
           </svg>
         </button>
       </div>

@@ -65,7 +65,7 @@ export function PlaybookNodeSheet({ node, onClose, milestoneSlot }: Props) {
               borderLeft: "1px solid rgba(255,255,255,0.10)",
             }}
           >
-            <div style={{ padding: "32px 32px 48px" }}>
+            <div className="p-5 sm:p-8 pb-12 sm:pb-12">
               {/* Close */}
               <button
                 type="button"

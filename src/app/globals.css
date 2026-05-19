@@ -496,6 +496,17 @@ body:has(.admin-shell)::before {
   }
 }
 
+@keyframes slide-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(32px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 @keyframes celebrate-in {
   0% {
     opacity: 0;

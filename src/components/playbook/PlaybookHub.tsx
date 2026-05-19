@@ -29,14 +29,9 @@ interface Props {
 export function PlaybookHub({ nodes, firstClientLandedAt, onOpenNode }: Props) {
   return (
     <div
+      className="grid gap-4 w-full mx-auto px-5 sm:px-6 lg:px-8 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4"
       style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-        gap: 16,
-        width: "100%",
         maxWidth: 1280,
-        margin: "0 auto",
-        padding: "0 32px",
       }}
     >
       {nodes.map((node) => (

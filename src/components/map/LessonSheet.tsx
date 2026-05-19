@@ -214,7 +214,7 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
       />
 
       <div
-        className="fixed inset-0 z-[50] flex items-center justify-center p-4"
+        className="fixed inset-0 z-[50] flex items-center justify-center p-0 sm:p-4"
         style={{ pointerEvents: "none" }}
       >
         <div
@@ -222,15 +222,14 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
           role="dialog"
           aria-modal="true"
           aria-labelledby="lesson-sheet-title"
-          className="flex flex-col"
+          className="flex flex-col w-full sm:w-auto h-full sm:h-auto rounded-none sm:rounded-2xl"
           style={{
             pointerEvents: "auto",
-            width: "min(840px, 92vw)",
-            maxHeight: "92vh",
+            maxWidth: 840,
+            maxHeight: "100dvh",
             background:
               "linear-gradient(180deg, var(--color-bg-card) 0%, var(--color-bg-secondary) 100%)",
             border: "1px solid var(--color-border-hover)",
-            borderRadius: 16,
             overflow: "hidden",
             boxShadow: "0 40px 80px rgba(0,0,0,0.6)",
             animation: "fade-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both",
@@ -1289,7 +1288,7 @@ function GroupSheet({
       />
 
       <div
-        className="fixed inset-0 z-[50] flex items-center justify-center p-4"
+        className="fixed inset-0 z-[50] flex items-center justify-center p-0 sm:p-4"
         style={{ pointerEvents: "none" }}
       >
         <div
@@ -1297,15 +1296,14 @@ function GroupSheet({
           role="dialog"
           aria-modal="true"
           aria-labelledby="group-sheet-title"
-          className="flex flex-col"
+          className="flex flex-col w-full sm:w-auto h-full sm:h-auto rounded-none sm:rounded-2xl"
           style={{
             pointerEvents: "auto",
-            width: "min(720px, 92vw)",
-            maxHeight: "92vh",
+            maxWidth: 720,
+            maxHeight: "100dvh",
             background:
               "linear-gradient(180deg, var(--color-bg-card) 0%, var(--color-bg-secondary) 100%)",
             border: "1px solid var(--color-border-hover)",
-            borderRadius: 16,
             overflow: "hidden",
             boxShadow: "0 40px 80px rgba(0,0,0,0.6)",
             animation: "fade-in 0.35s cubic-bezier(0.22, 1, 0.36, 1) both",

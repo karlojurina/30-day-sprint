@@ -120,20 +120,6 @@ function PlaybookCard({
       )}
 
       <div>
-        {/* Position numeral / mark */}
-        <p
-          style={{
-            fontSize: 11,
-            fontFamily: "var(--font-mono)",
-            color: isMilestone ? "var(--color-gold-light)" : "rgba(255,255,255,0.4)",
-            letterSpacing: "0.16em",
-            textTransform: "uppercase",
-            marginBottom: 10,
-          }}
-        >
-          {String(node.position).padStart(2, "0")} ·{" "}
-          {isMilestone ? "the work click moment" : "always-on"}
-        </p>
         <h3
           style={{
             fontSize: 22,
@@ -141,6 +127,9 @@ function PlaybookCard({
             letterSpacing: "-0.022em",
             lineHeight: 1.15,
             marginBottom: 8,
+            // Reserve room for the absolute "Milestone" pill in the
+            // top-right so the title doesn't wrap underneath it.
+            paddingRight: isMilestone ? 92 : 0,
           }}
         >
           {node.title}

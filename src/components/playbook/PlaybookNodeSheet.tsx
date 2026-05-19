@@ -1,18 +1,14 @@
 "use client";
 
 /**
- * v42 (v2) — sheet that opens when a Map 2 hub card is clicked.
+ * v43 — Centered modal for the Map 2 hub. Was originally a right-rail
+ * aside (mirrored the LessonSheet's earlier shape) but the centered
+ * popup pattern is the one Karlo wants everywhere now, same as the
+ * map lesson sheets.
  *
- * Layout mirrors the existing LessonSheet — full-screen overlay
- * + scrim, right-rail card with body content. Header carries the
- * node title/subtitle. Body renders doc_content (markdown bodies
- * land later; today the placeholder TODO(karlo) strings just
- * render as preformatted text). Optional video_url embeds above
- * the doc if set.
- *
- * Step 4 ships the read-only sheet. Step 5 wires the
- * mark-complete + crowned celebration onto the milestone node's
- * sheet via the `milestoneSlot` prop.
+ * Wraps the same content the right-rail version had: optional video,
+ * doc body, milestone CTA slot. Sizing matches the LessonSheet group
+ * variant (720px on desktop, full-screen on phone).
  */
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -21,8 +17,8 @@ import type { PlaybookNode } from "@/types/database";
 interface Props {
   node: PlaybookNode | null;
   onClose: () => void;
-  /** Step 5 — slot the milestone's mark-complete button + landed
-   *  confirmation goes through this. Step 4 leaves it empty. */
+  /** Milestone-only: the mark-complete CTA + post-landing confirmation
+   *  panel is injected here so this component stays presentational. */
   milestoneSlot?: React.ReactNode;
 }
 
@@ -50,171 +46,158 @@ export function PlaybookNodeSheet({ node, onClose, milestoneSlot }: Props) {
             }}
           />
 
-          <motion.aside
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="pb-node-title"
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
-            className="fixed top-0 right-0 z-[65] h-full overflow-y-auto"
-            style={{
-              width: "min(640px, 100vw)",
-              background: "var(--color-bg-card)",
-              borderLeft: "1px solid rgba(255,255,255,0.10)",
-            }}
+          <div
+            className="fixed inset-0 z-[65] flex items-center justify-center p-0 sm:p-4"
+            style={{ pointerEvents: "none" }}
           >
-            <div className="p-5 sm:p-8 pb-12 sm:pb-12">
-              {/* Close */}
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label="Close"
-                style={{
-                  position: "absolute",
-                  top: 18,
-                  right: 18,
-                  width: 32,
-                  height: 32,
-                  borderRadius: 8,
-                  background: "transparent",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  color: "rgba(255,255,255,0.78)",
-                  cursor: "pointer",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
-
+            <motion.div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="pb-node-title"
+              initial={{ opacity: 0, y: 16, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.97 }}
+              transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+              className="flex flex-col w-full sm:w-[min(720px,92vw)] h-full sm:h-auto max-h-[100dvh] sm:max-h-[92vh] rounded-none sm:rounded-2xl overflow-hidden"
+              style={{
+                pointerEvents: "auto",
+                background:
+                  "linear-gradient(180deg, var(--color-bg-card) 0%, var(--color-bg-secondary) 100%)",
+                border: "1px solid var(--color-border-hover)",
+                boxShadow: "0 40px 80px rgba(0,0,0,0.6)",
+              }}
+            >
               {/* Header */}
-              <p
-                style={{
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  color: node.is_milestone
-                    ? "var(--color-gold-light)"
-                    : "rgba(255,255,255,0.45)",
-                  letterSpacing: "0.18em",
-                  textTransform: "uppercase",
-                  marginBottom: 10,
-                }}
+              <div
+                className="flex items-start justify-between p-5 sm:p-6 shrink-0"
+                style={{ borderBottom: "1px solid var(--color-border)" }}
               >
-                {node.is_milestone ? "Milestone" : "Always-on"}
-              </p>
-              <h2
-                id="pb-node-title"
-                style={{
-                  fontSize: 30,
-                  fontWeight: 600,
-                  letterSpacing: "-0.025em",
-                  lineHeight: 1.1,
-                  color: "rgba(255,255,255,0.96)",
-                  marginBottom: 10,
-                }}
+                <div className="min-w-0 pr-3">
+                  <p
+                    className="font-mono uppercase"
+                    style={{
+                      fontSize: 11,
+                      color: node.is_milestone
+                        ? "var(--color-gold-light)"
+                        : "rgba(255,255,255,0.45)",
+                      letterSpacing: "0.18em",
+                      marginBottom: 8,
+                    }}
+                  >
+                    {node.is_milestone ? "Milestone" : "Always-on"}
+                  </p>
+                  <h2
+                    id="pb-node-title"
+                    style={{
+                      fontSize: 24,
+                      fontWeight: 600,
+                      letterSpacing: "-0.022em",
+                      lineHeight: 1.15,
+                      color: "rgba(255,255,255,0.96)",
+                    }}
+                  >
+                    {node.title}
+                  </h2>
+                  {node.subtitle && (
+                    <p
+                      style={{
+                        fontSize: 14,
+                        color: "rgba(255,255,255,0.66)",
+                        lineHeight: 1.5,
+                        letterSpacing: "-0.005em",
+                        marginTop: 8,
+                      }}
+                    >
+                      {node.subtitle}
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label="Close"
+                  className="shrink-0"
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: 8,
+                    background: "transparent",
+                    border: "1px solid rgba(255,255,255,0.14)",
+                    color: "rgba(255,255,255,0.78)",
+                    cursor: "pointer",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Body — scrollable */}
+              <div
+                className="overflow-y-auto p-5 sm:p-6"
+                style={{ flex: 1 }}
               >
-                {node.title}
-              </h2>
-              {node.subtitle && (
-                <p
+                {/* Optional video — embedded above the doc body. */}
+                {node.video_url && (
+                  <div
+                    style={{
+                      position: "relative",
+                      paddingBottom: "56.25%",
+                      marginBottom: 22,
+                      borderRadius: 12,
+                      overflow: "hidden",
+                      background: "rgba(0,0,0,0.4)",
+                    }}
+                  >
+                    <iframe
+                      src={node.video_url}
+                      title={node.title}
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        width: "100%",
+                        height: "100%",
+                        border: "none",
+                      }}
+                      allow="autoplay; encrypted-media; picture-in-picture"
+                      allowFullScreen
+                    />
+                  </div>
+                )}
+
+                {/* Body — preformatted text. Markdown rendering arrives
+                    when Karlo's content actually needs the formatting. */}
+                <div
                   style={{
                     fontSize: 15,
-                    color: "rgba(255,255,255,0.66)",
-                    lineHeight: 1.5,
+                    lineHeight: 1.65,
+                    color: "rgba(255,255,255,0.82)",
+                    whiteSpace: "pre-wrap",
                     letterSpacing: "-0.005em",
                     marginBottom: 24,
                   }}
                 >
-                  {node.subtitle}
-                </p>
-              )}
-
-              {/* Optional video — embedded above the body. Karlo
-                  may or may not shoot one per node; doc-first per
-                  brief 05-content-delivery.md §7. */}
-              {node.video_url && (
-                <div
-                  style={{
-                    position: "relative",
-                    paddingBottom: "56.25%",
-                    marginBottom: 24,
-                    borderRadius: 12,
-                    overflow: "hidden",
-                    background: "rgba(0,0,0,0.4)",
-                  }}
-                >
-                  <iframe
-                    src={node.video_url}
-                    title={node.title}
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      width: "100%",
-                      height: "100%",
-                      border: "none",
-                    }}
-                    allow="autoplay; encrypted-media; picture-in-picture"
-                    allowFullScreen
-                  />
+                  {node.doc_content}
                 </div>
-              )}
 
-              {/* Body — plain text rendering of doc_content for now.
-                  preserves newlines without pulling in a markdown
-                  library. Real markdown rendering arrives when
-                  Karlo's content actually needs the formatting. */}
-              <div
-                style={{
-                  fontSize: 15,
-                  lineHeight: 1.65,
-                  color: "rgba(255,255,255,0.82)",
-                  whiteSpace: "pre-wrap",
-                  letterSpacing: "-0.005em",
-                  marginBottom: 32,
-                }}
-              >
-                {node.doc_content}
+                {/* Milestone CTA slot — wired from the parent page. */}
+                {node.is_milestone && milestoneSlot}
               </div>
-
-              {/* Milestone CTA slot — Step 5 fills this. */}
-              {node.is_milestone && milestoneSlot}
-
-              {/* Footer */}
-              <button
-                type="button"
-                onClick={onClose}
-                style={{
-                  marginTop: node.is_milestone ? 24 : 0,
-                  padding: "10px 16px",
-                  borderRadius: 10,
-                  background: "rgba(255,255,255,0.08)",
-                  border: "1px solid rgba(255,255,255,0.16)",
-                  color: "rgba(255,255,255,0.78)",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  fontFamily: "var(--font-mono)",
-                  letterSpacing: "0.04em",
-                }}
-              >
-                ← Back to the Playbook
-              </button>
-            </div>
-          </motion.aside>
+            </motion.div>
+          </div>
         </>
       )}
     </AnimatePresence>

@@ -222,11 +222,9 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
           role="dialog"
           aria-modal="true"
           aria-labelledby="lesson-sheet-title"
-          className="flex flex-col w-full sm:w-auto h-full sm:h-auto rounded-none sm:rounded-2xl"
+          className="flex flex-col w-full sm:w-[min(840px,92vw)] h-full sm:h-auto max-h-[100dvh] sm:max-h-[92vh] rounded-none sm:rounded-2xl"
           style={{
             pointerEvents: "auto",
-            maxWidth: 840,
-            maxHeight: "100dvh",
             background:
               "linear-gradient(180deg, var(--color-bg-card) 0%, var(--color-bg-secondary) 100%)",
             border: "1px solid var(--color-border-hover)",
@@ -1296,11 +1294,9 @@ function GroupSheet({
           role="dialog"
           aria-modal="true"
           aria-labelledby="group-sheet-title"
-          className="flex flex-col w-full sm:w-auto h-full sm:h-auto rounded-none sm:rounded-2xl"
+          className="flex flex-col w-full sm:w-[min(720px,92vw)] h-full sm:h-auto max-h-[100dvh] sm:max-h-[92vh] rounded-none sm:rounded-2xl"
           style={{
             pointerEvents: "auto",
-            maxWidth: 720,
-            maxHeight: "100dvh",
             background:
               "linear-gradient(180deg, var(--color-bg-card) 0%, var(--color-bg-secondary) 100%)",
             border: "1px solid var(--color-border-hover)",

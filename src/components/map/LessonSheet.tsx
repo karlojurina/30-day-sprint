@@ -1002,7 +1002,17 @@ function DiscordLinkBlock({
       }}
     >
       <p className="section-label" style={{ marginBottom: 6 }}>
-        Discord submission link
+        Discord submission link{" "}
+        <span
+          style={{
+            color: "var(--color-text-tertiary)",
+            fontWeight: 400,
+            textTransform: "none",
+            letterSpacing: 0,
+          }}
+        >
+          (optional)
+        </span>
       </p>
 
       {saved && !editing ? (

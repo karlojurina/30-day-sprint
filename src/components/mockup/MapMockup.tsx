@@ -106,6 +106,7 @@ import {
 } from "@/components/map/DiscountClaimCelebration";
 import { CinematicDive } from "./CinematicDive";
 import { StatsWidget } from "@/components/map/StatsWidget";
+import { RegionTodoWidget } from "@/components/map/RegionTodoWidget";
 
 interface MapMockupProps {
   onOpenLesson: (lessonId: string) => void;
@@ -629,8 +630,9 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       });
     }
 
-    // Region view — leaves room on the right for the side panel.
-    const usableW = Math.max(1, vw - sidePanelWidth);
+    // Region view — outerSize.w (which we read into vw above) is already
+    // the panel-adjusted area thanks to the flex layout.
+    const usableW = vw;
 
     if (SCENES[v]) {
       const cover = Math.max(usableW / MAP_W, vh / MAP_H);
@@ -661,10 +663,6 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   // time the user lands on the map, but a fast tween for subsequent view
   // changes (those run hidden behind cloud cover).
   const isFirstPaintRef = useRef(true);
-  // First-run skip flag for the sidePanelWidth re-fit effect. The [view,
-  // outerSize] effect already handles initial paint; this is only for
-  // subsequent panel collapses/expands.
-  const sidePanelInitRef = useRef(true);
 
   // Animate transform on view change
   useEffect(() => {
@@ -721,36 +719,6 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, outerSize]);
 
-  // Re-fit the camera when the side panel collapses/expands. Without
-  // this, the previous cover-fit stays put against the OLD area width
-  // and the now-wider canvas shows background bars on the right.
-  useEffect(() => {
-    if (sidePanelInitRef.current) {
-      sidePanelInitRef.current = false;
-      return;
-    }
-    if (outerSize.w === 0) return;
-    if (tweenRef.current) {
-      tweenRef.current.kill();
-      tweenRef.current = null;
-    }
-    const target = getTargetTransform(view);
-    tweenRef.current = gsap.to(transformRef.current, {
-      x: target.x,
-      y: target.y,
-      scale: target.scale,
-      duration: 0.35,
-      ease: SPEC_EASE_GSAP_INOUT,
-      onUpdate: () => {
-        applyTransform({ ...transformRef.current });
-      },
-      onComplete: () => {
-        tweenRef.current = null;
-      },
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidePanelWidth]);
-
   // ──────────────────────────────────────────────────────────
   // Pan + zoom — works in BOTH overview and region scenes.
   // - Drag to pan, wheel to zoom (pointer-anchored).
@@ -763,13 +731,10 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   // ──────────────────────────────────────────────────────────
   const suppressClickRef = useRef(false);
 
-  // The width the image needs to cover. Overview = full viewport; region
-  // view = viewport minus the side panel. The clamp uses this so panning
-  // never reveals the panel area or any background.
-  const getAreaW = () => {
-    if (view === "overview") return outerSize.w;
-    return Math.max(1, outerSize.w - sidePanelWidth);
-  };
+  // The width the image needs to cover. With the flex layout, outerSize.w
+  // is already the map area's actual width (panel is a sibling, not an
+  // overlay — flex-1 gives us viewport minus panel). So we just use it.
+  const getAreaW = () => outerSize.w;
 
   // Clamp pan so the image always covers the visible area. If the image is
   // somehow smaller than the area (shouldn't happen since min scale is
@@ -1069,9 +1034,10 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   });
 
   return (
+    <div className="absolute inset-0 flex">
     <div
       ref={outerRef}
-      className="absolute inset-0 overflow-hidden"
+      className="relative flex-1 min-w-0 overflow-hidden"
       style={{
         background: "#060C1A",
         cursor: view === "overview" ? "grab" : "default",
@@ -1730,50 +1696,16 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
         )}
       </div>
 
-      {/* Region side panel */}
-      {focusedRegion && (
-        <RegionSidePanel
-          region={focusedRegion}
-          lessons={focusedLessons}
-          completedLessonIds={completedLessonIds}
-          onOpenLesson={onOpenLesson}
-          onBack={() => transitionTo("overview")}
-          onPrev={prevRegion ? () => transitionTo(prevRegion.id as RegionId) : null}
-          onNext={
-            nextRegion
-              ? () => {
-                  const progress = regionProgress[focusedRegion.id];
-                  const isComplete = progress?.isComplete ?? false;
-                  if (!isComplete) {
-                    const remaining =
-                      (progress?.total ?? 0) - (progress?.completed ?? 0);
-                    showToast(
-                      remaining === 1
-                        ? "You haven't completed the last lesson"
-                        : `${remaining} lessons left to unlock Onward`,
-                    );
-                    return;
-                  }
-                  transitionTo(nextRegion.id as RegionId);
-                }
-              : null
-          }
-          nextLocked={
-            nextRegion != null &&
-            !(regionProgress[focusedRegion.id]?.isComplete ?? false)
-          }
-          width={sidePanelWidth}
-          collapsed={sidePanelCollapsed}
-          onToggleCollapsed={() => setSidePanelCollapsed((v) => !v)}
-          isPhone={isPhone}
-        />
-      )}
-
       {/* StatsWidget — visible ONLY on overview. Replaces the old
           TopBar. Hosts welcome, progress, streak, next lesson,
           discount countdown, and signout. */}
       {view === "overview" && (
-        <StatsWidget onOpenLesson={onOpenLesson} />
+        <>
+          <StatsWidget onOpenLesson={onOpenLesson} />
+          {/* Region to-do widget — sits next to StatsWidget on overview.
+              Auto-hides on phone (cramped). */}
+          {!isPhone && <RegionTodoWidget />}
+        </>
       )}
 
       {/* Back-to-map button — visible ONLY when zoomed into a region.
@@ -1942,6 +1874,96 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
         </div>
       )}
     </div>
+
+    {/* Region side panel — DESKTOP: rendered as a flex sibling so the
+        map container above (flex-1) physically shrinks/grows with the
+        panel. ResizeObserver on the map then drives the camera re-fit
+        through the standard [view, outerSize] layout effect — no
+        imperative override needed.
+
+        PHONE: panel renders inside the same flex container; it uses
+        its own absolute bottom-sheet positioning so flex flow doesn't
+        matter. */}
+    {focusedRegion && (
+      isPhone ? (
+        <RegionSidePanel
+          region={focusedRegion}
+          lessons={focusedLessons}
+          completedLessonIds={completedLessonIds}
+          onOpenLesson={onOpenLesson}
+          onBack={() => transitionTo("overview")}
+          onPrev={prevRegion ? () => transitionTo(prevRegion.id as RegionId) : null}
+          onNext={
+            nextRegion
+              ? () => {
+                  const progress = regionProgress[focusedRegion.id];
+                  const isComplete = progress?.isComplete ?? false;
+                  if (!isComplete) {
+                    const remaining =
+                      (progress?.total ?? 0) - (progress?.completed ?? 0);
+                    showToast(
+                      remaining === 1
+                        ? "You haven't completed the last lesson"
+                        : `${remaining} lessons left to unlock Onward`,
+                    );
+                    return;
+                  }
+                  transitionTo(nextRegion.id as RegionId);
+                }
+              : null
+          }
+          nextLocked={
+            nextRegion != null &&
+            !(regionProgress[focusedRegion.id]?.isComplete ?? false)
+          }
+          width={sidePanelWidth}
+          collapsed={sidePanelCollapsed}
+          onToggleCollapsed={() => setSidePanelCollapsed((v) => !v)}
+          isPhone
+        />
+      ) : (
+        <div
+          className="relative shrink-0"
+          style={{ width: sidePanelWidth }}
+        >
+          <RegionSidePanel
+            region={focusedRegion}
+            lessons={focusedLessons}
+            completedLessonIds={completedLessonIds}
+            onOpenLesson={onOpenLesson}
+            onBack={() => transitionTo("overview")}
+            onPrev={prevRegion ? () => transitionTo(prevRegion.id as RegionId) : null}
+            onNext={
+              nextRegion
+                ? () => {
+                    const progress = regionProgress[focusedRegion.id];
+                    const isComplete = progress?.isComplete ?? false;
+                    if (!isComplete) {
+                      const remaining =
+                        (progress?.total ?? 0) - (progress?.completed ?? 0);
+                      showToast(
+                        remaining === 1
+                          ? "You haven't completed the last lesson"
+                          : `${remaining} lessons left to unlock Onward`,
+                      );
+                      return;
+                    }
+                    transitionTo(nextRegion.id as RegionId);
+                  }
+                : null
+            }
+            nextLocked={
+              nextRegion != null &&
+              !(regionProgress[focusedRegion.id]?.isComplete ?? false)
+            }
+            width={sidePanelWidth}
+            collapsed={sidePanelCollapsed}
+            onToggleCollapsed={() => setSidePanelCollapsed((v) => !v)}
+          />
+        </div>
+      )
+    )}
+    </div>
   );
 }
 
@@ -1989,9 +2011,6 @@ function RegionSidePanel({
 
   const completed = lessons.filter((l) => completedLessonIds.has(l.id)).length;
   const total = lessons.length;
-  // En-dash in days_label ("Days 1–8") -> hyphen. Karlo's voice rule.
-  const daysLabel = (region.days_label ?? "").replace(/[–—]/g, "-");
-
   // Phone collapsed: a floating bottom tab. Tap to expand the sheet.
   if (isPhone && collapsed) {
     return (
@@ -2209,7 +2228,7 @@ function RegionSidePanel({
             marginBottom: 8,
           }}
         >
-          Region {numeral} · {daysLabel}
+          Region {numeral}
         </p>
         <h2
           style={{

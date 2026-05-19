@@ -482,18 +482,30 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
   }
 
   const outerRef = useRef<HTMLDivElement>(null);
+  // Inner translated div. We write to its style.transform directly on
+  // every pan/wheel/tween tick — going through React state would re-render
+  // the whole MapMockup tree (2500 lines, painted scene + path overlay +
+  // side panel) on every frame and the touch lag becomes brutal.
+  const mapInnerRef = useRef<HTMLDivElement>(null);
   const transformRef = useRef({ x: 0, y: 0, scale: 1 });
   const tweenRef = useRef<gsap.core.Tween | null>(null);
+
+  // Apply a new transform: source of truth lives in transformRef + the
+  // DOM, no React state. Called from drag, wheel, GSAP onUpdate, and
+  // baseline seeding. Bypassing React state is the whole reason touch
+  // pans aren't laggy.
+  const applyTransform = (t: { x: number; y: number; scale: number }) => {
+    transformRef.current = t;
+    const el = mapInnerRef.current;
+    if (el) {
+      el.style.transform = `translate(${t.x}px, ${t.y}px) scale(${t.scale})`;
+    }
+  };
 
   const [view, setView] = useState<View>("overview");
   const [outerSize, setOuterSize] = useState({ w: 0, h: 0 });
   const [discountModalMode, setDiscountModalMode] =
     useState<DiscountCelebrationMode | null>(null);
-  const [displayTransform, setDisplayTransform] = useState({
-    x: 0,
-    y: 0,
-    scale: 1,
-  });
 
   // Cloud-transition orchestration
   const [transitionCounter, setTransitionCounter] = useState(0);
@@ -675,13 +687,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
         y: (outerSize.h - MAP_H * cover) / 2,
         scale: cover,
       };
-      transformRef.current = baseline;
-      setDisplayTransform(baseline);
+      applyTransform(baseline);
     }
 
     if (reduced) {
-      transformRef.current = target;
-      setDisplayTransform(target);
+      applyTransform(target);
       return;
     }
 
@@ -697,7 +707,8 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       duration: isFirst ? 1.8 : 0.7,
       ease: isFirst ? SPEC_EASE_GSAP : SPEC_EASE_GSAP_INOUT,
       onUpdate: () => {
-        setDisplayTransform({ ...transformRef.current });
+        // GSAP mutates transformRef.current in place; mirror to DOM.
+        applyTransform({ ...transformRef.current });
       },
       onComplete: () => {
         tweenRef.current = null;
@@ -768,8 +779,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
         y: startTy + dy,
         scale: transformRef.current.scale,
       });
-      transformRef.current = next;
-      setDisplayTransform(next);
+      applyTransform(next);
     };
 
     const onUp = () => {
@@ -820,8 +830,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     const nextX = px - mx * newScale;
     const nextY = py - my * newScale;
     const next = clampTransform({ x: nextX, y: nextY, scale: newScale });
-    transformRef.current = next;
-    setDisplayTransform(next);
+    applyTransform(next);
   };
 
   // Lessons for each region come straight from the DB — group by
@@ -1002,7 +1011,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       duration: 0.32,
       ease: SPEC_EASE_GSAP,
       onUpdate: () => {
-        setDisplayTransform({ ...transformRef.current });
+        applyTransform({ ...transformRef.current });
       },
       onComplete: () => {
         tweenRef.current = null;
@@ -1037,15 +1046,20 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       onPointerDown={onMapPointerDown}
       onWheel={onMapWheel}
     >
-      {/* Map inner — scaled + translated by GSAP (mirrored to React state) */}
+      {/* Map inner — scaled + translated. Pan / wheel / GSAP write
+          directly to this element's style.transform via mapInnerRef so
+          we don't re-render the whole tree on every input tick. The
+          initial style.transform is seeded from transformRef; subsequent
+          updates are pure DOM mutation. */}
       <div
+        ref={mapInnerRef}
         style={{
           position: "absolute",
           left: 0,
           top: 0,
           width: MAP_W,
           height: MAP_H,
-          transform: `translate(${displayTransform.x}px, ${displayTransform.y}px) scale(${displayTransform.scale})`,
+          transform: `translate(${transformRef.current.x}px, ${transformRef.current.y}px) scale(${transformRef.current.scale})`,
           transformOrigin: "0 0",
           willChange: "transform",
           // Block accidental text highlighting when the user drags

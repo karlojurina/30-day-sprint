@@ -134,7 +134,9 @@ begin
     on conflict (student_id) do nothing;
   end if;
 
-  -- Backfill student_whop_sync
+  -- Backfill student_whop_sync.
+  -- whop_last_sync_unmatched on students is jsonb (per v5_whop_diagnostic.sql);
+  -- the new column is text[]. Cast jsonb array → text[] safely, handling null.
   if exists (
     select 1 from information_schema.columns
     where table_name='students' and column_name='whop_access_token'
@@ -145,14 +147,27 @@ begin
       last_sync_fetched, last_sync_matched
     )
     select
-      id, whop_access_token, whop_refresh_token, last_watch_sync_at,
-      whop_last_sync_error, whop_last_sync_error_at, whop_last_sync_unmatched,
-      whop_last_sync_fetched_count, whop_last_sync_matched_count
+      id,
+      whop_access_token,
+      whop_refresh_token,
+      last_watch_sync_at,
+      whop_last_sync_error,
+      whop_last_sync_error_at,
+      case
+        when whop_last_sync_unmatched is null then null
+        else array(
+          select jsonb_array_elements_text(whop_last_sync_unmatched)
+        )
+      end,
+      whop_last_sync_fetched_count,
+      whop_last_sync_matched_count
     from students
     on conflict (student_id) do nothing;
   end if;
 
-  -- Backfill student_celebrations
+  -- Backfill student_celebrations.
+  -- celebrated_region_ids on students is jsonb (per v10_celebration_flags.sql);
+  -- the new column is text[]. Cast jsonb → text[] with a null/empty guard.
   if exists (
     select 1 from information_schema.columns
     where table_name='students' and column_name='last_streak_milestone_shown'
@@ -165,7 +180,12 @@ begin
       id,
       coalesce(last_streak_milestone_shown, 0),
       month_review_seen_at,
-      coalesce(celebrated_region_ids, '{}')
+      case
+        when celebrated_region_ids is null then '{}'::text[]
+        else array(
+          select jsonb_array_elements_text(celebrated_region_ids)
+        )
+      end
     from students
     on conflict (student_id) do nothing;
   end if;

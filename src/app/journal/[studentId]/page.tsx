@@ -20,9 +20,10 @@ export default async function JournalPage(props: JournalPageProps) {
   const { studentId } = await props.params;
   const supabase = createServiceClient();
 
+  // v46 — longest_streak moved to student_streaks. Fetch both rows.
   const { data: student } = await supabase
     .from("students")
-    .select("id, name, joined_at, longest_streak")
+    .select("id, name, joined_at")
     .eq("id", studentId)
     .single();
 
@@ -36,6 +37,7 @@ export default async function JournalPage(props: JournalPageProps) {
     { data: completions },
     { data: discountReq },
     { data: monthReview },
+    { data: streaks },
   ] = await Promise.all([
     supabase.from("regions").select("*").order("order_num"),
     supabase.from("lessons").select("*").order("day").order("sort_order"),
@@ -55,11 +57,19 @@ export default async function JournalPage(props: JournalPageProps) {
       .select("*")
       .eq("student_id", studentId)
       .single(),
+    supabase
+      .from("student_streaks")
+      .select("longest_streak")
+      .eq("student_id", studentId)
+      .maybeSingle(),
   ]);
 
   return (
     <JournalView
-      student={student}
+      student={{
+        ...student,
+        longest_streak: streaks?.longest_streak ?? 0,
+      }}
       regions={regions ?? []}
       lessons={lessons ?? []}
       completions={completions ?? []}

@@ -7,9 +7,12 @@
  * surface for the student — single-use, no external side effects.
  *
  * What it does:
- *   1. Sets students.sprint_completed_at = now() (NULL guard so a
- *      duplicate click is idempotent).
+ *   1. Sets student_milestones.sprint_completed_at = now() (NULL guard
+ *      so a duplicate click is idempotent).
  *   2. Returns the new timestamp.
+ *
+ * v46 — sprint_completed_at lives on student_milestones, not students.
+ * See CLAUDE.md → "Table-level bounded contexts".
  *
  * No Discord side effects. No DMs. No admin notification. The
  * Map 1 → Map 2 transition is purely client-driven.
@@ -41,7 +44,7 @@ export async function POST(request: NextRequest) {
 
   const { data: student } = await supabase
     .from("students")
-    .select("id, sprint_completed_at")
+    .select("id")
     .eq("supabase_user_id", user.id)
     .single();
 
@@ -49,25 +52,36 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  // Idempotency — already finished? return the existing timestamp.
-  if (student.sprint_completed_at) {
+  // Read existing milestones to honor idempotency.
+  const { data: existingMs } = await supabase
+    .from("student_milestones")
+    .select("sprint_completed_at")
+    .eq("student_id", student.id)
+    .maybeSingle();
+
+  if (existingMs?.sprint_completed_at) {
     return NextResponse.json({
       ok: true,
       already_finished: true,
-      sprint_completed_at: student.sprint_completed_at,
+      sprint_completed_at: existingMs.sprint_completed_at,
     });
   }
 
   const finishedAt = new Date().toISOString();
-  const { data: updated, error: updateError } = await supabase
-    .from("students")
-    .update({ sprint_completed_at: finishedAt })
-    .eq("id", student.id)
-    .is("sprint_completed_at", null)
+  const { data: upserted, error: upsertError } = await supabase
+    .from("student_milestones")
+    .upsert(
+      {
+        student_id: student.id,
+        sprint_completed_at: finishedAt,
+        updated_at: finishedAt,
+      },
+      { onConflict: "student_id" },
+    )
     .select("sprint_completed_at")
     .single();
 
-  if (updateError || !updated) {
+  if (upsertError || !upserted) {
     return NextResponse.json(
       { error: "Failed to finish program" },
       { status: 500 },
@@ -77,6 +91,6 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     already_finished: false,
-    sprint_completed_at: updated.sprint_completed_at,
+    sprint_completed_at: upserted.sprint_completed_at,
   });
 }

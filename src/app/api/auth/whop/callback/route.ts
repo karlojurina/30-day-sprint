@@ -178,7 +178,7 @@ export async function GET(request: NextRequest) {
     // without overwriting it on returning students.
     const { data: existing } = await supabase
       .from("students")
-      .select("id, joined_at, first_sprint_login_at")
+      .select("id, joined_at")
       .eq("whop_user_id", userInfo.sub)
       .single();
 
@@ -187,6 +187,9 @@ export async function GET(request: NextRequest) {
     const discordUserId = await fetchWhopDiscordId(userInfo.sub);
 
     const now = new Date().toISOString();
+    // v46 — students table is identity-only. Whop tokens go to
+    // student_whop_sync; first_sprint_login_at goes to student_milestones.
+    // See CLAUDE.md → "Table-level bounded contexts".
     const baseFields = {
       whop_user_id: userInfo.sub,
       supabase_user_id: userId,
@@ -196,13 +199,6 @@ export async function GET(request: NextRequest) {
       discord_username: userInfo.username,
       discord_user_id: discordUserId,
       last_active_at: now,
-      whop_access_token: tokens.access_token ?? null,
-      whop_refresh_token: tokens.refresh_token ?? null,
-      // first_sprint_login_at: stamp on the first successful callback
-      // and never again. Powers the "Has logged into the app" template
-      // trigger condition — distinguishes "bought on Whop but never
-      // showed up" from "actually authed at least once."
-      first_sprint_login_at: existing?.first_sprint_login_at ?? now,
     };
 
     let upsertFields: Record<string, unknown> = baseFields;
@@ -228,6 +224,41 @@ export async function GET(request: NextRequest) {
 
     if (upsertError) {
       console.error("Student upsert failed:", upsertError);
+    }
+
+    // v46 — write Whop tokens to student_whop_sync (was on students).
+    if (upsertedStudent) {
+      await supabase
+        .from("student_whop_sync")
+        .upsert(
+          {
+            student_id: upsertedStudent.id,
+            access_token: tokens.access_token ?? null,
+            refresh_token: tokens.refresh_token ?? null,
+            updated_at: now,
+          },
+          { onConflict: "student_id" }
+        );
+
+      // v46 — first_sprint_login_at: stamp once on first successful
+      // callback, never overwrite. Powers the has_logged_into_app
+      // template trigger. Lives on student_milestones (was on students).
+      const { data: existingMilestones } = await supabase
+        .from("student_milestones")
+        .select("first_sprint_login_at")
+        .eq("student_id", upsertedStudent.id)
+        .maybeSingle();
+      await supabase
+        .from("student_milestones")
+        .upsert(
+          {
+            student_id: upsertedStudent.id,
+            first_sprint_login_at:
+              existingMilestones?.first_sprint_login_at ?? now,
+            updated_at: now,
+          },
+          { onConflict: "student_id" }
+        );
     }
 
     // 5b. Initial watch-progress sync with a short timeout. We don't want

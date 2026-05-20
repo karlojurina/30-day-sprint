@@ -33,17 +33,64 @@ When adding a new table, append it here. When deleting a field, scan
   `AuthContext`, `StudentContext`, all student API routes, all CSM
   cron jobs, admin UI
 - **Stable contract:** `id`, `whop_user_id`, `supabase_user_id`,
-  `email`, `name`, `joined_at`, `membership_status`,
-  `first_sprint_login_at` (powers the `has_logged_into_app` trigger)
-- **Forward-split candidates** (currently bolted on, should move to
-  their own tables per CLAUDE.md): `current_streak` / `longest_streak` /
-  `last_streak_date` (→ `student_streaks`); `sprint_completed_at` /
-  `bounty_access_claimed_at` / `first_client_landed_at` /
-  `playbook_welcome_seen_at` (→ `student_milestones`);
-  `whop_last_sync_*` / `whop_access_token` / `whop_refresh_token` (→
-  `student_whop_sync`); `last_streak_milestone_shown` /
-  `celebrated_region_ids` / `month_review_seen_at` (→
-  `student_celebrations`); `day28_dm_sent_at` (→ `student_dm_log`).
+  `email`, `name`, `joined_at`, `last_active_at`,
+  `membership_status`, `discord_user_id`, `current_title`,
+  `csm_exempt`, `ad_submissions_verified`
+- **Note:** As of v46/v47, students is identity + admin-flag only.
+  Per-function state (streaks, milestones, Whop sync, celebrations,
+  DM log) lives in sibling tables below — read CLAUDE.md
+  "Table-level bounded contexts" before adding any column here.
+
+### `student_milestones`
+- **Depends on:** `students`
+- **Depended on by:** `StudentContext` (`sprintCompletedAt`,
+  `bountyAccessClaimedAt`, `firstClientLandedAt`,
+  `playbookWelcomeSeenAt`, `onboardingCompletedAt`), milestone API
+  routes, `src/lib/csm-triggers.ts` (`has_logged_into_app` reads
+  `first_sprint_login_at`), `/api/auth/whop/callback` (stamps
+  `first_sprint_login_at` on first login),
+  `/api/cron/check-csm-tasks` (joins for the snapshot)
+- **Stable contract:** `student_id`, `onboarding_completed_at`,
+  `first_sprint_login_at`, `bounty_access_claimed_at`,
+  `sprint_completed_at`, `first_client_landed_at`,
+  `playbook_welcome_seen_at`
+
+### `student_streaks`
+- **Depends on:** `students`
+- **Depended on by:** `StudentContext` (`streak`), `src/lib/streak.ts`
+  + `src/app/api/student/_lib/update-streak.ts` (write),
+  `src/lib/day28-embed.ts` (read), admin student detail +
+  kanban drawer
+- **Stable contract:** `student_id`, `current_streak`,
+  `longest_streak`, `last_streak_date`
+
+### `student_whop_sync`
+- **Depends on:** `students`
+- **Depended on by:** `/api/auth/whop/callback` (token write),
+  `src/app/api/student/_lib/watch-sync.ts` (all sync diagnostics),
+  `StudentContext` (`syncDiagnostics`), admin student detail page
+- **Stable contract:** `student_id`, `access_token`, `refresh_token`,
+  `last_sync_at`, `last_sync_error`, `last_sync_error_at`,
+  `last_sync_unmatched`, `last_sync_fetched`, `last_sync_matched`
+- **Note:** Team-read RLS only — tokens are sensitive, students don't
+  need to read this themselves.
+
+### `student_celebrations`
+- **Depends on:** `students`
+- **Depended on by:** `/api/student/celebration-seen` (write),
+  `StudentContext` (`celebrations`), dashboard-mockup page (region
+  + streak + month-review one-shot logic)
+- **Stable contract:** `student_id`, `last_streak_milestone_shown`,
+  `month_review_seen_at`, `celebrated_region_ids`
+
+### `student_dm_log`
+- **Depends on:** `students`
+- **Depended on by:** `/api/cron/day28-dm` (read + write — the
+  "not yet sent" filter joins this table)
+- **Stable contract:** `student_id`, `day28_dm_sent_at`
+- **Note:** Add a column per DM type as new DM flows ship (don't
+  collapse into a generic events table — each DM type is its own
+  function with its own retry / dedupe / preview semantics).
 
 ## Curriculum (read-mostly)
 

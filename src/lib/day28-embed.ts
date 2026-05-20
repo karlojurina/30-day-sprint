@@ -234,6 +234,7 @@ export async function loadDay28EmbedInput(
 ): Promise<Day28EmbedInput | { error: string }> {
   const [
     { data: student },
+    { data: streaks },
     { data: completions },
     { data: discountReq },
     { count: notesCount },
@@ -241,9 +242,15 @@ export async function loadDay28EmbedInput(
   ] = await Promise.all([
     supabase
       .from("students")
-      .select("name, longest_streak, joined_at")
+      .select("name, joined_at")
       .eq("id", studentId)
       .single(),
+    // v46 — longest_streak lives on student_streaks (was on students).
+    supabase
+      .from("student_streaks")
+      .select("longest_streak")
+      .eq("student_id", studentId)
+      .maybeSingle(),
     supabase
       .from("student_lesson_completions")
       .select("lesson_id, completed_at, action_completed_at")
@@ -392,7 +399,7 @@ export async function loadDay28EmbedInput(
     studentName: student.name as string | null,
     lessonsDone,
     totalLessons,
-    longestStreak: Number(student.longest_streak ?? 0),
+    longestStreak: Number(streaks?.longest_streak ?? 0),
     notesCount: notesCount ?? 0,
     discountClaimed,
     actionShips,

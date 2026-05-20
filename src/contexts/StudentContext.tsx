@@ -24,6 +24,10 @@ import type {
   MonthReview,
   DiscountFeedbackQuestion,
   DiscountFeedbackAnswer,
+  StudentMilestones,
+  StudentStreaks,
+  StudentWhopSync,
+  StudentCelebrations,
 } from "@/types/database";
 import { getTitleForRegions } from "@/lib/titles";
 import { DISCOUNT_WINDOW_DAYS, progressPercent } from "@/lib/constants";
@@ -35,9 +39,9 @@ export interface RegionProgress {
   isUnlocked: boolean;
 }
 
-/** Snapshot of the last Whop watch-sync attempt — fed by the diagnostic
- *  columns on the students row + the masked WHOP_COURSE_ID env var. Read
- *  by the sync debug panel; updated after every sync run. */
+/** Snapshot of the last Whop watch-sync attempt — fed by student_whop_sync
+ *  + the masked WHOP_COURSE_ID env var. Read by the sync debug panel;
+ *  updated after every sync run. */
 export interface SyncDiagnostics {
   lastSyncAt: string | null;
   fetchedCount: number | null;
@@ -139,6 +143,11 @@ interface StudentContextType {
   markFirstClient: () => Promise<void>;
   dismissFirstClientCelebration: () => void;
 
+  // v46 — onboarding milestone + celebration state, sourced from
+  // student_milestones / student_celebrations respectively.
+  onboardingCompletedAt: string | null;
+  celebrations: StudentCelebrations | null;
+
   // Discount feedback form (v29) — Apply button now opens a 6-question
   // form that's submitted atomically with the discount_requests row.
   discountFeedbackQuestions: DiscountFeedbackQuestion[];
@@ -184,6 +193,16 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [completions, setCompletions] = useState<StudentLessonCompletion[]>([]);
   const [discountRequest, setDiscountRequest] = useState<DiscountRequest | null>(null);
+  // v46 — per-function student state, split from the students row into
+  // their own tables. Each is one row per student (or null if the row
+  // doesn't exist yet — treated as "all fields default").
+  const [milestones, setMilestones] = useState<StudentMilestones | null>(null);
+  const [whopSync, setWhopSync] = useState<StudentWhopSync | null>(null);
+  const [celebrations, setCelebrations] = useState<StudentCelebrations | null>(
+    null,
+  );
+  // student_streaks data folds into the existing `streak` state below
+  // (the public shape stays { current, longest } for consumers).
   // v42 (v2): celebration takeover state for the l057 bounty claim.
   // True from the moment the claim API resolves until the celebration
   // is dismissed. The bounty_access_claimed_at timestamp itself lives
@@ -244,9 +263,16 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         setLessons(data.lessons ?? []);
         setCompletions(data.completions ?? []);
         setDiscountRequest(data.discountRequest ?? null);
+        // v46 — sibling tables. Each can be null if the row doesn't
+        // exist yet (e.g. brand new student) — treat null as defaults.
+        setMilestones((data.milestones as StudentMilestones | null) ?? null);
+        setWhopSync((data.whopSync as StudentWhopSync | null) ?? null);
+        setCelebrations(
+          (data.celebrations as StudentCelebrations | null) ?? null,
+        );
         setStreak({
-          current: data.student?.current_streak ?? 0,
-          longest: data.student?.longest_streak ?? 0,
+          current: (data.streaks as StudentStreaks | null)?.current_streak ?? 0,
+          longest: (data.streaks as StudentStreaks | null)?.longest_streak ?? 0,
         });
 
         setQuizzes(data.quizzes ?? []);
@@ -274,13 +300,14 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         setDiscountFeedbackQuestions(
           (questions as DiscountFeedbackQuestion[] | null) ?? [],
         );
+        const ws = data.whopSync as StudentWhopSync | null;
         setSyncDiagnostics({
-          lastSyncAt: data.student?.last_watch_sync_at ?? null,
-          fetchedCount: data.student?.whop_last_sync_fetched_count ?? null,
-          matchedCount: data.student?.whop_last_sync_matched_count ?? null,
-          unmatchedWhopIds: data.student?.whop_last_sync_unmatched ?? [],
-          lastError: data.student?.whop_last_sync_error ?? null,
-          lastErrorAt: data.student?.whop_last_sync_error_at ?? null,
+          lastSyncAt: ws?.last_sync_at ?? null,
+          fetchedCount: ws?.last_sync_fetched ?? null,
+          matchedCount: ws?.last_sync_matched ?? null,
+          unmatchedWhopIds: ws?.last_sync_unmatched ?? [],
+          lastError: ws?.last_sync_error ?? null,
+          lastErrorAt: ws?.last_sync_error_at ?? null,
           whopUserId: data.student?.whop_user_id ?? null,
           whopCourseIdMasked: data.whopCourseIdMasked ?? null,
         });
@@ -309,18 +336,28 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     // applied) from /admin/discounts. Refresh it here so the student
     // sees the new state when they switch back to their tab.
     setDiscountRequest(fresh.discountRequest ?? null);
-    // v42: also push the fresh student row up to AuthContext so any
-    // student-row field that can change server-side (csm_exempt,
-    // bounty_access_claimed_at, sprint_completed_at, etc.) flows
-    // through to consumers without a hard reload.
+    // v46 — push the fresh student row up to AuthContext (identity
+    // changes are rare but possible — name, avatar, membership status)
+    // AND refresh the per-function sibling tables so admin-side state
+    // changes flow through without a hard reload.
     if (fresh.student) setStudent(fresh.student);
+    setMilestones((fresh.milestones as StudentMilestones | null) ?? null);
+    setWhopSync((fresh.whopSync as StudentWhopSync | null) ?? null);
+    setCelebrations(
+      (fresh.celebrations as StudentCelebrations | null) ?? null,
+    );
+    setStreak({
+      current: (fresh.streaks as StudentStreaks | null)?.current_streak ?? 0,
+      longest: (fresh.streaks as StudentStreaks | null)?.longest_streak ?? 0,
+    });
+    const ws = fresh.whopSync as StudentWhopSync | null;
     setSyncDiagnostics({
-      lastSyncAt: fresh.student?.last_watch_sync_at ?? null,
-      fetchedCount: fresh.student?.whop_last_sync_fetched_count ?? null,
-      matchedCount: fresh.student?.whop_last_sync_matched_count ?? null,
-      unmatchedWhopIds: fresh.student?.whop_last_sync_unmatched ?? [],
-      lastError: fresh.student?.whop_last_sync_error ?? null,
-      lastErrorAt: fresh.student?.whop_last_sync_error_at ?? null,
+      lastSyncAt: ws?.last_sync_at ?? null,
+      fetchedCount: ws?.last_sync_fetched ?? null,
+      matchedCount: ws?.last_sync_matched ?? null,
+      unmatchedWhopIds: ws?.last_sync_unmatched ?? [],
+      lastError: ws?.last_sync_error ?? null,
+      lastErrorAt: ws?.last_sync_error_at ?? null,
       whopUserId: fresh.student?.whop_user_id ?? null,
       whopCourseIdMasked: fresh.whopCourseIdMasked ?? null,
     });
@@ -559,11 +596,12 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       // v42 (v2): l058 — first bounty submitted. Raise the
       // celebration flag the moment the student marks it complete
       // (NOT when they uncheck). One-shot: don't re-fire if the
-      // sprint is already marked finished.
+      // sprint is already marked finished. v46 — sprint flag now
+      // lives on student_milestones.
       if (
         !isCompleted &&
         lessonId === "l058" &&
-        !student.sprint_completed_at
+        !milestones?.sprint_completed_at
       ) {
         setFirstBountyJustSubmitted(true);
       }
@@ -627,7 +665,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [student, completedLessonIds]
+    [student, completedLessonIds, milestones]
   );
 
   /**
@@ -941,7 +979,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
    * completions list + raises the celebration takeover flag.
    */
   const claimBountyAccess = useCallback(async () => {
-    if (!student || student.bounty_access_claimed_at) return;
+    if (!student || milestones?.bounty_access_claimed_at) return;
 
     const token = await getAccessToken();
     if (!token) return;
@@ -957,12 +995,18 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     if (!data.ok) return;
 
-    // Patch the student row locally so any UI reading
-    // student.bounty_access_claimed_at flips instantly.
-    setStudent({
-      ...student,
+    // v46 — patch the milestones state so any UI reading
+    // bountyAccessClaimedAt flips instantly.
+    setMilestones((prev) => ({
+      student_id: student.id,
+      onboarding_completed_at: prev?.onboarding_completed_at ?? null,
+      first_sprint_login_at: prev?.first_sprint_login_at ?? null,
+      sprint_completed_at: prev?.sprint_completed_at ?? null,
+      first_client_landed_at: prev?.first_client_landed_at ?? null,
+      playbook_welcome_seen_at: prev?.playbook_welcome_seen_at ?? null,
       bounty_access_claimed_at: data.bounty_access_claimed_at,
-    });
+      updated_at: data.bounty_access_claimed_at,
+    }));
     // Add l057 to completions if it's not there yet — the API
     // upserts the row server-side; mirror it client-side so the
     // map node + sheet flip without waiting for a refetch.
@@ -983,7 +1027,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     });
     // Fire the celebration unless this was a duplicate click.
     if (!data.already_claimed) setBountyAccessJustClaimed(true);
-  }, [student, setStudent]);
+  }, [student, milestones]);
 
   const dismissBountyClaim = useCallback(() => {
     setBountyAccessJustClaimed(false);
@@ -997,7 +1041,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
    * the new state immediately.
    */
   const finishProgram = useCallback(async () => {
-    if (!student || student.sprint_completed_at) return;
+    if (!student || milestones?.sprint_completed_at) return;
 
     const token = await getAccessToken();
     if (!token) return;
@@ -1013,11 +1057,17 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     if (!data.ok) return;
 
-    setStudent({
-      ...student,
+    setMilestones((prev) => ({
+      student_id: student.id,
+      onboarding_completed_at: prev?.onboarding_completed_at ?? null,
+      first_sprint_login_at: prev?.first_sprint_login_at ?? null,
+      bounty_access_claimed_at: prev?.bounty_access_claimed_at ?? null,
+      first_client_landed_at: prev?.first_client_landed_at ?? null,
+      playbook_welcome_seen_at: prev?.playbook_welcome_seen_at ?? null,
       sprint_completed_at: data.sprint_completed_at,
-    });
-  }, [student, setStudent]);
+      updated_at: data.sprint_completed_at,
+    }));
+  }, [student, milestones]);
 
   const dismissFirstBountyCelebration = useCallback(() => {
     setFirstBountyJustSubmitted(false);
@@ -1030,7 +1080,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
    * duplicate), raises the crowned-celebration flag.
    */
   const markFirstClient = useCallback(async () => {
-    if (!student || student.first_client_landed_at) return;
+    if (!student || milestones?.first_client_landed_at) return;
     const token = await getAccessToken();
     if (!token) return;
 
@@ -1045,12 +1095,18 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     if (!data.ok) return;
 
-    setStudent({
-      ...student,
+    setMilestones((prev) => ({
+      student_id: student.id,
+      onboarding_completed_at: prev?.onboarding_completed_at ?? null,
+      first_sprint_login_at: prev?.first_sprint_login_at ?? null,
+      bounty_access_claimed_at: prev?.bounty_access_claimed_at ?? null,
+      sprint_completed_at: prev?.sprint_completed_at ?? null,
+      playbook_welcome_seen_at: prev?.playbook_welcome_seen_at ?? null,
       first_client_landed_at: data.first_client_landed_at,
-    });
+      updated_at: data.first_client_landed_at,
+    }));
     if (!data.already_landed) setFirstClientJustLanded(true);
-  }, [student, setStudent]);
+  }, [student, milestones]);
 
   const dismissFirstClientCelebration = useCallback(() => {
     setFirstClientJustLanded(false);
@@ -1061,7 +1117,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
    * students.playbook_welcome_seen_at and patches the local row.
    */
   const dismissPlaybookWelcome = useCallback(async () => {
-    if (!student || student.playbook_welcome_seen_at) return;
+    if (!student || milestones?.playbook_welcome_seen_at) return;
     const token = await getAccessToken();
     if (!token) return;
 
@@ -1073,11 +1129,17 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     const data = await res.json();
     if (!data.ok) return;
 
-    setStudent({
-      ...student,
+    setMilestones((prev) => ({
+      student_id: student.id,
+      onboarding_completed_at: prev?.onboarding_completed_at ?? null,
+      first_sprint_login_at: prev?.first_sprint_login_at ?? null,
+      bounty_access_claimed_at: prev?.bounty_access_claimed_at ?? null,
+      sprint_completed_at: prev?.sprint_completed_at ?? null,
+      first_client_landed_at: prev?.first_client_landed_at ?? null,
       playbook_welcome_seen_at: data.playbook_welcome_seen_at,
-    });
-  }, [student, setStudent]);
+      updated_at: data.playbook_welcome_seen_at,
+    }));
+  }, [student, milestones]);
 
   const requestDiscount = useCallback(async () => {
     if (!student || !discountEligible) return;
@@ -1204,24 +1266,25 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         submitDiscountFeedback,
         submitQuiz,
         requestDiscount,
-        // v42 (v2): bounty access claim
-        bountyAccessClaimedAt: student?.bounty_access_claimed_at ?? null,
+        // v46 — sprint milestones now read from student_milestones,
+        // not the students row. Same public field names so consumers
+        // don't change.
+        bountyAccessClaimedAt: milestones?.bounty_access_claimed_at ?? null,
         bountyAccessJustClaimed,
         claimBountyAccess,
         dismissBountyClaim,
-        // v42 (v2): l058 Finish Program flow
-        sprintCompletedAt: student?.sprint_completed_at ?? null,
+        sprintCompletedAt: milestones?.sprint_completed_at ?? null,
         firstBountyJustSubmitted,
         finishProgram,
         dismissFirstBountyCelebration,
-        // v42 (v2): Map 2 welcome overlay
-        playbookWelcomeSeenAt: student?.playbook_welcome_seen_at ?? null,
+        playbookWelcomeSeenAt: milestones?.playbook_welcome_seen_at ?? null,
         dismissPlaybookWelcome,
-        // v42 (v2): first-client landed milestone
-        firstClientLandedAt: student?.first_client_landed_at ?? null,
+        firstClientLandedAt: milestones?.first_client_landed_at ?? null,
         firstClientJustLanded,
         markFirstClient,
         dismissFirstClientCelebration,
+        onboardingCompletedAt: milestones?.onboarding_completed_at ?? null,
+        celebrations,
         refreshWatchProgress,
         syncDiagnostics,
         forceSync,

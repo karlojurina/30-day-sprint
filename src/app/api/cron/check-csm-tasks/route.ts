@@ -112,13 +112,14 @@ export async function GET(request: NextRequest) {
     tasksRes,
     templatesRes,
     alertsRes,
+    milestonesRes,
   ] = await Promise.all([
     // Limit to actual paying students who joined on/after the
     // tasks cutoff. csm_exempt = test accounts we never DM.
     supabase
       .from("students")
       .select(
-        "id, name, joined_at, membership_status, last_active_at, discord_username, first_sprint_login_at",
+        "id, name, joined_at, membership_status, last_active_at, discord_username",
       )
       .eq("membership_status", "active")
       .eq("csm_exempt", false)
@@ -142,6 +143,11 @@ export async function GET(request: NextRequest) {
         "created_at",
         new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
       ),
+    // v46 — first_sprint_login_at lives on student_milestones now,
+    // pulled separately and joined per-student before snapshot build.
+    supabase
+      .from("student_milestones")
+      .select("student_id, first_sprint_login_at"),
   ]);
 
   const studentsErr = studentsRes.error ?? lessonsRes.error ?? templatesRes.error;
@@ -223,6 +229,21 @@ export async function GET(request: NextRequest) {
     existingByStudent.set(t.student_id, arr);
   }
 
+  // v46 — milestones rows joined by student_id so the snapshot can
+  // include first_sprint_login_at (no longer on students).
+  const milestonesByStudent = new Map<
+    string,
+    { first_sprint_login_at: string | null }
+  >();
+  for (const m of (milestonesRes.data ?? []) as Array<{
+    student_id: string;
+    first_sprint_login_at: string | null;
+  }>) {
+    milestonesByStudent.set(m.student_id, {
+      first_sprint_login_at: m.first_sprint_login_at,
+    });
+  }
+
   // Build all snapshots up front so the alert mapping can apply the
   // progress gate too (cancel_path alerts only fire if the student is
   // actually behind).
@@ -236,6 +257,7 @@ export async function GET(request: NextRequest) {
         lessons,
         regionTotals,
         existingByStudent.get(student.id) ?? [],
+        milestonesByStudent.get(student.id) ?? null,
       ),
     );
   }

@@ -44,6 +44,8 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
     discountEligible,
     regionProgress,
     openDiscountFeedback,
+    sprintCompletedAt,
+    bountyAccessClaimedAt,
   } = useStudent();
 
   const [applying, setApplying] = useState(false);
@@ -144,8 +146,8 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
     return null;
   })();
 
-  const sprintFinished = Boolean(student.sprint_completed_at);
-  const hasBountyAccess = Boolean(student.bounty_access_claimed_at);
+  const sprintFinished = Boolean(sprintCompletedAt);
+  const hasBountyAccess = Boolean(bountyAccessClaimedAt);
 
   const body = (
     <>

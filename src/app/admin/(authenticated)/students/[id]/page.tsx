@@ -9,6 +9,8 @@ import type {
   Lesson,
   StudentLessonCompletion,
   DiscountRequest,
+  StudentStreaks,
+  StudentWhopSync,
 } from "@/types/database";
 import { getDayNumber } from "@/types/database";
 import { LESSON_TYPE_LABELS, progressPercent } from "@/lib/constants";
@@ -37,6 +39,9 @@ export default function StudentDetailPage() {
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [completions, setCompletions] = useState<StudentLessonCompletion[]>([]);
   const [discountRequest, setDiscountRequest] = useState<DiscountRequest | null>(null);
+  // v46 — per-function sibling tables joined into the admin detail view.
+  const [streaks, setStreaks] = useState<StudentStreaks | null>(null);
+  const [whopSync, setWhopSync] = useState<StudentWhopSync | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -47,6 +52,8 @@ export default function StudentDetailPage() {
         lessonsRes,
         completionsRes,
         discountRes,
+        streaksRes,
+        whopSyncRes,
       ] = await Promise.all([
         supabase.from("students").select("*").eq("id", studentId).single(),
         supabase.from("regions").select("*").order("order_num"),
@@ -62,6 +69,16 @@ export default function StudentDetailPage() {
           .order("created_at", { ascending: false })
           .limit(1)
           .single(),
+        supabase
+          .from("student_streaks")
+          .select("*")
+          .eq("student_id", studentId)
+          .maybeSingle(),
+        supabase
+          .from("student_whop_sync")
+          .select("*")
+          .eq("student_id", studentId)
+          .maybeSingle(),
       ]);
 
       if (studentRes.data) setStudent(studentRes.data);
@@ -69,6 +86,8 @@ export default function StudentDetailPage() {
       if (lessonsRes.data) setLessons(lessonsRes.data);
       if (completionsRes.data) setCompletions(completionsRes.data);
       if (discountRes.data) setDiscountRequest(discountRes.data);
+      if (streaksRes.data) setStreaks(streaksRes.data as StudentStreaks);
+      if (whopSyncRes.data) setWhopSync(whopSyncRes.data as StudentWhopSync);
       setLoading(false);
     }
 
@@ -205,7 +224,7 @@ export default function StudentDetailPage() {
         style={{ gap: 12, marginBottom: 16 }}
       >
         <Stat label="Progress" value={`${overallPercent}%`} tone="accent" />
-        <Stat label="Streak" value={`${student.current_streak ?? 0}d`} />
+        <Stat label="Streak" value={`${streaks?.current_streak ?? 0}d`} />
         <Stat
           label="Joined"
           value={new Date(student.joined_at).toLocaleDateString()}
@@ -259,10 +278,10 @@ export default function StudentDetailPage() {
       <Section
         eyebrow="Whop sync"
         action={
-          student.last_watch_sync_at ? (
+          whopSync?.last_sync_at ? (
             <span style={T.meta}>
               Last synced{" "}
-              {new Date(student.last_watch_sync_at).toLocaleString(undefined, {
+              {new Date(whopSync.last_sync_at).toLocaleString(undefined, {
                 month: "short",
                 day: "numeric",
                 hour: "2-digit",
@@ -277,23 +296,20 @@ export default function StudentDetailPage() {
             className="grid grid-cols-3"
             style={{ gap: 16, marginBottom: 14 }}
           >
-            <SyncStat
-              label="Fetched"
-              value={student.whop_last_sync_fetched_count}
-            />
+            <SyncStat label="Fetched" value={whopSync?.last_sync_fetched ?? null} />
             <SyncStat
               label="Matched"
-              value={student.whop_last_sync_matched_count}
+              value={whopSync?.last_sync_matched ?? null}
               accent
             />
             <SyncStat
               label="Unmatched"
-              value={student.whop_last_sync_unmatched?.length ?? 0}
-              warn={(student.whop_last_sync_unmatched?.length ?? 0) > 0}
+              value={whopSync?.last_sync_unmatched?.length ?? 0}
+              warn={(whopSync?.last_sync_unmatched?.length ?? 0) > 0}
             />
           </div>
 
-          {student.whop_last_sync_error && (
+          {whopSync?.last_sync_error && (
             <div
               style={{
                 padding: "8px 10px",
@@ -304,12 +320,12 @@ export default function StudentDetailPage() {
                 marginBottom: 10,
               }}
             >
-              <strong>Last error:</strong> {student.whop_last_sync_error}
+              <strong>Last error:</strong> {whopSync.last_sync_error}
             </div>
           )}
 
-          {student.whop_last_sync_unmatched &&
-            student.whop_last_sync_unmatched.length > 0 && (
+          {whopSync?.last_sync_unmatched &&
+            whopSync.last_sync_unmatched.length > 0 && (
               <div>
                 <p style={{ ...T.bodyDim, fontSize: 12, marginBottom: 8 }}>
                   These Whop lesson IDs were fetched from this student&apos;s
@@ -324,7 +340,7 @@ export default function StudentDetailPage() {
                     overflowY: "auto",
                   }}
                 >
-                  {student.whop_last_sync_unmatched.map((id) => (
+                  {whopSync.last_sync_unmatched.map((id) => (
                     <p
                       key={id}
                       className="select-all"
@@ -341,7 +357,7 @@ export default function StudentDetailPage() {
               </div>
             )}
 
-          {student.whop_last_sync_unmatched?.length === 0 && (
+          {whopSync && whopSync.last_sync_unmatched?.length === 0 && (
             <p style={{ fontSize: 12, color: "var(--color-success)" }}>
               All Whop lessons this student has watched are mapped. ✓
             </p>

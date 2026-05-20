@@ -10,6 +10,8 @@
  *   • Precondition: sprint_completed_at IS NOT NULL (student must
  *     be on Map 2 to fire this). Enforced here as a guard.
  *
+ * v46 — both milestone fields live on student_milestones, not students.
+ *
  * No external side effects. The crowned celebration is purely
  * client-side; this endpoint just flips the timestamp.
  */
@@ -40,16 +42,22 @@ export async function POST(request: NextRequest) {
 
   const { data: student } = await supabase
     .from("students")
-    .select("id, sprint_completed_at, first_client_landed_at")
+    .select("id")
     .eq("supabase_user_id", user.id)
     .single();
   if (!student) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
+  const { data: milestones } = await supabase
+    .from("student_milestones")
+    .select("sprint_completed_at, first_client_landed_at")
+    .eq("student_id", student.id)
+    .maybeSingle();
+
   // Map-2-only — if the student hasn't finished the sprint, the
   // milestone shouldn't be reachable. Reject defensively.
-  if (!student.sprint_completed_at) {
+  if (!milestones?.sprint_completed_at) {
     return NextResponse.json(
       { error: "Sprint not finished yet" },
       { status: 400 },
@@ -59,19 +67,19 @@ export async function POST(request: NextRequest) {
   // Idempotency — already landed? return the existing timestamp so
   // the client can render the post-state without firing another
   // celebration.
-  if (student.first_client_landed_at) {
+  if (milestones.first_client_landed_at) {
     return NextResponse.json({
       ok: true,
       already_landed: true,
-      first_client_landed_at: student.first_client_landed_at,
+      first_client_landed_at: milestones.first_client_landed_at,
     });
   }
 
   const landedAt = new Date().toISOString();
   const { data: updated, error: updateError } = await supabase
-    .from("students")
-    .update({ first_client_landed_at: landedAt })
-    .eq("id", student.id)
+    .from("student_milestones")
+    .update({ first_client_landed_at: landedAt, updated_at: landedAt })
+    .eq("student_id", student.id)
     .is("first_client_landed_at", null)
     .select("first_client_landed_at")
     .single();

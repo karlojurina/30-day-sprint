@@ -22,8 +22,10 @@ import { onLessonCompleted } from "@/lib/csm-events";
  * (student_id, lesson_id) + ignoreDuplicates ensures this is idempotent.
  *
  * Diagnostic: the list of Whop lesson IDs we FETCHED but couldn't match to
- * any of our lessons is saved onto students.whop_last_sync_unmatched so
+ * any of our lessons is saved onto student_whop_sync.last_sync_unmatched so
  * Karlo can see exactly which Whop lessons still need a mapping.
+ *
+ * v46 — all Whop sync diagnostics live on student_whop_sync, not students.
  */
 export async function syncWatchProgress({
   studentId,
@@ -63,20 +65,25 @@ export async function syncWatchProgress({
 
     // Empty completed result — still write the diagnostic row so stale data clears
     if (interactions.length === 0) {
+      const nowIso = new Date().toISOString();
       await supabase
-        .from("students")
-        .update({
-          last_watch_sync_at: new Date().toISOString(),
-          whop_last_sync_error:
-            rawCount === 0
-              ? "Whop returned 0 total interactions for this user — admin key may not have visibility into this user's progress"
-              : `Whop returned ${rawCount} interactions but 0 marked completed`,
-          whop_last_sync_error_at: new Date().toISOString(),
-          whop_last_sync_fetched_count: rawCount,
-          whop_last_sync_matched_count: 0,
-          whop_last_sync_unmatched: [],
-        })
-        .eq("id", studentId);
+        .from("student_whop_sync")
+        .upsert(
+          {
+            student_id: studentId,
+            last_sync_at: nowIso,
+            last_sync_error:
+              rawCount === 0
+                ? "Whop returned 0 total interactions for this user — admin key may not have visibility into this user's progress"
+                : `Whop returned ${rawCount} interactions but 0 marked completed`,
+            last_sync_error_at: nowIso,
+            last_sync_fetched: rawCount,
+            last_sync_matched: 0,
+            last_sync_unmatched: [],
+            updated_at: nowIso,
+          },
+          { onConflict: "student_id" },
+        );
       return {
         syncedCount: 0,
         skippedCount: 0,
@@ -141,17 +148,22 @@ export async function syncWatchProgress({
       }
     }
 
+    const nowIso = new Date().toISOString();
     await supabase
-      .from("students")
-      .update({
-        last_watch_sync_at: new Date().toISOString(),
-        whop_last_sync_error: null,
-        whop_last_sync_error_at: null,
-        whop_last_sync_fetched_count: interactions.length,
-        whop_last_sync_matched_count: matched.length,
-        whop_last_sync_unmatched: unmatchedLessonIds,
-      })
-      .eq("id", studentId);
+      .from("student_whop_sync")
+      .upsert(
+        {
+          student_id: studentId,
+          last_sync_at: nowIso,
+          last_sync_error: null,
+          last_sync_error_at: null,
+          last_sync_fetched: interactions.length,
+          last_sync_matched: matched.length,
+          last_sync_unmatched: unmatchedLessonIds,
+          updated_at: nowIso,
+        },
+        { onConflict: "student_id" },
+      );
 
     // X.1 reactivation check — only when we actually newly-completed
     // something. Best-effort; failures never break the sync.
@@ -170,13 +182,18 @@ export async function syncWatchProgress({
     };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const nowIso = new Date().toISOString();
     await supabase
-      .from("students")
-      .update({
-        whop_last_sync_error: message.slice(0, 1000),
-        whop_last_sync_error_at: new Date().toISOString(),
-      })
-      .eq("id", studentId);
+      .from("student_whop_sync")
+      .upsert(
+        {
+          student_id: studentId,
+          last_sync_error: message.slice(0, 1000),
+          last_sync_error_at: nowIso,
+          updated_at: nowIso,
+        },
+        { onConflict: "student_id" },
+      );
     console.error("[watch-sync] failed:", message);
     throw err;
   }

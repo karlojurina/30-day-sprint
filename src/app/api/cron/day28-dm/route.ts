@@ -41,14 +41,30 @@ export async function GET(request: NextRequest) {
   const minJoined = new Date(now.getTime() - 29 * 86_400_000); // > 29d ago is OUT
   const maxJoined = new Date(now.getTime() - 28 * 86_400_000); // ≤ 28d ago is IN
 
-  const { data: candidates } = await supabase
+  // v46 — day28_dm_sent_at lives on student_dm_log. Join via left-join
+  // semantics: any student with no dm_log row is "not yet sent" (null).
+  const { data: rawCandidates } = await supabase
     .from("students")
-    .select("id, name, discord_user_id")
+    .select("id, name, discord_user_id, student_dm_log(day28_dm_sent_at)")
     .eq("membership_status", "active")
     .eq("csm_exempt", false)
-    .is("day28_dm_sent_at", null)
     .gt("joined_at", minJoined.toISOString())
     .lte("joined_at", maxJoined.toISOString());
+
+  // Filter out anyone who already has day28_dm_sent_at set.
+  type DmLogJoin = { day28_dm_sent_at: string | null };
+  type Candidate = {
+    id: string;
+    name: string | null;
+    discord_user_id: string | null;
+    student_dm_log: DmLogJoin | DmLogJoin[] | null;
+  };
+  const candidates = ((rawCandidates ?? []) as Candidate[]).filter((s) => {
+    const log = Array.isArray(s.student_dm_log)
+      ? s.student_dm_log[0]
+      : s.student_dm_log;
+    return !log?.day28_dm_sent_at;
+  });
 
   if (!candidates || candidates.length === 0) {
     return NextResponse.json({ checked: 0, sent: 0 });
@@ -101,11 +117,19 @@ export async function GET(request: NextRequest) {
     }
 
     // Stamp regardless (we don't want infinite retries on a broken
-    // discord_user_id; team can manually re-send if needed)
+    // discord_user_id; team can manually re-send if needed).
+    // v46 — day28_dm_sent_at lives on student_dm_log.
+    const stampIso = new Date().toISOString();
     await supabase
-      .from("students")
-      .update({ day28_dm_sent_at: new Date().toISOString() })
-      .eq("id", student.id);
+      .from("student_dm_log")
+      .upsert(
+        {
+          student_id: student.id,
+          day28_dm_sent_at: stampIso,
+          updated_at: stampIso,
+        },
+        { onConflict: "student_id" },
+      );
   }
 
   return NextResponse.json({

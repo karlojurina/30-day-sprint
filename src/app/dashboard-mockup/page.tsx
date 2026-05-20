@@ -49,6 +49,8 @@ export default function DashboardMockupPage() {
     completedLessonIds,
     streak,
     monthReview,
+    onboardingCompletedAt,
+    celebrations,
   } = useStudent();
 
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
@@ -71,11 +73,13 @@ export default function DashboardMockupPage() {
   const [showGraduation, setShowGraduation] = useState(false);
 
   // ---------- Onboarding bootstrap ----------
+  // v46 — onboarding_completed_at moved to student_milestones, exposed
+  // through StudentContext as onboardingCompletedAt.
   useEffect(() => {
     if (!student) return;
     if (showOnboarding !== null) return;
-    setShowOnboarding(student.onboarding_completed_at == null);
-  }, [student, showOnboarding]);
+    setShowOnboarding(onboardingCompletedAt == null);
+  }, [student, showOnboarding, onboardingCompletedAt]);
 
   const dismissOnboarding = async () => {
     setShowOnboarding(false);
@@ -97,11 +101,14 @@ export default function DashboardMockupPage() {
 
   // ---------- Region complete diff ----------
   // Initialize the "seen" set from the persisted celebrated_region_ids.
+  // v46 — celebrations split out of students; read from context.
   useEffect(() => {
     if (seenRegionsRef.current !== null) return;
     if (!student) return;
-    seenRegionsRef.current = new Set(student.celebrated_region_ids ?? []);
-  }, [student]);
+    seenRegionsRef.current = new Set(
+      celebrations?.celebrated_region_ids ?? [],
+    );
+  }, [student, celebrations]);
 
   // Watch regionProgress for newly-complete regions
   useEffect(() => {
@@ -137,9 +144,10 @@ export default function DashboardMockupPage() {
   }, [celebratingRegion, lessons]);
 
   // ---------- Streak milestones ----------
+  // v46 — last_streak_milestone_shown lives on student_celebrations.
   useEffect(() => {
     if (!student) return;
-    const lastShown = student.last_streak_milestone_shown ?? 0;
+    const lastShown = celebrations?.last_streak_milestone_shown ?? 0;
     const current = streak.current;
     let milestone: StreakMilestone | null = null;
     if (current >= 30 && lastShown < 30) milestone = 30;
@@ -149,18 +157,19 @@ export default function DashboardMockupPage() {
       setStreakToastMilestone(milestone);
       postCelebrationSeen({ kind: "streak", milestone });
     }
-  }, [student, streak.current, streakToastMilestone]);
+  }, [student, streak.current, streakToastMilestone, celebrations]);
 
   // ---------- Graduation modal ----------
+  // v46 — month_review_seen_at lives on student_celebrations.
   useEffect(() => {
     if (!student) return;
     if (showGraduation) return;
-    if (student.month_review_seen_at) return;
+    if (celebrations?.month_review_seen_at) return;
     if (!monthReview) return;
     const day = getDayNumber(student.joined_at);
     if (day < 28) return;
     setShowGraduation(true);
-  }, [student, monthReview, showGraduation]);
+  }, [student, monthReview, showGraduation, celebrations]);
 
   const dismissGraduation = () => {
     setShowGraduation(false);

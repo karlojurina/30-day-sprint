@@ -3,8 +3,10 @@
  *
  * Fires the first time a student dismisses the welcome overlay that
  * appears on their first visit to Map 2. Sets
- * students.playbook_welcome_seen_at = now() so the overlay never
- * appears again. Idempotent.
+ * student_milestones.playbook_welcome_seen_at = now() so the overlay
+ * never appears again. Idempotent.
+ *
+ * v46 — playbook_welcome_seen_at lives on student_milestones.
  *
  * No payload required — student is identified from the bearer token.
  */
@@ -35,26 +37,38 @@ export async function POST(request: NextRequest) {
 
   const { data: student } = await supabase
     .from("students")
-    .select("id, playbook_welcome_seen_at")
+    .select("id")
     .eq("supabase_user_id", user.id)
     .single();
   if (!student) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  if (student.playbook_welcome_seen_at) {
+  const { data: milestones } = await supabase
+    .from("student_milestones")
+    .select("playbook_welcome_seen_at")
+    .eq("student_id", student.id)
+    .maybeSingle();
+
+  if (milestones?.playbook_welcome_seen_at) {
     return NextResponse.json({
       ok: true,
       already_seen: true,
-      playbook_welcome_seen_at: student.playbook_welcome_seen_at,
+      playbook_welcome_seen_at: milestones.playbook_welcome_seen_at,
     });
   }
 
   const seenAt = new Date().toISOString();
   await supabase
-    .from("students")
-    .update({ playbook_welcome_seen_at: seenAt })
-    .eq("id", student.id);
+    .from("student_milestones")
+    .upsert(
+      {
+        student_id: student.id,
+        playbook_welcome_seen_at: seenAt,
+        updated_at: seenAt,
+      },
+      { onConflict: "student_id" },
+    );
 
   return NextResponse.json({
     ok: true,

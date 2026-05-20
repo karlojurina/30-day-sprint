@@ -9,6 +9,7 @@ import type {
   Lesson,
   StudentLessonCompletion,
   DiscountRequest,
+  StudentStreaks,
 } from "@/types/database";
 import { getDayNumber } from "@/types/database";
 import { TOTAL_LESSONS, progressPercent } from "@/lib/constants";
@@ -34,6 +35,8 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
   const [discountRequest, setDiscountRequest] = useState<DiscountRequest | null>(
     null
   );
+  // v46 — streaks split out of students; read separately.
+  const [streaks, setStreaks] = useState<StudentStreaks | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingVerification, setSavingVerification] = useState(false);
 
@@ -43,29 +46,41 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
     setStudent(null);
 
     async function fetchAll() {
-      const [studentRes, regionsRes, lessonsRes, completionsRes, discountRes] =
-        await Promise.all([
-          supabase.from("students").select("*").eq("id", studentId).single(),
-          supabase.from("regions").select("*").order("order_num"),
-          supabase.from("lessons").select("*").order("day").order("sort_order"),
-          supabase
-            .from("student_lesson_completions")
-            .select("*")
-            .eq("student_id", studentId),
-          supabase
-            .from("discount_requests")
-            .select("*")
-            .eq("student_id", studentId)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .single(),
-        ]);
+      const [
+        studentRes,
+        regionsRes,
+        lessonsRes,
+        completionsRes,
+        discountRes,
+        streaksRes,
+      ] = await Promise.all([
+        supabase.from("students").select("*").eq("id", studentId).single(),
+        supabase.from("regions").select("*").order("order_num"),
+        supabase.from("lessons").select("*").order("day").order("sort_order"),
+        supabase
+          .from("student_lesson_completions")
+          .select("*")
+          .eq("student_id", studentId),
+        supabase
+          .from("discount_requests")
+          .select("*")
+          .eq("student_id", studentId)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .single(),
+        supabase
+          .from("student_streaks")
+          .select("*")
+          .eq("student_id", studentId)
+          .maybeSingle(),
+      ]);
 
       if (studentRes.data) setStudent(studentRes.data);
       if (regionsRes.data) setRegions(regionsRes.data);
       if (lessonsRes.data) setLessons(lessonsRes.data);
       if (completionsRes.data) setCompletions(completionsRes.data);
       if (discountRes.data) setDiscountRequest(discountRes.data);
+      if (streaksRes.data) setStreaks(streaksRes.data as StudentStreaks);
       setLoading(false);
     }
     fetchAll();
@@ -229,7 +244,7 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
               style={{ gap: 8, marginBottom: 24 }}
             >
               <Stat label="Progress" value={`${overallPercent}%`} accent />
-              <Stat label="Streak" value={`${student.current_streak ?? 0}d`} />
+              <Stat label="Streak" value={`${streaks?.current_streak ?? 0}d`} />
               <Stat
                 label="Joined"
                 value={new Date(student.joined_at).toLocaleDateString()}

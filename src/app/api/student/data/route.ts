@@ -38,6 +38,12 @@ export async function GET(request: NextRequest) {
     quizQuestionsRes,
     quizAttemptsRes,
     monthReviewRes,
+    // v46 — per-function sibling tables (split from students)
+    milestonesRes,
+    streaksRes,
+    whopSyncRes,
+    celebrationsRes,
+    dmLogRes,
   ] = await Promise.all([
     supabase.from("regions").select("*").order("order_num"),
     supabase.from("lessons").select("*").order("day").order("sort_order"),
@@ -64,6 +70,31 @@ export async function GET(request: NextRequest) {
       .select("*")
       .eq("student_id", student.id)
       .single(),
+    supabase
+      .from("student_milestones")
+      .select("*")
+      .eq("student_id", student.id)
+      .maybeSingle(),
+    supabase
+      .from("student_streaks")
+      .select("*")
+      .eq("student_id", student.id)
+      .maybeSingle(),
+    supabase
+      .from("student_whop_sync")
+      .select("*")
+      .eq("student_id", student.id)
+      .maybeSingle(),
+    supabase
+      .from("student_celebrations")
+      .select("*")
+      .eq("student_id", student.id)
+      .maybeSingle(),
+    supabase
+      .from("student_dm_log")
+      .select("*")
+      .eq("student_id", student.id)
+      .maybeSingle(),
   ]);
 
   // Masked course ID for the sync debug panel — enough to verify in the
@@ -85,6 +116,11 @@ export async function GET(request: NextRequest) {
     quizQuestions: quizQuestionsRes.data ?? [],
     quizAttempts: quizAttemptsRes.data ?? [],
     monthReview: monthReviewRes.data ?? null,
+    milestones: milestonesRes.data ?? null,
+    streaks: streaksRes.data ?? null,
+    whopSync: whopSyncRes.data ?? null,
+    celebrations: celebrationsRes.data ?? null,
+    dmLog: dmLogRes.data ?? null,
     whopCourseIdMasked: courseIdMasked,
   });
 }

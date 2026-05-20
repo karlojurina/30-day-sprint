@@ -211,7 +211,7 @@ export default function PlaybookPage() {
 
         <PlaybookHub
           nodes={nodes}
-          firstClientLandedAt={student.first_client_landed_at}
+          firstClientLandedAt={firstClientLandedAt}
           onOpenNode={setOpenNodeId}
         />
       </main>

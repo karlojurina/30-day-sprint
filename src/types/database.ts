@@ -14,6 +14,20 @@ export type StudentTitle =
   | "strategist"
   | "et_pro";
 
+/**
+ * v46 — students table is now identity-only. State that used to live
+ * here was split into 5 sibling tables (one per function):
+ *
+ *   - student_milestones    — onboarding + sprint progression
+ *   - student_streaks       — streak counters
+ *   - student_whop_sync     — Whop tokens + watch-sync diagnostics
+ *   - student_celebrations  — which celebration overlays have been shown
+ *   - student_dm_log        — outbound DM-sent flags
+ *
+ * If you're tempted to add another column here, read CLAUDE.md →
+ * "Table-level bounded contexts" first. New state probably belongs
+ * in its own table, not on `students`.
+ */
 export interface Student {
   id: string;
   supabase_user_id: string | null;
@@ -22,59 +36,87 @@ export interface Student {
   email: string | null;
   name: string | null;
   discord_username: string | null;
+  discord_user_id: string | null;
   avatar_url: string | null;
   membership_status: "active" | "canceled" | "past_due" | "expired";
   joined_at: string;
   last_active_at: string;
-  /** v44 — stamped on first Whop OAuth callback in this app. null = the
-   *  student exists (likely created by Whop webhook on membership.activated)
-   *  but has never actually authenticated into the sprint app. */
-  first_sprint_login_at: string | null;
-  whop_access_token: string | null;
-  whop_refresh_token: string | null;
-  last_watch_sync_at: string | null;
-  whop_last_sync_error: string | null;
-  whop_last_sync_error_at: string | null;
-  whop_last_sync_unmatched: string[] | null;
-  whop_last_sync_fetched_count: number | null;
-  whop_last_sync_matched_count: number | null;
-  current_streak: number;
-  longest_streak: number;
-  last_streak_date: string | null;
+  /** Computed/derived from the streak count. Cached here for the UI. */
   current_title: StudentTitle;
-  onboarding_completed_at: string | null;
-  // Phase 2 celebration flags
-  last_streak_milestone_shown: number;
-  month_review_seen_at: string | null;
-  celebrated_region_ids: string[];
-  // Phase 3 (Discord)
-  day28_dm_sent_at: string | null;
-  discord_user_id: string | null;
-  // v12: ad-submissions verification gate (admin tick) — required
-  // before /api/discounts/approve will generate a Whop promo code.
+  // Admin gates (stay on students — they're identity-adjacent admin flags)
   ad_submissions_verified: boolean;
   ad_submissions_verified_at: string | null;
   ad_submissions_verified_by: string | null;
-  // v38: exclude this student from CSM task generation + Day-28 DM.
-  // Use for the team's own dummy accounts.
+  /** v38: exclude this student from CSM task generation + Day-28 DM.
+   *  Used for the team's own dummy accounts. */
   csm_exempt: boolean;
-  // v42 (v2 data model): three event-triggered timestamps + a flag
-  // for the one-time Map 2 welcome overlay.
-  //   bounty_access_claimed_at  — set when student clicks Claim
-  //                                Bounty Access on l057.
-  //   sprint_completed_at       — set when student clicks Finish
-  //                                Program after l058. Drives the
-  //                                conditional Map 2 default surface.
-  //   first_client_landed_at    — set when student self-reports the
-  //                                Land Your First Client milestone
-  //                                on Map 2.
-  //   playbook_welcome_seen_at  — set the first time a student lands
-  //                                on Map 2 (dismisses the intro overlay).
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * v46 — onboarding + sprint progression milestones. One row per
+ * student. Each column null = "not reached yet".
+ *
+ *   onboarding_completed_at   — first-run onboarding finished
+ *   first_sprint_login_at     — first authenticated visit to the app
+ *                                (powers the has_logged_into_app trigger)
+ *   bounty_access_claimed_at  — clicked Claim Bounty Access on l057 (v2)
+ *   sprint_completed_at       — clicked Finish Program after l058 (v2)
+ *                                — drives the Map 2 default surface
+ *   first_client_landed_at    — self-reported the Land Your First Client
+ *                                milestone on Map 2 (v2)
+ *   playbook_welcome_seen_at  — saw the Map 2 intro overlay once (v2)
+ */
+export interface StudentMilestones {
+  student_id: string;
+  onboarding_completed_at: string | null;
+  first_sprint_login_at: string | null;
   bounty_access_claimed_at: string | null;
   sprint_completed_at: string | null;
   first_client_landed_at: string | null;
   playbook_welcome_seen_at: string | null;
-  created_at: string;
+  updated_at: string;
+}
+
+/** v46 — streak counters, one row per student. */
+export interface StudentStreaks {
+  student_id: string;
+  current_streak: number;
+  longest_streak: number;
+  last_streak_date: string | null;
+  updated_at: string;
+}
+
+/** v46 — Whop OAuth tokens + watch-history sync diagnostics. */
+export interface StudentWhopSync {
+  student_id: string;
+  access_token: string | null;
+  refresh_token: string | null;
+  last_sync_at: string | null;
+  last_sync_error: string | null;
+  last_sync_error_at: string | null;
+  last_sync_unmatched: string[] | null;
+  last_sync_fetched: number | null;
+  last_sync_matched: number | null;
+  updated_at: string;
+}
+
+/** v46 — celebration overlay state. Tracks which one-shot overlays
+ *  have already played so we don't re-fire them. */
+export interface StudentCelebrations {
+  student_id: string;
+  last_streak_milestone_shown: number;
+  month_review_seen_at: string | null;
+  celebrated_region_ids: string[];
+  updated_at: string;
+}
+
+/** v46 — outbound DM log. Add a column per DM type as new DM
+ *  flows ship. */
+export interface StudentDmLog {
+  student_id: string;
+  day28_dm_sent_at: string | null;
   updated_at: string;
 }
 

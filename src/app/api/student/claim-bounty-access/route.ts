@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
 
   const { data: student } = await supabase
     .from("students")
-    .select("id, bounty_access_claimed_at")
+    .select("id")
     .eq("supabase_user_id", user.id)
     .single();
 
@@ -53,33 +53,53 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
+  // v46 — bounty_access_claimed_at lives on student_milestones.
+  const { data: milestones } = await supabase
+    .from("student_milestones")
+    .select("bounty_access_claimed_at")
+    .eq("student_id", student.id)
+    .maybeSingle();
+
   // Idempotency — if the flag is already set, return the existing
   // timestamp so the client can render the post-claim state without
   // a second celebration firing.
-  if (student.bounty_access_claimed_at) {
+  if (milestones?.bounty_access_claimed_at) {
     return NextResponse.json({
       ok: true,
       already_claimed: true,
-      bounty_access_claimed_at: student.bounty_access_claimed_at,
+      bounty_access_claimed_at: milestones.bounty_access_claimed_at,
     });
   }
 
-  // 1. Flip the flag. Conditional WHERE so a race between two
-  //    parallel calls can't double-claim.
+  // 1. Flip the flag via upsert on student_milestones. Conditional
+  //    WHERE on the bounty_access_claimed_at update path prevents a
+  //    race between two parallel calls.
   const claimedAt = new Date().toISOString();
-  const { data: updated, error: updateError } = await supabase
-    .from("students")
-    .update({ bounty_access_claimed_at: claimedAt })
-    .eq("id", student.id)
-    .is("bounty_access_claimed_at", null)
-    .select("bounty_access_claimed_at")
-    .single();
 
-  if (updateError || !updated) {
-    return NextResponse.json(
-      { error: "Failed to claim" },
-      { status: 500 },
-    );
+  // If no milestones row exists yet, insert one. If it does, update.
+  if (!milestones) {
+    await supabase
+      .from("student_milestones")
+      .insert({
+        student_id: student.id,
+        bounty_access_claimed_at: claimedAt,
+        updated_at: claimedAt,
+      });
+  } else {
+    const { data: updated, error: updateError } = await supabase
+      .from("student_milestones")
+      .update({
+        bounty_access_claimed_at: claimedAt,
+        updated_at: claimedAt,
+      })
+      .eq("student_id", student.id)
+      .is("bounty_access_claimed_at", null)
+      .select("bounty_access_claimed_at")
+      .single();
+
+    if (updateError || !updated) {
+      return NextResponse.json({ error: "Failed to claim" }, { status: 500 });
+    }
   }
 
   // 2. Mark l057 complete. Mirrors what toggle-lesson would do —
@@ -100,6 +120,6 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     already_claimed: false,
-    bounty_access_claimed_at: updated.bounty_access_claimed_at,
+    bounty_access_claimed_at: claimedAt,
   });
 }

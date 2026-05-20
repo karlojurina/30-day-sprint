@@ -120,9 +120,10 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 
 **Identity / accounts**
 - `team_members` — founder/admin/CSM accounts (Supabase auth-linked)
-- `students` — student row (Whop user + Supabase auth bridge). Currently
-  carries some state that should be split into separate tables — see
-  CLAUDE.md "table-level bounded contexts."
+- `students` — student row (Whop user + Supabase auth bridge).
+  Identity-only after v46/v47: id, whop_user_id, name, email,
+  membership_status, etc. Per-function state lives in the sibling
+  tables below.
 
 **Curriculum (read-mostly)**
 - `regions` — R1–R4 metadata
@@ -133,7 +134,17 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 - `templates` — CSM DM templates (built-in + custom, with `trigger_config`)
 - `admin_config` — key/value app config (booking link, program link, etc.)
 
-**Student state (per-student rows)**
+**Student state (per-student rows — one table per function, v46)**
+- `student_milestones` — onboarding + sprint progression timestamps
+  (onboarding_completed_at, first_sprint_login_at,
+  bounty_access_claimed_at, sprint_completed_at,
+  first_client_landed_at, playbook_welcome_seen_at)
+- `student_streaks` — current_streak, longest_streak, last_streak_date
+- `student_whop_sync` — Whop OAuth tokens + watch-history sync diagnostics
+- `student_celebrations` — last_streak_milestone_shown,
+  month_review_seen_at, celebrated_region_ids
+- `student_dm_log` — outbound DM-sent flags (day28_dm_sent_at; extend
+  as new DM flows ship)
 - `student_lesson_completions` — watch + action shipping state per lesson
 - `daily_notes` — one row per student per day
 - `lesson_notes` — per-lesson note

@@ -60,8 +60,12 @@ export type PaceLabel = "behind" | "on_pace" | "ahead";
 export interface StudentSnapshot {
   student: Pick<
     Student,
-    "id" | "name" | "joined_at" | "membership_status" | "last_active_at" | "first_sprint_login_at"
-  >;
+    "id" | "name" | "joined_at" | "membership_status" | "last_active_at"
+  > & {
+    /** v46 — sourced from student_milestones, joined into the snapshot
+     *  so condition evaluators can stay simple. */
+    first_sprint_login_at: string | null;
+  };
   /** Day counter, 1-indexed, computed from joined_at. */
   day: number;
 
@@ -148,6 +152,10 @@ export function buildStudentSnapshot(
   lessons: LessonRow[],
   regionTotals: Record<string, number>,
   existingTasks: ExistingTask[],
+  /** v46 — pulled from student_milestones at the call site and passed
+   *  in so the snapshot can carry first_sprint_login_at without the
+   *  evaluator needing to know about the new table layout. */
+  milestones: { first_sprint_login_at: string | null } | null,
 ): StudentSnapshot {
   const now = Date.now();
   const day = Math.max(
@@ -238,7 +246,7 @@ export function buildStudentSnapshot(
       joined_at: student.joined_at,
       membership_status: student.membership_status,
       last_active_at: student.last_active_at,
-      first_sprint_login_at: student.first_sprint_login_at,
+      first_sprint_login_at: milestones?.first_sprint_login_at ?? null,
     },
     day,
     regions,

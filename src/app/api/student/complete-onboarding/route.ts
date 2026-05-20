@@ -4,9 +4,11 @@ import { createClient } from "@supabase/supabase-js";
 /**
  * POST /api/student/complete-onboarding
  *
- * Stamps `students.onboarding_completed_at = now()` so the onboarding
- * modal won't fire again. Idempotent — overwrites the timestamp on
- * repeat calls but this is harmless.
+ * Stamps `student_milestones.onboarding_completed_at = now()` so the
+ * onboarding modal won't fire again. Idempotent — overwrites the
+ * timestamp on repeat calls but this is harmless.
+ *
+ * v46 — onboarding_completed_at lives on student_milestones.
  */
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -29,10 +31,26 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
 
-  const { error } = await supabase
+  const { data: student } = await supabase
     .from("students")
-    .update({ onboarding_completed_at: new Date().toISOString() })
-    .eq("supabase_user_id", user.id);
+    .select("id")
+    .eq("supabase_user_id", user.id)
+    .single();
+  if (!student) {
+    return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await supabase
+    .from("student_milestones")
+    .upsert(
+      {
+        student_id: student.id,
+        onboarding_completed_at: now,
+        updated_at: now,
+      },
+      { onConflict: "student_id" },
+    );
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

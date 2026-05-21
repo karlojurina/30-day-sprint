@@ -1,22 +1,48 @@
 "use client";
 
-import type { Student } from "@/types/database";
+import type { Student, RegionId } from "@/types/database";
 import { getDayNumber } from "@/types/database";
+import { Avatar, PacePill } from "@/components/admin/ui";
 
 interface StudentCardProps {
   student: Student;
   progressPercent: number;
+  currentRegion: RegionId;
+  paceLabel: "behind" | "on_pace" | "ahead";
   onClick: () => void;
 }
 
 /**
- * Compact card for the kanban view. Shows the bare essentials:
- * name, day-of-program, progress bar, last-active relative time.
+ * Kanban card. Surfaces the four things Karlo asked for at a glance:
  *
- * Day-1/7/14/21 SOP chips were removed 2026-05-16 — the CSM templates
- * + task queue replace them. Astrid copies from /admin/tasks now.
+ *   1. WHO          — avatar + name (line 1)
+ *   2. WHEN         — Day N chip on the right (line 1)
+ *   3. WHERE        — current region chip + pace pill (line 2)
+ *   4. PROGRESS     — bar + percent + last-active (lines 3-4)
+ *
+ * Clicking opens the right-side drawer with the full detail.
  */
-export function StudentCard({ student, progressPercent, onClick }: StudentCardProps) {
+const REGION_NUMERAL: Record<RegionId, string> = {
+  r1: "I",
+  r2: "II",
+  r3: "III",
+  r4: "IV",
+};
+
+const REGION_NAME: Record<RegionId, string> = {
+  r1: "Foundation",
+  r2: "Production",
+  r3: "Strategy",
+  r4: "Gate",
+};
+
+export function StudentCard({
+  student,
+  progressPercent,
+  currentRegion,
+  paceLabel,
+  onClick,
+}: StudentCardProps) {
   const day = getDayNumber(student.joined_at);
   const lastActiveLabel = relativeTime(student.last_active_at);
 
@@ -30,12 +56,17 @@ export function StudentCard({ student, progressPercent, onClick }: StudentCardPr
         borderRadius: 12,
         padding: 14,
         cursor: "pointer",
+        border: "1px solid var(--color-border)",
       }}
     >
-      {/* Name + day */}
-      <div className="flex items-baseline justify-between gap-2" style={{ marginBottom: 10 }}>
+      {/* Line 1: avatar + name + day chip */}
+      <div
+        className="flex items-center"
+        style={{ gap: 10, marginBottom: 10 }}
+      >
+        <Avatar src={student.avatar_url} name={student.name} size={28} />
         <p
-          className="truncate"
+          className="truncate flex-1 min-w-0"
           style={{
             fontSize: 14,
             fontWeight: 500,
@@ -58,7 +89,16 @@ export function StudentCard({ student, progressPercent, onClick }: StudentCardPr
         </span>
       </div>
 
-      {/* Progress bar */}
+      {/* Line 2: region chip + pace pill */}
+      <div
+        className="flex items-center"
+        style={{ gap: 6, marginBottom: 10, flexWrap: "wrap" }}
+      >
+        <RegionChip region={currentRegion} />
+        <PacePill label={paceLabel} compact />
+      </div>
+
+      {/* Line 3: progress bar */}
       <div
         style={{
           height: 4,
@@ -77,6 +117,7 @@ export function StudentCard({ student, progressPercent, onClick }: StudentCardPr
           }}
         />
       </div>
+      {/* Line 4: progress count + last active */}
       <div
         className="flex items-center justify-between"
         style={{
@@ -89,6 +130,38 @@ export function StudentCard({ student, progressPercent, onClick }: StudentCardPr
         <span>{lastActiveLabel}</span>
       </div>
     </button>
+  );
+}
+
+/** Compact region chip: Roman numeral + short name. Mirrors the
+ *  region numerals used on the map for at-a-glance recognition. */
+function RegionChip({ region }: { region: RegionId }) {
+  return (
+    <span
+      className="inline-flex items-center"
+      style={{
+        gap: 5,
+        padding: "2px 8px",
+        borderRadius: 999,
+        background: "var(--color-bg-elevated)",
+        border: "1px solid var(--color-border)",
+        fontSize: 10,
+        fontWeight: 600,
+        color: "var(--color-text-secondary)",
+        letterSpacing: "0.02em",
+      }}
+    >
+      <span
+        style={{
+          color: "var(--color-accent-dark)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+        }}
+      >
+        {REGION_NUMERAL[region]}
+      </span>
+      <span>{REGION_NAME[region]}</span>
+    </span>
   );
 }
 

@@ -28,6 +28,14 @@ const navItems: { href: string; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    href: "/admin/kanban",
+    label: "Kanban",
+    icon: (
+      // 3 vertical bars — column-shaped kanban glyph
+      <path d="M4 6v14M4 6a2 2 0 012-2h2a2 2 0 012 2m-6 0h6m0 0v14m0-14a2 2 0 012-2h2a2 2 0 012 2m-6 0h6m0 0v14m0-14a2 2 0 012-2h2a2 2 0 012 2v14M4 20h6m0 0h6m0 0h4" />
+    ),
+  },
+  {
     href: "/admin/discounts",
     label: "Discounts",
     icon: (

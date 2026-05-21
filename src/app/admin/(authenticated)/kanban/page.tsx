@@ -2,13 +2,18 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import type { Student, StudentLessonCompletion } from "@/types/database";
+import type {
+  Student,
+  StudentLessonCompletion,
+  RegionId,
+} from "@/types/database";
 import { getDayNumber } from "@/types/database";
 import {
   TOTAL_LESSONS,
   progressPercent,
   ADMIN_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
+import { buildPaceSummary } from "@/lib/csm-triggers";
 import { StudentCard } from "./StudentCard";
 import { StudentDrawer } from "./StudentDrawer";
 
@@ -56,7 +61,13 @@ function columnFor(student: Student): ColumnId {
 
 interface StudentWithProgress extends Student {
   completedCount: number;
+  /** Highest region the student has any complete lesson in. r1 default. */
+  currentRegion: RegionId;
+  /** Pace label vs the linear 30-day glide path. */
+  paceLabel: "behind" | "on_pace" | "ahead";
 }
+
+const REGION_ORDER: RegionId[] = ["r1", "r2", "r3", "r4"];
 
 export default function KanbanPage() {
   const supabase = createClient();
@@ -68,6 +79,7 @@ export default function KanbanPage() {
   useEffect(() => {
     async function fetchAll() {
       // Filter to actual paying students — see /admin/students for rationale.
+      // Cutoff: ADMIN_STUDENT_JOIN_CUTOFF (May 1, 2026) — see lib/constants.ts.
       const [studentsRes, completionsRes, lessonsRes] = await Promise.all([
         supabase
           .from("students")
@@ -78,27 +90,61 @@ export default function KanbanPage() {
           .order("joined_at", { ascending: false }),
         supabase
           .from("student_lesson_completions")
-          .select("student_id, completed_at, action_completed_at"),
-        supabase.from("lessons").select("id", { count: "exact", head: true }),
+          .select("student_id, lesson_id, completed_at, action_completed_at"),
+        // Pull lesson id + region_id so we can derive each student's
+        // current region (highest region they have any completion in).
+        supabase.from("lessons").select("id, region_id"),
       ]);
 
-      if (typeof lessonsRes.count === "number" && lessonsRes.count > 0) {
-        setTotalLessons(lessonsRes.count);
+      const lessonsList = (lessonsRes.data ?? []) as Array<{
+        id: string;
+        region_id: string;
+      }>;
+      if (lessonsList.length > 0) {
+        setTotalLessons(lessonsList.length);
       }
+      const lessonToRegion = new Map(
+        lessonsList.map((l) => [l.id, l.region_id as RegionId]),
+      );
 
+      // Per-student aggregates: count of watched lessons + the highest
+      // region they have any completed lesson in.
       const counts = new Map<string, number>();
+      const currentRegionByStudent = new Map<string, RegionId>();
       for (const c of (completionsRes.data ?? []) as Pick<
         StudentLessonCompletion,
-        "student_id" | "completed_at" | "action_completed_at"
+        "student_id" | "lesson_id" | "completed_at" | "action_completed_at"
       >[]) {
         if (!c.completed_at) continue;
         counts.set(c.student_id, (counts.get(c.student_id) ?? 0) + 1);
+        const rid = lessonToRegion.get(c.lesson_id);
+        if (!rid) continue;
+        const existing = currentRegionByStudent.get(c.student_id);
+        if (
+          !existing ||
+          REGION_ORDER.indexOf(rid) > REGION_ORDER.indexOf(existing)
+        ) {
+          currentRegionByStudent.set(c.student_id, rid);
+        }
       }
 
-      const out: StudentWithProgress[] = (studentsRes.data ?? []).map((s) => ({
-        ...s,
-        completedCount: counts.get(s.id) ?? 0,
-      }));
+      const totalLessonsCount = lessonsList.length || TOTAL_LESSONS;
+      const out: StudentWithProgress[] = (studentsRes.data ?? []).map((s) => {
+        const completedCount = counts.get(s.id) ?? 0;
+        const currentRegion = currentRegionByStudent.get(s.id) ?? "r1";
+        const pace = buildPaceSummary(
+          s.joined_at,
+          completedCount,
+          totalLessonsCount,
+          currentRegion,
+        );
+        return {
+          ...s,
+          completedCount,
+          currentRegion,
+          paceLabel: pace.progressLabel,
+        };
+      });
       setStudents(out);
       setLoading(false);
     }
@@ -253,6 +299,8 @@ export default function KanbanPage() {
                           s.completedCount,
                           totalLessons
                         )}
+                        currentRegion={s.currentRegion}
+                        paceLabel={s.paceLabel}
                         onClick={() => setDrawerStudentId(s.id)}
                       />
                     ))

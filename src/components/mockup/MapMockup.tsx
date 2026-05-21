@@ -372,7 +372,12 @@ const SCENES: Partial<Record<RegionId, Scene>> = {
       { x: 1766, y: 645 }, { x: 1736, y: 626 }, { x: 1717, y: 611 },
       { x: 1709, y: 591 }, { x: 1739, y: 564 }, { x: 1774, y: 548 },
       { x: 1822, y: 526 }, { x: 1882, y: 510 }, { x: 1920, y: 492 },
-      { x: 1952, y: 474 }, { x: 2018, y: 323 },
+      { x: 1952, y: 474 },
+      // v50.1 - Bounty Access end-marker. Brought DOWN from
+      // (2018, 323) (which sat way above the pillars in the sky)
+      // to land INSIDE the arch frame at the gate level. The path
+      // now arrives at the arch instead of overshooting it.
+      { x: 1985, y: 445 },
     ],
   },
 };
@@ -1273,10 +1278,13 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         label: "Program complete",
                         sublabel: "the work continues",
                       },
-                      // "In front" — below + slightly left of the arch,
-                      // close to where the path arrives at the summit but
-                      // before the Bounty Access end-marker.
-                      position: { x: 1822, y: 526 },
+                      // v50.1 - moved OFF the path. Previous spot
+                      // (1822, 526) sat right on top of the last
+                      // path waypoints, so the Program-complete
+                      // label overlapped the snowy-ground lesson
+                      // checkmarks. Pulled further down-left into
+                      // open foreground snow.
+                      position: { x: 1480, y: 760 },
                     },
                     {
                       marker: {
@@ -1286,9 +1294,13 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                           ? "Months 2-3 · open"
                           : "claim Bounty Access first",
                       },
-                      // Centroid of the stone-circle polygon Karlo
-                      // traced on the painted R4 scene.
-                      position: { x: 2732, y: 286 },
+                      // v50.1 - moved UP onto the volcano peak.
+                      // Earlier (2732, 286) was the centroid of the
+                      // traced polygon but landed on the right
+                      // slope. The polygon's topmost vertices were
+                      // around y≈145, so we sit just above that
+                      // for the marker to crown the summit.
+                      position: { x: 2615, y: 175 },
                       locked: !bountyAccessClaimedAt,
                       onClick: () => {
                         if (!bountyAccessClaimedAt) {

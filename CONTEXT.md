@@ -102,6 +102,9 @@ welcome, first-client landed, etc.).
 
 **Webhooks**
 - `POST /api/webhooks/whop` — HMAC-verified Whop events
+- `POST /api/webhooks/adbounty` — Zak's ad-bounty system fires here on
+  enrollment → stamps `student_milestones.bounty_access_claimed_at`
+  (sole source of that timestamp)
 
 **Cron** (Vercel scheduled)
 - `GET /api/cron/sync-whop` — pull Whop watch history into completions

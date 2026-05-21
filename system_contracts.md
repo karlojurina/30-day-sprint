@@ -43,17 +43,17 @@ When adding a new table, append it here. When deleting a field, scan
 
 ### `student_milestones`
 - **Depends on:** `students`
-- **Depended on by:** `StudentContext` (`sprintCompletedAt`,
-  `bountyAccessClaimedAt`, `firstClientLandedAt`,
-  `playbookWelcomeSeenAt`, `onboardingCompletedAt`), milestone API
-  routes, `src/lib/csm-triggers.ts` (`has_logged_into_app` reads
+- **Depended on by:** `StudentContext` (`bountyAccessClaimedAt`,
+  `firstClientLandedAt`, `playbookWelcomeSeenAt`,
+  `onboardingCompletedAt`), milestone API routes,
+  `src/lib/csm-triggers.ts` (`has_logged_into_app` reads
   `first_sprint_login_at`), `/api/auth/whop/callback` (stamps
   `first_sprint_login_at` on first login),
-  `/api/cron/check-csm-tasks` (joins for the snapshot)
+  `/api/cron/check-csm-tasks` (joins for the snapshot),
+  `/api/webhooks/adbounty` (sole writer of `bounty_access_claimed_at`)
 - **Stable contract:** `student_id`, `onboarding_completed_at`,
   `first_sprint_login_at`, `bounty_access_claimed_at`,
-  `sprint_completed_at`, `first_client_landed_at`,
-  `playbook_welcome_seen_at`
+  `first_client_landed_at`, `playbook_welcome_seen_at`
 
 ### `student_streaks`
 - **Depends on:** `students`

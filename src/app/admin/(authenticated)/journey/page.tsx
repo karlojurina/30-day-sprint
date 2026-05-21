@@ -2,11 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import type {
-  Student,
-  StudentLessonCompletion,
-  RegionId,
-} from "@/types/database";
+import type { Student, RegionId } from "@/types/database";
 import { getDayNumber } from "@/types/database";
 import {
   TOTAL_LESSONS,
@@ -14,7 +10,6 @@ import {
   ADMIN_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
 import { buildPaceSummary } from "@/lib/csm-triggers";
-import { completedLessonIdsFor } from "@/lib/progress";
 import { StudentCard } from "./StudentCard";
 import { StudentDrawer } from "./StudentDrawer";
 
@@ -68,7 +63,6 @@ interface StudentWithProgress extends Student {
   paceLabel: "behind" | "on_pace" | "ahead";
 }
 
-const REGION_ORDER: RegionId[] = ["r1", "r2", "r3", "r4"];
 
 export default function KanbanPage() {
   const supabase = createClient();
@@ -79,74 +73,57 @@ export default function KanbanPage() {
 
   useEffect(() => {
     async function fetchAll() {
-      // Filter to actual paying students — see /admin/students for rationale.
-      // Cutoff: ADMIN_STUDENT_JOIN_CUTOFF (May 1, 2026) — see lib/constants.ts.
-      const [studentsRes, completionsRes, lessonsRes] = await Promise.all([
-        supabase
-          .from("students")
-          .select("*")
-          .not("whop_membership_id", "is", null)
-          .in("membership_status", ["active", "past_due", "canceled"])
-          .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
-          .order("joined_at", { ascending: false }),
-        supabase
-          .from("student_lesson_completions")
-          .select("student_id, lesson_id, completed_at, action_completed_at"),
-        // Pull lesson id + region_id + requires_action so we can derive
-        // each student's current region (highest region they have any
-        // completion in) AND so the canonical progress helper knows
-        // which lessons are compound (need watch + ship to count).
-        supabase.from("lessons").select("id, region_id, requires_action"),
-      ]);
+      // v49 fix: per-student aggregates come from server-aggregated
+      // views (student_progress_counts + student_current_region) so
+      // we don't hit PostgREST's 1000-row cap on raw completions —
+      // the same pattern /admin/students uses for its progress
+      // numbers (which is why those have always been correct and
+      // the journey wasn't).
+      const [studentsRes, countsRes, regionsRes, totalLessonsRes] =
+        await Promise.all([
+          supabase
+            .from("students")
+            .select("*")
+            .not("whop_membership_id", "is", null)
+            .in("membership_status", ["active", "past_due", "canceled"])
+            .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
+            .order("joined_at", { ascending: false }),
+          supabase
+            .from("student_progress_counts")
+            .select("student_id, completed_count"),
+          supabase
+            .from("student_current_region")
+            .select("student_id, current_region"),
+          supabase.from("lessons").select("id", { count: "exact", head: true }),
+        ]);
 
-      const lessonsList = (lessonsRes.data ?? []) as Array<{
-        id: string;
-        region_id: string;
-        requires_action: boolean;
-      }>;
-      if (lessonsList.length > 0) {
-        setTotalLessons(lessonsList.length);
-      }
-      const lessonToRegion = new Map(
-        lessonsList.map((l) => [l.id, l.region_id as RegionId]),
-      );
+      const totalLessonsCount =
+        typeof totalLessonsRes.count === "number" && totalLessonsRes.count > 0
+          ? totalLessonsRes.count
+          : TOTAL_LESSONS;
+      setTotalLessons(totalLessonsCount);
 
-      // Group completions by student so we can run the canonical
-      // "is this lesson complete?" check per-student. Uses the shared
-      // helper in src/lib/progress.ts so kanban agrees with every
-      // other surface (and with the student_progress_counts view).
-      const completionsByStudent = new Map<
-        string,
-        StudentLessonCompletion[]
-      >();
-      for (const c of (completionsRes.data ?? []) as StudentLessonCompletion[]) {
-        const arr = completionsByStudent.get(c.student_id) ?? [];
-        arr.push(c);
-        completionsByStudent.set(c.student_id, arr);
-      }
-
-      // For each student, derive the count of completed lessons + the
-      // highest region they have any completed lesson in (drives the
-      // region chip on the card).
+      // student_id → count
       const counts = new Map<string, number>();
-      const currentRegionByStudent = new Map<string, RegionId>();
-      for (const [studentId, rows] of completionsByStudent) {
-        const doneIds = completedLessonIdsFor(rows, lessonsList);
-        counts.set(studentId, doneIds.size);
-        for (const lid of doneIds) {
-          const rid = lessonToRegion.get(lid);
-          if (!rid) continue;
-          const existing = currentRegionByStudent.get(studentId);
-          if (
-            !existing ||
-            REGION_ORDER.indexOf(rid) > REGION_ORDER.indexOf(existing)
-          ) {
-            currentRegionByStudent.set(studentId, rid);
-          }
-        }
+      for (const row of (countsRes.data ?? []) as Array<{
+        student_id: string;
+        completed_count: number;
+      }>) {
+        counts.set(row.student_id, row.completed_count);
       }
 
-      const totalLessonsCount = lessonsList.length || TOTAL_LESSONS;
+      // student_id → highest region with a completion
+      const currentRegionByStudent = new Map<string, RegionId>();
+      for (const row of (regionsRes.data ?? []) as Array<{
+        student_id: string;
+        current_region: string;
+      }>) {
+        currentRegionByStudent.set(
+          row.student_id,
+          row.current_region as RegionId,
+        );
+      }
+
       const out: StudentWithProgress[] = (studentsRes.data ?? []).map((s) => {
         const completedCount = counts.get(s.id) ?? 0;
         const currentRegion = currentRegionByStudent.get(s.id) ?? "r1";

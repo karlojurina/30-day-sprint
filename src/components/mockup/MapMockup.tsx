@@ -415,7 +415,12 @@ const SCENE_IMAGE_STACK: Array<{ id: View; src: string; eager: boolean }> = [
 
 // End-of-region marker that sits on the LAST waypoint of each scene.
 // Click → transitionTo nextView. R4 has no next (final region).
-type EndMarkerKind = "onward" | "discount" | "celebration" | "playbook";
+type EndMarkerKind =
+  | "onward"
+  | "discount"
+  | "celebration"
+  | "playbook"
+  | "bounty";
 interface SceneEndMarker {
   kind: EndMarkerKind;
   label: string;
@@ -427,7 +432,11 @@ const SCENE_END_MARKERS: Record<RegionId, SceneEndMarker> = {
   r1: { kind: "onward", label: "Onward",  sublabel: "to Creative Lab", nextView: "r2" },
   r2: { kind: "onward",  label: "Onward",          sublabel: "to Test Track",   nextView: "r3" },
   r3: { kind: "onward", label: "Onward",  sublabel: "to The Summit",  nextView: "r4" },
-  r4: { kind: "celebration", label: "Program complete", sublabel: "the work continues" },
+  // v50 — Bounty Access is the finish. Sits at the last waypoint
+  // (the arch in R4's painted scene). Click opens l057's sheet,
+  // where the Claim button completes the sprint. "Program complete"
+  // moved to a pinned label slightly in front (see below).
+  r4: { kind: "bounty", label: "Bounty Access", sublabel: "the finish line" },
 };
 
 // Action Items: lessons whose title starts with "Action Item:" render as
@@ -1169,7 +1178,22 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
             completedLessonIds={completedLessonIdsForMap}
             currentLessonId={virtualizeCurrentLessonId(currentLesson?.id ?? null)}
             onOpenLesson={onOpenLesson}
-            endMarker={SCENE_END_MARKERS[view as RegionId]}
+            endMarker={
+              // R4 — dynamic label so the marker reflects claimed state
+              // (matches the R2 discount marker pattern). Other regions
+              // use the static SCENE_END_MARKERS entry as-is.
+              view === "r4"
+                ? {
+                    kind: "bounty",
+                    label: bountyAccessClaimedAt
+                      ? "Bounty Access · claimed"
+                      : "Bounty Access",
+                    sublabel: bountyAccessClaimedAt
+                      ? "the finish line · done"
+                      : "the finish line",
+                  }
+                : SCENE_END_MARKERS[view as RegionId]
+            }
             endMarkerLocked={
               !(regionProgress[view as RegionId]?.isComplete ?? false)
             }
@@ -1186,12 +1210,18 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                 );
                 return;
               }
+              // v50 — R4's end-marker IS the Bounty Access claim. Open
+              // l057's lesson sheet where the Claim button lives.
+              if (view === "r4") {
+                onOpenLesson("l057");
+                return;
+              }
               const next = SCENE_END_MARKERS[view as RegionId]?.nextView;
               if (next) transitionTo(next);
             }}
-            // R2 → "Claim discount" marker. R4 → "Playbook" marker
-            // (locked until Bounty Access is claimed). Other regions
-            // get no secondary marker.
+            // R2 → "Claim discount" marker (auto-positioned 160px back
+            // from the last waypoint). Other regions don't use the
+            // auto-positioned secondary slot.
             secondaryMarker={
               view === "r2"
                 ? {
@@ -1213,25 +1243,12 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         ? "reward unlocked"
                         : "finish R1 + R2 first",
                   }
-                : view === "r4"
-                  ? {
-                      kind: "playbook",
-                      label: bountyAccessClaimedAt
-                        ? "The Playbook"
-                        : "The Playbook",
-                      sublabel: bountyAccessClaimedAt
-                        ? "Months 2-3 · open"
-                        : "claim Bounty Access first",
-                    }
-                  : undefined
+                : undefined
             }
-            secondaryMarkerLocked={view === "r4" && !bountyAccessClaimedAt}
             onSecondaryMarkerClick={
               view === "r2"
                 ? () => {
                     // Open the celebration modal in whichever mode applies.
-                    // The actual claim API call is wired through the modal's
-                    // "Claim my 30% discount" button (mode === 'claim').
                     if (discountRequest) {
                       setDiscountModalMode("review");
                     } else if (!discountAllLessonsDone) {
@@ -1240,17 +1257,51 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       setDiscountModalMode("claim");
                     }
                   }
-                : view === "r4"
-                  ? () => {
-                      // Locked = nudge via toast. Unlocked = enter the
-                      // Playbook. Plain client navigation; no cloud cover.
-                      if (!bountyAccessClaimedAt) {
-                        showToast("Claim Bounty Access to unlock the Playbook");
-                        return;
-                      }
-                      router.push("/dashboard/playbook");
-                    }
-                  : undefined
+                : undefined
+            }
+            // v50 — pinned markers with EXPLICIT positions (don't follow
+            // the path's last waypoint like the secondary marker does).
+            // Used on R4 for the "Program complete" celebration that sits
+            // in front of the arch and the "Playbook" marker that lives
+            // inside the stone circle off to the right of the path.
+            pinnedMarkers={
+              view === "r4"
+                ? [
+                    {
+                      marker: {
+                        kind: "celebration",
+                        label: "Program complete",
+                        sublabel: "the work continues",
+                      },
+                      // "In front" — below + slightly left of the arch,
+                      // close to where the path arrives at the summit but
+                      // before the Bounty Access end-marker.
+                      position: { x: 1822, y: 526 },
+                    },
+                    {
+                      marker: {
+                        kind: "playbook",
+                        label: "The Playbook",
+                        sublabel: bountyAccessClaimedAt
+                          ? "Months 2-3 · open"
+                          : "claim Bounty Access first",
+                      },
+                      // Centroid of the stone-circle polygon Karlo
+                      // traced on the painted R4 scene.
+                      position: { x: 2732, y: 286 },
+                      locked: !bountyAccessClaimedAt,
+                      onClick: () => {
+                        if (!bountyAccessClaimedAt) {
+                          showToast(
+                            "Claim Bounty Access to unlock the Playbook",
+                          );
+                          return;
+                        }
+                        router.push("/dashboard/playbook");
+                      },
+                    },
+                  ]
+                : undefined
             }
           />
         )}
@@ -2622,8 +2673,18 @@ interface ScenePathOverlayProps {
   secondaryMarker?: SceneEndMarker;
   onSecondaryMarkerClick?: () => void;
   /** When true, the secondary marker renders in a "locked" treatment
-   *  (lock glyph, dimmed). Used on R4 before Bounty Access is claimed. */
+   *  (lock glyph, dimmed). */
   secondaryMarkerLocked?: boolean;
+  /** v50 — extra markers with EXPLICIT positions in MAP coordinate
+   *  space (no auto-positioning relative to waypoints). Each can be
+   *  locked, can have its own click handler, etc. Used on R4 for the
+   *  "Program complete" celebration + the "Playbook" zone marker. */
+  pinnedMarkers?: Array<{
+    marker: SceneEndMarker;
+    position: { x: number; y: number };
+    onClick?: () => void;
+    locked?: boolean;
+  }>;
 }
 
 function ScenePathOverlay({
@@ -2638,6 +2699,7 @@ function ScenePathOverlay({
   secondaryMarker,
   onSecondaryMarkerClick,
   secondaryMarkerLocked = false,
+  pinnedMarkers,
 }: ScenePathOverlayProps) {
   // Lifted hover state — child markers report up so the hover label
   // can render once at the END of the SVG, on top of every other
@@ -2731,13 +2793,11 @@ function ScenePathOverlay({
         const displayTitle =
           MOCKUP_TITLE_OVERRIDES[lesson.id] ?? lesson.title;
         const size = perspectiveSize(pos.y);
-        // Headline claim marker — only l057 (bounty access) gets
-        // it on the lesson node itself. The 30% discount UI lives
-        // on R2's secondary end-marker, so l049 (the lesson) stays
-        // a regular action-item diamond. Two parallel "discount"
-        // visuals were redundant.
-        const claim: "discount" | "bounty" | null =
-          lesson.id === "l057" ? "bounty" : null;
+        // v50 — l057's headline "BOUNTY ACCESS" claim pill was moved
+        // off the lesson node and onto R4's end-marker (the green
+        // star at the arch). No lesson currently uses the per-node
+        // claim treatment; left as a hook in case we resurrect it.
+        const claim: "discount" | "bounty" | null = null;
         return (
           <LessonMarker
             key={lesson.id}
@@ -2803,6 +2863,20 @@ function ScenePathOverlay({
           locked={endMarkerLocked}
         />
       )}
+
+      {/* v50 — pinned markers at explicit map coords (no waypoint
+          relationship). Painted last among non-hover-label markers so
+          they sit on top of the path + lesson nodes. */}
+      {pinnedMarkers?.map((pm, i) => (
+        <EndMarker
+          key={i}
+          x={pm.position.x}
+          y={pm.position.y}
+          marker={pm.marker}
+          onClick={pm.onClick}
+          locked={pm.locked ?? false}
+        />
+      ))}
 
       {/* Hover label — rendered LAST in the SVG so it sits above every
           other marker (lesson, group, secondary, end). Source order =
@@ -3480,14 +3554,23 @@ function EndMarker({
         />
       )}
 
-      {/* Body — 16-point gold star on the discount marker so it
-          matches the bounty marker's claim treatment. Other kinds
-          keep the white disc. */}
+      {/* Body — 16-point gold star on the discount marker. The new
+          (v50) bounty end-marker uses a 16-point GREEN star — same
+          shape language but green to read as "bounty" the way gold
+          reads as "discount". Other kinds keep the white disc. */}
       {marker.kind === "discount" ? (
         <polygon
           points={gateStarPoints(36)}
           fill="rgba(230,192,122,0.22)"
           stroke={GATE_GOLD_HI}
+          strokeWidth={hot ? 2.6 : 2.2}
+          style={{ transition: "stroke-width 0.2s" }}
+        />
+      ) : marker.kind === "bounty" ? (
+        <polygon
+          points={gateStarPoints(36)}
+          fill="rgba(34, 197, 94, 0.22)"
+          stroke="#4ADE80"
           strokeWidth={hot ? 2.6 : 2.2}
           style={{ transition: "stroke-width 0.2s" }}
         />
@@ -3534,6 +3617,17 @@ function EndMarker({
           <line x1={-5} y1={11} x2={5} y2={11} stroke="rgba(15, 17, 21, 0.92)" strokeWidth={3} strokeLinecap="round" />
         </g>
       )}
+      {/* v50 — Bounty Access end-marker. Three-dot coin cluster
+          inside the green star (matches the Bounty Apprentice chip
+          visual language). */}
+      {marker.kind === "bounty" && (
+        <g fill="#15803D">
+          <circle cx={0} cy={-7} r={3.6} />
+          <circle cx={-6.2} cy={3.5} r={3.6} />
+          <circle cx={6.2} cy={3.5} r={3.6} />
+        </g>
+      )}
+
       {/* v50 — Playbook marker. Unlocked: open-book icon. Locked:
           padlock (matches the onward-locked variant so the language
           is consistent across the map). */}

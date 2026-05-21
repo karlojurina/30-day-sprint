@@ -55,15 +55,16 @@ export interface Student {
 }
 
 /**
- * v46 — onboarding + sprint progression milestones. One row per
+ * v46 → v50 — onboarding + sprint progression milestones. One row per
  * student. Each column null = "not reached yet".
  *
  *   onboarding_completed_at   — first-run onboarding finished
  *   first_sprint_login_at     — first authenticated visit to the app
  *                                (powers the has_logged_into_app trigger)
- *   bounty_access_claimed_at  — clicked Claim Bounty Access on l057 (v2)
- *   sprint_completed_at       — clicked Finish Program after l058 (v2)
- *                                — drives the Map 2 default surface
+ *   bounty_access_claimed_at  — clicked Bounty Access on l057. THIS is
+ *                                the finish line of the sprint and the
+ *                                signal that unlocks the Playbook.
+ *                                (v50 — sprint_completed_at retired.)
  *   first_client_landed_at    — self-reported the Land Your First Client
  *                                milestone on Map 2 (v2)
  *   playbook_welcome_seen_at  — saw the Map 2 intro overlay once (v2)
@@ -73,7 +74,6 @@ export interface StudentMilestones {
   onboarding_completed_at: string | null;
   first_sprint_login_at: string | null;
   bounty_access_claimed_at: string | null;
-  sprint_completed_at: string | null;
   first_client_landed_at: string | null;
   playbook_welcome_seen_at: string | null;
   updated_at: string;

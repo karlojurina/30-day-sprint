@@ -75,7 +75,6 @@ welcome, first-client landed, etc.).
 - `POST /api/student/save-action-link` — Discord submission URL
 - `POST /api/student/submit-quiz` — quiz attempt
 - `POST /api/student/claim-bounty-access` — l057 claim (v2)
-- `POST /api/student/finish-program` — l058 → `sprint_completed_at` (v2)
 - `POST /api/student/mark-first-client` — Map 2 milestone (v2)
 - `POST /api/student/dismiss-playbook-welcome` — Map 2 intro (v2)
 - `POST /api/student/celebration-seen` — dismiss celebration overlays

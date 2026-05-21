@@ -119,14 +119,10 @@ interface StudentContextType {
   claimBountyAccess: () => Promise<void>;
   dismissBountyClaim: () => void;
 
-  // v42 (v2): l058 first-bounty-submitted celebration + Finish
-  // Program flow. firstBountyJustSubmitted is raised the moment
-  // toggleLesson('l058') flips it from incomplete → complete.
-  // finishProgram() then sets sprint_completed_at and unlocks Map 2.
-  sprintCompletedAt: string | null;
-  firstBountyJustSubmitted: boolean;
-  finishProgram: () => Promise<void>;
-  dismissFirstBountyCelebration: () => void;
+  // v50 — Bounty Access (l057) is the finish line. The old "Finish
+  // Program" flow on l058 is gone; l058-l063 don't exist as lessons
+  // anymore (their concepts moved into the Playbook). bountyAccess-
+  // ClaimedAt above is now the single signal that unlocks Map 2.
 
   // v42 (v2): one-time Map 2 welcome overlay. playbookWelcomeSeenAt
   // is the stamp; if null the overlay shows on first visit. Action
@@ -209,9 +205,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   // is dismissed. The bounty_access_claimed_at timestamp itself lives
   // on the student row in AuthContext.
   const [bountyAccessJustClaimed, setBountyAccessJustClaimed] = useState(false);
-  // v42 (v2): same pattern for l058 → first bounty submitted. Raised
-  // by toggleLesson when it sees l058 flip incomplete → complete.
-  const [firstBountyJustSubmitted, setFirstBountyJustSubmitted] = useState(false);
   // v42 (v2): crowned-celebration takeover for the Map 2 milestone.
   // Set on markFirstClient() success when it wasn't a duplicate.
   const [firstClientJustLanded, setFirstClientJustLanded] = useState(false);
@@ -585,19 +578,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       if (!token) return;
 
       const isCompleted = completedLessonIds.has(lessonId);
-
-      // v42 (v2): l058 — first bounty submitted. Raise the
-      // celebration flag the moment the student marks it complete
-      // (NOT when they uncheck). One-shot: don't re-fire if the
-      // sprint is already marked finished. v46 — sprint flag now
-      // lives on student_milestones.
-      if (
-        !isCompleted &&
-        lessonId === "l058" &&
-        !milestones?.sprint_completed_at
-      ) {
-        setFirstBountyJustSubmitted(true);
-      }
 
       // Optimistic update
       if (isCompleted) {
@@ -994,7 +974,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       student_id: student.id,
       onboarding_completed_at: prev?.onboarding_completed_at ?? null,
       first_sprint_login_at: prev?.first_sprint_login_at ?? null,
-      sprint_completed_at: prev?.sprint_completed_at ?? null,
       first_client_landed_at: prev?.first_client_landed_at ?? null,
       playbook_welcome_seen_at: prev?.playbook_welcome_seen_at ?? null,
       bounty_access_claimed_at: data.bounty_access_claimed_at,
@@ -1027,46 +1006,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
-   * v42 — l058 "Finish Program" handler. Calls
-   * /api/student/finish-program which sets sprint_completed_at on
-   * the student row (with NULL guard). Patches the local student
-   * row so the LessonSheet swap + the eventual Map 2 redirect see
-   * the new state immediately.
-   */
-  const finishProgram = useCallback(async () => {
-    if (!student || milestones?.sprint_completed_at) return;
-
-    const token = await getAccessToken();
-    if (!token) return;
-
-    const res = await fetch("/api/student/finish-program", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
-      console.error("Finish program failed:", res.status);
-      return;
-    }
-    const data = await res.json();
-    if (!data.ok) return;
-
-    setMilestones((prev) => ({
-      student_id: student.id,
-      onboarding_completed_at: prev?.onboarding_completed_at ?? null,
-      first_sprint_login_at: prev?.first_sprint_login_at ?? null,
-      bounty_access_claimed_at: prev?.bounty_access_claimed_at ?? null,
-      first_client_landed_at: prev?.first_client_landed_at ?? null,
-      playbook_welcome_seen_at: prev?.playbook_welcome_seen_at ?? null,
-      sprint_completed_at: data.sprint_completed_at,
-      updated_at: data.sprint_completed_at,
-    }));
-  }, [student, milestones]);
-
-  const dismissFirstBountyCelebration = useCallback(() => {
-    setFirstBountyJustSubmitted(false);
-  }, []);
-
-  /**
    * v42 — "I just landed my first client" handler. Single
    * self-report on Map 2's milestone node sheet. POST flips
    * students.first_client_landed_at; on a fresh land (not a
@@ -1093,7 +1032,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       onboarding_completed_at: prev?.onboarding_completed_at ?? null,
       first_sprint_login_at: prev?.first_sprint_login_at ?? null,
       bounty_access_claimed_at: prev?.bounty_access_claimed_at ?? null,
-      sprint_completed_at: prev?.sprint_completed_at ?? null,
       playbook_welcome_seen_at: prev?.playbook_welcome_seen_at ?? null,
       first_client_landed_at: data.first_client_landed_at,
       updated_at: data.first_client_landed_at,
@@ -1127,7 +1065,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       onboarding_completed_at: prev?.onboarding_completed_at ?? null,
       first_sprint_login_at: prev?.first_sprint_login_at ?? null,
       bounty_access_claimed_at: prev?.bounty_access_claimed_at ?? null,
-      sprint_completed_at: prev?.sprint_completed_at ?? null,
       first_client_landed_at: prev?.first_client_landed_at ?? null,
       playbook_welcome_seen_at: data.playbook_welcome_seen_at,
       updated_at: data.playbook_welcome_seen_at,
@@ -1266,10 +1203,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         bountyAccessJustClaimed,
         claimBountyAccess,
         dismissBountyClaim,
-        sprintCompletedAt: milestones?.sprint_completed_at ?? null,
-        firstBountyJustSubmitted,
-        finishProgram,
-        dismissFirstBountyCelebration,
         playbookWelcomeSeenAt: milestones?.playbook_welcome_seen_at ?? null,
         dismissPlaybookWelcome,
         firstClientLandedAt: milestones?.first_client_landed_at ?? null,

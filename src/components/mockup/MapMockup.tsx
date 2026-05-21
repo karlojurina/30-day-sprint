@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { gsap } from "gsap";
 import { SPEC_EASE_GSAP, SPEC_EASE_GSAP_INOUT } from "@/lib/motion";
 import { useStudent } from "@/contexts/StudentContext";
@@ -99,7 +100,6 @@ function virtualizeCurrentLessonId(currentLessonId: string | null): string | nul
 }
 import { MapAmbience } from "@/components/map/MapAmbience";
 import { BountyAccessClaimCelebration } from "@/components/map/BountyAccessClaimCelebration";
-import { FirstBountySubmittedCelebration } from "@/components/map/FirstBountySubmittedCelebration";
 import {
   DiscountClaimCelebration,
   type DiscountCelebrationMode,
@@ -415,7 +415,7 @@ const SCENE_IMAGE_STACK: Array<{ id: View; src: string; eager: boolean }> = [
 
 // End-of-region marker that sits on the LAST waypoint of each scene.
 // Click → transitionTo nextView. R4 has no next (final region).
-type EndMarkerKind = "onward" | "discount" | "celebration";
+type EndMarkerKind = "onward" | "discount" | "celebration" | "playbook";
 interface SceneEndMarker {
   kind: EndMarkerKind;
   label: string;
@@ -463,11 +463,12 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     discountAllLessonsDone,
     regionProgress,
     requestDiscount,
-    // v42 (v2)
+    // v42 (v2) — bounty access claim celebration (l057). v50 retired
+    // the separate first-bounty-submitted celebration that lived on
+    // l058; Bounty Access IS the finish-line moment now.
     bountyAccessJustClaimed,
     dismissBountyClaim,
-    firstBountyJustSubmitted,
-    dismissFirstBountyCelebration,
+    bountyAccessClaimedAt,
   } = useStudent();
 
   // Toast for the "you haven't completed all lessons" message when
@@ -482,6 +483,7 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     toastTimerRef.current = window.setTimeout(() => setToast(null), 3000);
   }
 
+  const router = useRouter();
   const outerRef = useRef<HTMLDivElement>(null);
   // Inner translated div. We write to its style.transform directly on
   // every pan/wheel/tween tick — going through React state would re-render
@@ -1187,8 +1189,9 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
               const next = SCENE_END_MARKERS[view as RegionId]?.nextView;
               if (next) transitionTo(next);
             }}
-            // R2 specifically gets a second "Claim discount" marker
-            // stacked above the onward marker. Other regions don't.
+            // R2 → "Claim discount" marker. R4 → "Playbook" marker
+            // (locked until Bounty Access is claimed). Other regions
+            // get no secondary marker.
             secondaryMarker={
               view === "r2"
                 ? {
@@ -1210,8 +1213,19 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                         ? "reward unlocked"
                         : "finish R1 + R2 first",
                   }
-                : undefined
+                : view === "r4"
+                  ? {
+                      kind: "playbook",
+                      label: bountyAccessClaimedAt
+                        ? "The Playbook"
+                        : "The Playbook",
+                      sublabel: bountyAccessClaimedAt
+                        ? "Months 2-3 · open"
+                        : "claim Bounty Access first",
+                    }
+                  : undefined
             }
+            secondaryMarkerLocked={view === "r4" && !bountyAccessClaimedAt}
             onSecondaryMarkerClick={
               view === "r2"
                 ? () => {
@@ -1226,7 +1240,17 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       setDiscountModalMode("claim");
                     }
                   }
-                : undefined
+                : view === "r4"
+                  ? () => {
+                      // Locked = nudge via toast. Unlocked = enter the
+                      // Playbook. Plain client navigation; no cloud cover.
+                      if (!bountyAccessClaimedAt) {
+                        showToast("Claim Bounty Access to unlock the Playbook");
+                        return;
+                      }
+                      router.push("/dashboard/playbook");
+                    }
+                  : undefined
             }
           />
         )}
@@ -1862,16 +1886,6 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
       <BountyAccessClaimCelebration
         open={bountyAccessJustClaimed}
         onDismiss={dismissBountyClaim}
-      />
-
-      {/* v42 — First bounty submitted celebration. Raised by
-          toggleLesson('l058') the moment the standard mark-complete
-          flips l058 from incomplete → complete. Dismiss → student
-          returns to the sheet where the Finish Program CTA is
-          waiting. */}
-      <FirstBountySubmittedCelebration
-        open={firstBountyJustSubmitted}
-        onDismiss={dismissFirstBountyCelebration}
       />
 
       {/* Toast — single transient message dead-center on screen.
@@ -2603,9 +2617,13 @@ interface ScenePathOverlayProps {
   endMarkerLocked?: boolean;
   /** Optional second marker drawn ABOVE the primary endMarker. Used on
       R2 to surface the discount-claim CTA separately from the onward
-      transition button. */
+      transition button. v50: also used on R4 for the locked-Playbook
+      gate that appears past the "Program complete" marker. */
   secondaryMarker?: SceneEndMarker;
   onSecondaryMarkerClick?: () => void;
+  /** When true, the secondary marker renders in a "locked" treatment
+   *  (lock glyph, dimmed). Used on R4 before Bounty Access is claimed. */
+  secondaryMarkerLocked?: boolean;
 }
 
 function ScenePathOverlay({
@@ -2619,6 +2637,7 @@ function ScenePathOverlay({
   endMarkerLocked = false,
   secondaryMarker,
   onSecondaryMarkerClick,
+  secondaryMarkerLocked = false,
 }: ScenePathOverlayProps) {
   // Lifted hover state — child markers report up so the hover label
   // can render once at the END of the SVG, on top of every other
@@ -2769,6 +2788,7 @@ function ScenePathOverlay({
             y={sy}
             marker={secondaryMarker}
             onClick={onSecondaryMarkerClick}
+            locked={secondaryMarkerLocked}
           />
         );
       })()}
@@ -3512,6 +3532,21 @@ function EndMarker({
           />
           <line x1={-3} y1={8} x2={3} y2={8} stroke="rgba(15, 17, 21, 0.92)" strokeWidth={3} strokeLinecap="round" />
           <line x1={-5} y1={11} x2={5} y2={11} stroke="rgba(15, 17, 21, 0.92)" strokeWidth={3} strokeLinecap="round" />
+        </g>
+      )}
+      {/* v50 — Playbook marker. Unlocked: open-book icon. Locked:
+          padlock (matches the onward-locked variant so the language
+          is consistent across the map). */}
+      {marker.kind === "playbook" && !locked && (
+        <g stroke="rgba(15, 17, 21, 0.92)" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+          <path d="M -10 -7 L -10 9 L 0 6 L 10 9 L 10 -7 L 0 -4 Z" fill="rgba(15, 17, 21, 0.92)" />
+          <line x1={0} y1={-4} x2={0} y2={6} stroke="rgba(255, 255, 255, 0.6)" strokeWidth={1.2} />
+        </g>
+      )}
+      {marker.kind === "playbook" && locked && (
+        <g stroke="rgba(15, 17, 21, 0.92)" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" fill="none">
+          <rect x={-7} y={-2} width={14} height={12} rx={2} fill="rgba(15, 17, 21, 0.92)" />
+          <path d="M -5 -2 V -7 a 5 5 0 0 1 10 0 V -2" />
         </g>
       )}
 

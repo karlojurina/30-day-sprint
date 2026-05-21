@@ -29,21 +29,22 @@ const STREAK_LAST_SEEN_KEY = "et.streak.lastSeen";
 
 export default function DashboardPage() {
   const { student } = useAuth();
-  const { loading, streak, discountRequest, sprintCompletedAt } = useStudent();
+  const { loading, streak, discountRequest, bountyAccessClaimedAt } =
+    useStudent();
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // v42 (v2): conditional default surface. Students who've clicked
-  // "Finish Program" on l058 land on Map 2 instead of Map 1 by
+  // v50 — conditional default surface. Students who've claimed Bounty
+  // Access (l057) land on Map 2 (the Playbook) instead of Map 1 by
   // default. The ?map=1 query param is the override — used by the
   // "Back to the climb" link on Map 2 so the student can return to
   // the original map any time.
   const forceMap1 = searchParams.get("map") === "1";
   useEffect(() => {
-    if (!loading && sprintCompletedAt && !forceMap1) {
+    if (!loading && bountyAccessClaimedAt && !forceMap1) {
       router.replace("/dashboard/playbook");
     }
-  }, [loading, sprintCompletedAt, forceMap1, router]);
+  }, [loading, bountyAccessClaimedAt, forceMap1, router]);
 
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [streakCelebration, setStreakCelebration] = useState<number | null>(null);

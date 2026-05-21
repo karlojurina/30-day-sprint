@@ -58,8 +58,6 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
     discountRequest,
     bountyAccessClaimedAt,
     claimBountyAccess,
-    sprintCompletedAt,
-    finishProgram,
     toggleLesson,
     toggleLessonAction,
     saveDiscordLink,
@@ -188,14 +186,10 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
   const canClaimBounty = isBountyClaim && !bountyAccessClaimedAt;
   const bountyClaimed = isBountyClaim && Boolean(bountyAccessClaimedAt);
 
-  // v42 (v2): l058 — climactic final task. Once the student marks
-  // it complete, the regular "Mark complete" CTA gets replaced by
-  // a gold Finish Program panel. Click → sprint_completed_at set
-  // → Map 2 becomes default surface (Step 4).
-  const isFinalTask = lesson.id === "l058";
-  const canFinishProgram =
-    isFinalTask && isFullyCompleted && !sprintCompletedAt;
-  const programFinished = isFinalTask && Boolean(sprintCompletedAt);
+  // v50 — the old "Finish Program" panel that lived on l058 is gone.
+  // l058 itself was dropped as a lesson (its concept moved into the
+  // Playbook). Bounty Access (l057) is the new sprint finale; that
+  // celebration lives in the BountyAccessClaimCelebration overlay.
 
   return (
     <>
@@ -755,105 +749,6 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                   )}
                   . You&apos;re in the program. Head into Discord and pick
                   your first bounty when you&apos;re ready.
-                </p>
-              </div>
-            )}
-
-            {/* === l058 — Finish Program panel — v2 (v42) ===
-                Replaces the regular "Mark complete" affordance once
-                the student has actually marked l058 complete (the
-                completion writes via the standard toggleLesson path).
-                Click → sprint_completed_at set → Map 2 becomes
-                default surface. */}
-            {isFinalTask && canFinishProgram && (
-              <div
-                style={{
-                  padding: 20,
-                  borderRadius: 12,
-                  background: "rgba(200, 157, 85, 0.12)",
-                  border: "1px solid rgba(230, 192, 122, 0.45)",
-                }}
-              >
-                <p
-                  className="section-label"
-                  style={{
-                    color: "var(--color-gold-light)",
-                    marginBottom: 8,
-                  }}
-                >
-                  {/* TODO(karlo): final eyebrow */}
-                  30 days. The whole climb.
-                </p>
-                <p
-                  style={{
-                    color: "var(--color-text-primary)",
-                    fontSize: 16,
-                    lineHeight: 1.45,
-                    marginBottom: 16,
-                    fontWeight: 500,
-                    letterSpacing: "-0.011em",
-                  }}
-                >
-                  {/* TODO(karlo): final sub-copy */}
-                  You shipped your first bounty. There&apos;s nothing left
-                  on this map. When you&apos;re ready, cross over.
-                </p>
-                <button
-                  onClick={() => {
-                    void finishProgram();
-                  }}
-                  className="w-full transition-colors"
-                  style={{
-                    height: 44,
-                    borderRadius: 10,
-                    border: "none",
-                    background: "var(--color-gold)",
-                    color: "#0F1115",
-                    fontSize: 14,
-                    fontWeight: 600,
-                    letterSpacing: "-0.011em",
-                    cursor: "pointer",
-                  }}
-                >
-                  {/* TODO(karlo): final CTA label */}
-                  Finish Program →
-                </button>
-              </div>
-            )}
-
-            {isFinalTask && programFinished && sprintCompletedAt && (
-              <div
-                className="p-5 rounded-lg"
-                style={{
-                  background: "rgba(6,12,26,0.6)",
-                  border: "1px solid rgba(230, 192, 122, 0.45)",
-                }}
-              >
-                <p
-                  className="section-label"
-                  style={{
-                    color: "var(--color-gold-light)",
-                    marginBottom: 8,
-                  }}
-                >
-                  Program complete
-                </p>
-                <p
-                  style={{
-                    color: "var(--color-text-secondary)",
-                    fontSize: 14,
-                    lineHeight: 1.5,
-                    letterSpacing: "-0.005em",
-                  }}
-                >
-                  Crossed over on{" "}
-                  {new Date(sprintCompletedAt).toLocaleDateString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
-                  . The Playbook is your home now. Lessons are still here
-                  whenever you want a reference.
                 </p>
               </div>
             )}

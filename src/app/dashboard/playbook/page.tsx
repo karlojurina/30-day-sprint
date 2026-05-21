@@ -34,7 +34,7 @@ import { FirstClientLandedCelebration } from "@/components/playbook/FirstClientL
 export default function PlaybookPage() {
   const { student } = useAuth();
   const {
-    sprintCompletedAt,
+    bountyAccessClaimedAt,
     playbookWelcomeSeenAt,
     dismissPlaybookWelcome,
     firstClientLandedAt,
@@ -44,13 +44,14 @@ export default function PlaybookPage() {
   } = useStudent();
   const router = useRouter();
 
-  // Gate: if the student hasn't actually finished the sprint, send
-  // them back to Map 1. Map 2 is a post-sprint surface.
+  // v50 — gate: if the student hasn't claimed Bounty Access yet,
+  // send them back to Map 1. The Playbook unlocks the moment they
+  // click Bounty Access on l057 — no separate "Finish Program" step.
   useEffect(() => {
-    if (student && !sprintCompletedAt) {
+    if (student && !bountyAccessClaimedAt) {
       router.replace("/dashboard?map=1");
     }
-  }, [student, sprintCompletedAt, router]);
+  }, [student, bountyAccessClaimedAt, router]);
 
   const [nodes, setNodes] = useState<PlaybookNode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,7 +79,7 @@ export default function PlaybookPage() {
   // patches the local row so the overlay disappears for the rest of
   // the session AND any future load.
   const showWelcome =
-    Boolean(sprintCompletedAt) && !playbookWelcomeSeenAt;
+    Boolean(bountyAccessClaimedAt) && !playbookWelcomeSeenAt;
 
   if (!student || loading) {
     return (

@@ -44,7 +44,6 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
     discountEligible,
     regionProgress,
     openDiscountFeedback,
-    sprintCompletedAt,
     bountyAccessClaimedAt,
   } = useStudent();
 
@@ -146,7 +145,9 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
     return null;
   })();
 
-  const sprintFinished = Boolean(sprintCompletedAt);
+  // v50 — the "Open the Playbook" CTA appears the moment the student
+  // claims Bounty Access on l057. That's the new finish line.
+  const sprintFinished = Boolean(bountyAccessClaimedAt);
   const hasBountyAccess = Boolean(bountyAccessClaimedAt);
 
   const body = (

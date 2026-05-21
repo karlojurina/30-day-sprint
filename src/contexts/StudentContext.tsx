@@ -31,6 +31,7 @@ import type {
 } from "@/types/database";
 import { getTitleForRegions } from "@/lib/titles";
 import { DISCOUNT_WINDOW_DAYS, progressPercent } from "@/lib/constants";
+import { isLessonComplete } from "@/lib/progress";
 
 export interface RegionProgress {
   completed: number;
@@ -484,21 +485,13 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     return s;
   }, [completions]);
 
+  // Canonical "lesson is complete" check lives in src/lib/progress.ts
+  // — same formula the student_progress_counts view encodes in SQL and
+  // the admin kanban / students-list use, so every surface agrees.
   const completedLessonIds = useMemo(() => {
     const s = new Set<string>();
     for (const c of completions) {
-      const lesson = lessonsById.get(c.lesson_id);
-      if (!lesson) continue;
-      // Skipped lessons count toward path progression so the student
-      // can keep moving past optional content. Journal/workshop tell
-      // skipped from watched via skippedLessonIds.
-      if (c.skipped_at) {
-        s.add(c.lesson_id);
-        continue;
-      }
-      if (lesson.requires_action) {
-        if (c.completed_at && c.action_completed_at) s.add(c.lesson_id);
-      } else if (c.completed_at) {
+      if (isLessonComplete(c, lessonsById.get(c.lesson_id))) {
         s.add(c.lesson_id);
       }
     }

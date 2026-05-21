@@ -14,6 +14,7 @@ import {
   ADMIN_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
 import { buildPaceSummary } from "@/lib/csm-triggers";
+import { completedLessonIdsFor } from "@/lib/progress";
 import { StudentCard } from "./StudentCard";
 import { StudentDrawer } from "./StudentDrawer";
 
@@ -91,14 +92,17 @@ export default function KanbanPage() {
         supabase
           .from("student_lesson_completions")
           .select("student_id, lesson_id, completed_at, action_completed_at"),
-        // Pull lesson id + region_id so we can derive each student's
-        // current region (highest region they have any completion in).
-        supabase.from("lessons").select("id, region_id"),
+        // Pull lesson id + region_id + requires_action so we can derive
+        // each student's current region (highest region they have any
+        // completion in) AND so the canonical progress helper knows
+        // which lessons are compound (need watch + ship to count).
+        supabase.from("lessons").select("id, region_id, requires_action"),
       ]);
 
       const lessonsList = (lessonsRes.data ?? []) as Array<{
         id: string;
         region_id: string;
+        requires_action: boolean;
       }>;
       if (lessonsList.length > 0) {
         setTotalLessons(lessonsList.length);
@@ -107,24 +111,38 @@ export default function KanbanPage() {
         lessonsList.map((l) => [l.id, l.region_id as RegionId]),
       );
 
-      // Per-student aggregates: count of watched lessons + the highest
-      // region they have any completed lesson in.
+      // Group completions by student so we can run the canonical
+      // "is this lesson complete?" check per-student. Uses the shared
+      // helper in src/lib/progress.ts so kanban agrees with every
+      // other surface (and with the student_progress_counts view).
+      const completionsByStudent = new Map<
+        string,
+        StudentLessonCompletion[]
+      >();
+      for (const c of (completionsRes.data ?? []) as StudentLessonCompletion[]) {
+        const arr = completionsByStudent.get(c.student_id) ?? [];
+        arr.push(c);
+        completionsByStudent.set(c.student_id, arr);
+      }
+
+      // For each student, derive the count of completed lessons + the
+      // highest region they have any completed lesson in (drives the
+      // region chip on the card).
       const counts = new Map<string, number>();
       const currentRegionByStudent = new Map<string, RegionId>();
-      for (const c of (completionsRes.data ?? []) as Pick<
-        StudentLessonCompletion,
-        "student_id" | "lesson_id" | "completed_at" | "action_completed_at"
-      >[]) {
-        if (!c.completed_at) continue;
-        counts.set(c.student_id, (counts.get(c.student_id) ?? 0) + 1);
-        const rid = lessonToRegion.get(c.lesson_id);
-        if (!rid) continue;
-        const existing = currentRegionByStudent.get(c.student_id);
-        if (
-          !existing ||
-          REGION_ORDER.indexOf(rid) > REGION_ORDER.indexOf(existing)
-        ) {
-          currentRegionByStudent.set(c.student_id, rid);
+      for (const [studentId, rows] of completionsByStudent) {
+        const doneIds = completedLessonIdsFor(rows, lessonsList);
+        counts.set(studentId, doneIds.size);
+        for (const lid of doneIds) {
+          const rid = lessonToRegion.get(lid);
+          if (!rid) continue;
+          const existing = currentRegionByStudent.get(studentId);
+          if (
+            !existing ||
+            REGION_ORDER.indexOf(rid) > REGION_ORDER.indexOf(existing)
+          ) {
+            currentRegionByStudent.set(studentId, rid);
+          }
         }
       }
 
@@ -161,6 +179,19 @@ export default function KanbanPage() {
     return map;
   }, [students]);
 
+  // Pace overview — only count students who are still on the journey
+  // (in one of the 4 weekly columns). Churned + Month 2+ aren't on
+  // the pace curve anymore.
+  const paceCounts = useMemo(() => {
+    const counts = { behind: 0, on_pace: 0, ahead: 0 };
+    for (const s of students) {
+      const col = columnFor(s);
+      if (col === "churned" || col === "month-2") continue;
+      counts[s.paceLabel]++;
+    }
+    return counts;
+  }, [students]);
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
@@ -171,35 +202,74 @@ export default function KanbanPage() {
 
   return (
     <div className="flex flex-col h-screen">
-      {/* Header */}
+      {/* Header — title on the left, pace overview on the right */}
       <header
         style={{
           padding: "32px 48px 20px",
           borderBottom: "1px solid var(--color-border)",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 24,
+          flexWrap: "wrap",
         }}
       >
-        <h1
+        <div style={{ minWidth: 0 }}>
+          <h1
+            style={{
+              fontSize: 28,
+              fontWeight: 600,
+              letterSpacing: "-0.025em",
+              lineHeight: 1.15,
+              color: "var(--color-text-primary)",
+            }}
+          >
+            Student journey
+          </h1>
+          <p
+            style={{
+              fontSize: 14,
+              color: "var(--color-text-secondary)",
+              marginTop: 4,
+              letterSpacing: "-0.005em",
+            }}
+          >
+            Students flow through columns automatically based on join date
+            and membership status. Click a card to open their detail.
+          </p>
+        </div>
+
+        {/* Pace overview — three quick stats for everyone still on the
+            30-day journey (Week 1-4 columns). Detailed breakdown lives
+            on /admin/insights/progress. */}
+        <div
+          className="flex items-stretch"
           style={{
-            fontSize: 28,
-            fontWeight: 600,
-            letterSpacing: "-0.025em",
-            lineHeight: 1.15,
-            color: "var(--color-text-primary)",
+            gap: 8,
+            background: "var(--color-bg-card)",
+            border: "1px solid var(--color-border)",
+            borderRadius: 12,
+            padding: "10px 14px",
           }}
         >
-          Kanban
-        </h1>
-        <p
-          style={{
-            fontSize: 14,
-            color: "var(--color-text-secondary)",
-            marginTop: 4,
-            letterSpacing: "-0.005em",
-          }}
-        >
-          Students flow through columns automatically based on join date and
-          membership status. Click a card to open their detail.
-        </p>
+          <PaceStat
+            label="Behind"
+            value={paceCounts.behind}
+            color="var(--color-danger)"
+          />
+          <Divider />
+          <PaceStat
+            label="On pace"
+            value={paceCounts.on_pace}
+            color="var(--color-text-primary)"
+          />
+          <Divider />
+          <PaceStat
+            label="Ahead"
+            value={paceCounts.ahead}
+            color="var(--color-success)"
+          />
+        </div>
       </header>
 
       {/* Columns */}
@@ -318,5 +388,62 @@ export default function KanbanPage() {
         onClose={() => setDrawerStudentId(null)}
       />
     </div>
+  );
+}
+
+/** Small stat cell for the pace overview row. Value above label,
+ *  numeric tabular alignment so the trio line up cleanly. */
+function PaceStat({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: number;
+  color: string;
+}) {
+  return (
+    <div
+      className="flex flex-col items-center justify-center"
+      style={{ minWidth: 64, padding: "0 6px" }}
+    >
+      <span
+        style={{
+          fontSize: 20,
+          fontWeight: 600,
+          color,
+          letterSpacing: "-0.018em",
+          fontVariantNumeric: "tabular-nums",
+          lineHeight: 1.1,
+        }}
+      >
+        {value}
+      </span>
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 500,
+          letterSpacing: "0.05em",
+          textTransform: "uppercase",
+          color: "var(--color-text-tertiary)",
+          marginTop: 4,
+        }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function Divider() {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        width: 1,
+        background: "var(--color-border)",
+        margin: "2px 0",
+      }}
+    />
   );
 }

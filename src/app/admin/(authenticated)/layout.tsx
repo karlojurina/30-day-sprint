@@ -2,6 +2,7 @@
 
 import { TeamGuard } from "@/components/auth/TeamGuard";
 import { useAuth } from "@/contexts/AuthContext";
+import { useJourneyPaceCounts } from "@/lib/useJourneyPaceCounts";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -28,11 +29,11 @@ const navItems: { href: string; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
-    href: "/admin/kanban",
-    label: "Kanban",
+    href: "/admin/journey",
+    label: "Student journey",
     icon: (
-      // 3 vertical bars — column-shaped kanban glyph
-      <path d="M4 6v14M4 6a2 2 0 012-2h2a2 2 0 012 2m-6 0h6m0 0v14m0-14a2 2 0 012-2h2a2 2 0 012 2m-6 0h6m0 0v14m0-14a2 2 0 012-2h2a2 2 0 012 2v14M4 20h6m0 0h6m0 0h4" />
+      // Path / footsteps glyph — students moving along a journey
+      <path d="M3 12h3l3-9 6 18 3-9h3" />
     ),
   },
   {
@@ -75,6 +76,10 @@ const navItems: { href: string; label: string; icon: React.ReactNode }[] = [
 function AdminSidebar() {
   const pathname = usePathname();
   const { teamMember, signOut } = useAuth();
+  // Pace counts for the Student-journey nav badge. Cheap query;
+  // fires once when the sidebar mounts (and the layout persists
+  // across admin navigation, so it's once per session).
+  const paceCounts = useJourneyPaceCounts();
 
   return (
     <aside
@@ -156,7 +161,39 @@ function AdminSidebar() {
               >
                 {item.icon}
               </svg>
-              {item.label}
+              <span className="flex-1 min-w-0 truncate">{item.label}</span>
+
+              {/* Pace preview — only on the Student-journey item, only
+                  when there's at least one student behind. Three small
+                  dots colored red / neutral / green with their counts;
+                  full breakdown lives on the journey page header. */}
+              {item.href === "/admin/journey" &&
+                !paceCounts.loading &&
+                paceCounts.total > 0 && (
+                  <span
+                    className="flex items-center shrink-0"
+                    style={{
+                      gap: 4,
+                      fontSize: 10,
+                      fontVariantNumeric: "tabular-nums",
+                      fontWeight: 600,
+                      letterSpacing: "-0.005em",
+                    }}
+                    title={`Behind ${paceCounts.behind} · On pace ${paceCounts.on_pace} · Ahead ${paceCounts.ahead}`}
+                  >
+                    <span style={{ color: "var(--color-danger)" }}>
+                      {paceCounts.behind}
+                    </span>
+                    <span style={{ color: "var(--color-text-tertiary)" }}>·</span>
+                    <span style={{ color: "var(--color-text-secondary)" }}>
+                      {paceCounts.on_pace}
+                    </span>
+                    <span style={{ color: "var(--color-text-tertiary)" }}>·</span>
+                    <span style={{ color: "var(--color-success)" }}>
+                      {paceCounts.ahead}
+                    </span>
+                  </span>
+                )}
             </Link>
           );
         })}

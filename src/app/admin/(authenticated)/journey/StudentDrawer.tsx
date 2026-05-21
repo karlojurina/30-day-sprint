@@ -13,6 +13,7 @@ import type {
 } from "@/types/database";
 import { getDayNumber } from "@/types/database";
 import { TOTAL_LESSONS, progressPercent } from "@/lib/constants";
+import { completedLessonIdsFor } from "@/lib/progress";
 
 interface StudentDrawerProps {
   studentId: string | null;
@@ -96,9 +97,12 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [studentId, onClose]);
 
+  // Canonical "lesson is complete" check — see src/lib/progress.ts.
+  // Was previously `completions.filter((c) => c.completed_at)` which
+  // missed compound-lesson requirements + skipped lessons.
   const completedIds = useMemo(
-    () => new Set(completions.filter((c) => c.completed_at).map((c) => c.lesson_id)),
-    [completions]
+    () => completedLessonIdsFor(completions, lessons),
+    [completions, lessons]
   );
 
   // Use the live lessons array length when available so the math

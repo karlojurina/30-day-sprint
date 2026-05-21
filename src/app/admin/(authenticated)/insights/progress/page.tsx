@@ -1,30 +1,38 @@
 "use client";
 
 /**
- * /admin/insights/progress — admin metrics trend dashboard.
+ * /admin/insights/progress — platform health insights.
  *
- * Four charts side-by-side, fed by daily_progress_snapshots:
+ * Four trend charts driven by daily_progress_snapshots:
  *   - Avg progress (%)
  *   - Active students
  *   - Joined per day
  *   - Churned per day
  *
- * Data sources: nightly cron at /api/cron/snapshot-progress writes one
- * row per day. Migrations v31 + v32 seeded the first 14 days from
- * existing student rows.
+ * Plus a pace breakdown card (behind / on pace / ahead counts) for
+ * students currently on the 30-day journey, sourced from the same
+ * useJourneyPaceCounts hook the sidebar badge uses.
  *
- * Time-range selector: 7 / 30 / 90 / 365 days.
+ * UX:
+ *   - Range presets (7/30/90/all) AND custom from/to date pickers
+ *   - Hover anywhere on a chart → vertical scrubber + tooltip with
+ *     exact value + date at that x position
+ *   - Charts are 1-up full width (was 2x2 small grid) so the trend
+ *     is actually readable
+ *
+ * Data sources: nightly cron at /api/cron/snapshot-progress writes
+ * one row per day. Migrations v31 + v32 seeded the first 14 days.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import {
   AdminPage,
   PageHeader,
   Card,
-  Tabs,
   EmptyState,
 } from "@/components/admin/ui";
+import { useJourneyPaceCounts } from "@/lib/useJourneyPaceCounts";
 
 interface SnapshotRow {
   snapshot_date: string;
@@ -36,28 +44,28 @@ interface SnapshotRow {
   churned_count: number | null;
 }
 
-type RangeKey = "7" | "30" | "90" | "365";
-const RANGE_LABELS: Record<RangeKey, string> = {
-  "7": "Last 7 days",
-  "30": "Last 30 days",
-  "90": "Last 90 days",
-  "365": "Last year",
-};
+type RangePreset = "7" | "30" | "90" | "all" | "custom";
 
-type MetricKey = "avg_progress" | "active_count" | "joined_count" | "churned_count";
+const PRESETS: Array<{ value: RangePreset; label: string }> = [
+  { value: "7", label: "7d" },
+  { value: "30", label: "30d" },
+  { value: "90", label: "90d" },
+  { value: "all", label: "All" },
+];
+
+type MetricKey =
+  | "avg_progress"
+  | "active_count"
+  | "joined_count"
+  | "churned_count";
 
 interface MetricDef {
   label: string;
   description: string;
   suffix: string;
   color: string;
-  /** Drives the top-right summary: "running" = latest snapshot value;
-   *  "flow" = sum across the window. */
+  /** "running" = latest snapshot value; "flow" = sum across window. */
   mode: "running" | "flow";
-  /** Optional override for the chart rendering style only. When unset,
-   *  the chart follows `mode`. We use this for joined/churned so the
-   *  summary still shows the window total but the chart draws as a
-   *  line (matching the dashboard sparklines). */
   chartMode?: "running" | "flow";
 }
 
@@ -71,7 +79,8 @@ const METRICS: Record<MetricKey, MetricDef> = {
   },
   active_count: {
     label: "Active students",
-    description: "Students with active sprint membership (post-cutoff cohort).",
+    description:
+      "Students with active sprint membership (post-cutoff cohort).",
     suffix: "",
     color: "#5bb88e",
     mode: "running",
@@ -94,20 +103,38 @@ const METRICS: Record<MetricKey, MetricDef> = {
   },
 };
 
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function daysAgoIso(n: number): string {
+  return new Date(Date.now() - n * 86_400_000).toISOString().slice(0, 10);
+}
+
 export default function ProgressInsightsPage() {
   const supabase = createClient();
-  const [range, setRange] = useState<RangeKey>("30");
+  const [preset, setPreset] = useState<RangePreset>("30");
+  const [customFrom, setCustomFrom] = useState(daysAgoIso(30));
+  const [customTo, setCustomTo] = useState(todayIso());
   const [points, setPoints] = useState<SnapshotRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const paceCounts = useJourneyPaceCounts();
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       const token = session?.access_token;
-      const res = await fetch(`/api/admin/insights/progress?range=${range}`, {
+      const url =
+        preset === "custom"
+          ? `/api/admin/insights/progress?from=${customFrom}&to=${customTo}`
+          : `/api/admin/insights/progress?range=${preset}`;
+      const res = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
@@ -131,7 +158,7 @@ export default function ProgressInsightsPage() {
       setError(e instanceof Error ? e.message : String(e));
     }
     setLoading(false);
-  }, [range, supabase]);
+  }, [preset, customFrom, customTo, supabase]);
 
   useEffect(() => {
     void fetchData();
@@ -148,8 +175,10 @@ export default function ProgressInsightsPage() {
         const delta = lastV != null && firstV != null ? lastV - firstV : null;
         return { current: lastV, delta };
       }
-      // flow: sum
-      const total = points.reduce((sum, p) => sum + ((p[key] as number | null) ?? 0), 0);
+      const total = points.reduce(
+        (sum, p) => sum + ((p[key] as number | null) ?? 0),
+        0,
+      );
       return { current: total, delta: null };
     }
     return {
@@ -164,19 +193,111 @@ export default function ProgressInsightsPage() {
     <AdminPage>
       <PageHeader
         title="Insights"
-        description="Daily snapshots of platform health. Cron writes one row at 00:30 UTC; long ranges will be sparse until more data accumulates."
+        description="Daily snapshots of platform health. Cron writes one row at 00:30 UTC."
       />
 
-      <div style={{ marginBottom: 24 }}>
-        <Tabs
-          value={range}
-          onChange={(v) => setRange(v)}
-          tabs={(Object.keys(RANGE_LABELS) as RangeKey[]).map((k) => ({
-            value: k,
-            label: RANGE_LABELS[k],
-          }))}
-        />
+      {/* Range controls — presets on the left, custom from/to on the right */}
+      <div
+        className="flex items-center"
+        style={{
+          gap: 12,
+          marginBottom: 24,
+          flexWrap: "wrap",
+        }}
+      >
+        <div
+          className="inline-flex items-center"
+          style={{
+            background: "var(--color-bg-card)",
+            border: "1px solid var(--color-border)",
+            borderRadius: 10,
+            padding: 3,
+            gap: 2,
+          }}
+        >
+          {PRESETS.map((p) => {
+            const active = preset === p.value;
+            return (
+              <button
+                key={p.value}
+                type="button"
+                onClick={() => setPreset(p.value)}
+                style={{
+                  padding: "6px 12px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  borderRadius: 7,
+                  border: "none",
+                  background: active
+                    ? "var(--color-bg-elevated)"
+                    : "transparent",
+                  color: active
+                    ? "var(--color-text-primary)"
+                    : "var(--color-text-secondary)",
+                  cursor: "pointer",
+                  letterSpacing: "-0.005em",
+                }}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+          <span
+            aria-hidden="true"
+            style={{
+              width: 1,
+              alignSelf: "stretch",
+              background: "var(--color-border)",
+              margin: "2px 4px",
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => setPreset("custom")}
+            style={{
+              padding: "6px 12px",
+              fontSize: 12,
+              fontWeight: 600,
+              borderRadius: 7,
+              border: "none",
+              background:
+                preset === "custom"
+                  ? "var(--color-bg-elevated)"
+                  : "transparent",
+              color:
+                preset === "custom"
+                  ? "var(--color-text-primary)"
+                  : "var(--color-text-secondary)",
+              cursor: "pointer",
+              letterSpacing: "-0.005em",
+            }}
+          >
+            Custom
+          </button>
+        </div>
+
+        {preset === "custom" && (
+          <div className="flex items-center" style={{ gap: 8 }}>
+            <DateInput
+              value={customFrom}
+              onChange={setCustomFrom}
+              label="From"
+            />
+            <span style={{ color: "var(--color-text-tertiary)", fontSize: 12 }}>
+              →
+            </span>
+            <DateInput
+              value={customTo}
+              onChange={setCustomTo}
+              label="To"
+              max={todayIso()}
+            />
+          </div>
+        )}
       </div>
+
+      {/* Pace breakdown card — uses the same source as the journey nav badge */}
+      <PaceBreakdownCard counts={paceCounts} />
 
       {error && (
         <div
@@ -195,7 +316,10 @@ export default function ProgressInsightsPage() {
       )}
 
       {loading ? (
-        <div className="flex items-center justify-center" style={{ padding: 64 }}>
+        <div
+          className="flex items-center justify-center"
+          style={{ padding: 64 }}
+        >
           <div
             className="rounded-full animate-spin"
             style={{
@@ -214,121 +338,223 @@ export default function ProgressInsightsPage() {
           />
         </Card>
       ) : (
-        <>
-          <div
-            className="grid gap-4"
-            style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}
-          >
-            {(Object.keys(METRICS) as MetricKey[]).map((key) => (
-              <MetricCard
-                key={key}
-                def={METRICS[key]}
-                points={points}
-                valueKey={key}
-                summary={summary?.[key]}
-              />
-            ))}
-          </div>
-
-          <CalcTransparency />
-        </>
+        <div
+          className="grid"
+          style={{ gridTemplateColumns: "minmax(0, 1fr)", gap: 16 }}
+        >
+          {(Object.keys(METRICS) as MetricKey[]).map((key) => (
+            <MetricCard
+              key={key}
+              def={METRICS[key]}
+              points={points}
+              valueKey={key}
+              summary={summary?.[key]}
+            />
+          ))}
+        </div>
       )}
+
+      <CalcTransparency />
     </AdminPage>
   );
 }
 
-/**
- * Explains exactly what each chart is measuring + the caveats Karlo
- * should know about. Mirrors the comments in the v31–v33 migrations.
- */
-function CalcTransparency() {
+function DateInput({
+  value,
+  onChange,
+  label,
+  max,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  label: string;
+  max?: string;
+}) {
   return (
-    <details
-      className="surface-resting mt-6"
+    <label
+      className="inline-flex items-center"
       style={{
+        gap: 6,
         background: "var(--color-bg-card)",
-        borderRadius: 12,
-        padding: 16,
         border: "1px solid var(--color-border)",
+        borderRadius: 8,
+        padding: "5px 10px",
+        fontSize: 12,
       }}
     >
-      <summary
+      <span
         style={{
-          fontSize: 13,
+          color: "var(--color-text-tertiary)",
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          fontSize: 10,
           fontWeight: 600,
-          color: "var(--color-text-primary)",
-          cursor: "pointer",
         }}
       >
-        How are these numbers calculated?
-      </summary>
-      <div
+        {label}
+      </span>
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.currentTarget.value)}
+        max={max}
         style={{
-          marginTop: 12,
+          border: "none",
+          background: "transparent",
+          color: "var(--color-text-primary)",
           fontSize: 12,
-          color: "var(--color-text-secondary)",
-          lineHeight: 1.6,
+          fontVariantNumeric: "tabular-nums",
+          padding: 0,
+          minWidth: 110,
         }}
-      >
-        <p className="mb-3">
-          One row is written into{" "}
-          <code style={{ color: "var(--color-text-primary)" }}>
-            daily_progress_snapshots
-          </code>{" "}
-          every night at <strong>00:30 UTC</strong>. The cron uses the same
-          formulas the dashboard tiles use:
-        </p>
-        <ul
+      />
+    </label>
+  );
+}
+
+/** Three-way pace stat card — same data as the sidebar badge but in
+ *  big detailed numbers with descriptions. */
+function PaceBreakdownCard({
+  counts,
+}: {
+  counts: ReturnType<typeof useJourneyPaceCounts>;
+}) {
+  return (
+    <div
+      style={{
+        background: "var(--color-bg-card)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 12,
+        padding: "18px 20px",
+        marginBottom: 16,
+      }}
+    >
+      <div className="flex items-baseline" style={{ marginBottom: 12, gap: 8 }}>
+        <h3
           style={{
-            paddingLeft: 16,
-            marginBottom: 12,
-            listStyle: "disc",
+            fontSize: 14,
+            fontWeight: 600,
+            color: "var(--color-text-primary)",
+            letterSpacing: "-0.012em",
           }}
         >
-          <li>
-            <strong style={{ color: "var(--color-text-primary)" }}>
-              Avg progress
-            </strong>{" "}
-            = total lessons completed by active students ÷ (active count ×
-            total lessons in the curriculum) × 100. Active students =
-            membership_status = &lsquo;active&rsquo;.
-          </li>
-          <li>
-            <strong style={{ color: "var(--color-text-primary)" }}>
-              Active students
-            </strong>{" "}
-            = count of students with{" "}
-            <code style={{ color: "var(--color-text-primary)" }}>
-              membership_status = &lsquo;active&rsquo;
-            </code>{" "}
-            and joined_at on or before this day. Restricted to the admin
-            cutoff (currently <strong>2026-01-01</strong>).
-          </li>
-          <li>
-            <strong style={{ color: "var(--color-text-primary)" }}>
-              Joined
-            </strong>{" "}
-            = students whose <code>joined_at::date</code> equals this day.
-          </li>
-          <li>
-            <strong style={{ color: "var(--color-text-primary)" }}>
-              Churned
-            </strong>{" "}
-            = students with status &lsquo;canceled&rsquo; whose{" "}
-            <code>updated_at::date</code> equals this day. This is the
-            best proxy without a status-change audit log —{" "}
-            <code>updated_at</code> also fires on other column changes, so
-            the count can be slightly noisy.
-          </li>
-        </ul>
-        <p>
-          The first 14 days were backfilled at install (migrations v31 +
-          v32) and everything since Jan 1 was backfilled by v33. From the
-          install date forward, the cron writes the canonical row each
-          night and never overwrites a manually-edited one.
-        </p>
+          Pace right now
+        </h3>
+        <span
+          style={{
+            fontSize: 11,
+            color: "var(--color-text-tertiary)",
+          }}
+        >
+          Students currently on the 30-day journey
+          {counts.loading ? "" : ` · ${counts.total} total`}
+        </span>
       </div>
-    </details>
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}
+      >
+        <PaceCell
+          label="Behind"
+          value={counts.behind}
+          total={counts.total}
+          color="var(--color-danger)"
+          description="< 0.5× expected pace. Worth a check-in."
+          loading={counts.loading}
+        />
+        <PaceCell
+          label="On pace"
+          value={counts.on_pace}
+          total={counts.total}
+          color="var(--color-text-primary)"
+          description="Within 0.5× – 1.5× of expected. Healthy."
+          loading={counts.loading}
+        />
+        <PaceCell
+          label="Ahead"
+          value={counts.ahead}
+          total={counts.total}
+          color="var(--color-success)"
+          description="> 1.5× expected pace. Crushing it."
+          loading={counts.loading}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PaceCell({
+  label,
+  value,
+  total,
+  color,
+  description,
+  loading,
+}: {
+  label: string;
+  value: number;
+  total: number;
+  color: string;
+  description: string;
+  loading: boolean;
+}) {
+  const pct = total > 0 ? Math.round((value / total) * 100) : 0;
+  return (
+    <div
+      style={{
+        background: "var(--color-bg-elevated)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 10,
+        padding: "14px 16px",
+      }}
+    >
+      <p
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+          color: "var(--color-text-tertiary)",
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </p>
+      <div className="flex items-baseline" style={{ gap: 8, marginBottom: 6 }}>
+        <span
+          style={{
+            fontSize: 28,
+            fontWeight: 600,
+            color,
+            letterSpacing: "-0.022em",
+            fontVariantNumeric: "tabular-nums",
+            lineHeight: 1,
+          }}
+        >
+          {loading ? "—" : value}
+        </span>
+        {!loading && total > 0 && (
+          <span
+            style={{
+              fontSize: 12,
+              color: "var(--color-text-tertiary)",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {pct}%
+          </span>
+        )}
+      </div>
+      <p
+        style={{
+          fontSize: 11,
+          color: "var(--color-text-tertiary)",
+          lineHeight: 1.4,
+        }}
+      >
+        {description}
+      </p>
+    </div>
   );
 }
 
@@ -350,17 +576,17 @@ function MetricCard({
       style={{
         background: "var(--color-bg-card)",
         borderRadius: 12,
-        padding: 16,
+        padding: 20,
         border: "1px solid var(--color-border)",
       }}
     >
       <div className="flex items-baseline justify-between gap-2 mb-1">
         <h3
           style={{
-            fontSize: 14,
+            fontSize: 15,
             fontWeight: 600,
             color: "var(--color-text-primary)",
-            letterSpacing: "-0.012em",
+            letterSpacing: "-0.014em",
           }}
         >
           {def.label}
@@ -368,11 +594,11 @@ function MetricCard({
         {current != null && (
           <p
             style={{
-              fontSize: 18,
+              fontSize: 22,
               fontWeight: 600,
               color: "var(--color-text-primary)",
               fontVariantNumeric: "tabular-nums",
-              letterSpacing: "-0.018em",
+              letterSpacing: "-0.022em",
             }}
           >
             {def.mode === "running"
@@ -384,9 +610,9 @@ function MetricCard({
 
       <p
         style={{
-          fontSize: 11,
+          fontSize: 12,
           color: "var(--color-text-tertiary)",
-          marginBottom: 4,
+          marginBottom: 6,
         }}
       >
         {def.description}
@@ -395,7 +621,7 @@ function MetricCard({
       {def.mode === "running" && delta != null && (
         <p
           style={{
-            fontSize: 11,
+            fontSize: 12,
             color:
               (valueKey === "churned_count" ? -delta : delta) > 0
                 ? "var(--color-success)"
@@ -403,23 +629,12 @@ function MetricCard({
                   ? "var(--color-danger)"
                   : "var(--color-text-tertiary)",
             fontVariantNumeric: "tabular-nums",
-            marginBottom: 10,
+            marginBottom: 14,
           }}
         >
           {delta > 0 ? "↑ +" : delta < 0 ? "↓ " : "→ "}
           {Math.abs(delta).toFixed(valueKey === "avg_progress" ? 1 : 0)}
           {def.suffix} vs start of range
-        </p>
-      )}
-      {def.mode === "flow" && (
-        <p
-          style={{
-            fontSize: 11,
-            color: "var(--color-text-tertiary)",
-            marginBottom: 10,
-          }}
-        >
-          Daily counts shown below; total above is the window sum.
         </p>
       )}
 
@@ -447,22 +662,28 @@ function Chart({
   suffix: string;
   mode: "running" | "flow";
 }) {
-  const W = 600;
-  const H = 180;
-  const PAD = 32;
+  const W = 1000;
+  const H = 280;
+  const PAD = 40;
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
-  const series = points
-    .map((p) => ({
-      date: p.snapshot_date,
-      v: (p[valueKey] as number | null) ?? 0,
-    }))
-    .filter((p) => p.v != null);
+  const series = useMemo(
+    () =>
+      points
+        .map((p) => ({
+          date: p.snapshot_date,
+          v: (p[valueKey] as number | null) ?? 0,
+        }))
+        .filter((p) => p.v != null),
+    [points, valueKey],
+  );
 
   if (series.length < 2) {
     return (
       <div
         style={{
-          padding: 24,
+          padding: 32,
           textAlign: "center",
           fontSize: 12,
           color: "var(--color-text-tertiary)",
@@ -475,16 +696,12 @@ function Chart({
   }
 
   const ys = series.map((p) => p.v);
-  const minY = 0; // always anchor counts/percentages to 0 so bars + lines look right
-  const maxY = Math.max(...ys, 1); // never collapse to a zero-height chart
+  const minY = 0;
+  const maxY = Math.max(...ys, 1);
   const rangeY = Math.max(1, maxY - minY);
-  // Line points span the full inner width (first at PAD, last at W-PAD).
   const lineStepX = (W - PAD * 2) / Math.max(1, series.length - 1);
-  // Bar slots divide the inner width into N equal columns; each bar is
-  // centered in its slot so they never collide with the y-axis labels
-  // (which sit in the left gutter at x < PAD).
   const slotW = (W - PAD * 2) / series.length;
-  const barW = Math.min(slotW * 0.6, 32);
+  const barW = Math.min(slotW * 0.7, 36);
 
   const linePoint = (i: number, v: number) => ({
     x: PAD + i * lineStepX,
@@ -510,109 +727,270 @@ function Chart({
     maxY,
   ];
 
+  /** Map a clientX (relative to SVG) to the nearest series index. */
+  function clientXToIndex(e: React.MouseEvent<SVGSVGElement>) {
+    const el = e.currentTarget;
+    const rect = el.getBoundingClientRect();
+    const scale = W / rect.width;
+    const svgX = (e.clientX - rect.left) * scale;
+    const inner = Math.max(0, Math.min(W - PAD * 2, svgX - PAD));
+    const step = mode === "flow" ? slotW : lineStepX;
+    const i = Math.round(inner / step);
+    return Math.max(0, Math.min(series.length - 1, i));
+  }
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }}>
-      {ticks.map((t) => {
-        const y = H - PAD - ((t - minY) / rangeY) * (H - PAD * 2);
-        return (
-          <g key={t}>
-            <line
-              x1={PAD}
-              x2={W - PAD}
-              y1={y}
-              y2={y}
-              stroke="var(--color-border)"
-              strokeWidth={0.5}
-            />
-            <text
-              x={PAD - 6}
-              y={y + 3}
-              fontSize={9}
-              fill="var(--color-text-tertiary)"
-              textAnchor="end"
-              fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
-            >
-              {Math.round(t)}
-              {suffix}
-            </text>
-          </g>
-        );
-      })}
-
-      {mode === "flow" ? (
-        // Bar chart for flow metrics (joined/churned per day). Each bar
-        // lives in its own slot so they never extend into the y-axis
-        // label gutter on the left.
-        series.map((p, i) => {
-          const { x, y } = barPoint(i, p.v);
-          const h = Math.max(0, H - PAD - y);
-          if (p.v === 0) return null;
+    <div ref={containerRef} style={{ position: "relative" }}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        style={{ width: "100%", height: "auto", display: "block" }}
+        onMouseMove={(e) => setHoverIdx(clientXToIndex(e))}
+        onMouseLeave={() => setHoverIdx(null)}
+      >
+        {/* Y-axis grid + labels */}
+        {ticks.map((t) => {
+          const y = H - PAD - ((t - minY) / rangeY) * (H - PAD * 2);
           return (
-            <rect
-              key={i}
-              x={x}
-              y={y}
-              width={barW}
-              height={h}
-              rx={2}
-              fill={color}
-              opacity={0.7}
-            />
+            <g key={t}>
+              <line
+                x1={PAD}
+                x2={W - PAD}
+                y1={y}
+                y2={y}
+                stroke="var(--color-border)"
+                strokeWidth={0.5}
+              />
+              <text
+                x={PAD - 8}
+                y={y + 3}
+                fontSize={10}
+                fill="var(--color-text-tertiary)"
+                textAnchor="end"
+                fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+              >
+                {Math.round(t)}
+                {suffix}
+              </text>
+            </g>
           );
-        })
-      ) : (
-        <>
-          <path d={areaPath} fill={color} fillOpacity={0.10} />
-          <path
-            d={linePath}
-            fill="none"
-            stroke={color}
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          {pathPts.map((p, i) => (
-            <circle key={i} cx={p.x} cy={p.y} r={2.2} fill={color} />
-          ))}
-        </>
-      )}
+        })}
 
-      {/* X-axis: first / mid / last (dedupe when series is tiny so the
-          labels don't pile on top of each other) */}
-      {(() => {
-        const lastIdx = series.length - 1;
-        const midIdx = Math.floor(lastIdx / 2);
-        const unique = Array.from(new Set([0, midIdx, lastIdx]));
-        const slots: Array<{ i: number; anchor: "start" | "middle" | "end" }> =
-          [];
-        for (let k = 0; k < unique.length; k++) {
-          const i = unique[k];
-          const anchor: "start" | "middle" | "end" =
-            i === 0 ? "start" : i === lastIdx ? "end" : "middle";
-          slots.push({ i, anchor });
-        }
-        return slots;
-      })().map((x) => {
-        // Match the chart's coordinate system: line points are anchored
-        // at the endpoints (lineStepX), bars at the slot centers (slotW).
-        const px =
-          mode === "flow"
-            ? PAD + (x.i + 0.5) * slotW
-            : PAD + x.i * lineStepX;
-        return (
-          <text
-            key={x.i}
-            x={px}
-            y={H - PAD + 14}
-            fontSize={9}
-            fill="var(--color-text-tertiary)"
-            textAnchor={x.anchor}
-            fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
-          >
-            {series[x.i].date.slice(5)}
-          </text>
-        );
-      })}
-    </svg>
+        {/* Series */}
+        {mode === "flow" ? (
+          series.map((p, i) => {
+            const { x, y } = barPoint(i, p.v);
+            const h = Math.max(0, H - PAD - y);
+            if (p.v === 0) return null;
+            return (
+              <rect
+                key={i}
+                x={x}
+                y={y}
+                width={barW}
+                height={h}
+                rx={3}
+                fill={color}
+                opacity={hoverIdx === i ? 1 : 0.7}
+              />
+            );
+          })
+        ) : (
+          <>
+            <path d={areaPath} fill={color} fillOpacity={0.10} />
+            <path
+              d={linePath}
+              fill="none"
+              stroke={color}
+              strokeWidth={2.5}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            {pathPts.map((p, i) => (
+              <circle
+                key={i}
+                cx={p.x}
+                cy={p.y}
+                r={hoverIdx === i ? 4 : 2.5}
+                fill={color}
+              />
+            ))}
+          </>
+        )}
+
+        {/* Scrubber — vertical guide at the hovered index */}
+        {hoverIdx != null &&
+          (() => {
+            const p =
+              mode === "flow"
+                ? PAD + (hoverIdx + 0.5) * slotW
+                : PAD + hoverIdx * lineStepX;
+            return (
+              <line
+                x1={p}
+                x2={p}
+                y1={PAD - 6}
+                y2={H - PAD}
+                stroke="var(--color-text-tertiary)"
+                strokeWidth={1}
+                strokeDasharray="3 3"
+                pointerEvents="none"
+              />
+            );
+          })()}
+
+        {/* X-axis labels: first / mid / last */}
+        {(() => {
+          const lastIdx = series.length - 1;
+          const midIdx = Math.floor(lastIdx / 2);
+          const unique = Array.from(new Set([0, midIdx, lastIdx]));
+          return unique.map((i, k) => {
+            const anchor: "start" | "middle" | "end" =
+              i === 0 ? "start" : i === lastIdx ? "end" : "middle";
+            const px =
+              mode === "flow"
+                ? PAD + (i + 0.5) * slotW
+                : PAD + i * lineStepX;
+            return (
+              <text
+                key={k}
+                x={px}
+                y={H - PAD + 18}
+                fontSize={10}
+                fill="var(--color-text-tertiary)"
+                textAnchor={anchor}
+                fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+              >
+                {series[i].date.slice(5)}
+              </text>
+            );
+          });
+        })()}
+      </svg>
+
+      {/* Tooltip — absolutely positioned over the chart at hover x */}
+      {hoverIdx != null && (
+        <ChartTooltip
+          date={series[hoverIdx].date}
+          value={series[hoverIdx].v}
+          suffix={suffix}
+          xPercent={
+            (mode === "flow"
+              ? PAD + (hoverIdx + 0.5) * slotW
+              : PAD + hoverIdx * lineStepX) / W
+          }
+        />
+      )}
+    </div>
+  );
+}
+
+function ChartTooltip({
+  date,
+  value,
+  suffix,
+  xPercent,
+}: {
+  date: string;
+  value: number;
+  suffix: string;
+  xPercent: number;
+}) {
+  // Clamp left edge so the tooltip never spills past the chart.
+  const leftPct = Math.min(Math.max(xPercent * 100, 4), 92);
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 6,
+        left: `${leftPct}%`,
+        transform: "translateX(-50%)",
+        background: "var(--color-bg-elevated)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 8,
+        padding: "6px 10px",
+        fontSize: 11,
+        pointerEvents: "none",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.10)",
+        whiteSpace: "nowrap",
+      }}
+    >
+      <div
+        style={{
+          color: "var(--color-text-tertiary)",
+          fontSize: 10,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {date}
+      </div>
+      <div
+        style={{
+          color: "var(--color-text-primary)",
+          fontWeight: 600,
+          fontVariantNumeric: "tabular-nums",
+          fontSize: 14,
+          marginTop: 1,
+        }}
+      >
+        {value}
+        {suffix}
+      </div>
+    </div>
+  );
+}
+
+function CalcTransparency() {
+  return (
+    <section
+      style={{
+        marginTop: 32,
+        background: "var(--color-bg-card)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 12,
+        padding: 18,
+      }}
+    >
+      <h3
+        style={{
+          fontSize: 13,
+          fontWeight: 600,
+          color: "var(--color-text-secondary)",
+          letterSpacing: "-0.005em",
+          marginBottom: 8,
+        }}
+      >
+        How these are calculated
+      </h3>
+      <ul
+        style={{
+          listStyle: "disc",
+          paddingLeft: 18,
+          fontSize: 12,
+          color: "var(--color-text-tertiary)",
+          lineHeight: 1.7,
+        }}
+      >
+        <li>
+          <strong>Avg progress</strong> &mdash; mean of completed-vs-expected
+          per active student, captured at 00:30 UTC nightly.
+        </li>
+        <li>
+          <strong>Active students</strong> &mdash; <code>membership_status</code>{" "}
+          in (<code>active</code>, <code>past_due</code>) at snapshot time.
+        </li>
+        <li>
+          <strong>Joined</strong> / <strong>Churned</strong> &mdash; new /
+          canceled memberships for that day; bars show daily counts and the
+          summary number is the window sum.
+        </li>
+        <li>
+          <strong>Pace right now</strong> &mdash; live count of students on the
+          30-day journey grouped by pace label (
+          <code>completedLessons / expectedLessons</code> per{" "}
+          <code>buildPaceSummary</code>). Behind = ratio &lt; 0.5, Ahead =
+          ratio &gt; 1.5.
+        </li>
+      </ul>
+    </section>
   );
 }

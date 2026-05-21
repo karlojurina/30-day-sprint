@@ -14,6 +14,7 @@ import type {
 } from "@/types/database";
 import { getDayNumber } from "@/types/database";
 import { LESSON_TYPE_LABELS, progressPercent } from "@/lib/constants";
+import { completedLessonIdsFor } from "@/lib/progress";
 import Link from "next/link";
 import {
   AdminPage,
@@ -102,7 +103,11 @@ export default function StudentDetailPage() {
     );
   }
 
-  const completedIds = new Set(completions.map((c) => c.lesson_id));
+  // Canonical "lesson is complete" check — see src/lib/progress.ts.
+  // Replaces the old `new Set(completions.map(c => c.lesson_id))`
+  // which counted partial rows (e.g. only the watch half of a
+  // compound lesson) toward completion.
+  const completedIds = completedLessonIdsFor(completions, lessons);
   const dayNumber = getDayNumber(student.joined_at);
   const overallPercent = progressPercent(completedIds.size, lessons.length);
 

@@ -49,7 +49,7 @@ welcome, first-client landed, etc.).
 |------|------------|
 | `/admin/login` | Email/password (Supabase Auth, `team_members` table) |
 | `/admin` | KPI overview |
-| `/admin/kanban` | Student kanban with drawer |
+| `/admin/journey` | Student journey board (per-week columns, pace overview, drawer detail) |
 | `/admin/students` + `/admin/students/[id]` | Table view + detail |
 | `/admin/templates` | CSM DM template editor (built-ins + custom, with TriggerBuilder) |
 | `/admin/tasks` | CSM task queue (open / completed / dismissed) |

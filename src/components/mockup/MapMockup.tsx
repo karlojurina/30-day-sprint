@@ -110,6 +110,12 @@ import { RegionTodoWidget } from "@/components/map/RegionTodoWidget";
 
 interface MapMockupProps {
   onOpenLesson: (lessonId: string) => void;
+  /** v50.3 — only honoured on /dashboard-mockup. Lets the dev test
+   *  panel override student state without writing to the DB so the
+   *  Playbook locked/unlocked visuals can be exercised live. */
+  testOverrides?: {
+    bountyAccessClaimedAt?: string | null;
+  };
 }
 
 type RegionId = keyof RegionStripMap;
@@ -248,6 +254,35 @@ const REGION_ZONES: Record<RegionId, RegionZone> = {
     ],
     labelX: 2059, labelY: 438,
   },
+};
+
+// v50.3 — Playbook aura zone. Lives on the R4 scene (not the overview).
+// Same shape contract as REGION_ZONES so it can reuse the glow/feather/fog
+// rendering, but it's a standalone constant because it's not part of the
+// sequential region unlock — it's a parallel claim that activates on
+// bounty_access_claimed_at.
+//
+// Polygon is a placeholder traced around the volcano summit on the
+// R4 painted scene. Refine via /dashboard-mockup/edit-regions if the
+// halo doesn't hug the summit cleanly.
+const PLAYBOOK_ZONE: RegionZone = {
+  polygon: [
+    { x: 2760, y:  90 },
+    { x: 2880, y: 120 },
+    { x: 2970, y: 195 },
+    { x: 3010, y: 290 },
+    { x: 3015, y: 380 },
+    { x: 2965, y: 470 },
+    { x: 2870, y: 535 },
+    { x: 2760, y: 555 },
+    { x: 2640, y: 535 },
+    { x: 2555, y: 470 },
+    { x: 2510, y: 380 },
+    { x: 2515, y: 290 },
+    { x: 2555, y: 195 },
+    { x: 2640, y: 120 },
+  ],
+  labelX: 2760, labelY: 321,
 };
 
 // ──────────────────────────────────────────────────────────────
@@ -465,7 +500,7 @@ function isActionItem(lesson: Lesson): boolean {
  *              Prev / Next region buttons navigate between regions.
  *              "Back to map" returns to overview.
  */
-export function MapMockup({ onOpenLesson }: MapMockupProps) {
+export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
   const {
     regions,
     lessons,
@@ -482,6 +517,15 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     dismissBountyClaim,
     bountyAccessClaimedAt,
   } = useStudent();
+
+  // v50.3 — testOverrides escape hatch. /dashboard-mockup wires this
+  // up to a dev test panel so we can flip the Playbook lock/unlock
+  // without touching the DB. Falls through to the real student value
+  // when no override is set (i.e. on real /dashboard).
+  const effectiveBountyAccessClaimedAt =
+    testOverrides && "bountyAccessClaimedAt" in testOverrides
+      ? testOverrides.bountyAccessClaimedAt ?? null
+      : bountyAccessClaimedAt;
 
   // Toast for the "you haven't completed all lessons" message when
   // the student tries to advance from a locked Onward marker.
@@ -948,9 +992,18 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
     focusedRegion ? lessonsByRegion[focusedRegion.id as RegionId] ?? [] : [];
   // Map-only lesson list — group sub-lessons collapsed into a single
   // virtual lesson so the path doesn't get crowded.
+  //
+  // v50.3 — l057 ("Complete Ad Bounty Onboarding") is intentionally
+  // hidden from the R4 path. The green Bounty Access end-marker IS the
+  // l057 lesson now: clicking the marker opens l057's sheet (see the
+  // onEndMarkerClick handler below). Rendering it as a separate path
+  // node confused users into thinking it was a different lesson.
   const focusedMapLessons = useMemo<Lesson[]>(
-    () => collapseLessonGroups(focusedLessons),
-    [focusedLessons]
+    () =>
+      collapseLessonGroups(focusedLessons).filter(
+        (l) => !(focusedRegion?.id === "r4" && l.id === "l057"),
+      ),
+    [focusedLessons, focusedRegion],
   );
   // Augment completedLessonIds with virtual group ids so the map's
   // LessonMarker can render the group as done when all sub-lessons are.
@@ -1188,10 +1241,10 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
               view === "r4"
                 ? {
                     kind: "bounty",
-                    label: bountyAccessClaimedAt
+                    label: effectiveBountyAccessClaimedAt
                       ? "Bounty Access · claimed"
                       : "Bounty Access",
-                    sublabel: bountyAccessClaimedAt
+                    sublabel: effectiveBountyAccessClaimedAt
                       ? "the finish line · done"
                       : "the finish line",
                   }
@@ -1262,33 +1315,21 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                   }
                 : undefined
             }
-            // v50 — pinned markers with EXPLICIT positions (don't follow
-            // the path's last waypoint like the secondary marker does).
-            // Used on R4 for the "Program complete" celebration that sits
-            // in front of the arch and the "Playbook" marker that lives
-            // inside the stone circle off to the right of the path.
+            // v50.3 — only the Playbook is pinned now. The Program
+            // Complete marker was removed (Bounty Access IS the
+            // finish line, so a separate celebration on the same
+            // scene was redundant). The Playbook's CLICK is its
+            // marker; the AURA polygon below provides the
+            // hover-glow / locked-fog treatment that matches the
+            // overview region zones.
             pinnedMarkers={
               view === "r4"
                 ? [
                     {
                       marker: {
-                        kind: "celebration",
-                        label: "Program complete",
-                        sublabel: "the work continues",
-                      },
-                      // v50.1 - moved OFF the path. Previous spot
-                      // (1822, 526) sat right on top of the last
-                      // path waypoints, so the Program-complete
-                      // label overlapped the snowy-ground lesson
-                      // checkmarks. Pulled further down-left into
-                      // open foreground snow.
-                      position: { x: 1480, y: 760 },
-                    },
-                    {
-                      marker: {
                         kind: "playbook",
                         label: "The Playbook",
-                        sublabel: bountyAccessClaimedAt
+                        sublabel: effectiveBountyAccessClaimedAt
                           ? "Months 2-3 · open"
                           : "claim Bounty Access first",
                       },
@@ -1297,9 +1338,9 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       // polygon (the polygon stays as the visual
                       // halo, this is just where the marker sits).
                       position: { x: 2760, y: 321 },
-                      locked: !bountyAccessClaimedAt,
+                      locked: !effectiveBountyAccessClaimedAt,
                       onClick: () => {
-                        if (!bountyAccessClaimedAt) {
+                        if (!effectiveBountyAccessClaimedAt) {
                           showToast(
                             "Claim Bounty Access to unlock the Playbook",
                           );
@@ -1309,6 +1350,28 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                       },
                     },
                   ]
+                : undefined
+            }
+            // v50.3 — Playbook aura. Rendered on R4 only. Same glow /
+            // feather / fog pattern as the overview region zones; locked
+            // when bounty access isn't claimed yet. Sits BEHIND the
+            // lesson markers + pinned Playbook marker because
+            // ScenePathOverlay draws the aura first.
+            playbookAura={
+              view === "r4"
+                ? {
+                    polygon: PLAYBOOK_ZONE.polygon,
+                    locked: !effectiveBountyAccessClaimedAt,
+                    onClick: () => {
+                      if (!effectiveBountyAccessClaimedAt) {
+                        showToast(
+                          "Claim Bounty Access to unlock the Playbook",
+                        );
+                        return;
+                      }
+                      router.push("/dashboard/playbook");
+                    },
+                  }
                 : undefined
             }
           />
@@ -2693,6 +2756,15 @@ interface ScenePathOverlayProps {
     onClick?: () => void;
     locked?: boolean;
   }>;
+  /** v50.3 — Playbook aura. A region-style hover-glow + locked-fog
+   *  halo painted over a polygon on the scene. Drawn behind lesson
+   *  nodes so the Playbook marker (which sits on top) reads
+   *  cleanly. */
+  playbookAura?: {
+    polygon: Array<{ x: number; y: number }>;
+    locked: boolean;
+    onClick: () => void;
+  };
 }
 
 function ScenePathOverlay({
@@ -2708,12 +2780,15 @@ function ScenePathOverlay({
   onSecondaryMarkerClick,
   secondaryMarkerLocked = false,
   pinnedMarkers,
+  playbookAura,
 }: ScenePathOverlayProps) {
   // Lifted hover state — child markers report up so the hover label
   // can render once at the END of the SVG, on top of every other
   // node. SVG paint order = source order, so anything that draws
   // last wins z-index.
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  // v50.3 — Playbook aura hover (separate from lesson-marker hover).
+  const [playbookAuraHot, setPlaybookAuraHot] = useState(false);
   // Lesson positions are distributed by ARC LENGTH along the waypoint
   // polyline (excluding the last waypoint, reserved for the end marker).
   // Index-based distribution caused overlaps where the user clicked many
@@ -2787,6 +2862,120 @@ function ScenePathOverlay({
       }}
     >
       {/* No path line — just the lesson nodes sitting on the painted trail */}
+
+      {/* v50.3 — Playbook aura. Same defs + render pattern as the
+          overview region zones (zone-glow, zone-fog, zone-feather), but
+          self-contained so this SVG doesn't depend on the overview's
+          <defs>. Drawn FIRST so lesson nodes + the Playbook marker
+          pinned on top still receive the clicks. The invisible hit
+          path catches taps anywhere inside the polygon and routes
+          to onClick. */}
+      {playbookAura && (
+        <g>
+          <defs>
+            <radialGradient id="playbook-aura-glow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="rgba(245,245,240,0.42)" />
+              <stop offset="60%" stopColor="rgba(245,245,240,0.16)" />
+              <stop offset="100%" stopColor="rgba(245,245,240,0)" />
+            </radialGradient>
+            <radialGradient id="playbook-aura-glow-hot" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="rgba(240,213,149,0.62)" />
+              <stop offset="60%" stopColor="rgba(240,213,149,0.24)" />
+              <stop offset="100%" stopColor="rgba(240,213,149,0)" />
+            </radialGradient>
+            <radialGradient id="playbook-aura-fog" cx="50%" cy="50%" r="55%">
+              <stop offset="0%" stopColor="rgba(10,20,40,0.9)" />
+              <stop offset="55%" stopColor="rgba(10,20,40,0.65)" />
+              <stop offset="100%" stopColor="rgba(10,20,40,0.16)" />
+            </radialGradient>
+            <filter
+              id="playbook-aura-feather"
+              x="-30%"
+              y="-30%"
+              width="160%"
+              height="160%"
+              colorInterpolationFilters="sRGB"
+            >
+              <feGaussianBlur stdDeviation="18" />
+            </filter>
+            <filter
+              id="playbook-aura-feather-hot"
+              x="-30%"
+              y="-30%"
+              width="160%"
+              height="160%"
+              colorInterpolationFilters="sRGB"
+            >
+              <feGaussianBlur stdDeviation="24" />
+            </filter>
+          </defs>
+
+          {(() => {
+            const d = smoothClosedPath(playbookAura.polygon);
+            const hot = !playbookAura.locked && playbookAuraHot;
+            return (
+              <g
+                style={{
+                  cursor: "pointer",
+                  pointerEvents: "auto",
+                }}
+                onClick={playbookAura.onClick}
+                onMouseEnter={() => setPlaybookAuraHot(true)}
+                onMouseLeave={() => setPlaybookAuraHot(false)}
+                role="button"
+                aria-label={
+                  playbookAura.locked
+                    ? "The Playbook — locked, claim Bounty Access first"
+                    : "The Playbook — open"
+                }
+              >
+                {/* Hit surface — invisible but catches clicks/taps over
+                    the whole polygon. */}
+                <path
+                  d={d}
+                  fill="rgba(0,0,0,0.001)"
+                  pointerEvents="all"
+                />
+
+                {playbookAura.locked ? (
+                  <path
+                    d={d}
+                    fill="url(#playbook-aura-fog)"
+                    filter="url(#playbook-aura-feather)"
+                    pointerEvents="none"
+                  >
+                    <animate
+                      attributeName="opacity"
+                      values="0.85;1;0.85"
+                      dur="6s"
+                      repeatCount="indefinite"
+                    />
+                  </path>
+                ) : (
+                  <path
+                    d={d}
+                    fill={hot ? "url(#playbook-aura-glow-hot)" : "url(#playbook-aura-glow)"}
+                    filter={hot ? "url(#playbook-aura-feather-hot)" : "url(#playbook-aura-feather)"}
+                    pointerEvents="none"
+                    style={{
+                      transition: "opacity 0.4s cubic-bezier(0.22,1,0.36,1)",
+                    }}
+                  >
+                    {!hot && (
+                      <animate
+                        attributeName="opacity"
+                        values="0.55;1;0.55"
+                        dur="4.5s"
+                        repeatCount="indefinite"
+                      />
+                    )}
+                  </path>
+                )}
+              </g>
+            );
+          })()}
+        </g>
+      )}
 
       {/* Lesson nodes (skipping the last waypoint). Node size scales with
           y: lessons further up the scene (smaller y, "further away") render

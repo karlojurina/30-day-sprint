@@ -8,6 +8,10 @@ import { TopBar } from "@/components/map/TopBar";
 import { LessonSheet } from "@/components/map/LessonSheet";
 import { MapMockup } from "@/components/mockup/MapMockup";
 import { SyncDebugPanel } from "@/components/map/SyncDebugPanel";
+import {
+  PlaybookTestPanel,
+  type BountyAccessOverride,
+} from "@/components/map/PlaybookTestPanel";
 import { OnboardingFlow } from "@/components/map/OnboardingFlow";
 import { RegionCompleteCelebration } from "@/components/map/RegionCompleteCelebration";
 import { StreakToast } from "@/components/map/StreakToast";
@@ -71,6 +75,19 @@ export default function DashboardMockupPage() {
 
   // Graduation modal
   const [showGraduation, setShowGraduation] = useState(false);
+
+  // v50.3 — dev test overrides. "real" = no override (fall through to
+  // StudentContext); "on"/"off" = force the Playbook aura state for
+  // visual testing without touching the DB.
+  const [bountyOverride, setBountyOverride] =
+    useState<BountyAccessOverride>("real");
+  const testOverrides =
+    bountyOverride === "real"
+      ? undefined
+      : {
+          bountyAccessClaimedAt:
+            bountyOverride === "on" ? new Date().toISOString() : null,
+        };
 
   // ---------- Onboarding bootstrap ----------
   // v46 — onboarding_completed_at moved to student_milestones, exposed
@@ -209,7 +226,10 @@ export default function DashboardMockupPage() {
       <TopBar onOpenLesson={(id) => setSelectedLessonId(id)} />
 
       <div className="relative flex-1 min-h-0">
-        <MapMockup onOpenLesson={(id) => setSelectedLessonId(id)} />
+        <MapMockup
+          onOpenLesson={(id) => setSelectedLessonId(id)}
+          testOverrides={testOverrides}
+        />
       </div>
 
       <LessonSheet
@@ -218,6 +238,11 @@ export default function DashboardMockupPage() {
       />
 
       <SyncDebugPanel />
+
+      <PlaybookTestPanel
+        bountyOverride={bountyOverride}
+        onBountyOverrideChange={setBountyOverride}
+      />
 
       <RegionCompleteCelebration
         region={celebratingRegion}

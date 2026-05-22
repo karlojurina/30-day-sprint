@@ -110,13 +110,13 @@ interface StudentContextType {
   }>;
   requestDiscount: () => Promise<void>;
 
-  // v42 (v2): bounty access claim — l057's one-time "claim my Bounty
-  // spot" button. claimBountyAccess() flips bounty_access_claimed_at,
-  // marks l057 complete, and surfaces the celebration. The boolean
-  // is the celebration takeover flag; clear it via dismissBountyClaim.
+  // v50.5 — Bounty Access state. Stamped exclusively by Zak's
+  // /api/webhooks/adbounty (no self-claim, no admin self-stamp).
+  // bountyAccessJustClaimed is the celebration takeover flag the
+  // map raises when the webhook lands during an active session;
+  // dismissBountyClaim clears it.
   bountyAccessClaimedAt: string | null;
   bountyAccessJustClaimed: boolean;
-  claimBountyAccess: () => Promise<void>;
   dismissBountyClaim: () => void;
 
   // v50 — Bounty Access (l057) is the finish line. The old "Finish
@@ -205,6 +205,13 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   // is dismissed. The bounty_access_claimed_at timestamp itself lives
   // on the student row in AuthContext.
   const [bountyAccessJustClaimed, setBountyAccessJustClaimed] = useState(false);
+  // v50.5 — observed transition tracker. The webhook is now the
+  // sole source of bounty_access_claimed_at, so the celebration
+  // can only fire on the client by *observing* the null → set
+  // transition (via refreshFromServer or the initial fetch). We
+  // initialize the ref to "unknown" and let the first observation
+  // seed it; only later observations can fire the celebration.
+  const bountyAccessLastSeenRef = useRef<"unset" | string | null>("unset");
   // v42 (v2): crowned-celebration takeover for the Map 2 milestone.
   // Set on markFirstClient() success when it wasn't a duplicate.
   const [firstClientJustLanded, setFirstClientJustLanded] = useState(false);
@@ -221,6 +228,26 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   >([]);
   const [discountFeedbackOpen, setDiscountFeedbackOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+
+  // v50.5 — watch milestones for the null → set webhook flip.
+  // Fires the takeover celebration the first time we observe a
+  // value after seeing nothing. The "unset" sentinel means we
+  // haven't observed yet — that observation seeds the ref without
+  // triggering, so reloading a long-claimed account doesn't
+  // re-fire the celebration.
+  useEffect(() => {
+    if (!milestones) return;
+    const seen = bountyAccessLastSeenRef.current;
+    const now = milestones.bounty_access_claimed_at;
+    if (seen === "unset") {
+      bountyAccessLastSeenRef.current = now;
+      return;
+    }
+    if (!seen && now) {
+      setBountyAccessJustClaimed(true);
+    }
+    bountyAccessLastSeenRef.current = now;
+  }, [milestones]);
   const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostics>({
     lastSyncAt: null,
     fetchedCount: null,
@@ -960,62 +987,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     }
   }, [student]);
 
-  /**
-   * v42 — l057 "Claim my Bounty spot" handler. Calls
-   * /api/student/claim-bounty-access which atomically flips the
-   * student's bounty_access_claimed_at and marks l057 complete.
-   * On success, patches the local student row + adds l057 to the
-   * completions list + raises the celebration takeover flag.
-   */
-  const claimBountyAccess = useCallback(async () => {
-    if (!student || milestones?.bounty_access_claimed_at) return;
-
-    const token = await getAccessToken();
-    if (!token) return;
-
-    const res = await fetch("/api/student/claim-bounty-access", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
-      console.error("Claim bounty access failed:", res.status);
-      return;
-    }
-    const data = await res.json();
-    if (!data.ok) return;
-
-    // v46 — patch the milestones state so any UI reading
-    // bountyAccessClaimedAt flips instantly.
-    setMilestones((prev) => ({
-      student_id: student.id,
-      onboarding_completed_at: prev?.onboarding_completed_at ?? null,
-      first_sprint_login_at: prev?.first_sprint_login_at ?? null,
-      first_client_landed_at: prev?.first_client_landed_at ?? null,
-      playbook_welcome_seen_at: prev?.playbook_welcome_seen_at ?? null,
-      bounty_access_claimed_at: data.bounty_access_claimed_at,
-      updated_at: data.bounty_access_claimed_at,
-    }));
-    // Add l057 to completions if it's not there yet — the API
-    // upserts the row server-side; mirror it client-side so the
-    // map node + sheet flip without waiting for a refetch.
-    setCompletions((prev) => {
-      if (prev.some((c) => c.lesson_id === "l057")) return prev;
-      return [
-        ...prev,
-        {
-          id: `local-l057-${student.id}`,
-          student_id: student.id,
-          lesson_id: "l057",
-          completed_at: data.bounty_access_claimed_at,
-          action_completed_at: null,
-          skipped_at: null,
-          discord_message_link: null,
-        } as StudentLessonCompletion,
-      ];
-    });
-    // Fire the celebration unless this was a duplicate click.
-    if (!data.already_claimed) setBountyAccessJustClaimed(true);
-  }, [student, milestones]);
+  // v50.5 - claimBountyAccess removed. Bounty Access is no longer
+  // self-claimable from l057; students apply via Tally form and the
+  // webhook (/api/webhooks/adbounty) is the SOLE source of
+  // bounty_access_claimed_at now. The old /api/student/claim-
+  // bounty-access route is gone too.
 
   const dismissBountyClaim = useCallback(() => {
     setBountyAccessJustClaimed(false);
@@ -1217,7 +1193,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         // don't change.
         bountyAccessClaimedAt: milestones?.bounty_access_claimed_at ?? null,
         bountyAccessJustClaimed,
-        claimBountyAccess,
         dismissBountyClaim,
         playbookWelcomeSeenAt: milestones?.playbook_welcome_seen_at ?? null,
         dismissPlaybookWelcome,

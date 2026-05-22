@@ -18,7 +18,7 @@ interface AuthState {
   student: Student | null;
   /** Patch the student row locally without refetching from the API.
    *  Used by StudentContext after actions that mutate students.*
-   *  fields (e.g. claim-bounty-access flips bounty_access_claimed_at). */
+   *  fields. */
   setStudent: (s: Student | null) => void;
   teamMember: TeamMember | null;
   isStudent: boolean;

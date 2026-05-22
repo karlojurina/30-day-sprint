@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
@@ -759,10 +759,11 @@ function StreakChip({
   value: string;
   active?: boolean;
 }) {
-  // v50.4 — hover tooltip on the Streak chip. Native `title` is just
-  // enough here (no need for a styled popover) and works on touch via
-  // long-press on iOS / Android. The "Best" chip carries a sibling
-  // explanation so the metric reads clearly even cold.
+  // v50.5 — custom popover replaces the native `title` tooltip
+  // (browser default delay was ~1.5 s and the styling clashed with
+  // the rest of the dashboard). Same dark-panel + uppercase-label
+  // language as the existing widgets, fires after 120 ms on hover
+  // / focus so it feels snappy without being jumpy.
   const tooltip =
     label === "Streak"
       ? "Complete one lesson every day to keep your streak going. Miss a day and it resets to 1."
@@ -771,9 +772,30 @@ function StreakChip({
         : label === "Day"
           ? "Days since you started the 30-day sprint."
           : undefined;
+  const [tipOpen, setTipOpen] = useState(false);
+  const tipTimerRef = useRef<number | null>(null);
+  const openTip = () => {
+    if (tipTimerRef.current != null) window.clearTimeout(tipTimerRef.current);
+    tipTimerRef.current = window.setTimeout(() => setTipOpen(true), 120);
+  };
+  const closeTip = () => {
+    if (tipTimerRef.current != null) window.clearTimeout(tipTimerRef.current);
+    setTipOpen(false);
+  };
+  useEffect(
+    () => () => {
+      if (tipTimerRef.current != null) window.clearTimeout(tipTimerRef.current);
+    },
+    [],
+  );
   return (
     <div
-      title={tooltip}
+      onMouseEnter={tooltip ? openTip : undefined}
+      onMouseLeave={tooltip ? closeTip : undefined}
+      onFocus={tooltip ? openTip : undefined}
+      onBlur={tooltip ? closeTip : undefined}
+      tabIndex={tooltip ? 0 : undefined}
+      aria-describedby={tooltip ? `streakchip-tip-${label}` : undefined}
       style={{
         flex: 1,
         padding: "8px 12px",
@@ -784,8 +806,63 @@ function StreakChip({
         alignItems: "center",
         gap: 8,
         cursor: tooltip ? "help" : "default",
+        position: "relative",
       }}
     >
+      {tooltip && tipOpen && (
+        <div
+          id={`streakchip-tip-${label}`}
+          role="tooltip"
+          style={{
+            position: "absolute",
+            bottom: "calc(100% + 8px)",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 80,
+            width: 220,
+            padding: "10px 12px",
+            borderRadius: 8,
+            background: "rgba(10,14,22,0.96)",
+            border: "1px solid rgba(255,255,255,0.10)",
+            boxShadow: "0 12px 28px rgba(0,0,0,0.45)",
+            color: "rgba(255,255,255,0.92)",
+            fontSize: 12,
+            lineHeight: 1.45,
+            letterSpacing: "-0.003em",
+            pointerEvents: "none",
+            animation: "fade-in-tip 120ms cubic-bezier(0.22,1,0.36,1) both",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 600,
+              color: "rgba(255,255,255,0.45)",
+              letterSpacing: "0.10em",
+              textTransform: "uppercase",
+              marginBottom: 4,
+            }}
+          >
+            {label}
+          </div>
+          {tooltip}
+          {/* Caret pointing down to the chip */}
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              top: "100%",
+              left: "50%",
+              transform: "translate(-50%, -1px)",
+              width: 0,
+              height: 0,
+              borderLeft: "6px solid transparent",
+              borderRight: "6px solid transparent",
+              borderTop: "6px solid rgba(10,14,22,0.96)",
+            }}
+          />
+        </div>
+      )}
       {label === "Streak" && (
         <svg
           width="12"

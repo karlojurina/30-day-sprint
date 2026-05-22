@@ -57,7 +57,6 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
     discountAllLessonsDone,
     discountRequest,
     bountyAccessClaimedAt,
-    claimBountyAccess,
     toggleLesson,
     toggleLessonAction,
     saveDiscordLink,
@@ -653,10 +652,22 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
               </div>
             )}
 
-            {/* === Bounty Access claim — l057 — v2 (v42) ===
-                Mirrors the discount-gate panel above but in green.
-                Single-use: shows the claim CTA when unclaimed, then
-                collapses to a confirmation after click. */}
+            {/* === Bounty Access application - l057 - v50.5 ===
+                Replaces the old self-claim button (v42). Bounty
+                Access is now gated by application + approval:
+                  1. Student clicks the CTA → Tally form opens
+                  2. Karlo/team review the submission
+                  3. On approval, Zak's webhook fires our
+                     /api/webhooks/adbounty endpoint with the
+                     enrollment payload
+                  4. We stamp bounty_access_claimed_at, which both
+                     unlocks the Playbook (Map 2) AND collapses
+                     this panel to the "Claimed" confirmation
+                     below.
+                There's no pending state on our side - the student
+                sees the same Apply CTA until the webhook lands.
+                That's intentional: we don't want a stuck "pending"
+                that depends on the student's word. */}
             {isBountyClaim && canClaimBounty && (
               <div
                 style={{
@@ -681,35 +692,79 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                     color: "var(--color-text-primary)",
                     fontSize: 16,
                     lineHeight: 1.45,
-                    marginBottom: 16,
+                    marginBottom: 12,
                     fontWeight: 500,
                     letterSpacing: "-0.011em",
                   }}
                 >
-                  {/* TODO(karlo): final sub-copy on what claiming gets them */}
-                  You&apos;ve climbed the map. The program you&apos;ve been
-                  training for is now open to you.
+                  {/* TODO(karlo): final sub-copy. The line about the
+                      Playbook is load-bearing - it's the only place
+                      we tell the student up-front that approval
+                      unlocks Map 2. */}
+                  You&apos;ve climbed the map. Apply for the bounty
+                  program below. Once our team approves you,{" "}
+                  <span style={{ color: "#4ADE80", fontWeight: 600 }}>
+                    the Playbook unlocks
+                  </span>{" "}
+                  - your Month 2-3 hub with always-on activities.
                 </p>
-                <button
-                  onClick={() => {
-                    void claimBountyAccess();
-                  }}
-                  className="w-full transition-colors"
+                <a
+                  href="https://tally.so/r/7RxaWR"
+                  target="_blank"
+                  rel="noopener noreferrer"
                   style={{
                     height: 44,
                     borderRadius: 10,
-                    border: "none",
                     background: "#22C55E",
                     color: "#0F1115",
                     fontSize: 14,
                     fontWeight: 600,
                     letterSpacing: "-0.011em",
                     cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    textDecoration: "none",
+                    transition: "background 150ms cubic-bezier(0.22,1,0.36,1)",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "#16A34A";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "#22C55E";
                   }}
                 >
                   {/* TODO(karlo): final button label */}
-                  Claim my Bounty spot
-                </button>
+                  Apply for Bounty Access
+                  <svg
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M7 17L17 7M9 7h8v8" />
+                  </svg>
+                </a>
+                <p
+                  style={{
+                    marginTop: 12,
+                    fontSize: 12,
+                    lineHeight: 1.5,
+                    color: "rgba(230,220,200,0.55)",
+                    letterSpacing: "-0.003em",
+                  }}
+                >
+                  Approval usually takes under 24 hours. This page
+                  flips to <span style={{ color: "rgba(230,220,200,0.85)" }}>Claimed</span>{" "}
+                  automatically once you&apos;re in - no need to
+                  refresh manually.
+                </p>
               </div>
             )}
 

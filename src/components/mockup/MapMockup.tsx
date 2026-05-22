@@ -373,11 +373,9 @@ const SCENES: Partial<Record<RegionId, Scene>> = {
       { x: 1709, y: 591 }, { x: 1739, y: 564 }, { x: 1774, y: 548 },
       { x: 1822, y: 526 }, { x: 1882, y: 510 }, { x: 1920, y: 492 },
       { x: 1952, y: 474 },
-      // v50.1 - Bounty Access end-marker. Brought DOWN from
-      // (2018, 323) (which sat way above the pillars in the sky)
-      // to land INSIDE the arch frame at the gate level. The path
-      // now arrives at the arch instead of overshooting it.
-      { x: 1985, y: 445 },
+      // v50.2 - Bounty Access end-marker. Karlo-supplied coords for
+      // where the gate sits on the painted scene.
+      { x: 2021, y: 304 },
     ],
   },
 };
@@ -1294,13 +1292,11 @@ export function MapMockup({ onOpenLesson }: MapMockupProps) {
                           ? "Months 2-3 · open"
                           : "claim Bounty Access first",
                       },
-                      // v50.1 - moved UP onto the volcano peak.
-                      // Earlier (2732, 286) was the centroid of the
-                      // traced polygon but landed on the right
-                      // slope. The polygon's topmost vertices were
-                      // around y≈145, so we sit just above that
-                      // for the marker to crown the summit.
-                      position: { x: 2615, y: 175 },
+                      // v50.2 - Karlo-supplied coords for the button
+                      // position inside the traced volcano-summit
+                      // polygon (the polygon stays as the visual
+                      // halo, this is just where the marker sits).
+                      position: { x: 2760, y: 321 },
                       locked: !bountyAccessClaimedAt,
                       onClick: () => {
                         if (!bountyAccessClaimedAt) {

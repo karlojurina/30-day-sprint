@@ -759,8 +759,21 @@ function StreakChip({
   value: string;
   active?: boolean;
 }) {
+  // v50.4 — hover tooltip on the Streak chip. Native `title` is just
+  // enough here (no need for a styled popover) and works on touch via
+  // long-press on iOS / Android. The "Best" chip carries a sibling
+  // explanation so the metric reads clearly even cold.
+  const tooltip =
+    label === "Streak"
+      ? "Complete one lesson every day to keep your streak going. Miss a day and it resets to 1."
+      : label === "Best"
+        ? "Your longest streak so far."
+        : label === "Day"
+          ? "Days since you started the 30-day sprint."
+          : undefined;
   return (
     <div
+      title={tooltip}
       style={{
         flex: 1,
         padding: "8px 12px",
@@ -770,6 +783,7 @@ function StreakChip({
         display: "flex",
         alignItems: "center",
         gap: 8,
+        cursor: tooltip ? "help" : "default",
       }}
     >
       {label === "Streak" && (

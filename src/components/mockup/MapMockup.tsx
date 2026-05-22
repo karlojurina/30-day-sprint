@@ -589,6 +589,12 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
     label: string;
   } | null>(null);
   const [hoveredZone, setHoveredZone] = useState<RegionId | null>(null);
+  // v50.4 — Playbook aura hot state lives in MapMockup so the
+  // polygon AND the pinned Playbook marker can both flip it on.
+  // Without this, moving the cursor from polygon → marker fires
+  // onMouseLeave on the polygon and the glow collapses (the marker
+  // sits ABOVE the polygon in the SVG, so it intercepts events).
+  const [playbookAuraHot, setPlaybookAuraHot] = useState(false);
 
   // Region scenes are mounted lazily — after the overview is in front of
   // the user. The overview alone is ~330 KB; deferring the four regions
@@ -872,6 +878,13 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
 
   const onMapPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
+    // v50.4 — don't accept pan during a region transition. The
+    // pre-zoom tween's onComplete is what advances the cinematic
+    // (setTransitionCounter → CinematicDive → onPeak → clears
+    // pendingViewRef). Killing the tween mid-flight left
+    // pendingViewRef stuck non-null, which made every subsequent
+    // back-to-map click a no-op until the page was reloaded.
+    if (pendingViewRef.current !== null) return;
     // Kill any in-flight tween so it doesn't fight the manual pan
     if (tweenRef.current) {
       tweenRef.current.kill();
@@ -1091,6 +1104,18 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
     // keyboard activation paths.
     if (next !== "overview" && !unlockedRegions.has(next as RegionId)) return;
     pendingViewRef.current = next;
+
+    // v50.4 — failsafe. If onPeak never fires (e.g. CinematicDive
+    // unmounts mid-flight, GSAP timeline aborted by a window blur,
+    // ref attachment race), pendingViewRef would stay non-null and
+    // every future transitionTo call would silently no-op. Three
+    // seconds is comfortably longer than the 2 s dive duration —
+    // the normal path clears the ref well before this fires.
+    window.setTimeout(() => {
+      if (pendingViewRef.current === next) {
+        pendingViewRef.current = null;
+      }
+    }, 3000);
 
     // Snapshot title for the destination. Stored in state so it
     // stays mounted past peak — pendingViewRef gets cleared in
@@ -1348,6 +1373,11 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                         }
                         router.push("/dashboard/playbook");
                       },
+                      // v50.4 — keep the aura's glow alive while the
+                      // cursor sits on the marker (the marker draws
+                      // above the polygon, so otherwise the polygon's
+                      // mouseleave fires and the halo collapses).
+                      onHoverChange: setPlaybookAuraHot,
                     },
                   ]
                 : undefined
@@ -1362,6 +1392,8 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                 ? {
                     polygon: PLAYBOOK_ZONE.polygon,
                     locked: !effectiveBountyAccessClaimedAt,
+                    hot: playbookAuraHot,
+                    onHotChange: setPlaybookAuraHot,
                     onClick: () => {
                       if (!effectiveBountyAccessClaimedAt) {
                         showToast(
@@ -1421,15 +1453,19 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
             />
 
             <defs>
+              {/* v50.4 — pearl-white auras (was gold). Karlo is
+                  pulling all gold accents off the map; the hover
+                  state is now a brighter white instead of a warm
+                  amber. */}
               <radialGradient id="zone-glow" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="rgba(245,245,240,0.35)" />
-                <stop offset="60%" stopColor="rgba(245,245,240,0.12)" />
-                <stop offset="100%" stopColor="rgba(245,245,240,0)" />
+                <stop offset="0%" stopColor="rgba(255,255,255,0.42)" />
+                <stop offset="60%" stopColor="rgba(255,255,255,0.16)" />
+                <stop offset="100%" stopColor="rgba(255,255,255,0)" />
               </radialGradient>
               <radialGradient id="zone-glow-hot" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="rgba(240,213,149,0.55)" />
-                <stop offset="60%" stopColor="rgba(240,213,149,0.2)" />
-                <stop offset="100%" stopColor="rgba(240,213,149,0)" />
+                <stop offset="0%" stopColor="rgba(255,255,255,0.72)" />
+                <stop offset="60%" stopColor="rgba(255,255,255,0.30)" />
+                <stop offset="100%" stopColor="rgba(255,255,255,0)" />
               </radialGradient>
               {/* Fog-of-war gradient — deep navy, sits over locked regions
                   so the painted terrain reads as obscured/unknown. Same
@@ -2075,7 +2111,6 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
           lessons={focusedLessons}
           completedLessonIds={completedLessonIds}
           onOpenLesson={onOpenLesson}
-          onBack={() => transitionTo("overview")}
           onPrev={prevRegion ? () => transitionTo(prevRegion.id as RegionId) : null}
           onNext={
             nextRegion
@@ -2119,7 +2154,9 @@ function RegionSidePanel({
   lessons,
   completedLessonIds,
   onOpenLesson,
-  onBack,
+  // v50.4 — onBack removed. The duplicate "Back to map" link inside
+  // this panel was deleted; the floating top-left pill on the map
+  // covers back-navigation now.
   onPrev,
   onNext,
   nextLocked = false,
@@ -2132,7 +2169,6 @@ function RegionSidePanel({
   lessons: Lesson[];
   completedLessonIds: Set<string>;
   onOpenLesson: (id: string) => void;
-  onBack: () => void;
   onPrev: (() => void) | null;
   onNext: (() => void) | null;
   /** When true, the "Onward" footer button still fires onNext (parent
@@ -2292,87 +2328,68 @@ function RegionSidePanel({
       onWheel={(e) => e.stopPropagation()}
       style={asideStyle}
     >
-      {/* Top nav: back to map + collapse */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "12px 18px",
-          borderBottom: "1px solid rgba(255,255,255,0.06)",
-        }}
-      >
-        <button
-          onClick={onBack}
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "rgba(255,255,255,0.70)",
-            fontSize: 13,
-            fontWeight: 500,
-            letterSpacing: "-0.005em",
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            padding: 0,
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.color = "rgba(255,255,255,0.96)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.color = "rgba(255,255,255,0.70)";
-          }}
-        >
-          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M11 17l-5-5m0 0l5-5m-5 5h12" />
-          </svg>
-          Back to map
-        </button>
-        <button
-          onClick={onToggleCollapsed}
-          aria-label={isPhone ? "Close panel" : "Collapse panel"}
-          title={isPhone ? "Close panel" : "Collapse panel"}
-          style={{
-            background: "transparent",
-            border: "1px solid rgba(255,255,255,0.10)",
-            borderRadius: 8,
-            color: "rgba(255,255,255,0.55)",
-            cursor: "pointer",
-            width: 28,
-            height: 28,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: 0,
-          }}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            {/* Phone: down chevron (close sheet). Desktop: right chevron (collapse rail). */}
-            <path d={isPhone ? "M6 9l6 6 6-6" : "M9 18l6-6-6-6"} />
-          </svg>
-        </button>
-      </div>
+      {/* v50.4 — old "Top nav" row removed. It carried a duplicate
+          "Back to map" link (the floating top-left pill already
+          handles back-navigation) and a collapse chevron. The
+          collapse moved inline with the region label below so we
+          reclaim ~50 px of vertical space for the lesson list. */}
 
       {/* Region header - tighter than before */}
       <div
         style={{
           padding: "18px 18px 16px",
           borderBottom: "1px solid rgba(255,255,255,0.06)",
+          position: "relative",
         }}
       >
-        <p
+        <div
           style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: "rgba(255,255,255,0.45)",
-            letterSpacing: "0.10em",
-            textTransform: "uppercase",
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 12,
             marginBottom: 8,
           }}
         >
-          Region {numeral}
-        </p>
+          <p
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: "rgba(255,255,255,0.45)",
+              letterSpacing: "0.10em",
+              textTransform: "uppercase",
+            }}
+          >
+            Region {numeral}
+          </p>
+          {/* v50.4 — collapse chevron, moved out of the now-deleted
+              top nav and inline with the region label so the panel
+              header is one row taller instead of two. */}
+          <button
+            onClick={onToggleCollapsed}
+            aria-label={isPhone ? "Close panel" : "Collapse panel"}
+            title={isPhone ? "Close panel" : "Collapse panel"}
+            style={{
+              background: "transparent",
+              border: "1px solid rgba(255,255,255,0.10)",
+              borderRadius: 8,
+              color: "rgba(255,255,255,0.55)",
+              cursor: "pointer",
+              width: 28,
+              height: 28,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 0,
+              flexShrink: 0,
+            }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              {/* Phone: down chevron (close sheet). Desktop: right chevron (collapse rail). */}
+              <path d={isPhone ? "M6 9l6 6 6-6" : "M9 18l6-6-6-6"} />
+            </svg>
+          </button>
+        </div>
         <h2
           style={{
             fontSize: 24,
@@ -2755,6 +2772,10 @@ interface ScenePathOverlayProps {
     position: { x: number; y: number };
     onClick?: () => void;
     locked?: boolean;
+    /** v50.4 — bubble hover up. Used by R4's Playbook marker so the
+     *  surrounding aura polygon keeps its glow alive while the cursor
+     *  sits on the marker itself. */
+    onHoverChange?: (hot: boolean) => void;
   }>;
   /** v50.3 — Playbook aura. A region-style hover-glow + locked-fog
    *  halo painted over a polygon on the scene. Drawn behind lesson
@@ -2764,6 +2785,12 @@ interface ScenePathOverlayProps {
     polygon: Array<{ x: number; y: number }>;
     locked: boolean;
     onClick: () => void;
+    /** v50.4 — controlled-hover. Parent owns the hot state so the
+     *  Playbook marker (rendered ABOVE the aura) can also flip it
+     *  on. Without this, moving the cursor from polygon → marker
+     *  fires onMouseLeave on the polygon and the glow collapses. */
+    hot: boolean;
+    onHotChange: (hot: boolean) => void;
   };
 }
 
@@ -2787,8 +2814,10 @@ function ScenePathOverlay({
   // node. SVG paint order = source order, so anything that draws
   // last wins z-index.
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-  // v50.3 — Playbook aura hover (separate from lesson-marker hover).
-  const [playbookAuraHot, setPlaybookAuraHot] = useState(false);
+  // v50.4 — Playbook aura hover state is now controlled by the
+  // parent (see playbookAura.hot). Lifted so the marker rendered on
+  // top of the polygon can keep the glow alive instead of letting
+  // mouseleave-on-polygon collapse it.
   // Lesson positions are distributed by ARC LENGTH along the waypoint
   // polyline (excluding the last waypoint, reserved for the end marker).
   // Index-based distribution caused overlaps where the user clicked many
@@ -2873,20 +2902,24 @@ function ScenePathOverlay({
       {playbookAura && (
         <g>
           <defs>
+            {/* v50.4 — pearl-white glow (no gold accent). Higher base
+                opacity than the regions because the volcano summit is
+                a brighter scene than the overview, so the same alpha
+                read as invisible against bright sky. */}
             <radialGradient id="playbook-aura-glow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="rgba(245,245,240,0.42)" />
-              <stop offset="60%" stopColor="rgba(245,245,240,0.16)" />
-              <stop offset="100%" stopColor="rgba(245,245,240,0)" />
+              <stop offset="0%" stopColor="rgba(255,255,255,0.62)" />
+              <stop offset="55%" stopColor="rgba(255,255,255,0.28)" />
+              <stop offset="100%" stopColor="rgba(255,255,255,0)" />
             </radialGradient>
             <radialGradient id="playbook-aura-glow-hot" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="rgba(240,213,149,0.62)" />
-              <stop offset="60%" stopColor="rgba(240,213,149,0.24)" />
-              <stop offset="100%" stopColor="rgba(240,213,149,0)" />
+              <stop offset="0%" stopColor="rgba(255,255,255,0.86)" />
+              <stop offset="55%" stopColor="rgba(255,255,255,0.42)" />
+              <stop offset="100%" stopColor="rgba(255,255,255,0)" />
             </radialGradient>
             <radialGradient id="playbook-aura-fog" cx="50%" cy="50%" r="55%">
-              <stop offset="0%" stopColor="rgba(10,20,40,0.9)" />
-              <stop offset="55%" stopColor="rgba(10,20,40,0.65)" />
-              <stop offset="100%" stopColor="rgba(10,20,40,0.16)" />
+              <stop offset="0%" stopColor="rgba(10,20,40,0.92)" />
+              <stop offset="55%" stopColor="rgba(10,20,40,0.68)" />
+              <stop offset="100%" stopColor="rgba(10,20,40,0.18)" />
             </radialGradient>
             <filter
               id="playbook-aura-feather"
@@ -2912,7 +2945,7 @@ function ScenePathOverlay({
 
           {(() => {
             const d = smoothClosedPath(playbookAura.polygon);
-            const hot = !playbookAura.locked && playbookAuraHot;
+            const hot = !playbookAura.locked && playbookAura.hot;
             return (
               <g
                 style={{
@@ -2920,8 +2953,8 @@ function ScenePathOverlay({
                   pointerEvents: "auto",
                 }}
                 onClick={playbookAura.onClick}
-                onMouseEnter={() => setPlaybookAuraHot(true)}
-                onMouseLeave={() => setPlaybookAuraHot(false)}
+                onMouseEnter={() => playbookAura.onHotChange(true)}
+                onMouseLeave={() => playbookAura.onHotChange(false)}
                 role="button"
                 aria-label={
                   playbookAura.locked
@@ -2961,11 +2994,16 @@ function ScenePathOverlay({
                       transition: "opacity 0.4s cubic-bezier(0.22,1,0.36,1)",
                     }}
                   >
+                    {/* v50.4 — louder pulse than the regions
+                        (0.40 → 1.0 vs 0.55 → 1.0) so the halo reads
+                        against bright sky. Pulse stops while hot so
+                        the user gets a clear "I'm pointing at this"
+                        moment. */}
                     {!hot && (
                       <animate
                         attributeName="opacity"
-                        values="0.55;1;0.55"
-                        dur="4.5s"
+                        values="0.40;1;0.40"
+                        dur="3.6s"
                         repeatCount="indefinite"
                       />
                     )}
@@ -3072,6 +3110,7 @@ function ScenePathOverlay({
           marker={pm.marker}
           onClick={pm.onClick}
           locked={pm.locked ?? false}
+          onHoverChange={pm.onHoverChange}
         />
       ))}
 
@@ -3654,6 +3693,7 @@ function EndMarker({
   marker,
   onClick,
   locked = false,
+  onHoverChange,
 }: {
   x: number;
   y: number;
@@ -3663,6 +3703,11 @@ function EndMarker({
    *  pulsing aura is suppressed. Click still fires onClick (parent
    *  decides whether to show a notification instead of navigating). */
   locked?: boolean;
+  /** v50.4 — bubble hover state up so parents like the Playbook
+   *  aura can keep their glow alive while the cursor is on the
+   *  marker (otherwise the polygon's mouseleave fires when the
+   *  cursor crosses onto the marker). */
+  onHoverChange?: (hot: boolean) => void;
 }) {
   const [hot, setHot] = useState(false);
   const isClickable = !!onClick;
@@ -3681,8 +3726,14 @@ function EndMarker({
         transition: "opacity 200ms cubic-bezier(0.25,0.1,0.25,1)",
       }}
       onClick={onClick}
-      onMouseEnter={() => setHot(true)}
-      onMouseLeave={() => setHot(false)}
+      onMouseEnter={() => {
+        setHot(true);
+        onHoverChange?.(true);
+      }}
+      onMouseLeave={() => {
+        setHot(false);
+        onHoverChange?.(false);
+      }}
       onKeyDown={(e) => {
         if (!isClickable) return;
         if (e.key === "Enter" || e.key === " ") {

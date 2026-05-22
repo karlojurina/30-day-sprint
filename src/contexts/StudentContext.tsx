@@ -623,6 +623,15 @@ export function StudentProvider({ children }: { children: ReactNode }) {
               )
             );
           }
+          // v50.4 — refresh streak (+ everything else from
+          // /api/student/data) so streak.current bumps on the client
+          // when the server-side updateStudentStreak() ticks it. The
+          // dashboard's StreakCelebration effect only fires on
+          // `streak.current` changing — without this refetch the
+          // streak stayed stale until a hard reload, so the
+          // celebration never fired in real use. Best-effort: failure
+          // doesn't roll back the toggle.
+          void refreshFromServer(token);
         }
       } catch {
         // Revert on network error
@@ -638,7 +647,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [student, completedLessonIds, milestones]
+    [student, completedLessonIds, milestones, refreshFromServer]
   );
 
   /**
@@ -714,6 +723,10 @@ export function StudentProvider({ children }: { children: ReactNode }) {
               return [...prev, result.completion];
             });
           }
+          // v50.4 — mark-action-shipped also calls updateStudentStreak
+          // server-side. Refresh so streak.current bumps on the client
+          // and the dashboard's celebration effect picks it up.
+          void refreshFromServer(token);
         }
       } catch {
         const token2 = await getAccessToken();
@@ -728,7 +741,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [student, actionShippedLessonIds]
+    [student, actionShippedLessonIds, refreshFromServer]
   );
 
   /**
@@ -883,6 +896,9 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       if (data.attempt) {
         setQuizAttempts((prev) => [...prev, data.attempt]);
       }
+      // v50.4 — submit-quiz also ticks the streak server-side. Refresh
+      // so the dashboard's celebration effect can fire.
+      void refreshFromServer(token);
       return {
         score: data.score,
         total: data.total,
@@ -890,7 +906,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         answers: data.answers,
       };
     },
-    []
+    [refreshFromServer]
   );
 
   const refreshWatchProgress = useCallback(async () => {

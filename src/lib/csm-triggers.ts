@@ -355,106 +355,19 @@ function totalCompletedAcrossRegions(snap: StudentSnapshot): number {
 
 export type TriggerCheck = (snap: StudentSnapshot) => string | null;
 
-export const triggers: Record<string, TriggerCheck> = {
-  // W1.1 — R1 complete. No day-window restriction.
-  "W1.1": (s) => {
-    if (!regionComplete(s, "r1")) return null;
-    if (s.recentTaskScenarios.has("W1.1")) return null;
-    return `Day ${s.day} · R1 complete (${s.regions.r1.fullyComplete}/${s.regions.r1.total} lessons, both action items shipped).`;
-  },
-
-  // W1.2 — Watched ≥10 R1 lessons but l018 + l020 not shipped.
-  // Widened from Day 7-8 to Day 7-10 (4-day window) so a cron miss
-  // doesn't drop the trigger entirely.
-  "W1.2": (s) => {
-    if (s.day < 7 || s.day > 10) return null;
-    if (s.regions.r1.watchedComplete < 10) return null;
-    if (s.shipped["l018"] || s.shipped["l020"]) return null;
-    if (s.recentTaskScenarios.has("W1.2")) return null;
-    return `Day ${s.day} · ${s.regions.r1.watchedComplete} R1 lessons watched but neither l018 (Organic) nor l020 (UGC) shipped.`;
-  },
-
-  // W1.3 — Slow start: <3 lessons completed.
-  // Widened from Day 4-5 to Day 4-7.
-  "W1.3": (s) => {
-    if (s.day < 4 || s.day > 7) return null;
-    if (totalCompletedAcrossRegions(s) >= 3) return null;
-    if (s.recentTaskScenarios.has("W1.3")) return null;
-    const count = totalCompletedAcrossRegions(s);
-    return `Day ${s.day} · only ${count} lesson${count === 1 ? "" : "s"} completed so far.`;
-  },
-
-  // W2.1 — R2 complete. No day-window restriction.
-  "W2.1": (s) => {
-    if (!regionComplete(s, "r2")) return null;
-    if (s.recentTaskScenarios.has("W2.1")) return null;
-    return `Day ${s.day} · R2 complete (${s.regions.r2.fullyComplete}/${s.regions.r2.total}) — discount widget unlocked.`;
-  },
-
-  // W2.3 — ≥5 R2 lessons watched, l022 + l024 not shipped.
-  // Widened from Day 10-11 to Day 10-13.
-  "W2.3": (s) => {
-    if (s.day < 10 || s.day > 13) return null;
-    if (s.regions.r2.watchedComplete < 5) return null;
-    if (s.shipped["l022"] || s.shipped["l024"]) return null;
-    if (s.recentTaskScenarios.has("W2.3")) return null;
-    return `Day ${s.day} · ${s.regions.r2.watchedComplete} R2 lessons watched but neither l022 (VSL) nor l024 (High-Prod) shipped.`;
-  },
-
-  // W2.4 — Behind pace: R1 < 85% on Day 9-12.
-  // Gated by progress ratio so 17/18 doesn't fire — only genuinely
-  // behind students hit this.
-  "W2.4": (s) => {
-    if (s.day < 9 || s.day > 12) return null;
-    if (!regionBelow(s, "r1", 0.85)) return null;
-    if (s.progressRatio >= 0.85) return null;
-    if (s.recentTaskScenarios.has("W2.4")) return null;
-    return `Day ${s.day} · R1 ${s.regions.r1.fullyComplete}/${s.regions.r1.total} (pace ${s.progressRatio.toFixed(2)}).`;
-  },
-
-  // W2.5 — Day 12-14, R1 < 85% (winning-mindset reframe).
-  "W2.5": (s) => {
-    if (s.day < 12 || s.day > 14) return null;
-    if (!regionBelow(s, "r1", 0.85)) return null;
-    if (s.progressRatio >= 0.85) return null;
-    if (s.recentTaskScenarios.has("W2.5")) return null;
-    return `Day ${s.day} · R1 ${s.regions.r1.fullyComplete}/${s.regions.r1.total} (pace ${s.progressRatio.toFixed(2)}) — discount window approaching.`;
-  },
-
-  // W3.1 — R3 complete.
-  "W3.1": (s) => {
-    if (!regionComplete(s, "r3")) return null;
-    if (s.recentTaskScenarios.has("W3.1")) return null;
-    return `Day ${s.day} · R3 complete (${s.regions.r3.fullyComplete}/${s.regions.r3.total}).`;
-  },
-
-  // W3.2 — Day 21-23, R2 < 85%.
-  "W3.2": (s) => {
-    if (s.day < 21 || s.day > 23) return null;
-    if (!regionBelow(s, "r2", 0.85)) return null;
-    if (s.progressRatio >= 0.85) return null;
-    if (s.recentTaskScenarios.has("W3.2")) return null;
-    return `Day ${s.day} · R2 ${s.regions.r2.fullyComplete}/${s.regions.r2.total} (pace ${s.progressRatio.toFixed(2)}) — significant intervention.`;
-  },
-
-  // W4.1 — Day 25-30, R3 < 85%.
-  "W4.1": (s) => {
-    if (s.day < 25 || s.day > 30) return null;
-    if (!regionBelow(s, "r3", 0.85)) return null;
-    if (s.progressRatio >= 0.85) return null;
-    if (s.recentTaskScenarios.has("W4.1")) return null;
-    return `Day ${s.day} · R3 ${s.regions.r3.fullyComplete}/${s.regions.r3.total} (pace ${s.progressRatio.toFixed(2)}) — last stretch before R4.`;
-  },
-
-  // W4.2 — Day 30 exactly, R4 incomplete, still active.
-  "W4.2": (s) => {
-    if (s.day !== 30) return null;
-    if (s.student.membership_status !== "active") return null;
-    if (!regionIncomplete(s, "r4")) return null;
-    if (s.recentTaskScenarios.has("W4.2")) return null;
-    return `Day 30 · R4 ${s.regions.r4.fullyComplete}/${s.regions.r4.total} — sprint incomplete but still paying.`;
-  },
-};
+// v57 - W-series built-in triggers removed. They were superseded by
+// brief v3's situation-based scenarios (welcome, stalled, nolessons,
+// noship, pace, month2). The new scenarios are NOT yet wired into
+// this cron - they need their own trigger logic written. Until that
+// lands:
+//   - welcome.day1 is sent manually by Astrid (no cron)
+//   - stalled.discord.day* + stalled.whop.day* fire from check-na-tasks
+//   - nolessons.day* + noship.r*.day* + pace.day* + month2.entry
+//     have NO cron yet - they're awaiting trigger implementation
+//
+// Custom-trigger templates (is_custom=true with a trigger_config
+// DSL) still fire normally via the evaluateCustomTrigger path below.
+export const triggers: Record<string, TriggerCheck> = {};
 
 /* ─────────────────────────────────────────────────────────────────
  * Custom triggers (v34) — built from the JSON DSL Karlo edits via
@@ -813,25 +726,34 @@ export function evaluateCustomTrigger(
   return { match: true, summary: pieces.join(" · ") };
 }
 
-/** Bucket label used in the cron's Discord summary. */
+/**
+ * Bucket label used in the cron's Discord summary + the admin
+ * task UI. v57 - replaced the old W-series + X.1 entries with the
+ * descriptive brief v3 slugs. Bucket values still drive the
+ * task-priority slot (cancel_path beats at_risk).
+ */
 export const SCENARIO_BUCKET: Record<string, string> = {
-  "W1.1": "crushing",
-  "W1.2": "at_risk",
-  "W1.3": "at_risk",
-  "W1.4": "cancel_path",
-  "W2.1": "crushing",
-  "W2.2": "crushing",
-  "W2.3": "at_risk",
-  "W2.4": "at_risk",
-  "W2.5": "at_risk",
-  "W2.6": "admin",
-  "W2.7": "cancel_path",
-  "W3.1": "crushing",
-  "W3.2": "at_risk",
-  "W3.3": "cancel_path",
-  "W4.1": "at_risk",
-  "W4.2": "at_risk",
-  "W4.3": "cancel_path",
-  "W4.4": "cancel_path",
-  "X.1": "event",
+  // Welcome event (manual send from /admin/templates)
+  "welcome.day1": "event",
+  // Stalled student (paid, no dashboard login) - cancel_path
+  // because they're trending toward churn
+  "stalled.discord.day3": "cancel_path",
+  "stalled.discord.day5": "cancel_path",
+  "stalled.discord.day7": "cancel_path",
+  "stalled.discord.day10": "cancel_path",
+  "stalled.whop.day3": "cancel_path",
+  "stalled.whop.day5": "cancel_path",
+  "stalled.whop.day7": "cancel_path",
+  "stalled.whop.day10": "cancel_path",
+  // Activated but stuck (at_risk)
+  "nolessons.day3": "at_risk",
+  "nolessons.day7": "at_risk",
+  "nolessons.day14": "at_risk",
+  "noship.r1.day7": "at_risk",
+  "noship.r2.day14": "at_risk",
+  "pace.day7": "at_risk",
+  "pace.day14": "at_risk",
+  "pace.day21": "at_risk",
+  // Month 2 entry (event)
+  "month2.entry": "event",
 };

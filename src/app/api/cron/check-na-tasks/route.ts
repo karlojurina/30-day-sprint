@@ -21,14 +21,14 @@
  *
  *   tier (Day 3/5/7/10) maps to template index 1/2/3/4
  *
- *   cohort = 'A' (has discord_username) → NA-A.{tier}, Discord DM
- *   cohort = 'B' (no  discord_username) → NA-B.{tier}, Whop DM
+ *   cohort = 'A' (has discord_username) → stalled.discord.day{N}, Discord DM
+ *   cohort = 'B' (no  discord_username) → stalled.whop.day{N}, Whop DM
  *
  *   At tier 4 (Day 10), after creating the task, set
  *   high_churn_risk = true so subsequent passes skip the student.
  *
  * Cohort is re-evaluated every pass - if a Cohort B student joins
- * Discord between triggers, the next tier fires NA-A.
+ * Discord between triggers, the next tier fires stalled.discord.x.
  *
  * Dedupe relies on the partial unique index
  *   idx_tasks_unique_open ON tasks(student_id, scenario_id) WHERE status='open'
@@ -56,8 +56,11 @@ function daysSince(iso: string): number {
 }
 
 function templateIdFor(cohort: "A" | "B", tier: Tier): string {
-  const idx = TIER_DAYS.indexOf(tier) + 1; // 1..4
-  return `NA-${cohort}.${idx}`;
+  // v57 - scenario ids renamed to descriptive slugs. Cohort A
+  // (has Discord) -> stalled.discord.day{N}, Cohort B (no
+  // Discord) -> stalled.whop.day{N}.
+  const channel = cohort === "A" ? "discord" : "whop";
+  return `stalled.${channel}.day${tier}`;
 }
 
 function suggestedChannel(cohort: "A" | "B"): string {
@@ -100,10 +103,11 @@ export async function GET(request: NextRequest) {
   const pool = (studentsRaw ?? []) as NotActivatedRow[];
 
   // Resolve template ids for all 8 NA scenarios in one query.
-  const allNaIds = TIER_DAYS.flatMap((t) => {
-    const idx = TIER_DAYS.indexOf(t) + 1;
-    return [`NA-A.${idx}`, `NA-B.${idx}`];
-  });
+  // v57 - new scenario id slugs (was NA-A.1 / NA-B.1 etc.)
+  const allNaIds = TIER_DAYS.flatMap((t) => [
+    `stalled.discord.day${t}`,
+    `stalled.whop.day${t}`,
+  ]);
   const { data: templates } = await supabase
     .from("templates")
     .select("id, scenario_id")

@@ -76,22 +76,27 @@ function priorityFor(bucket: string): number {
   return 99;
 }
 
+/**
+ * v57 - this function used to map disengagement alerts to legacy
+ * W-series scenarios (W1.4, W2.7, W3.3, W4.3). Those templates
+ * were deleted by v57; the function now returns null for every
+ * input. Tasks still fire via the custom-trigger-config path
+ * (templates with is_custom=true) and via the check-na-tasks
+ * cron (stalled.* scenarios).
+ *
+ * Brief v3's situation-based scenarios (nolessons, noship, pace)
+ * are NOT yet wired here. When their cron logic lands, this
+ * function should map:
+ *   no_lessons_3d + day  3 -> nolessons.day3
+ *   no_lessons_3d + day  7 -> nolessons.day7
+ *   no_lessons_3d + day 14 -> nolessons.day14
+ *   pace alerts            -> pace.day{7|14|21}
+ *   etc.
+ */
 function pickExistingAlertScenario(
-  alertType: string,
-  day: number,
+  _alertType: string,
+  _day: number,
 ): string | null {
-  if (alertType === "no_login_5d") {
-    if (day <= 7) return "W1.4";
-    if (day <= 14) return "W2.7";
-    if (day <= 23) return null;
-    if (day <= 30) return "W4.3";
-    return null;
-  }
-  if (alertType === "no_lessons_7d") {
-    if (day >= 8 && day <= 14) return "W2.7";
-    if (day >= 15 && day <= 23) return "W3.3";
-    return null;
-  }
   return null;
 }
 

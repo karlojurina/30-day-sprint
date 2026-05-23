@@ -132,11 +132,19 @@ When adding a new table, append it here. When deleting a field, scan
 ### `templates`
 - **Depends on:** —
 - **Depended on by:** `tasks.template_id`, CSM cron
-  (`/api/cron/check-csm-tasks`), `/admin/templates` UI,
-  `src/lib/templates.ts` (renderer), `src/lib/csm-triggers.ts`
-  (evaluator reads `trigger_config`)
+  (`/api/cron/check-csm-tasks`), NA cron (`/api/cron/check-na-tasks`),
+  `/admin/templates` UI, `src/lib/templates.ts` (renderer),
+  `src/lib/csm-triggers.ts` (evaluator reads `trigger_config`)
 - **Stable contract:** `id`, `scenario_id`, `bucket`, `body`,
   `trigger_config`, `is_active`, `is_custom`, `intent`, `tone`
+- **Naming convention** (v57): `{situation}.{sub?}.{day|entry}`
+  where `situation` = `welcome` / `stalled` / `nolessons` /
+  `noship` / `pace` / `month2`, and `sub` is a cohort (`discord` /
+  `whop`) or region (`r1` / `r2`) where relevant. 18 rows after
+  v57: `welcome.day1`, `stalled.discord.day{3|5|7|10}`,
+  `stalled.whop.day{3|5|7|10}`, `nolessons.day{3|7|14}`,
+  `noship.r1.day7`, `noship.r2.day14`, `pace.day{7|14|21}`,
+  `month2.entry`. Legacy W-series + X.1 deleted in v57.
 
 ### `admin_config`
 - **Depends on:** —

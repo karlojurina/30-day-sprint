@@ -62,12 +62,16 @@ export function SwipeCardsQuiz({
   const [swipeDir, setSwipeDir] = useState<"left" | "right" | null>(null);
   const revealTimerRef = useRef<number | null>(null);
 
-  // Drag state for the active card. We use a motion value so the
-  // card responds to drag in real time without re-rendering.
-  const dragX = useMotionValue(0);
-  const dragRotate = useTransform(dragX, [-220, 0, 220], [-10, 0, 10]);
-  const leftTint = useTransform(dragX, [-160, -30, 0], [1, 0.2, 0]);
-  const rightTint = useTransform(dragX, [0, 30, 160], [0, 0.2, 1]);
+  // v54.4 - dragVisualX is decoupled from the card's actual transform.
+  // It only drives the rotate/tint effects DURING drag (via onDrag
+  // updates from framer-motion). The card itself uses framer-motion's
+  // internal drag transform, so exit animations on `x` don't leak
+  // their final value (e.g. 460) into dragVisualX and cause the next
+  // card to mount off-center.
+  const dragVisualX = useMotionValue(0);
+  const dragRotate = useTransform(dragVisualX, [-220, 0, 220], [-10, 0, 10]);
+  const leftTint = useTransform(dragVisualX, [-160, -30, 0], [1, 0.2, 0]);
+  const rightTint = useTransform(dragVisualX, [0, 30, 160], [0, 0.2, 1]);
 
   // Per-card A/B swap (randomize which option is on the LEFT). Keyed
   // by card id, rebuilt when the deck changes so re-asks re-randomize.
@@ -109,21 +113,17 @@ export function SwipeCardsQuiz({
     });
     setReveal(null);
     setSwipeDir(null);
-    dragX.set(0);
-  }, [dragX]);
+    dragVisualX.set(0);
+  }, [dragVisualX]);
 
   const handlePick = useCallback(
     (pick: "left" | "right") => {
       if (!top || reveal != null) return;
       setSwipeDir(pick);
-      // v54.3 - snap dragX back to 0 the instant we commit. Without
-      // this, the reveal panel renders inside a card stuck at the
-      // drag position for the full 1.5/2.5s timeout. Using
-      // motionValue.set() (instant) instead of an `animate()` helper
-      // import - the snap is barely visible and avoids a framer-
-      // motion top-level import that was blowing up the Vercel
-      // build.
-      dragX.set(0);
+      // v54.4 - reset the drag visual tracker. The actual card
+      // transform is managed by framer-motion's internal drag, so
+      // we no longer need to fight an x-bound motion value.
+      dragVisualX.set(0);
 
       let isCorrect = false;
       let correctText: string | null = null;
@@ -161,7 +161,7 @@ export function SwipeCardsQuiz({
         revealTimerRef.current = window.setTimeout(() => advanceDeck(false), 2500);
       }
     },
-    [top, reveal, swapAbForCard, advanceDeck, dragX],
+    [top, reveal, swapAbForCard, advanceDeck, dragVisualX],
   );
 
   // Keyboard arrows mirror swipe buttons.
@@ -278,6 +278,14 @@ export function SwipeCardsQuiz({
             drag={reveal == null ? "x" : false}
             dragConstraints={{ left: 0, right: 0 }}
             dragElastic={0.45}
+            onDrag={(_, info) => {
+              if (reveal != null) return;
+              // Mirror the actual drag offset into the visual
+              // tracker so the rotate + tints respond in real time.
+              // The card's own x transform is managed internally by
+              // framer-motion - we don't bind it via style anymore.
+              dragVisualX.set(info.offset.x);
+            }}
             onDragEnd={(_, info) => {
               if (reveal != null) return;
               if (info.offset.x < -SWIPE_COMMIT_THRESHOLD) {
@@ -285,14 +293,13 @@ export function SwipeCardsQuiz({
               } else if (info.offset.x > SWIPE_COMMIT_THRESHOLD) {
                 handlePick("right");
               } else {
-                // No-op - framer-motion springs dragX back to 0
-                // automatically via dragConstraints {left:0,
-                // right:0}. We don't need to import an animate
-                // helper for this.
+                // framer-motion's drag automatically springs the
+                // card back to x=0 via dragConstraints {left:0,
+                // right:0}. We just reset the visual tracker.
+                dragVisualX.set(0);
               }
             }}
             style={{
-              x: dragX,
               rotate: reveal == null ? dragRotate : 0,
               position: "absolute",
               inset: 0,

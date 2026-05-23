@@ -28,6 +28,40 @@ interface RegionCompleteCelebrationProps {
   onDismiss: () => void;
 }
 
+/**
+ * Brief v3 §8 - Pop.1-4 region-complete modal copy. Headline +
+ * body per region. Karlo's final copy (23-05-2026). The R4 entry
+ * (Pop.4) gets distinct visual treatment per the brief - bigger
+ * end-of-sprint moment - which is signaled by the `isSprintEnd`
+ * flag we read in the render.
+ */
+const REGION_POPUP_COPY: Record<
+  string,
+  { headline: string; body: string; isSprintEnd?: boolean }
+> = {
+  r1: {
+    headline: "Region 1 complete!",
+    body:
+      "Both action items shipped, every lesson done. A lot of students don't make it through this part - real respect.\n\nThe fact that you actually shipped is the part that matters most.\n\nRegion 2 just unlocked. The ad formats get heavier from here, but you handled the first two - you'll handle these.\n\nKeep cooking 👨‍🍳",
+  },
+  r2: {
+    headline: "Region 2 complete!",
+    body:
+      "That's the heaviest content region in the whole program - the editing breakdowns alone are hours of footage. Getting through is no joke.\n\nYour 30% off month two is now in your dashboard - go grab it whenever you're ready.\n\nRegion 3 is up next: static ads, money-making methods, creative strategy. Different gear from R1 and R2 but you've shown you can handle whatever's next.\n\nKeep cooking 👨‍🍳",
+  },
+  r3: {
+    headline: "Region 3 complete!",
+    body:
+      "By this point, you know how to make ads across multiple formats, you understand the strategy behind them, you know how to land clients, and you've seen exactly how bounties pay out.\n\nYou're equipped now. That's not hype - that's facts.\n\nRegion 4 is up next: real ad bounty submissions for real brands. The part of the program where everything starts to pay off.\n\nKeep crushing it ⛏️",
+  },
+  r4: {
+    headline: "Sprint complete!",
+    body:
+      "30 days, 4 regions, real ad submissions for real brands. Most people who join never see this screen.\n\nTake a second.\n\nYou're a different person than you were 30 days ago - proof of work in your portfolio, you know how the bounty system works, and your floor is officially higher than it was on Day 1.\n\nThis isn't the end - it's the gun going off. Keep shipping bounties, keep stacking skills. The work pays you back from here.\n\nReal respect 🔥",
+    isSprintEnd: true,
+  },
+};
+
 export function RegionCompleteCelebration({
   region,
   stats,
@@ -53,6 +87,8 @@ function Content({
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useFocusTrap(dialogRef, true);
+  // v51 (brief v3 §8): Pop.1-4 copy keyed by region id.
+  const copy = REGION_POPUP_COPY[region.id];
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -200,30 +236,32 @@ function Content({
             style={{
               color: "var(--color-text-primary)",
               fontWeight: 600,
-              fontSize: 44,
+              fontSize: copy?.isSprintEnd ? 52 : 44,
               lineHeight: 1.05,
               letterSpacing: "-0.025em",
               marginBottom: 12,
             }}
           >
-            {region.name}
+            {copy?.headline ?? region.name}
           </motion.h2>
 
-          {region.tagline && (
+          {copy?.body && (
             <motion.p
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6, delay: 0.78 }}
               style={{
                 color: "var(--color-text-secondary)",
-                fontSize: 16,
-                maxWidth: 380,
+                fontSize: 15,
+                maxWidth: 540,
                 margin: "0 auto 28px",
                 letterSpacing: "-0.011em",
-                lineHeight: 1.4,
+                lineHeight: 1.55,
+                whiteSpace: "pre-line",
+                textAlign: "left",
               }}
             >
-              {region.tagline}
+              {copy.body}
             </motion.p>
           )}
 

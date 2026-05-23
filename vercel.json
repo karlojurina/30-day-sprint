@@ -17,6 +17,10 @@
       "schedule": "15 9 * * *"
     },
     {
+      "path": "/api/cron/check-na-tasks",
+      "schedule": "20 9 * * *"
+    },
+    {
       "path": "/api/cron/day28-dm",
       "schedule": "30 9 * * *"
     }

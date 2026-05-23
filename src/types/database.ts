@@ -95,6 +95,32 @@ export interface StudentMilestones {
   updated_at: string;
 }
 
+/** v53 (Phase 5) - achievement catalog row. */
+export interface Achievement {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  rarity: "common" | "uncommon" | "rare" | "legendary";
+  sort_order: number;
+}
+
+/** v53 (Phase 5) - per-student unlock row. */
+export interface StudentAchievement {
+  student_id: string;
+  achievement_id: string;
+  unlocked_at: string;
+}
+
+/** v53 (Phase 5) - aggregated stats from achievement_unlock_stats
+ *  view. unlock_pct is 0-100 (1 decimal). */
+export interface AchievementUnlockStats {
+  id: string;
+  unlocked_count: number;
+  total_count: number;
+  unlock_pct: number;
+}
+
 /** v46 — streak counters, one row per student. */
 export interface StudentStreaks {
   student_id: string;

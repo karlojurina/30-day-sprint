@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { updateStudentStreak } from "../_lib/update-streak";
 import { onLessonCompleted } from "@/lib/csm-events";
+import { evaluateAchievements } from "@/lib/achievements";
 
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -70,6 +71,17 @@ export async function POST(request: NextRequest) {
     // X.1 reactivation check (best-effort).
     await onLessonCompleted(supabase, student.id);
 
-    return NextResponse.json({ action: "checked", completion: data });
+    // v53 (Phase 5) - achievements. Best-effort; failure here
+    // shouldn't block the completion.
+    const newlyUnlocked = await evaluateAchievements(
+      supabase,
+      student.id,
+    );
+
+    return NextResponse.json({
+      action: "checked",
+      completion: data,
+      newAchievements: newlyUnlocked,
+    });
   }
 }

@@ -13,6 +13,7 @@ import {
   progressPercent,
 } from "@/lib/constants";
 import { useIsPhone } from "@/lib/useMediaQuery";
+import { AchievementsButton } from "@/components/map/AchievementsButton";
 
 interface StatsWidgetProps {
   onOpenLesson?: (lessonId: string) => void;
@@ -238,9 +239,17 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         </button>
       </div>
 
-      {/* Bounty Apprentice chip - only when claimed, full width row */}
-      {hasBountyAccess && (
-        <div>
+      {/* Bounty Apprentice chip (when claimed) + Achievements button.
+          Both sit in the same row so the floating bar stays compact. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
+        }}
+      >
+        {hasBountyAccess && (
           <span
             title="Claimed Bounty Access"
             style={{
@@ -265,8 +274,12 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
             </svg>
             Bounty Apprentice
           </span>
-        </div>
-      )}
+        )}
+        {/* v53 (Phase 5) - Achievements pill. Sits inline with the
+            Bounty Apprentice chip so the floating bar absorbs it
+            without adding height. */}
+        {student && <AchievementsButton studentId={student.id} />}
+      </div>
 
       {/* Progress block */}
       <div>

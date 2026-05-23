@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { scoreQuiz } from "@/lib/quiz";
 import { updateStudentStreak } from "../_lib/update-streak";
+import { evaluateAchievements } from "@/lib/achievements";
 
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -83,11 +84,15 @@ export async function POST(request: NextRequest) {
 
   await updateStudentStreak(supabase, student.id);
 
+  // v53 (Phase 5) - achievements.
+  const newAchievements = await evaluateAchievements(supabase, student.id);
+
   return NextResponse.json({
     attempt,
     score: result.score,
     total: result.total,
     passed: result.passed,
     answers: result.answers,
+    newAchievements,
   });
 }

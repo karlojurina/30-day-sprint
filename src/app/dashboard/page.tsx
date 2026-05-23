@@ -12,6 +12,8 @@ import { DiscountApprovedCelebration } from "@/components/map/DiscountApprovedCe
 import { DiscountFeedbackModal } from "@/components/map/DiscountFeedbackModal";
 import { GraduationModal } from "@/components/map/GraduationModal";
 import { DevTestPanel } from "@/components/dev/DevTestPanel";
+import { IntroVideoGate } from "@/components/onboarding/IntroVideoGate";
+import { WhyYoureHerePanel } from "@/components/onboarding/WhyYoureHerePanel";
 
 interface MockMonthReview {
   total_lessons_completed: number;
@@ -29,8 +31,18 @@ const STREAK_LAST_SEEN_KEY = "et.streak.lastSeen";
 
 export default function DashboardPage() {
   const { student } = useAuth();
-  const { loading, streak, discountRequest, bountyAccessClaimedAt } =
-    useStudent();
+  const {
+    loading,
+    streak,
+    discountRequest,
+    bountyAccessClaimedAt,
+    firstDashboardLoginAt,
+    introVideoThresholdMet,
+    whyYoureHerePanelDismissed,
+    markDashboardLogin,
+    markIntroVideoThreshold,
+    dismissWhyYoureHere,
+  } = useStudent();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -48,6 +60,37 @@ export default function DashboardPage() {
 
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [streakCelebration, setStreakCelebration] = useState<number | null>(null);
+
+  // v51 (Phase 2) - first-login chain.
+  //   1. Stamp first_dashboard_login_at the first time we're here
+  //   2. Show IntroVideoGate until intro_video_threshold_met
+  //   3. Then show WYH panel until why_youre_here_panel_dismissed
+  //   4. Map underneath stays interactive only after both clear
+  // Re-watch state for the persistent re-access button (Phase 2 UI).
+  const [introRewatch, setIntroRewatch] = useState(false);
+  const [wyhRewatch, setWyhRewatch] = useState(false);
+  const [introUnlockedThisSession, setIntroUnlockedThisSession] =
+    useState(false);
+
+  useEffect(() => {
+    if (loading || !student) return;
+    if (!firstDashboardLoginAt) void markDashboardLogin();
+  }, [loading, student, firstDashboardLoginAt, markDashboardLogin]);
+
+  const showIntroGate =
+    !!student &&
+    !loading &&
+    !introVideoThresholdMet &&
+    !introUnlockedThisSession;
+  // WYH fires only after intro is met AND not dismissed yet. The
+  // introUnlockedThisSession flag lets us advance immediately after
+  // the student clicks Continue without waiting for the server's
+  // refresh.
+  const showWyh =
+    !!student &&
+    !loading &&
+    (introVideoThresholdMet || introUnlockedThisSession) &&
+    !whyYoureHerePanelDismissed;
   const [discountCelebration, setDiscountCelebration] = useState<boolean>(false);
   const [graduationReview, setGraduationReview] = useState<MockMonthReview | null>(null);
 
@@ -190,6 +233,112 @@ export default function DashboardPage() {
       />
 
       <DevTestPanel />
+
+      {/* v51 (Phase 2) - first-login intro video gate. Auto-fires when
+          the student hasn't met the threshold yet. Continue advances
+          to the WYH panel. */}
+      <IntroVideoGate
+        open={showIntroGate || introRewatch}
+        rewatchMode={introRewatch}
+        onThresholdReached={() => {
+          void markIntroVideoThreshold();
+          setIntroUnlockedThisSession(true);
+        }}
+        onContinue={() => {
+          if (introRewatch) {
+            setIntroRewatch(false);
+            return;
+          }
+          setIntroUnlockedThisSession(true);
+        }}
+        onClose={() => setIntroRewatch(false)}
+      />
+
+      {/* v51 (Phase 2) - Why You're Here flipbook. Fires after the
+          intro gate clears, dismisses on the final card's CTA. */}
+      <WhyYoureHerePanel
+        open={(showWyh && !introRewatch) || wyhRewatch}
+        rewatchMode={wyhRewatch}
+        onDismiss={() => {
+          if (wyhRewatch) {
+            setWyhRewatch(false);
+            return;
+          }
+          void dismissWhyYoureHere();
+        }}
+      />
+
+      {/* v51 (Phase 2) - persistent re-access button. Only shows
+          AFTER the student has cleared both the intro gate and the
+          WYH panel. Floating top-right pill so it doesn't fight the
+          top-left StatsWidget area or the back-to-map button. */}
+      {introVideoThresholdMet && whyYoureHerePanelDismissed && (
+        <div
+          style={{
+            position: "fixed",
+            top: 20,
+            right: 20,
+            zIndex: 40,
+            display: "flex",
+            gap: 8,
+          }}
+        >
+          <button
+            onClick={() => setIntroRewatch(true)}
+            title="Rewatch the intro video"
+            style={{
+              padding: "8px 14px",
+              borderRadius: 999,
+              background: "rgba(10,14,22,0.7)",
+              border: "1px solid rgba(255,255,255,0.16)",
+              backdropFilter: "blur(20px) saturate(140%)",
+              WebkitBackdropFilter: "blur(20px) saturate(140%)",
+              color: "rgba(255,255,255,0.78)",
+              fontSize: 12,
+              fontWeight: 500,
+              letterSpacing: "-0.005em",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+            }}
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <polygon points="6 4 20 12 6 20 6 4" />
+            </svg>
+            Intro
+          </button>
+          <button
+            onClick={() => setWyhRewatch(true)}
+            title="Open the Why You're Here panel"
+            style={{
+              padding: "8px 14px",
+              borderRadius: 999,
+              background: "rgba(10,14,22,0.7)",
+              border: "1px solid rgba(255,255,255,0.16)",
+              backdropFilter: "blur(20px) saturate(140%)",
+              WebkitBackdropFilter: "blur(20px) saturate(140%)",
+              color: "rgba(255,255,255,0.78)",
+              fontSize: 12,
+              fontWeight: 500,
+              letterSpacing: "-0.005em",
+              cursor: "pointer",
+            }}
+          >
+            Why you&rsquo;re here
+          </button>
+        </div>
+      )}
     </div>
   );
 }

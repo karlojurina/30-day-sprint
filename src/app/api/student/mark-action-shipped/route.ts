@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { updateStudentStreak } from "../_lib/update-streak";
+import { evaluateAchievements } from "@/lib/achievements";
 import { checkR2CompoundsShipped, onLessonCompleted } from "@/lib/csm-events";
 
 /**
@@ -138,5 +139,8 @@ export async function POST(request: NextRequest) {
     await onLessonCompleted(supabase, student.id);
   }
 
-  return NextResponse.json({ completion: result });
+  // v53 (Phase 5) - achievements.
+  const newAchievements = await evaluateAchievements(supabase, student.id);
+
+  return NextResponse.json({ completion: result, newAchievements });
 }

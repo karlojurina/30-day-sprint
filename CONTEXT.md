@@ -74,11 +74,13 @@ welcome, first-client landed, etc.).
 - `POST /api/student/skip-lesson` — mark optional lesson skipped
 - `POST /api/student/save-action-link` — Discord submission URL
 - `POST /api/student/submit-quiz` — quiz attempt
-- `POST /api/student/claim-bounty-access` — l057 claim (v2)
 - `POST /api/student/mark-first-client` — Map 2 milestone (v2)
 - `POST /api/student/dismiss-playbook-welcome` — Map 2 intro (v2)
 - `POST /api/student/celebration-seen` — dismiss celebration overlays
 - `POST /api/student/complete-onboarding` — finish first-time onboarding
+- `POST /api/student/mark-dashboard-login` — stamp first /dashboard load (v51)
+- `POST /api/student/mark-intro-video-threshold` — intro video ~65% watched (v51)
+- `POST /api/student/dismiss-why-youre-here` — final WYH card dismissed (v51)
 - `POST /api/student/refresh-watch-sync` — force a Whop watch-history pull
 - `GET  /api/student/data` — full snapshot for the dashboard
 
@@ -110,6 +112,7 @@ welcome, first-client landed, etc.).
 - `GET /api/cron/sync-whop` — pull Whop watch history into completions
 - `GET /api/cron/check-engagement` — engagement scan → `disengagement_alerts`
 - `GET /api/cron/check-csm-tasks` — evaluate triggers, create CSM tasks
+- `GET /api/cron/check-na-tasks` — Not-Activated escalation (Day 3/5/7/10) (v51)
 - `GET /api/cron/snapshot-progress` — write `daily_progress_snapshots`
 - `GET /api/cron/day28-dm` — fire day-28 Discord DM
 
@@ -159,6 +162,9 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 - `disengagement_alerts` — auto-generated churn alerts
 - `tasks` — CSM task queue (per-student, per-scenario, links to `templates`)
 - `daily_progress_snapshots` — frozen daily progress per student
+- `achievements` — catalog of 17 unlockable achievements (v53)
+- `student_achievements` — per-student unlock rows + `achievement_unlock_stats`
+  view exposing global unlock % (v53)
 
 **Legacy / archive (do not extend)**
 - `lessons_archive` — frozen pre-migration copy

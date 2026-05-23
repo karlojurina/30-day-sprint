@@ -37,6 +37,14 @@ const navItems: { href: string; label: string; icon: React.ReactNode }[] = [
     ),
   },
   {
+    href: "/admin/not-activated",
+    label: "Not Activated",
+    icon: (
+      // Hourglass / unactivated student — waiting on first login
+      <path d="M6 2h12v6l-4 4 4 4v6H6v-6l4-4-4-4z" />
+    ),
+  },
+  {
     href: "/admin/discounts",
     label: "Discounts",
     icon: (

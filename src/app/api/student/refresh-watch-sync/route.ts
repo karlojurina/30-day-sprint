@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { syncWatchProgress } from "../_lib/watch-sync";
 import { updateStudentStreak } from "../_lib/update-streak";
+import { evaluateAchievements } from "@/lib/achievements";
 
 /**
  * Authenticated POST. Runs the watch progress sync for the signed-in
@@ -52,7 +53,13 @@ export async function POST(request: NextRequest) {
     if (result.syncedCount > 0) {
       await updateStudentStreak(supabase, student.id);
     }
-    return NextResponse.json({ ok: true, ...result });
+    // v53 (Phase 5) - achievements. Sync can land R-clear / streak
+    // achievements when the student watches in Whop.
+    const newAchievements = await evaluateAchievements(
+      supabase,
+      student.id,
+    );
+    return NextResponse.json({ ok: true, ...result, newAchievements });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json(

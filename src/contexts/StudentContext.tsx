@@ -145,6 +145,19 @@ interface StudentContextType {
   onboardingCompletedAt: string | null;
   celebrations: StudentCelebrations | null;
 
+  // v51 (Phase 2, brief v3) — intro video gate + WYH panel state.
+  // The 3 flags below drive the first-login chain on /dashboard.
+  // markDashboardLogin() fires on first /dashboard load to stamp
+  // first_dashboard_login_at. markIntroVideoThreshold() fires when
+  // watch progress crosses ~65%. dismissWhyYoureHere() fires when
+  // the student clicks Let's go on the final WYH card.
+  firstDashboardLoginAt: string | null;
+  introVideoThresholdMet: boolean;
+  whyYoureHerePanelDismissed: boolean;
+  markDashboardLogin: () => Promise<void>;
+  markIntroVideoThreshold: () => Promise<void>;
+  dismissWhyYoureHere: () => Promise<void>;
+
   // Discount feedback form (v29) — Apply button now opens a 6-question
   // form that's submitted atomically with the discount_requests row.
   discountFeedbackQuestions: DiscountFeedbackQuestion[];
@@ -659,6 +672,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           // celebration never fired in real use. Best-effort: failure
           // doesn't roll back the toggle.
           void refreshFromServer(token);
+          // v53 (Phase 5) - signal AchievementsButton to re-poll the
+          // unlocks (server-side evaluator runs inside the route, so
+          // the row may already exist).
+          if (typeof window !== "undefined")
+            window.dispatchEvent(new Event("et:achievements-changed"));
         }
       } catch {
         // Revert on network error
@@ -754,6 +772,9 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           // server-side. Refresh so streak.current bumps on the client
           // and the dashboard's celebration effect picks it up.
           void refreshFromServer(token);
+          // v53 (Phase 5) - signal AchievementsButton to re-poll.
+          if (typeof window !== "undefined")
+            window.dispatchEvent(new Event("et:achievements-changed"));
         }
       } catch {
         const token2 = await getAccessToken();
@@ -926,6 +947,9 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       // v50.4 — submit-quiz also ticks the streak server-side. Refresh
       // so the dashboard's celebration effect can fire.
       void refreshFromServer(token);
+      // v53 (Phase 5) - signal AchievementsButton to re-poll.
+      if (typeof window !== "undefined")
+        window.dispatchEvent(new Event("et:achievements-changed"));
       return {
         score: data.score,
         total: data.total,
@@ -1069,6 +1093,79 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     }));
   }, [student, milestones]);
 
+  // v51 (Phase 2) — intro video gate + WYH panel persistence. All
+  // three patch the local milestones row optimistically so the UI
+  // can transition immediately; on API failure the next
+  // refreshFromServer reconciles.
+  const patchMilestoneFlag = useCallback(
+    (
+      partial: Partial<
+        Pick<
+          StudentMilestones,
+          | "first_dashboard_login_at"
+          | "intro_video_threshold_met"
+          | "why_youre_here_panel_dismissed"
+        >
+      >,
+    ) => {
+      setMilestones((prev) => ({
+        student_id: prev?.student_id ?? student?.id ?? "",
+        onboarding_completed_at: prev?.onboarding_completed_at ?? null,
+        first_sprint_login_at: prev?.first_sprint_login_at ?? null,
+        first_dashboard_login_at:
+          partial.first_dashboard_login_at !== undefined
+            ? partial.first_dashboard_login_at
+            : prev?.first_dashboard_login_at ?? null,
+        intro_video_threshold_met:
+          partial.intro_video_threshold_met !== undefined
+            ? partial.intro_video_threshold_met
+            : prev?.intro_video_threshold_met ?? false,
+        why_youre_here_panel_dismissed:
+          partial.why_youre_here_panel_dismissed !== undefined
+            ? partial.why_youre_here_panel_dismissed
+            : prev?.why_youre_here_panel_dismissed ?? false,
+        bounty_access_claimed_at: prev?.bounty_access_claimed_at ?? null,
+        first_client_landed_at: prev?.first_client_landed_at ?? null,
+        playbook_welcome_seen_at: prev?.playbook_welcome_seen_at ?? null,
+        updated_at: new Date().toISOString(),
+      }));
+    },
+    [student],
+  );
+
+  const markDashboardLogin = useCallback(async () => {
+    if (!student || milestones?.first_dashboard_login_at) return;
+    const token = await getAccessToken();
+    if (!token) return;
+    patchMilestoneFlag({ first_dashboard_login_at: new Date().toISOString() });
+    await fetch("/api/student/mark-dashboard-login", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  }, [student, milestones, patchMilestoneFlag]);
+
+  const markIntroVideoThreshold = useCallback(async () => {
+    if (!student || milestones?.intro_video_threshold_met) return;
+    const token = await getAccessToken();
+    if (!token) return;
+    patchMilestoneFlag({ intro_video_threshold_met: true });
+    await fetch("/api/student/mark-intro-video-threshold", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  }, [student, milestones, patchMilestoneFlag]);
+
+  const dismissWhyYoureHere = useCallback(async () => {
+    if (!student || milestones?.why_youre_here_panel_dismissed) return;
+    const token = await getAccessToken();
+    if (!token) return;
+    patchMilestoneFlag({ why_youre_here_panel_dismissed: true });
+    await fetch("/api/student/dismiss-why-youre-here", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  }, [student, milestones, patchMilestoneFlag]);
+
   const requestDiscount = useCallback(async () => {
     if (!student || !discountEligible) return;
 
@@ -1208,6 +1305,13 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         dismissFirstClientCelebration,
         onboardingCompletedAt: milestones?.onboarding_completed_at ?? null,
         celebrations,
+        firstDashboardLoginAt: milestones?.first_dashboard_login_at ?? null,
+        introVideoThresholdMet: milestones?.intro_video_threshold_met ?? false,
+        whyYoureHerePanelDismissed:
+          milestones?.why_youre_here_panel_dismissed ?? false,
+        markDashboardLogin,
+        markIntroVideoThreshold,
+        dismissWhyYoureHere,
         refreshWatchProgress,
         syncDiagnostics,
         forceSync,

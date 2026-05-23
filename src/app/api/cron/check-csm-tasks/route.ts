@@ -77,26 +77,34 @@ function priorityFor(bucket: string): number {
 }
 
 /**
- * v57 - this function used to map disengagement alerts to legacy
- * W-series scenarios (W1.4, W2.7, W3.3, W4.3). Those templates
- * were deleted by v57; the function now returns null for every
- * input. Tasks still fire via the custom-trigger-config path
- * (templates with is_custom=true) and via the check-na-tasks
- * cron (stalled.* scenarios).
+ * v58 - map disengagement_alerts rows (created by check-engagement)
+ * to the closest brief-v3 scenario.
  *
- * Brief v3's situation-based scenarios (nolessons, noship, pace)
- * are NOT yet wired here. When their cron logic lands, this
- * function should map:
- *   no_lessons_3d + day  3 -> nolessons.day3
- *   no_lessons_3d + day  7 -> nolessons.day7
- *   no_lessons_3d + day 14 -> nolessons.day14
- *   pace alerts            -> pace.day{7|14|21}
- *   etc.
+ *   no_lessons_3d  → `nolessons.day{N}` based on the day tier
+ *   no_login_5d    → `pace.day{N}` (student hasn't been around)
+ *   no_tasks_7d    → `pace.day{N}` (student isn't completing
+ *                    things)
+ *
+ * Day-tier matching is loose: the trigger functions themselves
+ * also gate by day, so this just picks the right scenario when
+ * the engagement cron noticed a problem on a day-N tier.
  */
 function pickExistingAlertScenario(
-  _alertType: string,
-  _day: number,
+  alertType: string,
+  day: number,
 ): string | null {
+  if (alertType === "no_lessons_3d") {
+    if (day <= 5)  return "nolessons.day3";
+    if (day <= 10) return "nolessons.day7";
+    if (day <= 17) return "nolessons.day14";
+    return null;
+  }
+  if (alertType === "no_tasks_7d" || alertType === "no_login_5d") {
+    if (day <= 9)  return "pace.day7";
+    if (day <= 17) return "pace.day14";
+    if (day <= 24) return "pace.day21";
+    return null;
+  }
   return null;
 }
 
@@ -321,9 +329,15 @@ export async function GET(request: NextRequest) {
     const snap = snapByStudent.get(student.id);
     if (!snap) continue;
 
-    // 2a. Built-in scenarios (W1.1, W1.2, …). Skip any scenario whose
-    //     template has an explicit trigger_config override — that one
-    //     gets evaluated via the trigger_config path in 2b instead.
+    // 2a. Built-in scenarios. Skip any scenario whose template has
+    //     an explicit trigger_config override - that one gets
+    //     evaluated via the trigger_config path in 2b instead.
+    //
+    // v58: triggers fire in insertion order (welcome -> stalled ->
+    // nolessons -> noship -> pace). After a match we add the
+    // scenarioId to snap.recentTaskScenarios so SUBSEQUENT triggers
+    // can check it for supersession (e.g. pace.day7 skips when
+    // noship.r1.day7 just fired on the same student).
     for (const [scenarioId, check] of Object.entries(triggers)) {
       if (overriddenScenarios.has(scenarioId)) continue;
       const result = check(snap);
@@ -336,6 +350,7 @@ export async function GET(request: NextRequest) {
         template_id: templateId,
         behavior_summary: result,
       });
+      snap.recentTaskScenarios.add(scenarioId);
     }
 
     // 2b. trigger_config-driven evaluations. Includes:

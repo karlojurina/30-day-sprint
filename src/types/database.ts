@@ -382,7 +382,10 @@ export type TemplateBucket =
   | "event"
   | "admin";
 
-export type TemplateWeek = "D1" | "W1" | "W2" | "W3" | "W4" | "X" | null;
+// v58 - day-prefixed bucket labels (was W1/W2/W3/W4/X from the
+// week-based v1 model). Strings stay free-form so a new bucket
+// like 'D28' or 'M3' can land via migration without a type change.
+export type TemplateWeek = string | null;
 
 export interface Template {
   id: string;

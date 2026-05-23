@@ -27,7 +27,21 @@ import {
 import { TriggerBuilder } from "@/components/admin/TriggerBuilder";
 import { AdminPage, PageHeader, Button, T } from "@/components/admin/ui";
 
-const WEEK_ORDER = ["D1", "W1", "W2", "W3", "W4", "X", "CUSTOM"];
+// v58 - day-based ordering. After the v57 rename the week column
+// holds day-prefixed buckets (D01, D03, D05, D07, D10, D14, D21, M2)
+// + CUSTOM for Karlo's home-rolled templates. The order matches a
+// student's journey from welcome to month 2.
+const WEEK_ORDER = [
+  "D01",
+  "D03",
+  "D05",
+  "D07",
+  "D10",
+  "D14",
+  "D21",
+  "M2",
+  "CUSTOM",
+];
 
 const BUCKET_OPTIONS: Array<{ value: TemplateBucket; label: string }> = [
   { value: "crushing", label: "★ Crushing it" },
@@ -37,17 +51,15 @@ const BUCKET_OPTIONS: Array<{ value: TemplateBucket; label: string }> = [
   { value: "event", label: "⚡ Event" },
 ];
 
-/**
- * Friendlier labels for the internal week buckets. Karlo's not thinking
- * in days anymore (templates speak region/task language, not day numbers).
- */
 const GROUP_LABEL: Record<string, string> = {
-  D1: "Onboarding (manual DM)",
-  W1: "Foundation region",
-  W2: "Production region",
-  W3: "Strategy region",
-  W4: "Scale region",
-  X: "Other",
+  D01: "Day 1 - Welcome",
+  D03: "Day 3",
+  D05: "Day 5",
+  D07: "Day 7",
+  D10: "Day 10",
+  D14: "Day 14",
+  D21: "Day 21",
+  M2: "Month 2",
   CUSTOM: "Your custom templates",
 };
 

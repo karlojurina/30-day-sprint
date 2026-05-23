@@ -355,19 +355,94 @@ function totalCompletedAcrossRegions(snap: StudentSnapshot): number {
 
 export type TriggerCheck = (snap: StudentSnapshot) => string | null;
 
-// v57 - W-series built-in triggers removed. They were superseded by
-// brief v3's situation-based scenarios (welcome, stalled, nolessons,
-// noship, pace, month2). The new scenarios are NOT yet wired into
-// this cron - they need their own trigger logic written. Until that
-// lands:
-//   - welcome.day1 is sent manually by Astrid (no cron)
-//   - stalled.discord.day* + stalled.whop.day* fire from check-na-tasks
-//   - nolessons.day* + noship.r*.day* + pace.day* + month2.entry
-//     have NO cron yet - they're awaiting trigger implementation
+// v58 - brief v3 situation-based triggers. Evaluation order matters
+// because of supersession: on a given day, ZL > WNS > B. We use
+// `recentTaskScenarios` to detect supersession (a higher-priority
+// scenario already fired today suppresses the lower one).
 //
-// Custom-trigger templates (is_custom=true with a trigger_config
-// DSL) still fire normally via the evaluateCustomTrigger path below.
-export const triggers: Record<string, TriggerCheck> = {};
+// `welcome.day1` is NOT here - Astrid sends it manually from
+// /admin/templates as the Day 1 SOP. `stalled.*` scenarios live in
+// /api/cron/check-na-tasks (separate cron because they target
+// students with joined_at IS NULL). `month2.entry` will need a
+// Whop renewal webhook handler (not in this round).
+export const triggers: Record<string, TriggerCheck> = {
+  // nolessons.day3 / .day7 / .day14 - student LOGGED IN but hasn't
+  // started any lessons. Highest-priority intervention in the v3
+  // ladder (ZL = "zero lessons").
+  "nolessons.day3": (s) => {
+    if (s.day !== 3 && s.day !== 4) return null; // Day 3, +1 grace
+    if (!s.student.joined_at) return null;
+    if (totalCompletedAcrossRegions(s) > 0) return null;
+    if (s.recentTaskScenarios.has("nolessons.day3")) return null;
+    return `Day ${s.day} · 0 lessons watched, 0 actions shipped.`;
+  },
+  "nolessons.day7": (s) => {
+    if (s.day < 7 || s.day > 9) return null;
+    if (!s.student.joined_at) return null;
+    if (totalCompletedAcrossRegions(s) > 0) return null;
+    if (s.recentTaskScenarios.has("nolessons.day7")) return null;
+    return `Day ${s.day} · full week in, still 0 lessons watched.`;
+  },
+  "nolessons.day14": (s) => {
+    if (s.day < 14 || s.day > 17) return null;
+    if (!s.student.joined_at) return null;
+    if (totalCompletedAcrossRegions(s) > 0) return null;
+    if (s.recentTaskScenarios.has("nolessons.day14")) return null;
+    return `Day ${s.day} · halfway through sprint, still 0 lessons.`;
+  },
+
+  // noship.r1.day7 - watched most of R1 but didn't ship the two
+  // R1 action items (l018 + l020). Mid-priority. ZL wins if it
+  // also matches (which it shouldn't here since they DID watch).
+  "noship.r1.day7": (s) => {
+    if (s.day < 7 || s.day > 10) return null;
+    if (s.regions.r1.watchedComplete < 10) return null;
+    if (s.shipped["l018"] || s.shipped["l020"]) return null;
+    if (s.recentTaskScenarios.has("noship.r1.day7")) return null;
+    return `Day ${s.day} · ${s.regions.r1.watchedComplete} R1 lessons watched, neither l018 (Organic) nor l020 (UGC) shipped.`;
+  },
+  // noship.r2.day14 - same pattern for R2 actions (l022 + l024).
+  "noship.r2.day14": (s) => {
+    if (s.day < 14 || s.day > 17) return null;
+    if (s.regions.r2.watchedComplete < 5) return null;
+    if (s.shipped["l022"] || s.shipped["l024"]) return null;
+    if (s.recentTaskScenarios.has("noship.r2.day14")) return null;
+    return `Day ${s.day} · ${s.regions.r2.watchedComplete} R2 lessons watched, neither l022 (VSL) nor l024 (High-Prod) shipped.`;
+  },
+
+  // pace.day7 / .day14 / .day21 - LOWEST priority. Behind on pace
+  // without the more-specific ZL or noship state. Supersession
+  // suppresses pace if a higher-priority scenario already fired
+  // today for this student.
+  //
+  // Threshold: progressRatio < 0.85 (per the brief's "5+ lessons
+  // behind expected" guidance, generalized to a ratio).
+  "pace.day7": (s) => {
+    if (s.day < 7 || s.day > 9) return null;
+    if (s.progressRatio >= 0.85) return null;
+    if (totalCompletedAcrossRegions(s) === 0) return null; // ZL wins
+    if (s.recentTaskScenarios.has("nolessons.day7")) return null;
+    if (s.recentTaskScenarios.has("noship.r1.day7")) return null;
+    if (s.recentTaskScenarios.has("pace.day7")) return null;
+    return `Day ${s.day} · behind pace (${(s.progressRatio * 100).toFixed(0)}% of expected). Discount window still open.`;
+  },
+  "pace.day14": (s) => {
+    if (s.day < 14 || s.day > 17) return null;
+    if (s.progressRatio >= 0.85) return null;
+    if (totalCompletedAcrossRegions(s) === 0) return null;
+    if (s.recentTaskScenarios.has("nolessons.day14")) return null;
+    if (s.recentTaskScenarios.has("noship.r2.day14")) return null;
+    if (s.recentTaskScenarios.has("pace.day14")) return null;
+    return `Day ${s.day} · behind pace (${(s.progressRatio * 100).toFixed(0)}% of expected). Halfway, discount likely slipped.`;
+  },
+  "pace.day21": (s) => {
+    if (s.day < 21 || s.day > 24) return null;
+    if (s.progressRatio >= 0.85) return null;
+    if (totalCompletedAcrossRegions(s) === 0) return null;
+    if (s.recentTaskScenarios.has("pace.day21")) return null;
+    return `Day ${s.day} · behind pace (${(s.progressRatio * 100).toFixed(0)}% of expected). 9 days left, R4 imminent.`;
+  },
+};
 
 /* ─────────────────────────────────────────────────────────────────
  * Custom triggers (v34) — built from the JSON DSL Karlo edits via

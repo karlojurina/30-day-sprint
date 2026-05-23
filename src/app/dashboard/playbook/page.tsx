@@ -4,7 +4,7 @@
  * /dashboard/playbook — Map 2.
  *
  * Post-sprint hub. Loads as the default surface for any student
- * whose `sprint_completed_at` is set (auto-redirect from /dashboard).
+ * whose `bounty_access_claimed_at` is set (auto-redirect from /dashboard).
  * 4 always-on cards: pb_submit_bounties, pb_build_portfolio,
  * pb_apply_job_board, pb_land_first_client (milestone).
  *

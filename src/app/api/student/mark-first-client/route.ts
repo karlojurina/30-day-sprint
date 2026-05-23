@@ -2,15 +2,17 @@
  * POST /api/student/mark-first-client
  *
  * Fires when the student clicks "I just landed my first client" on
- * the pb_land_first_client node sheet on Map 2. Per
- * lovro-brief-v2/02-triggers.md trigger 3 + 04-map2-playbook.md §5:
+ * the pb_land_first_client node sheet on Map 2.
  *
  *   • Pure self-report — no upload, no admin review, no attestation
  *   • Single-use — guarded by IS NULL on the SQL update
- *   • Precondition: sprint_completed_at IS NOT NULL (student must
- *     be on Map 2 to fire this). Enforced here as a guard.
+ *   • Precondition: bounty_access_claimed_at IS NOT NULL (student
+ *     must be on Map 2 to fire this). Enforced here as a guard.
  *
- * v46 — both milestone fields live on student_milestones, not students.
+ * v46 — milestone fields live on student_milestones, not students.
+ * v50 — bounty_access_claimed_at replaced sprint_completed_at as the
+ * Map 2 unlock signal (sprint_completed_at column dropped). v55
+ * updates this route to read the new field.
  *
  * No external side effects. The crowned celebration is purely
  * client-side; this endpoint just flips the timestamp.
@@ -51,15 +53,15 @@ export async function POST(request: NextRequest) {
 
   const { data: milestones } = await supabase
     .from("student_milestones")
-    .select("sprint_completed_at, first_client_landed_at")
+    .select("bounty_access_claimed_at, first_client_landed_at")
     .eq("student_id", student.id)
     .maybeSingle();
 
-  // Map-2-only — if the student hasn't finished the sprint, the
+  // Map-2-only — if the student hasn't claimed Bounty Access, the
   // milestone shouldn't be reachable. Reject defensively.
-  if (!milestones?.sprint_completed_at) {
+  if (!milestones?.bounty_access_claimed_at) {
     return NextResponse.json(
-      { error: "Sprint not finished yet" },
+      { error: "Bounty Access not claimed yet" },
       { status: 400 },
     );
   }

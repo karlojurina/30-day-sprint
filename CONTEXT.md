@@ -36,8 +36,8 @@ Two surfaces in one Next.js app:
 |------|------------|
 | `/login` | Whop OAuth entry |
 | `/auth/callback` + `/auth/complete` | OAuth callback + post-auth landing |
-| `/dashboard` | The map (overview + 4 regions, gated by `sprint_completed_at`) |
-| `/dashboard/playbook` | Map 2 hub (post-sprint, after Finish Program) |
+| `/dashboard` | The map (overview + 4 regions). Auto-redirects to `/dashboard/playbook` once `bounty_access_claimed_at` is set unless `?map=1` is passed. |
+| `/dashboard/playbook` | Map 2 hub. Opens once `bounty_access_claimed_at` is stamped by the AdBounty webhook. |
 
 **State:** `AuthContext` (session + student row), `StudentContext`
 (lessons, completions, streaks, discount, sprint milestones, playbook

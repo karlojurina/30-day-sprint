@@ -65,12 +65,13 @@ function suggestedChannel(cohort: "A" | "B"): string {
 }
 
 export async function GET(request: NextRequest) {
-  // Vercel cron auth — same pattern as the other cron routes.
+  // v55 - hardened to match check-csm-tasks. Previously the
+  // CRON_SECRET check was conditional on the env var being set,
+  // which meant a missing env var silently disabled the auth gate.
+  // Now the check is unconditional - if CRON_SECRET isn't set the
+  // header can never match, so the route stays locked.
   const authHeader = request.headers.get("authorization");
-  if (
-    process.env.CRON_SECRET &&
-    authHeader !== `Bearer ${process.env.CRON_SECRET}`
-  ) {
+  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

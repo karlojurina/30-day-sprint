@@ -60,34 +60,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  const now = new Date().toISOString();
-
-  // Read-then-write to avoid Postgres needing a sequence. Race
-  // window is small (single user, single tab); on collision the
-  // worst case is one missed increment, which is acceptable for
-  // engagement telemetry.
-  const { data: existing } = await supabase
-    .from("student_region_quiz")
-    .select("quiz_attempts")
-    .eq("student_id", student.id)
-    .eq("region_id", regionId)
-    .maybeSingle();
-
-  const nextAttempts = (existing?.quiz_attempts ?? 0) + 1;
-
-  const { error } = await supabase.from("student_region_quiz").upsert(
+  // v55 - use atomic RPC instead of read-then-write. The RPC does
+  // an INSERT ... ON CONFLICT DO UPDATE with `attempts + 1` in a
+  // single statement, so concurrent calls don't lose increments.
+  const { data, error } = await supabase.rpc(
+    "increment_region_quiz_attempts",
     {
-      student_id: student.id,
-      region_id: regionId,
-      quiz_attempts: nextAttempts,
-      updated_at: now,
+      p_student_id: student.id,
+      p_region_id: regionId,
     },
-    { onConflict: "student_id,region_id" },
   );
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, quiz_attempts: nextAttempts });
+  return NextResponse.json({
+    ok: true,
+    quiz_attempts: (data as number) ?? 0,
+  });
 }

@@ -20,11 +20,11 @@ interface StatsWidgetProps {
 }
 
 /**
- * Top-left floating widget that sits over the map. Redesigned for v2:
- * tighter width (300 vs 380), less ornament, no "welcome back" filler,
- * sign-out moved behind a kebab menu. New: "Open the Playbook" CTA
- * at the bottom whenever sprint_completed_at is set so the path
- * forward isn't trapped on the l058 sheet.
+ * Top-left floating widget that sits over the map. The "Open the
+ * Playbook" CTA appears at the bottom whenever bountyAccessClaimedAt
+ * is set (v50: Bounty Access is the new finish line, not the dropped
+ * sprint_completed_at field; l058 doesn't exist as a lesson anymore
+ * either).
  *
  * Visibility: always rendered (overview AND region views).
  * Position: absolute top-left of its parent (the map container).

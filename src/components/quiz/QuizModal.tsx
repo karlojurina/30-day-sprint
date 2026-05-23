@@ -14,6 +14,7 @@
  */
 
 import { ReactNode, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { WinScreen } from "./WinScreen";
 
@@ -65,7 +66,9 @@ export function QuizModal({
     };
   }, [open, onClose]);
 
-  return (
+  if (typeof document === "undefined") return null;
+
+  const content = (
     <AnimatePresence>
       {open && (
         <motion.div
@@ -183,4 +186,6 @@ export function QuizModal({
       )}
     </AnimatePresence>
   );
+
+  return createPortal(content, document.body);
 }

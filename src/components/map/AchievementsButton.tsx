@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase-browser";
 import { useIsPhone } from "@/lib/useMediaQuery";
@@ -290,7 +291,15 @@ function AchievementsModal({
     return () => window.removeEventListener("resize", measure);
   }, [open, isPhone, PANEL_LEFT, PANEL_WIDTH]);
 
-  return (
+  // v53.6 - portal to document.body so the panel escapes StatsWidget's
+  // backdrop-filter containing block. backdrop-filter creates a new
+  // containing block for fixed-position descendants, which is why
+  // left:20 resolved to StatsWidget's left edge + 20px (= viewport
+  // x=40) instead of viewport x=20. Portaling fixes the indent
+  // problem permanently.
+  if (typeof document === "undefined") return null;
+
+  const content = (
     <AnimatePresence>
       {open && anchor && (
         <motion.div
@@ -457,6 +466,8 @@ function AchievementsModal({
       )}
     </AnimatePresence>
   );
+
+  return createPortal(content, document.body);
 }
 
 // v53.5 - hybrid reveal. Only these two stay hidden until earned (the

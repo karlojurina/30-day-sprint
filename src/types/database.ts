@@ -50,29 +50,45 @@ export interface Student {
   /** v38: exclude this student from CSM task generation + Day-28 DM.
    *  Used for the team's own dummy accounts. */
   csm_exempt: boolean;
+  /** v51 (Phase 1, brief v3): set true when the NA cron's Day-10
+   *  escalation fires. Stops further NA pings. UI badge optional. */
+  high_churn_risk: boolean;
   created_at: string;
   updated_at: string;
 }
 
 /**
- * v46 → v50 — onboarding + sprint progression milestones. One row per
- * student. Each column null = "not reached yet".
+ * v46 → v51 — onboarding + sprint progression milestones. One row per
+ * student. Each column null/false = "not reached yet".
  *
- *   onboarding_completed_at   — first-run onboarding finished
- *   first_sprint_login_at     — first authenticated visit to the app
- *                                (powers the has_logged_into_app trigger)
- *   bounty_access_claimed_at  — clicked Bounty Access on l057. THIS is
- *                                the finish line of the sprint and the
- *                                signal that unlocks the Playbook.
- *                                (v50 — sprint_completed_at retired.)
- *   first_client_landed_at    — self-reported the Land Your First Client
- *                                milestone on Map 2 (v2)
- *   playbook_welcome_seen_at  — saw the Map 2 intro overlay once (v2)
+ *   onboarding_completed_at         — first-run onboarding finished
+ *                                      (legacy 3-step OnboardingFlow,
+ *                                       superseded by the v51 video
+ *                                       gate + WYH panel)
+ *   first_sprint_login_at           — first authenticated visit to the
+ *                                      app (powers has_logged_into_app)
+ *   first_dashboard_login_at        — v51: first /dashboard load
+ *                                      post-OAuth. Drives the intro
+ *                                      video auto-play gate.
+ *   intro_video_threshold_met       — v51: watch progress crossed
+ *                                      the unlock threshold (~65%).
+ *                                      Sticky.
+ *   why_youre_here_panel_dismissed  — v51: clicked Let's go on the
+ *                                      final WYH panel card. Sticky.
+ *   bounty_access_claimed_at        — Bounty Access webhook fired.
+ *                                      Stamp comes from Zak's system
+ *                                      only (v50). Unlocks the
+ *                                      Playbook.
+ *   first_client_landed_at          — self-reported on Map 2 (v2)
+ *   playbook_welcome_seen_at        — saw the Map 2 intro once (v2)
  */
 export interface StudentMilestones {
   student_id: string;
   onboarding_completed_at: string | null;
   first_sprint_login_at: string | null;
+  first_dashboard_login_at: string | null;
+  intro_video_threshold_met: boolean;
+  why_youre_here_panel_dismissed: boolean;
   bounty_access_claimed_at: string | null;
   first_client_landed_at: string | null;
   playbook_welcome_seen_at: string | null;
@@ -348,7 +364,7 @@ export interface Template {
   is_active: boolean;
   is_admin_only: boolean;
   /** True for templates Karlo created via /admin/templates. Built-ins
-   *  (W1.1, W1.2, …, D1.A, etc.) have this set to false. */
+   *  (D1, W1.1, W1.2, …) have this set to false. */
   is_custom: boolean;
   /** DSL the CSM cron evaluates. Null for built-ins (hardcoded). */
   trigger_config: TriggerConfig | null;

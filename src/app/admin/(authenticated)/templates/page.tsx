@@ -411,12 +411,10 @@ export default function AdminTemplatesPage() {
                         ).toISOString(),
                       },
                       config: {
-                        astrid_booking_link:
-                          "https://cal.com/astrid/onboarding",
                         program_login_link:
                           "https://sprint.ecomtalent.com/login",
-                        karlo_walkthrough_video_link:
-                          "https://youtu.be/<walkthrough>",
+                        discord_invite_link:
+                          "https://discord.gg/<server>",
                       },
                     })
                   : null;

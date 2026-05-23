@@ -1,11 +1,14 @@
 "use client";
 
 /**
- * /admin/settings — edit the 3 URL config vars used by Astrid's templates.
+ * /admin/settings — edit URL config vars used by Astrid's templates.
  *
- * - astrid_booking_link          → {bookingLink}
- * - program_login_link           → {programLink}
- * - karlo_walkthrough_video_link → {videoLink}
+ * v51 (brief v3): astrid_booking_link + karlo_walkthrough_video_link
+ * removed (call branching killed, intro video moved behind the
+ * dashboard login). Keys now:
+ *
+ * - program_login_link    → {programLink}
+ * - discord_invite_link   → {discordInvite} (Cohort B NA templates)
  *
  * Founder + admin only — checked server-side on PUT.
  */
@@ -16,9 +19,8 @@ import { createClient } from "@/lib/supabase-browser";
 import type { AdminConfigRow } from "@/types/database";
 
 const FRIENDLY_LABELS: Record<string, string> = {
-  astrid_booking_link: "Astrid's booking link",
   program_login_link: "Program login link",
-  karlo_walkthrough_video_link: "Karlo's walkthrough video link",
+  discord_invite_link: "Discord invite link",
 };
 
 export default function AdminSettingsPage() {
@@ -203,11 +205,7 @@ export default function AdminSettingsPage() {
                       [row.key]: e.target.value,
                     }))
                   }
-                  placeholder={
-                    row.key === "karlo_walkthrough_video_link"
-                      ? "https://… (empty until Karlo records)"
-                      : "https://…"
-                  }
+                  placeholder="https://…"
                   style={{
                     flex: 1,
                     padding: "8px 10px",
@@ -248,7 +246,7 @@ export default function AdminSettingsPage() {
                       : "Save"}
                 </button>
               </div>
-              {empty && row.key === "karlo_walkthrough_video_link" && (
+              {empty && (
                 <p
                   style={{
                     fontSize: 11,
@@ -256,8 +254,8 @@ export default function AdminSettingsPage() {
                     marginTop: 6,
                   }}
                 >
-                  ⚠ Empty — D1.B template will render with the placeholder
-                  intact.
+                  ⚠ Empty — templates that reference this will render
+                  with the placeholder intact.
                 </p>
               )}
             </div>

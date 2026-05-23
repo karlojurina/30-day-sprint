@@ -134,12 +134,13 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 - `quizzes` + `quiz_questions` — per-region quizzes
 - `playbook_nodes` — Map 2 hub cards
 - `templates` — CSM DM templates (built-in + custom, with `trigger_config`)
-- `admin_config` — key/value app config (booking link, program link, etc.)
+- `admin_config` — key/value app config (program link, Discord invite, etc.)
 
 **Student state (per-student rows — one table per function, v46)**
-- `student_milestones` — onboarding + sprint progression timestamps
+- `student_milestones` — onboarding + sprint progression
   (onboarding_completed_at, first_sprint_login_at,
-  bounty_access_claimed_at, sprint_completed_at,
+  first_dashboard_login_at, intro_video_threshold_met,
+  why_youre_here_panel_dismissed, bounty_access_claimed_at,
   first_client_landed_at, playbook_welcome_seen_at)
 - `student_streaks` — current_streak, longest_streak, last_streak_date
 - `student_whop_sync` — Whop OAuth tokens + watch-history sync diagnostics

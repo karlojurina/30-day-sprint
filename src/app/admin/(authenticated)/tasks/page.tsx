@@ -72,9 +72,8 @@ type StatusKey = "open" | "completed" | "dismissed";
 type AdminConfig =
   | Partial<
       Record<
-        | "astrid_booking_link"
         | "program_login_link"
-        | "karlo_walkthrough_video_link",
+        | "discord_invite_link",
         string | null
       >
     >

@@ -34,8 +34,9 @@ When adding a new table, append it here. When deleting a field, scan
   cron jobs, admin UI
 - **Stable contract:** `id`, `whop_user_id`, `supabase_user_id`,
   `email`, `name`, `joined_at`, `last_active_at`,
-  `membership_status`, `discord_user_id`, `current_title`,
-  `csm_exempt`, `ad_submissions_verified`
+  `membership_status`, `discord_username`, `discord_user_id`,
+  `current_title`, `csm_exempt`, `ad_submissions_verified`,
+  `high_churn_risk` (v51)
 - **Note:** As of v46/v47, students is identity + admin-flag only.
   Per-function state (streaks, milestones, Whop sync, celebrations,
   DM log) lives in sibling tables below — read CLAUDE.md
@@ -50,10 +51,15 @@ When adding a new table, append it here. When deleting a field, scan
   `first_sprint_login_at`), `/api/auth/whop/callback` (stamps
   `first_sprint_login_at` on first login),
   `/api/cron/check-csm-tasks` (joins for the snapshot),
-  `/api/webhooks/adbounty` (sole writer of `bounty_access_claimed_at`)
+  `/api/webhooks/adbounty` (sole writer of `bounty_access_claimed_at`),
+  `/dashboard` intro-video gate + WYH panel (v51 — read/write
+  `intro_video_threshold_met`, `why_youre_here_panel_dismissed`,
+  `first_dashboard_login_at`)
 - **Stable contract:** `student_id`, `onboarding_completed_at`,
-  `first_sprint_login_at`, `bounty_access_claimed_at`,
-  `first_client_landed_at`, `playbook_welcome_seen_at`
+  `first_sprint_login_at`, `first_dashboard_login_at`,
+  `intro_video_threshold_met`, `why_youre_here_panel_dismissed`,
+  `bounty_access_claimed_at`, `first_client_landed_at`,
+  `playbook_welcome_seen_at`
 
 ### `student_streaks`
 - **Depends on:** `students`
@@ -136,8 +142,9 @@ When adding a new table, append it here. When deleting a field, scan
 - **Depends on:** —
 - **Depended on by:** `src/lib/templates.ts` (variable substitution),
   `/admin/settings`, day-28 DM
-- **Stable contract:** keys `astrid_booking_link`,
-  `program_login_link`, `karlo_walkthrough_video_link`
+- **Stable contract:** keys `program_login_link`, `discord_invite_link`
+  (v51 dropped `astrid_booking_link` + `karlo_walkthrough_video_link`
+  when D1.A/D1.B were merged into a single D1)
 
 ## Student state
 

@@ -1,16 +1,21 @@
 /**
  * Server-side template renderer for Astrid's DM templates.
  *
- * Templates live in the `templates` table (seeded from
- * lovro-brief/context/templates.md, edited via /admin/templates).
+ * Templates live in the `templates` table (seeded from migrations,
+ * edited via /admin/templates).
  *
  * Variables supported:
- *   {firstName}    — first token of students.name
- *   {fullName}     — students.name
- *   {dayNumber}    — computed from students.joined_at
- *   {bookingLink}  — admin_config.astrid_booking_link
- *   {programLink}  — admin_config.program_login_link
- *   {videoLink}    — admin_config.karlo_walkthrough_video_link
+ *   {firstName}      — first token of students.name
+ *   {fullName}       — students.name
+ *   {dayNumber}      — computed from students.joined_at
+ *   {programLink}    — admin_config.program_login_link
+ *   {discordInvite}  — admin_config.discord_invite_link (Cohort B
+ *                       NA templates - first contact needs to push
+ *                       students into Discord, brief v3 §3)
+ *
+ * v51 (brief v3): {bookingLink} + {videoLink} removed - call branching
+ * killed, single D1 sends students to the dashboard where the new
+ * intro-video gate plays.
  *
  * Behavior: if a template references an unsupported variable, the
  * placeholder is left in place and the unresolved name is reported
@@ -25,9 +30,8 @@ const KNOWN_VARS = [
   "firstName",
   "fullName",
   "dayNumber",
-  "bookingLink",
   "programLink",
-  "videoLink",
+  "discordInvite",
 ] as const;
 
 export type TemplateVariableName = (typeof KNOWN_VARS)[number];
@@ -37,10 +41,10 @@ export interface TemplateRenderInputs {
   student: { name: string | null; joined_at: string };
   /**
    * Resolved admin config map (key → value). Pass `null` to skip
-   * config-driven variables; they'll render as `[bookingLink]`-style
+   * config-driven variables; they'll render as `[programLink]`-style
    * placeholders.
    */
-  config?: Partial<Record<"astrid_booking_link" | "program_login_link" | "karlo_walkthrough_video_link", string | null>>;
+  config?: Partial<Record<"program_login_link" | "discord_invite_link", string | null>>;
 }
 
 export interface RenderedTemplate {
@@ -63,25 +67,23 @@ export function renderTemplate(
   const firstName = (student.name?.split(/\s+/)[0] ?? "").trim() || "there";
   const fullName = student.name?.trim() || "there";
   const dayNumber = String(getDayNumber(student.joined_at));
-  const bookingLink = config?.astrid_booking_link ?? "";
   const programLink = config?.program_login_link ?? "";
-  const videoLink = config?.karlo_walkthrough_video_link ?? "";
+  const discordInvite = config?.discord_invite_link ?? "";
 
   const values: Record<TemplateVariableName, string> = {
     firstName,
     fullName,
     dayNumber,
-    bookingLink,
     programLink,
-    videoLink,
+    discordInvite,
   };
 
   const unresolved = new Set<string>();
   const rendered = body.replace(PLACEHOLDER_RE, (full, name: string) => {
     if (name in values) {
       const v = values[name as TemplateVariableName];
-      // Empty config values (e.g. videoLink before Karlo records the
-      // video) → leave the placeholder so Astrid notices.
+      // Empty config values (e.g. discordInvite before Karlo
+      // fills it in) → leave the placeholder so Astrid notices.
       if (v === "") {
         unresolved.add(name);
         return full;
@@ -110,9 +112,8 @@ export async function loadAdminConfig(
     .from("admin_config")
     .select("key, value")
     .in("key", [
-      "astrid_booking_link",
       "program_login_link",
-      "karlo_walkthrough_video_link",
+      "discord_invite_link",
     ]);
 
   const map: TemplateRenderInputs["config"] = {};

@@ -8,7 +8,7 @@
  *     student,
  *     template,
  *     rendered: { body, unresolved },
- *     config: { astrid_booking_link, program_login_link, karlo_walkthrough_video_link }
+ *     config: { program_login_link, discord_invite_link }
  *   }
  */
 

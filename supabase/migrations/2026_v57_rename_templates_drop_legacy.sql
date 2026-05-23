@@ -11,11 +11,16 @@
 -- dashboard login), Discord channel, fires day 10."
 --
 -- This migration:
---   1. Deletes the 18 inactive legacy rows (W1.1, W1.2, W1.3, W2.*,
---      W3.*, W4.*, X.1). tasks.template_id is ON DELETE SET NULL
---      (per v27), so any historical task rows referencing these
---      get their template_id nulled - no FK errors, no data loss.
---   2. Renames the 18 active rows to the new convention + cleans
+--   1. Widens `scenario_id` from varchar(16) to varchar(48) on
+--      both `templates` and `tasks`. The old 16-char cap was
+--      tight enough for D1/NA-A.1 but blows up on the new
+--      descriptive slugs (stalled.discord.day10 = 21 chars).
+--   2. Deletes the 18 inactive legacy rows (W1.1, W1.2, W1.3,
+--      W2.*, W3.*, W4.*, X.1). tasks.template_id is ON DELETE
+--      SET NULL (per v27), so any historical task rows
+--      referencing these get their template_id nulled - no FK
+--      errors, no data loss.
+--   3. Renames the 18 active rows to the new convention + cleans
 --      up their titles.
 --
 -- After this migration the templates table is exactly 18 rows
@@ -23,6 +28,12 @@
 --
 -- Idempotent on re-run via guard checks (where new id exists).
 -- ============================================================
+
+-- 0. Widen scenario_id ------------------------------------------------
+-- ALTER COLUMN TYPE to varchar(48) is no-op when the column is
+-- already at that size, so safe to re-run.
+alter table templates alter column scenario_id type varchar(48);
+alter table tasks     alter column scenario_id type varchar(48);
 
 -- 1. Drop the legacy inactive rows --------------------------------------
 delete from templates

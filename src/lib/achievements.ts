@@ -109,10 +109,8 @@ export const ACHIEVEMENT_RULES: AchievementRule[] = [
     id: "r4_clear",
     evaluate: (s) => regionComplete(s, "r4"),
   },
-  {
-    id: "streak_30",
-    evaluate: (s) => s.currentStreak >= 30 || s.longestStreak >= 30,
-  },
+  // v56 - streak_30 (Rare) removed - it overlapped with the
+  // `unbroken` legendary and didn't earn its own tier slot.
   {
     id: "bounty_access_claimed",
     evaluate: (s) => s.bountyAccessClaimedAt != null,

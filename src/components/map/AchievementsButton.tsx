@@ -496,7 +496,8 @@ function AchievementTile({
   return (
     <div
       style={{
-        padding: 10,
+        // v56 - slightly bigger padding to host the bumped typography.
+        padding: 12,
         background: unlocked
           ? "rgba(255,255,255,0.04)"
           : "rgba(255,255,255,0.02)",
@@ -506,16 +507,16 @@ function AchievementTile({
         borderRadius: 10,
         display: "flex",
         flexDirection: "column",
-        gap: 6,
+        gap: 8,
         opacity: unlocked ? 1 : 0.78,
         transition: "all 200ms cubic-bezier(0.22,1,0.36,1)",
       }}
     >
       <div
         style={{
-          width: 32,
-          height: 32,
-          borderRadius: 8,
+          width: 36,
+          height: 36,
+          borderRadius: 9,
           background: unlocked
             ? "rgba(255,255,255,0.08)"
             : "rgba(255,255,255,0.04)",
@@ -525,7 +526,7 @@ function AchievementTile({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: 17,
+          fontSize: 19,
           filter: unlocked
             ? "none"
             : visible
@@ -538,13 +539,16 @@ function AchievementTile({
       <div>
         <p
           style={{
-            fontSize: 12,
+            // v56 - bumped from 12 to 13.5 - tile copy was hard to
+            // read at the old size, and shortened descriptions free
+            // up the vertical space for it.
+            fontSize: 13.5,
             fontWeight: 600,
             letterSpacing: "-0.01em",
             color: unlocked
-              ? "rgba(255,255,255,0.94)"
-              : "rgba(255,255,255,0.62)",
-            marginBottom: 2,
+              ? "rgba(255,255,255,0.96)"
+              : "rgba(255,255,255,0.64)",
+            marginBottom: 3,
             lineHeight: 1.2,
           }}
         >
@@ -552,11 +556,15 @@ function AchievementTile({
         </p>
         <p
           style={{
-            fontSize: 10.5,
-            lineHeight: 1.35,
+            // v56 - bumped from 10.5 to 12, plus a slightly looser
+            // line-height so longer one-liners (e.g. "Hit a 30-day
+            // streak from Day 1.") still breathe.
+            fontSize: 12,
+            lineHeight: 1.4,
             color: unlocked
-              ? "rgba(255,255,255,0.6)"
-              : "rgba(255,255,255,0.45)",
+              ? "rgba(255,255,255,0.66)"
+              : "rgba(255,255,255,0.48)",
+            letterSpacing: "-0.003em",
           }}
         >
           {visible ? ach.description : "Hidden until earned."}
@@ -565,7 +573,9 @@ function AchievementTile({
       {unlocked && unlockPct != null && (
         <p
           style={{
-            fontSize: 9,
+            // v56 - bumped from 9 to 10.5 so "12% earned" is
+            // legible at a glance.
+            fontSize: 10.5,
             fontFamily: "var(--font-mono)",
             letterSpacing: "0.10em",
             textTransform: "uppercase",

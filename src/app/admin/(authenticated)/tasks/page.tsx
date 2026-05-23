@@ -126,6 +126,7 @@ export default function AdminTasksKanban() {
   const [studentSearch, setStudentSearch] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -136,6 +137,9 @@ export default function AdminTasksKanban() {
   } | null>(null);
   const [dismissNote, setDismissNote] = useState("");
   const [config, setConfig] = useState<AdminConfig>(undefined);
+
+  const isElevated =
+    teamMember?.role === "founder" || teamMember?.role === "admin";
 
   const fetchTasks = useCallback(
     async (silent = false) => {
@@ -171,6 +175,43 @@ export default function AdminTasksKanban() {
     },
     [studentSearch, supabase],
   );
+
+  // v59 - manual trigger for the daily task crons. Hits the
+  // /api/admin/run-task-crons endpoint which proxies to both
+  // check-csm-tasks and check-na-tasks. Surfaces "created N" in
+  // a toast so Astrid sees what just landed.
+  const generateTasksNow = useCallback(async () => {
+    setGenerating(true);
+    setError(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/admin/run-task-crons", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      const { csm, na } = (await res.json()) as {
+        csm: { created?: number } | null;
+        na: { created?: number } | null;
+      };
+      const csmN = csm?.created ?? 0;
+      const naN = na?.created ?? 0;
+      setToast(
+        `Generated ${csmN + naN} task${csmN + naN === 1 ? "" : "s"} (${csmN} pace/nolessons/noship · ${naN} stalled).`,
+      );
+      // Refresh the queue so the new rows show up.
+      await fetchTasks(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setGenerating(false);
+  }, [supabase, fetchTasks]);
 
   useEffect(() => {
     void fetchTasks(false);
@@ -312,14 +353,27 @@ export default function AdminTasksKanban() {
             : "Copy a DM, send it in Discord, then mark it sent."
         }
         actions={
-          <Button
-            variant="subtle"
-            size="md"
-            busy={refreshing}
-            onClick={() => void fetchTasks(true)}
-          >
-            {refreshing ? "Refreshing…" : "↻ Refresh"}
-          </Button>
+          <div style={{ display: "flex", gap: 8 }}>
+            {isElevated && (
+              <Button
+                variant="subtle"
+                size="md"
+                busy={generating}
+                onClick={() => void generateTasksNow()}
+                title="Run the daily task crons now (don't wait until 09:15 UTC tomorrow)."
+              >
+                {generating ? "Generating…" : "⚡ Generate tasks now"}
+              </Button>
+            )}
+            <Button
+              variant="subtle"
+              size="md"
+              busy={refreshing}
+              onClick={() => void fetchTasks(true)}
+            >
+              {refreshing ? "Refreshing…" : "↻ Refresh"}
+            </Button>
+          </div>
         }
       />
 

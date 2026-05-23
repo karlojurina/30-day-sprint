@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createClient } from "@/lib/supabase-browser";
+import { useIsPhone } from "@/lib/useMediaQuery";
 import type {
   Achievement,
   StudentAchievement,
@@ -247,53 +248,37 @@ function AchievementsModal({
     maxHeight: number;
   } | null>(null);
 
+  // v53.4 - hardcode left/width to match StatsWidget's exact CSS
+  // values rather than measuring. Two trips through measurement
+  // weren't fixing the alignment; getBoundingClientRect was
+  // returning rounded values that still drifted a few pixels.
+  // Hardcoding what StatsWidget uses guarantees pixel-perfect
+  // alignment. Top is still dynamic (below StatsWidget's bottom).
+  const isPhone = useIsPhone();
+  const PANEL_LEFT = isPhone ? 12 : 20;
+  const PANEL_WIDTH = isPhone
+    ? Math.min(340, typeof window !== "undefined" ? window.innerWidth - 24 : 340)
+    : 380;
+  const ABS_MAX_HEIGHT = 480;
+
   useEffect(() => {
     if (!open) return;
     const measure = () => {
       const el = document.querySelector<HTMLElement>(
         '[data-statswidget="root"]',
       );
-      // v53.3 - cap height so the panel doesn't extend all the way to
-      // the bottom of tall monitors. The grid is scrollable inside;
-      // ~520px is enough to show 4-6 tiles at a glance.
-      const ABS_MAX_HEIGHT = 520;
-      if (!el) {
-        // No StatsWidget on this surface - fall back to top-left
-        // anchored.
-        const w = Math.min(340, window.innerWidth - 24);
-        setAnchor({
-          left: 12,
-          top: 60,
-          width: w,
-          maxHeight: Math.min(
-            ABS_MAX_HEIGHT,
-            window.innerHeight - 80,
-          ),
-        });
-        return;
-      }
-      const rect = el.getBoundingClientRect();
       const gap = 10;
-      // Round so sub-pixel rect values don't push the panel half a
-      // pixel off the StatsWidget left edge.
-      const top = Math.round(rect.bottom + gap);
-      const left = Math.round(rect.left);
-      // When StatsWidget renders as the small phone chip its width
-      // is too narrow for the achievement grid. Force a sensible
-      // minimum so the panel still reads as a list, anchored to the
-      // chip's left edge.
-      const minWidth = 300;
-      const maxOnPhone = window.innerWidth - left - 12;
-      const width = Math.round(
-        Math.max(
-          Math.min(rect.width, maxOnPhone),
-          Math.min(minWidth, maxOnPhone),
-        ),
-      );
+      // Top sits below whatever StatsWidget renders. Falls back to a
+      // sensible default if the marker is missing.
+      const top = el
+        ? Math.round(el.getBoundingClientRect().bottom + gap)
+        : isPhone
+          ? 60
+          : 440;
       setAnchor({
-        left,
+        left: PANEL_LEFT,
         top,
-        width,
+        width: PANEL_WIDTH,
         maxHeight: Math.min(
           ABS_MAX_HEIGHT,
           Math.max(220, window.innerHeight - top - 20),
@@ -303,7 +288,7 @@ function AchievementsModal({
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [open]);
+  }, [open, isPhone, PANEL_LEFT, PANEL_WIDTH]);
 
   return (
     <AnimatePresence>
@@ -332,14 +317,18 @@ function AchievementsModal({
             zIndex: 35,
             display: "flex",
             flexDirection: "column",
-            background: "rgba(15, 17, 21, 0.92)",
+            // v53.4 - identical chrome to StatsWidget (background
+            // opacity, border, backdrop-filter, shadow) so the two
+            // panels read as one stacked widget cluster.
+            background: "rgba(15, 17, 21, 0.62)",
             border: "1px solid rgba(255, 255, 255, 0.14)",
             backdropFilter: "blur(24px) saturate(140%)",
             WebkitBackdropFilter: "blur(24px) saturate(140%)",
             borderRadius: 18,
             boxShadow:
-              "0 30px 80px rgba(0,0,0,0.55), 0 1px 0 rgba(255,255,255,0.05) inset",
+              "0 14px 40px rgba(0,0,0,0.50), 0 1px 0 rgba(255,255,255,0.05) inset",
             color: "rgba(255,255,255,0.94)",
+            boxSizing: "border-box",
           }}
         >
           {/* Header */}

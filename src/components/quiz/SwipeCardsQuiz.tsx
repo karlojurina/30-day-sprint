@@ -19,7 +19,7 @@
  *   - Signals progressLine + passed back to the parent via callbacks
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   motion,
   AnimatePresence,
@@ -60,7 +60,6 @@ export function SwipeCardsQuiz({
   const [correctIds, setCorrectIds] = useState<Set<string>>(() => new Set());
   const [reveal, setReveal] = useState<RevealState | null>(null);
   const [swipeDir, setSwipeDir] = useState<"left" | "right" | null>(null);
-  const revealTimerRef = useRef<number | null>(null);
 
   // v54.4 - dragVisualX is decoupled from the card's actual transform.
   // It only drives the rotate/tint effects DURING drag (via onDrag
@@ -92,14 +91,6 @@ export function SwipeCardsQuiz({
   useEffect(() => {
     if (deck.length === 0 && total > 0) onPass();
   }, [deck.length, total, onPass]);
-
-  useEffect(
-    () => () => {
-      if (revealTimerRef.current != null)
-        window.clearTimeout(revealTimerRef.current);
-    },
-    [],
-  );
 
   const top = deck[0] ?? null;
   const next = deck[1] ?? null;
@@ -151,23 +142,35 @@ export function SwipeCardsQuiz({
           return next;
         });
         setReveal({ kind: "correct", card: top, correctText: null });
-        if (revealTimerRef.current != null)
-          window.clearTimeout(revealTimerRef.current);
-        revealTimerRef.current = window.setTimeout(() => advanceDeck(true), 1500);
       } else {
         setReveal({ kind: "wrong", card: top, correctText });
-        if (revealTimerRef.current != null)
-          window.clearTimeout(revealTimerRef.current);
-        revealTimerRef.current = window.setTimeout(() => advanceDeck(false), 2500);
       }
+      // v54.6 - no more auto-advance setTimeout. The student clicks
+      // Continue when they're ready, OR taps the card itself. Gives
+      // them full read time on long "why" lines.
     },
-    [top, reveal, swapAbForCard, advanceDeck, dragVisualX],
+    [top, reveal, swapAbForCard, dragVisualX],
   );
 
-  // Keyboard arrows mirror swipe buttons.
+  // v54.6 - manual advance when reveal is showing. Wraps advanceDeck
+  // with the correct/wrong signal from the current reveal state.
+  const advanceFromReveal = useCallback(() => {
+    if (reveal == null) return;
+    advanceDeck(reveal.kind === "correct");
+  }, [reveal, advanceDeck]);
+
+  // Keyboard:
+  //   - During question: ← / → mirror the swipe buttons
+  //   - During reveal: Enter / Space / → advance to the next card
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (reveal != null) return;
+      if (reveal != null) {
+        if (e.key === "Enter" || e.key === " " || e.key === "ArrowRight") {
+          e.preventDefault();
+          advanceFromReveal();
+        }
+        return;
+      }
       if (e.key === "ArrowLeft") {
         e.preventDefault();
         handlePick("left");
@@ -178,7 +181,7 @@ export function SwipeCardsQuiz({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [handlePick, reveal]);
+  }, [handlePick, reveal, advanceFromReveal]);
 
   if (!top) return null;
 
@@ -334,9 +337,14 @@ export function SwipeCardsQuiz({
             whileTap={reveal == null ? { cursor: "grabbing" } : undefined}
           >
             <div
+              // v54.6 - click-anywhere-to-advance during reveal as a
+              // secondary affordance (Continue button is the primary).
+              // The card cursor flips to pointer so it reads clickable.
+              onClick={reveal != null ? advanceFromReveal : undefined}
               style={{
                 position: "relative",
                 padding: "24px 24px 20px",
+                cursor: reveal != null ? "pointer" : "default",
                 // v54.5 - premium glassmorphism. Layered translucent
                 // surface: a base tinted gradient (correct/wrong/
                 // neutral) PLUS a backdrop-filter that picks up the
@@ -520,27 +528,43 @@ export function SwipeCardsQuiz({
         </AnimatePresence>
       </div>
 
-      {/* Buttons */}
+      {/* v54.6 - footer swaps the two swipe buttons for a single
+          Continue when the reveal is showing. This:
+            1. Stops the reveal panel from overlapping the swipe
+               buttons (Lovro's screenshot bug). Now the footer has
+               one button instead of two, and the swipe buttons
+               aren't visible while the reveal is.
+            2. Lets the student read the explanation at their own
+               pace - auto-advance is gone. */}
       <div
         style={{
-          display: "grid",
-          gridTemplateColumns: "1fr 1fr",
-          gap: 10,
           flexShrink: 0,
         }}
       >
-        <SwipeButton
-          side="left"
-          label={leftLabel}
-          disabled={reveal != null}
-          onClick={() => handlePick("left")}
-        />
-        <SwipeButton
-          side="right"
-          label={rightLabel}
-          disabled={reveal != null}
-          onClick={() => handlePick("right")}
-        />
+        {reveal == null ? (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 10,
+            }}
+          >
+            <SwipeButton
+              side="left"
+              label={leftLabel}
+              disabled={false}
+              onClick={() => handlePick("left")}
+            />
+            <SwipeButton
+              side="right"
+              label={rightLabel}
+              disabled={false}
+              onClick={() => handlePick("right")}
+            />
+          </div>
+        ) : (
+          <ContinueButton onClick={advanceFromReveal} />
+        )}
       </div>
     </div>
   );
@@ -751,6 +775,67 @@ function SwipeButton({
           <path d="M5 12h14M12 5l7 7-7 7" />
         </svg>
       )}
+    </button>
+  );
+}
+
+function ContinueButton({ onClick }: { onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const lifted = hovered && !pressed;
+  return (
+    <button
+      onClick={onClick}
+      autoFocus
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => {
+        setHovered(false);
+        setPressed(false);
+      }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
+      style={{
+        width: "100%",
+        padding: "15px 18px",
+        background:
+          "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(238,242,247,0.96) 100%)",
+        border: "1px solid rgba(255,255,255,0.40)",
+        borderRadius: 12,
+        color: "rgba(15,17,21,0.92)",
+        fontSize: 14,
+        fontWeight: 700,
+        letterSpacing: "0.02em",
+        cursor: "pointer",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 10,
+        transform: pressed
+          ? "scale(0.97)"
+          : lifted
+            ? "translateY(-2px)"
+            : "translateY(0)",
+        boxShadow: lifted
+          ? "0 14px 30px rgba(255,255,255,0.22), 0 1px 0 rgba(255,255,255,0.60) inset, 0 -1px 0 rgba(0,0,0,0.18) inset"
+          : "0 8px 22px rgba(0,0,0,0.32), 0 1px 0 rgba(255,255,255,0.60) inset, 0 -1px 0 rgba(0,0,0,0.15) inset",
+        transition:
+          "transform 150ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms cubic-bezier(0.22,1,0.36,1)",
+      }}
+    >
+      Continue
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M5 12h14M12 5l7 7-7 7" />
+      </svg>
     </button>
   );
 }

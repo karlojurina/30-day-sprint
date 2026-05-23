@@ -44,6 +44,7 @@ export async function GET(request: NextRequest) {
     whopSyncRes,
     celebrationsRes,
     dmLogRes,
+    regionQuizRes,
   ] = await Promise.all([
     supabase.from("regions").select("*").order("order_num"),
     supabase.from("lessons").select("*").order("day").order("sort_order"),
@@ -95,6 +96,14 @@ export async function GET(request: NextRequest) {
       .select("*")
       .eq("student_id", student.id)
       .maybeSingle(),
+    // v54 - region-end quiz gate (lovro-brief-region-quiz). One row
+    // per (student, region) tracking quiz_passed_at + quiz_attempts.
+    // Returned as an array (may be empty); the client folds into a
+    // Map keyed by region_id.
+    supabase
+      .from("student_region_quiz")
+      .select("region_id, quiz_passed_at, quiz_attempts")
+      .eq("student_id", student.id),
   ]);
 
   // Masked course ID for the sync debug panel — enough to verify in the
@@ -121,6 +130,7 @@ export async function GET(request: NextRequest) {
     whopSync: whopSyncRes.data ?? null,
     celebrations: celebrationsRes.data ?? null,
     dmLog: dmLogRes.data ?? null,
+    regionQuiz: regionQuizRes.data ?? [],
     whopCourseIdMasked: courseIdMasked,
   });
 }

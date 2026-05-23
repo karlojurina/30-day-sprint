@@ -95,6 +95,15 @@ export interface StudentMilestones {
   updated_at: string;
 }
 
+/** v54 - per-student per-region quiz gate state. One row per pair;
+ *  null = no row yet (never opened the quiz). */
+export interface StudentRegionQuiz {
+  student_id: string;
+  region_id: string;
+  quiz_passed_at: string | null;
+  quiz_attempts: number;
+}
+
 /** v53 (Phase 5) - achievement catalog row. */
 export interface Achievement {
   id: string;

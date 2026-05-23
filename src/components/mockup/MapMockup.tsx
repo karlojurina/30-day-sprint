@@ -107,6 +107,9 @@ import {
 import { CinematicDive } from "./CinematicDive";
 import { StatsWidget } from "@/components/map/StatsWidget";
 import { RegionTodoWidget } from "@/components/map/RegionTodoWidget";
+import { QuizModal } from "@/components/quiz/QuizModal";
+import { SwipeCardsQuiz } from "@/components/quiz/SwipeCardsQuiz";
+import { getRegionQuiz } from "@/lib/region-quizzes";
 
 interface MapMockupProps {
   onOpenLesson: (lessonId: string) => void;
@@ -516,6 +519,10 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
     bountyAccessJustClaimed,
     dismissBountyClaim,
     bountyAccessClaimedAt,
+    // v54 (brief-region-quiz) - per-region quiz state + mutators.
+    regionQuiz,
+    markRegionQuizPassed,
+    incrementRegionQuizAttempts,
   } = useStudent();
 
   // v50.3 — testOverrides escape hatch. /dashboard-mockup wires this
@@ -526,6 +533,17 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
     testOverrides && "bountyAccessClaimedAt" in testOverrides
       ? testOverrides.bountyAccessClaimedAt ?? null
       : bountyAccessClaimedAt;
+
+  // v54 (brief-region-quiz) - quiz modal state. quizRegionId is the
+  // region whose quiz is currently open (null = closed). quizProgress
+  // is the counter line surfaced from the format component to the
+  // shared modal header. quizPassed flips when the format signals
+  // pass; the modal renders WinScreen + we transition to the next
+  // region on advance.
+  const [quizRegionId, setQuizRegionId] = useState<RegionId | null>(null);
+  const [quizProgress, setQuizProgress] = useState<string>("");
+  const [quizPassed, setQuizPassed] = useState(false);
+  const quizAttemptIncrementedRef = useRef<RegionId | null>(null);
 
   // Toast for the "you haven't completed all lessons" message when
   // the student tries to advance from a locked Onward marker.
@@ -2022,6 +2040,63 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
         }}
       />
 
+      {/* v54 (brief-region-quiz) - region-end quiz gate. Modal mounts
+          when Onward is clicked on a fully-complete region whose
+          quiz isn't yet passed. The shared QuizModal wrapper handles
+          chrome + win screen; each region's format component
+          (currently only SwipeCardsQuiz) plugs inside. */}
+      {(() => {
+        if (!quizRegionId) return null;
+        const quizConfig = getRegionQuiz(quizRegionId);
+        if (!quizConfig) return null;
+        const focusedRegionName =
+          regions.find((r) => r.id === quizRegionId)?.name ?? "Region";
+        return (
+          <QuizModal
+            open={true}
+            regionName={focusedRegionName}
+            progressLine={quizProgress}
+            passed={quizPassed}
+            onClose={() => {
+              // Close = abort. Per brief, progress doesn't persist
+              // across sessions, so we just dump state.
+              setQuizRegionId(null);
+              setQuizPassed(false);
+              setQuizProgress("");
+              quizAttemptIncrementedRef.current = null;
+            }}
+            onAdvance={() => {
+              // Win screen continue - mark pass + transition.
+              void markRegionQuizPassed(quizRegionId);
+              const nextMap: Record<RegionId, RegionId | null> = {
+                r1: "r2",
+                r2: "r3",
+                r3: "r4",
+                r4: null,
+              };
+              const nextRid = nextMap[quizRegionId];
+              setQuizRegionId(null);
+              setQuizPassed(false);
+              setQuizProgress("");
+              quizAttemptIncrementedRef.current = null;
+              if (nextRid) transitionTo(nextRid);
+            }}
+          >
+            {quizConfig.format === "swipe_cards" && (
+              <SwipeCardsQuiz
+                cards={quizConfig.cards}
+                onProgressChange={setQuizProgress}
+                onPass={() => setQuizPassed(true)}
+              />
+            )}
+            {/* Other formats (stack_builder, tier_ranking,
+                vault_tumblers) plug in here once Karlo ships
+                content for R2-4 - brief explicitly out of scope
+                this round. */}
+          </QuizModal>
+        );
+      })()}
+
       {/* Discount claim celebration — replaces the old alert() flow.
           Mode is set when the secondary R2 marker is clicked. The modal
           renders inline; calling onClaim triggers requestDiscount(). */}
@@ -2125,6 +2200,26 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                         ? "You haven't completed the last lesson"
                         : `${remaining} lessons left to unlock Onward`,
                     );
+                    return;
+                  }
+                  // v54 - quiz gate. If the region has a quiz config
+                  // AND this student hasn't passed it yet, fire the
+                  // modal instead of jumping. After they pass, the
+                  // modal calls markRegionQuizPassed + transitionTo
+                  // on Continue. Regions without a quiz config (R2-4
+                  // for now) fall through to the existing behavior.
+                  const focusedRid = focusedRegion.id as RegionId;
+                  const quiz = getRegionQuiz(focusedRid);
+                  const alreadyPassed =
+                    regionQuiz[focusedRid]?.quiz_passed_at != null;
+                  if (quiz && !alreadyPassed) {
+                    if (quizAttemptIncrementedRef.current !== focusedRid) {
+                      quizAttemptIncrementedRef.current = focusedRid;
+                      void incrementRegionQuizAttempts(focusedRid);
+                    }
+                    setQuizPassed(false);
+                    setQuizProgress("");
+                    setQuizRegionId(focusedRid);
                     return;
                   }
                   transitionTo(nextRegion.id as RegionId);

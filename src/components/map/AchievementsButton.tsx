@@ -459,6 +459,13 @@ function AchievementsModal({
   );
 }
 
+// v53.5 - hybrid reveal. Only these two stay hidden until earned (the
+// strictest legendaries - surprise value on unlock). Everything else
+// shows name + description from the start so students see the
+// ladder they can climb (goal-gradient effect beats mystery for
+// long-tail engagement).
+const SECRET_ACHIEVEMENT_IDS = new Set(["unbroken", "perfect_run"]);
+
 function AchievementTile({
   ach,
   unlocked,
@@ -468,6 +475,10 @@ function AchievementTile({
   unlocked: boolean;
   unlockPct?: number;
 }) {
+  const isSecret = !unlocked && SECRET_ACHIEVEMENT_IDS.has(ach.id);
+  // Visible = unlocked OR not in the secret set. Secret + locked
+  // = render as ??? silhouette.
+  const visible = unlocked || !isSecret;
   return (
     <div
       style={{
@@ -482,7 +493,7 @@ function AchievementTile({
         display: "flex",
         flexDirection: "column",
         gap: 6,
-        opacity: unlocked ? 1 : 0.74,
+        opacity: unlocked ? 1 : 0.78,
         transition: "all 200ms cubic-bezier(0.22,1,0.36,1)",
       }}
     >
@@ -501,10 +512,14 @@ function AchievementTile({
           alignItems: "center",
           justifyContent: "center",
           fontSize: 17,
-          filter: unlocked ? "none" : "grayscale(1) brightness(0.55)",
+          filter: unlocked
+            ? "none"
+            : visible
+              ? "grayscale(0.8) brightness(0.7)"
+              : "grayscale(1) brightness(0.55)",
         }}
       >
-        {unlocked ? ach.icon : "🔒"}
+        {visible ? ach.icon : "🔒"}
       </div>
       <div>
         <p
@@ -514,12 +529,12 @@ function AchievementTile({
             letterSpacing: "-0.01em",
             color: unlocked
               ? "rgba(255,255,255,0.94)"
-              : "rgba(255,255,255,0.55)",
+              : "rgba(255,255,255,0.62)",
             marginBottom: 2,
             lineHeight: 1.2,
           }}
         >
-          {unlocked ? ach.name : "???"}
+          {visible ? ach.name : "???"}
         </p>
         <p
           style={{
@@ -527,10 +542,10 @@ function AchievementTile({
             lineHeight: 1.35,
             color: unlocked
               ? "rgba(255,255,255,0.6)"
-              : "rgba(255,255,255,0.38)",
+              : "rgba(255,255,255,0.45)",
           }}
         >
-          {unlocked ? ach.description : "Unlock to reveal."}
+          {visible ? ach.description : "Hidden until earned."}
         </p>
       </div>
       {unlocked && unlockPct != null && (

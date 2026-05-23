@@ -28,6 +28,8 @@ import type {
   StudentStreaks,
   StudentWhopSync,
   StudentCelebrations,
+  StudentRegionQuiz,
+  RegionId,
 } from "@/types/database";
 import { getTitleForRegions } from "@/lib/titles";
 import { DISCOUNT_WINDOW_DAYS, progressPercent } from "@/lib/constants";
@@ -145,6 +147,16 @@ interface StudentContextType {
   onboardingCompletedAt: string | null;
   celebrations: StudentCelebrations | null;
 
+  // v54 (brief-region-quiz) — per-region quiz gate. Keyed by
+  // region id; each region's row is independent. quiz_passed_at
+  // null = quiz not yet cleared; clicking Onward opens the modal.
+  // After passing once, Onward jumps straight to the next region.
+  regionQuiz: Record<RegionId, StudentRegionQuiz | null>;
+  /** Stamps quiz_passed_at on first pass. No-op on subsequent passes. */
+  markRegionQuizPassed: (regionId: RegionId) => Promise<void>;
+  /** Increments quiz_attempts each time the student opens the modal. */
+  incrementRegionQuizAttempts: (regionId: RegionId) => Promise<void>;
+
   // v51 (Phase 2, brief v3) — intro video gate + WYH panel state.
   // The 3 flags below drive the first-login chain on /dashboard.
   // markDashboardLogin() fires on first /dashboard load to stamp
@@ -211,6 +223,39 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [celebrations, setCelebrations] = useState<StudentCelebrations | null>(
     null,
   );
+  // v54 (brief-region-quiz) - per-region quiz state, fetched as a
+  // small array and folded into a Map for O(1) per-region lookup.
+  const [regionQuizMap, setRegionQuizMap] = useState<
+    Record<RegionId, StudentRegionQuiz | null>
+  >({ r1: null, r2: null, r3: null, r4: null });
+
+  function foldRegionQuiz(
+    rows: Array<{
+      region_id: string;
+      quiz_passed_at: string | null;
+      quiz_attempts: number;
+    }> | null,
+    studentId: string | undefined,
+  ): Record<RegionId, StudentRegionQuiz | null> {
+    const out: Record<RegionId, StudentRegionQuiz | null> = {
+      r1: null,
+      r2: null,
+      r3: null,
+      r4: null,
+    };
+    if (!rows || !studentId) return out;
+    for (const r of rows) {
+      if (r.region_id === "r1" || r.region_id === "r2" || r.region_id === "r3" || r.region_id === "r4") {
+        out[r.region_id] = {
+          student_id: studentId,
+          region_id: r.region_id,
+          quiz_passed_at: r.quiz_passed_at,
+          quiz_attempts: r.quiz_attempts,
+        };
+      }
+    }
+    return out;
+  }
   // student_streaks data folds into the existing `streak` state below
   // (the public shape stays { current, longest } for consumers).
   // v42 (v2): celebration takeover state for the l057 bounty claim.
@@ -304,6 +349,16 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         setCelebrations(
           (data.celebrations as StudentCelebrations | null) ?? null,
         );
+        setRegionQuizMap(
+          foldRegionQuiz(
+            data.regionQuiz as Array<{
+              region_id: string;
+              quiz_passed_at: string | null;
+              quiz_attempts: number;
+            }> | null,
+            student?.id,
+          ),
+        );
         setStreak({
           current: (data.streaks as StudentStreaks | null)?.current_streak ?? 0,
           longest: (data.streaks as StudentStreaks | null)?.longest_streak ?? 0,
@@ -379,6 +434,16 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     setWhopSync((fresh.whopSync as StudentWhopSync | null) ?? null);
     setCelebrations(
       (fresh.celebrations as StudentCelebrations | null) ?? null,
+    );
+    setRegionQuizMap(
+      foldRegionQuiz(
+        fresh.regionQuiz as Array<{
+          region_id: string;
+          quiz_passed_at: string | null;
+          quiz_attempts: number;
+        }> | null,
+        fresh.student?.id,
+      ),
     );
     setStreak({
       current: (fresh.streaks as StudentStreaks | null)?.current_streak ?? 0,
@@ -1166,6 +1231,67 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     });
   }, [student, milestones, patchMilestoneFlag]);
 
+  // v54 (brief-region-quiz) - mark + attempts mutators. Both
+  // optimistic-patch the local map so the UI flips before the
+  // server round-trip completes; failure is silent (refresh on
+  // next page load reconciles).
+  const markRegionQuizPassed = useCallback(
+    async (regionId: RegionId) => {
+      if (!student) return;
+      const existing = regionQuizMap[regionId];
+      if (existing?.quiz_passed_at) return;
+      const now = new Date().toISOString();
+      setRegionQuizMap((prev) => ({
+        ...prev,
+        [regionId]: {
+          student_id: student.id,
+          region_id: regionId,
+          quiz_passed_at: now,
+          quiz_attempts: existing?.quiz_attempts ?? 0,
+        },
+      }));
+      const token = await getAccessToken();
+      if (!token) return;
+      await fetch("/api/student/mark-region-quiz-passed", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ regionId }),
+      });
+    },
+    [student, regionQuizMap],
+  );
+
+  const incrementRegionQuizAttempts = useCallback(
+    async (regionId: RegionId) => {
+      if (!student) return;
+      const existing = regionQuizMap[regionId];
+      const nextAttempts = (existing?.quiz_attempts ?? 0) + 1;
+      setRegionQuizMap((prev) => ({
+        ...prev,
+        [regionId]: {
+          student_id: student.id,
+          region_id: regionId,
+          quiz_passed_at: existing?.quiz_passed_at ?? null,
+          quiz_attempts: nextAttempts,
+        },
+      }));
+      const token = await getAccessToken();
+      if (!token) return;
+      await fetch("/api/student/increment-region-quiz-attempts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ regionId }),
+      });
+    },
+    [student, regionQuizMap],
+  );
+
   const requestDiscount = useCallback(async () => {
     if (!student || !discountEligible) return;
 
@@ -1312,6 +1438,9 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         markDashboardLogin,
         markIntroVideoThreshold,
         dismissWhyYoureHere,
+        regionQuiz: regionQuizMap,
+        markRegionQuizPassed,
+        incrementRegionQuizAttempts,
         refreshWatchProgress,
         syncDiagnostics,
         forceSync,

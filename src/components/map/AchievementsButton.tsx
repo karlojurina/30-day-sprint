@@ -254,26 +254,36 @@ function AchievementsModal({
         '[data-statswidget="root"]',
       );
       if (!el) {
-        // Phone or other surface where StatsWidget isn't present -
-        // fall back to a centered, screen-fitting panel.
-        const w = Math.min(420, window.innerWidth - 32);
+        // No StatsWidget on this surface - fall back to a top-left
+        // anchored panel so the alignment intent is preserved.
+        const w = Math.min(340, window.innerWidth - 24);
         setAnchor({
-          left: (window.innerWidth - w) / 2,
+          left: 12,
           top: 60,
           width: w,
-          maxHeight: window.innerHeight - 120,
+          maxHeight: window.innerHeight - 80,
         });
         return;
       }
       const rect = el.getBoundingClientRect();
       const gap = 10;
       const top = rect.bottom + gap;
+      // When StatsWidget renders as the small phone chip its width
+      // is too narrow for the achievement grid. Force a sensible
+      // minimum so the panel still reads as a list, anchored to the
+      // chip's left edge.
+      const minWidth = 300;
+      const maxOnPhone = window.innerWidth - rect.left - 12;
+      const width = Math.max(
+        Math.min(rect.width, maxOnPhone),
+        Math.min(minWidth, maxOnPhone),
+      );
       setAnchor({
         left: rect.left,
         top,
-        width: rect.width,
         // Leave a 20px buffer at the bottom of the viewport so the
         // panel never bleeds off-screen on shorter monitors.
+        width,
         maxHeight: Math.max(220, window.innerHeight - top - 20),
       });
     };
@@ -325,7 +335,7 @@ function AchievementsModal({
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              padding: "16px 18px 14px",
+              padding: "12px 14px 10px",
               borderBottom: "1px solid rgba(255,255,255,0.08)",
               flexShrink: 0,
             }}
@@ -333,19 +343,19 @@ function AchievementsModal({
             <div>
               <p
                 style={{
-                  fontSize: 10,
+                  fontSize: 9.5,
                   fontFamily: "var(--font-mono)",
                   letterSpacing: "0.22em",
                   textTransform: "uppercase",
                   color: "rgba(255,255,255,0.45)",
-                  marginBottom: 4,
+                  marginBottom: 2,
                 }}
               >
                 Achievements
               </p>
               <h2
                 style={{
-                  fontSize: 16,
+                  fontSize: 14,
                   fontWeight: 600,
                   letterSpacing: "-0.014em",
                   color: "rgba(255,255,255,0.96)",
@@ -362,12 +372,12 @@ function AchievementsModal({
               style={{
                 background: "transparent",
                 border: "1px solid rgba(255,255,255,0.14)",
-                borderRadius: 8,
+                borderRadius: 7,
                 color: "rgba(255,255,255,0.65)",
-                width: 28,
-                height: 28,
+                width: 26,
+                height: 26,
                 cursor: "pointer",
-                fontSize: 16,
+                fontSize: 15,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -381,11 +391,11 @@ function AchievementsModal({
           {/* Grid - scroll lives here, not on the panel root. */}
           <div
             style={{
-              padding: "12px 18px 18px",
+              padding: "10px 14px 14px",
               overflowY: "auto",
               display: "flex",
               flexDirection: "column",
-              gap: 18,
+              gap: 14,
               flex: 1,
               minHeight: 0,
               overscrollBehavior: "contain",
@@ -398,12 +408,12 @@ function AchievementsModal({
                   <div key={rarity}>
                     <p
                       style={{
-                        fontSize: 10,
+                        fontSize: 9.5,
                         fontFamily: "var(--font-mono)",
                         letterSpacing: "0.22em",
                         textTransform: "uppercase",
                         color: RARITY_COLOR[rarity],
-                        marginBottom: 10,
+                        marginBottom: 8,
                       }}
                     >
                       {rarity}
@@ -411,11 +421,13 @@ function AchievementsModal({
                     <div
                       style={{
                         display: "grid",
-                        // Narrower tile minimum so the panel can host
-                        // 1-2 columns at the StatsWidget's 380px width.
+                        // v53.2 - tighter tiles so the panel reads as
+                        // a focused list rather than a sprawling
+                        // grid. 2 columns at StatsWidget's 380px
+                        // width.
                         gridTemplateColumns:
-                          "repeat(auto-fill, minmax(150px, 1fr))",
-                        gap: 10,
+                          "repeat(auto-fill, minmax(120px, 1fr))",
+                        gap: 8,
                       }}
                     >
                       {grouped[rarity].map((a) => {
@@ -454,26 +466,26 @@ function AchievementTile({
   return (
     <div
       style={{
-        padding: 14,
+        padding: 10,
         background: unlocked
           ? "rgba(255,255,255,0.04)"
           : "rgba(255,255,255,0.02)",
         border: unlocked
           ? `1px solid ${RARITY_BORDER[ach.rarity]}`
           : "1px solid rgba(255,255,255,0.06)",
-        borderRadius: 12,
+        borderRadius: 10,
         display: "flex",
         flexDirection: "column",
-        gap: 8,
+        gap: 6,
         opacity: unlocked ? 1 : 0.74,
         transition: "all 200ms cubic-bezier(0.22,1,0.36,1)",
       }}
     >
       <div
         style={{
-          width: 44,
-          height: 44,
-          borderRadius: 10,
+          width: 32,
+          height: 32,
+          borderRadius: 8,
           background: unlocked
             ? "rgba(255,255,255,0.08)"
             : "rgba(255,255,255,0.04)",
@@ -483,7 +495,7 @@ function AchievementTile({
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: 22,
+          fontSize: 17,
           filter: unlocked ? "none" : "grayscale(1) brightness(0.55)",
         }}
       >
@@ -492,35 +504,34 @@ function AchievementTile({
       <div>
         <p
           style={{
-            fontSize: 13,
+            fontSize: 12,
             fontWeight: 600,
             letterSpacing: "-0.01em",
             color: unlocked
               ? "rgba(255,255,255,0.94)"
               : "rgba(255,255,255,0.55)",
-            marginBottom: 4,
+            marginBottom: 2,
+            lineHeight: 1.2,
           }}
         >
           {unlocked ? ach.name : "???"}
         </p>
         <p
           style={{
-            fontSize: 11.5,
-            lineHeight: 1.4,
+            fontSize: 10.5,
+            lineHeight: 1.35,
             color: unlocked
-              ? "rgba(255,255,255,0.62)"
+              ? "rgba(255,255,255,0.6)"
               : "rgba(255,255,255,0.38)",
-            minHeight: 30,
           }}
         >
           {unlocked ? ach.description : "Unlock to reveal."}
         </p>
       </div>
-      {/* Unlock % - shown only when unlocked, per Karlo's request */}
       {unlocked && unlockPct != null && (
         <p
           style={{
-            fontSize: 10,
+            fontSize: 9,
             fontFamily: "var(--font-mono)",
             letterSpacing: "0.10em",
             textTransform: "uppercase",

@@ -609,6 +609,7 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
           type="button"
           onClick={() => setPhoneOpen(true)}
           aria-label="Open progress panel"
+          data-statswidget="root"
           style={{
             position: "absolute",
             top: 12,

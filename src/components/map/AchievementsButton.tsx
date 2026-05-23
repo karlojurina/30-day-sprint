@@ -260,7 +260,10 @@ function AchievementsModal({
   const PANEL_WIDTH = isPhone
     ? Math.min(340, typeof window !== "undefined" ? window.innerWidth - 24 : 340)
     : 380;
-  const ABS_MAX_HEIGHT = 480;
+  // v53.7 - tile rows ~110-120px + header (~50) + section eyebrows
+  // + gaps. 640px shows ~4 tile rows comfortably, which is the
+  // visual rhythm Lovro asked for.
+  const ABS_MAX_HEIGHT = 640;
 
   useEffect(() => {
     if (!open) return;

@@ -20,7 +20,13 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence, useMotionValue, useTransform } from "framer-motion";
+import {
+  motion,
+  AnimatePresence,
+  useMotionValue,
+  useTransform,
+  animate,
+} from "framer-motion";
 import type { SwipeCardQuestion } from "@/lib/region-quizzes";
 
 interface SwipeCardsQuizProps {
@@ -111,6 +117,17 @@ export function SwipeCardsQuiz({
     (pick: "left" | "right") => {
       if (!top || reveal != null) return;
       setSwipeDir(pick);
+      // v54.2 - snap dragX back to 0 the instant we commit, so the
+      // reveal panel renders inside a centered card instead of one
+      // stuck at the drag position. Without this, dragging then
+      // committing leaves the card visually skewed for the full
+      // reveal duration (1.5-2.5s).
+      animate(dragX, 0, {
+        type: "spring",
+        stiffness: 420,
+        damping: 32,
+        mass: 0.6,
+      });
 
       let isCorrect = false;
       let correctText: string | null = null;
@@ -148,7 +165,7 @@ export function SwipeCardsQuiz({
         revealTimerRef.current = window.setTimeout(() => advanceDeck(false), 2500);
       }
     },
-    [top, reveal, swapAbForCard, advanceDeck],
+    [top, reveal, swapAbForCard, advanceDeck, dragX],
   );
 
   // Keyboard arrows mirror swipe buttons.
@@ -272,8 +289,13 @@ export function SwipeCardsQuiz({
               } else if (info.offset.x > SWIPE_COMMIT_THRESHOLD) {
                 handlePick("right");
               } else {
-                // Snap back
-                dragX.set(0);
+                // Snap back smoothly (spring beats a hard set).
+                animate(dragX, 0, {
+                  type: "spring",
+                  stiffness: 480,
+                  damping: 30,
+                  mass: 0.5,
+                });
               }
             }}
             style={{
@@ -296,15 +318,19 @@ export function SwipeCardsQuiz({
               opacity: 0,
               x:
                 swipeDir === "left"
-                  ? -360
+                  ? -460
                   : swipeDir === "right"
-                    ? 360
+                    ? 460
                     : 0,
+              y: 30,
               rotate:
-                swipeDir === "left" ? -14 : swipeDir === "right" ? 14 : 0,
-              transition: { duration: 0.32, ease: [0.22, 1, 0.36, 1] },
+                swipeDir === "left" ? -18 : swipeDir === "right" ? 18 : 0,
+              transition: {
+                duration: 0.45,
+                ease: [0.32, 0, 0.32, 1],
+              },
             }}
-            transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
             whileTap={reveal == null ? { cursor: "grabbing" } : undefined}
           >
             <div
@@ -582,17 +608,27 @@ function SwipeButton({
 }) {
   const isTrue = label === "TRUE";
   const isFalse = label === "FALSE";
-  // For T/F give the buttons a subtle red/green undertone. For A/B
-  // keep them neutral - the picks are symmetric.
   const accent = isTrue
-    ? "rgba(74,222,128,0.35)"
+    ? "rgba(74,222,128,0.40)"
     : isFalse
-      ? "rgba(239,68,68,0.32)"
-      : "rgba(255,255,255,0.14)";
+      ? "rgba(239,68,68,0.38)"
+      : "rgba(255,255,255,0.16)";
+  const glowColor = isTrue
+    ? "rgba(74,222,128,0.20)"
+    : isFalse
+      ? "rgba(239,68,68,0.18)"
+      : "rgba(255,255,255,0.10)";
   return (
-    <button
+    <motion.button
       onClick={onClick}
       disabled={disabled}
+      whileHover={
+        disabled
+          ? undefined
+          : { y: -2, boxShadow: `0 12px 28px ${glowColor}, 0 1px 0 rgba(255,255,255,0.08) inset` }
+      }
+      whileTap={disabled ? undefined : { scale: 0.97 }}
+      transition={{ type: "spring", stiffness: 400, damping: 28 }}
       style={{
         padding: "15px 18px",
         background: disabled
@@ -600,7 +636,7 @@ function SwipeButton({
           : "linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 100%)",
         border: `1px solid ${disabled ? "rgba(255,255,255,0.08)" : accent}`,
         borderRadius: 12,
-        color: disabled ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.94)",
+        color: disabled ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.96)",
         fontSize: 14,
         fontWeight: 700,
         letterSpacing: "0.02em",
@@ -608,11 +644,10 @@ function SwipeButton({
         display: "flex",
         alignItems: "center",
         justifyContent: side === "left" ? "flex-start" : "flex-end",
-        gap: 8,
+        gap: 10,
         boxShadow: disabled
           ? "none"
-          : "0 4px 12px rgba(0,0,0,0.25), 0 1px 0 rgba(255,255,255,0.06) inset",
-        transition: "all 150ms cubic-bezier(0.22,1,0.36,1)",
+          : "0 6px 18px rgba(0,0,0,0.30), 0 1px 0 rgba(255,255,255,0.06) inset",
       }}
     >
       {side === "left" && (
@@ -630,7 +665,7 @@ function SwipeButton({
           <path d="M19 12H5M12 19l-7-7 7-7" />
         </svg>
       )}
-      {label}
+      <span>{label}</span>
       {side === "right" && (
         <svg
           width="16"
@@ -646,7 +681,7 @@ function SwipeButton({
           <path d="M5 12h14M12 5l7 7-7 7" />
         </svg>
       )}
-    </button>
+    </motion.button>
   );
 }
 

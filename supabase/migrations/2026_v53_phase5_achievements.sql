@@ -105,7 +105,7 @@ using (
 drop policy if exists "student_achievements: team reads all" on student_achievements;
 create policy "student_achievements: team reads all"
 on student_achievements for select
-using (exists (select 1 from team_members where supabase_user_id = auth.uid()));
+using (exists (select 1 from team_members where id = auth.uid()));
 
 -- 5. seed --------------------------------------------------------------
 insert into achievements (id, name, description, icon, rarity, sort_order) values

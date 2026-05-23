@@ -1315,6 +1315,24 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                 onOpenLesson("l057");
                 return;
               }
+              // v54 - quiz gate. Same logic as the side panel
+              // Onward button. The painted end-marker is what most
+              // students click; without this branch the gate never
+              // fires for users who don't open the side panel.
+              const currentRid = view as RegionId;
+              const quizConfig = getRegionQuiz(currentRid);
+              const alreadyPassed =
+                regionQuiz[currentRid]?.quiz_passed_at != null;
+              if (quizConfig && !alreadyPassed) {
+                if (quizAttemptIncrementedRef.current !== currentRid) {
+                  quizAttemptIncrementedRef.current = currentRid;
+                  void incrementRegionQuizAttempts(currentRid);
+                }
+                setQuizPassed(false);
+                setQuizProgress("");
+                setQuizRegionId(currentRid);
+                return;
+              }
               const next = SCENE_END_MARKERS[view as RegionId]?.nextView;
               if (next) transitionTo(next);
             }}

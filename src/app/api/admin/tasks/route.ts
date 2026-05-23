@@ -77,13 +77,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // After joined filters with bucket/week, tasks whose template
-  // doesn't match end up with `template: null`. Drop those server-side
-  // so the client only sees real matches.
-  const tasks = (data ?? []).filter((t) => {
-    if (bucket || week) return Boolean((t as { template?: unknown }).template);
-    return true;
-  });
+  // v59 - always drop tasks whose template is null. Two cases produce
+  // these:
+  //   1. The task pointed at a template that's since been deleted
+  //      (ON DELETE SET NULL on tasks.template_id). v57 leaving the
+  //      W-series template-id-nulled tasks behind was the trigger
+  //      for this.
+  //   2. A bucket/week filter is applied and this task's template
+  //      doesn't match. Same outcome - render nothing.
+  // Either way, a "(no template)" task is noise - Astrid has nothing
+  // to copy.
+  const tasks = (data ?? []).filter((t) =>
+    Boolean((t as { template?: unknown }).template),
+  );
 
   return NextResponse.json({ tasks });
 }

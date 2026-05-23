@@ -28,9 +28,10 @@
 -- Tasks whose template_id is NULL (legacy W-series deleted in v57)
 -- keep their historical scenario_id - it's the only record of what
 -- they were.
+-- tasks has no updated_at column (only created_at / completed_at /
+-- dismissed_at), so only set scenario_id here.
 update tasks t
-set scenario_id = tpl.scenario_id,
-    updated_at = now()
+set scenario_id = tpl.scenario_id
 from templates tpl
 where t.template_id = tpl.id
   and t.scenario_id is distinct from tpl.scenario_id;

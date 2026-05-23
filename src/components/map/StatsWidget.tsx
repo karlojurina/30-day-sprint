@@ -736,6 +736,7 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
 
   return (
     <div
+      data-statswidget="root"
       style={{
         position: "absolute",
         top: 20,

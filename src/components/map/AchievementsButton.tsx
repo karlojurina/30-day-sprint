@@ -235,154 +235,207 @@ function AchievementsModal({
   };
   for (const a of catalog) grouped[a.rarity].push(a);
 
+  // v53.1 - position the panel just below StatsWidget so it reads
+  // as a drop-down extension of the same top-left cluster. We
+  // measure StatsWidget on open and on viewport resize so the
+  // panel stays anchored if StatsWidget's height changes (e.g. the
+  // discount countdown card appearing).
+  const [anchor, setAnchor] = useState<{
+    left: number;
+    top: number;
+    width: number;
+    maxHeight: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const measure = () => {
+      const el = document.querySelector<HTMLElement>(
+        '[data-statswidget="root"]',
+      );
+      if (!el) {
+        // Phone or other surface where StatsWidget isn't present -
+        // fall back to a centered, screen-fitting panel.
+        const w = Math.min(420, window.innerWidth - 32);
+        setAnchor({
+          left: (window.innerWidth - w) / 2,
+          top: 60,
+          width: w,
+          maxHeight: window.innerHeight - 120,
+        });
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      const gap = 10;
+      const top = rect.bottom + gap;
+      setAnchor({
+        left: rect.left,
+        top,
+        width: rect.width,
+        // Leave a 20px buffer at the bottom of the viewport so the
+        // panel never bleeds off-screen on shorter monitors.
+        maxHeight: Math.max(220, window.innerHeight - top - 20),
+      });
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [open]);
+
   return (
     <AnimatePresence>
-      {open && (
+      {open && anchor && (
         <motion.div
           key="achievements-modal"
           role="dialog"
-          aria-modal="true"
+          aria-modal="false"
           aria-label="Achievements"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.25 }}
-          className="fixed inset-0 z-[150] flex items-center justify-center"
+          initial={{ opacity: 0, y: -8, scale: 0.985 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: -6, scale: 0.985 }}
+          transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+          // Stop wheel + touchmove from bubbling into the underlying
+          // map (which treats wheel as zoom). The panel itself owns
+          // its own scrolling.
+          onWheel={(e) => e.stopPropagation()}
+          onTouchMove={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
           style={{
-            background:
-              "radial-gradient(ellipse at center, rgba(8,12,22,0.88) 0%, rgba(4,8,16,0.96) 100%)",
-            backdropFilter: "blur(18px) saturate(140%)",
-            WebkitBackdropFilter: "blur(18px) saturate(140%)",
+            position: "fixed",
+            top: anchor.top,
+            left: anchor.left,
+            width: anchor.width,
+            maxHeight: anchor.maxHeight,
+            zIndex: 35,
+            display: "flex",
+            flexDirection: "column",
+            background: "rgba(15, 17, 21, 0.92)",
+            border: "1px solid rgba(255, 255, 255, 0.14)",
+            backdropFilter: "blur(24px) saturate(140%)",
+            WebkitBackdropFilter: "blur(24px) saturate(140%)",
+            borderRadius: 18,
+            boxShadow:
+              "0 30px 80px rgba(0,0,0,0.55), 0 1px 0 rgba(255,255,255,0.05) inset",
+            color: "rgba(255,255,255,0.94)",
           }}
-          onClick={onClose}
         >
-          <motion.div
-            initial={{ scale: 0.96, opacity: 0, y: 12 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            exit={{ scale: 0.96, opacity: 0, y: 8 }}
-            transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-            onClick={(e) => e.stopPropagation()}
+          {/* Header */}
+          <div
             style={{
-              width: "min(880px, 94vw)",
-              maxHeight: "88vh",
               display: "flex",
-              flexDirection: "column",
-              background: "rgba(10,14,22,0.96)",
-              border: "1px solid rgba(255,255,255,0.08)",
-              borderRadius: 18,
-              boxShadow:
-                "0 40px 100px rgba(0,0,0,0.55), 0 1px 0 rgba(255,255,255,0.06) inset",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "16px 18px 14px",
+              borderBottom: "1px solid rgba(255,255,255,0.08)",
+              flexShrink: 0,
             }}
           >
-            {/* Header */}
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                padding: "20px 24px 16px",
-                borderBottom: "1px solid rgba(255,255,255,0.06)",
-              }}
-            >
-              <div>
-                <p
-                  style={{
-                    fontSize: 11,
-                    fontFamily: "var(--font-mono)",
-                    letterSpacing: "0.22em",
-                    textTransform: "uppercase",
-                    color: "rgba(255,255,255,0.45)",
-                    marginBottom: 4,
-                  }}
-                >
-                  Achievements
-                </p>
-                <h2
-                  style={{
-                    fontSize: 20,
-                    fontWeight: 600,
-                    letterSpacing: "-0.018em",
-                    color: "rgba(255,255,255,0.96)",
-                  }}
-                >
-                  {loading ? "Loading..." : `${mine.size} of ${catalog.length} unlocked`}
-                </h2>
-              </div>
-              <button
-                onClick={onClose}
-                aria-label="Close"
+            <div>
+              <p
                 style={{
-                  background: "transparent",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  borderRadius: 8,
-                  color: "rgba(255,255,255,0.62)",
-                  width: 32,
-                  height: 32,
-                  cursor: "pointer",
-                  fontSize: 18,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
+                  fontSize: 10,
+                  fontFamily: "var(--font-mono)",
+                  letterSpacing: "0.22em",
+                  textTransform: "uppercase",
+                  color: "rgba(255,255,255,0.45)",
+                  marginBottom: 4,
                 }}
               >
-                ×
-              </button>
+                Achievements
+              </p>
+              <h2
+                style={{
+                  fontSize: 16,
+                  fontWeight: 600,
+                  letterSpacing: "-0.014em",
+                  color: "rgba(255,255,255,0.96)",
+                }}
+              >
+                {loading
+                  ? "Loading..."
+                  : `${mine.size} of ${catalog.length} unlocked`}
+              </h2>
             </div>
-
-            {/* Grid */}
-            <div
+            <button
+              onClick={onClose}
+              aria-label="Close achievements"
               style={{
-                padding: "16px 24px 24px",
-                overflowY: "auto",
+                background: "transparent",
+                border: "1px solid rgba(255,255,255,0.14)",
+                borderRadius: 8,
+                color: "rgba(255,255,255,0.65)",
+                width: 28,
+                height: 28,
+                cursor: "pointer",
+                fontSize: 16,
                 display: "flex",
-                flexDirection: "column",
-                gap: 22,
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
               }}
             >
-              {(["legendary", "rare", "uncommon", "common"] as const).map(
-                (rarity) => {
-                  if (grouped[rarity].length === 0) return null;
-                  return (
-                    <div key={rarity}>
-                      <p
-                        style={{
-                          fontSize: 11,
-                          fontFamily: "var(--font-mono)",
-                          letterSpacing: "0.22em",
-                          textTransform: "uppercase",
-                          color: RARITY_COLOR[rarity],
-                          marginBottom: 12,
-                        }}
-                      >
-                        {rarity}
-                      </p>
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns:
-                            "repeat(auto-fill, minmax(180px, 1fr))",
-                          gap: 12,
-                        }}
-                      >
-                        {grouped[rarity].map((a) => {
-                          const unlocked = mine.has(a.id);
-                          const pct = stats.get(a.id);
-                          return (
-                            <AchievementTile
-                              key={a.id}
-                              ach={a}
-                              unlocked={unlocked}
-                              unlockPct={pct}
-                            />
-                          );
-                        })}
-                      </div>
+              ×
+            </button>
+          </div>
+
+          {/* Grid - scroll lives here, not on the panel root. */}
+          <div
+            style={{
+              padding: "12px 18px 18px",
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 18,
+              flex: 1,
+              minHeight: 0,
+              overscrollBehavior: "contain",
+            }}
+          >
+            {(["legendary", "rare", "uncommon", "common"] as const).map(
+              (rarity) => {
+                if (grouped[rarity].length === 0) return null;
+                return (
+                  <div key={rarity}>
+                    <p
+                      style={{
+                        fontSize: 10,
+                        fontFamily: "var(--font-mono)",
+                        letterSpacing: "0.22em",
+                        textTransform: "uppercase",
+                        color: RARITY_COLOR[rarity],
+                        marginBottom: 10,
+                      }}
+                    >
+                      {rarity}
+                    </p>
+                    <div
+                      style={{
+                        display: "grid",
+                        // Narrower tile minimum so the panel can host
+                        // 1-2 columns at the StatsWidget's 380px width.
+                        gridTemplateColumns:
+                          "repeat(auto-fill, minmax(150px, 1fr))",
+                        gap: 10,
+                      }}
+                    >
+                      {grouped[rarity].map((a) => {
+                        const unlocked = mine.has(a.id);
+                        const pct = stats.get(a.id);
+                        return (
+                          <AchievementTile
+                            key={a.id}
+                            ach={a}
+                            unlocked={unlocked}
+                            unlockPct={pct}
+                          />
+                        );
+                      })}
                     </div>
-                  );
-                },
-              )}
-            </div>
-          </motion.div>
+                  </div>
+                );
+              },
+            )}
+          </div>
         </motion.div>
       )}
     </AnimatePresence>

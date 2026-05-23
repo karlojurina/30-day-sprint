@@ -336,27 +336,54 @@ export function SwipeCardsQuiz({
             <div
               style={{
                 position: "relative",
-                padding: "22px 22px 18px",
+                padding: "24px 24px 20px",
+                // v54.5 - premium glassmorphism. Layered translucent
+                // surface: a base tinted gradient (correct/wrong/
+                // neutral) PLUS a backdrop-filter that picks up the
+                // dimmed map behind the modal. Hairline 1px borders
+                // with low alpha so the card edge reads as glass.
                 background:
                   reveal?.kind === "correct"
-                    ? "linear-gradient(180deg, rgba(34,197,94,0.08) 0%, rgba(34,197,94,0.04) 100%)"
+                    ? "linear-gradient(155deg, rgba(74,222,128,0.16) 0%, rgba(34,197,94,0.06) 55%, rgba(34,197,94,0.02) 100%)"
                     : reveal?.kind === "wrong"
-                      ? "linear-gradient(180deg, rgba(239,68,68,0.08) 0%, rgba(239,68,68,0.04) 100%)"
-                      : "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%)",
+                      ? "linear-gradient(155deg, rgba(252,165,165,0.18) 0%, rgba(239,68,68,0.06) 55%, rgba(239,68,68,0.02) 100%)"
+                      : "linear-gradient(155deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 55%, rgba(255,255,255,0.02) 100%)",
+                backdropFilter: "blur(20px) saturate(170%)",
+                WebkitBackdropFilter: "blur(20px) saturate(170%)",
                 border: reveal
                   ? reveal.kind === "correct"
-                    ? "1px solid rgba(34,197,94,0.45)"
-                    : "1px solid rgba(239,68,68,0.45)"
-                  : "1px solid rgba(255,255,255,0.12)",
-                borderRadius: 16,
+                    ? "1px solid rgba(74,222,128,0.50)"
+                    : "1px solid rgba(252,165,165,0.50)"
+                  : "1px solid rgba(255,255,255,0.16)",
+                borderRadius: 18,
                 display: "flex",
                 flexDirection: "column",
                 gap: 16,
+                // Layered shadow: deep ambient + tight contact + inner
+                // top highlight. Reads as "lifted glass" not "card on
+                // a flat surface".
                 boxShadow:
-                  "0 18px 50px rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.06) inset",
+                  "0 24px 60px -8px rgba(0,0,0,0.55), 0 4px 12px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.10) inset, 0 -1px 0 rgba(0,0,0,0.30) inset",
                 overflow: "hidden",
               }}
             >
+              {/* v54.5 - top sheen. A subtle light gradient at the
+                  card's top edge mimics how light catches a piece of
+                  glass. Pure decoration, pointer-events:none. */}
+              <div
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 80,
+                  background:
+                    "linear-gradient(180deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 100%)",
+                  pointerEvents: "none",
+                  opacity: 0.9,
+                }}
+              />
               {/* Direction tint overlays - fade in as the student
                   drags toward a side. Pure visual feedback. */}
               {reveal == null && (
@@ -532,22 +559,44 @@ function OptionTile({
     <div
       style={{
         padding: 14,
-        background: "rgba(255,255,255,0.04)",
-        border: "1px solid rgba(255,255,255,0.12)",
+        // v54.5 - matching glassmorphism on the option tiles. Slightly
+        // brighter glass than the card body so they read as
+        // separate, interactive surfaces.
+        background:
+          "linear-gradient(160deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.03) 100%)",
+        backdropFilter: "blur(12px) saturate(150%)",
+        WebkitBackdropFilter: "blur(12px) saturate(150%)",
+        border: "1px solid rgba(255,255,255,0.14)",
         borderRadius: 12,
         display: "flex",
         flexDirection: "column",
         gap: 10,
         position: "relative",
         boxShadow:
-          "0 4px 12px rgba(0,0,0,0.20), 0 1px 0 rgba(255,255,255,0.04) inset",
+          "0 6px 16px rgba(0,0,0,0.25), 0 1px 0 rgba(255,255,255,0.08) inset, 0 -1px 0 rgba(0,0,0,0.20) inset",
+        overflow: "hidden",
       }}
     >
+      {/* Tile top sheen */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 36,
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 100%)",
+          pointerEvents: "none",
+        }}
+      />
       <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: 8,
+          position: "relative",
         }}
       >
         <span
@@ -555,16 +604,19 @@ function OptionTile({
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
-            width: 22,
-            height: 22,
+            width: 24,
+            height: 24,
             borderRadius: 999,
-            background: "rgba(255,255,255,0.10)",
-            border: "1px solid rgba(255,255,255,0.16)",
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.06) 100%)",
+            border: "1px solid rgba(255,255,255,0.22)",
             fontSize: 11,
             fontWeight: 700,
             letterSpacing: "0.04em",
-            color: "rgba(255,255,255,0.92)",
+            color: "rgba(255,255,255,0.96)",
             fontVariantNumeric: "tabular-nums",
+            boxShadow:
+              "0 1px 2px rgba(0,0,0,0.30), 0 1px 0 rgba(255,255,255,0.18) inset",
           }}
         >
           {badge}
@@ -575,7 +627,7 @@ function OptionTile({
             fontFamily: "var(--font-mono)",
             letterSpacing: "0.20em",
             textTransform: "uppercase",
-            color: "rgba(255,255,255,0.38)",
+            color: "rgba(255,255,255,0.42)",
           }}
         >
           {side === "left" ? "Swipe left" : "Swipe right"}
@@ -585,8 +637,9 @@ function OptionTile({
         style={{
           fontSize: 13.5,
           lineHeight: 1.45,
-          color: "rgba(255,255,255,0.88)",
+          color: "rgba(255,255,255,0.90)",
           letterSpacing: "-0.005em",
+          position: "relative",
         }}
       >
         {text}
@@ -636,7 +689,12 @@ function SwipeButton({
         padding: "15px 18px",
         background: disabled
           ? "rgba(255,255,255,0.03)"
-          : "linear-gradient(180deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 100%)",
+          // v54.5 - matching glassmorphism. Subtle gradient + frost
+          // so the buttons read as part of the same material as the
+          // card above them.
+          : "linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.04) 100%)",
+        backdropFilter: disabled ? undefined : "blur(12px) saturate(150%)",
+        WebkitBackdropFilter: disabled ? undefined : "blur(12px) saturate(150%)",
         border: `1px solid ${disabled ? "rgba(255,255,255,0.08)" : accent}`,
         borderRadius: 12,
         color: disabled ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.96)",
@@ -648,11 +706,6 @@ function SwipeButton({
         alignItems: "center",
         justifyContent: side === "left" ? "flex-start" : "flex-end",
         gap: 10,
-        // v54.3 - hover lift + tap shrink via CSS transform/transition
-        // (was framer-motion whileHover/whileTap). Plain HTML button
-        // with CSS lets us keep the same effect without depending on
-        // a framer-motion helper that may not be exported uniformly
-        // across build environments.
         transform: pressed
           ? "scale(0.97)"
           : lifted
@@ -661,8 +714,8 @@ function SwipeButton({
         boxShadow: disabled
           ? "none"
           : lifted
-            ? `0 12px 28px ${glowColor}, 0 1px 0 rgba(255,255,255,0.08) inset`
-            : "0 6px 18px rgba(0,0,0,0.30), 0 1px 0 rgba(255,255,255,0.06) inset",
+            ? `0 14px 30px ${glowColor}, 0 1px 0 rgba(255,255,255,0.14) inset, 0 -1px 0 rgba(0,0,0,0.25) inset`
+            : "0 8px 22px rgba(0,0,0,0.32), 0 1px 0 rgba(255,255,255,0.10) inset, 0 -1px 0 rgba(0,0,0,0.20) inset",
         transition:
           "transform 150ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms cubic-bezier(0.22,1,0.36,1)",
       }}

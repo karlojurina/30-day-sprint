@@ -25,7 +25,6 @@ import {
   AnimatePresence,
   useMotionValue,
   useTransform,
-  animate,
 } from "framer-motion";
 import type { SwipeCardQuestion } from "@/lib/region-quizzes";
 
@@ -117,17 +116,14 @@ export function SwipeCardsQuiz({
     (pick: "left" | "right") => {
       if (!top || reveal != null) return;
       setSwipeDir(pick);
-      // v54.2 - snap dragX back to 0 the instant we commit, so the
-      // reveal panel renders inside a centered card instead of one
-      // stuck at the drag position. Without this, dragging then
-      // committing leaves the card visually skewed for the full
-      // reveal duration (1.5-2.5s).
-      animate(dragX, 0, {
-        type: "spring",
-        stiffness: 420,
-        damping: 32,
-        mass: 0.6,
-      });
+      // v54.3 - snap dragX back to 0 the instant we commit. Without
+      // this, the reveal panel renders inside a card stuck at the
+      // drag position for the full 1.5/2.5s timeout. Using
+      // motionValue.set() (instant) instead of an `animate()` helper
+      // import - the snap is barely visible and avoids a framer-
+      // motion top-level import that was blowing up the Vercel
+      // build.
+      dragX.set(0);
 
       let isCorrect = false;
       let correctText: string | null = null;
@@ -289,13 +285,10 @@ export function SwipeCardsQuiz({
               } else if (info.offset.x > SWIPE_COMMIT_THRESHOLD) {
                 handlePick("right");
               } else {
-                // Snap back smoothly (spring beats a hard set).
-                animate(dragX, 0, {
-                  type: "spring",
-                  stiffness: 480,
-                  damping: 30,
-                  mass: 0.5,
-                });
+                // No-op - framer-motion springs dragX back to 0
+                // automatically via dragConstraints {left:0,
+                // right:0}. We don't need to import an animate
+                // helper for this.
               }
             }}
             style={{
@@ -606,6 +599,8 @@ function SwipeButton({
   disabled: boolean;
   onClick: () => void;
 }) {
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
   const isTrue = label === "TRUE";
   const isFalse = label === "FALSE";
   const accent = isTrue
@@ -614,21 +609,22 @@ function SwipeButton({
       ? "rgba(239,68,68,0.38)"
       : "rgba(255,255,255,0.16)";
   const glowColor = isTrue
-    ? "rgba(74,222,128,0.20)"
+    ? "rgba(74,222,128,0.22)"
     : isFalse
-      ? "rgba(239,68,68,0.18)"
-      : "rgba(255,255,255,0.10)";
+      ? "rgba(239,68,68,0.20)"
+      : "rgba(255,255,255,0.12)";
+  const lifted = !disabled && hovered && !pressed;
   return (
-    <motion.button
+    <button
       onClick={onClick}
       disabled={disabled}
-      whileHover={
-        disabled
-          ? undefined
-          : { y: -2, boxShadow: `0 12px 28px ${glowColor}, 0 1px 0 rgba(255,255,255,0.08) inset` }
-      }
-      whileTap={disabled ? undefined : { scale: 0.97 }}
-      transition={{ type: "spring", stiffness: 400, damping: 28 }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => {
+        setHovered(false);
+        setPressed(false);
+      }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
       style={{
         padding: "15px 18px",
         background: disabled
@@ -645,9 +641,23 @@ function SwipeButton({
         alignItems: "center",
         justifyContent: side === "left" ? "flex-start" : "flex-end",
         gap: 10,
+        // v54.3 - hover lift + tap shrink via CSS transform/transition
+        // (was framer-motion whileHover/whileTap). Plain HTML button
+        // with CSS lets us keep the same effect without depending on
+        // a framer-motion helper that may not be exported uniformly
+        // across build environments.
+        transform: pressed
+          ? "scale(0.97)"
+          : lifted
+            ? "translateY(-2px)"
+            : "translateY(0)",
         boxShadow: disabled
           ? "none"
-          : "0 6px 18px rgba(0,0,0,0.30), 0 1px 0 rgba(255,255,255,0.06) inset",
+          : lifted
+            ? `0 12px 28px ${glowColor}, 0 1px 0 rgba(255,255,255,0.08) inset`
+            : "0 6px 18px rgba(0,0,0,0.30), 0 1px 0 rgba(255,255,255,0.06) inset",
+        transition:
+          "transform 150ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms cubic-bezier(0.22,1,0.36,1)",
       }}
     >
       {side === "left" && (
@@ -681,7 +691,7 @@ function SwipeButton({
           <path d="M5 12h14M12 5l7 7-7 7" />
         </svg>
       )}
-    </motion.button>
+    </button>
   );
 }
 

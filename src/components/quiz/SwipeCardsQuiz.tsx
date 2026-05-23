@@ -393,7 +393,8 @@ export function SwipeCardsQuiz({
                 }}
               />
               {/* Direction tint overlays - fade in as the student
-                  drags toward a side. Pure visual feedback. */}
+                  drags toward a side. Pure visual feedback. Only
+                  during the question state. */}
               {reveal == null && (
                 <>
                   <motion.div
@@ -421,76 +422,88 @@ export function SwipeCardsQuiz({
                 </>
               )}
 
-              {/* Question type tag */}
-              <p
-                style={{
-                  fontSize: 10,
-                  fontFamily: "var(--font-mono)",
-                  letterSpacing: "0.22em",
-                  textTransform: "uppercase",
-                  color: "rgba(255,255,255,0.42)",
-                  position: "relative",
-                }}
-              >
-                {isAb ? "Pick one" : "True or False"}
-              </p>
+              {reveal == null ? (
+                <>
+                  {/* Question type tag */}
+                  <p
+                    style={{
+                      fontSize: 10,
+                      fontFamily: "var(--font-mono)",
+                      letterSpacing: "0.22em",
+                      textTransform: "uppercase",
+                      color: "rgba(255,255,255,0.42)",
+                      position: "relative",
+                    }}
+                  >
+                    {isAb ? "Pick one" : "True or False"}
+                  </p>
 
-              {/* Question */}
-              <p
-                style={{
-                  fontSize: 19,
-                  fontWeight: 500,
-                  letterSpacing: "-0.014em",
-                  lineHeight: 1.4,
-                  color: "rgba(255,255,255,0.96)",
-                  position: "relative",
-                }}
-              >
-                {top.question_text}
-              </p>
+                  {/* Question */}
+                  <p
+                    style={{
+                      fontSize: 19,
+                      fontWeight: 500,
+                      letterSpacing: "-0.014em",
+                      lineHeight: 1.4,
+                      color: "rgba(255,255,255,0.96)",
+                      position: "relative",
+                    }}
+                  >
+                    {top.question_text}
+                  </p>
 
-              {isAb && (
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 10,
-                    position: "relative",
-                  }}
-                >
-                  <OptionTile
-                    side="left"
-                    badge={swap ? "B" : "A"}
-                    text={swap ? top.option_b : top.option_a}
-                  />
-                  <OptionTile
-                    side="right"
-                    badge={swap ? "A" : "B"}
-                    text={swap ? top.option_a : top.option_b}
-                  />
-                </div>
-              )}
+                  {isAb && (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr",
+                        gap: 10,
+                        position: "relative",
+                      }}
+                    >
+                      <OptionTile
+                        side="left"
+                        badge={swap ? "B" : "A"}
+                        text={swap ? top.option_b : top.option_a}
+                      />
+                      <OptionTile
+                        side="right"
+                        badge={swap ? "A" : "B"}
+                        text={swap ? top.option_a : top.option_b}
+                      />
+                    </div>
+                  )}
+                </>
+              ) : (
+                /* v54.7 - REVEAL STATE. The question + tiles are
+                    replaced by a focused reveal layout so the
+                    explanation has room to breathe AND no overflow
+                    into the Continue button below. The student
+                    just answered, so repeating the question/tiles
+                    isn't needed.
 
-              {/* Reveal panel */}
-              {reveal && (
+                    Layout: big glyph + status label + (if wrong,
+                    the correct answer) + the "why" text. Nothing
+                    competes with the explanation. */
                 <motion.div
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+                  transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
                   style={{
-                    paddingTop: 14,
-                    borderTop: "1px solid rgba(255,255,255,0.10)",
                     display: "flex",
                     flexDirection: "column",
-                    gap: 6,
+                    alignItems: "flex-start",
+                    gap: 14,
                     position: "relative",
+                    minHeight: 200,
+                    paddingTop: 4,
                   }}
                 >
                   <div
                     style={{
                       display: "flex",
                       alignItems: "center",
-                      gap: 8,
+                      gap: 12,
                     }}
                   >
                     <RevealGlyph kind={reveal.kind} />
@@ -498,31 +511,80 @@ export function SwipeCardsQuiz({
                       style={{
                         fontSize: 11,
                         fontFamily: "var(--font-mono)",
-                        letterSpacing: "0.18em",
+                        letterSpacing: "0.22em",
                         textTransform: "uppercase",
                         color:
                           reveal.kind === "correct" ? "#86EFAC" : "#FCA5A5",
                       }}
                     >
-                      {reveal.kind === "correct"
-                        ? "Correct"
-                        : reveal.correctText
-                          ? `Correct answer: ${reveal.correctText}`
-                          : "Wrong"}
+                      {reveal.kind === "correct" ? "Correct" : "Wrong"}
                     </p>
                   </div>
-                  <p
+                  {reveal.kind === "wrong" && reveal.correctText && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <p
+                        style={{
+                          fontSize: 10,
+                          fontFamily: "var(--font-mono)",
+                          letterSpacing: "0.22em",
+                          textTransform: "uppercase",
+                          color: "rgba(255,255,255,0.42)",
+                        }}
+                      >
+                        Correct answer
+                      </p>
+                      <p
+                        style={{
+                          fontSize: 15,
+                          fontWeight: 500,
+                          letterSpacing: "-0.011em",
+                          lineHeight: 1.45,
+                          color: "rgba(255,255,255,0.94)",
+                        }}
+                      >
+                        {reveal.correctText}
+                      </p>
+                    </div>
+                  )}
+                  <div
                     style={{
-                      fontSize: 14,
-                      lineHeight: 1.5,
-                      color: "rgba(255,255,255,0.82)",
-                      letterSpacing: "-0.005em",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
                     }}
                   >
-                    {reveal.card.why_text}
-                  </p>
+                    <p
+                      style={{
+                        fontSize: 10,
+                        fontFamily: "var(--font-mono)",
+                        letterSpacing: "0.22em",
+                        textTransform: "uppercase",
+                        color: "rgba(255,255,255,0.42)",
+                      }}
+                    >
+                      Why
+                    </p>
+                    <p
+                      style={{
+                        fontSize: 16,
+                        fontWeight: 400,
+                        lineHeight: 1.5,
+                        color: "rgba(255,255,255,0.90)",
+                        letterSpacing: "-0.005em",
+                      }}
+                    >
+                      {reveal.card.why_text}
+                    </p>
+                  </div>
                 </motion.div>
               )}
+
             </div>
           </motion.div>
         </AnimatePresence>

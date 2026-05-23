@@ -253,38 +253,51 @@ function AchievementsModal({
       const el = document.querySelector<HTMLElement>(
         '[data-statswidget="root"]',
       );
+      // v53.3 - cap height so the panel doesn't extend all the way to
+      // the bottom of tall monitors. The grid is scrollable inside;
+      // ~520px is enough to show 4-6 tiles at a glance.
+      const ABS_MAX_HEIGHT = 520;
       if (!el) {
-        // No StatsWidget on this surface - fall back to a top-left
-        // anchored panel so the alignment intent is preserved.
+        // No StatsWidget on this surface - fall back to top-left
+        // anchored.
         const w = Math.min(340, window.innerWidth - 24);
         setAnchor({
           left: 12,
           top: 60,
           width: w,
-          maxHeight: window.innerHeight - 80,
+          maxHeight: Math.min(
+            ABS_MAX_HEIGHT,
+            window.innerHeight - 80,
+          ),
         });
         return;
       }
       const rect = el.getBoundingClientRect();
       const gap = 10;
-      const top = rect.bottom + gap;
+      // Round so sub-pixel rect values don't push the panel half a
+      // pixel off the StatsWidget left edge.
+      const top = Math.round(rect.bottom + gap);
+      const left = Math.round(rect.left);
       // When StatsWidget renders as the small phone chip its width
       // is too narrow for the achievement grid. Force a sensible
       // minimum so the panel still reads as a list, anchored to the
       // chip's left edge.
       const minWidth = 300;
-      const maxOnPhone = window.innerWidth - rect.left - 12;
-      const width = Math.max(
-        Math.min(rect.width, maxOnPhone),
-        Math.min(minWidth, maxOnPhone),
+      const maxOnPhone = window.innerWidth - left - 12;
+      const width = Math.round(
+        Math.max(
+          Math.min(rect.width, maxOnPhone),
+          Math.min(minWidth, maxOnPhone),
+        ),
       );
       setAnchor({
-        left: rect.left,
+        left,
         top,
-        // Leave a 20px buffer at the bottom of the viewport so the
-        // panel never bleeds off-screen on shorter monitors.
         width,
-        maxHeight: Math.max(220, window.innerHeight - top - 20),
+        maxHeight: Math.min(
+          ABS_MAX_HEIGHT,
+          Math.max(220, window.innerHeight - top - 20),
+        ),
       });
     };
     measure();
@@ -401,7 +414,10 @@ function AchievementsModal({
               overscrollBehavior: "contain",
             }}
           >
-            {(["legendary", "rare", "uncommon", "common"] as const).map(
+            {/* v53.3 - common at top, legendary at bottom so the
+                most-achievable rewards are the first thing the
+                student reads. */}
+            {(["common", "uncommon", "rare", "legendary"] as const).map(
               (rarity) => {
                 if (grouped[rarity].length === 0) return null;
                 return (

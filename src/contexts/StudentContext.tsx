@@ -149,13 +149,18 @@ interface StudentContextType {
 
   // v54 (brief-region-quiz) — per-region quiz gate. Keyed by
   // region id; each region's row is independent. quiz_passed_at
-  // null = quiz not yet cleared; clicking Onward opens the modal.
-  // After passing once, Onward jumps straight to the next region.
+  // null = never scored 50%+. v65 - Onward stays locked until best
+  // score >= 50%; retakes always allowed. Score fields drive the
+  // region card's "Best: 78%" badge + retake CTA copy.
   regionQuiz: Record<RegionId, StudentRegionQuiz | null>;
-  /** Stamps quiz_passed_at on first pass. No-op on subsequent passes. */
-  markRegionQuizPassed: (regionId: RegionId) => Promise<void>;
-  /** Increments quiz_attempts each time the student opens the modal. */
-  incrementRegionQuizAttempts: (regionId: RegionId) => Promise<void>;
+  /** v65 - submits one completed attempt. Increments quiz_attempts,
+   *  updates last/best scores, stamps quiz_passed_at on the first
+   *  attempt scoring >= 50%. Returns whether the OVERALL pass state
+   *  (best ever >= 50%) is now true. */
+  submitRegionQuiz: (
+    regionId: RegionId,
+    scorePct: number,
+  ) => Promise<{ passed: boolean; bestScorePct: number } | null>;
 
   // v51 (Phase 2, brief v3) — intro video gate + WYH panel state.
   // The 3 flags below drive the first-login chain on /dashboard.
@@ -234,6 +239,9 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       region_id: string;
       quiz_passed_at: string | null;
       quiz_attempts: number;
+      best_score_pct: number | null;
+      last_score_pct: number | null;
+      last_attempt_at: string | null;
     }> | null,
     studentId: string | undefined,
   ): Record<RegionId, StudentRegionQuiz | null> {
@@ -251,6 +259,9 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           region_id: r.region_id,
           quiz_passed_at: r.quiz_passed_at,
           quiz_attempts: r.quiz_attempts,
+          best_score_pct: r.best_score_pct,
+          last_score_pct: r.last_score_pct,
+          last_attempt_at: r.last_attempt_at,
         };
       }
     }
@@ -355,6 +366,9 @@ export function StudentProvider({ children }: { children: ReactNode }) {
               region_id: string;
               quiz_passed_at: string | null;
               quiz_attempts: number;
+              best_score_pct: number | null;
+              last_score_pct: number | null;
+              last_attempt_at: string | null;
             }> | null,
             student?.id,
           ),
@@ -441,6 +455,9 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           region_id: string;
           quiz_passed_at: string | null;
           quiz_attempts: number;
+          best_score_pct: number | null;
+          last_score_pct: number | null;
+          last_attempt_at: string | null;
         }> | null,
         fresh.student?.id,
       ),
@@ -1231,63 +1248,78 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     });
   }, [student, milestones, patchMilestoneFlag]);
 
-  // v54 (brief-region-quiz) - mark + attempts mutators. Both
-  // optimistic-patch the local map so the UI flips before the
-  // server round-trip completes; failure is silent (refresh on
-  // next page load reconciles).
-  const markRegionQuizPassed = useCallback(
-    async (regionId: RegionId) => {
-      if (!student) return;
+  // v65 - single mutator replaces the v54 mark + attempts split.
+  // One round-trip per completed attempt. Optimistic patch the
+  // local map so the result screen flips immediately; the server's
+  // authoritative state arrives in the response and overwrites.
+  const submitRegionQuiz = useCallback(
+    async (regionId: RegionId, scorePct: number) => {
+      if (!student) return null;
       const existing = regionQuizMap[regionId];
-      if (existing?.quiz_passed_at) return;
+      const scoreInt = Math.max(0, Math.min(100, Math.round(scorePct)));
       const now = new Date().toISOString();
-      setRegionQuizMap((prev) => ({
-        ...prev,
-        [regionId]: {
-          student_id: student.id,
-          region_id: regionId,
-          quiz_passed_at: now,
-          quiz_attempts: existing?.quiz_attempts ?? 0,
-        },
-      }));
-      const token = await getAccessToken();
-      if (!token) return;
-      await fetch("/api/student/mark-region-quiz-passed", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ regionId }),
-      });
-    },
-    [student, regionQuizMap],
-  );
+      const optimisticBest = Math.max(scoreInt, existing?.best_score_pct ?? 0);
+      const optimisticAttempts = (existing?.quiz_attempts ?? 0) + 1;
+      const optimisticPassedAt =
+        existing?.quiz_passed_at ?? (scoreInt >= 50 ? now : null);
 
-  const incrementRegionQuizAttempts = useCallback(
-    async (regionId: RegionId) => {
-      if (!student) return;
-      const existing = regionQuizMap[regionId];
-      const nextAttempts = (existing?.quiz_attempts ?? 0) + 1;
       setRegionQuizMap((prev) => ({
         ...prev,
         [regionId]: {
           student_id: student.id,
           region_id: regionId,
-          quiz_passed_at: existing?.quiz_passed_at ?? null,
-          quiz_attempts: nextAttempts,
+          quiz_passed_at: optimisticPassedAt,
+          quiz_attempts: optimisticAttempts,
+          best_score_pct: optimisticBest,
+          last_score_pct: scoreInt,
+          last_attempt_at: now,
         },
       }));
+
       const token = await getAccessToken();
-      if (!token) return;
-      await fetch("/api/student/increment-region-quiz-attempts", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ regionId }),
-      });
+      if (!token) {
+        return { passed: optimisticBest >= 50, bestScorePct: optimisticBest };
+      }
+
+      try {
+        const res = await fetch("/api/student/submit-region-quiz", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ regionId, scorePct: scoreInt }),
+        });
+        if (!res.ok) {
+          return { passed: optimisticBest >= 50, bestScorePct: optimisticBest };
+        }
+        const data = (await res.json()) as {
+          passed: boolean;
+          best_score_pct: number;
+          last_score_pct: number;
+          quiz_attempts: number;
+          quiz_passed_at: string | null;
+        };
+        // Reconcile with the server's authoritative state.
+        setRegionQuizMap((prev) => ({
+          ...prev,
+          [regionId]: {
+            student_id: student.id,
+            region_id: regionId,
+            quiz_passed_at: data.quiz_passed_at,
+            quiz_attempts: data.quiz_attempts,
+            best_score_pct: data.best_score_pct,
+            last_score_pct: data.last_score_pct,
+            last_attempt_at: now,
+          },
+        }));
+        return {
+          passed: data.passed,
+          bestScorePct: data.best_score_pct,
+        };
+      } catch {
+        return { passed: optimisticBest >= 50, bestScorePct: optimisticBest };
+      }
     },
     [student, regionQuizMap],
   );
@@ -1439,8 +1471,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         markIntroVideoThreshold,
         dismissWhyYoureHere,
         regionQuiz: regionQuizMap,
-        markRegionQuizPassed,
-        incrementRegionQuizAttempts,
+        submitRegionQuiz,
         refreshWatchProgress,
         syncDiagnostics,
         forceSync,

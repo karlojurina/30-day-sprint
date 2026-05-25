@@ -102,7 +102,9 @@ export async function GET(request: NextRequest) {
     // Map keyed by region_id.
     supabase
       .from("student_region_quiz")
-      .select("region_id, quiz_passed_at, quiz_attempts")
+      .select(
+        "region_id, quiz_passed_at, quiz_attempts, best_score_pct, last_score_pct, last_attempt_at",
+      )
       .eq("student_id", student.id),
   ]);
 

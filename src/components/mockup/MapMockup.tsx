@@ -107,8 +107,11 @@ import {
 import { CinematicDive } from "./CinematicDive";
 import { StatsWidget } from "@/components/map/StatsWidget";
 import { RegionTodoWidget } from "@/components/map/RegionTodoWidget";
-import { QuizModal } from "@/components/quiz/QuizModal";
-import { SwipeCardsQuiz } from "@/components/quiz/SwipeCardsQuiz";
+import { QuizModal, type QuizResult } from "@/components/quiz/QuizModal";
+import {
+  SwipeCardsQuiz,
+  type QuizCompletePayload,
+} from "@/components/quiz/SwipeCardsQuiz";
 import { getRegionQuiz } from "@/lib/region-quizzes";
 
 interface MapMockupProps {
@@ -519,10 +522,10 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
     bountyAccessJustClaimed,
     dismissBountyClaim,
     bountyAccessClaimedAt,
-    // v54 (brief-region-quiz) - per-region quiz state + mutators.
+    // v54 (brief-region-quiz) - per-region quiz state. v65 - single
+    // submit mutator replaces the v54 mark + increment split.
     regionQuiz,
-    markRegionQuizPassed,
-    incrementRegionQuizAttempts,
+    submitRegionQuiz,
   } = useStudent();
 
   // v50.3 — testOverrides escape hatch. /dashboard-mockup wires this
@@ -551,13 +554,16 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
   // v54 (brief-region-quiz) - quiz modal state. quizRegionId is the
   // region whose quiz is currently open (null = closed). quizProgress
   // is the counter line surfaced from the format component to the
-  // shared modal header. quizPassed flips when the format signals
-  // pass; the modal renders WinScreen + we transition to the next
-  // region on advance.
+  // shared modal header.
+  //
+  // v65 - quizResult holds the post-attempt payload; non-null swaps
+  // the modal body from the format deck to ResultScreen. quizAttempt
+  // is bumped on Retake to force the format component to remount
+  // with a fresh shuffled deck (used as a React key).
   const [quizRegionId, setQuizRegionId] = useState<RegionId | null>(null);
   const [quizProgress, setQuizProgress] = useState<string>("");
-  const [quizPassed, setQuizPassed] = useState(false);
-  const quizAttemptIncrementedRef = useRef<RegionId | null>(null);
+  const [quizResult, setQuizResult] = useState<QuizResult | null>(null);
+  const [quizAttempt, setQuizAttempt] = useState(0);
 
   // Toast for the "you haven't completed all lessons" message when
   // the student tries to advance from a locked Onward marker.
@@ -1333,17 +1339,18 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
               // Onward button. The painted end-marker is what most
               // students click; without this branch the gate never
               // fires for users who don't open the side panel.
+              // v65 - alreadyPassed is now "best score >= 50%" (via
+              // quiz_passed_at which stamps on the first such
+              // attempt). Sub-50% attempts leave the gate locked.
+              // Attempts log on submit, not on open.
               const currentRid = view as RegionId;
               const quizConfig = getRegionQuiz(currentRid);
               const alreadyPassed =
                 regionQuiz[currentRid]?.quiz_passed_at != null;
               if (quizConfig && !alreadyPassed) {
-                if (quizAttemptIncrementedRef.current !== currentRid) {
-                  quizAttemptIncrementedRef.current = currentRid;
-                  void incrementRegionQuizAttempts(currentRid);
-                }
-                setQuizPassed(false);
+                setQuizResult(null);
                 setQuizProgress("");
+                setQuizAttempt((n) => n + 1);
                 setQuizRegionId(currentRid);
                 return;
               }
@@ -2068,34 +2075,55 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
         }}
       />
 
-      {/* v54 (brief-region-quiz) - region-end quiz gate. Modal mounts
-          when Onward is clicked on a fully-complete region whose
-          quiz isn't yet passed. The shared QuizModal wrapper handles
-          chrome + win screen; each region's format component
-          (currently only SwipeCardsQuiz) plugs inside. */}
+      {/* v54 (brief-region-quiz) / v65 - region-end quiz gate.
+          Modal mounts when Onward is clicked on a fully-complete
+          region whose quiz hasn't been passed (best < 50%). The
+          shared QuizModal wrapper handles chrome + ResultScreen;
+          each region's format component plugs inside.
+
+          v65 - quizAttempt is used as a React key on the format
+          component so Retake remounts it with a fresh shuffled
+          deck. */}
       {(() => {
         if (!quizRegionId) return null;
         const quizConfig = getRegionQuiz(quizRegionId);
         if (!quizConfig) return null;
         const focusedRegionName =
           regions.find((r) => r.id === quizRegionId)?.name ?? "Region";
+
+        const handleComplete = async (payload: QuizCompletePayload) => {
+          const scorePct = Math.round(
+            (payload.correctIds.size / payload.total) * 100,
+          );
+          // Submit first, then render the result screen. The submit
+          // returns the OVERALL pass state (best ever >= 50%) which
+          // drives whether ResultScreen enables Continue.
+          const submitted = await submitRegionQuiz(quizRegionId, scorePct);
+          const overallPassed = submitted?.passed ?? scorePct >= 50;
+          setQuizResult({
+            scorePct,
+            overallPassed,
+            wrongAnswers: payload.wrongAnswers,
+            total: payload.total,
+          });
+        };
+
         return (
           <QuizModal
             open={true}
             regionName={focusedRegionName}
             progressLine={quizProgress}
-            passed={quizPassed}
+            result={quizResult}
             onClose={() => {
-              // Close = abort. Per brief, progress doesn't persist
-              // across sessions, so we just dump state.
+              // Close = abort. If the attempt was already submitted
+              // (result is set), the server-side row is already
+              // updated; we just dump the local UI state.
               setQuizRegionId(null);
-              setQuizPassed(false);
+              setQuizResult(null);
               setQuizProgress("");
-              quizAttemptIncrementedRef.current = null;
             }}
             onAdvance={() => {
-              // Win screen continue - mark pass + transition.
-              void markRegionQuizPassed(quizRegionId);
+              // Continue from result screen → next region.
               const nextMap: Record<RegionId, RegionId | null> = {
                 r1: "r2",
                 r2: "r3",
@@ -2104,23 +2132,31 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
               };
               const nextRid = nextMap[quizRegionId];
               setQuizRegionId(null);
-              setQuizPassed(false);
+              setQuizResult(null);
               setQuizProgress("");
-              quizAttemptIncrementedRef.current = null;
               if (nextRid) transitionTo(nextRid);
+            }}
+            onRetake={() => {
+              // Bump the attempt key → format component remounts
+              // with a fresh shuffled deck. Clear the result so the
+              // body swaps from ResultScreen back to the deck.
+              setQuizResult(null);
+              setQuizProgress("");
+              setQuizAttempt((n) => n + 1);
             }}
           >
             {quizConfig.format === "swipe_cards" && (
               <SwipeCardsQuiz
+                key={quizAttempt}
                 cards={quizConfig.cards}
                 onProgressChange={setQuizProgress}
-                onPass={() => setQuizPassed(true)}
+                onComplete={handleComplete}
               />
             )}
             {/* Other formats (stack_builder, tier_ranking,
                 vault_tumblers) plug in here once Karlo ships
-                content for R2-4 - brief explicitly out of scope
-                this round. */}
+                content for R2-4. They conform to the same
+                onComplete contract. */}
           </QuizModal>
         );
       })()}
@@ -2231,22 +2267,19 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                     return;
                   }
                   // v54 - quiz gate. If the region has a quiz config
-                  // AND this student hasn't passed it yet, fire the
-                  // modal instead of jumping. After they pass, the
-                  // modal calls markRegionQuizPassed + transitionTo
-                  // on Continue. Regions without a quiz config (R2-4
-                  // for now) fall through to the existing behavior.
+                  // AND this student hasn't scored >= 50% yet, fire
+                  // the modal instead of jumping. After they pass at
+                  // 50%+, quiz_passed_at gets stamped (server-side)
+                  // and this branch falls through. Regions without
+                  // a quiz config (R2-4 for now) fall through too.
                   const focusedRid = focusedRegion.id as RegionId;
                   const quiz = getRegionQuiz(focusedRid);
                   const alreadyPassed =
                     regionQuiz[focusedRid]?.quiz_passed_at != null;
                   if (quiz && !alreadyPassed) {
-                    if (quizAttemptIncrementedRef.current !== focusedRid) {
-                      quizAttemptIncrementedRef.current = focusedRid;
-                      void incrementRegionQuizAttempts(focusedRid);
-                    }
-                    setQuizPassed(false);
+                    setQuizResult(null);
                     setQuizProgress("");
+                    setQuizAttempt((n) => n + 1);
                     setQuizRegionId(focusedRid);
                     return;
                   }
@@ -2258,6 +2291,39 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
             nextRegion != null &&
             !(regionProgress[focusedRegion.id]?.isComplete ?? false)
           }
+          quizInfo={(() => {
+            // v65 - build the quiz card payload from the region's
+            // configured quiz format + the student's row in
+            // student_region_quiz. Null = no quiz format for this
+            // region (R2-4 currently); the card section doesn't
+            // render.
+            const focusedRid = focusedRegion.id as RegionId;
+            const quiz = getRegionQuiz(focusedRid);
+            if (!quiz) return null;
+            const cards =
+              quiz.format === "swipe_cards"
+                ? quiz.cards
+                : quiz.format === "stack_builder" ||
+                    quiz.format === "vault_tumblers"
+                  ? quiz.cards
+                  : null;
+            if (!cards) return null;
+            const row = regionQuiz[focusedRid];
+            return {
+              questionCount: cards.length,
+              bestScorePct: row?.best_score_pct ?? null,
+              lastScorePct: row?.last_score_pct ?? null,
+              alreadyPassed: row?.quiz_passed_at != null,
+            };
+          })()}
+          onOpenQuiz={() => {
+            const focusedRid = focusedRegion.id as RegionId;
+            if (!getRegionQuiz(focusedRid)) return;
+            setQuizResult(null);
+            setQuizProgress("");
+            setQuizAttempt((n) => n + 1);
+            setQuizRegionId(focusedRid);
+          }}
           width={sidePanelWidth}
           collapsed={sidePanelCollapsed}
           onToggleCollapsed={() => setSidePanelCollapsed((v) => !v)}
@@ -2283,6 +2349,8 @@ function RegionSidePanel({
   onPrev,
   onNext,
   nextLocked = false,
+  quizInfo = null,
+  onOpenQuiz,
   width,
   collapsed,
   onToggleCollapsed,
@@ -2297,6 +2365,18 @@ function RegionSidePanel({
   /** When true, the "Onward" footer button still fires onNext (parent
    *  will show a toast), but it renders dimmed with a lock affordance. */
   nextLocked?: boolean;
+  /** v65 - region-quiz summary shown above the Onward footer. Null
+   *  for regions without a quiz format. */
+  quizInfo?: {
+    questionCount: number;
+    bestScorePct: number | null;
+    lastScorePct: number | null;
+    alreadyPassed: boolean;
+  } | null;
+  /** v65 - fires when the student clicks the "Take quiz" / "Retake"
+   *  pill on the region card. Always opens the quiz regardless of
+   *  pass state. */
+  onOpenQuiz?: () => void;
   width: number;
   collapsed: boolean;
   onToggleCollapsed: () => void;
@@ -2799,6 +2879,86 @@ function RegionSidePanel({
           );
         })}
       </div>
+
+      {/* v65 - Quiz card. Sits above the Onward footer so the student
+          knows a quiz is coming before they hit Onward, and so they
+          can retake after they've passed. Renders only when the
+          region has a quiz format configured. */}
+      {quizInfo && onOpenQuiz && (
+        <div
+          style={{
+            padding: "12px 14px",
+            borderTop: "1px solid rgba(255,255,255,0.06)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 10,
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              minWidth: 0,
+            }}
+          >
+            <p
+              style={{
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: "rgba(255,255,255,0.45)",
+              }}
+            >
+              Region quiz
+            </p>
+            <p
+              style={{
+                fontSize: 13,
+                color: "rgba(255,255,255,0.86)",
+                letterSpacing: "-0.005em",
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              {quizInfo.bestScorePct == null
+                ? `${quizInfo.questionCount} questions · pass at 50%`
+                : quizInfo.alreadyPassed
+                  ? `Best ${quizInfo.bestScorePct}% · passed`
+                  : `Best ${quizInfo.bestScorePct}% · keep going`}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenQuiz}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              background: quizInfo.alreadyPassed
+                ? "rgba(255,255,255,0.06)"
+                : "rgba(255,255,255,0.94)",
+              border: quizInfo.alreadyPassed
+                ? "1px solid rgba(255,255,255,0.14)"
+                : "none",
+              color: quizInfo.alreadyPassed
+                ? "rgba(255,255,255,0.88)"
+                : "rgba(15,17,21,0.92)",
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: "0.02em",
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+          >
+            {quizInfo.bestScorePct == null
+              ? "Take quiz"
+              : quizInfo.alreadyPassed
+                ? "Retake"
+                : "Try again"}
+          </button>
+        </div>
+      )}
 
       {/* Footer - single full-width Onward button when a next
           region exists. "Back to map" in the top nav already covers

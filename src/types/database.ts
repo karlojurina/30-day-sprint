@@ -96,12 +96,22 @@ export interface StudentMilestones {
 }
 
 /** v54 - per-student per-region quiz gate state. One row per pair;
- *  null = no row yet (never opened the quiz). */
+ *  null = no row yet (never opened the quiz). v65 - added scoring
+ *  fields so the region card can show best/last % and the gate
+ *  can use a 50% threshold instead of 100%-deck-clear. */
 export interface StudentRegionQuiz {
   student_id: string;
   region_id: string;
   quiz_passed_at: string | null;
   quiz_attempts: number;
+  /** Best percentage ever scored on this region's quiz (0-100).
+   *  Null until first attempt. v65. */
+  best_score_pct: number | null;
+  /** Most recent attempt's percentage (0-100). Null until first
+   *  attempt. v65. */
+  last_score_pct: number | null;
+  /** Timestamp of the most recent attempt. v65. */
+  last_attempt_at: string | null;
 }
 
 /** v53 (Phase 5) - achievement catalog row. */

@@ -3,20 +3,20 @@
 /**
  * Region 1's quiz format: Swipe Cards.
  *
- * Polished pass (v54.1): card-stack with peeking next cards,
- * drag-to-swipe with tilt + color tint based on direction, larger
- * question typography, premium A/B tile design, smoother reveal
- * transitions. The mechanic stays the same:
+ * v65 - drain-through scoring. Each card is shown exactly once;
+ * wrong answers stay wrong and the deck advances. When the deck
+ * empties, the parent gets the full per-question result set and
+ * can show the score screen + decide whether to gate Onward.
  *
  *   - Shuffle deck on session start (no per-card persistence)
  *   - True/False (left = false, right = true)
- *   - A/B pick (left = A, right = B), positions randomized per render
- *   - Wrong = card returns to bottom of deck + reveal panel (correct
- *     answer + why_text) for 2.5s
- *   - Correct = green tick + why_text for 1.5s, card removed
+ *   - A/B pick, positions randomized per render
+ *   - Per-Q reveal: correct = green tick + why; wrong = red X +
+ *     correct answer + why. Continue advances either way.
+ *   - Deck empty → onComplete({ correctIds, wrongAnswers })
  *   - Drag: > 90px horizontal commit, else snap back
- *   - Keyboard: ← / → mirror the swipe buttons
- *   - Signals progressLine + passed back to the parent via callbacks
+ *   - Keyboard: ← / → mirror swipe buttons; Enter / Space / → on
+ *     reveal advances
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -28,10 +28,27 @@ import {
 } from "framer-motion";
 import type { SwipeCardQuestion } from "@/lib/region-quizzes";
 
+/** v65 - record of one wrong answer. The result screen uses these
+ *  rows to render the "review" list (Q + correct answer + why). */
+export interface QuizWrongAnswer {
+  card: SwipeCardQuestion;
+  /** Human-readable correct answer ("TRUE" / "FALSE" / option_a /
+   *  option_b) so the result screen doesn't need to re-derive it. */
+  correctText: string;
+}
+
+/** v65 - signature the parent receives when the deck empties. */
+export interface QuizCompletePayload {
+  correctIds: Set<string>;
+  wrongAnswers: QuizWrongAnswer[];
+  total: number;
+}
+
 interface SwipeCardsQuizProps {
   cards: SwipeCardQuestion[];
   onProgressChange: (line: string) => void;
-  onPass: () => void;
+  /** v65 - fires once when the deck empties (each card seen once). */
+  onComplete: (result: QuizCompletePayload) => void;
 }
 
 interface RevealState {
@@ -54,10 +71,13 @@ const SWIPE_COMMIT_THRESHOLD = 90; // px horizontal drag to commit
 export function SwipeCardsQuiz({
   cards,
   onProgressChange,
-  onPass,
+  onComplete,
 }: SwipeCardsQuizProps) {
   const [deck, setDeck] = useState<SwipeCardQuestion[]>(() => shuffle(cards));
   const [correctIds, setCorrectIds] = useState<Set<string>>(() => new Set());
+  // v65 - track wrong answers with the derived "correct" text so the
+  // result screen can show a review list without re-walking the cards.
+  const [wrongAnswers, setWrongAnswers] = useState<QuizWrongAnswer[]>([]);
   const [reveal, setReveal] = useState<RevealState | null>(null);
   const [swipeDir, setSwipeDir] = useState<"left" | "right" | null>(null);
 
@@ -83,25 +103,29 @@ export function SwipeCardsQuiz({
   const total = cards.length;
 
   useEffect(() => {
-    onProgressChange(
-      `${correctIds.size} of ${total} correct · ${deck.length} left in deck`,
-    );
-  }, [correctIds, deck.length, total, onProgressChange]);
+    const answered = correctIds.size + wrongAnswers.length;
+    onProgressChange(`Question ${Math.min(answered + 1, total)} of ${total}`);
+  }, [correctIds, wrongAnswers, total, onProgressChange]);
 
   useEffect(() => {
-    if (deck.length === 0 && total > 0) onPass();
-  }, [deck.length, total, onPass]);
+    if (deck.length === 0 && total > 0) {
+      onComplete({ correctIds, wrongAnswers, total });
+    }
+    // onComplete intentionally omitted from deps - we want this to
+    // fire EXACTLY when the deck transitions to empty, not whenever
+    // the parent re-creates the callback.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deck.length, total]);
 
   const top = deck[0] ?? null;
   const next = deck[1] ?? null;
   const next2 = deck[2] ?? null;
 
-  const advanceDeck = useCallback((wasCorrect: boolean) => {
-    setDeck((cur) => {
-      if (cur.length === 0) return cur;
-      const [first, ...rest] = cur;
-      return wasCorrect ? rest : [...rest, first];
-    });
+  // v65 - drain-through: always pop, regardless of right/wrong. The
+  // student sees each question exactly once per attempt; wrong stays
+  // wrong and counts against the score on the result screen.
+  const advanceDeck = useCallback(() => {
+    setDeck((cur) => (cur.length === 0 ? cur : cur.slice(1)));
     setReveal(null);
     setSwipeDir(null);
     dragVisualX.set(0);
@@ -143,20 +167,32 @@ export function SwipeCardsQuiz({
         });
         setReveal({ kind: "correct", card: top, correctText: null });
       } else {
+        // v65 - log the wrong answer + derived correct text so the
+        // result screen can render the review list directly.
+        const derivedCorrect =
+          correctText ??
+          (top.question_type === "true_false"
+            ? top.correct_answer === "true"
+              ? "TRUE"
+              : "FALSE"
+            : top.correct_answer === "a"
+              ? top.option_a
+              : top.option_b);
+        setWrongAnswers((prev) => [
+          ...prev,
+          { card: top, correctText: derivedCorrect },
+        ]);
         setReveal({ kind: "wrong", card: top, correctText });
       }
-      // v54.6 - no more auto-advance setTimeout. The student clicks
-      // Continue when they're ready, OR taps the card itself. Gives
-      // them full read time on long "why" lines.
     },
     [top, reveal, swapAbForCard, dragVisualX],
   );
 
-  // v54.6 - manual advance when reveal is showing. Wraps advanceDeck
-  // with the correct/wrong signal from the current reveal state.
+  // v65 - reveal → next card. Same behavior regardless of correct/
+  // wrong (no more loop-back).
   const advanceFromReveal = useCallback(() => {
     if (reveal == null) return;
-    advanceDeck(reveal.kind === "correct");
+    advanceDeck();
   }, [reveal, advanceDeck]);
 
   // Keyboard:
@@ -215,7 +251,11 @@ export function SwipeCardsQuiz({
         <motion.div
           initial={false}
           animate={{
-            width: `${total > 0 ? (correctIds.size / total) * 100 : 0}%`,
+            // v65 - bar tracks deck progress (answered / total), not
+            // correctness ratio. With drain-through, "answered" is
+            // the meaningful denominator; correctness is revealed
+            // on the result screen.
+            width: `${total > 0 ? ((correctIds.size + wrongAnswers.length) / total) * 100 : 0}%`,
           }}
           transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
           style={{

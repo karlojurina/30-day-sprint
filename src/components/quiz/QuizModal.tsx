@@ -1,37 +1,51 @@
 "use client";
 
 /**
- * Shared region-quiz modal wrapper (brief: lovro-brief-region-quiz).
+ * Shared region-quiz modal wrapper.
  *
- * Hosts the modal chrome (backdrop, header, close, win screen) so
- * each per-format component (SwipeCardsQuiz, future StackBuilder,
+ * Hosts the modal chrome (backdrop, header, close, result screen)
+ * so each per-format component (SwipeCardsQuiz, future StackBuilder,
  * etc.) only has to render its own card/interaction surface.
  *
- * The format components signal completion by calling onPass; the
- * wrapper renders the WinScreen and persists quiz_passed_at via
- * the StudentContext mutator. After ~2s or Continue click, it
- * dismisses + the caller transitions to the next region.
+ * v65 - the format components signal completion by handing the
+ * parent a CompletePayload (correctIds + wrongAnswers + total).
+ * The parent computes the score, submits it to the server, then
+ * sets the `result` prop here, which mounts ResultScreen.
+ *
+ * Continue / Retake are owned by ResultScreen and fire onAdvance /
+ * onRetake here, which the parent wires up.
  */
 
 import { ReactNode, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { WinScreen } from "./WinScreen";
+import { ResultScreen } from "./ResultScreen";
+import type { QuizWrongAnswer } from "./SwipeCardsQuiz";
+
+export interface QuizResult {
+  scorePct: number;
+  overallPassed: boolean;
+  wrongAnswers: QuizWrongAnswer[];
+  total: number;
+}
 
 interface QuizModalProps {
   open: boolean;
   regionName: string;
-  /** "12 of 19" left-side counter line. Format component computes
+  /** "Question 5 of 19" left-side counter. Format component computes
    *  this from its own deck state. */
   progressLine: string;
-  /** Passed in by the format component when the student clears the
-   *  deck (or whatever the win condition is). Triggers the win
-   *  screen overlay; the parent persists + transitions on Continue. */
-  passed: boolean;
+  /** v65 - non-null = the student finished an attempt and we show
+   *  the result screen instead of the deck. */
+  result: QuizResult | null;
   onClose: () => void;
-  /** Fires when the student dismisses the win screen (Continue or
-   *  auto-timer). Parent should transitionTo the next region. */
+  /** v65 - fires when the student clicks Continue on the result
+   *  screen. Parent should transitionTo the next region. */
   onAdvance: () => void;
+  /** v65 - fires when the student clicks Retake on the result
+   *  screen. Parent should remount the format component with a
+   *  fresh deck (e.g. bump a session key). */
+  onRetake: () => void;
   children: ReactNode;
 }
 
@@ -39,18 +53,12 @@ export function QuizModal({
   open,
   regionName,
   progressLine,
-  passed,
+  result,
   onClose,
   onAdvance,
+  onRetake,
   children,
 }: QuizModalProps) {
-  // Auto-advance the win screen at 2s.
-  useEffect(() => {
-    if (!passed) return;
-    const t = window.setTimeout(() => onAdvance(), 2000);
-    return () => window.clearTimeout(t);
-  }, [passed, onAdvance]);
-
   // Lock body scroll while open + close on Escape.
   useEffect(() => {
     if (!open) return;
@@ -144,7 +152,7 @@ export function QuizModal({
                     letterSpacing: "-0.005em",
                   }}
                 >
-                  {progressLine}
+                  {result ? "Results" : progressLine}
                 </p>
               </div>
               <button
@@ -169,7 +177,7 @@ export function QuizModal({
               </button>
             </div>
 
-            {/* Body - either the format component OR the win screen */}
+            {/* Body - either the format component OR the result screen */}
             <div
               style={{
                 position: "relative",
@@ -179,7 +187,18 @@ export function QuizModal({
                 flexDirection: "column",
               }}
             >
-              {passed ? <WinScreen onAdvance={onAdvance} /> : children}
+              {result ? (
+                <ResultScreen
+                  scorePct={result.scorePct}
+                  overallPassed={result.overallPassed}
+                  wrongAnswers={result.wrongAnswers}
+                  total={result.total}
+                  onRetake={onRetake}
+                  onContinue={onAdvance}
+                />
+              ) : (
+                children
+              )}
             </div>
           </motion.div>
         </motion.div>

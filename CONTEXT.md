@@ -81,8 +81,7 @@ welcome, first-client landed, etc.).
 - `POST /api/student/mark-dashboard-login` — stamp first /dashboard load (v51)
 - `POST /api/student/mark-intro-video-threshold` — intro video ~65% watched (v51)
 - `POST /api/student/dismiss-why-youre-here` — final WYH card dismissed (v51)
-- `POST /api/student/mark-region-quiz-passed` — region quiz cleared (v54)
-- `POST /api/student/increment-region-quiz-attempts` — modal open count (v54)
+- `POST /api/student/submit-region-quiz` — region-quiz attempt (v65). One round-trip per completed attempt: updates last/best score, increments attempts, stamps `quiz_passed_at` on first attempt at ≥ 50%. Replaces v54's mark-region-quiz-passed + increment-region-quiz-attempts split.
 - `POST /api/student/refresh-watch-sync` — force a Whop watch-history pull
 - `GET  /api/student/data` — full snapshot for the dashboard
 
@@ -168,8 +167,11 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 - `student_achievements` — per-student unlock rows + `achievement_unlock_stats`
   view exposing global unlock % (v53)
 - `student_region_quiz` — per-(student, region) quiz_passed_at +
-  quiz_attempts for the Onward gate (v54). regions.quiz_format
-  controls which mini-game wrapper to render.
+  quiz_attempts + best_score_pct + last_score_pct + last_attempt_at
+  (v54 + v65). regions.quiz_format controls which mini-game wrapper
+  to render. v65 - quiz_passed_at now stamps on first attempt at ≥ 50%
+  (was: 100% deck clear). Sub-50% scores leave the Onward gate locked
+  until a passing attempt.
 
 **Legacy / archive (do not extend)**
 - `lessons_archive` — frozen pre-migration copy

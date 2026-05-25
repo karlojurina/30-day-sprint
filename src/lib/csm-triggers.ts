@@ -369,23 +369,30 @@ export const triggers: Record<string, TriggerCheck> = {
   // nolessons.day3 / .day7 / .day14 - student LOGGED IN but hasn't
   // started any lessons. Highest-priority intervention in the v3
   // ladder (ZL = "zero lessons").
+  //
+  // The first_sprint_login_at gate is critical: Whop's
+  // membership.activated webhook stamps joined_at on insert, so a
+  // student who paid but never opened our app would otherwise
+  // satisfy "Day N, 0 lessons" and double-fire alongside the NA
+  // (stalled.*) pipeline. These triggers only fire AFTER the
+  // student has actually opened the dashboard.
   "nolessons.day3": (s) => {
+    if (!s.student.first_sprint_login_at) return null;
     if (s.day !== 3 && s.day !== 4) return null; // Day 3, +1 grace
-    if (!s.student.joined_at) return null;
     if (totalCompletedAcrossRegions(s) > 0) return null;
     if (s.recentTaskScenarios.has("nolessons.day3")) return null;
     return `Day ${s.day} · 0 lessons watched, 0 actions shipped.`;
   },
   "nolessons.day7": (s) => {
+    if (!s.student.first_sprint_login_at) return null;
     if (s.day < 7 || s.day > 9) return null;
-    if (!s.student.joined_at) return null;
     if (totalCompletedAcrossRegions(s) > 0) return null;
     if (s.recentTaskScenarios.has("nolessons.day7")) return null;
     return `Day ${s.day} · full week in, still 0 lessons watched.`;
   },
   "nolessons.day14": (s) => {
+    if (!s.student.first_sprint_login_at) return null;
     if (s.day < 14 || s.day > 17) return null;
-    if (!s.student.joined_at) return null;
     if (totalCompletedAcrossRegions(s) > 0) return null;
     if (s.recentTaskScenarios.has("nolessons.day14")) return null;
     return `Day ${s.day} · halfway through sprint, still 0 lessons.`;
@@ -395,6 +402,7 @@ export const triggers: Record<string, TriggerCheck> = {
   // R1 action items (l018 + l020). Mid-priority. ZL wins if it
   // also matches (which it shouldn't here since they DID watch).
   "noship.r1.day7": (s) => {
+    if (!s.student.first_sprint_login_at) return null;
     if (s.day < 7 || s.day > 10) return null;
     if (s.regions.r1.watchedComplete < 10) return null;
     if (s.shipped["l018"] || s.shipped["l020"]) return null;
@@ -403,6 +411,7 @@ export const triggers: Record<string, TriggerCheck> = {
   },
   // noship.r2.day14 - same pattern for R2 actions (l022 + l024).
   "noship.r2.day14": (s) => {
+    if (!s.student.first_sprint_login_at) return null;
     if (s.day < 14 || s.day > 17) return null;
     if (s.regions.r2.watchedComplete < 5) return null;
     if (s.shipped["l022"] || s.shipped["l024"]) return null;
@@ -418,6 +427,7 @@ export const triggers: Record<string, TriggerCheck> = {
   // Threshold: progressRatio < 0.85 (per the brief's "5+ lessons
   // behind expected" guidance, generalized to a ratio).
   "pace.day7": (s) => {
+    if (!s.student.first_sprint_login_at) return null;
     if (s.day < 7 || s.day > 9) return null;
     if (s.progressRatio >= 0.85) return null;
     if (totalCompletedAcrossRegions(s) === 0) return null; // ZL wins
@@ -427,6 +437,7 @@ export const triggers: Record<string, TriggerCheck> = {
     return `Day ${s.day} · behind pace (${(s.progressRatio * 100).toFixed(0)}% of expected). Discount window still open.`;
   },
   "pace.day14": (s) => {
+    if (!s.student.first_sprint_login_at) return null;
     if (s.day < 14 || s.day > 17) return null;
     if (s.progressRatio >= 0.85) return null;
     if (totalCompletedAcrossRegions(s) === 0) return null;
@@ -436,6 +447,7 @@ export const triggers: Record<string, TriggerCheck> = {
     return `Day ${s.day} · behind pace (${(s.progressRatio * 100).toFixed(0)}% of expected). Halfway, discount likely slipped.`;
   },
   "pace.day21": (s) => {
+    if (!s.student.first_sprint_login_at) return null;
     if (s.day < 21 || s.day > 24) return null;
     if (s.progressRatio >= 0.85) return null;
     if (totalCompletedAcrossRegions(s) === 0) return null;

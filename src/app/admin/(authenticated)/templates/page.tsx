@@ -424,7 +424,7 @@ export default function AdminTemplatesPage() {
                       },
                       config: {
                         program_login_link:
-                          "https://sprint.ecomtalent.com/login",
+                          "https://30-day-sprint-smkv.vercel.app/login",
                         discord_invite_link:
                           "https://discord.gg/<server>",
                       },

@@ -304,6 +304,11 @@ export async function GET(request: NextRequest) {
   for (const alert of alerts) {
     const student = students.find((s) => s.id === alert.student_id);
     if (!student) continue;
+    const snap = snapByStudent.get(student.id);
+    // Same login gate the built-in triggers use. A student with an
+    // alert but no first_sprint_login_at hasn't opened the app yet -
+    // they belong to the NA (stalled.*) pipeline, not nolessons/pace.
+    if (snap && !snap.student.first_sprint_login_at) continue;
     const day = dayNumber(student.joined_at);
     const scenarioId = pickExistingAlertScenario(alert.alert_type, day);
     if (!scenarioId) continue;
@@ -311,7 +316,6 @@ export async function GET(request: NextRequest) {
     if (!templateId) continue;
 
     // Progress gate — all four mapped scenarios are cancel_path.
-    const snap = snapByStudent.get(student.id);
     if (snap && snap.progressRatio >= CANCEL_PATH_PROGRESS_GATE) continue;
 
     const label = ALERT_LABEL[alert.alert_type] ?? alert.message;

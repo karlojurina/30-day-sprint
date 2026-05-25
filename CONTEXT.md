@@ -82,6 +82,7 @@ welcome, first-client landed, etc.).
 - `POST /api/student/mark-intro-video-threshold` — intro video ~65% watched (v51)
 - `POST /api/student/dismiss-why-youre-here` — final WYH card dismissed (v51)
 - `POST /api/student/submit-region-quiz` — region-quiz attempt (v65). One round-trip per completed attempt: updates last/best score, increments attempts, stamps `quiz_passed_at` on first attempt at ≥ 50%. Replaces v54's mark-region-quiz-passed + increment-region-quiz-attempts split.
+- `POST /api/student/toggle-manual-todo` — flip a manual region todo's `completed_at` (v66). Symmetric tap-to-undo. Backs the RegionTodoWidget's honor-system todos.
 - `POST /api/student/refresh-watch-sync` — force a Whop watch-history pull
 - `GET  /api/student/data` — full snapshot for the dashboard
 
@@ -172,6 +173,10 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
   to render. v65 - quiz_passed_at now stamps on first attempt at ≥ 50%
   (was: 100% deck clear). Sub-50% scores leave the Onward gate locked
   until a passing attempt.
+- `student_manual_todos` — per-(student, todo_key) honor-system
+  region todos that aren't tied to a specific lesson (v66). The
+  RegionTodoWidget owns the registry of valid todo_keys; this table
+  just owns `completed_at`. Backs R3/R4 third-todo slots.
 
 **Legacy / archive (do not extend)**
 - `lessons_archive` — frozen pre-migration copy

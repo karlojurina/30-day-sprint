@@ -112,6 +112,8 @@ import {
   SwipeCardsQuiz,
   type QuizCompletePayload,
 } from "@/components/quiz/SwipeCardsQuiz";
+import { StackBuilderQuiz } from "@/components/quiz/StackBuilderQuiz";
+import { VaultTumblersQuiz } from "@/components/quiz/VaultTumblersQuiz";
 import { getRegionQuiz } from "@/lib/region-quizzes";
 
 interface MapMockupProps {
@@ -2153,10 +2155,22 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                 onComplete={handleComplete}
               />
             )}
-            {/* Other formats (stack_builder, tier_ranking,
-                vault_tumblers) plug in here once Karlo ships
-                content for R2-4. They conform to the same
-                onComplete contract. */}
+            {quizConfig.format === "stack_builder" && (
+              <StackBuilderQuiz
+                key={quizAttempt}
+                cards={quizConfig.cards}
+                onProgressChange={setQuizProgress}
+                onComplete={handleComplete}
+              />
+            )}
+            {quizConfig.format === "vault_tumblers" && (
+              <VaultTumblersQuiz
+                key={quizAttempt}
+                cards={quizConfig.cards}
+                onProgressChange={setQuizProgress}
+                onComplete={handleComplete}
+              />
+            )}
           </QuizModal>
         );
       })()}

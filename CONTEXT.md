@@ -170,9 +170,12 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 - `student_region_quiz` — per-(student, region) quiz_passed_at +
   quiz_attempts + best_score_pct + last_score_pct + last_attempt_at
   (v54 + v65). regions.quiz_format controls which mini-game wrapper
-  to render. v65 - quiz_passed_at now stamps on first attempt at ≥ 50%
-  (was: 100% deck clear). Sub-50% scores leave the Onward gate locked
-  until a passing attempt.
+  to render (v69 wires r2/r3 → `stack_builder`, r4 → `vault_tumblers`;
+  r1 → `swipe_cards` from v54). v65 - quiz_passed_at now stamps on
+  first attempt at ≥ 50% (was: 100% deck clear). Sub-50% scores leave
+  the Onward gate locked until a passing attempt. All three formats
+  (Swipe Cards, Stack Builder, Vault Tumblers) share the same v65
+  drain-through contract, plug into the shared QuizModal + ResultScreen.
 - `student_manual_todos` — per-(student, todo_key) honor-system
   region todos that aren't tied to a specific lesson (v66). The
   RegionTodoWidget owns the registry of valid todo_keys; this table

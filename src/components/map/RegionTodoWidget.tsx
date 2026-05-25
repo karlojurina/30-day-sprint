@@ -131,10 +131,30 @@ export function RegionTodoWidget() {
     toggleManualTodo,
   } = useStudent();
 
-  // Anchor: where the student is currently working. Falls back to
-  // r1 for new accounts. This is the default view AND the upper
-  // bound for the arrow nav (no peeking forward).
-  const currentRegionId = ((currentLesson?.region_id as RegionId) ?? "r1");
+  // Anchor: where the student is currently working. This is the
+  // default view AND the upper bound for the arrow nav (no peeking
+  // forward). currentLesson is null in two cases:
+  //   - Brand new account, no progress yet -> fall back to r1
+  //   - Student has completed ALL lessons -> anchor to the highest
+  //     region with any completion so they can scroll back through
+  //     everything (v66.1 fix: was trapping post-sprint students on
+  //     r1 with both arrows greyed out).
+  const currentRegionId = useMemo<RegionId>(() => {
+    if (currentLesson?.region_id) return currentLesson.region_id as RegionId;
+    let highest: RegionId = "r1";
+    for (const l of lessons) {
+      if (
+        completedLessonIds.has(l.id) &&
+        REGION_ORDER.includes(l.region_id as RegionId)
+      ) {
+        const lessonIdx = REGION_ORDER.indexOf(l.region_id as RegionId);
+        if (lessonIdx > REGION_ORDER.indexOf(highest)) {
+          highest = l.region_id as RegionId;
+        }
+      }
+    }
+    return highest;
+  }, [currentLesson, lessons, completedLessonIds]);
   const currentIdx = Math.max(0, REGION_ORDER.indexOf(currentRegionId));
 
   // Viewed region: which region's todos are currently rendered.

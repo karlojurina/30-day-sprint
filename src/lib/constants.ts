@@ -34,7 +34,9 @@ export const DISCOUNT_GATE_LESSON_ID = "l049";
 
 // Time window for the 30% discount: complete all of R1 + R2 within
 // this many days of joining Whop. Measured server-side at claim time.
-export const DISCOUNT_WINDOW_DAYS = 14;
+// Lovro confirmed 15 days = "more than 15 days in = no discount" so
+// the eligible window covers days 1-15 inclusive.
+export const DISCOUNT_WINDOW_DAYS = 15;
 
 // Hard cutoff for admin list views — only show students who joined
 // on or after this date. Karlo briefly moved this to 2026-01-01 on

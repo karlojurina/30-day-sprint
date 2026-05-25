@@ -13,11 +13,8 @@ import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
  *                             (null if denominator is 0)
  *   - monthTwoConversionDenom raw count >30d ago (so the UI can hide the rate
  *                             when the cohort is too small to be meaningful)
- *   - bountyAccessCount       students with bounty_access_claimed_at set
- *                             (replaces the old adValueOnboardedRate placeholder
- *                             since Zak's webhook is live)
- *   - bountyAccessRate        bountyAccessCount / activeStudents
- *   - firstClientCount        students who have self-reported first_client_landed_at
+ *   - bountyAccessCount       students who joined the Bounty Program
+ *                             (Zak's webhook stamps bounty_access_claimed_at)
  */
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -52,11 +49,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Team only" }, { status: 403 });
   }
 
-  // Pull all paying students + their milestone rows in parallel. Cohort
-  // sizes are small enough that this is cheap. Filter mirrors the
+  // Pull all paying students + count of bounty enrollments in parallel.
+  // Cohort sizes are small enough that this is cheap. Filter mirrors the
   // admin pages: only students with a real Whop membership and a
   // tracked status (drop 'expired' and null statuses).
-  const [studentsRes, milestonesRes] = await Promise.all([
+  const [studentsRes, bountyCountRes] = await Promise.all([
     supabase
       .from("students")
       .select("id, membership_status, joined_at, updated_at")
@@ -65,18 +62,17 @@ export async function GET(request: NextRequest) {
       .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF),
     supabase
       .from("student_milestones")
-      .select("student_id, bounty_access_claimed_at, first_client_landed_at"),
+      .select("student_id", { count: "exact", head: true })
+      .not("bounty_access_claimed_at", "is", null),
   ]);
 
   const all = studentsRes.data ?? [];
-  const milestones = milestonesRes.data ?? [];
   const now = Date.now();
   const thirtyDaysAgo = now - 30 * 86_400_000;
 
-  const activeIds = new Set(
-    all.filter((s) => s.membership_status === "active").map((s) => s.id as string),
-  );
-  const activeStudents = activeIds.size;
+  const activeStudents = all.filter(
+    (s) => s.membership_status === "active",
+  ).length;
 
   const churnedThisCohort = all.filter(
     (s) =>
@@ -96,25 +92,11 @@ export async function GET(request: NextRequest) {
       ? monthTwoActive / monthTwoConversionDenom
       : null;
 
-  // Bounty Access rollups - sourced from Zak's webhook (live since v50).
-  // Only count students who are still in the active pool so we don't
-  // pollute the rate with churned bounty members.
-  const bountyAccessCount = milestones.filter(
-    (m) => m.bounty_access_claimed_at && activeIds.has(m.student_id as string),
-  ).length;
-  const firstClientCount = milestones.filter(
-    (m) => m.first_client_landed_at && activeIds.has(m.student_id as string),
-  ).length;
-  const bountyAccessRate =
-    activeStudents > 0 ? bountyAccessCount / activeStudents : null;
-
   return NextResponse.json({
     activeStudents,
     churnedThisCohort,
     monthTwoConversionRate,
     monthTwoConversionDenom,
-    bountyAccessCount,
-    bountyAccessRate,
-    firstClientCount,
+    bountyAccessCount: bountyCountRes.count ?? 0,
   });
 }

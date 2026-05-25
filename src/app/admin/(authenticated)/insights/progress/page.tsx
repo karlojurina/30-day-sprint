@@ -1009,11 +1009,11 @@ function CalcTransparency() {
           ratio &gt; 1.5.
         </li>
         <li>
-          <strong>Bounty Access</strong> &mdash; live count of students with
-          <code> bounty_access_claimed_at</code> set on{" "}
-          <code>student_milestones</code>. Stamped exclusively by Zak's{" "}
-          <code>/api/webhooks/adbounty</code>. <strong>First client</strong> is
-          self-reported by the student on Map 2 (Playbook).
+          <strong>Bounty Program · joined</strong> &mdash; live count of
+          students who completed the course and onboarded to the Bounty
+          Program. Sourced from <code>student_milestones.bounty_access_claimed_at</code>,
+          stamped exclusively by Zak&rsquo;s{" "}
+          <code>/api/webhooks/adbounty</code>.
         </li>
       </ul>
     </section>
@@ -1021,89 +1021,33 @@ function CalcTransparency() {
 }
 
 /* ─── Bounty insights ─── */
+//
+// Single number: how many people joined the Bounty Program via Zak's
+// webhook. That is the only thing this section tracks - it is not a
+// funnel and it does NOT include first_client_landed_at (which is a
+// self-reported Playbook milestone, unrelated to bounty enrollment).
 
 interface BountyInsights {
   loading: boolean;
-  activeCount: number;
-  bountyAccessCount: number;
-  firstClientCount: number;
-  /** Most recent N enrollments (claimed_at desc), with student name. */
-  recent: Array<{
-    student_id: string;
-    student_name: string | null;
-    claimed_at: string;
-    first_client_landed_at: string | null;
-  }>;
+  count: number;
 }
 
 function useBountyInsights(): BountyInsights {
   const supabase = createClient();
   const [data, setData] = useState<BountyInsights>({
     loading: true,
-    activeCount: 0,
-    bountyAccessCount: 0,
-    firstClientCount: 0,
-    recent: [],
+    count: 0,
   });
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      // Mirrors the dashboard filter so the two numbers agree.
-      const studentsRes = await supabase
-        .from("students")
-        .select("id, name, membership_status, joined_at")
-        .not("whop_membership_id", "is", null)
-        .in("membership_status", ["active", "past_due", "canceled"])
-        .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF);
-      const milestonesRes = await supabase
+      const { count } = await supabase
         .from("student_milestones")
-        .select(
-          "student_id, bounty_access_claimed_at, first_client_landed_at",
-        )
+        .select("student_id", { count: "exact", head: true })
         .not("bounty_access_claimed_at", "is", null);
-
-      const students = (studentsRes.data ?? []) as Array<{
-        id: string;
-        name: string | null;
-        membership_status: string;
-        joined_at: string;
-      }>;
-      const milestones = (milestonesRes.data ?? []) as Array<{
-        student_id: string;
-        bounty_access_claimed_at: string;
-        first_client_landed_at: string | null;
-      }>;
-
-      const activeIds = new Set(
-        students
-          .filter((s) => s.membership_status === "active")
-          .map((s) => s.id),
-      );
-      const nameById = new Map(students.map((s) => [s.id, s.name]));
-      const inActive = milestones.filter((m) => activeIds.has(m.student_id));
-
-      const recent = [...milestones]
-        .sort((a, b) =>
-          b.bounty_access_claimed_at.localeCompare(a.bounty_access_claimed_at),
-        )
-        .slice(0, 20)
-        .map((m) => ({
-          student_id: m.student_id,
-          student_name: nameById.get(m.student_id) ?? null,
-          claimed_at: m.bounty_access_claimed_at,
-          first_client_landed_at: m.first_client_landed_at,
-        }));
-
       if (cancelled) return;
-      setData({
-        loading: false,
-        activeCount: activeIds.size,
-        bountyAccessCount: inActive.length,
-        firstClientCount: inActive.filter((m) => m.first_client_landed_at)
-          .length,
-        recent,
-      });
+      setData({ loading: false, count: count ?? 0 });
     };
     void run();
     return () => {
@@ -1115,14 +1059,6 @@ function useBountyInsights(): BountyInsights {
 }
 
 function BountyAccessCard({ data }: { data: BountyInsights }) {
-  const rate =
-    data.activeCount > 0
-      ? Math.round((data.bountyAccessCount / data.activeCount) * 100)
-      : 0;
-  const firstClientRate =
-    data.bountyAccessCount > 0
-      ? Math.round((data.firstClientCount / data.bountyAccessCount) * 100)
-      : 0;
   return (
     <div
       style={{
@@ -1133,123 +1069,32 @@ function BountyAccessCard({ data }: { data: BountyInsights }) {
         marginBottom: 16,
       }}
     >
-      <div className="flex items-baseline" style={{ marginBottom: 12, gap: 8 }}>
-        <h3
-          style={{
-            fontSize: 14,
-            fontWeight: 600,
-            color: "var(--color-text-primary)",
-            letterSpacing: "-0.012em",
-          }}
-        >
-          Bounty Access · Zak integration
-        </h3>
-        <span style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>
-          {data.loading
-            ? ""
-            : `${data.activeCount} active students · webhook live`}
-        </span>
-      </div>
-      <div
-        className="grid"
-        style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}
+      <p style={{ ...T.eyebrow, marginBottom: 6 }}>
+        Bounty Program · joined
+      </p>
+      <p
+        style={{
+          fontSize: 36,
+          fontWeight: 600,
+          color: "var(--color-text-primary)",
+          letterSpacing: "-0.022em",
+          fontVariantNumeric: "tabular-nums",
+          lineHeight: 1,
+        }}
       >
-        <BountyCell
-          label="Bounty Access claimed"
-          value={data.bountyAccessCount}
-          sublabel={
-            data.activeCount > 0 ? `${rate}% of active students` : "—"
-          }
-          color="var(--color-accent-dark)"
-          loading={data.loading}
-        />
-        <BountyCell
-          label="First client landed"
-          value={data.firstClientCount}
-          sublabel={
-            data.bountyAccessCount > 0
-              ? `${firstClientRate}% of bounty-enrolled`
-              : "—"
-          }
-          color="var(--color-success)"
-          loading={data.loading}
-        />
-        <BountyCell
-          label="Pending land"
-          value={data.bountyAccessCount - data.firstClientCount}
-          sublabel="Have access, haven't reported a client"
-          color="var(--color-text-secondary)"
-          loading={data.loading}
-        />
-      </div>
-
-      {!data.loading && data.recent.length > 0 && (
-        <>
-          <p
-            style={{
-              ...T.eyebrow,
-              marginTop: 18,
-              marginBottom: 8,
-            }}
-          >
-            Recent enrollments
-          </p>
-          <ul
-            style={{
-              listStyle: "none",
-              padding: 0,
-              margin: 0,
-              borderTop: "1px solid var(--color-border)",
-            }}
-          >
-            {data.recent.map((r) => (
-              <li
-                key={r.student_id}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr auto auto",
-                  gap: 12,
-                  alignItems: "center",
-                  padding: "8px 0",
-                  borderBottom: "1px solid var(--color-border)",
-                  fontSize: 12,
-                }}
-              >
-                <span
-                  style={{
-                    color: "var(--color-text-primary)",
-                    fontWeight: 500,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {r.student_name ?? r.student_id.slice(0, 8)}
-                </span>
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: r.first_client_landed_at
-                      ? "var(--color-success)"
-                      : "var(--color-text-tertiary)",
-                  }}
-                >
-                  {r.first_client_landed_at ? "Client landed" : "No client yet"}
-                </span>
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: "var(--color-text-tertiary)",
-                    fontVariantNumeric: "tabular-nums",
-                  }}
-                >
-                  {r.claimed_at.slice(0, 10)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
+        {data.loading ? "—" : data.count}
+      </p>
+      <p
+        style={{
+          fontSize: 12,
+          color: "var(--color-text-tertiary)",
+          marginTop: 8,
+          lineHeight: 1.4,
+        }}
+      >
+        Students who finished the course and onboarded to the Bounty
+        Program. Stamped by Zak&rsquo;s webhook.
+      </p>
     </div>
   );
 }

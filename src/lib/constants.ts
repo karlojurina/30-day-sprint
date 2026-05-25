@@ -38,21 +38,38 @@ export const DISCOUNT_GATE_LESSON_ID = "l049";
 // the eligible window covers days 1-15 inclusive.
 export const DISCOUNT_WINDOW_DAYS = 15;
 
+// Real launch date for the 30-Day Sprint platform. The single
+// source of truth for "ignore everything that happened before this."
+// Updating this one constant moves every admin surface + CSM task
+// pipeline forward together (which is what you want — diverging
+// cutoffs was a pre-launch artifact, not a feature).
+//
+// History:
+//   2026-05-01 — first admin cutoff (cleared test accounts)
+//   2026-05-18 — TASKS_STUDENT_JOIN_CUTOFF moved (CSM launched separately)
+//   2026-06-01 — unified launch (admin + tasks both move here)
+//
+// If you ever need to diverge admin and tasks again (e.g. show
+// pre-launch students in /admin/students but not generate tasks
+// for them), just hardcode a different ISO string on the constant
+// that needs to move, instead of pointing it at LAUNCH_DATE.
+export const LAUNCH_DATE = "2026-06-01T00:00:00.000Z";
+
 // Hard cutoff for admin list views — only show students who joined
-// on or after this date. Karlo briefly moved this to 2026-01-01 on
-// 2026-05-16, then back to 2026-05-01 on 2026-05-17 because pre-May
-// records are test accounts + free joiners that shouldn't show up
-// in the working surface (Students list, dashboard tiles, month-2
-// conversion). The Insights snapshot table backfilled to 2026-01-01
-// separately — it stays intact and shows pre-May trend history.
-export const ADMIN_STUDENT_JOIN_CUTOFF = "2026-05-01T00:00:00.000Z";
+// on or after the launch date. Filters Students list, dashboard
+// tiles, month-2 conversion, Journey, Insights, Discord test page.
+//
+// The Insights `daily_progress_snapshots` table is backfilled to
+// 2026-01-01 separately — it stays intact and shows pre-launch
+// trend history. That backfill is NOT gated by this constant.
+export const ADMIN_STUDENT_JOIN_CUTOFF = LAUNCH_DATE;
 
 // Cutoff used ONLY by the CSM task pipeline (task generation cron
 // + /api/admin/tasks read filter + dashboard "Open tasks" count).
-// Set to the launch date so Astrid's queue starts clean on day one
-// and isn't polluted by pre-launch students. Bump this whenever the
-// real launch date shifts.
-export const TASKS_STUDENT_JOIN_CUTOFF = "2026-05-18T00:00:00.000Z";
+// Decoupled by name so it can diverge from ADMIN_STUDENT_JOIN_CUTOFF
+// if Karlo ever wants to launch CSM after the rest of the app —
+// today both point at LAUNCH_DATE.
+export const TASKS_STUDENT_JOIN_CUTOFF = LAUNCH_DATE;
 
 // The "editing breakdowns" group: 9 R2 lessons that collapse into a
 // single map node. The student opens the group and chooses Watch or

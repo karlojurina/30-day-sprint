@@ -1022,32 +1022,39 @@ function CalcTransparency() {
 
 /* ─── Bounty insights ─── */
 //
-// Single number: how many people joined the Bounty Program via Zak's
-// webhook. That is the only thing this section tracks - it is not a
-// funnel and it does NOT include first_client_landed_at (which is a
-// self-reported Playbook milestone, unrelated to bounty enrollment).
+// Trendline + range comparison: are more people joining the Bounty
+// Program this period vs the previous one? That's the whole point of
+// tracking it. The card pulls every enrollment timestamp once, then
+// the range toggle re-windows the same data in JS.
+
+type BountyRange = "7" | "30" | "90" | "all";
 
 interface BountyInsights {
   loading: boolean;
-  count: number;
+  /** All enrollment claim timestamps (ISO), sorted ascending. */
+  claimedAts: string[];
 }
 
 function useBountyInsights(): BountyInsights {
   const supabase = createClient();
   const [data, setData] = useState<BountyInsights>({
     loading: true,
-    count: 0,
+    claimedAts: [],
   });
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
-      const { count } = await supabase
+      const { data: rows } = await supabase
         .from("student_milestones")
-        .select("student_id", { count: "exact", head: true })
-        .not("bounty_access_claimed_at", "is", null);
+        .select("bounty_access_claimed_at")
+        .not("bounty_access_claimed_at", "is", null)
+        .order("bounty_access_claimed_at", { ascending: true });
       if (cancelled) return;
-      setData({ loading: false, count: count ?? 0 });
+      const claimedAts = (rows ?? [])
+        .map((r) => r.bounty_access_claimed_at as string)
+        .filter(Boolean);
+      setData({ loading: false, claimedAts });
     };
     void run();
     return () => {
@@ -1058,7 +1065,82 @@ function useBountyInsights(): BountyInsights {
   return data;
 }
 
+/** Bucket enrollments by date (YYYY-MM-DD), zero-filled between
+ *  the from/to bounds so the sparkline doesn't collapse empty days. */
+function bucketByDay(
+  claimedAts: string[],
+  fromDay: number,
+  toDay: number,
+): Array<{ date: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const ts of claimedAts) {
+    const day = ts.slice(0, 10);
+    counts.set(day, (counts.get(day) ?? 0) + 1);
+  }
+  const out: Array<{ date: string; count: number }> = [];
+  // fromDay/toDay are ms timestamps (UTC midnight).
+  for (let t = fromDay; t <= toDay; t += 86_400_000) {
+    const day = new Date(t).toISOString().slice(0, 10);
+    out.push({ date: day, count: counts.get(day) ?? 0 });
+  }
+  return out;
+}
+
 function BountyAccessCard({ data }: { data: BountyInsights }) {
+  const [range, setRange] = useState<BountyRange>("30");
+
+  const totalAllTime = data.claimedAts.length;
+
+  // Window math: "current" is the last N days inclusive of today,
+  // "prior" is the N days immediately before that.
+  const todayMidnight =
+    Math.floor(Date.now() / 86_400_000) * 86_400_000;
+  const days =
+    range === "all" ? null : Number.parseInt(range, 10);
+
+  const currentFrom =
+    days != null ? todayMidnight - (days - 1) * 86_400_000 : null;
+  const priorFrom =
+    days != null ? todayMidnight - (2 * days - 1) * 86_400_000 : null;
+  const priorTo =
+    days != null ? todayMidnight - days * 86_400_000 : null;
+
+  const currentCount =
+    days == null
+      ? totalAllTime
+      : data.claimedAts.filter(
+          (ts) => new Date(ts).getTime() >= (currentFrom ?? 0),
+        ).length;
+  const priorCount =
+    days == null || priorFrom == null || priorTo == null
+      ? null
+      : data.claimedAts.filter((ts) => {
+          const t = new Date(ts).getTime();
+          return t >= priorFrom && t <= priorTo;
+        }).length;
+
+  const delta =
+    priorCount == null ? null : currentCount - priorCount;
+  const deltaPct =
+    priorCount == null || priorCount === 0
+      ? null
+      : Math.round(((currentCount - priorCount) / priorCount) * 100);
+
+  // Sparkline series: zero-filled per day across the current range
+  // (or all-time bucketed by week when range = all).
+  const series = useMemo(() => {
+    if (data.loading) return [];
+    if (range === "all") {
+      if (data.claimedAts.length === 0) return [];
+      const first =
+        Math.floor(new Date(data.claimedAts[0]).getTime() / 86_400_000) *
+        86_400_000;
+      return bucketByDay(data.claimedAts, first, todayMidnight);
+    }
+    if (currentFrom == null) return [];
+    return bucketByDay(data.claimedAts, currentFrom, todayMidnight);
+  }, [data.claimedAts, data.loading, range, currentFrom, todayMidnight]);
+
   return (
     <div
       style={{
@@ -1069,33 +1151,244 @@ function BountyAccessCard({ data }: { data: BountyInsights }) {
         marginBottom: 16,
       }}
     >
-      <p style={{ ...T.eyebrow, marginBottom: 6 }}>
-        Bounty Program · joined
-      </p>
-      <p
-        style={{
-          fontSize: 36,
-          fontWeight: 600,
-          color: "var(--color-text-primary)",
-          letterSpacing: "-0.022em",
-          fontVariantNumeric: "tabular-nums",
-          lineHeight: 1,
-        }}
+      <div
+        className="flex items-center justify-between"
+        style={{ marginBottom: 12, gap: 12, flexWrap: "wrap" }}
       >
-        {data.loading ? "—" : data.count}
-      </p>
+        <div>
+          <p style={{ ...T.eyebrow, marginBottom: 4 }}>
+            Bounty Program · joined
+          </p>
+          <p
+            style={{
+              fontSize: 11,
+              color: "var(--color-text-tertiary)",
+            }}
+          >
+            {data.loading
+              ? ""
+              : `${totalAllTime} total all-time · stamped by Zak's webhook`}
+          </p>
+        </div>
+        <BountyRangeToggle value={range} onChange={setRange} />
+      </div>
+
+      <div
+        className="flex items-baseline"
+        style={{ gap: 14, flexWrap: "wrap", marginBottom: 14 }}
+      >
+        <p
+          style={{
+            fontSize: 40,
+            fontWeight: 600,
+            color: "var(--color-text-primary)",
+            letterSpacing: "-0.024em",
+            fontVariantNumeric: "tabular-nums",
+            lineHeight: 1,
+          }}
+        >
+          {data.loading ? "—" : currentCount}
+        </p>
+        {!data.loading && delta != null && (
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color:
+                delta > 0
+                  ? "var(--color-success)"
+                  : delta < 0
+                    ? "var(--color-danger)"
+                    : "var(--color-text-tertiary)",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {delta > 0 ? "↑ +" : delta < 0 ? "↓ " : "→ "}
+            {Math.abs(delta)}
+            {deltaPct != null && ` (${deltaPct > 0 ? "+" : ""}${deltaPct}%)`}
+            <span style={{ color: "var(--color-text-tertiary)" }}>
+              {" "}
+              vs prior {range === "7"
+                ? "week"
+                : range === "30"
+                  ? "month"
+                  : range === "90"
+                    ? "3 months"
+                    : ""}
+            </span>
+          </span>
+        )}
+        {!data.loading && delta == null && range !== "all" && (
+          <span
+            style={{
+              fontSize: 12,
+              color: "var(--color-text-tertiary)",
+            }}
+          >
+            No prior-period baseline yet
+          </span>
+        )}
+      </div>
+
+      <BountySparkline series={series} loading={data.loading} />
+
       <p
         style={{
-          fontSize: 12,
+          fontSize: 11,
           color: "var(--color-text-tertiary)",
-          marginTop: 8,
+          marginTop: 10,
           lineHeight: 1.4,
         }}
       >
         Students who finished the course and onboarded to the Bounty
-        Program. Stamped by Zak&rsquo;s webhook.
+        Program. Compare windows side-by-side to spot momentum.
       </p>
     </div>
+  );
+}
+
+function BountyRangeToggle({
+  value,
+  onChange,
+}: {
+  value: BountyRange;
+  onChange: (v: BountyRange) => void;
+}) {
+  const opts: Array<{ v: BountyRange; label: string }> = [
+    { v: "7", label: "Week" },
+    { v: "30", label: "Month" },
+    { v: "90", label: "3 months" },
+    { v: "all", label: "All" },
+  ];
+  return (
+    <div
+      className="inline-flex items-center"
+      style={{
+        background: "var(--color-bg-elevated)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 8,
+        padding: 2,
+        gap: 2,
+      }}
+    >
+      {opts.map((o) => {
+        const active = o.v === value;
+        return (
+          <button
+            key={o.v}
+            type="button"
+            onClick={() => onChange(o.v)}
+            style={{
+              padding: "5px 10px",
+              fontSize: 11,
+              fontWeight: 600,
+              borderRadius: 6,
+              border: "none",
+              background: active ? "var(--color-bg-card)" : "transparent",
+              color: active
+                ? "var(--color-text-primary)"
+                : "var(--color-text-secondary)",
+              cursor: "pointer",
+              letterSpacing: "-0.005em",
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function BountySparkline({
+  series,
+  loading,
+}: {
+  series: Array<{ date: string; count: number }>;
+  loading: boolean;
+}) {
+  if (loading) return null;
+  if (series.length === 0) {
+    return (
+      <div
+        style={{
+          padding: 24,
+          textAlign: "center",
+          fontSize: 12,
+          color: "var(--color-text-tertiary)",
+          fontStyle: "italic",
+          border: "1px dashed var(--color-border)",
+          borderRadius: 8,
+        }}
+      >
+        No bounty enrollments yet.
+      </div>
+    );
+  }
+  const W = 1000;
+  const H = 100;
+  const PAD = 12;
+  const max = Math.max(1, ...series.map((p) => p.count));
+  const slotW = (W - PAD * 2) / series.length;
+  const barW = Math.min(slotW * 0.7, 20);
+  const baseline = H - PAD;
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      style={{ width: "100%", height: 100, display: "block" }}
+      aria-label="Bounty enrollments per day"
+    >
+      <line
+        x1={PAD}
+        x2={W - PAD}
+        y1={baseline}
+        y2={baseline}
+        stroke="var(--color-border)"
+        strokeWidth={0.5}
+      />
+      {series.map((p, i) => {
+        const x = PAD + (i + 0.5) * slotW - barW / 2;
+        const h = (p.count / max) * (H - PAD * 2);
+        const y = baseline - h;
+        if (p.count === 0) return null;
+        return (
+          <rect
+            key={`${p.date}-${i}`}
+            x={x}
+            y={y}
+            width={barW}
+            height={h}
+            rx={2}
+            fill="var(--color-accent-dark)"
+          >
+            <title>
+              {p.date}: {p.count} enrollment{p.count === 1 ? "" : "s"}
+            </title>
+          </rect>
+        );
+      })}
+      {/* First / last date labels */}
+      <text
+        x={PAD}
+        y={H - 1}
+        fontSize={9}
+        fill="var(--color-text-tertiary)"
+        textAnchor="start"
+        fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+      >
+        {series[0].date.slice(5)}
+      </text>
+      <text
+        x={W - PAD}
+        y={H - 1}
+        fontSize={9}
+        fill="var(--color-text-tertiary)"
+        textAnchor="end"
+        fontFamily="ui-monospace, SFMono-Regular, Menlo, monospace"
+      >
+        {series[series.length - 1].date.slice(5)}
+      </text>
+    </svg>
   );
 }
 

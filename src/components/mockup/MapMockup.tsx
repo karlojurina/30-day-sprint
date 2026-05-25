@@ -1331,12 +1331,6 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                 );
                 return;
               }
-              // v50 — R4's end-marker IS the Bounty Access claim. Open
-              // l057's lesson sheet where the Claim button lives.
-              if (view === "r4") {
-                onOpenLesson("l057");
-                return;
-              }
               // v54 - quiz gate. Same logic as the side panel
               // Onward button. The painted end-marker is what most
               // students click; without this branch the gate never
@@ -1345,6 +1339,11 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
               // quiz_passed_at which stamps on the first such
               // attempt). Sub-50% attempts leave the gate locked.
               // Attempts log on submit, not on open.
+              // v69.1 - R4 now ALSO routes through the quiz gate
+              // (Vault Tumblers). The R4 quiz gates the Bounty
+              // Access claim the same way R1/R2/R3 quizzes gate
+              // region-to-region jumps. After passing, the marker
+              // opens l057 (where the Claim button lives) directly.
               const currentRid = view as RegionId;
               const quizConfig = getRegionQuiz(currentRid);
               const alreadyPassed =
@@ -1354,6 +1353,13 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                 setQuizProgress("");
                 setQuizAttempt((n) => n + 1);
                 setQuizRegionId(currentRid);
+                return;
+              }
+              // v50 - once R4's quiz is passed (or the region has
+              // no quiz config), the marker opens l057's lesson
+              // sheet where the Claim button lives.
+              if (view === "r4") {
+                onOpenLesson("l057");
                 return;
               }
               const next = SCENE_END_MARKERS[view as RegionId]?.nextView;
@@ -2125,7 +2131,12 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
               setQuizProgress("");
             }}
             onAdvance={() => {
-              // Continue from result screen → next region.
+              // Continue from result screen → next region. R1-R3
+              // jump to the next region. R4 has no "next region"
+              // (it's the final region) - instead, passing the R4
+              // quiz unlocks the Bounty Access claim, so we open
+              // l057's lesson sheet directly. Student can then
+              // click Claim inside l057.
               const nextMap: Record<RegionId, RegionId | null> = {
                 r1: "r2",
                 r2: "r3",
@@ -2133,10 +2144,15 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                 r4: null,
               };
               const nextRid = nextMap[quizRegionId];
+              const isR4 = quizRegionId === "r4";
               setQuizRegionId(null);
               setQuizResult(null);
               setQuizProgress("");
-              if (nextRid) transitionTo(nextRid);
+              if (nextRid) {
+                transitionTo(nextRid);
+              } else if (isR4) {
+                onOpenLesson("l057");
+              }
             }}
             onRetake={() => {
               // Bump the attempt key → format component remounts

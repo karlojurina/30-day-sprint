@@ -12,6 +12,8 @@
  */
 
 import { motion, AnimatePresence } from "framer-motion";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { PlaybookNode } from "@/types/database";
 
 interface Props {
@@ -178,19 +180,140 @@ export function PlaybookNodeSheet({ node, onClose, milestoneSlot }: Props) {
                   </div>
                 )}
 
-                {/* Body — preformatted text. Markdown rendering arrives
-                    when Karlo's content actually needs the formatting. */}
+                {/* Body - markdown rendered via react-markdown (v66).
+                    The X-thread style relies on real bold + headers, so
+                    we render properly. Custom component overrides give
+                    each markdown element the dark-mode styling the rest
+                    of the sheet uses. */}
                 <div
+                  className="playbook-doc"
                   style={{
                     fontSize: 15,
                     lineHeight: 1.65,
                     color: "rgba(255,255,255,0.82)",
-                    whiteSpace: "pre-wrap",
                     letterSpacing: "-0.005em",
                     marginBottom: 24,
                   }}
                 >
-                  {node.doc_content}
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      h1: ({ children }) => (
+                        <h2 style={{
+                          fontSize: 22,
+                          fontWeight: 700,
+                          letterSpacing: "-0.022em",
+                          color: "rgba(255,255,255,0.96)",
+                          marginTop: 28,
+                          marginBottom: 12,
+                          lineHeight: 1.2,
+                        }}>{children}</h2>
+                      ),
+                      h2: ({ children }) => (
+                        <h3 style={{
+                          fontSize: 18,
+                          fontWeight: 700,
+                          letterSpacing: "-0.016em",
+                          color: "rgba(255,255,255,0.96)",
+                          marginTop: 24,
+                          marginBottom: 10,
+                          lineHeight: 1.25,
+                        }}>{children}</h3>
+                      ),
+                      h3: ({ children }) => (
+                        <h4 style={{
+                          fontSize: 15,
+                          fontWeight: 700,
+                          letterSpacing: "-0.011em",
+                          color: "rgba(255,255,255,0.96)",
+                          marginTop: 20,
+                          marginBottom: 8,
+                          lineHeight: 1.3,
+                        }}>{children}</h4>
+                      ),
+                      p: ({ children }) => (
+                        <p style={{
+                          marginBottom: 14,
+                          lineHeight: 1.65,
+                          color: "rgba(255,255,255,0.82)",
+                        }}>{children}</p>
+                      ),
+                      strong: ({ children }) => (
+                        <strong style={{
+                          fontWeight: 700,
+                          color: "rgba(255,255,255,0.96)",
+                        }}>{children}</strong>
+                      ),
+                      em: ({ children }) => (
+                        <em style={{ fontStyle: "italic" }}>{children}</em>
+                      ),
+                      ol: ({ children }) => (
+                        <ol style={{
+                          marginBottom: 18,
+                          paddingLeft: 22,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                        }}>{children}</ol>
+                      ),
+                      ul: ({ children }) => (
+                        <ul style={{
+                          marginBottom: 18,
+                          paddingLeft: 22,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                          listStyle: "disc",
+                        }}>{children}</ul>
+                      ),
+                      li: ({ children }) => (
+                        <li style={{
+                          lineHeight: 1.55,
+                          color: "rgba(255,255,255,0.82)",
+                        }}>{children}</li>
+                      ),
+                      hr: () => (
+                        <hr style={{
+                          border: "none",
+                          borderTop: "1px solid rgba(255,255,255,0.10)",
+                          margin: "24px 0",
+                        }} />
+                      ),
+                      blockquote: ({ children }) => (
+                        <blockquote style={{
+                          borderLeft: "2px solid rgba(230,192,122,0.55)",
+                          paddingLeft: 14,
+                          margin: "16px 0",
+                          color: "rgba(255,255,255,0.72)",
+                          fontStyle: "italic",
+                        }}>{children}</blockquote>
+                      ),
+                      code: ({ children }) => (
+                        <code style={{
+                          fontFamily: "var(--font-mono)",
+                          fontSize: 13,
+                          padding: "1px 6px",
+                          borderRadius: 4,
+                          background: "rgba(255,255,255,0.06)",
+                          color: "rgba(255,255,255,0.92)",
+                        }}>{children}</code>
+                      ),
+                      a: ({ children, href }) => (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{
+                            color: "var(--color-gold-light)",
+                            textDecoration: "underline",
+                            textUnderlineOffset: 2,
+                          }}
+                        >{children}</a>
+                      ),
+                    }}
+                  >
+                    {node.doc_content}
+                  </ReactMarkdown>
                 </div>
 
                 {/* Milestone CTA slot — wired from the parent page. */}

@@ -80,19 +80,42 @@ export default function NotActivatedPage() {
   async function load() {
     setLoading(true);
     const supabase = createClient();
-    // Pool query mirrors the cron's pool.
-    const { data: students } = await supabase
+    // v59 - "Not activated" means PAID but never opened OUR app.
+    // The Whop sync sets students.joined_at to the Whop membership
+    // creation date the moment a student appears in Whop, so it
+    // doesn't actually mean "logged into the dashboard". The real
+    // "logged in to our app" signal is
+    // student_milestones.first_sprint_login_at - stamped only on
+    // first OAuth success against our auth callback. Pull the
+    // active pool first, then exclude anyone whose milestones row
+    // has first_sprint_login_at set.
+    const { data: studentsRaw } = await supabase
       .from("students")
       .select(
         "id, name, email, discord_username, created_at, high_churn_risk",
       )
       .eq("membership_status", "active")
-      .is("joined_at", null)
       .eq("high_churn_risk", false)
       .eq("csm_exempt", false)
       .order("created_at", { ascending: true });
 
-    const ids = (students ?? []).map((s) => s.id);
+    const allIds = (studentsRaw ?? []).map((s) => s.id);
+    let activatedIds = new Set<string>();
+    if (allIds.length > 0) {
+      const { data: activated } = await supabase
+        .from("student_milestones")
+        .select("student_id")
+        .in("student_id", allIds)
+        .not("first_sprint_login_at", "is", null);
+      activatedIds = new Set(
+        (activated ?? []).map((r) => r.student_id as string),
+      );
+    }
+    const students = (studentsRaw ?? []).filter(
+      (s) => !activatedIds.has(s.id as string),
+    );
+
+    const ids = students.map((s) => s.id);
     let syncBy = new Map<string, number>();
     if (ids.length > 0) {
       const { data: sync } = await supabase

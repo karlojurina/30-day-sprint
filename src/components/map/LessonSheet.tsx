@@ -156,7 +156,12 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
   const isCompound = lesson.requires_action;
   const isWatchType = lesson.type === "watch";
   const showWatchCard = isWatchType; // includes compound (which is type='watch' + requires_action)
-  const showMissionBlock = !isWatchType || isCompound;
+  // v59 - mission block hidden when the bounty-access panel handles
+  // its own dedicated CTA copy (l057). Avoids the double-render the
+  // user reported.
+  const isBountyClaimLesson = lesson.id === "l057";
+  const showMissionBlock =
+    (!isWatchType || isCompound) && !isBountyClaimLesson;
   const hasWhopLesson = Boolean(lesson.whop_lesson_id);
   const whopUrl = hasWhopLesson ? WHOP_LESSON_URL(lesson.whop_lesson_id!) : null;
 
@@ -373,8 +378,10 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
             className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5"
             style={{ overscrollBehavior: "contain" }}
           >
-            {/* Description (plain) */}
-            {lesson.description && !isCompound && (
+            {/* Description (plain). v59 - hide for l057 (the Bounty
+                Access claim panel below carries the full copy; the
+                lesson-level description was duplicating). */}
+            {lesson.description && !isCompound && !isBountyClaim && (
               <p
                 style={{
                   color: "var(--color-text-secondary)",

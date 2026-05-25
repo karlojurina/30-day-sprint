@@ -35,6 +35,7 @@ export default function PlaybookPage() {
   const { student } = useAuth();
   const {
     bountyAccessClaimedAt,
+    regionProgress,
     playbookWelcomeSeenAt,
     dismissPlaybookWelcome,
     firstClientLandedAt,
@@ -44,14 +45,18 @@ export default function PlaybookPage() {
   } = useStudent();
   const router = useRouter();
 
-  // v50 — gate: if the student hasn't claimed Bounty Access yet,
-  // send them back to Map 1. The Playbook unlocks the moment they
-  // click Bounty Access on l057 — no separate "Finish Program" step.
+  // v59 - gate widened from "bounty access claimed" to "R4 complete
+  // OR bounty access claimed". Karlo's call: the Playbook should be
+  // accessible the moment the student finishes the sprint so they
+  // can see what's next, not gated behind an external Whop/AdBounty
+  // webhook they might not understand yet.
+  const r4Complete = regionProgress.r4?.isComplete ?? false;
+  const playbookUnlocked = r4Complete || Boolean(bountyAccessClaimedAt);
   useEffect(() => {
-    if (student && !bountyAccessClaimedAt) {
+    if (student && !playbookUnlocked) {
       router.replace("/dashboard?map=1");
     }
-  }, [student, bountyAccessClaimedAt, router]);
+  }, [student, playbookUnlocked, router]);
 
   const [nodes, setNodes] = useState<PlaybookNode[]>([]);
   const [loading, setLoading] = useState(true);

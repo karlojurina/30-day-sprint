@@ -534,6 +534,20 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
       ? testOverrides.bountyAccessClaimedAt ?? null
       : bountyAccessClaimedAt;
 
+  // v59 - The Playbook unlock now hinges on R4 being COMPLETE (all
+  // lessons + actions in R4 done), NOT on the Bounty Access webhook.
+  // Karlo's call: the student grasps "here's the next step after
+  // the sprint" much faster if the Playbook is right there when
+  // they finish, rather than gated behind an external integration
+  // they may not even understand yet. The Bounty Access marker
+  // stays as its own thing - clicking it still opens l057.
+  // testOverrides.bountyAccessClaimedAt is reused here as a manual
+  // unlock signal so the dev panel can still flip the Playbook
+  // visible/hidden without finishing R4.
+  const r4Complete = regionProgress.r4?.isComplete ?? false;
+  const playbookUnlocked =
+    r4Complete || Boolean(effectiveBountyAccessClaimedAt);
+
   // v54 (brief-region-quiz) - quiz modal state. quizRegionId is the
   // region whose quiz is currently open (null = closed). quizProgress
   // is the counter line surfaced from the format component to the
@@ -1390,20 +1404,16 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                       marker: {
                         kind: "playbook",
                         label: "The Playbook",
-                        sublabel: effectiveBountyAccessClaimedAt
+                        sublabel: playbookUnlocked
                           ? "Months 2-3 · open"
-                          : "claim Bounty Access first",
+                          : "finish Region 4 first",
                       },
-                      // v50.2 - Karlo-supplied coords for the button
-                      // position inside the traced volcano-summit
-                      // polygon (the polygon stays as the visual
-                      // halo, this is just where the marker sits).
                       position: { x: 2760, y: 321 },
-                      locked: !effectiveBountyAccessClaimedAt,
+                      locked: !playbookUnlocked,
                       onClick: () => {
-                        if (!effectiveBountyAccessClaimedAt) {
+                        if (!playbookUnlocked) {
                           showToast(
-                            "Claim Bounty Access to unlock the Playbook",
+                            "Finish Region 4 to unlock the Playbook",
                           );
                           return;
                         }
@@ -1427,13 +1437,13 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
               view === "r4"
                 ? {
                     polygon: PLAYBOOK_ZONE.polygon,
-                    locked: !effectiveBountyAccessClaimedAt,
+                    locked: !playbookUnlocked,
                     hot: playbookAuraHot,
                     onHotChange: setPlaybookAuraHot,
                     onClick: () => {
-                      if (!effectiveBountyAccessClaimedAt) {
+                      if (!playbookUnlocked) {
                         showToast(
-                          "Claim Bounty Access to unlock the Playbook",
+                          "Finish Region 4 to unlock the Playbook",
                         );
                         return;
                       }

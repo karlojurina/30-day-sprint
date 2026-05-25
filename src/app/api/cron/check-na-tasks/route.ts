@@ -81,14 +81,20 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceClient();
   const started = Date.now();
 
-  // Pull the "not activated" pool.
+  // v59 - "not activated" = paid but never OAuth'd into our app.
+  // students.joined_at is set by the Whop sync at insert time, so
+  // it's not a reliable signal. The real "logged in" stamp is
+  // student_milestones.first_sprint_login_at - written by
+  // /auth/whop/callback on first successful OAuth.
+  //
+  // Strategy: pull the active-paid pool from students, then drop
+  // anyone whose milestones row has first_sprint_login_at set.
   const { data: studentsRaw, error: studentsErr } = await supabase
     .from("students")
     .select(
       "id, name, email, discord_username, created_at, high_churn_risk",
     )
     .eq("membership_status", "active")
-    .is("joined_at", null)
     .eq("high_churn_risk", false)
     .eq("csm_exempt", false);
 
@@ -100,7 +106,22 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const pool = (studentsRaw ?? []) as NotActivatedRow[];
+  const allIds = (studentsRaw ?? []).map((s) => s.id as string);
+  let activatedIds = new Set<string>();
+  if (allIds.length > 0) {
+    const { data: activated } = await supabase
+      .from("student_milestones")
+      .select("student_id")
+      .in("student_id", allIds)
+      .not("first_sprint_login_at", "is", null);
+    activatedIds = new Set(
+      (activated ?? []).map((r) => r.student_id as string),
+    );
+  }
+
+  const pool = (studentsRaw ?? []).filter(
+    (s) => !activatedIds.has(s.id as string),
+  ) as NotActivatedRow[];
 
   // Resolve template ids for all 8 NA scenarios in one query.
   // v57 - new scenario id slugs (was NA-A.1 / NA-B.1 etc.)

@@ -1,16 +1,19 @@
 "use client";
 
 /**
- * v44 — Region to-do widget. Sits next to the StatsWidget on the
- * overview, top-left of the map. Lists the concrete things the student
- * needs to do to finish their current region.
+ * Region to-do widget. Sits next to the StatsWidget on the overview,
+ * top-left of the map. Lists the concrete things the student needs
+ * to do to finish their current region.
  *
- * R1 (only one wired today):
- *   1. Complete all lessons   — auto-tracked from completedLessonIds
- *   2. Ship Organic ad (l018) — manual "Mark Ad Shipped"
- *   3. Ship UGC ad (l020)     — manual "Mark Ad Shipped"
+ * Two todo kinds:
+ *   - watch_lessons_in_region: counts non-action lessons in the
+ *     region. Auto-tracked via the Whop watch sync + manual toggles.
+ *   - action_shipped: counts a specific lesson's action_completed_at.
+ *     Renders an inline "Mark Ad Shipped" button.
  *
- * R2/R3/R4: not specced yet — widget hides itself when no tasks.
+ * The "watch" count deliberately excludes lessons where
+ * requires_action = true. Those have their own dedicated
+ * "Ship your X ad" todos and shouldn't double-count.
  *
  * Per Karlo's brief:
  *   - inline Mark Ad Shipped on each row (no need to open the lesson)
@@ -24,7 +27,7 @@ import { useMemo } from "react";
 import { useStudent } from "@/contexts/StudentContext";
 
 type TodoKind =
-  | { type: "all_lessons_in_region"; regionId: string }
+  | { type: "watch_lessons_in_region"; regionId: string }
   | { type: "action_shipped"; lessonId: string };
 
 interface TodoSpec {
@@ -36,9 +39,9 @@ interface TodoSpec {
 const REGION_TODOS: Record<string, TodoSpec[]> = {
   r1: [
     {
-      id: "r1_all_lessons",
-      title: "Complete all R1 lessons",
-      kind: { type: "all_lessons_in_region", regionId: "r1" },
+      id: "r1_watch_lessons",
+      title: "Watch all R1 lessons",
+      kind: { type: "watch_lessons_in_region", regionId: "r1" },
     },
     {
       id: "r1_ship_organic",
@@ -51,10 +54,37 @@ const REGION_TODOS: Record<string, TodoSpec[]> = {
       kind: { type: "action_shipped", lessonId: "l020" },
     },
   ],
-  // R2/R3/R4: empty for now — Karlo to spec.
-  r2: [],
-  r3: [],
-  r4: [],
+  r2: [
+    {
+      id: "r2_watch_lessons",
+      title: "Watch all R2 lessons",
+      kind: { type: "watch_lessons_in_region", regionId: "r2" },
+    },
+    {
+      id: "r2_ship_vsl",
+      title: "Ship your VSL ad",
+      kind: { type: "action_shipped", lessonId: "l022" },
+    },
+    {
+      id: "r2_ship_highprod",
+      title: "Ship your High-Prod ad",
+      kind: { type: "action_shipped", lessonId: "l024" },
+    },
+  ],
+  r3: [
+    {
+      id: "r3_watch_lessons",
+      title: "Watch all R3 lessons",
+      kind: { type: "watch_lessons_in_region", regionId: "r3" },
+    },
+  ],
+  r4: [
+    {
+      id: "r4_watch_lessons",
+      title: "Watch all R4 lessons",
+      kind: { type: "watch_lessons_in_region", regionId: "r4" },
+    },
+  ],
 };
 
 export function RegionTodoWidget() {
@@ -73,9 +103,13 @@ export function RegionTodoWidget() {
   const region = regions.find((r) => r.id === currentRegionId);
   const todos = REGION_TODOS[currentRegionId] ?? [];
 
-  // Aggregate R1 lesson totals once (cheap, but memoize for cleanliness).
+  // Watch-only count: lessons in the current region where
+  // requires_action is false. Action items (shipping) live in
+  // their own dedicated todos below so we don't double-count.
   const regionLessonStats = useMemo(() => {
-    const inRegion = lessons.filter((l) => l.region_id === currentRegionId);
+    const inRegion = lessons.filter(
+      (l) => l.region_id === currentRegionId && !l.requires_action,
+    );
     const total = inRegion.length;
     const done = inRegion.filter((l) => completedLessonIds.has(l.id)).length;
     return { total, done };
@@ -128,7 +162,7 @@ export function RegionTodoWidget() {
       {/* Rows */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {todos.map((todo) => {
-          if (todo.kind.type === "all_lessons_in_region") {
+          if (todo.kind.type === "watch_lessons_in_region") {
             const { done, total } = regionLessonStats;
             const isDone = total > 0 && done === total;
             return (

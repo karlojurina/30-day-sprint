@@ -17,8 +17,8 @@
  *     not in our app" - shown as a hint, not a cohort gate)
  *
  * Cohort derivation (Phase 3 simplification - no form webhook):
- *   discord_username NOT NULL → Cohort A → NA-A.{tier} via Discord DM
- *   discord_username IS  NULL → Cohort B → NA-B.{tier} via Whop DM
+ *   discord_username NOT NULL → Cohort A → stalled.discord.day{tier} via Discord DM
+ *   discord_username IS  NULL → Cohort B → stalled.whop.day{tier} via Whop DM
  *
  * Filters: cohort, current tier, "watching in Whop" hint.
  */
@@ -60,8 +60,10 @@ function cohortFor(row: NotActivatedRow): "A" | "B" {
 }
 
 function templateIdFor(cohort: "A" | "B", tier: Tier): string {
-  const idx = TIER_DAYS.indexOf(tier) + 1;
-  return `NA-${cohort}.${idx}`;
+  // v57 renamed NA-A.{idx} / NA-B.{idx} to stalled.{channel}.day{tier}.
+  // Cohort A (has Discord) -> Discord DM channel, Cohort B (no Discord) -> Whop DM.
+  const channel = cohort === "A" ? "discord" : "whop";
+  return `stalled.${channel}.day${tier}`;
 }
 
 export default function NotActivatedPage() {
@@ -191,8 +193,10 @@ export default function NotActivatedPage() {
           }}
         >
           Students who paid for Whop but haven&rsquo;t signed in to
-          the dashboard yet. Cohort A (has Discord) gets NA-A.x via
-          Discord DM. Cohort B (no Discord) gets NA-B.x via Whop DM.
+          the dashboard yet. Cohort A (has Discord) gets{" "}
+          <code>stalled.discord.day&#123;tier&#125;</code> via Discord
+          DM. Cohort B (no Discord) gets{" "}
+          <code>stalled.whop.day&#123;tier&#125;</code> via Whop DM.
           Day-10 tier flips <code>high_churn_risk</code> and drops
           them from this list.
         </p>

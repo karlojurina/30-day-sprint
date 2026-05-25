@@ -52,6 +52,10 @@ interface DashboardData {
   openTasks: number;
   monthTwoConversionRate: number | null;
   monthTwoCohortSize: number;
+  /** # of active students who have claimed Bounty Access (Zak's webhook). */
+  bountyAccessCount: number;
+  /** # of active students with a self-reported first client landed. */
+  firstClientCount: number;
   /** Last 14 days of nightly snapshots (oldest first) — feeds the sparkline tiles. */
   trend: MetricPoint[];
 }
@@ -80,6 +84,7 @@ export default function AdminDashboard() {
         discountsRes,
         tasksRes,
         snapshotsRes,
+        milestonesRes,
       ] = await Promise.all([
         supabase
           .from("students")
@@ -115,6 +120,11 @@ export default function AdminDashboard() {
           )
           .gte("snapshot_date", fourteenDaysAgo)
           .order("snapshot_date", { ascending: true }),
+        // Bounty rollups - feeds the Bounty Access hero stat (replaces
+        // the old "pending integration with Zak" placeholder).
+        supabase
+          .from("student_milestones")
+          .select("student_id, bounty_access_claimed_at, first_client_landed_at"),
       ]);
 
       const students = (studentsRes.data || []) as Student[];
@@ -169,6 +179,21 @@ export default function AdminDashboard() {
         churned_count: Number(r.churned_count ?? 0),
       }));
 
+      // Bounty rollups - only count rows tied to a student still in
+      // the active pool (otherwise churned bounty members pad it).
+      const activeIdSet = new Set(activeStudents.map((s) => s.id));
+      const milestoneRows = (milestonesRes.data ?? []) as Array<{
+        student_id: string;
+        bounty_access_claimed_at: string | null;
+        first_client_landed_at: string | null;
+      }>;
+      const bountyAccessCount = milestoneRows.filter(
+        (m) => m.bounty_access_claimed_at && activeIdSet.has(m.student_id),
+      ).length;
+      const firstClientCount = milestoneRows.filter(
+        (m) => m.first_client_landed_at && activeIdSet.has(m.student_id),
+      ).length;
+
       setData({
         totalStudents: students.length,
         activeStudents: activeStudents.length,
@@ -179,6 +204,8 @@ export default function AdminDashboard() {
         openTasks: tasksRes.count ?? 0,
         monthTwoConversionRate,
         monthTwoCohortSize: matureCohort.length,
+        bountyAccessCount,
+        firstClientCount,
         trend,
       });
 
@@ -249,9 +276,17 @@ export default function AdminDashboard() {
             accent
           />
           <HeroStat
-            label="AdValue onboarded"
-            value="—"
-            sublabel="Pending integration with Zak."
+            label="Bounty Access"
+            value={String(data.bountyAccessCount)}
+            sublabel={
+              data.activeStudents > 0
+                ? `${Math.round(
+                    (data.bountyAccessCount / data.activeStudents) * 100,
+                  )}% of active students enrolled via Zak's webhook · ${
+                    data.firstClientCount
+                  } first client${data.firstClientCount === 1 ? "" : "s"} landed.`
+                : "Zak's webhook live — no active students yet."
+            }
           />
         </div>
       </Section>

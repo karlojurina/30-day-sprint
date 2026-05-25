@@ -31,8 +31,10 @@ import {
   PageHeader,
   Card,
   EmptyState,
+  T,
 } from "@/components/admin/ui";
 import { useJourneyPaceCounts } from "@/lib/useJourneyPaceCounts";
+import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 
 interface SnapshotRow {
   snapshot_date: string;
@@ -121,6 +123,8 @@ export default function ProgressInsightsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const paceCounts = useJourneyPaceCounts();
+  const bounty = useBountyInsights();
+  const sprinters = useCurrentSprinterProgress();
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -298,6 +302,17 @@ export default function ProgressInsightsPage() {
 
       {/* Pace breakdown card — uses the same source as the journey nav badge */}
       <PaceBreakdownCard counts={paceCounts} />
+
+      {/* Current sprinters card - avg progress for students still WITHIN
+          their 30-day window. The chart below ("Avg progress") includes
+          graduates and so trends upward forever; this number is the
+          honest "are people in the sprint progressing" signal. */}
+      <CurrentSprintersCard data={sprinters} />
+
+      {/* Bounty Access funnel — sourced from student_milestones (Zak's
+          webhook stamps bounty_access_claimed_at; students self-report
+          first_client_landed_at on Map 2). */}
+      <BountyAccessCard data={bounty} />
 
       {error && (
         <div
@@ -971,8 +986,11 @@ function CalcTransparency() {
         }}
       >
         <li>
-          <strong>Avg progress</strong> &mdash; mean of completed-vs-expected
-          per active student, captured at 00:30 UTC nightly.
+          <strong>Avg progress</strong> &mdash; mean of completion % across
+          every active student (including graduates at 100%). Trends upward
+          monotonically until churn or new joiners drag it down. For a
+          cleaner "are current sprinters progressing" signal, see the
+          live current-sprinters tile above the trends.
         </li>
         <li>
           <strong>Active students</strong> &mdash; <code>membership_status</code>{" "}
@@ -990,7 +1008,456 @@ function CalcTransparency() {
           <code>buildPaceSummary</code>). Behind = ratio &lt; 0.5, Ahead =
           ratio &gt; 1.5.
         </li>
+        <li>
+          <strong>Bounty Access</strong> &mdash; live count of students with
+          <code> bounty_access_claimed_at</code> set on{" "}
+          <code>student_milestones</code>. Stamped exclusively by Zak's{" "}
+          <code>/api/webhooks/adbounty</code>. <strong>First client</strong> is
+          self-reported by the student on Map 2 (Playbook).
+        </li>
       </ul>
     </section>
+  );
+}
+
+/* ─── Bounty insights ─── */
+
+interface BountyInsights {
+  loading: boolean;
+  activeCount: number;
+  bountyAccessCount: number;
+  firstClientCount: number;
+  /** Most recent N enrollments (claimed_at desc), with student name. */
+  recent: Array<{
+    student_id: string;
+    student_name: string | null;
+    claimed_at: string;
+    first_client_landed_at: string | null;
+  }>;
+}
+
+function useBountyInsights(): BountyInsights {
+  const supabase = createClient();
+  const [data, setData] = useState<BountyInsights>({
+    loading: true,
+    activeCount: 0,
+    bountyAccessCount: 0,
+    firstClientCount: 0,
+    recent: [],
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      // Mirrors the dashboard filter so the two numbers agree.
+      const studentsRes = await supabase
+        .from("students")
+        .select("id, name, membership_status, joined_at")
+        .not("whop_membership_id", "is", null)
+        .in("membership_status", ["active", "past_due", "canceled"])
+        .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF);
+      const milestonesRes = await supabase
+        .from("student_milestones")
+        .select(
+          "student_id, bounty_access_claimed_at, first_client_landed_at",
+        )
+        .not("bounty_access_claimed_at", "is", null);
+
+      const students = (studentsRes.data ?? []) as Array<{
+        id: string;
+        name: string | null;
+        membership_status: string;
+        joined_at: string;
+      }>;
+      const milestones = (milestonesRes.data ?? []) as Array<{
+        student_id: string;
+        bounty_access_claimed_at: string;
+        first_client_landed_at: string | null;
+      }>;
+
+      const activeIds = new Set(
+        students
+          .filter((s) => s.membership_status === "active")
+          .map((s) => s.id),
+      );
+      const nameById = new Map(students.map((s) => [s.id, s.name]));
+      const inActive = milestones.filter((m) => activeIds.has(m.student_id));
+
+      const recent = [...milestones]
+        .sort((a, b) =>
+          b.bounty_access_claimed_at.localeCompare(a.bounty_access_claimed_at),
+        )
+        .slice(0, 20)
+        .map((m) => ({
+          student_id: m.student_id,
+          student_name: nameById.get(m.student_id) ?? null,
+          claimed_at: m.bounty_access_claimed_at,
+          first_client_landed_at: m.first_client_landed_at,
+        }));
+
+      if (cancelled) return;
+      setData({
+        loading: false,
+        activeCount: activeIds.size,
+        bountyAccessCount: inActive.length,
+        firstClientCount: inActive.filter((m) => m.first_client_landed_at)
+          .length,
+        recent,
+      });
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
+
+  return data;
+}
+
+function BountyAccessCard({ data }: { data: BountyInsights }) {
+  const rate =
+    data.activeCount > 0
+      ? Math.round((data.bountyAccessCount / data.activeCount) * 100)
+      : 0;
+  const firstClientRate =
+    data.bountyAccessCount > 0
+      ? Math.round((data.firstClientCount / data.bountyAccessCount) * 100)
+      : 0;
+  return (
+    <div
+      style={{
+        background: "var(--color-bg-card)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 12,
+        padding: "18px 20px",
+        marginBottom: 16,
+      }}
+    >
+      <div className="flex items-baseline" style={{ marginBottom: 12, gap: 8 }}>
+        <h3
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: "var(--color-text-primary)",
+            letterSpacing: "-0.012em",
+          }}
+        >
+          Bounty Access · Zak integration
+        </h3>
+        <span style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>
+          {data.loading
+            ? ""
+            : `${data.activeCount} active students · webhook live`}
+        </span>
+      </div>
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12 }}
+      >
+        <BountyCell
+          label="Bounty Access claimed"
+          value={data.bountyAccessCount}
+          sublabel={
+            data.activeCount > 0 ? `${rate}% of active students` : "—"
+          }
+          color="var(--color-accent-dark)"
+          loading={data.loading}
+        />
+        <BountyCell
+          label="First client landed"
+          value={data.firstClientCount}
+          sublabel={
+            data.bountyAccessCount > 0
+              ? `${firstClientRate}% of bounty-enrolled`
+              : "—"
+          }
+          color="var(--color-success)"
+          loading={data.loading}
+        />
+        <BountyCell
+          label="Pending land"
+          value={data.bountyAccessCount - data.firstClientCount}
+          sublabel="Have access, haven't reported a client"
+          color="var(--color-text-secondary)"
+          loading={data.loading}
+        />
+      </div>
+
+      {!data.loading && data.recent.length > 0 && (
+        <>
+          <p
+            style={{
+              ...T.eyebrow,
+              marginTop: 18,
+              marginBottom: 8,
+            }}
+          >
+            Recent enrollments
+          </p>
+          <ul
+            style={{
+              listStyle: "none",
+              padding: 0,
+              margin: 0,
+              borderTop: "1px solid var(--color-border)",
+            }}
+          >
+            {data.recent.map((r) => (
+              <li
+                key={r.student_id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto auto",
+                  gap: 12,
+                  alignItems: "center",
+                  padding: "8px 0",
+                  borderBottom: "1px solid var(--color-border)",
+                  fontSize: 12,
+                }}
+              >
+                <span
+                  style={{
+                    color: "var(--color-text-primary)",
+                    fontWeight: 500,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {r.student_name ?? r.student_id.slice(0, 8)}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: r.first_client_landed_at
+                      ? "var(--color-success)"
+                      : "var(--color-text-tertiary)",
+                  }}
+                >
+                  {r.first_client_landed_at ? "Client landed" : "No client yet"}
+                </span>
+                <span
+                  style={{
+                    fontSize: 11,
+                    color: "var(--color-text-tertiary)",
+                    fontVariantNumeric: "tabular-nums",
+                  }}
+                >
+                  {r.claimed_at.slice(0, 10)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
+function BountyCell({
+  label,
+  value,
+  sublabel,
+  color,
+  loading,
+  suffix = "",
+}: {
+  label: string;
+  value: number;
+  sublabel: string;
+  color: string;
+  loading: boolean;
+  suffix?: string;
+}) {
+  return (
+    <div
+      style={{
+        background: "var(--color-bg-elevated)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 10,
+        padding: "14px 16px",
+      }}
+    >
+      <p
+        style={{
+          fontSize: 10,
+          fontWeight: 600,
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+          color: "var(--color-text-tertiary)",
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </p>
+      <div className="flex items-baseline" style={{ gap: 8, marginBottom: 6 }}>
+        <span
+          style={{
+            fontSize: 28,
+            fontWeight: 600,
+            color,
+            letterSpacing: "-0.022em",
+            fontVariantNumeric: "tabular-nums",
+            lineHeight: 1,
+          }}
+        >
+          {loading ? "—" : `${value}${suffix}`}
+        </span>
+      </div>
+      <p
+        style={{
+          fontSize: 11,
+          color: "var(--color-text-tertiary)",
+          lineHeight: 1.4,
+        }}
+      >
+        {sublabel}
+      </p>
+    </div>
+  );
+}
+
+/* ─── Current-sprinters progress (live) ─── */
+
+interface SprinterProgress {
+  loading: boolean;
+  /** Students still within 30 days of joining + membership active. */
+  count: number;
+  /** Mean completion % across that pool. */
+  avgProgress: number;
+  /** Median completion % across that pool. Catches the case where a few
+   *  high performers pull the mean up. */
+  medianProgress: number;
+}
+
+function useCurrentSprinterProgress(): SprinterProgress {
+  const supabase = createClient();
+  const [data, setData] = useState<SprinterProgress>({
+    loading: true,
+    count: 0,
+    avgProgress: 0,
+    medianProgress: 0,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      const thirtyDaysAgo = new Date(
+        Date.now() - 30 * 86_400_000,
+      ).toISOString();
+      const [studentsRes, lessonsRes, completionsRes] = await Promise.all([
+        supabase
+          .from("students")
+          .select("id, joined_at, membership_status")
+          .eq("membership_status", "active")
+          .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
+          .gte("joined_at", thirtyDaysAgo),
+        supabase.from("lessons").select("id", { count: "exact", head: true }),
+        supabase
+          .from("student_progress_counts")
+          .select("student_id, completed_count"),
+      ]);
+
+      const students = (studentsRes.data ?? []) as Array<{
+        id: string;
+        joined_at: string;
+      }>;
+      const totalLessons =
+        typeof lessonsRes.count === "number" && lessonsRes.count > 0
+          ? lessonsRes.count
+          : 57;
+      const completionMap = new Map<string, number>();
+      for (const r of (completionsRes.data ?? []) as Array<{
+        student_id: string;
+        completed_count: number;
+      }>) {
+        completionMap.set(r.student_id, r.completed_count);
+      }
+
+      const pcts = students.map((s) => {
+        const done = completionMap.get(s.id) ?? 0;
+        return Math.max(0, Math.min(100, Math.round((done / totalLessons) * 100)));
+      });
+
+      const avg =
+        pcts.length > 0
+          ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length)
+          : 0;
+      const sorted = [...pcts].sort((a, b) => a - b);
+      const median =
+        sorted.length === 0
+          ? 0
+          : sorted.length % 2 === 1
+            ? sorted[(sorted.length - 1) / 2]
+            : Math.round(
+                (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2,
+              );
+
+      if (cancelled) return;
+      setData({
+        loading: false,
+        count: students.length,
+        avgProgress: avg,
+        medianProgress: median,
+      });
+    };
+    void run();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
+
+  return data;
+}
+
+function CurrentSprintersCard({ data }: { data: SprinterProgress }) {
+  return (
+    <div
+      style={{
+        background: "var(--color-bg-card)",
+        border: "1px solid var(--color-border)",
+        borderRadius: 12,
+        padding: "18px 20px",
+        marginBottom: 16,
+      }}
+    >
+      <div className="flex items-baseline" style={{ marginBottom: 12, gap: 8 }}>
+        <h3
+          style={{
+            fontSize: 14,
+            fontWeight: 600,
+            color: "var(--color-text-primary)",
+            letterSpacing: "-0.012em",
+          }}
+        >
+          Current sprinters
+        </h3>
+        <span style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>
+          Active members within 30 days of joining
+          {data.loading ? "" : ` · ${data.count}`}
+        </span>
+      </div>
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}
+      >
+        <BountyCell
+          label="Mean progress"
+          value={data.avgProgress}
+          sublabel="Average completion % across the cohort"
+          color="var(--color-accent-dark)"
+          loading={data.loading}
+          suffix="%"
+        />
+        <BountyCell
+          label="Median progress"
+          value={data.medianProgress}
+          sublabel="Half the cohort is above this number"
+          color="var(--color-text-secondary)"
+          loading={data.loading}
+          suffix="%"
+        />
+      </div>
+    </div>
   );
 }

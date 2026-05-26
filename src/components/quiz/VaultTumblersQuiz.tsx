@@ -22,12 +22,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import type { SwipeCardQuestion } from "@/lib/region-quizzes";
 import type {
   QuizCompletePayload,
   QuizWrongAnswer,
 } from "./SwipeCardsQuiz";
+import { useQuizAnimationSlots } from "./QuizModal";
 
 interface VaultTumblersQuizProps {
   /** Brief v2: must be exactly 15 cards in fixed 1→15 order. */
@@ -191,54 +193,39 @@ export function VaultTumblersQuiz({
 
   if (!top && questionIdx < total) return null;
 
+  const animationSlots = useQuizAnimationSlots();
   const swap = top ? swapAbForCard.get(top.id) ?? false : false;
   const isAb = top?.question_type === "ab_pick";
   const leftLabel = isAb ? (swap ? "B" : "A") : "FALSE";
   const rightLabel = isAb ? (swap ? "A" : "B") : "TRUE";
 
   return (
-    <div
-      style={{
-        // v70.2 - absolute positioning layout. Dials float at top,
-        // question card geometrically centered in modal viewport,
-        // buttons absolute at bottom. minHeight on the format
-        // component sets modal size; R1 is unaffected.
-        position: "relative",
-        flex: 1,
-        minHeight: 620,
-        padding: "16px 20px 22px",
-      }}
-    >
-      {/* Dial row - absolute top, floats independently. */}
+    <>
+      {/* v70.3 - dial row portaled OUTSIDE the panel into the top
+          slot owned by QuizModal. */}
+      {animationSlots.top &&
+        createPortal(
+          <DialRow
+            dials={dialStates}
+            activeDialIdx={activeDialIdx}
+            thunkKey={thunkKey}
+          />,
+          animationSlots.top,
+        )}
+
       <div
         style={{
-          position: "absolute",
-          top: 16,
-          left: 20,
-          right: 20,
+          flex: 1,
           display: "flex",
-          justifyContent: "center",
-          pointerEvents: "none",
-          zIndex: 1,
+          flexDirection: "column",
+          padding: "16px 20px 18px",
+          gap: 14,
         }}
       >
-        <DialRow
-          dials={dialStates}
-          activeDialIdx={activeDialIdx}
-          thunkKey={thunkKey}
-        />
-      </div>
-
-      {/* Question card - geometrically centered in modal viewport. */}
       {top && (
         <div
           style={{
-            position: "absolute",
-            top: "50%",
-            left: 20,
-            right: 20,
-            transform: "translateY(-50%)",
-            zIndex: 2,
+            position: "relative",
             background:
               reveal?.kind === "correct"
                 ? "linear-gradient(155deg, rgba(74,222,128,0.16) 0%, rgba(34,197,94,0.06) 55%, rgba(34,197,94,0.02) 100%)"
@@ -338,17 +325,8 @@ export function VaultTumblersQuiz({
         </div>
       )}
 
-      {/* Buttons - absolute-positioned at the bottom of the modal
-          viewport, separate layer from the centered question card. */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 22,
-          left: 20,
-          right: 20,
-          zIndex: 2,
-        }}
-      >
+      {/* Buttons - compact, in flow under the question card. */}
+      <div style={{ flexShrink: 0 }}>
         {reveal == null ? (
           <div
             style={{
@@ -372,7 +350,8 @@ export function VaultTumblersQuiz({
           <ContinueButton onClick={advanceFromReveal} />
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 

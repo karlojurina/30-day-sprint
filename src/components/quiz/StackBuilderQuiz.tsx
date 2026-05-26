@@ -19,12 +19,14 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import type { SwipeCardQuestion } from "@/lib/region-quizzes";
 import type {
   QuizCompletePayload,
   QuizWrongAnswer,
 } from "./SwipeCardsQuiz";
+import { useQuizAnimationSlots } from "./QuizModal";
 
 interface StackBuilderQuizProps {
   cards: SwipeCardQuestion[];
@@ -177,59 +179,41 @@ export function StackBuilderQuiz({
 
   if (!top && deck.length === 0) return null;
 
+  const slots = useQuizAnimationSlots();
   const swap = top ? swapAbForCard.get(top.id) ?? false : false;
   const isAb = top?.question_type === "ab_pick";
   const leftLabel = isAb ? (swap ? "B" : "A") : "FALSE";
   const rightLabel = isAb ? (swap ? "A" : "B") : "TRUE";
 
   return (
-    <div
-      style={{
-        // v70.2 - new layout per Karlo: question card geometrically
-        // centered in the modal viewport; animation (tower) and
-        // buttons float as separate absolute layers. Format
-        // component sets its own minHeight so R1 (SwipeCards) isn't
-        // affected by a global modal height.
-        position: "relative",
-        flex: 1,
-        minHeight: 620,
-        padding: "16px 20px 22px",
-      }}
-    >
-      {/* Tower - absolute-positioned at top, floats above the
-          centered question card. Pointer-events: none so it never
-          blocks clicks on the question card if there's overlap. */}
+    <>
+      {/* v70.3 - tower is portaled OUTSIDE the modal panel into the
+          top slot owned by QuizModal. The modal stays compact (just
+          question + buttons); the tower floats above it in screen
+          space. */}
+      {slots.top &&
+        createPortal(
+          <Tower
+            total={total}
+            correctCount={correctCount}
+            wobbleKey={wobbleKey}
+          />,
+          slots.top,
+        )}
+
       <div
         style={{
-          position: "absolute",
-          top: 16,
-          left: 20,
-          right: 20,
+          flex: 1,
           display: "flex",
-          justifyContent: "center",
-          pointerEvents: "none",
-          zIndex: 1,
+          flexDirection: "column",
+          padding: "16px 20px 18px",
+          gap: 14,
         }}
       >
-        <Tower
-          total={total}
-          correctCount={correctCount}
-          wobbleKey={wobbleKey}
-        />
-      </div>
-
-      {/* Question card - geometrically centered in the modal
-          viewport via top: 50% + translateY. Sits above (z-index)
-          any animation that visually extends into its zone. */}
       {top && (
         <div
           style={{
-            position: "absolute",
-            top: "50%",
-            left: 20,
-            right: 20,
-            transform: "translateY(-50%)",
-            zIndex: 2,
+            position: "relative",
             background:
               reveal?.kind === "correct"
                 ? "linear-gradient(155deg, rgba(74,222,128,0.16) 0%, rgba(34,197,94,0.06) 55%, rgba(34,197,94,0.02) 100%)"
@@ -329,17 +313,8 @@ export function StackBuilderQuiz({
         </div>
       )}
 
-      {/* Buttons - absolute-positioned at the bottom of the modal
-          viewport, separate layer from the centered question card. */}
-      <div
-        style={{
-          position: "absolute",
-          bottom: 22,
-          left: 20,
-          right: 20,
-          zIndex: 2,
-        }}
-      >
+      {/* Buttons - compact, in flow under the question card. */}
+      <div style={{ flexShrink: 0 }}>
         {reveal == null ? (
           <div
             style={{
@@ -363,7 +338,8 @@ export function StackBuilderQuiz({
           <ContinueButton onClick={advanceFromReveal} />
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 

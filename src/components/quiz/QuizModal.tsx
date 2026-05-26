@@ -3,20 +3,40 @@
 /**
  * Shared region-quiz modal wrapper.
  *
- * Hosts the modal chrome (backdrop, header, close, result screen)
- * so each per-format component (SwipeCardsQuiz, future StackBuilder,
- * etc.) only has to render its own card/interaction surface.
+ * Hosts the modal chrome (backdrop, header, close, result screen) so
+ * each per-format component (SwipeCardsQuiz, StackBuilderQuiz, etc.)
+ * only has to render its own card/interaction surface.
  *
  * v65 - the format components signal completion by handing the
- * parent a CompletePayload (correctIds + wrongAnswers + total).
- * The parent computes the score, submits it to the server, then
- * sets the `result` prop here, which mounts ResultScreen.
+ * parent a CompletePayload (correctIds + wrongAnswers + total). The
+ * parent computes the score, submits it to the server, then sets
+ * the `result` prop here, which mounts ResultScreen.
  *
- * Continue / Retake are owned by ResultScreen and fire onAdvance /
- * onRetake here, which the parent wires up.
+ * v70.3 - animation slots live OUTSIDE the modal panel (per Karlo:
+ * "Animations can be outside of that main question window and float
+ *  ... above the question window floating or on the sides floating").
+ * Format components portal their animation visuals into these slots
+ * via the `useQuizAnimationSlots` context. The modal panel itself
+ * stays compact, R1-style, containing just question + buttons.
+ *
+ * Slot layout in the overlay:
+ *
+ *        ┌──────────────────────┐
+ *        │     [top slot]       │     ← animations float here
+ *        └──────────────────────┘
+ *   ┌──┐ ┌──────────────────────┐ ┌──┐
+ *   │L │ │   modal panel        │ │R │ ← compact panel; question +
+ *   │  │ │   (compact)          │ │  │   buttons only.
+ *   └──┘ └──────────────────────┘ └──┘
  */
 
-import { ReactNode, useEffect } from "react";
+import {
+  createContext,
+  ReactNode,
+  useContext,
+  useEffect,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { ResultScreen } from "./ResultScreen";
@@ -27,6 +47,25 @@ export interface QuizResult {
   overallPassed: boolean;
   wrongAnswers: QuizWrongAnswer[];
   total: number;
+}
+
+/** Animation slots exposed by QuizModal. Format components consume
+ *  them via useQuizAnimationSlots() + createPortal to render their
+ *  visual OUTSIDE the modal panel (top / left / right of it). */
+interface QuizAnimationSlots {
+  top: HTMLDivElement | null;
+  left: HTMLDivElement | null;
+  right: HTMLDivElement | null;
+}
+
+const QuizAnimationSlotsContext = createContext<QuizAnimationSlots>({
+  top: null,
+  left: null,
+  right: null,
+});
+
+export function useQuizAnimationSlots(): QuizAnimationSlots {
+  return useContext(QuizAnimationSlotsContext);
 }
 
 interface QuizModalProps {
@@ -74,6 +113,13 @@ export function QuizModal({
     };
   }, [open, onClose]);
 
+  // v70.3 - DOM refs for animation slots that live OUTSIDE the modal
+  // panel. State-setter refs (not useRef) so children re-render after
+  // mount and pick up the now-non-null slot element via context.
+  const [topSlot, setTopSlot] = useState<HTMLDivElement | null>(null);
+  const [leftSlot, setLeftSlot] = useState<HTMLDivElement | null>(null);
+  const [rightSlot, setRightSlot] = useState<HTMLDivElement | null>(null);
+
   if (typeof document === "undefined") return null;
 
   const content = (
@@ -88,8 +134,6 @@ export function QuizModal({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.3 }}
-          // Stop wheel/touchmove from bubbling into the map zoom
-          // handler under the modal.
           onWheel={(e) => e.stopPropagation()}
           onTouchMove={(e) => e.stopPropagation()}
           className="fixed inset-0 z-[170] flex items-center justify-center"
@@ -101,112 +145,173 @@ export function QuizModal({
             padding: 16,
           }}
         >
-          <motion.div
-            initial={{ scale: 0.96, opacity: 0, y: 10 }}
-            animate={{ scale: 1, opacity: 1, y: 0 }}
-            transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+          {/* Scene container - column with TOP slot above the panel
+              row. The panel row has the LEFT slot, panel, RIGHT slot.
+              All slots are siblings of the modal panel, NOT inside it. */}
+          <div
             style={{
-              width: "min(560px, 100%)",
-              // v70.2 - back to content-sized modal. Format components
-              // that need a stable layout (R2/R3/R4 - animation +
-              // question + buttons) set their OWN minHeight so they
-              // dictate modal size. R1 SwipeCards naturally sizes to
-              // its content (was getting tall + empty when modal had
-              // a global fixed height).
-              maxHeight: "92vh",
               display: "flex",
               flexDirection: "column",
-              background: "rgba(15, 17, 21, 0.96)",
-              border: "1px solid rgba(255, 255, 255, 0.12)",
-              borderRadius: 18,
-              boxShadow:
-                "0 30px 80px rgba(0,0,0,0.60), 0 1px 0 rgba(255,255,255,0.05) inset",
-              color: "rgba(255,255,255,0.94)",
-              overflow: "hidden",
+              alignItems: "center",
+              gap: 24,
+              width: "100%",
+              maxWidth: "min(1100px, 100%)",
             }}
-            onClick={(e) => e.stopPropagation()}
           >
-            {/* Header */}
+            {/* TOP slot - animations portal here. Empty if a format
+                doesn't provide a top animation. */}
+            <div
+              ref={setTopSlot}
+              style={{
+                width: "min(560px, 100%)",
+                display: "flex",
+                justifyContent: "center",
+                pointerEvents: "none",
+              }}
+            />
+
+            {/* Panel row - left slot | modal panel | right slot */}
             <div
               style={{
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "space-between",
-                padding: "16px 20px 12px",
-                borderBottom: "1px solid rgba(255,255,255,0.06)",
-                flexShrink: 0,
+                gap: 24,
+                width: "100%",
+                justifyContent: "center",
               }}
             >
-              <div>
-                <p
-                  style={{
-                    fontSize: 10,
-                    fontFamily: "var(--font-mono)",
-                    letterSpacing: "0.22em",
-                    textTransform: "uppercase",
-                    color: "rgba(255,255,255,0.45)",
-                    marginBottom: 2,
-                  }}
-                >
-                  {regionName} quiz
-                </p>
-                <p
-                  style={{
-                    fontSize: 13,
-                    color: "rgba(255,255,255,0.78)",
-                    fontVariantNumeric: "tabular-nums",
-                    letterSpacing: "-0.005em",
-                  }}
-                >
-                  {result ? "Results" : progressLine}
-                </p>
-              </div>
-              <button
-                onClick={onClose}
-                aria-label="Close quiz"
+              <div
+                ref={setLeftSlot}
                 style={{
-                  background: "transparent",
-                  border: "1px solid rgba(255,255,255,0.14)",
-                  borderRadius: 8,
-                  color: "rgba(255,255,255,0.65)",
-                  width: 30,
-                  height: 30,
-                  cursor: "pointer",
-                  fontSize: 17,
+                  flex: "0 0 auto",
                   display: "flex",
-                  alignItems: "center",
                   justifyContent: "center",
-                  flexShrink: 0,
+                  pointerEvents: "none",
                 }}
-              >
-                ×
-              </button>
-            </div>
+              />
 
-            {/* Body - either the format component OR the result screen */}
-            <div
-              style={{
-                position: "relative",
-                flex: 1,
-                minHeight: 0,
-                display: "flex",
-                flexDirection: "column",
-              }}
-            >
-              {result ? (
-                <ResultScreen
-                  scorePct={result.scorePct}
-                  overallPassed={result.overallPassed}
-                  wrongAnswers={result.wrongAnswers}
-                  total={result.total}
-                  onRetake={onRetake}
-                  onContinue={onAdvance}
-                />
-              ) : (
-                children
-              )}
+              <motion.div
+                initial={{ scale: 0.96, opacity: 0, y: 10 }}
+                animate={{ scale: 1, opacity: 1, y: 0 }}
+                transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+                style={{
+                  width: "min(560px, 100%)",
+                  // v70.3 - back to compact, R1-style. The animation
+                  // lives OUTSIDE this panel now (in the slots above /
+                  // beside it), so the panel just needs room for the
+                  // question card + buttons. maxHeight cap handles
+                  // small viewports.
+                  maxHeight: "92vh",
+                  display: "flex",
+                  flexDirection: "column",
+                  background: "rgba(15, 17, 21, 0.96)",
+                  border: "1px solid rgba(255, 255, 255, 0.12)",
+                  borderRadius: 18,
+                  boxShadow:
+                    "0 30px 80px rgba(0,0,0,0.60), 0 1px 0 rgba(255,255,255,0.05) inset",
+                  color: "rgba(255,255,255,0.94)",
+                  overflow: "hidden",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Header */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "16px 20px 12px",
+                    borderBottom: "1px solid rgba(255,255,255,0.06)",
+                    flexShrink: 0,
+                  }}
+                >
+                  <div>
+                    <p
+                      style={{
+                        fontSize: 10,
+                        fontFamily: "var(--font-mono)",
+                        letterSpacing: "0.22em",
+                        textTransform: "uppercase",
+                        color: "rgba(255,255,255,0.45)",
+                        marginBottom: 2,
+                      }}
+                    >
+                      {regionName} quiz
+                    </p>
+                    <p
+                      style={{
+                        fontSize: 13,
+                        color: "rgba(255,255,255,0.78)",
+                        fontVariantNumeric: "tabular-nums",
+                        letterSpacing: "-0.005em",
+                      }}
+                    >
+                      {result ? "Results" : progressLine}
+                    </p>
+                  </div>
+                  <button
+                    onClick={onClose}
+                    aria-label="Close quiz"
+                    style={{
+                      background: "transparent",
+                      border: "1px solid rgba(255,255,255,0.14)",
+                      borderRadius: 8,
+                      color: "rgba(255,255,255,0.65)",
+                      width: 30,
+                      height: 30,
+                      cursor: "pointer",
+                      fontSize: 17,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {/* Body - either the format component OR the result
+                    screen */}
+                <div
+                  style={{
+                    position: "relative",
+                    flex: 1,
+                    minHeight: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                  }}
+                >
+                  {result ? (
+                    <ResultScreen
+                      scorePct={result.scorePct}
+                      overallPassed={result.overallPassed}
+                      wrongAnswers={result.wrongAnswers}
+                      total={result.total}
+                      onRetake={onRetake}
+                      onContinue={onAdvance}
+                    />
+                  ) : (
+                    <QuizAnimationSlotsContext.Provider
+                      value={{ top: topSlot, left: leftSlot, right: rightSlot }}
+                    >
+                      {children}
+                    </QuizAnimationSlotsContext.Provider>
+                  )}
+                </div>
+              </motion.div>
+
+              <div
+                ref={setRightSlot}
+                style={{
+                  flex: "0 0 auto",
+                  display: "flex",
+                  justifyContent: "center",
+                  pointerEvents: "none",
+                }}
+              />
             </div>
-          </motion.div>
+          </div>
         </motion.div>
       )}
     </AnimatePresence>

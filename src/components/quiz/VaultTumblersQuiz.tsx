@@ -407,7 +407,7 @@ function DialRow({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
+          gap: 16,
           justifyContent: "center",
           position: "relative",
         }}
@@ -426,7 +426,7 @@ function DialRow({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
+          gap: 16,
           justifyContent: "center",
         }}
       >
@@ -434,7 +434,7 @@ function DialRow({
           <span
             key={`label-${d.idx}`}
             style={{
-              width: 92,
+              width: 116,
               fontSize: 10,
               fontFamily: "var(--font-mono)",
               letterSpacing: "0.18em",
@@ -464,24 +464,23 @@ function Dial({
   state: DialState;
   thunkKey: number;
 }) {
-  // Locked = satisfying 360 spin. Wrong (thunk) = brief counter-
-  // rotate. Spring physics on lock for a more mechanical feel.
   const baseRotate = state.isLocked ? 360 : 0;
 
-  // Three "tumbler pins" around the dial's inner ring. Filled when
-  // the corresponding question in this dial was answered correctly.
   const marks = Array.from({ length: QUESTIONS_PER_DIAL }, (_, i) => {
     const isFilled = i < state.correctInDial;
     const wasAsked = i < state.askedInDial;
     return { i, isFilled, wasAsked };
   });
 
-  // v70.1 - bigger again. The dial row now lives in its own
-  // prominent top zone above the question card, so it can scale
-  // up further without crowding anything.
-  const size = 92;
-  const innerRadius = size / 2 - 14;
-  const markSize = 10;
+  // v70.6 - bigger and more mechanical. Added knurled rim with 24
+  // tick marks, a pointer indicator at top, center screw detail.
+  // Reads as an actual rotating dial, not just a circle with dots.
+  const size = 116;
+  const innerRadius = size / 2 - 18;
+  const markSize = 11;
+  const tickCount = 24;
+  const tickInnerR = size / 2 - 6;
+  const tickOuterR = size / 2 - 2;
 
   return (
     <motion.div
@@ -534,9 +533,48 @@ function Dial({
             : "inset 0 2px 4px rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.04)",
       }}
     >
-      {/* Inner ring - a thin recessed groove inside the dial that the
-          tumbler marks sit on. Pure decoration; gives the dial more
-          mechanical depth. */}
+      {/* Knurled rim - 24 short tick marks around the perimeter.
+          Makes the dial feel like a real mechanical rotating element
+          you'd grip. Rendered via SVG inside the dial. */}
+      <svg
+        aria-hidden="true"
+        viewBox={`0 0 ${size} ${size}`}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+          pointerEvents: "none",
+        }}
+      >
+        {Array.from({ length: tickCount }, (_, i) => {
+          const angle = (i / tickCount) * 360 - 90;
+          const rad = (angle * Math.PI) / 180;
+          const x1 = size / 2 + Math.cos(rad) * tickInnerR;
+          const y1 = size / 2 + Math.sin(rad) * tickInnerR;
+          const x2 = size / 2 + Math.cos(rad) * tickOuterR;
+          const y2 = size / 2 + Math.sin(rad) * tickOuterR;
+          return (
+            <line
+              key={i}
+              x1={x1}
+              y1={y1}
+              x2={x2}
+              y2={y2}
+              stroke={
+                state.isLocked
+                  ? "rgba(255,255,255,0.55)"
+                  : state.isActive
+                    ? "rgba(255,255,255,0.32)"
+                    : "rgba(255,255,255,0.12)"
+              }
+              strokeWidth="1"
+              strokeLinecap="round"
+            />
+          );
+        })}
+      </svg>
+      {/* Inner ring - a recessed groove that the tumbler marks orbit. */}
       <div
         aria-hidden="true"
         style={{
@@ -544,16 +582,20 @@ function Dial({
           top: "50%",
           left: "50%",
           transform: "translate(-50%, -50%)",
-          width: innerRadius * 2 + markSize,
-          height: innerRadius * 2 + markSize,
+          width: innerRadius * 2 + markSize + 4,
+          height: innerRadius * 2 + markSize + 4,
           borderRadius: "50%",
-          border: state.isLocked || state.isActive
-            ? "0.5px solid rgba(255,255,255,0.18)"
-            : "0.5px solid rgba(255,255,255,0.08)",
+          border:
+            state.isLocked || state.isActive
+              ? "0.5px solid rgba(255,255,255,0.20)"
+              : "0.5px solid rgba(255,255,255,0.08)",
+          boxShadow:
+            "inset 0 0 8px rgba(0,0,0,0.30)",
           pointerEvents: "none",
         }}
       />
-      {/* Center notch - scales with the dial. */}
+      {/* Center screw - small recessed disk in the middle. Sells the
+          mechanical-object metaphor. */}
       <div
         aria-hidden="true"
         style={{
@@ -561,13 +603,32 @@ function Dial({
           top: "50%",
           left: "50%",
           transform: "translate(-50%, -50%)",
-          width: 14,
-          height: 2.5,
+          width: 12,
+          height: 12,
+          borderRadius: "50%",
+          background:
+            "radial-gradient(circle at 35% 30%, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.06) 50%, rgba(0,0,0,0.20) 100%)",
+          border: "0.5px solid rgba(255,255,255,0.18)",
+          boxShadow:
+            "inset 0 1px 2px rgba(0,0,0,0.40), 0 0 0 1px rgba(0,0,0,0.10)",
+          pointerEvents: "none",
+        }}
+      />
+      {/* Center notch - horizontal line crossing the screw. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: 8,
+          height: 1.5,
           borderRadius: 1,
           background: state.isLocked
             ? "rgba(255,255,255,0.55)"
             : state.isActive
-              ? "rgba(255,255,255,0.30)"
+              ? "rgba(255,255,255,0.32)"
               : "rgba(255,255,255,0.14)",
           pointerEvents: "none",
         }}

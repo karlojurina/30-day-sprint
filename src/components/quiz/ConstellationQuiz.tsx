@@ -377,9 +377,10 @@ function Constellation({
   total: number;
   flickerKey: number;
 }) {
-  // Bigger container - the starfield now lives in its own prominent
-  // top zone above the question card.
-  const containerHeight = 240;
+  // v70.6 - significantly bigger. Karlo: "we have so much space now
+  // to use." Container goes from 240 to 380px tall + uses the full
+  // available width. Stars scale up, glow halos get more dramatic.
+  const containerHeight = 380;
   const stars = STAR_POSITIONS.slice(0, total).map((pos, i) => {
     const answered = i < answerLog.length;
     const isLit = answered && answerLog[i].correct;
@@ -387,7 +388,6 @@ function Constellation({
     return { ...pos, idx: i, isLit, isDim };
   });
 
-  // Flicker target = the most recently answered star, if wrong.
   const lastAnsweredIdx = answerLog.length - 1;
 
   return (
@@ -399,16 +399,36 @@ function Constellation({
         overflow: "visible",
       }}
     >
-      {/* Subtle radial gradient backdrop - tints the starfield area
-          with a faint blue cosmic wash. Makes the modal feel like
-          it has depth. */}
+      {/* Nebula clouds - subtle colored radial gradients that give
+          the starfield real cosmic depth. Layered: a wider blue
+          ambient + a smaller purple accent + a deep ground glow. */}
       <div
         aria-hidden="true"
         style={{
           position: "absolute",
           inset: 0,
           background:
-            "radial-gradient(ellipse at 50% 40%, rgba(60,90,140,0.10) 0%, rgba(20,30,50,0.04) 50%, rgba(0,0,0,0) 80%)",
+            "radial-gradient(ellipse 60% 70% at 30% 45%, rgba(60,90,160,0.16) 0%, rgba(30,50,90,0.05) 45%, rgba(0,0,0,0) 75%)",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "radial-gradient(ellipse 40% 50% at 75% 60%, rgba(120,80,180,0.10) 0%, rgba(60,40,100,0.03) 50%, rgba(0,0,0,0) 80%)",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "radial-gradient(ellipse 80% 30% at 50% 90%, rgba(40,60,100,0.12) 0%, rgba(20,30,50,0.04) 50%, rgba(0,0,0,0) 80%)",
           pointerEvents: "none",
         }}
       />
@@ -423,13 +443,8 @@ function Constellation({
           overflow: "visible",
         }}
       >
-        {/* Ambient background starfield - 40+ tiny dim dots that
-            twinkle independently. Adds real depth so the answer
-            stars feel like they're in a sky, not on a flat panel. */}
         <BackgroundStars />
 
-        {/* Answer stars - 18 deliberate positions, scattered across
-            three loose bands. Each ignites in answer order. */}
         {stars.map((s) => (
           <Star
             key={s.idx}
@@ -464,34 +479,34 @@ function Star({
   shouldFlicker: boolean;
   flickerKey: number;
 }) {
-  // Size scale - small / medium / large anchor stars. Bigger stars
-  // get a more substantial glow when lit.
-  const haloR = size === 3 ? 4.5 : size === 2 ? 3.4 : 2.6;
-  const midR = size === 3 ? 2.2 : size === 2 ? 1.7 : 1.3;
-  const coreR = size === 3 ? 1.1 : size === 2 ? 0.85 : 0.65;
+  // v70.6 - bigger stars all around. Anchor stars (size 3) get a
+  // dramatic 4-pointed glint cross + outer halo. Mid stars (size 2)
+  // get a substantial glow. Small stars (size 1) are still readable.
+  const haloR = size === 3 ? 7 : size === 2 ? 5 : 3.6;
+  const midR = size === 3 ? 3.2 : size === 2 ? 2.4 : 1.7;
+  const coreR = size === 3 ? 1.6 : size === 2 ? 1.2 : 0.85;
+  const glintLength = size === 3 ? 7 : size === 2 ? 4.5 : 0; // size 1 = no glint
 
   if (isLit) {
-    // Slow pulse after ignition - amplitude scales with star size so
-    // anchor stars feel more "alive."
-    const pulseScale = size === 3 ? 1.12 : size === 2 ? 1.08 : 1.05;
+    const pulseScale = size === 3 ? 1.14 : size === 2 ? 1.09 : 1.05;
     return (
       <motion.g
         initial={{ opacity: 0, scale: 0.3 }}
         animate={{
           opacity: 1,
-          scale: [0.3, 1.25, 1],
-          transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] },
+          scale: [0.3, 1.3, 1],
+          transition: { duration: 0.55, ease: [0.22, 1, 0.36, 1] },
         }}
         style={{ transformOrigin: `${x}px ${y}px` }}
       >
-        {/* Outer ambient halo - slow breathing pulse for "alive" feel */}
+        {/* Outer ambient halo with breathing pulse */}
         <motion.circle
           cx={x}
           cy={y}
           r={haloR}
-          fill="rgba(255,255,255,0.06)"
+          fill="rgba(180,210,255,0.08)"
           animate={{
-            opacity: [0.6, 1, 0.6],
+            opacity: [0.5, 1, 0.5],
             scale: [1, pulseScale, 1],
           }}
           transition={{
@@ -502,26 +517,62 @@ function Star({
           }}
           style={{ transformOrigin: `${x}px ${y}px` }}
         />
+        {/* Inner halo - tighter, brighter */}
+        <circle
+          cx={x}
+          cy={y}
+          r={haloR * 0.6}
+          fill="rgba(220,235,255,0.14)"
+        />
+        {/* 4-pointed glint cross for medium + anchor stars - makes
+            them feel like real stars not just dots. Crisp diagonal
+            lines that catch the eye. */}
+        {glintLength > 0 && (
+          <g opacity={0.85}>
+            {/* Horizontal arm */}
+            <line
+              x1={x - glintLength}
+              y1={y}
+              x2={x + glintLength}
+              y2={y}
+              stroke="rgba(255,255,255,0.50)"
+              strokeWidth="0.18"
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+            {/* Vertical arm */}
+            <line
+              x1={x}
+              y1={y - glintLength}
+              x2={x}
+              y2={y + glintLength}
+              stroke="rgba(255,255,255,0.50)"
+              strokeWidth="0.18"
+              strokeLinecap="round"
+              vectorEffect="non-scaling-stroke"
+            />
+          </g>
+        )}
         {/* Mid glow */}
         <circle
           cx={x}
           cy={y}
           r={midR}
-          fill="rgba(255,255,255,0.36)"
+          fill="rgba(255,255,255,0.40)"
         />
         {/* Bright core */}
         <circle
           cx={x}
           cy={y}
           r={coreR}
-          fill="rgba(255,255,255,0.98)"
+          fill="rgba(255,255,255,1)"
         />
-        {/* Tiny sparkle offset - extra detail for anchor stars */}
+        {/* Tiny sparkle offset for anchor stars */}
         {size === 3 && (
           <circle
-            cx={x + coreR * 0.7}
-            cy={y - coreR * 0.5}
-            r={0.18}
+            cx={x + coreR * 0.6}
+            cy={y - coreR * 0.4}
+            r={0.28}
             fill="rgba(255,255,255,1)"
           />
         )}
@@ -530,23 +581,27 @@ function Star({
   }
 
   if (isDim) {
-    // Wrong-answered star: brief red flicker on the most recent one,
-    // then settles to soft dim red. Anchor stars stay slightly more
-    // visible (size matters for visual hierarchy).
-    const baseR = coreR * 1.1;
+    const baseR = coreR * 1.2;
     return (
       <motion.g
         key={shouldFlicker ? `flicker-${flickerKey}` : undefined}
         animate={
           shouldFlicker
             ? {
-                opacity: [0.3, 0.95, 0.4, 0.75, 0.32],
+                opacity: [0.3, 0.95, 0.4, 0.75, 0.34],
                 transition: { duration: 0.6, ease: "easeInOut" },
               }
-            : { opacity: 0.32 }
+            : { opacity: 0.34 }
         }
-        initial={{ opacity: 0.32 }}
+        initial={{ opacity: 0.34 }}
       >
+        {/* Soft red halo */}
+        <circle
+          cx={x}
+          cy={y}
+          r={baseR * 2}
+          fill="rgba(252,165,165,0.08)"
+        />
         <circle
           cx={x}
           cy={y}
@@ -557,16 +612,23 @@ function Star({
     );
   }
 
-  // Unanswered "ghost" - dim white dot at the future star's position.
-  // Bigger ghosts for anchor positions so the constellation skeleton
-  // is visible from the start.
+  // Unanswered "ghost" - dim white dot, slightly larger than before
+  // so the constellation skeleton reads from the start.
   return (
-    <circle
-      cx={x}
-      cy={y}
-      r={coreR * 0.7}
-      fill="rgba(255,255,255,0.16)"
-    />
+    <g opacity={0.22}>
+      <circle
+        cx={x}
+        cy={y}
+        r={coreR * 1.4}
+        fill="rgba(255,255,255,0.12)"
+      />
+      <circle
+        cx={x}
+        cy={y}
+        r={coreR * 0.65}
+        fill="rgba(255,255,255,0.55)"
+      />
+    </g>
   );
 }
 

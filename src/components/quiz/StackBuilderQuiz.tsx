@@ -360,15 +360,16 @@ function Tower({
   correctCount: number;
   wobbleKey: number;
 }) {
-  // v70.1 - taller container and wider blocks. The animation now
-  // gets its own prominent zone at the top of the modal so it can
-  // actually breathe instead of competing with the question card.
-  const containerHeight = 240;
-  const foundationHeight = 8;
-  const usableHeight = containerHeight - foundationHeight - 10;
-  const blockGap = 4;
-  const blockHeight = Math.max(9, Math.min(20, usableHeight / total - blockGap));
-  const blockWidth = 160;
+  // v70.6 - substantial upgrade. The animation slot has way more
+  // room now that it's outside the modal panel, so the tower scales
+  // up to match. Wider blocks + taller container + more visible
+  // empty slots (subtle gradient outline instead of pure dashes).
+  const containerHeight = 320;
+  const foundationHeight = 10;
+  const usableHeight = containerHeight - foundationHeight - 14;
+  const blockGap = 5;
+  const blockHeight = Math.max(11, Math.min(22, usableHeight / total - blockGap));
+  const blockWidth = 220;
 
   const slots = Array.from({ length: total }, (_, i) => {
     const isFilled = i < correctCount;
@@ -389,6 +390,21 @@ function Tower({
         position: "relative",
       }}
     >
+      {/* Overhead light cone - casts a subtle spotlight on the
+          tower from above. Adds dramatic vertical lighting that
+          makes the tower feel like a featured object. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          top: -20,
+          width: blockWidth + 180,
+          height: containerHeight + 40,
+          background:
+            "radial-gradient(ellipse 50% 70% at 50% 30%, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 50%, rgba(255,255,255,0) 80%)",
+          pointerEvents: "none",
+        }}
+      />
       {/* Bigger ground glow with two layers - tight inner contact +
           wider ambient pool. Floats the tower in space without
           needing a hard surface. */}
@@ -396,11 +412,11 @@ function Tower({
         aria-hidden="true"
         style={{
           position: "absolute",
-          bottom: -8,
-          width: blockWidth + 120,
-          height: 50,
+          bottom: -10,
+          width: blockWidth + 160,
+          height: 70,
           background:
-            "radial-gradient(ellipse at center, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.04) 35%, rgba(255,255,255,0) 75%)",
+            "radial-gradient(ellipse at center, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.05) 35%, rgba(255,255,255,0) 75%)",
           pointerEvents: "none",
         }}
       />
@@ -440,20 +456,36 @@ function Tower({
         ))}
       </motion.div>
 
-      {/* Foundation - bigger, more dimensional. */}
+      {/* Foundation - more substantial, dimensional bar with a
+          subtle highlight rail. Anchors the tower visually. */}
       <div
         aria-hidden="true"
         style={{
-          width: blockWidth + 40,
+          position: "relative",
+          width: blockWidth + 60,
           height: foundationHeight,
           background:
-            "linear-gradient(180deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.06) 60%, rgba(255,255,255,0.02) 100%)",
-          border: "1px solid rgba(255,255,255,0.12)",
-          borderRadius: 4,
+            "linear-gradient(180deg, rgba(255,255,255,0.24) 0%, rgba(255,255,255,0.08) 55%, rgba(255,255,255,0.02) 100%)",
+          border: "1px solid rgba(255,255,255,0.14)",
+          borderRadius: 5,
           boxShadow:
-            "0 3px 8px rgba(0,0,0,0.50), 0 1px 0 rgba(255,255,255,0.16) inset",
+            "0 4px 12px rgba(0,0,0,0.55), 0 1px 0 rgba(255,255,255,0.20) inset, 0 -1px 0 rgba(0,0,0,0.30) inset",
         }}
-      />
+      >
+        {/* Highlight rail - thin bright line at top of foundation */}
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            top: 2,
+            left: "10%",
+            right: "10%",
+            height: 1,
+            background:
+              "linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.30) 50%, rgba(255,255,255,0) 100%)",
+          }}
+        />
+      </div>
     </div>
   );
 }
@@ -471,19 +503,16 @@ function Block({
 }) {
   return (
     <motion.div
-      initial={isNewest ? { y: -48, scale: 1.12, opacity: 0 } : false}
+      initial={isNewest ? { y: -56, scale: 1.14, opacity: 0 } : false}
       animate={
         isNewest
           ? {
-              // Anticipation drop: overshoot down + tiny squash on
-              // impact + settle. Spring-like via custom timing
-              // instead of generic ease.
-              y: [-48, 6, -1, 0],
-              scaleY: [1, 0.88, 1.04, 1],
-              scaleX: [1, 1.06, 0.98, 1],
+              y: [-56, 6, -1, 0],
+              scaleY: [1, 0.86, 1.04, 1],
+              scaleX: [1, 1.08, 0.98, 1],
               opacity: [0, 1, 1, 1],
               transition: {
-                duration: 0.5,
+                duration: 0.55,
                 ease: [0.22, 1, 0.36, 1],
                 times: [0, 0.55, 0.78, 1],
               },
@@ -494,45 +523,64 @@ function Block({
         position: "relative",
         width,
         height,
-        borderRadius: 4,
+        borderRadius: 5,
         overflow: "hidden",
-        // Filled = neutral white glass with depth. Empty = thin
-        // recessed slot. No gold anywhere - matches R1's scheme.
+        // v70.6 - filled blocks are MORE present. Empty slots are
+        // more clearly visible (subtle gradient + inner highlight)
+        // so the tower's full shape reads as a structure from the
+        // start, not just a thin line growing upward.
         background: isFilled
-          ? "linear-gradient(155deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.08) 55%, rgba(255,255,255,0.04) 100%)"
-          : "linear-gradient(180deg, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.04) 100%)",
-        backdropFilter: isFilled ? "blur(8px) saturate(160%)" : undefined,
+          ? "linear-gradient(155deg, rgba(255,255,255,0.24) 0%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.05) 100%)"
+          : "linear-gradient(180deg, rgba(255,255,255,0.025) 0%, rgba(0,0,0,0.10) 100%)",
+        backdropFilter: isFilled ? "blur(10px) saturate(170%)" : undefined,
         WebkitBackdropFilter: isFilled
-          ? "blur(8px) saturate(160%)"
+          ? "blur(10px) saturate(170%)"
           : undefined,
         border: isFilled
-          ? "1px solid rgba(255,255,255,0.22)"
-          : "1px solid rgba(255,255,255,0.06)",
+          ? "1px solid rgba(255,255,255,0.28)"
+          : "1px solid rgba(255,255,255,0.10)",
         boxShadow: isFilled
-          ? // Lifted glass: outer drop, hairline top highlight, hairline
-            // bottom shadow. Mirrors the SwipeCards card material.
-            "0 3px 8px rgba(0,0,0,0.40), 0 1px 0 rgba(255,255,255,0.20) inset, 0 -1px 0 rgba(0,0,0,0.30) inset"
-          : // Empty: inner shadow only, suggests recess.
-            "inset 0 1px 2px rgba(0,0,0,0.30)",
+          ? // Filled: outer drop + hairline highlights + side bevel
+            "0 4px 10px rgba(0,0,0,0.50), 0 1px 0 rgba(255,255,255,0.26) inset, 0 -1px 0 rgba(0,0,0,0.30) inset, 1px 0 0 rgba(255,255,255,0.04) inset, -1px 0 0 rgba(0,0,0,0.15) inset"
+          : // Empty: subtle recess + faint top hint so the slot is
+            // readable but doesn't compete with filled blocks.
+            "inset 0 1px 2px rgba(0,0,0,0.35), inset 0 -1px 0 rgba(255,255,255,0.04)",
       }}
     >
       {/* Top sheen on filled blocks - light catches the glass edge.
-          Matches the SwipeCards card sheen. Decorative only. */}
+          Stronger gradient for more lift. */}
       {isFilled && (
-        <div
-          aria-hidden="true"
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            height: Math.max(2, Math.min(6, height / 2)),
-            background:
-              "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 100%)",
-            pointerEvents: "none",
-            opacity: 0.9,
-          }}
-        />
+        <>
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: Math.max(3, Math.min(8, height / 2.2)),
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.24) 0%, rgba(255,255,255,0) 100%)",
+              pointerEvents: "none",
+              opacity: 0.95,
+            }}
+          />
+          {/* Subtle inner glow accent line - adds material depth */}
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: 8,
+              right: 8,
+              height: 1,
+              background:
+                "linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.10) 50%, rgba(255,255,255,0) 100%)",
+              transform: "translateY(-50%)",
+              pointerEvents: "none",
+            }}
+          />
+        </>
       )}
     </motion.div>
   );

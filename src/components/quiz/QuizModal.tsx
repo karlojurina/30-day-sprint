@@ -170,8 +170,10 @@ export function QuizModal({
             }}
           >
             {/* TOP slot - bottom edge of this slot's box equals the
-                top edge of the modal panel (minus the gap). Anything
-                portaled in here floats above the panel. */}
+                top edge of the modal panel (minus the gap). Wider
+                than the modal panel so formats with wider visuals
+                (Vault dials) can extend symmetrically beyond the
+                modal edges - like a shelf above the panel. */}
             <div
               ref={setTopSlot}
               style={{
@@ -180,7 +182,7 @@ export function QuizModal({
                 left: "50%",
                 transform: "translateX(-50%)",
                 marginBottom: 24,
-                width: "min(560px, 100vw)",
+                width: "min(720px, 100vw)",
                 display: "flex",
                 justifyContent: "center",
                 pointerEvents: "none",

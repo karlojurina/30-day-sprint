@@ -2334,18 +2334,20 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
             // v65 - build the quiz card payload from the region's
             // configured quiz format + the student's row in
             // student_region_quiz. Null = no quiz format for this
-            // region (R2-4 currently); the card section doesn't
-            // render.
+            // region. v70.10 - all 4 live formats share the same
+            // `cards` shape, so a single membership check covers
+            // them all (was previously missing 'constellation',
+            // which is why R3 didn't show the Retake button).
             const focusedRid = focusedRegion.id as RegionId;
             const quiz = getRegionQuiz(focusedRid);
             if (!quiz) return null;
             const cards =
-              quiz.format === "swipe_cards"
+              quiz.format === "swipe_cards" ||
+              quiz.format === "stack_builder" ||
+              quiz.format === "constellation" ||
+              quiz.format === "vault_tumblers"
                 ? quiz.cards
-                : quiz.format === "stack_builder" ||
-                    quiz.format === "vault_tumblers"
-                  ? quiz.cards
-                  : null;
+                : null;
             if (!cards) return null;
             const row = regionQuiz[focusedRid];
             return {

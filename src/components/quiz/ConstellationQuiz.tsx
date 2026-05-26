@@ -721,7 +721,11 @@ function BackgroundStars() {
 // a base opacity scaled by its distance from the viewport center
 // (stars near the modal are denser/brighter; stars near the edges
 // fade to nearly nothing).
-const AMBIENT_STAR_COUNT = 180;
+// v70.10 - dropped from 180 to 80. The previous count overwhelmed
+// the constellation. 80 is enough to suggest a starry surround
+// without competing with the focused 18 answer stars + 40 stars
+// in the focused zone.
+const AMBIENT_STAR_COUNT = 80;
 const AMBIENT_STARS = generateAmbientStars(AMBIENT_STAR_COUNT);
 
 function generateAmbientStars(count: number) {
@@ -734,7 +738,7 @@ function generateAmbientStars(count: number) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   }
-  return Array.from({ length: count }, (_, i) => {
+  return Array.from({ length: count }, () => {
     const x = rand() * 100;
     const y = rand() * 100;
     // Radial distance from viewport center (50, 50). Max possible
@@ -742,13 +746,13 @@ function generateAmbientStars(count: number) {
     const dx = x - 50;
     const dy = y - 50;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    // Fade curve: 1 at center, 0 at distance ~60. Stars near edges
-    // basically invisible.
+    // Fade curve: 1 at center, 0 at distance ~55 from center. Stars
+    // near edges are basically invisible.
     const fade = Math.max(0, Math.min(1, 1 - dist / 55));
     return {
       x,
       y,
-      r: 0.12 + rand() * 0.18, // 0.12 - 0.30 in viewBox units
+      r: 0.10 + rand() * 0.14, // 0.10 - 0.24 - smaller than before
       fade,
       delay: rand() * 4,
       duration: 4 + rand() * 4, // 4-8s twinkle cycles
@@ -783,13 +787,12 @@ export function AmbientViewportStarfield() {
             cy={s.y}
             r={s.r}
             fill="rgba(220,230,255,1)"
-            opacity={s.fade * 0.5}
-            initial={{ opacity: s.fade * 0.25 }}
+            initial={{ opacity: s.fade * 0.18 }}
             animate={{
               opacity: [
-                s.fade * 0.25,
-                s.fade * 0.6,
-                s.fade * 0.25,
+                s.fade * 0.18,
+                s.fade * 0.42,
+                s.fade * 0.18,
               ],
             }}
             transition={{

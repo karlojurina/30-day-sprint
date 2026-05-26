@@ -155,10 +155,18 @@ export function QuizModal({
               alignment, which means the PANEL gets centered - and
               therefore the question card inside it lands at the
               geometric middle of the viewport. Animations float
-              above/beside without affecting where the panel sits. */}
+              above/beside without affecting where the panel sits.
+              v70.5 - explicit width on the cluster. Without it, the
+              cluster sized to its `display: block` default (full
+              available width of the flex item), the modal panel sat
+              left-aligned within it, and the centered topSlot
+              ended up offset from the modal. Locking the cluster
+              width to the modal width keeps everything aligned. */}
           <div
             style={{
               position: "relative",
+              width: "min(560px, 100%)",
+              flexShrink: 0,
             }}
           >
             {/* TOP slot - bottom edge of this slot's box equals the

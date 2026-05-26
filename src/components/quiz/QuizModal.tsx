@@ -136,32 +136,48 @@ export function QuizModal({
           transition={{ duration: 0.3 }}
           onWheel={(e) => e.stopPropagation()}
           onTouchMove={(e) => e.stopPropagation()}
-          className="fixed inset-0 z-[170] flex items-center justify-center"
+          className="fixed inset-0 z-[170]"
           style={{
             background:
               "radial-gradient(ellipse at center, rgba(8,12,22,0.92) 0%, rgba(4,8,16,0.98) 100%)",
             backdropFilter: "blur(20px) saturate(140%)",
             WebkitBackdropFilter: "blur(20px) saturate(140%)",
             padding: 16,
+            // v70.7 - 3-row grid layout. Row 1 (1fr): top space +
+            // top slot anchored to bottom of row. Row 2 (auto):
+            // modal panel. Row 3 (1fr): bottom space. Equal 1fr
+            // rows mean the modal lands EXACTLY at viewport center
+            // regardless of how tall the top slot's animation gets.
+            // Replaces flex items-center which let animation
+            // overflow push perceived layout around on small
+            // viewports.
+            display: "grid",
+            gridTemplateRows: "1fr auto 1fr",
+            justifyItems: "center",
+            alignItems: "center",
           }}
         >
-          {/* v70.4 - modal cluster. The cluster IS the modal panel
-              (cluster bounds = panel bounds). Animation slots are
-              ABSOLUTELY POSITIONED relative to the cluster, so:
-                - top slot's bottom edge sits at the panel's top edge
-                  (+ a 24px gap above the panel)
-                - left/right slots sit beside the panel
-              The cluster gets centered by the overlay's flex
-              alignment, which means the PANEL gets centered - and
-              therefore the question card inside it lands at the
-              geometric middle of the viewport. Animations float
-              above/beside without affecting where the panel sits.
-              v70.5 - explicit width on the cluster. Without it, the
-              cluster sized to its `display: block` default (full
-              available width of the flex item), the modal panel sat
-              left-aligned within it, and the centered topSlot
-              ended up offset from the modal. Locking the cluster
-              width to the modal width keeps everything aligned. */}
+          {/* GRID ROW 1: top slot - anchored to the BOTTOM of row 1
+              so the animation sits just above the modal panel's
+              top edge. justifyItems on the parent grid centers
+              horizontally. Wider than the panel so formats with
+              wide visuals (Vault dials) can extend beyond the
+              panel edges - like a shelf above the panel. */}
+          <div
+            ref={setTopSlot}
+            style={{
+              alignSelf: "end",
+              marginBottom: 24,
+              width: "min(720px, 100vw)",
+              display: "flex",
+              justifyContent: "center",
+              pointerEvents: "none",
+            }}
+          />
+
+          {/* GRID ROW 2: modal cluster. Sits in the auto-sized
+              middle row, which is EXACTLY at viewport center
+              (because rows 1 and 3 are equal 1fr). */}
           <div
             style={{
               position: "relative",
@@ -169,26 +185,6 @@ export function QuizModal({
               flexShrink: 0,
             }}
           >
-            {/* TOP slot - bottom edge of this slot's box equals the
-                top edge of the modal panel (minus the gap). Wider
-                than the modal panel so formats with wider visuals
-                (Vault dials) can extend symmetrically beyond the
-                modal edges - like a shelf above the panel. */}
-            <div
-              ref={setTopSlot}
-              style={{
-                position: "absolute",
-                bottom: "100%",
-                left: "50%",
-                transform: "translateX(-50%)",
-                marginBottom: 24,
-                width: "min(720px, 100vw)",
-                display: "flex",
-                justifyContent: "center",
-                pointerEvents: "none",
-              }}
-            />
-
             {/* LEFT slot - right edge sits at the panel's left edge. */}
             <div
               ref={setLeftSlot}
@@ -325,6 +321,10 @@ export function QuizModal({
                 </div>
               </motion.div>
           </div>
+
+          {/* GRID ROW 3: empty spacer. Balances row 1 (1fr) so the
+              modal in row 2 lands at exactly viewport center. */}
+          <div />
         </motion.div>
       )}
     </AnimatePresence>

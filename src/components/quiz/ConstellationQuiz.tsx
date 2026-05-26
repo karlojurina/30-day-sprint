@@ -399,16 +399,17 @@ function Constellation({
         overflow: "visible",
       }}
     >
-      {/* Nebula clouds - subtle colored radial gradients that give
-          the starfield real cosmic depth. Layered: a wider blue
-          ambient + a smaller purple accent + a deep ground glow. */}
+      {/* Nebula clouds - v70.7 softer transitions. More gradient
+          stops with smaller deltas + larger ellipse coverage so
+          the nebula fades all the way to transparent without a
+          visible boundary against the overlay backdrop. */}
       <div
         aria-hidden="true"
         style={{
           position: "absolute",
           inset: 0,
           background:
-            "radial-gradient(ellipse 60% 70% at 30% 45%, rgba(60,90,160,0.16) 0%, rgba(30,50,90,0.05) 45%, rgba(0,0,0,0) 75%)",
+            "radial-gradient(ellipse 90% 110% at 30% 45%, rgba(60,90,160,0.16) 0%, rgba(55,85,150,0.12) 20%, rgba(45,70,125,0.07) 40%, rgba(30,50,90,0.03) 60%, rgba(15,25,45,0.01) 80%, rgba(0,0,0,0) 100%)",
           pointerEvents: "none",
         }}
       />
@@ -418,7 +419,7 @@ function Constellation({
           position: "absolute",
           inset: 0,
           background:
-            "radial-gradient(ellipse 40% 50% at 75% 60%, rgba(120,80,180,0.10) 0%, rgba(60,40,100,0.03) 50%, rgba(0,0,0,0) 80%)",
+            "radial-gradient(ellipse 70% 90% at 75% 60%, rgba(120,80,180,0.10) 0%, rgba(105,70,160,0.07) 25%, rgba(85,55,135,0.04) 50%, rgba(50,35,85,0.015) 75%, rgba(0,0,0,0) 100%)",
           pointerEvents: "none",
         }}
       />
@@ -428,7 +429,7 @@ function Constellation({
           position: "absolute",
           inset: 0,
           background:
-            "radial-gradient(ellipse 80% 30% at 50% 90%, rgba(40,60,100,0.12) 0%, rgba(20,30,50,0.04) 50%, rgba(0,0,0,0) 80%)",
+            "radial-gradient(ellipse 110% 60% at 50% 90%, rgba(40,60,100,0.12) 0%, rgba(35,55,90,0.08) 25%, rgba(28,45,75,0.04) 50%, rgba(15,25,45,0.015) 75%, rgba(0,0,0,0) 100%)",
           pointerEvents: "none",
         }}
       />

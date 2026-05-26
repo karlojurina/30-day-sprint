@@ -212,8 +212,14 @@ export function ConstellationQuiz({
 
   return (
     <>
-      {/* v70.3 - starfield portaled OUTSIDE the panel into the top
-          slot owned by QuizModal. */}
+      {/* v70.9 - ambient viewport-wide starfield. Wraps around the
+          modal with radial fade so stars dwindle out at the edges
+          without a hard cutoff. */}
+      {animationSlots.background &&
+        createPortal(<AmbientViewportStarfield />, animationSlots.background)}
+
+      {/* v70.3 - focused starfield (18 answer stars) portaled into
+          the top slot above the modal panel. */}
       {animationSlots.top &&
         createPortal(
           <Constellation
@@ -627,10 +633,11 @@ function Star({
   );
 }
 
-// 40+ ambient background stars. Stable positions (no re-render
-// jiggle) but each twinkles on its own slow cycle for "alive sky"
-// feel. The positions look random but are hand-tuned so they fill
-// the canvas without crowding the 18 answer stars.
+// 40+ ambient background stars inside the focused starfield zone.
+// Stable positions, each twinkles independently. These fill the
+// constellation slot above the modal. For the wider VIEWPORT-FILLING
+// ambient field that wraps around the modal with radial fade, see
+// AMBIENT_VIEWPORT_STARS below.
 const BACKGROUND_STARS: Array<{ x: number; y: number; r: number; delay: number }> = [
   // Top band
   { x: 4, y: 4, r: 0.22, delay: 0.0 },
@@ -700,6 +707,101 @@ function BackgroundStars() {
         />
       ))}
     </>
+  );
+}
+
+// v70.9 - viewport-wide ambient starfield. Renders into the
+// background slot (full overlay) so stars wrap around the modal
+// with a soft radial fade toward the edges. No hard cutoff at
+// the focused-slot boundary - the night sky just continues out
+// across the page.
+//
+// 180 stars generated deterministically via a seeded pseudo-random
+// sequence so positions stay stable across renders. Each star gets
+// a base opacity scaled by its distance from the viewport center
+// (stars near the modal are denser/brighter; stars near the edges
+// fade to nearly nothing).
+const AMBIENT_STAR_COUNT = 180;
+const AMBIENT_STARS = generateAmbientStars(AMBIENT_STAR_COUNT);
+
+function generateAmbientStars(count: number) {
+  // Mulberry32 PRNG for deterministic positions.
+  let seed = 0x9d2c5680;
+  function rand() {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = seed;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  return Array.from({ length: count }, (_, i) => {
+    const x = rand() * 100;
+    const y = rand() * 100;
+    // Radial distance from viewport center (50, 50). Max possible
+    // distance is from corner = sqrt(50^2 + 50^2) ~= 70.7.
+    const dx = x - 50;
+    const dy = y - 50;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    // Fade curve: 1 at center, 0 at distance ~60. Stars near edges
+    // basically invisible.
+    const fade = Math.max(0, Math.min(1, 1 - dist / 55));
+    return {
+      x,
+      y,
+      r: 0.12 + rand() * 0.18, // 0.12 - 0.30 in viewBox units
+      fade,
+      delay: rand() * 4,
+      duration: 4 + rand() * 4, // 4-8s twinkle cycles
+    };
+  });
+}
+
+export function AmbientViewportStarfield() {
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        position: "absolute",
+        inset: 0,
+        pointerEvents: "none",
+      }}
+    >
+      <svg
+        viewBox="0 0 100 100"
+        preserveAspectRatio="xMidYMid slice"
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          height: "100%",
+        }}
+      >
+        {AMBIENT_STARS.map((s, i) => (
+          <motion.circle
+            key={i}
+            cx={s.x}
+            cy={s.y}
+            r={s.r}
+            fill="rgba(220,230,255,1)"
+            opacity={s.fade * 0.5}
+            initial={{ opacity: s.fade * 0.25 }}
+            animate={{
+              opacity: [
+                s.fade * 0.25,
+                s.fade * 0.6,
+                s.fade * 0.25,
+              ],
+            }}
+            transition={{
+              duration: s.duration,
+              ease: "easeInOut",
+              repeat: Infinity,
+              delay: s.delay,
+            }}
+          />
+        ))}
+      </svg>
+    </div>
   );
 }
 

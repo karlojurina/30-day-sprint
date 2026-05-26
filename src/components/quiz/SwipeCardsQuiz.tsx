@@ -229,12 +229,18 @@ export function SwipeCardsQuiz({
   return (
     <div
       style={{
+        // v70.9 - stable body height so R1's modal panel stays the
+        // same size as R2/R3/R4 (consistent viewport positioning
+        // and no jumping). The card stack still has its own
+        // minHeight: 280; the body floor of 408 just guarantees
+        // header+body together hit a consistent panel height
+        // across all 4 region quizzes.
         flex: 1,
         display: "flex",
         flexDirection: "column",
         padding: "18px 20px 22px",
         gap: 18,
-        minHeight: 0,
+        minHeight: 408,
       }}
     >
       {/* Progress bar - subtle visual feedback above the deck */}

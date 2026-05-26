@@ -51,14 +51,22 @@ export interface QuizResult {
 
 /** Animation slots exposed by QuizModal. Format components consume
  *  them via useQuizAnimationSlots() + createPortal to render their
- *  visual OUTSIDE the modal panel (top / left / right of it). */
+ *  visual OUTSIDE the modal panel.
+ *
+ *  - background: full overlay area, BEHIND the modal. For ambient
+ *    effects that should extend across the whole viewport (e.g.
+ *    starfield wrapping around the modal with edge fade).
+ *  - top / left / right: focused slots adjacent to the modal panel.
+ */
 interface QuizAnimationSlots {
+  background: HTMLDivElement | null;
   top: HTMLDivElement | null;
   left: HTMLDivElement | null;
   right: HTMLDivElement | null;
 }
 
 const QuizAnimationSlotsContext = createContext<QuizAnimationSlots>({
+  background: null,
   top: null,
   left: null,
   right: null,
@@ -116,6 +124,9 @@ export function QuizModal({
   // v70.3 - DOM refs for animation slots that live OUTSIDE the modal
   // panel. State-setter refs (not useRef) so children re-render after
   // mount and pick up the now-non-null slot element via context.
+  // v70.9 - added background slot for full-viewport ambient effects.
+  const [backgroundSlot, setBackgroundSlot] =
+    useState<HTMLDivElement | null>(null);
   const [topSlot, setTopSlot] = useState<HTMLDivElement | null>(null);
   const [leftSlot, setLeftSlot] = useState<HTMLDivElement | null>(null);
   const [rightSlot, setRightSlot] = useState<HTMLDivElement | null>(null);
@@ -148,15 +159,28 @@ export function QuizModal({
             // modal panel. Row 3 (1fr): bottom space. Equal 1fr
             // rows mean the modal lands EXACTLY at viewport center
             // regardless of how tall the top slot's animation gets.
-            // Replaces flex items-center which let animation
-            // overflow push perceived layout around on small
-            // viewports.
             display: "grid",
             gridTemplateRows: "1fr auto 1fr",
             justifyItems: "center",
             alignItems: "center",
           }}
         >
+          {/* BACKGROUND slot - sits absolute across the entire
+              overlay area, BEHIND the grid content. For ambient
+              effects that should fill the viewport (e.g. R3's
+              starfield wrapping around the modal with edge fade).
+              z-index 0 + pointer-events: none so it doesn't block
+              modal interaction. */}
+          <div
+            ref={setBackgroundSlot}
+            style={{
+              position: "absolute",
+              inset: 0,
+              overflow: "hidden",
+              pointerEvents: "none",
+              zIndex: 0,
+            }}
+          />
           {/* GRID ROW 1: top slot - anchored to the BOTTOM of row 1
               so the animation sits just above the modal panel's
               top edge. justifyItems on the parent grid centers
@@ -166,6 +190,8 @@ export function QuizModal({
           <div
             ref={setTopSlot}
             style={{
+              position: "relative",
+              zIndex: 1,
               alignSelf: "end",
               marginBottom: 24,
               width: "min(720px, 100vw)",
@@ -181,6 +207,7 @@ export function QuizModal({
           <div
             style={{
               position: "relative",
+              zIndex: 1,
               width: "min(560px, 100%)",
               flexShrink: 0,
             }}
@@ -313,7 +340,12 @@ export function QuizModal({
                     />
                   ) : (
                     <QuizAnimationSlotsContext.Provider
-                      value={{ top: topSlot, left: leftSlot, right: rightSlot }}
+                      value={{
+                        background: backgroundSlot,
+                        top: topSlot,
+                        left: leftSlot,
+                        right: rightSlot,
+                      }}
                     >
                       {children}
                     </QuizAnimationSlotsContext.Provider>

@@ -1,21 +1,22 @@
 "use client";
 
 /**
- * Region 3 quiz format: Constellation.
+ * Region 3 quiz format: Starfield.
  *
- * Visual: a climbing arc of 18 stars (low-left to high-right).
- * Each correct answer "ignites" the next star in sequence + draws
- * a connecting line from the previously-lit star. Wrong answers
- * leave a gap - the star at that sequence position stays dim, and
- * no line is drawn to or from it. The final constellation shape
- * tells the score visually (full chain = 100%, gaps = misses).
+ * v70.1 redesign: the original "climbing arc with connecting lines"
+ * looked like a trendline. Replaced with an actual cosmic starfield
+ * - 18 answer stars scattered across the top zone in a deliberate
+ * but organic pattern, surrounded by 40+ ambient background stars
+ * that breathe with a slow twinkle. No connecting lines.
  *
- * Mechanics: v65 drain-through, 50% pass threshold, plugs into
- * the shared QuizModal + ResultScreen via the same
- * QuizCompletePayload contract as Swipe / Stack / Vault.
+ * Each correct answer ignites the next star in sequence:
+ *   - Soft pulse-in + 4-layer glow (outer halo, mid, core, sparkle)
+ *   - Subtle slow pulse animation after ignition (1.5s loop)
+ * Wrong answer leaves that star dim with a brief red flicker.
  *
- * No gold, no mascots. Pure geometric stars + thin lines on the
- * existing dark map background.
+ * Mechanics: v65 drain-through, 50% pass threshold, plugs into the
+ * shared QuizModal + ResultScreen via the same QuizCompletePayload
+ * contract as Swipe / Stack / Vault.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -38,30 +39,34 @@ interface RevealState {
   correctText: string | null;
 }
 
-// 18 stars arranged as a climbing arc - low-left to high-right.
-// Coords are 0-100 normalized (SVG viewBox). Designed so the
-// constellation reads as deliberate, not random. Final star sits
-// near the top-right corner for a satisfying "completion" feel.
-const STAR_POSITIONS = [
-  { x: 4, y: 82 },
-  { x: 10, y: 76 },
-  { x: 16, y: 69 },
-  { x: 22, y: 62 },
-  { x: 28, y: 55 },
-  { x: 34, y: 50 },
-  { x: 40, y: 46 },
-  { x: 46, y: 44 },
-  { x: 52, y: 42 },
-  { x: 58, y: 40 },
-  { x: 63, y: 36 },
-  { x: 68, y: 32 },
-  { x: 73, y: 27 },
-  { x: 78, y: 22 },
-  { x: 83, y: 17 },
-  { x: 88, y: 12 },
-  { x: 93, y: 8 },
-  { x: 97, y: 4 },
-] as const;
+// 18 answer stars scattered across the starfield in a deliberate
+// but organic pattern. Loosely clustered in 3 horizontal bands so
+// the field reads as a real sky, not a line. Sizes vary per star
+// (some are "anchor" stars, larger and brighter when lit).
+// Coords are 0-100 normalized (SVG viewBox 0 0 100 60).
+const STAR_POSITIONS: Array<{ x: number; y: number; size: 1 | 2 | 3 }> = [
+  // Top band - 5 stars
+  { x: 14, y: 8, size: 1 },
+  { x: 30, y: 12, size: 2 },
+  { x: 46, y: 6, size: 1 },
+  { x: 64, y: 11, size: 3 },
+  { x: 84, y: 9, size: 2 },
+  // Middle band - 7 stars (denser, with anchor stars)
+  { x: 8, y: 26, size: 1 },
+  { x: 22, y: 30, size: 2 },
+  { x: 38, y: 24, size: 3 },
+  { x: 54, y: 32, size: 1 },
+  { x: 68, y: 26, size: 2 },
+  { x: 82, y: 30, size: 1 },
+  { x: 93, y: 22, size: 2 },
+  // Bottom band - 6 stars
+  { x: 12, y: 48, size: 2 },
+  { x: 28, y: 52, size: 1 },
+  { x: 44, y: 46, size: 3 },
+  { x: 60, y: 52, size: 1 },
+  { x: 76, y: 48, size: 2 },
+  { x: 90, y: 54, size: 1 },
+];
 
 function shuffle<T>(arr: T[]): T[] {
   const out = arr.slice();
@@ -376,10 +381,9 @@ function Constellation({
   total: number;
   flickerKey: number;
 }) {
-  // SVG viewBox is 100 × 90 to match the star positions array. Width
-  // is 100% of container, height auto via aspect ratio (~10:9).
-  // Container height locked so the constellation has consistent size.
-  const containerHeight = 180;
+  // Bigger container - the starfield now lives in its own prominent
+  // top zone above the question card.
+  const containerHeight = 240;
   const stars = STAR_POSITIONS.slice(0, total).map((pos, i) => {
     const answered = i < answerLog.length;
     const isLit = answered && answerLog[i].correct;
@@ -387,21 +391,7 @@ function Constellation({
     return { ...pos, idx: i, isLit, isDim };
   });
 
-  // Lines connect consecutive LIT stars only. A wrong answer (dim
-  // star) creates a visible gap in the chain.
-  const lines: Array<{
-    from: (typeof stars)[number];
-    to: (typeof stars)[number];
-    key: string;
-  }> = [];
-  for (let i = 0; i < stars.length - 1; i++) {
-    if (stars[i].isLit && stars[i + 1].isLit) {
-      lines.push({ from: stars[i], to: stars[i + 1], key: `${i}-${i + 1}` });
-    }
-  }
-
-  // The flicker target - the next-in-sequence star (whichever was
-  // just answered wrong). Used to pulse the most recent dim star.
+  // Flicker target = the most recently answered star, if wrong.
   const lastAnsweredIdx = answerLog.length - 1;
 
   return (
@@ -413,46 +403,43 @@ function Constellation({
         overflow: "visible",
       }}
     >
+      {/* Subtle radial gradient backdrop - tints the starfield area
+          with a faint blue cosmic wash. Makes the modal feel like
+          it has depth. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          inset: 0,
+          background:
+            "radial-gradient(ellipse at 50% 40%, rgba(60,90,140,0.10) 0%, rgba(20,30,50,0.04) 50%, rgba(0,0,0,0) 80%)",
+          pointerEvents: "none",
+        }}
+      />
+
       <svg
-        viewBox="0 0 100 90"
+        viewBox="0 0 100 60"
         preserveAspectRatio="xMidYMid meet"
         style={{
+          position: "relative",
           width: "100%",
           height: "100%",
           overflow: "visible",
         }}
       >
-        {/* Faint background starfield - decorative dim dots that
-            never light up. Adds depth so the constellation feels
-            like it's in a sky, not floating on a flat background. */}
+        {/* Ambient background starfield - 40+ tiny dim dots that
+            twinkle independently. Adds real depth so the answer
+            stars feel like they're in a sky, not on a flat panel. */}
         <BackgroundStars />
 
-        {/* Connecting lines between lit stars */}
-        <AnimatePresence>
-          {lines.map((l) => (
-            <motion.line
-              key={l.key}
-              x1={l.from.x}
-              y1={l.from.y}
-              x2={l.to.x}
-              y2={l.to.y}
-              stroke="rgba(255,255,255,0.32)"
-              strokeWidth="0.35"
-              strokeLinecap="round"
-              vectorEffect="non-scaling-stroke"
-              initial={{ pathLength: 0, opacity: 0 }}
-              animate={{ pathLength: 1, opacity: 1 }}
-              transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-            />
-          ))}
-        </AnimatePresence>
-
-        {/* Stars */}
+        {/* Answer stars - 18 deliberate positions, scattered across
+            three loose bands. Each ignites in answer order. */}
         {stars.map((s) => (
           <Star
             key={s.idx}
             x={s.x}
             y={s.y}
+            size={s.size}
             isLit={s.isLit}
             isDim={s.isDim}
             shouldFlicker={s.idx === lastAnsweredIdx && s.isDim}
@@ -467,6 +454,7 @@ function Constellation({
 function Star({
   x,
   y,
+  size,
   isLit,
   isDim,
   shouldFlicker,
@@ -474,106 +462,188 @@ function Star({
 }: {
   x: number;
   y: number;
+  size: 1 | 2 | 3;
   isLit: boolean;
   isDim: boolean;
   shouldFlicker: boolean;
   flickerKey: number;
 }) {
-  // Three layers: ambient halo (large soft circle), mid glow, bright
-  // core. Lit stars get all three; dim stars only get the core at
-  // low opacity. Unanswered stars are a tiny ghost dot.
+  // Size scale - small / medium / large anchor stars. Bigger stars
+  // get a more substantial glow when lit.
+  const haloR = size === 3 ? 4.5 : size === 2 ? 3.4 : 2.6;
+  const midR = size === 3 ? 2.2 : size === 2 ? 1.7 : 1.3;
+  const coreR = size === 3 ? 1.1 : size === 2 ? 0.85 : 0.65;
+
   if (isLit) {
+    // Slow pulse after ignition - amplitude scales with star size so
+    // anchor stars feel more "alive."
+    const pulseScale = size === 3 ? 1.12 : size === 2 ? 1.08 : 1.05;
     return (
       <motion.g
-        initial={{ opacity: 0, scale: 0.4 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+        initial={{ opacity: 0, scale: 0.3 }}
+        animate={{
+          opacity: 1,
+          scale: [0.3, 1.25, 1],
+          transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] },
+        }}
         style={{ transformOrigin: `${x}px ${y}px` }}
       >
-        {/* Soft outer halo */}
-        <circle
+        {/* Outer ambient halo - slow breathing pulse for "alive" feel */}
+        <motion.circle
           cx={x}
           cy={y}
-          r={3.6}
-          fill="rgba(255,255,255,0.08)"
+          r={haloR}
+          fill="rgba(255,255,255,0.06)"
+          animate={{
+            opacity: [0.6, 1, 0.6],
+            scale: [1, pulseScale, 1],
+          }}
+          transition={{
+            duration: 2.8,
+            ease: "easeInOut",
+            repeat: Infinity,
+            delay: Math.random() * 1.5,
+          }}
+          style={{ transformOrigin: `${x}px ${y}px` }}
         />
         {/* Mid glow */}
         <circle
           cx={x}
           cy={y}
-          r={1.8}
-          fill="rgba(255,255,255,0.32)"
+          r={midR}
+          fill="rgba(255,255,255,0.36)"
         />
         {/* Bright core */}
         <circle
           cx={x}
           cy={y}
-          r={0.85}
+          r={coreR}
           fill="rgba(255,255,255,0.98)"
         />
+        {/* Tiny sparkle offset - extra detail for anchor stars */}
+        {size === 3 && (
+          <circle
+            cx={x + coreR * 0.7}
+            cy={y - coreR * 0.5}
+            r={0.18}
+            fill="rgba(255,255,255,1)"
+          />
+        )}
       </motion.g>
     );
   }
 
   if (isDim) {
+    // Wrong-answered star: brief red flicker on the most recent one,
+    // then settles to soft dim red. Anchor stars stay slightly more
+    // visible (size matters for visual hierarchy).
+    const baseR = coreR * 1.1;
     return (
       <motion.g
         key={shouldFlicker ? `flicker-${flickerKey}` : undefined}
         animate={
           shouldFlicker
             ? {
-                opacity: [0.25, 0.85, 0.25, 0.6, 0.25],
-                transition: { duration: 0.55, ease: "easeInOut" },
+                opacity: [0.3, 0.95, 0.4, 0.75, 0.32],
+                transition: { duration: 0.6, ease: "easeInOut" },
               }
-            : { opacity: 0.25 }
+            : { opacity: 0.32 }
         }
-        initial={{ opacity: 0.25 }}
+        initial={{ opacity: 0.32 }}
       >
         <circle
           cx={x}
           cy={y}
-          r={0.85}
-          fill="rgba(252,165,165,0.7)"
+          r={baseR}
+          fill="rgba(252,165,165,0.85)"
         />
       </motion.g>
     );
   }
 
-  // Unanswered - tiny ghost dot.
+  // Unanswered "ghost" - dim white dot at the future star's position.
+  // Bigger ghosts for anchor positions so the constellation skeleton
+  // is visible from the start.
   return (
     <circle
       cx={x}
       cy={y}
-      r={0.6}
-      fill="rgba(255,255,255,0.18)"
+      r={coreR * 0.7}
+      fill="rgba(255,255,255,0.16)"
     />
   );
 }
 
+// 40+ ambient background stars. Stable positions (no re-render
+// jiggle) but each twinkles on its own slow cycle for "alive sky"
+// feel. The positions look random but are hand-tuned so they fill
+// the canvas without crowding the 18 answer stars.
+const BACKGROUND_STARS: Array<{ x: number; y: number; r: number; delay: number }> = [
+  // Top band
+  { x: 4, y: 4, r: 0.22, delay: 0.0 },
+  { x: 19, y: 2, r: 0.18, delay: 1.2 },
+  { x: 24, y: 15, r: 0.28, delay: 0.5 },
+  { x: 38, y: 17, r: 0.20, delay: 2.1 },
+  { x: 52, y: 14, r: 0.18, delay: 0.8 },
+  { x: 58, y: 4, r: 0.24, delay: 3.0 },
+  { x: 70, y: 3, r: 0.20, delay: 1.6 },
+  { x: 78, y: 16, r: 0.28, delay: 0.3 },
+  { x: 90, y: 4, r: 0.18, delay: 2.4 },
+  { x: 96, y: 15, r: 0.22, delay: 1.0 },
+  // Middle band
+  { x: 2, y: 22, r: 0.20, delay: 1.8 },
+  { x: 14, y: 21, r: 0.22, delay: 0.6 },
+  { x: 28, y: 35, r: 0.18, delay: 2.7 },
+  { x: 32, y: 22, r: 0.26, delay: 0.2 },
+  { x: 44, y: 36, r: 0.20, delay: 1.4 },
+  { x: 48, y: 22, r: 0.18, delay: 3.2 },
+  { x: 62, y: 35, r: 0.24, delay: 0.9 },
+  { x: 72, y: 36, r: 0.18, delay: 2.0 },
+  { x: 88, y: 36, r: 0.22, delay: 0.4 },
+  { x: 98, y: 30, r: 0.18, delay: 1.7 },
+  // Lower-middle gaps
+  { x: 5, y: 35, r: 0.22, delay: 0.8 },
+  { x: 17, y: 40, r: 0.18, delay: 2.3 },
+  { x: 36, y: 42, r: 0.20, delay: 0.5 },
+  { x: 54, y: 42, r: 0.18, delay: 1.5 },
+  { x: 68, y: 40, r: 0.22, delay: 2.8 },
+  { x: 86, y: 44, r: 0.18, delay: 0.7 },
+  // Bottom band
+  { x: 4, y: 56, r: 0.20, delay: 1.1 },
+  { x: 22, y: 58, r: 0.18, delay: 2.6 },
+  { x: 38, y: 56, r: 0.24, delay: 0.6 },
+  { x: 54, y: 58, r: 0.18, delay: 1.9 },
+  { x: 70, y: 56, r: 0.22, delay: 0.3 },
+  { x: 84, y: 58, r: 0.18, delay: 2.2 },
+  { x: 96, y: 56, r: 0.20, delay: 1.3 },
+  // Filler dots scattered through
+  { x: 9, y: 11, r: 0.14, delay: 0.4 },
+  { x: 41, y: 8, r: 0.14, delay: 1.7 },
+  { x: 65, y: 17, r: 0.14, delay: 2.9 },
+  { x: 81, y: 25, r: 0.14, delay: 0.8 },
+  { x: 25, y: 49, r: 0.14, delay: 2.0 },
+  { x: 58, y: 49, r: 0.14, delay: 0.5 },
+  { x: 92, y: 49, r: 0.14, delay: 1.6 },
+];
+
 function BackgroundStars() {
-  // Stable seeded background stars - same positions every render so
-  // they don't twinkle distractingly. Just dim decoration.
-  const positions = [
-    { x: 8, y: 18 },
-    { x: 26, y: 8 },
-    { x: 38, y: 75 },
-    { x: 56, y: 12 },
-    { x: 72, y: 78 },
-    { x: 12, y: 50 },
-    { x: 88, y: 60 },
-    { x: 50, y: 65 },
-    { x: 18, y: 88 },
-    { x: 64, y: 60 },
-  ];
   return (
     <>
-      {positions.map((p, i) => (
-        <circle
+      {BACKGROUND_STARS.map((p, i) => (
+        <motion.circle
           key={i}
           cx={p.x}
           cy={p.y}
-          r={0.3}
-          fill="rgba(255,255,255,0.10)"
+          r={p.r}
+          fill="rgba(255,255,255,0.45)"
+          initial={{ opacity: 0.25 }}
+          animate={{ opacity: [0.25, 0.6, 0.25] }}
+          transition={{
+            duration: 4.5 + (i % 3) * 1.2,
+            ease: "easeInOut",
+            repeat: Infinity,
+            delay: p.delay,
+          }}
         />
       ))}
     </>

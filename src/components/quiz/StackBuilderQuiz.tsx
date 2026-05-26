@@ -375,15 +375,15 @@ function Tower({
   correctCount: number;
   wobbleKey: number;
 }) {
-  // Container scales blocks to fit 18 in a fixed viewport. Larger
-  // blocks (chunkier proportions) read more premium than the previous
-  // 8px-tall slivers; we trade some vertical density for visual weight.
-  const containerHeight = 180;
-  const foundationHeight = 6;
-  const usableHeight = containerHeight - foundationHeight - 8;
-  const blockGap = 3;
-  const blockHeight = Math.max(7, Math.min(16, usableHeight / total - blockGap));
-  const blockWidth = 120;
+  // v70.1 - taller container and wider blocks. The animation now
+  // gets its own prominent zone at the top of the modal so it can
+  // actually breathe instead of competing with the question card.
+  const containerHeight = 240;
+  const foundationHeight = 8;
+  const usableHeight = containerHeight - foundationHeight - 10;
+  const blockGap = 4;
+  const blockHeight = Math.max(9, Math.min(20, usableHeight / total - blockGap));
+  const blockWidth = 160;
 
   const slots = Array.from({ length: total }, (_, i) => {
     const isFilled = i < correctCount;
@@ -404,17 +404,18 @@ function Tower({
         position: "relative",
       }}
     >
-      {/* Subtle ground glow under the tower - adds depth without
-          drawing attention. Mirrors SwipeCards' card halo. */}
+      {/* Bigger ground glow with two layers - tight inner contact +
+          wider ambient pool. Floats the tower in space without
+          needing a hard surface. */}
       <div
         aria-hidden="true"
         style={{
           position: "absolute",
-          bottom: 0,
-          width: blockWidth + 60,
-          height: 24,
+          bottom: -8,
+          width: blockWidth + 120,
+          height: 50,
           background:
-            "radial-gradient(ellipse at center, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 70%)",
+            "radial-gradient(ellipse at center, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.04) 35%, rgba(255,255,255,0) 75%)",
           pointerEvents: "none",
         }}
       />
@@ -454,19 +455,18 @@ function Tower({
         ))}
       </motion.div>
 
-      {/* Foundation - a more dimensional bar with inset highlight +
-          drop shadow. Reads as resting on the ground. */}
+      {/* Foundation - bigger, more dimensional. */}
       <div
         aria-hidden="true"
         style={{
-          width: blockWidth + 28,
+          width: blockWidth + 40,
           height: foundationHeight,
           background:
-            "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.04) 60%, rgba(255,255,255,0.02) 100%)",
-          border: "1px solid rgba(255,255,255,0.10)",
-          borderRadius: 3,
+            "linear-gradient(180deg, rgba(255,255,255,0.20) 0%, rgba(255,255,255,0.06) 60%, rgba(255,255,255,0.02) 100%)",
+          border: "1px solid rgba(255,255,255,0.12)",
+          borderRadius: 4,
           boxShadow:
-            "0 2px 6px rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.14) inset",
+            "0 3px 8px rgba(0,0,0,0.50), 0 1px 0 rgba(255,255,255,0.16) inset",
         }}
       />
     </div>

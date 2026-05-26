@@ -413,7 +413,7 @@ function DialRow({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 16,
+          gap: 12,
           justifyContent: "center",
           position: "relative",
         }}
@@ -432,7 +432,7 @@ function DialRow({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 16,
+          gap: 12,
           justifyContent: "center",
         }}
       >
@@ -440,7 +440,7 @@ function DialRow({
           <span
             key={`label-${d.idx}`}
             style={{
-              width: 76,
+              width: 92,
               fontSize: 10,
               fontFamily: "var(--font-mono)",
               letterSpacing: "0.18em",
@@ -482,12 +482,12 @@ function Dial({
     return { i, isFilled, wasAsked };
   });
 
-  // Dimensions - bigger than v69.1 so the mechanical feel really
-  // reads (Karlo: "make it a bit bigger"). Inner ring + mark size
-  // scale with dial size.
-  const size = 76;
-  const innerRadius = size / 2 - 12; // mark orbit
-  const markSize = 9;
+  // v70.1 - bigger again. The dial row now lives in its own
+  // prominent top zone above the question card, so it can scale
+  // up further without crowding anything.
+  const size = 92;
+  const innerRadius = size / 2 - 14;
+  const markSize = 10;
 
   return (
     <motion.div
@@ -559,8 +559,7 @@ function Dial({
           pointerEvents: "none",
         }}
       />
-      {/* Center notch - a horizontal line through the middle. Visual
-          cue that the dial can rotate (suggests a mechanical groove). */}
+      {/* Center notch - scales with the dial. */}
       <div
         aria-hidden="true"
         style={{
@@ -568,8 +567,8 @@ function Dial({
           top: "50%",
           left: "50%",
           transform: "translate(-50%, -50%)",
-          width: 11,
-          height: 2,
+          width: 14,
+          height: 2.5,
           borderRadius: 1,
           background: state.isLocked
             ? "rgba(255,255,255,0.55)"

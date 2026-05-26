@@ -218,74 +218,103 @@ export function VaultTumblersQuiz({
       {top && (
         <div
           style={{
+            position: "relative",
             background:
               reveal?.kind === "correct"
-                ? "linear-gradient(155deg, rgba(74,222,128,0.16) 0%, rgba(34,197,94,0.04) 100%)"
+                ? "linear-gradient(155deg, rgba(74,222,128,0.16) 0%, rgba(34,197,94,0.06) 55%, rgba(34,197,94,0.02) 100%)"
                 : reveal?.kind === "wrong"
-                  ? "linear-gradient(155deg, rgba(252,165,165,0.18) 0%, rgba(239,68,68,0.04) 100%)"
-                  : "linear-gradient(155deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%)",
+                  ? "linear-gradient(155deg, rgba(252,165,165,0.18) 0%, rgba(239,68,68,0.06) 55%, rgba(239,68,68,0.02) 100%)"
+                  : "linear-gradient(155deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 55%, rgba(255,255,255,0.02) 100%)",
+            backdropFilter: "blur(20px) saturate(170%)",
+            WebkitBackdropFilter: "blur(20px) saturate(170%)",
             border: reveal
               ? reveal.kind === "correct"
                 ? "1px solid rgba(74,222,128,0.50)"
                 : "1px solid rgba(252,165,165,0.50)"
-              : "1px solid rgba(255,255,255,0.14)",
-            borderRadius: 14,
-            padding: "14px 16px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-            transition: "background 200ms, border-color 200ms",
+              : "1px solid rgba(255,255,255,0.16)",
+            borderRadius: 16,
+            padding: "16px 18px",
+            boxShadow:
+              "0 16px 40px -8px rgba(0,0,0,0.45), 0 4px 10px rgba(0,0,0,0.30), 0 1px 0 rgba(255,255,255,0.10) inset, 0 -1px 0 rgba(0,0,0,0.30) inset",
+            overflow: "hidden",
+            transition: "background 240ms, border-color 240ms",
           }}
         >
-          {reveal == null ? (
-            <>
-              <p
-                style={{
-                  fontSize: 10,
-                  fontFamily: "var(--font-mono)",
-                  letterSpacing: "0.22em",
-                  textTransform: "uppercase",
-                  color: "rgba(255,255,255,0.42)",
-                }}
-              >
-                {isAb ? "Pick one" : "True or False"}
-              </p>
-              <p
-                style={{
-                  fontSize: 16,
-                  fontWeight: 500,
-                  lineHeight: 1.4,
-                  color: "rgba(255,255,255,0.96)",
-                  letterSpacing: "-0.011em",
-                }}
-              >
-                {top.question_text}
-              </p>
-              {isAb && (
-                <div
+          {/* Top sheen */}
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 60,
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 100%)",
+              pointerEvents: "none",
+              opacity: 0.9,
+            }}
+          />
+          {/* Content above sheen */}
+          <div
+            style={{
+              position: "relative",
+              zIndex: 1,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            {reveal == null ? (
+              <>
+                <p
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 8,
-                    marginTop: 4,
+                    fontSize: 10,
+                    fontFamily: "var(--font-mono)",
+                    letterSpacing: "0.22em",
+                    textTransform: "uppercase",
+                    color: "rgba(255,255,255,0.45)",
                   }}
                 >
-                  <OptionTile
-                    side="left"
-                    badge={swap ? "B" : "A"}
-                    text={swap ? top.option_b : top.option_a}
-                  />
-                  <OptionTile
-                    side="right"
-                    badge={swap ? "A" : "B"}
-                    text={swap ? top.option_a : top.option_b}
-                  />
-                </div>
-              )}
-            </>
-          ) : (
-            <RevealPanel reveal={reveal} />
-          )}
+                  {isAb ? "Pick one" : "True or False"}
+                </p>
+                <p
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 500,
+                    lineHeight: 1.42,
+                    color: "rgba(255,255,255,0.96)",
+                    letterSpacing: "-0.011em",
+                  }}
+                >
+                  {top.question_text}
+                </p>
+                {isAb && (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 8,
+                      marginTop: 4,
+                    }}
+                  >
+                    <OptionTile
+                      side="left"
+                      badge={swap ? "B" : "A"}
+                      text={swap ? top.option_b : top.option_a}
+                    />
+                    <OptionTile
+                      side="right"
+                      badge={swap ? "A" : "B"}
+                      text={swap ? top.option_a : top.option_b}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <RevealPanel reveal={reveal} />
+            )}
+          </div>
         </div>
       )}
 
@@ -347,15 +376,32 @@ function DialRow({
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        gap: 8,
+        gap: 10,
+        position: "relative",
       }}
     >
+      {/* Subtle glow under the active dial - draws the eye without
+          shouting. Mirrors the SwipeCards ambient lighting. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          top: -10,
+          left: 0,
+          right: 0,
+          height: 80,
+          background:
+            "radial-gradient(ellipse 240px 60px at center top, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 70%)",
+          pointerEvents: "none",
+        }}
+      />
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
+          gap: 16,
           justifyContent: "center",
+          position: "relative",
         }}
       >
         {dials.map((d) => (
@@ -372,7 +418,7 @@ function DialRow({
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 12,
+          gap: 16,
           justifyContent: "center",
         }}
       >
@@ -380,20 +426,22 @@ function DialRow({
           <span
             key={`label-${d.idx}`}
             style={{
-              width: 40,
-              fontSize: 9,
+              width: 56,
+              fontSize: 10,
               fontFamily: "var(--font-mono)",
-              letterSpacing: "0.10em",
+              letterSpacing: "0.18em",
               textTransform: "uppercase",
               textAlign: "center",
+              fontWeight: d.isLocked || d.isActive ? 600 : 400,
               color: d.isLocked
-                ? "rgba(230,192,122,0.92)"
+                ? "rgba(255,255,255,0.92)"
                 : d.isActive
                   ? "rgba(255,255,255,0.78)"
-                  : "rgba(255,255,255,0.35)",
+                  : "rgba(255,255,255,0.30)",
+              transition: "color 240ms",
             }}
           >
-            {d.isLocked ? "✓" : d.idx + 1}
+            {d.isLocked ? "Locked" : `Dial ${d.idx + 1}`}
           </span>
         ))}
       </div>
@@ -408,17 +456,22 @@ function Dial({
   state: DialState;
   thunkKey: number;
 }) {
-  // When dial transitions to locked, do a satisfying ~360deg spin.
-  // When wrong (thunkKey bump), counter-rotate ~-20deg briefly.
+  // Locked = satisfying 360 spin. Wrong (thunk) = brief counter-
+  // rotate. Spring physics on lock for a more mechanical feel.
   const baseRotate = state.isLocked ? 360 : 0;
 
-  // Compute the three "mark slots" around the inside ring. Each mark
-  // is filled if its question was answered correctly.
+  // Three "tumbler pins" around the dial's inner ring. Filled when
+  // the corresponding question in this dial was answered correctly.
   const marks = Array.from({ length: QUESTIONS_PER_DIAL }, (_, i) => {
     const isFilled = i < state.correctInDial;
     const wasAsked = i < state.askedInDial;
     return { i, isFilled, wasAsked };
   });
+
+  // Dimensions - chunkier than before so the mechanical feel reads.
+  const size = 56;
+  const innerRadius = size / 2 - 9; // mark orbit
+  const markSize = 7;
 
   return (
     <motion.div
@@ -426,54 +479,112 @@ function Dial({
       animate={
         thunkKey > 0
           ? {
-              rotate: [baseRotate, baseRotate - 20, baseRotate],
-              transition: { duration: 0.45, ease: "easeOut" },
+              rotate: [baseRotate, baseRotate - 18, baseRotate + 4, baseRotate],
+              transition: {
+                duration: 0.55,
+                ease: [0.32, 0.72, 0.36, 1],
+                times: [0, 0.35, 0.7, 1],
+              },
             }
           : { rotate: baseRotate }
       }
       transition={
         state.isLocked
-          ? { duration: 0.7, ease: [0.22, 1, 0.36, 1] }
+          ? { type: "spring", stiffness: 110, damping: 16, mass: 1.1 }
           : { duration: 0.3 }
       }
       style={{
         position: "relative",
-        width: 40,
-        height: 40,
+        width: size,
+        height: size,
         borderRadius: "50%",
+        // Neutral glass palette across all states. Locked is the
+        // brightest (more opaque + saturate), active is mid (a lit
+        // surface), inactive is recessed (inset shadow only).
         background: state.isLocked
-          ? "linear-gradient(135deg, rgba(230,192,122,0.45) 0%, rgba(195,159,98,0.55) 100%)"
+          ? "radial-gradient(circle at 30% 25%, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.08) 55%, rgba(255,255,255,0.02) 100%)"
           : state.isActive
-            ? "linear-gradient(135deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.06) 100%)"
-            : "rgba(255,255,255,0.04)",
+            ? "radial-gradient(circle at 30% 25%, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.05) 55%, rgba(255,255,255,0.01) 100%)"
+            : "linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%)",
+        backdropFilter: state.isLocked || state.isActive
+          ? "blur(8px) saturate(160%)"
+          : undefined,
+        WebkitBackdropFilter: state.isLocked || state.isActive
+          ? "blur(8px) saturate(160%)"
+          : undefined,
         border: state.isLocked
-          ? "1.5px solid rgba(230,192,122,0.95)"
+          ? "1.5px solid rgba(255,255,255,0.42)"
           : state.isActive
-            ? "1.5px solid rgba(255,255,255,0.42)"
-            : "1px solid rgba(255,255,255,0.14)",
+            ? "1.5px solid rgba(255,255,255,0.32)"
+            : "1px solid rgba(255,255,255,0.10)",
         boxShadow: state.isLocked
-          ? "0 4px 12px rgba(230,192,122,0.30), 0 1px 0 rgba(255,255,255,0.18) inset"
+          ? "0 6px 16px rgba(0,0,0,0.40), 0 0 18px rgba(255,255,255,0.10), 0 1px 0 rgba(255,255,255,0.24) inset, 0 -1px 0 rgba(0,0,0,0.30) inset"
           : state.isActive
-            ? "0 2px 8px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.10) inset"
-            : "inset 0 1px 2px rgba(0,0,0,0.30)",
+            ? "0 4px 12px rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.16) inset, 0 -1px 0 rgba(0,0,0,0.30) inset"
+            : "inset 0 2px 4px rgba(0,0,0,0.42), 0 1px 0 rgba(255,255,255,0.04)",
       }}
     >
-      {/* Three mark slots inside the dial - top, bottom-right,
-          bottom-left. Filled when the corresponding question in this
-          dial was answered correctly. Stays "ghost" if wrong/unasked. */}
+      {/* Inner ring - a thin recessed groove inside the dial that the
+          tumbler marks sit on. Pure decoration; gives the dial more
+          mechanical depth. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: innerRadius * 2 + markSize,
+          height: innerRadius * 2 + markSize,
+          borderRadius: "50%",
+          border: state.isLocked || state.isActive
+            ? "0.5px solid rgba(255,255,255,0.18)"
+            : "0.5px solid rgba(255,255,255,0.08)",
+          pointerEvents: "none",
+        }}
+      />
+      {/* Center notch - a horizontal line through the middle. Visual
+          cue that the dial can rotate (suggests a mechanical groove). */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: 8,
+          height: 1.5,
+          borderRadius: 1,
+          background: state.isLocked
+            ? "rgba(255,255,255,0.55)"
+            : state.isActive
+              ? "rgba(255,255,255,0.30)"
+              : "rgba(255,255,255,0.14)",
+          pointerEvents: "none",
+        }}
+      />
+
+      {/* Three tumbler marks orbiting the inner ring. Green for
+          correct, soft red for wrong/asked, ghost otherwise.
+          Locked state lifts all three to bright white (the dial
+          has "clicked into place"). */}
       {marks.map((m) => {
         const angle = -90 + m.i * 120; // top, then clockwise
-        const r = 11; // distance from center
         const rad = (angle * Math.PI) / 180;
-        const x = Math.cos(rad) * r;
-        const y = Math.sin(rad) * r;
+        const x = Math.cos(rad) * innerRadius;
+        const y = Math.sin(rad) * innerRadius;
         const fillColor = state.isLocked
-          ? "rgba(255,255,255,0.92)"
+          ? "rgba(255,255,255,0.95)"
           : m.isFilled
-            ? "rgba(134,239,172,0.92)"
+            ? "rgba(134,239,172,0.95)"
             : m.wasAsked
               ? "rgba(252,165,165,0.55)"
-              : "rgba(255,255,255,0.22)";
+              : "rgba(255,255,255,0.18)";
+        const glow = state.isLocked
+          ? "0 0 6px rgba(255,255,255,0.40), 0 1px 0 rgba(255,255,255,0.30) inset"
+          : m.isFilled
+            ? "0 0 5px rgba(134,239,172,0.45)"
+            : "inset 0 1px 1px rgba(0,0,0,0.30)";
         return (
           <div
             key={m.i}
@@ -483,11 +594,12 @@ function Dial({
               top: "50%",
               left: "50%",
               transform: `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`,
-              width: 5,
-              height: 5,
+              width: markSize,
+              height: markSize,
               borderRadius: "50%",
               background: fillColor,
-              transition: "background 220ms",
+              boxShadow: glow,
+              transition: "background 280ms, box-shadow 280ms",
             }}
           />
         );
@@ -512,52 +624,84 @@ function OptionTile({
   return (
     <div
       style={{
-        padding: 12,
+        position: "relative",
+        padding: 14,
         background:
-          "linear-gradient(160deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%)",
-        border: "1px solid rgba(255,255,255,0.12)",
-        borderRadius: 10,
+          "linear-gradient(160deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.03) 100%)",
+        backdropFilter: "blur(12px) saturate(150%)",
+        WebkitBackdropFilter: "blur(12px) saturate(150%)",
+        border: "1px solid rgba(255,255,255,0.14)",
+        borderRadius: 12,
+        boxShadow:
+          "0 6px 16px rgba(0,0,0,0.25), 0 1px 0 rgba(255,255,255,0.10) inset, 0 -1px 0 rgba(0,0,0,0.20) inset",
+        overflow: "hidden",
         display: "flex",
         flexDirection: "column",
-        gap: 8,
+        gap: 10,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 32,
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 100%)",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          position: "relative",
+        }}
+      >
         <span
           style={{
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
-            width: 22,
-            height: 22,
+            width: 24,
+            height: 24,
             borderRadius: 999,
             background:
               "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.06) 100%)",
             border: "1px solid rgba(255,255,255,0.22)",
-            fontSize: 10,
+            fontSize: 11,
             fontWeight: 700,
+            letterSpacing: "0.04em",
             color: "rgba(255,255,255,0.96)",
+            fontVariantNumeric: "tabular-nums",
+            boxShadow:
+              "0 1px 2px rgba(0,0,0,0.30), 0 1px 0 rgba(255,255,255,0.18) inset",
           }}
         >
           {badge}
         </span>
         <span
           style={{
-            fontSize: 9,
+            fontSize: 9.5,
             fontFamily: "var(--font-mono)",
-            letterSpacing: "0.18em",
+            letterSpacing: "0.20em",
             textTransform: "uppercase",
-            color: "rgba(255,255,255,0.42)",
+            color: "rgba(255,255,255,0.45)",
           }}
         >
-          {side === "left" ? "Left" : "Right"}
+          {side === "left" ? "Left button" : "Right button"}
         </span>
       </div>
       <span
         style={{
-          fontSize: 13,
-          lineHeight: 1.4,
-          color: "rgba(255,255,255,0.88)",
+          position: "relative",
+          fontSize: 13.5,
+          lineHeight: 1.45,
+          color: "rgba(255,255,255,0.90)",
+          letterSpacing: "-0.005em",
         }}
       >
         {text}
@@ -575,6 +719,8 @@ function PickButton({
   label: string;
   onClick: () => void;
 }) {
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
   const isTrue = label === "TRUE";
   const isFalse = label === "FALSE";
   const accent = isTrue
@@ -582,14 +728,29 @@ function PickButton({
     : isFalse
       ? "rgba(239,68,68,0.38)"
       : "rgba(255,255,255,0.16)";
+  const glowColor = isTrue
+    ? "rgba(74,222,128,0.22)"
+    : isFalse
+      ? "rgba(239,68,68,0.20)"
+      : "rgba(255,255,255,0.12)";
+  const lifted = hovered && !pressed;
   return (
     <button
       type="button"
       onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => {
+        setHovered(false);
+        setPressed(false);
+      }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
       style={{
-        padding: "14px 16px",
+        padding: "15px 18px",
         background:
           "linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.04) 100%)",
+        backdropFilter: "blur(12px) saturate(150%)",
+        WebkitBackdropFilter: "blur(12px) saturate(150%)",
         border: `1px solid ${accent}`,
         borderRadius: 12,
         color: "rgba(255,255,255,0.96)",
@@ -600,13 +761,23 @@ function PickButton({
         display: "flex",
         alignItems: "center",
         justifyContent: side === "left" ? "flex-start" : "flex-end",
-        gap: 8,
+        gap: 10,
+        transform: pressed
+          ? "scale(0.97)"
+          : lifted
+            ? "translateY(-2px)"
+            : "translateY(0)",
+        boxShadow: lifted
+          ? `0 14px 30px ${glowColor}, 0 1px 0 rgba(255,255,255,0.14) inset, 0 -1px 0 rgba(0,0,0,0.25) inset`
+          : "0 8px 22px rgba(0,0,0,0.32), 0 1px 0 rgba(255,255,255,0.10) inset, 0 -1px 0 rgba(0,0,0,0.20) inset",
+        transition:
+          "transform 150ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms cubic-bezier(0.22,1,0.36,1)",
       }}
     >
       {side === "left" && (
         <svg
-          width="14"
-          height="14"
+          width="16"
+          height="16"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -621,8 +792,8 @@ function PickButton({
       <span>{label}</span>
       {side === "right" && (
         <svg
-          width="14"
-          height="14"
+          width="16"
+          height="16"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -639,14 +810,24 @@ function PickButton({
 }
 
 function ContinueButton({ onClick }: { onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const lifted = hovered && !pressed;
   return (
     <button
       type="button"
       onClick={onClick}
       autoFocus
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => {
+        setHovered(false);
+        setPressed(false);
+      }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
       style={{
         width: "100%",
-        padding: "13px 18px",
+        padding: "15px 18px",
         background:
           "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(238,242,247,0.96) 100%)",
         border: "1px solid rgba(255,255,255,0.40)",
@@ -659,13 +840,23 @@ function ContinueButton({ onClick }: { onClick: () => void }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: 8,
+        gap: 10,
+        transform: pressed
+          ? "scale(0.97)"
+          : lifted
+            ? "translateY(-2px)"
+            : "translateY(0)",
+        boxShadow: lifted
+          ? "0 14px 30px rgba(255,255,255,0.22), 0 1px 0 rgba(255,255,255,0.60) inset, 0 -1px 0 rgba(0,0,0,0.18) inset"
+          : "0 8px 22px rgba(0,0,0,0.32), 0 1px 0 rgba(255,255,255,0.60) inset, 0 -1px 0 rgba(0,0,0,0.15) inset",
+        transition:
+          "transform 150ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms cubic-bezier(0.22,1,0.36,1)",
       }}
     >
       Continue
       <svg
-        width="14"
-        height="14"
+        width="16"
+        height="16"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"

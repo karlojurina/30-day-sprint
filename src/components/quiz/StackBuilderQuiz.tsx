@@ -207,78 +207,109 @@ export function StackBuilderQuiz({
         wobbleKey={wobbleKey}
       />
 
-      {/* Question card */}
+      {/* Question card - full glassmorphism treatment matching R1's
+          SwipeCards card. Backdrop blur + saturate, top sheen
+          overlay, layered drop shadow, hairline inset highlight. */}
       {top && (
         <div
           style={{
+            position: "relative",
             background:
               reveal?.kind === "correct"
-                ? "linear-gradient(155deg, rgba(74,222,128,0.16) 0%, rgba(34,197,94,0.04) 100%)"
+                ? "linear-gradient(155deg, rgba(74,222,128,0.16) 0%, rgba(34,197,94,0.06) 55%, rgba(34,197,94,0.02) 100%)"
                 : reveal?.kind === "wrong"
-                  ? "linear-gradient(155deg, rgba(252,165,165,0.18) 0%, rgba(239,68,68,0.04) 100%)"
-                  : "linear-gradient(155deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%)",
+                  ? "linear-gradient(155deg, rgba(252,165,165,0.18) 0%, rgba(239,68,68,0.06) 55%, rgba(239,68,68,0.02) 100%)"
+                  : "linear-gradient(155deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.04) 55%, rgba(255,255,255,0.02) 100%)",
+            backdropFilter: "blur(20px) saturate(170%)",
+            WebkitBackdropFilter: "blur(20px) saturate(170%)",
             border: reveal
               ? reveal.kind === "correct"
                 ? "1px solid rgba(74,222,128,0.50)"
                 : "1px solid rgba(252,165,165,0.50)"
-              : "1px solid rgba(255,255,255,0.14)",
-            borderRadius: 14,
-            padding: "14px 16px",
-            display: "flex",
-            flexDirection: "column",
-            gap: 10,
-            transition: "background 200ms, border-color 200ms",
+              : "1px solid rgba(255,255,255,0.16)",
+            borderRadius: 16,
+            padding: "16px 18px",
+            boxShadow:
+              "0 16px 40px -8px rgba(0,0,0,0.45), 0 4px 10px rgba(0,0,0,0.30), 0 1px 0 rgba(255,255,255,0.10) inset, 0 -1px 0 rgba(0,0,0,0.30) inset",
+            overflow: "hidden",
+            transition: "background 240ms, border-color 240ms",
           }}
         >
-          {reveal == null ? (
-            <>
-              <p
-                style={{
-                  fontSize: 10,
-                  fontFamily: "var(--font-mono)",
-                  letterSpacing: "0.22em",
-                  textTransform: "uppercase",
-                  color: "rgba(255,255,255,0.42)",
-                }}
-              >
-                {isAb ? "Pick one" : "True or False"}
-              </p>
-              <p
-                style={{
-                  fontSize: 16,
-                  fontWeight: 500,
-                  lineHeight: 1.4,
-                  color: "rgba(255,255,255,0.96)",
-                  letterSpacing: "-0.011em",
-                }}
-              >
-                {top.question_text}
-              </p>
-              {isAb && (
-                <div
+          {/* Top sheen */}
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              right: 0,
+              height: 60,
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 100%)",
+              pointerEvents: "none",
+              opacity: 0.9,
+            }}
+          />
+          {/* Content - sits above the sheen via z-index */}
+          <div
+            style={{
+              position: "relative",
+              zIndex: 1,
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            {reveal == null ? (
+              <>
+                <p
                   style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: 8,
-                    marginTop: 4,
+                    fontSize: 10,
+                    fontFamily: "var(--font-mono)",
+                    letterSpacing: "0.22em",
+                    textTransform: "uppercase",
+                    color: "rgba(255,255,255,0.45)",
                   }}
                 >
-                  <OptionTile
-                    side="left"
-                    badge={swap ? "B" : "A"}
-                    text={swap ? top.option_b : top.option_a}
-                  />
-                  <OptionTile
-                    side="right"
-                    badge={swap ? "A" : "B"}
-                    text={swap ? top.option_a : top.option_b}
-                  />
-                </div>
-              )}
-            </>
-          ) : (
-            <RevealPanel reveal={reveal} />
-          )}
+                  {isAb ? "Pick one" : "True or False"}
+                </p>
+                <p
+                  style={{
+                    fontSize: 16,
+                    fontWeight: 500,
+                    lineHeight: 1.42,
+                    color: "rgba(255,255,255,0.96)",
+                    letterSpacing: "-0.011em",
+                  }}
+                >
+                  {top.question_text}
+                </p>
+                {isAb && (
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 8,
+                      marginTop: 4,
+                    }}
+                  >
+                    <OptionTile
+                      side="left"
+                      badge={swap ? "B" : "A"}
+                      text={swap ? top.option_b : top.option_a}
+                    />
+                    <OptionTile
+                      side="right"
+                      badge={swap ? "A" : "B"}
+                      text={swap ? top.option_a : top.option_b}
+                    />
+                  </div>
+                )}
+              </>
+            ) : (
+              <RevealPanel reveal={reveal} />
+            )}
+          </div>
         </div>
       )}
 
@@ -314,6 +345,10 @@ export function StackBuilderQuiz({
 // ──────────────────────────────────────────────────────────────────────
 // Tower visual
 // ──────────────────────────────────────────────────────────────────────
+// Design language matches R1 SwipeCards: neutral white glassmorphism,
+// no gold. Filled blocks have backdrop-blur, top sheen, layered drop
+// shadow, and a hairline highlight on top. Empty slots are recessed
+// glass placeholders with subtle inner shadow.
 
 function Tower({
   total,
@@ -324,22 +359,20 @@ function Tower({
   correctCount: number;
   wobbleKey: number;
 }) {
-  // The tower container is fixed height. Block size scales with
-  // total so 18 blocks always fit on small viewports. Brief allows
-  // either scrolling OR scaling; we pick scaling.
-  const containerHeight = 160; // px
-  const foundationHeight = 4;
-  const usableHeight = containerHeight - foundationHeight - 6; // 6px gap
-  const blockHeight = Math.max(4, Math.min(14, usableHeight / total - 2));
-  const blockGap = 2;
-  const blockWidth = 90;
+  // Container scales blocks to fit 18 in a fixed viewport. Larger
+  // blocks (chunkier proportions) read more premium than the previous
+  // 8px-tall slivers; we trade some vertical density for visual weight.
+  const containerHeight = 180;
+  const foundationHeight = 6;
+  const usableHeight = containerHeight - foundationHeight - 8;
+  const blockGap = 3;
+  const blockHeight = Math.max(7, Math.min(16, usableHeight / total - blockGap));
+  const blockWidth = 120;
 
-  // Build slot array bottom-to-top. Slot index 0 = bottom = first
-  // correct answer's block. We render from bottom up so blocks
-  // appear stacked correctly.
   const slots = Array.from({ length: total }, (_, i) => {
     const isFilled = i < correctCount;
-    return { i, isFilled };
+    const isNewest = isFilled && i === correctCount - 1;
+    return { i, isFilled, isNewest };
   });
 
   return (
@@ -351,18 +384,37 @@ function Tower({
         flexDirection: "column",
         alignItems: "center",
         justifyContent: "flex-end",
-        gap: 4,
+        gap: 6,
+        position: "relative",
       }}
     >
+      {/* Subtle ground glow under the tower - adds depth without
+          drawing attention. Mirrors SwipeCards' card halo. */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          bottom: 0,
+          width: blockWidth + 60,
+          height: 24,
+          background:
+            "radial-gradient(ellipse at center, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 70%)",
+          pointerEvents: "none",
+        }}
+      />
+
       <motion.div
         key={wobbleKey}
-        // Wobble animation on every increment of wobbleKey (= every
-        // wrong answer). Subtle - 3 degrees side to side, ~600ms.
+        // Spring wobble - more organic than the previous easeInOut.
         animate={
           wobbleKey > 0
             ? {
-                rotate: [0, -3, 3, -2, 2, 0],
-                transition: { duration: 0.6, ease: "easeInOut" },
+                rotate: [0, -2.5, 2.2, -1.4, 1, -0.4, 0],
+                transition: {
+                  duration: 0.7,
+                  ease: [0.32, 0.72, 0.36, 1],
+                  times: [0, 0.18, 0.38, 0.58, 0.76, 0.9, 1],
+                },
               }
             : { rotate: 0 }
         }
@@ -372,6 +424,7 @@ function Tower({
           alignItems: "center",
           gap: blockGap,
           transformOrigin: "bottom center",
+          position: "relative",
         }}
       >
         {slots.map((slot) => (
@@ -380,21 +433,24 @@ function Tower({
             isFilled={slot.isFilled}
             width={blockWidth}
             height={blockHeight}
-            // Stagger the drop-in only for the most recent block.
-            isNewest={slot.isFilled && slot.i === correctCount - 1}
+            isNewest={slot.isNewest}
           />
         ))}
       </motion.div>
-      {/* Foundation */}
+
+      {/* Foundation - a more dimensional bar with inset highlight +
+          drop shadow. Reads as resting on the ground. */}
       <div
         aria-hidden="true"
         style={{
-          width: blockWidth + 18,
+          width: blockWidth + 28,
           height: foundationHeight,
           background:
-            "linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.06) 100%)",
-          borderRadius: 2,
-          boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
+            "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.04) 60%, rgba(255,255,255,0.02) 100%)",
+          border: "1px solid rgba(255,255,255,0.10)",
+          borderRadius: 3,
+          boxShadow:
+            "0 2px 6px rgba(0,0,0,0.45), 0 1px 0 rgba(255,255,255,0.14) inset",
         }}
       />
     </div>
@@ -414,34 +470,70 @@ function Block({
 }) {
   return (
     <motion.div
-      initial={
-        isNewest ? { y: -40, scale: 1.1, opacity: 0 } : false
-      }
+      initial={isNewest ? { y: -48, scale: 1.12, opacity: 0 } : false}
       animate={
         isNewest
           ? {
-              y: [-40, 4, 0],
-              scale: [1.1, 0.96, 1],
-              opacity: [0, 1, 1],
-              transition: { duration: 0.42, ease: [0.22, 1, 0.36, 1] },
+              // Anticipation drop: overshoot down + tiny squash on
+              // impact + settle. Spring-like via custom timing
+              // instead of generic ease.
+              y: [-48, 6, -1, 0],
+              scaleY: [1, 0.88, 1.04, 1],
+              scaleX: [1, 1.06, 0.98, 1],
+              opacity: [0, 1, 1, 1],
+              transition: {
+                duration: 0.5,
+                ease: [0.22, 1, 0.36, 1],
+                times: [0, 0.55, 0.78, 1],
+              },
             }
           : undefined
       }
       style={{
+        position: "relative",
         width,
         height,
-        borderRadius: 3,
+        borderRadius: 4,
+        overflow: "hidden",
+        // Filled = neutral white glass with depth. Empty = thin
+        // recessed slot. No gold anywhere - matches R1's scheme.
         background: isFilled
-          ? "linear-gradient(180deg, rgba(230,192,122,0.96) 0%, rgba(195,159,98,0.96) 100%)"
-          : "transparent",
+          ? "linear-gradient(155deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.08) 55%, rgba(255,255,255,0.04) 100%)"
+          : "linear-gradient(180deg, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.04) 100%)",
+        backdropFilter: isFilled ? "blur(8px) saturate(160%)" : undefined,
+        WebkitBackdropFilter: isFilled
+          ? "blur(8px) saturate(160%)"
+          : undefined,
         border: isFilled
-          ? "1px solid rgba(230,192,122,1)"
-          : "1px dashed rgba(255,255,255,0.18)",
+          ? "1px solid rgba(255,255,255,0.22)"
+          : "1px solid rgba(255,255,255,0.06)",
         boxShadow: isFilled
-          ? "0 2px 4px rgba(0,0,0,0.35), 0 1px 0 rgba(255,255,255,0.20) inset"
-          : "none",
+          ? // Lifted glass: outer drop, hairline top highlight, hairline
+            // bottom shadow. Mirrors the SwipeCards card material.
+            "0 3px 8px rgba(0,0,0,0.40), 0 1px 0 rgba(255,255,255,0.20) inset, 0 -1px 0 rgba(0,0,0,0.30) inset"
+          : // Empty: inner shadow only, suggests recess.
+            "inset 0 1px 2px rgba(0,0,0,0.30)",
       }}
-    />
+    >
+      {/* Top sheen on filled blocks - light catches the glass edge.
+          Matches the SwipeCards card sheen. Decorative only. */}
+      {isFilled && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            height: Math.max(2, Math.min(6, height / 2)),
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0) 100%)",
+            pointerEvents: "none",
+            opacity: 0.9,
+          }}
+        />
+      )}
+    </motion.div>
   );
 }
 
@@ -461,52 +553,86 @@ function OptionTile({
   return (
     <div
       style={{
-        padding: 12,
+        position: "relative",
+        padding: 14,
+        // Premium glass to match R1 tile material.
         background:
-          "linear-gradient(160deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0.02) 100%)",
-        border: "1px solid rgba(255,255,255,0.12)",
-        borderRadius: 10,
+          "linear-gradient(160deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.03) 100%)",
+        backdropFilter: "blur(12px) saturate(150%)",
+        WebkitBackdropFilter: "blur(12px) saturate(150%)",
+        border: "1px solid rgba(255,255,255,0.14)",
+        borderRadius: 12,
+        boxShadow:
+          "0 6px 16px rgba(0,0,0,0.25), 0 1px 0 rgba(255,255,255,0.10) inset, 0 -1px 0 rgba(0,0,0,0.20) inset",
+        overflow: "hidden",
         display: "flex",
         flexDirection: "column",
-        gap: 8,
+        gap: 10,
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      {/* Top sheen on tile */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: 32,
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 100%)",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          position: "relative",
+        }}
+      >
         <span
           style={{
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
-            width: 22,
-            height: 22,
+            width: 24,
+            height: 24,
             borderRadius: 999,
             background:
               "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.06) 100%)",
             border: "1px solid rgba(255,255,255,0.22)",
-            fontSize: 10,
+            fontSize: 11,
             fontWeight: 700,
+            letterSpacing: "0.04em",
             color: "rgba(255,255,255,0.96)",
+            fontVariantNumeric: "tabular-nums",
+            boxShadow:
+              "0 1px 2px rgba(0,0,0,0.30), 0 1px 0 rgba(255,255,255,0.18) inset",
           }}
         >
           {badge}
         </span>
         <span
           style={{
-            fontSize: 9,
+            fontSize: 9.5,
             fontFamily: "var(--font-mono)",
-            letterSpacing: "0.18em",
+            letterSpacing: "0.20em",
             textTransform: "uppercase",
-            color: "rgba(255,255,255,0.42)",
+            color: "rgba(255,255,255,0.45)",
           }}
         >
-          {side === "left" ? "Left" : "Right"}
+          {side === "left" ? "Left button" : "Right button"}
         </span>
       </div>
       <span
         style={{
-          fontSize: 13,
-          lineHeight: 1.4,
-          color: "rgba(255,255,255,0.88)",
+          position: "relative",
+          fontSize: 13.5,
+          lineHeight: 1.45,
+          color: "rgba(255,255,255,0.90)",
+          letterSpacing: "-0.005em",
         }}
       >
         {text}
@@ -524,6 +650,8 @@ function PickButton({
   label: string;
   onClick: () => void;
 }) {
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
   const isTrue = label === "TRUE";
   const isFalse = label === "FALSE";
   const accent = isTrue
@@ -531,14 +659,29 @@ function PickButton({
     : isFalse
       ? "rgba(239,68,68,0.38)"
       : "rgba(255,255,255,0.16)";
+  const glowColor = isTrue
+    ? "rgba(74,222,128,0.22)"
+    : isFalse
+      ? "rgba(239,68,68,0.20)"
+      : "rgba(255,255,255,0.12)";
+  const lifted = hovered && !pressed;
   return (
     <button
       type="button"
       onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => {
+        setHovered(false);
+        setPressed(false);
+      }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
       style={{
-        padding: "14px 16px",
+        padding: "15px 18px",
         background:
           "linear-gradient(180deg, rgba(255,255,255,0.14) 0%, rgba(255,255,255,0.04) 100%)",
+        backdropFilter: "blur(12px) saturate(150%)",
+        WebkitBackdropFilter: "blur(12px) saturate(150%)",
         border: `1px solid ${accent}`,
         borderRadius: 12,
         color: "rgba(255,255,255,0.96)",
@@ -549,13 +692,23 @@ function PickButton({
         display: "flex",
         alignItems: "center",
         justifyContent: side === "left" ? "flex-start" : "flex-end",
-        gap: 8,
+        gap: 10,
+        transform: pressed
+          ? "scale(0.97)"
+          : lifted
+            ? "translateY(-2px)"
+            : "translateY(0)",
+        boxShadow: lifted
+          ? `0 14px 30px ${glowColor}, 0 1px 0 rgba(255,255,255,0.14) inset, 0 -1px 0 rgba(0,0,0,0.25) inset`
+          : "0 8px 22px rgba(0,0,0,0.32), 0 1px 0 rgba(255,255,255,0.10) inset, 0 -1px 0 rgba(0,0,0,0.20) inset",
+        transition:
+          "transform 150ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms cubic-bezier(0.22,1,0.36,1)",
       }}
     >
       {side === "left" && (
         <svg
-          width="14"
-          height="14"
+          width="16"
+          height="16"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -570,8 +723,8 @@ function PickButton({
       <span>{label}</span>
       {side === "right" && (
         <svg
-          width="14"
-          height="14"
+          width="16"
+          height="16"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -588,14 +741,24 @@ function PickButton({
 }
 
 function ContinueButton({ onClick }: { onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const lifted = hovered && !pressed;
   return (
     <button
       type="button"
       onClick={onClick}
       autoFocus
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => {
+        setHovered(false);
+        setPressed(false);
+      }}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
       style={{
         width: "100%",
-        padding: "13px 18px",
+        padding: "15px 18px",
         background:
           "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(238,242,247,0.96) 100%)",
         border: "1px solid rgba(255,255,255,0.40)",
@@ -608,13 +771,23 @@ function ContinueButton({ onClick }: { onClick: () => void }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: 8,
+        gap: 10,
+        transform: pressed
+          ? "scale(0.97)"
+          : lifted
+            ? "translateY(-2px)"
+            : "translateY(0)",
+        boxShadow: lifted
+          ? "0 14px 30px rgba(255,255,255,0.22), 0 1px 0 rgba(255,255,255,0.60) inset, 0 -1px 0 rgba(0,0,0,0.18) inset"
+          : "0 8px 22px rgba(0,0,0,0.32), 0 1px 0 rgba(255,255,255,0.60) inset, 0 -1px 0 rgba(0,0,0,0.15) inset",
+        transition:
+          "transform 150ms cubic-bezier(0.22,1,0.36,1), box-shadow 200ms cubic-bezier(0.22,1,0.36,1)",
       }}
     >
       Continue
       <svg
-        width="14"
-        height="14"
+        width="16"
+        height="16"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"

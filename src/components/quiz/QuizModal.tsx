@@ -107,13 +107,12 @@ export function QuizModal({
             transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
             style={{
               width: "min(560px, 100%)",
-              // v70.1 - stable height so format components have spare
-              // vertical room to center the question card against. The
-              // animation lives in the top zone, question card centers
-              // in the remaining space, buttons pin to the bottom.
-              // Without a minHeight, the modal collapsed to content and
-              // there was nothing to center against.
-              height: "min(680px, 92vh)",
+              // v70.2 - back to content-sized modal. Format components
+              // that need a stable layout (R2/R3/R4 - animation +
+              // question + buttons) set their OWN minHeight so they
+              // dictate modal size. R1 SwipeCards naturally sizes to
+              // its content (was getting tall + empty when modal had
+              // a global fixed height).
               maxHeight: "92vh",
               display: "flex",
               flexDirection: "column",

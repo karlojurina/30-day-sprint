@@ -210,15 +210,24 @@ export function ConstellationQuiz({
   return (
     <div
       style={{
+        // v70.2 - absolute positioning layout.
+        position: "relative",
         flex: 1,
-        display: "flex",
-        flexDirection: "column",
+        minHeight: 620,
         padding: "16px 20px 22px",
-        minHeight: 0,
       }}
     >
-      {/* Constellation - top of modal body, fixed natural height. */}
-      <div style={{ flexShrink: 0 }}>
+      {/* Starfield - absolute top, floats independently. */}
+      <div
+        style={{
+          position: "absolute",
+          top: 16,
+          left: 20,
+          right: 20,
+          pointerEvents: "none",
+          zIndex: 1,
+        }}
+      >
         <Constellation
           answerLog={answerLog}
           total={total}
@@ -226,21 +235,16 @@ export function ConstellationQuiz({
         />
       </div>
 
-      {/* Question card - vertically centered in remaining space. */}
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          padding: "16px 0",
-          minHeight: 0,
-        }}
-      >
-        {top && (
+      {/* Question card - geometrically centered. */}
+      {top && (
           <div
             style={{
-              position: "relative",
+              position: "absolute",
+              top: "50%",
+              left: 20,
+              right: 20,
+              transform: "translateY(-50%)",
+              zIndex: 2,
               background:
                 reveal?.kind === "correct"
                   ? "linear-gradient(155deg, rgba(74,222,128,0.16) 0%, rgba(34,197,94,0.06) 55%, rgba(34,197,94,0.02) 100%)"
@@ -337,10 +341,18 @@ export function ConstellationQuiz({
             </div>
           </div>
         )}
-      </div>
 
-      {/* Buttons - pinned to bottom. */}
-      <div style={{ flexShrink: 0 }}>
+      {/* Buttons - absolute-positioned at the bottom of the modal
+          viewport, separate layer from the centered question card. */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 22,
+          left: 20,
+          right: 20,
+          zIndex: 2,
+        }}
+      >
         {reveal == null ? (
           <div
             style={{

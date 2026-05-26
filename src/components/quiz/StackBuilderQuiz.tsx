@@ -185,20 +185,32 @@ export function StackBuilderQuiz({
   return (
     <div
       style={{
+        // v70.2 - new layout per Karlo: question card geometrically
+        // centered in the modal viewport; animation (tower) and
+        // buttons float as separate absolute layers. Format
+        // component sets its own minHeight so R1 (SwipeCards) isn't
+        // affected by a global modal height.
+        position: "relative",
         flex: 1,
-        display: "flex",
-        flexDirection: "column",
+        minHeight: 620,
         padding: "16px 20px 22px",
-        minHeight: 0,
       }}
     >
-      {/* Tower visual - top of modal body, fixed natural height.
-
-          Brief v2: "the tower can scale down slightly with each
-          block so it always fits on screen." Fixed-height
-          container with auto-scaling blocks; question card sits
-          in the centered middle band below it. */}
-      <div style={{ flexShrink: 0 }}>
+      {/* Tower - absolute-positioned at top, floats above the
+          centered question card. Pointer-events: none so it never
+          blocks clicks on the question card if there's overlap. */}
+      <div
+        style={{
+          position: "absolute",
+          top: 16,
+          left: 20,
+          right: 20,
+          display: "flex",
+          justifyContent: "center",
+          pointerEvents: "none",
+          zIndex: 1,
+        }}
+      >
         <Tower
           total={total}
           correctCount={correctCount}
@@ -206,28 +218,18 @@ export function StackBuilderQuiz({
         />
       </div>
 
-      {/* Question card - vertically centered in remaining space.
-          Tower above, buttons below; this middle band absorbs
-          whatever vertical room is left so the question sits
-          where the student's eye actually lands. */}
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          padding: "16px 0",
-          minHeight: 0,
-        }}
-      >
-
-      {/* Question card - full glassmorphism treatment matching R1's
-          SwipeCards card. Backdrop blur + saturate, top sheen
-          overlay, layered drop shadow, hairline inset highlight. */}
+      {/* Question card - geometrically centered in the modal
+          viewport via top: 50% + translateY. Sits above (z-index)
+          any animation that visually extends into its zone. */}
       {top && (
         <div
           style={{
-            position: "relative",
+            position: "absolute",
+            top: "50%",
+            left: 20,
+            right: 20,
+            transform: "translateY(-50%)",
+            zIndex: 2,
             background:
               reveal?.kind === "correct"
                 ? "linear-gradient(155deg, rgba(74,222,128,0.16) 0%, rgba(34,197,94,0.06) 55%, rgba(34,197,94,0.02) 100%)"
@@ -326,11 +328,18 @@ export function StackBuilderQuiz({
           </div>
         </div>
       )}
-      </div>
 
-      {/* Buttons - either pick (left/right) or continue. Pinned to
-          the bottom of the modal body. */}
-      <div style={{ flexShrink: 0 }}>
+      {/* Buttons - absolute-positioned at the bottom of the modal
+          viewport, separate layer from the centered question card. */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 22,
+          left: 20,
+          right: 20,
+          zIndex: 2,
+        }}
+      >
         {reveal == null ? (
           <div
             style={{

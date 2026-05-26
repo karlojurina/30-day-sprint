@@ -199,15 +199,29 @@ export function VaultTumblersQuiz({
   return (
     <div
       style={{
+        // v70.2 - absolute positioning layout. Dials float at top,
+        // question card geometrically centered in modal viewport,
+        // buttons absolute at bottom. minHeight on the format
+        // component sets modal size; R1 is unaffected.
+        position: "relative",
         flex: 1,
-        display: "flex",
-        flexDirection: "column",
+        minHeight: 620,
         padding: "16px 20px 22px",
-        minHeight: 0,
       }}
     >
-      {/* Dial row - top of modal body, fixed natural height. */}
-      <div style={{ flexShrink: 0 }}>
+      {/* Dial row - absolute top, floats independently. */}
+      <div
+        style={{
+          position: "absolute",
+          top: 16,
+          left: 20,
+          right: 20,
+          display: "flex",
+          justifyContent: "center",
+          pointerEvents: "none",
+          zIndex: 1,
+        }}
+      >
         <DialRow
           dials={dialStates}
           activeDialIdx={activeDialIdx}
@@ -215,23 +229,16 @@ export function VaultTumblersQuiz({
         />
       </div>
 
-      {/* Question card - vertically centered in remaining space.
-          Dials above, buttons below; the question sits where the
-          student's eye actually lands. */}
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          padding: "16px 0",
-          minHeight: 0,
-        }}
-      >
+      {/* Question card - geometrically centered in modal viewport. */}
       {top && (
         <div
           style={{
-            position: "relative",
+            position: "absolute",
+            top: "50%",
+            left: 20,
+            right: 20,
+            transform: "translateY(-50%)",
+            zIndex: 2,
             background:
               reveal?.kind === "correct"
                 ? "linear-gradient(155deg, rgba(74,222,128,0.16) 0%, rgba(34,197,94,0.06) 55%, rgba(34,197,94,0.02) 100%)"
@@ -330,10 +337,18 @@ export function VaultTumblersQuiz({
           </div>
         </div>
       )}
-      </div>
 
-      {/* Buttons - pinned to the bottom of the modal body. */}
-      <div style={{ flexShrink: 0 }}>
+      {/* Buttons - absolute-positioned at the bottom of the modal
+          viewport, separate layer from the centered question card. */}
+      <div
+        style={{
+          position: "absolute",
+          bottom: 22,
+          left: 20,
+          right: 20,
+          zIndex: 2,
+        }}
+      >
         {reveal == null ? (
           <div
             style={{

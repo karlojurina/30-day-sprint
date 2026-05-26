@@ -215,17 +215,29 @@ export function VaultTumblersQuiz({
 
       <div
         style={{
+          // v70.8 - stable body height locks the modal panel size
+          // across questions.
           flex: 1,
           display: "flex",
           flexDirection: "column",
           padding: "16px 20px 18px",
-          gap: 14,
+          minHeight: 360,
+        }}
+      >
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          marginBottom: 14,
+          minHeight: 0,
         }}
       >
       {top && (
         <div
           style={{
             position: "relative",
+            width: "100%",
             background:
               reveal?.kind === "correct"
                 ? "linear-gradient(155deg, rgba(74,222,128,0.16) 0%, rgba(34,197,94,0.06) 55%, rgba(34,197,94,0.02) 100%)"
@@ -324,8 +336,9 @@ export function VaultTumblersQuiz({
           </div>
         </div>
       )}
+      </div>
 
-      {/* Buttons - compact, in flow under the question card. */}
+      {/* Buttons - pinned to the bottom of the stable-height body. */}
       <div style={{ flexShrink: 0 }}>
         {reveal == null ? (
           <div

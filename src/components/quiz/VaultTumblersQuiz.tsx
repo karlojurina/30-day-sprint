@@ -203,18 +203,31 @@ export function VaultTumblersQuiz({
         display: "flex",
         flexDirection: "column",
         padding: "16px 20px 22px",
-        gap: 14,
         minHeight: 0,
       }}
     >
-      {/* Dial row */}
-      <DialRow
-        dials={dialStates}
-        activeDialIdx={activeDialIdx}
-        thunkKey={thunkKey}
-      />
+      {/* Dial row - top of modal body, fixed natural height. */}
+      <div style={{ flexShrink: 0 }}>
+        <DialRow
+          dials={dialStates}
+          activeDialIdx={activeDialIdx}
+          thunkKey={thunkKey}
+        />
+      </div>
 
-      {/* Question card */}
+      {/* Question card - vertically centered in remaining space.
+          Dials above, buttons below; the question sits where the
+          student's eye actually lands. */}
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          padding: "16px 0",
+          minHeight: 0,
+        }}
+      >
       {top && (
         <div
           style={{
@@ -317,8 +330,9 @@ export function VaultTumblersQuiz({
           </div>
         </div>
       )}
+      </div>
 
-      {/* Buttons */}
+      {/* Buttons - pinned to the bottom of the modal body. */}
       <div style={{ flexShrink: 0 }}>
         {reveal == null ? (
           <div
@@ -426,7 +440,7 @@ function DialRow({
           <span
             key={`label-${d.idx}`}
             style={{
-              width: 56,
+              width: 76,
               fontSize: 10,
               fontFamily: "var(--font-mono)",
               letterSpacing: "0.18em",
@@ -468,10 +482,12 @@ function Dial({
     return { i, isFilled, wasAsked };
   });
 
-  // Dimensions - chunkier than before so the mechanical feel reads.
-  const size = 56;
-  const innerRadius = size / 2 - 9; // mark orbit
-  const markSize = 7;
+  // Dimensions - bigger than v69.1 so the mechanical feel really
+  // reads (Karlo: "make it a bit bigger"). Inner ring + mark size
+  // scale with dial size.
+  const size = 76;
+  const innerRadius = size / 2 - 12; // mark orbit
+  const markSize = 9;
 
   return (
     <motion.div
@@ -552,8 +568,8 @@ function Dial({
           top: "50%",
           left: "50%",
           transform: "translate(-50%, -50%)",
-          width: 8,
-          height: 1.5,
+          width: 11,
+          height: 2,
           borderRadius: 1,
           background: state.isLocked
             ? "rgba(255,255,255,0.55)"

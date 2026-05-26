@@ -189,23 +189,37 @@ export function StackBuilderQuiz({
         display: "flex",
         flexDirection: "column",
         padding: "16px 20px 22px",
-        gap: 14,
         minHeight: 0,
       }}
     >
-      {/* Tower visual - ghost slots top to bottom, filled blocks
-          stack from foundation upward as correct answers land.
+      {/* Tower visual - top of modal body, fixed natural height.
 
           Brief v2: "the tower can scale down slightly with each
-          block so it always fits on screen." We give the tower a
-          fixed-height container and scale block size to fit; for
-          18-card decks at small viewports this keeps everything
-          visible without scroll. */}
-      <Tower
-        total={total}
-        correctCount={correctCount}
-        wobbleKey={wobbleKey}
-      />
+          block so it always fits on screen." Fixed-height
+          container with auto-scaling blocks; question card sits
+          in the centered middle band below it. */}
+      <div style={{ flexShrink: 0 }}>
+        <Tower
+          total={total}
+          correctCount={correctCount}
+          wobbleKey={wobbleKey}
+        />
+      </div>
+
+      {/* Question card - vertically centered in remaining space.
+          Tower above, buttons below; this middle band absorbs
+          whatever vertical room is left so the question sits
+          where the student's eye actually lands. */}
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          padding: "16px 0",
+          minHeight: 0,
+        }}
+      >
 
       {/* Question card - full glassmorphism treatment matching R1's
           SwipeCards card. Backdrop blur + saturate, top sheen
@@ -312,8 +326,10 @@ export function StackBuilderQuiz({
           </div>
         </div>
       )}
+      </div>
 
-      {/* Buttons - either pick (left/right) or continue */}
+      {/* Buttons - either pick (left/right) or continue. Pinned to
+          the bottom of the modal body. */}
       <div style={{ flexShrink: 0 }}>
         {reveal == null ? (
           <div

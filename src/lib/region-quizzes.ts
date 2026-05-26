@@ -36,12 +36,15 @@ export type SwipeCardQuestion =
     };
 
 // v66 - tier_ranking killed per brief v2 (Karlo decision: too much
-// ambiguity in S/A/B/C ordering). All three live formats use the
-// same SwipeCardQuestion shape underneath; only the visual wrapper
+// ambiguity in S/A/B/C ordering). v70 - constellation added for R3
+// (split off from R2's stack_builder so each region has its own
+// visual identity). All four live formats use the same
+// SwipeCardQuestion shape underneath; only the visual wrapper
 // differs.
 export type QuizFormat =
   | "swipe_cards"
   | "stack_builder"
+  | "constellation"
   | "vault_tumblers";
 
 export interface SwipeCardsQuiz {
@@ -51,6 +54,14 @@ export interface SwipeCardsQuiz {
 
 export interface StackBuilderQuiz {
   format: "stack_builder";
+  cards: SwipeCardQuestion[];
+}
+
+export interface ConstellationQuiz {
+  format: "constellation";
+  /** v70: 18 cards. Stars in STAR_POSITIONS array light up in
+   *  ANSWER order (not card order) - each correct answer ignites
+   *  the next star in sequence. */
   cards: SwipeCardQuestion[];
 }
 
@@ -64,6 +75,7 @@ export interface VaultTumblersQuiz {
 export type RegionQuiz =
   | SwipeCardsQuiz
   | StackBuilderQuiz
+  | ConstellationQuiz
   | VaultTumblersQuiz;
 
 // ─── Region 1 content (lovro-brief-region-quiz §03, final) ───────────
@@ -897,7 +909,9 @@ const R4_CARDS: SwipeCardQuestion[] = [
 export const REGION_QUIZ_REGISTRY: Partial<Record<RegionId, RegionQuiz>> = {
   r1: { format: "swipe_cards", cards: R1_CARDS },
   r2: { format: "stack_builder", cards: R2_CARDS },
-  r3: { format: "stack_builder", cards: R3_CARDS },
+  // v70 - R3 split from stack_builder to constellation. Each region
+  // now has its own visual identity.
+  r3: { format: "constellation", cards: R3_CARDS },
   r4: { format: "vault_tumblers", cards: R4_CARDS },
 };
 

@@ -113,6 +113,7 @@ import {
   type QuizCompletePayload,
 } from "@/components/quiz/SwipeCardsQuiz";
 import { StackBuilderQuiz } from "@/components/quiz/StackBuilderQuiz";
+import { ConstellationQuiz } from "@/components/quiz/ConstellationQuiz";
 import { VaultTumblersQuiz } from "@/components/quiz/VaultTumblersQuiz";
 import { getRegionQuiz } from "@/lib/region-quizzes";
 
@@ -2173,6 +2174,14 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
             )}
             {quizConfig.format === "stack_builder" && (
               <StackBuilderQuiz
+                key={quizAttempt}
+                cards={quizConfig.cards}
+                onProgressChange={setQuizProgress}
+                onComplete={handleComplete}
+              />
+            )}
+            {quizConfig.format === "constellation" && (
+              <ConstellationQuiz
                 key={quizAttempt}
                 cards={quizConfig.cards}
                 onProgressChange={setQuizProgress}

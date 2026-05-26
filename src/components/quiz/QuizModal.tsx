@@ -145,75 +145,89 @@ export function QuizModal({
             padding: 16,
           }}
         >
-          {/* Scene container - column with TOP slot above the panel
-              row. The panel row has the LEFT slot, panel, RIGHT slot.
-              All slots are siblings of the modal panel, NOT inside it. */}
+          {/* v70.4 - modal cluster. The cluster IS the modal panel
+              (cluster bounds = panel bounds). Animation slots are
+              ABSOLUTELY POSITIONED relative to the cluster, so:
+                - top slot's bottom edge sits at the panel's top edge
+                  (+ a 24px gap above the panel)
+                - left/right slots sit beside the panel
+              The cluster gets centered by the overlay's flex
+              alignment, which means the PANEL gets centered - and
+              therefore the question card inside it lands at the
+              geometric middle of the viewport. Animations float
+              above/beside without affecting where the panel sits. */}
           <div
             style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 24,
-              width: "100%",
-              maxWidth: "min(1100px, 100%)",
+              position: "relative",
             }}
           >
-            {/* TOP slot - animations portal here. Empty if a format
-                doesn't provide a top animation. */}
+            {/* TOP slot - bottom edge of this slot's box equals the
+                top edge of the modal panel (minus the gap). Anything
+                portaled in here floats above the panel. */}
             <div
               ref={setTopSlot}
               style={{
-                width: "min(560px, 100%)",
+                position: "absolute",
+                bottom: "100%",
+                left: "50%",
+                transform: "translateX(-50%)",
+                marginBottom: 24,
+                width: "min(560px, 100vw)",
                 display: "flex",
                 justifyContent: "center",
                 pointerEvents: "none",
               }}
             />
 
-            {/* Panel row - left slot | modal panel | right slot */}
+            {/* LEFT slot - right edge sits at the panel's left edge. */}
             <div
+              ref={setLeftSlot}
               style={{
+                position: "absolute",
+                right: "100%",
+                marginRight: 24,
+                top: "50%",
+                transform: "translateY(-50%)",
                 display: "flex",
-                alignItems: "center",
-                gap: 24,
-                width: "100%",
                 justifyContent: "center",
+                pointerEvents: "none",
               }}
-            >
-              <div
-                ref={setLeftSlot}
-                style={{
-                  flex: "0 0 auto",
-                  display: "flex",
-                  justifyContent: "center",
-                  pointerEvents: "none",
-                }}
-              />
+            />
 
-              <motion.div
-                initial={{ scale: 0.96, opacity: 0, y: 10 }}
-                animate={{ scale: 1, opacity: 1, y: 0 }}
-                transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-                style={{
-                  width: "min(560px, 100%)",
-                  // v70.3 - back to compact, R1-style. The animation
-                  // lives OUTSIDE this panel now (in the slots above /
-                  // beside it), so the panel just needs room for the
-                  // question card + buttons. maxHeight cap handles
-                  // small viewports.
-                  maxHeight: "92vh",
-                  display: "flex",
-                  flexDirection: "column",
-                  background: "rgba(15, 17, 21, 0.96)",
-                  border: "1px solid rgba(255, 255, 255, 0.12)",
-                  borderRadius: 18,
-                  boxShadow:
-                    "0 30px 80px rgba(0,0,0,0.60), 0 1px 0 rgba(255,255,255,0.05) inset",
-                  color: "rgba(255,255,255,0.94)",
-                  overflow: "hidden",
-                }}
-                onClick={(e) => e.stopPropagation()}
-              >
+            {/* RIGHT slot - left edge sits at the panel's right edge. */}
+            <div
+              ref={setRightSlot}
+              style={{
+                position: "absolute",
+                left: "100%",
+                marginLeft: 24,
+                top: "50%",
+                transform: "translateY(-50%)",
+                display: "flex",
+                justifyContent: "center",
+                pointerEvents: "none",
+              }}
+            />
+
+            <motion.div
+              initial={{ scale: 0.96, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+              style={{
+                width: "min(560px, 100%)",
+                maxHeight: "92vh",
+                display: "flex",
+                flexDirection: "column",
+                background: "rgba(15, 17, 21, 0.96)",
+                border: "1px solid rgba(255, 255, 255, 0.12)",
+                borderRadius: 18,
+                boxShadow:
+                  "0 30px 80px rgba(0,0,0,0.60), 0 1px 0 rgba(255,255,255,0.05) inset",
+                color: "rgba(255,255,255,0.94)",
+                overflow: "hidden",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
                 {/* Header */}
                 <div
                   style={{
@@ -300,17 +314,6 @@ export function QuizModal({
                   )}
                 </div>
               </motion.div>
-
-              <div
-                ref={setRightSlot}
-                style={{
-                  flex: "0 0 auto",
-                  display: "flex",
-                  justifyContent: "center",
-                  pointerEvents: "none",
-                }}
-              />
-            </div>
           </div>
         </motion.div>
       )}

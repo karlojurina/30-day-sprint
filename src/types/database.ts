@@ -182,11 +182,13 @@ export interface StudentDmLog {
 }
 
 /**
- * v42: One row per always-on node on Map 2 (the Playbook hub). Four
- * rows seeded: pb_submit_bounties, pb_build_portfolio,
- * pb_apply_job_board, pb_land_first_client. Only pb_land_first_client
- * has is_milestone = true — it's the only node with a completion
- * action (sets students.first_client_landed_at).
+ * v42 / v72: One row per always-on node on Map 2 (the Playbook hub).
+ * v72 collapsed to 3 rows: pb_submit_bounties, pb_build_portfolio,
+ * pb_apply_job_board. The pb_land_first_client milestone node was
+ * dropped. Each node's sheet body now renders a standalone HTML
+ * article (public/playbook/<article_slug>/index.html) inside an
+ * iframe; doc_content is no longer rendered. is_milestone stays on
+ * the table but all 3 nodes are always-on (false).
  */
 export interface PlaybookNode {
   id: string;
@@ -196,6 +198,9 @@ export interface PlaybookNode {
   doc_content: string;
   video_url: string | null;
   is_milestone: boolean;
+  /** v72 - folder under public/playbook/ whose index.html the node
+   *  sheet renders in an iframe. Null only on legacy rows. */
+  article_slug: string | null;
   created_at: string;
   updated_at: string;
 }

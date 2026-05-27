@@ -1,0 +1,1631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>How To Build A Portfolio That Gets You Hired | EcomTalent Playbook</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+[id] { scroll-margin-top: 32px; }
+
+body {
+  background: #0a0a0a;
+  color: #d4d4d4;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  line-height: 1.7;
+  font-size: 18px;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  padding: 60px 24px 160px;
+  overflow-x: hidden;
+}
+
+article {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+/* HEADER */
+header {
+  margin-bottom: 48px;
+}
+
+.kicker {
+  font-size: 13px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: #888;
+  margin-bottom: 20px;
+  font-weight: 600;
+}
+
+.byline {
+  font-size: 14px;
+  color: #888;
+  margin: 24px 0 0;
+}
+
+.byline .byline-author {
+  color: #d4d4d4;
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 52px;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: #fff;
+  margin-bottom: 0;
+}
+
+/* BODY */
+p {
+  margin-bottom: 22px;
+  color: #d4d4d4;
+}
+
+p strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+ul {
+  margin: 0 0 24px;
+  padding-left: 22px;
+  color: #d4d4d4;
+}
+
+ul li {
+  margin-bottom: 8px;
+  line-height: 1.6;
+  padding-left: 6px;
+}
+
+ul li::marker {
+  color: #D4B775;
+  font-weight: 700;
+}
+
+ol {
+  margin: 0 0 24px;
+  padding-left: 26px;
+  color: #d4d4d4;
+}
+
+ol li {
+  margin-bottom: 14px;
+  line-height: 1.6;
+  padding-left: 6px;
+}
+
+ol li::marker {
+  color: #D4B775;
+  font-weight: 700;
+}
+
+a {
+  color: #D4B775;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(212, 183, 117, 0.4);
+  transition: border-color 0.15s ease;
+}
+
+a:hover {
+  border-bottom-color: #D4B775;
+}
+
+/* HEADINGS */
+h2 {
+  font-size: 36px;
+  font-weight: 700;
+  color: #fff;
+  margin-top: 80px;
+  margin-bottom: 24px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  margin-top: 48px;
+  margin-bottom: 16px;
+}
+
+/* PIECE TITLES (numbered sections) */
+.piece-title {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  margin-top: 64px;
+  margin-bottom: 24px;
+  padding-top: 36px;
+  border-top: 1px solid #1f1f1f;
+}
+
+.piece-num {
+  font-size: 48px;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: #D4B775;
+  line-height: 1;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.piece-name {
+  flex: 1;
+  font-size: 28px;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+
+@media (max-width: 640px) {
+  .piece-title { gap: 16px; margin-top: 48px; padding-top: 28px; }
+  .piece-num { font-size: 38px; }
+  .piece-name { font-size: 22px; }
+}
+
+/* CALLOUT */
+.callout-bold {
+  font-size: 24px;
+  font-weight: 700;
+  color: #fff;
+  margin: 32px 0;
+  padding: 24px 28px;
+  border-left: 3px solid #D4B775;
+  background: rgba(212, 183, 117, 0.04);
+  line-height: 1.4;
+}
+
+/* SHORT STACK */
+.short-stack p {
+  margin-bottom: 6px;
+}
+.short-stack {
+  margin-bottom: 22px;
+}
+
+/* META */
+.meta-aside {
+  color: #888;
+  font-style: italic;
+  font-size: 0.92em;
+}
+
+/* IMAGES */
+figure {
+  margin: 40px 0 32px;
+}
+
+figure img {
+  width: 100%;
+  max-width: 100%;
+  border-radius: 10px;
+  border: 1px solid #1f1f1f;
+  display: block;
+}
+
+figcaption {
+  font-size: 14px;
+  color: #777;
+  margin-top: 12px;
+  text-align: center;
+}
+
+/* ===========================================
+   TEMPLATE MOCKUP - TEXT-FIRST (Notion / Doc)
+   =========================================== */
+.template-frame {
+  margin: 36px 0 48px;
+  position: relative;
+  width: calc(100% + 80px);
+  margin-left: -40px;
+  margin-right: -40px;
+}
+
+.template-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 0 40px;
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: #D4B775;
+}
+
+.template-label::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background: #D4B775;
+  border-radius: 50%;
+}
+
+.doc-mockup {
+  background: #f7f6f3;
+  color: #2a2825;
+  border-radius: 14px;
+  padding: 44px 52px 48px;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.55;
+  border: 1px solid #2a2a2a;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.doc-mockup .doc-name {
+  font-size: 28px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0 0 6px;
+  letter-spacing: -0.02em;
+}
+
+.doc-mockup .doc-sub {
+  font-size: 13px;
+  color: #6b6864;
+  margin: 0 0 28px;
+}
+
+.doc-mockup .doc-h {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 26px 0 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e1ddd5;
+}
+
+.doc-mockup p {
+  font-size: 13px;
+  color: #3a3835;
+  margin-bottom: 10px;
+  line-height: 1.55;
+}
+
+.doc-mockup ul {
+  padding-left: 18px;
+  margin-bottom: 10px;
+}
+
+.doc-mockup ul li {
+  font-size: 13px;
+  color: #3a3835;
+  margin-bottom: 4px;
+  padding-left: 0;
+}
+
+.doc-mockup ul li::marker {
+  color: #999;
+}
+
+.doc-mockup .doc-link {
+  color: #1163c4;
+  border-bottom: 1px solid rgba(17, 99, 196, 0.3);
+  text-decoration: none;
+  font-size: 13px;
+}
+
+.doc-mockup .case-block {
+  background: #fff;
+  border: 1px solid #e1ddd5;
+  border-radius: 8px;
+  padding: 18px 20px;
+  margin: 16px 0;
+}
+
+.doc-mockup .case-block-h,
+.notion-mockup .case-block-h {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0 0 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.35;
+}
+
+.doc-mockup .case-block-stat {
+  font-size: 12px;
+  color: #7a766f;
+  margin: 0 0 12px;
+}
+
+.doc-mockup .case-block-stat strong {
+  color: #1a1a1a;
+  font-weight: 700;
+}
+
+.doc-mockup .case-row {
+  display: flex;
+  gap: 14px;
+  margin-bottom: 12px;
+  align-items: flex-start;
+}
+
+.doc-mockup .case-thumb {
+  width: 80px;
+  height: 100px;
+  background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-align: center;
+  padding: 8px;
+}
+
+.doc-mockup .case-text {
+  flex: 1;
+  font-size: 12px;
+  color: #3a3835;
+  line-height: 1.55;
+}
+
+.doc-mockup .case-text strong {
+  color: #1a1a1a;
+  font-weight: 700;
+}
+
+.doc-mockup .loom-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: #f3f1ec;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #5a5651;
+  margin-top: 6px;
+  border: 1px solid #e1ddd5;
+}
+
+.doc-mockup .loom-pill::before {
+  content: "▶";
+  color: #875cf5;
+  font-size: 9px;
+}
+
+/* CONTACT PILLS in doc */
+.doc-mockup .doc-contact-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 24px;
+}
+
+.doc-mockup .contact-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: #fff;
+  border: 1px solid #e1ddd5;
+  border-radius: 999px;
+  font-size: 11px;
+  color: #3a3835;
+}
+
+.doc-mockup .contact-pill strong {
+  color: #1a1a1a;
+  font-weight: 700;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* PORTFOLIO GROUPS in doc */
+.doc-mockup .doc-h-sub {
+  font-weight: 400;
+  font-size: 12px;
+  color: #7a766f;
+  margin-left: 6px;
+}
+
+.doc-mockup .doc-portfolio-group {
+  margin-bottom: 14px;
+}
+
+.doc-mockup .doc-portfolio-brand {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 10px 0 4px;
+  letter-spacing: 0.01em;
+}
+
+.doc-mockup .doc-portfolio-list {
+  padding-left: 18px;
+  margin-bottom: 4px;
+}
+
+.doc-mockup .doc-portfolio-list li {
+  font-size: 12px;
+  padding-left: 0;
+  margin-bottom: 3px;
+}
+
+/* PROOF PANEL in doc */
+.doc-mockup .proof-panel {
+  background: #0e0e0e;
+  border-radius: 6px;
+  padding: 12px 14px 14px;
+  margin: 12px 0 14px;
+  border: 1px solid #2a2a2a;
+}
+
+.doc-mockup .proof-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #1f1f1f;
+}
+
+.doc-mockup .proof-panel-label {
+  font-size: 9px;
+  color: #888;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.doc-mockup .proof-ad-name {
+  font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  color: #D4B775;
+  margin-bottom: 12px;
+  padding: 6px 8px;
+  background: #181818;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.doc-mockup .proof-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+
+.doc-mockup .proof-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.doc-mockup .proof-stat span {
+  font-size: 9px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.doc-mockup .proof-stat strong {
+  font-size: 15px;
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+/* PROOF PLACEHOLDER (image placeholder for screenshot) */
+.doc-mockup .proof-placeholder {
+  background: #ebe7df;
+  border: 1px dashed #c5beb1;
+  border-radius: 6px;
+  padding: 40px 16px;
+  margin: 14px 0 16px;
+  text-align: center;
+}
+
+.doc-mockup .proof-placeholder-label {
+  font-size: 11px;
+  color: #7a766f;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.doc-mockup .case-ad-link {
+  font-size: 13px;
+  margin: 0 0 14px;
+}
+
+.doc-mockup .case-ad-link a {
+  font-weight: 600;
+}
+
+.doc-mockup .doc-portfolio-list li strong {
+  color: #1a1a1a;
+  font-weight: 700;
+}
+
+/* ===========================================
+   TEMPLATE MOCKUP - VISUAL BOARD (Milanote)
+   =========================================== */
+.board-mockup {
+  background: #e8e6e1;
+  border-radius: 14px;
+  padding: 32px;
+  border: 1px solid #2a2a2a;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+.board-mockup::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle, rgba(0,0,0,0.07) 1px, transparent 1px);
+  background-size: 14px 14px;
+  pointer-events: none;
+}
+
+.board-mockup .board-inner {
+  position: relative;
+  z-index: 1;
+}
+
+.board-mockup .board-title-row {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.board-mockup .board-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: #1a1a1a;
+  letter-spacing: -0.01em;
+}
+
+.board-mockup .board-top {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.board-mockup .intro-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 14px;
+  flex: 0 0 200px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+.board-mockup .intro-video {
+  width: 100%;
+  aspect-ratio: 16 / 11;
+  background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
+  border-radius: 4px;
+  margin-bottom: 10px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.board-mockup .intro-video::after {
+  content: "▶";
+  color: #fff;
+  font-size: 20px;
+  opacity: 0.7;
+}
+
+.board-mockup .intro-contact {
+  font-size: 10px;
+  color: #555;
+  line-height: 1.5;
+}
+
+.board-mockup .intro-contact strong {
+  color: #1a1a1a;
+}
+
+.board-mockup .tag-stack {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  flex: 1;
+  align-self: stretch;
+}
+
+.board-mockup .board-tag {
+  background: #fff;
+  padding: 16px 18px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a1a1a;
+  border-left: 4px solid #D4B775;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  display: flex;
+  align-items: center;
+  letter-spacing: 0.01em;
+}
+
+.board-mockup .board-tag.t-1 { border-left-color: #e94e4e; }
+.board-mockup .board-tag.t-2 { border-left-color: #f5b441; }
+.board-mockup .board-tag.t-3 { border-left-color: #d97b3a; }
+.board-mockup .board-tag.t-4 { border-left-color: #4abf99; }
+
+.board-mockup .board-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+
+.board-mockup .ad-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.board-mockup .ad-card-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1a1a1a;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+.board-mockup .ad-thumb {
+  aspect-ratio: 4 / 5;
+  background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #888;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+}
+
+.board-mockup .ad-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+  font-size: 10px;
+  padding-top: 4px;
+  border-top: 1px solid #e8e6e1;
+}
+
+.board-mockup .ad-stats .stat-label {
+  color: #777;
+}
+
+.board-mockup .ad-stats .stat-val {
+  color: #1a1a1a;
+  font-weight: 700;
+  text-align: right;
+}
+
+.board-mockup .ad-note {
+  font-size: 10px;
+  color: #555;
+  line-height: 1.45;
+  padding-top: 6px;
+  border-top: 1px solid #e8e6e1;
+}
+
+.board-mockup .ad-note strong {
+  color: #1a1a1a;
+  font-weight: 700;
+  display: block;
+  margin-bottom: 2px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* BOARD INTRO CARD - expanded contact list */
+.board-mockup .intro-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 8px 0 6px;
+  text-align: center;
+}
+
+.board-mockup .intro-contact-list {
+  font-size: 9px;
+  color: #555;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-top: 1px solid #e8e6e1;
+  padding-top: 8px;
+}
+
+.board-mockup .intro-contact-list div {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.board-mockup .intro-contact-list strong {
+  color: #1a1a1a;
+  font-weight: 700;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.board-mockup .intro-contact-list span {
+  color: #555;
+  font-size: 9px;
+  text-align: right;
+}
+
+/* BOARD AD CARD - proof signal */
+.board-mockup .ad-card-meta {
+  font-family: 'SF Mono', Menlo, Monaco, Consolas, monospace;
+  font-size: 8.5px;
+  color: #6b6864;
+  text-align: center;
+  letter-spacing: -0.01em;
+  word-break: break-all;
+  margin-top: -4px;
+}
+
+.board-mockup .ad-card-loom {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  background: #f3f1ec;
+  border-radius: 3px;
+  font-size: 9px;
+  color: #5a5651;
+  border: 1px solid #e1ddd5;
+  align-self: flex-start;
+}
+
+.board-mockup .ad-card-loom::before {
+  content: "▶";
+  color: #875cf5;
+  font-size: 7px;
+}
+
+/* ===========================================
+   TEMPLATE MOCKUP - NOTION (HYBRID)
+   =========================================== */
+.notion-mockup {
+  background: #fff;
+  color: #37352f;
+  border-radius: 14px;
+  padding: 44px 52px 48px;
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  border: 1px solid #2a2a2a;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.notion-mockup .notion-icon {
+  font-size: 48px;
+  line-height: 1;
+  margin-bottom: 10px;
+}
+
+.notion-mockup .notion-title {
+  font-size: 30px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 0 0 6px;
+  letter-spacing: -0.02em;
+}
+
+.notion-mockup .notion-sub {
+  font-size: 13px;
+  color: #777570;
+  margin: 0 0 20px;
+}
+
+.notion-mockup .notion-callout {
+  background: #f7f6f3;
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin: 16px 0 28px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.notion-mockup .notion-callout-icon {
+  font-size: 18px;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.notion-mockup .notion-callout-body {
+  flex: 1;
+}
+
+.notion-mockup .notion-callout-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px 24px;
+}
+
+.notion-mockup .notion-callout-grid div {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: #37352f;
+  align-items: baseline;
+}
+
+.notion-mockup .notion-callout-grid strong {
+  font-weight: 700;
+  color: #1a1a1a;
+  text-transform: uppercase;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  min-width: 70px;
+}
+
+.notion-mockup .notion-h {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1a1a1a;
+  margin: 28px 0 10px;
+}
+
+.notion-mockup .notion-h-sub {
+  font-weight: 400;
+  font-size: 12px;
+  color: #777570;
+  margin-left: 6px;
+}
+
+.notion-mockup p {
+  font-size: 13px;
+  color: #37352f;
+  margin-bottom: 10px;
+  line-height: 1.6;
+}
+
+.notion-mockup p strong {
+  color: #1a1a1a;
+  font-weight: 700;
+}
+
+.notion-mockup ul {
+  padding-left: 18px;
+  margin-bottom: 14px;
+}
+
+.notion-mockup ul li {
+  font-size: 13px;
+  color: #37352f;
+  margin-bottom: 4px;
+  padding-left: 0;
+}
+
+.notion-mockup ul li::marker {
+  color: #999;
+}
+
+.notion-mockup ul li strong {
+  color: #1a1a1a;
+  font-weight: 700;
+}
+
+.notion-mockup .notion-link {
+  color: #2e7cd6;
+  text-decoration: underline;
+  text-decoration-color: rgba(46, 124, 214, 0.4);
+  font-size: 13px;
+}
+
+.notion-mockup .notion-case {
+  border-top: 1px solid #ebeae5;
+  padding-top: 28px;
+  margin-top: 28px;
+}
+
+.notion-mockup .notion-case:first-of-type {
+  border-top: 0;
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+.notion-mockup .notion-embed {
+  background: #fafaf8;
+  border: 1px solid #ebeae5;
+  border-radius: 6px;
+  margin: 12px 0 14px;
+  overflow: hidden;
+}
+
+.notion-mockup .notion-embed-video {
+  aspect-ratio: 9 / 16;
+  background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.notion-mockup .notion-embed-video::after {
+  content: "▶";
+  color: #fff;
+  font-size: 36px;
+  opacity: 0.85;
+}
+
+.notion-mockup .notion-embed-image {
+  aspect-ratio: 16 / 8;
+  background: #ebe7df;
+  border-bottom: 1px dashed #c5beb1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  color: #7a766f;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 700;
+  text-align: center;
+  padding: 12px;
+}
+
+.notion-mockup .notion-embed-label {
+  font-size: 11px;
+  color: #777570;
+  padding: 8px 14px;
+  background: #fafaf8;
+  border-top: 1px solid #ebeae5;
+  letter-spacing: 0.01em;
+}
+
+/* 2-col media row (portrait ad video + landscape screenshot side by side) */
+.notion-mockup .notion-media-row {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 14px;
+  margin: 12px 0 14px;
+  align-items: start;
+}
+
+.notion-mockup .notion-media-row .notion-embed {
+  margin: 0;
+}
+
+.notion-mockup .notion-media-row .notion-embed-image {
+  aspect-ratio: 16 / 10;
+}
+
+/* Compact Loom embed (small thumb + label inline) */
+.notion-mockup .notion-loom-embed {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fafaf8;
+  border: 1px solid #ebeae5;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 12px 0;
+}
+
+.notion-mockup .notion-loom-thumb {
+  width: 64px;
+  height: 38px;
+  background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.notion-mockup .notion-loom-thumb::after {
+  content: "▶";
+  color: #fff;
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+.notion-mockup .notion-loom-label {
+  font-size: 12px;
+  color: #37352f;
+  line-height: 1.4;
+}
+
+.notion-mockup .notion-loom-label strong {
+  display: block;
+  color: #1a1a1a;
+  font-weight: 700;
+  font-size: 11px;
+  margin-bottom: 1px;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 640px) {
+  .template-frame {
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
+  .template-label {
+    padding: 0;
+  }
+  .doc-mockup {
+    padding: 28px 22px;
+  }
+  .board-mockup {
+    padding: 20px;
+  }
+  .board-mockup .board-cards {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .board-mockup .board-top {
+    flex-direction: column;
+  }
+  .board-mockup .intro-card,
+  .board-mockup .tag-stack {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+  .board-mockup .tag-stack {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .notion-mockup {
+    padding: 28px 22px;
+  }
+  .notion-mockup .notion-callout {
+    flex-direction: column;
+  }
+  .notion-mockup .notion-callout-grid {
+    grid-template-columns: 1fr;
+  }
+  .notion-mockup .notion-media-row {
+    grid-template-columns: 1fr;
+  }
+  .notion-mockup .notion-media-row .notion-embed:first-child {
+    max-width: 180px;
+    justify-self: center;
+  }
+}
+
+/* ARTICLE SIGNOFF */
+.article-signoff {
+  margin: 72px 0 0;
+  padding-top: 36px;
+  border-top: 1px solid #1f1f1f;
+}
+
+.signoff-name {
+  font-size: 22px;
+  font-weight: 700;
+  color: #fff;
+  margin: 0 0 6px;
+  letter-spacing: -0.01em;
+}
+
+.signoff-meta {
+  font-size: 14px;
+  color: #888;
+  margin: 0;
+  letter-spacing: 0.02em;
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  body { padding: 32px 16px 80px; font-size: 17px; }
+  h1 { font-size: 36px; }
+  h2 { font-size: 28px; }
+  .callout-bold { font-size: 20px; padding: 20px; }
+}
+</style>
+</head>
+<body>
+<article>
+
+<!-- =========================================================== -->
+<!-- HEADER -->
+<!-- =========================================================== -->
+<header>
+  <p class="kicker">EcomTalent · The Playbook</p>
+  <h1>How To Build A Portfolio That Gets You Hired</h1>
+  <p class="byline">Written by <span class="byline-author">Karlo</span> · 26-05-2026</p>
+</header>
+
+<!-- =========================================================== -->
+<!-- SECTION 1 · THE OPENER -->
+<!-- =========================================================== -->
+
+<p>You apply to a brand on the Job Board. A brand owner sees your name and clicks.</p>
+
+<p>Sixty seconds.</p>
+
+<p>That's how long they'll spend on your portfolio before they decide whether to DM you or close the tab. Sixty seconds for them to scan, judge, and either pull you into the conversation or move on to the next applicant.</p>
+
+<p>That number isn't an exaggeration. Brand owners on the program are scaling 7 and 8 figure businesses. They're getting dozens of applications a week. They open your portfolio with one question in their head, and they want the answer fast.</p>
+
+<div class="callout-bold">Can this person make ads that print money?</div>
+
+<p>So here's the question for you.</p>
+
+<p>When they click your name, what do they actually see?</p>
+
+<p>This article is about making sure the answer is the right one. Not the most beautifully designed answer. Not the most elaborate one. Just the right one. The version of your portfolio that gives a busy brand owner everything they need in those sixty seconds and pulls them into asking about the rest.</p>
+
+<!-- =========================================================== -->
+<!-- SECTION 2 · THE PRINCIPLE -->
+<!-- =========================================================== -->
+
+<h2 id="principle">The Only Principle</h2>
+
+<p>Results first.</p>
+
+<p>That's the entire principle. Every section of your portfolio either shows a result or supports a result. Anything else is filler.</p>
+
+<p>Brand owners aren't there to read your "About" page. They aren't there to admire your branding skills. They aren't there to watch a 5-minute intro video about who you are as a person. They're there for one signal - <strong>can you make ads that print money for brands like mine</strong> - and they want to see proof in the first scroll.</p>
+
+<p>If you're ever unsure whether something belongs in your portfolio, ask yourself one question.</p>
+
+<p>Does this show a result, or does it delay the brand owner from seeing one?</p>
+
+<p>If it delays, cut it.</p>
+
+<div class="short-stack">
+  <p>Lead with the proof.</p>
+  <p>Everything else serves the proof.</p>
+</div>
+
+<p>You already have the rarest thing in this industry.</p>
+
+<p>You have real ad results from real brands.</p>
+
+<p>Most creators applying for ad roles right now have to lie, exaggerate, or beg an old client to send them a screenshot. You don't. You went through the 30-day sprint. You submitted bounties. Your ads ran in real brand ad accounts on real budgets. You have a dashboard. You have receipts.</p>
+
+<p>That's the asset. The portfolio is just how you package it.</p>
+
+<!-- =========================================================== -->
+<!-- SECTION 3 · THE 3-PART STRUCTURE -->
+<!-- =========================================================== -->
+
+<h2 id="structure">The 3-Part Structure</h2>
+
+<p>Every portfolio that actually gets brands to DM you has the same three sections. Same order, every time.</p>
+
+<ul>
+  <li>Intro</li>
+  <li>Portfolio</li>
+  <li>Case studies</li>
+</ul>
+
+<h3 class="piece-title">
+  <span class="piece-num">01</span>
+  <span class="piece-name">Intro</span>
+</h3>
+
+<p>Short. Your name. A one-line version of your story in ecom. What you do.</p>
+
+<p>Then contact info, prominently placed.</p>
+
+<p>Contact info matters more than people think. Some portfolios have all the right ads, all the right results, all the right breakdowns... and then the brand owner can't find a way to actually reach the creator. Email is missing. Or it's buried at the bottom. Or there's only one channel.</p>
+
+<p>Put your contact info at the top of the portfolio. Right under your name. Visible immediately, easy to copy, accessible from anywhere in the doc.</p>
+
+<p>And give them more than one way to reach you. Email is the baseline. Add WhatsApp, Telegram, Instagram DM, Discord, X DM - whatever channels you actually check. The more ways you give a brand owner to contact you, the higher the chance they pick the one that's most natural for them and actually reach out.</p>
+
+<p>Do not write your life story. Do not write the "how I got into marketing" essay. The brand owner does not care where you grew up or what you studied. They care that you exist, they can reach you, and you've done work in this exact space before.</p>
+
+<h3 class="piece-title">
+  <span class="piece-num">02</span>
+  <span class="piece-name">Portfolio</span>
+</h3>
+
+<p>This is where you show your work. Sorted, organized, easy to navigate.</p>
+
+<p>How you sort it is up to you. Two patterns work well.</p>
+
+<p><strong>Sort by brand.</strong> One section per brand you've worked with. Inside each section, every ad you made for that brand. Best for showing depth - "I went deep on Dog Friendly Co, here are 5 ads I built for them."</p>
+
+<p><strong>Sort by ad type.</strong> AI ads in one section. UGC in another. Statics in a third. Creative strategy concepts in a fourth. Best for showing range - "I can shoot UGC, but I can also direct AI ad workflows and write static concepts."</p>
+
+<p>Pick the one that actually matches your work. If you went deep on one brand, sort by brand. If you've shipped a mix of formats across many brands, sort by type. Some portfolios combine both - top level by brand, then by ad type inside each. That's fine too.</p>
+
+<p>You don't need a hundred ads in here. You need a few well-executed ones per category. Three or four sharp examples in each bucket beats fifty rushed ones. Brand owners are looking at quality, not count.</p>
+
+<p>Whatever you pick, sort it. A flat list of 20 ads with no structure is harder to read than 4 categories with 3 to 5 ads each.</p>
+
+<h3 class="piece-title">
+  <span class="piece-num">03</span>
+  <span class="piece-name">Case studies</span>
+</h3>
+
+<p>This is the section that gets you hired. It's also the section most students get wrong by either skipping it entirely or writing too much.</p>
+
+<p>One case study per ad that performed. You don't need a case study for every ad you ever made. You need case studies for the ads that show your best thinking.</p>
+
+<p>Each case study contains the same elements, in roughly this order:</p>
+
+<ul>
+  <li><strong>The ad itself.</strong> Embed the video, or screenshot if it's a static.</li>
+  <li><strong>Proof it's yours.</strong> A screenshot from the Ad Bounty dashboard, or from the brand's ad account showing your name in the ad name field. Plus the headline numbers - Purchase Value, Spend, ROAS, CTR.</li>
+  <li><strong>Why it worked.</strong> Your thinking. The angle, the hook, the format choice, the script logic.</li>
+  <li><strong>Optional Loom breakdown.</strong> A 10 to 15 minute video walkthrough of the ad on camera.</li>
+</ul>
+
+<p>A few notes on each.</p>
+
+<p><strong>The proof piece matters more than students realize.</strong> A dashboard screenshot floating in isolation is easy to fake. A screenshot from the ad account with your name in the ad name field, or a screenshot from the Ad Bounty dashboard tied to your account, is harder to fake. That's what makes the rest of the case study believable.</p>
+
+<p><strong>The "why it worked" section is doing the heavy lifting on the hire-or-pass decision.</strong> The brand owner is reading it asking whether you can reproduce the result on a different brand, at a different scale. The clearer your reasoning, the higher the chance they think you can.</p>
+
+<p><strong>The Loom is optional, but it's the move that positions you as an authority.</strong> 10 to 15 minutes where you walk through how you got the idea, how you wrote the script, how you edited it, why you made every choice you made. Most creators don't bother with this. The ones who do come across like someone who actually understands the craft, not someone who got lucky with one ad. Brand owners don't always watch the whole thing. The fact that you made it is half the signal.</p>
+
+<!-- =========================================================== -->
+<!-- SECTION 4 · TWO WAYS TO RENDER IT -->
+<!-- =========================================================== -->
+
+<h2 id="render">Two Ways To Render It</h2>
+
+<p>The structure above is the spine. The medium you build it in is up to you.</p>
+
+<p>There are three formats brand owners are used to seeing, and all three work. Pick whichever one fits your taste and the way you naturally present work.</p>
+
+<p><strong>Google Doc.</strong> Pure text. Links out to your ads and screenshots hosted elsewhere. Cleanest, fastest format to scan. Easy for the brand to open on their phone between meetings.</p>
+
+<p><strong>Milanote / Miro / Figma.</strong> Visual-first board. The portfolio looks like a creative board. Cards for each ad, stats and breakdown right under each thumbnail.</p>
+
+<p><strong>Notion.</strong> The hybrid. Same 3-part text structure as the Google Doc, but you can embed ad videos and screenshots directly in the doc instead of linking out. Best of both worlds.</p>
+
+<p>All three use the exact same 3-part structure. They just look different.</p>
+
+<p>Here's what each one can look like.</p>
+
+<div class="template-frame">
+  <p class="template-label">Format 1 · Google Doc (text-first)</p>
+  <div class="doc-mockup">
+    <h3 class="doc-name">[Your Name]</h3>
+    <p class="doc-sub">Creative strategist · UGC editor · Ad Bounty Program</p>
+
+    <div class="doc-contact-row">
+      <span class="contact-pill"><strong>Email</strong> name@email.com</span>
+      <span class="contact-pill"><strong>WhatsApp</strong> +xx xxx xxx xxx</span>
+      <span class="contact-pill"><strong>Telegram</strong> @yourname</span>
+      <span class="contact-pill"><strong>Instagram</strong> @yourname</span>
+      <span class="contact-pill"><strong>Discord</strong> yourname#0001</span>
+      <span class="contact-pill"><strong>X DM</strong> @yourname</span>
+    </div>
+
+    <h4 class="doc-h">About</h4>
+    <p>Self-taught ad creator. 2 years in ecom. Spent the last 6 months inside EcomTalent shipping bounties for Dog Friendly Co, Brand B, Brand C.</p>
+
+    <h4 class="doc-h">Portfolio <span class="doc-h-sub">sorted by brand</span></h4>
+
+    <ul class="doc-portfolio-list">
+      <li><strong>Brand A</strong> - <a class="doc-link" href="#">View all ads for this brand</a></li>
+      <li><strong>Brand B</strong> - <a class="doc-link" href="#">View all ads for this brand</a></li>
+      <li><strong>Brand C</strong> - <a class="doc-link" href="#">View all ads for this brand</a></li>
+    </ul>
+
+    <h4 class="doc-h">Case Studies</h4>
+
+    <div class="case-block">
+      <p class="case-block-h">Brand A | Static ad | $50K spend in 30 days</p>
+
+      <div class="proof-placeholder">
+        <span class="proof-placeholder-label">Ad Bounty Dashboard / Ad Account screenshot</span>
+      </div>
+
+      <p class="case-ad-link"><a class="doc-link" href="#">→ Watch the ad (hosted on Google Drive / Frame.io)</a></p>
+
+      <p><strong>Why it worked.</strong> Static format with a problem-aware hook in the first frame. The headline named the exact audience before the viewer's eye reached the product shot. The bottom third carried the offer and the CTA, which is where Meta's eye-tracking shows paid traffic lands first. Most statics in this category try to sell the full benefit stack. This one sold one thing, one promise, one reason to click. That focus is what scaled it past $50K when most statics burn out at $5K.</p>
+
+      <p class="case-ad-link"><a class="doc-link" href="#">→ Watch the 10-15 min Loom breakdown</a></p>
+    </div>
+
+    <div class="case-block">
+      <p class="case-block-h">Brand B | Founder-voice UGC | 2.85x ROAS</p>
+
+      <div class="proof-placeholder">
+        <span class="proof-placeholder-label">Ad Bounty Dashboard / Ad Account screenshot</span>
+      </div>
+
+      <p class="case-ad-link"><a class="doc-link" href="#">→ Watch the ad (hosted on Google Drive / Frame.io)</a></p>
+
+      <p><strong>Why it worked.</strong> Founder-voice UGC shot in a behind-the-scenes setting at the warehouse. The script opened with a real moment - "we're producing 3,000 boxes this month, here's why people keep ordering" - which felt authentic instead of sales-y. The middle walked through the product mechanism in plain language, no jargon. The CTA tied to a small-batch urgency that wasn't manufactured. The brand actually produces in batches. That truthful urgency closed the sale on viewers who would have scrolled past a generic "limited time offer."</p>
+
+      <p class="case-ad-link"><a class="doc-link" href="#">→ Watch the 10-15 min Loom breakdown</a></p>
+    </div>
+  </div>
+</div>
+
+<p>The text-first format wins on speed. A brand owner can scan it on their phone in the back of an Uber. The intro tells them who you are. The portfolio list tells them you've shipped work. The case study blocks let them zoom in on the ad that catches their eye.</p>
+
+<p>Now here's what the same content looks like as a visual board.</p>
+
+<div class="template-frame">
+  <p class="template-label">Format 2 · Visual-first (Milanote / Miro / Figma)</p>
+  <div class="board-mockup">
+    <div class="board-inner">
+      <div class="board-title-row">
+        <span class="board-title">[Your Name]'s Portfolio</span>
+      </div>
+
+      <div class="board-top">
+        <div class="intro-card">
+          <div class="intro-video"></div>
+          <div class="intro-name">[Your Name]</div>
+          <div class="intro-contact-list">
+            <div><strong>Email</strong><span>name@email.com</span></div>
+            <div><strong>WhatsApp</strong><span>+xx xxx xxx xxx</span></div>
+            <div><strong>Telegram</strong><span>@yourname</span></div>
+            <div><strong>Instagram</strong><span>@yourname</span></div>
+            <div><strong>Discord</strong><span>yourname#0001</span></div>
+            <div><strong>X DM</strong><span>@yourname</span></div>
+          </div>
+        </div>
+        <div class="tag-stack">
+          <div class="board-tag t-1">AI Ads</div>
+          <div class="board-tag t-2">UGC</div>
+          <div class="board-tag t-3">Static</div>
+          <div class="board-tag t-4">Creative Strategy</div>
+        </div>
+      </div>
+
+      <div class="board-cards">
+        <div class="ad-card">
+          <div class="ad-card-title">Dog Friendly Co · Ad 1</div>
+          <div class="ad-card-meta">yourname_dogfriendly_problem_v2</div>
+          <div class="ad-thumb">AD VIDEO</div>
+          <div class="ad-stats">
+            <div class="stat-label">Purchase</div><div class="stat-val">$201K</div>
+            <div class="stat-label">Spend</div><div class="stat-val">$111K</div>
+            <div class="stat-label">ROAS</div><div class="stat-val">1.81</div>
+            <div class="stat-label">CTR</div><div class="stat-val">2.4%</div>
+          </div>
+          <p class="ad-note"><strong>Why it works</strong>Problem-first hook, named the avatar in the first second, UGC-native format.</p>
+          <span class="ad-card-loom">10-15 min Loom</span>
+        </div>
+
+        <div class="ad-card">
+          <div class="ad-card-title">Brand B · Ad 2</div>
+          <div class="ad-card-meta">yourname_brandb_founder_v1</div>
+          <div class="ad-thumb">AD VIDEO</div>
+          <div class="ad-stats">
+            <div class="stat-label">Purchase</div><div class="stat-val">$42K</div>
+            <div class="stat-label">Spend</div><div class="stat-val">$35K</div>
+            <div class="stat-label">ROAS</div><div class="stat-val">1.20</div>
+            <div class="stat-label">CTR</div><div class="stat-val">1.9%</div>
+          </div>
+          <p class="ad-note"><strong>Why it works</strong>Founder voice. Bottom-of-funnel retargeting. Authentic and fast.</p>
+        </div>
+
+        <div class="ad-card">
+          <div class="ad-card-title">Brand C · Ad 1</div>
+          <div class="ad-card-meta">yourname_brandc_aistatic_v1</div>
+          <div class="ad-thumb">AD VIDEO</div>
+          <div class="ad-stats">
+            <div class="stat-label">Purchase</div><div class="stat-val">$16K</div>
+            <div class="stat-label">Spend</div><div class="stat-val">$5K</div>
+            <div class="stat-label">ROAS</div><div class="stat-val">3.20</div>
+            <div class="stat-label">CTR</div><div class="stat-val">3.1%</div>
+          </div>
+          <p class="ad-note"><strong>Why it works</strong>AI-generated visuals. Static format. Strong offer in the hook.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p>The board format wins on showing range fast. A brand owner sees four different categories of work tagged down the side. They see thumbnails of every ad at once. They can click into any single one to read the breakdown. It's the same content, rearranged for someone who processes visuals before text.</p>
+
+<p>Now here's the hybrid. Same structure as the Google Doc, but with the ad videos and dashboard screenshots embedded inline.</p>
+
+<div class="template-frame">
+  <p class="template-label">Format 3 · Notion (hybrid)</p>
+  <div class="notion-mockup">
+    <div class="notion-icon">📊</div>
+    <h3 class="notion-title">[Your Name]'s Portfolio</h3>
+    <p class="notion-sub">Creative strategist · UGC editor · Ad Bounty Program</p>
+
+    <div class="notion-callout">
+      <span class="notion-callout-icon">📬</span>
+      <div class="notion-callout-body">
+        <div class="notion-callout-grid">
+          <div><strong>Email</strong>name@email.com</div>
+          <div><strong>WhatsApp</strong>+xx xxx xxx xxx</div>
+          <div><strong>Telegram</strong>@yourname</div>
+          <div><strong>Instagram</strong>@yourname</div>
+          <div><strong>Discord</strong>yourname#0001</div>
+          <div><strong>X DM</strong>@yourname</div>
+        </div>
+      </div>
+    </div>
+
+    <h4 class="notion-h">About</h4>
+    <p>Self-taught ad creator. 2 years in ecom. Spent the last 6 months inside EcomTalent shipping bounties for Brand A, Brand B, Brand C.</p>
+
+    <h4 class="notion-h">Portfolio <span class="notion-h-sub">sorted by brand</span></h4>
+    <ul>
+      <li><strong>Brand A</strong> - <a class="notion-link" href="#">View all ads for this brand</a></li>
+      <li><strong>Brand B</strong> - <a class="notion-link" href="#">View all ads for this brand</a></li>
+      <li><strong>Brand C</strong> - <a class="notion-link" href="#">View all ads for this brand</a></li>
+    </ul>
+
+    <h4 class="notion-h">Case Studies</h4>
+
+    <div class="notion-case">
+      <p class="case-block-h">Brand A | Static ad | $50K spend in 30 days</p>
+
+      <div class="notion-media-row">
+        <div class="notion-embed">
+          <div class="notion-embed-video"></div>
+          <div class="notion-embed-label">brand_a_static_ad_v2.mp4</div>
+        </div>
+        <div class="notion-embed">
+          <div class="notion-embed-image">Dashboard / Ad Account screenshot</div>
+          <div class="notion-embed-label">dashboard-snapshot.png</div>
+        </div>
+      </div>
+
+      <p><strong>Why it worked.</strong> Static format with a problem-aware hook in the first frame. The headline named the exact audience before the viewer's eye reached the product shot. The bottom third carried the offer and the CTA, which is where Meta's eye-tracking shows paid traffic lands first. Most statics in this category try to sell the full benefit stack. This one sold one thing, one promise, one reason to click. That focus is what scaled it past $50K when most statics burn out at $5K.</p>
+
+      <div class="notion-loom-embed">
+        <div class="notion-loom-thumb"></div>
+        <div class="notion-loom-label">
+          <strong>Loom video</strong>
+          10-15 min breakdown of the ad
+        </div>
+      </div>
+    </div>
+
+    <div class="notion-case">
+      <p class="case-block-h">Brand B | Founder-voice UGC | 2.85x ROAS</p>
+
+      <div class="notion-media-row">
+        <div class="notion-embed">
+          <div class="notion-embed-video"></div>
+          <div class="notion-embed-label">brand_b_founder_ugc_v1.mp4</div>
+        </div>
+        <div class="notion-embed">
+          <div class="notion-embed-image">Dashboard / Ad Account screenshot</div>
+          <div class="notion-embed-label">dashboard-snapshot.png</div>
+        </div>
+      </div>
+
+      <p><strong>Why it worked.</strong> Founder-voice UGC shot in a behind-the-scenes setting at the warehouse. The script opened with a real moment - "we're producing 3,000 boxes this month, here's why people keep ordering" - which felt authentic instead of sales-y. The middle walked through the product mechanism in plain language, no jargon. The CTA tied to a small-batch urgency that wasn't manufactured. The brand actually produces in batches. That truthful urgency closed the sale on viewers who would have scrolled past a generic "limited time offer."</p>
+
+      <div class="notion-loom-embed">
+        <div class="notion-loom-thumb"></div>
+        <div class="notion-loom-label">
+          <strong>Loom video</strong>
+          10-15 min breakdown of the ad
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- =========================================================== -->
+<!-- SECTION 5 · THE PSYCHOLOGY -->
+<!-- =========================================================== -->
+
+<h2 id="psychology">Why These Templates Work</h2>
+
+<p>The structure isn't random. Every section is doing a specific job inside the brand owner's head.</p>
+
+<p>Here's what each one is actually for.</p>
+
+<p><strong>The intro is a screen-out.</strong> The brand owner is looking for the smallest possible reason to keep reading. If your intro is short and your contact info is right there, they keep going. If it's a wall of text about your origin story, they bounce. The intro isn't there to sell you. It's there to not get in the way.</p>
+
+<p><strong>The portfolio list is a credibility filter.</strong> Before they read a single case study, they want to know if you've actually shipped work. A list of brands and ads tells them yes. They might not click any of the links. The list itself is the signal.</p>
+
+<p><strong>The case studies are the actual decision.</strong> This is where they figure out whether they want to hire you. And the deciding factor isn't the result. It's the "why it worked" section.</p>
+
+<p>That part deserves its own beat.</p>
+
+<div class="callout-bold">Anyone can post a dashboard. Not everyone can explain it.</div>
+
+<p>A brand owner has seen plenty of dashboards with big numbers behind them. They've also hired creators based on those dashboards and watched them flop on a new brand. They've learned the hard way that a number alone doesn't prove skill. The skill is in the thinking that produced the number.</p>
+
+<p>When you write "why it worked," what you're really showing is whether you understand your own ad. Whether you can reproduce that result on a different brand, with a different audience, at a different scale. That's what they're hiring.</p>
+
+<p>And one last thing about the structure. Three to five case studies is the sweet spot. Two feels thin. Ten feels like you're padding and the brand owner won't read past the third one anyway. Pick your strongest three to five and rank them. Lead with the one that has the biggest number on it.</p>
+
+<p>If your strongest case study isn't first, the brand owner might never see it.</p>
+
+<!-- =========================================================== -->
+<!-- SECTION 6 · DON'T COPY -->
+<!-- =========================================================== -->
+
+<h2 id="customize">Use The Structure, Not The Template</h2>
+
+<p>One thing I want to be clear about before we close.</p>
+
+<p>I purposefully didn't give you a template to copy-paste.</p>
+
+<p>If I had dropped a finished Notion file you could duplicate, or a Milanote board you could clone, every student in EcomTalent would be submitting the exact same portfolio. Same fonts. Same case study format. Same headline style. Same everything.</p>
+
+<p>That wouldn't help you. The whole point of a portfolio is to stand out from the other applicants on the Job Board. If yours looks identical to the 30 others sitting in the brand owner's inbox, the thing that was supposed to separate you blends in instead.</p>
+
+<p>So what I gave you is the structure. The principles. Three formats to look at and the psychology behind each one. The rest is yours to build.</p>
+
+<p>Make your own portfolio. Whatever format you like. Whatever visual style fits the way you think. Whatever way of writing the case study breakdowns feels natural to you. Your own personality in the intro. Your own touches that make a brand owner go "this person actually put thought into this."</p>
+
+<p>The structure makes sure they find the results fast. Your personality makes sure they remember who you are after they close the tab.</p>
+
+<p>Both matter.</p>
+
+<!-- =========================================================== -->
+<!-- SECTION 7 · IF YOU HAVEN'T SUBMITTED YET -->
+<!-- =========================================================== -->
+
+<h2 id="pre-bounty">If You Haven't Submitted A Bounty Yet</h2>
+
+<p>Short note for you specifically.</p>
+
+<p>You might be reading this thinking "I don't have any results yet, this article isn't for me." It is. You're just one step earlier in the process.</p>
+
+<p>Build the template now. Pick your format. Set up the intro section. Create the empty portfolio list. Build out one case study block as a placeholder with the headings already in place ("Headline," "Dashboard screenshot," "Why it worked," etc.).</p>
+
+<p>Then when your first bounty runs, you don't have to think about structure. You already have the slot waiting. You pull the dashboard screenshot, drop in the ad, write the breakdown, and ship.</p>
+
+<p>The students who wait until they have a winning ad to start building a portfolio are the same students who then take 2 weeks figuring out a Notion layout instead of submitting their second bounty. Build the template now. Fill it in as you go.</p>
+
+<!-- =========================================================== -->
+<!-- SECTION 8 · CLOSE -->
+<!-- =========================================================== -->
+
+<h2 id="close">Close</h2>
+
+<p>When a brand owner clicks your name on the Job Board, you stop being a name in a list and start being a creator with proof.</p>
+
+<p>That's the leverage shift this article is about.</p>
+
+<p>You don't need a perfect portfolio. You don't need a 10-section showcase with custom illustrations. You need three sections, in the right order, with real numbers and real thinking behind them.</p>
+
+<div class="short-stack">
+  <p>Intro. Short.</p>
+  <p>Portfolio list. Clean.</p>
+  <p>Case studies. Sharp.</p>
+</div>
+
+<p>Build the file this week. Fill it with whatever you have so far. Then keep adding case studies as you ship more bounties.</p>
+
+<p>The next time a brand owner clicks your name, they won't have to wonder if you can do the work.</p>
+
+<p>They'll already be writing the DM.</p>
+
+<div class="article-signoff">
+  <p class="signoff-name">- Karlo</p>
+</div>
+
+</article>
+
+</body>
+</html>

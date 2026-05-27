@@ -15,8 +15,9 @@ Two surfaces in one Next.js app:
 
 - **Student-facing** — `/dashboard` (the 30-day sprint map: 4 painted
   regions, lessons, action items, streaks, discount window, region
-  to-dos) and `/dashboard/playbook` (Map 2: post-sprint hub with 4
-  always-on activities + the "first client landed" milestone).
+  to-dos) and `/dashboard/playbook` (Map 2: post-sprint hub with 3
+  always-on cards, each opening a full HTML article in an iframe —
+  v72).
 - **Team-facing** — `/admin` (Karlo + CSM team): kanban, students,
   templates, discounts, alerts, insights, discord settings.
 
@@ -137,7 +138,12 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 - `lessons` — canonical lesson list (id, region, day, sort_order,
   watch vs action, `whop_lesson_id`, etc.)
 - `quizzes` + `quiz_questions` — per-region quizzes
-- `playbook_nodes` — Map 2 hub cards
+- `playbook_nodes` — Map 2 hub cards (3 rows as of v72:
+  pb_submit_bounties, pb_build_portfolio, pb_apply_job_board). Each
+  row's `article_slug` points at `public/playbook/<slug>/index.html`,
+  a standalone HTML article the node sheet renders in an iframe.
+  doc_content is no longer rendered. The pb_land_first_client
+  milestone node was dropped (v72).
 - `templates` — CSM DM templates (built-in + custom, with `trigger_config`)
 - `admin_config` — key/value app config (program link, Discord invite, etc.)
 

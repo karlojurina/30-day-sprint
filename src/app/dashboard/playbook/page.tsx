@@ -5,18 +5,15 @@
  *
  * Post-sprint hub. Loads as the default surface for any student
  * whose `bounty_access_claimed_at` is set (auto-redirect from /dashboard).
- * 4 always-on cards: pb_submit_bounties, pb_build_portfolio,
- * pb_apply_job_board, pb_land_first_client (milestone).
  *
- * Step 4 ships the page + hub + per-node sheet + welcome overlay.
- * Step 5 wires the mark-complete + crowned celebration onto the
- * milestone card.
+ * v72 (lovro-brief-playbook-articles): 3 always-on cards -
+ * pb_submit_bounties, pb_build_portfolio, pb_apply_job_board. The
+ * pb_land_first_client milestone node + its crowned celebration were
+ * dropped. Each card opens a sheet that renders a full standalone
+ * HTML article in an iframe.
  *
- * Per the brief (04-map2-playbook.md):
  *   • Map 1 stays accessible via "Back to the climb" → /dashboard?map=1
- *   • No completion state for the 3 always-on cards
- *   • Hub stays open even after the milestone fires
- *   • v1 placeholder visual; full Map 2 visual set is P2 (Karlo)
+ *   • No completion state - all 3 cards are always-on
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -29,7 +26,6 @@ import type { PlaybookNode } from "@/types/database";
 import { PlaybookHub } from "@/components/playbook/PlaybookHub";
 import { PlaybookNodeSheet } from "@/components/playbook/PlaybookNodeSheet";
 import { PlaybookWelcomeOverlay } from "@/components/playbook/PlaybookWelcomeOverlay";
-import { FirstClientLandedCelebration } from "@/components/playbook/FirstClientLandedCelebration";
 
 export default function PlaybookPage() {
   const { student } = useAuth();
@@ -38,10 +34,6 @@ export default function PlaybookPage() {
     regionProgress,
     playbookWelcomeSeenAt,
     dismissPlaybookWelcome,
-    firstClientLandedAt,
-    firstClientJustLanded,
-    markFirstClient,
-    dismissFirstClientCelebration,
   } = useStudent();
   const router = useRouter();
 
@@ -174,7 +166,7 @@ export default function PlaybookPage() {
         <div className="hidden sm:block" style={{ width: 180 }} />
       </header>
 
-      {/* Hub — 4 cards */}
+      {/* Hub — 3 cards */}
       <main
         className="py-8 sm:py-12"
         style={{
@@ -197,7 +189,6 @@ export default function PlaybookPage() {
               marginBottom: 12,
             }}
           >
-            {/* TODO(karlo): hub headline */}
             You&rsquo;re a marketer now.
           </h1>
           <p
@@ -209,102 +200,19 @@ export default function PlaybookPage() {
               lineHeight: 1.55,
             }}
           >
-            {/* TODO(karlo): hub sub-copy */}
-            Four activities. Always open. Rotate through them until
-            the income is real.
+            Three playbooks. Always open. Work through them until the
+            income is real.
           </p>
         </div>
 
-        <PlaybookHub
-          nodes={nodes}
-          firstClientLandedAt={firstClientLandedAt}
-          onOpenNode={setOpenNodeId}
-        />
+        <PlaybookHub nodes={nodes} onOpenNode={setOpenNodeId} />
       </main>
 
-      <PlaybookNodeSheet
-        node={openNode}
-        onClose={() => setOpenNodeId(null)}
-        // Step 5 — milestone CTA. Pre-landing: the self-report
-        // button. Post-landing: a "Landed · {date}" confirmation
-        // panel that keeps the sheet useful as a re-readable record.
-        milestoneSlot={
-          openNode?.is_milestone ? (
-            firstClientLandedAt ? (
-              <div
-                style={{
-                  padding: 18,
-                  borderRadius: 12,
-                  background: "rgba(230,192,122,0.10)",
-                  border: "1px solid rgba(230,192,122,0.4)",
-                  marginBottom: 16,
-                }}
-              >
-                <p
-                  className="font-mono uppercase"
-                  style={{
-                    fontSize: 11,
-                    color: "var(--color-gold-light)",
-                    letterSpacing: "0.18em",
-                    marginBottom: 6,
-                  }}
-                >
-                  Landed
-                </p>
-                <p
-                  style={{
-                    fontSize: 14,
-                    color: "rgba(255,255,255,0.78)",
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {new Date(firstClientLandedAt).toLocaleDateString(
-                    undefined,
-                    { month: "long", day: "numeric", year: "numeric" },
-                  )}
-                  . The promise of the program, delivered.
-                </p>
-              </div>
-            ) : (
-              <button
-                onClick={() => {
-                  void markFirstClient();
-                }}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  marginBottom: 16,
-                  padding: "16px 20px",
-                  borderRadius: 12,
-                  background: "var(--color-gold)",
-                  color: "var(--color-bg-primary)",
-                  border: "none",
-                  fontSize: 15,
-                  fontWeight: 600,
-                  letterSpacing: "-0.011em",
-                  cursor: "pointer",
-                }}
-              >
-                {/* TODO(karlo): final CTA */}
-                I just landed my first client
-              </button>
-            )
-          ) : undefined
-        }
-      />
+      <PlaybookNodeSheet node={openNode} onClose={() => setOpenNodeId(null)} />
 
       <PlaybookWelcomeOverlay
         open={showWelcome}
         onDismiss={() => void dismissPlaybookWelcome()}
-      />
-
-      {/* v42 — crowned celebration. Fires on first-client-landed
-          (single use). Larger than the Map 1 celebrations per
-          brief §4: the moment the entire program promise is
-          delivered on. */}
-      <FirstClientLandedCelebration
-        open={firstClientJustLanded}
-        onDismiss={dismissFirstClientCelebration}
       />
     </div>
   );

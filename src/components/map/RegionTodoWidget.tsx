@@ -20,10 +20,6 @@
  * v66 - arrow nav. Student can scroll backward through completed
  * regions (read-only). Cannot peek forward into locked regions.
  * Per Karlo + Lovro: prevent accidental edits to old state.
- *
- * Placeholder rows: R3 and R4 have a placeholder slot for a third
- * todo Karlo hasn't named yet. The slot renders disabled with
- * "Coming soon" copy until the registry below is updated.
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -32,8 +28,7 @@ import { useStudent } from "@/contexts/StudentContext";
 type TodoKind =
   | { type: "watch_lessons_in_region"; regionId: string }
   | { type: "action_shipped"; lessonId: string }
-  | { type: "manual"; todoKey: string }
-  | { type: "placeholder" };
+  | { type: "manual"; todoKey: string };
 
 interface TodoSpec {
   id: string;
@@ -76,6 +71,8 @@ const REGION_TODOS: Record<string, TodoSpec[]> = {
       kind: { type: "action_shipped", lessonId: "l024" },
     },
   ],
+  // v72.2 - R3 + R4 are 2-todo regions (Karlo's call). They don't
+  // have a natural third shippable action, so no placeholder.
   r3: [
     {
       id: "r3_watch_lessons",
@@ -87,26 +84,12 @@ const REGION_TODOS: Record<string, TodoSpec[]> = {
       title: "Ship your Static ad",
       kind: { type: "action_shipped", lessonId: "l049" },
     },
-    {
-      // Placeholder - Karlo to finalize the third R3 todo. Until
-      // then, this renders disabled so the widget still shows 3
-      // rows.
-      id: "r3_third_placeholder",
-      title: "Coming soon",
-      kind: { type: "placeholder" },
-    },
   ],
   r4: [
     {
       id: "r4_watch_lessons",
       title: "Watch all R4 lessons",
       kind: { type: "watch_lessons_in_region", regionId: "r4" },
-    },
-    {
-      // Placeholder - Karlo to finalize the second R4 todo.
-      id: "r4_second_placeholder",
-      title: "Coming soon",
-      kind: { type: "placeholder" },
     },
     {
       id: "r4_claim_bounty",
@@ -329,16 +312,6 @@ export function RegionTodoWidget() {
               />
             );
           }
-          if (todo.kind.type === "placeholder") {
-            return (
-              <TodoRow
-                key={todo.id}
-                title={todo.title}
-                isDone={false}
-                placeholder
-              />
-            );
-          }
           return null;
         })}
       </div>
@@ -405,13 +378,11 @@ function TodoRow({
   isDone,
   meta,
   action,
-  placeholder = false,
 }: {
   title: string;
   isDone: boolean;
   meta?: string;
   action?: React.ReactNode;
-  placeholder?: boolean;
 }) {
   return (
     <div
@@ -421,11 +392,8 @@ function TodoRow({
         gap: 10,
         padding: "6px 8px",
         borderRadius: 10,
-        background: placeholder
-          ? "rgba(255,255,255,0.02)"
-          : "rgba(255,255,255,0.04)",
+        background: "rgba(255,255,255,0.04)",
         border: "1px solid rgba(255,255,255,0.08)",
-        opacity: placeholder ? 0.55 : 1,
       }}
     >
       <CheckCircle done={isDone} />
@@ -435,13 +403,10 @@ function TodoRow({
           minWidth: 0,
           fontSize: 13,
           fontWeight: 500,
-          color: placeholder
-            ? "rgba(255,255,255,0.42)"
-            : isDone
-              ? "rgba(255,255,255,0.55)"
-              : "rgba(255,255,255,0.94)",
+          color: isDone
+            ? "rgba(255,255,255,0.55)"
+            : "rgba(255,255,255,0.94)",
           textDecoration: isDone ? "line-through" : "none",
-          fontStyle: placeholder ? "italic" : "normal",
           letterSpacing: "-0.005em",
           whiteSpace: "nowrap",
           overflow: "hidden",

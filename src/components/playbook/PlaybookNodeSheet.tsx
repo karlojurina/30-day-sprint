@@ -28,8 +28,24 @@ interface Props {
   onClose: () => void;
 }
 
+// v72.1 - hardcoded node-id → article-slug fallback. The article
+// rendering shouldn't break just because the v72 migration (which
+// populates playbook_nodes.article_slug) hasn't run on a given
+// environment yet. If the DB column is set we use it; otherwise we
+// resolve the slug from the stable node id.
+const SLUG_BY_NODE_ID: Record<string, string> = {
+  pb_submit_bounties: "01-submit-ad-bounties",
+  pb_build_portfolio: "02-build-your-portfolio",
+  pb_apply_job_board: "03-apply-to-brands",
+};
+
+function resolveArticleSlug(node: PlaybookNode): string | null {
+  return node.article_slug ?? SLUG_BY_NODE_ID[node.id] ?? null;
+}
+
 export function PlaybookNodeSheet({ node, onClose }: Props) {
   const open = Boolean(node);
+  const articleSlug = node ? resolveArticleSlug(node) : null;
 
   return (
     <AnimatePresence>
@@ -139,13 +155,12 @@ export function PlaybookNodeSheet({ node, onClose }: Props) {
           </div>
 
           {/* Body - the HTML article. Fills the rest of the screen;
-              scrolls internally. article_slug should always be set
-              post-v72; fall back to a message if a legacy row sneaks
-              through. */}
-          {node.article_slug ? (
+              scrolls internally. Slug comes from the DB column when
+              set, else the node-id fallback map. */}
+          {articleSlug ? (
             <iframe
-              key={node.article_slug}
-              src={`/playbook/${node.article_slug}/index.html`}
+              key={articleSlug}
+              src={`/playbook/${articleSlug}/index.html`}
               title={node.title}
               style={{
                 flex: 1,

@@ -3,8 +3,11 @@
 /**
  * /dashboard/playbook — Map 2.
  *
- * Post-sprint hub. Loads as the default surface for any student
- * whose `bounty_access_claimed_at` is set (auto-redirect from /dashboard).
+ * Post-sprint hub. Unlocks the moment the student completes l078
+ * "How I Approach Research / Coming Up With Ad Ideas" — the last
+ * watch lesson in R4 (day 28). Bounty Access is a separate parallel
+ * milestone and does NOT unlock the Playbook on its own (corrected
+ * v72.7 - see PLAYBOOK_UNLOCK_LESSON_ID in src/lib/constants.ts).
  *
  * v72 (lovro-brief-playbook-articles): 3 always-on cards -
  * pb_submit_bounties, pb_build_portfolio, pb_apply_job_board. The
@@ -22,6 +25,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { createClient } from "@/lib/supabase-browser";
+import { PLAYBOOK_UNLOCK_LESSON_ID } from "@/lib/constants";
 import type { PlaybookNode } from "@/types/database";
 import { PlaybookHub } from "@/components/playbook/PlaybookHub";
 import { PlaybookNodeSheet } from "@/components/playbook/PlaybookNodeSheet";
@@ -29,21 +33,11 @@ import { PlaybookWelcomeOverlay } from "@/components/playbook/PlaybookWelcomeOve
 
 export default function PlaybookPage() {
   const { student } = useAuth();
-  const {
-    bountyAccessClaimedAt,
-    regionProgress,
-    playbookWelcomeSeenAt,
-    dismissPlaybookWelcome,
-  } = useStudent();
+  const { completedLessonIds, playbookWelcomeSeenAt, dismissPlaybookWelcome } =
+    useStudent();
   const router = useRouter();
 
-  // v59 - gate widened from "bounty access claimed" to "R4 complete
-  // OR bounty access claimed". Karlo's call: the Playbook should be
-  // accessible the moment the student finishes the sprint so they
-  // can see what's next, not gated behind an external Whop/AdBounty
-  // webhook they might not understand yet.
-  const r4Complete = regionProgress.r4?.isComplete ?? false;
-  const playbookUnlocked = r4Complete || Boolean(bountyAccessClaimedAt);
+  const playbookUnlocked = completedLessonIds.has(PLAYBOOK_UNLOCK_LESSON_ID);
   useEffect(() => {
     if (student && !playbookUnlocked) {
       router.replace("/dashboard?map=1");
@@ -74,9 +68,10 @@ export default function PlaybookPage() {
   // Welcome overlay fires once per student. We rely on the timestamp
   // being null — when the student dismisses, dismissPlaybookWelcome
   // patches the local row so the overlay disappears for the rest of
-  // the session AND any future load.
-  const showWelcome =
-    Boolean(bountyAccessClaimedAt) && !playbookWelcomeSeenAt;
+  // the session AND any future load. Gated on playbookUnlocked (l078
+  // completed) so it only fires when the student has actually earned
+  // access, not when bounty was claimed independently.
+  const showWelcome = playbookUnlocked && !playbookWelcomeSeenAt;
 
   if (!student || loading) {
     return (

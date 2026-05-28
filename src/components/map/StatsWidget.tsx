@@ -9,6 +9,7 @@ import { getDayNumber } from "@/types/database";
 import {
   DISCOUNT_WINDOW_DAYS,
   LESSON_GROUPS,
+  PLAYBOOK_UNLOCK_LESSON_ID,
   lessonGroupOf,
   progressPercent,
 } from "@/lib/constants";
@@ -21,10 +22,13 @@ interface StatsWidgetProps {
 
 /**
  * Top-left floating widget that sits over the map. The "Open the
- * Playbook" CTA appears at the bottom whenever bountyAccessClaimedAt
- * is set (v50: Bounty Access is the new finish line, not the dropped
- * sprint_completed_at field; l058 doesn't exist as a lesson anymore
- * either).
+ * Playbook" CTA appears at the bottom once the student has completed
+ * the Playbook-unlock lesson (l078 - see PLAYBOOK_UNLOCK_LESSON_ID
+ * in src/lib/constants.ts). The Bounty Apprentice chip is separate:
+ * it shows whenever bounty_access_claimed_at is set, independent of
+ * Playbook access. v72.7 - Playbook CTA was gated on bounty alone
+ * for v50; corrected here because Playbook unlock and Bounty Access
+ * are independent milestones.
  *
  * Visibility: always rendered (overview AND region views).
  * Position: absolute top-left of its parent (the map container).
@@ -146,9 +150,11 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
     return null;
   })();
 
-  // v50 — the "Open the Playbook" CTA appears the moment the student
-  // claims Bounty Access on l057. That's the new finish line.
-  const sprintFinished = Boolean(bountyAccessClaimedAt);
+  // v72.7 - "Open the Playbook" CTA shows once l078 (the Playbook
+  // unlock lesson) is completed. Independent of bounty access.
+  const sprintFinished = completedLessonIds.has(PLAYBOOK_UNLOCK_LESSON_ID);
+  // "Bounty Apprentice" chip is a separate signal - whenever Zak's
+  // adbounty webhook has fired for this student.
   const hasBountyAccess = Boolean(bountyAccessClaimedAt);
 
   const body = (

@@ -37,8 +37,8 @@ Two surfaces in one Next.js app:
 |------|------------|
 | `/login` | Whop OAuth entry |
 | `/auth/callback` + `/auth/complete` | OAuth callback + post-auth landing |
-| `/dashboard` | The map (overview + 4 regions). Auto-redirects to `/dashboard/playbook` once `bounty_access_claimed_at` is set unless `?map=1` is passed. |
-| `/dashboard/playbook` | Map 2 hub. Opens once `bounty_access_claimed_at` is stamped by the AdBounty webhook. |
+| `/dashboard` | The map (overview + 4 regions). Auto-redirects to `/dashboard/playbook` once the student has completed `PLAYBOOK_UNLOCK_LESSON_ID` (l078, the last R4 watch lesson) unless `?map=1` is passed. |
+| `/dashboard/playbook` | Map 2 hub. Unlocks when l078 ("How I Approach Research / Coming Up With Ad Ideas") is completed. Bounty Access (`bounty_access_claimed_at`) is a SEPARATE milestone and does NOT unlock the Playbook. |
 
 **State:** `AuthContext` (session + student row), `StudentContext`
 (lessons, completions, streaks, discount, sprint milestones, playbook
@@ -75,12 +75,11 @@ welcome, first-client landed, etc.).
 - `POST /api/student/skip-lesson` — mark optional lesson skipped
 - `POST /api/student/save-action-link` — Discord submission URL
 - `POST /api/student/submit-quiz` — quiz attempt
-- `POST /api/student/mark-first-client` — Map 2 milestone (v2)
 - `POST /api/student/dismiss-playbook-welcome` — Map 2 intro (v2)
 - `POST /api/student/celebration-seen` — dismiss celebration overlays
 - `POST /api/student/complete-onboarding` — finish first-time onboarding
 - `POST /api/student/mark-dashboard-login` — stamp first /dashboard load (v51)
-- `POST /api/student/mark-intro-video-threshold` — intro video ~65% watched (v51)
+- `POST /api/student/mark-intro-video-threshold` — intro video watched end-to-end (v51; v72.5/72.6 dropped the ~65% threshold for a full-`ended` requirement, column name kept for back-compat)
 - `POST /api/student/dismiss-why-youre-here` — final WYH card dismissed (v51)
 - `POST /api/student/submit-region-quiz` — region-quiz attempt (v65). One round-trip per completed attempt: updates last/best score, increments attempts, stamps `quiz_passed_at` on first attempt at ≥ 50%. Replaces v54's mark-region-quiz-passed + increment-region-quiz-attempts split.
 - `POST /api/student/refresh-watch-sync` — force a Whop watch-history pull
@@ -151,7 +150,10 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
   (onboarding_completed_at, first_sprint_login_at,
   first_dashboard_login_at, intro_video_threshold_met,
   why_youre_here_panel_dismissed, bounty_access_claimed_at,
-  first_client_landed_at, playbook_welcome_seen_at)
+  first_client_landed_at, playbook_welcome_seen_at).
+  Note: `first_client_landed_at` is dormant - the column persists but
+  the API route, celebration component, and milestone node were all
+  removed in v72.4. Safe to drop in a future migration if reclaimed.
 - `student_streaks` — current_streak, longest_streak, last_streak_date
 - `student_whop_sync` — Whop OAuth tokens + watch-history sync diagnostics
 - `student_celebrations` — last_streak_milestone_shown,
@@ -191,11 +193,12 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 
 | Job | Cadence | What it does |
 |-----|---------|-------------|
-| `sync-whop` | hourly | Pull Whop watch history → `student_lesson_completions` |
-| `check-engagement` | daily | Detect churn signals → `disengagement_alerts` |
-| `check-csm-tasks` | daily | Evaluate `templates.trigger_config` → `tasks` |
-| `snapshot-progress` | daily | Freeze today's progress per student |
-| `day28-dm` | daily | Fire day-28 Discord DM |
+| `sync-whop` | daily 00:00 UTC | Pull Whop watch history → `student_lesson_completions` |
+| `snapshot-progress` | daily 00:30 UTC | Freeze today's progress per student |
+| `check-engagement` | daily 09:00 UTC | Detect churn signals → `disengagement_alerts` |
+| `check-csm-tasks` | daily 09:15 UTC | Evaluate `templates.trigger_config` → `tasks` |
+| `check-na-tasks` | daily 09:20 UTC | Not-Activated escalation (Day 3/5/7/10) |
+| `day28-dm` | daily 09:30 UTC | Fire day-28 Discord DM |
 
 Schedules live in `vercel.json`.
 
@@ -212,14 +215,18 @@ Schedules live in `vercel.json`.
 | `templates.ts` | DM template renderer (variable substitution) |
 | `dm-toggles.ts` | Day-28 DM enable/disable |
 | `streak.ts` | Streak math |
-| `quiz.ts` | Quiz scoring |
+| `quiz.ts` | Quiz scoring (legacy single quiz) |
+| `region-quizzes.ts` | Region-quiz scoring + format dispatch (v54/v65/v69/v70) |
+| `progress.ts` | Shared progress / completion derivations |
+| `achievements.ts` | Achievement catalog + unlock evaluation (v53) |
 | `discord.ts` | Discord HTTP helpers |
 | `day28-embed.ts` | Day-28 DM embed builder |
 | `titles.ts` | Student title progression |
-| `constants.ts` | Lesson groups, discount window, etc. |
+| `constants.ts` | Lesson groups, discount window, `DISCOUNT_GATE_LESSON_ID`, `PLAYBOOK_UNLOCK_LESSON_ID` (l078), launch date, etc. |
 | `motion.ts` | GSAP / Framer easing constants |
 | `useMediaQuery.ts` | SSR-safe phone-detection hook |
 | `useFocusTrap.ts` | Modal a11y |
+| `useJourneyPaceCounts.ts` | Admin Journey pace tile data |
 | `map/` | Map geometry (path math, region bounds) |
 | `sop-templates.ts` | SOP scaffolding |
 

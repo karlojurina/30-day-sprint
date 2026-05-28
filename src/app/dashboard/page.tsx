@@ -14,6 +14,7 @@ import { GraduationModal } from "@/components/map/GraduationModal";
 import { DevTestPanel } from "@/components/dev/DevTestPanel";
 import { IntroVideoGate } from "@/components/onboarding/IntroVideoGate";
 import { WhyYoureHerePanel } from "@/components/onboarding/WhyYoureHerePanel";
+import { PLAYBOOK_UNLOCK_LESSON_ID } from "@/lib/constants";
 
 interface MockMonthReview {
   total_lessons_completed: number;
@@ -35,7 +36,7 @@ export default function DashboardPage() {
     loading,
     streak,
     discountRequest,
-    bountyAccessClaimedAt,
+    completedLessonIds,
     firstDashboardLoginAt,
     introVideoThresholdMet,
     whyYoureHerePanelDismissed,
@@ -46,17 +47,20 @@ export default function DashboardPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  // v50 — conditional default surface. Students who've claimed Bounty
-  // Access (l057) land on Map 2 (the Playbook) instead of Map 1 by
-  // default. The ?map=1 query param is the override — used by the
-  // "Back to the climb" link on Map 2 so the student can return to
-  // the original map any time.
+  // Conditional default surface. Students who have completed l078
+  // (the Playbook-unlock lesson - see PLAYBOOK_UNLOCK_LESSON_ID in
+  // src/lib/constants.ts) land on Map 2 (the Playbook) by default.
+  // The ?map=1 query param overrides - used by "Back to the climb"
+  // on Map 2 so the student can return to the original map.
+  // v72.7 - was bountyAccessClaimedAt; corrected because bounty is a
+  // separate milestone that does NOT unlock the Playbook.
+  const playbookUnlocked = completedLessonIds.has(PLAYBOOK_UNLOCK_LESSON_ID);
   const forceMap1 = searchParams.get("map") === "1";
   useEffect(() => {
-    if (!loading && bountyAccessClaimedAt && !forceMap1) {
+    if (!loading && playbookUnlocked && !forceMap1) {
       router.replace("/dashboard/playbook");
     }
-  }, [loading, bountyAccessClaimedAt, forceMap1, router]);
+  }, [loading, playbookUnlocked, forceMap1, router]);
 
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [streakCelebration, setStreakCelebration] = useState<number | null>(null);

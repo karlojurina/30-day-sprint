@@ -45,9 +45,8 @@ When adding a new table, append it here. When deleting a field, scan
 ### `student_milestones`
 - **Depends on:** `students`
 - **Depended on by:** `StudentContext` (`bountyAccessClaimedAt`,
-  `firstClientLandedAt`, `playbookWelcomeSeenAt`,
-  `onboardingCompletedAt`), milestone API routes,
-  `src/lib/csm-triggers.ts` (`has_logged_into_app` reads
+  `playbookWelcomeSeenAt`, `onboardingCompletedAt`), milestone API
+  routes, `src/lib/csm-triggers.ts` (`has_logged_into_app` reads
   `first_sprint_login_at`), `/api/auth/whop/callback` (stamps
   `first_sprint_login_at` on first login),
   `/api/cron/check-csm-tasks` (joins for the snapshot),
@@ -58,8 +57,19 @@ When adding a new table, append it here. When deleting a field, scan
 - **Stable contract:** `student_id`, `onboarding_completed_at`,
   `first_sprint_login_at`, `first_dashboard_login_at`,
   `intro_video_threshold_met`, `why_youre_here_panel_dismissed`,
-  `bounty_access_claimed_at`, `first_client_landed_at`,
-  `playbook_welcome_seen_at`
+  `bounty_access_claimed_at`, `playbook_welcome_seen_at`
+- **Dormant column (do not extend):** `first_client_landed_at` — the
+  API route, celebration component, and Map 2 milestone node were
+  all removed in v72.4. Column persists for back-compat; safe to
+  drop in a future migration.
+- **Note on `intro_video_threshold_met`:** column name kept for
+  back-compat; semantic is now "watched end to end" (v72.5/72.6
+  dropped the original ~65% threshold).
+- **Note on `bounty_access_claimed_at`:** stamping this does NOT
+  unlock the Playbook (Map 2). The Playbook gate is `l078` lesson
+  completion (see `PLAYBOOK_UNLOCK_LESSON_ID` in
+  `src/lib/constants.ts`). Bounty Access is a separate parallel
+  milestone (drives the "Bounty Apprentice" chip + l057 claim CTA).
 
 ### `student_streaks`
 - **Depends on:** `students`

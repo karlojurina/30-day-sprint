@@ -32,6 +32,17 @@ export function progressPercent(completed: number, total: number): number {
 // "you've shipped your static ad, here's your discount" moment.
 export const DISCOUNT_GATE_LESSON_ID = "l049";
 
+// The Playbook (Map 2) unlocks the moment the student finishes l078
+// "How I Approach Research / Coming Up With Ad Ideas" - the last
+// watch lesson in R4 (day 28). Everything after l078 (l057 bounty
+// onboarding, l058-l063 action lessons) is post-Playbook material.
+// Bounty Access is a SEPARATE milestone and does NOT unlock the
+// Playbook on its own (corrected v72.7 - prior gate was
+// `r4Complete || bountyAccessClaimedAt` which both let bounty alone
+// unlock it AND required ALL R4 lessons including post-Playbook
+// action items, neither matching product intent).
+export const PLAYBOOK_UNLOCK_LESSON_ID = "l078";
+
 // Time window for the 30% discount: complete all of R1 + R2 within
 // this many days of joining Whop. Measured server-side at claim time.
 // Lovro confirmed 15 days = "more than 15 days in = no discount" so

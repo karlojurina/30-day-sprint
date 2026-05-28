@@ -45,7 +45,6 @@ export async function GET(request: NextRequest) {
     celebrationsRes,
     dmLogRes,
     regionQuizRes,
-    manualTodosRes,
   ] = await Promise.all([
     supabase.from("regions").select("*").order("order_num"),
     supabase.from("lessons").select("*").order("day").order("sort_order"),
@@ -107,12 +106,6 @@ export async function GET(request: NextRequest) {
         "region_id, quiz_passed_at, quiz_attempts, best_score_pct, last_score_pct, last_attempt_at",
       )
       .eq("student_id", student.id),
-    // v66 - manual region todos. One row per (student, todo_key);
-    // completed_at null = not done.
-    supabase
-      .from("student_manual_todos")
-      .select("todo_key, completed_at")
-      .eq("student_id", student.id),
   ]);
 
   // Masked course ID for the sync debug panel — enough to verify in the
@@ -140,7 +133,6 @@ export async function GET(request: NextRequest) {
     celebrations: celebrationsRes.data ?? null,
     dmLog: dmLogRes.data ?? null,
     regionQuiz: regionQuizRes.data ?? [],
-    manualTodos: manualTodosRes.data ?? [],
     whopCourseIdMasked: courseIdMasked,
   });
 }

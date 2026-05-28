@@ -106,7 +106,6 @@ import {
 } from "@/components/map/DiscountClaimCelebration";
 import { CinematicDive } from "./CinematicDive";
 import { StatsWidget } from "@/components/map/StatsWidget";
-import { RegionTodoWidget } from "@/components/map/RegionTodoWidget";
 import { QuizModal, type QuizResult } from "@/components/quiz/QuizModal";
 import {
   SwipeCardsQuiz,
@@ -687,7 +686,8 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
   }, [regionsMounted]);
 
   const isPhone = useIsPhone();
-  const [sidePanelCollapsed, setSidePanelCollapsed] = useState(false);
+  // v72.3 - Karlo: side panel should be closed by default.
+  const [sidePanelCollapsed, setSidePanelCollapsed] = useState(true);
   // On phone, the side panel renders as a bottom-sheet overlay - it
   // does NOT take horizontal space in the layout. So we report 0 to
   // anything that uses sidePanelWidth for canvas sizing.
@@ -1998,14 +1998,29 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
 
       {/* StatsWidget — visible ONLY on overview. Replaces the old
           TopBar. Hosts welcome, progress, streak, next lesson,
-          discount countdown, and signout. */}
+          discount countdown, and signout.
+          v72.3 - the "Next up" click now transitions into the
+          lesson's region before opening the sheet, so when the
+          student closes the sheet they land inside the region
+          they were working on (not back on the overview). */}
       {view === "overview" && (
-        <>
-          <StatsWidget onOpenLesson={onOpenLesson} />
-          {/* Region to-do widget — sits next to StatsWidget on overview.
-              Auto-hides on phone (cramped). */}
-          {!isPhone && <RegionTodoWidget />}
-        </>
+        <StatsWidget
+          onOpenLesson={(lessonId) => {
+            // We're guaranteed to be on overview here (the parent
+            // {view === "overview" && ...} gates this branch).
+            const lesson = lessons.find((l) => l.id === lessonId);
+            const rid = lesson?.region_id;
+            if (
+              rid === "r1" ||
+              rid === "r2" ||
+              rid === "r3" ||
+              rid === "r4"
+            ) {
+              transitionTo(rid);
+            }
+            onOpenLesson(lessonId);
+          }}
+        />
       )}
 
       {/* Back-to-map button — visible ONLY when zoomed into a region.
@@ -2331,16 +2346,17 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
             !(regionProgress[focusedRegion.id]?.isComplete ?? false)
           }
           quizInfo={(() => {
-            // v65 - build the quiz card payload from the region's
-            // configured quiz format + the student's row in
-            // student_region_quiz. Null = no quiz format for this
-            // region. v70.10 - all 4 live formats share the same
-            // `cards` shape, so a single membership check covers
-            // them all (was previously missing 'constellation',
-            // which is why R3 didn't show the Retake button).
+            // v72.3 - the quiz only appears after the student has
+            // completed every lesson in the region. The Onward
+            // button and end-marker click were already gated; this
+            // closes the side-panel Quiz card gap so the student
+            // can't take the quiz early via the "Take quiz" pill.
             const focusedRid = focusedRegion.id as RegionId;
             const quiz = getRegionQuiz(focusedRid);
             if (!quiz) return null;
+            const isComplete =
+              regionProgress[focusedRid]?.isComplete ?? false;
+            if (!isComplete) return null;
             const cards =
               quiz.format === "swipe_cards" ||
               quiz.format === "stack_builder" ||
@@ -2360,6 +2376,9 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
           onOpenQuiz={() => {
             const focusedRid = focusedRegion.id as RegionId;
             if (!getRegionQuiz(focusedRid)) return;
+            // Defense in depth - even if a caller somehow reaches
+            // this callback on an incomplete region, hard-block.
+            if (!(regionProgress[focusedRid]?.isComplete ?? false)) return;
             setQuizResult(null);
             setQuizProgress("");
             setQuizAttempt((n) => n + 1);

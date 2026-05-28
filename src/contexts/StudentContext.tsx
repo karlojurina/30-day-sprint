@@ -162,14 +162,6 @@ interface StudentContextType {
     scorePct: number,
   ) => Promise<{ passed: boolean; bestScorePct: number } | null>;
 
-  // v66 - honor-system region todos. Set of todo_keys the
-  // student has marked done. Lookup is "is this key in the
-  // set?" - the widget owns the registry of valid keys.
-  manualTodosDone: Set<string>;
-  /** Flip completed_at on a manual todo. Symmetric: tap once
-   *  to mark done, tap again to undo. */
-  toggleManualTodo: (todoKey: string) => Promise<void>;
-
   // v51 (Phase 2, brief v3) — intro video gate + WYH panel state.
   // The 3 flags below drive the first-login chain on /dashboard.
   // markDashboardLogin() fires on first /dashboard load to stamp
@@ -241,22 +233,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [regionQuizMap, setRegionQuizMap] = useState<
     Record<RegionId, StudentRegionQuiz | null>
   >({ r1: null, r2: null, r3: null, r4: null });
-  // v66 - honor-system region todos. Set of todo_keys with
-  // completed_at != null. Lookup is O(1).
-  const [manualTodosDone, setManualTodosDone] = useState<Set<string>>(
-    () => new Set(),
-  );
-
-  function foldManualTodos(
-    rows: Array<{ todo_key: string; completed_at: string | null }> | null,
-  ): Set<string> {
-    const out = new Set<string>();
-    if (!rows) return out;
-    for (const r of rows) {
-      if (r.completed_at) out.add(r.todo_key);
-    }
-    return out;
-  }
 
   function foldRegionQuiz(
     rows: Array<{
@@ -397,14 +373,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
             student?.id,
           ),
         );
-        setManualTodosDone(
-          foldManualTodos(
-            data.manualTodos as Array<{
-              todo_key: string;
-              completed_at: string | null;
-            }> | null,
-          ),
-        );
         setStreak({
           current: (data.streaks as StudentStreaks | null)?.current_streak ?? 0,
           longest: (data.streaks as StudentStreaks | null)?.longest_streak ?? 0,
@@ -492,14 +460,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           last_attempt_at: string | null;
         }> | null,
         fresh.student?.id,
-      ),
-    );
-    setManualTodosDone(
-      foldManualTodos(
-        fresh.manualTodos as Array<{
-          todo_key: string;
-          completed_at: string | null;
-        }> | null,
       ),
     );
     setStreak({
@@ -1364,37 +1324,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     [student, regionQuizMap],
   );
 
-  // v66 - flip a manual todo's completed_at. Symmetric tap to undo.
-  // Optimistic patch the local set; server reconciliation arrives in
-  // the response.
-  const toggleManualTodo = useCallback(
-    async (todoKey: string) => {
-      if (!student) return;
-      const wasDone = manualTodosDone.has(todoKey);
-      setManualTodosDone((prev) => {
-        const next = new Set(prev);
-        if (wasDone) next.delete(todoKey);
-        else next.add(todoKey);
-        return next;
-      });
-      const token = await getAccessToken();
-      if (!token) return;
-      try {
-        await fetch("/api/student/toggle-manual-todo", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ todoKey }),
-        });
-      } catch {
-        // Silent fail - next refresh reconciles.
-      }
-    },
-    [student, manualTodosDone],
-  );
-
   const requestDiscount = useCallback(async () => {
     if (!student || !discountEligible) return;
 
@@ -1543,8 +1472,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         dismissWhyYoureHere,
         regionQuiz: regionQuizMap,
         submitRegionQuiz,
-        manualTodosDone,
-        toggleManualTodo,
         refreshWatchProgress,
         syncDiagnostics,
         forceSync,

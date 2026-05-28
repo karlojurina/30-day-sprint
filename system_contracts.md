@@ -110,7 +110,7 @@ When adding a new table, append it here. When deleting a field, scan
 - **Depends on:** `regions`
 - **Depended on by:** `student_lesson_completions.lesson_id`,
   `MapMockup`, `ScenePathOverlay`, `LessonSheet`, `RegionSidePanel`,
-  `RegionTodoWidget`, `StudentContext`, `src/lib/csm-triggers.ts`
+  `StudentContext`, `src/lib/csm-triggers.ts`
   (`lesson_shipped`, `lesson_watched`, `region_completion_pct`),
   discount eligibility (action items)
 - **Stable contract:** `id`, `region_id`, `day`, `sort_order`, `type`

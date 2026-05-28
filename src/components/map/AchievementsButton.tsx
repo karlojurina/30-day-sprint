@@ -573,17 +573,20 @@ function AchievementTile({
       {unlocked && unlockPct != null && (
         <p
           style={{
-            // v56 - bumped from 9 to 10.5 so "12% earned" is
-            // legible at a glance.
+            // v56 - bumped from 9 to 10.5 so the unlock % stays
+            // legible at a glance. v72.3 - copy changed from
+            // "X% earned" -> "Owned by X% of students" so the
+            // meaning is clear (Karlo: "this is not clear enough").
             fontSize: 10.5,
             fontFamily: "var(--font-mono)",
             letterSpacing: "0.10em",
             textTransform: "uppercase",
             color: RARITY_COLOR[ach.rarity],
             marginTop: "auto",
+            lineHeight: 1.4,
           }}
         >
-          {unlockPct}% earned
+          Owned by {unlockPct}% of students
         </p>
       )}
     </div>
@@ -678,7 +681,7 @@ function AchievementUnlockToast({
               }}
             >
               {unlockPct != null
-                ? `${achievement.description} · ${unlockPct}% earned`
+                ? `${achievement.description} · Owned by ${unlockPct}% of students`
                 : achievement.description}
             </p>
           </div>

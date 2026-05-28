@@ -232,7 +232,9 @@ export default function DashboardPage() {
         onDismiss={() => setGraduationReview(null)}
       />
 
-      <DevTestPanel />
+      {/* v72.3 - dev only. Students were seeing the 🛠 button
+          bottom-right in production. */}
+      {process.env.NODE_ENV === "development" && <DevTestPanel />}
 
       {/* v51 (Phase 2) - first-login intro video gate. Auto-fires when
           the student hasn't met the threshold yet. Continue advances

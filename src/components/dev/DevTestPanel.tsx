@@ -15,10 +15,13 @@ import { useEffect, useState } from "react";
  * Listeners:
  *   et:test:transition         → MapMockup transitions to detail.target
  *   et:test:streak             → DashboardPage shows StreakCelebration with detail
- *   et:test:banner             → DiscountUrgencyBanner overrides its state
- *   et:test:banner-clear       → clears any banner override
  *   et:test:discount-approved  → DashboardPage shows DiscountApprovedCelebration
  *   et:test:graduation         → DashboardPage shows GraduationModal with mock detail
+ *
+ * Note: et:test:banner + et:test:banner-clear are still fired by some
+ * buttons in this panel but have no listener (DiscountUrgencyBanner
+ * was removed in v72.4 - the live countdown lives in StatsWidget,
+ * which doesn't honor overrides). Harmless; no-op fires.
  */
 export function DevTestPanel() {
   const [open, setOpen] = useState(false);

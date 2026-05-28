@@ -132,16 +132,6 @@ interface StudentContextType {
   playbookWelcomeSeenAt: string | null;
   dismissPlaybookWelcome: () => Promise<void>;
 
-  // v42 (v2): "Land Your First Client" milestone on Map 2. Single
-  // self-report. firstClientLandedAt is the stamp; firstClientJust
-  // Landed is the celebration takeover flag set the moment the
-  // markFirstClient API call resolves (and the timestamp wasn't
-  // already set server-side).
-  firstClientLandedAt: string | null;
-  firstClientJustLanded: boolean;
-  markFirstClient: () => Promise<void>;
-  dismissFirstClientCelebration: () => void;
-
   // v46 — onboarding milestone + celebration state, sourced from
   // student_milestones / student_celebrations respectively.
   onboardingCompletedAt: string | null;
@@ -281,9 +271,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   // initialize the ref to "unknown" and let the first observation
   // seed it; only later observations can fire the celebration.
   const bountyAccessLastSeenRef = useRef<"unset" | string | null>("unset");
-  // v42 (v2): crowned-celebration takeover for the Map 2 milestone.
-  // Set on markFirstClient() success when it wasn't a duplicate.
-  const [firstClientJustLanded, setFirstClientJustLanded] = useState(false);
   const [streak, setStreak] = useState<{ current: number; longest: number }>({
     current: 0,
     longest: 0,
@@ -680,16 +667,26 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     return Boolean(r1?.isComplete && r2?.isComplete);
   }, [regionProgress]);
 
-  const discountMsLeft = useMemo(() => {
-    if (!student) return 0;
-    const joined = new Date(student.joined_at).getTime();
-    const deadline = joined + DISCOUNT_WINDOW_DAYS * 86_400_000;
-    return deadline - Date.now();
-  }, [student]);
+  // v72.4 - the previous useMemo with Date.now() inside violated
+  // React 19's react-hooks/purity rule. Now backed by a state that
+  // ticks every minute via setInterval - the component body becomes
+  // deterministic (a pure function of `student` and `nowMs`) and the
+  // value still updates as time passes. 60s cadence is fine for the
+  // only consumers: discountEligible (boolean threshold check) and
+  // DiscountCountdown (which has its own 60s tick).
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
 
-  const discountEligible = useMemo(() => {
-    return discountAllLessonsDone && discountMsLeft > 0;
-  }, [discountAllLessonsDone, discountMsLeft]);
+  const discountMsLeft = student
+    ? new Date(student.joined_at).getTime() +
+      DISCOUNT_WINDOW_DAYS * 86_400_000 -
+      nowMs
+    : 0;
+
+  const discountEligible = discountAllLessonsDone && discountMsLeft > 0;
 
   // Actions
 
@@ -1103,46 +1100,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     setBountyAccessJustClaimed(false);
   }, []);
 
-  /**
-   * v42 — "I just landed my first client" handler. Single
-   * self-report on Map 2's milestone node sheet. POST flips
-   * students.first_client_landed_at; on a fresh land (not a
-   * duplicate), raises the crowned-celebration flag.
-   */
-  const markFirstClient = useCallback(async () => {
-    if (!student || milestones?.first_client_landed_at) return;
-    const token = await getAccessToken();
-    if (!token) return;
-
-    const res = await fetch("/api/student/mark-first-client", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) {
-      console.error("Mark first client failed:", res.status);
-      return;
-    }
-    const data = await res.json();
-    if (!data.ok) return;
-
-    setMilestones((prev) => ({
-      student_id: student.id,
-      onboarding_completed_at: prev?.onboarding_completed_at ?? null,
-      first_sprint_login_at: prev?.first_sprint_login_at ?? null,
-      first_dashboard_login_at: prev?.first_dashboard_login_at ?? null,
-      intro_video_threshold_met: prev?.intro_video_threshold_met ?? false,
-      why_youre_here_panel_dismissed: prev?.why_youre_here_panel_dismissed ?? false,
-      bounty_access_claimed_at: prev?.bounty_access_claimed_at ?? null,
-      playbook_welcome_seen_at: prev?.playbook_welcome_seen_at ?? null,
-      first_client_landed_at: data.first_client_landed_at,
-      updated_at: data.first_client_landed_at,
-    }));
-    if (!data.already_landed) setFirstClientJustLanded(true);
-  }, [student, milestones]);
-
-  const dismissFirstClientCelebration = useCallback(() => {
-    setFirstClientJustLanded(false);
-  }, []);
 
   /**
    * v42 — one-shot dismiss for the Map 2 welcome overlay. Sets
@@ -1457,10 +1414,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         dismissBountyClaim,
         playbookWelcomeSeenAt: milestones?.playbook_welcome_seen_at ?? null,
         dismissPlaybookWelcome,
-        firstClientLandedAt: milestones?.first_client_landed_at ?? null,
-        firstClientJustLanded,
-        markFirstClient,
-        dismissFirstClientCelebration,
         onboardingCompletedAt: milestones?.onboarding_completed_at ?? null,
         celebrations,
         firstDashboardLoginAt: milestones?.first_dashboard_login_at ?? null,

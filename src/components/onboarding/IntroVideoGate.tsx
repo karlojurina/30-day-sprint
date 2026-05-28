@@ -3,26 +3,32 @@
 /**
  * Phase 2 - Intro Video Gate.
  *
- * Renders as a full-screen modal that auto-plays Karlo's intro video
- * the first time a student loads /dashboard post-OAuth. The Continue
- * button is locked until the student watches the ENTIRE video end to
- * end - we listen for the player's `ended` event. Scrubbing forward
- * is blocked (rewind is still allowed) so the "watch the full video"
- * gate can't be bypassed by dragging the timeline.
+ * Full-screen modal that plays Karlo's welcome video the first time
+ * a student loads /dashboard post-OAuth. The Continue button stays
+ * disabled until the video's native `ended` event fires (full watch).
  *
- * Persistence: once `ended` fires for the first time, parent calls
- * POST /api/student/mark-intro-video-threshold to flip
- * `student_milestones.intro_video_threshold_met` permanently. The
- * field name kept the "threshold" wording for backwards-compat with
- * the DB column - the *meaning* is now "watched the whole video."
+ * Hard "must watch" enforcement (v72.6):
+ *  - Native player chrome is HIDDEN (`controls={false}`). The student
+ *    can't drag a scrubber, can't right-click "Save as", can't
+ *    Picture-in-Picture, can't download.
+ *  - We render our own minimal control bar: play/pause, volume,
+ *    fullscreen. No timeline scrub. The progress bar is visual only.
+ *  - `onSeeking` is still wired as a belt-and-suspenders catch (keyboard
+ *    shortcuts, fullscreen-mode native controls, anything else that
+ *    might attempt a seek) - if currentTime exceeds the furthest point
+ *    ever played, snap back.
  *
- * Re-watch mode (mounted from the persistent button in StatsWidget):
- * Continue is unlocked from the start, seek is unrestricted - we
- * just play the video again.
+ * Persistence: parent fires `onContinue` only after the student
+ * clicks the Continue button (which is only enabled post-`ended`).
+ * Parent then writes `student_milestones.intro_video_threshold_met`
+ * and dismisses the gate. No auto-advance.
  *
- * Video URL comes from NEXT_PUBLIC_INTRO_VIDEO_URL. If unset, the
- * component renders a placeholder so dev / staging environments
- * without the env var configured don't 500.
+ * No rewatch mode anymore — once watched, the gate stays dormant
+ * forever. The DB column name still says "threshold_met" for back
+ * compat; the semantic is "watched end to end."
+ *
+ * Video URL: NEXT_PUBLIC_INTRO_VIDEO_URL. Unset → placeholder so dev
+ * environments don't 500.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -31,81 +37,127 @@ import { motion, AnimatePresence } from "framer-motion";
 const SEEK_TOLERANCE_S = 0.5;
 
 interface IntroVideoGateProps {
-  /** True the first time a student loads the dashboard AND hasn't yet
-   *  finished the video. When false, the gate is dormant. */
+  /** True the first time a student loads the dashboard AND hasn't
+   *  yet finished the video. When false, the gate is dormant. */
   open: boolean;
-  /** Re-watch mode. Mounts the gate from the persistent button in
-   *  StatsWidget. Completion already persisted, so Continue is
-   *  unlocked from the start and seek is unrestricted. */
-  rewatchMode?: boolean;
-  /** Called when the student finishes the video for the first time.
-   *  Parent fires POST /api/student/mark-intro-video-threshold to
-   *  persist. No-op in rewatch mode. */
-  onThresholdReached: () => void;
-  /** Called when Continue clicks. Parent advances to WYH panel. */
+  /** Fired when the student clicks Continue (which is only enabled
+   *  after the video's `ended` event). Parent persists the milestone
+   *  + dismisses the gate. */
   onContinue: () => void;
-  /** Called when re-watch mode dismisses. (Re-watch only - the
-   *  first-pass gate has no Close affordance.) */
-  onClose?: () => void;
 }
 
-export function IntroVideoGate({
-  open,
-  rewatchMode = false,
-  onThresholdReached,
-  onContinue,
-  onClose,
-}: IntroVideoGateProps) {
+function formatTime(seconds: number): string {
+  if (!isFinite(seconds) || seconds < 0) return "0:00";
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+export function IntroVideoGate({ open, onContinue }: IntroVideoGateProps) {
   const videoUrl = process.env.NEXT_PUBLIC_INTRO_VIDEO_URL ?? "";
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [unlocked, setUnlocked] = useState(rewatchMode);
-  const [watchedPct, setWatchedPct] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
   const endedFiredRef = useRef(false);
-  // Furthest point the playhead has actually reached via real playback.
-  // Used to block forward-scrubbing in non-rewatch mode.
   const maxReachedRef = useRef(0);
 
-  // Reset internal state when the gate opens fresh.
+  const [unlocked, setUnlocked] = useState(false);
+  const [watchedPct, setWatchedPct] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Reset internal state every time the gate opens fresh.
   useEffect(() => {
-    if (open && !rewatchMode) {
+    if (open) {
       setUnlocked(false);
       setWatchedPct(0);
+      setCurrentTime(0);
       endedFiredRef.current = false;
       maxReachedRef.current = 0;
     }
-    if (open && rewatchMode) {
-      setUnlocked(true);
+  }, [open]);
+
+  // Track fullscreen state (the browser owns this transition; we just
+  // react to it so the icon stays accurate).
+  useEffect(() => {
+    function onFsChange() {
+      setIsFullscreen(!!document.fullscreenElement);
     }
-  }, [open, rewatchMode]);
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
 
   const handleTimeUpdate = useCallback(() => {
     const el = videoRef.current;
     if (!el || !el.duration || !isFinite(el.duration)) return;
     const t = el.currentTime;
     if (t > maxReachedRef.current) maxReachedRef.current = t;
+    setCurrentTime(t);
     setWatchedPct(t / el.duration);
   }, []);
 
-  // Block forward seek in first-pass mode. If the user drags the
-  // scrubber past the furthest point they've actually watched, snap
-  // back. Rewind (currentTime < maxReached) is always allowed.
+  const handleLoadedMetadata = useCallback(() => {
+    const el = videoRef.current;
+    if (!el || !isFinite(el.duration)) return;
+    setDuration(el.duration);
+  }, []);
+
+  // Belt-and-suspenders seek block. Native controls are off so this
+  // mostly catches keyboard shortcuts and fullscreen-mode controls.
   const handleSeeking = useCallback(() => {
-    if (rewatchMode) return;
     const el = videoRef.current;
     if (!el) return;
     if (el.currentTime > maxReachedRef.current + SEEK_TOLERANCE_S) {
       el.currentTime = maxReachedRef.current;
     }
-  }, [rewatchMode]);
+  }, []);
 
   const handleEnded = useCallback(() => {
-    if (rewatchMode) return;
     if (endedFiredRef.current) return;
     endedFiredRef.current = true;
     setUnlocked(true);
     setWatchedPct(1);
-    onThresholdReached();
-  }, [onThresholdReached, rewatchMode]);
+    setPlaying(false);
+  }, []);
+
+  const togglePlay = useCallback(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.paused || el.ended) {
+      void el.play();
+    } else {
+      el.pause();
+    }
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.muted = !el.muted;
+    setMuted(el.muted);
+  }, []);
+
+  const handleVolumeChange = useCallback((v: number) => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.volume = v;
+    el.muted = v === 0;
+    setVolume(v);
+    setMuted(v === 0);
+  }, []);
+
+  const toggleFullscreen = useCallback(() => {
+    const c = containerRef.current;
+    if (!c) return;
+    if (!document.fullscreenElement) {
+      void c.requestFullscreen?.();
+    } else {
+      void document.exitFullscreen?.();
+    }
+  }, []);
 
   if (!open) return null;
 
@@ -142,65 +194,35 @@ export function IntroVideoGate({
           }}
         >
           {/* Header */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "flex-start",
-              justifyContent: "space-between",
-              gap: 16,
-            }}
-          >
-            <div>
-              <p
-                style={{
-                  fontSize: 11,
-                  fontFamily: "var(--font-mono)",
-                  letterSpacing: "0.22em",
-                  textTransform: "uppercase",
-                  color: "rgba(255,255,255,0.45)",
-                  marginBottom: 6,
-                }}
-              >
-                {rewatchMode ? "Re-watch" : "Welcome"}
-              </p>
-              <h2
-                style={{
-                  fontSize: 22,
-                  fontWeight: 600,
-                  letterSpacing: "-0.018em",
-                  color: "rgba(255,255,255,0.96)",
-                  lineHeight: 1.2,
-                }}
-              >
-                A quick word from Karlo before you start
-              </h2>
-            </div>
-            {rewatchMode && onClose && (
-              <button
-                onClick={onClose}
-                aria-label="Close"
-                style={{
-                  background: "transparent",
-                  border: "1px solid rgba(255,255,255,0.16)",
-                  borderRadius: 8,
-                  color: "rgba(255,255,255,0.65)",
-                  cursor: "pointer",
-                  width: 32,
-                  height: 32,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  flexShrink: 0,
-                  fontSize: 18,
-                }}
-              >
-                ×
-              </button>
-            )}
+          <div>
+            <p
+              style={{
+                fontSize: 11,
+                fontFamily: "var(--font-mono)",
+                letterSpacing: "0.22em",
+                textTransform: "uppercase",
+                color: "rgba(255,255,255,0.45)",
+                marginBottom: 6,
+              }}
+            >
+              Welcome
+            </p>
+            <h2
+              style={{
+                fontSize: 22,
+                fontWeight: 600,
+                letterSpacing: "-0.018em",
+                color: "rgba(255,255,255,0.96)",
+                lineHeight: 1.2,
+              }}
+            >
+              A quick word from Karlo before you start
+            </h2>
           </div>
 
-          {/* Video frame */}
+          {/* Video frame with custom controls */}
           <div
+            ref={containerRef}
             style={{
               position: "relative",
               borderRadius: 14,
@@ -212,22 +234,221 @@ export function IntroVideoGate({
             }}
           >
             {videoUrl ? (
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                autoPlay={!rewatchMode}
-                controls
-                playsInline
-                onTimeUpdate={handleTimeUpdate}
-                onSeeking={handleSeeking}
-                onEnded={handleEnded}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                  objectFit: "contain",
-                  background: "#000",
-                }}
-              />
+              <>
+                <video
+                  ref={videoRef}
+                  src={videoUrl}
+                  autoPlay
+                  playsInline
+                  controls={false}
+                  controlsList="nodownload"
+                  disablePictureInPicture
+                  onContextMenu={(e) => e.preventDefault()}
+                  onTimeUpdate={handleTimeUpdate}
+                  onLoadedMetadata={handleLoadedMetadata}
+                  onSeeking={handleSeeking}
+                  onEnded={handleEnded}
+                  onPlay={() => setPlaying(true)}
+                  onPause={() => setPlaying(false)}
+                  onVolumeChange={() => {
+                    const el = videoRef.current;
+                    if (!el) return;
+                    setVolume(el.volume);
+                    setMuted(el.muted);
+                  }}
+                  onClick={togglePlay}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "contain",
+                    background: "#000",
+                    cursor: "pointer",
+                  }}
+                />
+
+                {/* Big center play button overlay - shown when paused */}
+                {!playing && !endedFiredRef.current && (
+                  <button
+                    onClick={togglePlay}
+                    aria-label="Play video"
+                    style={{
+                      position: "absolute",
+                      top: "50%",
+                      left: "50%",
+                      transform: "translate(-50%, -50%)",
+                      width: 72,
+                      height: 72,
+                      borderRadius: "50%",
+                      background: "rgba(0,0,0,0.55)",
+                      border: "1px solid rgba(255,255,255,0.24)",
+                      backdropFilter: "blur(8px)",
+                      WebkitBackdropFilter: "blur(8px)",
+                      color: "rgba(255,255,255,0.95)",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      pointerEvents: "auto",
+                    }}
+                  >
+                    <svg
+                      width="28"
+                      height="28"
+                      viewBox="0 0 24 24"
+                      fill="currentColor"
+                      aria-hidden="true"
+                    >
+                      <polygon points="7 4 20 12 7 20 7 4" />
+                    </svg>
+                  </button>
+                )}
+
+                {/* Bottom control bar */}
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    position: "absolute",
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    padding: "10px 14px 12px",
+                    background:
+                      "linear-gradient(to top, rgba(0,0,0,0.72), rgba(0,0,0,0))",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    pointerEvents: "auto",
+                  }}
+                >
+                  {/* Visual-only progress bar */}
+                  <div
+                    aria-hidden="true"
+                    style={{
+                      height: 3,
+                      background: "rgba(255,255,255,0.18)",
+                      borderRadius: 2,
+                      overflow: "hidden",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: `${Math.min(100, watchedPct * 100)}%`,
+                        height: "100%",
+                        background: unlocked
+                          ? "rgba(74,222,128,0.85)"
+                          : "rgba(255,255,255,0.85)",
+                        transition: "width 0.2s linear",
+                      }}
+                    />
+                  </div>
+
+                  {/* Controls row */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 14,
+                      color: "rgba(255,255,255,0.92)",
+                    }}
+                  >
+                    {/* Play/pause */}
+                    <button
+                      onClick={togglePlay}
+                      aria-label={playing ? "Pause" : "Play"}
+                      style={iconBtnStyle}
+                    >
+                      {playing ? (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                          <rect x="6" y="4" width="4" height="16" rx="1" />
+                          <rect x="14" y="4" width="4" height="16" rx="1" />
+                        </svg>
+                      ) : (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                          <polygon points="7 4 20 12 7 20 7 4" />
+                        </svg>
+                      )}
+                    </button>
+
+                    {/* Time display */}
+                    <span
+                      style={{
+                        fontSize: 12,
+                        fontVariantNumeric: "tabular-nums",
+                        color: "rgba(255,255,255,0.85)",
+                        minWidth: 86,
+                      }}
+                    >
+                      {formatTime(currentTime)} / {formatTime(duration)}
+                    </span>
+
+                    <div style={{ flex: 1 }} />
+
+                    {/* Volume */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 6,
+                      }}
+                    >
+                      <button
+                        onClick={toggleMute}
+                        aria-label={muted ? "Unmute" : "Mute"}
+                        style={iconBtnStyle}
+                      >
+                        {muted || volume === 0 ? (
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none" />
+                            <line x1="23" y1="9" x2="17" y2="15" />
+                            <line x1="17" y1="9" x2="23" y2="15" />
+                          </svg>
+                        ) : (
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none" />
+                            <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+                          </svg>
+                        )}
+                      </button>
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={muted ? 0 : volume}
+                        onChange={(e) =>
+                          handleVolumeChange(parseFloat(e.target.value))
+                        }
+                        aria-label="Volume"
+                        style={{
+                          width: 72,
+                          accentColor: "rgba(255,255,255,0.85)",
+                          cursor: "pointer",
+                        }}
+                      />
+                    </div>
+
+                    {/* Fullscreen */}
+                    <button
+                      onClick={toggleFullscreen}
+                      aria-label={
+                        isFullscreen ? "Exit fullscreen" : "Enter fullscreen"
+                      }
+                      style={iconBtnStyle}
+                    >
+                      {isFullscreen ? (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" />
+                        </svg>
+                      ) : (
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3" />
+                        </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </>
             ) : (
               <div
                 style={{
@@ -266,111 +487,86 @@ export function IntroVideoGate({
             )}
           </div>
 
-          {/* Progress + Continue */}
+          {/* Status text + Continue */}
           <div
             style={{
               display: "flex",
-              flexDirection: "column",
-              gap: 10,
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 16,
             }}
           >
-            {/* Real watch progress bar (0 → 100% of video duration).
-             *  Hidden in rewatch mode since completion isn't gating. */}
-            {!rewatchMode && videoUrl && (
-              <div
-                aria-hidden="true"
-                style={{
-                  height: 3,
-                  background: "rgba(255,255,255,0.10)",
-                  borderRadius: 2,
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    width: `${Math.min(100, watchedPct * 100)}%`,
-                    height: "100%",
-                    background: unlocked
-                      ? "rgba(74,222,128,0.85)"
-                      : "rgba(255,255,255,0.7)",
-                    transition: "width 0.3s cubic-bezier(0.22,1,0.36,1)",
-                  }}
-                />
-              </div>
-            )}
-
-            <div
+            <p
               style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: 16,
+                fontSize: 12,
+                color: unlocked
+                  ? "rgba(74,222,128,0.85)"
+                  : "rgba(255,255,255,0.45)",
+                letterSpacing: "-0.003em",
               }}
             >
-              <p
-                style={{
-                  fontSize: 12,
-                  color: unlocked
-                    ? "rgba(74,222,128,0.85)"
-                    : "rgba(255,255,255,0.45)",
-                  letterSpacing: "-0.003em",
-                }}
+              {!videoUrl
+                ? "No video configured — press Continue to proceed."
+                : unlocked
+                  ? "Continue is unlocked."
+                  : "Watch the full video to continue."}
+            </p>
+            <button
+              onClick={onContinue}
+              disabled={!unlocked && !!videoUrl}
+              style={{
+                padding: "12px 22px",
+                borderRadius: 10,
+                background:
+                  unlocked || !videoUrl
+                    ? "rgba(255,255,255,0.94)"
+                    : "rgba(255,255,255,0.12)",
+                color:
+                  unlocked || !videoUrl
+                    ? "rgba(15,17,21,0.92)"
+                    : "rgba(255,255,255,0.4)",
+                border: "none",
+                fontSize: 14,
+                fontWeight: 700,
+                letterSpacing: "-0.011em",
+                cursor:
+                  unlocked || !videoUrl ? "pointer" : "not-allowed",
+                transition: "all 200ms cubic-bezier(0.22,1,0.36,1)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              Continue
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.4"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
               >
-                {rewatchMode
-                  ? "Re-watching — no progress saved."
-                  : !videoUrl
-                    ? "No video configured — press Continue to proceed."
-                    : unlocked
-                      ? "Continue is unlocked."
-                      : "Watch the full video to continue."}
-              </p>
-              <button
-                onClick={onContinue}
-                disabled={!unlocked && !!videoUrl}
-                style={{
-                  padding: "12px 22px",
-                  borderRadius: 10,
-                  background:
-                    unlocked || !videoUrl
-                      ? "rgba(255,255,255,0.94)"
-                      : "rgba(255,255,255,0.12)",
-                  color:
-                    unlocked || !videoUrl
-                      ? "rgba(15,17,21,0.92)"
-                      : "rgba(255,255,255,0.4)",
-                  border: "none",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  letterSpacing: "-0.011em",
-                  cursor:
-                    unlocked || !videoUrl ? "pointer" : "not-allowed",
-                  transition: "all 200ms cubic-bezier(0.22,1,0.36,1)",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                {rewatchMode ? "Done" : "Continue"}
-                {!rewatchMode && (
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.4"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M5 12h14M12 5l7 7-7 7" />
-                  </svg>
-                )}
-              </button>
-            </div>
+                <path d="M5 12h14M12 5l7 7-7 7" />
+              </svg>
+            </button>
           </div>
         </motion.div>
       </motion.div>
     </AnimatePresence>
   );
 }
+
+const iconBtnStyle: React.CSSProperties = {
+  background: "transparent",
+  border: "none",
+  color: "rgba(255,255,255,0.92)",
+  cursor: "pointer",
+  padding: 4,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  lineHeight: 0,
+};

@@ -61,15 +61,24 @@ export default function DashboardPage() {
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [streakCelebration, setStreakCelebration] = useState<number | null>(null);
 
-  // v51 (Phase 2) - first-login chain.
+  // v51 (Phase 2) - first-login chain. v72.6 split: intro and WYH
+  // are now SEPARATE sessions to avoid dumping everything on the
+  // student at once.
   //   1. Stamp first_dashboard_login_at the first time we're here
-  //   2. Show IntroVideoGate until intro_video_threshold_met
-  //   3. Then show WYH panel until why_youre_here_panel_dismissed
-  //   4. Map underneath stays interactive only after both clear
-  // Re-watch state for the persistent re-access button (Phase 2 UI).
-  const [introRewatch, setIntroRewatch] = useState(false);
+  //   2. Session N (first visit): IntroVideoGate. Student must watch
+  //      the full video, then click Continue manually. Server stamps
+  //      intro_video_threshold_met. Student lands on the map and can
+  //      start using it immediately. No WYH this session.
+  //   3. Session N+1+ (next visit): WYH panel auto-mounts. Student
+  //      dismisses → why_youre_here_panel_dismissed. Stays dormant.
+  //   4. WYH re-access button stays (separate ask); intro rewatch
+  //      removed (v72.6 - once watched, never shown again).
   const [wyhRewatch, setWyhRewatch] = useState(false);
-  const [introUnlockedThisSession, setIntroUnlockedThisSession] =
+  // True after the student clicks Continue on the intro gate THIS
+  // session. Drives two things: (a) hides the gate immediately, (b)
+  // suppresses WYH until the next session so we don't auto-mount
+  // it the moment the student lands on the map.
+  const [introCompletedThisSession, setIntroCompletedThisSession] =
     useState(false);
 
   useEffect(() => {
@@ -81,15 +90,15 @@ export default function DashboardPage() {
     !!student &&
     !loading &&
     !introVideoThresholdMet &&
-    !introUnlockedThisSession;
-  // WYH fires only after intro is met AND not dismissed yet. The
-  // introUnlockedThisSession flag lets us advance immediately after
-  // the student clicks Continue without waiting for the server's
-  // refresh.
+    !introCompletedThisSession;
+  // WYH fires only on a SECOND-or-later session: the DB sticky is set
+  // (so they watched the intro at some point in the past) AND we
+  // didn't just finish the intro in this same session.
   const showWyh =
     !!student &&
     !loading &&
-    (introVideoThresholdMet || introUnlockedThisSession) &&
+    introVideoThresholdMet &&
+    !introCompletedThisSession &&
     !whyYoureHerePanelDismissed;
   const [discountCelebration, setDiscountCelebration] = useState<boolean>(false);
   const [graduationReview, setGraduationReview] = useState<MockMonthReview | null>(null);
@@ -236,30 +245,22 @@ export default function DashboardPage() {
           bottom-right in production. */}
       {process.env.NODE_ENV === "development" && <DevTestPanel />}
 
-      {/* v51 (Phase 2) - first-login intro video gate. Auto-fires when
-          the student hasn't met the threshold yet. Continue advances
-          to the WYH panel. */}
+      {/* v51 (Phase 2) - first-login intro video gate. v72.6: student
+          must watch the full video then click Continue manually. */}
       <IntroVideoGate
-        open={showIntroGate || introRewatch}
-        rewatchMode={introRewatch}
-        onThresholdReached={() => {
-          void markIntroVideoThreshold();
-          setIntroUnlockedThisSession(true);
-        }}
+        open={showIntroGate}
         onContinue={() => {
-          if (introRewatch) {
-            setIntroRewatch(false);
-            return;
-          }
-          setIntroUnlockedThisSession(true);
+          void markIntroVideoThreshold();
+          setIntroCompletedThisSession(true);
         }}
-        onClose={() => setIntroRewatch(false)}
       />
 
-      {/* v51 (Phase 2) - Why You're Here flipbook. Fires after the
-          intro gate clears, dismisses on the final card's CTA. */}
+      {/* v51 (Phase 2) - Why You're Here flipbook. v72.6: fires on the
+          NEXT session after the intro is watched (not in the same
+          session as the intro - too much at once). Dismisses on the
+          final card's CTA. */}
       <WhyYoureHerePanel
-        open={(showWyh && !introRewatch) || wyhRewatch}
+        open={showWyh || wyhRewatch}
         rewatchMode={wyhRewatch}
         onDismiss={() => {
           if (wyhRewatch) {
@@ -270,10 +271,9 @@ export default function DashboardPage() {
         }}
       />
 
-      {/* v51 (Phase 2) - persistent re-access button. Only shows
-          AFTER the student has cleared both the intro gate and the
-          WYH panel. Floating top-right pill so it doesn't fight the
-          top-left StatsWidget area or the back-to-map button. */}
+      {/* v51 (Phase 2) - persistent WYH re-access button. v72.6:
+          intro rewatch button removed (once watched, never shown
+          again). Only the WYH "Why you're here" pill remains. */}
       {introVideoThresholdMet && whyYoureHerePanelDismissed && (
         <div
           style={{
@@ -285,41 +285,6 @@ export default function DashboardPage() {
             gap: 8,
           }}
         >
-          <button
-            onClick={() => setIntroRewatch(true)}
-            title="Rewatch the intro video"
-            style={{
-              padding: "8px 14px",
-              borderRadius: 999,
-              background: "rgba(10,14,22,0.7)",
-              border: "1px solid rgba(255,255,255,0.16)",
-              backdropFilter: "blur(20px) saturate(140%)",
-              WebkitBackdropFilter: "blur(20px) saturate(140%)",
-              color: "rgba(255,255,255,0.78)",
-              fontSize: 12,
-              fontWeight: 500,
-              letterSpacing: "-0.005em",
-              cursor: "pointer",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            <svg
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <polygon points="6 4 20 12 6 20 6 4" />
-            </svg>
-            Intro
-          </button>
           <button
             onClick={() => setWyhRewatch(true)}
             title="Open the Why You're Here panel"

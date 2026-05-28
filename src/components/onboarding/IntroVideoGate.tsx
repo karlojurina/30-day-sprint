@@ -1,40 +1,46 @@
 "use client";
 
 /**
- * Phase 2 - Intro Video Gate (brief v3 §02).
+ * Phase 2 - Intro Video Gate.
  *
  * Renders as a full-screen modal that auto-plays Karlo's intro video
  * the first time a student loads /dashboard post-OAuth. The Continue
- * button is locked until ~65% of the video has been watched -
- * tracked from the player's timeupdate events. Once unlocked, click
- * advances the chain to the Why You're Here panel.
+ * button is locked until the student watches the ENTIRE video end to
+ * end - we listen for the player's `ended` event. Scrubbing forward
+ * is blocked (rewind is still allowed) so the "watch the full video"
+ * gate can't be bypassed by dragging the timeline.
  *
- * Threshold state is persisted via POST /api/student/mark-intro-
- * video-threshold so the gate stays open for the student forever
- * after they cross it once (re-watches don't flip it back).
+ * Persistence: once `ended` fires for the first time, parent calls
+ * POST /api/student/mark-intro-video-threshold to flip
+ * `student_milestones.intro_video_threshold_met` permanently. The
+ * field name kept the "threshold" wording for backwards-compat with
+ * the DB column - the *meaning* is now "watched the whole video."
  *
- * Video URL comes from NEXT_PUBLIC_INTRO_VIDEO_URL (placeholder
- * until Karlo records). If unset, the component renders a gentle
- * notice instead of a broken player so dev / staging environments
- * don't 500.
+ * Re-watch mode (mounted from the persistent button in StatsWidget):
+ * Continue is unlocked from the start, seek is unrestricted - we
+ * just play the video again.
+ *
+ * Video URL comes from NEXT_PUBLIC_INTRO_VIDEO_URL. If unset, the
+ * component renders a placeholder so dev / staging environments
+ * without the env var configured don't 500.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
-const WATCH_THRESHOLD = 0.65;
+const SEEK_TOLERANCE_S = 0.5;
 
 interface IntroVideoGateProps {
   /** True the first time a student loads the dashboard AND hasn't yet
-   *  crossed the watch threshold. When false, the gate is dormant. */
+   *  finished the video. When false, the gate is dormant. */
   open: boolean;
   /** Re-watch mode. Mounts the gate from the persistent button in
-   *  StatsWidget. Threshold is already met, so Continue is unlocked
-   *  from the start - we just play the video again. */
+   *  StatsWidget. Completion already persisted, so Continue is
+   *  unlocked from the start and seek is unrestricted. */
   rewatchMode?: boolean;
-  /** Called when the student crosses the watch threshold for the
-   *  first time. Parent fires POST /api/student/mark-intro-video-
-   *  threshold to persist. No-op in rewatch mode. */
+  /** Called when the student finishes the video for the first time.
+   *  Parent fires POST /api/student/mark-intro-video-threshold to
+   *  persist. No-op in rewatch mode. */
   onThresholdReached: () => void;
   /** Called when Continue clicks. Parent advances to WYH panel. */
   onContinue: () => void;
@@ -54,14 +60,18 @@ export function IntroVideoGate({
   const videoRef = useRef<HTMLVideoElement>(null);
   const [unlocked, setUnlocked] = useState(rewatchMode);
   const [watchedPct, setWatchedPct] = useState(0);
-  const thresholdFiredRef = useRef(false);
+  const endedFiredRef = useRef(false);
+  // Furthest point the playhead has actually reached via real playback.
+  // Used to block forward-scrubbing in non-rewatch mode.
+  const maxReachedRef = useRef(0);
 
   // Reset internal state when the gate opens fresh.
   useEffect(() => {
     if (open && !rewatchMode) {
       setUnlocked(false);
       setWatchedPct(0);
-      thresholdFiredRef.current = false;
+      endedFiredRef.current = false;
+      maxReachedRef.current = 0;
     }
     if (open && rewatchMode) {
       setUnlocked(true);
@@ -71,17 +81,30 @@ export function IntroVideoGate({
   const handleTimeUpdate = useCallback(() => {
     const el = videoRef.current;
     if (!el || !el.duration || !isFinite(el.duration)) return;
-    const pct = el.currentTime / el.duration;
-    setWatchedPct(pct);
-    if (
-      !rewatchMode &&
-      !thresholdFiredRef.current &&
-      pct >= WATCH_THRESHOLD
-    ) {
-      thresholdFiredRef.current = true;
-      setUnlocked(true);
-      onThresholdReached();
+    const t = el.currentTime;
+    if (t > maxReachedRef.current) maxReachedRef.current = t;
+    setWatchedPct(t / el.duration);
+  }, []);
+
+  // Block forward seek in first-pass mode. If the user drags the
+  // scrubber past the furthest point they've actually watched, snap
+  // back. Rewind (currentTime < maxReached) is always allowed.
+  const handleSeeking = useCallback(() => {
+    if (rewatchMode) return;
+    const el = videoRef.current;
+    if (!el) return;
+    if (el.currentTime > maxReachedRef.current + SEEK_TOLERANCE_S) {
+      el.currentTime = maxReachedRef.current;
     }
+  }, [rewatchMode]);
+
+  const handleEnded = useCallback(() => {
+    if (rewatchMode) return;
+    if (endedFiredRef.current) return;
+    endedFiredRef.current = true;
+    setUnlocked(true);
+    setWatchedPct(1);
+    onThresholdReached();
   }, [onThresholdReached, rewatchMode]);
 
   if (!open) return null;
@@ -196,6 +219,8 @@ export function IntroVideoGate({
                 controls
                 playsInline
                 onTimeUpdate={handleTimeUpdate}
+                onSeeking={handleSeeking}
+                onEnded={handleEnded}
                 style={{
                   width: "100%",
                   height: "100%",
@@ -230,12 +255,12 @@ export function IntroVideoGate({
                   Placeholder
                 </p>
                 <p style={{ fontSize: 15, lineHeight: 1.5, maxWidth: 480 }}>
-                  Karlo&rsquo;s intro video lands here once recorded.
-                  Set <code style={{ color: "rgba(255,255,255,0.95)" }}>
+                  Karlo&rsquo;s intro video lands here once{" "}
+                  <code style={{ color: "rgba(255,255,255,0.95)" }}>
                     NEXT_PUBLIC_INTRO_VIDEO_URL
                   </code>{" "}
-                  to swap it in. For now you can continue without
-                  watching.
+                  is set. Dev fallback only — production must have the
+                  URL configured.
                 </p>
               </div>
             )}
@@ -249,7 +274,8 @@ export function IntroVideoGate({
               gap: 10,
             }}
           >
-            {/* Progress bar - hidden in rewatch mode */}
+            {/* Real watch progress bar (0 → 100% of video duration).
+             *  Hidden in rewatch mode since completion isn't gating. */}
             {!rewatchMode && videoUrl && (
               <div
                 aria-hidden="true"
@@ -262,12 +288,11 @@ export function IntroVideoGate({
               >
                 <div
                   style={{
-                    width: `${Math.min(100, (watchedPct / WATCH_THRESHOLD) * 100)}%`,
+                    width: `${Math.min(100, watchedPct * 100)}%`,
                     height: "100%",
-                    background:
-                      unlocked
-                        ? "rgba(74,222,128,0.85)"
-                        : "rgba(255,255,255,0.7)",
+                    background: unlocked
+                      ? "rgba(74,222,128,0.85)"
+                      : "rgba(255,255,255,0.7)",
                     transition: "width 0.3s cubic-bezier(0.22,1,0.36,1)",
                   }}
                 />
@@ -292,12 +317,12 @@ export function IntroVideoGate({
                 }}
               >
                 {rewatchMode
-                  ? "Re-watching - no progress saved."
+                  ? "Re-watching — no progress saved."
                   : !videoUrl
-                    ? "No video configured - press Continue to proceed."
+                    ? "No video configured — press Continue to proceed."
                     : unlocked
                       ? "Continue is unlocked."
-                      : "Watch the video to unlock the next step."}
+                      : "Watch the full video to continue."}
               </p>
               <button
                 onClick={onContinue}

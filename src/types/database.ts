@@ -70,9 +70,11 @@ export interface Student {
  *   first_dashboard_login_at        — v51: first /dashboard load
  *                                      post-OAuth. Drives the intro
  *                                      video auto-play gate.
- *   intro_video_threshold_met       — v51: watch progress crossed
- *                                      the unlock threshold (~65%).
- *                                      Sticky.
+ *   intro_video_threshold_met       — v51: intro video watched end
+ *                                      to end (column name kept for
+ *                                      back-compat — v72.4 dropped
+ *                                      the % threshold for a full
+ *                                      `ended` event). Sticky.
  *   why_youre_here_panel_dismissed  — v51: clicked Let's go on the
  *                                      final WYH panel card. Sticky.
  *   bounty_access_claimed_at        — Bounty Access webhook fired.

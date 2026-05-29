@@ -764,6 +764,12 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
         display: "flex",
         flexDirection: "column",
         gap: 16,
+        // v72.9 - block accidental text highlight when the student
+        // scrolls / drags the map underneath. Same fix MapMockup uses
+        // on its draggable surface (which is why it stopped happening
+        // on the map but kept happening here).
+        userSelect: "none",
+        WebkitUserSelect: "none",
       }}
     >
       {body}

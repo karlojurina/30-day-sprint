@@ -19,6 +19,7 @@ import {
   EmptyState,
   Tabs,
 } from "@/components/admin/ui";
+import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 
 type RequestWithStudent = DiscountRequest & { student: Student };
 type FilterValue = "pending" | "approved" | "applied" | "rejected" | "all";
@@ -62,6 +63,9 @@ export default function DiscountsPage() {
     let query = supabase
       .from("discount_requests")
       .select("*, student:students(*)")
+      // v72.9 - sync to the same launch-date cutoff every other admin
+      // page uses (Karlo wants all sidebar surfaces filtered consistently).
+      .gte("student.joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
       .order("created_at", { ascending: false });
 
     if (filter !== "all") {

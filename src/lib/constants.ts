@@ -59,12 +59,17 @@ export const DISCOUNT_WINDOW_DAYS = 15;
 //   2026-05-01 — first admin cutoff (cleared test accounts)
 //   2026-05-18 — TASKS_STUDENT_JOIN_CUTOFF moved (CSM launched separately)
 //   2026-06-01 — unified launch (admin + tasks both move here)
+//   2026-05-25 — moved BACK 5 days (Monday) so Karlo has live data
+//                to drive the admin dashboard during launch-week
+//                testing. Real launch day is still ~2026-06-01 in
+//                Karlo's head, but the cutoff is a testing tool now,
+//                not a launch flag.
 //
 // If you ever need to diverge admin and tasks again (e.g. show
 // pre-launch students in /admin/students but not generate tasks
 // for them), just hardcode a different ISO string on the constant
 // that needs to move, instead of pointing it at LAUNCH_DATE.
-export const LAUNCH_DATE = "2026-06-01T00:00:00.000Z";
+export const LAUNCH_DATE = "2026-05-25T00:00:00.000Z";
 
 // Hard cutoff for admin list views — only show students who joined
 // on or after the launch date. Filters Students list, dashboard

@@ -25,6 +25,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 
 interface NotActivatedRow {
   id: string;
@@ -99,6 +100,10 @@ export default function NotActivatedPage() {
       .eq("membership_status", "active")
       .eq("high_churn_risk", false)
       .eq("csm_exempt", false)
+      // v72.9 - apply the same launch-date cutoff every other admin
+      // page uses. Without this filter the page was returning ~270
+      // pre-launch test accounts (Karlo's bug report 2026-05-29).
+      .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
       .order("created_at", { ascending: true });
 
     const allIds = (studentsRaw ?? []).map((s) => s.id);

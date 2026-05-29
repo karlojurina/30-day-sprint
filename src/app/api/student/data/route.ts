@@ -45,6 +45,7 @@ export async function GET(request: NextRequest) {
     celebrationsRes,
     dmLogRes,
     regionQuizRes,
+    lessonRatingsRes,
   ] = await Promise.all([
     supabase.from("regions").select("*").order("order_num"),
     supabase.from("lessons").select("*").order("day").order("sort_order"),
@@ -106,6 +107,12 @@ export async function GET(request: NextRequest) {
         "region_id, quiz_passed_at, quiz_attempts, best_score_pct, last_score_pct, last_attempt_at",
       )
       .eq("student_id", student.id),
+    // v75 - per-lesson rating + optional comment. One row per
+    // (student, lesson). Client folds into a Map for O(1) lookup.
+    supabase
+      .from("student_lesson_ratings")
+      .select("lesson_id, stars, comment, created_at, updated_at")
+      .eq("student_id", student.id),
   ]);
 
   // Masked course ID for the sync debug panel — enough to verify in the
@@ -133,6 +140,7 @@ export async function GET(request: NextRequest) {
     celebrations: celebrationsRes.data ?? null,
     dmLog: dmLogRes.data ?? null,
     regionQuiz: regionQuizRes.data ?? [],
+    lessonRatings: lessonRatingsRes.data ?? [],
     whopCourseIdMasked: courseIdMasked,
   });
 }

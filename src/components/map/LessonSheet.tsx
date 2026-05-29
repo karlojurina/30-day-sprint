@@ -62,6 +62,8 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
     saveDiscordLink,
     skipLesson,
     openDiscountFeedback,
+    lessonRatings,
+    rateLesson,
   } = useStudent();
 
   const lesson = useMemo(
@@ -905,6 +907,23 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                 row + always renders for compound ad-review lessons.
                 The mark-shipped button is now gated on the saved link,
                 not the other way around. */}
+
+            {/* v75 - "How did you like this lesson?" - 5-star rating
+                + optional comment. Appears once the lesson is marked
+                complete (any mechanism: watched / shipped / skipped).
+                Optional; never blocks navigation. Stays visible
+                indefinitely so the student can come back and rate
+                later. Bounty claim (l057) is excluded - rating a
+                setup step isn't useful. */}
+            {isFullyCompleted && !isBountyClaim && (
+              <LessonRatingBlock
+                lessonId={lesson.id}
+                saved={lessonRatings.get(lesson.id) ?? null}
+                onSave={(stars, comment) =>
+                  rateLesson(lesson.id, stars, comment)
+                }
+              />
+            )}
           </div>
         </div>
       </div>
@@ -1123,6 +1142,304 @@ function DiscordLinkBlock({
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * v75 - lesson rating + optional comment.
+ *
+ * Appears at the bottom of the LessonSheet once the lesson is marked
+ * complete. Always optional. After a student submits a rating, the
+ * block flips to a compact "saved" view with the chosen stars + an
+ * "Edit" link that re-opens the form pre-populated with the previous
+ * values. The comment is stored verbatim (trimmed, 2k char cap) and
+ * shows in /admin/lessons next to the student's name + email.
+ */
+function LessonRatingBlock({
+  lessonId,
+  saved,
+  onSave,
+}: {
+  lessonId: string;
+  saved: { stars: number; comment: string | null } | null;
+  onSave: (stars: number, comment: string | null) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(!saved);
+  const [draftStars, setDraftStars] = useState(saved?.stars ?? 0);
+  const [draftComment, setDraftComment] = useState(saved?.comment ?? "");
+  const [submitting, setSubmitting] = useState(false);
+
+  // If a fresh save lands while editing (e.g. from another tab),
+  // sync the local draft state without trampling an in-progress edit.
+  useEffect(() => {
+    if (editing) return;
+    setDraftStars(saved?.stars ?? 0);
+    setDraftComment(saved?.comment ?? "");
+  }, [editing, saved?.stars, saved?.comment]);
+
+  async function handleSubmit() {
+    if (draftStars < 1) return;
+    setSubmitting(true);
+    try {
+      await onSave(
+        draftStars,
+        draftComment.trim().length > 0 ? draftComment.trim() : null,
+      );
+      setEditing(false);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!editing && saved) {
+    return (
+      <div
+        style={{
+          padding: 16,
+          borderRadius: 12,
+          background: "var(--color-fill-secondary)",
+          border: "1px solid var(--color-border)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <StarRow value={saved.stars} interactive={false} />
+            <span
+              style={{
+                fontSize: 13,
+                color: "var(--color-text-tertiary)",
+                letterSpacing: "-0.003em",
+              }}
+            >
+              Thanks for the feedback.
+            </span>
+          </div>
+          <button
+            onClick={() => setEditing(true)}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "var(--color-text-tertiary)",
+              cursor: "pointer",
+              fontSize: 12,
+              padding: 0,
+              textDecoration: "underline",
+              textDecorationColor: "var(--color-border)",
+              textUnderlineOffset: 3,
+            }}
+          >
+            Edit
+          </button>
+        </div>
+        {saved.comment && (
+          <p
+            style={{
+              marginTop: 10,
+              fontSize: 13,
+              color: "var(--color-text-secondary)",
+              lineHeight: 1.55,
+              letterSpacing: "-0.005em",
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {saved.comment}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        padding: 16,
+        borderRadius: 12,
+        background: "var(--color-fill-secondary)",
+        border: "1px solid var(--color-border)",
+      }}
+    >
+      <p
+        className="section-label"
+        style={{ marginBottom: 10 }}
+      >
+        How did you like this lesson?
+      </p>
+      <StarRow
+        value={draftStars}
+        interactive
+        onChange={setDraftStars}
+      />
+      <textarea
+        value={draftComment}
+        onChange={(e) => setDraftComment(e.target.value)}
+        placeholder="Optional — anything you'd change, anything you loved?"
+        rows={3}
+        maxLength={2000}
+        style={{
+          width: "100%",
+          marginTop: 12,
+          padding: "10px 12px",
+          fontSize: 13,
+          lineHeight: 1.5,
+          letterSpacing: "-0.003em",
+          background: "rgba(255,255,255,0.04)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 8,
+          color: "var(--color-text-primary)",
+          resize: "vertical",
+          fontFamily: "inherit",
+        }}
+      />
+      <div
+        style={{
+          marginTop: 10,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            color: "var(--color-text-tertiary)",
+            letterSpacing: "-0.003em",
+          }}
+        >
+          {draftStars > 0
+            ? `${draftStars} star${draftStars === 1 ? "" : "s"} selected`
+            : "Tap a star to rate"}
+        </span>
+        <div style={{ display: "flex", gap: 8 }}>
+          {saved && (
+            <button
+              onClick={() => setEditing(false)}
+              disabled={submitting}
+              style={{
+                background: "transparent",
+                border: "1px solid var(--color-border)",
+                color: "var(--color-text-secondary)",
+                fontSize: 13,
+                padding: "8px 14px",
+                borderRadius: 8,
+                cursor: submitting ? "wait" : "pointer",
+              }}
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            onClick={handleSubmit}
+            disabled={draftStars < 1 || submitting}
+            style={{
+              background:
+                draftStars < 1
+                  ? "rgba(255,255,255,0.06)"
+                  : "var(--color-gold)",
+              border: "none",
+              color:
+                draftStars < 1
+                  ? "rgba(255,255,255,0.4)"
+                  : "var(--color-bg-primary)",
+              fontSize: 13,
+              fontWeight: 600,
+              padding: "8px 16px",
+              borderRadius: 8,
+              cursor:
+                draftStars < 1 || submitting
+                  ? "not-allowed"
+                  : "pointer",
+            }}
+          >
+            {submitting ? "Saving..." : saved ? "Update" : "Submit rating"}
+          </button>
+        </div>
+      </div>
+      <p
+        style={{
+          marginTop: 8,
+          fontSize: 11,
+          color: "var(--color-text-tertiary)",
+          letterSpacing: "-0.003em",
+        }}
+      >
+        Optional — only the team sees this. Helps us improve the
+        lesson, lesson {lessonId}.
+      </p>
+    </div>
+  );
+}
+
+function StarRow({
+  value,
+  interactive,
+  onChange,
+}: {
+  value: number;
+  interactive: boolean;
+  onChange?: (n: number) => void;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  const display = hover ?? value;
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 4,
+      }}
+      onMouseLeave={() => setHover(null)}
+    >
+      {[1, 2, 3, 4, 5].map((n) => {
+        const lit = n <= display;
+        return (
+          <button
+            key={n}
+            type="button"
+            onClick={() => interactive && onChange?.(n)}
+            onMouseEnter={() => interactive && setHover(n)}
+            aria-label={`${n} star${n === 1 ? "" : "s"}`}
+            disabled={!interactive}
+            style={{
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              width: 26,
+              height: 26,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: interactive ? "pointer" : "default",
+              color: lit
+                ? "var(--color-gold)"
+                : "rgba(255,255,255,0.18)",
+              transition: "color 120ms ease",
+            }}
+          >
+            <svg
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill={lit ? "currentColor" : "none"}
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.62L12 2 9.19 8.62 2 9.24l5.46 4.73L5.82 21z" />
+            </svg>
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -153,6 +153,18 @@ interface StudentContextType {
     scorePct: number,
   ) => Promise<{ passed: boolean; bestScorePct: number } | null>;
 
+  // v75 - per-lesson rating + optional comment. Map keyed by
+  // lesson id. Read-mostly; the LessonSheet writes via rateLesson()
+  // once the student is done with the lesson.
+  lessonRatings: Map<string, { stars: number; comment: string | null }>;
+  /** Upsert a rating for a lesson. Optimistic; server reconciles
+   *  in the background. */
+  rateLesson: (
+    lessonId: string,
+    stars: number,
+    comment: string | null,
+  ) => Promise<void>;
+
   // v51 (Phase 2, brief v3) — intro video gate + WYH panel state.
   // The 3 flags below drive the first-login chain on /dashboard.
   // markDashboardLogin() fires on first /dashboard load to stamp
@@ -224,6 +236,21 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [regionQuizMap, setRegionQuizMap] = useState<
     Record<RegionId, StudentRegionQuiz | null>
   >({ r1: null, r2: null, r3: null, r4: null });
+
+  // v75 - per-lesson rating map. Keyed by lesson_id.
+  const [lessonRatings, setLessonRatings] = useState<
+    Map<string, { stars: number; comment: string | null }>
+  >(new Map());
+
+  function foldLessonRatings(
+    rows: Array<{ lesson_id: string; stars: number; comment: string | null }>,
+  ): Map<string, { stars: number; comment: string | null }> {
+    const out = new Map<string, { stars: number; comment: string | null }>();
+    for (const r of rows) {
+      out.set(r.lesson_id, { stars: r.stars, comment: r.comment ?? null });
+    }
+    return out;
+  }
 
   function foldRegionQuiz(
     rows: Array<{
@@ -350,6 +377,15 @@ export function StudentProvider({ children }: { children: ReactNode }) {
             student?.id,
           ),
         );
+        setLessonRatings(
+          foldLessonRatings(
+            (data.lessonRatings ?? []) as Array<{
+              lesson_id: string;
+              stars: number;
+              comment: string | null;
+            }>,
+          ),
+        );
         setStreak({
           current: (data.streaks as StudentStreaks | null)?.current_streak ?? 0,
           longest: (data.streaks as StudentStreaks | null)?.longest_streak ?? 0,
@@ -473,6 +509,15 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           last_attempt_at: string | null;
         }> | null,
         fresh.student?.id,
+      ),
+    );
+    setLessonRatings(
+      foldLessonRatings(
+        (fresh.lessonRatings ?? []) as Array<{
+          lesson_id: string;
+          stars: number;
+          comment: string | null;
+        }>,
       ),
     );
     setStreak({
@@ -1318,6 +1363,48 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     [student, regionQuizMap],
   );
 
+  // v75 - upsert a lesson rating. Optimistic - the map flips
+  // immediately so the LessonSheet UI shows the chosen stars + saved
+  // comment without waiting on the round-trip. Server reconciliation
+  // runs in the background.
+  const rateLesson = useCallback(
+    async (lessonId: string, stars: number, comment: string | null) => {
+      if (!student) return;
+      const cleanedStars = Math.max(1, Math.min(5, Math.round(stars)));
+      const cleanedComment =
+        typeof comment === "string" && comment.trim().length > 0
+          ? comment.trim().slice(0, 2000)
+          : null;
+      setLessonRatings((prev) => {
+        const next = new Map(prev);
+        next.set(lessonId, { stars: cleanedStars, comment: cleanedComment });
+        return next;
+      });
+      void (async () => {
+        const token = await getAccessToken();
+        if (!token) return;
+        try {
+          await fetch("/api/student/rate-lesson", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({
+              lessonId,
+              stars: cleanedStars,
+              comment: cleanedComment,
+            }),
+          });
+        } catch {
+          // Optimistic state persists; next refreshFromServer will
+          // reconcile if the server diverged.
+        }
+      })();
+    },
+    [student],
+  );
+
   const requestDiscount = useCallback(async () => {
     if (!student || !discountEligible) return;
 
@@ -1460,6 +1547,8 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         dismissWhyYoureHere,
         regionQuiz: regionQuizMap,
         submitRegionQuiz,
+        lessonRatings,
+        rateLesson,
         refreshWatchProgress,
         syncDiagnostics,
         forceSync,

@@ -371,9 +371,13 @@ export default function ProgressInsightsPage() {
           />
         </Card>
       ) : (
+        // v75.9 - was a 1-column stack which made the page feel like
+        // a tall scroll of huge full-width charts. Two columns let
+        // four metrics share two screen rows on desktop and still
+        // collapse to 1-up on narrow.
         <div
-          className="grid"
-          style={{ gridTemplateColumns: "minmax(0, 1fr)", gap: 16 }}
+          className="grid grid-cols-1 xl:grid-cols-2"
+          style={{ gap: 16 }}
         >
           {(Object.keys(METRICS) as MetricKey[]).map((key) => (
             <MetricCard
@@ -972,69 +976,91 @@ function ChartTooltip({
   );
 }
 
+/**
+ * v75.9 - was a disc-bulleted `<ul>` of inline-`<code>` strings,
+ * read as developer scratch text. Now a tidy two-column definition
+ * grid that matches the rest of the page. Collapsed behind a
+ * `<details>` so the page footer stays light unless someone needs
+ * the reference.
+ */
 function CalcTransparency() {
+  const entries: Array<{ label: string; body: React.ReactNode }> = [
+    {
+      label: "Avg progress",
+      body: "Mean completion % across every active student (including graduates at 100%). Trends upward until churn or new joiners drag it down. For a cleaner 'are current sprinters progressing' read, use the Current sprinters card above.",
+    },
+    {
+      label: "Active on platform",
+      body: "Memberships in 'active' or 'past_due' at snapshot time.",
+    },
+    {
+      label: "Joined / Churned",
+      body: "New / canceled memberships per day. The chart shows daily counts; the summary number is the window sum.",
+    },
+    {
+      label: "Pace right now",
+      body: "Live count of students currently on the 30-day journey, grouped by completedLessons / expectedLessons. Behind < 0.5×, Ahead > 1.5×.",
+    },
+    {
+      label: "Bounty Program · joined",
+      body: "Live count of students onboarded to the Bounty Program. Stamped exclusively by Zak's adbounty webhook.",
+    },
+  ];
   return (
-    <section
+    <details
       style={{
-        marginTop: 32,
+        marginTop: 24,
         background: "var(--color-bg-card)",
         border: "1px solid var(--color-border)",
         borderRadius: 12,
-        padding: 18,
+        padding: "14px 18px",
       }}
     >
-      <h3
+      <summary
         style={{
-          fontSize: 13,
+          cursor: "pointer",
+          fontSize: 12,
           fontWeight: 600,
           color: "var(--color-text-secondary)",
           letterSpacing: "-0.005em",
-          marginBottom: 8,
+          userSelect: "none",
         }}
       >
         How these are calculated
-      </h3>
-      <ul
+      </summary>
+      <dl
+        className="grid grid-cols-1 sm:grid-cols-2"
         style={{
-          listStyle: "disc",
-          paddingLeft: 18,
-          fontSize: 12,
-          color: "var(--color-text-tertiary)",
-          lineHeight: 1.7,
+          gap: "14px 24px",
+          marginTop: 14,
+          marginBottom: 4,
         }}
       >
-        <li>
-          <strong>Avg progress</strong> &mdash; mean of completion % across
-          every active student (including graduates at 100%). Trends upward
-          monotonically until churn or new joiners drag it down. For a
-          cleaner "are current sprinters progressing" signal, see the
-          live current-sprinters tile above the trends.
-        </li>
-        <li>
-          <strong>Active students</strong> &mdash; <code>membership_status</code>{" "}
-          in (<code>active</code>, <code>past_due</code>) at snapshot time.
-        </li>
-        <li>
-          <strong>Joined</strong> / <strong>Churned</strong> &mdash; new /
-          canceled memberships for that day; bars show daily counts and the
-          summary number is the window sum.
-        </li>
-        <li>
-          <strong>Pace right now</strong> &mdash; live count of students on the
-          30-day journey grouped by pace label (
-          <code>completedLessons / expectedLessons</code> per{" "}
-          <code>buildPaceSummary</code>). Behind = ratio &lt; 0.5, Ahead =
-          ratio &gt; 1.5.
-        </li>
-        <li>
-          <strong>Bounty Program · joined</strong> &mdash; live count of
-          students who completed the course and onboarded to the Bounty
-          Program. Sourced from <code>student_milestones.bounty_access_claimed_at</code>,
-          stamped exclusively by Zak&rsquo;s{" "}
-          <code>/api/webhooks/adbounty</code>.
-        </li>
-      </ul>
-    </section>
+        {entries.map((e) => (
+          <div key={e.label}>
+            <dt
+              style={{
+                ...T.eyebrow,
+                marginBottom: 4,
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              {e.label}
+            </dt>
+            <dd
+              style={{
+                fontSize: 12,
+                lineHeight: 1.5,
+                color: "var(--color-text-tertiary)",
+                letterSpacing: "-0.003em",
+              }}
+            >
+              {e.body}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </details>
   );
 }
 

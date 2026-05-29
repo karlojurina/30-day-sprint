@@ -17,6 +17,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase-browser";
 import type { AdminConfigRow } from "@/types/database";
+import { RestrictedPage } from "@/components/admin/ui";
 
 const FRIENDLY_LABELS: Record<string, string> = {
   program_login_link: "Program login link",
@@ -24,6 +25,14 @@ const FRIENDLY_LABELS: Record<string, string> = {
 };
 
 export default function AdminSettingsPage() {
+  const { teamMember } = useAuth();
+  if (teamMember?.role === "csm") {
+    return <RestrictedPage title="Settings" />;
+  }
+  return <AdminSettingsBody />;
+}
+
+function AdminSettingsBody() {
   const { teamMember } = useAuth();
   const supabase = createClient();
   const [rows, setRows] = useState<AdminConfigRow[]>([]);

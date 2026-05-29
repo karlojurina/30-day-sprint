@@ -6,13 +6,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 /** Items flagged `founderOnly: true` only render in the nav for
- *  the founder role. The page + API enforce the role server-side
- *  anyway, but hiding the link removes the dead end for non-founders. */
+ *  the founder role; items flagged `csmHidden: true` are hidden from
+ *  CSM-role members. The page + API enforce the role server-side
+ *  anyway; hiding the link removes the dead end. */
 const navItems: {
   href: string;
   label: string;
   icon: React.ReactNode;
   founderOnly?: boolean;
+  csmHidden?: boolean;
 }[] = [
   {
     href: "/admin",
@@ -38,6 +40,7 @@ const navItems: {
   {
     href: "/admin/lessons",
     label: "Lessons",
+    csmHidden: true,
     icon: (
       // Star icon — matches the rating UI students see.
       <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.62L12 2 9.19 8.62 2 9.24l5.46 4.73L5.82 21z" />
@@ -83,6 +86,7 @@ const navItems: {
   {
     href: "/admin/discord",
     label: "Discord test",
+    csmHidden: true,
     icon: (
       <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
     ),
@@ -90,6 +94,7 @@ const navItems: {
   {
     href: "/admin/settings",
     label: "Settings",
+    csmHidden: true,
     icon: (
       <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     ),
@@ -204,6 +209,9 @@ function AdminTopNav() {
         >
           {navItems.map((item) => {
             if (item.founderOnly && teamMember?.role !== "founder") {
+              return null;
+            }
+            if (item.csmHidden && teamMember?.role === "csm") {
               return null;
             }
             const isActive =

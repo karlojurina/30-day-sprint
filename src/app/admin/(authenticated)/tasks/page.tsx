@@ -138,8 +138,10 @@ export default function AdminTasksKanban() {
   const [dismissNote, setDismissNote] = useState("");
   const [config, setConfig] = useState<AdminConfig>(undefined);
 
-  const isElevated =
-    teamMember?.role === "founder" || teamMember?.role === "admin";
+  // v75.3 - "Generate now" is now visible to every team role
+  // (was founder/admin only). The run-task-crons API already lets
+  // any team member trigger it; the button just gates the UI.
+  // Karlo's call: CSMs need it as much as Astrid does.
 
   const fetchTasks = useCallback(
     async (silent = false) => {
@@ -354,17 +356,15 @@ export default function AdminTasksKanban() {
         }
         actions={
           <div style={{ display: "flex", gap: 8 }}>
-            {isElevated && (
-              <Button
-                variant="subtle"
-                size="md"
-                busy={generating}
-                onClick={() => void generateTasksNow()}
-                title="Run the daily task crons now (don't wait until 09:15 UTC tomorrow)."
-              >
-                {generating ? "Generating…" : "⚡ Generate tasks now"}
-              </Button>
-            )}
+            <Button
+              variant="subtle"
+              size="md"
+              busy={generating}
+              onClick={() => void generateTasksNow()}
+              title="Run the daily task crons now (don't wait until 09:15 UTC tomorrow)."
+            >
+              {generating ? "Generating…" : "⚡ Generate tasks now"}
+            </Button>
             <Button
               variant="subtle"
               size="md"

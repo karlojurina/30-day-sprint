@@ -20,7 +20,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
-import { AdminPage, PageHeader, T } from "@/components/admin/ui";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  AdminPage,
+  PageHeader,
+  RestrictedPage,
+  T,
+} from "@/components/admin/ui";
 
 interface LessonRow {
   id: string;
@@ -48,6 +54,14 @@ interface StudentRow {
 type SortMode = "lowest_avg" | "highest_avg" | "most_ratings" | "lesson_order";
 
 export default function AdminLessonsPage() {
+  const { teamMember } = useAuth();
+  if (teamMember?.role === "csm") {
+    return <RestrictedPage title="Lessons" />;
+  }
+  return <AdminLessonsBody />;
+}
+
+function AdminLessonsBody() {
   const supabase = createClient();
   const [lessons, setLessons] = useState<LessonRow[]>([]);
   const [ratings, setRatings] = useState<RatingRow[]>([]);

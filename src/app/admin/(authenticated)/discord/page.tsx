@@ -21,10 +21,12 @@ import {
   Section,
   Card,
   Button,
+  RestrictedPage,
   T,
 } from "@/components/admin/ui";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 import type { DmToggleKey } from "@/lib/dm-toggles";
+import { useAuth } from "@/contexts/AuthContext";
 
 interface PreviewResponse {
   ok: boolean;
@@ -40,6 +42,14 @@ interface PreviewResponse {
 }
 
 export default function AdminDiscordPage() {
+  const { teamMember } = useAuth();
+  if (teamMember?.role === "csm") {
+    return <RestrictedPage title="Discord test" />;
+  }
+  return <AdminDiscordBody />;
+}
+
+function AdminDiscordBody() {
   const supabase = createClient();
   const [students, setStudents] = useState<Student[]>([]);
   const [pick, setPick] = useState<string>("");

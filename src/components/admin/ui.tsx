@@ -707,3 +707,35 @@ export function Toast({ message }: { message: string }) {
     </div>
   );
 }
+
+/* ─── Restricted-page stub ─── */
+
+/**
+ * v75.3 - shown when a CSM-role member URL-hops onto a page that's
+ * scoped to founders or admins. Renders the page chrome (so the nav
+ * is still there) plus a polite "not for you" card. Server-side gates
+ * remain the source of truth for the underlying data; this is just
+ * the user-facing dead-end.
+ */
+export function RestrictedPage({
+  title,
+  reason,
+}: {
+  title: string;
+  reason?: string;
+}) {
+  return (
+    <AdminPage>
+      <PageHeader
+        title={title}
+        description="This page isn't available for your role."
+      />
+      <Card padding={28}>
+        <p style={T.bodyDim}>
+          {reason ??
+            "Ask a founder or admin if you need access — it's a quick role change."}
+        </p>
+      </Card>
+    </AdminPage>
+  );
+}

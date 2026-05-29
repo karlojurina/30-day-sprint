@@ -780,30 +780,76 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
               </div>
             )}
 
+            {/* v74.3 - Discord link block ALWAYS renders for ad-review
+                action items now (was gated on actionRecorded), and the
+                Mark shipped button is gated on the link being saved.
+                Karlo's call: "they always need to paste it in before
+                they can mark it as shipped." Bounty claim (l057) is
+                excluded - it has its own Tally CTA, no shipped flow. */}
+            {isCompound && !isBountyClaim && (
+              <DiscordLinkBlock
+                lessonId={lesson.id}
+                savedLink={savedDiscordLink}
+                onSave={(link) => saveDiscordLink(lesson.id, link)}
+              />
+            )}
+
             {/* === Action buttons row === */}
             <div className="flex flex-col sm:flex-row gap-3">
-              {/* Compound: ship-the-ad toggle */}
-              {isCompound && (
-                <button
-                  onClick={() => toggleLessonAction(lesson.id)}
-                  className="flex-1 px-6 py-3.5 rounded-lg font-semibold transition-colors"
-                  style={
-                    isShipped
-                      ? {
-                          background: "rgba(230,192,122,0.14)",
-                          color: "rgba(230,220,200,0.88)",
-                          border: "1px solid rgba(230,192,122,0.35)",
-                        }
-                      : {
-                          background: "var(--color-gold)",
-                          color: "var(--color-bg-primary)",
-                          fontSize: 15,
-                        }
-                  }
-                >
-                  {isShipped ? "Unmark shipped" : "Mark ad shipped"}
-                </button>
-              )}
+              {/* Compound: ship-the-ad toggle. Bounty claim (l057)
+                  uses the Tally CTA above instead. Disabled until the
+                  student has saved their #ad-review link. */}
+              {isCompound && !isBountyClaim && (() => {
+                const canShip = isShipped || Boolean(savedDiscordLink);
+                return (
+                  <div className="flex-1">
+                    <button
+                      onClick={() => canShip && toggleLessonAction(lesson.id)}
+                      disabled={!canShip}
+                      className="w-full px-6 py-3.5 rounded-lg font-semibold transition-colors"
+                      style={
+                        isShipped
+                          ? {
+                              background: "rgba(230,192,122,0.14)",
+                              color: "rgba(230,220,200,0.88)",
+                              border: "1px solid rgba(230,192,122,0.35)",
+                              cursor: "pointer",
+                            }
+                          : canShip
+                            ? {
+                                background: "var(--color-gold)",
+                                color: "var(--color-bg-primary)",
+                                fontSize: 15,
+                                cursor: "pointer",
+                              }
+                            : {
+                                background: "rgba(255,255,255,0.06)",
+                                color: "rgba(255,255,255,0.45)",
+                                border: "1px solid rgba(255,255,255,0.12)",
+                                fontSize: 15,
+                                cursor: "not-allowed",
+                              }
+                      }
+                    >
+                      {isShipped ? "Unmark shipped" : "Mark ad shipped"}
+                    </button>
+                    {!canShip && (
+                      <p
+                        style={{
+                          marginTop: 8,
+                          fontSize: 12,
+                          color: "var(--color-text-tertiary)",
+                          textAlign: "center",
+                          letterSpacing: "-0.003em",
+                        }}
+                      >
+                        Paste your #ad-review link above and click Save
+                        first.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Non-compound action/setup: standard mark-complete.
                   Hidden for the bounty-claim lesson (l057) — the
@@ -855,17 +901,10 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
               )}
             </div>
 
-            {/* Discord message link capture — shown for compound or pure
-                action lessons after the action half is recorded. The link
-                surfaces on the admin student card and on the discount
-                review queue so the team doesn't have to scroll #ad-review. */}
-            {(isCompound || isActionType) && actionRecorded && (
-              <DiscordLinkBlock
-                lessonId={lesson.id}
-                savedLink={savedDiscordLink}
-                onSave={(link) => saveDiscordLink(lesson.id, link)}
-              />
-            )}
+            {/* v74.3 - DiscordLinkBlock moved ABOVE the action button
+                row + always renders for compound ad-review lessons.
+                The mark-shipped button is now gated on the saved link,
+                not the other way around. */}
           </div>
         </div>
       </div>

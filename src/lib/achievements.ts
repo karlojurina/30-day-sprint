@@ -21,6 +21,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { SPRINT_EXCLUDED_LESSON_IDS } from "./constants";
 
 export interface AchievementSnapshot {
   /** Lesson IDs the student has completed (skipped or watched OR
@@ -254,6 +255,11 @@ export async function buildAchievementSnapshot(
     r4: [],
   };
   for (const l of lessons) {
+    // v74.3 - exclude SPRINT_EXCLUDED_LESSON_IDS (currently l057
+    // bounty onboarding) so achievements like early_finisher /
+    // speedrun / region_4 fire on the curriculum being done, not
+    // gated on the student also having applied to Bounty Access.
+    if (SPRINT_EXCLUDED_LESSON_IDS.has(l.id)) continue;
     if (lessonsByRegion[l.region_id]) lessonsByRegion[l.region_id].push(l.id);
   }
 

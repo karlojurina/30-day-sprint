@@ -15,6 +15,7 @@ import {
   LESSON_TYPE_LABELS,
   LESSON_GROUPS,
   PLAYBOOK_UNLOCK_LESSON_ID,
+  SPRINT_EXCLUDED_LESSON_IDS,
 } from "@/lib/constants";
 import { useIsPhone } from "@/lib/useMediaQuery";
 import type { Lesson } from "@/types/database";
@@ -637,13 +638,12 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
       0,
       Math.floor((Date.now() - joinedMs) / 86_400_000),
     );
-    // v74.1 - exclude l057 ("Complete Ad Bounty Onboarding") from
-    // the lesson tally. l057 is bounty-program onboarding, not a
-    // sprint lesson - Karlo saw "64/65" on graduation because the
-    // denominator included it. The sprint is 64 lessons by his
-    // mental model.
-    const SPRINT_EXCLUDE = new Set<string>(["l057"]);
-    const sprintLessons = lessons.filter((l) => !SPRINT_EXCLUDE.has(l.id));
+    // Exclude SPRINT_EXCLUDED_LESSON_IDS (l057 bounty onboarding,
+    // see src/lib/constants.ts). Karlo's mental model: the sprint
+    // is 64 lessons.
+    const sprintLessons = lessons.filter(
+      (l) => !SPRINT_EXCLUDED_LESSON_IDS.has(l.id),
+    );
     const sprintCompleted = sprintLessons.filter((l) =>
       completedLessonIds.has(l.id),
     ).length;
@@ -1060,6 +1060,10 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
   const lessonsByRegion = useMemo(() => {
     const out: Record<RegionId, Lesson[]> = { r1: [], r2: [], r3: [], r4: [] };
     for (const l of lessons) {
+      // v74.3 - exclude SPRINT_EXCLUDED_LESSON_IDS so the side panel
+      // count (14/14 not 14/15) and the marker plotting both match
+      // the sprint definition every other surface uses.
+      if (SPRINT_EXCLUDED_LESSON_IDS.has(l.id)) continue;
       const rid = l.region_id as RegionId;
       if (out[rid]) out[rid].push(l);
     }

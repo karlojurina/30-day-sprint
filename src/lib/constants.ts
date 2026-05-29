@@ -43,6 +43,18 @@ export const DISCOUNT_GATE_LESSON_ID = "l049";
 // action items, neither matching product intent).
 export const PLAYBOOK_UNLOCK_LESSON_ID = "l078";
 
+// Lessons that exist in the lessons table but DON'T count toward
+// the sprint (region progress, achievements, graduation tally).
+// - l057 "Complete Ad Bounty Onboarding" is bounty-program
+//   onboarding, not curriculum. Without this exclusion R4
+//   displays 14/15 forever for any student who finishes the
+//   curriculum but hasn't applied to bounty yet (Karlo's bug
+//   2026-05-29 + 2026-05-30).
+// Keep this set tight - most lessons should count. Add an entry
+// only when the lesson is structurally non-curriculum (onboarding,
+// setup steps that gate external integrations, etc.).
+export const SPRINT_EXCLUDED_LESSON_IDS = new Set<string>(["l057"]);
+
 // Time window for the 30% discount: complete all of R1 + R2 within
 // this many days of joining Whop. Measured server-side at claim time.
 // Lovro confirmed 15 days = "more than 15 days in = no discount" so

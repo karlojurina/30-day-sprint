@@ -202,15 +202,19 @@ function AdminTopNav() {
           </div>
         </Link>
 
-        {/* Nav cluster — centered */}
+        {/* Nav cluster — centered. v75.8 — was overflowX: auto, which
+            creates a clipping context. The Students ▾ / Settings ▾
+            dropdowns are absolutely positioned children of nav-item
+            buttons; with overflow set on the nav, the dropdown got
+            clipped at the nav boundary and never appeared visibly.
+            Now that there are only 7 top-level items they fit
+            comfortably without horizontal scroll. */}
         <nav
           className="flex items-stretch"
           style={{
             gap: 0,
             height: 60,
             justifySelf: "center",
-            overflowX: "auto",
-            scrollbarWidth: "none",
           }}
         >
           {navEntries.map((entry) => {
@@ -531,13 +535,27 @@ function NavGroupItem({
   );
 }
 
+/**
+ * v75.8 - solid dark avatar with light initials. The previous
+ * gradient (accent-dark → bg-card 120%) faded into the page
+ * background and read as washed-out gray. Now: deep ink with a
+ * tight diagonal sheen so it feels solid + a touch dimensional,
+ * not flat. Initials are picked from first + last name parts.
+ */
 function Avatar({ name }: { name: string }) {
-  const initials = name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() ?? "")
-    .join("");
+  const parts = name.split(/\s+/).filter(Boolean);
+  const initials =
+    parts.length === 0
+      ? "·"
+      : parts.length === 1
+        ? parts[0].slice(0, 2).toUpperCase()
+        : `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase();
+  // Tiny deterministic hue spin off the name so different team
+  // members get visually distinguishable avatars when they sit
+  // next to each other (Karlo's KJ vs Astrid's AC etc.) without
+  // needing a real picture.
+  const hue =
+    Array.from(name).reduce((sum, c) => sum + c.charCodeAt(0), 0) % 360;
   return (
     <div
       aria-hidden="true"
@@ -545,21 +563,20 @@ function Avatar({ name }: { name: string }) {
         width: 32,
         height: 32,
         borderRadius: 999,
-        background:
-          "linear-gradient(135deg, var(--color-accent-dark) 0%, var(--color-bg-card) 120%)",
-        border: "1px solid var(--color-border)",
+        background: `linear-gradient(140deg, hsl(${hue} 22% 22%) 0%, hsl(${hue} 22% 12%) 100%)`,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        color: "var(--color-text-primary)",
+        color: "rgba(255,255,255,0.96)",
         fontSize: 11,
         fontWeight: 700,
-        letterSpacing: "-0.005em",
+        letterSpacing: "0.02em",
         flexShrink: 0,
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10)",
+        boxShadow:
+          "inset 0 1px 0 rgba(255,255,255,0.10), 0 1px 2px rgba(0,0,0,0.10)",
       }}
     >
-      {initials || "·"}
+      {initials}
     </div>
   );
 }

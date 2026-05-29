@@ -302,15 +302,13 @@ export default function AdminDashboard() {
       <PageHeader
         title="Dashboard"
         description="The numbers that matter for the next month."
+        meta={
+          lastRefreshed
+            ? `Updated ${lastRefreshed.toLocaleTimeString()}`
+            : undefined
+        }
         actions={
-          <>
-            {lastRefreshed && (
-              <span style={{ ...T.meta, marginRight: 4 }}>
-                Updated {lastRefreshed.toLocaleTimeString()}
-              </span>
-            )}
-            <RefreshEverything onDone={() => void fetchDashboard(true)} />
-          </>
+          <RefreshEverything onDone={() => void fetchDashboard(true)} />
         }
       />
 
@@ -332,9 +330,20 @@ export default function AdminDashboard() {
                 ? undefined
                 : `of ${data.monthTwoCohortSize} past day 30`
             }
+            sublabel={
+              data.monthTwoConversionRate == null
+                ? "Waiting on the first month-2 cohort."
+                : undefined
+            }
             // v75.5 - real per-day trend, reconstructed from the
             // students table client-side. See fetchDashboard.
-            trendPoints={data.monthTwoTrend}
+            // When there's no cohort yet pass an empty array so the
+            // HeroSparkline hides instead of drawing a flat line at 0.
+            trendPoints={
+              data.monthTwoConversionRate == null
+                ? []
+                : data.monthTwoTrend
+            }
             accent
           />
           <HeroStat
@@ -509,7 +518,7 @@ function HeroStat({
             }}
           >
             {delta > 0 ? "↑ " : delta < 0 ? "↓ " : "→ "}
-            {Math.abs(delta)} vs 14d ago
+            {Math.abs(delta)}
           </span>
         )}
       </div>
@@ -760,7 +769,7 @@ function SparklineTile({
         >
           {delta > 0 ? "↑ " : delta < 0 ? "↓ " : "→ "}
           {Math.abs(delta)}
-          {deltaSuffix} vs 14d ago
+          {deltaSuffix}
         </p>
       )}
     </Link>

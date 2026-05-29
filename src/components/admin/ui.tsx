@@ -100,10 +100,15 @@ export function PageHeader({
   title,
   description,
   actions,
+  meta,
 }: {
   title: string;
   description?: string;
   actions?: React.ReactNode;
+  /** Tertiary metadata line under the description. E.g. "Updated
+   *  18:11:13". Renders smaller + dimmer than `description` so the
+   *  hierarchy stays title > description > meta. */
+  meta?: React.ReactNode;
 }) {
   return (
     <header
@@ -114,6 +119,17 @@ export function PageHeader({
         <h1 style={T.display}>{title}</h1>
         {description && (
           <p style={{ ...T.bodyDim, marginTop: 4 }}>{description}</p>
+        )}
+        {meta && (
+          <p
+            style={{
+              ...T.meta,
+              marginTop: 6,
+              color: "var(--color-text-tertiary)",
+            }}
+          >
+            {meta}
+          </p>
         )}
       </div>
       {actions && (

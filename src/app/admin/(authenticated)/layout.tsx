@@ -4,19 +4,48 @@ import { TeamGuard } from "@/components/auth/TeamGuard";
 import { useAuth } from "@/contexts/AuthContext";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
-/** Items flagged `founderOnly: true` only render in the nav for
- *  the founder role; items flagged `csmHidden: true` are hidden from
- *  CSM-role members. The page + API enforce the role server-side
- *  anyway; hiding the link removes the dead end. */
-const navItems: {
+/**
+ * v75.7 — nav restructure.
+ *
+ * Top-level items collapsed from 11 to 7 by grouping related routes
+ * under "Students" and "Settings" dropdowns:
+ *   - Students ▾ → All students, Student journey, Not activated, Discounts
+ *   - Settings ▾ → General, Discord test, Team (founder-only)
+ *
+ * Layout shifts from flex (brand left, nav left, profile right) to a
+ * 3-column grid so the nav cluster sits dead-center between brand
+ * and profile regardless of how wide either edge is.
+ *
+ * Role gates (csmHidden, founderOnly) still work — they propagate
+ * down to children so a CSM never sees the Settings group at all
+ * (every child is hidden for them).
+ */
+
+type NavLeaf = {
+  type: "leaf";
   href: string;
   label: string;
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
   founderOnly?: boolean;
   csmHidden?: boolean;
-}[] = [
+};
+
+type NavGroup = {
+  type: "group";
+  label: string;
+  icon: React.ReactNode;
+  children: NavLeaf[];
+  founderOnly?: boolean;
+  csmHidden?: boolean;
+};
+
+type NavEntry = NavLeaf | NavGroup;
+
+const navEntries: NavEntry[] = [
   {
+    type: "leaf",
     href: "/admin",
     label: "Dashboard",
     icon: (
@@ -24,6 +53,7 @@ const navItems: {
     ),
   },
   {
+    type: "leaf",
     href: "/admin/tasks",
     label: "Tasks",
     icon: (
@@ -31,52 +61,35 @@ const navItems: {
     ),
   },
   {
-    href: "/admin/students",
+    type: "group",
     label: "Students",
     icon: (
       <path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
     ),
+    children: [
+      { type: "leaf", href: "/admin/students", label: "All students" },
+      { type: "leaf", href: "/admin/journey", label: "Student journey" },
+      { type: "leaf", href: "/admin/not-activated", label: "Not activated" },
+      { type: "leaf", href: "/admin/discounts", label: "Discounts" },
+    ],
   },
   {
+    type: "leaf",
     href: "/admin/lessons",
     label: "Lessons",
     csmHidden: true,
     icon: (
-      // Star icon — matches the rating UI students see.
       <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.62L12 2 9.19 8.62 2 9.24l5.46 4.73L5.82 21z" />
     ),
   },
   {
-    href: "/admin/journey",
-    label: "Student journey",
-    icon: (
-      // Path / footsteps glyph — students moving along a journey
-      <path d="M3 12h3l3-9 6 18 3-9h3" />
-    ),
-  },
-  {
-    href: "/admin/not-activated",
-    label: "Not Activated",
-    icon: (
-      // Hourglass / unactivated student — waiting on first login
-      <path d="M6 2h12v6l-4 4 4 4v6H6v-6l4-4-4-4z" />
-    ),
-  },
-  {
-    href: "/admin/discounts",
-    label: "Discounts",
-    icon: (
-      <path d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-    ),
-  },
-  {
+    type: "leaf",
     href: "/admin/insights/progress",
     label: "Insights",
-    icon: (
-      <path d="M3 3v18h18M7 14l3-3 3 3 5-5" />
-    ),
+    icon: <path d="M3 3v18h18M7 14l3-3 3 3 5-5" />,
   },
   {
+    type: "leaf",
     href: "/admin/templates",
     label: "Templates",
     icon: (
@@ -84,45 +97,35 @@ const navItems: {
     ),
   },
   {
-    href: "/admin/discord",
-    label: "Discord test",
-    csmHidden: true,
-    icon: (
-      <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z" />
-    ),
-  },
-  {
-    href: "/admin/settings",
+    type: "group",
     label: "Settings",
-    csmHidden: true,
     icon: (
       <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     ),
-  },
-  {
-    href: "/admin/team",
-    label: "Team",
-    founderOnly: true,
-    icon: (
-      // Two-person icon - distinct from Students (which is people +
-      // detail) and matches the team-management surface.
-      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />
-    ),
+    csmHidden: true,
+    children: [
+      { type: "leaf", href: "/admin/settings", label: "General" },
+      { type: "leaf", href: "/admin/discord", label: "Discord test" },
+      {
+        type: "leaf",
+        href: "/admin/team",
+        label: "Team",
+        founderOnly: true,
+      },
+    ],
   },
 ];
 
-/**
- * v75.1 - polished top nav. Tab-style active state with an accent
- * underline (replaces the box highlight which read as "pill"),
- * subtle hover state on every item, soft elevated header background
- * with a hairline divider + 1px highlight, profile avatar with
- * initials. Pace numbers next to the Journey item are gone -
- * Karlo wanted them out of the global nav (they live on the page
- * itself).
- */
 function AdminTopNav() {
   const pathname = usePathname();
   const { teamMember, signOut } = useAuth();
+  const role = teamMember?.role;
+
+  function entryVisible(e: { founderOnly?: boolean; csmHidden?: boolean }) {
+    if (e.founderOnly && role !== "founder") return false;
+    if (e.csmHidden && role === "csm") return false;
+    return true;
+  }
 
   return (
     <header
@@ -132,29 +135,33 @@ function AdminTopNav() {
           "linear-gradient(180deg, var(--color-bg-elevated) 0%, var(--color-bg-card) 100%)",
         borderBottom: "1px solid var(--color-border)",
         boxShadow:
-          "inset 0 1px 0 rgba(255,255,255,0.04), 0 1px 0 rgba(0,0,0,0.10)",
+          "inset 0 1px 0 rgba(255,255,255,0.04), 0 1px 0 rgba(0,0,0,0.04)",
         backdropFilter: "saturate(140%) blur(10px)",
         WebkitBackdropFilter: "saturate(140%) blur(10px)",
       }}
     >
+      {/* 3-column grid — brand sticks to the left edge, profile sticks
+          to the right edge, nav cluster sits dead-center. */}
       <div
-        className="flex items-center"
         style={{
+          display: "grid",
+          gridTemplateColumns: "1fr auto 1fr",
+          alignItems: "center",
           height: 60,
           paddingInline: 24,
-          gap: 28,
+          gap: 18,
         }}
       >
         {/* Brand */}
         <Link
           href="/admin"
-          className="flex items-center shrink-0"
+          className="flex items-center"
           style={{
             gap: 10,
             textDecoration: "none",
+            justifySelf: "start",
           }}
         >
-          {/* Brand mark - 4-pointed star, sage tint. */}
           <svg
             width="22"
             height="22"
@@ -195,91 +202,49 @@ function AdminTopNav() {
           </div>
         </Link>
 
-        {/* Nav - tab-style active underline. */}
+        {/* Nav cluster — centered */}
         <nav
           className="flex items-stretch"
           style={{
             gap: 0,
-            flex: 1,
-            minWidth: 0,
+            height: 60,
+            justifySelf: "center",
             overflowX: "auto",
             scrollbarWidth: "none",
-            height: 60,
           }}
         >
-          {navItems.map((item) => {
-            if (item.founderOnly && teamMember?.role !== "founder") {
-              return null;
-            }
-            if (item.csmHidden && teamMember?.role === "csm") {
-              return null;
-            }
-            const isActive =
-              item.href === "/admin"
-                ? pathname === "/admin"
-                : pathname.startsWith(item.href);
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="admin-nav-item flex items-center shrink-0 relative"
-                style={{
-                  gap: 7,
-                  paddingInline: 12,
-                  fontSize: 13,
-                  fontWeight: isActive ? 600 : 500,
-                  letterSpacing: "-0.008em",
-                  color: isActive
-                    ? "var(--color-text-primary)"
-                    : "var(--color-text-secondary)",
-                  textDecoration: "none",
-                  transition: "color 120ms ease",
-                  height: "100%",
-                }}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={1.7}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  {item.icon}
-                </svg>
-                <span>{item.label}</span>
-                {/* Active underline indicator */}
-                <span
-                  aria-hidden="true"
-                  style={{
-                    position: "absolute",
-                    left: 12,
-                    right: 12,
-                    bottom: 0,
-                    height: 2,
-                    background: isActive
-                      ? "var(--color-accent-dark)"
-                      : "transparent",
-                    borderRadius: 2,
-                    transition: "background 150ms ease",
-                  }}
+          {navEntries.map((entry) => {
+            if (!entryVisible(entry)) return null;
+            if (entry.type === "leaf") {
+              return (
+                <NavLeafItem
+                  key={entry.href}
+                  entry={entry}
+                  pathname={pathname}
                 />
-              </Link>
+              );
+            }
+            const visibleChildren = entry.children.filter(entryVisible);
+            if (visibleChildren.length === 0) return null;
+            return (
+              <NavGroupItem
+                key={entry.label}
+                entry={{ ...entry, children: visibleChildren }}
+                pathname={pathname}
+              />
             );
           })}
         </nav>
 
-        {/* Profile + sign out */}
+        {/* Profile */}
         <div
-          className="flex items-center shrink-0"
+          className="flex items-center"
           style={{
             gap: 12,
             paddingLeft: 18,
             borderLeft: "1px solid var(--color-border)",
             height: 36,
+            justifySelf: "end",
           }}
         >
           <Avatar name={teamMember?.full_name ?? ""} />
@@ -323,16 +288,249 @@ function AdminTopNav() {
         </div>
       </div>
       <style>{`
-        .admin-nav-item:hover {
-          color: var(--color-text-primary);
-        }
+        .admin-nav-item:hover { color: var(--color-text-primary); }
+        .admin-nav-item:hover .admin-nav-underline { background: var(--color-border-strong); }
+        .admin-nav-item-active .admin-nav-underline { background: var(--color-accent-dark) !important; }
+        .admin-nav-dropdown-item:hover { background: var(--color-fill-secondary); }
       `}</style>
     </header>
   );
 }
 
-/** Round avatar with the team member's initials. Falls back to a
- *  single dot if no name yet (rare; just first-render). */
+function NavLeafItem({
+  entry,
+  pathname,
+}: {
+  entry: NavLeaf;
+  pathname: string;
+}) {
+  const isActive =
+    entry.href === "/admin"
+      ? pathname === "/admin"
+      : pathname.startsWith(entry.href);
+  return (
+    <Link
+      href={entry.href}
+      className={`admin-nav-item flex items-center shrink-0 relative${isActive ? " admin-nav-item-active" : ""}`}
+      style={{
+        gap: 7,
+        paddingInline: 12,
+        fontSize: 13,
+        fontWeight: isActive ? 600 : 500,
+        letterSpacing: "-0.008em",
+        color: isActive
+          ? "var(--color-text-primary)"
+          : "var(--color-text-secondary)",
+        textDecoration: "none",
+        transition: "color 120ms ease",
+        height: "100%",
+      }}
+    >
+      {entry.icon && (
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.7}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          {entry.icon}
+        </svg>
+      )}
+      <span>{entry.label}</span>
+      <span
+        aria-hidden="true"
+        className="admin-nav-underline"
+        style={{
+          position: "absolute",
+          left: 12,
+          right: 12,
+          bottom: 0,
+          height: 2,
+          background: "transparent",
+          borderRadius: 2,
+          transition: "background 150ms ease",
+        }}
+      />
+    </Link>
+  );
+}
+
+function NavGroupItem({
+  entry,
+  pathname,
+}: {
+  entry: NavGroup;
+  pathname: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const isAnyChildActive = entry.children.some((c) =>
+    pathname.startsWith(c.href),
+  );
+
+  // Close on outside click + Escape.
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      const t = e.target as Node;
+      if (
+        buttonRef.current?.contains(t) ||
+        menuRef.current?.contains(t)
+      )
+        return;
+      setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  // Close the menu when the user navigates.
+  useEffect(() => {
+    setOpen(false);
+  }, [pathname]);
+
+  return (
+    <div style={{ position: "relative", display: "flex" }}>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`admin-nav-item flex items-center shrink-0 relative${isAnyChildActive ? " admin-nav-item-active" : ""}`}
+        style={{
+          gap: 7,
+          paddingInline: 12,
+          fontSize: 13,
+          fontWeight: isAnyChildActive ? 600 : 500,
+          letterSpacing: "-0.008em",
+          color: isAnyChildActive
+            ? "var(--color-text-primary)"
+            : "var(--color-text-secondary)",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          height: "100%",
+          textDecoration: "none",
+        }}
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.7}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          {entry.icon}
+        </svg>
+        <span>{entry.label}</span>
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          style={{
+            transform: open ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 150ms ease",
+          }}
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+        <span
+          aria-hidden="true"
+          className="admin-nav-underline"
+          style={{
+            position: "absolute",
+            left: 12,
+            right: 12,
+            bottom: 0,
+            height: 2,
+            background: "transparent",
+            borderRadius: 2,
+            transition: "background 150ms ease",
+          }}
+        />
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          role="menu"
+          style={{
+            position: "absolute",
+            top: "calc(100% - 1px)",
+            left: 0,
+            minWidth: 200,
+            background: "var(--color-bg-card)",
+            border: "1px solid var(--color-border)",
+            borderRadius: 10,
+            padding: 4,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            zIndex: 40,
+            boxShadow:
+              "0 8px 24px rgba(0,0,0,0.10), 0 2px 6px rgba(0,0,0,0.06)",
+          }}
+        >
+          {entry.children.map((c) => {
+            const isActive = pathname.startsWith(c.href);
+            return (
+              <Link
+                key={c.href}
+                href={c.href}
+                role="menuitem"
+                className="admin-nav-dropdown-item"
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  height: 32,
+                  paddingInline: 10,
+                  borderRadius: 6,
+                  fontSize: 13,
+                  fontWeight: isActive ? 600 : 500,
+                  color: isActive
+                    ? "var(--color-text-primary)"
+                    : "var(--color-text-secondary)",
+                  letterSpacing: "-0.005em",
+                  textDecoration: "none",
+                  background: isActive
+                    ? "var(--color-fill-secondary)"
+                    : "transparent",
+                  transition: "background 120ms ease, color 120ms ease",
+                }}
+              >
+                {c.label}
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Avatar({ name }: { name: string }) {
   const initials = name
     .split(/\s+/)

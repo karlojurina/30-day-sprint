@@ -341,6 +341,11 @@ function AchievementsModal({
               "0 14px 40px rgba(0,0,0,0.50), 0 1px 0 rgba(255,255,255,0.05) inset",
             color: "rgba(255,255,255,0.94)",
             boxSizing: "border-box",
+            // v75.6 - same text-select block StatsWidget got in v72.9.
+            // Achievement names + descriptions kept getting highlighted
+            // when students scrolled / clicked around the panel.
+            userSelect: "none",
+            WebkitUserSelect: "none",
           }}
         >
           {/* Header */}

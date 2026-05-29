@@ -75,13 +75,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Supabase invite: creates the auth user + emails a magic link
-  // the recipient clicks to set their password. The returned user
-  // has the id we need for the team_members row.
+  // Supabase invite: creates the auth user + emails a magic link.
+  // Clicking the link confirms the email + creates a session; we
+  // redirect to /admin/set-password (v75.4) so the invitee can set
+  // a real password. Without that step they'd be logged in via the
+  // magic link but with no password set, so any future logout would
+  // strand them.
   const { data: inviteData, error: inviteError } =
     await supabase.auth.admin.inviteUserByEmail(email, {
       data: { full_name },
-      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/admin/login`,
+      redirectTo: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/admin/set-password`,
     });
   if (inviteError || !inviteData?.user) {
     return NextResponse.json(

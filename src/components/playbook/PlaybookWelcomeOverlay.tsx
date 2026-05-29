@@ -2,18 +2,12 @@
 
 /**
  * v42 (v2) — one-time welcome overlay that fires the first time a
- * student lands on Map 2 (after clicking "Finish Program" on l058).
- * Per brief 04-map2-playbook.md §8: "first-time experience (could
- * be a one-off intro overlay welcoming them to the Playbook,
- * dismissable, then just the hub)."
+ * student lands on Map 2 (after completing l078, the Playbook unlock
+ * lesson). v72.8 - copy finalized to match the three article cards'
+ * voice; was TODO(karlo) placeholder.
  *
  * Dismiss → POST /api/student/dismiss-playbook-welcome → row gets a
  * playbook_welcome_seen_at stamp → never appears again.
- *
- * For P0 this is the minimal version. The "sick as fuck" Map 1 → 2
- * transition lives in P1 (06-open-questions.md §1).
- *
- * All copy marked TODO(karlo).
  */
 
 import { motion, AnimatePresence } from "framer-motion";
@@ -75,8 +69,7 @@ export function PlaybookWelcomeOverlay({ open, onDismiss }: Props) {
                   fontSize: 11,
                 }}
               >
-                {/* TODO(karlo): eyebrow */}
-                Welcome to the Playbook
+                EcomTalent · The Playbook
               </span>
               <h2
                 id="pb-welcome-title"
@@ -89,8 +82,7 @@ export function PlaybookWelcomeOverlay({ open, onDismiss }: Props) {
                   marginBottom: 14,
                 }}
               >
-                {/* TODO(karlo): final headline */}
-                You stopped being a student.
+                Welcome to the Playbook.
               </h2>
               <p
                 style={{
@@ -100,11 +92,10 @@ export function PlaybookWelcomeOverlay({ open, onDismiss }: Props) {
                   marginBottom: 26,
                 }}
               >
-                {/* TODO(karlo): final sub-copy */}
-                This is where you put the skill to work. Bounty by
-                bounty, brand by brand. Four activities sit on this
-                hub, always open. Rotate through them until the income
-                is real.
+                Three articles to turn what you just learned into
+                paychecks. How to submit your first ad bounty, how to
+                build a portfolio that gets you hired, and how to talk
+                to brands so they pick you out of the pile.
               </p>
               <button
                 type="button"
@@ -121,8 +112,7 @@ export function PlaybookWelcomeOverlay({ open, onDismiss }: Props) {
                   cursor: "pointer",
                 }}
               >
-                {/* TODO(karlo): final CTA */}
-                Start the work
+                Let&rsquo;s go
               </button>
             </motion.div>
           </div>

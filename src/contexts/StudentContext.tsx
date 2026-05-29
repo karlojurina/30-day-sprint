@@ -114,12 +114,9 @@ interface StudentContextType {
 
   // v50.5 — Bounty Access state. Stamped exclusively by Zak's
   // /api/webhooks/adbounty (no self-claim, no admin self-stamp).
-  // bountyAccessJustClaimed is the celebration takeover flag the
-  // map raises when the webhook lands during an active session;
-  // dismissBountyClaim clears it.
+  // v72.8 - claim celebration removed; no in-app celebration on the
+  // null→set transition anymore.
   bountyAccessClaimedAt: string | null;
-  bountyAccessJustClaimed: boolean;
-  dismissBountyClaim: () => void;
 
   // v50 — Bounty Access (l057) is the finish line. The old "Finish
   // Program" flow on l058 is gone; l058-l063 don't exist as lessons
@@ -259,18 +256,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   }
   // student_streaks data folds into the existing `streak` state below
   // (the public shape stays { current, longest } for consumers).
-  // v42 (v2): celebration takeover state for the l057 bounty claim.
-  // True from the moment the claim API resolves until the celebration
-  // is dismissed. The bounty_access_claimed_at timestamp itself lives
-  // on the student row in AuthContext.
-  const [bountyAccessJustClaimed, setBountyAccessJustClaimed] = useState(false);
-  // v50.5 — observed transition tracker. The webhook is now the
-  // sole source of bounty_access_claimed_at, so the celebration
-  // can only fire on the client by *observing* the null → set
-  // transition (via refreshFromServer or the initial fetch). We
-  // initialize the ref to "unknown" and let the first observation
-  // seed it; only later observations can fire the celebration.
-  const bountyAccessLastSeenRef = useRef<"unset" | string | null>("unset");
   const [streak, setStreak] = useState<{ current: number; longest: number }>({
     current: 0,
     longest: 0,
@@ -285,25 +270,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [discountFeedbackOpen, setDiscountFeedbackOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // v50.5 — watch milestones for the null → set webhook flip.
-  // Fires the takeover celebration the first time we observe a
-  // value after seeing nothing. The "unset" sentinel means we
-  // haven't observed yet — that observation seeds the ref without
-  // triggering, so reloading a long-claimed account doesn't
-  // re-fire the celebration.
-  useEffect(() => {
-    if (!milestones) return;
-    const seen = bountyAccessLastSeenRef.current;
-    const now = milestones.bounty_access_claimed_at;
-    if (seen === "unset") {
-      bountyAccessLastSeenRef.current = now;
-      return;
-    }
-    if (!seen && now) {
-      setBountyAccessJustClaimed(true);
-    }
-    bountyAccessLastSeenRef.current = now;
-  }, [milestones]);
   const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostics>({
     lastSyncAt: null,
     fetchedCount: null,
@@ -1096,11 +1062,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   // bounty_access_claimed_at now. The old /api/student/claim-
   // bounty-access route is gone too.
 
-  const dismissBountyClaim = useCallback(() => {
-    setBountyAccessJustClaimed(false);
-  }, []);
-
-
   /**
    * v42 — one-shot dismiss for the Map 2 welcome overlay. Sets
    * students.playbook_welcome_seen_at and patches the local row.
@@ -1410,8 +1371,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         // not the students row. Same public field names so consumers
         // don't change.
         bountyAccessClaimedAt: milestones?.bounty_access_claimed_at ?? null,
-        bountyAccessJustClaimed,
-        dismissBountyClaim,
         playbookWelcomeSeenAt: milestones?.playbook_welcome_seen_at ?? null,
         dismissPlaybookWelcome,
         onboardingCompletedAt: milestones?.onboarding_completed_at ?? null,

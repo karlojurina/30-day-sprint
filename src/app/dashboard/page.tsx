@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { LessonSheet } from "@/components/map/LessonSheet";
@@ -14,7 +13,6 @@ import { GraduationModal } from "@/components/map/GraduationModal";
 import { DevTestPanel } from "@/components/dev/DevTestPanel";
 import { IntroVideoGate } from "@/components/onboarding/IntroVideoGate";
 import { WhyYoureHerePanel } from "@/components/onboarding/WhyYoureHerePanel";
-import { PLAYBOOK_UNLOCK_LESSON_ID } from "@/lib/constants";
 
 interface MockMonthReview {
   total_lessons_completed: number;
@@ -28,7 +26,13 @@ interface MockMonthReview {
 
 const DISCOUNT_APPROVED_LAST_SEEN_KEY = "et.discountApproved.lastSeen";
 
-const STREAK_LAST_SEEN_KEY = "et.streak.lastSeen";
+// v72.8 - scope by student id. Was a global key, which meant
+// switching accounts on the same browser carried the previous
+// account's "last celebrated" value over - a new account with
+// streak=1 would silently not fire because the localStorage said
+// "we already celebrated 30." Bug Karlo flagged on 2026-05-29.
+const streakLastSeenKey = (studentId: string) =>
+  `et.streak.lastSeen.${studentId}`;
 
 export default function DashboardPage() {
   const { student } = useAuth();
@@ -36,7 +40,6 @@ export default function DashboardPage() {
     loading,
     streak,
     discountRequest,
-    completedLessonIds,
     firstDashboardLoginAt,
     introVideoThresholdMet,
     whyYoureHerePanelDismissed,
@@ -44,23 +47,12 @@ export default function DashboardPage() {
     markIntroVideoThreshold,
     dismissWhyYoureHere,
   } = useStudent();
-  const router = useRouter();
-  const searchParams = useSearchParams();
 
-  // Conditional default surface. Students who have completed l078
-  // (the Playbook-unlock lesson - see PLAYBOOK_UNLOCK_LESSON_ID in
-  // src/lib/constants.ts) land on Map 2 (the Playbook) by default.
-  // The ?map=1 query param overrides - used by "Back to the climb"
-  // on Map 2 so the student can return to the original map.
-  // v72.7 - was bountyAccessClaimedAt; corrected because bounty is a
-  // separate milestone that does NOT unlock the Playbook.
-  const playbookUnlocked = completedLessonIds.has(PLAYBOOK_UNLOCK_LESSON_ID);
-  const forceMap1 = searchParams.get("map") === "1";
-  useEffect(() => {
-    if (!loading && playbookUnlocked && !forceMap1) {
-      router.replace("/dashboard/playbook");
-    }
-  }, [loading, playbookUnlocked, forceMap1, router]);
+  // v72.8 - removed the auto-redirect to /dashboard/playbook. Even
+  // when the student has unlocked the Playbook (completed l078) we
+  // leave them on the map by default. The student picks where they
+  // go - the Playbook is accessible via the StatsWidget CTA or
+  // direct navigation.
 
   const [selectedLessonId, setSelectedLessonId] = useState<string | null>(null);
   const [streakCelebration, setStreakCelebration] = useState<number | null>(null);
@@ -142,17 +134,19 @@ export default function DashboardPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (loading) return;
+    if (!student) return;
     if (streak.current <= 0) return;
 
-    const lastSeenRaw = window.localStorage.getItem(STREAK_LAST_SEEN_KEY);
+    const key = streakLastSeenKey(student.id);
+    const lastSeenRaw = window.localStorage.getItem(key);
     const lastSeen = lastSeenRaw ? parseInt(lastSeenRaw, 10) : 0;
     if (Number.isNaN(lastSeen)) return;
 
     if (streak.current > lastSeen) {
       setStreakCelebration(streak.current);
-      window.localStorage.setItem(STREAK_LAST_SEEN_KEY, String(streak.current));
+      window.localStorage.setItem(key, String(streak.current));
     }
-  }, [streak.current, loading]);
+  }, [streak.current, loading, student]);
 
   // Dev test panel listener — manually fire the streak celebration
   // with any value (no API call, no streak mutation).
@@ -174,18 +168,17 @@ export default function DashboardPage() {
       window.removeEventListener("et:test:discount-approved", handler);
   }, []);
 
-  // Dev test panel listener — manually fire the graduation modal with a
-  // mock month-review payload. Auto-fire on real completion still TODO
-  // (needs a backend job to write the month_reviews row when a student
-  // hits 100% — without that the GraduationModal stays hidden because
-  // it requires monthReview to be non-null).
+  // Graduation modal listener. Single channel for both the auto-fire
+  // (MapMockup dispatches when l078 completes IN the R4 view) AND
+  // the dev test panel (which dispatches with mock data). Once-per-
+  // student dedupe lives in MapMockup via localStorage.
   useEffect(() => {
     const handler = (e: Event) => {
       const ce = e as CustomEvent<MockMonthReview>;
       if (ce.detail) setGraduationReview(ce.detail);
     };
-    window.addEventListener("et:test:graduation", handler);
-    return () => window.removeEventListener("et:test:graduation", handler);
+    window.addEventListener("et:graduation", handler);
+    return () => window.removeEventListener("et:graduation", handler);
   }, []);
 
   if (loading || !student) {

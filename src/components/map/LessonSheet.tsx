@@ -192,8 +192,9 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
 
   // v50 — the old "Finish Program" panel that lived on l058 is gone.
   // l058 itself was dropped as a lesson (its concept moved into the
-  // Playbook). Bounty Access (l057) is the new sprint finale; that
-  // celebration lives in the BountyAccessClaimCelebration overlay.
+  // Playbook). v72.8 — the Bounty Access claim celebration overlay
+  // was also removed; the lesson sheet's "Claimed on …" panel below
+  // is the only post-claim affordance now.
 
   return (
     <>
@@ -691,7 +692,6 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                     marginBottom: 8,
                   }}
                 >
-                  {/* TODO(karlo): final panel headline */}
                   Bounty Access opens here
                 </p>
                 <p
@@ -704,16 +704,9 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                     letterSpacing: "-0.011em",
                   }}
                 >
-                  {/* TODO(karlo): final sub-copy. The line about the
-                      Playbook is load-bearing - it's the only place
-                      we tell the student up-front that approval
-                      unlocks Map 2. */}
-                  You&apos;ve climbed the map. Apply for the bounty
-                  program below. Once our team approves you,{" "}
-                  <span style={{ color: "#4ADE80", fontWeight: 600 }}>
-                    the Playbook unlocks
-                  </span>{" "}
-                  - your Month 2-3 hub with always-on activities.
+                  You&apos;re at the last step of the sprint. Apply for
+                  the bounty program below — once our team approves
+                  you, you can start getting paid for the ads you make.
                 </p>
                 <a
                   href="https://tally.so/r/7RxaWR"
@@ -742,7 +735,6 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                     e.currentTarget.style.background = "#22C55E";
                   }}
                 >
-                  {/* TODO(karlo): final button label */}
                   Apply for Bounty Access
                   <svg
                     width="13"
@@ -767,9 +759,9 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                     letterSpacing: "-0.003em",
                   }}
                 >
-                  Approval usually takes under 24 hours. This page
+                  Approval usually takes under 48 hours. This page
                   flips to <span style={{ color: "rgba(230,220,200,0.85)" }}>Claimed</span>{" "}
-                  automatically once you&apos;re in - no need to
+                  automatically once you&apos;re in — no need to
                   refresh manually.
                 </p>
               </div>

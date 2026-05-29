@@ -5,12 +5,17 @@ import { useRouter } from "next/navigation";
 import { gsap } from "gsap";
 import { SPEC_EASE_GSAP, SPEC_EASE_GSAP_INOUT } from "@/lib/motion";
 import { useStudent } from "@/contexts/StudentContext";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   MAP_W,
   MAP_H,
   type RegionStripMap,
 } from "@/lib/map/path-math";
-import { LESSON_TYPE_LABELS, LESSON_GROUPS } from "@/lib/constants";
+import {
+  LESSON_TYPE_LABELS,
+  LESSON_GROUPS,
+  PLAYBOOK_UNLOCK_LESSON_ID,
+} from "@/lib/constants";
 import { useIsPhone } from "@/lib/useMediaQuery";
 import type { Lesson } from "@/types/database";
 
@@ -99,7 +104,6 @@ function virtualizeCurrentLessonId(currentLessonId: string | null): string | nul
   return currentLessonId;
 }
 import { MapAmbience } from "@/components/map/MapAmbience";
-import { BountyAccessClaimCelebration } from "@/components/map/BountyAccessClaimCelebration";
 import {
   DiscountClaimCelebration,
   type DiscountCelebrationMode,
@@ -509,21 +513,19 @@ function isActionItem(lesson: Lesson): boolean {
  *              "Back to map" returns to overview.
  */
 export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
+  const { student } = useAuth();
   const {
     regions,
     lessons,
     completedLessonIds,
+    actionShippedLessonIds,
     currentLesson,
     discountRequest,
     discountAllLessonsDone,
     regionProgress,
     requestDiscount,
-    // v42 (v2) — bounty access claim celebration (l057). v50 retired
-    // the separate first-bounty-submitted celebration that lived on
-    // l058; Bounty Access IS the finish-line moment now.
-    bountyAccessJustClaimed,
-    dismissBountyClaim,
     bountyAccessClaimedAt,
+    streak,
     // v54 (brief-region-quiz) - per-region quiz state. v65 - single
     // submit mutator replaces the v54 mark + increment split.
     regionQuiz,
@@ -617,6 +619,50 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
   const [outerSize, setOuterSize] = useState({ w: 0, h: 0 });
   const [discountModalMode, setDiscountModalMode] =
     useState<DiscountCelebrationMode | null>(null);
+
+  // v72.8 - GraduationModal auto-fire. Fires once per student per
+  // browser when both conditions hold: (1) the student has completed
+  // l078 (the Playbook-unlock lesson, last R4 watch lesson), AND
+  // (2) they're currently focused on the R4 region. The view check
+  // is what keeps the modal from firing on a Whop watch-sync that
+  // happens while they're elsewhere - we only want the moment to
+  // land when they hit it IN the R4 view. localStorage keyed on
+  // student id so it can't refire on reload, and different test
+  // accounts behave independently in the same browser.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!student) return;
+    if (view !== "r4") return;
+    if (!completedLessonIds.has(PLAYBOOK_UNLOCK_LESSON_ID)) return;
+    const key = `et.graduation.seen.${student.id}`;
+    if (window.localStorage.getItem(key)) return;
+    const joinedMs = new Date(student.joined_at).getTime();
+    const days = Math.max(
+      0,
+      Math.floor((Date.now() - joinedMs) / 86_400_000),
+    );
+    const detail = {
+      total_lessons_completed: completedLessonIds.size,
+      total_lessons: lessons.length,
+      longest_streak: streak.longest,
+      ad_submissions: actionShippedLessonIds.size,
+      discount_earned:
+        discountRequest?.status === "approved" ||
+        discountRequest?.status === "applied",
+      notes_count: 0,
+      days_to_finish: days,
+    };
+    window.localStorage.setItem(key, String(Date.now()));
+    window.dispatchEvent(new CustomEvent("et:graduation", { detail }));
+  }, [
+    view,
+    completedLessonIds,
+    student,
+    lessons.length,
+    streak.longest,
+    actionShippedLessonIds,
+    discountRequest,
+  ]);
 
   // Cloud-transition orchestration
   const [transitionCounter, setTransitionCounter] = useState(0);
@@ -2229,14 +2275,6 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
           setDiscountModalMode("review");
         }}
         onDismiss={() => setDiscountModalMode(null)}
-      />
-
-      {/* v42 — Bounty Access claim celebration. Fires from the l057
-          lesson sheet's claim button via StudentContext, which raises
-          bountyAccessJustClaimed = true and the takeover renders here. */}
-      <BountyAccessClaimCelebration
-        open={bountyAccessJustClaimed}
-        onDismiss={dismissBountyClaim}
       />
 
       {/* Toast — single transient message dead-center on screen.

@@ -4,33 +4,34 @@ import { useEffect, useState } from "react";
 
 /**
  * Dev-only test panel — floating button bottom-right that opens a
- * panel of "fire this state" buttons. Lets the developer test every
- * visual moment (region transitions, streak celebration, banner
- * states, etc.) without touching the backend.
+ * panel of "fire this state" buttons. Lets the developer test the
+ * celebration / modal overlays without touching the backend.
  *
- * Wiring: each button dispatches a window CustomEvent on the
- * `et:test:*` namespace. The relevant component listens for the
- * event and updates its visual state. No API calls, no DB writes.
+ * v72.8 — slimmed down to the three things still worth testing:
+ *   1. Streak celebration (custom value or quick presets)
+ *   2. Discount approved celebration
+ *   3. Graduation modal (full house + partial finish)
  *
- * Listeners:
- *   et:test:transition         → MapMockup transitions to detail.target
- *   et:test:streak             → DashboardPage shows StreakCelebration with detail
- *   et:test:discount-approved  → DashboardPage shows DiscountApprovedCelebration
- *   et:test:graduation         → DashboardPage shows GraduationModal with mock detail
+ * Removed (no longer useful):
+ *   - Map region transitions
+ *   - Discount banner overrides (banner removed in v72.4)
  *
- * Note: et:test:banner + et:test:banner-clear are still fired by some
- * buttons in this panel but have no listener (DiscountUrgencyBanner
- * was removed in v72.4 - the live countdown lives in StatsWidget,
- * which doesn't honor overrides). Harmless; no-op fires.
+ * Wiring: each button dispatches a window CustomEvent. The dashboard
+ * listens and updates the relevant overlay. No API calls.
+ *
+ * Listeners (in src/app/dashboard/page.tsx):
+ *   et:test:streak             → StreakCelebration with detail
+ *   et:test:discount-approved  → DiscountApprovedCelebration
+ *   et:graduation              → GraduationModal with detail (shared
+ *                                channel with the real auto-fire from
+ *                                MapMockup)
  */
 export function DevTestPanel() {
   const [open, setOpen] = useState(false);
   const [streakValue, setStreakValue] = useState(7);
-  const [daysOverride, setDaysOverride] = useState(5);
-  const [bannerCode, setBannerCode] = useState("ECOM30-TEST42");
 
   function fire(name: string, detail?: unknown) {
-    window.dispatchEvent(new CustomEvent(`et:test:${name}`, { detail }));
+    window.dispatchEvent(new CustomEvent(name, { detail }));
   }
 
   if (!open) {
@@ -54,12 +55,13 @@ export function DevTestPanel() {
           backdropFilter: "blur(20px)",
           WebkitBackdropFilter: "blur(20px)",
           cursor: "pointer",
-          fontSize: 16,
+          fontSize: 14,
+          fontWeight: 600,
           lineHeight: 1,
           boxShadow: "0 8px 24px rgba(0,0,0,0.40)",
         }}
       >
-        🛠
+        dev
       </button>
     );
   }
@@ -71,7 +73,7 @@ export function DevTestPanel() {
         bottom: 16,
         right: 16,
         zIndex: 9000,
-        width: 280,
+        width: 260,
         maxHeight: "80vh",
         overflowY: "auto",
         padding: 14,
@@ -119,17 +121,6 @@ export function DevTestPanel() {
         </button>
       </header>
 
-      <Section title="Map transitions">
-        <div className="grid grid-cols-2" style={{ gap: 6 }}>
-          {(["r1", "r2", "r3", "r4"] as const).map((r) => (
-            <Btn key={r} onClick={() => fire("transition", r)}>
-              → {r.toUpperCase()}
-            </Btn>
-          ))}
-        </div>
-        <Btn onClick={() => fire("transition", "overview")}>→ Overview</Btn>
-      </Section>
-
       <Section title="Streak celebration">
         <div style={{ display: "flex", gap: 6 }}>
           <input
@@ -149,105 +140,27 @@ export function DevTestPanel() {
               fontVariantNumeric: "tabular-nums",
             }}
           />
-          <Btn onClick={() => fire("streak", streakValue)}>Fire</Btn>
+          <Btn onClick={() => fire("et:test:streak", streakValue)}>Fire</Btn>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
           {[1, 3, 7, 14, 30].map((n) => (
-            <Btn key={n} onClick={() => fire("streak", n)}>
+            <Btn key={n} onClick={() => fire("et:test:streak", n)}>
               {n}d
             </Btn>
           ))}
         </div>
       </Section>
 
-      <Section title="Discount banner state">
-        <div style={{ display: "flex", gap: 6 }}>
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-              flex: 1,
-              fontSize: 11,
-              color: "rgba(255, 255, 255, 0.55)",
-            }}
-          >
-            Days
-            <input
-              type="number"
-              min={0}
-              max={30}
-              value={daysOverride}
-              onChange={(e) =>
-                setDaysOverride(parseInt(e.target.value, 10) || 0)
-              }
-              style={{
-                width: "100%",
-                padding: "4px 8px",
-                borderRadius: 6,
-                background: "rgba(255, 255, 255, 0.06)",
-                border: "1px solid rgba(255, 255, 255, 0.16)",
-                color: "rgba(255, 255, 255, 0.92)",
-                fontSize: 12,
-                fontVariantNumeric: "tabular-nums",
-              }}
-            />
-          </label>
-          <Btn
-            onClick={() =>
-              fire("banner", { state: "countdown", days: daysOverride })
-            }
-          >
-            Set
-          </Btn>
-        </div>
-        <Btn onClick={() => fire("banner", { state: "eligible" })}>
-          Eligible
-        </Btn>
-        <Btn onClick={() => fire("banner", { state: "pending" })}>
-          Pending
-        </Btn>
-        <div style={{ display: "flex", gap: 6 }}>
-          <input
-            type="text"
-            value={bannerCode}
-            onChange={(e) => setBannerCode(e.target.value)}
-            placeholder="ECOM30-..."
-            style={{
-              flex: 1,
-              padding: "6px 10px",
-              borderRadius: 6,
-              background: "rgba(255, 255, 255, 0.06)",
-              border: "1px solid rgba(255, 255, 255, 0.16)",
-              color: "rgba(255, 255, 255, 0.92)",
-              fontSize: 11,
-              fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-            }}
-          />
-          <Btn
-            onClick={() =>
-              fire("banner", { state: "approved", code: bannerCode })
-            }
-          >
-            Approved
-          </Btn>
-        </div>
-        <Btn onClick={() => fire("banner", { state: "rejected" })}>
-          Rejected
-        </Btn>
-        <Btn onClick={() => fire("banner-clear")}>Clear override</Btn>
-      </Section>
-
       <Section title="Discount approval celebration">
-        <Btn onClick={() => fire("discount-approved", true)}>
+        <Btn onClick={() => fire("et:test:discount-approved", true)}>
           Fire celebration
         </Btn>
       </Section>
 
-      <Section title="Graduation modal (all-complete celebration)">
+      <Section title="Graduation modal">
         <Btn
           onClick={() =>
-            fire("graduation", {
+            fire("et:graduation", {
               total_lessons_completed: 66,
               total_lessons: 66,
               longest_streak: 24,
@@ -262,7 +175,7 @@ export function DevTestPanel() {
         </Btn>
         <Btn
           onClick={() =>
-            fire("graduation", {
+            fire("et:graduation", {
               total_lessons_completed: 50,
               total_lessons: 66,
               longest_streak: 11,
@@ -358,7 +271,6 @@ function Btn({
 
 /**
  * Helper to subscribe to a test event with proper TypeScript narrowing.
- * Caller pushes the right shape via the generic.
  */
 export function useTestEvent<T = unknown>(
   name: string,
@@ -369,16 +281,8 @@ export function useTestEvent<T = unknown>(
       const ce = e as CustomEvent<T>;
       handler(ce.detail);
     };
-    window.addEventListener(`et:test:${name}`, wrapped);
-    return () => window.removeEventListener(`et:test:${name}`, wrapped);
+    window.addEventListener(name, wrapped);
+    return () => window.removeEventListener(name, wrapped);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name]);
 }
-
-/** Banner override shape — discount banner reads this when set. */
-export type BannerOverride =
-  | { state: "countdown"; days: number }
-  | { state: "eligible" }
-  | { state: "pending" }
-  | { state: "approved"; code: string }
-  | { state: "rejected" };

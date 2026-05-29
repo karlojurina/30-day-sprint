@@ -541,19 +541,15 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
       ? testOverrides.bountyAccessClaimedAt ?? null
       : bountyAccessClaimedAt;
 
-  // v59 - The Playbook unlock now hinges on R4 being COMPLETE (all
-  // lessons + actions in R4 done), NOT on the Bounty Access webhook.
-  // Karlo's call: the student grasps "here's the next step after
-  // the sprint" much faster if the Playbook is right there when
-  // they finish, rather than gated behind an external integration
-  // they may not even understand yet. The Bounty Access marker
-  // stays as its own thing - clicking it still opens l057.
-  // testOverrides.bountyAccessClaimedAt is reused here as a manual
-  // unlock signal so the dev panel can still flip the Playbook
-  // visible/hidden without finishing R4.
-  const r4Complete = regionProgress.r4?.isComplete ?? false;
-  const playbookUnlocked =
-    r4Complete || Boolean(effectiveBountyAccessClaimedAt);
+  // v72.7 / v74.2 - the Playbook unlock is now keyed on completion of
+  // l078 (the last R4 watch lesson, see PLAYBOOK_UNLOCK_LESSON_ID in
+  // src/lib/constants.ts). Bounty Access does NOT unlock the Playbook
+  // - it's a parallel post-sprint milestone. Was `r4Complete ||
+  // bountyAccessClaimedAt` which let the bounty webhook open the
+  // Playbook independently AND required ALL R4 lessons (incl. l057
+  // bounty onboarding) which made the marker locked even after the
+  // student finished every watch lesson. Karlo's bug 2026-05-29.
+  const playbookUnlocked = completedLessonIds.has(PLAYBOOK_UNLOCK_LESSON_ID);
 
   // v54 (brief-region-quiz) - quiz modal state. quizRegionId is the
   // region whose quiz is currently open (null = closed). quizProgress
@@ -1478,14 +1474,14 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                         label: "The Playbook",
                         sublabel: playbookUnlocked
                           ? "Months 2-3 · open"
-                          : "finish Region 4 first",
+                          : "finish every R4 lesson first",
                       },
                       position: { x: 2760, y: 321 },
                       locked: !playbookUnlocked,
                       onClick: () => {
                         if (!playbookUnlocked) {
                           showToast(
-                            "Finish Region 4 to unlock the Playbook",
+                            "Watch every R4 lesson to unlock the Playbook",
                           );
                           return;
                         }
@@ -1515,7 +1511,7 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                     onClick: () => {
                       if (!playbookUnlocked) {
                         showToast(
-                          "Finish Region 4 to unlock the Playbook",
+                          "Watch every R4 lesson to unlock the Playbook",
                         );
                         return;
                       }

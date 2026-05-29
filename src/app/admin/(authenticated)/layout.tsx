@@ -81,163 +81,201 @@ const navItems: { href: string; label: string; icon: React.ReactNode }[] = [
   },
 ];
 
-function AdminSidebar() {
+/**
+ * v74.2 - top horizontal nav bar. Replaced the left sidebar per
+ * Karlo's feedback ("side bar feels cheap... it's boring"). Same
+ * nav items, same active state, same Journey pace badge. Logo +
+ * brand on the left, nav pills in the middle (scroll horizontally
+ * if the viewport is too narrow), team member + sign out on the
+ * right. The whole content column now gets the full width which
+ * makes the admin pages feel a lot less cramped.
+ */
+function AdminTopNav() {
   const pathname = usePathname();
   const { teamMember, signOut } = useAuth();
-  // Pace counts for the Student-journey nav badge. Cheap query;
-  // fires once when the sidebar mounts (and the layout persists
-  // across admin navigation, so it's once per session).
   const paceCounts = useJourneyPaceCounts();
 
   return (
-    <aside
-      className="flex flex-col h-screen sticky top-0"
+    <header
+      className="sticky top-0 z-30"
       style={{
-        width: 232,
         background: "var(--color-bg-elevated)",
-        borderRight: "1px solid var(--color-border)",
+        borderBottom: "1px solid var(--color-border)",
+        backdropFilter: "saturate(140%) blur(10px)",
+        WebkitBackdropFilter: "saturate(140%) blur(10px)",
       }}
     >
-      {/* Brand */}
-      <div className="px-5 py-5">
-        <p
-          style={{
-            fontSize: 14,
-            fontWeight: 600,
-            color: "var(--color-text-primary)",
-            letterSpacing: "-0.014em",
-          }}
-        >
-          EcomTalent
-        </p>
-        <p
-          style={{
-            fontSize: 11,
-            color: "var(--color-text-tertiary)",
-            marginTop: 1,
-            letterSpacing: "-0.005em",
-          }}
-        >
-          Team
-        </p>
-      </div>
-
-      {/* Nav */}
-      <nav className="flex-1 px-2">
-        {navItems.map((item) => {
-          const isActive =
-            item.href === "/admin"
-              ? pathname === "/admin"
-              : pathname.startsWith(item.href);
-
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex items-center gap-3 px-3 transition-colors"
-              style={{
-                height: 40,
-                borderRadius: 10,
-                fontSize: 14,
-                fontWeight: isActive ? 600 : 500,
-                letterSpacing: "-0.011em",
-                color: isActive
-                  ? "var(--color-accent-dark)"
-                  : "var(--color-text-secondary)",
-                background: isActive
-                  ? "rgba(140, 140, 130, 0.14)"
-                  : "transparent",
-                border: isActive
-                  ? "1px solid rgba(140, 140, 130, 0.28)"
-                  : "1px solid transparent",
-                boxShadow: isActive
-                  ? "0 1px 2px rgba(20, 20, 24, 0.04)"
-                  : "none",
-                marginBottom: 4,
-              }}
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth={1.7}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                {item.icon}
-              </svg>
-              <span className="flex-1 min-w-0 truncate">{item.label}</span>
-
-              {/* Pace preview — only on the Student-journey item, only
-                  when there's at least one student behind. Three small
-                  dots colored red / neutral / green with their counts;
-                  full breakdown lives on the journey page header. */}
-              {item.href === "/admin/journey" &&
-                !paceCounts.loading &&
-                paceCounts.total > 0 && (
-                  <span
-                    className="flex items-center shrink-0"
-                    style={{
-                      gap: 4,
-                      fontSize: 10,
-                      fontVariantNumeric: "tabular-nums",
-                      fontWeight: 600,
-                      letterSpacing: "-0.005em",
-                    }}
-                    title={`Behind ${paceCounts.behind} · On pace ${paceCounts.on_pace} · Ahead ${paceCounts.ahead}`}
-                  >
-                    <span style={{ color: "var(--color-danger)" }}>
-                      {paceCounts.behind}
-                    </span>
-                    <span style={{ color: "var(--color-text-tertiary)" }}>·</span>
-                    <span style={{ color: "var(--color-text-secondary)" }}>
-                      {paceCounts.on_pace}
-                    </span>
-                    <span style={{ color: "var(--color-text-tertiary)" }}>·</span>
-                    <span style={{ color: "var(--color-success)" }}>
-                      {paceCounts.ahead}
-                    </span>
-                  </span>
-                )}
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* Footer — team member + sign out */}
       <div
-        className="px-5 py-4"
-        style={{ borderTop: "1px solid var(--color-border)" }}
+        className="flex items-center"
+        style={{
+          height: 56,
+          paddingInline: 20,
+          gap: 18,
+        }}
       >
-        <p
-          className="truncate"
+        {/* Brand */}
+        <Link
+          href="/admin"
+          className="flex items-baseline shrink-0"
           style={{
-            fontSize: 12,
-            fontWeight: 500,
-            color: "var(--color-text-secondary)",
+            gap: 8,
+            textDecoration: "none",
           }}
         >
-          {teamMember?.full_name}
-        </p>
-        <button
-          onClick={signOut}
-          className="mt-1 transition-colors"
+          <span
+            style={{
+              fontSize: 15,
+              fontWeight: 600,
+              color: "var(--color-text-primary)",
+              letterSpacing: "-0.014em",
+            }}
+          >
+            EcomTalent
+          </span>
+          <span
+            style={{
+              fontSize: 11,
+              color: "var(--color-text-tertiary)",
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+            }}
+          >
+            Team
+          </span>
+        </Link>
+
+        {/* Nav pills */}
+        <nav
+          className="flex items-center"
           style={{
-            fontSize: 12,
-            color: "var(--color-text-tertiary)",
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-            padding: 0,
+            gap: 2,
+            flex: 1,
+            minWidth: 0,
+            overflowX: "auto",
+            scrollbarWidth: "none",
           }}
         >
-          Sign out
-        </button>
+          {navItems.map((item) => {
+            const isActive =
+              item.href === "/admin"
+                ? pathname === "/admin"
+                : pathname.startsWith(item.href);
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="flex items-center transition-colors shrink-0"
+                style={{
+                  gap: 7,
+                  height: 32,
+                  paddingInline: 11,
+                  borderRadius: 8,
+                  fontSize: 13,
+                  fontWeight: isActive ? 600 : 500,
+                  letterSpacing: "-0.008em",
+                  color: isActive
+                    ? "var(--color-text-primary)"
+                    : "var(--color-text-secondary)",
+                  background: isActive
+                    ? "var(--color-bg-card)"
+                    : "transparent",
+                  border: "1px solid",
+                  borderColor: isActive
+                    ? "var(--color-border)"
+                    : "transparent",
+                  textDecoration: "none",
+                }}
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.7}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  {item.icon}
+                </svg>
+                <span>{item.label}</span>
+
+                {item.href === "/admin/journey" &&
+                  !paceCounts.loading &&
+                  paceCounts.total > 0 && (
+                    <span
+                      className="flex items-center"
+                      style={{
+                        gap: 3,
+                        fontSize: 10,
+                        fontVariantNumeric: "tabular-nums",
+                        fontWeight: 600,
+                        letterSpacing: "-0.005em",
+                        marginLeft: 4,
+                        opacity: isActive ? 1 : 0.85,
+                      }}
+                      title={`Behind ${paceCounts.behind} · On pace ${paceCounts.on_pace} · Ahead ${paceCounts.ahead}`}
+                    >
+                      <span style={{ color: "var(--color-danger)" }}>
+                        {paceCounts.behind}
+                      </span>
+                      <span style={{ color: "var(--color-text-tertiary)" }}>
+                        ·
+                      </span>
+                      <span style={{ color: "var(--color-text-secondary)" }}>
+                        {paceCounts.on_pace}
+                      </span>
+                      <span style={{ color: "var(--color-text-tertiary)" }}>
+                        ·
+                      </span>
+                      <span style={{ color: "var(--color-success)" }}>
+                        {paceCounts.ahead}
+                      </span>
+                    </span>
+                  )}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* Team member + sign out */}
+        <div
+          className="flex items-center shrink-0"
+          style={{
+            gap: 12,
+            paddingLeft: 14,
+            borderLeft: "1px solid var(--color-border)",
+            height: 32,
+          }}
+        >
+          <span
+            className="truncate"
+            style={{
+              fontSize: 12,
+              fontWeight: 500,
+              color: "var(--color-text-secondary)",
+              maxWidth: 140,
+            }}
+          >
+            {teamMember?.full_name ?? ""}
+          </span>
+          <button
+            onClick={signOut}
+            style={{
+              fontSize: 12,
+              color: "var(--color-text-tertiary)",
+              background: "transparent",
+              border: "none",
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            Sign out
+          </button>
+        </div>
       </div>
-    </aside>
+    </header>
   );
 }
 
@@ -249,10 +287,10 @@ export default function AdminLayout({
   return (
     <TeamGuard>
       <div
-        className="admin-shell flex min-h-screen"
+        className="admin-shell flex flex-col min-h-screen"
         style={{ background: "var(--color-bg-primary)" }}
       >
-        <AdminSidebar />
+        <AdminTopNav />
         <main className="flex-1 overflow-auto">{children}</main>
       </div>
     </TeamGuard>

@@ -628,9 +628,16 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     for (const r of regions) {
       progress[r.id] = { completed: 0, total: 0, isComplete: false, isUnlocked: false };
     }
-    // count
+    // count - v74.2 excludes l057 ("Complete Ad Bounty Onboarding")
+    // from R4's tally. l057 is bounty-program onboarding, not a sprint
+    // lesson - including it meant R4 displayed 14/15 forever for any
+    // student who finished the curriculum but hadn't yet applied to
+    // the bounty program (Karlo's bug 2026-05-29). Same exclusion as
+    // the graduation modal payload.
+    const SPRINT_EXCLUDE = new Set<string>(["l057"]);
     for (const lesson of lessons) {
       if (!progress[lesson.region_id]) continue;
+      if (SPRINT_EXCLUDE.has(lesson.id)) continue;
       progress[lesson.region_id].total++;
       if (completedLessonIds.has(lesson.id)) {
         progress[lesson.region_id].completed++;

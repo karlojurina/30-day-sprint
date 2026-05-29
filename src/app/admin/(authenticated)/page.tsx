@@ -52,9 +52,12 @@ interface DashboardData {
   openTasks: number;
   monthTwoConversionRate: number | null;
   monthTwoCohortSize: number;
-  /** # of students who have joined the Bounty Program (Zak's webhook
-   *  stamps bounty_access_claimed_at). */
-  bountyAccessCount: number;
+  /** All-time # of students who have joined the Bounty Program. */
+  bountyAccessAllTime: number;
+  /** # of bounty enrollments in the last 14 days (the hero number). */
+  bountyAccessLast14d: number;
+  /** Per-day bounty enrollments, last 14 days oldest first. */
+  bountyTrend: number[];
   /** Last 14 days of nightly snapshots (oldest first) — feeds the sparkline tiles. */
   trend: MetricPoint[];
 }
@@ -184,9 +187,28 @@ export default function AdminDashboard() {
         student_id: string;
         bounty_access_claimed_at: string | null;
       }>;
-      const bountyAccessCount = milestoneRows.filter(
+      const bountyAccessAllTime = milestoneRows.filter(
         (m) => m.bounty_access_claimed_at,
       ).length;
+
+      // v74.2 - per-day bounty enrollments for the last 14 days
+      // (oldest first). Feeds the hero-stat sparkline + the headline
+      // number is now the 14d count, not the all-time total.
+      const todayStartMs =
+        Math.floor(Date.now() / 86_400_000) * 86_400_000;
+      const bountyTrend: number[] = [];
+      let bountyAccessLast14d = 0;
+      for (let i = 13; i >= 0; i--) {
+        const dayStart = todayStartMs - i * 86_400_000;
+        const dayEnd = dayStart + 86_400_000;
+        const count = milestoneRows.filter((m) => {
+          if (!m.bounty_access_claimed_at) return false;
+          const t = new Date(m.bounty_access_claimed_at).getTime();
+          return t >= dayStart && t < dayEnd;
+        }).length;
+        bountyTrend.push(count);
+        bountyAccessLast14d += count;
+      }
 
       setData({
         totalStudents: students.length,
@@ -198,7 +220,9 @@ export default function AdminDashboard() {
         openTasks: tasksRes.count ?? 0,
         monthTwoConversionRate,
         monthTwoCohortSize: matureCohort.length,
-        bountyAccessCount,
+        bountyAccessAllTime,
+        bountyAccessLast14d,
+        bountyTrend,
         trend,
       });
 
@@ -270,8 +294,9 @@ export default function AdminDashboard() {
           />
           <HeroStat
             label="Bounty Program · joined"
-            value={String(data.bountyAccessCount)}
-            sublabel="Students who finished the course and onboarded to the Bounty Program (Zak's webhook)."
+            value={String(data.bountyAccessLast14d)}
+            valueSuffix={`/ 14d · ${data.bountyAccessAllTime} all-time`}
+            trendPoints={data.bountyTrend}
           />
         </div>
       </Section>
@@ -363,52 +388,144 @@ function HeroStat({
   value,
   sublabel,
   accent = false,
+  trendPoints,
+  valueSuffix,
 }: {
   label: string;
   value: string;
-  sublabel: string;
+  /** Optional context line under the big number. Omit to render none. */
+  sublabel?: string;
   accent?: boolean;
+  /** Optional 14d sparkline. Renders top-right of the card. */
+  trendPoints?: number[];
+  /** Small text appended next to the value (e.g. "/ 14d"). */
+  valueSuffix?: string;
 }) {
   return (
     <Card padding={32}>
-      <p
+      <div
         style={{
-          fontSize: 13,
-          fontWeight: 500,
-          letterSpacing: "-0.005em",
-          color: accent
-            ? "var(--color-accent-dark)"
-            : "var(--color-text-tertiary)",
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 12,
         }}
       >
-        {label}
-      </p>
-      <p
-        className="stat-value"
-        style={{
-          fontSize: 56,
-          fontWeight: 600,
-          lineHeight: 1.0,
-          letterSpacing: "-0.028em",
-          color: accent
-            ? "var(--color-accent-dark)"
-            : "var(--color-text-primary)",
-          marginTop: 12,
-          fontVariantNumeric: "tabular-nums",
-        }}
+        <p
+          style={{
+            fontSize: 13,
+            fontWeight: 500,
+            letterSpacing: "-0.005em",
+            color: accent
+              ? "var(--color-accent-dark)"
+              : "var(--color-text-tertiary)",
+          }}
+        >
+          {label}
+        </p>
+        {trendPoints && trendPoints.length > 1 && (
+          <HeroSparkline points={trendPoints} accent={accent} />
+        )}
+      </div>
+      <div
+        className="flex items-baseline"
+        style={{ gap: 8, marginTop: 12, flexWrap: "wrap" }}
       >
-        {value}
-      </p>
-      <p
-        style={{
-          ...T.bodyDim,
-          marginTop: 14,
-          lineHeight: 1.4,
-        }}
-      >
-        {sublabel}
-      </p>
+        <p
+          className="stat-value"
+          style={{
+            fontSize: 56,
+            fontWeight: 600,
+            lineHeight: 1.0,
+            letterSpacing: "-0.028em",
+            color: accent
+              ? "var(--color-accent-dark)"
+              : "var(--color-text-primary)",
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {value}
+        </p>
+        {valueSuffix && (
+          <span
+            style={{
+              fontSize: 14,
+              color: "var(--color-text-tertiary)",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {valueSuffix}
+          </span>
+        )}
+      </div>
+      {sublabel && (
+        <p
+          style={{
+            ...T.bodyDim,
+            marginTop: 14,
+            lineHeight: 1.4,
+          }}
+        >
+          {sublabel}
+        </p>
+      )}
     </Card>
+  );
+}
+
+function HeroSparkline({
+  points,
+  accent,
+}: {
+  points: number[];
+  accent: boolean;
+}) {
+  const W = 120;
+  const H = 38;
+  const PAD = 2;
+  const max = Math.max(1, ...points);
+  const stepX = points.length > 1 ? (W - PAD * 2) / (points.length - 1) : 0;
+  const coords = points.map((v, i) => {
+    const x = PAD + i * stepX;
+    const y = PAD + (1 - v / max) * (H - PAD * 2);
+    return { x, y };
+  });
+  const line = coords
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`)
+    .join(" ");
+  const area =
+    coords.length > 0
+      ? `${line} L ${coords[coords.length - 1].x.toFixed(2)} ${H - PAD} L ${coords[0].x.toFixed(2)} ${H - PAD} Z`
+      : "";
+  const stroke = accent
+    ? "var(--color-accent-dark)"
+    : "var(--color-text-secondary)";
+  return (
+    <svg
+      width={W}
+      height={H}
+      viewBox={`0 0 ${W} ${H}`}
+      aria-hidden="true"
+      style={{ flexShrink: 0 }}
+    >
+      <defs>
+        <linearGradient id="hero-spark-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={stroke} stopOpacity="0.25" />
+          <stop offset="100%" stopColor={stroke} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {area && <path d={area} fill="url(#hero-spark-grad)" stroke="none" />}
+      {line && (
+        <path
+          d={line}
+          fill="none"
+          stroke={stroke}
+          strokeWidth={1.4}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+    </svg>
   );
 }
 

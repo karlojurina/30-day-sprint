@@ -189,7 +189,7 @@ export function GraduationModal({
                   hidden: {},
                   visible: { transition: { staggerChildren: 0.1, delayChildren: 1.05 } },
                 }}
-                className="grid grid-cols-3 gap-3 mb-7"
+                className="grid grid-cols-3 sm:grid-cols-5 gap-3 mb-7"
               >
                 <Stat
                   label="Lessons"
@@ -200,10 +200,12 @@ export function GraduationModal({
                   value={`${monthReview.longest_streak}d`}
                 />
                 <Stat label="Ads shipped" value={`${monthReview.ad_submissions}`} />
-                <Stat
-                  label="Notes written"
-                  value={`${monthReview.notes_count}`}
-                />
+                {/* v74.1 - "Notes written" stat removed (notes feature
+                    deprecated student-side; tables linger for the team
+                    journal view). Slot intentionally left as 5 stats
+                    in a row on desktop. Cohort-percentile stat to
+                    replace this post-launch once we have a
+                    cohort-stats endpoint. */}
                 <Stat
                   label="Discount"
                   value={monthReview.discount_earned ? "Earned" : "—"}

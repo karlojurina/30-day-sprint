@@ -55,10 +55,6 @@ interface DashboardData {
   /** # of students who have joined the Bounty Program (Zak's webhook
    *  stamps bounty_access_claimed_at). */
   bountyAccessCount: number;
-  /** Bounty enrollments per day for the last 14 days, oldest first. */
-  bountyTrend: number[];
-  /** Bounty enrollments summed across the last 14 days. */
-  bountyLast14d: number;
   /** Last 14 days of nightly snapshots (oldest first) — feeds the sparkline tiles. */
   trend: MetricPoint[];
 }
@@ -192,24 +188,6 @@ export default function AdminDashboard() {
         (m) => m.bounty_access_claimed_at,
       ).length;
 
-      // v74 - per-day bounty enrollments for the last 14 days
-      // (oldest first). Feeds the sparkline tile.
-      const todayStartMs =
-        Math.floor(Date.now() / 86_400_000) * 86_400_000;
-      const bountyTrend: number[] = [];
-      let bountyLast14d = 0;
-      for (let i = 13; i >= 0; i--) {
-        const dayStart = todayStartMs - i * 86_400_000;
-        const dayEnd = dayStart + 86_400_000;
-        const count = milestoneRows.filter((m) => {
-          if (!m.bounty_access_claimed_at) return false;
-          const t = new Date(m.bounty_access_claimed_at).getTime();
-          return t >= dayStart && t < dayEnd;
-        }).length;
-        bountyTrend.push(count);
-        bountyLast14d += count;
-      }
-
       setData({
         totalStudents: students.length,
         activeStudents: activeStudents.length,
@@ -221,8 +199,6 @@ export default function AdminDashboard() {
         monthTwoConversionRate,
         monthTwoCohortSize: matureCohort.length,
         bountyAccessCount,
-        bountyTrend,
-        bountyLast14d,
         trend,
       });
 
@@ -326,7 +302,7 @@ export default function AdminDashboard() {
       {/* ─── Trends · last 14 days ─── */}
       <Section eyebrow="Trends · last 14 days">
         <div
-          className="grid grid-cols-2 lg:grid-cols-5"
+          className="grid grid-cols-2 lg:grid-cols-4"
           style={{ gap: 12 }}
         >
           <SparklineTile
@@ -362,17 +338,12 @@ export default function AdminDashboard() {
             color="var(--color-accent-dark)"
             deltaSuffix="%"
           />
-          {/* v74 - bounty trend now lives on the main dashboard so
-              Karlo can see "how many people joined the Bounty Program
-              in the last 14d" without opening the Insights page. */}
-          <SparklineTile
-            label="Onboarded to Bounty Program"
-            current={data.bountyLast14d}
-            currentSuffix=" / 14d"
-            points={data.bountyTrend}
-            mode="running"
-            color="var(--color-accent-dark)"
-          />
+          {/* v74.1 - bounty sparkline tile removed from here per
+              Karlo's clarification: bounty is one of the TWO hero
+              stats (month 2 conversion + bounty joined), not a
+              14d-trend tile. The hero card above is the canonical
+              place; this row is for the daily-snapshot trend
+              metrics only. */}
         </div>
       </Section>
     </AdminPage>

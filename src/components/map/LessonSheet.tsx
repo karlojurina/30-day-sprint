@@ -524,19 +524,12 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                     : lesson.description ??
                       "Finish this on your own, then mark it done below."}
                 </p>
-                {lesson.discord_channel && (
-                  <p
-                    style={{
-                      marginTop: 8,
-                      color: "var(--color-gold)",
-                      fontSize: 13,
-                      fontWeight: 500,
-                      letterSpacing: "-0.005em",
-                    }}
-                  >
-                    #{lesson.discord_channel}
-                  </p>
-                )}
+                {/* v74.1 - dropped the standalone "#ad-review" gold
+                    tag. The mission description above already mentions
+                    "Submit to #ad-review" in its text, so the tag was
+                    a visible duplicate Karlo flagged. lesson
+                    .discord_channel is still consulted by the
+                    DiscordLinkInput below for paste-link validation. */}
               </div>
             )}
 

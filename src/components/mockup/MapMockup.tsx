@@ -641,9 +641,19 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
       0,
       Math.floor((Date.now() - joinedMs) / 86_400_000),
     );
+    // v74.1 - exclude l057 ("Complete Ad Bounty Onboarding") from
+    // the lesson tally. l057 is bounty-program onboarding, not a
+    // sprint lesson - Karlo saw "64/65" on graduation because the
+    // denominator included it. The sprint is 64 lessons by his
+    // mental model.
+    const SPRINT_EXCLUDE = new Set<string>(["l057"]);
+    const sprintLessons = lessons.filter((l) => !SPRINT_EXCLUDE.has(l.id));
+    const sprintCompleted = sprintLessons.filter((l) =>
+      completedLessonIds.has(l.id),
+    ).length;
     const detail = {
-      total_lessons_completed: completedLessonIds.size,
-      total_lessons: lessons.length,
+      total_lessons_completed: sprintCompleted,
+      total_lessons: sprintLessons.length,
       longest_streak: streak.longest,
       ad_submissions: actionShippedLessonIds.size,
       discount_earned:

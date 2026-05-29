@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { LessonSheet } from "@/components/map/LessonSheet";
@@ -47,6 +48,15 @@ export default function DashboardPage() {
     markIntroVideoThreshold,
     dismissWhyYoureHere,
   } = useStudent();
+
+  // v74.1 - DevTestPanel now also mounts in production when the URL
+  // has ?devtest=1 - lets Karlo / Lovro fire the graduation modal
+  // (and other test events) on live to verify changes without
+  // running locally. Regular students never see the panel.
+  const searchParams = useSearchParams();
+  const showDevPanel =
+    process.env.NODE_ENV === "development" ||
+    searchParams.get("devtest") === "1";
 
   // v72.8 - removed the auto-redirect to /dashboard/playbook. Even
   // when the student has unlocked the Playbook (completed l078) we
@@ -237,9 +247,10 @@ export default function DashboardPage() {
         onDismiss={() => setGraduationReview(null)}
       />
 
-      {/* v72.3 - dev only. Students were seeing the 🛠 button
-          bottom-right in production. */}
-      {process.env.NODE_ENV === "development" && <DevTestPanel />}
+      {/* v72.3 - dev only. v74.1 - now also shows in prod when the URL
+          has ?devtest=1 so the team can fire the graduation modal /
+          streak / discount celebrations against a live account. */}
+      {showDevPanel && <DevTestPanel />}
 
       {/* v51 (Phase 2) - first-login intro video gate. v72.6: student
           must watch the full video then click Continue manually. */}

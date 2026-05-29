@@ -458,11 +458,11 @@ function PaceBreakdownCard({
         background: "var(--color-bg-card)",
         border: "1px solid var(--color-border)",
         borderRadius: 12,
-        padding: "18px 20px",
-        marginBottom: 16,
+        padding: "14px 16px",
+        marginBottom: 12,
       }}
     >
-      <div className="flex items-baseline" style={{ marginBottom: 12, gap: 8 }}>
+      <div className="flex items-baseline" style={{ marginBottom: 10, gap: 8 }}>
         <h3
           style={{
             fontSize: 14,
@@ -1167,12 +1167,12 @@ function BountyAccessCard({
         background: "var(--color-bg-card)",
         border: "1px solid var(--color-border)",
         borderRadius: 12,
-        padding: "18px 20px",
-        marginBottom: 16,
+        padding: "14px 16px",
+        marginBottom: 12,
       }}
     >
-      <div style={{ marginBottom: 12 }}>
-        <p style={{ ...T.eyebrow, marginBottom: 4 }}>
+      <div style={{ marginBottom: 8 }}>
+        <p style={{ ...T.eyebrow, marginBottom: 2 }}>
           Onboarded to Bounty Program
         </p>
         <p
@@ -1187,14 +1187,14 @@ function BountyAccessCard({
 
       <div
         className="flex items-baseline"
-        style={{ gap: 14, flexWrap: "wrap", marginBottom: 14 }}
+        style={{ gap: 12, flexWrap: "wrap", marginBottom: 10 }}
       >
         <p
           style={{
-            fontSize: 40,
+            fontSize: 28,
             fontWeight: 600,
             color: "var(--color-text-primary)",
-            letterSpacing: "-0.024em",
+            letterSpacing: "-0.022em",
             fontVariantNumeric: "tabular-nums",
             lineHeight: 1,
           }}
@@ -1260,15 +1260,36 @@ function BountySparkline({
   const H = 100;
   const PAD = 12;
   const max = Math.max(1, ...series.map((p) => p.count));
-  const slotW = (W - PAD * 2) / series.length;
-  const barW = Math.min(slotW * 0.7, 20);
+  const slotW =
+    series.length > 1 ? (W - PAD * 2) / (series.length - 1) : 0;
   const baseline = H - PAD;
+  // v74.1 - was a bar chart; switched to a smoothed line per Karlo's
+  // ask ("we still have the bar chart, we wanted a trend line").
+  const points = series.map((p, i) => {
+    const x = PAD + i * slotW;
+    const h = (p.count / max) * (H - PAD * 2);
+    const y = baseline - h;
+    return { x, y, count: p.count, date: p.date };
+  });
+  const linePath = points
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`)
+    .join(" ");
+  const areaPath =
+    points.length > 0
+      ? `${linePath} L ${points[points.length - 1].x.toFixed(2)} ${baseline} L ${points[0].x.toFixed(2)} ${baseline} Z`
+      : "";
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
       style={{ width: "100%", height: 100, display: "block" }}
       aria-label="Bounty enrollments per day"
     >
+      <defs>
+        <linearGradient id="bounty-area-grad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--color-accent-dark)" stopOpacity="0.28" />
+          <stop offset="100%" stopColor="var(--color-accent-dark)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
       <line
         x1={PAD}
         x2={W - PAD}
@@ -1277,27 +1298,32 @@ function BountySparkline({
         stroke="var(--color-border)"
         strokeWidth={0.5}
       />
-      {series.map((p, i) => {
-        const x = PAD + (i + 0.5) * slotW - barW / 2;
-        const h = (p.count / max) * (H - PAD * 2);
-        const y = baseline - h;
-        if (p.count === 0) return null;
-        return (
-          <rect
-            key={`${p.date}-${i}`}
-            x={x}
-            y={y}
-            width={barW}
-            height={h}
-            rx={2}
-            fill="var(--color-accent-dark)"
-          >
-            <title>
-              {p.date}: {p.count} enrollment{p.count === 1 ? "" : "s"}
-            </title>
-          </rect>
-        );
-      })}
+      {areaPath && (
+        <path d={areaPath} fill="url(#bounty-area-grad)" stroke="none" />
+      )}
+      {linePath && (
+        <path
+          d={linePath}
+          fill="none"
+          stroke="var(--color-accent-dark)"
+          strokeWidth={1.5}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      )}
+      {points.map((p) => (
+        <circle
+          key={`${p.date}-pt`}
+          cx={p.x}
+          cy={p.y}
+          r={p.count > 0 ? 2 : 0}
+          fill="var(--color-accent-dark)"
+        >
+          <title>
+            {p.date}: {p.count} enrollment{p.count === 1 ? "" : "s"}
+          </title>
+        </circle>
+      ))}
       {/* First / last date labels */}
       <text
         x={PAD}
@@ -1486,11 +1512,11 @@ function CurrentSprintersCard({ data }: { data: SprinterProgress }) {
         background: "var(--color-bg-card)",
         border: "1px solid var(--color-border)",
         borderRadius: 12,
-        padding: "18px 20px",
-        marginBottom: 16,
+        padding: "14px 16px",
+        marginBottom: 12,
       }}
     >
-      <div className="flex items-baseline" style={{ marginBottom: 12, gap: 8 }}>
+      <div className="flex items-baseline" style={{ marginBottom: 10, gap: 8 }}>
         <h3
           style={{
             fontSize: 14,

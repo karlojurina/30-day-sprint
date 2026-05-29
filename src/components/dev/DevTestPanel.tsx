@@ -161,12 +161,14 @@ export function DevTestPanel() {
         <Btn
           onClick={() =>
             fire("et:graduation", {
-              total_lessons_completed: 66,
-              total_lessons: 66,
+              // v74.1 - 64 sprint lessons (excludes l057 bounty
+              // onboarding; matches the real graduation payload).
+              total_lessons_completed: 64,
+              total_lessons: 64,
               longest_streak: 24,
               ad_submissions: 5,
               discount_earned: true,
-              notes_count: 18,
+              notes_count: 0,
               days_to_finish: 27,
             })
           }
@@ -177,11 +179,11 @@ export function DevTestPanel() {
           onClick={() =>
             fire("et:graduation", {
               total_lessons_completed: 50,
-              total_lessons: 66,
+              total_lessons: 64,
               longest_streak: 11,
               ad_submissions: 3,
               discount_earned: true,
-              notes_count: 6,
+              notes_count: 0,
               days_to_finish: 30,
             })
           }

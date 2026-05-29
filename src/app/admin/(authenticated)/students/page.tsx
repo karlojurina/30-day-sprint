@@ -57,7 +57,12 @@ export default function StudentsPage() {
         supabase
           .from("student_progress_counts")
           .select("student_id, completed_count"),
-        supabase.from("lessons").select("id", { count: "exact", head: true }),
+        // v75.1 - exclude l057 (bounty onboarding) so the list's
+        // per-student % matches the 64-lesson sprint denominator.
+        supabase
+          .from("lessons")
+          .select("id", { count: "exact", head: true })
+          .neq("id", "l057"),
       ]);
 
       if (studentsRes.data) setStudents(studentsRes.data);

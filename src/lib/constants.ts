@@ -8,10 +8,14 @@ export const WHOP_API_BASE = "https://api.whop.com/api/v1";
 // we only fetch student records). Kept in sync with the live DB
 // after each content migration:
 //   v4 seeded 63, v6 deleted 4 (l034, l040, l043, l044) → 59,
-//   v13 deleted 2 (l006, l012) → 57.
-// Always prefer using the live `lessons.length` over this constant
-// when you have it. Always clamp displayed percentages at 100%.
-export const TOTAL_LESSONS = 57;
+//   v13 deleted 2 (l006, l012) → 57,
+//   v20-v24 expanded the R3+R4 curriculum and v26+v50 dropped l058-
+//   l063 → 65 rows in the DB,
+//   v74 excludes l057 (bounty onboarding) from the sprint count →
+//   64 is the canonical "lessons in the sprint" number.
+// Always prefer the live filtered count over this constant when
+// you have it. Always clamp displayed percentages at 100%.
+export const TOTAL_LESSONS = 64;
 export const TOTAL_DAYS = 30;
 export const TOTAL_REGIONS = 4;
 

@@ -94,7 +94,12 @@ export default function KanbanPage() {
           supabase
             .from("student_current_region")
             .select("student_id, current_region"),
-          supabase.from("lessons").select("id", { count: "exact", head: true }),
+          // v75.1 - exclude l057 (bounty onboarding) so per-student
+          // % matches the 64-lesson sprint denominator.
+          supabase
+            .from("lessons")
+            .select("id", { count: "exact", head: true })
+            .neq("id", "l057"),
         ]);
 
       const totalLessonsCount =

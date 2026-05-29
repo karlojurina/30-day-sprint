@@ -75,6 +75,15 @@ interface StudentContextType {
   // Derived state
   completedLessonIds: Set<string>;
   regionProgress: Record<string, RegionProgress>;
+  /** Lessons that count toward the sprint (lessons minus
+   *  SPRINT_EXCLUDED_LESSON_IDS — currently just l057 bounty
+   *  onboarding). Use this for any "X / Y lessons completed"
+   *  display so the denominator matches Karlo's 64-lesson sprint
+   *  definition. */
+  sprintLessons: Lesson[];
+  /** Number of *sprint* lessons the student has completed (excludes
+   *  the SPRINT_EXCLUDED set). */
+  sprintCompletedCount: number;
   overallProgress: number;                 // 0-100 across all lessons
   currentLesson: Lesson | null;            // first incomplete lesson in day order
   currentRegionId: string | null;
@@ -714,9 +723,23 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     return progress;
   }, [regions, lessons, completedLessonIds, regionQuizMap]);
 
+  // v75.1 - "sprint" view of lessons excludes SPRINT_EXCLUDED_LESSON_IDS
+  // (currently just l057 bounty onboarding). Every X/Y display the
+  // student sees should use these instead of the raw lessons array
+  // so the denominator matches the 64-lesson sprint definition.
+  const sprintLessons = useMemo(
+    () => lessons.filter((l) => !SPRINT_EXCLUDED_LESSON_IDS.has(l.id)),
+    [lessons],
+  );
+  const sprintCompletedCount = useMemo(
+    () =>
+      sprintLessons.filter((l) => completedLessonIds.has(l.id)).length,
+    [sprintLessons, completedLessonIds],
+  );
+
   const overallProgress = useMemo(() => {
-    return progressPercent(completedLessonIds.size, lessons.length);
-  }, [lessons, completedLessonIds]);
+    return progressPercent(sprintCompletedCount, sprintLessons.length);
+  }, [sprintLessons, sprintCompletedCount]);
 
   // First incomplete lesson in day/sort_order sequence
   const currentLesson = useMemo(() => {
@@ -1510,6 +1533,8 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         actionShippedLessonIds,
         skippedLessonIds,
         regionProgress,
+        sprintLessons,
+        sprintCompletedCount,
         overallProgress,
         currentLesson,
         currentRegionId,

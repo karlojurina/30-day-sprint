@@ -13,7 +13,11 @@ import type {
   StudentWhopSync,
 } from "@/types/database";
 import { getDayNumber } from "@/types/database";
-import { LESSON_TYPE_LABELS, progressPercent } from "@/lib/constants";
+import {
+  LESSON_TYPE_LABELS,
+  SPRINT_EXCLUDED_LESSON_IDS,
+  progressPercent,
+} from "@/lib/constants";
 import { completedLessonIdsFor } from "@/lib/progress";
 import Link from "next/link";
 import {
@@ -109,7 +113,21 @@ export default function StudentDetailPage() {
   // compound lesson) toward completion.
   const completedIds = completedLessonIdsFor(completions, lessons);
   const dayNumber = getDayNumber(student.joined_at);
-  const overallPercent = progressPercent(completedIds.size, lessons.length);
+  // v75.1 - lessons.length includes l057 (bounty onboarding). Filter
+  // it out so the % displayed matches the 64-lesson sprint baseline
+  // every other surface uses.
+  const sprintLessons = lessons.filter(
+    (l) => !SPRINT_EXCLUDED_LESSON_IDS.has(l.id),
+  );
+  const sprintCompletedIds = new Set(
+    Array.from(completedIds).filter(
+      (id) => !SPRINT_EXCLUDED_LESSON_IDS.has(id),
+    ),
+  );
+  const overallPercent = progressPercent(
+    sprintCompletedIds.size,
+    sprintLessons.length,
+  );
 
   // Highest region with any completion — drives the region-pace pill.
   const lessonRegion = new Map(lessons.map((l) => [l.id, l.region_id]));
@@ -123,8 +141,8 @@ export default function StudentDetailPage() {
   }
   const pace = buildPaceSummary(
     student.joined_at,
-    completedIds.size,
-    lessons.length,
+    sprintCompletedIds.size,
+    sprintLessons.length,
     currentRegion,
   );
 

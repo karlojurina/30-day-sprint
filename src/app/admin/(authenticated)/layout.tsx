@@ -2,11 +2,18 @@
 
 import { TeamGuard } from "@/components/auth/TeamGuard";
 import { useAuth } from "@/contexts/AuthContext";
-import { useJourneyPaceCounts } from "@/lib/useJourneyPaceCounts";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-const navItems: { href: string; label: string; icon: React.ReactNode }[] = [
+/** Items flagged `founderOnly: true` only render in the nav for
+ *  the founder role. The page + API enforce the role server-side
+ *  anyway, but hiding the link removes the dead end for non-founders. */
+const navItems: {
+  href: string;
+  label: string;
+  icon: React.ReactNode;
+  founderOnly?: boolean;
+}[] = [
   {
     href: "/admin",
     label: "Dashboard",
@@ -87,28 +94,40 @@ const navItems: { href: string; label: string; icon: React.ReactNode }[] = [
       <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065zM15 12a3 3 0 11-6 0 3 3 0 016 0z" />
     ),
   },
+  {
+    href: "/admin/team",
+    label: "Team",
+    founderOnly: true,
+    icon: (
+      // Two-person icon - distinct from Students (which is people +
+      // detail) and matches the team-management surface.
+      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />
+    ),
+  },
 ];
 
 /**
- * v74.2 - top horizontal nav bar. Replaced the left sidebar per
- * Karlo's feedback ("side bar feels cheap... it's boring"). Same
- * nav items, same active state, same Journey pace badge. Logo +
- * brand on the left, nav pills in the middle (scroll horizontally
- * if the viewport is too narrow), team member + sign out on the
- * right. The whole content column now gets the full width which
- * makes the admin pages feel a lot less cramped.
+ * v75.1 - polished top nav. Tab-style active state with an accent
+ * underline (replaces the box highlight which read as "pill"),
+ * subtle hover state on every item, soft elevated header background
+ * with a hairline divider + 1px highlight, profile avatar with
+ * initials. Pace numbers next to the Journey item are gone -
+ * Karlo wanted them out of the global nav (they live on the page
+ * itself).
  */
 function AdminTopNav() {
   const pathname = usePathname();
   const { teamMember, signOut } = useAuth();
-  const paceCounts = useJourneyPaceCounts();
 
   return (
     <header
       className="sticky top-0 z-30"
       style={{
-        background: "var(--color-bg-elevated)",
+        background:
+          "linear-gradient(180deg, var(--color-bg-elevated) 0%, var(--color-bg-card) 100%)",
         borderBottom: "1px solid var(--color-border)",
+        boxShadow:
+          "inset 0 1px 0 rgba(255,255,255,0.04), 0 1px 0 rgba(0,0,0,0.10)",
         backdropFilter: "saturate(140%) blur(10px)",
         WebkitBackdropFilter: "saturate(140%) blur(10px)",
       }}
@@ -116,54 +135,77 @@ function AdminTopNav() {
       <div
         className="flex items-center"
         style={{
-          height: 56,
-          paddingInline: 20,
-          gap: 18,
+          height: 60,
+          paddingInline: 24,
+          gap: 28,
         }}
       >
         {/* Brand */}
         <Link
           href="/admin"
-          className="flex items-baseline shrink-0"
+          className="flex items-center shrink-0"
           style={{
-            gap: 8,
+            gap: 10,
             textDecoration: "none",
           }}
         >
-          <span
-            style={{
-              fontSize: 15,
-              fontWeight: 600,
-              color: "var(--color-text-primary)",
-              letterSpacing: "-0.014em",
-            }}
+          {/* Brand mark - 4-pointed star, sage tint. */}
+          <svg
+            width="22"
+            height="22"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
           >
-            EcomTalent
-          </span>
-          <span
-            style={{
-              fontSize: 11,
-              color: "var(--color-text-tertiary)",
-              letterSpacing: "0.04em",
-              textTransform: "uppercase",
-            }}
-          >
-            Team
-          </span>
+            <path
+              d="M12 2 L13.8 10.2 L22 12 L13.8 13.8 L12 22 L10.2 13.8 L2 12 L10.2 10.2 Z"
+              fill="var(--color-accent-dark)"
+              opacity="0.85"
+            />
+          </svg>
+          <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+            <span
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: "var(--color-text-primary)",
+                letterSpacing: "-0.014em",
+                lineHeight: 1.1,
+              }}
+            >
+              EcomTalent
+            </span>
+            <span
+              style={{
+                fontSize: 9,
+                color: "var(--color-text-tertiary)",
+                letterSpacing: "0.16em",
+                textTransform: "uppercase",
+                fontWeight: 600,
+                lineHeight: 1,
+              }}
+            >
+              Team
+            </span>
+          </div>
         </Link>
 
-        {/* Nav pills */}
+        {/* Nav - tab-style active underline. */}
         <nav
-          className="flex items-center"
+          className="flex items-stretch"
           style={{
-            gap: 2,
+            gap: 0,
             flex: 1,
             minWidth: 0,
             overflowX: "auto",
             scrollbarWidth: "none",
+            height: 60,
           }}
         >
           {navItems.map((item) => {
+            if (item.founderOnly && teamMember?.role !== "founder") {
+              return null;
+            }
             const isActive =
               item.href === "/admin"
                 ? pathname === "/admin"
@@ -172,26 +214,19 @@ function AdminTopNav() {
               <Link
                 key={item.href}
                 href={item.href}
-                className="flex items-center transition-colors shrink-0"
+                className="admin-nav-item flex items-center shrink-0 relative"
                 style={{
                   gap: 7,
-                  height: 32,
-                  paddingInline: 11,
-                  borderRadius: 8,
+                  paddingInline: 12,
                   fontSize: 13,
                   fontWeight: isActive ? 600 : 500,
                   letterSpacing: "-0.008em",
                   color: isActive
                     ? "var(--color-text-primary)"
                     : "var(--color-text-secondary)",
-                  background: isActive
-                    ? "var(--color-bg-card)"
-                    : "transparent",
-                  border: "1px solid",
-                  borderColor: isActive
-                    ? "var(--color-border)"
-                    : "transparent",
                   textDecoration: "none",
+                  transition: "color 120ms ease",
+                  height: "100%",
                 }}
               >
                 <svg
@@ -208,82 +243,118 @@ function AdminTopNav() {
                   {item.icon}
                 </svg>
                 <span>{item.label}</span>
-
-                {item.href === "/admin/journey" &&
-                  !paceCounts.loading &&
-                  paceCounts.total > 0 && (
-                    <span
-                      className="flex items-center"
-                      style={{
-                        gap: 3,
-                        fontSize: 10,
-                        fontVariantNumeric: "tabular-nums",
-                        fontWeight: 600,
-                        letterSpacing: "-0.005em",
-                        marginLeft: 4,
-                        opacity: isActive ? 1 : 0.85,
-                      }}
-                      title={`Behind ${paceCounts.behind} · On pace ${paceCounts.on_pace} · Ahead ${paceCounts.ahead}`}
-                    >
-                      <span style={{ color: "var(--color-danger)" }}>
-                        {paceCounts.behind}
-                      </span>
-                      <span style={{ color: "var(--color-text-tertiary)" }}>
-                        ·
-                      </span>
-                      <span style={{ color: "var(--color-text-secondary)" }}>
-                        {paceCounts.on_pace}
-                      </span>
-                      <span style={{ color: "var(--color-text-tertiary)" }}>
-                        ·
-                      </span>
-                      <span style={{ color: "var(--color-success)" }}>
-                        {paceCounts.ahead}
-                      </span>
-                    </span>
-                  )}
+                {/* Active underline indicator */}
+                <span
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute",
+                    left: 12,
+                    right: 12,
+                    bottom: 0,
+                    height: 2,
+                    background: isActive
+                      ? "var(--color-accent-dark)"
+                      : "transparent",
+                    borderRadius: 2,
+                    transition: "background 150ms ease",
+                  }}
+                />
               </Link>
             );
           })}
         </nav>
 
-        {/* Team member + sign out */}
+        {/* Profile + sign out */}
         <div
           className="flex items-center shrink-0"
           style={{
             gap: 12,
-            paddingLeft: 14,
+            paddingLeft: 18,
             borderLeft: "1px solid var(--color-border)",
-            height: 32,
+            height: 36,
           }}
         >
-          <span
-            className="truncate"
+          <Avatar name={teamMember?.full_name ?? ""} />
+          <div
             style={{
-              fontSize: 12,
-              fontWeight: 500,
-              color: "var(--color-text-secondary)",
-              maxWidth: 140,
+              display: "flex",
+              flexDirection: "column",
+              gap: 0,
+              maxWidth: 160,
             }}
           >
-            {teamMember?.full_name ?? ""}
-          </span>
-          <button
-            onClick={signOut}
-            style={{
-              fontSize: 12,
-              color: "var(--color-text-tertiary)",
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              padding: 0,
-            }}
-          >
-            Sign out
-          </button>
+            <span
+              className="truncate"
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: "var(--color-text-primary)",
+                letterSpacing: "-0.005em",
+                lineHeight: 1.2,
+              }}
+            >
+              {teamMember?.full_name ?? "—"}
+            </span>
+            <button
+              onClick={signOut}
+              style={{
+                fontSize: 11,
+                color: "var(--color-text-tertiary)",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                padding: 0,
+                textAlign: "left",
+                letterSpacing: "-0.003em",
+                lineHeight: 1.2,
+              }}
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </div>
+      <style>{`
+        .admin-nav-item:hover {
+          color: var(--color-text-primary);
+        }
+      `}</style>
     </header>
+  );
+}
+
+/** Round avatar with the team member's initials. Falls back to a
+ *  single dot if no name yet (rare; just first-render). */
+function Avatar({ name }: { name: string }) {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
+  return (
+    <div
+      aria-hidden="true"
+      style={{
+        width: 32,
+        height: 32,
+        borderRadius: 999,
+        background:
+          "linear-gradient(135deg, var(--color-accent-dark) 0%, var(--color-bg-card) 120%)",
+        border: "1px solid var(--color-border)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: "var(--color-text-primary)",
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: "-0.005em",
+        flexShrink: 0,
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10)",
+      }}
+    >
+      {initials || "·"}
+    </div>
   );
 }
 

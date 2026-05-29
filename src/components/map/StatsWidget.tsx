@@ -39,7 +39,8 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
 
   const { student, signOut } = useAuth();
   const {
-    lessons,
+    sprintLessons,
+    sprintCompletedCount,
     regions,
     completedLessonIds,
     currentLesson,
@@ -73,8 +74,10 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
 
   const firstName = student.name?.split(" ")[0] || "Explorer";
   const dayNumber = getDayNumber(student.joined_at);
-  const totalLessons = lessons.length;
-  const completed = completedLessonIds.size;
+  // v75.1 - use sprintLessons (excludes l057 bounty onboarding) so
+  // the dashboard reads 0/64 not 0/65.
+  const totalLessons = sprintLessons.length;
+  const completed = sprintCompletedCount;
   const percent = progressPercent(completed, totalLessons);
 
   const currentRegionId = currentLesson?.region_id ?? null;

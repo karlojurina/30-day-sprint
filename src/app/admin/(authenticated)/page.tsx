@@ -100,7 +100,12 @@ export default function AdminDashboard() {
         supabase
           .from("student_progress_counts")
           .select("student_id, completed_count"),
-        supabase.from("lessons").select("id", { count: "exact", head: true }),
+        // v75.1 - excludes l057 (bounty onboarding) so the avg-progress
+        // denominator matches the 64-lesson sprint.
+        supabase
+          .from("lessons")
+          .select("id", { count: "exact", head: true })
+          .neq("id", "l057"),
         supabase.from("discount_requests").select("id").eq("status", "pending"),
         // Mirror /api/admin/tasks filtering exactly so the dashboard
         // count and the Tasks page count agree. !inner forces the
@@ -269,7 +274,7 @@ export default function AdminDashboard() {
         }
       />
 
-      {/* ─── Hero: Month 2 conversion + AdValue placeholder ─── */}
+      {/* ─── Hero: Month 2 conversion + Bounty Program ─── */}
       <Section>
         <div
           className="grid grid-cols-1 md:grid-cols-2"
@@ -282,13 +287,21 @@ export default function AdminDashboard() {
                 ? "—"
                 : `${Math.round(data.monthTwoConversionRate * 100)}%`
             }
-            sublabel={
+            valueSuffix={
               data.monthTwoConversionRate == null
-                ? "No platform cohort past 30 days yet."
-                : `${Math.round(
-                    (data.monthTwoConversionRate ?? 0) *
-                      data.monthTwoCohortSize,
-                  )} of ${data.monthTwoCohortSize} platform signups past day 30 still active. Whop-wide churn not yet counted.`
+                ? undefined
+                : `of ${data.monthTwoCohortSize} past day 30`
+            }
+            trendPoints={
+              // v75.1 - placeholder: flat line at the current rate
+              // until we have per-day historical month-2 conversion
+              // in daily_progress_snapshots. Visual consistency with
+              // the Bounty hero next to it.
+              data.monthTwoConversionRate == null
+                ? []
+                : Array(14).fill(
+                    Math.round(data.monthTwoConversionRate * 100),
+                  )
             }
             accent
           />
@@ -335,7 +348,6 @@ export default function AdminDashboard() {
             current={data.activeStudents}
             points={data.trend.map((p) => p.active_count)}
             mode="running"
-            color="var(--color-success)"
           />
           <SparklineTile
             label="Joined"
@@ -343,7 +355,6 @@ export default function AdminDashboard() {
             currentSuffix=" / 14d"
             points={data.trend.map((p) => p.joined_count)}
             mode="running"
-            color="var(--color-accent-dark)"
           />
           <SparklineTile
             label="Churned"
@@ -351,7 +362,6 @@ export default function AdminDashboard() {
             currentSuffix=" / 14d"
             points={data.trend.map((p) => p.churned_count)}
             mode="running"
-            color="var(--color-danger)"
             inverseDelta
           />
           <SparklineTile
@@ -360,7 +370,6 @@ export default function AdminDashboard() {
             currentSuffix="%"
             points={data.trend.map((p) => p.avg_progress)}
             mode="running"
-            color="var(--color-accent-dark)"
             deltaSuffix="%"
           />
           {/* v74.1 - bounty sparkline tile removed from here per
@@ -390,51 +399,50 @@ function HeroStat({
   accent = false,
   trendPoints,
   valueSuffix,
+  inverseDelta = false,
 }: {
   label: string;
   value: string;
-  /** Optional context line under the big number. Omit to render none. */
+  /** Optional context line under the value. Omit to render none. */
   sublabel?: string;
   accent?: boolean;
-  /** Optional 14d sparkline. Renders top-right of the card. */
+  /** Optional 14d sparkline. Renders BELOW the value, full-width. */
   trendPoints?: number[];
   /** Small text appended next to the value (e.g. "/ 14d"). */
   valueSuffix?: string;
+  /** When true, an upward delta is "bad" (e.g. churn). Affects the
+   *  trend line + delta text color. */
+  inverseDelta?: boolean;
 }) {
+  // v75.1 - derive the trend color from the delta direction so green/
+  // red carries semantic meaning ("things are getting better/worse")
+  // not just brand color. Sparkline + delta text use the same hue.
+  const sparkColor = computeTrendColor(trendPoints, inverseDelta, accent);
+  const delta = computeDelta(trendPoints);
+  const hasTrend = trendPoints && trendPoints.length > 1;
   return (
-    <Card padding={32}>
-      <div
+    <Card padding={28}>
+      <p
         style={{
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "space-between",
-          gap: 12,
+          fontSize: 13,
+          fontWeight: 500,
+          letterSpacing: "-0.005em",
+          color: accent
+            ? "var(--color-accent-dark)"
+            : "var(--color-text-tertiary)",
+          marginBottom: 12,
         }}
       >
-        <p
-          style={{
-            fontSize: 13,
-            fontWeight: 500,
-            letterSpacing: "-0.005em",
-            color: accent
-              ? "var(--color-accent-dark)"
-              : "var(--color-text-tertiary)",
-          }}
-        >
-          {label}
-        </p>
-        {trendPoints && trendPoints.length > 1 && (
-          <HeroSparkline points={trendPoints} accent={accent} />
-        )}
-      </div>
+        {label}
+      </p>
       <div
         className="flex items-baseline"
-        style={{ gap: 8, marginTop: 12, flexWrap: "wrap" }}
+        style={{ gap: 8, flexWrap: "wrap" }}
       >
         <p
           className="stat-value"
           style={{
-            fontSize: 56,
+            fontSize: 52,
             fontWeight: 600,
             lineHeight: 1.0,
             letterSpacing: "-0.028em",
@@ -457,6 +465,30 @@ function HeroStat({
             {valueSuffix}
           </span>
         )}
+        {delta !== null && hasTrend && (
+          <span
+            style={{
+              marginLeft: "auto",
+              fontSize: 12,
+              fontWeight: 600,
+              color: sparkColor,
+              fontVariantNumeric: "tabular-nums",
+              letterSpacing: "-0.005em",
+            }}
+          >
+            {delta > 0 ? "↑ " : delta < 0 ? "↓ " : "→ "}
+            {Math.abs(delta)} vs 14d ago
+          </span>
+        )}
+      </div>
+      <div style={{ marginTop: hasTrend ? 14 : 0 }}>
+        {hasTrend && (
+          <HeroSparkline
+            points={trendPoints!}
+            color={sparkColor}
+            height={64}
+          />
+        )}
       </div>
       {sublabel && (
         <p
@@ -475,14 +507,16 @@ function HeroStat({
 
 function HeroSparkline({
   points,
-  accent,
+  color,
+  height = 64,
 }: {
   points: number[];
-  accent: boolean;
+  color: string;
+  height?: number;
 }) {
-  const W = 120;
-  const H = 38;
-  const PAD = 2;
+  const W = 600;
+  const H = height;
+  const PAD = 4;
   const max = Math.max(1, ...points);
   const stepX = points.length > 1 ? (W - PAD * 2) / (points.length - 1) : 0;
   const coords = points.map((v, i) => {
@@ -497,36 +531,63 @@ function HeroSparkline({
     coords.length > 0
       ? `${line} L ${coords[coords.length - 1].x.toFixed(2)} ${H - PAD} L ${coords[0].x.toFixed(2)} ${H - PAD} Z`
       : "";
-  const stroke = accent
-    ? "var(--color-accent-dark)"
-    : "var(--color-text-secondary)";
   return (
     <svg
-      width={W}
-      height={H}
       viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
       aria-hidden="true"
-      style={{ flexShrink: 0 }}
+      style={{ width: "100%", height, display: "block" }}
     >
       <defs>
-        <linearGradient id="hero-spark-grad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={stroke} stopOpacity="0.25" />
-          <stop offset="100%" stopColor={stroke} stopOpacity="0" />
+        <linearGradient id={`hero-spark-${color}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.28" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
-      {area && <path d={area} fill="url(#hero-spark-grad)" stroke="none" />}
+      {area && <path d={area} fill={`url(#hero-spark-${color})`} stroke="none" />}
       {line && (
         <path
           d={line}
           fill="none"
-          stroke={stroke}
-          strokeWidth={1.4}
+          stroke={color}
+          strokeWidth={1.6}
           strokeLinecap="round"
           strokeLinejoin="round"
+          vectorEffect="non-scaling-stroke"
         />
       )}
     </svg>
   );
+}
+
+/** Returns the running delta (last - first) for a sparkline series,
+ *  rounded to 1 decimal place. Null if the series is empty. */
+function computeDelta(points: number[] | undefined): number | null {
+  if (!points || points.length < 2) return null;
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (first == null || last == null) return null;
+  return Math.round((last - first) * 10) / 10;
+}
+
+/** Returns the trend color for a sparkline given the delta + the
+ *  inverseDelta flag. Green = "things are getting better"; red =
+ *  worse; tertiary = flat or no signal. */
+function computeTrendColor(
+  points: number[] | undefined,
+  inverseDelta: boolean,
+  accent: boolean,
+): string {
+  const delta = computeDelta(points);
+  if (delta == null || delta === 0) {
+    return accent
+      ? "var(--color-accent-dark)"
+      : "var(--color-text-secondary)";
+  }
+  const good = "var(--color-success)";
+  const bad = "var(--color-danger)";
+  if (delta > 0) return inverseDelta ? bad : good;
+  return inverseDelta ? good : bad;
 }
 
 /* ─── Attention tile ─── */
@@ -602,7 +663,6 @@ function SparklineTile({
   currentSuffix,
   points,
   mode,
-  color,
   inverseDelta = false,
   deltaSuffix = "",
 }: {
@@ -611,7 +671,6 @@ function SparklineTile({
   currentSuffix?: string;
   points: number[];
   mode: "running" | "flow";
-  color: string;
   /** When true, an upward delta is "bad" (e.g. churn). */
   inverseDelta?: boolean;
   /** Optional suffix appended to the delta number ("%" for avg progress). */
@@ -623,8 +682,10 @@ function SparklineTile({
     mode === "running" && first != null && last != null
       ? Math.round((last - first) * 10) / 10
       : null;
-  const goodColor = "var(--color-success)";
-  const badColor = "var(--color-danger)";
+  // v75.1 - line color + delta text both derive from delta sign +
+  // inverseDelta. Was a static prop which made e.g. Churned always
+  // red even when churn was dropping (which is a *good* signal).
+  const sparkColor = computeTrendColor(points, inverseDelta, false);
   return (
     <Link
       href="/admin/insights/progress"
@@ -655,22 +716,13 @@ function SparklineTile({
           {current}
           {currentSuffix ?? ""}
         </p>
-        <SparklineSVG points={points} mode={mode} color={color} />
+        <SparklineSVG points={points} mode={mode} color={sparkColor} />
       </div>
       {delta !== null && (
         <p
           style={{
             fontSize: 11,
-            color:
-              delta > 0
-                ? inverseDelta
-                  ? badColor
-                  : goodColor
-                : delta < 0
-                  ? inverseDelta
-                    ? goodColor
-                    : badColor
-                  : "var(--color-text-tertiary)",
+            color: sparkColor,
             fontVariantNumeric: "tabular-nums",
           }}
         >

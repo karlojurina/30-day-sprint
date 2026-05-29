@@ -5,12 +5,18 @@
  * data that the StudentContext already fetches but didn't have a UI
  * for. Shows once when the student crosses day-28 with non-null
  * monthReview data; persistence stamps a flag so it doesn't re-fire.
+ *
+ * v75.5 - cohort rank ("Faster than X% of finishers") replaced the
+ * Notes Written slot. The modal fetches /api/student/cohort-stats
+ * when it opens so the rank reflects current cohort state, not the
+ * stat the synthesized payload had at the moment of trigger.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { SPEC_EASE } from "@/lib/motion";
 import { useFocusTrap } from "@/lib/useFocusTrap";
+import { createClient } from "@/lib/supabase-browser";
 
 interface MonthReview {
   total_lessons_completed: number;
@@ -30,6 +36,13 @@ interface Props {
   onDownloadJournal?: () => void;
 }
 
+interface CohortStats {
+  rank: number | null;
+  total: number;
+  days_to_finish: number | null;
+  is_finisher: boolean;
+}
+
 export function GraduationModal({
   open,
   studentName,
@@ -39,6 +52,7 @@ export function GraduationModal({
 }: Props) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useFocusTrap(dialogRef, open);
+  const [cohort, setCohort] = useState<CohortStats | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -52,6 +66,34 @@ export function GraduationModal({
       document.body.style.overflow = "";
     };
   }, [open, onDismiss]);
+
+  // v75.5 - fetch cohort stats when the modal opens. Stay silent on
+  // network failure (the stat tile falls back to "—" in that case).
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const supabase = createClient();
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) return;
+        const res = await fetch("/api/student/cohort-stats", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as CohortStats;
+        if (!cancelled) setCohort(data);
+      } catch {
+        // ignore - the stat tile shows "—"
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   return (
     <AnimatePresence>
@@ -200,12 +242,19 @@ export function GraduationModal({
                   value={`${monthReview.longest_streak}d`}
                 />
                 <Stat label="Ads shipped" value={`${monthReview.ad_submissions}`} />
-                {/* v74.1 - "Notes written" stat removed (notes feature
-                    deprecated student-side; tables linger for the team
-                    journal view). Slot intentionally left as 5 stats
-                    in a row on desktop. Cohort-percentile stat to
-                    replace this post-launch once we have a
-                    cohort-stats endpoint. */}
+                {/* v75.5 - Cohort rank replaces Notes Written.
+                    Finishers see "#N of M" or "Top X%". Pre-finish
+                    fallback: the count of students who've already
+                    crossed the line. */}
+                <Stat
+                  label={
+                    cohort?.is_finisher ? "Cohort rank" : "Finished so far"
+                  }
+                  value={renderCohortValue(cohort)}
+                  highlight={
+                    cohort?.is_finisher && (cohort.rank ?? 99) <= 3
+                  }
+                />
                 <Stat
                   label="Discount"
                   value={monthReview.discount_earned ? "Earned" : "—"}
@@ -315,4 +364,24 @@ function Stat({
       </div>
     </motion.div>
   );
+}
+
+/** Renders the cohort-rank stat value. For finishers:
+ *  - first 3 places: "#1", "#2", "#3"
+ *  - otherwise:      "Top {percentile}%"
+ *  For non-finishers (this graduation modal shouldn't fire for them
+ *  but the fallback exists for the dev panel mock + edge cases):
+ *  show the running count of finishers. */
+function renderCohortValue(cohort: CohortStats | null): string {
+  if (!cohort) return "…";
+  if (cohort.is_finisher && cohort.rank != null && cohort.total > 0) {
+    if (cohort.rank <= 3) return `#${cohort.rank}`;
+    const percentile = Math.max(
+      1,
+      Math.round((cohort.rank / cohort.total) * 100),
+    );
+    return `Top ${percentile}%`;
+  }
+  if (cohort.total > 0) return `${cohort.total}`;
+  return "—";
 }

@@ -52,6 +52,11 @@ interface DashboardData {
   openTasks: number;
   monthTwoConversionRate: number | null;
   monthTwoCohortSize: number;
+  /** Per-day month-2 conversion rate (0-100) for the last 14 days,
+   *  oldest first. Reconstructed from students.joined_at +
+   *  membership_status + updated_at, so it's an approximation but
+   *  curves on real numbers. */
+  monthTwoTrend: number[];
   /** All-time # of students who have joined the Bounty Program. */
   bountyAccessAllTime: number;
   /** # of bounty enrollments in the last 14 days (the hero number). */
@@ -177,6 +182,40 @@ export default function AdminDashboard() {
       const monthTwoConversionRate =
         matureCohort.length > 0 ? matureActive / matureCohort.length : null;
 
+      // v75.5 - reconstruct the per-day month-2 conversion rate for
+      // the last 14 days from the students table itself. For each day
+      // D the cohort is students who were already 30+ days in by D,
+      // and "active at D" approximates as (currently active) OR
+      // (canceled with updated_at > D). It's an approximation - a
+      // student who churned then un-churned would be miscounted -
+      // but daily_progress_snapshots doesn't track month-2 yet and
+      // this gets the sparkline curving on real numbers instead of a
+      // flat placeholder.
+      const todayMidnight =
+        Math.floor(Date.now() / 86_400_000) * 86_400_000;
+      const monthTwoTrend: number[] = [];
+      const fourteenDaysAgoMs = todayMidnight - 13 * 86_400_000;
+      for (let i = 0; i < 14; i++) {
+        const dayStart = fourteenDaysAgoMs + i * 86_400_000;
+        const dayEnd = dayStart + 86_400_000;
+        const thirtyBeforeDay = dayStart - 30 * 86_400_000;
+        const cohortAtDay = students.filter(
+          (s) => new Date(s.joined_at).getTime() <= thirtyBeforeDay,
+        );
+        const activeAtDay = cohortAtDay.filter((s) => {
+          if (s.membership_status === "active") return true;
+          if (s.membership_status === "canceled") {
+            return new Date(s.updated_at).getTime() >= dayEnd;
+          }
+          return false;
+        }).length;
+        monthTwoTrend.push(
+          cohortAtDay.length > 0
+            ? Math.round((activeAtDay / cohortAtDay.length) * 100)
+            : 0,
+        );
+      }
+
       const trend = (snapshotsRes.data ?? []).map((r) => ({
         snapshot_date: r.snapshot_date as string,
         avg_progress: Number(r.avg_progress),
@@ -225,6 +264,7 @@ export default function AdminDashboard() {
         openTasks: tasksRes.count ?? 0,
         monthTwoConversionRate,
         monthTwoCohortSize: matureCohort.length,
+        monthTwoTrend,
         bountyAccessAllTime,
         bountyAccessLast14d,
         bountyTrend,
@@ -292,17 +332,9 @@ export default function AdminDashboard() {
                 ? undefined
                 : `of ${data.monthTwoCohortSize} past day 30`
             }
-            trendPoints={
-              // v75.1 - placeholder: flat line at the current rate
-              // until we have per-day historical month-2 conversion
-              // in daily_progress_snapshots. Visual consistency with
-              // the Bounty hero next to it.
-              data.monthTwoConversionRate == null
-                ? []
-                : Array(14).fill(
-                    Math.round(data.monthTwoConversionRate * 100),
-                  )
-            }
+            // v75.5 - real per-day trend, reconstructed from the
+            // students table client-side. See fetchDashboard.
+            trendPoints={data.monthTwoTrend}
             accent
           />
           <HeroStat

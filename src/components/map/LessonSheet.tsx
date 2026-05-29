@@ -263,19 +263,6 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
               >
                 {lesson.title}
               </h2>
-              {lesson.duration_label && (
-                <p
-                  style={{
-                    color: "var(--color-text-tertiary)",
-                    fontSize: 13,
-                    marginTop: 6,
-                    letterSpacing: "-0.005em",
-                    fontVariantNumeric: "tabular-nums",
-                  }}
-                >
-                  Duration · {lesson.duration_label}
-                </p>
-              )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
               {onSelectLesson && (
@@ -379,10 +366,18 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
             className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5"
             style={{ overscrollBehavior: "contain" }}
           >
-            {/* Description (plain). v59 - hide for l057 (the Bounty
-                Access claim panel below carries the full copy; the
-                lesson-level description was duplicating). */}
-            {lesson.description && !isCompound && !isBountyClaim && (
+            {/* Description (plain). v59 - hidden for l057 (Bounty
+                Access panel below carries the full copy). v74 - also
+                hidden for non-watch types (setup / action / quiz)
+                because the "Your mission" block below uses
+                `lesson.description` as its content - showing both was
+                a duplicate Karlo flagged on l001 (the Discord join
+                step had identical greyed copy and mission copy). The
+                greyed description still shows for pure watch lessons
+                (where there's no mission block) and for compound
+                lessons (where mission uses action_brief, not
+                description). */}
+            {lesson.description && isWatchType && !isCompound && !isBountyClaim && (
               <p
                 style={{
                   color: "var(--color-text-secondary)",
@@ -465,21 +460,6 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                     Opens in a new tab · auto-syncs when you come back
                   </p>
                 </div>
-                {lesson.duration_label && (
-                  <span
-                    className="absolute bottom-3 right-3 px-2 py-1 rounded"
-                    style={{
-                      background: "rgba(15,17,21,0.9)",
-                      color: "var(--color-gold)",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      fontVariantNumeric: "tabular-nums",
-                      letterSpacing: "-0.005em",
-                    }}
-                  >
-                    {lesson.duration_label}
-                  </span>
-                )}
               </a>
             )}
 
@@ -655,7 +635,7 @@ function SingleLessonSheet({ lessonId, onClose, onSelectLesson }: LessonSheetPro
                     : discountRequest.status === "rejected"
                       ? discountRequest.rejection_reason ||
                         "The team didn't approve this. Reach out in Discord."
-                      : "Thanks for applying. Our team will review it within 24 hours and apply your discount directly to your Whop subscription."}
+                      : "Thanks for applying. Our team will review it within 48 hours and apply your discount directly to your Whop subscription."}
                 </p>
               </div>
             )}
@@ -1411,18 +1391,17 @@ function GroupSheet({
                       >
                         {sub.title}
                       </p>
-                      <p
-                        style={{
-                          color: "var(--color-text-tertiary)",
-                          fontSize: 12,
-                          letterSpacing: "-0.005em",
-                          fontVariantNumeric: "tabular-nums",
-                        }}
-                      >
-                        {sub.duration_label ?? "-"}
-                        {watched && " · Watched"}
-                        {skipped && " · Skipped"}
-                      </p>
+                      {(watched || skipped) && (
+                        <p
+                          style={{
+                            color: "var(--color-text-tertiary)",
+                            fontSize: 12,
+                            letterSpacing: "-0.005em",
+                          }}
+                        >
+                          {watched ? "Watched" : "Skipped"}
+                        </p>
+                      )}
                     </div>
 
                     {/* Per-part actions */}

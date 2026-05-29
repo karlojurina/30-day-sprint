@@ -145,7 +145,7 @@ export function DiscountClaimCelebration({
                   >
                     R1 + R2 done inside the window. Apply now and the team
                     will check your action items in Discord and confirm
-                    within 24 hours.
+                    within 48 hours.
                   </p>
                   <button
                     onClick={handleClaim}
@@ -265,7 +265,7 @@ export function DiscountClaimCelebration({
                         }}
                       >
                         We&rsquo;re checking your ad submissions in Discord.
-                        You&rsquo;ll hear back within 24 hours, and the
+                        You&rsquo;ll hear back within 48 hours, and the
                         team will apply the discount straight to your
                         Whop subscription.
                       </p>

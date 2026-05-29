@@ -55,6 +55,10 @@ interface DashboardData {
   /** # of students who have joined the Bounty Program (Zak's webhook
    *  stamps bounty_access_claimed_at). */
   bountyAccessCount: number;
+  /** Bounty enrollments per day for the last 14 days, oldest first. */
+  bountyTrend: number[];
+  /** Bounty enrollments summed across the last 14 days. */
+  bountyLast14d: number;
   /** Last 14 days of nightly snapshots (oldest first) — feeds the sparkline tiles. */
   trend: MetricPoint[];
 }
@@ -188,6 +192,24 @@ export default function AdminDashboard() {
         (m) => m.bounty_access_claimed_at,
       ).length;
 
+      // v74 - per-day bounty enrollments for the last 14 days
+      // (oldest first). Feeds the sparkline tile.
+      const todayStartMs =
+        Math.floor(Date.now() / 86_400_000) * 86_400_000;
+      const bountyTrend: number[] = [];
+      let bountyLast14d = 0;
+      for (let i = 13; i >= 0; i--) {
+        const dayStart = todayStartMs - i * 86_400_000;
+        const dayEnd = dayStart + 86_400_000;
+        const count = milestoneRows.filter((m) => {
+          if (!m.bounty_access_claimed_at) return false;
+          const t = new Date(m.bounty_access_claimed_at).getTime();
+          return t >= dayStart && t < dayEnd;
+        }).length;
+        bountyTrend.push(count);
+        bountyLast14d += count;
+      }
+
       setData({
         totalStudents: students.length,
         activeStudents: activeStudents.length,
@@ -199,6 +221,8 @@ export default function AdminDashboard() {
         monthTwoConversionRate,
         monthTwoCohortSize: matureCohort.length,
         bountyAccessCount,
+        bountyTrend,
+        bountyLast14d,
         trend,
       });
 
@@ -302,42 +326,51 @@ export default function AdminDashboard() {
       {/* ─── Trends · last 14 days ─── */}
       <Section eyebrow="Trends · last 14 days">
         <div
-          className="grid grid-cols-2 lg:grid-cols-4"
+          className="grid grid-cols-2 lg:grid-cols-5"
           style={{ gap: 12 }}
         >
           <SparklineTile
             label="Active on platform"
             current={data.activeStudents}
-            metric="active_count"
+            points={data.trend.map((p) => p.active_count)}
             mode="running"
-            trend={data.trend}
             color="var(--color-success)"
           />
           <SparklineTile
             label="Joined"
             current={data.trend.reduce((s, p) => s + p.joined_count, 0)}
             currentSuffix=" / 14d"
-            metric="joined_count"
+            points={data.trend.map((p) => p.joined_count)}
             mode="running"
-            trend={data.trend}
             color="var(--color-accent-dark)"
           />
           <SparklineTile
             label="Churned"
             current={data.trend.reduce((s, p) => s + p.churned_count, 0)}
             currentSuffix=" / 14d"
-            metric="churned_count"
+            points={data.trend.map((p) => p.churned_count)}
             mode="running"
-            trend={data.trend}
             color="var(--color-danger)"
+            inverseDelta
           />
           <SparklineTile
             label="Avg progress"
             current={data.avgProgress}
             currentSuffix="%"
-            metric="avg_progress"
+            points={data.trend.map((p) => p.avg_progress)}
             mode="running"
-            trend={data.trend}
+            color="var(--color-accent-dark)"
+            deltaSuffix="%"
+          />
+          {/* v74 - bounty trend now lives on the main dashboard so
+              Karlo can see "how many people joined the Bounty Program
+              in the last 14d" without opening the Insights page. */}
+          <SparklineTile
+            label="Onboarded to Bounty Program"
+            current={data.bountyLast14d}
+            currentSuffix=" / 14d"
+            points={data.bountyTrend}
+            mode="running"
             color="var(--color-accent-dark)"
           />
         </div>
@@ -479,26 +512,31 @@ function SparklineTile({
   label,
   current,
   currentSuffix,
-  metric,
+  points,
   mode,
-  trend,
   color,
+  inverseDelta = false,
+  deltaSuffix = "",
 }: {
   label: string;
   current: number;
   currentSuffix?: string;
-  metric: "avg_progress" | "active_count" | "joined_count" | "churned_count";
+  points: number[];
   mode: "running" | "flow";
-  trend: MetricPoint[];
   color: string;
+  /** When true, an upward delta is "bad" (e.g. churn). */
+  inverseDelta?: boolean;
+  /** Optional suffix appended to the delta number ("%" for avg progress). */
+  deltaSuffix?: string;
 }) {
-  const points = trend.map((p) => p[metric] as number);
   const last = points[points.length - 1];
   const first = points[0];
   const delta =
     mode === "running" && first != null && last != null
       ? Math.round((last - first) * 10) / 10
       : null;
+  const goodColor = "var(--color-success)";
+  const badColor = "var(--color-danger)";
   return (
     <Link
       href="/admin/insights/progress"
@@ -537,20 +575,20 @@ function SparklineTile({
             fontSize: 11,
             color:
               delta > 0
-                ? metric === "churned_count"
-                  ? "var(--color-danger)"
-                  : "var(--color-success)"
+                ? inverseDelta
+                  ? badColor
+                  : goodColor
                 : delta < 0
-                  ? metric === "churned_count"
-                    ? "var(--color-success)"
-                    : "var(--color-danger)"
+                  ? inverseDelta
+                    ? goodColor
+                    : badColor
                   : "var(--color-text-tertiary)",
             fontVariantNumeric: "tabular-nums",
           }}
         >
           {delta > 0 ? "↑ " : delta < 0 ? "↓ " : "→ "}
           {Math.abs(delta)}
-          {metric === "avg_progress" ? "%" : ""} vs 14d ago
+          {deltaSuffix} vs 14d ago
         </p>
       )}
     </Link>

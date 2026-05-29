@@ -453,7 +453,7 @@ function ConfirmationScreen({ onClose }: { onClose: () => void }) {
           marginBottom: 20,
         }}
       >
-        The team will review it within 24 hours. You&rsquo;ll see the
+        The team will review it within 48 hours. You&rsquo;ll see the
         discount on your dashboard once it&rsquo;s approved.
       </p>
       <button

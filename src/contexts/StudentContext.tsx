@@ -270,6 +270,26 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [discountFeedbackOpen, setDiscountFeedbackOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  // v74 - track which lesson completions were just touched locally
+  // (via toggleLesson / toggleLessonAction / skipLesson). When
+  // refreshFromServer fires soon after, it preserves the LOCAL row
+  // for any lesson in this window instead of overwriting with the
+  // server's possibly-not-yet-replicated state. Fixes the "ship ->
+  // unship -> ship -> unship" flicker Karlo saw on action items
+  // (Supabase read-replica lag racing the post-write refresh).
+  const recentlyToggledRef = useRef<Map<string, number>>(new Map());
+  const RECENT_TOGGLE_WINDOW_MS = 3000;
+  function markRecentlyToggled(lessonId: string) {
+    const now = Date.now();
+    recentlyToggledRef.current.set(lessonId, now);
+    // Lazy cleanup expired entries each time we mark a new one.
+    for (const [id, ts] of recentlyToggledRef.current.entries()) {
+      if (now - ts > RECENT_TOGGLE_WINDOW_MS) {
+        recentlyToggledRef.current.delete(id);
+      }
+    }
+  }
+
   const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostics>({
     lastSyncAt: null,
     fetchedCount: null,
@@ -387,7 +407,43 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     });
     if (!dataRes.ok) return;
     const fresh = await dataRes.json();
-    setCompletions(fresh.completions ?? []);
+    // v74 - merge instead of replace: any lesson the user just touched
+    // (within RECENT_TOGGLE_WINDOW_MS) keeps its LOCAL completion row
+    // so a stale read-replica response can't undo their action.
+    const freshCompletions = (fresh.completions ?? []) as StudentLessonCompletion[];
+    const now = Date.now();
+    for (const [id, ts] of recentlyToggledRef.current.entries()) {
+      if (now - ts > RECENT_TOGGLE_WINDOW_MS) {
+        recentlyToggledRef.current.delete(id);
+      }
+    }
+    if (recentlyToggledRef.current.size === 0) {
+      setCompletions(freshCompletions);
+    } else {
+      const recent = recentlyToggledRef.current;
+      setCompletions((prev) => {
+        const result: StudentLessonCompletion[] = [];
+        const seen = new Set<string>();
+        for (const f of freshCompletions) {
+          seen.add(f.lesson_id);
+          if (recent.has(f.lesson_id)) {
+            const local = prev.find((p) => p.lesson_id === f.lesson_id);
+            if (local) {
+              result.push(local);
+              continue;
+            }
+          }
+          result.push(f);
+        }
+        // Preserve optimistic local rows not yet visible on the server.
+        for (const p of prev) {
+          if (!seen.has(p.lesson_id) && recent.has(p.lesson_id)) {
+            result.push(p);
+          }
+        }
+        return result;
+      });
+    }
     // Admin can change discount_requests.status (pending → approved →
     // applied) from /admin/discounts. Refresh it here so the student
     // sees the new state when they switch back to their tab.
@@ -586,7 +642,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         progress[id].total > 0 &&
         progress[id].completed === progress[id].total;
     }
-    // compute unlock state (sequential: r1 unlocked, each next unlocks when prev complete)
+    // Sequential unlock: R1 always open; every later region requires
+    // BOTH the previous region's lessons to be 100% complete AND its
+    // region quiz passed. v74 - the quiz-pass requirement was missing,
+    // so a student could finish R2 lessons and walk straight into R3
+    // without ever taking the quiz (Karlo's bug report 2026-05-29).
     const sortedRegions = [...regions].sort((a, b) => a.order_num - b.order_num);
     for (let i = 0; i < sortedRegions.length; i++) {
       const r = sortedRegions[i];
@@ -594,11 +654,14 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         progress[r.id].isUnlocked = true;
       } else {
         const prev = sortedRegions[i - 1];
-        progress[r.id].isUnlocked = progress[prev.id]?.isComplete ?? false;
+        const prevComplete = progress[prev.id]?.isComplete ?? false;
+        const prevQuizPassed =
+          regionQuizMap[prev.id as RegionId]?.quiz_passed_at != null;
+        progress[r.id].isUnlocked = prevComplete && prevQuizPassed;
       }
     }
     return progress;
-  }, [regions, lessons, completedLessonIds]);
+  }, [regions, lessons, completedLessonIds, regionQuizMap]);
 
   const overallProgress = useMemo(() => {
     return progressPercent(completedLessonIds.size, lessons.length);
@@ -663,6 +726,9 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       if (!token) return;
 
       const isCompleted = completedLessonIds.has(lessonId);
+
+      // v74 - mark so a racing refreshFromServer doesn't undo this.
+      markRecentlyToggled(lessonId);
 
       // Optimistic update
       if (isCompleted) {
@@ -755,6 +821,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       // session lookups can take 100-300ms on a cold tab.
       const isShipped = actionShippedLessonIds.has(lessonId);
       const optimisticTimestamp = isShipped ? null : new Date().toISOString();
+      markRecentlyToggled(lessonId);
       setCompletions((prev) => {
         const existing = prev.find((c) => c.lesson_id === lessonId);
         if (existing) {
@@ -904,6 +971,8 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       const isWatched = watchedLessonIds.has(lessonId);
       // Don't trample a watched row.
       if (isWatched) return;
+
+      markRecentlyToggled(lessonId);
 
       // Optimistic update
       if (isSkipped) {
@@ -1167,9 +1236,12 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   }, [student, milestones, patchMilestoneFlag]);
 
   // v65 - single mutator replaces the v54 mark + attempts split.
-  // One round-trip per completed attempt. Optimistic patch the
-  // local map so the result screen flips immediately; the server's
-  // authoritative state arrives in the response and overwrites.
+  // v74 - server call is now fire-and-forget so the ResultScreen
+  // flips instantly. Before: awaiting the API took ~1.5-2s on
+  // production (Supabase round-trip + insert) which Karlo noticed
+  // as "two seconds of nothing after I finish the quiz." Now we
+  // return the optimistic pass/score immediately and the server
+  // reconciliation runs in the background.
   const submitRegionQuiz = useCallback(
     async (regionId: RegionId, scorePct: number) => {
       if (!student) return null;
@@ -1194,50 +1266,48 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         },
       }));
 
-      const token = await getAccessToken();
-      if (!token) {
-        return { passed: optimisticBest >= 50, bestScorePct: optimisticBest };
-      }
-
-      try {
-        const res = await fetch("/api/student/submit-region-quiz", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ regionId, scorePct: scoreInt }),
-        });
-        if (!res.ok) {
-          return { passed: optimisticBest >= 50, bestScorePct: optimisticBest };
+      // Fire-and-forget server reconciliation. Result screen has
+      // already flipped from the optimistic update above.
+      void (async () => {
+        const token = await getAccessToken();
+        if (!token) return;
+        try {
+          const res = await fetch("/api/student/submit-region-quiz", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ regionId, scorePct: scoreInt }),
+          });
+          if (!res.ok) return;
+          const data = (await res.json()) as {
+            passed: boolean;
+            best_score_pct: number;
+            last_score_pct: number;
+            quiz_attempts: number;
+            quiz_passed_at: string | null;
+          };
+          setRegionQuizMap((prev) => ({
+            ...prev,
+            [regionId]: {
+              student_id: student.id,
+              region_id: regionId,
+              quiz_passed_at: data.quiz_passed_at,
+              quiz_attempts: data.quiz_attempts,
+              best_score_pct: data.best_score_pct,
+              last_score_pct: data.last_score_pct,
+              last_attempt_at: now,
+            },
+          }));
+          if (typeof window !== "undefined")
+            window.dispatchEvent(new Event("et:achievements-changed"));
+        } catch {
+          // Server reconciliation failed; optimistic state stays.
         }
-        const data = (await res.json()) as {
-          passed: boolean;
-          best_score_pct: number;
-          last_score_pct: number;
-          quiz_attempts: number;
-          quiz_passed_at: string | null;
-        };
-        // Reconcile with the server's authoritative state.
-        setRegionQuizMap((prev) => ({
-          ...prev,
-          [regionId]: {
-            student_id: student.id,
-            region_id: regionId,
-            quiz_passed_at: data.quiz_passed_at,
-            quiz_attempts: data.quiz_attempts,
-            best_score_pct: data.best_score_pct,
-            last_score_pct: data.last_score_pct,
-            last_attempt_at: now,
-          },
-        }));
-        return {
-          passed: data.passed,
-          bestScorePct: data.best_score_pct,
-        };
-      } catch {
-        return { passed: optimisticBest >= 50, bestScorePct: optimisticBest };
-      }
+      })();
+
+      return { passed: optimisticBest >= 50, bestScorePct: optimisticBest };
     },
     [student, regionQuizMap],
   );

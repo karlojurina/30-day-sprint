@@ -75,9 +75,8 @@ export default function DashboardPage() {
   //      start using it immediately. No WYH this session.
   //   3. Session N+1+ (next visit): WYH panel auto-mounts. Student
   //      dismisses → why_youre_here_panel_dismissed. Stays dormant.
-  //   4. WYH re-access button stays (separate ask); intro rewatch
-  //      removed (v72.6 - once watched, never shown again).
-  const [wyhRewatch, setWyhRewatch] = useState(false);
+  //   4. v72.7 - both intro AND WYH rewatch buttons removed. Once
+  //      watched / dismissed, neither resurfaces.
   // True after the student clicks Continue on the intro gate THIS
   // session. Drives two things: (a) hides the gate immediately, (b)
   // suppresses WYH until the next session so we don't auto-mount
@@ -262,54 +261,13 @@ export default function DashboardPage() {
       {/* v51 (Phase 2) - Why You're Here flipbook. v72.6: fires on the
           NEXT session after the intro is watched (not in the same
           session as the intro - too much at once). Dismisses on the
-          final card's CTA. */}
+          final card's CTA. v72.7: rewatch button removed; the panel
+          is single-shot now. */}
       <WhyYoureHerePanel
-        open={showWyh || wyhRewatch}
-        rewatchMode={wyhRewatch}
-        onDismiss={() => {
-          if (wyhRewatch) {
-            setWyhRewatch(false);
-            return;
-          }
-          void dismissWhyYoureHere();
-        }}
+        open={showWyh}
+        onDismiss={() => void dismissWhyYoureHere()}
       />
 
-      {/* v51 (Phase 2) - persistent WYH re-access button. v72.6:
-          intro rewatch button removed (once watched, never shown
-          again). Only the WYH "Why you're here" pill remains. */}
-      {introVideoThresholdMet && whyYoureHerePanelDismissed && (
-        <div
-          style={{
-            position: "fixed",
-            top: 20,
-            right: 20,
-            zIndex: 40,
-            display: "flex",
-            gap: 8,
-          }}
-        >
-          <button
-            onClick={() => setWyhRewatch(true)}
-            title="Open the Why You're Here panel"
-            style={{
-              padding: "8px 14px",
-              borderRadius: 999,
-              background: "rgba(10,14,22,0.7)",
-              border: "1px solid rgba(255,255,255,0.16)",
-              backdropFilter: "blur(20px) saturate(140%)",
-              WebkitBackdropFilter: "blur(20px) saturate(140%)",
-              color: "rgba(255,255,255,0.78)",
-              fontSize: 12,
-              fontWeight: 500,
-              letterSpacing: "-0.005em",
-              cursor: "pointer",
-            }}
-          >
-            Why you&rsquo;re here
-          </button>
-        </div>
-      )}
     </div>
   );
 }

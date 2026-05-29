@@ -3,11 +3,10 @@
 /**
  * Phase 2 - Why You're Here panel (brief v3 §02 + §9 of template-copy).
  *
- * 3-card modal flipbook that fires once after the intro video gate
- * clears. Final card's "Let's go →" closes the panel + persists the
- * dismissal so it doesn't fire again on subsequent loads. Persistent
- * re-access from the dashboard chrome opens it in rewatch mode (no
- * persistence write on dismiss).
+ * 3-card modal flipbook. Single-shot: fires once on the session AFTER
+ * the intro video is watched, the final card's "Let's go" persists
+ * the dismissal, and it never returns (v72.7 - rewatch button + mode
+ * removed).
  *
  * Copy is final per Karlo (lovro-brief-v3, 23-05-2026). Voice rules
  * apply - hyphens not em-dashes, lowercase "ecomtalent" in casual
@@ -46,18 +45,11 @@ interface WhyYoureHerePanelProps {
   open: boolean;
   /** Called when the student clicks the final card's "Let's go" CTA.
    *  Parent persists the dismissal via POST /api/student/dismiss-why-
-   *  youre-here. Skipped when rewatchMode is true. */
+   *  youre-here. */
   onDismiss: () => void;
-  /** Re-watch mode (fired from the persistent re-access button) -
-   *  same UI, but no persistence write on close. */
-  rewatchMode?: boolean;
 }
 
-export function WhyYoureHerePanel({
-  open,
-  onDismiss,
-  rewatchMode = false,
-}: WhyYoureHerePanelProps) {
+export function WhyYoureHerePanel({ open, onDismiss }: WhyYoureHerePanelProps) {
   const [idx, setIdx] = useState(0);
 
   // Reset to card 1 every time the panel opens.
@@ -203,23 +195,6 @@ export function WhyYoureHerePanel({
                   }}
                 >
                   ← Back
-                </button>
-              )}
-              {rewatchMode && (
-                <button
-                  onClick={onDismiss}
-                  style={{
-                    padding: "10px 14px",
-                    borderRadius: 8,
-                    background: "transparent",
-                    border: "1px solid rgba(255,255,255,0.14)",
-                    color: "rgba(255,255,255,0.55)",
-                    fontSize: 13,
-                    fontWeight: 500,
-                    cursor: "pointer",
-                  }}
-                >
-                  Close
                 </button>
               )}
             </div>

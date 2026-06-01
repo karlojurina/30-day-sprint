@@ -180,14 +180,35 @@ export async function POST(request: NextRequest) {
 
     case "payment.succeeded":
     case "payment_succeeded": {
+      // v75.10 — was an UPDATE only. If a student paid before our
+      // webhook was wired up (legacy customers like Michael
+      // Buratynskyi who joined Dec 2025), their original
+      // membership.activated event was never received, so no row
+      // existed — and every subsequent renewal `payment.succeeded`
+      // silent-no-op'd against a missing row. UPSERT now so any
+      // renewal also self-heals a missing row.
       const membership = payload.data as WhopMembership;
-      const { error } = await supabase
-        .from("students")
-        .update({ membership_status: "active" })
-        .eq("whop_user_id", membership.user.id);
+      if (!membership?.user?.id) {
+        console.warn(
+          "[whop-webhook] payment.succeeded missing user.id - skipping",
+        );
+        break;
+      }
+      const { error } = await supabase.from("students").upsert(
+        {
+          whop_user_id: membership.user.id,
+          whop_membership_id: membership.id,
+          email: membership.user.email,
+          name: membership.user.name,
+          discord_username: membership.user.username,
+          membership_status: "active",
+          joined_at: membership.joined_at || new Date().toISOString(),
+        },
+        { onConflict: "whop_user_id" },
+      );
 
       if (error) {
-        console.error("Webhook: payment update failed:", error);
+        console.error("Webhook: payment upsert failed:", error);
       }
       break;
     }

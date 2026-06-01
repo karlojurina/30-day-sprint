@@ -115,6 +115,65 @@ export async function* listMembershipsForProduct(
   }
 }
 
+/**
+ * Look up the active (or past_due) membership for a single user, by
+ * whop_user_id. Used by the OAuth callback to self-heal student rows
+ * for legacy customers who joined before our webhook was wired up
+ * (Karlo's bug 2026-05-30 — Michael Buratynskyi). Falls back across
+ * every product configured in WHOP_PRODUCT_ID.
+ *
+ * Returns null if no active membership exists for any of our
+ * products. Tolerates per-product fetch failures so a single bad
+ * response doesn't kill the whole check.
+ *
+ * v75.10 — new.
+ */
+export async function fetchActiveMembershipForUser(
+  whopUserId: string,
+): Promise<WhopMembershipRow | null> {
+  const apiKey = process.env.WHOP_API_KEY;
+  if (!apiKey) return null;
+  const productIds = (process.env.WHOP_PRODUCT_ID ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (productIds.length === 0) return null;
+
+  for (const pid of productIds) {
+    const url =
+      `${WHOP_MEMBERSHIPS_BASE}/memberships?product_id=` +
+      `${encodeURIComponent(pid)}&user_id=${encodeURIComponent(whopUserId)}` +
+      `&per_page=10`;
+    try {
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+        },
+      });
+      if (!res.ok) {
+        console.warn(
+          `[fetchActiveMembershipForUser] ${pid} returned ${res.status} for user ${whopUserId}`,
+        );
+        continue;
+      }
+      const json = (await res.json()) as { data?: WhopMembershipRow[] };
+      const rows = json.data ?? [];
+      const active = rows.find((m) => {
+        const status = mapStatus(m);
+        return status === "active" || status === "past_due";
+      });
+      if (active) return active;
+    } catch (err) {
+      console.warn(
+        `[fetchActiveMembershipForUser] ${pid} threw for user ${whopUserId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      continue;
+    }
+  }
+  return null;
+}
+
 /** Convenience: collect every membership across every product id in
  *  WHOP_PRODUCT_ID. Dedupes by user_id, last-wins for status. */
 export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {

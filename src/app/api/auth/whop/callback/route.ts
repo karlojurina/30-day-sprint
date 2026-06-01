@@ -8,6 +8,11 @@ import {
   fetchWhopDiscordId,
   generateStudentPassword,
 } from "@/lib/whop";
+import {
+  fetchActiveMembershipForUser,
+  mapStatus,
+  toIso,
+} from "@/lib/whop-members";
 import { unsignState } from "@/lib/pkce";
 import { syncWatchProgress } from "@/app/api/student/_lib/watch-sync";
 import { createClient } from "@supabase/supabase-js";
@@ -117,7 +122,51 @@ export async function GET(request: NextRequest) {
             })`;
       }
 
+      // v75.10 — self-heal fallback. The user-scoped /me/memberships
+      // call above returns 404 for legacy customers (Whop API
+      // quirk; reliably reproduced for michael.buratynskyi@gmail.com
+      // who's been paying since Dec 2025). Before blocking, try the
+      // admin-side v2 API (same path our daily sync-whop cron uses).
+      // If we find an active membership server-to-server, upsert
+      // the student row inline and let them in. That fixes every
+      // legacy customer on first login - no backfill script needed.
+      let selfHealed = false;
       if (!dbHasActive && !whopHasAccess) {
+        const adminRow = await fetchActiveMembershipForUser(userInfo.sub);
+        if (adminRow) {
+          const { error: healError } = await supabaseAdmin
+            .from("students")
+            .upsert(
+              {
+                whop_user_id: userInfo.sub,
+                whop_membership_id: adminRow.id,
+                email: adminRow.email ?? userInfo.email ?? null,
+                name: adminRow.username ?? userInfo.name ?? null,
+                membership_status: mapStatus(adminRow),
+                joined_at:
+                  toIso(adminRow.created_at) ?? new Date().toISOString(),
+              },
+              { onConflict: "whop_user_id" },
+            );
+          if (healError) {
+            console.error(
+              `[whop-callback] self-heal upsert failed for ${userInfo.sub}: ${healError.message}`,
+            );
+          } else {
+            selfHealed = true;
+            console.info(
+              `[whop-callback] self-healed student row for ${userInfo.sub} (${userInfo.email}) from admin API`,
+            );
+            // Update dbStatus for the block message in case the
+            // upsert succeeded but mapStatus reported non-active
+            // (shouldn't happen since we only upsert on active /
+            // past_due, but log accurately just in case).
+            dbStatus = mapStatus(adminRow);
+          }
+        }
+      }
+
+      if (!dbHasActive && !whopHasAccess && !selfHealed) {
         const detail = `user=${userInfo.sub} email=${userInfo.email ?? "(unknown)"} db_status=${dbStatus} whop=[${whopSummary}]`;
         return NextResponse.redirect(
           `${appUrl}/login?error=no_membership&detail=${encodeURIComponent(detail)}`

@@ -139,6 +139,9 @@ export async function POST(request: NextRequest) {
           discord_username: membership.user.username,
           membership_status: "active",
           joined_at: membership.joined_at || new Date().toISOString(),
+          // Clear canceled_at on re-activation so the snapshot cron's
+          // churned_count doesn't double-count a re-enrolled student.
+          canceled_at: null,
         },
         { onConflict: "whop_user_id" }
       );
@@ -160,7 +163,12 @@ export async function POST(request: NextRequest) {
       const membership = payload.data as WhopMembership;
       const { error } = await supabase
         .from("students")
-        .update({ membership_status: "canceled" })
+        .update({
+          membership_status: "canceled",
+          // Stamp the transition time so the snapshot cron can count
+          // "churned today" off real events instead of updated_at.
+          canceled_at: new Date().toISOString(),
+        })
         .eq("whop_user_id", membership.user.id);
 
       if (error) {
@@ -203,6 +211,9 @@ export async function POST(request: NextRequest) {
           discord_username: membership.user.username,
           membership_status: "active",
           joined_at: membership.joined_at || new Date().toISOString(),
+          // payment.succeeded means they paid; if they were marked
+          // canceled previously, clear the stamp on re-activation.
+          canceled_at: null,
         },
         { onConflict: "whop_user_id" },
       );

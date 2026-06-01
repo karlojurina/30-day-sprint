@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
 
   const t0 = Date.now();
   try {
-    const result = await runWhopCommunitySync(auth.supabase);
+    const result = await runWhopCommunitySync(auth.supabase, "admin-button");
     return NextResponse.json({
       ...result,
       duration_ms: Date.now() - t0,

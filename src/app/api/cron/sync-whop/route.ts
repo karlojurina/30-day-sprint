@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceClient();
   const t0 = Date.now();
   try {
-    const result = await runWhopCommunitySync(supabase);
+    const result = await runWhopCommunitySync(supabase, "cron");
     return NextResponse.json({ ...result, duration_ms: Date.now() - t0 });
   } catch (e) {
     return NextResponse.json(

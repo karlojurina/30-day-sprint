@@ -41,6 +41,12 @@ export interface Student {
   membership_status: "active" | "canceled" | "past_due" | "expired";
   joined_at: string;
   last_active_at: string;
+  /** v75.13: set on the transition INTO canceled/expired by the
+   *  Whop webhook and sync runner. The snapshot cron reads this for
+   *  churned_count; previously it used updated_at which fires on
+   *  every sync run (so every canceled student counted as "churned
+   *  today" every day). Null for active / past_due / never-canceled. */
+  canceled_at: string | null;
   /** Computed/derived from the streak count. Cached here for the UI. */
   current_title: StudentTitle;
   // Admin gates (stay on students — they're identity-adjacent admin flags)

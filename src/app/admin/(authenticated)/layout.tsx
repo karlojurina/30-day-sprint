@@ -2,6 +2,10 @@
 
 import { TeamGuard } from "@/components/auth/TeamGuard";
 import { useAuth } from "@/contexts/AuthContext";
+import {
+  AdminScopeProvider,
+} from "@/contexts/AdminScopeContext";
+import { ScopeToggle } from "@/components/admin/ScopeToggle";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -240,54 +244,62 @@ function AdminTopNav() {
           })}
         </nav>
 
-        {/* Profile */}
+        {/* Right column: scope toggle + profile */}
         <div
           className="flex items-center"
           style={{
-            gap: 12,
-            paddingLeft: 18,
-            borderLeft: "1px solid var(--color-border)",
-            height: 36,
+            gap: 16,
             justifySelf: "end",
           }}
         >
-          <Avatar name={teamMember?.full_name ?? ""} />
+          <ScopeToggle />
           <div
+            className="flex items-center"
             style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 0,
-              maxWidth: 160,
+              gap: 12,
+              paddingLeft: 18,
+              borderLeft: "1px solid var(--color-border)",
+              height: 36,
             }}
           >
-            <span
-              className="truncate"
+            <Avatar name={teamMember?.full_name ?? ""} />
+            <div
               style={{
-                fontSize: 12,
-                fontWeight: 600,
-                color: "var(--color-text-primary)",
-                letterSpacing: "-0.005em",
-                lineHeight: 1.2,
+                display: "flex",
+                flexDirection: "column",
+                gap: 0,
+                maxWidth: 160,
               }}
             >
-              {teamMember?.full_name ?? "—"}
-            </span>
-            <button
-              onClick={signOut}
-              style={{
-                fontSize: 11,
-                color: "var(--color-text-tertiary)",
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                padding: 0,
-                textAlign: "left",
-                letterSpacing: "-0.003em",
-                lineHeight: 1.2,
-              }}
-            >
-              Sign out
-            </button>
+              <span
+                className="truncate"
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "var(--color-text-primary)",
+                  letterSpacing: "-0.005em",
+                  lineHeight: 1.2,
+                }}
+              >
+                {teamMember?.full_name ?? "—"}
+              </span>
+              <button
+                onClick={signOut}
+                style={{
+                  fontSize: 11,
+                  color: "var(--color-text-tertiary)",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  textAlign: "left",
+                  letterSpacing: "-0.003em",
+                  lineHeight: 1.2,
+                }}
+              >
+                Sign out
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -588,13 +600,15 @@ export default function AdminLayout({
 }) {
   return (
     <TeamGuard>
-      <div
-        className="admin-shell flex flex-col min-h-screen"
-        style={{ background: "var(--color-bg-primary)" }}
-      >
-        <AdminTopNav />
-        <main className="flex-1 overflow-auto">{children}</main>
-      </div>
+      <AdminScopeProvider>
+        <div
+          className="admin-shell flex flex-col min-h-screen"
+          style={{ background: "var(--color-bg-primary)" }}
+        >
+          <AdminTopNav />
+          <main className="flex-1 overflow-auto">{children}</main>
+        </div>
+      </AdminScopeProvider>
     </TeamGuard>
   );
 }

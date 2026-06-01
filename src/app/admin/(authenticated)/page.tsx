@@ -24,6 +24,8 @@ import {
   ADMIN_STUDENT_JOIN_CUTOFF,
   TASKS_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
+import { isActiveMember } from "@/lib/admin/metrics-definitions";
+import { useAdminScope } from "@/contexts/AdminScopeContext";
 import Link from "next/link";
 import {
   AdminPage,
@@ -72,6 +74,7 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const supabase = createClient();
+  const { scope } = useAdminScope();
 
   const fetchDashboard = useCallback(
     async (silent = false) => {
@@ -84,6 +87,22 @@ export default function AdminDashboard() {
       const fourteenDaysAgo = new Date(now - 14 * 86_400_000)
         .toISOString()
         .slice(0, 10);
+
+      // Scope toggle: 'cohort' applies the launch-date filter so we
+      // exclude legacy / pre-launch students from every count on
+      // this page. 'all' drops it so the team sees everyone.
+      let studentsQuery = supabase
+        .from("students")
+        .select("*")
+        .not("whop_membership_id", "is", null)
+        .in("membership_status", ["active", "past_due", "canceled"]);
+      if (scope === "cohort") {
+        studentsQuery = studentsQuery.gte(
+          "joined_at",
+          ADMIN_STUDENT_JOIN_CUTOFF,
+        );
+      }
+
       const [
         studentsRes,
         completionsRes,
@@ -93,12 +112,7 @@ export default function AdminDashboard() {
         snapshotsRes,
         milestonesRes,
       ] = await Promise.all([
-        supabase
-          .from("students")
-          .select("*")
-          .not("whop_membership_id", "is", null)
-          .in("membership_status", ["active", "past_due", "canceled"])
-          .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF),
+        studentsQuery,
         // Per-student counts via a pre-aggregated view. Querying
         // student_lesson_completions directly truncates at the
         // 1000-row PostgREST cap once the community is large.
@@ -125,10 +139,12 @@ export default function AdminDashboard() {
           .eq("status", "open")
           .eq("student.csm_exempt", false)
           .gte("student.joined_at", TASKS_STUDENT_JOIN_CUTOFF),
+        // Fetch both column families so the sparkline can flip
+        // instantly when scope toggles, without refetching.
         supabase
           .from("daily_progress_snapshots")
           .select(
-            "snapshot_date, avg_progress, active_count, joined_count, churned_count",
+            "snapshot_date, avg_progress, active_count, joined_count, churned_count, avg_progress_cohort, active_count_cohort, joined_count_cohort, churned_count_cohort",
           )
           .gte("snapshot_date", fourteenDaysAgo)
           .order("snapshot_date", { ascending: true }),
@@ -150,9 +166,9 @@ export default function AdminDashboard() {
         completionMap[r.student_id] = r.completed_count;
       }
 
-      const activeStudents = students.filter(
-        (s) => s.membership_status === "active",
-      );
+      // "Active" = active + past_due (Whop's grace window keeps
+      // past-due users on the platform; they're still members).
+      const activeStudents = students.filter(isActiveMember);
       const joinedThisWeek = students.filter(
         (s) => s.joined_at >= weekAgo,
       ).length;
@@ -176,21 +192,17 @@ export default function AdminDashboard() {
       const matureCohort = students.filter(
         (s) => s.joined_at <= thirtyDaysAgo,
       );
-      const matureActive = matureCohort.filter(
-        (s) => s.membership_status === "active",
-      ).length;
+      const matureActive = matureCohort.filter(isActiveMember).length;
       const monthTwoConversionRate =
         matureCohort.length > 0 ? matureActive / matureCohort.length : null;
 
-      // v75.5 - reconstruct the per-day month-2 conversion rate for
-      // the last 14 days from the students table itself. For each day
-      // D the cohort is students who were already 30+ days in by D,
-      // and "active at D" approximates as (currently active) OR
-      // (canceled with updated_at > D). It's an approximation - a
-      // student who churned then un-churned would be miscounted -
-      // but daily_progress_snapshots doesn't track month-2 yet and
-      // this gets the sparkline curving on real numbers instead of a
-      // flat placeholder.
+      // Reconstruct per-day month-2 conversion rate for the last 14
+      // days. For each day D, cohort = students 30+ days in by D;
+      // "active at D" = currently active/past_due OR canceled-after-D
+      // (using students.canceled_at which is stamped on the actual
+      // transition, not on every row touch). Still an approximation
+      // for churn-then-rejoin, but the canceled_at-based logic is
+      // strictly more accurate than the v75.5 updated_at proxy.
       const todayMidnight =
         Math.floor(Date.now() / 86_400_000) * 86_400_000;
       const monthTwoTrend: number[] = [];
@@ -203,9 +215,9 @@ export default function AdminDashboard() {
           (s) => new Date(s.joined_at).getTime() <= thirtyBeforeDay,
         );
         const activeAtDay = cohortAtDay.filter((s) => {
-          if (s.membership_status === "active") return true;
-          if (s.membership_status === "canceled") {
-            return new Date(s.updated_at).getTime() >= dayEnd;
+          if (isActiveMember(s)) return true;
+          if (s.membership_status === "canceled" && s.canceled_at) {
+            return new Date(s.canceled_at).getTime() >= dayEnd;
           }
           return false;
         }).length;
@@ -216,12 +228,42 @@ export default function AdminDashboard() {
         );
       }
 
+      // Pick the column family that matches the active scope. Cohort
+      // columns may be null on legacy snapshot rows that haven't been
+      // rebuilt yet — fall back to the "all" columns so the sparkline
+      // doesn't blank out during the transition window.
+      const pickScopedColumn = (
+        r: Record<string, unknown>,
+        cohortCol: string,
+        allCol: string,
+      ): number => {
+        if (scope === "cohort" && r[cohortCol] != null) {
+          return Number(r[cohortCol]);
+        }
+        return Number(r[allCol] ?? 0);
+      };
       const trend = (snapshotsRes.data ?? []).map((r) => ({
-        snapshot_date: r.snapshot_date as string,
-        avg_progress: Number(r.avg_progress),
-        active_count: Number(r.active_count ?? 0),
-        joined_count: Number(r.joined_count ?? 0),
-        churned_count: Number(r.churned_count ?? 0),
+        snapshot_date: (r as { snapshot_date: string }).snapshot_date,
+        avg_progress: pickScopedColumn(
+          r as Record<string, unknown>,
+          "avg_progress_cohort",
+          "avg_progress",
+        ),
+        active_count: pickScopedColumn(
+          r as Record<string, unknown>,
+          "active_count_cohort",
+          "active_count",
+        ),
+        joined_count: pickScopedColumn(
+          r as Record<string, unknown>,
+          "joined_count_cohort",
+          "joined_count",
+        ),
+        churned_count: pickScopedColumn(
+          r as Record<string, unknown>,
+          "churned_count_cohort",
+          "churned_count",
+        ),
       }));
 
       // Bounty count - just "how many people joined the bounty program."
@@ -274,7 +316,7 @@ export default function AdminDashboard() {
       setLastRefreshed(new Date());
       setLoading(false);
     },
-    [supabase],
+    [supabase, scope],
   );
 
   useEffect(() => {

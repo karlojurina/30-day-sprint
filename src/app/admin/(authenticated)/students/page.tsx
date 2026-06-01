@@ -9,6 +9,7 @@ import {
   TOTAL_LESSONS,
   ADMIN_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
+import { useAdminScope } from "@/contexts/AdminScopeContext";
 import Link from "next/link";
 import {
   AdminPage,
@@ -36,20 +37,27 @@ export default function StudentsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
+  const { scope } = useAdminScope();
 
   useEffect(() => {
     async function fetchStudents() {
-      // Filter to actual paying students who joined on/after the
-      // cutoff (May 1, 2026). Older records are pre-cutover test
-      // accounts + free joiners we don't want in the working surface.
+      // Scope toggle: 'cohort' filters to launch-cohort joiners;
+      // 'all' shows every paying member including legacy customers.
+      let studentsQuery = supabase
+        .from("students")
+        .select("*")
+        .not("whop_membership_id", "is", null)
+        .in("membership_status", ["active", "past_due", "canceled"]);
+      if (scope === "cohort") {
+        studentsQuery = studentsQuery.gte(
+          "joined_at",
+          ADMIN_STUDENT_JOIN_CUTOFF,
+        );
+      }
+      studentsQuery = studentsQuery.order("joined_at", { ascending: false });
+
       const [studentsRes, completionsRes, lessonsRes] = await Promise.all([
-        supabase
-          .from("students")
-          .select("*")
-          .not("whop_membership_id", "is", null)
-          .in("membership_status", ["active", "past_due", "canceled"])
-          .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
-          .order("joined_at", { ascending: false }),
+        studentsQuery,
         // Pre-aggregated per-student counts via a view. Querying
         // student_lesson_completions directly returns one row per
         // completion and silently truncates at the 1000-row cap once
@@ -81,7 +89,7 @@ export default function StudentsPage() {
     }
 
     fetchStudents();
-  }, [supabase]);
+  }, [supabase, scope]);
 
   const filtered = useMemo(() => {
     let list = students;

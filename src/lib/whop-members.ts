@@ -30,6 +30,10 @@ export interface WhopMembershipRow {
   discord?: { id?: string; username?: string } | null;
   /** Some v2 endpoints surface discord_user_id at the top level instead. */
   discord_user_id?: string | null;
+  /** Optional product/plan IDs; the self-heal at login uses them to
+   *  filter to memberships under our configured WHOP_PRODUCT_ID. */
+  product_id?: string | null;
+  plan_id?: string | null;
 }
 
 /**
@@ -132,18 +136,99 @@ export async function fetchActiveMembershipForUser(
   whopUserId: string,
 ): Promise<WhopMembershipRow | null> {
   const apiKey = process.env.WHOP_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.warn(
+      `[self-heal] ABORT: WHOP_API_KEY not set (whop_user_id=${whopUserId})`,
+    );
+    return null;
+  }
   const productIds = (process.env.WHOP_PRODUCT_ID ?? "")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  if (productIds.length === 0) return null;
+  if (productIds.length === 0) {
+    console.warn(
+      `[self-heal] ABORT: WHOP_PRODUCT_ID empty (whop_user_id=${whopUserId})`,
+    );
+    return null;
+  }
 
+  console.info(
+    `[self-heal] starting for whop_user_id=${whopUserId} productIds=${productIds.join(",")}`,
+  );
+
+  // Strategy 1 — query by user_id alone (no product filter). If Whop's
+  // v2 supports user_id filtering, this returns just this user's
+  // memberships across our entire business in one call. Cheapest and
+  // most reliable when supported.
+  try {
+    const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?user_id=${encodeURIComponent(whopUserId)}&per_page=50`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+      },
+    });
+    console.info(
+      `[self-heal] strategy1 user_id-only: HTTP ${res.status} for ${whopUserId}`,
+    );
+    if (res.ok) {
+      const json = (await res.json()) as { data?: WhopMembershipRow[] };
+      const rows = json.data ?? [];
+      console.info(
+        `[self-heal] strategy1 returned ${rows.length} memberships: ${JSON.stringify(
+          rows.map((r) => ({
+            id: r.id,
+            user_id: r.user_id,
+            product_id: r.product_id,
+            plan_id: r.plan_id,
+            status: r.status,
+            valid: r.valid,
+          })),
+        )}`,
+      );
+      // If we see memberships for OTHER users in this response, the
+      // user_id filter is silently ignored and strategy 1 isn't safe
+      // to use — fall through to per-product iteration.
+      const allMatchUser = rows.every(
+        (r) => !r.user_id || r.user_id === whopUserId,
+      );
+      if (!allMatchUser) {
+        console.warn(
+          `[self-heal] strategy1 user_id filter appears ignored (got memberships for other users); falling through`,
+        );
+      } else {
+        const myActive = rows.find((m) => {
+          const matchesProduct =
+            !m.product_id || productIds.includes(m.product_id);
+          if (!matchesProduct) return false;
+          const status = mapStatus(m);
+          return status === "active" || status === "past_due";
+        });
+        if (myActive) {
+          console.info(
+            `[self-heal] strategy1 MATCH id=${myActive.id} status=${myActive.status} valid=${myActive.valid}`,
+          );
+          return myActive;
+        }
+        console.info(
+          `[self-heal] strategy1 found ${rows.length} memberships but none active+matching our products`,
+        );
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[self-heal] strategy1 threw: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  // Strategy 2 — per-product query with both product_id + user_id
+  // filters. Cheapest fallback if Whop's API does support filtering.
   for (const pid of productIds) {
     const url =
       `${WHOP_MEMBERSHIPS_BASE}/memberships?product_id=` +
       `${encodeURIComponent(pid)}&user_id=${encodeURIComponent(whopUserId)}` +
-      `&per_page=10`;
+      `&per_page=50`;
     try {
       const res = await fetch(url, {
         headers: {
@@ -151,26 +236,97 @@ export async function fetchActiveMembershipForUser(
           Accept: "application/json",
         },
       });
-      if (!res.ok) {
-        console.warn(
-          `[fetchActiveMembershipForUser] ${pid} returned ${res.status} for user ${whopUserId}`,
-        );
-        continue;
-      }
+      console.info(
+        `[self-heal] strategy2 product=${pid}: HTTP ${res.status} for ${whopUserId}`,
+      );
+      if (!res.ok) continue;
       const json = (await res.json()) as { data?: WhopMembershipRow[] };
-      const rows = json.data ?? [];
+      const rows = (json.data ?? []).filter(
+        (r) => !r.user_id || r.user_id === whopUserId,
+      );
+      console.info(
+        `[self-heal] strategy2 product=${pid} returned ${rows.length} (post-filter) memberships: ${JSON.stringify(
+          rows.map((r) => ({
+            id: r.id,
+            user_id: r.user_id,
+            product_id: r.product_id,
+            plan_id: r.plan_id,
+            status: r.status,
+            valid: r.valid,
+          })),
+        )}`,
+      );
       const active = rows.find((m) => {
         const status = mapStatus(m);
         return status === "active" || status === "past_due";
       });
-      if (active) return active;
+      if (active) {
+        console.info(
+          `[self-heal] strategy2 MATCH product=${pid} id=${active.id} status=${active.status}`,
+        );
+        return active;
+      }
     } catch (err) {
       console.warn(
-        `[fetchActiveMembershipForUser] ${pid} threw for user ${whopUserId}: ${err instanceof Error ? err.message : String(err)}`,
+        `[self-heal] strategy2 product=${pid} threw: ${err instanceof Error ? err.message : String(err)}`,
       );
       continue;
     }
   }
+
+  // Strategy 3 — last-ditch: /api/v2/members/{userId}. This endpoint
+  // returns a member object that may include memberships inline.
+  // Doesn't always work but worth one shot before giving up.
+  try {
+    const url = `${WHOP_MEMBERSHIPS_BASE}/members/${encodeURIComponent(whopUserId)}`;
+    const res = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        Accept: "application/json",
+      },
+    });
+    console.info(
+      `[self-heal] strategy3 /members/{id}: HTTP ${res.status} for ${whopUserId}`,
+    );
+    if (res.ok) {
+      const data = (await res.json()) as {
+        memberships?: WhopMembershipRow[];
+      };
+      const rows = data.memberships ?? [];
+      console.info(
+        `[self-heal] strategy3 member endpoint returned ${rows.length} embedded memberships: ${JSON.stringify(
+          rows.map((r) => ({
+            id: r.id,
+            product_id: r.product_id,
+            plan_id: r.plan_id,
+            status: r.status,
+            valid: r.valid,
+          })),
+        )}`,
+      );
+      const active = rows.find((m) => {
+        const matchesProduct =
+          !m.product_id || productIds.includes(m.product_id);
+        if (!matchesProduct) return false;
+        const status = mapStatus(m);
+        return status === "active" || status === "past_due";
+      });
+      if (active) {
+        console.info(
+          `[self-heal] strategy3 MATCH id=${active.id} status=${active.status}`,
+        );
+        return active;
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[self-heal] strategy3 threw: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  console.warn(
+    `[self-heal] EXHAUSTED all strategies for whop_user_id=${whopUserId} — no active membership found anywhere`,
+  );
   return null;
 }
 

@@ -80,11 +80,14 @@ export const DISCOUNT_WINDOW_DAYS = 15;
 //                testing. Real launch day is still ~2026-06-01 in
 //                Karlo's head, but the cutoff is a testing tool now,
 //                not a launch flag.
+//   2026-05-30 — admin stays at 2026-05-25; TASKS_STUDENT_JOIN_CUTOFF
+//                hardcoded to 2026-05-28 (real launch day) so CSM
+//                tasks don't fire for the launch-week test cohort
+//                between 5/25–5/27. See the constant below.
 //
-// If you ever need to diverge admin and tasks again (e.g. show
-// pre-launch students in /admin/students but not generate tasks
-// for them), just hardcode a different ISO string on the constant
-// that needs to move, instead of pointing it at LAUNCH_DATE.
+// If you ever need to diverge admin and tasks again, hardcode a
+// different ISO string on the constant that needs to move, instead
+// of pointing it at LAUNCH_DATE.
 export const LAUNCH_DATE = "2026-05-25T00:00:00.000Z";
 
 // Hard cutoff for admin list views — only show students who joined
@@ -99,9 +102,15 @@ export const ADMIN_STUDENT_JOIN_CUTOFF = LAUNCH_DATE;
 // Cutoff used ONLY by the CSM task pipeline (task generation cron
 // + /api/admin/tasks read filter + dashboard "Open tasks" count).
 // Decoupled by name so it can diverge from ADMIN_STUDENT_JOIN_CUTOFF
-// if Karlo ever wants to launch CSM after the rest of the app —
-// today both point at LAUNCH_DATE.
-export const TASKS_STUDENT_JOIN_CUTOFF = LAUNCH_DATE;
+// when Karlo wants admin to surface a test cohort that the task
+// system should ignore.
+//
+// 2026-05-30 — hardcoded to 2026-05-28 (real launch day). Admin
+// stays at LAUNCH_DATE = 2026-05-25 so the live testing students
+// from launch week still show up in /admin/students etc., but the
+// CSM task pipeline doesn't manufacture stalled / pace / nolessons
+// tasks for them.
+export const TASKS_STUDENT_JOIN_CUTOFF = "2026-05-28T00:00:00.000Z";
 
 // The "editing breakdowns" group: 9 R2 lessons that collapse into a
 // single map node. The student opens the group and chooses Watch or

@@ -39,20 +39,40 @@ export interface WhopMembershipRow {
 /**
  * Map a Whop membership status / valid flag to our students.membership_status
  * enum: 'active' | 'past_due' | 'canceled' | 'expired'.
+ *
+ * Trust order: row.valid first, then status string. `valid` is Whop's
+ * canonical "does this user have access right now" boolean — status is
+ * the lifecycle label downstream of it.
+ *
+ * v75.12 — was status-first, which mapped `completed` → "canceled".
+ * That blocked free / lifetime / one-time plans (status=completed,
+ * valid=true means "user has permanent entitlement"). Borna +
+ * Alessandro (free plan under prod_eE7r6SXa3H0MX) hit this on login.
  */
 export function mapStatus(
   row: Pick<WhopMembershipRow, "status" | "valid">,
 ): "active" | "past_due" | "canceled" | "expired" {
   const s = (row.status ?? "").toLowerCase();
-  if (s === "active" || s === "trialing") return "active";
+
+  // valid=true → user has access right now. Default to "active" but
+  // surface past_due so we can flag billing trouble downstream.
+  if (row.valid === true) {
+    return s === "past_due" ? "past_due" : "active";
+  }
+  // valid=false → user does not have access. Default to "canceled"
+  // but preserve "expired" for accurate categorization in the UI.
+  if (row.valid === false) {
+    return s === "expired" ? "expired" : "canceled";
+  }
+
+  // valid missing — fall back to status string. "completed" without a
+  // valid flag is treated as active for the lifetime / one-time /
+  // free-claim case; a recurring plan that genuinely ended would have
+  // valid=false caught above.
+  if (s === "active" || s === "trialing" || s === "completed") return "active";
   if (s === "past_due") return "past_due";
   if (s === "expired") return "expired";
-  if (s === "canceled" || s === "completed" || s === "suspended") {
-    return "canceled";
-  }
-  // Fall back to the boolean flag if status string isn't recognized.
-  if (row.valid === true) return "active";
-  if (row.valid === false) return "canceled";
+  if (s === "canceled" || s === "suspended") return "canceled";
   return "active";
 }
 

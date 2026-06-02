@@ -9,6 +9,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { runWhopCommunitySync } from "@/lib/whop-sync-runner";
 
+// v75.14.5: full sync iterates ~56 pages with 200ms throttle +
+// batched upserts. Default 60s isn't enough on first run with
+// thousands of members. 300s is Vercel Pro's max for fluid functions.
+export const maxDuration = 300;
+
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {

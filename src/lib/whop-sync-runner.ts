@@ -101,6 +101,12 @@ export async function runWhopCommunitySync(
     // forgets to update PAYING_WHOP_PLAN_IDS.
     const unknownPlanWarnings = new Set<string>();
 
+    // Build the full set of upsert rows in one pass (no DB calls
+    // here — just computation). v75.14.5 batches the writes to
+    // avoid 2,766 sequential round-trips that blow Vercel's 60s
+    // function timeout.
+    const upsertRows: Record<string, unknown>[] = [];
+
     for (const m of members) {
       if (!m.user) {
         result.skipped++;
@@ -139,77 +145,78 @@ export async function runWhopCommunitySync(
         );
       }
 
+      // canceled_at transition tracking:
+      //   - non-terminal → terminal: stamp now()
+      //   - terminal → non-terminal (re-activation): clear to null
+      //   - same bucket: keep existing value (undefined here, then
+      //     drop from the upsert row so we don't touch the column)
+      const wasTerminal = cur
+        ? TERMINAL_STATUSES.has((cur.membership_status ?? "").toLowerCase())
+        : false;
+      const isTerminal = TERMINAL_STATUSES.has(status);
+      let canceledAtUpdate: string | null | undefined;
       if (cur) {
-        // Detect status transition for canceled_at stamping. Three cases:
-        //   - was non-terminal, now terminal → stamp canceled_at = now()
-        //   - was terminal, now non-terminal → clear canceled_at (re-active)
-        //   - same bucket → leave canceled_at alone
-        const wasTerminal = TERMINAL_STATUSES.has(
-          (cur.membership_status ?? "").toLowerCase(),
-        );
-        const isTerminal = TERMINAL_STATUSES.has(status);
-        let canceledAtUpdate: string | null | undefined = undefined; // undefined = don't touch
         if (!wasTerminal && isTerminal) {
           canceledAtUpdate = new Date().toISOString();
         } else if (wasTerminal && !isTerminal) {
           canceledAtUpdate = null;
-        }
-
-        const update: Record<string, unknown> = {
-          whop_membership_id: m.id,
-          membership_status: status,
-          email,
-          name,
-        };
-        if (!cur.discord_user_id && discordId) update.discord_user_id = discordId;
-        if (discordUsername) update.discord_username = discordUsername;
-        if (canceledAtUpdate !== undefined) update.canceled_at = canceledAtUpdate;
-        // Refresh whop_plan_id when Whop returns one. Don't overwrite
-        // an existing plan_id with null (preserve last-known on rows
-        // where Whop didn't return the field this sync).
-        if (planId) update.whop_plan_id = planId;
-
-        const { error } = await supabase
-          .from("students")
-          .update(update)
-          .eq("whop_user_id", m.user);
-        if (error) {
-          console.error(
-            `[whop-sync] update failed for ${m.user}:`,
-            error.message,
-          );
-          result.errors++;
         } else {
-          result.updated++;
+          canceledAtUpdate = undefined; // don't touch
         }
       } else {
-        // Insert. supabase_user_id stays null until OAuth fills it.
-        // canceled_at = now() if we're inserting an already-terminal
-        // member (rare — usually means we missed their original
-        // activation webhook and they've since canceled).
-        const isTerminal = TERMINAL_STATUSES.has(status);
-        const { error } = await supabase.from("students").insert({
-          whop_user_id: m.user,
-          whop_membership_id: m.id,
-          membership_status: status,
-          email,
-          name,
-          joined_at: joinedAt,
-          last_active_at: joinedAt,
-          discord_user_id: discordId,
-          discord_username: discordUsername,
-          canceled_at: isTerminal ? new Date().toISOString() : null,
-          whop_plan_id: planId,
-        });
-        if (error) {
-          console.error(
-            `[whop-sync] insert failed for ${m.user}:`,
-            error.message,
-          );
-          result.errors++;
-        } else {
-          result.inserted++;
-        }
+        // Inserting fresh: set canceled_at only if landing terminal.
+        canceledAtUpdate = isTerminal ? new Date().toISOString() : null;
+      }
+
+      const row: Record<string, unknown> = {
+        whop_user_id: m.user,
+        whop_membership_id: m.id,
+        membership_status: status,
+        email,
+        name,
+      };
+
+      // INSERT-only fields (don't overwrite local values on existing rows)
+      if (!cur) {
+        row.joined_at = joinedAt;
+        row.last_active_at = joinedAt;
+      }
+
+      // Conditional fields — only include when we have a fresh value
+      // we want to persist.
+      if (!cur || (!cur.discord_user_id && discordId)) {
+        if (discordId) row.discord_user_id = discordId;
+      }
+      if (discordUsername) row.discord_username = discordUsername;
+      if (canceledAtUpdate !== undefined) row.canceled_at = canceledAtUpdate;
+      // Refresh plan_id when Whop returns one. Preserve last-known
+      // when Whop didn't send it (don't include the key at all).
+      if (planId) row.whop_plan_id = planId;
+      else if (!cur) row.whop_plan_id = null; // explicit null on insert
+
+      upsertRows.push(row);
+      if (cur) result.updated++;
+      else result.inserted++;
+    }
+
+    // Batch-upsert in chunks of 500 (Supabase REST handles up to 1000
+    // per request; 500 is a safe middle that keeps each request fast).
+    const BATCH_SIZE = 500;
+    for (let i = 0; i < upsertRows.length; i += BATCH_SIZE) {
+      const batch = upsertRows.slice(i, i + BATCH_SIZE);
+      const { error } = await supabase
+        .from("students")
+        .upsert(batch, { onConflict: "whop_user_id" });
+      if (error) {
+        console.error(
+          `[whop-sync] batch upsert ${i / BATCH_SIZE + 1} failed:`,
+          error.message,
+        );
+        result.errors += batch.length;
+        // Don't credit the inserted/updated counters for failed
+        // batches. Decrement by the chunk size.
+        result.inserted = Math.max(0, result.inserted - batch.length);
+        result.updated = Math.max(0, result.updated);
       }
     }
 

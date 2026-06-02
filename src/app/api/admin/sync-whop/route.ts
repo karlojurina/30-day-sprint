@@ -22,6 +22,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
 import { runWhopCommunitySync } from "@/lib/whop-sync-runner";
 
+// v75.14.5: full sync needs up to ~30-60s with batching; raise from
+// default 60s to match the cron endpoint so the Refresh button can't
+// hit a different ceiling.
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
   const auth = await requireTeam(request, ["founder", "admin"]);
   if (isAuthFailure(auth)) return auth.error;

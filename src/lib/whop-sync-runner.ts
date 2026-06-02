@@ -160,24 +160,26 @@ export async function runWhopCommunitySync(
         );
       }
 
-      // canceled_at = decision date (when the member chose to leave),
-      // NOT cycle-end date. Two sources:
-      //   1. Sync detects a genuine transition this run (was active
-      //      last time, now terminal) → stamp now(). Close approximation
-      //      to the real decision moment.
-      //   2. Webhook fires on the actual deactivation event → stamps
-      //      now() at webhook time (more accurate, handled in
-      //      src/app/api/webhooks/whop/route.ts).
+      // canceled_at handling. Three sources by priority:
+      //   1. Genuine transition observed this sync (was active last
+      //      time, now terminal) → stamp now() (real-time event)
+      //   2. Webhook fires on deactivation → stamps now() at webhook
+      //      time (most accurate, handled in src/app/api/webhooks/whop/)
+      //   3. Historical backfill: existing terminal row with no
+      //      canceled_at AND Whop's renewal_period_end is in the past →
+      //      stamp that (approximate "when access ended" — off by up
+      //      to 30 days from actual decision but it's all we have)
       //
-      // For HISTORICAL members already-terminal when we first synced:
-      // canceled_at stays NULL. We don't know when they decided to
-      // cancel — Whop's API doesn't expose that. Pretending we know
-      // (e.g. by stamping renewal_period_end, which is the cycle-end
-      // date) makes the churn chart lie. Better to be honestly empty
-      // than confidently wrong.
+      // Future-dated renewal_period_end is ALWAYS rejected via
+      // pastProxyOrNull (a canceled_at can't be in the future).
       //
-      // v75.16.2 — removed the renewal_period_end backfill that
-      // misrepresented cycle-end dates as cancellation decisions.
+      // v75.16.4 — restored the past-only backfill that v75.16.2
+      // had removed. Karlo wants past churn data; the cycle-end
+      // approximation is the only practical option since Whop's API
+      // doesn't expose the actual cancellation decision timestamp.
+      const whopEndIso = pastProxyOrNull(
+        toIso(m.renewal_period_end ?? m.expires_at),
+      );
       const wasTerminal = cur
         ? TERMINAL_STATUSES.has((cur.membership_status ?? "").toLowerCase())
         : false;
@@ -190,15 +192,22 @@ export async function runWhopCommunitySync(
         } else if (wasTerminal && !isTerminal) {
           // Re-activation — clear the stamp.
           canceledAtUpdate = null;
+        } else if (
+          wasTerminal &&
+          isTerminal &&
+          !cur.canceled_at &&
+          whopEndIso
+        ) {
+          // Backfill: historical terminal row with no canceled_at and
+          // Whop gave us a past cycle-end date. Approximate but useful.
+          canceledAtUpdate = whopEndIso;
         } else {
-          canceledAtUpdate = undefined; // same bucket — don't touch
+          canceledAtUpdate = undefined; // same bucket with date — don't touch
         }
       } else {
-        // Inserting fresh: canceled_at is NULL even if landing terminal.
-        // We don't know when they actually canceled. Going forward,
-        // webhook + sync transitions will populate accurate dates for
-        // any new cancellations.
-        canceledAtUpdate = null;
+        // Inserting fresh: use cycle-end approximation if terminal,
+        // else null. Future cycle-end → null (don't stamp future).
+        canceledAtUpdate = isTerminal ? whopEndIso : null;
       }
 
       const row: Record<string, unknown> = {
@@ -269,6 +278,20 @@ export async function runWhopCommunitySync(
     );
     throw e;
   }
+}
+
+/**
+ * Returns the ISO string ONLY if it represents a past timestamp.
+ * Returns null for future timestamps, null inputs, or unparseable
+ * inputs. Used to filter Whop's `renewal_period_end` (future for
+ * members still inside their paid cycle) before stamping it as
+ * canceled_at — a cancellation date cannot be in the future.
+ */
+function pastProxyOrNull(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return null;
+  return t <= Date.now() ? iso : null;
 }
 
 async function logSyncRun(

@@ -26,6 +26,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
+import { useAdminScope } from "@/contexts/AdminScopeContext";
 import {
   AdminPage,
   PageHeader,
@@ -77,14 +78,18 @@ export default function NotActivatedPage() {
     "all" | "watching" | "silent"
   >("all");
 
+  const { scope } = useAdminScope();
+
   useEffect(() => {
     void load();
-  }, []);
+    // Re-fetch when scope toggle changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope]);
 
   async function load() {
     setLoading(true);
     const supabase = createClient();
-    const { data: studentsRaw } = await supabase
+    let query = supabase
       .from("students")
       .select(
         "id, name, email, discord_username, created_at, high_churn_risk",
@@ -92,9 +97,13 @@ export default function NotActivatedPage() {
       .eq("membership_status", "active")
       .eq("high_churn_risk", false)
       .eq("csm_exempt", false)
-      .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
-      .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
-      .order("created_at", { ascending: true });
+      .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
+    if (scope === "cohort") {
+      query = query.gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF);
+    }
+    const { data: studentsRaw } = await query.order("created_at", {
+      ascending: true,
+    });
 
     const allIds = (studentsRaw ?? []).map((s) => s.id);
     let activatedIds = new Set<string>();

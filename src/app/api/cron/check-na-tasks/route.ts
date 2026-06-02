@@ -39,6 +39,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { postTeamAlert } from "@/lib/discord";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
+import { csmSprintWindowCutoffIso } from "@/lib/constants";
 
 interface NotActivatedRow {
   id: string;
@@ -100,7 +101,11 @@ export async function GET(request: NextRequest) {
     .eq("csm_exempt", false)
     // v79: paying-plan filter — free-plan users don't need a CSM
     // "not activated" nudge.
-    .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
+    .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
+    // v75.15: only nudge recent joiners. A 5-month-old paying
+    // customer who never activated is a known dud, not someone we
+    // want to keep alerting on.
+    .gte("created_at", csmSprintWindowCutoffIso());
 
   if (studentsErr) {
     console.error("[check-na-tasks] students query failed:", studentsErr);

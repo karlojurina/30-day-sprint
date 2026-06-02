@@ -41,7 +41,10 @@ import {
   evaluateCustomTrigger,
   SCENARIO_BUCKET,
 } from "@/lib/csm-triggers";
-import { TASKS_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+import {
+  TASKS_STUDENT_JOIN_CUTOFF,
+  csmSprintWindowCutoffIso,
+} from "@/lib/constants";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import type { Student, TriggerConfig } from "@/types/database";
 
@@ -130,9 +133,11 @@ export async function GET(request: NextRequest) {
   ] = await Promise.all([
     // Limit to actual paying students who joined on/after the
     // tasks cutoff. csm_exempt = test accounts we never DM.
-    // v79: also filter by whop_plan_id IN paying plans — free-plan
-    // signups don't generate CSM tasks even though their membership
-    // status is active.
+    // v79: also filter by whop_plan_id IN paying plans.
+    // v75.15: also filter to students currently in their 30-day
+    // sprint window — past day 30 they're graduates / lapsed and
+    // pace/stalled tasks no longer make sense (Karlo reported a
+    // stalled-task generated for a 5-month-old student).
     supabase
       .from("students")
       .select(
@@ -141,7 +146,8 @@ export async function GET(request: NextRequest) {
       .eq("membership_status", "active")
       .eq("csm_exempt", false)
       .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
-      .gte("joined_at", TASKS_STUDENT_JOIN_CUTOFF),
+      .gte("joined_at", TASKS_STUDENT_JOIN_CUTOFF)
+      .gte("joined_at", csmSprintWindowCutoffIso()),
     supabase
       .from("student_lesson_completions")
       .select("student_id, lesson_id, completed_at, action_completed_at"),

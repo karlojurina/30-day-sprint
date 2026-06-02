@@ -91,13 +91,22 @@ export function isInLaunchCohort(s: StudentLike): boolean {
 }
 
 /**
- * Scope toggle for admin views. "cohort" = launch cohort only;
- * "all" = every paying member regardless of join date. Lives in the
- * URL search params (?scope=cohort|all) and defaults to "cohort" so
- * launch-week ergonomics don't change unless the user opts in.
+ * Scope toggle for admin views. Internal values stay "cohort" / "all"
+ * (no UI text relies on these strings; the toggle UI relabels them
+ * "New students" and "All members" in v75.15).
+ *
+ * - "cohort" = students who joined on/after ADMIN_STUDENT_JOIN_CUTOFF
+ *              (launch date) — surfaces this as "New students" in UI
+ * - "all"    = every paying member regardless of join date — UI label
+ *              "All members"
+ *
+ * v75.15 flipped the default from "cohort" to "all" so churn and
+ * legacy customer activity are visible without an explicit toggle —
+ * the cohort-only view became misleading once we started counting
+ * legacy paying customers in the dataset.
  */
 export type Scope = "cohort" | "all";
-export const DEFAULT_SCOPE: Scope = "cohort";
+export const DEFAULT_SCOPE: Scope = "all";
 
 /** True iff the student is in the requested scope. */
 export function isInScope(s: StudentLike, scope: Scope): boolean {

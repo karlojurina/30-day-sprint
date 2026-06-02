@@ -23,6 +23,24 @@ export const PAYING_WHOP_PLAN_IDS = new Set<string>([
   "plan_fMMqxAljrzu75",
 ]);
 
+/**
+ * CSM tasks (pace / stalled / no-ship / not-activated / engagement
+ * alerts) only fire for students currently inside their 30-day sprint
+ * window. Students past day 30 are graduates or deeply lapsed —
+ * generating "you're stalled" tasks for someone on day 153 makes
+ * no sense; they've either completed enough or aren't coming back.
+ *
+ * v75.15 — added after Karlo reported a stalled-task generated for a
+ * 5-month-old student. Returns the ISO cutoff for "joined_at >= X"
+ * filters on the CSM crons.
+ */
+export const CSM_SPRINT_WINDOW_DAYS = 30;
+export function csmSprintWindowCutoffIso(): string {
+  return new Date(
+    Date.now() - CSM_SPRINT_WINDOW_DAYS * 86_400_000,
+  ).toISOString();
+}
+
 // Approximate lesson count used as a fallback denominator when the
 // actual lessons array isn't available (e.g. in admin views where
 // we only fetch student records). Kept in sync with the live DB

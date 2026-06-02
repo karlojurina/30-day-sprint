@@ -3,12 +3,14 @@
 /**
  * Small segmented toggle in the admin header. Two states:
  *
- *   [Sprint cohort]  — launch students only (default)
- *   [All members]    — every paying member, incl. legacy/pre-launch
+ *   [New students]  — students who joined on/after launch
+ *                     (ADMIN_STUDENT_JOIN_CUTOFF, 2026-05-25)
+ *   [All members]   — every paying member, including legacy customers
+ *                     who joined before launch (default v75.15+)
  *
- * Visible from every admin page. Dashboard, /admin/students, and
- * /admin/insights respect the choice; other pages (tasks, lessons)
- * ignore it.
+ * Visible from every admin page. Dashboard, /admin/students,
+ * /admin/insights, and /admin/not-activated respect the choice;
+ * other pages (tasks, lessons) ignore it.
  *
  * State lives in AdminScopeContext, persisted in localStorage.
  */
@@ -33,14 +35,14 @@ export function ScopeToggle() {
       }}
     >
       <ScopeButton
-        active={scope === "cohort"}
-        onClick={() => setScope("cohort")}
-        label="Sprint cohort"
-      />
-      <ScopeButton
         active={scope === "all"}
         onClick={() => setScope("all")}
         label="All members"
+      />
+      <ScopeButton
+        active={scope === "cohort"}
+        onClick={() => setScope("cohort")}
+        label="New students"
       />
     </div>
   );
@@ -90,7 +92,7 @@ function ScopeButton({
  * when the toggle has scrolled out of view.
  */
 export function ScopeBadge({ scope }: { scope: Scope }) {
-  const label = scope === "cohort" ? "Sprint cohort" : "All members";
+  const label = scope === "cohort" ? "New students" : "All members";
   return (
     <span
       style={{

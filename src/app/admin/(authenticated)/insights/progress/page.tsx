@@ -35,6 +35,7 @@ import {
 } from "@/components/admin/ui";
 import { useJourneyPaceCounts } from "@/lib/useJourneyPaceCounts";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+import { useAdminScope } from "@/contexts/AdminScopeContext";
 
 interface SnapshotRow {
   snapshot_date: string;
@@ -44,6 +45,12 @@ interface SnapshotRow {
   active_count: number | null;
   joined_count: number | null;
   churned_count: number | null;
+  // v75.15: cohort-only column family. Snapshots written since v77
+  // include both; older rows have null cohort columns.
+  avg_progress_cohort: number | null;
+  active_count_cohort: number | null;
+  joined_count_cohort: number | null;
+  churned_count_cohort: number | null;
 }
 
 type RangePreset = "7" | "14" | "30" | "90" | "all" | "custom";
@@ -83,7 +90,7 @@ const METRICS: Record<MetricKey, MetricDef> = {
   active_count: {
     label: "Active students",
     description:
-      "Students with active sprint membership (post-cutoff cohort).",
+      "Paying members with active or past-due status. Toggle scope in the header.",
     suffix: "",
     color: "#5bb88e",
     mode: "running",
@@ -123,6 +130,7 @@ export default function ProgressInsightsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const { scope } = useAdminScope();
   const paceCounts = useJourneyPaceCounts();
   const bounty = useBountyInsights();
   const sprinters = useCurrentSprinterProgress();
@@ -157,6 +165,17 @@ export default function ProgressInsightsPage() {
           joined_count: r.joined_count == null ? null : Number(r.joined_count),
           churned_count:
             r.churned_count == null ? null : Number(r.churned_count),
+          // v75.15: cohort columns. Older snapshot rows (pre-v77) have
+          // null cohort columns; the scope switch falls back to the
+          // "all" column when cohort is null so charts don't drop out.
+          avg_progress_cohort:
+            r.avg_progress_cohort == null ? null : Number(r.avg_progress_cohort),
+          active_count_cohort:
+            r.active_count_cohort == null ? null : Number(r.active_count_cohort),
+          joined_count_cohort:
+            r.joined_count_cohort == null ? null : Number(r.joined_count_cohort),
+          churned_count_cohort:
+            r.churned_count_cohort == null ? null : Number(r.churned_count_cohort),
         })),
       );
     } catch (e) {
@@ -169,10 +188,26 @@ export default function ProgressInsightsPage() {
     void fetchData();
   }, [fetchData]);
 
+  // v75.15: respect scope toggle. When scope=cohort, overlay the
+  // cohort column values onto the canonical keys so every downstream
+  // consumer (summary memo, MetricChart, etc.) reads from the same
+  // shape. Fall back to "all" values when cohort is null (pre-v77
+  // snapshot rows didn't have cohort columns).
+  const scopedPoints = useMemo<SnapshotRow[]>(() => {
+    if (scope === "all") return points;
+    return points.map((p) => ({
+      ...p,
+      avg_progress: p.avg_progress_cohort ?? p.avg_progress,
+      active_count: p.active_count_cohort ?? p.active_count,
+      joined_count: p.joined_count_cohort ?? p.joined_count,
+      churned_count: p.churned_count_cohort ?? p.churned_count,
+    }));
+  }, [points, scope]);
+
   const summary = useMemo(() => {
-    if (points.length === 0) return null;
-    const last = points[points.length - 1];
-    const first = points[0];
+    if (scopedPoints.length === 0) return null;
+    const last = scopedPoints[scopedPoints.length - 1];
+    const first = scopedPoints[0];
     function metric(key: MetricKey, mode: "running" | "flow") {
       if (mode === "running") {
         const lastV = (last[key] as number | null) ?? null;
@@ -180,7 +215,7 @@ export default function ProgressInsightsPage() {
         const delta = lastV != null && firstV != null ? lastV - firstV : null;
         return { current: lastV, delta };
       }
-      const total = points.reduce(
+      const total = scopedPoints.reduce(
         (sum, p) => sum + ((p[key] as number | null) ?? 0),
         0,
       );
@@ -192,7 +227,7 @@ export default function ProgressInsightsPage() {
       joined_count: metric("joined_count", "flow"),
       churned_count: metric("churned_count", "flow"),
     } as Record<MetricKey, { current: number | null; delta: number | null }>;
-  }, [points]);
+  }, [scopedPoints]);
 
   return (
     <AdminPage>
@@ -383,7 +418,7 @@ export default function ProgressInsightsPage() {
             <MetricCard
               key={key}
               def={METRICS[key]}
-              points={points}
+              points={scopedPoints}
               valueKey={key}
               summary={summary?.[key]}
             />

@@ -85,13 +85,28 @@ export async function runWhopCommunitySync(
       canceled_at: string | null;
       whop_plan_id: string | null;
     };
-    const { data: existingRows } = await supabase
-      .from("students")
-      .select("whop_user_id, email, name, joined_at, last_active_at, discord_user_id, membership_status, canceled_at, whop_plan_id")
-      .in("whop_user_id", userIds)
-      .returns<ExistingRow[]>();
+    // v75.16.3 — batch the .in() filter. PostgREST's URL-length cap
+    // silently truncates .in() at ~1000 items, which meant existing
+    // rows for ~1300 of our 2300 Whop members weren't being returned.
+    // Those members looked "new" to the loop, so transition detection
+    // (was active last sync, now canceled) never fired for them and
+    // canceled_at stayed null. Symptom: dashboard showed 0 churned
+    // even when real cancellations happened.
+    const EXISTING_FETCH_BATCH = 500;
+    const existingRows: ExistingRow[] = [];
+    for (let i = 0; i < userIds.length; i += EXISTING_FETCH_BATCH) {
+      const chunk = userIds.slice(i, i + EXISTING_FETCH_BATCH);
+      const { data } = await supabase
+        .from("students")
+        .select(
+          "whop_user_id, email, name, joined_at, last_active_at, discord_user_id, membership_status, canceled_at, whop_plan_id",
+        )
+        .in("whop_user_id", chunk)
+        .returns<ExistingRow[]>();
+      if (data) existingRows.push(...data);
+    }
     const existing = new Map(
-      (existingRows ?? []).map((r) => [r.whop_user_id, r]),
+      existingRows.map((r) => [r.whop_user_id, r]),
     );
 
     const TERMINAL_STATUSES = new Set(["canceled", "expired"]);

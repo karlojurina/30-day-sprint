@@ -19,6 +19,47 @@
 const WHOP_MEMBERSHIPS_BASE = "https://api.whop.com/api/v2";
 
 /**
+ * Fetch wrapper with Cloudflare-1015-aware retry. Whop's API sits
+ * behind Cloudflare and returns 429 with an HTML/JSON body when
+ * sustained request rates exceed (roughly) ~10/sec from one origin.
+ * Sync runs paginate through hundreds of pages, so we MUST handle
+ * 429 or the whole sync aborts mid-run.
+ *
+ * Strategy: honor Retry-After if present, else exponential backoff
+ * with jitter. Caps total wait at ~60s per attempt. Returns the
+ * final Response (which may still be 429 if the last attempt failed).
+ */
+async function whopFetchWithRetry(
+  url: string,
+  headers: HeadersInit,
+  maxRetries = 5,
+): Promise<Response> {
+  let lastRes: Response | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url, { headers });
+    if (res.status !== 429) return res;
+    lastRes = res;
+    if (attempt === maxRetries) break;
+    // Retry-After is in seconds when present; otherwise exponential
+    // backoff (1s, 2s, 4s, 8s, 16s) capped at 30s.
+    const retryAfterHeader = res.headers.get("retry-after");
+    const retryAfterSec = retryAfterHeader
+      ? parseInt(retryAfterHeader, 10)
+      : NaN;
+    let waitMs = !isNaN(retryAfterSec)
+      ? retryAfterSec * 1000
+      : Math.min(30_000, 1_000 * Math.pow(2, attempt));
+    // Small jitter so multiple in-flight requests don't all retry at once.
+    waitMs += Math.floor(Math.random() * 250);
+    console.warn(
+      `[whop-api] 429 rate-limited; waiting ${waitMs}ms before retry ${attempt + 1}/${maxRetries}`,
+    );
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
+  return lastRes!;
+}
+
+/**
  * Whop v2 /memberships response row. Field names match Whop's actual
  * response shape, NOT the names we'd ideally pick (which would all
  * end in `_id` for clarity). Verified empirically v75.14.3 — the
@@ -118,20 +159,26 @@ export async function* listMembershipsForProduct(
 ): AsyncGenerator<WhopMembershipRow> {
   const apiKey = process.env.WHOP_API_KEY;
   if (!apiKey) throw new Error("WHOP_API_KEY not set");
+  // Whop's actual per_page response was 10 even when we asked for 1
+  // — they have a 10-min cap. Push to 50 to halve the request count.
+  // (Lowering still further would help rate-limit but takes longer.)
   const perPage = opts.perPage ?? 50;
-  const maxPages = opts.maxPages ?? 200;
+  const maxPages = opts.maxPages ?? 500;
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    Accept: "application/json",
+  };
 
   let page = 1;
   while (page <= maxPages) {
+    // Throttle: 200ms between pages → max ~5 req/sec from this loop.
+    // Whop's Cloudflare layer rate-limits at ~10 req/sec so this
+    // stays well under. Adds ~10s to a 56-page sync (acceptable).
+    if (page > 1) await new Promise((r) => setTimeout(r, 200));
     const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?product_id=${encodeURIComponent(
       productId,
     )}&page=${page}&per_page=${perPage}`;
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
-      },
-    });
+    const res = await whopFetchWithRetry(url, headers);
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       throw new Error(
@@ -202,14 +249,13 @@ export async function fetchActiveMembershipForUser(
   // v2 supports user_id filtering, this returns just this user's
   // memberships across our entire business in one call. Cheapest and
   // most reliable when supported.
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    Accept: "application/json",
+  };
   try {
     const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?user_id=${encodeURIComponent(whopUserId)}&per_page=50`;
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
-      },
-    });
+    const res = await whopFetchWithRetry(url, headers);
     console.info(
       `[self-heal] strategy1 user_id-only: HTTP ${res.status} for ${whopUserId}`,
     );
@@ -271,12 +317,7 @@ export async function fetchActiveMembershipForUser(
       `${encodeURIComponent(pid)}&user_id=${encodeURIComponent(whopUserId)}` +
       `&per_page=50`;
     try {
-      const res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          Accept: "application/json",
-        },
-      });
+      const res = await whopFetchWithRetry(url, headers);
       console.info(
         `[self-heal] strategy2 product=${pid}: HTTP ${res.status} for ${whopUserId}`,
       );
@@ -320,12 +361,7 @@ export async function fetchActiveMembershipForUser(
   // Doesn't always work but worth one shot before giving up.
   try {
     const url = `${WHOP_MEMBERSHIPS_BASE}/members/${encodeURIComponent(whopUserId)}`;
-    const res = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        Accept: "application/json",
-      },
-    });
+    const res = await whopFetchWithRetry(url, headers);
     console.info(
       `[self-heal] strategy3 /members/{id}: HTTP ${res.status} for ${whopUserId}`,
     );

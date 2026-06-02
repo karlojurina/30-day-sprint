@@ -18,22 +18,35 @@
 // elsewhere still points at v1.
 const WHOP_MEMBERSHIPS_BASE = "https://api.whop.com/api/v2";
 
+/**
+ * Whop v2 /memberships response row. Field names match Whop's actual
+ * response shape, NOT the names we'd ideally pick (which would all
+ * end in `_id` for clarity). Verified empirically v75.14.3 — the
+ * earlier interface used `user_id` / `plan_id` / `product_id` and
+ * every read returned undefined, silently breaking sync.
+ *
+ * IDs are flat strings at the top level, not nested objects:
+ *   user:    'user_xxxxx'
+ *   plan:    'plan_xxxxx'
+ *   product: 'prod_xxxxx'
+ *
+ * The webhook payload shape is DIFFERENT — those use nested objects
+ * (`user.id`, `product.id`) and live in src/types/whop.ts.
+ */
 export interface WhopMembershipRow {
   id: string;
-  user_id: string | null;
+  user: string | null;
   email: string | null;
-  username: string | null;
   status: string | null;
   valid: boolean | null;
   created_at: number | string | null;
   expires_at: number | string | null;
   discord?: { id?: string; username?: string } | null;
-  /** Some v2 endpoints surface discord_user_id at the top level instead. */
+  /** Some endpoints surface discord_user_id at the top level instead. */
   discord_user_id?: string | null;
-  /** Optional product/plan IDs; the self-heal at login uses them to
-   *  filter to memberships under our configured WHOP_PRODUCT_ID. */
-  product_id?: string | null;
-  plan_id?: string | null;
+  /** Product + plan IDs for filtering / paying-plan classification. */
+  product?: string | null;
+  plan?: string | null;
 }
 
 /**
@@ -127,15 +140,23 @@ export async function* listMembershipsForProduct(
     }
     const json = (await res.json()) as {
       data?: WhopMembershipRow[];
-      pagination?: { next_page?: number | null; current_page?: number };
+      pagination?: {
+        current_page?: number;
+        total_page?: number;
+        total_count?: number;
+      };
     };
     const items = Array.isArray(json.data) ? json.data : [];
     for (const item of items) {
       yield item;
     }
-    const nextPage = json.pagination?.next_page;
-    if (!nextPage || nextPage <= page) break;
-    page = nextPage;
+    // Whop v2 uses {current_page, total_page} pagination, not the
+    // {next_page} shape my earlier code assumed. Loop while there are
+    // more pages; break when we've consumed the last one.
+    const currentPage = json.pagination?.current_page ?? page;
+    const totalPage = json.pagination?.total_page ?? currentPage;
+    if (currentPage >= totalPage) break;
+    page = currentPage + 1;
   }
 }
 
@@ -199,9 +220,9 @@ export async function fetchActiveMembershipForUser(
         `[self-heal] strategy1 returned ${rows.length} memberships: ${JSON.stringify(
           rows.map((r) => ({
             id: r.id,
-            user_id: r.user_id,
-            product_id: r.product_id,
-            plan_id: r.plan_id,
+            user: r.user,
+            product: r.product,
+            plan: r.plan,
             status: r.status,
             valid: r.valid,
           })),
@@ -211,7 +232,7 @@ export async function fetchActiveMembershipForUser(
       // user_id filter is silently ignored and strategy 1 isn't safe
       // to use — fall through to per-product iteration.
       const allMatchUser = rows.every(
-        (r) => !r.user_id || r.user_id === whopUserId,
+        (r) => !r.user || r.user === whopUserId,
       );
       if (!allMatchUser) {
         console.warn(
@@ -220,7 +241,7 @@ export async function fetchActiveMembershipForUser(
       } else {
         const myActive = rows.find((m) => {
           const matchesProduct =
-            !m.product_id || productIds.includes(m.product_id);
+            !m.product || productIds.includes(m.product);
           if (!matchesProduct) return false;
           const status = mapStatus(m);
           return status === "active" || status === "past_due";
@@ -262,15 +283,15 @@ export async function fetchActiveMembershipForUser(
       if (!res.ok) continue;
       const json = (await res.json()) as { data?: WhopMembershipRow[] };
       const rows = (json.data ?? []).filter(
-        (r) => !r.user_id || r.user_id === whopUserId,
+        (r) => !r.user || r.user === whopUserId,
       );
       console.info(
         `[self-heal] strategy2 product=${pid} returned ${rows.length} (post-filter) memberships: ${JSON.stringify(
           rows.map((r) => ({
             id: r.id,
-            user_id: r.user_id,
-            product_id: r.product_id,
-            plan_id: r.plan_id,
+            user: r.user,
+            product: r.product,
+            plan: r.plan,
             status: r.status,
             valid: r.valid,
           })),
@@ -317,8 +338,8 @@ export async function fetchActiveMembershipForUser(
         `[self-heal] strategy3 member endpoint returned ${rows.length} embedded memberships: ${JSON.stringify(
           rows.map((r) => ({
             id: r.id,
-            product_id: r.product_id,
-            plan_id: r.plan_id,
+            product: r.product,
+            plan: r.plan,
             status: r.status,
             valid: r.valid,
           })),
@@ -326,7 +347,7 @@ export async function fetchActiveMembershipForUser(
       );
       const active = rows.find((m) => {
         const matchesProduct =
-          !m.product_id || productIds.includes(m.product_id);
+          !m.product || productIds.includes(m.product);
         if (!matchesProduct) return false;
         const status = mapStatus(m);
         return status === "active" || status === "past_due";
@@ -364,17 +385,17 @@ export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
   const byUser = new Map<string, WhopMembershipRow>();
   for (const pid of productIds) {
     for await (const row of listMembershipsForProduct(pid)) {
-      if (!row.user_id) continue;
+      if (!row.user) continue;
       // Keep the most-recently-created membership per user (most likely
       // the current one).
-      const existing = byUser.get(row.user_id);
+      const existing = byUser.get(row.user);
       if (!existing) {
-        byUser.set(row.user_id, row);
+        byUser.set(row.user, row);
         continue;
       }
       const a = toIso(existing.created_at);
       const b = toIso(row.created_at);
-      if (a && b && b > a) byUser.set(row.user_id, row);
+      if (a && b && b > a) byUser.set(row.user, row);
     }
   }
   return Array.from(byUser.values());

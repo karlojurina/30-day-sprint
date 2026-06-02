@@ -73,7 +73,7 @@ export async function runWhopCommunitySync(
     // Pull existing rows in one query to decide insert-vs-update + to
     // preserve fields we don't want to overwrite + to detect
     // status transitions for canceled_at stamping.
-    const userIds = members.map((m) => m.user_id).filter(Boolean) as string[];
+    const userIds = members.map((m) => m.user).filter(Boolean) as string[];
     type ExistingRow = {
       whop_user_id: string;
       email: string | null;
@@ -101,34 +101,23 @@ export async function runWhopCommunitySync(
     // forgets to update PAYING_WHOP_PLAN_IDS.
     const unknownPlanWarnings = new Set<string>();
 
-    // v75.14.1 DIAGNOSTIC — dump the first member's full shape so we
-    // can see what fields Whop's v2 memberships endpoint actually
-    // returns. The plan_id column isn't populating after sync, which
-    // means either Whop returns it under a different key, or it's not
-    // included at this endpoint by default. Remove this block once
-    // we've confirmed the right field name.
-    if (members.length > 0) {
-      console.info(
-        `[whop-sync] DIAGNOSTIC sample keys: ${Object.keys(members[0]).join(",")}`,
-      );
-      console.info(
-        `[whop-sync] DIAGNOSTIC sample row: ${JSON.stringify(members[0]).slice(0, 1000)}`,
-      );
-    }
-
     for (const m of members) {
-      if (!m.user_id) {
+      if (!m.user) {
         result.skipped++;
         continue;
       }
-      const cur = existing.get(m.user_id);
+      const cur = existing.get(m.user);
       const joinedAt = toIso(m.created_at) ?? new Date().toISOString();
       const status = mapStatus(m);
       const discordId = m.discord?.id ?? m.discord_user_id ?? null;
       const discordUsername = m.discord?.username ?? null;
-      const name = m.username ?? cur?.name ?? null;
+      // Whop's v2 memberships response has no top-level username/name
+      // field — the user is just an ID string. The student's display
+      // name comes from the OAuth callback (userInfo.name on first
+      // login), not from the sync. Preserve cur.name if it exists.
+      const name = cur?.name ?? null;
       const email = m.email ?? cur?.email ?? null;
-      const planId = m.plan_id ?? null;
+      const planId = m.plan ?? null;
 
       // Surface unknown plan IDs so we notice if a new paid plan
       // gets added in Whop without an allowlist update. Only warn
@@ -183,10 +172,10 @@ export async function runWhopCommunitySync(
         const { error } = await supabase
           .from("students")
           .update(update)
-          .eq("whop_user_id", m.user_id);
+          .eq("whop_user_id", m.user);
         if (error) {
           console.error(
-            `[whop-sync] update failed for ${m.user_id}:`,
+            `[whop-sync] update failed for ${m.user}:`,
             error.message,
           );
           result.errors++;
@@ -200,7 +189,7 @@ export async function runWhopCommunitySync(
         // activation webhook and they've since canceled).
         const isTerminal = TERMINAL_STATUSES.has(status);
         const { error } = await supabase.from("students").insert({
-          whop_user_id: m.user_id,
+          whop_user_id: m.user,
           whop_membership_id: m.id,
           membership_status: status,
           email,
@@ -214,7 +203,7 @@ export async function runWhopCommunitySync(
         });
         if (error) {
           console.error(
-            `[whop-sync] insert failed for ${m.user_id}:`,
+            `[whop-sync] insert failed for ${m.user}:`,
             error.message,
           );
           result.errors++;

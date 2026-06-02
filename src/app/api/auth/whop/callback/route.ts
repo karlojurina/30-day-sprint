@@ -141,7 +141,9 @@ export async function GET(request: NextRequest) {
                 whop_user_id: userInfo.sub,
                 whop_membership_id: adminRow.id,
                 email: adminRow.email ?? userInfo.email ?? null,
-                name: adminRow.username ?? userInfo.name ?? null,
+                // Whop's v2 row has no `username` field. Fall back
+                // to the OAuth userInfo.name.
+                name: userInfo.name ?? null,
                 membership_status: mapStatus(adminRow),
                 joined_at:
                   toIso(adminRow.created_at) ?? new Date().toISOString(),
@@ -149,7 +151,7 @@ export async function GET(request: NextRequest) {
                 // user is correctly classified as paying / free from
                 // first login. Without this they'd default to NULL
                 // (non-paying) until the next nightly sync.
-                whop_plan_id: adminRow.plan_id ?? null,
+                whop_plan_id: adminRow.plan ?? null,
               },
               { onConflict: "whop_user_id" },
             );

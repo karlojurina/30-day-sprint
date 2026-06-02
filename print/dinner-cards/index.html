@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>EcomTalent · Dinner cards</title>
+<style>
+  /* ============================================
+     EcomTalent · Dinner-event business cards
+     50 cards · European size 85 × 55 mm
+     2 cols × 5 rows per A4 sheet · 5 sheets total
+     ============================================ */
+
+  @font-face {
+    font-family: 'Awesome Serif';
+    src: url('AwesomeSerif-VAR.ttf') format('truetype-variations'),
+         url('AwesomeSerif-VAR.ttf') format('truetype');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: block;
+  }
+  @font-face {
+    font-family: 'Awesome Serif';
+    src: url('AwesomeSerif-Italic-VAR.ttf') format('truetype-variations'),
+         url('AwesomeSerif-Italic-VAR.ttf') format('truetype');
+    font-weight: 100 900;
+    font-style: italic;
+    font-display: block;
+  }
+
+  :root {
+    --paper:      #FFFFFF;
+    --ink:        #0F1115;
+    --ink-soft:   #4A4D55;
+    --ink-faint:  #9A9DA5;
+    --gold:       #8E7B4A;
+    --hairline:   #E2DFD8;
+  }
+
+  /* ---------- print page setup ---------- */
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #f0eee8;
+    font-family: 'Awesome Serif', 'Times New Roman', Georgia, serif;
+    color: var(--ink);
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* ---------- sheet (one per A4 page) ---------- */
+  .sheet {
+    width: 210mm;
+    height: 297mm;
+    padding: 11mm 20mm;
+    box-sizing: border-box;
+    background: var(--paper);
+    margin: 8mm auto;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    page-break-after: always;
+    display: grid;
+    grid-template-columns: repeat(2, 85mm);
+    grid-template-rows: repeat(5, 55mm);
+    gap: 0;
+  }
+  .sheet:last-child { page-break-after: auto; }
+
+  /* ---------- single card ----------
+     space-evenly distributes vertical breathing room: equal air above
+     the URL, between the URL and the body group, and below the body.
+     Avoids the prior "body floats in centered void" effect. */
+  .card {
+    width: 85mm;
+    height: 55mm;
+    box-sizing: border-box;
+    padding: 5mm 7mm;
+    position: relative;
+    background: var(--paper);
+    overflow: hidden;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-evenly;
+  }
+
+  /* faint outline so cuts are visible on white paper */
+  .card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 0.2mm dashed var(--hairline);
+    pointer-events: none;
+  }
+
+  /* tiny corner crop marks for precise cutting */
+  .card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(var(--ink-faint), var(--ink-faint)) top left    / 2mm 0.2mm no-repeat,
+      linear-gradient(var(--ink-faint), var(--ink-faint)) top left    / 0.2mm 2mm no-repeat,
+      linear-gradient(var(--ink-faint), var(--ink-faint)) top right   / 2mm 0.2mm no-repeat,
+      linear-gradient(var(--ink-faint), var(--ink-faint)) top right   / 0.2mm 2mm no-repeat,
+      linear-gradient(var(--ink-faint), var(--ink-faint)) bottom left / 2mm 0.2mm no-repeat,
+      linear-gradient(var(--ink-faint), var(--ink-faint)) bottom left / 0.2mm 2mm no-repeat,
+      linear-gradient(var(--ink-faint), var(--ink-faint)) bottom right/ 2mm 0.2mm no-repeat,
+      linear-gradient(var(--ink-faint), var(--ink-faint)) bottom right/ 0.2mm 2mm no-repeat;
+    pointer-events: none;
+  }
+
+  /* =====================================================================
+     Three typographic treatments only — the static-ad rule.
+       1. HERO   : the "90% off." line. Dominates the card.
+       2. BODY   : the URL and the action line. Quiet supporting voice.
+       3. CODE   : the redeemable code. Framed, letter-spaced, anchored.
+     The gold "90%" is the SAME treatment as the rest of the hero — only
+     its color changes. Color alone isn't a separate treatment.
+     ===================================================================== */
+
+  /* group around the hero + code (the actual offer block) */
+  .offer-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4mm;
+  }
+
+  /* TREATMENT 1 — HERO */
+  .hero {
+    font-family: 'Awesome Serif', serif;
+    font-weight: 500;
+    font-style: italic;
+    font-size: 30pt;
+    line-height: 1;
+    letter-spacing: -0.015em;
+    color: var(--ink);
+    text-align: center;
+  }
+  .hero .pct {
+    color: var(--ink);  /* same color as the rest — no accent */
+  }
+
+  /* TREATMENT 2 — BODY (URL + action line share this exactly) */
+  .body-text {
+    font-family: 'Awesome Serif', serif;
+    font-weight: 400;
+    font-style: normal;
+    font-size: 9pt;
+    line-height: 1.3;
+    letter-spacing: 0.02em;
+    color: var(--ink-soft);
+    text-align: center;
+  }
+
+  /* TREATMENT 3 — CODE
+     text-indent compensates for the trailing letter-spacing on the
+     last character. Without it, the bounding box includes 0.16em of
+     invisible space on the right, making the text appear shifted left
+     inside an otherwise symmetric padding box. */
+  .code {
+    display: inline-block;
+    font-family: 'Awesome Serif', serif;
+    font-weight: 600;
+    font-style: normal;
+    font-size: 11pt;
+    line-height: 1;
+    letter-spacing: 0.16em;
+    text-indent: 0.16em;
+    color: var(--ink);
+    padding: 1.5mm 4mm;
+    border: 0.25mm solid var(--ink);
+    border-radius: 1mm;
+  }
+
+  /* ---------- screen-only helper bar ---------- */
+  .toolbar {
+    position: sticky;
+    top: 0;
+    background: #1a1a1a;
+    color: #f5f5f0;
+    padding: 10px 16px;
+    font-family: -apple-system, system-ui, sans-serif;
+    font-size: 12px;
+    z-index: 10;
+    display: flex;
+    gap: 16px;
+    align-items: center;
+  }
+  .toolbar button {
+    background: #DDDDD5;
+    color: #0F1115;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 4px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .toolbar .hint { color: #999; }
+  @media print {
+    .toolbar { display: none; }
+    .sheet { margin: 0; box-shadow: none; }
+    body { background: white; }
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button onclick="window.print()">Print →</button>
+  <span class="hint">In the print dialog: paper = A4, margins = <strong>None</strong>, scale = 100%, headers/footers = off.</span>
+</div>
+
+<script>
+  // 50 random, unguessable codes — created on Whop, sequential codes archived.
+  // Order is random; cards print in this order top-to-bottom, left-to-right.
+  const CODES = [
+    'DINNER-ZDP8-90', 'DINNER-9WA9-90', 'DINNER-78ZH-90', 'DINNER-QQ2V-90', 'DINNER-62X2-90',
+    'DINNER-RGJE-90', 'DINNER-UFDX-90', 'DINNER-Y6HT-90', 'DINNER-DW7G-90', 'DINNER-2NGX-90',
+    'DINNER-JUM5-90', 'DINNER-J8BD-90', 'DINNER-WCGU-90', 'DINNER-GCS8-90', 'DINNER-Y8BX-90',
+    'DINNER-JUJF-90', 'DINNER-BTUQ-90', 'DINNER-V7PG-90', 'DINNER-X4QP-90', 'DINNER-KZNM-90',
+    'DINNER-CC6T-90', 'DINNER-QRRS-90', 'DINNER-RPVG-90', 'DINNER-8EGK-90', 'DINNER-G5C2-90',
+    'DINNER-QW22-90', 'DINNER-KYC5-90', 'DINNER-76WR-90', 'DINNER-SJZB-90', 'DINNER-7QQH-90',
+    'DINNER-2G2V-90', 'DINNER-A5ZP-90', 'DINNER-S3HM-90', 'DINNER-EKHK-90', 'DINNER-BC6N-90',
+    'DINNER-42VM-90', 'DINNER-K8AR-90', 'DINNER-SMPB-90', 'DINNER-4CDR-90', 'DINNER-5YCG-90',
+    'DINNER-FW8D-90', 'DINNER-7JM3-90', 'DINNER-UPHZ-90', 'DINNER-FEEB-90', 'DINNER-P2QJ-90',
+    'DINNER-9G33-90', 'DINNER-2AGN-90', 'DINNER-HS3G-90', 'DINNER-3JSH-90', 'DINNER-4P73-90',
+  ];
+  const PER_SHEET = 10;
+
+  const body = document.body;
+  for (let s = 0; s < CODES.length / PER_SHEET; s++) {
+    const sheet = document.createElement('div');
+    sheet.className = 'sheet';
+    for (let i = 0; i < PER_SHEET; i++) {
+      const code = CODES[s * PER_SHEET + i];
+      sheet.insertAdjacentHTML('beforeend', `
+        <div class="card">
+          <div class="body-text">whop.com/ecomtalent</div>
+          <div class="offer-group">
+            <div class="hero"><span class="pct">90%</span> off.</div>
+            <div class="code">${code}</div>
+          </div>
+          <div class="body-text">Start stacking skills.</div>
+        </div>
+      `);
+    }
+    body.appendChild(sheet);
+  }
+</script>
+
+</body>
+</html>

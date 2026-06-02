@@ -36,7 +36,16 @@ When adding a new table, append it here. When deleting a field, scan
   `email`, `name`, `joined_at`, `last_active_at`,
   `membership_status`, `discord_username`, `discord_user_id`,
   `current_title`, `csm_exempt`, `ad_submissions_verified`,
-  `high_churn_risk` (v51)
+  `high_churn_risk` (v51), `canceled_at` (v77 — stamped on transition
+  into canceled/expired; powers snapshot churn counts. Mixed
+  semantics: webhook + sync transitions stamp `now()` real-time;
+  historical backfill via `renewal_period_end` for members already
+  canceled when first synced — approximate to actual decision date
+  by up to 30 days. Future-dated values are always rejected.),
+  `whop_plan_id` (v79 — drives paying / free classification via
+  `PAYING_WHOP_PLAN_IDS` allowlist. Free-plan members keep full
+  student-side access but are excluded from CSM tasks, dashboard
+  metrics, and operational surfaces.)
 - **Note:** As of v46/v47, students is identity + admin-flag only.
   Per-function state (streaks, milestones, Whop sync, celebrations,
   DM log) lives in sibling tables below — read CLAUDE.md
@@ -219,17 +228,49 @@ When adding a new table, append it here. When deleting a field, scan
   optional ops digest
 - **Stable contract:** `student_id`, `scenario_id`, `template_id`,
   `status` (open/completed/dismissed), `behavior_summary`,
-  `created_at`, `completed_at`
+  `created_at`, `completed_at`, `dismissed_at`, `dismissed_by`,
+  `notes`
+- **CSM cron filters (v75.15+):** `check-csm-tasks`,
+  `check-engagement`, `check-na-tasks` all gate on
+  `joined_at >= csmSprintWindowCutoffIso()` (= `now() - 30d`) AND
+  `whop_plan_id IN PAYING_WHOP_PLAN_IDS`. So no task fires for a
+  student past day 30 of their sprint or on a free plan. Day-28 DM
+  has its own tight 1-day window.
 - **Note:** Not to be confused with the legacy curriculum `tasks`
   table (`student_task_completions`'s parent, predates `lessons`).
   The CSM `tasks` table is a *queue*.
 
 ### `daily_progress_snapshots`
 - **Depends on:** `students`, `lessons`
-- **Depended on by:** `/admin/insights`, pace metric math,
-  retention analysis
-- **Stable contract:** `student_id`, `snapshot_date`, completion
-  counts per region
+- **Depended on by:** `/admin/insights`, `/admin` dashboard sparklines,
+  pace metric math, retention analysis
+- **Stable contract:** `snapshot_date` (primary key, daily grain),
+  all-paying-members counts (`active_count`, `joined_count`,
+  `churned_count`, `avg_progress`) AND cohort-only counts
+  (`active_count_cohort`, `joined_count_cohort`,
+  `churned_count_cohort`, `avg_progress_cohort`, added v77). The
+  scope toggle in admin picks which column family to render.
+- **Filter rules** applied by `snapshot-progress` cron + the
+  `rebuild_daily_snapshots()` RPC:
+  - "active" = `membership_status IN ('active', 'past_due')`
+  - paying = `whop_plan_id IN PAYING_WHOP_PLAN_IDS` (v79; the
+    plan-IDs are duplicated in the RPC since SQL can't read TS
+    constants — when you change one, change the other)
+  - cohort = `joined_at >= ADMIN_STUDENT_JOIN_CUTOFF`
+  - churned_count = `canceled_at::date = day` (NOT `updated_at` —
+    that fires on every sync)
+
+### `sync_runs` (v77)
+- **Depends on:** —
+- **Depended on by:** team-read RLS only; queried ad-hoc to confirm
+  cron health
+- **Stable contract:** `id`, `started_at`, `finished_at`, `source`
+  (`cron` / `admin-button`), `status` (`success` / `failed` /
+  `running`), counts (`fetched`, `inserted`, `updated`, `skipped`,
+  `errors`), `error_message`, `duration_ms`
+- **Note:** Written by `runWhopCommunitySync()` in
+  `src/lib/whop-sync-runner.ts` — every sync attempt produces one
+  row regardless of outcome.
 
 ### `student_rewards` + `hidden_rewards`
 - **Depends on:** `students`

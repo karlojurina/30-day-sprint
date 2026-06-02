@@ -38,7 +38,7 @@ Two surfaces in one Next.js app:
 | `/login` | Whop OAuth entry |
 | `/auth/callback` + `/auth/complete` | OAuth callback + post-auth landing |
 | `/dashboard` | The map (overview + 4 regions). Auto-redirects to `/dashboard/playbook` once the student has completed `PLAYBOOK_UNLOCK_LESSON_ID` (l078, the last R4 watch lesson) unless `?map=1` is passed. |
-| `/dashboard/playbook` | Map 2 hub. Unlocks when l078 ("How I Approach Research / Coming Up With Ad Ideas") is completed. Bounty Access (`bounty_access_claimed_at`) is a SEPARATE milestone and does NOT unlock the Playbook. |
+| `/dashboard/playbook` | Map 2 hub. Two unlock paths (v75.16, see `isPlaybookUnlocked` in `src/lib/progress.ts`): standard sprint completion of l078 ("How I Approach Research / Coming Up With Ad Ideas"), OR legacy auto-unlock (`joined_at >= 30 days ago` AND completion ratio >= 0.80) — for older customers who passed the action-item phase before our platform existed. Bounty Access (`bounty_access_claimed_at`) is a SEPARATE milestone and does NOT unlock the Playbook. |
 
 **State:** `AuthContext` (session + student row), `StudentContext`
 (lessons, completions, streaks, discount, sprint milestones, playbook
@@ -60,6 +60,8 @@ welcome, first-client landed, etc.).
 | `/admin/discord` | Day-28 DM toggles, preview |
 | `/admin/settings` | Admin config (booking link, program link, etc.) |
 | `/journal/[studentId]` | Student daily-notes journal (read-only for team) |
+
+**Scope toggle (v75.13+):** every metric surface (dashboard, /admin/students, /admin/journey, /admin/not-activated, /admin/insights) respects a global "All members | New students" toggle in the header (right of the avatar). Default is **All members** (v75.15+). "New students" = joined since launch (`ADMIN_STUDENT_JOIN_CUTOFF` = 2026-05-25). State persists in localStorage via `AdminScopeContext`. CSM crons and the day-28 DM ignore the toggle — they have their own day-30 sprint-window filter.
 
 ## API Routes
 
@@ -170,7 +172,8 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
   `discount_feedback_responses` — discount flow
 - `disengagement_alerts` — auto-generated churn alerts
 - `tasks` — CSM task queue (per-student, per-scenario, links to `templates`)
-- `daily_progress_snapshots` — frozen daily progress per student
+- `daily_progress_snapshots` — frozen daily progress per student. v77 added cohort columns (`active_count_cohort`, `joined_count_cohort`, `churned_count_cohort`, `avg_progress_cohort`) so the scope toggle can swap between all-paying and launch-cohort views without refetching.
+- `sync_runs` — audit log for the Whop community sync (v77). One row per attempt with source (cron / admin-button), status (success/failed), counts (fetched/inserted/updated/skipped/errors), duration_ms, error_message. Team-read RLS. Use to answer "did sync run last night?" without digging Vercel logs.
 - `achievements` — catalog of 17 unlockable achievements (v53)
 - `student_achievements` — per-student unlock rows + `achievement_unlock_stats`
   view exposing global unlock % (v53)
@@ -217,12 +220,13 @@ Schedules live in `vercel.json`.
 | `streak.ts` | Streak math |
 | `quiz.ts` | Quiz scoring (legacy single quiz) |
 | `region-quizzes.ts` | Region-quiz scoring + format dispatch (v54/v65/v69/v70) |
-| `progress.ts` | Shared progress / completion derivations |
+| `progress.ts` | Shared progress / completion derivations + `isPlaybookUnlocked` (gate helper, v75.16) |
+| `admin/metrics-definitions.ts` | Canonical predicates for admin metrics (v75.13+): `isActiveMember` (active + past_due), `isPayingMember` (active member on a `PAYING_WHOP_PLAN_IDS` plan), `isInLaunchCohort`, scope helpers |
 | `achievements.ts` | Achievement catalog + unlock evaluation (v53) |
 | `discord.ts` | Discord HTTP helpers |
 | `day28-embed.ts` | Day-28 DM embed builder |
 | `titles.ts` | Student title progression |
-| `constants.ts` | Lesson groups, discount window, `DISCOUNT_GATE_LESSON_ID`, `PLAYBOOK_UNLOCK_LESSON_ID` (l078), launch date, etc. |
+| `constants.ts` | Lesson groups, discount window, `DISCOUNT_GATE_LESSON_ID`, `PLAYBOOK_UNLOCK_LESSON_ID` (l078), launch date, `PAYING_WHOP_PLAN_IDS` allowlist (v79), `csmSprintWindowCutoffIso()` (v75.15 — `now - 30d` for CSM cron filters), etc. |
 | `motion.ts` | GSAP / Framer easing constants |
 | `useMediaQuery.ts` | SSR-safe phone-detection hook |
 | `useFocusTrap.ts` | Modal a11y |
@@ -236,6 +240,7 @@ Schedules live in `vercel.json`.
 |---------|-------|-----------------|
 | `AuthContext` | Global | `user`, `session`, `student`, `teamMember`, `isStudent`, `isTeam`, `signOut()`, `setStudent()` |
 | `StudentContext` | `/dashboard`, `/dashboard/playbook` | Lessons, completions, streaks, discount state, sprint milestones, playbook welcome, first-client landed, action-shipped toggles, etc. |
+| `AdminScopeContext` | `/admin/*` (v75.13+) | `scope` ("cohort" \| "all") + `setScope`. Persisted to localStorage. Drives "New students vs All members" toggle in admin header. |
 
 ## Integrations
 

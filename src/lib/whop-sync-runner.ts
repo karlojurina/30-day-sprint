@@ -101,6 +101,21 @@ export async function runWhopCommunitySync(
     // forgets to update PAYING_WHOP_PLAN_IDS.
     const unknownPlanWarnings = new Set<string>();
 
+    // v75.14.1 DIAGNOSTIC — dump the first member's full shape so we
+    // can see what fields Whop's v2 memberships endpoint actually
+    // returns. The plan_id column isn't populating after sync, which
+    // means either Whop returns it under a different key, or it's not
+    // included at this endpoint by default. Remove this block once
+    // we've confirmed the right field name.
+    if (members.length > 0) {
+      console.info(
+        `[whop-sync] DIAGNOSTIC sample keys: ${Object.keys(members[0]).join(",")}`,
+      );
+      console.info(
+        `[whop-sync] DIAGNOSTIC sample row: ${JSON.stringify(members[0]).slice(0, 1000)}`,
+      );
+    }
+
     for (const m of members) {
       if (!m.user_id) {
         result.skipped++;

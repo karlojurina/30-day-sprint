@@ -82,6 +82,11 @@ export interface WhopMembershipRow {
   valid: boolean | null;
   created_at: number | string | null;
   expires_at: number | string | null;
+  /** For canceled / expired memberships this is approximately when
+   *  access ended (the end of the last paid billing cycle). For
+   *  active memberships it's a future date — only use it as a
+   *  cancellation proxy when status is terminal. */
+  renewal_period_end?: number | string | null;
   discord?: { id?: string; username?: string } | null;
   /** Some endpoints surface discord_user_id at the top level instead. */
   discord_user_id?: string | null;

@@ -145,11 +145,21 @@ export async function runWhopCommunitySync(
         );
       }
 
-      // canceled_at transition tracking:
-      //   - non-terminal → terminal: stamp now()
-      //   - terminal → non-terminal (re-activation): clear to null
-      //   - same bucket: keep existing value (undefined here, then
-      //     drop from the upsert row so we don't touch the column)
+      // canceled_at handling. Three sources, in priority order:
+      //   1. Real-time transition observed: stamp now() (most accurate)
+      //   2. Whop's renewal_period_end: end of last paid billing
+      //      cycle — best proxy for "when access ended" when we're
+      //      inserting a member who was already canceled
+      //   3. Whop's expires_at: time-bound expiry (less reliable for
+      //      subscription cancellations, more for one-time products)
+      //
+      // v75.14.6 fix: previous code stamped now() for ALL terminal
+      // inserts. The first full sync inserted 1,553 historically-
+      // canceled members and stamped them all to "today" → dashboard
+      // showed 1551 churns in a single day. Now we only stamp now()
+      // for genuine same-sync transitions; for inserts and stale-row
+      // backfills, we recover the real date from Whop fields.
+      const whopEndIso = toIso(m.renewal_period_end ?? m.expires_at);
       const wasTerminal = cur
         ? TERMINAL_STATUSES.has((cur.membership_status ?? "").toLowerCase())
         : false;
@@ -157,15 +167,30 @@ export async function runWhopCommunitySync(
       let canceledAtUpdate: string | null | undefined;
       if (cur) {
         if (!wasTerminal && isTerminal) {
+          // Genuine transition observed this sync — stamp now()
+          // (real-time event, most accurate).
           canceledAtUpdate = new Date().toISOString();
         } else if (wasTerminal && !isTerminal) {
+          // Re-activation — clear the stamp.
           canceledAtUpdate = null;
+        } else if (
+          wasTerminal &&
+          isTerminal &&
+          !cur.canceled_at &&
+          whopEndIso
+        ) {
+          // Existing terminal row with no historical date AND Whop
+          // gave us a useful proxy — fill it in. Lets us recover
+          // historical churn dates without a hard backfill.
+          canceledAtUpdate = whopEndIso;
         } else {
           canceledAtUpdate = undefined; // don't touch
         }
       } else {
-        // Inserting fresh: set canceled_at only if landing terminal.
-        canceledAtUpdate = isTerminal ? new Date().toISOString() : null;
+        // Inserting fresh: use Whop's end-of-cycle proxy if terminal,
+        // else null. NEVER stamp now() on insert — we don't know
+        // when this member actually canceled.
+        canceledAtUpdate = isTerminal ? (whopEndIso ?? null) : null;
       }
 
       const row: Record<string, unknown> = {

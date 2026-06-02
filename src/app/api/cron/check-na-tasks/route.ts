@@ -102,10 +102,12 @@ export async function GET(request: NextRequest) {
     // v79: paying-plan filter — free-plan users don't need a CSM
     // "not activated" nudge.
     .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
-    // v75.15: only nudge recent joiners. A 5-month-old paying
-    // customer who never activated is a known dud, not someone we
-    // want to keep alerting on.
-    .gte("created_at", csmSprintWindowCutoffIso());
+    // v75.16.5: filter by joined_at (Whop's membership-creation
+    // date), NOT created_at (when WE inserted the row). After bulk
+    // syncs, created_at is "today" for everyone, so the filter
+    // matched everyone and the pool ballooned to 494. joined_at
+    // is the real "when did they pay on Whop" timestamp.
+    .gte("joined_at", csmSprintWindowCutoffIso());
 
   if (studentsErr) {
     console.error("[check-na-tasks] students query failed:", studentsErr);

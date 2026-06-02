@@ -147,19 +147,21 @@ export async function runWhopCommunitySync(
 
       // canceled_at handling. Three sources, in priority order:
       //   1. Real-time transition observed: stamp now() (most accurate)
-      //   2. Whop's renewal_period_end: end of last paid billing
-      //      cycle — best proxy for "when access ended" when we're
-      //      inserting a member who was already canceled
-      //   3. Whop's expires_at: time-bound expiry (less reliable for
-      //      subscription cancellations, more for one-time products)
+      //   2. Whop's renewal_period_end / expires_at IF in the past —
+      //      a reasonable proxy for "when their access actually ended"
+      //   3. NULL — we don't know when they canceled; better to
+      //      omit than to lie
       //
-      // v75.14.6 fix: previous code stamped now() for ALL terminal
-      // inserts. The first full sync inserted 1,553 historically-
-      // canceled members and stamped them all to "today" → dashboard
-      // showed 1551 churns in a single day. Now we only stamp now()
-      // for genuine same-sync transitions; for inserts and stale-row
-      // backfills, we recover the real date from Whop fields.
-      const whopEndIso = toIso(m.renewal_period_end ?? m.expires_at);
+      // v75.16.1 fix: previous code took renewal_period_end at face
+      // value, which is a FUTURE date for canceled members whose paid
+      // cycle hasn't ended yet on Whop's calendar. That created 165
+      // rows with future canceled_at values, polluting the churn
+      // chart with "people who will churn next month" — semantically
+      // wrong. pastProxyOrNull rejects future dates and returns null
+      // so they don't contribute to any day's churn count.
+      const whopEndIso = pastProxyOrNull(
+        toIso(m.renewal_period_end ?? m.expires_at),
+      );
       const wasTerminal = cur
         ? TERMINAL_STATUSES.has((cur.membership_status ?? "").toLowerCase())
         : false;
@@ -261,6 +263,21 @@ export async function runWhopCommunitySync(
     );
     throw e;
   }
+}
+
+/**
+ * Returns the ISO string ONLY if it represents a past timestamp.
+ * Returns null for future timestamps, null inputs, or unparseable
+ * inputs. Used to filter Whop's `renewal_period_end` (which is a
+ * future date for members still inside their paid cycle) before
+ * stamping it as `canceled_at` — a member's cancellation date
+ * cannot be in the future.
+ */
+function pastProxyOrNull(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return null;
+  return t <= Date.now() ? iso : null;
 }
 
 async function logSyncRun(

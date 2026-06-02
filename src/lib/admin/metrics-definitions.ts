@@ -17,7 +17,10 @@
  * canonical.
  */
 
-import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+import {
+  ADMIN_STUDENT_JOIN_CUTOFF,
+  PAYING_WHOP_PLAN_IDS,
+} from "@/lib/constants";
 
 /**
  * The set of membership_status values that mean "this user currently
@@ -40,6 +43,7 @@ export type VisibleStatus = (typeof VISIBLE_STATUSES)[number];
 interface StudentLike {
   membership_status?: string | null;
   joined_at?: string | null;
+  whop_plan_id?: string | null;
 }
 
 /** True iff the student currently has platform access. */
@@ -48,6 +52,33 @@ export function isActiveMember(s: StudentLike): boolean {
     s.membership_status ?? "",
   );
 }
+
+/**
+ * True iff the student is an active paying customer (active or
+ * past_due AND on a plan in the PAYING_WHOP_PLAN_IDS allowlist).
+ *
+ * Used by every operational surface — CSM crons, dashboard counts,
+ * students list, snapshot cron. Free-plan members are isActiveMember
+ * but NOT isPayingMember; they keep platform access but stay invisible
+ * to admin / outreach.
+ *
+ * v79 added the plan_id check. Before v79, the operational surfaces
+ * used isActiveMember and free-plan users were leaking into
+ * everything (CSM tasks were getting generated for them, etc).
+ */
+export function isPayingMember(s: StudentLike): boolean {
+  if (!isActiveMember(s)) return false;
+  return PAYING_WHOP_PLAN_IDS.has(s.whop_plan_id ?? "");
+}
+
+/**
+ * Array form of the paying-plan allowlist for Supabase `.in()`
+ * filters (which can't accept a Set directly). Cached once at module
+ * load so we don't re-allocate per query.
+ */
+export const PAYING_WHOP_PLAN_IDS_ARRAY: readonly string[] = Array.from(
+  PAYING_WHOP_PLAN_IDS,
+);
 
 /**
  * True iff the student joined on/after the launch cutoff. Used to

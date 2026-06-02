@@ -32,8 +32,9 @@ import { createServiceClient } from "@/lib/supabase-server";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 import {
   ACTIVE_STATUSES,
-  isActiveMember,
   isInLaunchCohort,
+  isPayingMember,
+  PAYING_WHOP_PLAN_IDS_ARRAY,
 } from "@/lib/admin/metrics-definitions";
 
 export async function GET(request: NextRequest) {
@@ -58,15 +59,17 @@ export async function GET(request: NextRequest) {
     .neq("id", "l057");
   const totalLessons = lessonCount ?? 0;
 
-  // Pull every currently-active student (active + past_due) with
-  // their joined_at so we can split into all vs cohort in JS. One
-  // query, two derived sets.
+  // Pull every currently-active PAYING student (active + past_due
+  // AND plan_id in PAYING_WHOP_PLAN_IDS) with joined_at so we can
+  // split into all vs cohort in JS. Free-plan users are excluded
+  // upfront via the .in() on whop_plan_id.
   const { data: activeRows } = await supabase
     .from("students")
-    .select("id, joined_at, membership_status")
-    .in("membership_status", ACTIVE_STATUSES as unknown as string[]);
+    .select("id, joined_at, membership_status, whop_plan_id")
+    .in("membership_status", ACTIVE_STATUSES as unknown as string[])
+    .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
 
-  const activeAll = (activeRows ?? []).filter(isActiveMember);
+  const activeAll = (activeRows ?? []).filter(isPayingMember);
   const activeCohort = activeAll.filter(isInLaunchCohort);
 
   const idsAll = activeAll.map((s) => s.id);
@@ -96,36 +99,43 @@ export async function GET(request: NextRequest) {
 
   // joined_count: students whose joined_at falls inside today.
   // joined_at is immutable post-insert so this is exact.
+  // All counts also filter by whop_plan_id IN paying plans —
+  // free-plan signups don't count in the dashboard's "joined".
   const [joinedAllRes, joinedCohortRes] = await Promise.all([
     supabase
       .from("students")
       .select("id", { count: "exact", head: true })
       .gte("joined_at", todayStart)
-      .lt("joined_at", tomorrowStart),
+      .lt("joined_at", tomorrowStart)
+      .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]),
     supabase
       .from("students")
       .select("id", { count: "exact", head: true })
       .gte("joined_at", todayStart)
       .lt("joined_at", tomorrowStart)
-      .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF),
+      .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
+      .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]),
   ]);
 
   // churned_count: students who transitioned INTO canceled today.
   // Uses students.canceled_at (set on the transition itself, not
   // touched by routine syncs) so the count is the real event count,
-  // not "rows updated today".
+  // not "rows updated today". Plan filter again — we don't care
+  // about free users churning.
   const [churnedAllRes, churnedCohortRes] = await Promise.all([
     supabase
       .from("students")
       .select("id", { count: "exact", head: true })
       .gte("canceled_at", todayStart)
-      .lt("canceled_at", tomorrowStart),
+      .lt("canceled_at", tomorrowStart)
+      .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]),
     supabase
       .from("students")
       .select("id", { count: "exact", head: true })
       .gte("canceled_at", todayStart)
       .lt("canceled_at", tomorrowStart)
-      .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF),
+      .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
+      .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]),
   ]);
 
   const avgAll = computeAvg(activeAll.length, allCompletions, totalLessons);

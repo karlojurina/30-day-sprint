@@ -25,6 +25,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import {
   AdminPage,
   PageHeader,
@@ -91,6 +92,7 @@ export default function NotActivatedPage() {
       .eq("membership_status", "active")
       .eq("high_churn_risk", false)
       .eq("csm_exempt", false)
+      .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
       .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
       .order("created_at", { ascending: true });
 

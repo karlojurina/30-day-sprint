@@ -24,7 +24,10 @@ import {
   ADMIN_STUDENT_JOIN_CUTOFF,
   TASKS_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
-import { isActiveMember } from "@/lib/admin/metrics-definitions";
+import {
+  isPayingMember,
+  PAYING_WHOP_PLAN_IDS_ARRAY,
+} from "@/lib/admin/metrics-definitions";
 import { useAdminScope } from "@/contexts/AdminScopeContext";
 import Link from "next/link";
 import {
@@ -91,11 +94,14 @@ export default function AdminDashboard() {
       // Scope toggle: 'cohort' applies the launch-date filter so we
       // exclude legacy / pre-launch students from every count on
       // this page. 'all' drops it so the team sees everyone.
+      // v79: PAYING_WHOP_PLAN_IDS filter excludes free-plan users
+      // from every operational surface, regardless of scope.
       let studentsQuery = supabase
         .from("students")
         .select("*")
         .not("whop_membership_id", "is", null)
-        .in("membership_status", ["active", "past_due", "canceled"]);
+        .in("membership_status", ["active", "past_due", "canceled"])
+        .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
       if (scope === "cohort") {
         studentsQuery = studentsQuery.gte(
           "joined_at",
@@ -166,9 +172,10 @@ export default function AdminDashboard() {
         completionMap[r.student_id] = r.completed_count;
       }
 
-      // "Active" = active + past_due (Whop's grace window keeps
-      // past-due users on the platform; they're still members).
-      const activeStudents = students.filter(isActiveMember);
+      // "Active" = active + past_due on a PAYING plan (Whop's grace
+      // window keeps past-due users on the platform; they're still
+      // paying members). isPayingMember combines both checks.
+      const activeStudents = students.filter(isPayingMember);
       const joinedThisWeek = students.filter(
         (s) => s.joined_at >= weekAgo,
       ).length;
@@ -192,7 +199,7 @@ export default function AdminDashboard() {
       const matureCohort = students.filter(
         (s) => s.joined_at <= thirtyDaysAgo,
       );
-      const matureActive = matureCohort.filter(isActiveMember).length;
+      const matureActive = matureCohort.filter(isPayingMember).length;
       const monthTwoConversionRate =
         matureCohort.length > 0 ? matureActive / matureCohort.length : null;
 
@@ -215,7 +222,7 @@ export default function AdminDashboard() {
           (s) => new Date(s.joined_at).getTime() <= thirtyBeforeDay,
         );
         const activeAtDay = cohortAtDay.filter((s) => {
-          if (isActiveMember(s)) return true;
+          if (isPayingMember(s)) return true;
           if (s.membership_status === "canceled" && s.canceled_at) {
             return new Date(s.canceled_at).getTime() >= dayEnd;
           }

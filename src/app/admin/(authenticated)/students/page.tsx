@@ -10,6 +10,7 @@ import {
   ADMIN_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
 import { useAdminScope } from "@/contexts/AdminScopeContext";
+import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import Link from "next/link";
 import {
   AdminPage,
@@ -43,11 +44,13 @@ export default function StudentsPage() {
     async function fetchStudents() {
       // Scope toggle: 'cohort' filters to launch-cohort joiners;
       // 'all' shows every paying member including legacy customers.
+      // v79: free-plan members never appear here regardless of scope.
       let studentsQuery = supabase
         .from("students")
         .select("*")
         .not("whop_membership_id", "is", null)
-        .in("membership_status", ["active", "past_due", "canceled"]);
+        .in("membership_status", ["active", "past_due", "canceled"])
+        .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
       if (scope === "cohort") {
         studentsQuery = studentsQuery.gte(
           "joined_at",

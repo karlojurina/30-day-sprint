@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { postTeamAlert, buildAlertsEmbed } from "@/lib/discord";
 import { isDmEnabled } from "@/lib/dm-toggles";
+import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 
 /**
  * V3 engagement cron: detect disengaged students and queue alerts for the team.
@@ -24,7 +25,10 @@ export async function GET(request: NextRequest) {
   const { data: students } = await supabase
     .from("students")
     .select("*")
-    .eq("membership_status", "active");
+    .eq("membership_status", "active")
+    // v79: skip free-plan members — they shouldn't trigger
+    // engagement alerts or team-channel posts.
+    .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
 
   if (!students || students.length === 0) {
     return NextResponse.json({ checked: 0, alerts: 0 });

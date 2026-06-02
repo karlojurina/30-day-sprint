@@ -42,6 +42,7 @@ import {
   SCENARIO_BUCKET,
 } from "@/lib/csm-triggers";
 import { TASKS_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import type { Student, TriggerConfig } from "@/types/database";
 
 /** Plain-English label for each disengagement_alerts.alert_type. */
@@ -129,6 +130,9 @@ export async function GET(request: NextRequest) {
   ] = await Promise.all([
     // Limit to actual paying students who joined on/after the
     // tasks cutoff. csm_exempt = test accounts we never DM.
+    // v79: also filter by whop_plan_id IN paying plans — free-plan
+    // signups don't generate CSM tasks even though their membership
+    // status is active.
     supabase
       .from("students")
       .select(
@@ -136,6 +140,7 @@ export async function GET(request: NextRequest) {
       )
       .eq("membership_status", "active")
       .eq("csm_exempt", false)
+      .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
       .gte("joined_at", TASKS_STUDENT_JOIN_CUTOFF),
     supabase
       .from("student_lesson_completions")

@@ -25,6 +25,7 @@ import {
   mapStatus,
   toIso,
 } from "@/lib/whop-members";
+import { PAYING_WHOP_PLAN_IDS } from "@/lib/constants";
 
 export interface SyncResult {
   fetched: number;
@@ -82,10 +83,11 @@ export async function runWhopCommunitySync(
       discord_user_id: string | null;
       membership_status: string | null;
       canceled_at: string | null;
+      whop_plan_id: string | null;
     };
     const { data: existingRows } = await supabase
       .from("students")
-      .select("whop_user_id, email, name, joined_at, last_active_at, discord_user_id, membership_status, canceled_at")
+      .select("whop_user_id, email, name, joined_at, last_active_at, discord_user_id, membership_status, canceled_at, whop_plan_id")
       .in("whop_user_id", userIds)
       .returns<ExistingRow[]>();
     const existing = new Map(
@@ -93,6 +95,11 @@ export async function runWhopCommunitySync(
     );
 
     const TERMINAL_STATUSES = new Set(["canceled", "expired"]);
+    // Track unique unknown plan IDs so we don't spam the log. One
+    // warning per plan_id per sync run is enough — Karlo can grep
+    // Vercel logs for the marker if he adds a new paid plan and
+    // forgets to update PAYING_WHOP_PLAN_IDS.
+    const unknownPlanWarnings = new Set<string>();
 
     for (const m of members) {
       if (!m.user_id) {
@@ -106,6 +113,27 @@ export async function runWhopCommunitySync(
       const discordUsername = m.discord?.username ?? null;
       const name = m.username ?? cur?.name ?? null;
       const email = m.email ?? cur?.email ?? null;
+      const planId = m.plan_id ?? null;
+
+      // Surface unknown plan IDs so we notice if a new paid plan
+      // gets added in Whop without an allowlist update. Only warn
+      // for ACTIVE memberships — canceled/expired members on
+      // unknown plans don't matter operationally.
+      if (
+        planId &&
+        !PAYING_WHOP_PLAN_IDS.has(planId) &&
+        !unknownPlanWarnings.has(planId) &&
+        (status === "active" || status === "past_due")
+      ) {
+        unknownPlanWarnings.add(planId);
+        console.warn(
+          `[whop-sync] UNKNOWN_PLAN_ID '${planId}' seen on active member — ` +
+            `currently treated as non-paying (no CSM tasks, no day-28 DM, ` +
+            `not counted in dashboard). If this is a new PAID plan, add it ` +
+            `to PAYING_WHOP_PLAN_IDS in src/lib/constants.ts AND to the ` +
+            `v_paying_plans array in rebuild_daily_snapshots() RPC.`,
+        );
+      }
 
       if (cur) {
         // Detect status transition for canceled_at stamping. Three cases:
@@ -132,6 +160,10 @@ export async function runWhopCommunitySync(
         if (!cur.discord_user_id && discordId) update.discord_user_id = discordId;
         if (discordUsername) update.discord_username = discordUsername;
         if (canceledAtUpdate !== undefined) update.canceled_at = canceledAtUpdate;
+        // Refresh whop_plan_id when Whop returns one. Don't overwrite
+        // an existing plan_id with null (preserve last-known on rows
+        // where Whop didn't return the field this sync).
+        if (planId) update.whop_plan_id = planId;
 
         const { error } = await supabase
           .from("students")
@@ -163,6 +195,7 @@ export async function runWhopCommunitySync(
           discord_user_id: discordId,
           discord_username: discordUsername,
           canceled_at: isTerminal ? new Date().toISOString() : null,
+          whop_plan_id: planId,
         });
         if (error) {
           console.error(

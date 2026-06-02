@@ -32,6 +32,9 @@ export interface WhopMembership {
   renewal_period_start: string;
   renewal_period_end: string;
   metadata: Record<string, unknown>;
+  /** v79: the plan inside the product this membership belongs to.
+   *  Drives paying / free classification — see PAYING_WHOP_PLAN_IDS. */
+  plan_id?: string | null;
 }
 
 /**

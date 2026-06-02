@@ -38,6 +38,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { postTeamAlert } from "@/lib/discord";
+import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 
 interface NotActivatedRow {
   id: string;
@@ -96,7 +97,10 @@ export async function GET(request: NextRequest) {
     )
     .eq("membership_status", "active")
     .eq("high_churn_risk", false)
-    .eq("csm_exempt", false);
+    .eq("csm_exempt", false)
+    // v79: paying-plan filter — free-plan users don't need a CSM
+    // "not activated" nudge.
+    .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
 
   if (studentsErr) {
     console.error("[check-na-tasks] students query failed:", studentsErr);

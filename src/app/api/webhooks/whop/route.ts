@@ -142,6 +142,8 @@ export async function POST(request: NextRequest) {
           // Clear canceled_at on re-activation so the snapshot cron's
           // churned_count doesn't double-count a re-enrolled student.
           canceled_at: null,
+          // v79: classify paying / free at the source event.
+          whop_plan_id: membership.plan_id ?? null,
         },
         { onConflict: "whop_user_id" }
       );
@@ -214,6 +216,9 @@ export async function POST(request: NextRequest) {
           // payment.succeeded means they paid; if they were marked
           // canceled previously, clear the stamp on re-activation.
           canceled_at: null,
+          // v79: refresh plan_id; a payment event might fire after
+          // the user upgraded/downgraded plans.
+          whop_plan_id: membership.plan_id ?? null,
         },
         { onConflict: "whop_user_id" },
       );

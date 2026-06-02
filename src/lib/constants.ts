@@ -3,6 +3,26 @@ export const WHOP_TOKEN_URL = "https://api.whop.com/oauth/token";
 export const WHOP_USERINFO_URL = "https://api.whop.com/oauth/userinfo";
 export const WHOP_API_BASE = "https://api.whop.com/api/v1";
 
+// Whop plan IDs that count as "paying customers" — i.e., students
+// that SHOULD get CSM tasks, day-28 DMs, and count in dashboard
+// metrics. Allowlist design: any plan_id NOT in this set is
+// treated as non-paying (free / promo / partner) and skipped by
+// every operational surface, regardless of membership_status.
+//
+// Free-plan users still get FULL student-side access (login,
+// dashboard, lessons, achievements) — they're just invisible to
+// admin and don't trigger outreach.
+//
+// If you add a new PAID plan in Whop, add its ID here AND update
+// the matching list in supabase/migrations/2026_v79_whop_plan_id.sql
+// (rebuild_daily_snapshots RPC). The sync runner logs a warning
+// each night for any plan_id outside this set so we notice if a
+// new paid plan slips by un-listed.
+export const PAYING_WHOP_PLAN_IDS = new Set<string>([
+  "plan_4ZrwR4PmBsVsx",
+  "plan_fMMqxAljrzu75",
+]);
+
 // Approximate lesson count used as a fallback denominator when the
 // actual lessons array isn't available (e.g. in admin views where
 // we only fetch student records). Kept in sync with the live DB

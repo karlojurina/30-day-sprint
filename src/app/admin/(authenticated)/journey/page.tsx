@@ -9,6 +9,7 @@ import {
   progressPercent,
   ADMIN_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
+import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import { buildPaceSummary } from "@/lib/csm-triggers";
 import { StudentCard } from "./StudentCard";
 import { StudentDrawer } from "./StudentDrawer";
@@ -86,6 +87,7 @@ export default function KanbanPage() {
             .select("*")
             .not("whop_membership_id", "is", null)
             .in("membership_status", ["active", "past_due", "canceled"])
+            .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
             .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
             .order("joined_at", { ascending: false }),
           supabase

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { createServiceClient } from "@/lib/supabase-server";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 
 /**
  * Team-only KPI rollups for the /admin home dashboard.
@@ -59,6 +60,7 @@ export async function GET(request: NextRequest) {
       .select("id, membership_status, joined_at, updated_at")
       .not("whop_membership_id", "is", null)
       .in("membership_status", ["active", "past_due", "canceled"])
+      .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
       .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF),
     supabase
       .from("student_milestones")

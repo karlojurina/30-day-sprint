@@ -145,6 +145,11 @@ export async function GET(request: NextRequest) {
                 membership_status: mapStatus(adminRow),
                 joined_at:
                   toIso(adminRow.created_at) ?? new Date().toISOString(),
+                // v79: stamp plan_id from the admin row so the new
+                // user is correctly classified as paying / free from
+                // first login. Without this they'd default to NULL
+                // (non-paying) until the next nightly sync.
+                whop_plan_id: adminRow.plan_id ?? null,
               },
               { onConflict: "whop_user_id" },
             );

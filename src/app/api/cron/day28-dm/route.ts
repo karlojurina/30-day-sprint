@@ -3,6 +3,7 @@ import { createServiceClient } from "@/lib/supabase-server";
 import { dmStudent, postTeamAlert } from "@/lib/discord";
 import { buildDay28Embed, loadDay28EmbedInput } from "@/lib/day28-embed";
 import { isDmEnabled } from "@/lib/dm-toggles";
+import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 
 /**
  * Day-28 student summary DM cron.
@@ -48,6 +49,7 @@ export async function GET(request: NextRequest) {
     .select("id, name, discord_user_id, student_dm_log(day28_dm_sent_at)")
     .eq("membership_status", "active")
     .eq("csm_exempt", false)
+    .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
     .gt("joined_at", minJoined.toISOString())
     .lte("joined_at", maxJoined.toISOString());
 

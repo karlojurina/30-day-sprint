@@ -47,6 +47,12 @@ export interface Student {
    *  every sync run (so every canceled student counted as "churned
    *  today" every day). Null for active / past_due / never-canceled. */
   canceled_at: string | null;
+  /** v79: the Whop plan_id this membership belongs to. Drives the
+   *  paying / free classification via PAYING_WHOP_PLAN_IDS — any
+   *  plan_id NOT in that allowlist is treated as non-paying and
+   *  excluded from CSM tasks, dashboard metrics, etc. Populated by
+   *  the webhook + sync runner + OAuth callback self-heal. */
+  whop_plan_id: string | null;
   /** Computed/derived from the streak count. Cached here for the UI. */
   current_title: StudentTitle;
   // Admin gates (stay on students — they're identity-adjacent admin flags)

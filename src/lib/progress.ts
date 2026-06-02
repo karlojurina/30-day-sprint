@@ -85,3 +85,61 @@ export function countCompletedLessons(
 ): number {
   return completedLessonIdsFor(completions, lessons).size;
 }
+
+/**
+ * Days since this student joined the platform.
+ */
+function daysSinceJoined(joinedAtIso: string): number {
+  return (Date.now() - new Date(joinedAtIso).getTime()) / 86_400_000;
+}
+
+/**
+ * Thresholds for the legacy auto-unlock branch of the Playbook gate.
+ * A student qualifies for auto-unlock if they've been on the platform
+ * at least PLAYBOOK_AUTO_UNLOCK_DAYS days AND completed at least
+ * PLAYBOOK_AUTO_UNLOCK_RATIO of all lessons. Both must be true.
+ *
+ * Why: older / legacy customers (joined long before launch, signed up
+ * via Whop's older flow) often went past the action-item phase into
+ * creative strategy without checking off action items here, so they
+ * never trigger the standard l078-completion unlock. Karlo doesn't
+ * want to force-march them through the sprint just to access the
+ * Playbook content. v75.16 — Karlo's call, 2026-06-02.
+ */
+export const PLAYBOOK_AUTO_UNLOCK_DAYS = 30;
+export const PLAYBOOK_AUTO_UNLOCK_RATIO = 0.8;
+
+/**
+ * The Playbook unlock gate.
+ *
+ * Two paths to unlocked, OR'd together:
+ *   1. Standard sprint path — student completed PLAYBOOK_UNLOCK_LESSON_ID
+ *      (l078, "How I Approach Research / Coming Up With Ad Ideas"). This
+ *      is the canonical "you finished the watch curriculum" milestone.
+ *   2. Legacy auto-unlock — joined_at >= PLAYBOOK_AUTO_UNLOCK_DAYS ago
+ *      AND completed >= PLAYBOOK_AUTO_UNLOCK_RATIO of all lessons. For
+ *      students who've been around long enough and done most of the
+ *      course but skipped the action-item gate.
+ *
+ * The new-student path (path 1) is unchanged from v72.7. Karlo's
+ * explicit ask: "don't make any mistakes in terms of changing how the
+ * new students part works."
+ */
+export function isPlaybookUnlocked(args: {
+  student: { joined_at: string };
+  completedLessonIds: Set<string>;
+  playbookUnlockLessonId: string;
+  totalLessons: number;
+}): boolean {
+  // Path 1: standard sprint completion.
+  if (args.completedLessonIds.has(args.playbookUnlockLessonId)) return true;
+
+  // Path 2: legacy auto-unlock.
+  if (args.totalLessons <= 0) return false;
+  const days = daysSinceJoined(args.student.joined_at);
+  const ratio = args.completedLessonIds.size / args.totalLessons;
+  return (
+    days >= PLAYBOOK_AUTO_UNLOCK_DAYS &&
+    ratio >= PLAYBOOK_AUTO_UNLOCK_RATIO
+  );
+}

@@ -25,7 +25,8 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { createClient } from "@/lib/supabase-browser";
-import { PLAYBOOK_UNLOCK_LESSON_ID } from "@/lib/constants";
+import { PLAYBOOK_UNLOCK_LESSON_ID, TOTAL_LESSONS } from "@/lib/constants";
+import { isPlaybookUnlocked } from "@/lib/progress";
 import type { PlaybookNode } from "@/types/database";
 import { PlaybookHub } from "@/components/playbook/PlaybookHub";
 import { PlaybookNodeSheet } from "@/components/playbook/PlaybookNodeSheet";
@@ -37,7 +38,18 @@ export default function PlaybookPage() {
     useStudent();
   const router = useRouter();
 
-  const playbookUnlocked = completedLessonIds.has(PLAYBOOK_UNLOCK_LESSON_ID);
+  // v75.16: gate respects BOTH the standard l078 path AND the legacy
+  // auto-unlock (30+ days AND 80% complete). New students keep the
+  // l078 requirement unchanged — see isPlaybookUnlocked in
+  // src/lib/progress.ts for the precise rule.
+  const playbookUnlocked = student
+    ? isPlaybookUnlocked({
+        student: { joined_at: student.joined_at },
+        completedLessonIds,
+        playbookUnlockLessonId: PLAYBOOK_UNLOCK_LESSON_ID,
+        totalLessons: TOTAL_LESSONS,
+      })
+    : false;
   useEffect(() => {
     if (student && !playbookUnlocked) {
       router.replace("/dashboard?map=1");

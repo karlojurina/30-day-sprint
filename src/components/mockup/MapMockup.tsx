@@ -16,7 +16,9 @@ import {
   LESSON_GROUPS,
   PLAYBOOK_UNLOCK_LESSON_ID,
   SPRINT_EXCLUDED_LESSON_IDS,
+  TOTAL_LESSONS,
 } from "@/lib/constants";
+import { isPlaybookUnlocked } from "@/lib/progress";
 import { useIsPhone } from "@/lib/useMediaQuery";
 import type { Lesson } from "@/types/database";
 
@@ -542,15 +544,23 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
       ? testOverrides.bountyAccessClaimedAt ?? null
       : bountyAccessClaimedAt;
 
-  // v72.7 / v74.2 - the Playbook unlock is now keyed on completion of
+  // v72.7 / v74.2 - the Playbook unlock is keyed on completion of
   // l078 (the last R4 watch lesson, see PLAYBOOK_UNLOCK_LESSON_ID in
   // src/lib/constants.ts). Bounty Access does NOT unlock the Playbook
-  // - it's a parallel post-sprint milestone. Was `r4Complete ||
-  // bountyAccessClaimedAt` which let the bounty webhook open the
-  // Playbook independently AND required ALL R4 lessons (incl. l057
-  // bounty onboarding) which made the marker locked even after the
-  // student finished every watch lesson. Karlo's bug 2026-05-29.
-  const playbookUnlocked = completedLessonIds.has(PLAYBOOK_UNLOCK_LESSON_ID);
+  // - it's a parallel post-sprint milestone.
+  //
+  // v75.16 - second auto-unlock path: legacy students 30+ days in AND
+  // 80%+ complete. New-student behavior unchanged (still needs l078).
+  // The helper handles both branches with an OR — see isPlaybookUnlocked
+  // in src/lib/progress.ts.
+  const playbookUnlocked = student
+    ? isPlaybookUnlocked({
+        student: { joined_at: student.joined_at },
+        completedLessonIds,
+        playbookUnlockLessonId: PLAYBOOK_UNLOCK_LESSON_ID,
+        totalLessons: TOTAL_LESSONS,
+      })
+    : false;
 
   // v54 (brief-region-quiz) - quiz modal state. quizRegionId is the
   // region whose quiz is currently open (null = closed). quizProgress

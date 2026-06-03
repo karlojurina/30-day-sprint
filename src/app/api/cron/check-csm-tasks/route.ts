@@ -469,6 +469,71 @@ export async function GET(request: NextRequest) {
       .eq("id", id);
   }
 
+  // ─── 3b. Family-level supersession (v75.17) ──────────────
+  // When a later-stage task fires (e.g. stalled.discord.day5) while
+  // an earlier-stage task in the SAME family is still open
+  // (stalled.discord.day3), dismiss the earlier one and let the later
+  // one take its place. Prevents the CSM queue from accumulating
+  // multiple open tasks per student per family.
+  //
+  // Family = scenario_id with the trailing .dayN suffix stripped.
+  // Scenarios without a .dayN suffix (e.g. month2.entry, welcome.day1
+  // doesn't have a stage progression) are no-ops here.
+  //
+  // Only OPEN tasks get dismissed. If the earlier-stage task was
+  // already completed (CSM sent the message), it stays as an audit
+  // trail and the later stage fires fresh — which is the correct
+  // escalation behavior.
+
+  const familyOf = (s: string): string | null => {
+    const m = s.match(/^(.+)\.day\d+$/);
+    return m ? m[1] : null;
+  };
+
+  // Index every existing open task by (student_id, family).
+  const openByFamilyKey = new Map<string, OpenTaskRow[]>();
+  for (const t of (openTasksWithBucket ?? []) as unknown as OpenTaskRow[]) {
+    const family = familyOf(t.scenario_id);
+    if (!family) continue;
+    const key = `${t.student_id}|${family}`;
+    const arr = openByFamilyKey.get(key) ?? [];
+    arr.push(t);
+    openByFamilyKey.set(key, arr);
+  }
+
+  // For each task we're about to insert, find any open tasks in the
+  // same family for the same student and queue them for dismissal.
+  const familySupersedeNotes = new Map<string, string>();
+  for (const row of finalToInsert) {
+    const family = familyOf(row.scenario_id);
+    if (!family) continue;
+    const existing = openByFamilyKey.get(`${row.student_id}|${family}`) ?? [];
+    for (const t of existing) {
+      // Skip the exact same scenario (the unique-index handles that).
+      if (t.scenario_id === row.scenario_id) continue;
+      // Don't dismiss something we already dismissed in section 3.
+      if (toDismiss.includes(t.id)) continue;
+      // Don't queue twice if multiple new family-tasks supersede this
+      // same existing one (shouldn't happen but defensive).
+      if (familySupersedeNotes.has(t.id)) continue;
+      familySupersedeNotes.set(
+        t.id,
+        `Superseded by ${row.scenario_id} (later stage in same family).`,
+      );
+    }
+  }
+
+  for (const [id, note] of familySupersedeNotes) {
+    await supabase
+      .from("tasks")
+      .update({
+        status: "dismissed",
+        dismissed_at: new Date().toISOString(),
+        notes: note,
+      })
+      .eq("id", id);
+  }
+
   // ─── 4. Insert (idempotent via partial unique index) ──────
 
   let createdCount = 0;

@@ -78,7 +78,21 @@ export async function POST(request: NextRequest) {
   // v75.20: anchor on first_paid_at (original signup), not joined_at
   // (current cycle start). Returning customers can't get a fresh
   // 14-day discount window from a renewal.
-  const joinedAt = new Date(studentRow.first_paid_at ?? studentRow.joined_at);
+  // v75.26: NULL first_paid_at → block at the FINAL approval gate.
+  // This is the last line of defense if the request/feedback gates
+  // were somehow bypassed. The admin must manually verify the
+  // student's signup history and backfill first_paid_at before
+  // approving.
+  if (!studentRow.first_paid_at) {
+    return NextResponse.json(
+      {
+        error:
+          "Cannot approve: student has no first_paid_at on file. Run the Whop sync (Refresh on /admin) to backfill, then retry. If still NULL, this student's Whop membership history needs manual review.",
+      },
+      { status: 400 },
+    );
+  }
+  const joinedAt = new Date(studentRow.first_paid_at);
   const deadline = new Date(
     joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000
   );

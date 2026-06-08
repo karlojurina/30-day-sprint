@@ -130,23 +130,44 @@ export async function POST(request: NextRequest) {
     case "membership.went_valid":
     case "membership_went_valid": {
       const membership = payload.data as WhopMembership;
-      const { error } = await supabase.from("students").upsert(
-        {
-          whop_user_id: membership.user.id,
-          whop_membership_id: membership.id,
-          email: membership.user.email,
-          name: membership.user.name,
-          discord_username: membership.user.username,
-          membership_status: "active",
-          joined_at: membership.joined_at || new Date().toISOString(),
-          // Clear canceled_at on re-activation so the snapshot cron's
-          // churned_count doesn't double-count a re-enrolled student.
-          canceled_at: null,
-          // v79: classify paying / free at the source event.
-          whop_plan_id: membership.plan_id ?? null,
-        },
-        { onConflict: "whop_user_id" }
-      );
+      // v75.26: pre-fetch to detect INSERT vs UPDATE. We only set
+      // first_paid_at on INSERT — never on UPDATE — to preserve the
+      // original signup date for returning customers. Without this,
+      // a renewal webhook would overwrite a returning customer's
+      // months-old first_paid_at with today's date, re-opening the
+      // discount window they shouldn't have access to.
+      const { data: existingStudent } = await supabase
+        .from("students")
+        .select("first_paid_at")
+        .eq("whop_user_id", membership.user.id)
+        .maybeSingle();
+
+      const upsertPayload: Record<string, unknown> = {
+        whop_user_id: membership.user.id,
+        whop_membership_id: membership.id,
+        email: membership.user.email,
+        name: membership.user.name,
+        discord_username: membership.user.username,
+        membership_status: "active",
+        joined_at: membership.joined_at || new Date().toISOString(),
+        // Clear canceled_at on re-activation so the snapshot cron's
+        // churned_count doesn't double-count a re-enrolled student.
+        canceled_at: null,
+        // v79: classify paying / free at the source event.
+        whop_plan_id: membership.plan_id ?? null,
+      };
+
+      // INSERT path: stamp first_paid_at so the new student isn't
+      // invisible to every cohort-scoped admin surface until the
+      // nightly Whop sync runs.
+      if (!existingStudent) {
+        upsertPayload.first_paid_at =
+          membership.joined_at || new Date().toISOString();
+      }
+
+      const { error } = await supabase
+        .from("students")
+        .upsert(upsertPayload, { onConflict: "whop_user_id" });
 
       if (error) {
         console.error("Webhook: student upsert failed:", error);
@@ -204,24 +225,38 @@ export async function POST(request: NextRequest) {
         );
         break;
       }
-      const { error } = await supabase.from("students").upsert(
-        {
-          whop_user_id: membership.user.id,
-          whop_membership_id: membership.id,
-          email: membership.user.email,
-          name: membership.user.name,
-          discord_username: membership.user.username,
-          membership_status: "active",
-          joined_at: membership.joined_at || new Date().toISOString(),
-          // payment.succeeded means they paid; if they were marked
-          // canceled previously, clear the stamp on re-activation.
-          canceled_at: null,
-          // v79: refresh plan_id; a payment event might fire after
-          // the user upgraded/downgraded plans.
-          whop_plan_id: membership.plan_id ?? null,
-        },
-        { onConflict: "whop_user_id" },
-      );
+      // v75.26: same INSERT-only first_paid_at pattern as
+      // membership.activated above. payment.succeeded fires on EVERY
+      // recurring renewal, so blindly setting first_paid_at here
+      // would overwrite a returning customer's true original signup
+      // date on every billing cycle — closing the discount window
+      // they shouldn't have access to.
+      const { data: existingPaymentStudent } = await supabase
+        .from("students")
+        .select("first_paid_at")
+        .eq("whop_user_id", membership.user.id)
+        .maybeSingle();
+
+      const paymentUpsertPayload: Record<string, unknown> = {
+        whop_user_id: membership.user.id,
+        whop_membership_id: membership.id,
+        email: membership.user.email,
+        name: membership.user.name,
+        discord_username: membership.user.username,
+        membership_status: "active",
+        joined_at: membership.joined_at || new Date().toISOString(),
+        canceled_at: null,
+        whop_plan_id: membership.plan_id ?? null,
+      };
+
+      if (!existingPaymentStudent) {
+        paymentUpsertPayload.first_paid_at =
+          membership.joined_at || new Date().toISOString();
+      }
+
+      const { error } = await supabase
+        .from("students")
+        .upsert(paymentUpsertPayload, { onConflict: "whop_user_id" });
 
       if (error) {
         console.error("Webhook: payment upsert failed:", error);

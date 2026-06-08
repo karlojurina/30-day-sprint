@@ -95,11 +95,13 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
     : null;
 
   // v75.20: anchor on first_paid_at (original signup), not joined_at.
-  const joined = new Date(
-    student.first_paid_at ?? student.joined_at,
-  ).getTime();
-  const deadline = joined + DISCOUNT_WINDOW_DAYS * 86_400_000;
-  const msLeft = Math.max(0, deadline - Date.now());
+  // v75.26: NULL first_paid_at → msLeft = 0 (no joined_at fallback).
+  const joined = student.first_paid_at
+    ? new Date(student.first_paid_at).getTime()
+    : null;
+  const deadline =
+    joined !== null ? joined + DISCOUNT_WINDOW_DAYS * 86_400_000 : 0;
+  const msLeft = joined !== null ? Math.max(0, deadline - Date.now()) : 0;
 
   const currentGroupId = currentLesson ? lessonGroupOf(currentLesson.id) : null;
   const nextTitle = currentGroupId

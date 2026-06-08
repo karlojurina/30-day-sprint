@@ -266,9 +266,21 @@ export async function GET(request: NextRequest) {
       const whopJoinDate = await fetchWhopMembershipJoinDate(
         tokens.access_token
       );
+      // v75.26: also set first_paid_at on INSERT. Before this fix,
+      // first_paid_at stayed NULL until the nightly Whop sync ran,
+      // so a customer who paid + logged in today was invisible to
+      // every cohort-scoped admin surface for up to 24h AND could
+      // bypass the discount eligibility gate via the joined_at
+      // fallback. Setting it here closes both gaps.
+      //
+      // Only set on INSERT (the !existing branch) — never on UPDATE,
+      // so a returning customer's original first_paid_at is preserved.
+      // The Whop sync runner separately enforces this invariant.
+      const anchorIso = whopJoinDate ?? new Date().toISOString();
       upsertFields = {
         ...baseFields,
-        joined_at: whopJoinDate ?? new Date().toISOString(),
+        joined_at: anchorIso,
+        first_paid_at: anchorIso,
       };
     }
 

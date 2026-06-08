@@ -82,7 +82,17 @@ export async function POST(request: NextRequest) {
 
   // v75.18: discount window anchored on first_paid_at (original
   // signup), not joined_at (current cycle start).
-  const joinedAt = new Date(student.first_paid_at ?? student.joined_at);
+  // v75.26: NULL first_paid_at → ineligible (no joined_at fallback).
+  if (!student.first_paid_at) {
+    return NextResponse.json(
+      {
+        error:
+          "We can't verify your signup date right now — please contact support and we'll sort it out within 24h.",
+      },
+      { status: 400 },
+    );
+  }
+  const joinedAt = new Date(student.first_paid_at);
   const deadline = new Date(
     joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000,
   );

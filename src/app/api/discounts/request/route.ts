@@ -47,8 +47,25 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  const anchorIso = student.first_paid_at ?? student.joined_at;
-  const joinedAt = new Date(anchorIso);
+  // v75.26: NULL first_paid_at is no longer treated as 'fall back to
+  // joined_at' for discount eligibility. A returning customer whose
+  // first_paid_at was never backfilled would otherwise get a fresh
+  // 14-day window anchored on their RENEWAL joined_at — exactly the
+  // leak v75.18/v75.20 was meant to prevent (F14 audit confirmed 18
+  // students at risk). NULL → ineligible, contact support. The
+  // nightly Whop sync will backfill first_paid_at for any legitimate
+  // first-timer caught by this guard within 24h.
+  if (!student.first_paid_at) {
+    return NextResponse.json(
+      {
+        error:
+          "We can't verify your signup date right now — please contact support and we'll sort it out within 24h.",
+      },
+      { status: 400 },
+    );
+  }
+
+  const joinedAt = new Date(student.first_paid_at);
   const deadline = new Date(
     joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000
   );

@@ -786,11 +786,16 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   // v75.18: anchor on first_paid_at (original signup), not joined_at
   // (current cycle start). Returning customers don't get a fresh
   // 14-day discount window from a renewal.
-  const discountMsLeft = student
-    ? new Date(student.first_paid_at ?? student.joined_at).getTime() +
-      DISCOUNT_WINDOW_DAYS * 86_400_000 -
-      nowMs
-    : 0;
+  // v75.26: NULL first_paid_at → discountMsLeft = 0 (no fallback to
+  // joined_at). UI shows the discount window as closed; the API
+  // gates reject any attempt to claim. Backend-side message tells
+  // student to contact support if they think this is wrong.
+  const discountMsLeft =
+    student && student.first_paid_at
+      ? new Date(student.first_paid_at).getTime() +
+        DISCOUNT_WINDOW_DAYS * 86_400_000 -
+        nowMs
+      : 0;
 
   const discountEligible = discountAllLessonsDone && discountMsLeft > 0;
 

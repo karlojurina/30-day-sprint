@@ -35,6 +35,14 @@ const DEFAULT_PAGE_SIZE = 1000;
  * Fetch every row matching the query, paginated to bypass PostgREST's
  * server-side max-rows cap. Returns the merged result.
  *
+ * v75.32: on error, returns `{ data: [], error }` instead of
+ * `{ data: partial, error }`. The "return whatever we got" behavior
+ * was footgun-shaped — every caller (v75.27 + v75.29) destructured
+ * only `data` and silently rendered truncated state on mid-page
+ * failure. Now a single batch error gives the caller an empty array
+ * to render (clear visual signal "something went wrong") instead of
+ * "looks complete but is actually missing rows."
+ *
  * @param buildQuery Thunk that constructs the query — called once per
  *   page. Must return a query builder, NOT an already-awaited result.
  *   We type this as `any` because Supabase's PostgrestFilterBuilder
@@ -53,12 +61,26 @@ export async function fetchAllRowsPaginated<T>(
   // Hard cap on iterations as a runaway-loop backstop. 100 pages ×
   // 1000 rows = 100k rows max. Far above any realistic admin surface.
   for (let page = 0; page < 100; page++) {
-    const { data, error } = (await buildQuery().range(
-      from,
-      from + pageSize - 1,
-    )) as { data: T[] | null; error: { message: string } | null };
+    let result: { data: T[] | null; error: { message: string } | null };
+    try {
+      result = (await buildQuery().range(from, from + pageSize - 1)) as {
+        data: T[] | null;
+        error: { message: string } | null;
+      };
+    } catch (e) {
+      // v75.32: catch thunk/builder throws too — the contract is
+      // structured { data, error }, never propagate exceptions to
+      // surprised callers.
+      const msg = e instanceof Error ? e.message : String(e);
+      return { data: [], error: new Error(msg) };
+    }
+    const { data, error } = result;
     if (error) {
-      return { data: all, error: new Error(error.message) };
+      // v75.32: empty data on error, NOT the partial accumulated set.
+      // Callers that forget to check `error` will at least render
+      // an empty list (visible problem) instead of a silently-truncated
+      // list (invisible problem).
+      return { data: [], error: new Error(error.message) };
     }
     if (!data || data.length === 0) break;
     all.push(...data);

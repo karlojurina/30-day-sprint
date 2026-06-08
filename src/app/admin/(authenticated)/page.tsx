@@ -176,6 +176,17 @@ export default function AdminDashboard() {
           .select("student_id, bounty_access_claimed_at"),
       ]);
 
+      // v75.32: surface pagination errors. Helper returns empty data
+      // on error (v75.32 change), so an empty list signals a problem.
+      // Log + show a console-visible warning rather than silently
+      // rendering missing rows as if everything was fine.
+      if (studentsRes.error) {
+        console.error("[admin/dashboard] students fetch failed:", studentsRes.error);
+      }
+      if (completionsRes.error) {
+        console.error("[admin/dashboard] progress counts fetch failed:", completionsRes.error);
+      }
+
       const students = (studentsRes.data || []) as Student[];
       const completions = completionsRes.data || [];
       const totalLessons =

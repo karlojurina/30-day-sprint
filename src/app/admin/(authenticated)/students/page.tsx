@@ -80,6 +80,15 @@ export default function StudentsPage() {
           .neq("id", "l057"),
       ]);
 
+      // v75.32: surface paginated fetch errors. Helper returns empty
+      // data on error so the empty list is the visual signal; the
+      // console.error gives Karlo debug breadcrumbs.
+      if (studentsRes.error) {
+        console.error("[admin/students] students fetch failed:", studentsRes.error);
+      }
+      if (completionsRes.error) {
+        console.error("[admin/students] progress counts fetch failed:", completionsRes.error);
+      }
       if (studentsRes.data) setStudents(studentsRes.data);
 
       const counts: Record<string, number> = {};

@@ -38,8 +38,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { postTeamAlert } from "@/lib/discord";
+import { isDmEnabled } from "@/lib/dm-toggles";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import { csmSprintWindowCutoffIso } from "@/lib/constants";
+
+// v75.32: raised from Vercel's 60s default.
+export const maxDuration = 300;
 
 interface NotActivatedRow {
   id: string;
@@ -238,16 +242,23 @@ export async function GET(request: NextRequest) {
     )
       .filter(Boolean)
       .join(" · ");
-    try {
-      await postTeamAlert([
-        {
-          title: "NA tasks created",
-          description: `${created.length} NA task${created.length === 1 ? "" : "s"} for Astrid. ${summary}`,
-          color: 0x9aa0a6,
-        },
-      ]);
-    } catch (e) {
-      console.warn("[check-na-tasks] discord notify failed:", e);
+    // v75.32: gate on the same Discord pause toggle every other cron
+    // respects. Before this, flipping the Discord master switch off
+    // in /admin/discord silenced check-csm-tasks + check-engagement +
+    // day28-dm but check-na-tasks still posted — making the kill
+    // switch effectively non-master.
+    if (await isDmEnabled(supabase, "csm_task_summary_enabled")) {
+      try {
+        await postTeamAlert([
+          {
+            title: "NA tasks created",
+            description: `${created.length} NA task${created.length === 1 ? "" : "s"} for Astrid. ${summary}`,
+            color: 0x9aa0a6,
+          },
+        ]);
+      } catch (e) {
+        console.warn("[check-na-tasks] discord notify failed:", e);
+      }
     }
   }
 

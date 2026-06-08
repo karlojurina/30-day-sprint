@@ -49,6 +49,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+
+// v75.32: raised from Vercel's 60s default. The active fetch + view
+// scan + 2x4 count queries can take 30-60s as the pool grows past
+// a few thousand members; 300s is Vercel Pro's max.
+export const maxDuration = 300;
 import {
   ACTIVE_STATUSES,
   isInLaunchCohort,

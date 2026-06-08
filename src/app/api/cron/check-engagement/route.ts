@@ -5,6 +5,10 @@ import { isDmEnabled } from "@/lib/dm-toggles";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import { csmSprintWindowCutoffIso } from "@/lib/constants";
 
+// v75.32: raised from Vercel's 60s default. Per-student completion
+// fetches in waves of 20 can take 30-60s as pool grows.
+export const maxDuration = 300;
+
 /**
  * V3 engagement cron: detect disengaged students and queue alerts for the team.
  * Simplified from V2 since we no longer have activation points or week buckets.
@@ -23,7 +27,7 @@ export async function GET(request: NextRequest) {
   const now = new Date();
   const alerts: { student_id: string; alert_type: string; message: string }[] = [];
 
-  const { data: students } = await supabase
+  const { data: students, error: studentsErr } = await supabase
     .from("students")
     .select("*")
     .eq("membership_status", "active")
@@ -34,6 +38,17 @@ export async function GET(request: NextRequest) {
     // Stops legacy customers who recently renewed from leaking into
     // engagement alerts.
     .gte("first_paid_at", csmSprintWindowCutoffIso());
+
+  if (studentsErr) {
+    // v75.32: surface DB errors instead of returning {checked: 0}
+    // like everything succeeded. Without this, a query error would
+    // silently stop disengagement alerts for the day.
+    console.error("[check-engagement] students fetch failed:", studentsErr);
+    return NextResponse.json(
+      { error: `Students fetch failed: ${studentsErr.message}` },
+      { status: 500 },
+    );
+  }
 
   if (!students || students.length === 0) {
     return NextResponse.json({ checked: 0, alerts: 0 });

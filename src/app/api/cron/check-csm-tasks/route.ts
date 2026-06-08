@@ -49,6 +49,10 @@ import {
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import type { Student, TriggerConfig } from "@/types/database";
 
+// v75.32: raised from Vercel's 60s default. The per-student
+// completions fetch + 3 dismissal loops can take 60+s at 2000 members.
+export const maxDuration = 300;
+
 /** Plain-English label for each disengagement_alerts.alert_type. */
 const ALERT_LABEL: Record<string, string> = {
   no_login_5d: "no platform login in 5 days",
@@ -460,7 +464,7 @@ export async function GET(request: NextRequest) {
     template_id: string | null;
     template: { bucket: string } | { bucket: string }[] | null;
   };
-  const { data: openTasksWithBucket } =
+  const { data: openTasksWithBucket, error: openTasksErr } =
     await fetchAllRowsPaginated<OpenTaskRow>(() =>
       supabase
         .from("tasks")
@@ -469,6 +473,15 @@ export async function GET(request: NextRequest) {
         )
         .eq("status", "open"),
     );
+  if (openTasksErr) {
+    // v75.32: short-circuit. Section 3/3b/3c housekeeping all read
+    // from openTasksWithBucket; running them against a partial fetch
+    // would corrupt the supersession + auto-dismiss state.
+    return NextResponse.json(
+      { error: `Open tasks fetch failed: ${openTasksErr.message}` },
+      { status: 500 },
+    );
+  }
 
   type OpenSlot = { id: string; bucket: string };
   const negativeSlot = new Map<string, OpenSlot>();

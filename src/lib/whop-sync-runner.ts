@@ -97,13 +97,26 @@ export async function runWhopCommunitySync(
     const existingRows: ExistingRow[] = [];
     for (let i = 0; i < userIds.length; i += EXISTING_FETCH_BATCH) {
       const chunk = userIds.slice(i, i + EXISTING_FETCH_BATCH);
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("students")
         .select(
           "whop_user_id, email, name, joined_at, last_active_at, discord_user_id, membership_status, canceled_at, whop_plan_id, first_paid_at",
         )
         .in("whop_user_id", chunk)
         .returns<ExistingRow[]>();
+      // v75.32: surface batch errors. Previously a silent failure on
+      // a batch meant those user_ids were missing from `existing`,
+      // got treated as new on the next iteration, and transition
+      // detection (active → canceled) didn't fire for them →
+      // canceled_at stayed NULL → churn count under-reported.
+      if (error) {
+        console.error(
+          `[whop-sync] existing-row fetch failed for batch ${i}-${i + chunk.length}: ${error.message}`,
+        );
+        throw new Error(
+          `Existing-row pre-fetch failed at batch ${i}: ${error.message}. Aborting sync so we don't write stale state.`,
+        );
+      }
       if (data) existingRows.push(...data);
     }
     const existing = new Map(

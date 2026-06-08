@@ -5,6 +5,10 @@ import { buildDay28Embed, loadDay28EmbedInput } from "@/lib/day28-embed";
 import { isDmEnabled } from "@/lib/dm-toggles";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 
+// v75.32: raised from Vercel's 60s default. Per-student embed build
+// + DM send can take 30-60s at scale.
+export const maxDuration = 300;
+
 /**
  * Day-28 student summary DM cron.
  *

@@ -35,6 +35,8 @@ import {
 } from "@/components/admin/ui";
 import { useJourneyPaceCounts } from "@/lib/useJourneyPaceCounts";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
+import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { useAdminScope } from "@/contexts/AdminScopeContext";
 
 interface SnapshotRow {
@@ -1501,17 +1503,33 @@ function useCurrentSprinterProgress(): SprinterProgress {
       const thirtyDaysAgo = new Date(
         Date.now() - 30 * 86_400_000,
       ).toISOString();
+      // v75.32: cohort filter now uses first_paid_at (real platform
+      // tenure) instead of joined_at (current cycle, breaks for
+      // returners). Adds paying-plan filter (free users no longer
+      // inflate denominator) and ACTIVE_STATUSES (past_due included).
+      // Lessons count excludes l057 (sprint denominator = 64, not 65).
+      // Paginates student_progress_counts so the view's ~1000-row cap
+      // doesn't silently truncate.
       const [studentsRes, lessonsRes, completionsRes] = await Promise.all([
         supabase
           .from("students")
           .select("id, joined_at, membership_status")
-          .eq("membership_status", "active")
-          .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
-          .gte("joined_at", thirtyDaysAgo),
-        supabase.from("lessons").select("id", { count: "exact", head: true }),
+          .in("membership_status", ["active", "past_due"])
+          .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
+          .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
+          .gte("first_paid_at", thirtyDaysAgo),
         supabase
-          .from("student_progress_counts")
-          .select("student_id, completed_count"),
+          .from("lessons")
+          .select("id", { count: "exact", head: true })
+          .neq("id", "l057"),
+        fetchAllRowsPaginated<{
+          student_id: string;
+          completed_count: number;
+        }>(() =>
+          supabase
+            .from("student_progress_counts")
+            .select("student_id, completed_count"),
+        ),
       ]);
 
       const students = (studentsRes.data ?? []) as Array<{
@@ -1521,7 +1539,7 @@ function useCurrentSprinterProgress(): SprinterProgress {
       const totalLessons =
         typeof lessonsRes.count === "number" && lessonsRes.count > 0
           ? lessonsRes.count
-          : 57;
+          : 64;
       const completionMap = new Map<string, number>();
       for (const r of (completionsRes.data ?? []) as Array<{
         student_id: string;

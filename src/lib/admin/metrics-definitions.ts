@@ -90,14 +90,17 @@ export const PAYING_WHOP_PLAN_IDS_ARRAY: readonly string[] = Array.from(
  * customers whose current cycle started after launch but whose first
  * Whop membership was months earlier are correctly excluded.
  *
- * Falls back to joined_at when first_paid_at is null (during the
- * backfill window only; once sync has run, every paying student has
- * first_paid_at populated).
+ * v75.28 — NO joined_at fallback. NULL first_paid_at returns FALSE
+ * (out of cohort). This keeps the cron, the rebuild RPC, and the
+ * admin .gte("first_paid_at", cutoff) raw filter in lockstep — all
+ * three now agree that NULL is excluded. v75.26 ensures every new
+ * INSERT path populates first_paid_at; the nightly Whop sync backfills
+ * any legacy NULLs within 24h. The fallback only mattered during the
+ * v75.18 transition window and now actively causes cron-vs-RPC drift.
  */
 export function isInLaunchCohort(s: StudentLike): boolean {
-  const anchor = s.first_paid_at ?? s.joined_at;
-  if (!anchor) return false;
-  return anchor >= ADMIN_STUDENT_JOIN_CUTOFF;
+  if (!s.first_paid_at) return false;
+  return s.first_paid_at >= ADMIN_STUDENT_JOIN_CUTOFF;
 }
 
 /**

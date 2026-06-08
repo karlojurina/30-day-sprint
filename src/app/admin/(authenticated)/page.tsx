@@ -200,15 +200,21 @@ export default function AdminDashboard() {
           s.membership_status === "canceled" && s.updated_at >= thirtyDaysAgo,
       ).length;
 
+      // v75.28: avgProgress now uses the SAME formula as the snapshot
+      // cron and the rebuild_daily_snapshots RPC (v81 migration):
+      // Σ completions / (active × total_lessons) × 100. Previously
+      // computed mean-of-rounded-per-student-percentages which gave a
+      // 0-2pt jitter vs the snapshot row. With this fix, hitting
+      // Refresh truly doesn't change the dashboard's number.
+      const totalCompletions = activeStudents.reduce(
+        (sum, s) => sum + (completionMap[s.id] || 0),
+        0,
+      );
       const avgProgress =
-        activeStudents.length > 0
+        activeStudents.length > 0 && totalLessons > 0
           ? Math.round(
-              activeStudents.reduce(
-                (sum, s) =>
-                  sum +
-                  progressPercent(completionMap[s.id] || 0, totalLessons),
-                0,
-              ) / activeStudents.length,
+              (totalCompletions / (activeStudents.length * totalLessons)) *
+                100,
             )
           : 0;
 

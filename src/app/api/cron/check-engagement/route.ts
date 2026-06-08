@@ -40,10 +40,12 @@ export async function GET(request: NextRequest) {
   }
 
   const studentIds = students.map((s) => s.id);
+  // v75.23: explicit high limit. Same truncation bug as check-csm-tasks.
   const { data: allCompletions } = await supabase
     .from("student_lesson_completions")
     .select("student_id, lesson_id, completed_at")
-    .in("student_id", studentIds);
+    .in("student_id", studentIds)
+    .limit(100000);
 
   // Build per-student completion data
   const completionsByStudent: Record<

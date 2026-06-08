@@ -359,25 +359,18 @@ export default function AdminTasksKanban() {
             : "Copy a DM, send it in Discord, then mark it sent."
         }
         actions={
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button
-              variant="subtle"
-              size="md"
-              busy={generating}
-              onClick={() => void generateTasksNow()}
-              title="Sync Whop, rebuild snapshots, re-evaluate all tasks (auto-dismiss stale + create new). ~2 min."
-            >
-              {generating ? "Refreshing…" : "↻ Refresh everything"}
-            </Button>
-            <Button
-              variant="subtle"
-              size="md"
-              busy={refreshing}
-              onClick={() => void fetchTasks(true)}
-            >
-              {refreshing ? "Refreshing…" : "↻ Refresh"}
-            </Button>
-          </div>
+          // v75.23: one button only. The old "↻ Refresh" (just
+          // refetch the queue without a Whop sync) was redundant and
+          // misleading — Karlo couldn't tell which one to click.
+          <Button
+            variant="subtle"
+            size="md"
+            busy={generating || refreshing}
+            onClick={() => void generateTasksNow()}
+            title="Sync Whop, rebuild snapshots, re-evaluate all tasks (auto-dismiss stale + create new). ~2 min."
+          >
+            {generating || refreshing ? "Refreshing…" : "↻ Refresh"}
+          </Button>
         }
       />
 

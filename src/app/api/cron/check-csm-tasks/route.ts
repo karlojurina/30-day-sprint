@@ -151,17 +151,29 @@ export async function GET(request: NextRequest) {
       // but their first_paid_at is months ago).
       .gte("first_paid_at", TASKS_STUDENT_JOIN_CUTOFF)
       .gte("first_paid_at", csmSprintWindowCutoffIso()),
+    // v75.23: explicit high limit. PostgREST defaults to 1000 rows
+    // and silently truncates beyond that. With ~650 active students
+    // x ~10-20 lessons each the completions table easily exceeds
+    // 1000 rows — without this limit, the snapshot would think
+    // students had 0 completions and fire "no lessons watched"
+    // tasks against people who'd actually watched 20+ lessons.
+    // 100k is well above current scale; safe for years.
     supabase
       .from("student_lesson_completions")
-      .select("student_id, lesson_id, completed_at, action_completed_at"),
+      .select("student_id, lesson_id, completed_at, action_completed_at")
+      .limit(100000),
     supabase.from("lessons").select("id, region_id, requires_action"),
+    // v75.23: explicit limits on every cron bulk-fetch — defends
+    // against PostgREST's silent 1000-row truncation.
     supabase
       .from("tasks")
       .select("student_id, scenario_id, status")
-      .in("status", ["open", "completed"]),
+      .in("status", ["open", "completed"])
+      .limit(50000),
     supabase
       .from("templates")
-      .select("id, scenario_id, bucket, is_custom, is_active, trigger_config"),
+      .select("id, scenario_id, bucket, is_custom, is_active, trigger_config")
+      .limit(1000),
     supabase
       .from("disengagement_alerts")
       .select("id, student_id, alert_type, message, created_at")
@@ -169,12 +181,14 @@ export async function GET(request: NextRequest) {
       .gte(
         "created_at",
         new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-      ),
+      )
+      .limit(10000),
     // v46 — first_sprint_login_at lives on student_milestones now,
     // pulled separately and joined per-student before snapshot build.
     supabase
       .from("student_milestones")
-      .select("student_id, first_sprint_login_at"),
+      .select("student_id, first_sprint_login_at")
+      .limit(50000),
   ]);
 
   const studentsErr = studentsRes.error ?? lessonsRes.error ?? templatesRes.error;

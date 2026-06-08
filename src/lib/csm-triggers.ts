@@ -60,13 +60,20 @@ export type PaceLabel = "behind" | "on_pace" | "ahead";
 export interface StudentSnapshot {
   student: Pick<
     Student,
-    "id" | "name" | "joined_at" | "membership_status" | "last_active_at"
+    | "id"
+    | "name"
+    | "joined_at"
+    | "first_paid_at"
+    | "membership_status"
+    | "last_active_at"
   > & {
     /** v46 — sourced from student_milestones, joined into the snapshot
      *  so condition evaluators can stay simple. */
     first_sprint_login_at: string | null;
   };
-  /** Day counter, 1-indexed, computed from joined_at. */
+  /** Day counter, 1-indexed. v75.20: computed from first_paid_at
+   *  (original Whop signup) with joined_at fallback. Returning
+   *  customers don't get a day-counter reset on renewal. */
   day: number;
 
   /**
@@ -158,9 +165,13 @@ export function buildStudentSnapshot(
   milestones: { first_sprint_login_at: string | null } | null,
 ): StudentSnapshot {
   const now = Date.now();
+  // v75.20: anchor day count on first_paid_at (original Whop signup)
+  // instead of joined_at (current subscription cycle start). Returning
+  // customers don't get their day-counter reset on renewal.
+  const anchorIso = student.first_paid_at ?? student.joined_at;
   const day = Math.max(
     1,
-    Math.ceil((now - new Date(student.joined_at).getTime()) / 86_400_000),
+    Math.ceil((now - new Date(anchorIso).getTime()) / 86_400_000),
   );
 
   const lessonsById = new Map(lessons.map((l) => [l.id, l]));
@@ -244,6 +255,7 @@ export function buildStudentSnapshot(
       id: student.id,
       name: student.name,
       joined_at: student.joined_at,
+      first_paid_at: student.first_paid_at ?? null,
       membership_status: student.membership_status,
       last_active_at: student.last_active_at,
       first_sprint_login_at: milestones?.first_sprint_login_at ?? null,

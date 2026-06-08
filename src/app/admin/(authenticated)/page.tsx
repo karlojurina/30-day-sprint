@@ -201,8 +201,9 @@ export default function AdminDashboard() {
             )
           : 0;
 
+      // v75.20: anchor on first_paid_at (real platform tenure).
       const matureCohort = students.filter(
-        (s) => s.joined_at <= thirtyDaysAgo,
+        (s) => (s.first_paid_at ?? s.joined_at) <= thirtyDaysAgo,
       );
       const matureActive = matureCohort.filter(isPayingMember).length;
       const monthTwoConversionRate =
@@ -223,9 +224,14 @@ export default function AdminDashboard() {
         const dayStart = fourteenDaysAgoMs + i * 86_400_000;
         const dayEnd = dayStart + 86_400_000;
         const thirtyBeforeDay = dayStart - 30 * 86_400_000;
-        const cohortAtDay = students.filter(
-          (s) => new Date(s.joined_at).getTime() <= thirtyBeforeDay,
-        );
+        // v75.20: anchor month-2 cohort on first_paid_at (original
+        // signup). A returning customer who renewed 10 days ago has
+        // joined_at = 10 days ago but their actual platform tenure
+        // is months+. They ARE month-2-eligible.
+        const cohortAtDay = students.filter((s) => {
+          const anchor = s.first_paid_at ?? s.joined_at;
+          return new Date(anchor).getTime() <= thirtyBeforeDay;
+        });
         const activeAtDay = cohortAtDay.filter((s) => {
           if (isPayingMember(s)) return true;
           if (s.membership_status === "canceled" && s.canceled_at) {

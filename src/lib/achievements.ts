@@ -174,7 +174,7 @@ export async function buildAchievementSnapshot(
     await Promise.all([
       supabase
         .from("students")
-        .select("id, joined_at")
+        .select("id, joined_at, first_paid_at")
         .eq("id", studentId)
         .maybeSingle(),
       supabase
@@ -206,7 +206,10 @@ export async function buildAchievementSnapshot(
         .maybeSingle(),
     ]);
 
-  const student = studentRes.data as { joined_at: string } | null;
+  const student = studentRes.data as {
+    joined_at: string;
+    first_paid_at: string | null;
+  } | null;
   if (!student?.joined_at) return null;
 
   const completions =
@@ -318,10 +321,15 @@ export async function buildAchievementSnapshot(
   }
   const uniqueActiveDaysSinceJoin = lessonsByDay.size;
 
+  // v75.20: anchor day on first_paid_at (original signup), not
+  // joined_at (current cycle start). Affects achievement evaluation
+  // for any "by Day N" criteria.
   const dayNumber = Math.max(
     1,
     Math.ceil(
-      (Date.now() - new Date(student.joined_at).getTime()) / 86_400_000,
+      (Date.now() -
+        new Date(student.first_paid_at ?? student.joined_at).getTime()) /
+        86_400_000,
     ),
   );
 

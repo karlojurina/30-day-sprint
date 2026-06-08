@@ -94,7 +94,10 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
       }
     : null;
 
-  const joined = new Date(student.joined_at).getTime();
+  // v75.20: anchor on first_paid_at (original signup), not joined_at.
+  const joined = new Date(
+    student.first_paid_at ?? student.joined_at,
+  ).getTime();
   const deadline = joined + DISCOUNT_WINDOW_DAYS * 86_400_000;
   const msLeft = Math.max(0, deadline - Date.now());
 

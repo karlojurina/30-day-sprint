@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
 
   const { data: studentRow } = await supabase
     .from("students")
-    .select("id, joined_at, ad_submissions_verified")
+    .select("id, joined_at, first_paid_at, ad_submissions_verified")
     .eq("id", discountReq.student_id)
     .single();
 
@@ -75,7 +75,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const joinedAt = new Date(studentRow.joined_at);
+  // v75.20: anchor on first_paid_at (original signup), not joined_at
+  // (current cycle start). Returning customers can't get a fresh
+  // 14-day discount window from a renewal.
+  const joinedAt = new Date(studentRow.first_paid_at ?? studentRow.joined_at);
   const deadline = new Date(
     joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000
   );

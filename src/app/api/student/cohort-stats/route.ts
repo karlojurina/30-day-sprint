@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
   // skew the rank.
   const { data: rows, error: rowsError } = await supabase
     .from("student_lesson_completions")
-    .select("student_id, completed_at, students!inner(joined_at)")
+    .select("student_id, completed_at, students!inner(joined_at, first_paid_at)")
     .eq("lesson_id", PLAYBOOK_UNLOCK_LESSON_ID)
     .not("completed_at", "is", null);
   if (rowsError) {
@@ -76,11 +76,13 @@ export async function GET(request: NextRequest) {
   type FinishRow = {
     student_id: string;
     completed_at: string;
-    students: { joined_at: string };
+    students: { joined_at: string; first_paid_at: string | null };
   };
   const finishers = (rows as unknown as FinishRow[])
     .map((r) => {
-      const joined = new Date(r.students.joined_at).getTime();
+      // v75.20: anchor sprint duration on first_paid_at (true Day 1).
+      const anchor = r.students.first_paid_at ?? r.students.joined_at;
+      const joined = new Date(anchor).getTime();
       const finished = new Date(r.completed_at).getTime();
       const days = Math.max(0, Math.floor((finished - joined) / 86_400_000));
       return { student_id: r.student_id, days };

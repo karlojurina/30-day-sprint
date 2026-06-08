@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
   const [studentsRes, bountyCountRes] = await Promise.all([
     supabase
       .from("students")
-      .select("id, membership_status, joined_at, updated_at")
+      .select("id, membership_status, joined_at, first_paid_at, updated_at")
       .not("whop_membership_id", "is", null)
       .in("membership_status", ["active", "past_due", "canceled"])
       .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
@@ -83,9 +83,11 @@ export async function GET(request: NextRequest) {
       new Date(s.updated_at).getTime() >= thirtyDaysAgo
   ).length;
 
-  const cohortPastMonth = all.filter(
-    (s) => new Date(s.joined_at).getTime() <= thirtyDaysAgo
-  );
+  // v75.20: anchor month-2 on first_paid_at (real platform tenure).
+  const cohortPastMonth = all.filter((s) => {
+    const anchor = s.first_paid_at ?? s.joined_at;
+    return new Date(anchor).getTime() <= thirtyDaysAgo;
+  });
   const monthTwoConversionDenom = cohortPastMonth.length;
   const monthTwoActive = cohortPastMonth.filter(
     (s) => s.membership_status === "active"

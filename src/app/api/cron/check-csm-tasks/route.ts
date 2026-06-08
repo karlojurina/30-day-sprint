@@ -33,6 +33,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
+import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { postTeamAlert } from "@/lib/discord";
 import { isDmEnabled } from "@/lib/dm-toggles";
 import {
@@ -443,21 +444,34 @@ export async function GET(request: NextRequest) {
 
   // Fetch open tasks with their bucket to know who currently holds
   // each student's negative slot.
-  const { data: openTasksWithBucket } = await supabase
-    .from("tasks")
-    .select("id, student_id, scenario_id, template:templates(bucket)")
-    .eq("status", "open");
-
-  type OpenSlot = { id: string; bucket: string };
-  const negativeSlot = new Map<string, OpenSlot>();
-  // Supabase's relational select can return the joined row as either a
-  // single object or an array, depending on inferred shape — normalize.
+  // v75.29: paginated to bypass PostgREST's ~1000-row server cap.
+  // This fetch drives bucket-cap supersession, family-level
+  // supersession, AND v75.19's auto-dismiss section 3c — every
+  // open-task housekeeping decision happens off this list. If a
+  // task is silently dropped from the result, its student's
+  // supersession state becomes wrong AND auto-dismiss can never
+  // reach it (orphans accumulate forever). Currently 54 open tasks
+  // = well under cap, but once cumulative open tasks grow past
+  // 1000 this would silently corrupt the queue.
   type OpenTaskRow = {
     id: string;
     student_id: string;
     scenario_id: string;
+    template_id: string | null;
     template: { bucket: string } | { bucket: string }[] | null;
   };
+  const { data: openTasksWithBucket } =
+    await fetchAllRowsPaginated<OpenTaskRow>(() =>
+      supabase
+        .from("tasks")
+        .select(
+          "id, student_id, scenario_id, template_id, template:templates(bucket)",
+        )
+        .eq("status", "open"),
+    );
+
+  type OpenSlot = { id: string; bucket: string };
+  const negativeSlot = new Map<string, OpenSlot>();
   for (const t of (openTasksWithBucket ?? []) as unknown as OpenTaskRow[]) {
     const tpl = Array.isArray(t.template) ? t.template[0] : t.template;
     const bucket = tpl?.bucket ?? bucketByScenario.get(t.scenario_id) ?? "";

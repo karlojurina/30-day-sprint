@@ -112,7 +112,8 @@ export default function StudentDetailPage() {
   // which counted partial rows (e.g. only the watch half of a
   // compound lesson) toward completion.
   const completedIds = completedLessonIdsFor(completions, lessons);
-  const dayNumber = getDayNumber(student.joined_at);
+  // v75.18: day from first_paid_at (original signup).
+  const dayNumber = getDayNumber(student.first_paid_at ?? student.joined_at);
   // v75.1 - lessons.length includes l057 (bounty onboarding). Filter
   // it out so the % displayed matches the 64-lesson sprint baseline
   // every other surface uses.

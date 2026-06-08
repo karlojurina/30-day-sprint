@@ -33,10 +33,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Student join date (from Whop membership, set at OAuth)
+  // v75.18: anchor the discount window on first_paid_at (original
+  // signup), NOT joined_at (current cycle start). A returning customer
+  // whose first Whop signup was 6 months ago shouldn't be eligible
+  // for a "first 14 days" discount even if they just renewed.
   const { data: student } = await supabase
     .from("students")
-    .select("joined_at")
+    .select("joined_at, first_paid_at")
     .eq("id", studentId)
     .single();
 
@@ -44,7 +47,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  const joinedAt = new Date(student.joined_at);
+  const anchorIso = student.first_paid_at ?? student.joined_at;
+  const joinedAt = new Date(anchorIso);
   const deadline = new Date(
     joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000
   );

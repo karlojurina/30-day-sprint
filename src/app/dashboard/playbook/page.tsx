@@ -44,7 +44,11 @@ export default function PlaybookPage() {
   // src/lib/progress.ts for the precise rule.
   const playbookUnlocked = student
     ? isPlaybookUnlocked({
-        student: { joined_at: student.joined_at },
+        // v75.18: anchor the "30+ days" auto-unlock on first_paid_at
+        // (original signup), not joined_at (current cycle start).
+        // A returning customer who just renewed shouldn't lose their
+        // playbook access by having their day-count reset to 0.
+        student: { joined_at: student.first_paid_at ?? student.joined_at },
         completedLessonIds,
         playbookUnlockLessonId: PLAYBOOK_UNLOCK_LESSON_ID,
         totalLessons: TOTAL_LESSONS,

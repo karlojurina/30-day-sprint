@@ -84,6 +84,7 @@ export async function runWhopCommunitySync(
       membership_status: string | null;
       canceled_at: string | null;
       whop_plan_id: string | null;
+      first_paid_at: string | null;
     };
     // v75.16.3 — batch the .in() filter. PostgREST's URL-length cap
     // silently truncates .in() at ~1000 items, which meant existing
@@ -99,7 +100,7 @@ export async function runWhopCommunitySync(
       const { data } = await supabase
         .from("students")
         .select(
-          "whop_user_id, email, name, joined_at, last_active_at, discord_user_id, membership_status, canceled_at, whop_plan_id",
+          "whop_user_id, email, name, joined_at, last_active_at, discord_user_id, membership_status, canceled_at, whop_plan_id, first_paid_at",
         )
         .in("whop_user_id", chunk)
         .returns<ExistingRow[]>();
@@ -235,6 +236,26 @@ export async function runWhopCommunitySync(
       // when Whop didn't send it (don't include the key at all).
       if (planId) row.whop_plan_id = planId;
       else if (!cur) row.whop_plan_id = null; // explicit null on insert
+
+      // first_paid_at (v75.18): the earliest membership.created_at
+      // across ALL of this user's memberships. Computed by
+      // fetchAllMemberships and attached as m._firstPaidAt.
+      //
+      // - INSERT: set whatever we computed (could be null if Whop's
+      //   dates were unparseable; preserves invariant "we tried")
+      // - UPDATE: only overwrite if the row's current value is null
+      //   OR we found an EARLIER date than what's stored. Stable
+      //   "first paid" semantic — we never push it forward in time.
+      const firstPaidIso = m._firstPaidAt ?? null;
+      if (!cur) {
+        row.first_paid_at = firstPaidIso;
+      } else if (firstPaidIso) {
+        if (!cur.first_paid_at) {
+          row.first_paid_at = firstPaidIso;
+        } else if (firstPaidIso < cur.first_paid_at) {
+          row.first_paid_at = firstPaidIso;
+        }
+      }
 
       upsertRows.push(row);
       if (cur) result.updated++;

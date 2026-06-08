@@ -43,6 +43,10 @@ export type VisibleStatus = (typeof VISIBLE_STATUSES)[number];
 interface StudentLike {
   membership_status?: string | null;
   joined_at?: string | null;
+  /** v75.18: original Whop signup date, never moves on renewal.
+   *  Used for cohort filtering instead of joined_at (which is
+   *  current cycle start and moves on each renewal). */
+  first_paid_at?: string | null;
   whop_plan_id?: string | null;
 }
 
@@ -81,13 +85,19 @@ export const PAYING_WHOP_PLAN_IDS_ARRAY: readonly string[] = Array.from(
 );
 
 /**
- * True iff the student joined on/after the launch cutoff. Used to
- * separate the launch cohort (post-2026-05-25) from legacy / test
- * accounts in admin views.
+ * True iff the student's ORIGINAL Whop signup was on/after launch.
+ * v75.18 — was joined_at-based, now first_paid_at-based. Returning
+ * customers whose current cycle started after launch but whose first
+ * Whop membership was months earlier are correctly excluded.
+ *
+ * Falls back to joined_at when first_paid_at is null (during the
+ * backfill window only; once sync has run, every paying student has
+ * first_paid_at populated).
  */
 export function isInLaunchCohort(s: StudentLike): boolean {
-  if (!s.joined_at) return false;
-  return s.joined_at >= ADMIN_STUDENT_JOIN_CUTOFF;
+  const anchor = s.first_paid_at ?? s.joined_at;
+  if (!anchor) return false;
+  return anchor >= ADMIN_STUDENT_JOIN_CUTOFF;
 }
 
 /**

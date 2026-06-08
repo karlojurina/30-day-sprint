@@ -30,10 +30,10 @@ export async function GET(request: NextRequest) {
     // v79: skip free-plan members — they shouldn't trigger
     // engagement alerts or team-channel posts.
     .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
-    // v75.15: skip students past day 30 of their sprint. Engagement
-    // alerts ("no lessons in 3d", etc.) are useless once they've
-    // graduated or fully lapsed.
-    .gte("joined_at", csmSprintWindowCutoffIso());
+    // v75.18: filter on first_paid_at (original signup), not joined_at.
+    // Stops legacy customers who recently renewed from leaking into
+    // engagement alerts.
+    .gte("first_paid_at", csmSprintWindowCutoffIso());
 
   if (!students || students.length === 0) {
     return NextResponse.json({ checked: 0, alerts: 0 });
@@ -81,7 +81,7 @@ export async function GET(request: NextRequest) {
     const dayNumber = Math.max(
       1,
       Math.ceil(
-        (now.getTime() - new Date(student.joined_at).getTime()) / 86400000
+        (now.getTime() - new Date(student.first_paid_at ?? student.joined_at).getTime()) / 86400000
       )
     );
     const studentData = completionsByStudent[student.id];

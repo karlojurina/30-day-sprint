@@ -50,9 +50,10 @@ export async function GET(request: NextRequest) {
   // and pre-launch joiners — only show tasks for students who
   // joined on/after the dedicated tasks cutoff. Decoupled from the
   // wider ADMIN cutoff so we can launch CSM later than the rest.
+  // v75.18: filter on first_paid_at (original signup).
   q = q
     .eq("student.csm_exempt", false)
-    .gte("student.joined_at", TASKS_STUDENT_JOIN_CUTOFF);
+    .gte("student.first_paid_at", TASKS_STUDENT_JOIN_CUTOFF);
 
   // Bucket/week filters apply to the joined template — Supabase supports
   // filtering on FK columns via the `template.column` path.

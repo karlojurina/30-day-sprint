@@ -783,8 +783,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(id);
   }, []);
 
+  // v75.18: anchor on first_paid_at (original signup), not joined_at
+  // (current cycle start). Returning customers don't get a fresh
+  // 14-day discount window from a renewal.
   const discountMsLeft = student
-    ? new Date(student.joined_at).getTime() +
+    ? new Date(student.first_paid_at ?? student.joined_at).getTime() +
       DISCOUNT_WINDOW_DAYS * 86_400_000 -
       nowMs
     : 0;

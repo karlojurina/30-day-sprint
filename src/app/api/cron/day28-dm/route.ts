@@ -36,11 +36,12 @@ export async function GET(request: NextRequest) {
   }
 
   const now = new Date();
-  // Exactly Day 28 — window is the 24-hour band 28 to 29 days after join.
-  // A student joined exactly 28d ago at this moment satisfies
-  //   joined_at <= (now - 28d)  AND  joined_at > (now - 29d)
-  const minJoined = new Date(now.getTime() - 29 * 86_400_000); // > 29d ago is OUT
-  const maxJoined = new Date(now.getTime() - 28 * 86_400_000); // ≤ 28d ago is IN
+  // Exactly Day 28 — window is the 24-hour band 28 to 29 days after the
+  // student's first paid join. v75.18 anchors on first_paid_at instead
+  // of joined_at so a returning customer who renewed on Day 28-of-cycle
+  // doesn't trigger a fresh "you finished Day 28!" DM.
+  const minFirstPaid = new Date(now.getTime() - 29 * 86_400_000); // > 29d ago is OUT
+  const maxFirstPaid = new Date(now.getTime() - 28 * 86_400_000); // ≤ 28d ago is IN
 
   // v46 — day28_dm_sent_at lives on student_dm_log. Join via left-join
   // semantics: any student with no dm_log row is "not yet sent" (null).
@@ -50,8 +51,8 @@ export async function GET(request: NextRequest) {
     .eq("membership_status", "active")
     .eq("csm_exempt", false)
     .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
-    .gt("joined_at", minJoined.toISOString())
-    .lte("joined_at", maxJoined.toISOString());
+    .gt("first_paid_at", minFirstPaid.toISOString())
+    .lte("first_paid_at", maxFirstPaid.toISOString());
 
   // Filter out anyone who already has day28_dm_sent_at set.
   type DmLogJoin = { day28_dm_sent_at: string | null };

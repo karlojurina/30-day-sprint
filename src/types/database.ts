@@ -53,6 +53,14 @@ export interface Student {
    *  excluded from CSM tasks, dashboard metrics, etc. Populated by
    *  the webhook + sync runner + OAuth callback self-heal. */
   whop_plan_id: string | null;
+  /** v75.18: original Whop signup date across ALL of this user's
+   *  memberships, not just the current one. Never moves on renewal.
+   *  joined_at = current subscription cycle start (could be recent
+   *  even for a 6-month customer who just renewed).
+   *  first_paid_at = first-ever membership creation = "true Day 1."
+   *  Used by every "is this a launch-cohort student / first-time
+   *  joiner?" check across the app. */
+  first_paid_at: string | null;
   /** Computed/derived from the streak count. Cached here for the UI. */
   current_title: StudentTitle;
   // Admin gates (stay on students — they're identity-adjacent admin flags)

@@ -102,12 +102,11 @@ export async function GET(request: NextRequest) {
     // v79: paying-plan filter — free-plan users don't need a CSM
     // "not activated" nudge.
     .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
-    // v75.16.5: filter by joined_at (Whop's membership-creation
-    // date), NOT created_at (when WE inserted the row). After bulk
-    // syncs, created_at is "today" for everyone, so the filter
-    // matched everyone and the pool ballooned to 494. joined_at
-    // is the real "when did they pay on Whop" timestamp.
-    .gte("joined_at", csmSprintWindowCutoffIso());
+    // v75.18: filter on first_paid_at (true original signup date)
+    // instead of joined_at (current cycle start). Stops a 6-month
+    // legacy customer who renewed yesterday from showing up as a
+    // "not activated" lead. NA nudges target first-time joiners only.
+    .gte("first_paid_at", csmSprintWindowCutoffIso());
 
   if (studentsErr) {
     console.error("[check-na-tasks] students query failed:", studentsErr);

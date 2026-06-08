@@ -52,8 +52,11 @@ export default function StudentsPage() {
         .in("membership_status", ["active", "past_due", "canceled"])
         .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
       if (scope === "cohort") {
+        // v75.18: cohort = "first-time joiners since launch."
+        // Filter on first_paid_at (original Whop signup) so returning
+        // customers don't sneak in by virtue of a recent renewal.
         studentsQuery = studentsQuery.gte(
-          "joined_at",
+          "first_paid_at",
           ADMIN_STUDENT_JOIN_CUTOFF,
         );
       }
@@ -121,7 +124,10 @@ export default function StudentsPage() {
           cmp = a.joined_at.localeCompare(b.joined_at);
           break;
         case "day":
-          cmp = getDayNumber(a.joined_at) - getDayNumber(b.joined_at);
+          // v75.18: anchor day on first_paid_at (original signup).
+          cmp =
+            getDayNumber(a.first_paid_at ?? a.joined_at) -
+            getDayNumber(b.first_paid_at ?? b.joined_at);
           break;
         case "progress":
           cmp =
@@ -292,7 +298,8 @@ export default function StudentsPage() {
           />
         ) : (
           filtered.map((student) => {
-            const day = getDayNumber(student.joined_at);
+            // v75.18: day from first_paid_at (original signup).
+            const day = getDayNumber(student.first_paid_at ?? student.joined_at);
             const completed = completionCounts[student.id] || 0;
             const percent = progressPercent(completed, totalLessons);
             const dayColor =

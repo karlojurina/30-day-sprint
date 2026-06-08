@@ -61,7 +61,8 @@ export async function GET(request: NextRequest) {
       .not("whop_membership_id", "is", null)
       .in("membership_status", ["active", "past_due", "canceled"])
       .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
-      .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF),
+      // v75.18: first_paid_at, not joined_at — see whop-sync-runner.ts.
+      .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF),
     supabase
       .from("student_milestones")
       .select("student_id", { count: "exact", head: true })

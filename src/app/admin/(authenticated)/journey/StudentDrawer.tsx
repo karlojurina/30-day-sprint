@@ -112,7 +112,10 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
     ? progressPercent(completedIds.size, lessons.length || TOTAL_LESSONS)
     : 0;
 
-  const dayNumber = student ? getDayNumber(student.joined_at) : 1;
+  // v75.18: anchor day on first_paid_at (original signup).
+  const dayNumber = student
+    ? getDayNumber(student.first_paid_at ?? student.joined_at)
+    : 1;
 
   async function toggleAdSubmissionsVerified(verified: boolean) {
     if (!student) return;

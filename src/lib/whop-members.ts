@@ -412,9 +412,24 @@ export async function fetchActiveMembershipForUser(
   return null;
 }
 
+/**
+ * Sync entry per user: the latest membership row (for current
+ * status / plan / canceled state) AND the earliest created_at
+ * across ALL of this user's memberships (their true "first paid"
+ * date, never moves on renewal).
+ */
+export type SyncEntry = WhopMembershipRow & {
+  /** ISO timestamp of the earliest membership created_at we saw
+   *  for this user across all paginated rows. Null only if we
+   *  couldn't parse any of the dates. */
+  _firstPaidAt: string | null;
+};
+
 /** Convenience: collect every membership across every product id in
- *  WHOP_PRODUCT_ID. Dedupes by user_id, last-wins for status. */
-export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
+ *  WHOP_PRODUCT_ID. Per-user dedupe: keeps the LATEST membership row
+ *  (for current state) and computes the EARLIEST created_at for
+ *  first_paid_at. */
+export async function fetchAllMemberships(): Promise<SyncEntry[]> {
   const raw = process.env.WHOP_PRODUCT_ID ?? "";
   const productIds = raw
     .split(",")
@@ -423,21 +438,33 @@ export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
   if (productIds.length === 0) {
     throw new Error("WHOP_PRODUCT_ID not set");
   }
-  const byUser = new Map<string, WhopMembershipRow>();
+  type Acc = { latest: WhopMembershipRow; firstPaidAt: string | null };
+  const byUser = new Map<string, Acc>();
   for (const pid of productIds) {
     for await (const row of listMembershipsForProduct(pid)) {
       if (!row.user) continue;
-      // Keep the most-recently-created membership per user (most likely
-      // the current one).
+      const createdIso = toIso(row.created_at);
       const existing = byUser.get(row.user);
       if (!existing) {
-        byUser.set(row.user, row);
+        byUser.set(row.user, { latest: row, firstPaidAt: createdIso });
         continue;
       }
-      const a = toIso(existing.created_at);
-      const b = toIso(row.created_at);
-      if (a && b && b > a) byUser.set(row.user, row);
+      // Track earliest created_at as first_paid_at.
+      if (
+        createdIso &&
+        (!existing.firstPaidAt || createdIso < existing.firstPaidAt)
+      ) {
+        existing.firstPaidAt = createdIso;
+      }
+      // Track latest membership row as the "current state."
+      const latestIso = toIso(existing.latest.created_at);
+      if (createdIso && latestIso && createdIso > latestIso) {
+        existing.latest = row;
+      }
     }
   }
-  return Array.from(byUser.values());
+  return Array.from(byUser.values()).map(({ latest, firstPaidAt }) => ({
+    ...latest,
+    _firstPaidAt: firstPaidAt,
+  }));
 }

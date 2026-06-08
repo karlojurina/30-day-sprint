@@ -48,7 +48,12 @@ const COLUMNS: Column[] = [
 
 function columnFor(student: Student): ColumnId {
   if (student.membership_status === "canceled") return "churned";
-  const day = getDayNumber(student.joined_at);
+  // v75.18: anchor on first_paid_at (original signup), not joined_at
+  // (current cycle start). Otherwise a returning customer who just
+  // renewed shows up as "Day 3" when they're really 5 months in.
+  // Falls back to joined_at if first_paid_at is null (during the
+  // backfill window).
+  const day = getDayNumber(student.first_paid_at ?? student.joined_at);
   if (day > 30 && student.membership_status === "active") return "month-2";
   if (day <= 7) return "week-1";
   if (day <= 14) return "week-2";
@@ -88,7 +93,10 @@ export default function KanbanPage() {
             .not("whop_membership_id", "is", null)
             .in("membership_status", ["active", "past_due", "canceled"])
             .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
-            .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
+            // v75.18: hardcoded first_paid_at filter (no scope toggle on
+            // this surface). Returning customers stay out of the journey
+            // — they're not first-time joiners by definition.
+            .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
             .order("joined_at", { ascending: false }),
           supabase
             .from("student_progress_counts")

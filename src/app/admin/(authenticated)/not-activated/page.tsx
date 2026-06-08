@@ -99,7 +99,8 @@ export default function NotActivatedPage() {
       .eq("csm_exempt", false)
       .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
     if (scope === "cohort") {
-      query = query.gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF);
+      // v75.18: first_paid_at (original signup), not joined_at.
+      query = query.gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF);
     }
     const { data: studentsRaw } = await query.order("created_at", {
       ascending: true,

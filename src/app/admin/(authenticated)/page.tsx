@@ -103,8 +103,12 @@ export default function AdminDashboard() {
         .in("membership_status", ["active", "past_due", "canceled"])
         .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
       if (scope === "cohort") {
+        // v75.18: filter by first_paid_at (original Whop signup),
+        // NOT joined_at (current cycle start). Returning customers
+        // who re-subscribed post-launch have a recent joined_at but
+        // their first_paid_at is pre-launch → correctly excluded.
         studentsQuery = studentsQuery.gte(
-          "joined_at",
+          "first_paid_at",
           ADMIN_STUDENT_JOIN_CUTOFF,
         );
       }
@@ -144,7 +148,8 @@ export default function AdminDashboard() {
           )
           .eq("status", "open")
           .eq("student.csm_exempt", false)
-          .gte("student.joined_at", TASKS_STUDENT_JOIN_CUTOFF),
+          // v75.18: filter on first_paid_at (original signup).
+          .gte("student.first_paid_at", TASKS_STUDENT_JOIN_CUTOFF),
         // Fetch both column families so the sparkline can flip
         // instantly when scope toggles, without refetching.
         supabase

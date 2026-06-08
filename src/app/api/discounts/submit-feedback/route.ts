@@ -73,14 +73,16 @@ export async function POST(request: NextRequest) {
   // rule as /api/discounts/request).
   const { data: student } = await supabase
     .from("students")
-    .select("joined_at")
+    .select("joined_at, first_paid_at")
     .eq("id", studentId)
     .single();
   if (!student) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  const joinedAt = new Date(student.joined_at);
+  // v75.18: discount window anchored on first_paid_at (original
+  // signup), not joined_at (current cycle start).
+  const joinedAt = new Date(student.first_paid_at ?? student.joined_at);
   const deadline = new Date(
     joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000,
   );

@@ -555,7 +555,9 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
   // in src/lib/progress.ts.
   const playbookUnlocked = student
     ? isPlaybookUnlocked({
-        student: { joined_at: student.joined_at },
+        // v75.18: anchor on first_paid_at (original signup), not
+        // joined_at (current cycle start).
+        student: { joined_at: student.first_paid_at ?? student.joined_at },
         completedLessonIds,
         playbookUnlockLessonId: PLAYBOOK_UNLOCK_LESSON_ID,
         totalLessons: TOTAL_LESSONS,
@@ -643,7 +645,10 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
     if (!completedLessonIds.has(PLAYBOOK_UNLOCK_LESSON_ID)) return;
     const key = `et.graduation.seen.${student.id}`;
     if (window.localStorage.getItem(key)) return;
-    const joinedMs = new Date(student.joined_at).getTime();
+    // v75.18: anchor day count on first_paid_at (original signup).
+    const joinedMs = new Date(
+      student.first_paid_at ?? student.joined_at,
+    ).getTime();
     const days = Math.max(
       0,
       Math.floor((Date.now() - joinedMs) / 86_400_000),

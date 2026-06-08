@@ -43,7 +43,8 @@ export function StudentCard({
   paceLabel,
   onClick,
 }: StudentCardProps) {
-  const day = getDayNumber(student.joined_at);
+  // v75.18: day from first_paid_at (original signup).
+  const day = getDayNumber(student.first_paid_at ?? student.joined_at);
   const lastActiveLabel = relativeTime(student.last_active_at);
 
   return (

@@ -593,7 +593,8 @@ function TaskRow({
 }) {
   const { student, template } = row;
   const isAdminOnly = template?.is_admin_only === true;
-  const day = student ? getDayNumber(student.joined_at) : null;
+  // v75.18: anchor day on first_paid_at (original signup), fallback to joined_at.
+  const day = student ? getDayNumber(student.first_paid_at ?? student.joined_at) : null;
   const dotColor = bucketDot(template?.bucket);
 
   return (
@@ -737,7 +738,8 @@ function TaskDetail({
   onDismiss: () => void;
 }) {
   const { student, template } = row;
-  const day = student ? getDayNumber(student.joined_at) : null;
+  // v75.18: anchor day on first_paid_at (original signup), fallback to joined_at.
+  const day = student ? getDayNumber(student.first_paid_at ?? student.joined_at) : null;
   const preview =
     template && student && !template.is_admin_only
       ? renderTemplate(template.body, {

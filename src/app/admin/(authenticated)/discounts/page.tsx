@@ -63,9 +63,10 @@ export default function DiscountsPage() {
     let query = supabase
       .from("discount_requests")
       .select("*, student:students(*)")
-      // v72.9 - sync to the same launch-date cutoff every other admin
-      // page uses (Karlo wants all sidebar surfaces filtered consistently).
-      .gte("student.joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
+      // v75.18: filter on first_paid_at (original signup), not joined_at
+      // (current cycle start). Returning customers who renewed post-launch
+      // shouldn't appear here — they're not first-time joiners.
+      .gte("student.first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
       .order("created_at", { ascending: false });
 
     if (filter !== "all") {

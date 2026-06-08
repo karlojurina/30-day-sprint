@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
   // upfront via the .in() on whop_plan_id.
   const { data: activeRows } = await supabase
     .from("students")
-    .select("id, joined_at, membership_status, whop_plan_id")
+    .select("id, joined_at, first_paid_at, membership_status, whop_plan_id")
     .in("membership_status", ACTIVE_STATUSES as unknown as string[])
     .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
 
@@ -97,31 +97,31 @@ export async function GET(request: NextRequest) {
   const allCompletions = allCompletionsRes.count ?? 0;
   const cohortCompletions = cohortCompletionsRes.count ?? 0;
 
-  // joined_count: students whose joined_at falls inside today.
-  // joined_at is immutable post-insert so this is exact.
-  // All counts also filter by whop_plan_id IN paying plans —
-  // free-plan signups don't count in the dashboard's "joined".
+  // joined_count: students whose FIRST_PAID_AT falls inside today
+  // (v75.18). This is the honest "new joiners today" signal —
+  // first-time signups, not renewals/cycle-starts that joined_at
+  // would otherwise capture. Plan filter still applies.
   const [joinedAllRes, joinedCohortRes] = await Promise.all([
     supabase
       .from("students")
       .select("id", { count: "exact", head: true })
-      .gte("joined_at", todayStart)
-      .lt("joined_at", tomorrowStart)
+      .gte("first_paid_at", todayStart)
+      .lt("first_paid_at", tomorrowStart)
       .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]),
     supabase
       .from("students")
       .select("id", { count: "exact", head: true })
-      .gte("joined_at", todayStart)
-      .lt("joined_at", tomorrowStart)
-      .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
+      .gte("first_paid_at", todayStart)
+      .lt("first_paid_at", tomorrowStart)
+      .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
       .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]),
   ]);
 
   // churned_count: students who transitioned INTO canceled today.
   // Uses students.canceled_at (set on the transition itself, not
-  // touched by routine syncs) so the count is the real event count,
-  // not "rows updated today". Plan filter again — we don't care
-  // about free users churning.
+  // touched by routine syncs). Cohort variant uses first_paid_at
+  // (v75.18) so legacy customers churning don't count toward the
+  // launch-cohort churn.
   const [churnedAllRes, churnedCohortRes] = await Promise.all([
     supabase
       .from("students")
@@ -134,7 +134,7 @@ export async function GET(request: NextRequest) {
       .select("id", { count: "exact", head: true })
       .gte("canceled_at", todayStart)
       .lt("canceled_at", tomorrowStart)
-      .gte("joined_at", ADMIN_STUDENT_JOIN_CUTOFF)
+      .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
       .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]),
   ]);
 

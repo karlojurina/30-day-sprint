@@ -141,13 +141,16 @@ export async function GET(request: NextRequest) {
     supabase
       .from("students")
       .select(
-        "id, name, joined_at, membership_status, last_active_at, discord_username",
+        "id, name, joined_at, first_paid_at, membership_status, last_active_at, discord_username",
       )
       .eq("membership_status", "active")
       .eq("csm_exempt", false)
       .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
-      .gte("joined_at", TASKS_STUDENT_JOIN_CUTOFF)
-      .gte("joined_at", csmSprintWindowCutoffIso()),
+      // v75.18: first_paid_at filters — pre-launch legacy customers
+      // who recently renewed are excluded (their joined_at is recent
+      // but their first_paid_at is months ago).
+      .gte("first_paid_at", TASKS_STUDENT_JOIN_CUTOFF)
+      .gte("first_paid_at", csmSprintWindowCutoffIso()),
     supabase
       .from("student_lesson_completions")
       .select("student_id, lesson_id, completed_at, action_completed_at"),
@@ -320,7 +323,9 @@ export async function GET(request: NextRequest) {
     // alert but no first_sprint_login_at hasn't opened the app yet -
     // they belong to the NA (stalled.*) pipeline, not nolessons/pace.
     if (snap && !snap.student.first_sprint_login_at) continue;
-    const day = dayNumber(student.joined_at);
+    // v75.18: day count from first_paid_at (true Day 1), fallback to
+    // joined_at for safety during the backfill window.
+    const day = dayNumber(student.first_paid_at ?? student.joined_at);
     const scenarioId = pickExistingAlertScenario(alert.alert_type, day);
     if (!scenarioId) continue;
     const templateId = templateBy.get(scenarioId);

@@ -183,7 +183,8 @@ export default function DashboardMockupPage() {
     if (showGraduation) return;
     if (celebrations?.month_review_seen_at) return;
     if (!monthReview) return;
-    const day = getDayNumber(student.joined_at);
+    // v75.18: anchor day on first_paid_at (original signup).
+    const day = getDayNumber(student.first_paid_at ?? student.joined_at);
     if (day < 28) return;
     setShowGraduation(true);
   }, [student, monthReview, showGraduation, celebrations]);

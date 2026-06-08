@@ -39,7 +39,13 @@ interface MonthReview {
 }
 
 interface JournalViewProps {
-  student: { id: string; name: string | null; joined_at: string; longest_streak: number };
+  student: {
+    id: string;
+    name: string | null;
+    joined_at: string;
+    first_paid_at: string | null;
+    longest_streak: number;
+  };
   regions: Region[];
   lessons: Lesson[];
   completions: Completion[];
@@ -61,7 +67,9 @@ export function JournalView({
     document.title = `Field Journal — ${student.name ?? "Student"}`;
   }, [student.name]);
 
-  const startDate = new Date(student.joined_at);
+  // v75.18: anchor the journal Day 1 on first_paid_at (original
+  // signup), not joined_at (current cycle start).
+  const startDate = new Date(student.first_paid_at ?? student.joined_at);
   const completionByLesson = new Map(
     completions.map((c) => [c.lesson_id, c])
   );

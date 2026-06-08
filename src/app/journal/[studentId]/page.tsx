@@ -23,7 +23,7 @@ export default async function JournalPage(props: JournalPageProps) {
   // v46 — longest_streak moved to student_streaks. Fetch both rows.
   const { data: student } = await supabase
     .from("students")
-    .select("id, name, joined_at")
+    .select("id, name, joined_at, first_paid_at")
     .eq("id", studentId)
     .single();
 

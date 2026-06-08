@@ -49,6 +49,41 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
+  // v75.30: server-side validation — only allow skipping lessons
+  // that AREN'T required-action items. Without this gate, a student
+  // could POST {lessonId: "l018"} (a required action lesson) and
+  // mark it skipped, then submit a discount request as if they'd
+  // shipped it. R1+R2 action items REQUIRE both completed_at AND
+  // action_completed_at per the canonical isLessonComplete formula —
+  // but skipped_at also satisfies the formula, so an action lesson
+  // marked skipped would mis-count as done.
+  const { data: lessonRow, error: lessonErr } = await supabase
+    .from("lessons")
+    .select("id, requires_action, type")
+    .eq("id", lessonId)
+    .maybeSingle();
+  if (lessonErr) {
+    return NextResponse.json(
+      { error: "Lesson lookup failed" },
+      { status: 500 },
+    );
+  }
+  if (!lessonRow) {
+    return NextResponse.json(
+      { error: "Lesson not found" },
+      { status: 404 },
+    );
+  }
+  if (lessonRow.requires_action || lessonRow.type === "action") {
+    return NextResponse.json(
+      {
+        error:
+          "This lesson can't be skipped — it's a required action item. Watch it and ship the action to complete it.",
+      },
+      { status: 400 },
+    );
+  }
+
   const { data: existing } = await supabase
     .from("student_lesson_completions")
     .select("id, completed_at, skipped_at")

@@ -134,27 +134,51 @@ export async function GET(request: NextRequest) {
       if (!dbHasActive && !whopHasAccess) {
         const adminRow = await fetchActiveMembershipForUser(userInfo.sub);
         if (adminRow) {
+          // v75.30: also stamp first_paid_at on this INSERT path.
+          // The v75.10 self-heal branch is the FIRST insert site;
+          // without first_paid_at here, the later v75.26 stamp at
+          // line ~283 is skipped (because `existing` is truthy
+          // after self-heal runs). Net regression: every legacy
+          // self-healed customer was left with first_paid_at=NULL
+          // until nightly sync — they'd then be hard-blocked from
+          // claiming the discount with the "contact support"
+          // message.
+          //
+          // Pre-fetch existing.first_paid_at so we ONLY set it on
+          // a real INSERT, not on UPDATE. Otherwise we'd overwrite
+          // a returning customer's true original signup date with
+          // the current renewal date and re-open their discount
+          // window — exactly the leak v75.20 was meant to prevent.
+          const healAnchor =
+            toIso(adminRow.created_at) ?? new Date().toISOString();
+          const { data: existingHealRow } = await supabaseAdmin
+            .from("students")
+            .select("first_paid_at")
+            .eq("whop_user_id", userInfo.sub)
+            .maybeSingle();
+
+          const healPayload: Record<string, unknown> = {
+            whop_user_id: userInfo.sub,
+            whop_membership_id: adminRow.id,
+            email: adminRow.email ?? userInfo.email ?? null,
+            // Whop's v2 row has no `username` field. Fall back
+            // to the OAuth userInfo.name.
+            name: userInfo.name ?? null,
+            membership_status: mapStatus(adminRow),
+            joined_at: healAnchor,
+            // v79: stamp plan_id from the admin row so the new
+            // user is correctly classified as paying / free from
+            // first login. Without this they'd default to NULL
+            // (non-paying) until the next nightly sync.
+            whop_plan_id: adminRow.plan ?? null,
+          };
+          if (!existingHealRow?.first_paid_at) {
+            healPayload.first_paid_at = healAnchor;
+          }
+
           const { error: healError } = await supabaseAdmin
             .from("students")
-            .upsert(
-              {
-                whop_user_id: userInfo.sub,
-                whop_membership_id: adminRow.id,
-                email: adminRow.email ?? userInfo.email ?? null,
-                // Whop's v2 row has no `username` field. Fall back
-                // to the OAuth userInfo.name.
-                name: userInfo.name ?? null,
-                membership_status: mapStatus(adminRow),
-                joined_at:
-                  toIso(adminRow.created_at) ?? new Date().toISOString(),
-                // v79: stamp plan_id from the admin row so the new
-                // user is correctly classified as paying / free from
-                // first login. Without this they'd default to NULL
-                // (non-paying) until the next nightly sync.
-                whop_plan_id: adminRow.plan ?? null,
-              },
-              { onConflict: "whop_user_id" },
-            );
+            .upsert(healPayload, { onConflict: "whop_user_id" });
           if (healError) {
             console.error(
               `[whop-callback] self-heal upsert failed for ${userInfo.sub}: ${healError.message}`,

@@ -195,8 +195,14 @@ export async function POST(request: NextRequest) {
         .eq("whop_user_id", membership.user.id);
 
       if (error) {
+        // v75.30: return 500 so Whop retries. membership.deactivated
+        // failing means we don't stamp canceled_at → churn metrics
+        // under-report → student stays in active counts indefinitely.
         console.error("Webhook: student update failed:", error);
-        break;
+        return NextResponse.json(
+          { error: "Database error" },
+          { status: 500 },
+        );
       }
 
       // v57 - the legacy W4.4 "churned" task creation was removed
@@ -259,7 +265,17 @@ export async function POST(request: NextRequest) {
         .upsert(paymentUpsertPayload, { onConflict: "whop_user_id" });
 
       if (error) {
+        // v75.30: return 500 so Whop retries on backoff. Previously
+        // returned 200 (via fallthrough), so a transient Supabase
+        // outage during a payment.succeeded burst permanently lost
+        // the renewal — membership_status not refreshed, canceled_at
+        // not cleared, plan_id not updated. Whop's Standard Webhooks
+        // contract uses HTTP status to drive retries.
         console.error("Webhook: payment upsert failed:", error);
+        return NextResponse.json(
+          { error: "Database error" },
+          { status: 500 },
+        );
       }
       break;
     }
@@ -295,12 +311,20 @@ export async function POST(request: NextRequest) {
         .eq("whop_user_id", whopUserId)
         .maybeSingle();
       if (studentResult.error) {
+        // v75.30: return 500 on real DB error so Whop retries.
+        // The previous fallthrough returned 200 → completion lost.
         console.error(
           `[whop-webhook] students lookup errored for whop_user_id=${whopUserId}: ${JSON.stringify(studentResult.error)}`
         );
-        break;
+        return NextResponse.json(
+          { error: "DB lookup error" },
+          { status: 500 },
+        );
       }
       if (!studentResult.data) {
+        // 404-equivalent — student hasn't logged in yet. Return 200
+        // because retrying won't help (Whop can't conjure our row);
+        // they'll get future events properly once they log in once.
         console.warn(
           `[whop-webhook] student not found for whop_user_id=${whopUserId}. ` +
             `They need to log into the EcomTalent dashboard at least once ` +
@@ -321,12 +345,19 @@ export async function POST(request: NextRequest) {
         .eq("whop_lesson_id", whopLessonId)
         .maybeSingle();
       if (lessonResult.error) {
+        // v75.30: return 500 on DB error so Whop retries.
         console.error(
           `[whop-webhook] lessons lookup errored for whop_lesson_id=${whopLessonId}: ${JSON.stringify(lessonResult.error)}`
         );
-        break;
+        return NextResponse.json(
+          { error: "DB lookup error" },
+          { status: 500 },
+        );
       }
       if (!lessonResult.data) {
+        // No mapping for this Whop lesson — return 200, retry won't
+        // help. Lesson catalog needs to be seeded with the missing
+        // whop_lesson_id mapping.
         console.warn(
           `[whop-webhook] no lesson mapped to whop_lesson_id=${whopLessonId} ` +
             `(not in seed or mismatched)`
@@ -346,14 +377,20 @@ export async function POST(request: NextRequest) {
         );
 
       if (error) {
+        // v75.30: return 500 so Whop retries. Was returning 200
+        // (via fallthrough) → during a transient Supabase outage we'd
+        // silently lose lesson completions across all students.
         console.error(
           `[whop-webhook] completion upsert failed for student=${student.id} lesson=${lesson.id}: ${error.message}`
         );
-      } else {
-        console.info(
-          `[whop-webhook] completion upserted: student=${student.id} lesson=${lesson.id} (whop_user=${whopUserId}, whop_lesson=${whopLessonId})`
+        return NextResponse.json(
+          { error: "Database error" },
+          { status: 500 },
         );
       }
+      console.info(
+        `[whop-webhook] completion upserted: student=${student.id} lesson=${lesson.id} (whop_user=${whopUserId}, whop_lesson=${whopLessonId})`
+      );
       break;
     }
 

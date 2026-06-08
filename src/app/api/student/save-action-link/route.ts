@@ -83,26 +83,59 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Existing row required.
+  // v75.33: support the v74.3 UI flow ("paste link first, then mark
+  // shipped"). The LessonSheet UI disables the Mark shipped button
+  // until the link is saved — but this route was rejecting the save
+  // when no completion row existed yet, leaving the student stuck:
+  // can't save link without prior row, can't mark shipped without
+  // saved link. The UI was redesigned in v74.3 but the route was
+  // never updated.
+  //
+  // Fix: maybeSingle + insert-or-update. If no row exists, INSERT
+  // a row with the link and null completion fields. If row exists,
+  // UPDATE the link column.
+  //
+  // Clearing (link === null) on a non-existent row is a no-op:
+  // nothing to clear.
   const { data: existing } = await supabase
     .from("student_lesson_completions")
     .select("id")
     .eq("student_id", student.id)
     .eq("lesson_id", lessonId)
-    .single();
-  if (!existing) {
-    return NextResponse.json(
-      { error: "Mark the action shipped before adding the Discord link." },
-      { status: 400 },
-    );
-  }
+    .maybeSingle();
 
-  const { data, error } = await supabase
-    .from("student_lesson_completions")
-    .update({ discord_message_link: link })
-    .eq("id", existing.id)
-    .select()
-    .single();
+  let data;
+  let error;
+
+  if (existing) {
+    const result = await supabase
+      .from("student_lesson_completions")
+      .update({ discord_message_link: link })
+      .eq("id", existing.id)
+      .select()
+      .single();
+    data = result.data;
+    error = result.error;
+  } else {
+    if (link === null) {
+      // Nothing to clear; not an error.
+      return NextResponse.json({ completion: null });
+    }
+    const result = await supabase
+      .from("student_lesson_completions")
+      .insert({
+        student_id: student.id,
+        lesson_id: lessonId,
+        completed_at: null,
+        action_completed_at: null,
+        skipped_at: null,
+        discord_message_link: link,
+      })
+      .select()
+      .single();
+    data = result.data;
+    error = result.error;
+  }
 
   if (error) {
     // CHECK constraint failure → friendly error

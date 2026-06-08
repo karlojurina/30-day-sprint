@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import type { Student, RegionId } from "@/types/database";
 import { getDayNumber } from "@/types/database";
 import {
@@ -85,25 +86,35 @@ export default function KanbanPage() {
       // the same pattern /admin/students uses for its progress
       // numbers (which is why those have always been correct and
       // the journey wasn't).
+      // v75.27: paginated student + view fetches. Bypasses the
+      // PostgREST ~1000-row server-side cap.
       const [studentsRes, countsRes, regionsRes, totalLessonsRes] =
         await Promise.all([
-          supabase
-            .from("students")
-            .select("*")
-            .not("whop_membership_id", "is", null)
-            .in("membership_status", ["active", "past_due", "canceled"])
-            .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
-            // v75.18: hardcoded first_paid_at filter (no scope toggle on
-            // this surface). Returning customers stay out of the journey
-            // — they're not first-time joiners by definition.
-            .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
-            .order("joined_at", { ascending: false }),
-          supabase
-            .from("student_progress_counts")
-            .select("student_id, completed_count"),
-          supabase
-            .from("student_current_region")
-            .select("student_id, current_region"),
+          fetchAllRowsPaginated<Student>(() =>
+            supabase
+              .from("students")
+              .select("*")
+              .not("whop_membership_id", "is", null)
+              .in("membership_status", ["active", "past_due", "canceled"])
+              .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
+              // v75.18: hardcoded first_paid_at filter (no scope toggle
+              // on this surface). Returning customers stay out of the
+              // journey — they're not first-time joiners by definition.
+              .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
+              .order("joined_at", { ascending: false }),
+          ),
+          fetchAllRowsPaginated<{ student_id: string; completed_count: number }>(
+            () =>
+              supabase
+                .from("student_progress_counts")
+                .select("student_id, completed_count"),
+          ),
+          fetchAllRowsPaginated<{ student_id: string; current_region: string }>(
+            () =>
+              supabase
+                .from("student_current_region")
+                .select("student_id, current_region"),
+          ),
           // v75.1 - exclude l057 (bounty onboarding) so per-student
           // % matches the 64-lesson sprint denominator.
           supabase

@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import type { Student } from "@/types/database";
 import {
   TOTAL_LESSONS,
@@ -96,22 +97,28 @@ export default function AdminDashboard() {
       // this page. 'all' drops it so the team sees everyone.
       // v79: PAYING_WHOP_PLAN_IDS filter excludes free-plan users
       // from every operational surface, regardless of scope.
-      let studentsQuery = supabase
-        .from("students")
-        .select("*")
-        .not("whop_membership_id", "is", null)
-        .in("membership_status", ["active", "past_due", "canceled"])
-        .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
-      if (scope === "cohort") {
-        // v75.18: filter by first_paid_at (original Whop signup),
-        // NOT joined_at (current cycle start). Returning customers
-        // who re-subscribed post-launch have a recent joined_at but
-        // their first_paid_at is pre-launch → correctly excluded.
-        studentsQuery = studentsQuery.gte(
-          "first_paid_at",
-          ADMIN_STUDENT_JOIN_CUTOFF,
-        );
-      }
+      //
+      // v75.27: wrapped in a thunk + fetchAllRowsPaginated to bypass
+      // PostgREST's ~1000-row server cap. With 750+ paying members
+      // (and growing), the unwrapped query silently truncated and
+      // the "Active on platform" tile was pinned at ≤1000. Same
+      // shape as the milicevic bug (v75.25) but on a different table.
+      const buildStudentsQuery = () => {
+        let q = supabase
+          .from("students")
+          .select("*")
+          .not("whop_membership_id", "is", null)
+          .in("membership_status", ["active", "past_due", "canceled"])
+          .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
+        if (scope === "cohort") {
+          // v75.18: filter by first_paid_at (original Whop signup),
+          // NOT joined_at (current cycle start). Returning customers
+          // who re-subscribed post-launch have a recent joined_at but
+          // their first_paid_at is pre-launch → correctly excluded.
+          q = q.gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF);
+        }
+        return q;
+      };
 
       const [
         studentsRes,
@@ -122,13 +129,17 @@ export default function AdminDashboard() {
         snapshotsRes,
         milestonesRes,
       ] = await Promise.all([
-        studentsQuery,
+        fetchAllRowsPaginated<Student>(buildStudentsQuery),
         // Per-student counts via a pre-aggregated view. Querying
         // student_lesson_completions directly truncates at the
         // 1000-row PostgREST cap once the community is large.
-        supabase
-          .from("student_progress_counts")
-          .select("student_id, completed_count"),
+        // v75.27: even the VIEW hits the same cap — paginate.
+        fetchAllRowsPaginated<{ student_id: string; completed_count: number }>(
+          () =>
+            supabase
+              .from("student_progress_counts")
+              .select("student_id, completed_count"),
+        ),
         // v75.1 - excludes l057 (bounty onboarding) so the avg-progress
         // denominator matches the 64-lesson sprint.
         supabase

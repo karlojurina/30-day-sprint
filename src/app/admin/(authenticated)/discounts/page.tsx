@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import type {
   DiscountRequest,
   Student,
@@ -81,15 +82,34 @@ export default function DiscountsPage() {
     // Bulk-fetch action submissions for these students.
     const studentIds = rows.map((r) => r.student_id).filter(Boolean);
     if (studentIds.length > 0) {
+      // v75.27: scope completions to ACTION lessons only — cuts the
+      // result ~5x and stays well under PostgREST's row cap. Without
+      // this scoping, pending discount approvals with 30+ requests
+      // could silently drop completion rows and wrongly mark students
+      // as not having shipped lessons they did ship.
+      const { data: actionLessonsList } = await supabase
+        .from("lessons")
+        .select("id, title, requires_action, type")
+        .or("requires_action.eq.true,type.eq.action");
+      const actionLessonIds = (actionLessonsList ?? []).map((l) => l.id);
+
       const [lessonsRes, completionsRes] = await Promise.all([
-        supabase
-          .from("lessons")
-          .select("id, title, requires_action, type")
-          .or("requires_action.eq.true,type.eq.action"),
-        supabase
-          .from("student_lesson_completions")
-          .select("student_id, lesson_id, completed_at, action_completed_at, discord_message_link")
-          .in("student_id", studentIds),
+        Promise.resolve({ data: actionLessonsList, error: null }),
+        fetchAllRowsPaginated<{
+          student_id: string;
+          lesson_id: string;
+          completed_at: string | null;
+          action_completed_at: string | null;
+          discord_message_link: string | null;
+        }>(() =>
+          supabase
+            .from("student_lesson_completions")
+            .select(
+              "student_id, lesson_id, completed_at, action_completed_at, discord_message_link",
+            )
+            .in("student_id", studentIds)
+            .in("lesson_id", actionLessonIds),
+        ),
       ]);
       const actionLessons = (lessonsRes.data ?? []) as Array<
         Pick<Lesson, "id" | "title" | "requires_action" | "type">

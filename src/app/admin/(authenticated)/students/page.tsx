@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import type { Student } from "@/types/database";
 import { getDayNumber } from "@/types/database";
 import {
@@ -45,25 +46,25 @@ export default function StudentsPage() {
       // Scope toggle: 'cohort' filters to launch-cohort joiners;
       // 'all' shows every paying member including legacy customers.
       // v79: free-plan members never appear here regardless of scope.
-      let studentsQuery = supabase
-        .from("students")
-        .select("*")
-        .not("whop_membership_id", "is", null)
-        .in("membership_status", ["active", "past_due", "canceled"])
-        .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
-      if (scope === "cohort") {
-        // v75.18: cohort = "first-time joiners since launch."
-        // Filter on first_paid_at (original Whop signup) so returning
-        // customers don't sneak in by virtue of a recent renewal.
-        studentsQuery = studentsQuery.gte(
-          "first_paid_at",
-          ADMIN_STUDENT_JOIN_CUTOFF,
-        );
-      }
-      studentsQuery = studentsQuery.order("joined_at", { ascending: false });
+      // v75.27: paginated to bypass PostgREST's ~1000-row server cap.
+      const buildStudentsQuery = () => {
+        let q = supabase
+          .from("students")
+          .select("*")
+          .not("whop_membership_id", "is", null)
+          .in("membership_status", ["active", "past_due", "canceled"])
+          .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
+        if (scope === "cohort") {
+          // v75.18: cohort = "first-time joiners since launch."
+          // Filter on first_paid_at (original Whop signup) so returning
+          // customers don't sneak in by virtue of a recent renewal.
+          q = q.gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF);
+        }
+        return q.order("joined_at", { ascending: false });
+      };
 
       const [studentsRes, completionsRes, lessonsRes] = await Promise.all([
-        studentsQuery,
+        fetchAllRowsPaginated<Student>(buildStudentsQuery),
         // Pre-aggregated per-student counts via a view. Querying
         // student_lesson_completions directly returns one row per
         // completion and silently truncates at the 1000-row cap once

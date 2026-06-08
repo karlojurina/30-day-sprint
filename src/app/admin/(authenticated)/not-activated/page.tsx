@@ -24,6 +24,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
+import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import { useAdminScope } from "@/contexts/AdminScopeContext";
@@ -89,22 +90,31 @@ export default function NotActivatedPage() {
   async function load() {
     setLoading(true);
     const supabase = createClient();
-    let query = supabase
-      .from("students")
-      .select(
-        "id, name, email, discord_username, created_at, high_churn_risk",
-      )
-      .eq("membership_status", "active")
-      .eq("high_churn_risk", false)
-      .eq("csm_exempt", false)
-      .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
-    if (scope === "cohort") {
-      // v75.18: first_paid_at (original signup), not joined_at.
-      query = query.gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF);
-    }
-    const { data: studentsRaw } = await query.order("created_at", {
-      ascending: true,
-    });
+    // v75.27: paginated to bypass PostgREST's ~1000-row server cap.
+    const buildQuery = () => {
+      let q = supabase
+        .from("students")
+        .select(
+          "id, name, email, discord_username, created_at, high_churn_risk",
+        )
+        .eq("membership_status", "active")
+        .eq("high_churn_risk", false)
+        .eq("csm_exempt", false)
+        .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
+      if (scope === "cohort") {
+        // v75.18: first_paid_at (original signup), not joined_at.
+        q = q.gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF);
+      }
+      return q.order("created_at", { ascending: true });
+    };
+    const { data: studentsRaw } = await fetchAllRowsPaginated<{
+      id: string;
+      name: string | null;
+      email: string | null;
+      discord_username: string | null;
+      created_at: string;
+      high_churn_risk: boolean;
+    }>(buildQuery);
 
     const allIds = (studentsRaw ?? []).map((s) => s.id);
     let activatedIds = new Set<string>();

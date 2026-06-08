@@ -39,15 +39,33 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ checked: 0, alerts: 0 });
   }
 
-  const studentIds = students.map((s) => s.id);
-  // v75.23: explicit high limit. Same truncation bug as check-csm-tasks.
-  // v75.24: include skipped_at so engagement metrics match the
-  // canonical isLessonComplete formula (skipped == done).
-  const { data: allCompletions } = await supabase
-    .from("student_lesson_completions")
-    .select("student_id, lesson_id, completed_at, skipped_at")
-    .in("student_id", studentIds)
-    .limit(100000);
+  // v75.25: per-student fetch. Supabase has a project-level
+  // max-rows cap (~1000) that silently truncates bulk fetches even
+  // with .limit(). With 8000+ completions in the table, the bulk
+  // .in(studentIds) query silently dropped most rows. Per-student
+  // queries return ≤64 rows each (TOTAL_LESSONS cap) so they're
+  // always under any server cap. 20-way parallelism keeps wall-clock
+  // under 1s for the engagement pool.
+  type EngagementCompletion = {
+    student_id: string;
+    lesson_id: string;
+    completed_at: string | null;
+    skipped_at: string | null;
+  };
+  const allCompletions: EngagementCompletion[] = [];
+  const CONCURRENT = 20;
+  for (let i = 0; i < students.length; i += CONCURRENT) {
+    const wave = students.slice(i, i + CONCURRENT);
+    await Promise.all(
+      wave.map(async (s) => {
+        const { data } = await supabase
+          .from("student_lesson_completions")
+          .select("student_id, lesson_id, completed_at, skipped_at")
+          .eq("student_id", s.id);
+        if (data) allCompletions.push(...(data as EngagementCompletion[]));
+      }),
+    );
+  }
 
   // Build per-student completion data
   const completionsByStudent: Record<
@@ -82,6 +100,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  const studentIds = students.map((s) => s.id);
   const { data: existingAlerts } = await supabase
     .from("disengagement_alerts")
     .select("student_id, alert_type")

@@ -124,7 +124,6 @@ export async function GET(request: NextRequest) {
 
   const [
     studentsRes,
-    completionsRes,
     lessonsRes,
     tasksRes,
     templatesRes,
@@ -151,23 +150,14 @@ export async function GET(request: NextRequest) {
       // but their first_paid_at is months ago).
       .gte("first_paid_at", TASKS_STUDENT_JOIN_CUTOFF)
       .gte("first_paid_at", csmSprintWindowCutoffIso()),
-    // v75.23: explicit high limit. PostgREST defaults to 1000 rows
-    // and silently truncates beyond that. With ~650 active students
-    // x ~10-20 lessons each the completions table easily exceeds
-    // 1000 rows — without this limit, the snapshot would think
-    // students had 0 completions and fire "no lessons watched"
-    // tasks against people who'd actually watched 20+ lessons.
-    // 100k is well above current scale; safe for years.
-    supabase
-      .from("student_lesson_completions")
-      .select(
-        // v75.24: skipped_at required for canonical isLessonComplete
-        // parity — without it the cron undercounts progress for any
-        // student who skipped optional content and fires bogus
-        // "no lessons watched" tasks against them.
-        "student_id, lesson_id, completed_at, action_completed_at, skipped_at",
-      )
-      .limit(100000),
+    // v75.25: completions fetch MOVED OUT of Promise.all — see below
+    // after the students fetch settles. We now batch by student_id
+    // because Supabase's project-level max-rows cap (~1000) silently
+    // truncates bulk fetches even with .limit(100000). Empirically
+    // verified: the completions table has 8340+ rows but the cron
+    // could only see ~1000, so students whose completions fell
+    // outside that slice appeared as "0 lessons watched" and got
+    // bogus nolessons.day3 tasks they couldn't escape.
     supabase.from("lessons").select("id, region_id, requires_action"),
     // v75.23: explicit limits on every cron bulk-fetch — defends
     // against PostgREST's silent 1000-row truncation.
@@ -203,7 +193,6 @@ export async function GET(request: NextRequest) {
   }
 
   const students = (studentsRes.data ?? []) as Student[];
-  const completions = completionsRes.data ?? [];
   const lessons = lessonsRes.data ?? [];
   const existingTasks = tasksRes.data ?? [];
   const templates = templatesRes.data ?? [];
@@ -213,18 +202,52 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ checked: 0, tasks_created: 0 });
   }
 
+  // ─── v75.25: per-student completions fetch ────────────────
+  //
+  // Supabase has a project-level max-rows cap (~1000) that silently
+  // truncates bulk fetches even when the client passes .limit(100000).
+  // The completions table has 8000+ rows; a bulk fetch sees the first
+  // 1000 only. Students whose rows fall outside that slice show as
+  // "0 lessons watched" in the snapshot, the nolessons.day3 trigger
+  // fires against them, and the auto-dismiss re-evaluation reaches
+  // the same wrong conclusion every run.
+  //
+  // Fix: scope the fetch to the eligible student pool, and break it
+  // into small per-student queries run with concurrency. Each query
+  // returns ≤64 rows (TOTAL_LESSONS upper bound), well below any
+  // server cap. 20-way parallelism keeps wall-clock under 1s for a
+  // ~75-student pool.
+  type CompletionRow = {
+    student_id: string;
+    lesson_id: string;
+    completed_at: string | null;
+    action_completed_at: string | null;
+    skipped_at: string | null;
+  };
+  const completionsByStudent = new Map<string, CompletionRow[]>();
+  const COMPLETION_FETCH_CONCURRENCY = 20;
+  for (let i = 0; i < students.length; i += COMPLETION_FETCH_CONCURRENCY) {
+    const wave = students.slice(i, i + COMPLETION_FETCH_CONCURRENCY);
+    await Promise.all(
+      wave.map(async (s) => {
+        const { data } = await supabase
+          .from("student_lesson_completions")
+          .select(
+            "student_id, lesson_id, completed_at, action_completed_at, skipped_at",
+          )
+          .eq("student_id", s.id);
+        if (data && data.length > 0) {
+          completionsByStudent.set(s.id, data as CompletionRow[]);
+        }
+      }),
+    );
+  }
+
   // ─── Pre-compute lookups ───────────────────────────────────
 
   const regionTotals: Record<string, number> = { r1: 0, r2: 0, r3: 0, r4: 0 };
   for (const l of lessons) {
     regionTotals[l.region_id] = (regionTotals[l.region_id] ?? 0) + 1;
-  }
-
-  const completionsByStudent = new Map<string, typeof completions>();
-  for (const c of completions) {
-    const arr = completionsByStudent.get(c.student_id) ?? [];
-    arr.push(c);
-    completionsByStudent.set(c.student_id, arr);
   }
 
   type TemplateRow = {
@@ -728,6 +751,13 @@ export async function GET(request: NextRequest) {
     checked: students.length,
     candidates: toInsert.length,
     tasks_created: createdCount,
+    // v75.25: surface auto-dismiss counts so a manual cron run shows
+    // whether section 3 (bucket-cap), 3b (family-supersede), and
+    // 3c (auto-dismiss orphans) actually fired and how many tasks
+    // each path swept.
+    bucket_dismissed: toDismiss.length,
+    family_dismissed: familySupersedeNotes.size,
+    auto_dismissed: autoDismissals.size,
     by_bucket: perBucket,
     discord_posted: discordPosted,
   });

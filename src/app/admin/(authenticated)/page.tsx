@@ -941,39 +941,36 @@ function RefreshEverything({ onDone }: { onDone: () => void }) {
     const parts: string[] = [];
     let worst: "ok" | "warn" | "err" = "ok";
 
-    setPhase("Syncing Whop…");
+    // v75.22: one call does it all — sync Whop, rebuild snapshots,
+    // re-run all three CSM crons (auto-dismiss + create). Takes
+    // ~100-130s.
+    setPhase("Syncing Whop + refreshing tasks…");
     try {
-      const res = await fetch("/api/admin/sync-whop", {
+      const res = await fetch("/api/admin/refresh-everything", {
         method: "POST",
         headers: auth,
       });
       const json = await res.json();
       if (!res.ok) {
-        parts.push(`Whop: ${json.error ?? res.statusText}`);
-        worst = "warn";
-      } else {
-        parts.push(`Whop +${json.inserted}/${json.updated} (${json.fetched})`);
-      }
-    } catch (e) {
-      parts.push(`Whop: ${e instanceof Error ? e.message : String(e)}`);
-      worst = "warn";
-    }
-
-    setPhase("Rebuilding trends…");
-    try {
-      const res = await fetch("/api/admin/rebuild-snapshots", {
-        method: "POST",
-        headers: auth,
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        parts.push(`Trends: ${json.error ?? res.statusText}`);
+        parts.push(`Refresh: ${json.error ?? res.statusText}`);
         worst = "err";
       } else {
-        parts.push(`Trends ${json.rows} rows`);
+        const sync = json.sync;
+        if (sync && typeof sync === "object" && "fetched" in sync) {
+          parts.push(`Whop +${sync.inserted ?? 0}/${sync.updated ?? 0} (${sync.fetched ?? 0})`);
+        }
+        if (json.rebuild?.ok) parts.push("Snapshots rebuilt");
+        const csm = json.csm_tasks;
+        if (csm && typeof csm === "object" && "tasks_created" in csm) {
+          parts.push(`+${csm.tasks_created} tasks`);
+        }
+        const eng = json.engagement;
+        if (eng && typeof eng === "object" && "alerts" in eng) {
+          parts.push(`${eng.alerts} alerts`);
+        }
       }
     } catch (e) {
-      parts.push(`Trends: ${e instanceof Error ? e.message : String(e)}`);
+      parts.push(`Refresh: ${e instanceof Error ? e.message : String(e)}`);
       worst = "err";
     }
 
@@ -984,7 +981,7 @@ function RefreshEverything({ onDone }: { onDone: () => void }) {
     setMsgTone(worst);
     setPhase(null);
     setBusy(false);
-    setTimeout(() => setMsg(null), 10_000);
+    setTimeout(() => setMsg(null), 12_000);
   };
 
   return (
@@ -994,7 +991,7 @@ function RefreshEverything({ onDone }: { onDone: () => void }) {
         size="md"
         busy={busy}
         onClick={() => void run()}
-        title="Re-pull Whop community, rebuild trend snapshots, reload data"
+        title="Sync Whop, rebuild snapshots, re-evaluate all CSM tasks (auto-dismiss stale + create new). ~2 min."
       >
         {busy ? phase ?? "Refreshing…" : "↻ Refresh"}
       </Button>

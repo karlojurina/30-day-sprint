@@ -178,10 +178,10 @@ export default function AdminTasksKanban() {
     [studentSearch, supabase],
   );
 
-  // v59 - manual trigger for the daily task crons. Hits the
-  // /api/admin/run-task-crons endpoint which proxies to both
-  // check-csm-tasks and check-na-tasks. Surfaces "created N" in
-  // a toast so Astrid sees what just landed.
+  // v75.22 - one-button full refresh. Hits /api/admin/refresh-everything
+  // which syncs Whop, rebuilds snapshots, and re-runs all three CSM
+  // crons (auto-dismiss orphans + create new). Takes ~2 minutes.
+  // Replaces the v59-era run-task-crons trigger.
   const generateTasksNow = useCallback(async () => {
     setGenerating(true);
     setError(null);
@@ -190,7 +190,7 @@ export default function AdminTasksKanban() {
         data: { session },
       } = await supabase.auth.getSession();
       const token = session?.access_token;
-      const res = await fetch("/api/admin/run-task-crons", {
+      const res = await fetch("/api/admin/refresh-everything", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -198,16 +198,20 @@ export default function AdminTasksKanban() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
-      const { csm, na } = (await res.json()) as {
-        csm: { created?: number } | null;
-        na: { created?: number } | null;
+      const payload = (await res.json()) as {
+        sync?: { fetched?: number; updated?: number; inserted?: number };
+        csm_tasks?: { tasks_created?: number };
+        na_tasks?: { created?: number };
+        engagement?: { alerts?: number };
       };
-      const csmN = csm?.created ?? 0;
-      const naN = na?.created ?? 0;
+      const csmN = payload.csm_tasks?.tasks_created ?? 0;
+      const naN = payload.na_tasks?.created ?? 0;
+      const alerts = payload.engagement?.alerts ?? 0;
+      const fetched = payload.sync?.fetched ?? 0;
       setToast(
-        `Generated ${csmN + naN} task${csmN + naN === 1 ? "" : "s"} (${csmN} pace/nolessons/noship · ${naN} stalled).`,
+        `Refreshed everything · Whop ${fetched} members · +${csmN + naN} tasks · ${alerts} alerts.`,
       );
-      // Refresh the queue so the new rows show up.
+      // Refresh the queue so any dismissed/new rows show up.
       await fetchTasks(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -361,9 +365,9 @@ export default function AdminTasksKanban() {
               size="md"
               busy={generating}
               onClick={() => void generateTasksNow()}
-              title="Run the daily task crons now (don't wait until 09:15 UTC tomorrow)."
+              title="Sync Whop, rebuild snapshots, re-evaluate all tasks (auto-dismiss stale + create new). ~2 min."
             >
-              {generating ? "Generating…" : "⚡ Generate tasks now"}
+              {generating ? "Refreshing…" : "↻ Refresh everything"}
             </Button>
             <Button
               variant="subtle"

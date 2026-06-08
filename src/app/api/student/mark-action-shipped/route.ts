@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { updateStudentStreak } from "../_lib/update-streak";
 import { evaluateAchievements } from "@/lib/achievements";
 import { checkR2CompoundsShipped, onLessonCompleted } from "@/lib/csm-events";
+import { reEvaluateStudentOpenTasks } from "@/lib/csm-task-evaluation";
 
 /**
  * POST /api/student/mark-action-shipped
@@ -141,6 +142,10 @@ export async function POST(request: NextRequest) {
 
   // v53 (Phase 5) - achievements.
   const newAchievements = await evaluateAchievements(supabase, student.id);
+
+  // v75.21 - real-time CSM task dismissal. Shipping an action can
+  // invalidate noship.*/pace.* tasks. Best-effort.
+  await reEvaluateStudentOpenTasks(supabase, student.id);
 
   return NextResponse.json({ completion: result, newAchievements });
 }

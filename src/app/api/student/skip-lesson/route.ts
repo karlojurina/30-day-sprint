@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { reEvaluateStudentOpenTasks } from "@/lib/csm-task-evaluation";
 
 /**
  * Skip / un-skip a lesson. Only meaningful for grouped/optional
@@ -86,6 +87,10 @@ export async function POST(request: NextRequest) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  // v75.21 - real-time CSM task dismissal. Skipping a lesson counts
+  // as progress; can invalidate nolessons.*/pace.* tasks. Best-effort.
+  await reEvaluateStudentOpenTasks(supabase, student.id);
 
   return NextResponse.json({ action: "skipped", completion: data });
 }

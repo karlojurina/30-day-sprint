@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { updateStudentStreak } from "../_lib/update-streak";
 import { onLessonCompleted } from "@/lib/csm-events";
 import { evaluateAchievements } from "@/lib/achievements";
+import { reEvaluateStudentOpenTasks } from "@/lib/csm-task-evaluation";
 
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -77,6 +78,12 @@ export async function POST(request: NextRequest) {
       supabase,
       student.id,
     );
+
+    // v75.21 - real-time CSM task dismissal. Watching a lesson can
+    // invalidate nolessons.*/pace.* tasks; dismiss them in the same
+    // request so the VA queue doesn't show stale items. Best-effort;
+    // failure is logged but doesn't break the lesson-completion path.
+    await reEvaluateStudentOpenTasks(supabase, student.id);
 
     return NextResponse.json({
       action: "checked",

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
 
 /**
  * Mark an approved discount request as "applied".
@@ -9,11 +9,18 @@ import { createServiceClient } from "@/lib/supabase-server";
  * It's the audit step that closes the loop — gives us a clean view
  * of which approved discounts are still pending action vs. fully done.
  *
+ * v75.31: was anonymous — anyone with a requestId could mark a row
+ * applied. Now requires founder/admin/csm.
+ *
  * Body:
  *   requestId — id of the discount_requests row (required)
  *   appliedBy — id of the team_member doing the marking (optional, audit only)
  */
 export async function POST(request: NextRequest) {
+  const auth = await requireTeam(request, ["founder", "admin", "csm"]);
+  if (isAuthFailure(auth)) return auth.error;
+  const supabase = auth.supabase;
+
   const body = await request.json();
   const { requestId, appliedBy } = body as {
     requestId?: string;
@@ -23,8 +30,6 @@ export async function POST(request: NextRequest) {
   if (!requestId) {
     return NextResponse.json({ error: "Missing requestId" }, { status: 400 });
   }
-
-  const supabase = createServiceClient();
 
   const { data: discountReq, error: fetchError } = await supabase
     .from("discount_requests")

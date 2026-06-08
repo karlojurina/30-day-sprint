@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { createWhopPromoCode } from "@/lib/whop";
 
@@ -26,6 +26,13 @@ import { createWhopPromoCode } from "@/lib/whop";
  *   reviewerId — id of the team_member approving (optional, audit only)
  */
 export async function POST(request: NextRequest) {
+  // v75.31: TEAM-only. Previously this route was anonymous — anyone
+  // who knew a requestId could trigger Whop promo code minting.
+  // Now requires a founder/admin/csm team member JWT.
+  const auth = await requireTeam(request, ["founder", "admin", "csm"]);
+  if (isAuthFailure(auth)) return auth.error;
+  const supabase = auth.supabase;
+
   const body = await request.json();
   const { requestId, reviewerId } = body as {
     requestId?: string;
@@ -35,8 +42,6 @@ export async function POST(request: NextRequest) {
   if (!requestId) {
     return NextResponse.json({ error: "Missing requestId" }, { status: 400 });
   }
-
-  const supabase = createServiceClient();
 
   const { data: discountReq, error: fetchError } = await supabase
     .from("discount_requests")

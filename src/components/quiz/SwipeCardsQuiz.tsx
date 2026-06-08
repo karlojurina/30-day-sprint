@@ -37,11 +37,24 @@ export interface QuizWrongAnswer {
   correctText: string;
 }
 
-/** v65 - signature the parent receives when the deck empties. */
+/** v75.31 - per-question selection record. Server scores against
+ *  REGION_QUIZ_REGISTRY's correct_answer using these. */
+export interface QuizSelection {
+  questionId: string;
+  /** Canonical choice token — matches the schema's correct_answer:
+   *   true_false → "true" | "false"
+   *   ab_pick    → "a" | "b" */
+  choice: string;
+}
+
+/** v65 - signature the parent receives when the deck empties.
+ *  v75.31 - now includes selections so the parent can forward them
+ *  to /api/student/submit-region-quiz for server-side scoring. */
 export interface QuizCompletePayload {
   correctIds: Set<string>;
   wrongAnswers: QuizWrongAnswer[];
   total: number;
+  selections: QuizSelection[];
 }
 
 interface SwipeCardsQuizProps {
@@ -78,6 +91,9 @@ export function SwipeCardsQuiz({
   // v65 - track wrong answers with the derived "correct" text so the
   // result screen can show a review list without re-walking the cards.
   const [wrongAnswers, setWrongAnswers] = useState<QuizWrongAnswer[]>([]);
+  // v75.31 - record every selection (right or wrong) so the parent
+  // can forward them to the server for authoritative scoring.
+  const [selections, setSelections] = useState<QuizSelection[]>([]);
   const [reveal, setReveal] = useState<RevealState | null>(null);
   const [swipeDir, setSwipeDir] = useState<"left" | "right" | null>(null);
 
@@ -109,7 +125,7 @@ export function SwipeCardsQuiz({
 
   useEffect(() => {
     if (deck.length === 0 && total > 0) {
-      onComplete({ correctIds, wrongAnswers, total });
+      onComplete({ correctIds, wrongAnswers, total, selections });
     }
     // onComplete intentionally omitted from deps - we want this to
     // fire EXACTLY when the deck transitions to empty, not whenever
@@ -142,8 +158,13 @@ export function SwipeCardsQuiz({
 
       let isCorrect = false;
       let correctText: string | null = null;
+      // v75.31: record the canonical choice token (matches schema's
+      // correct_answer format) so the parent can forward selections
+      // to the server for authoritative scoring.
+      let choiceToken: string;
       if (top.question_type === "true_false") {
         const chosen = pick === "right" ? "true" : "false";
+        choiceToken = chosen;
         isCorrect = chosen === top.correct_answer;
         if (!isCorrect)
           correctText = top.correct_answer === "true" ? "TRUE" : "FALSE";
@@ -152,12 +173,17 @@ export function SwipeCardsQuiz({
         const leftIsA = !swap;
         const chosenLetter =
           pick === "left" ? (leftIsA ? "a" : "b") : leftIsA ? "b" : "a";
+        choiceToken = chosenLetter;
         isCorrect = chosenLetter === top.correct_answer;
         if (!isCorrect) {
           correctText =
             top.correct_answer === "a" ? top.option_a : top.option_b;
         }
       }
+      setSelections((prev) => [
+        ...prev,
+        { questionId: top.id, choice: choiceToken },
+      ]);
 
       if (isCorrect) {
         setCorrectIds((prev) => {

@@ -56,6 +56,10 @@ export function VaultTumblersQuiz({
   const [questionIdx, setQuestionIdx] = useState(0);
   const [correctIds, setCorrectIds] = useState<Set<string>>(() => new Set());
   const [wrongAnswers, setWrongAnswers] = useState<QuizWrongAnswer[]>([]);
+  // v75.31 - record every selection for server-side scoring.
+  const [selections, setSelections] = useState<
+    Array<{ questionId: string; choice: string }>
+  >([]);
   const [reveal, setReveal] = useState<RevealState | null>(null);
   // Counter-rotate trigger: increments on each wrong answer so the
   // active dial briefly counter-rotates ("thunk").
@@ -78,7 +82,7 @@ export function VaultTumblersQuiz({
 
   useEffect(() => {
     if (questionIdx >= total && total > 0) {
-      onComplete({ correctIds, wrongAnswers, total });
+      onComplete({ correctIds, wrongAnswers, total, selections });
     }
     // Intentionally omit onComplete from deps - fires once on the
     // questionIdx >= total transition.
@@ -96,8 +100,10 @@ export function VaultTumblersQuiz({
 
       let isCorrect = false;
       let correctText: string | null = null;
+      let choiceToken: string;
       if (top.question_type === "true_false") {
         const chosen = pick === "right" ? "true" : "false";
+        choiceToken = chosen;
         isCorrect = chosen === top.correct_answer;
         if (!isCorrect)
           correctText = top.correct_answer === "true" ? "TRUE" : "FALSE";
@@ -106,12 +112,17 @@ export function VaultTumblersQuiz({
         const leftIsA = !swap;
         const chosenLetter =
           pick === "left" ? (leftIsA ? "a" : "b") : leftIsA ? "b" : "a";
+        choiceToken = chosenLetter;
         isCorrect = chosenLetter === top.correct_answer;
         if (!isCorrect) {
           correctText =
             top.correct_answer === "a" ? top.option_a : top.option_b;
         }
       }
+      setSelections((prev) => [
+        ...prev,
+        { questionId: top.id, choice: choiceToken },
+      ]);
 
       if (isCorrect) {
         setCorrectIds((prev) => {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { createClient } from "@supabase/supabase-js";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { onDiscountRequested } from "@/lib/csm-events";
 
@@ -7,15 +7,44 @@ import { onDiscountRequested } from "@/lib/csm-events";
  * V4: Discount = complete ALL Region 1 + Region 2 lessons within
  * DISCOUNT_WINDOW_DAYS (14) of the student's Whop join date.
  * Measured server-side. No partial discount, no do-overs.
+ *
+ * v75.31: student-self auth. Previously this route was anonymous
+ * and trusted body.studentId. Anyone on the internet (knowing a
+ * studentId UUID) could POST a request for that student. Now we
+ * require a valid student session and DERIVE studentId from the JWT.
+ * The body.studentId is ignored.
  */
 export async function POST(request: NextRequest) {
-  const { studentId } = await request.json();
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+  const token = authHeader.slice(7);
 
-  if (!studentId) {
-    return NextResponse.json({ error: "Missing studentId" }, { status: 400 });
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } },
+  );
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser(token);
+  if (userError || !user) {
+    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
 
-  const supabase = createServiceClient();
+  const { data: authedStudent } = await supabase
+    .from("students")
+    .select("id")
+    .eq("supabase_user_id", user.id)
+    .single();
+  if (!authedStudent) {
+    return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
+  // Server-derived; body.studentId (if any) is ignored.
+  const studentId = authedStudent.id;
 
   // Duplicate check
   const { data: existing } = await supabase

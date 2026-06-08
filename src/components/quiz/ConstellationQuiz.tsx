@@ -87,6 +87,11 @@ export function ConstellationQuiz({
   const [deck, setDeck] = useState<SwipeCardQuestion[]>(() => shuffle(cards));
   const [correctIds, setCorrectIds] = useState<Set<string>>(() => new Set());
   const [wrongAnswers, setWrongAnswers] = useState<QuizWrongAnswer[]>([]);
+  // v75.31 - record every selection so the parent can forward them
+  // to the server for authoritative scoring.
+  const [selections, setSelections] = useState<
+    Array<{ questionId: string; choice: string }>
+  >([]);
   // Ordered log of correctness per answered question. Drives which
   // stars in STAR_POSITIONS get lit (index N = the Nth answered
   // question's correctness).
@@ -111,7 +116,7 @@ export function ConstellationQuiz({
 
   useEffect(() => {
     if (deck.length === 0 && total > 0) {
-      onComplete({ correctIds, wrongAnswers, total });
+      onComplete({ correctIds, wrongAnswers, total, selections });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deck.length, total]);
@@ -129,8 +134,10 @@ export function ConstellationQuiz({
 
       let isCorrect = false;
       let correctText: string | null = null;
+      let choiceToken: string;
       if (top.question_type === "true_false") {
         const chosen = pick === "right" ? "true" : "false";
+        choiceToken = chosen;
         isCorrect = chosen === top.correct_answer;
         if (!isCorrect)
           correctText = top.correct_answer === "true" ? "TRUE" : "FALSE";
@@ -139,6 +146,7 @@ export function ConstellationQuiz({
         const leftIsA = !swap;
         const chosenLetter =
           pick === "left" ? (leftIsA ? "a" : "b") : leftIsA ? "b" : "a";
+        choiceToken = chosenLetter;
         isCorrect = chosenLetter === top.correct_answer;
         if (!isCorrect) {
           correctText =
@@ -146,6 +154,11 @@ export function ConstellationQuiz({
         }
       }
 
+      // v75.31: record selection for server-side scoring
+      setSelections((prev) => [
+        ...prev,
+        { questionId: top.id, choice: choiceToken },
+      ]);
       setAnswerLog((prev) => [...prev, { correct: isCorrect }]);
 
       if (isCorrect) {

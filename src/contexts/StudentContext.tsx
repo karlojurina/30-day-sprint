@@ -156,10 +156,14 @@ interface StudentContextType {
   /** v65 - submits one completed attempt. Increments quiz_attempts,
    *  updates last/best scores, stamps quiz_passed_at on the first
    *  attempt scoring >= 50%. Returns whether the OVERALL pass state
-   *  (best ever >= 50%) is now true. */
+   *  (best ever >= 50%) is now true.
+   *  v75.31 - selections are forwarded to the server for authoritative
+   *  scoring. scorePct stays for the optimistic UI (result screen
+   *  flips before the server reply lands). */
   submitRegionQuiz: (
     regionId: RegionId,
     scorePct: number,
+    selections?: Array<{ questionId: string; choice: string }>,
   ) => Promise<{ passed: boolean; bestScorePct: number } | null>;
 
   // v75 - per-lesson rating + optional comment. Map keyed by
@@ -1325,7 +1329,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   // return the optimistic pass/score immediately and the server
   // reconciliation runs in the background.
   const submitRegionQuiz = useCallback(
-    async (regionId: RegionId, scorePct: number) => {
+    async (
+      regionId: RegionId,
+      scorePct: number,
+      selections?: Array<{ questionId: string; choice: string }>,
+    ) => {
       if (!student) return null;
       const existing = regionQuizMap[regionId];
       const scoreInt = Math.max(0, Math.min(100, Math.round(scorePct)));
@@ -1354,13 +1362,21 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         const token = await getAccessToken();
         if (!token) return;
         try {
+          // v75.31: send selections so server can score authoritatively.
+          // scorePct stays in the body as a fallback for in-flight
+          // sessions on the legacy client bundle (the server prefers
+          // selections when both are present).
           const res = await fetch("/api/student/submit-region-quiz", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${token}`,
             },
-            body: JSON.stringify({ regionId, scorePct: scoreInt }),
+            body: JSON.stringify({
+              regionId,
+              scorePct: scoreInt,
+              selections: selections ?? [],
+            }),
           });
           if (!res.ok) return;
           const data = (await res.json()) as {

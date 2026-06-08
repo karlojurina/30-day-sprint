@@ -2193,7 +2193,16 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
           // Submit first, then render the result screen. The submit
           // returns the OVERALL pass state (best ever >= 50%) which
           // drives whether ResultScreen enables Continue.
-          const submitted = await submitRegionQuiz(quizRegionId, scorePct);
+          //
+          // v75.31: forward selections so the server can authoritatively
+          // score against REGION_QUIZ_REGISTRY. scorePct is still passed
+          // (it's used for the optimistic result screen + as the legacy
+          // fallback the server falls back to if selections is missing).
+          const submitted = await submitRegionQuiz(
+            quizRegionId,
+            scorePct,
+            payload.selections,
+          );
           const overallPassed = submitted?.passed ?? scorePct >= 50;
           setQuizResult({
             scorePct,

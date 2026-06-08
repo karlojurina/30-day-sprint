@@ -26,7 +26,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createServiceClient } from "@/lib/supabase-server";
+import { createClient } from "@supabase/supabase-js";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { onDiscountRequested } from "@/lib/csm-events";
 
@@ -38,14 +38,40 @@ interface IncomingAnswer {
 }
 
 export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => null);
-  const studentId =
-    typeof body?.studentId === "string" ? body.studentId : null;
-  const rawAnswers = Array.isArray(body?.answers) ? body.answers : null;
-
-  if (!studentId) {
-    return NextResponse.json({ error: "Missing studentId" }, { status: 400 });
+  // v75.31: student-self auth. Previously this route was anonymous
+  // and trusted body.studentId. Now we derive studentId from the JWT.
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
   }
+  const token = authHeader.slice(7);
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } },
+  );
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser(token);
+  if (userError || !user) {
+    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+  }
+
+  const { data: authedStudent } = await supabase
+    .from("students")
+    .select("id")
+    .eq("supabase_user_id", user.id)
+    .single();
+  if (!authedStudent) {
+    return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
+  const studentId = authedStudent.id;
+
+  const body = await request.json().catch(() => null);
+  const rawAnswers = Array.isArray(body?.answers) ? body.answers : null;
   if (!rawAnswers) {
     return NextResponse.json({ error: "Missing answers" }, { status: 400 });
   }
@@ -66,8 +92,6 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
-
-  const supabase = createServiceClient();
 
   // Re-validate the eligibility window (server-side defense — same
   // rule as /api/discounts/request).

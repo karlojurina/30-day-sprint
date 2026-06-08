@@ -10,15 +10,15 @@
     },
     {
       "path": "/api/cron/check-engagement",
-      "schedule": "0 9 * * *"
+      "schedule": "0 */4 * * *"
     },
     {
       "path": "/api/cron/check-csm-tasks",
-      "schedule": "15 9 * * *"
+      "schedule": "15 */4 * * *"
     },
     {
       "path": "/api/cron/check-na-tasks",
-      "schedule": "20 9 * * *"
+      "schedule": "20 */4 * * *"
     },
     {
       "path": "/api/cron/day28-dm",

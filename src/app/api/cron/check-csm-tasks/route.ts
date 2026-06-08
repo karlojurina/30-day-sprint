@@ -539,6 +539,118 @@ export async function GET(request: NextRequest) {
       .eq("id", id);
   }
 
+  // ─── 3c. Auto-dismiss orphan tasks (v75.19) ───────────────
+  //
+  // For each remaining open task, re-evaluate whether its trigger
+  // condition still applies to the student's CURRENT state. If not,
+  // dismiss with a clear note.
+  //
+  // Catches:
+  //   * Day-N tasks that lingered when student moved past the stage
+  //     and no later-stage task fired (e.g. day-3 stalled task still
+  //     open when student is on day 11)
+  //   * Tasks whose underlying condition stopped applying (e.g.
+  //     stalled task on a student who has since watched many lessons)
+  //   * Tasks for students no longer in the eligible pool (out of
+  //     cohort, past day 30, on free plan, etc.)
+  //
+  // Three evaluation paths, in order:
+  //   1. Built-in trigger function in `triggers` map → re-run with
+  //      a clean recentTaskScenarios set (so the dedup gate inside
+  //      the trigger doesn't false-skip itself)
+  //   2. Custom trigger_config on template → evaluateCustomTrigger
+  //   3. Day-tolerance fallback for *.dayN scenarios (catches
+  //      stalled.*.dayN which is alert-based, not in triggers map):
+  //      if current day > scenario_day + STALE_DAYS, dismiss.
+
+  const STALE_DAYS = 3;
+  const studentById = new Map(students.map((s) => [s.id, s]));
+  const templateByScenario = new Map(templates.map((t) => [t.scenario_id, t]));
+  const autoDismissals = new Map<string, string>();
+
+  for (const t of (openTasksWithBucket ?? []) as unknown as OpenTaskRow[]) {
+    // Skip anything already queued for dismissal by sections 3 or 3b.
+    if (toDismiss.includes(t.id)) continue;
+    if (familySupersedeNotes.has(t.id)) continue;
+
+    const student = studentById.get(t.student_id);
+    if (!student) {
+      autoDismissals.set(
+        t.id,
+        "Auto-dismissed: student no longer in eligible pool.",
+      );
+      continue;
+    }
+
+    const snap = snapByStudent.get(student.id);
+    if (!snap) continue;
+
+    // Re-evaluate with a fresh recentTaskScenarios so a trigger's
+    // dedup gate doesn't incorrectly skip itself when checking the
+    // CURRENT state of the world.
+    const cleanSnap = {
+      ...snap,
+      recentTaskScenarios: new Set<string>(),
+    };
+
+    let stillMatches: boolean | null = null;
+
+    // Path 1: built-in trigger function.
+    const triggerFn = triggers[t.scenario_id];
+    if (triggerFn) {
+      stillMatches = !!triggerFn(cleanSnap);
+    }
+
+    // Path 2: custom trigger_config on template.
+    if (stillMatches === null) {
+      const tpl = templateByScenario.get(t.scenario_id);
+      if (tpl?.trigger_config) {
+        stillMatches = evaluateCustomTrigger(
+          cleanSnap,
+          tpl.trigger_config,
+        ).match;
+      }
+    }
+
+    // Path 3: day-tolerance fallback for *.dayN scenarios.
+    if (stillMatches === null) {
+      const m = t.scenario_id.match(/\.day(\d+)$/);
+      if (m) {
+        const scenarioDay = parseInt(m[1], 10);
+        const currentDay = dayNumber(
+          student.first_paid_at ?? student.joined_at,
+        );
+        if (currentDay > scenarioDay + STALE_DAYS) {
+          autoDismissals.set(
+            t.id,
+            `Auto-dismissed: ${t.scenario_id} stage stale (current day ${currentDay}).`,
+          );
+          continue;
+        }
+      }
+      // Anything else (manual welcome.day1, etc.) we don't auto-dismiss.
+      continue;
+    }
+
+    if (stillMatches === false) {
+      autoDismissals.set(
+        t.id,
+        `Auto-dismissed: ${t.scenario_id} trigger condition no longer met.`,
+      );
+    }
+  }
+
+  for (const [id, note] of autoDismissals) {
+    await supabase
+      .from("tasks")
+      .update({
+        status: "dismissed",
+        dismissed_at: new Date().toISOString(),
+        notes: note,
+      })
+      .eq("id", id);
+  }
+
   // ─── 4. Insert (idempotent via partial unique index) ──────
 
   let createdCount = 0;

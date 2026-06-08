@@ -39,6 +39,13 @@ interface CompletionRow {
   lesson_id: string;
   completed_at: string | null;
   action_completed_at: string | null;
+  /** v75.24: required for canonical isLessonComplete parity.
+   *  Skipped lessons count toward path progression (the canonical
+   *  rule in src/lib/progress.ts). Without this field, the cron
+   *  silently undercounted progress for any student who skipped
+   *  optional content (e.g. R4 editing breakdowns), then fired
+   *  "no lessons watched" tasks against them. */
+  skipped_at: string | null;
 }
 
 interface LessonRow {
@@ -192,18 +199,34 @@ export function buildStudentSnapshot(
     const region = regions[lesson.region_id];
     if (!region) continue;
 
-    if (c.completed_at) {
+    // v75.24: skipped_at counts as "path progression" per the
+    // canonical formula in src/lib/progress.ts. Without this branch,
+    // a student who skipped optional R4 lessons would appear to the
+    // cron as "0 lessons watched" while the student profile correctly
+    // counted them as done — exactly the milicevic divergence.
+    const watchedOrSkipped = Boolean(c.completed_at) || Boolean(c.skipped_at);
+    if (watchedOrSkipped) {
       region.watchedComplete += 1;
       watched[c.lesson_id] = true;
-      const t = new Date(c.completed_at).getTime();
-      if (latestCompletionAt === null || t > latestCompletionAt) {
-        latestCompletionAt = t;
+      if (c.completed_at) {
+        const t = new Date(c.completed_at).getTime();
+        if (latestCompletionAt === null || t > latestCompletionAt) {
+          latestCompletionAt = t;
+        }
       }
     }
 
-    const fullyDone = lesson.requires_action
-      ? Boolean(c.action_completed_at)
-      : Boolean(c.completed_at);
+    // Canonical isLessonComplete formula (must stay in lockstep with
+    // src/lib/progress.ts and the student_progress_counts view):
+    //   - skipped_at IS NOT NULL                       → complete
+    //   - requires_action=false AND completed_at       → complete
+    //   - requires_action=true AND completed_at AND
+    //     action_completed_at                          → complete
+    const fullyDone = c.skipped_at
+      ? true
+      : lesson.requires_action
+        ? Boolean(c.completed_at && c.action_completed_at)
+        : Boolean(c.completed_at);
     if (fullyDone) region.fullyComplete += 1;
 
     if (lesson.requires_action) {

@@ -41,9 +41,11 @@ export async function GET(request: NextRequest) {
 
   const studentIds = students.map((s) => s.id);
   // v75.23: explicit high limit. Same truncation bug as check-csm-tasks.
+  // v75.24: include skipped_at so engagement metrics match the
+  // canonical isLessonComplete formula (skipped == done).
   const { data: allCompletions } = await supabase
     .from("student_lesson_completions")
-    .select("student_id, lesson_id, completed_at")
+    .select("student_id, lesson_id, completed_at, skipped_at")
     .in("student_id", studentIds)
     .limit(100000);
 
@@ -59,13 +61,24 @@ export async function GET(request: NextRequest) {
         latestAt: null,
       };
     }
+    // v75.24: only count rows that satisfy canonical "done" — either
+    // watched (completed_at) OR skipped (skipped_at). Skipped lessons
+    // count toward "engagement" the same way the student profile
+    // counts them.
+    const isDone = Boolean(c.completed_at) || Boolean(c.skipped_at);
+    if (!isDone) continue;
     completionsByStudent[c.student_id].lessonIds.add(c.lesson_id);
-    const cDate = new Date(c.completed_at);
-    if (
-      !completionsByStudent[c.student_id].latestAt ||
-      cDate > completionsByStudent[c.student_id].latestAt!
-    ) {
-      completionsByStudent[c.student_id].latestAt = cDate;
+    // latestAt tracks watch activity specifically (for "no lessons
+    // watched in 3d" detection) — skips don't qualify as fresh
+    // platform activity for that signal.
+    if (c.completed_at) {
+      const cDate = new Date(c.completed_at);
+      if (
+        !completionsByStudent[c.student_id].latestAt ||
+        cDate > completionsByStudent[c.student_id].latestAt!
+      ) {
+        completionsByStudent[c.student_id].latestAt = cDate;
+      }
     }
   }
 

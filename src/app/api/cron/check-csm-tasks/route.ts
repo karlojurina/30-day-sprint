@@ -160,7 +160,13 @@ export async function GET(request: NextRequest) {
     // 100k is well above current scale; safe for years.
     supabase
       .from("student_lesson_completions")
-      .select("student_id, lesson_id, completed_at, action_completed_at")
+      .select(
+        // v75.24: skipped_at required for canonical isLessonComplete
+        // parity — without it the cron undercounts progress for any
+        // student who skipped optional content and fires bogus
+        // "no lessons watched" tasks against them.
+        "student_id, lesson_id, completed_at, action_completed_at, skipped_at",
+      )
       .limit(100000),
     supabase.from("lessons").select("id, region_id, requires_action"),
     // v75.23: explicit limits on every cron bulk-fetch — defends

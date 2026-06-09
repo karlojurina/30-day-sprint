@@ -29,6 +29,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { createServiceClient } from "@/lib/supabase-server";
 import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
 import { toIso } from "@/lib/whop-members";
 
@@ -107,9 +108,21 @@ async function fetchEarliestMembershipDate(
 }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireTeam(request, ["founder", "admin"]);
-  if (isAuthFailure(auth)) return auth.error;
-  const supabase = auth.supabase;
+  // v75.34: dual auth — accept CRON_SECRET for service-level one-time
+  // backfill (so the founder can trigger it from terminal without
+  // extracting a Supabase JWT), OR a team-member session for in-app
+  // triggering. CRON_SECRET path stays restricted to this route only
+  // and is intended for one-time operations.
+  const authHeader = request.headers.get("authorization") ?? "";
+  const cronSecret = process.env.CRON_SECRET;
+  let supabase;
+  if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
+    supabase = createServiceClient();
+  } else {
+    const auth = await requireTeam(request, ["founder", "admin"]);
+    if (isAuthFailure(auth)) return auth.error;
+    supabase = auth.supabase;
+  }
 
   const apiKey = process.env.WHOP_API_KEY;
   if (!apiKey) {

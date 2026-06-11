@@ -27,6 +27,8 @@ import {
 } from "@/lib/constants";
 import {
   isPayingMember,
+  isMonth2Converted,
+  isInMonth2Cohort,
   PAYING_WHOP_PLAN_IDS_ARRAY,
 } from "@/lib/admin/metrics-definitions";
 import { useAdminScope } from "@/contexts/AdminScopeContext";
@@ -238,21 +240,22 @@ export default function AdminDashboard() {
             )
           : 0;
 
-      // v75.20: anchor on first_paid_at (real platform tenure).
-      const matureCohort = students.filter(
-        (s) => (s.first_paid_at ?? s.joined_at) <= thirtyDaysAgo,
-      );
-      const matureActive = matureCohort.filter(isPayingMember).length;
+      // v75.38: Month-2 conversion now flows through ONE canonical
+      // helper (isMonth2Converted + isInMonth2Cohort) in metrics-
+      // definitions.ts. Same formula here, same formula in the trend
+      // loop below — the hero stat and the sparkline's last point
+      // can no longer drift apart. The matureCohort/matureActive
+      // names are kept for the data payload field but the underlying
+      // computation is now centralized.
+      const matureCohort = students.filter(isInMonth2Cohort);
+      const matureActive = students.filter((s) => isMonth2Converted(s)).length;
       const monthTwoConversionRate =
         matureCohort.length > 0 ? matureActive / matureCohort.length : null;
 
       // Reconstruct per-day month-2 conversion rate for the last 14
-      // days. For each day D, cohort = students 30+ days in by D;
-      // "active at D" = currently active/past_due OR canceled-after-D
-      // (using students.canceled_at which is stamped on the actual
-      // transition, not on every row touch). Still an approximation
-      // for churn-then-rejoin, but the canceled_at-based logic is
-      // strictly more accurate than the v75.5 updated_at proxy.
+      // days. For each day D, use the canonical helper as-of D's end-
+      // of-day (midnight UTC the following day) so a student who
+      // crossed day 30 mid-day still counts at the right snapshot.
       const todayMidnight =
         Math.floor(Date.now() / 86_400_000) * 86_400_000;
       const monthTwoTrend: number[] = [];
@@ -260,25 +263,15 @@ export default function AdminDashboard() {
       for (let i = 0; i < 14; i++) {
         const dayStart = fourteenDaysAgoMs + i * 86_400_000;
         const dayEnd = dayStart + 86_400_000;
-        const thirtyBeforeDay = dayStart - 30 * 86_400_000;
-        // v75.20: anchor month-2 cohort on first_paid_at (original
-        // signup). A returning customer who renewed 10 days ago has
-        // joined_at = 10 days ago but their actual platform tenure
-        // is months+. They ARE month-2-eligible.
-        const cohortAtDay = students.filter((s) => {
-          const anchor = s.first_paid_at ?? s.joined_at;
-          return new Date(anchor).getTime() <= thirtyBeforeDay;
-        });
-        const activeAtDay = cohortAtDay.filter((s) => {
-          if (isPayingMember(s)) return true;
-          if (s.membership_status === "canceled" && s.canceled_at) {
-            return new Date(s.canceled_at).getTime() >= dayEnd;
-          }
-          return false;
-        }).length;
+        const cohortAtDay = students.filter((s) =>
+          isInMonth2Cohort(s, dayEnd),
+        );
+        const convertedAtDay = students.filter((s) =>
+          isMonth2Converted(s, dayEnd),
+        ).length;
         monthTwoTrend.push(
           cohortAtDay.length > 0
-            ? Math.round((activeAtDay / cohortAtDay.length) * 100)
+            ? Math.round((convertedAtDay / cohortAtDay.length) * 100)
             : 0,
         );
       }

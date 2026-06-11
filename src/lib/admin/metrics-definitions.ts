@@ -47,6 +47,9 @@ interface StudentLike {
    *  Used for cohort filtering instead of joined_at (which is
    *  current cycle start and moves on each renewal). */
   first_paid_at?: string | null;
+  /** v75.38: needed for isMonth2Converted (NULL = never canceled,
+   *  set = transition timestamp). */
+  canceled_at?: string | null;
   whop_plan_id?: string | null;
 }
 
@@ -101,6 +104,70 @@ export const PAYING_WHOP_PLAN_IDS_ARRAY: readonly string[] = Array.from(
 export function isInLaunchCohort(s: StudentLike): boolean {
   if (!s.first_paid_at) return false;
   return s.first_paid_at >= ADMIN_STUDENT_JOIN_CUTOFF;
+}
+
+/**
+ * Month-2 conversion — the platform's north-star retention KPI.
+ *
+ * A student is "Month-2 converted as of `asOfMs`" iff:
+ *   1. They have a first_paid_at (NULL = not in cohort)
+ *   2. first_paid_at + 30d <= asOfMs (they've BEEN on the platform for
+ *      at least 30 days as of the snapshot moment)
+ *   3. They were on a paying plan (whop_plan_id ∈ PAYING_WHOP_PLAN_IDS)
+ *   4. EITHER they never canceled (canceled_at IS NULL — still active)
+ *      OR they canceled AFTER day 30 (canceled_at > first_paid_at + 30d).
+ *      A student who churned on day 16 does NOT count as converted even
+ *      after they've been on the platform 30+ wall-clock days.
+ *
+ * v75.38: centralizing this here because the dashboard hero stat, the
+ * 14-day trend sparkline, and the (now-deleted) /api/admin/kpis route
+ * each computed it slightly differently. Drift between the three was
+ * visible — hero said X, sparkline last-point said X+/-1 — and would
+ * have gotten worse once the first cohort hit day 30 on 2026-06-24.
+ *
+ * Pair with isInMonth2Cohort() for the denominator. The conversion
+ * rate is: |students filter isMonth2Converted| / |students filter
+ * isInMonth2Cohort|.
+ */
+export function isMonth2Converted(
+  s: StudentLike,
+  asOfMs: number = Date.now(),
+): boolean {
+  if (!s.first_paid_at) return false;
+  if (
+    !s.whop_plan_id ||
+    !PAYING_WHOP_PLAN_IDS.has(s.whop_plan_id)
+  ) {
+    return false;
+  }
+  const day30Ms = new Date(s.first_paid_at).getTime() + 30 * 86_400_000;
+  if (day30Ms > asOfMs) return false; // not yet 30 days in
+  if (!s.canceled_at) return true; // never canceled — fully converted
+  // Canceled after day 30 = converted (they made it past M1 → M2 boundary)
+  return new Date(s.canceled_at).getTime() > day30Ms;
+}
+
+/**
+ * Denominator companion to isMonth2Converted. A student is "in the
+ * Month-2 cohort as of `asOfMs`" iff they paid at least 30 days ago
+ * on a paying plan, regardless of whether they're still active now.
+ *
+ * The conversion rate denominator is "students whose Month-1 ended by
+ * `asOfMs`" — they're the population eligible to have converted.
+ */
+export function isInMonth2Cohort(
+  s: StudentLike,
+  asOfMs: number = Date.now(),
+): boolean {
+  if (!s.first_paid_at) return false;
+  if (
+    !s.whop_plan_id ||
+    !PAYING_WHOP_PLAN_IDS.has(s.whop_plan_id)
+  ) {
+    return false;
+  }
+  const day30Ms = new Date(s.first_paid_at).getTime() + 30 * 86_400_000;
+  return day30Ms <= asOfMs;
 }
 
 /**

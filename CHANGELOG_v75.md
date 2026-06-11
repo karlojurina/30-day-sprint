@@ -5,8 +5,9 @@ Read this top-to-bottom before making structural changes to admin
 metrics, sync logic, or CSM tasks — many of the v75 commits established
 invariants that look arbitrary but are load-bearing.
 
-Latest: **v75.54** — June 11 2026 (v75.53 `first_paid_at` sync self-heal +
-v75.54 backfill `CRON_SECRET` trim).
+Latest: **v75.58** — June 11 2026 (v75.53 `first_paid_at` sync self-heal,
+v75.54 backfill `CRON_SECRET` trim, v75.55–.58 audit must-fixes: token
+leak, pagination caps, NA-task anchor unification, no-fallback writes).
 
 ## TL;DR — invariants now true
 
@@ -266,10 +267,19 @@ FROM daily_progress_snapshots WHERE snapshot_date = current_date;
 
 These are real but were explicitly deferred:
 
-- **v75.40 dismissal logic refactor.** Diagnostic showed ~12% of task
-  dismissals were over-fired (~5/day average). Plan: separate
-  firing-window predicates from open-state predicates per trigger.
-  Not blocking — gone 30+ days without anyone noticing.
+- **v75.40 dismissal logic refactor — PARTIALLY addressed by v75.57.**
+  The stalled.\*.dayN flicker (anchor mismatch between NA creation and
+  3c dismissal) is fixed. STILL OPEN, in scope for the full refactor:
+  (a) pace.\*/nolessons.\* day-window triggers conflate "should I fire"
+  with "does the problem still apply", so 3c/real-time re-eval can
+  dismiss them as "trigger no longer met" when only the day window
+  closed; (b) stalled.\* tiers progress via fresh NA-cron inserts, NOT
+  3b family supersession (3b only sees the CSM cron's own inserts), so
+  retirement of an old stalled tier is 3c staleness by design — day3
+  and day5 can briefly coexist open; (c) OWNER DECISION PENDING: the
+  terminal stalled.\*.day10 task is auto-dismissed by 3c once day > 13
+  even if Astrid never actioned it — decide whether the highest tier
+  should be exempt from 3c's day-tolerance path.
 
 - **Day-28 DM timing precision.** Anchored on wall-clock time, not
   UTC midnight. Students who paid late in the UTC day can miss
@@ -278,8 +288,10 @@ These are real but were explicitly deferred:
 
 - **`/api/student/data` leaks `quiz_questions.correct_index`.** Quiz
   scoring is server-side post-v75.31, but the answer key still
-  ships to the client. Determined cheaters can bypass by reading
-  the bundle.
+  ships to the client (and is also readable via direct RLS query).
+  Karlo explicitly accepted this risk 2026-06-11 ("if they're that
+  determined, that's on them") — scores can't be faked either way.
+  Don't re-raise unless the gate semantics change.
 
 - **Dashboard "Canceling" tile has no historical sparkline.** Column
   is too new (v75.46). After ~14 days of sync runs, add a snapshot
@@ -324,3 +336,7 @@ These are real but were explicitly deferred:
 | v75.52 | Jun 11 | Stale scope-comment cleanup |
 | v75.53 | Jun 11 | `first_paid_at` sync self-heal — cross-product `fetchEarliestMembershipDateForUser` extracted + bounded recovery pass in the sync (closes the 91-NULL leak; the daily inflow now self-corrects) |
 | v75.54 | Jun 11 | backfill route `CRON_SECRET` comparison now whitespace-trimmed (mirrors `verifyCronAuth`) — was the last inlined untrimmed `Bearer ${CRON_SECRET}` check; a trailing newline made it return "Invalid token" while the crons authenticated fine |
+| v75.55 | Jun 11 | `/api/student/data` no longer ships Whop OAuth tokens — `student_whop_sync` read switched from `select(*)` to an explicit diagnostics-only column list (access/refresh tokens were readable in the browser network tab) |
+| v75.56 | Jun 11 | three more PostgREST ~1000-row cap fixes: `/admin/students` progress-counts view read, `/admin/lessons` ratings read, and check-csm-tasks `tasks`+`student_milestones` bulk reads (raw `.limit(50000)` does NOT bypass the server cap) — all via `fetchAllRowsPaginated`, with error short-circuit in the cron |
+| v75.57 | Jun 11 | canonical `sprintDayNumber` helper (constants.ts) — NA cron task CREATION, CSM 3c stale-DISMISSAL, snapshot day, and the /admin/not-activated page all share one day anchor (`first_paid_at`, ceil). Was: created on floor(created_at), dismissed on ceil(first_paid_at) → stalled.\*.dayN tasks for backfilled students flickered into existence and auto-dismissed within one cron window, silently neutralizing the NA pipeline. Note: floor→ceil means NA tiers + the day-10 high_churn_risk flag now fire ~24h earlier. Also: late-pool entrants at day 10–13 clamp to the day-10 tier (terminal touch + flag); day ≥ 14 entrants still get nothing (open question below) |
+| v75.58 | Jun 11 | NO `joined_at` fallback writes to `first_paid_at` — backfill route + sync recovery pass leave NULL when Whop has no parseable membership date (retried every sync; we pull from Whop, no webhook dependency). Backfill UPDATE also gains the `.is(first_paid_at, null)` fill-only guard. Consequence to know: while a paying student's `first_paid_at` is NULL they receive ZERO NA/CSM outreach (NULL = out of every pool) — the H3 diagnostic query is the watchdog for that population |

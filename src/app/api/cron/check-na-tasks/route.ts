@@ -1,10 +1,10 @@
 /**
  * Phase 3 (brief v3 §03) - Not Activated cohort cron.
  *
- * Runs once daily at 09:20 UTC (5 minutes after check-csm-tasks so
- * the team Discord post order reads: engagement alerts → CSM tasks
- * → NA tasks). Generates Astrid tasks for paying members who never
- * signed in to the dashboard.
+ * Schedule lives in vercel.json (every 4h at :20, 5 minutes after
+ * check-csm-tasks so the team Discord post order reads: engagement
+ * alerts → CSM tasks → NA tasks). Generates Astrid tasks for paying
+ * members who never signed in to the dashboard.
  *
  * Trigger logic (per the 23-05-2026 simplification - no form
  * webhook):
@@ -15,9 +15,10 @@
  *              AND high_churn_risk = false
  *              AND csm_exempt = false
  *
- *   days_since_signup = today - whop_subscription_start_date (using
- *     students.created_at as the proxy when Whop start isn't stored
- *     separately)
+ *   days_since_signup = sprintDayNumber(first_paid_at) — the canonical
+ *     Day-N counter shared with check-csm-tasks (v75.57; was
+ *     floor(days since students.created_at), which diverged from the
+ *     dismissal side and made tasks flicker)
  *
  *   tier (Day 3/5/7/10) maps to template index 1/2/3/4
  *
@@ -40,7 +41,7 @@ import { createServiceClient } from "@/lib/supabase-server";
 import { postTeamAlert } from "@/lib/discord";
 import { isDmEnabled } from "@/lib/dm-toggles";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
-import { csmSprintWindowCutoffIso } from "@/lib/constants";
+import { csmSprintWindowCutoffIso, sprintDayNumber } from "@/lib/constants";
 import {
   verifyCronAuth,
   cronUnauthorizedResponse,
@@ -59,15 +60,13 @@ interface NotActivatedRow {
   email: string | null;
   discord_username: string | null;
   created_at: string;
+  first_paid_at: string | null;
+  joined_at: string | null;
   high_churn_risk: boolean;
 }
 
 const TIER_DAYS = [3, 5, 7, 10] as const;
 type Tier = (typeof TIER_DAYS)[number];
-
-function daysSince(iso: string): number {
-  return Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
-}
 
 function templateIdFor(cohort: "A" | "B", tier: Tier): string {
   // v57 - scenario ids renamed to descriptive slugs. Cohort A
@@ -109,7 +108,7 @@ export async function GET(request: NextRequest) {
   const { data: studentsRaw, error: studentsErr } = await supabase
     .from("students")
     .select(
-      "id, name, email, discord_username, created_at, high_churn_risk",
+      "id, name, email, discord_username, created_at, first_paid_at, joined_at, high_churn_risk",
     )
     .eq("membership_status", "active")
     .eq("high_churn_risk", false)
@@ -178,7 +177,26 @@ export async function GET(request: NextRequest) {
   const errors: string[] = [];
 
   for (const s of pool) {
-    const days = daysSince(s.created_at) as Tier | number;
+    // v75.57: tier day comes from the canonical sprintDayNumber on
+    // first_paid_at (joined_at/created_at fallback for safety) — the
+    // SAME anchor + rounding check-csm-tasks section 3c uses for its
+    // stale-dismissal check. Anchoring creation on created_at while
+    // dismissal ran on first_paid_at made stalled tasks for backfilled
+    // students appear and auto-dismiss within one cron window.
+    const rawDays = sprintDayNumber(
+      s.first_paid_at ?? s.joined_at ?? s.created_at,
+    );
+    // Terminal-tier catch-up: a student whose first_paid_at fills LATE
+    // (sync recovery / backfill) can enter the pool past day 10 and
+    // would otherwise skip every tier — never getting the day-10 touch
+    // or the high_churn_risk flag. Clamp days 10-13 to tier 10. The
+    // window stops at 13 because check-csm-tasks 3c stale-dismisses
+    // .day10 tasks once day > 13 (STALE_DAYS=3) — creating one past
+    // that would flicker. Day >= 14 entrants get no NA task (open
+    // question, see CHANGELOG "not yet done").
+    const days = (rawDays >= 10 && rawDays <= 13 ? 10 : rawDays) as
+      | Tier
+      | number;
     if (!TIER_DAYS.includes(days as Tier)) continue;
 
     const tier = days as Tier;

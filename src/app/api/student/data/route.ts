@@ -82,9 +82,15 @@ export async function GET(request: NextRequest) {
       .select("*")
       .eq("student_id", student.id)
       .maybeSingle(),
+    // v75.55: explicit column list — NEVER select * here. The row also
+    // carries access_token/refresh_token (the student's Whop OAuth
+    // credentials); select("*") shipped them to the browser in the
+    // dashboard payload. The client only reads the sync diagnostics.
     supabase
       .from("student_whop_sync")
-      .select("*")
+      .select(
+        "student_id, last_sync_at, last_sync_error, last_sync_error_at, last_sync_unmatched, last_sync_fetched, last_sync_matched, updated_at",
+      )
       .eq("student_id", student.id)
       .maybeSingle(),
     supabase

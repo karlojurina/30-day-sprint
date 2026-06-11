@@ -76,7 +76,7 @@ export async function POST(request: NextRequest) {
   // for re-enrollment, and they'd get backfilled on re-OAuth).
   const { data: candidates, error: candErr } = await supabase
     .from("students")
-    .select("id, whop_user_id, email, joined_at")
+    .select("id, whop_user_id, email")
     .is("first_paid_at", null)
     .in("membership_status", ["active", "past_due"])
     .not("whop_user_id", "is", null);
@@ -89,9 +89,10 @@ export async function POST(request: NextRequest) {
   const summary = {
     total_candidates: candidatesList.length,
     backfilled: 0,
+    // v75.58: rows Whop has no record for stay NULL (no joined_at
+    // fallback) — they show up here and need manual review.
     no_whop_record: 0,
     api_errors: 0,
-    fallback_to_joined_at: 0,
     errors: [] as Array<{ student_id: string; reason: string }>,
   };
 
@@ -101,31 +102,33 @@ export async function POST(request: NextRequest) {
     if (!c.whop_user_id) continue;
 
     try {
-      const { firstPaidIso, foundCount } =
-        await fetchEarliestMembershipDateForUser(c.whop_user_id as string);
+      const { firstPaidIso } = await fetchEarliestMembershipDateForUser(
+        c.whop_user_id as string,
+      );
 
-      let valueToWrite: string | null = firstPaidIso;
-      let usedFallback = false;
-
-      if (!valueToWrite) {
-        // Whop returned 0 memberships OR all rows had unparseable
-        // created_at. Fall back to joined_at — better than NULL,
-        // and joined_at was their first dashboard touchpoint so
-        // it's a reasonable lower bound.
-        if (c.joined_at) {
-          valueToWrite = c.joined_at as string;
-          usedFallback = true;
-          summary.fallback_to_joined_at += 1;
-        } else {
-          summary.no_whop_record += 1;
-          continue;
-        }
+      // v75.58: NO joined_at fallback. first_paid_at is the cohort
+      // anchor AND the discount-window anchor, and it never moves once
+      // set — writing a fabricated date (joined_at is a renewal/login
+      // date, not a payment date) would permanently mislabel the
+      // student and could re-open a discount window. Leave NULL: the
+      // student stays out-of-cohort (correct for missing data), keeps
+      // showing in the NULL-first_paid_at diagnostics, and is retried
+      // on every re-run + by the nightly sync recovery pass — we PULL
+      // from Whop's API, so no webhook is needed for the real date to
+      // eventually land.
+      if (!firstPaidIso) {
+        summary.no_whop_record += 1;
+        continue;
       }
 
+      // .is("first_paid_at", null) — fill-only-if-still-NULL, so a
+      // racing writer (sync recovery / webhook) can never be
+      // overwritten. Mirrors the sync recovery pass guard.
       const { error: updateErr } = await supabase
         .from("students")
-        .update({ first_paid_at: valueToWrite })
-        .eq("id", c.id);
+        .update({ first_paid_at: firstPaidIso })
+        .eq("id", c.id)
+        .is("first_paid_at", null);
 
       if (updateErr) {
         summary.api_errors += 1;
@@ -137,11 +140,6 @@ export async function POST(request: NextRequest) {
       }
 
       summary.backfilled += 1;
-      if (foundCount === 0 && !usedFallback) {
-        // Shouldn't reach here (valueToWrite would be null) but
-        // belt-and-suspenders.
-        summary.no_whop_record += 1;
-      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       summary.api_errors += 1;

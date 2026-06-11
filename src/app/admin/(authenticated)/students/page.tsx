@@ -64,9 +64,20 @@ export default function StudentsPage() {
         // student_lesson_completions directly returns one row per
         // completion and silently truncates at the 1000-row cap once
         // the community is large.
-        supabase
-          .from("student_progress_counts")
-          .select("student_id, completed_count"),
+        // v75.56: the VIEW read itself is one row per student, so past
+        // ~1000 students it hits the same server cap — students beyond
+        // the cap showed 0% progress on this roster. Paginated like the
+        // students query above (dashboard/journey/insights already do).
+        fetchAllRowsPaginated<{ student_id: string; completed_count: number }>(
+          () =>
+            supabase
+              .from("student_progress_counts")
+              .select("student_id, completed_count")
+              // Stable order required for .range() pagination — view
+              // output has no inherent order; without this, rows can be
+              // skipped across page boundaries.
+              .order("student_id"),
+        ),
         // v75.1 - exclude l057 (bounty onboarding) so the list's
         // per-student % matches the 64-lesson sprint denominator.
         supabase

@@ -25,7 +25,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase-browser";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
-import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+import { ADMIN_STUDENT_JOIN_CUTOFF, sprintDayNumber } from "@/lib/constants";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 // v75.51: useAdminScope removed. Cohort-only.
 import {
@@ -43,6 +43,8 @@ interface NotActivatedRow {
   email: string | null;
   discord_username: string | null;
   created_at: string;
+  first_paid_at: string | null;
+  joined_at: string | null;
   high_churn_risk: boolean;
   whop_fetched_count: number | null;
 }
@@ -50,8 +52,12 @@ interface NotActivatedRow {
 const TIER_DAYS = [3, 5, 7, 10] as const;
 type Tier = (typeof TIER_DAYS)[number];
 
-function daysSince(iso: string): number {
-  return Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+// v75.57: same canonical day counter the NA cron uses to fire tiers —
+// this page PREDICTS what the cron will do, so the two must share one
+// anchor + rounding (was floor(created_at) vs the cron's
+// ceil(first_paid_at), which predicted tiers the cron never fired).
+function dayFor(r: Pick<NotActivatedRow, "first_paid_at" | "joined_at" | "created_at">): number {
+  return sprintDayNumber(r.first_paid_at ?? r.joined_at ?? r.created_at);
 }
 
 function nextTierForDay(days: number): Tier | null {
@@ -92,7 +98,7 @@ export default function NotActivatedPage() {
       supabase
         .from("students")
         .select(
-          "id, name, email, discord_username, created_at, high_churn_risk",
+          "id, name, email, discord_username, created_at, first_paid_at, joined_at, high_churn_risk",
         )
         .eq("membership_status", "active")
         .eq("high_churn_risk", false)
@@ -107,6 +113,8 @@ export default function NotActivatedPage() {
       email: string | null;
       discord_username: string | null;
       created_at: string;
+      first_paid_at: string | null;
+      joined_at: string | null;
       high_churn_risk: boolean;
     }>(buildQuery);
 
@@ -147,6 +155,8 @@ export default function NotActivatedPage() {
       email: (s.email as string | null) ?? null,
       discord_username: (s.discord_username as string | null) ?? null,
       created_at: s.created_at as string,
+      first_paid_at: (s.first_paid_at as string | null) ?? null,
+      joined_at: (s.joined_at as string | null) ?? null,
       high_churn_risk: (s.high_churn_risk as boolean | null) ?? false,
       whop_fetched_count: syncBy.get(s.id as string) ?? null,
     }));
@@ -158,7 +168,7 @@ export default function NotActivatedPage() {
     return rows.filter((r) => {
       const c = cohortFor(r);
       if (cohortFilter !== "all" && cohortFilter !== c) return false;
-      const days = daysSince(r.created_at);
+      const days = dayFor(r);
       const nextTier = nextTierForDay(days);
       if (tierFilter !== "all" && nextTier !== tierFilter) return false;
       if (watchingFilter === "watching") {
@@ -301,7 +311,7 @@ export default function NotActivatedPage() {
           </div>
 
           {filtered.map((r) => {
-            const days = daysSince(r.created_at);
+            const days = dayFor(r);
             const cohort = cohortFor(r);
             const nextTier = nextTierForDay(days);
             const scenarioId = nextTier

@@ -79,9 +79,15 @@ export default function StudentDetailPage() {
           .select("*")
           .eq("student_id", studentId)
           .maybeSingle(),
+        // v75.55: explicit column list — the row also carries
+        // access_token/refresh_token (the student's Whop OAuth
+        // credentials), which are SERVER-ONLY and must never reach a
+        // browser, including a team member's.
         supabase
           .from("student_whop_sync")
-          .select("*")
+          .select(
+            "student_id, last_sync_at, last_sync_error, last_sync_error_at, last_sync_unmatched, last_sync_fetched, last_sync_matched, updated_at",
+          )
           .eq("student_id", studentId)
           .maybeSingle(),
       ]);

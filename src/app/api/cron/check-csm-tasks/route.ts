@@ -51,6 +51,7 @@ import {
 import {
   TASKS_STUDENT_JOIN_CUTOFF,
   csmSprintWindowCutoffIso,
+  sprintDayNumber,
 } from "@/lib/constants";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import type { Student, TriggerConfig } from "@/types/database";
@@ -73,12 +74,9 @@ interface AlertRow {
   created_at: string;
 }
 
-function dayNumber(joinedAt: string): number {
-  return Math.max(
-    1,
-    Math.ceil((Date.now() - new Date(joinedAt).getTime()) / 86_400_000),
-  );
-}
+// v75.57: local dayNumber() replaced by the shared sprintDayNumber in
+// src/lib/constants.ts so creation (check-na-tasks) and dismissal (3c
+// below) can never disagree on what "Day N" means.
 
 /**
  * Bucket → priority for the one-open-negative-task-per-student cap.
@@ -175,13 +173,28 @@ export async function GET(request: NextRequest) {
     // outside that slice appeared as "0 lessons watched" and got
     // bogus nolessons.day3 tasks they couldn't escape.
     supabase.from("lessons").select("id, region_id, requires_action"),
-    // v75.23: explicit limits on every cron bulk-fetch — defends
-    // against PostgREST's silent 1000-row truncation.
-    supabase
-      .from("tasks")
-      .select("student_id, scenario_id, status")
-      .in("status", ["open", "completed"])
-      .limit(50000),
+    // v75.56: tasks + milestones are UNBOUNDED tables (one row per
+    // task / per student forever) and a raw .limit(50000) does NOT
+    // bypass PostgREST's server-side ~1000-row cap — the limit only
+    // lowers the client ask, the server still truncates silently.
+    // Truncated tasks lose supersession/dedup context; truncated
+    // milestones make students past row 1000 look like they never
+    // logged in. fetchAllRowsPaginated pages past the cap.
+    fetchAllRowsPaginated<{
+      student_id: string;
+      scenario_id: string;
+      status: string;
+    }>(() =>
+      supabase
+        .from("tasks")
+        .select("student_id, scenario_id, status")
+        .in("status", ["open", "completed"])
+        // Stable order is REQUIRED for .range() pagination — without
+        // ORDER BY, Postgres gives no row-order guarantee and rows can
+        // be skipped/duplicated across page boundaries under
+        // concurrent writes.
+        .order("id"),
+    ),
     supabase
       .from("templates")
       .select("id, scenario_id, bucket, is_custom, is_active, trigger_config")
@@ -197,13 +210,32 @@ export async function GET(request: NextRequest) {
       .limit(10000),
     // v46 — first_sprint_login_at lives on student_milestones now,
     // pulled separately and joined per-student before snapshot build.
-    supabase
-      .from("student_milestones")
-      .select("student_id, first_sprint_login_at")
-      .limit(50000),
+    // v75.56: paginated (see tasks note above).
+    fetchAllRowsPaginated<{
+      student_id: string;
+      first_sprint_login_at: string | null;
+    }>(() =>
+      supabase
+        .from("student_milestones")
+        .select("student_id, first_sprint_login_at")
+        // Stable order required for .range() pagination — a skipped
+        // milestones row would make that student look never-logged-in
+        // and 3c would wrongly dismiss their valid tasks.
+        .order("student_id"),
+    ),
   ]);
 
-  const studentsErr = studentsRes.error ?? lessonsRes.error ?? templatesRes.error;
+  // v75.56: tasks + milestones errors now short-circuit too. The
+  // pagination helper returns EMPTY data on error (v75.32 contract);
+  // running on an empty milestones set would make every student look
+  // never-logged-in and 3c would mass-dismiss valid tasks for the
+  // wrong reason.
+  const studentsErr =
+    studentsRes.error ??
+    lessonsRes.error ??
+    templatesRes.error ??
+    tasksRes.error ??
+    milestonesRes.error;
   if (studentsErr) {
     await logCronFinish(runId, "failed", { error: studentsErr.message });
     return NextResponse.json({ error: studentsErr.message }, { status: 500 });
@@ -386,7 +418,7 @@ export async function GET(request: NextRequest) {
     if (snap && !snap.student.first_sprint_login_at) continue;
     // v75.18: day count from first_paid_at (true Day 1), fallback to
     // joined_at for safety during the backfill window.
-    const day = dayNumber(student.first_paid_at ?? student.joined_at);
+    const day = sprintDayNumber(student.first_paid_at ?? student.joined_at);
     const scenarioId = pickExistingAlertScenario(alert.alert_type, day);
     if (!scenarioId) continue;
     const templateId = templateBy.get(scenarioId);
@@ -703,7 +735,10 @@ export async function GET(request: NextRequest) {
       const m = t.scenario_id.match(/\.day(\d+)$/);
       if (m) {
         const scenarioDay = parseInt(m[1], 10);
-        const currentDay = dayNumber(
+        // v75.57: same sprintDayNumber the NA cron now uses to CREATE
+        // stalled.*.dayN tasks — creation and stale-dismissal can no
+        // longer disagree about the student's day.
+        const currentDay = sprintDayNumber(
           student.first_paid_at ?? student.joined_at,
         );
         if (currentDay > scenarioDay + STALE_DAYS) {

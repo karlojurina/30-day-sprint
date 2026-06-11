@@ -179,7 +179,10 @@ export interface StudentStreaks {
   updated_at: string;
 }
 
-/** v46 — Whop OAuth tokens + watch-history sync diagnostics. */
+/** v46 — Whop OAuth tokens + watch-history sync diagnostics.
+ *  v75.55: access_token/refresh_token are SERVER-ONLY — never include
+ *  them in any payload returned to the browser (/api/student/data
+ *  selects an explicit column list for exactly this reason). */
 export interface StudentWhopSync {
   student_id: string;
   access_token: string | null;

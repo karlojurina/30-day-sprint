@@ -41,6 +41,26 @@ export function csmSprintWindowCutoffIso(): string {
   ).toISOString();
 }
 
+/**
+ * Canonical sprint day counter, 1-indexed: Day 1 starts the moment the
+ * anchor timestamp (first_paid_at, with joined_at fallback) is stamped.
+ *
+ * v75.57 — extracted so every producer AND consumer of "Day N" uses the
+ * exact same anchor + rounding. Before this, check-na-tasks created
+ * stalled.*.dayN tasks from floor(days since students.created_at) while
+ * check-csm-tasks section 3c auto-dismissed them from ceil(days since
+ * first_paid_at) — for any student whose first_paid_at preceded their
+ * row creation by >3 days (every backfilled student), the task was born
+ * and auto-dismissed within the same cron window, silently neutralizing
+ * the Not-Activated pipeline. One helper, one definition, no drift.
+ */
+export function sprintDayNumber(anchorIso: string): number {
+  return Math.max(
+    1,
+    Math.ceil((Date.now() - new Date(anchorIso).getTime()) / 86_400_000),
+  );
+}
+
 // Approximate lesson count used as a fallback denominator when the
 // actual lessons array isn't available (e.g. in admin views where
 // we only fetch student records). Kept in sync with the live DB

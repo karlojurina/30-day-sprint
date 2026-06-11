@@ -20,6 +20,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
+import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { useAuth } from "@/contexts/AuthContext";
 import {
   AdminPage,
@@ -81,13 +82,25 @@ function AdminLessonsBody() {
         .order("region_id")
         .order("day")
         .order("sort_order"),
-      supabase
-        .from("student_lesson_ratings")
-        .select(
-          "id, student_id, lesson_id, stars, comment, created_at, updated_at",
-        )
-        .order("updated_at", { ascending: false }),
+      // v75.56: one row per (student, lesson) rating — past ~1000 rows
+      // PostgREST silently truncates to the newest 1000, skewing the
+      // averages/counts this page exists to surface. Paginated.
+      fetchAllRowsPaginated<RatingRow>(() =>
+        supabase
+          .from("student_lesson_ratings")
+          .select(
+            "id, student_id, lesson_id, stars, comment, created_at, updated_at",
+          )
+          // .order("id") tiebreaker: updated_at is mutable + non-unique,
+          // so alone it's not a stable order for .range() pagination —
+          // boundary rows could be skipped/duplicated between pages.
+          .order("updated_at", { ascending: false })
+          .order("id"),
+      ),
     ]);
+    if (ratingsRes.error) {
+      console.error("[admin/lessons] ratings fetch failed:", ratingsRes.error);
+    }
     const lessonRows = (lessonsRes.data ?? []) as LessonRow[];
     const ratingRows = (ratingsRes.data ?? []) as RatingRow[];
     setLessons(lessonRows);

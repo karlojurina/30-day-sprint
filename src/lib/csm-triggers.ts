@@ -27,6 +27,7 @@ import type {
   RegionId,
   TriggerConfig,
 } from "@/types/database";
+import { sprintDayNumber } from "@/lib/constants";
 
 // Re-export RegionId for callers that already import from this module —
 // keeps existing import paths working without adding new modules.
@@ -175,11 +176,10 @@ export function buildStudentSnapshot(
   // v75.20: anchor day count on first_paid_at (original Whop signup)
   // instead of joined_at (current subscription cycle start). Returning
   // customers don't get their day-counter reset on renewal.
+  // v75.57: via the shared sprintDayNumber so snapshot day, NA-task
+  // creation, and 3c stale-dismissal all share one definition.
   const anchorIso = student.first_paid_at ?? student.joined_at;
-  const day = Math.max(
-    1,
-    Math.ceil((now - new Date(anchorIso).getTime()) / 86_400_000),
-  );
+  const day = sprintDayNumber(anchorIso);
 
   const lessonsById = new Map(lessons.map((l) => [l.id, l]));
 
@@ -324,10 +324,7 @@ export function buildPaceSummary(
   totalLessons: number,
   currentRegion: RegionId,
 ): PaceSummary {
-  const day = Math.max(
-    1,
-    Math.ceil((Date.now() - new Date(joinedAt).getTime()) / 86_400_000),
-  );
+  const day = sprintDayNumber(joinedAt);
   const lessonsPerDay = totalLessons > 0 ? totalLessons / 30 : 0;
   const expectedLessons = Math.max(0, day * lessonsPerDay);
   const progressRatio =

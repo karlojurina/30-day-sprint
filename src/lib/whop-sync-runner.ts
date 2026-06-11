@@ -148,8 +148,7 @@ export async function runWhopCommunitySync(
     // NULL this run (the product-scoped fetch can't see their
     // membership). Recovered after the upsert via a bounded
     // cross-product lookup — see the recovery pass below.
-    const recoveryCandidates: Array<{ whopUserId: string; joinedAt: string }> =
-      [];
+    const recoveryCandidates: Array<{ whopUserId: string }> = [];
 
     for (const m of members) {
       if (!m.user) {
@@ -337,7 +336,7 @@ export async function runWhopCommunitySync(
         PAYING_WHOP_PLAN_IDS.has(effectivePlan) &&
         (!cur || !cur.first_paid_at)
       ) {
-        recoveryCandidates.push({ whopUserId: m.user, joinedAt });
+        recoveryCandidates.push({ whopUserId: m.user });
       }
 
       upsertRows.push(row);
@@ -395,6 +394,20 @@ export async function runWhopCommunitySync(
         );
       }
     } else {
+      // Fairness rotation: candidates arrive in stable Whop member
+      // order, so >cap permanent no-record rows (Whop has no
+      // membership data) would occupy the same slice every sync and
+      // starve newer candidates forever. Shuffle when over cap so
+      // every candidate eventually gets attempts.
+      if (recoveryCandidates.length > FIRST_PAID_RECOVERY_CAP) {
+        for (let i = recoveryCandidates.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [recoveryCandidates[i], recoveryCandidates[j]] = [
+            recoveryCandidates[j],
+            recoveryCandidates[i],
+          ];
+        }
+      }
       let processed = 0;
       for (const cand of recoveryCandidates.slice(0, FIRST_PAID_RECOVERY_CAP)) {
         if (Date.now() - t0 > RECOVERY_DEADLINE_MS) break;
@@ -402,23 +415,32 @@ export async function runWhopCommunitySync(
         try {
           const { firstPaidIso: recovered } =
             await fetchEarliestMembershipDateForUser(cand.whopUserId);
-          // Fall back to joined_at (their first touchpoint) when Whop has
-          // no parseable membership date — better than leaving NULL. Note:
-          // for a brand-new row whose Whop created_at was unparseable,
-          // joinedAt is effectively now() (see the joinedAt assignment).
-          const valueToWrite = recovered ?? cand.joinedAt;
-          // .is("first_paid_at", null) preserves the "first paid never
-          // moves" invariant (only fills a NULL, never overwrites).
-          // .select() returns the rows actually changed so we count ONLY
-          // real fills — a no-op update (row gone, or filled by a racing
-          // writer) doesn't inflate first_paid_recovered.
-          const { data, error } = await supabase
-            .from("students")
-            .update({ first_paid_at: valueToWrite })
-            .eq("whop_user_id", cand.whopUserId)
-            .is("first_paid_at", null)
-            .select("whop_user_id");
-          if (!error && data && data.length > 0) result.first_paid_recovered++;
+          // v75.58: NO joined_at fallback. first_paid_at anchors cohort
+          // membership AND the discount window, and never moves once
+          // set — a fabricated date would permanently mislabel the
+          // student. When Whop has no parseable record, leave NULL:
+          // this candidate set is re-derived every sync, so the row is
+          // simply retried tomorrow (we pull from Whop's API; nothing
+          // depends on a webhook re-firing).
+          if (!recovered) {
+            console.warn(
+              `[whop-sync] first_paid recovery: no parseable membership date for ${cand.whopUserId}; left NULL (retries next sync).`,
+            );
+          } else {
+            // .is("first_paid_at", null) preserves the "first paid never
+            // moves" invariant (only fills a NULL, never overwrites).
+            // .select() returns the rows actually changed so we count ONLY
+            // real fills — a no-op update (row gone, or filled by a racing
+            // writer) doesn't inflate first_paid_recovered.
+            const { data, error } = await supabase
+              .from("students")
+              .update({ first_paid_at: recovered })
+              .eq("whop_user_id", cand.whopUserId)
+              .is("first_paid_at", null)
+              .select("whop_user_id");
+            if (!error && data && data.length > 0)
+              result.first_paid_recovered++;
+          }
         } catch (e) {
           console.warn(
             `[whop-sync] first_paid recovery failed for ${cand.whopUserId}: ${

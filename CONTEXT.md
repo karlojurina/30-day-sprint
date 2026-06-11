@@ -220,7 +220,7 @@ Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` 
 |------|------|
 | `supabase-browser.ts` / `supabase-server.ts` | Client construction |
 | `admin-auth.ts` | Team auth gate for API routes |
-| `whop.ts` / `whop-members.ts` / `whop-sync-runner.ts` | Whop HTTP + sync. v75.53: the sync self-heals NULL `first_paid_at` for active paying students via a bounded, throttled cross-product `fetchEarliestMembershipDateForUser` lookup (shared with the backfill). Closes the leak where students on a plan outside `WHOP_PRODUCT_ID` stayed `first_paid_at`=NULL → invisible to every cohort surface + uncovered by the CSM crons. |
+| `whop.ts` / `whop-members.ts` / `whop-sync-runner.ts` | Whop HTTP + sync. v75.53: the sync self-heals NULL `first_paid_at` via a bounded cross-product lookup (shared with the backfill). **v75.59 LOAD-BEARING: every upsert row carries the IDENTICAL full column set, preserving by VALUE — never reintroduce a conditional row key.** postgrest-js unions batch keys and PostgREST NULLs omitted columns on conflict-update (the 2026-06-11 wipe: 638 `first_paid_at` + 67 `whop_plan_id` + ~48 `cancel_scheduled_at` erased); a tripwire aborts the sync on any non-uniform key set. v75.60/61: `canceled_at` backfill tries past cycle-end, then past `expires_at` (refund revocations), then stamps the observation moment — a churned student can never stay invisible to the churn trend. |
 | `pkce.ts` | OAuth PKCE helpers |
 | `csm-triggers.ts` | Trigger metric registry + evaluator |
 | `csm-events.ts` | CSM event hooks (called from mark-* routes) |

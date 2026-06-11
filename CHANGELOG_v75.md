@@ -5,8 +5,8 @@ Read this top-to-bottom before making structural changes to admin
 metrics, sync logic, or CSM tasks — many of the v75 commits established
 invariants that look arbitrary but are load-bearing.
 
-Last commit: **v75.52** (`4ea19aa`) — June 11 2026.
-Working tree: **v75.53** (uncommitted) — `first_paid_at` sync self-heal.
+Latest: **v75.54** — June 11 2026 (v75.53 `first_paid_at` sync self-heal +
+v75.54 backfill `CRON_SECRET` trim).
 
 ## TL;DR — invariants now true
 
@@ -323,3 +323,4 @@ These are real but were explicitly deferred:
 | v75.51 | Jun 11 | Scope toggle removed entirely |
 | v75.52 | Jun 11 | Stale scope-comment cleanup |
 | v75.53 | Jun 11 | `first_paid_at` sync self-heal — cross-product `fetchEarliestMembershipDateForUser` extracted + bounded recovery pass in the sync (closes the 91-NULL leak; the daily inflow now self-corrects) |
+| v75.54 | Jun 11 | backfill route `CRON_SECRET` comparison now whitespace-trimmed (mirrors `verifyCronAuth`) — was the last inlined untrimmed `Bearer ${CRON_SECRET}` check; a trailing newline made it return "Invalid token" while the crons authenticated fine |

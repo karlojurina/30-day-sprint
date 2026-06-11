@@ -44,8 +44,16 @@ export async function POST(request: NextRequest) {
   // extracting a Supabase JWT), OR a team-member session for in-app
   // triggering. CRON_SECRET path stays restricted to this route only
   // and is intended for one-time operations.
-  const authHeader = request.headers.get("authorization") ?? "";
-  const cronSecret = process.env.CRON_SECRET;
+  //
+  // v75.54: whitespace-trim BOTH sides, mirroring verifyCronAuth
+  // (cron-auth.ts). Was a raw `=== \`Bearer ${cronSecret}\`` compare —
+  // the exact untrimmed-inline check v75.37 warned against. A trailing
+  // newline on the Vercel env var (the CRON_SECRET-drift incident) or
+  // on the pasted curl header made this fall through to team auth and
+  // return "Invalid token" even with the correct secret, while the
+  // crons (which trim) authenticated fine.
+  const authHeader = (request.headers.get("authorization") ?? "").trim();
+  const cronSecret = process.env.CRON_SECRET?.trim();
   let supabase;
   if (cronSecret && authHeader === `Bearer ${cronSecret}`) {
     supabase = createServiceClient();

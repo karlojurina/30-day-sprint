@@ -208,9 +208,19 @@ export async function runWhopCommunitySync(
       // had removed. Karlo wants past churn data; the cycle-end
       // approximation is the only practical option since Whop's API
       // doesn't expose the actual cancellation decision timestamp.
-      const whopEndIso = pastProxyOrNull(
-        toIso(m.renewal_period_end ?? m.expires_at),
-      );
+      // v75.60: try BOTH end-date candidates, taking the first one in
+      // the past. renewal_period_end is right for normal cancels (access
+      // runs to cycle end) — but for REFUNDS access is revoked
+      // mid-cycle, so renewal_period_end is future-dated and the old
+      // `renewal_period_end ?? expires_at` never consulted expires_at
+      // (the actual revocation moment) at all. Result: refund-churned
+      // students with a lost/NULL canceled_at could never be
+      // auto-restamped and stayed invisible to the dashboard churn
+      // trend (the 2026-06-11 case: 2 refund churns at 0 on the tile
+      // while the status-based journey column showed them).
+      const whopEndIso =
+        pastProxyOrNull(toIso(m.renewal_period_end ?? m.expires_at)) ??
+        pastProxyOrNull(toIso(m.expires_at));
       const wasTerminal = cur
         ? TERMINAL_STATUSES.has((cur.membership_status ?? "").toLowerCase())
         : false;

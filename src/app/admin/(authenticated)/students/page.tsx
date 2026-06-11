@@ -10,7 +10,7 @@ import {
   TOTAL_LESSONS,
   ADMIN_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
-import { useAdminScope } from "@/contexts/AdminScopeContext";
+// v75.51: useAdminScope removed. Cohort-only.
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import Link from "next/link";
 import {
@@ -39,29 +39,24 @@ export default function StudentsPage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
-  const { scope } = useAdminScope();
 
   useEffect(() => {
     async function fetchStudents() {
-      // Scope toggle: 'cohort' filters to launch-cohort joiners;
-      // 'all' shows every paying member including legacy customers.
-      // v79: free-plan members never appear here regardless of scope.
+      // v75.51: hardcoded cohort filter. Was scope-gated; cohort
+      // is now the only view. Free-plan members never appear here.
       // v75.27: paginated to bypass PostgREST's ~1000-row server cap.
-      const buildStudentsQuery = () => {
-        let q = supabase
+      const buildStudentsQuery = () =>
+        supabase
           .from("students")
           .select("*")
           .not("whop_membership_id", "is", null)
           .in("membership_status", ["active", "past_due", "canceled"])
-          .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
-        if (scope === "cohort") {
+          .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
           // v75.18: cohort = "first-time joiners since launch."
           // Filter on first_paid_at (original Whop signup) so returning
           // customers don't sneak in by virtue of a recent renewal.
-          q = q.gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF);
-        }
-        return q.order("joined_at", { ascending: false });
-      };
+          .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
+          .order("joined_at", { ascending: false });
 
       const [studentsRes, completionsRes, lessonsRes] = await Promise.all([
         fetchAllRowsPaginated<Student>(buildStudentsQuery),
@@ -105,7 +100,7 @@ export default function StudentsPage() {
     }
 
     fetchStudents();
-  }, [supabase, scope]);
+  }, [supabase]);
 
   const filtered = useMemo(() => {
     let list = students;

@@ -2,10 +2,9 @@
 
 import { TeamGuard } from "@/components/auth/TeamGuard";
 import { useAuth } from "@/contexts/AuthContext";
-import {
-  AdminScopeProvider,
-} from "@/contexts/AdminScopeContext";
-import { ScopeToggle } from "@/components/admin/ScopeToggle";
+// v75.51: AdminScopeProvider + ScopeToggle removed. Every admin
+// surface is now LAUNCH COHORT only. Pre-launch customers stay out
+// of the operational view via the hardcoded first_paid_at filters.
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -255,13 +254,11 @@ function AdminTopNav() {
             justifySelf: "end",
           }}
         >
-          <ScopeToggle />
+          {/* v75.51: ScopeToggle removed. Cohort is the only view. */}
           <div
             className="flex items-center"
             style={{
               gap: 12,
-              paddingLeft: 18,
-              borderLeft: "1px solid var(--color-border)",
               height: 36,
             }}
           >
@@ -603,15 +600,13 @@ export default function AdminLayout({
 }) {
   return (
     <TeamGuard>
-      <AdminScopeProvider>
-        <div
-          className="admin-shell flex flex-col min-h-screen"
-          style={{ background: "var(--color-bg-primary)" }}
-        >
-          <AdminTopNav />
-          <main className="flex-1 overflow-auto">{children}</main>
-        </div>
-      </AdminScopeProvider>
+      <div
+        className="admin-shell flex flex-col min-h-screen"
+        style={{ background: "var(--color-bg-primary)" }}
+      >
+        <AdminTopNav />
+        <main className="flex-1 overflow-auto">{children}</main>
+      </div>
     </TeamGuard>
   );
 }

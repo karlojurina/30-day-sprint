@@ -32,7 +32,7 @@ import {
   isCanceling,
   PAYING_WHOP_PLAN_IDS_ARRAY,
 } from "@/lib/admin/metrics-definitions";
-import { useAdminScope } from "@/contexts/AdminScopeContext";
+// v75.51: useAdminScope removed. Every metric here is cohort-only.
 import Link from "next/link";
 import {
   AdminPage,
@@ -87,7 +87,6 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const supabase = createClient();
-  const { scope } = useAdminScope();
 
   const fetchDashboard = useCallback(
     async (silent = false) => {
@@ -112,22 +111,20 @@ export default function AdminDashboard() {
       // (and growing), the unwrapped query silently truncated and
       // the "Active on platform" tile was pinned at ≤1000. Same
       // shape as the milicevic bug (v75.25) but on a different table.
-      const buildStudentsQuery = () => {
-        let q = supabase
+      // v75.51: hardcoded cohort filter. Was scope-gated; cohort is
+       // now the only view.
+      const buildStudentsQuery = () =>
+        supabase
           .from("students")
           .select("*")
           .not("whop_membership_id", "is", null)
           .in("membership_status", ["active", "past_due", "canceled"])
-          .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
-        if (scope === "cohort") {
+          .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
           // v75.18: filter by first_paid_at (original Whop signup),
           // NOT joined_at (current cycle start). Returning customers
           // who re-subscribed post-launch have a recent joined_at but
           // their first_paid_at is pre-launch → correctly excluded.
-          q = q.gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF);
-        }
-        return q;
-      };
+          .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF);
 
       const [
         studentsRes,
@@ -293,16 +290,16 @@ export default function AdminDashboard() {
         );
       }
 
-      // Pick the column family that matches the active scope. Cohort
-      // columns may be null on legacy snapshot rows that haven't been
-      // rebuilt yet — fall back to the "all" columns so the sparkline
-      // doesn't blank out during the transition window.
+      // v75.51: always read the *_cohort columns. Falls back to the
+      // legacy non-cohort column only when the cohort one is null
+      // (pre-v77 snapshot rows that don't have the cohort family
+      // yet — keeps historical sparklines from blanking out).
       const pickScopedColumn = (
         r: Record<string, unknown>,
         cohortCol: string,
         allCol: string,
       ): number => {
-        if (scope === "cohort" && r[cohortCol] != null) {
+        if (r[cohortCol] != null) {
           return Number(r[cohortCol]);
         }
         return Number(r[allCol] ?? 0);
@@ -403,7 +400,7 @@ export default function AdminDashboard() {
       setLastRefreshed(new Date());
       setLoading(false);
     },
-    [supabase, scope],
+    [supabase],
   );
 
   useEffect(() => {

@@ -27,7 +27,7 @@ import { createClient } from "@/lib/supabase-browser";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
-import { useAdminScope } from "@/contexts/AdminScopeContext";
+// v75.51: useAdminScope removed. Cohort-only.
 import {
   AdminPage,
   PageHeader,
@@ -79,20 +79,17 @@ export default function NotActivatedPage() {
     "all" | "watching" | "silent"
   >("all");
 
-  const { scope } = useAdminScope();
-
   useEffect(() => {
     void load();
-    // Re-fetch when scope toggle changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope]);
+  }, []);
 
   async function load() {
     setLoading(true);
     const supabase = createClient();
-    // v75.27: paginated to bypass PostgREST's ~1000-row server cap.
-    const buildQuery = () => {
-      let q = supabase
+    // v75.27: paginated. v75.51: cohort filter hardcoded.
+    const buildQuery = () =>
+      supabase
         .from("students")
         .select(
           "id, name, email, discord_username, created_at, high_churn_risk",
@@ -100,13 +97,10 @@ export default function NotActivatedPage() {
         .eq("membership_status", "active")
         .eq("high_churn_risk", false)
         .eq("csm_exempt", false)
-        .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]);
-      if (scope === "cohort") {
+        .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
         // v75.18: first_paid_at (original signup), not joined_at.
-        q = q.gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF);
-      }
-      return q.order("created_at", { ascending: true });
-    };
+        .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
+        .order("created_at", { ascending: true });
     const { data: studentsRaw } = await fetchAllRowsPaginated<{
       id: string;
       name: string | null;

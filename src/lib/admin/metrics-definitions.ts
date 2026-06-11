@@ -212,45 +212,8 @@ export function isInMonth2Cohort(
   return day30Ms <= asOfMs;
 }
 
-/**
- * Scope toggle for admin views. Internal values stay "cohort" / "all"
- * (no UI text relies on these strings; the toggle UI relabels them
- * "New students" and "All members" in v75.15).
- *
- * - "cohort" = students who joined on/after ADMIN_STUDENT_JOIN_CUTOFF
- *              (launch date) — surfaces this as "New students" in UI
- * - "all"    = every paying member regardless of join date — UI label
- *              "All members"
- *
- * v75.15 flipped the default from "cohort" to "all" so churn and
- * legacy customer activity are visible without an explicit toggle —
- * the cohort-only view became misleading once we started counting
- * legacy paying customers in the dataset.
- */
-export type Scope = "cohort" | "all";
-export const DEFAULT_SCOPE: Scope = "all";
-
-/** True iff the student is in the requested scope. */
-export function isInScope(s: StudentLike, scope: Scope): boolean {
-  if (scope === "all") return true;
-  return isInLaunchCohort(s);
-}
-
-/**
- * Parse the scope from URL search params. Anything other than "all"
- * resolves to the default ("cohort") so an unrecognized value
- * doesn't silently widen the dataset.
- */
-export function parseScope(value: string | null | undefined): Scope {
-  return value === "all" ? "all" : "cohort";
-}
-
-/**
- * The ISO cutoff string Supabase queries should use to filter by
- * cohort, or null for "no filter" (all-scope). Returning null lets
- * callers conditionally apply `.gte()` without branching on the
- * scope value in every query site.
- */
-export function cohortCutoffOrNull(scope: Scope): string | null {
-  return scope === "cohort" ? ADMIN_STUDENT_JOIN_CUTOFF : null;
-}
+// v75.51: Scope type, DEFAULT_SCOPE, isInScope, parseScope, and
+// cohortCutoffOrNull deleted. Every admin surface now uses the
+// launch-cohort filter unconditionally via isInLaunchCohort or a
+// hardcoded .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF). No
+// toggle, no branching, no scope-aware variants.

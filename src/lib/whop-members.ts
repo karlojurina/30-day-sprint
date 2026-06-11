@@ -422,6 +422,83 @@ export async function fetchActiveMembershipForUser(
 }
 
 /**
+ * Fetch ALL memberships for a single whop_user_id — across EVERY
+ * product, not just those in WHOP_PRODUCT_ID — and return the earliest
+ * created_at as ISO 8601 (the user's TRUE "first paid" date, stable
+ * across renewals).
+ *
+ * This is the cross-product lookup the per-product company sync
+ * (fetchAllMemberships) structurally can't do: a student whose paying
+ * membership sits under a product NOT in WHOP_PRODUCT_ID gets
+ * _firstPaidAt=null from the sync, so first_paid_at would stay NULL
+ * forever — invisible to every cohort surface and uncovered by the CSM
+ * crons. Both the one-time backfill (/api/admin/backfill-first-paid-at)
+ * and the sync runner's null-recovery pass call this to recover the
+ * real date.
+ *
+ * Returns { firstPaidIso, foundCount }. firstPaidIso is null only when
+ * Whop has no membership record for the user (or all dates were
+ * unparseable). Throws if Whop ignores the user_id filter, so we never
+ * attribute another user's date to this one.
+ *
+ * v75.53 — extracted from the backfill route so the sync can reuse it
+ * (and so it inherits whopFetchWithRetry's 429 handling).
+ */
+export async function fetchEarliestMembershipDateForUser(
+  whopUserId: string,
+): Promise<{ firstPaidIso: string | null; foundCount: number }> {
+  const apiKey = process.env.WHOP_API_KEY;
+  if (!apiKey) throw new Error("WHOP_API_KEY not set");
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    Accept: "application/json",
+  };
+
+  let earliest: string | null = null;
+  let foundCount = 0;
+  let page = 1;
+  const PER_PAGE = 50;
+  // Hard cap — a single user should never have >500 memberships; if
+  // Whop returns more, something is wrong and we stop.
+  for (let i = 0; i < 10; i++) {
+    const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?user_id=${encodeURIComponent(
+      whopUserId,
+    )}&per_page=${PER_PAGE}&page=${page}`;
+    const res = await whopFetchWithRetry(url, headers);
+    if (!res.ok) {
+      throw new Error(`Whop API HTTP ${res.status} for user ${whopUserId}`);
+    }
+    const json = (await res.json()) as {
+      data?: Array<{ user: string | null; created_at: number | string | null }>;
+      pagination?: { current_page?: number; total_page?: number };
+    };
+    const rows = json.data ?? [];
+
+    // Sanity: if Whop ignored our user_id filter, abort rather than
+    // attribute other users' dates to this one.
+    const allMatchUser = rows.every((r) => !r.user || r.user === whopUserId);
+    if (!allMatchUser) {
+      throw new Error(
+        `Whop user_id filter ignored for ${whopUserId} — refusing to write`,
+      );
+    }
+
+    for (const r of rows) {
+      const iso = toIso(r.created_at);
+      if (!iso) continue;
+      foundCount += 1;
+      if (!earliest || iso < earliest) earliest = iso;
+    }
+
+    const totalPages = json.pagination?.total_page ?? 1;
+    if (page >= totalPages) break;
+    page += 1;
+  }
+
+  return { firstPaidIso: earliest, foundCount };
+}
+
+/**
  * Sync entry per user: the latest membership row (for current
  * status / plan / canceled state) AND the earliest created_at
  * across ALL of this user's memberships (their true "first paid"

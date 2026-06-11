@@ -18,8 +18,11 @@
  * sufficient for cohort filtering + discount eligibility.
  *
  * Rate limit: Whop caps at ~10 req/sec. We throttle to 200ms between
- * calls (5 req/sec). For ~350 students, total ~70s. maxDuration=300
- * leaves headroom.
+ * calls (5 req/sec); the shared fetchEarliestMembershipDateForUser also
+ * retries on 429 via whopFetchWithRetry, so a throttled run can take
+ * meaningfully longer than the ~70s nominal for ~350 students and may
+ * approach maxDuration=300. That's fine — it's idempotent, so if it
+ * dies mid-pass just re-run; each run resumes from the remaining NULLs.
  *
  * Idempotent. Safe to re-run — only touches NULL rows. Existing
  * first_paid_at values are NEVER overwritten (preserves the v75.18+
@@ -31,81 +34,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
-import { toIso } from "@/lib/whop-members";
+import { fetchEarliestMembershipDateForUser } from "@/lib/whop-members";
 
 export const maxDuration = 300;
-
-const WHOP_MEMBERSHIPS_BASE = "https://api.whop.com/api/v2";
-
-interface WhopMembershipMinimal {
-  user: string | null;
-  created_at: number | string | null;
-}
-
-/**
- * Fetch ALL memberships for a single whop_user_id and return the
- * earliest created_at as ISO 8601, or null if Whop has no record.
- */
-async function fetchEarliestMembershipDate(
-  whopUserId: string,
-  apiKey: string,
-): Promise<{ firstPaidIso: string | null; foundCount: number }> {
-  const headers = {
-    Authorization: `Bearer ${apiKey}`,
-    Accept: "application/json",
-  };
-
-  let earliest: string | null = null;
-  let foundCount = 0;
-  let page = 1;
-  const PER_PAGE = 50;
-  // Hard cap — a single user should never have >500 memberships;
-  // if Whop returns more, something is wrong and we stop.
-  for (let i = 0; i < 10; i++) {
-    const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?user_id=${encodeURIComponent(
-      whopUserId,
-    )}&per_page=${PER_PAGE}&page=${page}`;
-
-    const res = await fetch(url, { headers });
-    if (res.status === 429) {
-      // Rate limited — sleep and retry this page.
-      await new Promise((r) => setTimeout(r, 2000));
-      continue;
-    }
-    if (!res.ok) {
-      throw new Error(`Whop API HTTP ${res.status} for user ${whopUserId}`);
-    }
-    const json = (await res.json()) as {
-      data?: WhopMembershipMinimal[];
-      pagination?: { current_page?: number; total_page?: number };
-    };
-    const rows = json.data ?? [];
-
-    // Sanity: if Whop ignored our user_id filter, abort to avoid
-    // attributing other users' dates to this one.
-    const allMatchUser = rows.every(
-      (r) => !r.user || r.user === whopUserId,
-    );
-    if (!allMatchUser) {
-      throw new Error(
-        `Whop user_id filter ignored for ${whopUserId} — refusing to write`,
-      );
-    }
-
-    for (const r of rows) {
-      const iso = toIso(r.created_at);
-      if (!iso) continue;
-      foundCount += 1;
-      if (!earliest || iso < earliest) earliest = iso;
-    }
-
-    const totalPages = json.pagination?.total_page ?? 1;
-    if (page >= totalPages) break;
-    page += 1;
-  }
-
-  return { firstPaidIso: earliest, foundCount };
-}
 
 export async function POST(request: NextRequest) {
   // v75.34: dual auth — accept CRON_SECRET for service-level one-time
@@ -124,8 +55,7 @@ export async function POST(request: NextRequest) {
     supabase = auth.supabase;
   }
 
-  const apiKey = process.env.WHOP_API_KEY;
-  if (!apiKey) {
+  if (!process.env.WHOP_API_KEY) {
     return NextResponse.json(
       { error: "WHOP_API_KEY not set" },
       { status: 500 },
@@ -163,10 +93,8 @@ export async function POST(request: NextRequest) {
     if (!c.whop_user_id) continue;
 
     try {
-      const { firstPaidIso, foundCount } = await fetchEarliestMembershipDate(
-        c.whop_user_id as string,
-        apiKey,
-      );
+      const { firstPaidIso, foundCount } =
+        await fetchEarliestMembershipDateForUser(c.whop_user_id as string);
 
       let valueToWrite: string | null = firstPaidIso;
       let usedFallback = false;

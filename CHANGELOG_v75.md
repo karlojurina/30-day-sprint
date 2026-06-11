@@ -6,6 +6,7 @@ metrics, sync logic, or CSM tasks — many of the v75 commits established
 invariants that look arbitrary but are load-bearing.
 
 Last commit: **v75.52** (`4ea19aa`) — June 11 2026.
+Working tree: **v75.53** (uncommitted) — `first_paid_at` sync self-heal.
 
 ## TL;DR — invariants now true
 
@@ -93,6 +94,29 @@ Same bug class hit 5 times: bulk fetches silently truncated at
   sync runner stamps/clears it
 - v75.47: amber "Canceling" pill on journey kanban + M2 helper update
 - v75.49: dashboard "Canceling" tile (early-warning churn signal)
+
+### first_paid_at population leak (v75.53)
+The 91-NULL-`first_paid_at` finding (Jun 11): active paying students were
+left `first_paid_at`=NULL — invisible to every cohort surface AND
+uncovered by the CSM crons (NULL fails the `gte('first_paid_at', …)`
+filters). 27 of the 91 joined post-launch and belonged in the cohort;
+the most recent landed the same day, so it was live and accumulating.
+- Root cause: the company sync (`fetchAllMemberships`) only fetches
+  memberships under products in `WHOP_PRODUCT_ID`, so `_firstPaidAt`
+  comes through null for students whose paying membership sits under a
+  different product. The sync's UPDATE branch only heals NULL when it
+  computed a date, so those stayed NULL forever. The v75.34 backfill
+  (cross-product per-user lookup) was the ONLY path that fixed them —
+  a one-time job, so new arrivals kept leaking.
+- Fix: extracted the per-user cross-product lookup into
+  `fetchEarliestMembershipDateForUser` in `whop-members.ts` (reused by
+  the backfill), and added a bounded (cap 25), throttled (200ms),
+  time-budgeted (240s) recovery pass to `runWhopCommunitySync` that
+  fills NULL `first_paid_at` for active paying students each run. Guards:
+  `.is('first_paid_at', null)` (never moves a set value), skips entirely
+  when an upsert batch failed, counts only real fills.
+- NOT closed for students on a paid plan outside `PAYING_WHOP_PLAN_IDS`
+  (treated as non-paying platform-wide until the plan is allowlisted).
 
 ### Cron audit + auth hardening (v75.37)
 - New `src/lib/cron-auth.ts` helper
@@ -200,7 +224,11 @@ If you suspect any v75 invariant is violated, these queries diagnose:
 
 ```sql
 -- Are there cohort students still with NULL first_paid_at?
--- Expected: 0 after v75.34 backfill ran.
+-- Expected: 0. v75.34 backfill clears the backlog; v75.53 sync
+-- self-heal keeps it at 0 as new members arrive. A non-zero result
+-- now means either a plan outside PAYING_WHOP_PLAN_IDS (expected —
+-- not recovered until allowlisted) or the sync hasn't run since they
+-- joined (run the backfill or wait for the next sync).
 SELECT count(*) FROM students
 WHERE first_paid_at IS NULL
   AND membership_status IN ('active','past_due')
@@ -294,3 +322,4 @@ These are real but were explicitly deferred:
 | v75.50 | Jun 11 | Insights cards restored (cohort-only, no Joined) |
 | v75.51 | Jun 11 | Scope toggle removed entirely |
 | v75.52 | Jun 11 | Stale scope-comment cleanup |
+| v75.53 | Jun 11 | `first_paid_at` sync self-heal — cross-product `fetchEarliestMembershipDateForUser` extracted + bounded recovery pass in the sync (closes the 91-NULL leak; the daily inflow now self-corrects) |

@@ -220,7 +220,7 @@ Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` 
 |------|------|
 | `supabase-browser.ts` / `supabase-server.ts` | Client construction |
 | `admin-auth.ts` | Team auth gate for API routes |
-| `whop.ts` / `whop-members.ts` / `whop-sync-runner.ts` | Whop HTTP + sync |
+| `whop.ts` / `whop-members.ts` / `whop-sync-runner.ts` | Whop HTTP + sync. v75.53: the sync self-heals NULL `first_paid_at` for active paying students via a bounded, throttled cross-product `fetchEarliestMembershipDateForUser` lookup (shared with the backfill). Closes the leak where students on a plan outside `WHOP_PRODUCT_ID` stayed `first_paid_at`=NULL → invisible to every cohort surface + uncovered by the CSM crons. |
 | `pkce.ts` | OAuth PKCE helpers |
 | `csm-triggers.ts` | Trigger metric registry + evaluator |
 | `csm-events.ts` | CSM event hooks (called from mark-* routes) |

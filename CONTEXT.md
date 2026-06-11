@@ -61,7 +61,9 @@ welcome, first-client landed, etc.).
 | `/admin/settings` | Admin config (booking link, program link, etc.) |
 | `/journal/[studentId]` | Student daily-notes journal (read-only for team) |
 
-**Scope toggle (v75.13+):** every metric surface (dashboard, /admin/students, /admin/journey, /admin/not-activated, /admin/insights) respects a global "All members | New students" toggle in the header (right of the avatar). Default is **All members** (v75.15+). "New students" = joined since launch (`ADMIN_STUDENT_JOIN_CUTOFF` = 2026-05-25). State persists in localStorage via `AdminScopeContext`. CSM crons and the day-28 DM ignore the toggle — they have their own day-30 sprint-window filter.
+**Launch cohort only (v75.51):** every admin metric surface (dashboard, /admin/students, /admin/journey, /admin/not-activated, /admin/insights, /admin/discounts) filters to the LAUNCH COHORT — students whose `first_paid_at >= ADMIN_STUDENT_JOIN_CUTOFF` (2026-05-25). Pre-launch / legacy customers are excluded from operational surfaces. The previous "All members | New students" scope toggle (v75.13–v75.50) was removed because it produced inconsistent reads across surfaces and obscured the actual launch-retention signal. CSM crons and the day-28 DM also filter via their own (independent) day-30 sprint-window filter (`csmSprintWindowCutoffIso()`).
+
+**Canceling state (v75.46–v75.47):** Whop emits a "Canceling" status when a student clicks cancel but still has access through the end of their billing cycle. The sync runner stamps `students.cancel_scheduled_at` for these students. The dashboard surfaces a "Canceling" early-warning tile; the journey kanban shows an amber pill on the student card. The M2 conversion helper (`isMonth2Converted`) counts Canceling students as NOT converted if the cancel was scheduled on/before day 30.
 
 ## API Routes
 
@@ -92,18 +94,20 @@ welcome, first-client landed, etc.).
   tasks (`/api/admin/tasks`, `/api/admin/tasks/[id]`, plus
   copy/dismiss/refire/transition), discord toggles, admin_config
 - Sync triggers (`/api/admin/sync-whop`, `/api/admin/rebuild-snapshots`,
-  `/api/admin/backfill-discord-ids`)
+  `/api/admin/backfill-discord-ids`, `/api/admin/backfill-first-paid-at` v75.34,
+  `/api/admin/refresh-everything` v75.22)
 - Day-28 DM preview (`/api/admin/preview-day28-dm`)
 - Ad-submissions verification gate
   (`/api/admin/verify-ad-submissions`)
-- KPIs + insights (`/api/admin/kpis`, `/api/admin/insights/progress`)
+- v75.38 + v75.45: `/api/admin/kpis` and `/api/admin/insights/progress` routes deleted (the M2 helper centralized + insights now fetches snapshots client-direct)
 
-**Discounts**
-- `POST /api/discounts/request` — student opens flow
-- `POST /api/discounts/submit-feedback` — 6-question form
-- `POST /api/discounts/approve` — creates Whop promo
-- `POST /api/discounts/reject`
-- `POST /api/discounts/mark-applied`
+**Discounts** (all require auth post-v75.31)
+- `POST /api/discounts/request` — student-self auth; opens flow
+- `POST /api/discounts/submit-feedback` — student-self auth; 6-question form
+- `POST /api/discounts/approve` — team auth (founder/admin/csm); creates Whop promo
+- `POST /api/discounts/reject` — team auth
+- `POST /api/discounts/mark-applied` — team auth
+- All four gates (`request`, `submit-feedback`, `approve`, UI) treat NULL `first_paid_at` as ineligible (v75.26 closed a discount-leak that let returning customers get a fresh 14-day window via the `joined_at` fallback).
 
 **Webhooks**
 - `POST /api/webhooks/whop` — HMAC-verified Whop events
@@ -172,8 +176,9 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
   `discount_feedback_responses` — discount flow
 - `disengagement_alerts` — auto-generated churn alerts
 - `tasks` — CSM task queue (per-student, per-scenario, links to `templates`)
-- `daily_progress_snapshots` — frozen daily progress per student. v77 added cohort columns (`active_count_cohort`, `joined_count_cohort`, `churned_count_cohort`, `avg_progress_cohort`) so the scope toggle can swap between all-paying and launch-cohort views without refetching.
+- `daily_progress_snapshots` — frozen daily progress per student. v77 added cohort columns (`active_count_cohort`, `joined_count_cohort`, `churned_count_cohort`, `avg_progress_cohort`). After v75.51 (scope toggle removed), only the `_cohort` columns are read by the UI; the legacy non-cohort columns are still written by the snapshot cron for historical continuity. v81 aligned the cron + RPC + dashboard avg_progress formula on the canonical isLessonComplete + l057 exclusion (single source of truth).
 - `sync_runs` — audit log for the Whop community sync (v77). One row per attempt with source (cron / admin-button), status (success/failed), counts (fetched/inserted/updated/skipped/errors), duration_ms, error_message. Team-read RLS. Use to answer "did sync run last night?" without digging Vercel logs.
+- `cron_runs` (v82) — audit log for ALL six cron invocations. Captures route_name, started_at, finished_at, auth_status, status (running/success/failed/auth_failed), error_message, rows_affected. Written by every cron handler via `src/lib/cron-auth.ts`. Use to answer "did Vercel fire this cron in the last 24h?" — separable from sync_runs which only covers sync-whop.
 - `achievements` — catalog of 17 unlockable achievements (v53)
 - `student_achievements` — per-student unlock rows + `achievement_unlock_stats`
   view exposing global unlock % (v53)
@@ -196,14 +201,18 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 
 | Job | Cadence | What it does |
 |-----|---------|-------------|
-| `sync-whop` | daily 00:00 UTC | Pull Whop watch history → `student_lesson_completions` |
-| `snapshot-progress` | daily 00:30 UTC | Freeze today's progress per student |
-| `check-engagement` | daily 09:00 UTC | Detect churn signals → `disengagement_alerts` |
-| `check-csm-tasks` | daily 09:15 UTC | Evaluate `templates.trigger_config` → `tasks` |
-| `check-na-tasks` | daily 09:20 UTC | Not-Activated escalation (Day 3/5/7/10) |
+| `sync-whop` | daily 00:00 UTC | Pull Whop watch history → `student_lesson_completions`. Also stamps `students.cancel_scheduled_at` from Whop's `cancel_at_period_end` field (v75.46). |
+| `snapshot-progress` | daily 00:30 UTC | Writes yesterday+today rows to `daily_progress_snapshots`. Reads canonical `student_progress_counts` view (v75.28) so dashboard live values match snapshot trend values. |
+| `check-engagement` | every 4h offset 00 | Detect churn signals → `disengagement_alerts` |
+| `check-csm-tasks` | every 4h offset :15 | Evaluate `templates.trigger_config` → `tasks`. Includes auto-dismiss for orphan tasks (v75.19). |
+| `check-na-tasks` | every 4h offset :20 | Not-Activated escalation (Day 3/5/7/10) |
 | `day28-dm` | daily 09:30 UTC | Fire day-28 Discord DM |
 
-Schedules live in `vercel.json`.
+Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` helper from `src/lib/cron-auth.ts` (v75.37) which trims whitespace from CRON_SECRET (defense against env-var-drift silent 401s) and writes audit rows to the `cron_runs` table on every invocation. Use `cron_runs` to answer "did Vercel fire this cron in the last N hours?" — separable from "did the work succeed?".
+
+**Manual triggers** (Karlo/team):
+- "↻ Refresh everything" button (dashboard + `/admin/tasks`) → `/api/admin/refresh-everything` runs sync-whop, rebuild_daily_snapshots RPC, then 3 CSM crons in parallel (v75.22)
+- One-time first_paid_at backfill: `/api/admin/backfill-first-paid-at` (v75.34) — accepts CRON_SECRET fallback auth for terminal use.
 
 ## Key Libraries (`src/lib/`)
 
@@ -221,7 +230,10 @@ Schedules live in `vercel.json`.
 | `quiz.ts` | Quiz scoring (legacy single quiz) |
 | `region-quizzes.ts` | Region-quiz scoring + format dispatch (v54/v65/v69/v70) |
 | `progress.ts` | Shared progress / completion derivations + `isPlaybookUnlocked` (gate helper, v75.16) |
-| `admin/metrics-definitions.ts` | Canonical predicates for admin metrics (v75.13+): `isActiveMember` (active + past_due), `isPayingMember` (active member on a `PAYING_WHOP_PLAN_IDS` plan), `isInLaunchCohort`, scope helpers |
+| `admin/metrics-definitions.ts` | Canonical predicates for admin metrics: `isActiveMember` (active + past_due), `isPayingMember` (active member on a `PAYING_WHOP_PLAN_IDS` plan), `isInLaunchCohort` (first_paid_at >= cutoff, NO joined_at fallback post-v75.28), `isMonth2Converted` (cohort student who reached day 30 and didn't cancel before then, v75.38/v75.42), `isInMonth2Cohort` (denominator companion), `isCanceling` (cancel_scheduled_at set + still active, v75.47). Scope-toggle helpers deleted in v75.51. |
+| `supabase-pagination.ts` (v75.27) | `fetchAllRowsPaginated(thunk)` — calls `.range(0,999)`, `.range(1000,1999)`, etc. until a page returns less than 1000 rows. Bypasses PostgREST's silent server-side max-rows cap. Returns empty data on error (not partial) so silent truncation can't sneak through. EVERY bulk fetch on admin surfaces should use this. |
+| `cron-auth.ts` (v75.37) | `verifyCronAuth(request)` + `logCronStart`/`logCronFinish` — shared auth check (whitespace-trimmed against drift) + audit-log writes to `cron_runs`. All 6 cron handlers use this; replaces the per-route inline `Bearer ${process.env.CRON_SECRET}` check. |
+| `csm-task-evaluation.ts` (v75.21) | `reEvaluateStudentOpenTasks(supabase, studentId)` — real-time auto-dismiss helper called from toggle-lesson / mark-action-shipped / skip-lesson API routes. Re-evaluates each open task's trigger against the student's CURRENT state and dismisses any that no longer apply. Same evaluation logic as check-csm-tasks section 3c but scoped to one student. |
 | `achievements.ts` | Achievement catalog + unlock evaluation (v53) |
 | `discord.ts` | Discord HTTP helpers |
 | `day28-embed.ts` | Day-28 DM embed builder |
@@ -239,8 +251,8 @@ Schedules live in `vercel.json`.
 | Context | Scope | What it provides |
 |---------|-------|-----------------|
 | `AuthContext` | Global | `user`, `session`, `student`, `teamMember`, `isStudent`, `isTeam`, `signOut()`, `setStudent()` |
-| `StudentContext` | `/dashboard`, `/dashboard/playbook` | Lessons, completions, streaks, discount state, sprint milestones, playbook welcome, first-client landed, action-shipped toggles, etc. |
-| `AdminScopeContext` | `/admin/*` (v75.13+) | `scope` ("cohort" \| "all") + `setScope`. Persisted to localStorage. Drives "New students vs All members" toggle in admin header. |
+| `StudentContext` | `/dashboard`, `/dashboard/playbook` | Lessons, completions, streaks, discount state (NULL `first_paid_at` blocks claim post-v75.26), sprint milestones, playbook welcome, first-client landed, action-shipped toggles, etc. |
+| ~~`AdminScopeContext`~~ | — | Removed in v75.51. Cohort is the only admin view; no toggle. |
 
 ## Integrations
 
@@ -253,6 +265,9 @@ Schedules live in `vercel.json`.
 
 ## Other docs in this repo
 
+- [CHANGELOG_v75.md](CHANGELOG_v75.md) — invariants established by the
+  v75 June 2026 admin push. **Read this before touching admin metrics,
+  sync logic, CSM tasks, or anything related to cohort filtering.**
 - [PLATFORM_OVERVIEW.md](PLATFORM_OVERVIEW.md) — Karlo-facing product
   description (what each surface does for the user). Regenerated when
   the product changes meaningfully.

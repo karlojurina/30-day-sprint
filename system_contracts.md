@@ -46,13 +46,22 @@ When adding a new table, append it here. When deleting a field, scan
   `PAYING_WHOP_PLAN_IDS` allowlist. Free-plan members keep full
   student-side access but are excluded from CSM tasks, dashboard
   metrics, and operational surfaces.),
+  `first_paid_at` (v80 — EARLIEST membership.created_at across all of
+  this user's Whop memberships. NEVER moves on renewal. THE foundation
+  field for cohort filtering and discount eligibility. v75.26 stamps it
+  on every INSERT path (OAuth callback, membership.activated webhook,
+  payment.succeeded webhook). v75.34 endpoint backfilled the column
+  for ~400 legacy students whose first_paid_at was NULL. Post-v75.28
+  NULL is treated as out-of-cohort everywhere — no joined_at fallback.
+  Distinct from `joined_at` which is the CURRENT subscription cycle
+  start and moves on each renewal.),
   `cancel_scheduled_at` (v83 — set when Whop's
   `cancel_at_period_end=true` AND membership is still active/past_due
   i.e. "Canceling" state. Distinct from `canceled_at` (access ended):
   this fires the moment the student clicks cancel, well before access
   actually ends. Used by journey kanban + dashboard early-warning
-  surfaces. Stamped/cleared by sync runner from
-  `WhopMembershipRow.cancel_at_period_end`.)
+  surfaces + the v75.47 isMonth2Converted helper. Stamped/cleared by
+  sync runner from `WhopMembershipRow.cancel_at_period_end`.)
 - **Note:** As of v46/v47, students is identity + admin-flag only.
   Per-function state (streaks, milestones, Whop sync, celebrations,
   DM log) lives in sibling tables below — read CLAUDE.md
@@ -277,7 +286,27 @@ When adding a new table, append it here. When deleting a field, scan
   `errors`), `error_message`, `duration_ms`
 - **Note:** Written by `runWhopCommunitySync()` in
   `src/lib/whop-sync-runner.ts` — every sync attempt produces one
-  row regardless of outcome.
+  row regardless of outcome. SCOPE: only sync-whop. For the broader
+  "did Vercel fire any of the 6 crons?" question, see `cron_runs`.
+
+### `cron_runs` (v82)
+- **Depends on:** —
+- **Depended on by:** team-read RLS only; queried ad-hoc to confirm
+  scheduler health
+- **Stable contract:** `id`, `route_name` (`sync-whop` /
+  `snapshot-progress` / `check-engagement` / `check-csm-tasks` /
+  `check-na-tasks` / `day28-dm`), `started_at`, `finished_at`,
+  `auth_status` (`ok` / `no_secret_configured` / `missing_header` /
+  `mismatch`), `status` (`running` / `success` / `failed` /
+  `auth_failed`), `error_message`, `rows_affected`
+- **Note:** Written by every cron handler via
+  `src/lib/cron-auth.ts` (`logCronStart` on entry,
+  `logCronFinish` on every exit path including throws). The
+  separation of `auth_status` from `status` lets you distinguish
+  "Vercel scheduled this cron but the secret was wrong" from
+  "Vercel didn't schedule it at all" from "scheduled + auth ok but
+  the work errored." Best-effort writes — never throw, so audit
+  failures don't break business logic.
 
 ### `student_rewards` + `hidden_rewards`
 - **Depends on:** `students`

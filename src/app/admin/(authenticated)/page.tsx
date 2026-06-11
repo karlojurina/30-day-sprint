@@ -29,6 +29,7 @@ import {
   isPayingMember,
   isMonth2Converted,
   isInMonth2Cohort,
+  isCanceling,
   PAYING_WHOP_PLAN_IDS_ARRAY,
 } from "@/lib/admin/metrics-definitions";
 import { useAdminScope } from "@/contexts/AdminScopeContext";
@@ -71,6 +72,12 @@ interface DashboardData {
   bountyAccessLast14d: number;
   /** Per-day bounty enrollments, last 14 days oldest first. */
   bountyTrend: number[];
+  /** v75.49: # of students with cancel_scheduled_at IS NOT NULL AND
+   *  membership_status IN ('active','past_due'). These students have
+   *  clicked cancel in Whop but still have access through end of cycle.
+   *  Earliest churn signal — they'll show up in 'Churned' 30 days
+   *  later when access actually ends. */
+  cancelingCount: number;
   /** Last 14 days of nightly snapshots (oldest first) — feeds the sparkline tiles. */
   trend: MetricPoint[];
 }
@@ -369,12 +376,19 @@ export default function AdminDashboard() {
         bountyAccessLast14d += count;
       }
 
+      // v75.49: Canceling count — students who clicked cancel in Whop
+      // but still have access. Sourced from cancel_scheduled_at via
+      // isCanceling helper (v75.47). Updates in real-time as the sync
+      // runner stamps the column.
+      const cancelingCount = students.filter(isCanceling).length;
+
       setData({
         totalStudents: students.length,
         activeStudents: activeStudents.length,
         joinedThisWeek,
         avgProgress,
         canceledThisMonth,
+        cancelingCount,
         pendingDiscounts: discountsRes.data?.length || 0,
         openTasks: tasksRes.count ?? 0,
         monthTwoConversionRate,
@@ -496,13 +510,14 @@ export default function AdminDashboard() {
       </Section>
 
       {/* ─── Trends · last 14 days ─── */}
-      {/* v75.43: removed the "Joined" tile per Karlo: 'I don't think
-          Joined is relevant for us, because we see that in the Whop
-          dashboard.' Three tiles instead of four — grid stays at
-          lg:grid-cols-4 so each tile gets more breathing room. */}
+      {/* v75.43: removed the "Joined" tile per Karlo.
+          v75.49: added "Canceling" tile — students who clicked cancel
+          in Whop but still have access through end of billing cycle.
+          Early-warning churn signal that the existing "Churned" tile
+          (which uses canceled_at) misses by up to 30 days. */}
       <Section eyebrow="Trends · last 14 days">
         <div
-          className="grid grid-cols-2 lg:grid-cols-3"
+          className="grid grid-cols-2 lg:grid-cols-4"
           style={{ gap: 12 }}
         >
           <SparklineTile
@@ -510,6 +525,18 @@ export default function AdminDashboard() {
             current={data.activeStudents}
             points={data.trend.map((p) => p.active_count)}
             mode="running"
+          />
+          <SparklineTile
+            label="Canceling"
+            current={data.cancelingCount}
+            currentSuffix=" early"
+            // No historical sparkline yet — cancel_scheduled_at column
+            // is brand new (v75.46). Pass a zeroed series so the tile
+            // renders without a trend line. After ~14 days of sync
+            // runs we can populate this from a new snapshot column.
+            points={Array(14).fill(0)}
+            mode="running"
+            inverseDelta
           />
           <SparklineTile
             label="Churned"

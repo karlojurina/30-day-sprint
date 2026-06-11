@@ -403,10 +403,12 @@ export default function AdminDashboard() {
       />
 
       {/* ─── Hero: Month 2 conversion + Bounty Program ─── */}
+      {/* v75.41: widened gap to give the hero row more breathing
+          room from the secondary tiles below. */}
       <Section>
         <div
           className="grid grid-cols-1 md:grid-cols-2"
-          style={{ gap: 16 }}
+          style={{ gap: 24 }}
         >
           <HeroStat
             label="Month 2 conversion"
@@ -551,32 +553,36 @@ function HeroStat({
   const sparkColor = computeTrendColor(trendPoints, inverseDelta, accent);
   const delta = computeDelta(trendPoints);
   const hasTrend = trendPoints && trendPoints.length > 1;
+  // v75.41: increased padding + value font-size to give the M2 +
+  // Bounty hero stats real visual dominance over the secondary
+  // trend tiles below. They're the platform's two north-star KPIs;
+  // they should LOOK like it.
   return (
-    <Card padding={28}>
+    <Card padding={36}>
       <p
         style={{
-          fontSize: 13,
+          fontSize: 14,
           fontWeight: 500,
           letterSpacing: "-0.005em",
           color: accent
             ? "var(--color-accent-dark)"
             : "var(--color-text-tertiary)",
-          marginBottom: 12,
+          marginBottom: 16,
         }}
       >
         {label}
       </p>
       <div
         className="flex items-baseline"
-        style={{ gap: 8, flexWrap: "wrap" }}
+        style={{ gap: 10, flexWrap: "wrap" }}
       >
         <p
           className="stat-value"
           style={{
-            fontSize: 52,
+            fontSize: 68,
             fontWeight: 600,
             lineHeight: 1.0,
-            letterSpacing: "-0.028em",
+            letterSpacing: "-0.030em",
             color: accent
               ? "var(--color-accent-dark)"
               : "var(--color-text-primary)",
@@ -612,12 +618,12 @@ function HeroStat({
           </span>
         )}
       </div>
-      <div style={{ marginTop: hasTrend ? 14 : 0 }}>
+      <div style={{ marginTop: hasTrend ? 18 : 0 }}>
         {hasTrend && (
           <HeroSparkline
             points={trendPoints!}
             color={sparkColor}
-            height={64}
+            height={80}
           />
         )}
       </div>

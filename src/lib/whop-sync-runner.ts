@@ -86,6 +86,9 @@ export async function runWhopCommunitySync(
       joined_at: string | null;
       last_active_at: string | null;
       discord_user_id: string | null;
+      // v75.59: needed for preserve-by-value (see uniform-keys note at
+      // the row builder).
+      discord_username: string | null;
       membership_status: string | null;
       canceled_at: string | null;
       whop_plan_id: string | null;
@@ -108,7 +111,7 @@ export async function runWhopCommunitySync(
       const { data, error } = await supabase
         .from("students")
         .select(
-          "whop_user_id, email, name, joined_at, last_active_at, discord_user_id, membership_status, canceled_at, whop_plan_id, first_paid_at, cancel_scheduled_at",
+          "whop_user_id, email, name, joined_at, last_active_at, discord_user_id, discord_username, membership_status, canceled_at, whop_plan_id, first_paid_at, cancel_scheduled_at",
         )
         .in("whop_user_id", chunk)
         .returns<ExistingRow[]>();
@@ -238,27 +241,69 @@ export async function runWhopCommunitySync(
         canceledAtUpdate = isTerminal ? whopEndIso : null;
       }
 
+      // ── v75.59: UNIFORM KEYS — preserve by VALUE, never by omission ──
+      //
+      // postgrest-js computes the bulk-upsert `?columns=` parameter as
+      // the UNION of keys across ALL rows in the batch
+      // (PostgrestQueryBuilder.upsert: values.reduce(concat(Object.keys))),
+      // and PostgREST sets any unioned column a row OMITS to NULL on the
+      // conflict-UPDATE. The old "omit the key to preserve the stored
+      // value" pattern therefore ERASED the stored value for every row
+      // whose batch-mate carried the key.
+      //
+      // 2026-06-11 incident: one afternoon of repeated manual syncs
+      // NULLed first_paid_at on 638 active paying students (entire
+      // launch cohort vanished from every admin surface), whop_plan_id
+      // on 67, and cancel_scheduled_at on ~48 — and the CSM cron then
+      // auto-dismissed all open tasks as "student no longer in eligible
+      // pool". This was also the silent source of the creeping-NULL
+      // first_paid_at population (the "91 rows" found earlier that day).
+      //
+      // Rule: EVERY row carries EVERY column, with the preserved value
+      // copied from `cur` when there's no new value. The tripwire before
+      // the batch loop enforces this shape forever.
+
+      // first_paid_at (v75.18): the earliest membership.created_at
+      // across this user's memberships in the configured products
+      // (m._firstPaidAt). INSERT: whatever we computed. UPDATE: only
+      // move when the stored value is NULL or the computed date is
+      // EARLIER — "first paid" never moves forward in time.
+      const firstPaidIso = m._firstPaidAt ?? null;
+      let firstPaidValue: string | null;
+      if (!cur) {
+        firstPaidValue = firstPaidIso;
+      } else if (
+        firstPaidIso &&
+        (!cur.first_paid_at || firstPaidIso < cur.first_paid_at)
+      ) {
+        firstPaidValue = firstPaidIso;
+      } else {
+        firstPaidValue = cur.first_paid_at;
+      }
+
       const row: Record<string, unknown> = {
         whop_user_id: m.user,
         whop_membership_id: m.id,
         membership_status: status,
         email,
         name,
+        // INSERT seeds both; UPDATE preserves the locally-maintained
+        // values verbatim (last_active_at is written by app activity,
+        // joined_at by the original insert).
+        joined_at: cur ? cur.joined_at : joinedAt,
+        last_active_at: cur ? cur.last_active_at : joinedAt,
+        // discord_user_id: only ever FILL an empty value (the stored id
+        // wins once set — same rule as before, value-form).
+        discord_user_id:
+          (cur ? cur.discord_user_id ?? discordId : discordId) ?? null,
+        // discord_username: fresh value wins when Whop sent one,
+        // otherwise preserve.
+        discord_username: discordUsername ?? cur?.discord_username ?? null,
+        canceled_at:
+          canceledAtUpdate !== undefined
+            ? canceledAtUpdate
+            : cur?.canceled_at ?? null,
       };
-
-      // INSERT-only fields (don't overwrite local values on existing rows)
-      if (!cur) {
-        row.joined_at = joinedAt;
-        row.last_active_at = joinedAt;
-      }
-
-      // Conditional fields — only include when we have a fresh value
-      // we want to persist.
-      if (!cur || (!cur.discord_user_id && discordId)) {
-        if (discordId) row.discord_user_id = discordId;
-      }
-      if (discordUsername) row.discord_username = discordUsername;
-      if (canceledAtUpdate !== undefined) row.canceled_at = canceledAtUpdate;
 
       // v75.46: cancel_scheduled_at — Whop's "Canceling" state.
       // When status is active/past_due AND Whop reports
@@ -293,32 +338,16 @@ export async function runWhopCommunitySync(
           ? new Date().toISOString()
           : null;
       }
-      if (cancelScheduledAtUpdate !== undefined)
-        row.cancel_scheduled_at = cancelScheduledAtUpdate;
-      // Refresh plan_id when Whop returns one. Preserve last-known
-      // when Whop didn't send it (don't include the key at all).
-      if (planId) row.whop_plan_id = planId;
-      else if (!cur) row.whop_plan_id = null; // explicit null on insert
-
-      // first_paid_at (v75.18): the earliest membership.created_at
-      // across ALL of this user's memberships. Computed by
-      // fetchAllMemberships and attached as m._firstPaidAt.
-      //
-      // - INSERT: set whatever we computed (could be null if Whop's
-      //   dates were unparseable; preserves invariant "we tried")
-      // - UPDATE: only overwrite if the row's current value is null
-      //   OR we found an EARLIER date than what's stored. Stable
-      //   "first paid" semantic — we never push it forward in time.
-      const firstPaidIso = m._firstPaidAt ?? null;
-      if (!cur) {
-        row.first_paid_at = firstPaidIso;
-      } else if (firstPaidIso) {
-        if (!cur.first_paid_at) {
-          row.first_paid_at = firstPaidIso;
-        } else if (firstPaidIso < cur.first_paid_at) {
-          row.first_paid_at = firstPaidIso;
-        }
-      }
+      // v75.59 value-form (uniform keys — see the row-builder note):
+      // no-change means "carry the stored value", never "omit the key".
+      row.cancel_scheduled_at =
+        cancelScheduledAtUpdate !== undefined
+          ? cancelScheduledAtUpdate
+          : cur?.cancel_scheduled_at ?? null;
+      // Refresh plan_id when Whop returns one; preserve last-known
+      // BY VALUE when Whop didn't send it.
+      row.whop_plan_id = planId ?? cur?.whop_plan_id ?? null;
+      row.first_paid_at = firstPaidValue;
 
       // v75.53: if this active paying student would be left with a NULL
       // first_paid_at — no _firstPaidAt from the product-scoped fetch
@@ -342,6 +371,25 @@ export async function runWhopCommunitySync(
       upsertRows.push(row);
       if (cur) result.updated++;
       else result.inserted++;
+    }
+
+    // ── v75.59 tripwire: every row MUST carry the identical key set ──
+    // If any future edit reintroduces a conditional key, ABORT the
+    // whole sync loudly (logged to sync_runs as failed) instead of
+    // letting postgrest-js's columns-union silently NULL batch-mates'
+    // fields again. A failed sync is recoverable; a silent wipe is not.
+    if (upsertRows.length > 0) {
+      const keySig = Object.keys(upsertRows[0]).sort().join(",");
+      for (const r of upsertRows) {
+        const sig = Object.keys(r).sort().join(",");
+        if (sig !== keySig) {
+          throw new Error(
+            `[whop-sync] non-uniform upsert keys detected (${sig} vs ${keySig}). ` +
+              `Aborting before write — a row omitting a key would have its ` +
+              `column NULLed by the batch columns-union. Fix the row builder.`,
+          );
+        }
+      }
     }
 
     // Batch-upsert in chunks of 500 (Supabase REST handles up to 1000

@@ -173,9 +173,18 @@ export default function DiscountsPage() {
   async function handleApprove(requestId: string) {
     setProcessing(requestId);
     try {
+      // v75.35: v75.31 added requireTeam() to /api/discounts/approve,
+      // but the UI wasn't updated to send the Bearer token — every
+      // approve since the v75.31 deploy 401s with "Not authenticated."
+      // Match the canonical pattern (settings/page.tsx, tasks/page.tsx).
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
       const res = await fetch("/api/discounts/approve", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           requestId,
           reviewerId: teamMember?.id,
@@ -197,9 +206,15 @@ export default function DiscountsPage() {
   async function handleMarkApplied(requestId: string) {
     setProcessing(requestId);
     try {
+      // v75.35: same auth pattern as handleApprove above.
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
       const res = await fetch("/api/discounts/mark-applied", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           requestId,
           appliedBy: teamMember?.id,
@@ -222,18 +237,29 @@ export default function DiscountsPage() {
     const reason = prompt("Rejection reason (optional):");
     setProcessing(requestId);
 
-    const { error } = await supabase
-      .from("discount_requests")
-      .update({
-        status: "rejected",
-        reviewed_by: teamMember?.id,
-        reviewed_at: new Date().toISOString(),
-        rejection_reason: reason || null,
-      })
-      .eq("id", requestId);
+    // v75.35: switch from direct supabase write to the v75.31 hardened
+    // route. Before this fix, rejects bypassed the API entirely — the
+    // requireTeam gate on /api/discounts/reject was dead code.
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/discounts/reject", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ requestId, reason: reason || null }),
+      });
 
-    if (!error) {
-      fetchRequests();
+      if (res.ok) {
+        fetchRequests();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(`Reject failed: ${data.error || "Unknown error"}`);
+      }
+    } catch (err) {
+      alert(`Reject failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
     setProcessing(null);

@@ -173,9 +173,19 @@ export default function AdminDashboard() {
           .gte("snapshot_date", fourteenDaysAgo)
           .order("snapshot_date", { ascending: true }),
         // Bounty count - feeds the "Bounty Program · joined" hero stat.
-        supabase
-          .from("student_milestones")
-          .select("student_id, bounty_access_claimed_at"),
+        // v75.48: paginate. student_milestones has one row per student
+        // (~2300+ rows total) so the raw .select() silently truncated
+        // at PostgREST's ~1000-row cap. Karlo saw 16 on the dashboard
+        // vs 65 in SQL — the missing 49 stamps were on milestone rows
+        // past page 1. Same row-cap bug class as v75.27 / v75.32 / v75.45.
+        fetchAllRowsPaginated<{
+          student_id: string;
+          bounty_access_claimed_at: string | null;
+        }>(() =>
+          supabase
+            .from("student_milestones")
+            .select("student_id, bounty_access_claimed_at"),
+        ),
       ]);
 
       // v75.32: surface pagination errors. Helper returns empty data

@@ -233,15 +233,19 @@ export async function runWhopCommunitySync(
         } else if (wasTerminal && !isTerminal) {
           // Re-activation — clear the stamp.
           canceledAtUpdate = null;
-        } else if (
-          wasTerminal &&
-          isTerminal &&
-          !cur.canceled_at &&
-          whopEndIso
-        ) {
-          // Backfill: historical terminal row with no canceled_at and
-          // Whop gave us a past cycle-end date. Approximate but useful.
-          canceledAtUpdate = whopEndIso;
+        } else if (wasTerminal && isTerminal && !cur.canceled_at) {
+          // Backfill: terminal row with no canceled_at. Prefer Whop's
+          // past end-date (cycle end for normal cancels; v75.60 added
+          // expires_at for refund revocations). v75.61: when Whop gives
+          // NO usable past date at all (mid-cycle refunds can keep even
+          // expires_at in the future), stamp the OBSERVATION moment as
+          // the last resort. Whop only ever sends the churn STATE,
+          // never the transition timestamp — the date is always ours to
+          // record, and a student with no access must NEVER be
+          // invisible to the churn trend (the 2026-06-11 case: two
+          // refund churns stuck NULL after the wipe, dashboard tile at
+          // 0 while the status-based journey showed them).
+          canceledAtUpdate = whopEndIso ?? new Date().toISOString();
         } else {
           canceledAtUpdate = undefined; // same bucket with date — don't touch
         }

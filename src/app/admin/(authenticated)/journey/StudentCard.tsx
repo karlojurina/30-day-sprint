@@ -2,7 +2,8 @@
 
 import type { Student, RegionId } from "@/types/database";
 import { getDayNumber } from "@/types/database";
-import { Avatar, PacePill } from "@/components/admin/ui";
+import { Avatar, PacePill, Pill } from "@/components/admin/ui";
+import { isCanceling } from "@/lib/admin/metrics-definitions";
 
 interface StudentCardProps {
   student: Student;
@@ -90,13 +91,23 @@ export function StudentCard({
         </span>
       </div>
 
-      {/* Line 2: region chip + pace pill */}
+      {/* Line 2: region chip + pace pill + canceling pill (if applicable)
+          v75.47: amber "Canceling" pill for students who clicked cancel
+          in Whop but still have access through end of cycle. They stay
+          in their current week column (still active) but Karlo can
+          see at-a-glance that they're churning. */}
       <div
         className="flex items-center"
         style={{ gap: 6, marginBottom: 10, flexWrap: "wrap" }}
       >
         <RegionChip region={currentRegion} />
         <PacePill label={paceLabel} compact />
+        {isCanceling(student) && (
+          <Pill tone="warning">
+            <span aria-hidden="true">⏳</span>
+            <span style={{ marginLeft: 4 }}>Canceling</span>
+          </Pill>
+        )}
       </div>
 
       {/* Line 3: progress bar */}

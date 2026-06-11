@@ -50,6 +50,10 @@ interface StudentLike {
   /** v75.38: needed for isMonth2Converted (NULL = never canceled,
    *  set = transition timestamp). */
   canceled_at?: string | null;
+  /** v75.47: Whop "Canceling" state — student clicked cancel but
+   *  still has access until end of cycle. Set by the sync runner
+   *  from WhopMembershipRow.cancel_at_period_end. */
+  cancel_scheduled_at?: string | null;
   whop_plan_id?: string | null;
 }
 
@@ -107,6 +111,24 @@ export function isInLaunchCohort(s: StudentLike): boolean {
 }
 
 /**
+ * v75.47: Whop "Canceling" predicate — student clicked cancel but
+ * still has access through end of billing cycle. The earliest churn
+ * signal Whop emits.
+ *
+ * True iff cancel_scheduled_at is stamped AND membership is still
+ * active/past_due. Once access actually ends, canceled_at takes over
+ * and cancel_scheduled_at gets cleared by the sync runner.
+ *
+ * Used by the journey kanban "Canceling" badge + the M2 helper to
+ * count these students as non-converted (they've signaled intent to
+ * leave even though they're still technically paying).
+ */
+export function isCanceling(s: StudentLike): boolean {
+  if (!s.cancel_scheduled_at) return false;
+  return s.membership_status === "active" || s.membership_status === "past_due";
+}
+
+/**
  * Month-2 conversion — the platform's north-star retention KPI.
  *
  * v75.42: RESTRICTED TO THE LAUNCH COHORT. The v75.38 definition
@@ -151,6 +173,15 @@ export function isMonth2Converted(
   }
   const day30Ms = new Date(s.first_paid_at).getTime() + 30 * 86_400_000;
   if (day30Ms > asOfMs) return false; // not yet 30 days in
+  // v75.47: a student who scheduled cancellation BEFORE day 30 has
+  // unambiguously signaled non-retention. Counting them as converted
+  // would inflate the north-star KPI. Still keep them in the
+  // denominator (isInMonth2Cohort) — they did reach day 30, the
+  // metric measures retention OF those who reached day 30.
+  if (s.cancel_scheduled_at) {
+    const scheduledMs = new Date(s.cancel_scheduled_at).getTime();
+    if (scheduledMs <= day30Ms) return false;
+  }
   if (!s.canceled_at) return true; // never canceled — fully converted
   // Canceled after day 30 = converted (they made it past M1 → M2 boundary)
   return new Date(s.canceled_at).getTime() > day30Ms;

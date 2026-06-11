@@ -471,22 +471,19 @@ export default function AdminDashboard() {
       </Section>
 
       {/* ─── Trends · last 14 days ─── */}
+      {/* v75.43: removed the "Joined" tile per Karlo: 'I don't think
+          Joined is relevant for us, because we see that in the Whop
+          dashboard.' Three tiles instead of four — grid stays at
+          lg:grid-cols-4 so each tile gets more breathing room. */}
       <Section eyebrow="Trends · last 14 days">
         <div
-          className="grid grid-cols-2 lg:grid-cols-4"
+          className="grid grid-cols-2 lg:grid-cols-3"
           style={{ gap: 12 }}
         >
           <SparklineTile
             label="Active on platform"
             current={data.activeStudents}
             points={data.trend.map((p) => p.active_count)}
-            mode="running"
-          />
-          <SparklineTile
-            label="Joined"
-            current={data.trend.reduce((s, p) => s + p.joined_count, 0)}
-            currentSuffix=" / 14d"
-            points={data.trend.map((p) => p.joined_count)}
             mode="running"
           />
           <SparklineTile

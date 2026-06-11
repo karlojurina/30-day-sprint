@@ -15,7 +15,7 @@ import { useEffect, useRef, useState } from "react";
  *
  * Top-level items collapsed from 11 to 7 by grouping related routes
  * under "Students" and "Settings" dropdowns:
- *   - Students ▾ → All students, Student journey, Not activated, Discounts
+ *   - Students ▾ → All students, Student journey, Discounts (v75.43: Not activated removed)
  *   - Settings ▾ → General, Discord test, Team (founder-only)
  *
  * Layout shifts from flex (brand left, nav left, profile right) to a
@@ -73,7 +73,10 @@ const navEntries: NavEntry[] = [
     children: [
       { type: "leaf", href: "/admin/students", label: "All students" },
       { type: "leaf", href: "/admin/journey", label: "Student journey" },
-      { type: "leaf", href: "/admin/not-activated", label: "Not activated" },
+      // v75.43: "Not activated" removed from sidebar per Karlo.
+      // The page itself stays at /admin/not-activated for direct
+      // URL access — only the nav link is hidden. Reachable from
+      // the journey kanban's first column if needed.
       { type: "leaf", href: "/admin/discounts", label: "Discounts" },
     ],
   },

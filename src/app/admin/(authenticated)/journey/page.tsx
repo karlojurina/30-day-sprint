@@ -101,18 +101,16 @@ export default function KanbanPage() {
               // on this surface). Returning customers stay out of the
               // journey — they're not first-time joiners by definition.
               //
-              // v75.36: churned students with NULL first_paid_at were
-              // silently disappearing from the kanban — Karlo saw a
-              // student churn on day 16, then vanish after refresh.
-              // Include rows where first_paid_at IS NULL but
-              // canceled_at IS NOT NULL so we don't lose track of who
-              // churned during the sprint. The post-filter pace logic
-              // already handles NULL first_paid_at via fallback to
-              // joined_at, so visually they'll appear in the right
-              // column.
-              .or(
-                `first_paid_at.gte.${ADMIN_STUDENT_JOIN_CUTOFF},and(first_paid_at.is.null,canceled_at.not.is.null)`,
-              )
+              // v75.39: rolled back v75.36's NULL-first_paid_at-with-
+              // canceled_at fallback. Karlo saw 372 legacy churns
+              // (mostly pre-launch customers) leak in. Cohort students
+              // who churn DO keep their first_paid_at — that field is
+              // immutable post-v75.18 — so they still pass this strict
+              // filter. The original "student disappears on churn"
+              // symptom Karlo reported was likely the cron-not-firing
+              // issue (CRON_SECRET drift fixed in v75.37), not a
+              // genuine filter problem.
+              .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
               .order("joined_at", { ascending: false }),
           ),
           fetchAllRowsPaginated<{ student_id: string; completed_count: number }>(

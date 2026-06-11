@@ -314,13 +314,28 @@ export default function AdminDashboard() {
         ),
       }));
 
-      // Bounty count - just "how many people joined the bounty program."
-      // No funnel, no rate, no first-client overlay - those aren't bounty
-      // signals.
-      const milestoneRows = (milestonesRes.data ?? []) as Array<{
+      // Bounty count - "how many people joined the bounty program."
+      //
+      // v75.44: scope-aware. Previously this counted EVERY non-null
+      // bounty_access_claimed_at across student_milestones, including:
+      //   * Legacy customers (pre-launch) with bounty stamps from
+      //     before the platform tracking went live
+      //   * v50 migration-backfilled stamps (sprint_completed_at proxy)
+      //     for test-cohort students — synthetic, not real bounty signups
+      //   * Students whose plan dropped to non-paying after stamping
+      //
+      // None of those should count for "is the LAUNCH COHORT converting
+      // to the bounty program?" — Karlo's second north-star KPI. Fix:
+      // filter milestoneRows to only include students in `students`
+      // (which is already scope-filtered + paying-plan-filtered).
+      const studentIdSet = new Set(students.map((s) => s.id));
+      const milestoneRowsAll = (milestonesRes.data ?? []) as Array<{
         student_id: string;
         bounty_access_claimed_at: string | null;
       }>;
+      const milestoneRows = milestoneRowsAll.filter((m) =>
+        studentIdSet.has(m.student_id),
+      );
       const bountyAccessAllTime = milestoneRows.filter(
         (m) => m.bounty_access_claimed_at,
       ).length;

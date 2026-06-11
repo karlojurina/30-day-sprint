@@ -41,9 +41,17 @@ import { postTeamAlert } from "@/lib/discord";
 import { isDmEnabled } from "@/lib/dm-toggles";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import { csmSprintWindowCutoffIso } from "@/lib/constants";
+import {
+  verifyCronAuth,
+  cronUnauthorizedResponse,
+  logCronStart,
+  logCronFinish,
+} from "@/lib/cron-auth";
 
 // v75.32: raised from Vercel's 60s default.
 export const maxDuration = 300;
+
+const ROUTE_NAME = "check-na-tasks";
 
 interface NotActivatedRow {
   id: string;
@@ -79,10 +87,13 @@ export async function GET(request: NextRequest) {
   // which meant a missing env var silently disabled the auth gate.
   // Now the check is unconditional - if CRON_SECRET isn't set the
   // header can never match, so the route stays locked.
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // v75.37: shared cron auth + audit.
+  const auth = verifyCronAuth(request);
+  if (!auth.ok) {
+    await logCronStart(ROUTE_NAME, auth.reason);
+    return cronUnauthorizedResponse(auth.reason);
   }
+  const runId = await logCronStart(ROUTE_NAME, "ok");
 
   const supabase = createServiceClient();
   const started = Date.now();
@@ -114,6 +125,7 @@ export async function GET(request: NextRequest) {
 
   if (studentsErr) {
     console.error("[check-na-tasks] students query failed:", studentsErr);
+    await logCronFinish(runId, "failed", { error: studentsErr.message });
     return NextResponse.json(
       { error: studentsErr.message },
       { status: 500 },
@@ -262,6 +274,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  await logCronFinish(runId, "success", { rowsAffected: created.length });
   return NextResponse.json({
     ok: true,
     pool_size: pool.length,

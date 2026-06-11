@@ -35,6 +35,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { postTeamAlert } from "@/lib/discord";
+import {
+  verifyCronAuth,
+  cronUnauthorizedResponse,
+  logCronStart,
+  logCronFinish,
+} from "@/lib/cron-auth";
 import { isDmEnabled } from "@/lib/dm-toggles";
 import {
   buildStudentSnapshot,
@@ -117,11 +123,16 @@ function pickExistingAlertScenario(
   return null;
 }
 
+const ROUTE_NAME = "check-csm-tasks";
+
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // v75.37: shared cron auth + audit.
+  const auth = verifyCronAuth(request);
+  if (!auth.ok) {
+    await logCronStart(ROUTE_NAME, auth.reason);
+    return cronUnauthorizedResponse(auth.reason);
   }
+  const runId = await logCronStart(ROUTE_NAME, "ok");
 
   const supabase = createServiceClient();
 
@@ -194,6 +205,7 @@ export async function GET(request: NextRequest) {
 
   const studentsErr = studentsRes.error ?? lessonsRes.error ?? templatesRes.error;
   if (studentsErr) {
+    await logCronFinish(runId, "failed", { error: studentsErr.message });
     return NextResponse.json({ error: studentsErr.message }, { status: 500 });
   }
 
@@ -204,6 +216,7 @@ export async function GET(request: NextRequest) {
   const alerts = (alertsRes.data ?? []) as AlertRow[];
 
   if (students.length === 0) {
+    await logCronFinish(runId, "success", { rowsAffected: 0 });
     return NextResponse.json({ checked: 0, tasks_created: 0 });
   }
 
@@ -477,6 +490,9 @@ export async function GET(request: NextRequest) {
     // v75.32: short-circuit. Section 3/3b/3c housekeeping all read
     // from openTasksWithBucket; running them against a partial fetch
     // would corrupt the supersession + auto-dismiss state.
+    await logCronFinish(runId, "failed", {
+      error: `Open tasks fetch failed: ${openTasksErr.message}`,
+    });
     return NextResponse.json(
       { error: `Open tasks fetch failed: ${openTasksErr.message}` },
       { status: 500 },
@@ -774,6 +790,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  await logCronFinish(runId, "success", { rowsAffected: createdCount });
   return NextResponse.json({
     checked: students.length,
     candidates: toInsert.length,

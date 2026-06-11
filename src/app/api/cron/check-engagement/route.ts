@@ -4,10 +4,18 @@ import { postTeamAlert, buildAlertsEmbed } from "@/lib/discord";
 import { isDmEnabled } from "@/lib/dm-toggles";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import { csmSprintWindowCutoffIso } from "@/lib/constants";
+import {
+  verifyCronAuth,
+  cronUnauthorizedResponse,
+  logCronStart,
+  logCronFinish,
+} from "@/lib/cron-auth";
 
 // v75.32: raised from Vercel's 60s default. Per-student completion
 // fetches in waves of 20 can take 30-60s as pool grows.
 export const maxDuration = 300;
+
+const ROUTE_NAME = "check-engagement";
 
 /**
  * V3 engagement cron: detect disengaged students and queue alerts for the team.
@@ -18,10 +26,13 @@ export const maxDuration = 300;
  * all NEW alerts produced this run.
  */
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // v75.37: shared cron auth + audit.
+  const auth = verifyCronAuth(request);
+  if (!auth.ok) {
+    await logCronStart(ROUTE_NAME, auth.reason);
+    return cronUnauthorizedResponse(auth.reason);
   }
+  const runId = await logCronStart(ROUTE_NAME, "ok");
 
   const supabase = createServiceClient();
   const now = new Date();
@@ -44,6 +55,7 @@ export async function GET(request: NextRequest) {
     // like everything succeeded. Without this, a query error would
     // silently stop disengagement alerts for the day.
     console.error("[check-engagement] students fetch failed:", studentsErr);
+    await logCronFinish(runId, "failed", { error: studentsErr.message });
     return NextResponse.json(
       { error: `Students fetch failed: ${studentsErr.message}` },
       { status: 500 },
@@ -51,6 +63,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (!students || students.length === 0) {
+    await logCronFinish(runId, "success", { rowsAffected: 0 });
     return NextResponse.json({ checked: 0, alerts: 0 });
   }
 
@@ -236,6 +249,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  await logCronFinish(runId, "success", { rowsAffected: alerts.length });
   return NextResponse.json({
     checked: students.length,
     alerts: alerts.length,

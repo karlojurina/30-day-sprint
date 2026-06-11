@@ -49,6 +49,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+import {
+  verifyCronAuth,
+  cronUnauthorizedResponse,
+  logCronStart,
+  logCronFinish,
+} from "@/lib/cron-auth";
+
+const ROUTE_NAME = "snapshot-progress";
 
 // v75.32: raised from Vercel's 60s default. The active fetch + view
 // scan + 2x4 count queries can take 30-60s as the pool grows past
@@ -95,12 +103,17 @@ function dateWindow(daysAgo: number): DateWindow {
 }
 
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // v75.37: shared cron auth + audit. See src/lib/cron-auth.ts.
+  const auth = verifyCronAuth(request);
+  if (!auth.ok) {
+    await logCronStart(ROUTE_NAME, auth.reason);
+    return cronUnauthorizedResponse(auth.reason);
   }
+  const runId = await logCronStart(ROUTE_NAME, "ok");
 
   const supabase = createServiceClient();
+
+  try {
 
   // Lessons count — denominator for avg_progress. v75.1 excludes
   // l057 (bounty onboarding) to match the 64-lesson sprint count.
@@ -127,6 +140,7 @@ export async function GET(request: NextRequest) {
     );
 
   if (activeErr) {
+    await logCronFinish(runId, "failed", { error: activeErr.message });
     return NextResponse.json({ error: activeErr.message }, { status: 500 });
   }
 
@@ -159,6 +173,7 @@ export async function GET(request: NextRequest) {
         .select("student_id, completed_count"),
     );
   if (progressErr) {
+    await logCronFinish(runId, "failed", { error: progressErr.message });
     return NextResponse.json({ error: progressErr.message }, { status: 500 });
   }
 
@@ -277,29 +292,38 @@ export async function GET(request: NextRequest) {
 
   const upsertErr = upsertBoth.find((r) => r.error)?.error;
   if (upsertErr) {
+    await logCronFinish(runId, "failed", { error: upsertErr.message });
     return NextResponse.json({ error: upsertErr.message }, { status: 500 });
   }
 
-  return NextResponse.json({
-    yesterday: yesterday.date,
-    today: today.date,
-    all: {
-      active_count: activeAll.length,
-      joined_count_today: todayCounts.joined_all,
-      joined_count_yesterday: yesterdayCounts.joined_all,
-      churned_count_today: todayCounts.churned_all,
-      churned_count_yesterday: yesterdayCounts.churned_all,
-      avg_progress: avgAll,
-    },
-    cohort: {
-      active_count: activeCohort.length,
-      joined_count_today: todayCounts.joined_cohort,
-      joined_count_yesterday: yesterdayCounts.joined_cohort,
-      churned_count_today: todayCounts.churned_cohort,
-      churned_count_yesterday: yesterdayCounts.churned_cohort,
-      avg_progress: avgCohort,
-    },
-  });
+    await logCronFinish(runId, "success", {
+      rowsAffected: activeAll.length,
+    });
+    return NextResponse.json({
+      yesterday: yesterday.date,
+      today: today.date,
+      all: {
+        active_count: activeAll.length,
+        joined_count_today: todayCounts.joined_all,
+        joined_count_yesterday: yesterdayCounts.joined_all,
+        churned_count_today: todayCounts.churned_all,
+        churned_count_yesterday: yesterdayCounts.churned_all,
+        avg_progress: avgAll,
+      },
+      cohort: {
+        active_count: activeCohort.length,
+        joined_count_today: todayCounts.joined_cohort,
+        joined_count_yesterday: yesterdayCounts.joined_cohort,
+        churned_count_today: todayCounts.churned_cohort,
+        churned_count_yesterday: yesterdayCounts.churned_cohort,
+        avg_progress: avgCohort,
+      },
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await logCronFinish(runId, "failed", { error: msg });
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 }
 
 function computeAvg(

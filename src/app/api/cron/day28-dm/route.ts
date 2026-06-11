@@ -4,10 +4,18 @@ import { dmStudent, postTeamAlert } from "@/lib/discord";
 import { buildDay28Embed, loadDay28EmbedInput } from "@/lib/day28-embed";
 import { isDmEnabled } from "@/lib/dm-toggles";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
+import {
+  verifyCronAuth,
+  cronUnauthorizedResponse,
+  logCronStart,
+  logCronFinish,
+} from "@/lib/cron-auth";
 
 // v75.32: raised from Vercel's 60s default. Per-student embed build
 // + DM send can take 30-60s at scale.
 export const maxDuration = 300;
+
+const ROUTE_NAME = "day28-dm";
 
 /**
  * Day-28 student summary DM cron.
@@ -27,15 +35,19 @@ export const maxDuration = 300;
  * the same student isn't messaged twice.
  */
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // v75.37: shared cron auth + audit.
+  const auth = verifyCronAuth(request);
+  if (!auth.ok) {
+    await logCronStart(ROUTE_NAME, auth.reason);
+    return cronUnauthorizedResponse(auth.reason);
   }
+  const runId = await logCronStart(ROUTE_NAME, "ok");
 
   const supabase = createServiceClient();
 
   // Pause gate — controlled from /admin/discord. Default off.
   if (!(await isDmEnabled(supabase, "day28_dm_enabled"))) {
+    await logCronFinish(runId, "success", { rowsAffected: 0 });
     return NextResponse.json({ paused: true, checked: 0, sent: 0 });
   }
 
@@ -74,6 +86,7 @@ export async function GET(request: NextRequest) {
   });
 
   if (!candidates || candidates.length === 0) {
+    await logCronFinish(runId, "success", { rowsAffected: 0 });
     return NextResponse.json({ checked: 0, sent: 0 });
   }
 
@@ -139,6 +152,7 @@ export async function GET(request: NextRequest) {
       );
   }
 
+  await logCronFinish(runId, "success", { rowsAffected: sent });
   return NextResponse.json({
     checked: candidates.length,
     sent,

@@ -47,6 +47,14 @@ export interface Student {
    *  every sync run (so every canceled student counted as "churned
    *  today" every day). Null for active / past_due / never-canceled. */
   canceled_at: string | null;
+  /** v75.46: Whop's "Canceling" state — the student clicked cancel
+   *  but still has access through the end of the billing cycle.
+   *  When set, the student WILL churn at the end of the cycle but
+   *  hasn't yet (membership_status is still 'active' or 'past_due').
+   *  This is the platform's earliest churn signal — sync runner
+   *  stamps it on cancel-click detection, clears it on re-activation
+   *  or when access actually ends (canceled_at then takes over). */
+  cancel_scheduled_at: string | null;
   /** v79: the Whop plan_id this membership belongs to. Drives the
    *  paying / free classification via PAYING_WHOP_PLAN_IDS — any
    *  plan_id NOT in that allowlist is treated as non-paying and

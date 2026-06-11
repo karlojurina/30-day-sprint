@@ -85,6 +85,9 @@ export async function runWhopCommunitySync(
       canceled_at: string | null;
       whop_plan_id: string | null;
       first_paid_at: string | null;
+      // v75.46: track per-user so we don't re-stamp on every sync
+      // (preserve the ORIGINAL cancel-click timestamp).
+      cancel_scheduled_at: string | null;
     };
     // v75.16.3 — batch the .in() filter. PostgREST's URL-length cap
     // silently truncates .in() at ~1000 items, which meant existing
@@ -100,7 +103,7 @@ export async function runWhopCommunitySync(
       const { data, error } = await supabase
         .from("students")
         .select(
-          "whop_user_id, email, name, joined_at, last_active_at, discord_user_id, membership_status, canceled_at, whop_plan_id, first_paid_at",
+          "whop_user_id, email, name, joined_at, last_active_at, discord_user_id, membership_status, canceled_at, whop_plan_id, first_paid_at, cancel_scheduled_at",
         )
         .in("whop_user_id", chunk)
         .returns<ExistingRow[]>();
@@ -245,6 +248,42 @@ export async function runWhopCommunitySync(
       }
       if (discordUsername) row.discord_username = discordUsername;
       if (canceledAtUpdate !== undefined) row.canceled_at = canceledAtUpdate;
+
+      // v75.46: cancel_scheduled_at — Whop's "Canceling" state.
+      // When status is active/past_due AND Whop reports
+      // cancel_at_period_end=true, the student clicked cancel but
+      // still has access through the end of the cycle. This is the
+      // earliest churn signal we have.
+      //
+      // Rules:
+      //   * Existing row + currently "Canceling" + no prior stamp →
+      //     stamp now() (preserves the cancel-click moment)
+      //   * Existing row + currently "Canceling" + already stamped →
+      //     don't re-stamp (preserve original timestamp)
+      //   * Existing row + NOT "Canceling" (re-activated OR went
+      //     terminal) → clear to null
+      //   * New row + "Canceling" at insert time → stamp now()
+      //   * New row + not Canceling → null
+      //
+      // Don't stamp when isTerminal=true: canceled_at takes over.
+      const isCancelingNow =
+        !isTerminal && m.cancel_at_period_end === true;
+      let cancelScheduledAtUpdate: string | null | undefined;
+      if (cur) {
+        if (isCancelingNow && !cur.cancel_scheduled_at) {
+          cancelScheduledAtUpdate = new Date().toISOString();
+        } else if (!isCancelingNow && cur.cancel_scheduled_at) {
+          cancelScheduledAtUpdate = null;
+        } else {
+          cancelScheduledAtUpdate = undefined; // no change
+        }
+      } else {
+        cancelScheduledAtUpdate = isCancelingNow
+          ? new Date().toISOString()
+          : null;
+      }
+      if (cancelScheduledAtUpdate !== undefined)
+        row.cancel_scheduled_at = cancelScheduledAtUpdate;
       // Refresh plan_id when Whop returns one. Preserve last-known
       // when Whop didn't send it (don't include the key at all).
       if (planId) row.whop_plan_id = planId;

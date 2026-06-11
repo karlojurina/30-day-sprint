@@ -45,7 +45,14 @@ When adding a new table, append it here. When deleting a field, scan
   `whop_plan_id` (v79 — drives paying / free classification via
   `PAYING_WHOP_PLAN_IDS` allowlist. Free-plan members keep full
   student-side access but are excluded from CSM tasks, dashboard
-  metrics, and operational surfaces.)
+  metrics, and operational surfaces.),
+  `cancel_scheduled_at` (v83 — set when Whop's
+  `cancel_at_period_end=true` AND membership is still active/past_due
+  i.e. "Canceling" state. Distinct from `canceled_at` (access ended):
+  this fires the moment the student clicks cancel, well before access
+  actually ends. Used by journey kanban + dashboard early-warning
+  surfaces. Stamped/cleared by sync runner from
+  `WhopMembershipRow.cancel_at_period_end`.)
 - **Note:** As of v46/v47, students is identity + admin-flag only.
   Per-function state (streaks, milestones, Whop sync, celebrations,
   DM log) lives in sibling tables below — read CLAUDE.md

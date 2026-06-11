@@ -87,6 +87,15 @@ export interface WhopMembershipRow {
    *  active memberships it's a future date — only use it as a
    *  cancellation proxy when status is terminal. */
   renewal_period_end?: number | string | null;
+  /** v75.46: Whop's "Canceling" state. When true AND status is still
+   *  active/past_due, the student clicked cancel but has access
+   *  through end of billing cycle. This is the earliest churn signal
+   *  the platform exposes — sync runner uses it to stamp
+   *  students.cancel_scheduled_at. Previously we were silently
+   *  dropping this field from every read because it wasn't declared
+   *  on the interface (TypeScript erases unknown JSON fields). The
+   *  webhook payload at types/whop.ts:29 has carried it all along. */
+  cancel_at_period_end?: boolean | null;
   discord?: { id?: string; username?: string } | null;
   /** Some endpoints surface discord_user_id at the top level instead. */
   discord_user_id?: string | null;

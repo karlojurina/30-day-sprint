@@ -100,17 +100,15 @@ export default function AdminDashboard() {
         .toISOString()
         .slice(0, 10);
 
-      // Scope toggle: 'cohort' applies the launch-date filter so we
-      // exclude legacy / pre-launch students from every count on
-      // this page. 'all' drops it so the team sees everyone.
-      // v79: PAYING_WHOP_PLAN_IDS filter excludes free-plan users
-      // from every operational surface, regardless of scope.
+      // v75.51: launch-cohort only — every count on this page
+      // filters out pre-launch students via the hardcoded
+      // first_paid_at gate. v79: PAYING_WHOP_PLAN_IDS filter
+      // excludes free-plan users from every operational surface.
       //
       // v75.27: wrapped in a thunk + fetchAllRowsPaginated to bypass
       // PostgREST's ~1000-row server cap. With 750+ paying members
       // (and growing), the unwrapped query silently truncated and
-      // the "Active on platform" tile was pinned at ≤1000. Same
-      // shape as the milicevic bug (v75.25) but on a different table.
+      // the "Active on platform" tile was pinned at ≤1000.
       // v75.51: hardcoded cohort filter. Was scope-gated; cohort is
        // now the only view.
       const buildStudentsQuery = () =>
@@ -167,8 +165,11 @@ export default function AdminDashboard() {
           .eq("student.csm_exempt", false)
           // v75.18: filter on first_paid_at (original signup).
           .gte("student.first_paid_at", TASKS_STUDENT_JOIN_CUTOFF),
-        // Fetch both column families so the sparkline can flip
-        // instantly when scope toggles, without refetching.
+        // v75.52: select only the _cohort columns. The non-cohort
+        // family is still written by the snapshot cron for legacy
+        // continuity but no UI surface reads it now (post-v75.51
+        // scope removal). pickScopedColumn falls back to the legacy
+        // column only when the cohort one is null (pre-v77 rows).
         supabase
           .from("daily_progress_snapshots")
           .select(
@@ -330,8 +331,9 @@ export default function AdminDashboard() {
 
       // Bounty count - "how many people joined the bounty program."
       //
-      // v75.44: scope-aware. Previously this counted EVERY non-null
-      // bounty_access_claimed_at across student_milestones, including:
+      // v75.44 (then v75.51): cohort-filtered. Previously this
+      // counted EVERY non-null bounty_access_claimed_at across
+      // student_milestones, including:
       //   * Legacy customers (pre-launch) with bounty stamps from
       //     before the platform tracking went live
       //   * v50 migration-backfilled stamps (sprint_completed_at proxy)

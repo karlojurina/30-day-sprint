@@ -109,21 +109,25 @@ export function isInLaunchCohort(s: StudentLike): boolean {
 /**
  * Month-2 conversion — the platform's north-star retention KPI.
  *
+ * v75.42: RESTRICTED TO THE LAUNCH COHORT. The v75.38 definition
+ * included every paying student whose first_paid_at was 30+ days ago,
+ * which dragged in 1400+ legacy (pre-launch) customers and produced
+ * a misleading 98.5% conversion rate. The metric we actually want
+ * answers: 'is the launch cohort retaining past day 30?' — that
+ * requires excluding legacy noise.
+ *
  * A student is "Month-2 converted as of `asOfMs`" iff:
  *   1. They have a first_paid_at (NULL = not in cohort)
- *   2. first_paid_at + 30d <= asOfMs (they've BEEN on the platform for
- *      at least 30 days as of the snapshot moment)
- *   3. They were on a paying plan (whop_plan_id ∈ PAYING_WHOP_PLAN_IDS)
- *   4. EITHER they never canceled (canceled_at IS NULL — still active)
+ *   2. first_paid_at >= ADMIN_STUDENT_JOIN_CUTOFF (launch cohort only)
+ *   3. first_paid_at + 30d <= asOfMs (they've completed Month 1)
+ *   4. They were on a paying plan (whop_plan_id ∈ PAYING_WHOP_PLAN_IDS)
+ *   5. EITHER they never canceled (canceled_at IS NULL — still active)
  *      OR they canceled AFTER day 30 (canceled_at > first_paid_at + 30d).
- *      A student who churned on day 16 does NOT count as converted even
- *      after they've been on the platform 30+ wall-clock days.
+ *      A student who churned on day 16 does NOT count as converted.
  *
- * v75.38: centralizing this here because the dashboard hero stat, the
- * 14-day trend sparkline, and the (now-deleted) /api/admin/kpis route
- * each computed it slightly differently. Drift between the three was
- * visible — hero said X, sparkline last-point said X+/-1 — and would
- * have gotten worse once the first cohort hit day 30 on 2026-06-24.
+ * Today (2026-06-11): zero launch-cohort students have hit day 30 yet
+ * (earliest is 2026-06-24). The metric correctly reads 0/0 → "—" on
+ * the dashboard until then.
  *
  * Pair with isInMonth2Cohort() for the denominator. The conversion
  * rate is: |students filter isMonth2Converted| / |students filter
@@ -134,6 +138,11 @@ export function isMonth2Converted(
   asOfMs: number = Date.now(),
 ): boolean {
   if (!s.first_paid_at) return false;
+  // LAUNCH COHORT ONLY — pre-launch customers' M1→M2 transition
+  // happened months/years ago and produces noise (98.5% conversion
+  // because they all got past day 30 long ago). The metric needs to
+  // measure the LAUNCH cohort specifically.
+  if (s.first_paid_at < ADMIN_STUDENT_JOIN_CUTOFF) return false;
   if (
     !s.whop_plan_id ||
     !PAYING_WHOP_PLAN_IDS.has(s.whop_plan_id)
@@ -149,17 +158,19 @@ export function isMonth2Converted(
 
 /**
  * Denominator companion to isMonth2Converted. A student is "in the
- * Month-2 cohort as of `asOfMs`" iff they paid at least 30 days ago
- * on a paying plan, regardless of whether they're still active now.
+ * Month-2 cohort as of `asOfMs`" iff they're in the LAUNCH cohort
+ * (first_paid_at >= ADMIN_STUDENT_JOIN_CUTOFF) and have completed
+ * Month 1 (first_paid_at + 30d <= asOfMs), on a paying plan.
  *
- * The conversion rate denominator is "students whose Month-1 ended by
- * `asOfMs`" — they're the population eligible to have converted.
+ * v75.42: launch-cohort restriction matches isMonth2Converted —
+ * keeps the denominator and numerator pulling from the same pool.
  */
 export function isInMonth2Cohort(
   s: StudentLike,
   asOfMs: number = Date.now(),
 ): boolean {
   if (!s.first_paid_at) return false;
+  if (s.first_paid_at < ADMIN_STUDENT_JOIN_CUTOFF) return false;
   if (
     !s.whop_plan_id ||
     !PAYING_WHOP_PLAN_IDS.has(s.whop_plan_id)

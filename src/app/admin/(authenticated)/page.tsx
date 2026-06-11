@@ -206,9 +206,18 @@ export default function AdminDashboard() {
       const joinedThisWeek = students.filter(
         (s) => s.joined_at >= weekAgo,
       ).length;
+      // v75.36: switch from the broken updated_at proxy to canceled_at.
+      // updated_at fires on every sync, so "canceled AND updated_at
+      // >= 30d ago" was matching every legacy canceled student on every
+      // run — the canceledThisMonth count was monotonically increasing.
+      // The snapshot cron and v81 RPC both correctly use canceled_at
+      // (v75.13 + v77 fix); this was the last surface still using the
+      // updated_at hack.
       const canceledThisMonth = students.filter(
         (s) =>
-          s.membership_status === "canceled" && s.updated_at >= thirtyDaysAgo,
+          s.membership_status === "canceled" &&
+          s.canceled_at !== null &&
+          s.canceled_at >= thirtyDaysAgo,
       ).length;
 
       // v75.28: avgProgress now uses the SAME formula as the snapshot

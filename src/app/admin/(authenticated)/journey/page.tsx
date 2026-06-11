@@ -100,7 +100,19 @@ export default function KanbanPage() {
               // v75.18: hardcoded first_paid_at filter (no scope toggle
               // on this surface). Returning customers stay out of the
               // journey — they're not first-time joiners by definition.
-              .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
+              //
+              // v75.36: churned students with NULL first_paid_at were
+              // silently disappearing from the kanban — Karlo saw a
+              // student churn on day 16, then vanish after refresh.
+              // Include rows where first_paid_at IS NULL but
+              // canceled_at IS NOT NULL so we don't lose track of who
+              // churned during the sprint. The post-filter pace logic
+              // already handles NULL first_paid_at via fallback to
+              // joined_at, so visually they'll appear in the right
+              // column.
+              .or(
+                `first_paid_at.gte.${ADMIN_STUDENT_JOIN_CUTOFF},and(first_paid_at.is.null,canceled_at.not.is.null)`,
+              )
               .order("joined_at", { ascending: false }),
           ),
           fetchAllRowsPaginated<{ student_id: string; completed_count: number }>(
@@ -153,8 +165,12 @@ export default function KanbanPage() {
       const out: StudentWithProgress[] = (studentsRes.data ?? []).map((s) => {
         const completedCount = counts.get(s.id) ?? 0;
         const currentRegion = currentRegionByStudent.get(s.id) ?? "r1";
+        // v75.36: pace anchor on first_paid_at (real platform tenure)
+        // not joined_at (current cycle start, breaks for returners).
+        // Matches every other surface's day-N anchor since v75.20.
+        const paceAnchor = s.first_paid_at ?? s.joined_at;
         const pace = buildPaceSummary(
-          s.joined_at,
+          paceAnchor,
           completedCount,
           totalLessonsCount,
           currentRegion,

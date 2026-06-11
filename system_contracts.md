@@ -51,7 +51,12 @@ When adding a new table, append it here. When deleting a field, scan
   field for cohort filtering and discount eligibility. v75.26 stamps it
   on every INSERT path (OAuth callback, membership.activated webhook,
   payment.succeeded webhook). v75.34 endpoint backfilled the column
-  for ~400 legacy students whose first_paid_at was NULL. Post-v75.28
+  for ~400 legacy students whose first_paid_at was NULL. v75.53 — the
+  sync runner (`runWhopCommunitySync`) self-heals NULL first_paid_at for
+  active paying students each run via a bounded cross-product
+  `fetchEarliestMembershipDateForUser` lookup, so members on products
+  outside `WHOP_PRODUCT_ID` (which the per-product sync can't see) no
+  longer stay NULL. Post-v75.28
   NULL is treated as out-of-cohort everywhere — no joined_at fallback.
   Distinct from `joined_at` which is the CURRENT subscription cycle
   start and moves on each renewal.),

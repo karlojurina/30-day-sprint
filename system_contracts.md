@@ -281,6 +281,20 @@ When adding a new table, append it here. When deleting a field, scan
   - churned_count = `canceled_at::date = day` (NOT `updated_at` —
     that fires on every sync)
 
+### `canceling_snapshots` (v84)
+- **Depends on:** `students` (`cancel_scheduled_at`, status, plan,
+  `first_paid_at`)
+- **Depended on by:** `/admin` dashboard Canceling tile trend line
+- **Stable contract:** `snapshot_date` (primary key, daily grain),
+  `canceling_count_cohort` (launch-cohort paying students in Whop's
+  "Canceling" state at snapshot time)
+- **Note:** Written ONLY by the `snapshot-progress` cron. DELIBERATELY
+  separate from `daily_progress_snapshots`: the `rebuild_daily_snapshots()`
+  RPC deletes+reinserts that table, and point-in-time canceling state
+  cannot be recomputed for past dates — keeping it here makes the
+  history rebuild-proof. History starts at the v76 ship date; the
+  dashboard renders missing dates as 0.
+
 ### `sync_runs` (v77)
 - **Depends on:** —
 - **Depended on by:** team-read RLS only; queried ad-hoc to confirm

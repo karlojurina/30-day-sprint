@@ -154,7 +154,7 @@ export async function GET(request: NextRequest) {
     supabase
       .from("students")
       .select(
-        "id, name, joined_at, first_paid_at, membership_status, last_active_at, discord_username",
+        "id, name, joined_at, first_paid_at, membership_status, last_active_at, discord_username, cancel_scheduled_at",
       )
       .eq("membership_status", "active")
       .eq("csm_exempt", false)

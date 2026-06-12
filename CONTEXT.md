@@ -178,6 +178,13 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 - `tasks` — CSM task queue (per-student, per-scenario, links to `templates`)
 - `daily_progress_snapshots` — frozen daily progress per student. v77 added cohort columns (`active_count_cohort`, `joined_count_cohort`, `churned_count_cohort`, `avg_progress_cohort`). After v75.51 (scope toggle removed), only the `_cohort` columns are read by the UI; the legacy non-cohort columns are still written by the snapshot cron for historical continuity. v81 aligned the cron + RPC + dashboard avg_progress formula on the canonical isLessonComplete + l057 exclusion (single source of truth).
 - `sync_runs` — audit log for the Whop community sync (v77). One row per attempt with source (cron / admin-button), status (success/failed), counts (fetched/inserted/updated/skipped/errors), duration_ms, error_message. Team-read RLS. Use to answer "did sync run last night?" without digging Vercel logs.
+- `canceling_snapshots` (v84) — one row per day: how many launch-cohort
+  paying students were in Whop's "Canceling" state at snapshot time.
+  Written by the snapshot-progress cron; feeds the dashboard Canceling
+  tile's trend line. DELIBERATELY separate from
+  `daily_progress_snapshots`: the rebuild RPC deletes+reinserts that
+  table and point-in-time canceling state can't be recomputed — a
+  column there would be wiped on every "Refresh everything".
 - `cron_runs` (v82) — audit log for ALL six cron invocations. Captures route_name, started_at, finished_at, auth_status, status (running/success/failed/auth_failed), error_message, rows_affected. Written by every cron handler via `src/lib/cron-auth.ts`. Use to answer "did Vercel fire this cron in the last 24h?" — separable from sync_runs which only covers sync-whop.
 - `achievements` — catalog of 17 unlockable achievements (v53)
 - `student_achievements` — per-student unlock rows + `achievement_unlock_stats`
@@ -202,7 +209,7 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 | Job | Cadence | What it does |
 |-----|---------|-------------|
 | `sync-whop` | daily 00:00 UTC | Pull Whop watch history → `student_lesson_completions`. Also stamps `students.cancel_scheduled_at` from Whop's `cancel_at_period_end` field (v75.46). |
-| `snapshot-progress` | daily 00:30 UTC | Writes yesterday+today rows to `daily_progress_snapshots`. Reads canonical `student_progress_counts` view (v75.28) so dashboard live values match snapshot trend values. |
+| `snapshot-progress` | daily 00:30 UTC | Writes yesterday+today rows to `daily_progress_snapshots` + the daily Canceling count to `canceling_snapshots` (v76). Reads canonical `student_progress_counts` view (v75.28) so dashboard live values match snapshot trend values. |
 | `check-engagement` | every 4h offset 00 | Detect churn signals → `disengagement_alerts` |
 | `check-csm-tasks` | every 4h offset :15 | Evaluate `templates.trigger_config` → `tasks`. Includes auto-dismiss for orphan tasks (v75.19). |
 | `check-na-tasks` | every 4h offset :20 | Not-Activated escalation (Day 3/5/7/10) |
@@ -222,7 +229,7 @@ Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` 
 | `admin-auth.ts` | Team auth gate for API routes |
 | `whop.ts` / `whop-members.ts` / `whop-sync-runner.ts` | Whop HTTP + sync. v75.53: the sync self-heals NULL `first_paid_at` via a bounded cross-product lookup (shared with the backfill). **v75.59 LOAD-BEARING: every upsert row carries the IDENTICAL full column set, preserving by VALUE — never reintroduce a conditional row key.** postgrest-js unions batch keys and PostgREST NULLs omitted columns on conflict-update (the 2026-06-11 wipe: 638 `first_paid_at` + 67 `whop_plan_id` + ~48 `cancel_scheduled_at` erased); a tripwire aborts the sync on any non-uniform key set. v75.60/61: `canceled_at` backfill tries past cycle-end, then past `expires_at` (refund revocations), then stamps the observation moment — a churned student can never stay invisible to the churn trend. |
 | `pkce.ts` | OAuth PKCE helpers |
-| `csm-triggers.ts` | Trigger metric registry + evaluator |
+| `csm-triggers.ts` | Trigger metric registry + evaluator. v76: `is_canceling` condition (cancel_scheduled_at + still active) available in the /admin/templates TriggerBuilder — powers the save-the-sale "Canceling" task template. |
 | `csm-events.ts` | CSM event hooks (called from mark-* routes) |
 | `templates.ts` | DM template renderer (variable substitution) |
 | `dm-toggles.ts` | Day-28 DM enable/disable |

@@ -49,6 +49,8 @@ interface MetricPoint {
   active_count: number;
   joined_count: number;
   churned_count: number;
+  // v76 — from canceling_snapshots (0 for dates before the feature shipped).
+  canceling_count: number;
 }
 
 interface DashboardData {
@@ -132,6 +134,7 @@ export default function AdminDashboard() {
         tasksRes,
         snapshotsRes,
         milestonesRes,
+        cancelingSnapsRes,
       ] = await Promise.all([
         fetchAllRowsPaginated<Student>(buildStudentsQuery),
         // Per-student counts via a pre-aggregated view. Querying
@@ -191,6 +194,16 @@ export default function AdminDashboard() {
             .from("student_milestones")
             .select("student_id, bounty_access_claimed_at"),
         ),
+        // v76 — Canceling trend history. Own table (NOT a snapshot
+        // column) because the rebuild RPC deletes+reinserts
+        // daily_progress_snapshots and point-in-time canceling state
+        // can't be recomputed — see the v84 migration. Day-bounded,
+        // so no pagination needed (max 14 rows).
+        supabase
+          .from("canceling_snapshots")
+          .select("snapshot_date, canceling_count_cohort")
+          .gte("snapshot_date", fourteenDaysAgo)
+          .order("snapshot_date", { ascending: true }),
       ]);
 
       // v75.32: surface pagination errors. Helper returns empty data
@@ -305,6 +318,17 @@ export default function AdminDashboard() {
         }
         return Number(r[allCol] ?? 0);
       };
+      // v76 — canceling history keyed by date. Dates with no row
+      // (before the feature shipped) render as 0.
+      const cancelingByDate = new Map(
+        (
+          (cancelingSnapsRes.data ?? []) as Array<{
+            snapshot_date: string;
+            canceling_count_cohort: number;
+          }>
+        ).map((r) => [r.snapshot_date, r.canceling_count_cohort]),
+      );
+
       const trend = (snapshotsRes.data ?? []).map((r) => ({
         snapshot_date: (r as { snapshot_date: string }).snapshot_date,
         avg_progress: pickScopedColumn(
@@ -327,6 +351,9 @@ export default function AdminDashboard() {
           "churned_count_cohort",
           "churned_count",
         ),
+        canceling_count:
+          cancelingByDate.get((r as { snapshot_date: string }).snapshot_date) ??
+          0,
       }));
 
       // Bounty count - "how many people joined the bounty program."
@@ -529,11 +556,11 @@ export default function AdminDashboard() {
             label="Canceling"
             current={data.cancelingCount}
             currentSuffix=" early"
-            // No historical sparkline yet — cancel_scheduled_at column
-            // is brand new (v75.46). Pass a zeroed series so the tile
-            // renders without a trend line. After ~14 days of sync
-            // runs we can populate this from a new snapshot column.
-            points={Array(14).fill(0)}
+            // v76 — real history from canceling_snapshots (written
+            // daily by snapshot-progress; rebuild-proof, see v84
+            // migration). Dates before the feature shipped render 0,
+            // so the line grows organically over the first ~2 weeks.
+            points={data.trend.map((p) => p.canceling_count)}
             mode="running"
             inverseDelta
           />

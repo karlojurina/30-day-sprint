@@ -494,7 +494,12 @@ export type ConditionMetric =
   // Distinguishes "bought on Whop but never showed up" from "actually
   // came over and logged in." Stored as students.first_sprint_login_at;
   // truthy = condition is true.
-  | "has_logged_into_app";
+  | "has_logged_into_app"
+  // v76: is the student in Whop's "Canceling" state — clicked cancel
+  // but still has access through end of billing cycle? Stored as
+  // students.cancel_scheduled_at (v83); true only while membership is
+  // still active/past_due. The save-the-sale window.
+  | "is_canceling";
 
 /** Numeric / boolean / enum conditions all share the discriminator
  *  but have different shapes. Keep them as one union and let the
@@ -537,7 +542,8 @@ export type Condition =
     }
   | {
       // v44 — boolean: has the student ever authed into the sprint app?
-      metric: "has_logged_into_app";
+      // v76 — is_canceling: same plain-boolean shape (no param).
+      metric: "has_logged_into_app" | "is_canceling";
       op: "is" | "is_not";
     };
 

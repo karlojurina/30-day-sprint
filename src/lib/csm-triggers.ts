@@ -74,6 +74,8 @@ export interface StudentSnapshot {
     | "first_paid_at"
     | "membership_status"
     | "last_active_at"
+    // v76 — drives the is_canceling custom-trigger condition.
+    | "cancel_scheduled_at"
   > & {
     /** v46 — sourced from student_milestones, joined into the snapshot
      *  so condition evaluators can stay simple. */
@@ -281,6 +283,7 @@ export function buildStudentSnapshot(
       first_paid_at: student.first_paid_at ?? null,
       membership_status: student.membership_status,
       last_active_at: student.last_active_at,
+      cancel_scheduled_at: student.cancel_scheduled_at ?? null,
       first_sprint_login_at: milestones?.first_sprint_login_at ?? null,
     },
     day,
@@ -715,6 +718,19 @@ export const METRICS: Record<import("@/types/database").ConditionMetric, MetricD
         ? "Has logged into the sprint app"
         : "Has NOT logged into the sprint app",
   },
+  // v76 — Whop "Canceling" state: clicked cancel, still has access
+  // through end of billing cycle. THE save-the-sale window. True only
+  // while membership is still active/past_due (terminal students are
+  // churned, not canceling).
+  is_canceling: {
+    id: "is_canceling",
+    label: "Is canceling (clicked cancel, still has access)",
+    input: "boolean",
+    describe: (c) =>
+      c.op === "is"
+        ? "Is canceling (cancel scheduled)"
+        : "Is NOT canceling",
+  },
 };
 
 /* ─────────────────────────────────────────────────────────────────
@@ -812,6 +828,18 @@ function evalCondition(snap: StudentSnapshot, c: Condition): boolean {
       // True when first_sprint_login_at is stamped (non-null).
       const loggedIn = Boolean(snap.student.first_sprint_login_at);
       return c.op === "is" ? loggedIn : !loggedIn;
+    }
+    case "is_canceling": {
+      // v76 — mirrors isCanceling in admin/metrics-definitions.ts:
+      // cancel_scheduled_at stamped AND membership still active/past_due
+      // (a terminal student is churned, not canceling — the trigger
+      // auto-dismisses via 3c/real-time re-eval once they churn or
+      // re-activate, closing the save-the-sale window either way).
+      const canceling =
+        Boolean(snap.student.cancel_scheduled_at) &&
+        (snap.student.membership_status === "active" ||
+          snap.student.membership_status === "past_due");
+      return c.op === "is" ? canceling : !canceling;
     }
     default: {
       const actual = getNumericValue(snap, c);

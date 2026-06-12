@@ -62,7 +62,7 @@ export async function reEvaluateStudentOpenTasks(
       supabase
         .from("students")
         .select(
-          "id, name, joined_at, first_paid_at, membership_status, last_active_at",
+          "id, name, joined_at, first_paid_at, membership_status, last_active_at, cancel_scheduled_at",
         )
         .eq("id", studentId)
         .maybeSingle(),
@@ -94,6 +94,7 @@ export async function reEvaluateStudentOpenTasks(
       | "first_paid_at"
       | "membership_status"
       | "last_active_at"
+      | "cancel_scheduled_at"
     >;
     const completions = completionsRes.data ?? [];
     const lessons = (lessonsRes.data ?? []) as Array<{

@@ -75,6 +75,8 @@ type ActiveRow = {
   first_paid_at: string | null;
   membership_status: string;
   whop_plan_id: string | null;
+  // v76 — for the daily canceling_snapshots write.
+  cancel_scheduled_at: string | null;
 };
 
 type ProgressCountRow = {
@@ -134,7 +136,9 @@ export async function GET(request: NextRequest) {
     await fetchAllRowsPaginated<ActiveRow>(() =>
       supabase
         .from("students")
-        .select("id, joined_at, first_paid_at, membership_status, whop_plan_id")
+        .select(
+          "id, joined_at, first_paid_at, membership_status, whop_plan_id, cancel_scheduled_at",
+        )
         .in("membership_status", ACTIVE_STATUSES as unknown as string[])
         .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[]),
     );
@@ -255,7 +259,32 @@ export async function GET(request: NextRequest) {
   // both rows). Acceptable until we add a transitions log. Same
   // semantic as the pre-v75.28 cron, just now applied to two dates.
 
+  // v76 — daily Canceling count for the dashboard tile's trend line.
+  // Point-in-time state (same "reflects now" semantic as active_count,
+  // documented above). Lives in its OWN table because the rebuild RPC
+  // deletes+reinserts daily_progress_snapshots and canceling state
+  // cannot be recomputed for past dates — see the v84 migration.
+  // activeCohort is already active/past_due + paying + launch cohort,
+  // so a stamped cancel_scheduled_at here = isCanceling.
+  const cancelingCohortCount = activeCohort.filter(
+    (s) => s.cancel_scheduled_at != null,
+  ).length;
+
   const upsertBoth = await Promise.all([
+    supabase.from("canceling_snapshots").upsert(
+      {
+        snapshot_date: yesterday.date,
+        canceling_count_cohort: cancelingCohortCount,
+      },
+      { onConflict: "snapshot_date" },
+    ),
+    supabase.from("canceling_snapshots").upsert(
+      {
+        snapshot_date: today.date,
+        canceling_count_cohort: cancelingCohortCount,
+      },
+      { onConflict: "snapshot_date" },
+    ),
     supabase.from("daily_progress_snapshots").upsert(
       {
         snapshot_date: yesterday.date,

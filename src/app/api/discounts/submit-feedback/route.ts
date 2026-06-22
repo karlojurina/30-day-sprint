@@ -130,7 +130,23 @@ export async function POST(request: NextRequest) {
   }
 
   // Atomic insert via the v29 RPC function.
-  const { data, error } = await supabase.rpc(
+  //
+  // The RPC has an internal authorization guard (auth.uid() must match
+  // the student or be a team member). The service-role client above has
+  // no user identity — auth.uid() is null there — so calling the RPC
+  // through it makes the guard raise "Not authorized" and nothing is
+  // written. Call it through a client carrying the student's own JWT so
+  // auth.uid() resolves to them and the guard passes. The inserts still
+  // run with the function's security-definer privileges (RLS-exempt).
+  const userClient = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      auth: { persistSession: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    },
+  );
+  const { data, error } = await userClient.rpc(
     "submit_discount_with_feedback",
     {
       p_student_id: studentId,

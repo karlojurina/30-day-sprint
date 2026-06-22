@@ -1505,10 +1505,20 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     async (answers: DiscountFeedbackAnswer[]): Promise<string | null> => {
       if (!student) return "Not signed in";
 
+      // v75.31 made /api/discounts/submit-feedback require student-self
+      // auth (Bearer token), but this call was never updated to send it —
+      // so every submission 401'd before the RPC ran and no feedback rows
+      // were ever written. Same bug class as the v75.35 admin-approve fix.
+      const token = await getAccessToken();
+      if (!token) return "Not signed in";
+
       try {
         const res = await fetch("/api/discounts/submit-feedback", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
           body: JSON.stringify({
             studentId: student.id,
             answers,

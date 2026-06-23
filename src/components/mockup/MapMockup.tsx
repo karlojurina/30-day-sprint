@@ -17,6 +17,7 @@ import {
   PLAYBOOK_UNLOCK_LESSON_ID,
   SPRINT_EXCLUDED_LESSON_IDS,
   TOTAL_LESSONS,
+  DISCOUNT_WINDOW_DAYS,
 } from "@/lib/constants";
 import { isPlaybookUnlocked } from "@/lib/progress";
 import { useIsPhone } from "@/lib/useMediaQuery";
@@ -525,6 +526,7 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
     currentLesson,
     discountRequest,
     discountAllLessonsDone,
+    discountMsLeft,
     regionProgress,
     requestDiscount,
     bountyAccessClaimedAt,
@@ -1450,18 +1452,29 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                         : discountRequest.status === "rejected"
                           ? "Discount rejected"
                           : "Discount pending"
-                      : "Claim discount",
+                      : discountMsLeft <= 0
+                        ? "Discount window closed"
+                        : "Claim discount",
                     sublabel: discountRequest
                       ? discountRequest.status === "approved" || discountRequest.status === "applied"
                         ? "30% off - applied by team"
                         : discountRequest.status === "rejected"
                           ? "see Discord"
                           : "review in progress"
-                      : discountAllLessonsDone
-                        ? "reward unlocked"
-                        : "finish R1 + R2 first",
+                      : discountMsLeft <= 0
+                        ? `the ${DISCOUNT_WINDOW_DAYS}-day window has passed`
+                        : discountAllLessonsDone
+                          ? "reward unlocked"
+                          : "finish R1 + R2 first",
                   }
                 : undefined
+            }
+            // Past the discount window with no existing request: lock the
+            // checkpoint (dimmed) so a student can't open the claim form
+            // only to be rejected server-side. An existing request still
+            // opens its status regardless of the window.
+            secondaryMarkerLocked={
+              view === "r2" && discountMsLeft <= 0 && !discountRequest
             }
             onSecondaryMarkerClick={
               view === "r2"
@@ -1469,6 +1482,13 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
                     // Open the celebration modal in whichever mode applies.
                     if (discountRequest) {
                       setDiscountModalMode("review");
+                    } else if (discountMsLeft <= 0) {
+                      // Window closed and they never applied — no claim
+                      // path, just explain why instead of opening a form
+                      // that the server will reject.
+                      showToast(
+                        `The ${DISCOUNT_WINDOW_DAYS}-day discount window has closed.`,
+                      );
                     } else if (!discountAllLessonsDone) {
                       setDiscountModalMode("blocked");
                     } else {

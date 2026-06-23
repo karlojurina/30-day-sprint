@@ -136,9 +136,10 @@ export function StatsWidget({ onOpenLesson }: StatsWidgetProps) {
     if (discountAllLessonsDone && discountEligible) {
       return { kind: "eligible" as const };
     }
-    if (discountAllLessonsDone) {
-      return { kind: "status" as const, text: "Ready to apply for 30% off" };
-    }
+    // Lessons done but the 14-day window has closed (discountEligible is
+    // false) and there's no existing request: nothing to show. The block
+    // disappears rather than dangling a "ready to apply" they can't act
+    // on. (Existing requests are handled by the status branches above.)
     if (msLeft > 0) {
       const totalSec = Math.floor(msLeft / 1000);
       const d = Math.floor(totalSec / 86_400);

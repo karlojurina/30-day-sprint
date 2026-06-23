@@ -1154,7 +1154,7 @@ function DiscordLinkBlock({
  * block flips to a compact "saved" view with the chosen stars + an
  * "Edit" link that re-opens the form pre-populated with the previous
  * values. The comment is stored verbatim (trimmed, 2k char cap) and
- * shows in /admin/lessons next to the student's name + email.
+ * shows in /admin/feedback/lessons next to the student's name + email.
  */
 function LessonRatingBlock({
   lessonId,

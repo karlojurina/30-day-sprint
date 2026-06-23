@@ -80,13 +80,16 @@ const navEntries: NavEntry[] = [
     ],
   },
   {
-    type: "leaf",
-    href: "/admin/lessons",
-    label: "Lessons",
+    type: "group",
+    label: "Feedback",
     csmHidden: true,
     icon: (
-      <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.62L12 2 9.19 8.62 2 9.24l5.46 4.73L5.82 21z" />
+      <path d="M8 10h8M8 14h5m-9 6 3.5-3H18a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2z" />
     ),
+    children: [
+      { type: "leaf", href: "/admin/feedback/lessons", label: "Lessons" },
+      { type: "leaf", href: "/admin/feedback/survey", label: "Survey" },
+    ],
   },
   {
     type: "leaf",

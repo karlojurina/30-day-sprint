@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useStudent } from "@/contexts/StudentContext";
-import { progressPercent } from "@/lib/constants";
+import { progressPercent, DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 
 /**
  * Focal element of the (now single-row) TopBar. Horizontal bar showing
@@ -124,7 +124,7 @@ export function DiscountProgressBar() {
               pointerEvents: "none",
               lineHeight: 1,
             }}
-            title="30% off your next month — finish R1 + R2 within 14 days of joining"
+            title={`30% off your next month — finish R1 + R2 within ${DISCOUNT_WINDOW_DAYS} days of joining`}
           >
             <svg
               width="9"

@@ -30,7 +30,7 @@ Every entity the platform stores, in plain English. This is what lets you design
 | `discord_username` | Pulled from Whop at login (the `username` field). |
 | `discord_user_id` | The Discord snowflake (e.g. `123456789012345678`). Looked up once at signup via `whop.com/api/v2/members/{id}` → `social_accounts`. Used by the day-28 DM bot. Best-effort: null if the student hasn't connected Discord. |
 | `membership_status` | `active` / `canceled` / `past_due` / `expired`. Updated by Whop webhooks. This is what drives the "Churned" column in Kanban. |
-| `joined_at` | The student's Whop **membership** join date (not their login date). Pulled from Whop at OAuth. Drives the day counter, the 14-day discount window, and Kanban column placement. |
+| `joined_at` | The student's Whop **membership** join date (not their login date). Pulled from Whop at OAuth. Drives the day counter and Kanban column placement. (The 14-day discount window anchors on `first_paid_at`, not this — see note 6 below.) |
 | `last_active_at` | Last time they hit the dashboard. Used for the "inactive 5d" alert and the Last Active column. |
 | `current_streak` | Day-streak counter. |
 | `whop_access_token`, `whop_refresh_token` | Their personal Whop OAuth tokens. Used by certain refresh flows. |
@@ -608,7 +608,7 @@ Things to be aware of before designing on top of the platform.
 3. **Activation Points (AP1/AP2/AP3) don't exist in the code.** The old docs reference them; the schema has no AP fields. Any KPI that mentions activation points is currently undefined.
 4. **Email-as-identity is fragile.** Whop students get a synthetic Supabase email like `user_XYZ@whop.ecomtalent.com`. If you want to email students directly, you need their real email from the `students.email` field (which is the Whop-provided one).
 5. **`joined_at` is set once, at first login, from Whop's earliest membership for our product.** If Whop's data is wrong at that moment, our day counter is wrong forever. There's no UI to correct it.
-6. **The discount window is 14 days from `joined_at`, not from the student's first login.** A student who joins on Whop but waits 5 days to log in only has 9 days left. Worth being explicit about in CSM Day 1 messaging.
+6. **The discount window is 14 days from `first_paid_at` (original Whop signup), not from the student's first login.** A student who joins on Whop but waits 5 days to log in only has 9 days left. Worth being explicit about in CSM Day 1 messaging.
 7. **Compound lesson semantics matter for KPIs.** A "completed lesson" can mean: (a) `completed_at` is set, or (b) for compound lessons, both halves are set. The discount eligibility check uses (b). A naive "count of `student_lesson_completions` rows where completed_at is not null" undercounts compound lessons that are only half done and overcounts compound lessons where only the watch half is done.
 8. **`student_lesson_completions` rows can also represent skips.** Any KPI that counts rows must filter on `completed_at IS NOT NULL` (or explicitly include skips, depending on what you mean by "engagement").
 9. **The `MANUAL-` promo-code fallback is silent.** If the Whop API fails on approval, the student still sees a code, but it's not a real Whop promo. The team has to manually create it. There's no admin warning surface for this beyond the response of the API call.
@@ -629,7 +629,7 @@ Things to be aware of before designing on top of the platform.
 - Total lessons: **57** (R1: 20, R2: 22, R3: 10, R4: 7 — approximate; always prefer the live count).
 - Total days: **30**.
 - Total regions: **4**.
-- Discount window: **14 days** from Whop join.
+- Discount window: **14 days** from `first_paid_at` (original Whop signup).
 - Discount gate lesson: **l049** ("Action Item: Static Ads").
 - Admin student cutoff: joins on/after **2026-05-01**.
 - Editing Breakdowns group: 9 lessons (l032, l033, l035–l039, l041, l042).

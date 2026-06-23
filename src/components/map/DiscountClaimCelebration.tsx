@@ -17,6 +17,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { SPEC_EASE } from "@/lib/motion";
+import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import type { DiscountRequest } from "@/types/database";
 
 export type DiscountCelebrationMode =
@@ -322,7 +323,7 @@ export function DiscountClaimCelebration({
                     }}
                   >
                     {blockerReason ??
-                      "Finish every lesson in Region 1 and Region 2 within the 14-day window to claim 30% off."}
+                      `Finish every lesson in Region 1 and Region 2 within the ${DISCOUNT_WINDOW_DAYS}-day window to claim 30% off.`}
                   </p>
                   <button
                     onClick={onDismiss}

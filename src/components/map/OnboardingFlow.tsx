@@ -21,6 +21,7 @@ import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { SPEC_EASE } from "@/lib/motion";
 import { useFocusTrap } from "@/lib/useFocusTrap";
+import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 
 interface OnboardingFlowProps {
   studentFirstName: string;
@@ -254,7 +255,7 @@ export function OnboardingFlow({
                     />
                     <Step
                       n="03"
-                      title="Finish R1 + R2 in 14 days, claim your discount"
+                      title={`Finish R1 + R2 in ${DISCOUNT_WINDOW_DAYS} days, claim your discount`}
                       body="Region 1 + Region 2 + the action items unlock 30% off your next month. There&rsquo;s a marker for it on the map."
                     />
                   </ul>

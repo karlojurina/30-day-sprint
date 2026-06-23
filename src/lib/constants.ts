@@ -119,9 +119,10 @@ export const SPRINT_EXCLUDED_LESSON_IDS = new Set<string>(["l057"]);
 
 // Time window for the 30% discount: complete all of R1 + R2 within
 // this many days of joining Whop. Measured server-side at claim time.
-// Lovro confirmed 15 days = "more than 15 days in = no discount" so
-// the eligible window covers days 1-15 inclusive.
-export const DISCOUNT_WINDOW_DAYS = 15;
+// 14 days / 2 weeks from joining — once past day 14 there is no
+// discount, and the claim checkpoint + sidebar block are hidden so a
+// student can't fill out the form only to hit a server error.
+export const DISCOUNT_WINDOW_DAYS = 14;
 
 // Real launch date for the 30-Day Sprint platform. The single
 // source of truth for "ignore everything that happened before this."

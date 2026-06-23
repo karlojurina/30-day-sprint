@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
 import type {
   Student,
@@ -19,7 +19,6 @@ import {
   progressPercent,
 } from "@/lib/constants";
 import { completedLessonIdsFor } from "@/lib/progress";
-import Link from "next/link";
 import {
   AdminPage,
   Section,
@@ -36,6 +35,7 @@ import type { RegionId } from "@/types/database";
 
 export default function StudentDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const studentId = params.id as string;
   const supabase = createClient();
 
@@ -186,11 +186,15 @@ export default function StudentDetailPage() {
         className="flex items-center gap-3 flex-wrap"
         style={{ marginBottom: 24 }}
       >
-        <Link
-          href="/admin/students"
-          aria-label="Back to students"
+        <button
+          type="button"
+          onClick={() => router.back()}
+          aria-label="Go back"
           style={{
             color: "var(--color-text-secondary)",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
             textDecoration: "none",
             display: "inline-flex",
             alignItems: "center",
@@ -212,7 +216,7 @@ export default function StudentDetailPage() {
           >
             <path d="M15 19l-7-7 7-7" />
           </svg>
-        </Link>
+        </button>
         <Avatar src={student.avatar_url} name={student.name} size={36} />
         <div className="flex-1 min-w-0">
           <h1

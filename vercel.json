@@ -19,10 +19,6 @@
     {
       "path": "/api/cron/check-na-tasks",
       "schedule": "20 */4 * * *"
-    },
-    {
-      "path": "/api/cron/day28-dm",
-      "schedule": "30 9 * * *"
     }
   ]
 }

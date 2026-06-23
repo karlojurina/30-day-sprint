@@ -34,9 +34,14 @@ export async function POST(request: NextRequest) {
   const supabase = auth.supabase;
 
   const body = await request.json();
-  const { requestId, reviewerId } = body as {
+  const { requestId, reviewerId, override } = body as {
     requestId?: string;
     reviewerId?: string;
+    // v77: team can force-approve past the eligibility gates
+    // (ad-verification, missing first_paid_at, R1+R2 completion, window).
+    // The admin reviews every application manually and is the control —
+    // surfaced as the "Generate anyway" button in the admin UI.
+    override?: boolean;
   };
 
   if (!requestId) {
@@ -70,7 +75,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  if (!studentRow.ad_submissions_verified) {
+  if (!override && !studentRow.ad_submissions_verified) {
     return NextResponse.json(
       {
         error:
@@ -88,7 +93,7 @@ export async function POST(request: NextRequest) {
   // were somehow bypassed. The admin must manually verify the
   // student's signup history and backfill first_paid_at before
   // approving.
-  if (!studentRow.first_paid_at) {
+  if (!override && !studentRow.first_paid_at) {
     return NextResponse.json(
       {
         error:
@@ -97,7 +102,10 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
-  const joinedAt = new Date(studentRow.first_paid_at);
+  // `?? 0` only matters under override (first_paid_at can be null then);
+  // the resulting deadline is unused because the window check below is
+  // also override-gated.
+  const joinedAt = new Date(studentRow.first_paid_at ?? 0);
   const deadline = new Date(
     joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000
   );
@@ -143,7 +151,7 @@ export async function POST(request: NextRequest) {
     const fullyDone = lesson.requires_action
       ? watchDone && actionDone
       : watchDone || skipped;
-    if (!fullyDone) {
+    if (!override && !fullyDone) {
       return NextResponse.json(
         { error: "Student has not completed all required R1 + R2 lessons" },
         { status: 400 }
@@ -157,10 +165,16 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  if (latestCompletion > deadline) {
+  if (!override && latestCompletion > deadline) {
     return NextResponse.json(
       { error: "Student finished R1 + R2 after the discount window closed" },
       { status: 400 }
+    );
+  }
+
+  if (override) {
+    console.warn(
+      `[discount approve] OVERRIDE by team member ${reviewerId ?? "unknown"} — request ${requestId}, student ${discountReq.student_id}. Eligibility gates skipped.`,
     );
   }
 

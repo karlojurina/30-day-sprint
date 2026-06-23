@@ -39,6 +39,9 @@ export default function DiscountsPage() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState<string | null>(null);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  // Per-request action error, shown inline (no native alert()). Keyed by
+  // request id so each row surfaces its own approve/reject/apply failure.
+  const [actionError, setActionError] = useState<Record<string, string>>({});
   // Per-student action submissions (lesson_id → link). Only fetched
   // for students whose request is currently rendered, so we don't pull
   // the whole completions table on every visit.
@@ -171,8 +174,20 @@ export default function DiscountsPage() {
     }
   }
 
-  async function handleApprove(requestId: string) {
+  function clearActionError(requestId: string) {
+    setActionError((prev) => {
+      if (!(requestId in prev)) return prev;
+      const next = { ...prev };
+      delete next[requestId];
+      return next;
+    });
+  }
+
+  // override=true skips the server eligibility gates (window, completion,
+  // ad-verification, missing first_paid_at) — the "Generate anyway" path.
+  async function handleApprove(requestId: string, override = false) {
     setProcessing(requestId);
+    clearActionError(requestId);
     try {
       // v75.35: v75.31 added requireTeam() to /api/discounts/approve,
       // but the UI wasn't updated to send the Bearer token — every
@@ -189,6 +204,7 @@ export default function DiscountsPage() {
         body: JSON.stringify({
           requestId,
           reviewerId: teamMember?.id,
+          override,
         }),
       });
 
@@ -196,16 +212,61 @@ export default function DiscountsPage() {
       if (res.ok) {
         fetchRequests();
       } else {
-        alert(`Approve failed: ${data.error || "Unknown error"}`);
+        setActionError((prev) => ({
+          ...prev,
+          [requestId]: data.error || "Unknown error",
+        }));
       }
     } catch (err) {
-      alert(`Approve failed: ${err instanceof Error ? err.message : String(err)}`);
+      setActionError((prev) => ({
+        ...prev,
+        [requestId]: err instanceof Error ? err.message : String(err),
+      }));
+    }
+    setProcessing(null);
+  }
+
+  // Toggle the student's ad_submissions_verified flag inline, without
+  // having to open the profile. Reuses the existing admin endpoint.
+  async function toggleAdVerified(
+    studentId: string,
+    verified: boolean,
+    requestId: string,
+  ) {
+    setProcessing(requestId);
+    clearActionError(requestId);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch("/api/admin/verify-ad-submissions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ studentId, verified }),
+      });
+      if (res.ok) {
+        fetchRequests();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setActionError((prev) => ({
+          ...prev,
+          [requestId]: data.error || "Couldn't update ad verification",
+        }));
+      }
+    } catch (err) {
+      setActionError((prev) => ({
+        ...prev,
+        [requestId]: err instanceof Error ? err.message : String(err),
+      }));
     }
     setProcessing(null);
   }
 
   async function handleMarkApplied(requestId: string) {
     setProcessing(requestId);
+    clearActionError(requestId);
     try {
       // v75.35: same auth pattern as handleApprove above.
       const { data: { session } } = await supabase.auth.getSession();
@@ -226,10 +287,16 @@ export default function DiscountsPage() {
       if (res.ok) {
         fetchRequests();
       } else {
-        alert(`Mark applied failed: ${data.error || "Unknown error"}`);
+        setActionError((prev) => ({
+          ...prev,
+          [requestId]: data.error || "Unknown error",
+        }));
       }
     } catch (err) {
-      alert(`Mark applied failed: ${err instanceof Error ? err.message : String(err)}`);
+      setActionError((prev) => ({
+        ...prev,
+        [requestId]: err instanceof Error ? err.message : String(err),
+      }));
     }
     setProcessing(null);
   }
@@ -237,6 +304,7 @@ export default function DiscountsPage() {
   async function handleReject(requestId: string) {
     const reason = prompt("Rejection reason (optional):");
     setProcessing(requestId);
+    clearActionError(requestId);
 
     // v75.35: switch from direct supabase write to the v75.31 hardened
     // route. Before this fix, rejects bypassed the API entirely — the
@@ -257,10 +325,16 @@ export default function DiscountsPage() {
         fetchRequests();
       } else {
         const data = await res.json().catch(() => ({}));
-        alert(`Reject failed: ${data.error || "Unknown error"}`);
+        setActionError((prev) => ({
+          ...prev,
+          [requestId]: data.error || "Unknown error",
+        }));
       }
     } catch (err) {
-      alert(`Reject failed: ${err instanceof Error ? err.message : String(err)}`);
+      setActionError((prev) => ({
+        ...prev,
+        [requestId]: err instanceof Error ? err.message : String(err),
+      }));
     }
 
     setProcessing(null);
@@ -362,7 +436,33 @@ export default function DiscountsPage() {
                     )}
                   </p>
                 </div>
-                <StatusPill status={req.status} />
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      toggleAdVerified(
+                        req.student_id,
+                        !req.student?.ad_submissions_verified,
+                        req.id,
+                      )
+                    }
+                    disabled={processing === req.id}
+                    title={
+                      req.student?.ad_submissions_verified
+                        ? "Ad submissions verified — click to unverify"
+                        : "Mark ad submissions verified"
+                    }
+                    style={adVerifyStyle(
+                      Boolean(req.student?.ad_submissions_verified),
+                      processing === req.id,
+                    )}
+                  >
+                    {req.student?.ad_submissions_verified
+                      ? "✓ Ads verified"
+                      : "Ads not verified"}
+                  </button>
+                  <StatusPill status={req.status} />
+                </div>
               </div>
 
               {req.promo_code && (
@@ -523,33 +623,70 @@ export default function DiscountsPage() {
               )}
 
               {req.status === "pending" && (
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleApprove(req.id)}
-                    disabled={processing === req.id}
-                    style={primaryBtnStyle(processing === req.id)}
-                  >
-                    {processing === req.id ? "Generating code…" : "Approve & generate code"}
-                  </button>
-                  <button
-                    onClick={() => handleReject(req.id)}
-                    disabled={processing === req.id}
-                    style={secondaryBtnStyle(processing === req.id)}
-                  >
-                    Reject
-                  </button>
+                <div className="flex flex-col gap-2" style={{ width: "100%" }}>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleApprove(req.id)}
+                      disabled={processing === req.id}
+                      style={primaryBtnStyle(processing === req.id)}
+                    >
+                      {processing === req.id ? "Generating code…" : "Approve & generate code"}
+                    </button>
+                    <button
+                      onClick={() => handleReject(req.id)}
+                      disabled={processing === req.id}
+                      style={secondaryBtnStyle(processing === req.id)}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                  {actionError[req.id] && (
+                    <div style={errorBoxStyle}>
+                      <p
+                        style={{
+                          fontSize: 13,
+                          color: "#e98aa0",
+                          margin: 0,
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        {actionError[req.id]}
+                      </p>
+                      <button
+                        onClick={() => handleApprove(req.id, true)}
+                        disabled={processing === req.id}
+                        style={overrideBtnStyle(processing === req.id)}
+                      >
+                        {processing === req.id ? "Generating…" : "Generate anyway"}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
               {req.status === "approved" && (
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleMarkApplied(req.id)}
-                    disabled={processing === req.id}
-                    style={primaryBtnStyle(processing === req.id)}
-                  >
-                    {processing === req.id ? "Marking…" : "Mark applied"}
-                  </button>
+                <div className="flex flex-col gap-2" style={{ width: "100%" }}>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleMarkApplied(req.id)}
+                      disabled={processing === req.id}
+                      style={primaryBtnStyle(processing === req.id)}
+                    >
+                      {processing === req.id ? "Marking…" : "Mark applied"}
+                    </button>
+                  </div>
+                  {actionError[req.id] && (
+                    <p
+                      style={{
+                        fontSize: 13,
+                        color: "#e98aa0",
+                        margin: 0,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {actionError[req.id]}
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -588,6 +725,55 @@ function secondaryBtnStyle(disabled: boolean): React.CSSProperties {
     letterSpacing: "-0.005em",
     cursor: disabled ? "default" : "pointer",
     opacity: disabled ? 0.6 : 1,
+    transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+  };
+}
+
+const errorBoxStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  alignItems: "flex-start",
+  padding: "10px 12px",
+  borderRadius: 8,
+  background: "rgba(221,51,102,0.10)",
+  border: "1px solid rgba(221,51,102,0.30)",
+};
+
+// "Generate anyway" — amber/warning so it reads as a deliberate force,
+// not a normal primary action.
+function overrideBtnStyle(disabled: boolean): React.CSSProperties {
+  return {
+    padding: "6px 14px",
+    borderRadius: 8,
+    border: "1px solid rgba(214,158,46,0.55)",
+    background: "rgba(214,158,46,0.12)",
+    color: "#e0b65a",
+    fontSize: 13,
+    fontWeight: 600,
+    letterSpacing: "-0.005em",
+    cursor: disabled ? "default" : "pointer",
+    opacity: disabled ? 0.6 : 1,
+    transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+  };
+}
+
+function adVerifyStyle(
+  verified: boolean,
+  disabled: boolean,
+): React.CSSProperties {
+  return {
+    padding: "3px 10px",
+    borderRadius: 999,
+    border: `1px solid ${verified ? "rgba(46,139,87,0.45)" : "var(--color-border)"}`,
+    background: verified ? "rgba(46,139,87,0.12)" : "transparent",
+    color: verified ? "var(--color-success)" : "var(--color-text-tertiary)",
+    fontSize: 11,
+    fontWeight: 600,
+    letterSpacing: "0.01em",
+    cursor: disabled ? "default" : "pointer",
+    opacity: disabled ? 0.6 : 1,
+    whiteSpace: "nowrap",
     transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
   };
 }

@@ -1,24 +1,29 @@
 "use client";
 
 /**
- * /admin/tasks/insights — Outreach insights (v85.2).
+ * /admin/tasks/insights — Outreach insights (v85.3).
  *
  * The Phase 0 measurement surface: does our outreach move behavior,
  * and which templates do the moving? Everything here is computed by
  * src/lib/outreach-insights.ts (shared with the /admin/templates
  * strip) — definitions live in the methodology box at the bottom.
  *
- * Headline metric: REVIVAL RATE — of DMs sent to dormant students
- * (zero activity in the 72h before the send), how many were active
- * within 72h after. Plain re-engagement is kept as a secondary
- * column but is inflated by already-active students.
+ * v85.3 — per-family SUCCESS grading (Karlo's call): each template is
+ * graded on what its message asks for. Stalled → logged in. Zero
+ * lessons → started a lesson. No-ship → shipped an action. Pace →
+ * came back (dormant sends only). Canceling → still subscribed with
+ * the cancel withdrawn. Events → not graded. The old revival /
+ * re-engaged pair and the dismissed column are gone from display.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
-import type { OutreachInsights, TemplateInsightRow } from "@/lib/outreach-insights";
+import type {
+  OutreachInsights,
+  TemplateInsightRow,
+} from "@/lib/outreach-insights";
 import { stripBucketGlyph } from "@/lib/templates";
 import {
   AdminPage,
@@ -33,14 +38,7 @@ import {
 
 type RangeKey = "30d" | "all";
 
-type SortKey =
-  | "title"
-  | "sent"
-  | "time"
-  | "revival"
-  | "reengaged"
-  | "replied"
-  | "dismissed";
+type SortKey = "title" | "sent" | "time" | "success" | "replied";
 
 function bucketDot(b?: string | null) {
   if (b === "at_risk") return "var(--color-warning)";
@@ -121,16 +119,12 @@ export default function OutreachInsightsPage() {
           return r.sent;
         case "time":
           return r.median_time_to_send_ms ?? -1;
-        case "revival":
-          return r.revival_eligible > 0 ? r.revived / r.revival_eligible : -1;
-        case "reengaged":
-          return r.sent > 0 ? r.re_engaged_72h / r.sent : -1;
+        case "success":
+          return r.success_eligible > 0 ? r.success / r.success_eligible : -1;
         case "replied": {
           const marked = r.replied + r.no_reply;
           return marked > 0 ? r.replied / marked : -1;
         }
-        case "dismissed":
-          return r.dismissed;
       }
     };
     return [...data.templates].sort((a, b) => {
@@ -150,13 +144,12 @@ export default function OutreachInsightsPage() {
     );
 
   const totals = data?.totals;
-  const markedTotal = (totals?.replied ?? 0) + (totals?.no_reply ?? 0);
 
   return (
     <AdminPage>
       <PageHeader
         title="Outreach insights"
-        description="Which DMs move behavior. Revival rate is the honest number — see how everything is calculated at the bottom."
+        description="Every template graded on what its message actually asks for. Definitions at the bottom."
         actions={
           <select
             value={range}
@@ -234,9 +227,9 @@ export default function OutreachInsightsPage() {
             }}
           >
             <Stat
-              label="Tasks created"
-              value={totals.created}
-              sublabel={`${totals.open} open now`}
+              label="Students reached"
+              value={totals.students_reached}
+              sublabel="got at least 1 DM"
             />
             <Stat label="DMs sent" value={totals.sent} />
             <Stat
@@ -245,19 +238,24 @@ export default function OutreachInsightsPage() {
               sublabel="queue latency, not copy quality"
             />
             <Stat
-              label="Revival rate"
-              value={pct(totals.revived, totals.revival_eligible)}
-              sublabel={`${totals.revived} of ${totals.revival_eligible} dormant sends`}
-              tone="accent"
+              label="Saves"
+              value={pct(totals.saves, totals.saves_eligible)}
+              sublabel={
+                totals.saves_eligible === 0
+                  ? "no save DMs sent in range"
+                  : `${totals.saves} of ${totals.saves_eligible} save DMs — still subscribed`
+              }
+              tone={totals.saves_eligible > 0 ? "accent" : "default"}
             />
             <Stat
-              label="Replied"
-              value={pct(totals.replied, markedTotal)}
+              label="Success rate"
+              value={pct(totals.success, totals.success_eligible)}
               sublabel={
-                markedTotal === 0
-                  ? "no outcomes marked yet"
-                  : `of ${markedTotal} marked`
+                totals.success_eligible === 0
+                  ? "no graded sends in range"
+                  : `${totals.success} of ${totals.success_eligible} graded sends did the thing`
               }
+              tone={totals.success_eligible > 0 ? "accent" : "default"}
             />
           </div>
 
@@ -307,10 +305,8 @@ export default function OutreachInsightsPage() {
                             ["title", "Template", "left"],
                             ["sent", "Sent", "right"],
                             ["time", "Time → send", "right"],
-                            ["revival", "Revival", "right"],
-                            ["reengaged", "Re-engaged", "right"],
+                            ["success", "Success", "right"],
                             ["replied", "Replied", "right"],
-                            ["dismissed", "Dismissed", "right"],
                           ] as Array<[SortKey, string, "left" | "right"]>
                         ).map(([key, label, align]) => (
                           <th
@@ -323,8 +319,7 @@ export default function OutreachInsightsPage() {
                               cursor: "pointer",
                               userSelect: "none",
                               whiteSpace: "nowrap",
-                              borderBottom:
-                                "1px solid var(--color-border)",
+                              borderBottom: "1px solid var(--color-border)",
                             }}
                             title="Click to sort"
                           >
@@ -345,15 +340,11 @@ export default function OutreachInsightsPage() {
                           <tr
                             key={r.template_id}
                             style={{
-                              borderBottom:
-                                "1px solid var(--color-border)",
+                              borderBottom: "1px solid var(--color-border)",
                             }}
                           >
                             <td
-                              style={{
-                                padding: "10px 16px",
-                                maxWidth: 320,
-                              }}
+                              style={{ padding: "10px 16px", maxWidth: 340 }}
                             >
                               <span
                                 className="flex items-center gap-2"
@@ -382,6 +373,17 @@ export default function OutreachInsightsPage() {
                                     : (r.scenario_id ?? "(deleted template)")}
                                 </span>
                               </span>
+                              <span
+                                style={{
+                                  display: "block",
+                                  fontSize: 11,
+                                  color: "var(--color-text-tertiary)",
+                                  marginTop: 2,
+                                  paddingLeft: 14,
+                                }}
+                              >
+                                success = {r.success_label}
+                              </span>
                             </td>
                             <td style={cellRight}>{r.sent}</td>
                             <td style={cellRight}>
@@ -389,21 +391,19 @@ export default function OutreachInsightsPage() {
                             </td>
                             <td
                               style={cellRight}
-                              title={`${r.revived} revived of ${r.revival_eligible} sends to dormant students`}
+                              title={
+                                r.family === "event"
+                                  ? "Event templates aren't graded"
+                                  : `${r.success} of ${r.success_eligible} eligible sends · ${r.success_label}`
+                              }
                             >
-                              {pct(r.revived, r.revival_eligible)}
-                              {r.revival_eligible > 0 && (
+                              {pct(r.success, r.success_eligible)}
+                              {r.success_eligible > 0 && (
                                 <span style={subNum}>
                                   {" "}
-                                  {r.revived}/{r.revival_eligible}
+                                  {r.success}/{r.success_eligible}
                                 </span>
                               )}
-                            </td>
-                            <td
-                              style={cellRight}
-                              title={`${r.re_engaged_72h} of ${r.sent} sends had any activity within 72h after (includes already-active students)`}
-                            >
-                              {pct(r.re_engaged_72h, r.sent)}
                             </td>
                             <td
                               style={cellRight}
@@ -414,15 +414,6 @@ export default function OutreachInsightsPage() {
                                 <span style={subNum}>
                                   {" "}
                                   {r.unmarked} unmarked
-                                </span>
-                              )}
-                            </td>
-                            <td style={cellRight}>
-                              {r.dismissed}
-                              {r.dismissed_auto > 0 && (
-                                <span style={subNum}>
-                                  {" "}
-                                  ({r.dismissed_auto} auto)
                                 </span>
                               )}
                             </td>
@@ -449,43 +440,46 @@ export default function OutreachInsightsPage() {
                 }}
               >
                 <li>
-                  <strong>Activity</strong> = the student marked a lesson
-                  watched, shipped an action item, or wrote/edited a daily
-                  note. Nothing else counts (logins alone are invisible to
-                  us historically).
+                  <strong>Success is graded per template family</strong> — on
+                  the thing the message actually asks for. Stalled DMs:
+                  logged in within 72h of the send. Zero-lessons DMs:
+                  started a lesson within 72h. No-ship DMs: shipped an
+                  action item within 72h (watching more lessons does NOT
+                  count). Behind-pace DMs: lesson or note activity within
+                  72h, counted only for sends to students who were dormant
+                  in the 72h before (so already-active students can&apos;t
+                  inflate it). Each row shows its own definition.
                 </li>
                 <li>
-                  <strong>Revival rate</strong> — the headline. Only DMs
-                  sent to <em>dormant</em> students count (zero activity in
-                  the 72h before the send). Revived = the student had
-                  activity within 72h after. This is the closest thing we
-                  have to &quot;the message woke them up.&quot;
-                </li>
-                <li>
-                  <strong>Re-engaged</strong> — any activity within 72h
-                  after the send, including students who were already
-                  active. Inflated by design; kept for continuity with the
-                  strip on /admin/templates.
+                  <strong>Saves</strong> (canceling DMs) = the student is
+                  active today with the cancel withdrawn. We don&apos;t
+                  store cancel history yet, so this is a current-state
+                  check — it can&apos;t prove the un-cancel happened after
+                  the DM. Treat it as a strong signal, not a timestamped
+                  fact.
                 </li>
                 <li>
                   <strong>Replied</strong> — manual Replied / No reply taps
                   on the Sent tab. Only as accurate as the team&apos;s
-                  tapping. Unmarked sends are excluded from the rate.
+                  tapping; unmarked sends are excluded from the rate.
+                  Matters most for save conversations.
                 </li>
                 <li>
-                  <strong>Time → send</strong> — median gap between the
-                  task appearing in the queue and the CSM marking it sent.
-                  Measures our process, not the copy.
+                  <strong>Time → send</strong> — median gap between the task
+                  appearing in the queue and the CSM marking it sent.
+                  Measures our process, not the copy. Send time = the
+                  moment &quot;Mark sent&quot; was clicked.
                 </li>
                 <li>
-                  <strong>Send time</strong> = the moment the CSM clicked
-                  &quot;Mark sent,&quot; which is only as precise as the
-                  team&apos;s habit of marking right after sending.
+                  <strong>Students reached</strong> counts unique students,
+                  so the escalation ladder (day 3 → 5 → 7) doesn&apos;t
+                  inflate it the way raw task counts would.
                 </li>
                 <li>
-                  Admin-only tasks (discount reviews) and tasks whose
-                  template was deleted are excluded from every number
-                  above.
+                  Welcome, month-2 and celebration templates aren&apos;t
+                  graded (&quot;—&quot;). Admin-only tasks (discount
+                  reviews) and tasks whose template was deleted are
+                  excluded from every number.
                 </li>
                 <li>
                   All of this is <strong>correlation, not causation</strong>
@@ -507,6 +501,7 @@ const cellRight: CSSProperties = {
   textAlign: "right",
   whiteSpace: "nowrap",
   color: "var(--color-text-primary)",
+  verticalAlign: "top",
 };
 
 const subNum: CSSProperties = {

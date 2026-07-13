@@ -6,9 +6,10 @@
  * computation the /admin/tasks/insights page uses, so the strip and
  * the page can never disagree. All-time range.
  *
- * Response shape kept from v85:
+ * Response shape (v85.3 — success replaced re_engaged_72h):
  *   { stats: { [templateId]: { created, open, sent, dismissed,
- *     replied, no_reply, re_engaged_72h } }, computed_at }
+ *     replied, no_reply, success, success_eligible, success_label } },
+ *     computed_at }
  *
  * Correlation, not causation — see the methodology box on
  * /admin/tasks/insights for the full definitions.
@@ -33,7 +34,9 @@ export async function GET(request: NextRequest) {
         dismissed: number;
         replied: number;
         no_reply: number;
-        re_engaged_72h: number;
+        success: number;
+        success_eligible: number;
+        success_label: string;
       }
     > = {};
     for (const row of insights.templates) {
@@ -44,7 +47,9 @@ export async function GET(request: NextRequest) {
         dismissed: row.dismissed,
         replied: row.replied,
         no_reply: row.no_reply,
-        re_engaged_72h: row.re_engaged_72h,
+        success: row.success,
+        success_eligible: row.success_eligible,
+        success_label: row.success_label,
       };
     }
     return NextResponse.json({

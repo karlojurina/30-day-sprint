@@ -90,7 +90,10 @@ interface TemplateStatLite {
   dismissed: number;
   replied: number;
   no_reply: number;
-  re_engaged_72h: number;
+  /** v85.3 — per-family success (see /admin/tasks/insights methodology). */
+  success: number;
+  success_eligible: number;
+  success_label: string;
 }
 
 
@@ -523,17 +526,18 @@ export default function AdminTemplatesPage() {
                       {(() => {
                         // Phase 0 — effectiveness at a glance. Hidden
                         // until this template has ever fired a task.
+                        // Full breakdown lives on /admin/tasks/insights.
                         const s = stats?.[t.id];
                         if (!s || s.created === 0) return null;
-                        const reEng =
-                          s.sent > 0
-                            ? ` · ${Math.round((s.re_engaged_72h / s.sent) * 100)}% re-engaged`
+                        const success =
+                          s.success_eligible > 0
+                            ? ` · ${Math.round((s.success / s.success_eligible) * 100)}% success`
                             : "";
                         const replied =
                           s.replied > 0 ? ` · ${s.replied} replied` : "";
                         return (
                           <span
-                            title="sent = DMs marked sent · re-engaged = student watched or shipped within 72h of the send · replied = manual tap on the Sent tab"
+                            title={`sent = DMs marked sent · success = ${s.success_label} (${s.success}/${s.success_eligible}) · replied = manual tap on the Sent tab · full breakdown on the tasks Insights tab`}
                             style={{
                               fontSize: 11,
                               color: "var(--color-text-tertiary)",
@@ -541,7 +545,7 @@ export default function AdminTemplatesPage() {
                               fontVariantNumeric: "tabular-nums",
                             }}
                           >
-                            {s.sent} sent{reEng}
+                            {s.sent} sent{success}
                             {replied}
                           </span>
                         );

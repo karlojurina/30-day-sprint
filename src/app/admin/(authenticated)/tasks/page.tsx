@@ -29,7 +29,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase-browser";
-import type { Student, Task, Template } from "@/types/database";
+import type { Student, Task, TaskOutcome, Template } from "@/types/database";
 import { getDayNumber } from "@/types/database";
 import {
   BUCKET_GLYPH,
@@ -418,6 +418,7 @@ export default function AdminTasksKanban() {
       onCopy={() => copyDMOnly(row)}
       onMarkSent={() => transitionTask(row.id, "completed")}
       onReopen={() => transitionTask(row.id, "open")}
+      onOutcome={(next) => void setTaskOutcome(row.id, next)}
       onDismiss={() =>
         setDismissModal({
           id: row.id,
@@ -459,6 +460,37 @@ export default function AdminTasksKanban() {
           Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({ to, notes }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error ?? `HTTP ${res.status}`);
+      }
+      await fetchTasks(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setBusyId(null);
+  }
+
+  /**
+   * Phase 0 — one-tap reply tracking on sent tasks. Tapping the active
+   * outcome again clears it (handled by the caller passing null).
+   */
+  async function setTaskOutcome(rowId: string, outcome: TaskOutcome | null) {
+    setBusyId(rowId);
+    setError(null);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch(`/api/admin/tasks/${rowId}/outcome`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ outcome }),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -754,6 +786,7 @@ function TaskRow({
   onCopy,
   onMarkSent,
   onReopen,
+  onOutcome,
   onDismiss,
 }: {
   row: TaskRow;
@@ -763,6 +796,7 @@ function TaskRow({
   onCopy: () => void;
   onMarkSent: () => void;
   onReopen: () => void;
+  onOutcome: (next: TaskOutcome | null) => void;
   onDismiss: () => void;
 }) {
   const { student, template } = row;
@@ -931,6 +965,32 @@ function TaskRow({
             <Button variant="primary" href="/admin/discounts">
               Open discount →
             </Button>
+          )}
+          {status === "completed" && (
+            <>
+              <Button
+                variant={row.outcome === "replied" ? "primary" : "ghost"}
+                size="sm"
+                busy={busy}
+                onClick={() =>
+                  onOutcome(row.outcome === "replied" ? null : "replied")
+                }
+                title="Student replied to the DM (tap again to clear)"
+              >
+                Replied
+              </Button>
+              <Button
+                variant={row.outcome === "no_reply" ? "primary" : "ghost"}
+                size="sm"
+                busy={busy}
+                onClick={() =>
+                  onOutcome(row.outcome === "no_reply" ? null : "no_reply")
+                }
+                title="No response to the DM (tap again to clear)"
+              >
+                No reply
+              </Button>
+            </>
           )}
           {status !== "open" && (
             <Button variant="ghost" busy={busy} onClick={onReopen}>

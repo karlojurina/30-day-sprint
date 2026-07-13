@@ -82,6 +82,17 @@ interface DraftFields {
 
 const EMPTY_TRIGGER: TriggerConfig = { all: [] };
 
+/** Phase 0 — per-template effectiveness from /api/admin/templates/stats. */
+interface TemplateStatLite {
+  created: number;
+  open: number;
+  sent: number;
+  dismissed: number;
+  replied: number;
+  no_reply: number;
+  re_engaged_72h: number;
+}
+
 
 function emptyDraft(): DraftFields {
   return {
@@ -116,6 +127,34 @@ export default function AdminTemplatesPage() {
 
   useEffect(() => {
     void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Phase 0 — load per-template effectiveness. Non-fatal: the editor
+  // works fine without stats, so failures are swallowed silently.
+  const [stats, setStats] = useState<Record<
+    string,
+    TemplateStatLite
+  > | null>(null);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        const res = await fetch("/api/admin/templates/stats", {
+          headers: { Authorization: `Bearer ${session?.access_token}` },
+        });
+        if (res.ok) {
+          const json = (await res.json()) as {
+            stats: Record<string, TemplateStatLite>;
+          };
+          setStats(json.stats);
+        }
+      } catch {
+        // stats are additive — never block the editor on them
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -481,6 +520,32 @@ export default function AdminTemplatesPage() {
                       >
                         {stripBucketGlyph(t.title)}
                       </span>
+                      {(() => {
+                        // Phase 0 — effectiveness at a glance. Hidden
+                        // until this template has ever fired a task.
+                        const s = stats?.[t.id];
+                        if (!s || s.created === 0) return null;
+                        const reEng =
+                          s.sent > 0
+                            ? ` · ${Math.round((s.re_engaged_72h / s.sent) * 100)}% re-engaged`
+                            : "";
+                        const replied =
+                          s.replied > 0 ? ` · ${s.replied} replied` : "";
+                        return (
+                          <span
+                            title="sent = DMs marked sent · re-engaged = student watched or shipped within 72h of the send · replied = manual tap on the Sent tab"
+                            style={{
+                              fontSize: 11,
+                              color: "var(--color-text-tertiary)",
+                              whiteSpace: "nowrap",
+                              fontVariantNumeric: "tabular-nums",
+                            }}
+                          >
+                            {s.sent} sent{reEng}
+                            {replied}
+                          </span>
+                        );
+                      })()}
                       {t.is_admin_only && (
                         <span
                           style={{

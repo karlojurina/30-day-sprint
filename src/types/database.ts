@@ -553,6 +553,9 @@ export interface TriggerConfig {
 
 export type TaskStatus = "open" | "completed" | "dismissed";
 
+/** v85 — manual CSM reply tracking on sent tasks. */
+export type TaskOutcome = "replied" | "no_reply";
+
 export interface Task {
   id: string;
   student_id: string;
@@ -566,6 +569,10 @@ export interface Task {
   dismissed_at: string | null;
   dismissed_by: string | null;
   notes: string | null;
+  /** v85 columns — undefined at runtime until the migration is applied. */
+  outcome?: TaskOutcome | null;
+  outcome_at?: string | null;
+  outcome_by?: string | null;
 }
 
 export interface AdminConfigRow {

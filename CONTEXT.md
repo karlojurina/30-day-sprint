@@ -52,7 +52,7 @@ welcome, first-client landed, etc.).
 | `/admin` | KPI overview |
 | `/admin/journey` | Student journey board (per-week columns, pace overview, drawer detail) |
 | `/admin/students` + `/admin/students/[id]` | Table view + detail |
-| `/admin/templates` | CSM DM template editor (built-ins + custom, with TriggerBuilder) |
+| `/admin/templates` | CSM DM template editor (built-ins + custom, with TriggerBuilder). v85: per-template effectiveness strip on each row (sent · % re-engaged within 72h · replied) from `/api/admin/templates/stats`. |
 | `/admin/tasks` | CSM task queue (open / completed / dismissed). Open tab is priority-first: Canceling (derived from the STUDENT row via `isCanceling`, pinned on top regardless of template) → Cancel path → At risk → Events & wins, oldest-first with waiting-time chips; cards carry behavior summary + @discord / No-Discord + Canceling / Past-due pills; queue-health strip (open by tier, oldest wait, sent today). Sent/Dismissed keep recency grouping. |
 | `/admin/discounts` | Pending discount review |
 | `/admin/alerts` | Auto-generated churn alerts |
@@ -92,7 +92,15 @@ welcome, first-client landed, etc.).
 **Admin**
 - CRUD on templates (`/api/admin/templates`, `/api/admin/templates/[id]`),
   tasks (`/api/admin/tasks`, `/api/admin/tasks/[id]`, plus
-  copy/dismiss/refire/transition), discord toggles, admin_config
+  copy/dismiss/refire/transition/outcome), discord toggles, admin_config
+- `GET /api/admin/templates/stats` (v85, Phase 0 retention) — per-template
+  effectiveness over the FULL task history: created/open/sent/dismissed,
+  replied/no_reply (manual taps), re_engaged_72h (student watched or
+  shipped within 72h of the send — computed live from
+  student_lesson_completions, so it grades pre-v85 history too).
+  Correlation not causation; for comparing templates against each other.
+- `POST /api/admin/tasks/[id]/outcome` (v85) — one-tap replied/no_reply
+  on sent tasks; null clears; requires the v85 migration.
 - Sync triggers (`/api/admin/sync-whop`, `/api/admin/rebuild-snapshots`,
   `/api/admin/backfill-discord-ids`, `/api/admin/backfill-first-paid-at` v75.34,
   `/api/admin/refresh-everything` v75.22)
@@ -175,7 +183,10 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 - `discount_requests` + `discount_feedback_questions` +
   `discount_feedback_responses` — discount flow
 - `disengagement_alerts` — auto-generated churn alerts
-- `tasks` — CSM task queue (per-student, per-scenario, links to `templates`)
+- `tasks` — CSM task queue (per-student, per-scenario, links to
+  `templates`). v85 added `outcome` (replied/no_reply/NULL, manual CSM
+  tap on the Sent tab) + `outcome_at` + `outcome_by` — Phase 0 of the
+  retention overhaul's feedback loop.
 - `daily_progress_snapshots` — frozen daily progress per student. v77 added cohort columns (`active_count_cohort`, `joined_count_cohort`, `churned_count_cohort`, `avg_progress_cohort`). After v75.51 (scope toggle removed), only the `_cohort` columns are read by the UI; the legacy non-cohort columns are still written by the snapshot cron for historical continuity. v81 aligned the cron + RPC + dashboard avg_progress formula on the canonical isLessonComplete + l057 exclusion (single source of truth).
 - `sync_runs` — audit log for the Whop community sync (v77). One row per attempt with source (cron / admin-button), status (success/failed), counts (fetched/inserted/updated/skipped/errors), duration_ms, error_message. Team-read RLS. Use to answer "did sync run last night?" without digging Vercel logs.
 - `canceling_snapshots` (v84) — one row per day: how many launch-cohort

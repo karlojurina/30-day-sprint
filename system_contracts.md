@@ -250,7 +250,9 @@ When adding a new table, append it here. When deleting a field, scan
 - **Stable contract:** `student_id`, `scenario_id`, `template_id`,
   `status` (open/completed/dismissed), `behavior_summary`,
   `created_at`, `completed_at`, `dismissed_at`, `dismissed_by`,
-  `notes`
+  `notes`, `outcome` (v85 — replied/no_reply/NULL, written only by
+  `POST /api/admin/tasks/[id]/outcome`, read by
+  `GET /api/admin/templates/stats` for per-template reply rates)
 - **CSM cron filters (v75.15+):** `check-csm-tasks`,
   `check-engagement`, `check-na-tasks` all gate on
   `joined_at >= csmSprintWindowCutoffIso()` (= `now() - 30d`) AND

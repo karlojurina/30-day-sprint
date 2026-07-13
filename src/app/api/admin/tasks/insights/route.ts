@@ -19,10 +19,15 @@ export async function GET(request: NextRequest) {
   if (isAuthFailure(auth)) return auth.error;
 
   const sinceRaw = new URL(request.url).searchParams.get("since");
-  const sinceIso =
-    sinceRaw && !Number.isNaN(new Date(sinceRaw).getTime())
-      ? new Date(sinceRaw).toISOString()
-      : null;
+  if (sinceRaw && Number.isNaN(new Date(sinceRaw).getTime())) {
+    // Loud 400 — silently degrading to all-time would present
+    // unfiltered numbers as filtered ones.
+    return NextResponse.json(
+      { error: "Invalid since — must be an ISO timestamp" },
+      { status: 400 },
+    );
+  }
+  const sinceIso = sinceRaw ? new Date(sinceRaw).toISOString() : null;
 
   try {
     const insights = await computeOutreachInsights(auth.supabase, {

@@ -198,7 +198,9 @@ export async function GET(request: NextRequest) {
     ),
     supabase
       .from("templates")
-      .select("id, scenario_id, bucket, is_custom, is_active, trigger_config")
+      .select(
+        "id, scenario_id, bucket, is_custom, is_active, is_admin_only, trigger_config",
+      )
       .limit(1000),
     supabase
       .from("disengagement_alerts")
@@ -413,6 +415,12 @@ export async function GET(request: NextRequest) {
     const student = students.find((s) => s.id === alert.student_id);
     if (!student) continue;
     const snap = snapByStudent.get(student.id);
+    // v85.4 — the alert path bypasses the trigger registry, so the
+    // canceling suppression must be enforced here too. Without this,
+    // check-engagement (which has no cancel filtering) turns a quiet
+    // canceling student into no_login_5d → pace.dayN every run, and
+    // the wrong task re-appears each cycle after 3c dismisses it.
+    if (snap && snapshotIsCanceling(snap)) continue;
     // Same login gate the built-in triggers use. A student with an
     // alert but no first_sprint_login_at hasn't opened the app yet -
     // they belong to the NA (stalled.*) pipeline, not nolessons/pace.
@@ -687,6 +695,31 @@ export async function GET(request: NextRequest) {
   const templateByScenario = new Map(templates.map((t) => [t.scenario_id, t]));
   const autoDismissals = new Map<string, string>();
 
+  // v85.4 (F2) — past_due students who clicked cancel sit OUTSIDE the
+  // active-only pool above, so studentById misses them and the plain
+  // "no longer in eligible pool" dismissal below would kill their
+  // save-the-sale task — which could never be re-created (creation
+  // only sees active students). Fetch just their ids so canceling-
+  // aware tasks survive. Tiny set; single query.
+  const { data: pastDueCancelingRows } = await supabase
+    .from("students")
+    .select("id")
+    .eq("membership_status", "past_due")
+    .not("cancel_scheduled_at", "is", null)
+    .eq("csm_exempt", false);
+  const pastDueCancelingIds = new Set(
+    ((pastDueCancelingRows ?? []) as Array<{ id: string }>).map((r) => r.id),
+  );
+
+  const isCancelingAwareScenario = (scenarioId: string): boolean => {
+    const tpl = templateByScenario.get(scenarioId);
+    return Boolean(
+      tpl?.trigger_config?.all?.some(
+        (c: { metric?: string }) => c.metric === "is_canceling",
+      ),
+    );
+  };
+
   for (const t of (openTasksWithBucket ?? []) as unknown as OpenTaskRow[]) {
     // Skip anything already queued for dismissal by sections 3 or 3b.
     if (toDismiss.includes(t.id)) continue;
@@ -694,6 +727,14 @@ export async function GET(request: NextRequest) {
 
     const student = studentById.get(t.student_id);
     if (!student) {
+      // v85.4 (F2) — protect the save task for past_due canceling
+      // students; everything else keeps the pool-exit dismissal.
+      if (
+        pastDueCancelingIds.has(t.student_id) &&
+        isCancelingAwareScenario(t.scenario_id)
+      ) {
+        continue;
+      }
       autoDismissals.set(
         t.id,
         "Auto-dismissed: student no longer in eligible pool.",
@@ -712,14 +753,15 @@ export async function GET(request: NextRequest) {
     // trigger function or config — path 3's day tolerance would keep
     // them up to 3 extra days, telling the CSM to send an activation
     // nudge to someone who already clicked cancel.
+    // v85.4 (F3) — admin-only tasks are exempt: they're work items
+    // (discount review), not DMs, and a canceling student applying
+    // for the discount is a save signal Astrid must see.
     if (snapshotIsCanceling(snap)) {
       const cancelingTpl = templateByScenario.get(t.scenario_id);
-      const cancelingAware = Boolean(
-        cancelingTpl?.trigger_config?.all?.some(
-          (c: { metric?: string }) => c.metric === "is_canceling",
-        ),
-      );
-      if (!cancelingAware) {
+      if (
+        !cancelingTpl?.is_admin_only &&
+        !isCancelingAwareScenario(t.scenario_id)
+      ) {
         autoDismissals.set(
           t.id,
           "Auto-dismissed: student is canceling, save-the-sale flow owns this student.",

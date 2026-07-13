@@ -16,7 +16,7 @@
  * re-engaged pair and the dismissed column are gone from display.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
@@ -74,7 +74,12 @@ export default function OutreachInsightsPage() {
     dir: -1,
   });
 
+  // Monotonic fetch counter — a slow all-time response resolving
+  // after a fast 30d one must not overwrite it (range-flip race).
+  const fetchSeqRef = useRef(0);
+
   const fetchInsights = useCallback(async () => {
+    const seq = ++fetchSeqRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -98,11 +103,14 @@ export default function OutreachInsightsPage() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
-      setData((await res.json()) as OutreachInsights);
+      const payload = (await res.json()) as OutreachInsights;
+      if (seq !== fetchSeqRef.current) return; // stale response
+      setData(payload);
     } catch (e) {
+      if (seq !== fetchSeqRef.current) return;
       setError(e instanceof Error ? e.message : String(e));
     }
-    setLoading(false);
+    if (seq === fetchSeqRef.current) setLoading(false);
   }, [range, supabase]);
 
   useEffect(() => {
@@ -127,11 +135,13 @@ export default function OutreachInsightsPage() {
         }
       }
     };
+    // dir -1 = descending (largest first) — matches the ↓ arrow. The
+    // -1 no-data sentinels sink to the bottom of the default view.
     return [...data.templates].sort((a, b) => {
       const va = value(a);
       const vb = value(b);
-      if (va < vb) return sort.dir;
-      if (va > vb) return -sort.dir;
+      if (va < vb) return -sort.dir;
+      if (va > vb) return sort.dir;
       return 0;
     });
   }, [data, sort]);
@@ -200,7 +210,7 @@ export default function OutreachInsightsPage() {
         </div>
       )}
 
-      {loading || !totals ? (
+      {loading ? (
         <div
           className="flex items-center justify-center"
           style={{ padding: 64 }}
@@ -215,7 +225,7 @@ export default function OutreachInsightsPage() {
             }}
           />
         </div>
-      ) : (
+      ) : !totals ? null : ( // failed fetch: error banner above, no spinner
         <>
           {/* KPI row */}
           <div
@@ -480,6 +490,12 @@ export default function OutreachInsightsPage() {
                   graded (&quot;—&quot;). Admin-only tasks (discount
                   reviews) and tasks whose template was deleted are
                   excluded from every number.
+                </li>
+                <li>
+                  Canceling templates carry their saves in their own
+                  Success column, while the Success-rate KPI pools only
+                  the other families (Saves has its own tile) — so the
+                  column doesn&apos;t sum to the KPI, by design.
                 </li>
                 <li>
                   All of this is <strong>correlation, not causation</strong>

@@ -55,6 +55,30 @@ async function insertTask(
   }
 }
 
+/**
+ * v85.4 — canceling students are owned by the save-the-sale flow, so
+ * the celebration (W2.2) and reactivation (X.1) DM events stay quiet
+ * for them. W2.6 (discount review) is deliberately NOT guarded: it's
+ * an admin work item, and a canceling student applying for the
+ * discount is a save signal Astrid must see. Same predicate as
+ * isCanceling / snapshotIsCanceling.
+ */
+async function isCancelingStudent(
+  supabase: SupabaseClient,
+  studentId: string,
+): Promise<boolean> {
+  const { data } = await supabase
+    .from("students")
+    .select("membership_status, cancel_scheduled_at")
+    .eq("id", studentId)
+    .single();
+  return Boolean(
+    data?.cancel_scheduled_at &&
+      (data.membership_status === "active" ||
+        data.membership_status === "past_due"),
+  );
+}
+
 const R2_COMPOUND_LESSONS = ["l022", "l024"];
 
 /**
@@ -81,6 +105,8 @@ export async function checkR2CompoundsShipped(
         .map((r) => r.lesson_id),
     );
     if (shipped.size < R2_COMPOUND_LESSONS.length) return;
+    // v85.4 — no celebration DM for a canceling student.
+    if (await isCancelingStudent(supabase, studentId)) return;
     await insertTask(
       supabase,
       studentId,
@@ -171,6 +197,11 @@ export async function onLessonCompleted(
       .gte("created_at", sinceIso)
       .limit(1);
     if (priorX1 && priorX1.length > 0) return;
+
+    // v85.4 — no reactivation DM for a canceling student; the
+    // save-the-sale flow owns them. (Checked late so the extra
+    // students query only runs when X.1 would actually fire.)
+    if (await isCancelingStudent(supabase, studentId)) return;
 
     // 4. Fire X.1.
     await insertTask(

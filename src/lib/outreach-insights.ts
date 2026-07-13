@@ -146,7 +146,15 @@ export interface OutreachInsights {
 }
 
 export function familyOf(tpl: TemplateLite): OutreachFamily {
-  if (tpl.trigger_config?.all?.some((c) => c.metric === "is_canceling")) {
+  // Op matters: only "IS canceling" makes a save template. A template
+  // using "is NOT canceling" (an exclusion condition) targets
+  // non-canceling students — grading it on subscription state would
+  // inflate the Saves KPI with people who were never canceling.
+  if (
+    tpl.trigger_config?.all?.some(
+      (c) => c.metric === "is_canceling" && c.op === "is",
+    )
+  ) {
     return "canceling";
   }
   const sid = tpl.scenario_id ?? "";
@@ -214,12 +222,18 @@ export async function computeOutreachInsights(
   // tasks is a narrow queue table (no blob columns) — select * so this
   // works both before and after the v85 outcome migration (an explicit
   // "outcome" in the select would 400 pre-migration).
+  // Stable .order() on every paginated scan — .range() paging without
+  // ORDER BY can skip/duplicate rows across page boundaries under
+  // concurrent writes (the repo's own v75.56 lesson).
   const [tasksRes, templatesRes] = await Promise.all([
-    fetchAllRowsPaginated<TaskLite>(() => supabase.from("tasks").select("*")),
+    fetchAllRowsPaginated<TaskLite>(() =>
+      supabase.from("tasks").select("*").order("id"),
+    ),
     fetchAllRowsPaginated<TemplateLite>(() =>
       supabase
         .from("templates")
-        .select("id, scenario_id, title, bucket, is_admin_only, trigger_config"),
+        .select("id, scenario_id, title, bucket, is_admin_only, trigger_config")
+        .order("id"),
     ),
   ]);
   if (tasksRes.error) throw tasksRes.error;
@@ -309,7 +323,8 @@ export async function computeOutreachInsights(
             .in("student_id", batch)
             .or(
               `completed_at.gte.${lowerBoundIso},action_completed_at.gte.${lowerBoundIso}`,
-            ),
+            )
+            .order("student_id"),
         ),
         fetchAllRowsPaginated<{
           student_id: string;
@@ -322,7 +337,8 @@ export async function computeOutreachInsights(
             .in("student_id", batch)
             .or(
               `created_at.gte.${lowerBoundIso},updated_at.gte.${lowerBoundIso}`,
-            ),
+            )
+            .order("id"),
         ),
       ]);
       if (completionsRes.error) throw completionsRes.error;
@@ -350,7 +366,8 @@ export async function computeOutreachInsights(
           .from("student_milestones")
           .select("student_id, first_sprint_login_at")
           .in("student_id", batch)
-          .not("first_sprint_login_at", "is", null),
+          .not("first_sprint_login_at", "is", null)
+          .order("student_id"),
       );
       if (error) throw error;
       for (const r of data) {
@@ -378,7 +395,8 @@ export async function computeOutreachInsights(
         supabase
           .from("students")
           .select("id, membership_status, cancel_scheduled_at")
-          .in("id", batch),
+          .in("id", batch)
+          .order("id"),
       );
       if (error) throw error;
       for (const r of data) {
@@ -422,7 +440,14 @@ export async function computeOutreachInsights(
       }
     }
     if (t.status === "dismissed" && inRange(t.dismissed_at)) {
-      const auto = (t.notes ?? "").startsWith("Auto-dismissed");
+      // Machine dismissals write three note shapes: "Auto-dismissed…",
+      // the two supersession notes ("Superseded by…"), and the v62
+      // backfill marker (appended after existing notes, so includes).
+      const notes = t.notes ?? "";
+      const auto =
+        notes.startsWith("Auto-dismissed") ||
+        notes.startsWith("Superseded by") ||
+        notes.includes("[v62 auto-dismiss]");
       bump(tid, (s) => {
         s.dismissed++;
         if (auto) s.dismissed_auto++;

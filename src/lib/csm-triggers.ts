@@ -400,7 +400,7 @@ export type TriggerCheck = (snap: StudentSnapshot) => string | null;
 // /api/cron/check-na-tasks (separate cron because they target
 // students with joined_at IS NULL). `month2.entry` will need a
 // Whop renewal webhook handler (not in this round).
-export const triggers: Record<string, TriggerCheck> = {
+const rawTriggers: Record<string, TriggerCheck> = {
   // nolessons.day3 / .day7 / .day14 - student LOGGED IN but hasn't
   // started any lessons. Highest-priority intervention in the v3
   // ladder (ZL = "zero lessons").
@@ -490,6 +490,32 @@ export const triggers: Record<string, TriggerCheck> = {
     return `Day ${s.day} · behind pace (${(s.progressRatio * 100).toFixed(0)}% of expected). 9 days left, R4 imminent.`;
   },
 };
+
+/**
+ * v85.1 — canceling suppression. A student who clicked cancel (Whop
+ * "Canceling": cancel_scheduled_at set, access still active) is owned
+ * by the save-the-sale flow. Every OTHER trigger goes quiet for them,
+ * otherwise the queue tells the CSM to send "you're behind pace" to
+ * someone who already decided to leave (the 2026-07-13 screenshot).
+ */
+export function snapshotIsCanceling(s: StudentSnapshot): boolean {
+  return (
+    Boolean(s.student.cancel_scheduled_at) &&
+    (s.student.membership_status === "active" ||
+      s.student.membership_status === "past_due")
+  );
+}
+
+// v85.1 — single wrap point: creation (section 2), 3c auto-dismiss,
+// and the real-time evaluator all call these same functions, so
+// built-in triggers returning null for canceling students both stops
+// NEW wrong tasks and auto-dismisses EXISTING ones on the next pass.
+export const triggers: Record<string, TriggerCheck> = Object.fromEntries(
+  Object.entries(rawTriggers).map(([id, fn]) => [
+    id,
+    ((s) => (snapshotIsCanceling(s) ? null : fn(s))) as TriggerCheck,
+  ]),
+);
 
 /* ─────────────────────────────────────────────────────────────────
  * Custom triggers (v34) — built from the JSON DSL Karlo edits via
@@ -864,6 +890,15 @@ export function evaluateCustomTrigger(
   config: TriggerConfig,
 ): { match: boolean; summary: string } {
   if (!Array.isArray(config?.all) || config.all.length === 0) {
+    return { match: false, summary: "" };
+  }
+  // v85.1 — canceling students only match canceling-aware templates
+  // (configs that reference the is_canceling metric). Everything else
+  // goes quiet for them; the save-the-sale flow owns this student.
+  if (
+    snapshotIsCanceling(snap) &&
+    !config.all.some((c) => c.metric === "is_canceling")
+  ) {
     return { match: false, summary: "" };
   }
   for (const c of config.all) {

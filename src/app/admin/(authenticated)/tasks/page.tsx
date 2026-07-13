@@ -807,6 +807,15 @@ function TaskRow({
   const cancelingStudent = Boolean(student && isCanceling(student));
   const pastDue = student?.membership_status === "past_due";
   const wait = status === "open" ? waitingLabel(row.created_at) : null;
+  // Left-edge accent per tier (Karlo 2026-07-13): canceling = black,
+  // cancel path = red, at risk = yellow, everything else = none.
+  const edge = cancelingStudent
+    ? "var(--color-text-primary)"
+    : template?.bucket === "cancel_path"
+      ? "var(--color-danger)"
+      : template?.bucket === "at_risk"
+        ? "var(--color-warning)"
+        : null;
   // "Why this fired" is the decision fuel; template title is the fallback
   // for tasks whose cron didn't write a behavior summary.
   const why =
@@ -816,11 +825,7 @@ function TaskRow({
   return (
     <Card
       padding={0}
-      style={
-        cancelingStudent
-          ? { borderLeft: "2px solid var(--color-danger)" }
-          : undefined
-      }
+      style={edge ? { borderLeft: `2px solid ${edge}` } : undefined}
     >
       <div
         role="button"

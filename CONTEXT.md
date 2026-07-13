@@ -222,7 +222,7 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 | `sync-whop` | daily 00:00 UTC | Pull Whop watch history → `student_lesson_completions`. Also stamps `students.cancel_scheduled_at` from Whop's `cancel_at_period_end` field (v75.46). |
 | `snapshot-progress` | daily 00:30 UTC | Writes yesterday+today rows to `daily_progress_snapshots` + the daily Canceling count to `canceling_snapshots` (v76). Reads canonical `student_progress_counts` view (v75.28) so dashboard live values match snapshot trend values. |
 | `check-engagement` | every 4h offset 00 | Detect churn signals → `disengagement_alerts` |
-| `check-csm-tasks` | every 4h offset :15 | Evaluate `templates.trigger_config` → `tasks`. Includes auto-dismiss for orphan tasks (v75.19). |
+| `check-csm-tasks` | every 4h offset :15 | Evaluate `templates.trigger_config` → `tasks`. Includes auto-dismiss for orphan tasks (v75.19). v85.1: 3c also dismisses any non-canceling-aware open task for a canceling student ("save-the-sale flow owns this student"). |
 | `check-na-tasks` | every 4h offset :20 | Not-Activated escalation (Day 3/5/7/10) |
 | `day28-dm` | daily 09:30 UTC | Fire day-28 Discord DM |
 
@@ -240,7 +240,7 @@ Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` 
 | `admin-auth.ts` | Team auth gate for API routes |
 | `whop.ts` / `whop-members.ts` / `whop-sync-runner.ts` | Whop HTTP + sync. v75.53: the sync self-heals NULL `first_paid_at` via a bounded cross-product lookup (shared with the backfill). **v75.59 LOAD-BEARING: every upsert row carries the IDENTICAL full column set, preserving by VALUE — never reintroduce a conditional row key.** postgrest-js unions batch keys and PostgREST NULLs omitted columns on conflict-update (the 2026-06-11 wipe: 638 `first_paid_at` + 67 `whop_plan_id` + ~48 `cancel_scheduled_at` erased); a tripwire aborts the sync on any non-uniform key set. v75.60/61: `canceled_at` backfill tries past cycle-end, then past `expires_at` (refund revocations), then stamps the observation moment — a churned student can never stay invisible to the churn trend. |
 | `pkce.ts` | OAuth PKCE helpers |
-| `csm-triggers.ts` | Trigger metric registry + evaluator. v76: `is_canceling` condition (cancel_scheduled_at + still active) available in the /admin/templates TriggerBuilder — powers the save-the-sale "Canceling" task template. |
+| `csm-triggers.ts` | Trigger metric registry + evaluator. v76: `is_canceling` condition (cancel_scheduled_at + still active) available in the /admin/templates TriggerBuilder — powers the save-the-sale "Canceling" task template. v85.1: CANCELING SUPPRESSION — for canceling students every built-in trigger returns null (`snapshotIsCanceling` wrap on the registry) and `evaluateCustomTrigger` only matches configs referencing `is_canceling`; check-csm-tasks 3c + check-na-tasks reinforce it, so canceling students hold exactly one task: the save-the-sale one. |
 | `csm-events.ts` | CSM event hooks (called from mark-* routes) |
 | `templates.ts` | DM template renderer (variable substitution) |
 | `dm-toggles.ts` | Day-28 DM enable/disable |

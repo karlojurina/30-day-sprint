@@ -63,6 +63,7 @@ interface NotActivatedRow {
   first_paid_at: string | null;
   joined_at: string | null;
   high_churn_risk: boolean;
+  cancel_scheduled_at: string | null;
 }
 
 const TIER_DAYS = [3, 5, 7, 10] as const;
@@ -108,7 +109,7 @@ export async function GET(request: NextRequest) {
   const { data: studentsRaw, error: studentsErr } = await supabase
     .from("students")
     .select(
-      "id, name, email, discord_username, created_at, first_paid_at, joined_at, high_churn_risk",
+      "id, name, email, discord_username, created_at, first_paid_at, joined_at, high_churn_risk, cancel_scheduled_at",
     )
     .eq("membership_status", "active")
     .eq("high_churn_risk", false)
@@ -177,6 +178,10 @@ export async function GET(request: NextRequest) {
   const errors: string[] = [];
 
   for (const s of pool) {
+    // v85.1 — canceling students get the save-the-sale flow, not an
+    // activation nudge. (Pool is already membership_status='active',
+    // so cancel_scheduled_at alone means Whop "Canceling".)
+    if (s.cancel_scheduled_at) continue;
     // v75.57: tier day comes from the canonical sprintDayNumber on
     // first_paid_at (joined_at/created_at fallback for safety) — the
     // SAME anchor + rounding check-csm-tasks section 3c uses for its

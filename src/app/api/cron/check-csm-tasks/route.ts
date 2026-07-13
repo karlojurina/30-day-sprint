@@ -46,6 +46,7 @@ import {
   buildStudentSnapshot,
   triggers,
   evaluateCustomTrigger,
+  snapshotIsCanceling,
   SCENARIO_BUCKET,
 } from "@/lib/csm-triggers";
 import {
@@ -702,6 +703,30 @@ export async function GET(request: NextRequest) {
 
     const snap = snapByStudent.get(student.id);
     if (!snap) continue;
+
+    // v85.1 — canceling students are owned by the save-the-sale flow.
+    // Any open task whose template isn't canceling-aware (no
+    // is_canceling condition in trigger_config) gets dismissed
+    // outright. Paths 1/2 below already return false for these via
+    // the csm-triggers suppression, but stalled.*.dayN tasks have no
+    // trigger function or config — path 3's day tolerance would keep
+    // them up to 3 extra days, telling the CSM to send an activation
+    // nudge to someone who already clicked cancel.
+    if (snapshotIsCanceling(snap)) {
+      const cancelingTpl = templateByScenario.get(t.scenario_id);
+      const cancelingAware = Boolean(
+        cancelingTpl?.trigger_config?.all?.some(
+          (c: { metric?: string }) => c.metric === "is_canceling",
+        ),
+      );
+      if (!cancelingAware) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: student is canceling, save-the-sale flow owns this student.",
+        );
+        continue;
+      }
+    }
 
     // Re-evaluate with a fresh recentTaskScenarios so a trigger's
     // dedup gate doesn't incorrectly skip itself when checking the

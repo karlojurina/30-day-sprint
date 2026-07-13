@@ -53,7 +53,7 @@ welcome, first-client landed, etc.).
 | `/admin/journey` | Student journey board (per-week columns, pace overview, drawer detail) |
 | `/admin/students` + `/admin/students/[id]` | Table view + detail |
 | `/admin/templates` | CSM DM template editor (built-ins + custom, with TriggerBuilder) |
-| `/admin/tasks` | CSM task queue (open / completed / dismissed) |
+| `/admin/tasks` | CSM task queue (open / completed / dismissed). Open tab is priority-first: Canceling (derived from the STUDENT row via `isCanceling`, pinned on top regardless of template) → Cancel path → At risk → Events & wins, oldest-first with waiting-time chips; cards carry behavior summary + @discord / No-Discord + Canceling / Past-due pills; queue-health strip (open by tier, oldest wait, sent today). Sent/Dismissed keep recency grouping. |
 | `/admin/discounts` | Pending discount review |
 | `/admin/alerts` | Auto-generated churn alerts |
 | `/admin/insights` | Progress + retention insights |

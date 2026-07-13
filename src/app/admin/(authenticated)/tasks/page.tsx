@@ -1,21 +1,27 @@
 "use client";
 
 /**
- * /admin/tasks — Astrid's task queue (v2).
+ * /admin/tasks — Astrid's task queue (v3: priority-first).
  *
- * Design intent (vs. the prior 3-column Kanban):
+ * Design intent (vs. v2's age grouping):
  *
- *   • Calmer cards. One line: avatar + name + day badge + primary
- *     CTA. One line below: bucket icon (small, monochrome) + scenario
- *     in plain English + secondary kebab. Three buttons / row → one.
+ *   • Priority is the primary axis. Open tasks group into tiers:
+ *     Canceling (student clicked cancel, still has access — computed
+ *     from the student row via isCanceling, NOT from the template, so
+ *     any open task for a canceling student pins to the top) →
+ *     Cancel path → At risk → Events & wins. Age grouping
+ *     (Today / This week / Older) remains only on Sent / Dismissed.
  *
- *   • Single-column list grouped by urgency (Today / This week / Older)
- *     instead of three Kanban columns. Status moves to a top tab so
- *     "what should I do right now?" is the entire screen, not a third
- *     of it.
+ *   • Oldest first within each tier, with a "waiting Nd" chip that
+ *     warms at 2d and burns at 4d — neglected tasks surface instead
+ *     of sinking, and nothing rots silently into auto-dismiss.
  *
- *   • Bucket / Discord / behavior summary live in the detail modal,
- *     not on every card.
+ *   • Cards decide without the modal: behavior summary ("why this
+ *     fired") + @discord / No-Discord chip + Canceling / Past-due
+ *     pills live on the card. The modal keeps the full DM preview.
+ *
+ *   • Queue health strip under the tabs: open count by tier, oldest
+ *     waiting, sent today.
  *
  * Workflow stays the same: Copy DM → send in Discord → Mark sent.
  */
@@ -47,6 +53,7 @@ import {
   EmptyState,
   T,
 } from "@/components/admin/ui";
+import { isCanceling } from "@/lib/admin/metrics-definitions";
 
 type TaskRow = Task & {
   student: Student | null;
@@ -105,9 +112,8 @@ function bucketDot(b?: string) {
 }
 
 /**
- * Bucket the created_at timestamp into "today" / "this_week" / "older"
- * for the urgency groups. Cards inside each group sort by bucket
- * priority, then recency.
+ * Bucket a timestamp into "today" / "this_week" / "older". Used only
+ * on the Sent / Dismissed tabs, where recency IS the right grouping.
  */
 function urgencyOf(createdAt: string): "today" | "this_week" | "older" {
   const ageMs = Date.now() - new Date(createdAt).getTime();
@@ -115,6 +121,60 @@ function urgencyOf(createdAt: string): "today" | "this_week" | "older" {
   if (days < 1) return "today";
   if (days < 7) return "this_week";
   return "older";
+}
+
+/**
+ * Priority tier for the open queue. Canceling comes from the STUDENT
+ * (cancel_scheduled_at + still active), not the template — a student
+ * who clicks cancel while holding any open task jumps to the top.
+ */
+type Tier = "canceling" | "cancel_path" | "at_risk" | "other";
+
+const TIER_ORDER: Tier[] = ["canceling", "cancel_path", "at_risk", "other"];
+
+const TIER_LABEL: Record<Tier, string> = {
+  canceling: "Canceling · save first",
+  cancel_path: "Cancel path",
+  at_risk: "At risk",
+  other: "Events & wins",
+};
+
+function tierOf(row: TaskRow): Tier {
+  if (row.student && isCanceling(row.student)) return "canceling";
+  const b = row.template?.bucket;
+  if (b === "cancel_path") return "cancel_path";
+  if (b === "at_risk") return "at_risk";
+  return "other";
+}
+
+/** "waiting 3h/3d" chip — warms at 2 days in queue, burns at 4. */
+function waitingLabel(createdAt: string): {
+  text: string;
+  color: string;
+} {
+  const ms = Date.now() - new Date(createdAt).getTime();
+  const days = Math.floor(ms / 86_400_000);
+  if (days < 1) {
+    const h = Math.max(1, Math.floor(ms / 3_600_000));
+    return { text: `waiting ${h}h`, color: "var(--color-text-tertiary)" };
+  }
+  return {
+    text: `waiting ${days}d`,
+    color:
+      days >= 4
+        ? "var(--color-danger)"
+        : days >= 2
+          ? "var(--color-warning)"
+          : "var(--color-text-tertiary)",
+  };
+}
+
+/** Whole days since the sync first observed the scheduled cancel. */
+function daysSince(iso: string): number {
+  return Math.max(
+    0,
+    Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000),
+  );
 }
 
 export default function AdminTasksKanban() {
@@ -244,53 +304,127 @@ export default function AdminTasksKanban() {
   }, [rows]);
 
   /**
-   * Rows for the currently-selected tab, grouped by urgency, sorted
-   * by bucket priority (more urgent first) then recency.
+   * Open tab: tasks grouped into priority tiers (canceling first),
+   * OLDEST first within each tier so long-waiting tasks surface.
+   * Ties inside "Events & wins" keep the old bucket order.
    */
-  const grouped = useMemo(() => {
-    const inTab = rows.filter((r) => r.status === status);
+  const openTiers = useMemo(() => {
+    const tiers: Record<Tier, TaskRow[]> = {
+      canceling: [],
+      cancel_path: [],
+      at_risk: [],
+      other: [],
+    };
+    for (const r of rows) {
+      if (r.status !== "open") continue;
+      tiers[tierOf(r)].push(r);
+    }
+    for (const tier of TIER_ORDER) {
+      tiers[tier].sort((a, b) => {
+        if (tier === "other") {
+          const pa = BUCKET_PRIORITY[a.template?.bucket ?? ""] ?? 99;
+          const pb = BUCKET_PRIORITY[b.template?.bucket ?? ""] ?? 99;
+          if (pa !== pb) return pa - pb;
+        }
+        return (
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+        );
+      });
+    }
+    return tiers;
+  }, [rows]);
+
+  /**
+   * Sent / Dismissed tabs keep the v2 recency grouping — for history,
+   * "when did this happen" is the right mental model.
+   */
+  const historyGroups = useMemo(() => {
     const groups: Record<"today" | "this_week" | "older", TaskRow[]> = {
       today: [],
       this_week: [],
       older: [],
     };
-    for (const r of inTab) {
+    if (status === "open") return groups;
+    for (const r of rows) {
+      if (r.status !== status) continue;
       const sortKey =
-        status === "open"
-          ? r.created_at
-          : status === "completed"
-            ? r.completed_at ?? r.created_at
-            : r.dismissed_at ?? r.created_at;
+        status === "completed"
+          ? r.completed_at ?? r.created_at
+          : r.dismissed_at ?? r.created_at;
       groups[urgencyOf(sortKey)].push(r);
     }
     for (const g of Object.values(groups)) {
       g.sort((a, b) => {
-        if (status === "open") {
-          const pa = BUCKET_PRIORITY[a.template?.bucket ?? ""] ?? 99;
-          const pb = BUCKET_PRIORITY[b.template?.bucket ?? ""] ?? 99;
-          if (pa !== pb) return pa - pb;
-        }
         const ta =
-          status === "open"
-            ? a.created_at
-            : status === "completed"
-              ? a.completed_at ?? a.created_at
-              : a.dismissed_at ?? a.created_at;
+          status === "completed"
+            ? a.completed_at ?? a.created_at
+            : a.dismissed_at ?? a.created_at;
         const tb =
-          status === "open"
-            ? b.created_at
-            : status === "completed"
-              ? b.completed_at ?? b.created_at
-              : b.dismissed_at ?? b.created_at;
+          status === "completed"
+            ? b.completed_at ?? b.created_at
+            : b.dismissed_at ?? b.created_at;
         return new Date(tb).getTime() - new Date(ta).getTime();
       });
     }
     return groups;
   }, [rows, status]);
 
+  /** Queue health: open by tier, oldest wait, sent today. */
+  const health = useMemo(() => {
+    const open = rows.filter((r) => r.status === "open");
+    let oldestDays = 0;
+    for (const r of open) {
+      const d = Math.floor(
+        (Date.now() - new Date(r.created_at).getTime()) / 86_400_000,
+      );
+      if (d > oldestDays) oldestDays = d;
+    }
+    const today = new Date().toDateString();
+    const sentToday = rows.filter(
+      (r) =>
+        r.status === "completed" &&
+        r.completed_at &&
+        new Date(r.completed_at).toDateString() === today,
+    ).length;
+    return {
+      open: open.length,
+      canceling: open.filter((r) => tierOf(r) === "canceling").length,
+      cancelPath: open.filter((r) => tierOf(r) === "cancel_path").length,
+      atRisk: open.filter((r) => tierOf(r) === "at_risk").length,
+      oldestDays,
+      sentToday,
+    };
+  }, [rows]);
+
   const openTask = useMemo(
     () => rows.find((r) => r.id === openTaskId) ?? null,
     [rows, openTaskId],
+  );
+
+  const isQueueEmpty =
+    status === "open"
+      ? TIER_ORDER.every((t) => openTiers[t].length === 0)
+      : historyGroups.today.length === 0 &&
+        historyGroups.this_week.length === 0 &&
+        historyGroups.older.length === 0;
+
+  const renderRow = (row: TaskRow) => (
+    <TaskRow
+      key={row.id}
+      row={row}
+      status={status}
+      busy={busyId === row.id}
+      onOpen={() => setOpenTaskId(row.id)}
+      onCopy={() => copyDMOnly(row)}
+      onMarkSent={() => transitionTask(row.id, "completed")}
+      onReopen={() => transitionTask(row.id, "open")}
+      onDismiss={() =>
+        setDismissModal({
+          id: row.id,
+          name: row.student?.name ?? "this student",
+        })
+      }
+    />
   );
 
   async function copyDMOnly(row: TaskRow) {
@@ -412,6 +546,52 @@ export default function AdminTasksKanban() {
         />
       </div>
 
+      {/* Queue health — the "am I done for today?" line. */}
+      {!loading && rows.length > 0 && (
+        <p
+          style={{
+            ...T.meta,
+            marginBottom: 20,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          <span style={{ fontWeight: 600 }}>{health.open} open</span>
+          {health.canceling > 0 && (
+            <span style={{ color: "var(--color-danger)", fontWeight: 600 }}>
+              {" · "}
+              {health.canceling} canceling
+            </span>
+          )}
+          {health.cancelPath > 0 && (
+            <span>
+              {" · "}
+              {health.cancelPath} cancel path
+            </span>
+          )}
+          {health.atRisk > 0 && (
+            <span>
+              {" · "}
+              {health.atRisk} at risk
+            </span>
+          )}
+          {health.oldestDays >= 1 && (
+            <span
+              style={
+                health.oldestDays >= 4
+                  ? { color: "var(--color-warning)" }
+                  : undefined
+              }
+            >
+              {" · "}oldest waiting {health.oldestDays}d
+            </span>
+          )}
+          <span>
+            {" · "}
+            {health.sentToday} sent today
+          </span>
+        </p>
+      )}
+
       {error && (
         <div
           style={{
@@ -432,48 +612,45 @@ export default function AdminTasksKanban() {
         <LoadingPulse />
       ) : (
         <>
-          {(["today", "this_week", "older"] as const).map((group) => {
-            const items = grouped[group];
-            if (items.length === 0) return null;
-            return (
-              <Section
-                key={group}
-                eyebrow={groupLabel(group)}
-                count={items.length}
-              >
-                <div className="flex flex-col" style={{ gap: 8 }}>
-                  {items.map((row) => (
-                    <TaskRow
-                      key={row.id}
-                      row={row}
-                      status={status}
-                      busy={busyId === row.id}
-                      onOpen={() => setOpenTaskId(row.id)}
-                      onCopy={() => copyDMOnly(row)}
-                      onMarkSent={() => transitionTask(row.id, "completed")}
-                      onReopen={() => transitionTask(row.id, "open")}
-                      onDismiss={() =>
-                        setDismissModal({
-                          id: row.id,
-                          name: row.student?.name ?? "this student",
-                        })
-                      }
-                    />
-                  ))}
-                </div>
-              </Section>
-            );
-          })}
-          {grouped.today.length === 0 &&
-            grouped.this_week.length === 0 &&
-            grouped.older.length === 0 && (
-              <Card>
-                <EmptyState
-                  title={emptyLabel(status)}
-                  description={emptyDescription(status)}
-                />
-              </Card>
-            )}
+          {status === "open"
+            ? TIER_ORDER.map((tier) => {
+                const items = openTiers[tier];
+                if (items.length === 0) return null;
+                return (
+                  <Section
+                    key={tier}
+                    eyebrow={TIER_LABEL[tier]}
+                    count={items.length}
+                  >
+                    <div className="flex flex-col" style={{ gap: 8 }}>
+                      {items.map(renderRow)}
+                    </div>
+                  </Section>
+                );
+              })
+            : (["today", "this_week", "older"] as const).map((group) => {
+                const items = historyGroups[group];
+                if (items.length === 0) return null;
+                return (
+                  <Section
+                    key={group}
+                    eyebrow={groupLabel(group)}
+                    count={items.length}
+                  >
+                    <div className="flex flex-col" style={{ gap: 8 }}>
+                      {items.map(renderRow)}
+                    </div>
+                  </Section>
+                );
+              })}
+          {isQueueEmpty && (
+            <Card>
+              <EmptyState
+                title={emptyLabel(status)}
+                description={emptyDescription(status)}
+              />
+            </Card>
+          )}
         </>
       )}
 
@@ -593,9 +770,24 @@ function TaskRow({
   // v75.18: anchor day on first_paid_at (original signup), fallback to joined_at.
   const day = student ? getDayNumber(student.first_paid_at ?? student.joined_at) : null;
   const dotColor = bucketDot(template?.bucket);
+  const cancelingStudent = Boolean(student && isCanceling(student));
+  const pastDue = student?.membership_status === "past_due";
+  const wait = status === "open" ? waitingLabel(row.created_at) : null;
+  // "Why this fired" is the decision fuel; template title is the fallback
+  // for tasks whose cron didn't write a behavior summary.
+  const why =
+    row.behavior_summary ??
+    (template?.title ? stripBucketGlyph(template.title) : "(no template)");
 
   return (
-    <Card padding={0}>
+    <Card
+      padding={0}
+      style={
+        cancelingStudent
+          ? { borderLeft: "2px solid var(--color-danger)" }
+          : undefined
+      }
+    >
       <div
         role="button"
         tabIndex={0}
@@ -627,12 +819,26 @@ function TaskRow({
         />
         <Avatar src={student?.avatar_url} name={student?.name} />
         <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0">
             <strong style={T.cardTitle} className="truncate">
               {student?.name ?? "—"}
             </strong>
             {day !== null && (
               <span style={T.meta}>Day {day}</span>
+            )}
+            {cancelingStudent && (
+              <Pill tone="danger">
+                Canceling
+                {student?.cancel_scheduled_at
+                  ? ` · ${daysSince(student.cancel_scheduled_at)}d`
+                  : ""}
+              </Pill>
+            )}
+            {pastDue && !cancelingStudent && (
+              <Pill tone="warning">Past due</Pill>
+            )}
+            {!student?.discord_username && !isAdminOnly && (
+              <Pill tone="warning">No Discord</Pill>
             )}
           </div>
           <p
@@ -643,9 +849,33 @@ function TaskRow({
               marginTop: 2,
             }}
           >
-            {template?.title ? stripBucketGlyph(template.title) : "(no template)"}
+            {student?.discord_username && (
+              <span
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--color-text-tertiary)",
+                }}
+              >
+                @{student.discord_username}
+                {" · "}
+              </span>
+            )}
+            {why}
           </p>
         </div>
+        {wait && (
+          <span
+            style={{
+              fontSize: 11,
+              color: wait.color,
+              flexShrink: 0,
+              fontVariantNumeric: "tabular-nums",
+              letterSpacing: "-0.005em",
+            }}
+          >
+            {wait.text}
+          </span>
+        )}
         <div
           className="flex items-center gap-2"
           onClick={(e) => e.stopPropagation()}

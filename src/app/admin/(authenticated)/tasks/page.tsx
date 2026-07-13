@@ -27,6 +27,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase-browser";
 import type { Student, Task, TaskOutcome, Template } from "@/types/database";
@@ -179,6 +180,7 @@ function daysSince(iso: string): number {
 
 export default function AdminTasksKanban() {
   const supabase = createClient();
+  const router = useRouter();
   const { teamMember } = useAuth();
 
   const [rows, setRows] = useState<TaskRow[]>([]);
@@ -539,6 +541,21 @@ export default function AdminTasksKanban() {
           </Button>
         }
       />
+
+      {/* v85.2 — Queue | Insights sub-nav. Insights = the Phase 0
+          outreach-effectiveness page (/admin/tasks/insights). */}
+      <div style={{ marginBottom: 16 }}>
+        <Tabs
+          value="queue"
+          onChange={(v) => {
+            if (v === "insights") router.push("/admin/tasks/insights");
+          }}
+          tabs={[
+            { value: "queue", label: "Queue" },
+            { value: "insights", label: "Insights" },
+          ]}
+        />
+      </div>
 
       {/* Status tabs — primary mental model for what to look at next. */}
       <div

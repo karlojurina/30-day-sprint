@@ -53,7 +53,8 @@ welcome, first-client landed, etc.).
 | `/admin/journey` | Student journey board (per-week columns, pace overview, drawer detail) |
 | `/admin/students` + `/admin/students/[id]` | Table view + detail |
 | `/admin/templates` | CSM DM template editor (built-ins + custom, with TriggerBuilder). v85: per-template effectiveness strip on each row (sent · % re-engaged within 72h · replied) from `/api/admin/templates/stats`. |
-| `/admin/tasks` | CSM task queue (open / completed / dismissed). Open tab is priority-first: Canceling (derived from the STUDENT row via `isCanceling`, pinned on top regardless of template) → Cancel path → At risk → Events & wins, oldest-first with waiting-time chips; cards carry behavior summary + @discord / No-Discord + Canceling / Past-due pills; queue-health strip (open by tier, oldest wait, sent today). Sent/Dismissed keep recency grouping. |
+| `/admin/tasks` | CSM task queue (open / completed / dismissed). Open tab is priority-first: Canceling (derived from the STUDENT row via `isCanceling`, pinned on top regardless of template) → Cancel path → At risk → Events & wins, oldest-first with waiting-time chips; cards carry behavior summary + @discord / No-Discord + Canceling / Past-due pills; queue-health strip (open by tier, oldest wait, sent today). Sent/Dismissed keep recency grouping. Queue \| Insights sub-nav (v85.2). |
+| `/admin/tasks/insights` | Outreach insights (v85.2, Phase 0 measurement surface). Range selector (30d / all-time), KPI row (created, sent, median task→send, REVIVAL RATE, replied), unmarked-outcomes nudge, sortable per-template table (sent, time→send, revival, re-engaged, replied, dismissed w/ auto split), plain-language methodology box. All numbers from `src/lib/outreach-insights.ts`. |
 | `/admin/discounts` | Pending discount review |
 | `/admin/alerts` | Auto-generated churn alerts |
 | `/admin/insights` | Progress + retention insights |
@@ -93,12 +94,15 @@ welcome, first-client landed, etc.).
 - CRUD on templates (`/api/admin/templates`, `/api/admin/templates/[id]`),
   tasks (`/api/admin/tasks`, `/api/admin/tasks/[id]`, plus
   copy/dismiss/refire/transition/outcome), discord toggles, admin_config
-- `GET /api/admin/templates/stats` (v85, Phase 0 retention) — per-template
-  effectiveness over the FULL task history: created/open/sent/dismissed,
-  replied/no_reply (manual taps), re_engaged_72h (student watched or
-  shipped within 72h of the send — computed live from
-  student_lesson_completions, so it grades pre-v85 history too).
-  Correlation not causation; for comparing templates against each other.
+- `GET /api/admin/tasks/insights?since=<ISO>` (v85.2) — full outreach
+  payload for /admin/tasks/insights: totals + per-template rows
+  (revival rate, re-engagement, reply outcomes, dismissal split, median
+  time-to-send). Computed by `src/lib/outreach-insights.ts`.
+- `GET /api/admin/templates/stats` (v85, Phase 0 retention) — thin
+  all-time projection over the SAME `outreach-insights.ts` computation
+  (v85.2 refactor) for the inline strip on /admin/templates: per
+  template created/open/sent/dismissed, replied/no_reply,
+  re_engaged_72h. The strip and the insights page can never disagree.
 - `POST /api/admin/tasks/[id]/outcome` (v85) — one-tap replied/no_reply
   on sent tasks; null clears; requires the v85 migration.
 - Sync triggers (`/api/admin/sync-whop`, `/api/admin/rebuild-snapshots`,
@@ -252,6 +256,7 @@ Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` 
 | `supabase-pagination.ts` (v75.27) | `fetchAllRowsPaginated(thunk)` — calls `.range(0,999)`, `.range(1000,1999)`, etc. until a page returns less than 1000 rows. Bypasses PostgREST's silent server-side max-rows cap. Returns empty data on error (not partial) so silent truncation can't sneak through. EVERY bulk fetch on admin surfaces should use this. |
 | `cron-auth.ts` (v75.37) | `verifyCronAuth(request)` + `logCronStart`/`logCronFinish` — shared auth check (whitespace-trimmed against drift) + audit-log writes to `cron_runs`. All 6 cron handlers use this; replaces the per-route inline `Bearer ${process.env.CRON_SECRET}` check. |
 | `csm-task-evaluation.ts` (v75.21) | `reEvaluateStudentOpenTasks(supabase, studentId)` — real-time auto-dismiss helper called from toggle-lesson / mark-action-shipped / skip-lesson API routes. Re-evaluates each open task's trigger against the student's CURRENT state and dismisses any that no longer apply. Same evaluation logic as check-csm-tasks section 3c but scoped to one student. |
+| `outreach-insights.ts` (v85.2) | `computeOutreachInsights(supabase, {sinceIso})` — single source of truth for outreach effectiveness. Activity = lesson watch/ship + daily notes. Per template + totals: created/open/sent/dismissed(+auto), replied/no_reply/unmarked, re_engaged_72h (any activity ≤72h after send), revival (dormant-before sends that came back — the honest metric), median time-to-send. Excludes admin-only + untemplated tasks. Per-metric range filtering (created_at / completed_at / dismissed_at). Used by /api/admin/tasks/insights + /api/admin/templates/stats. |
 | `achievements.ts` | Achievement catalog + unlock evaluation (v53) |
 | `discord.ts` | Discord HTTP helpers |
 | `day28-embed.ts` | Day-28 DM embed builder |

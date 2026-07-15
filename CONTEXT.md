@@ -223,12 +223,17 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 
 | Job | Cadence | What it does |
 |-----|---------|-------------|
-| `sync-whop` | daily 00:00 UTC | Pull Whop watch history → `student_lesson_completions`. Also stamps `students.cancel_scheduled_at` from Whop's `cancel_at_period_end` field (v75.46). |
-| `snapshot-progress` | daily 00:30 UTC | Writes yesterday+today rows to `daily_progress_snapshots` + the daily Canceling count to `canceling_snapshots` (v76). Reads canonical `student_progress_counts` view (v75.28) so dashboard live values match snapshot trend values. |
-| `check-engagement` | every 4h offset 00 | Detect churn signals → `disengagement_alerts` |
-| `check-csm-tasks` | every 4h offset :15 | Evaluate `templates.trigger_config` → `tasks`. Includes auto-dismiss for orphan tasks (v75.19). v85.1: 3c also dismisses any non-canceling-aware open task for a canceling student ("save-the-sale flow owns this student"). |
-| `check-na-tasks` | every 4h offset :20 | Not-Activated escalation (Day 3/5/7/10) |
-| `day28-dm` | daily 09:30 UTC | Fire day-28 Discord DM |
+| `sync-whop` | every 2h at :00 (v85.5, was daily) | Pull Whop watch history → `student_lesson_completions`. Also stamps `students.cancel_scheduled_at` from Whop's `cancel_at_period_end` field (v75.46). 2h cadence exists FOR the cancel flag: cancel click → save task within ~2h15m instead of up to 24h. |
+| `snapshot-progress` | daily 00:30 UTC (deliberately NOT 2h) | Writes yesterday+today rows to `daily_progress_snapshots` + the daily Canceling count to `canceling_snapshots` (v76). Daily-grain by design — one row per day. Reads canonical `student_progress_counts` view (v75.28) so dashboard live values match snapshot trend values. |
+| `check-engagement` | every 2h at :10 (v85.5) | Detect churn signals → `disengagement_alerts` |
+| `check-csm-tasks` | every 2h at :15 (v85.5) | Evaluate `templates.trigger_config` → `tasks`. Includes auto-dismiss for orphan tasks (v75.19). v85.1: 3c also dismisses any non-canceling-aware open task for a canceling student ("save-the-sale flow owns this student"). |
+| `check-na-tasks` | every 2h at :20 (v85.5) | Not-Activated escalation (Day 3/5/7/10) |
+| `day28-dm` | NO cron trigger (removed pre-v85; route retained) | Day-28 Discord DM route still exists for manual/preview fire, but nothing schedules it — the platform currently sends zero automated student DMs. |
+
+v85.5 chain each 2h cycle: sync :00 (fresh cancel flags + completions,
+worst case done ~:05) → engagement :10 (alerts) → csm-tasks :15 →
+na-tasks :20. Offsets are load-bearing — csm-tasks needs the sync's
+cancel flags and engagement's alerts from the SAME cycle.
 
 Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` helper from `src/lib/cron-auth.ts` (v75.37) which trims whitespace from CRON_SECRET (defense against env-var-drift silent 401s) and writes audit rows to the `cron_runs` table on every invocation. Use `cron_runs` to answer "did Vercel fire this cron in the last N hours?" — separable from "did the work succeed?".
 

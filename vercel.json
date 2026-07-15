@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/cron/sync-whop",
-      "schedule": "0 0 * * *"
+      "schedule": "0 */2 * * *"
     },
     {
       "path": "/api/cron/snapshot-progress",
@@ -10,15 +10,15 @@
     },
     {
       "path": "/api/cron/check-engagement",
-      "schedule": "0 */4 * * *"
+      "schedule": "10 */2 * * *"
     },
     {
       "path": "/api/cron/check-csm-tasks",
-      "schedule": "15 */4 * * *"
+      "schedule": "15 */2 * * *"
     },
     {
       "path": "/api/cron/check-na-tasks",
-      "schedule": "20 */4 * * *"
+      "schedule": "20 */2 * * *"
     }
   ]
 }

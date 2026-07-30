@@ -148,6 +148,22 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
   Identity-only after v46/v47: id, whop_user_id, name, email,
   membership_status, etc. Per-function state lives in the sibling
   tables below.
+  - **`membership_status` is the sole dashboard access gate.**
+    `MembershipBlockOverlay` (mounted on `/dashboard/layout.tsx`) hard-
+    blocks on anything other than `'active'` and never asks Whop. So a
+    stale value here locks out a fully paid student while every Whop-
+    native module keeps working. One row, but a Whop user may hold
+    SEVERAL memberships (re-subscribe, refund + rebuy, free-plan claim,
+    or a duplicate from clicking Renew on the overlay). Every writer
+    must resolve "does this user still have access anywhere?", never
+    "what did this one membership just do?". Three writers: the
+    `membership.deactivated` webhook (re-points to a surviving
+    membership instead of revoking, v85.6), `sync-whop`, and the OAuth
+    callback self-heal (runs whenever the row isn't active, so any
+    DB/Whop divergence self-corrects on next login, v85.6).
+  - `canceled_at` is OUR observation timestamp, written with
+    `new Date()` when our code decides a student is terminal. It is not
+    Whop's cancellation date and must never be read as one.
 
 **Curriculum (read-mostly)**
 - `regions` — R1–R4 metadata
@@ -223,7 +239,7 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 
 | Job | Cadence | What it does |
 |-----|---------|-------------|
-| `sync-whop` | every 2h at :00 (v85.5, was daily) | Pull Whop watch history → `student_lesson_completions`. Also stamps `students.cancel_scheduled_at` from Whop's `cancel_at_period_end` field (v75.46). 2h cadence exists FOR the cancel flag: cancel click → save task within ~2h15m instead of up to 24h. |
+| `sync-whop` | every 2h at :00 (v85.5, was daily) | Pull Whop watch history → `student_lesson_completions`. Also stamps `students.cancel_scheduled_at` from Whop's `cancel_at_period_end` field (v75.46). 2h cadence exists FOR the cancel flag: cancel click → save task within ~2h15m instead of up to 24h. **v85.6:** a user holding several memberships is deduped by ACCESS first, `created_at` recency only as a tiebreak within the same access class (`grantsAccess` in `src/lib/whop-members.ts`). Was recency-only, which let a dead duplicate outrank a live membership and hard-block a paid student on every run. |
 | `snapshot-progress` | daily 00:30 UTC (deliberately NOT 2h) | Writes yesterday+today rows to `daily_progress_snapshots` + the daily Canceling count to `canceling_snapshots` (v76). Daily-grain by design — one row per day. Reads canonical `student_progress_counts` view (v75.28) so dashboard live values match snapshot trend values. |
 | `check-engagement` | every 2h at :10 (v85.5) | Detect churn signals → `disengagement_alerts` |
 | `check-csm-tasks` | every 2h at :15 (v85.5) | Evaluate `templates.trigger_config` → `tasks`. Includes auto-dismiss for orphan tasks (v75.19). v85.1: 3c also dismisses any non-canceling-aware open task for a canceling student ("save-the-sale flow owns this student"). |

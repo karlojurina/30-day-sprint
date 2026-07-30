@@ -511,10 +511,17 @@ export type SyncEntry = WhopMembershipRow & {
   _firstPaidAt: string | null;
 };
 
+/** Does this membership currently grant access? v85.6 — the tiebreak
+ *  the per-user dedupe below sorts on. */
+function grantsAccess(row: WhopMembershipRow): boolean {
+  const s = mapStatus(row);
+  return s === "active" || s === "past_due";
+}
+
 /** Convenience: collect every membership across every product id in
- *  WHOP_PRODUCT_ID. Per-user dedupe: keeps the LATEST membership row
- *  (for current state) and computes the EARLIEST created_at for
- *  first_paid_at. */
+ *  WHOP_PRODUCT_ID. Per-user dedupe: keeps the membership that best
+ *  represents current access (for current state) and computes the
+ *  EARLIEST created_at for first_paid_at. */
 export async function fetchAllMemberships(): Promise<SyncEntry[]> {
   const raw = process.env.WHOP_PRODUCT_ID ?? "";
   const productIds = raw
@@ -542,10 +549,31 @@ export async function fetchAllMemberships(): Promise<SyncEntry[]> {
       ) {
         existing.firstPaidAt = createdIso;
       }
-      // Track latest membership row as the "current state."
-      const latestIso = toIso(existing.latest.created_at);
-      if (createdIso && latestIso && createdIso > latestIso) {
-        existing.latest = row;
+      // Track the row that represents "current state."
+      //
+      // v85.6 — was NEWEST-created wins, unconditionally. A user can
+      // hold several memberships at once (re-subscribe, refund + rebuy,
+      // free-plan claim, or a duplicate created by clicking Renew on
+      // the block overlay). When the newest one was the DEAD one, the
+      // sync stamped membership_status='canceled' on a fully paid-up
+      // student and the dashboard hard-blocked them — every run, forever,
+      // because a dead membership's created_at never stops being the
+      // newest. That's what locked Kelvin Nguyen (user_uJq98jGPhJfRr)
+      // out on 2026-07-29: his live mem_RahKXMQGRohtvj lost to his
+      // canceled duplicate mem_0xlEPe5fq0FqQj.
+      //
+      // Access wins over recency. Recency only breaks ties WITHIN the
+      // same access class, which preserves the old behavior for the
+      // normal single-membership case and for genuinely churned users.
+      const curGrants = grantsAccess(existing.latest);
+      const rowGrants = grantsAccess(row);
+      if (rowGrants !== curGrants) {
+        if (rowGrants) existing.latest = row;
+      } else {
+        const latestIso = toIso(existing.latest.created_at);
+        if (createdIso && latestIso && createdIso > latestIso) {
+          existing.latest = row;
+        }
       }
     }
   }

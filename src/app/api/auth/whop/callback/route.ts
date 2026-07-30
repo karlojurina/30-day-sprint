@@ -130,8 +130,21 @@ export async function GET(request: NextRequest) {
       // If we find an active membership server-to-server, upsert
       // the student row inline and let them in. That fixes every
       // legacy customer on first login - no backfill script needed.
+      //
+      // v85.6 — the gate used to be `!dbHasActive && !whopHasAccess`,
+      // which skipped the repair in the ONE case where it matters most:
+      // Whop says the student is entitled but our row says otherwise.
+      // Those students sailed through login (whopHasAccess passes the
+      // check below) and were then hard-blocked INSIDE the dashboard by
+      // MembershipBlockOverlay, which reads students.membership_status
+      // and never asks Whop. Logging out and back in couldn't fix it.
+      // Kelvin Nguyen hit exactly this on 2026-07-29 and re-logged in at
+      // 10:49 UTC to no effect. Now any DB/Whop divergence self-corrects
+      // on the next login, for every student. Genuinely lapsed students
+      // are unaffected: fetchActiveMembershipForUser returns null for
+      // them, nothing is written, and the block below still fires.
       let selfHealed = false;
-      if (!dbHasActive && !whopHasAccess) {
+      if (!dbHasActive) {
         const adminRow = await fetchActiveMembershipForUser(userInfo.sub);
         if (adminRow) {
           // v75.30: also stamp first_paid_at on this INSERT path.
@@ -153,7 +166,7 @@ export async function GET(request: NextRequest) {
             toIso(adminRow.created_at) ?? new Date().toISOString();
           const { data: existingHealRow } = await supabaseAdmin
             .from("students")
-            .select("first_paid_at")
+            .select("first_paid_at, joined_at, name")
             .eq("whop_user_id", userInfo.sub)
             .maybeSingle();
 
@@ -163,15 +176,31 @@ export async function GET(request: NextRequest) {
             email: adminRow.email ?? userInfo.email ?? null,
             // Whop's v2 row has no `username` field. Fall back
             // to the OAuth userInfo.name.
-            name: userInfo.name ?? null,
+            name: userInfo.name ?? existingHealRow?.name ?? null,
             membership_status: mapStatus(adminRow),
-            joined_at: healAnchor,
+            // v85.6: restoring access, so the churn stamp must go with
+            // it. Left set, the row reads active-but-canceled — the
+            // snapshot cron counts it as churned and the sync's
+            // transition logic preserves it indefinitely (same bucket,
+            // date present → don't touch).
+            canceled_at: null,
             // v79: stamp plan_id from the admin row so the new
             // user is correctly classified as paying / free from
             // first login. Without this they'd default to NULL
             // (non-paying) until the next nightly sync.
             whop_plan_id: adminRow.plan ?? null,
           };
+          // v85.6: joined_at is INSERT-only, same rule as first_paid_at.
+          // Now that this branch also repairs EXISTING rows (see the
+          // gate note above), writing healAnchor unconditionally would
+          // shove a long-time student's joined_at forward to whichever
+          // membership currently grants access — moving their sprint day
+          // counter and journey column. The surviving membership is
+          // frequently NOT the original one; that's the whole reason
+          // this branch runs.
+          if (!existingHealRow?.joined_at) {
+            healPayload.joined_at = healAnchor;
+          }
           if (!existingHealRow?.first_paid_at) {
             healPayload.first_paid_at = healAnchor;
           }

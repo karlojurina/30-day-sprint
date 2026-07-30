@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
+import {
+  fetchActiveMembershipForUser,
+  mapStatus,
+} from "@/lib/whop-members";
 import type {
   WhopWebhookPayload,
   WhopMembership,
@@ -184,6 +188,41 @@ export async function POST(request: NextRequest) {
     case "membership.went_invalid":
     case "membership_went_invalid": {
       const membership = payload.data as WhopMembership;
+
+      // v85.6 — a user can hold several memberships at once (re-subscribe,
+      // refund + rebuy, free-plan claim, or a duplicate created by
+      // clicking Renew on the block overlay). This update keys on
+      // whop_user_id alone, so ONE membership deactivating revoked
+      // dashboard access even while another was live and paid.
+      // Ask Whop whether anything valid survives before downgrading.
+      const surviving = await fetchActiveMembershipForUser(membership.user.id);
+      if (surviving) {
+        // Still entitled — re-point the row at the surviving membership
+        // instead of revoking. Keeps whop_membership_id / whop_plan_id
+        // pointing at the thing that actually grants access.
+        const { error: repointError } = await supabase
+          .from("students")
+          .update({
+            whop_membership_id: surviving.id,
+            whop_plan_id: surviving.plan ?? null,
+            membership_status: mapStatus(surviving),
+            canceled_at: null,
+          })
+          .eq("whop_user_id", membership.user.id);
+        if (repointError) {
+          console.error("Webhook: student re-point failed:", repointError);
+          return NextResponse.json(
+            { error: "Database error" },
+            { status: 500 },
+          );
+        }
+        console.info(
+          `[whop-webhook] ${membership.id} deactivated for ${membership.user.id} ` +
+            `but ${surviving.id} still grants access — kept active, re-pointed.`,
+        );
+        break;
+      }
+
       const { error } = await supabase
         .from("students")
         .update({

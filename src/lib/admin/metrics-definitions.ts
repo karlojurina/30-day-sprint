@@ -147,9 +147,16 @@ export function isCanceling(s: StudentLike): boolean {
  *      OR they canceled AFTER day 30 (canceled_at > first_paid_at + 30d).
  *      A student who churned on day 16 does NOT count as converted.
  *
- * Today (2026-06-11): zero launch-cohort students have hit day 30 yet
- * (earliest is 2026-06-24). The metric correctly reads 0/0 → "—" on
- * the dashboard until then.
+ * 2026-06-11: zero launch-cohort students had hit day 30 yet (earliest
+ * was 2026-06-24), so the metric correctly read 0/0 → "—". That note
+ * then masked a real bug for two months — the dashboard kept showing
+ * "—" well into month 3 because the denominator was calling
+ * isInMonth2Cohort bare inside .filter() (index landed in `asOfMs`).
+ * If this reads "—" again, check the CALL SITE before assuming the
+ * cohort is genuinely empty.
+ *
+ * NOTE ON ARITY: both helpers take an optional second arg. Never pass
+ * them directly to .filter()/.map()/.some() — always wrap in an arrow.
  *
  * Pair with isInMonth2Cohort() for the denominator. The conversion
  * rate is: |students filter isMonth2Converted| / |students filter

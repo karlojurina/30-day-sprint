@@ -275,7 +275,15 @@ export default function AdminDashboard() {
       // can no longer drift apart. The matureCohort/matureActive
       // names are kept for the data payload field but the underlying
       // computation is now centralized.
-      const matureCohort = students.filter(isInMonth2Cohort);
+      // Both helpers MUST be called through an arrow wrapper. Passing
+      // them to .filter() bare hands the array INDEX to the optional
+      // `asOfMs` parameter (filter invokes cb(el, i, arr)), so the
+      // day-30 check becomes `day30Ms <= 0|1|2…` → false for every
+      // student → empty denominator → the hero stat was pinned at "—"
+      // ("Waiting on the first month-2 cohort") from launch through
+      // month 3. The numerator was already wrapped; only the
+      // denominator was bare, so the KPI could never render.
+      const matureCohort = students.filter((s) => isInMonth2Cohort(s));
       const matureActive = students.filter((s) => isMonth2Converted(s)).length;
       const monthTwoConversionRate =
         matureCohort.length > 0 ? matureActive / matureCohort.length : null;

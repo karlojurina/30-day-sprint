@@ -328,7 +328,7 @@ Email + password form. Supabase auth. "Invalid email or password" on failure. Bo
 
 | Section | What it shows |
 |---|---|
-| Hero KPI: Month 2 conversion | Big % + "X of Y active." Computed as: of all students who joined ≥30 days ago, how many still have `membership_status = active`. Shows "—" if no mature cohort yet. |
+| Hero KPI: Month 2 conversion | Big % + "of N past renewal." Of launch-cohort paying students whose renewal moment has resolved (`first_paid_at` + 30d cycle + 7d grace), the share whose access survived it — i.e. a second payment must have landed. Definition lives in `isMonth2Converted` / `isInMonth2Cohort` (`src/lib/admin/metrics-definitions.ts`); read the `RENEWAL_GRACE_MS` docstring before touching it. An access-survival PROXY, not a payment count — no payments table exists. Shows "—" only when no student has resolved yet. |
 | Hero KPI: AdValue onboarded | Placeholder "—" / "Pending integration with Zak". Not wired. |
 | Supporting stats (this week) | Active students, Joined this week, Avg progress, Churned in last 30 days. |
 | Quick actions | Open Kanban / Pending discounts (with count badge) / Active alerts (with count badge). |

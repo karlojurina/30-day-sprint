@@ -493,7 +493,7 @@ export default function AdminDashboard() {
             valueSuffix={
               data.monthTwoConversionRate == null
                 ? undefined
-                : `of ${data.monthTwoCohortSize} past day 30`
+                : `of ${data.monthTwoCohortSize} past renewal`
             }
             sublabel={
               data.monthTwoConversionRate == null

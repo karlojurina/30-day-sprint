@@ -154,13 +154,27 @@ export function QuizModal({
             backdropFilter: "blur(20px) saturate(140%)",
             WebkitBackdropFilter: "blur(20px) saturate(140%)",
             padding: 16,
-            // v70.7 - 3-row grid layout. Row 1 (1fr): top space +
-            // top slot anchored to bottom of row. Row 2 (auto):
-            // modal panel. Row 3 (1fr): bottom space. Equal 1fr
-            // rows mean the modal lands EXACTLY at viewport center
-            // regardless of how tall the top slot's animation gets.
+            // v70.7 - 3-row grid layout. Row 1: top space + top slot
+            // anchored to the bottom of the row. Row 2 (auto): modal
+            // panel. Row 3: bottom space.
+            //
+            // v70.10 - the outer tracks are minmax(0, 1fr), NOT a
+            // bare 1fr. The old comment here claimed equal 1fr rows
+            // centered the panel "regardless of how tall the top
+            // slot's animation gets". That is backwards: `1fr` means
+            // `minmax(auto, 1fr)`, and the `auto` is a MINIMUM, so
+            // row 1 could never shrink below the animation portaled
+            // into the top slot (380 + 24 margin = 404 for R3's
+            // constellation). Row 3, an empty div, floors at 0 and
+            // can never balance it. The panel's top edge was pinned
+            // at a CONSTANT 420px on every viewport under ~1268px
+            // tall — pushing the answer buttons off the bottom of
+            // any laptop screen, with no scroll container anywhere
+            // in the fixed subtree to reach them.
+            // minmax(0, 1fr) lets both outer tracks shrink equally,
+            // which is what actually centers the panel.
             display: "grid",
-            gridTemplateRows: "1fr auto 1fr",
+            gridTemplateRows: "minmax(0, 1fr) auto minmax(0, 1fr)",
             justifyItems: "center",
             alignItems: "center",
           }}
@@ -192,10 +206,23 @@ export function QuizModal({
             style={{
               position: "relative",
               zIndex: 1,
-              alignSelf: "end",
-              marginBottom: 24,
+              // v70.10 - stretch to FILL row 1 rather than sizing to
+              // the animation. Two effects: the slot's box can never
+              // be taller than the space actually available above
+              // the panel, and row 1 becomes a definite height that
+              // the animation can size against (see the height:100%
+              // + maxHeight in ConstellationQuiz's container), so on
+              // a short viewport the visual scales down into the
+              // room left over instead of shoving the panel down.
+              // The 24px gap above the panel is padding now, not
+              // margin, so the slot's margin box stays exactly one
+              // row tall.
+              alignSelf: "stretch",
+              minHeight: 0,
+              paddingBottom: 24,
               width: "min(720px, 100vw)",
               display: "flex",
+              alignItems: "flex-end",
               justifyContent: "center",
               pointerEvents: "none",
             }}
@@ -327,6 +354,18 @@ export function QuizModal({
                     minHeight: 0,
                     display: "flex",
                     flexDirection: "column",
+                    // v70.10 - last-resort reachability. The panel is
+                    // capped at 92vh with overflow: hidden and every
+                    // format floors its own body (360-408px), so on a
+                    // very short viewport the buttons were clipped
+                    // with no way to get at them. Scrolls only when
+                    // it genuinely overflows. overflowX is pinned to
+                    // hidden because setting one axis to auto
+                    // computes the other from visible to auto, and
+                    // SwipeCards' drag transform would otherwise
+                    // create horizontal scroll range.
+                    overflowY: "auto",
+                    overflowX: "hidden",
                   }}
                 >
                   {result ? (

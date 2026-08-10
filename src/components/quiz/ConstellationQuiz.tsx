@@ -426,7 +426,16 @@ function Constellation({
       style={{
         position: "relative",
         width: "100%",
-        height: containerHeight,
+        // v70.10 - 380 is now the CAP, not the height. QuizModal's
+        // top slot stretches to fill grid row 1, so 100% resolves to
+        // the room actually available above the panel and the SVG
+        // (viewBox 0 0 100 60 + preserveAspectRatio "xMidYMid meet")
+        // scales down with it on short viewports instead of forcing
+        // the panel off-screen. COUPLED to the slot staying
+        // alignSelf: "stretch" — if that ever goes back to "end",
+        // this collapses to 0 and the starfield vanishes.
+        height: "100%",
+        maxHeight: containerHeight,
         overflow: "visible",
       }}
     >

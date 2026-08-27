@@ -3,14 +3,34 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 
-/** How long setSession gets before we call it dead. A healthy round-trip
- *  is well under a second. This exists because setSession does NOT reject
- *  when the auth host is unreachable — it just never settles, and the page
- *  sat on the spinner indefinitely (student stuck 30 min, 2026-08-25). */
-const SESSION_TIMEOUT_MS = 15_000;
+/** Overall budget for the handoff. setSession does NOT reject when the auth
+ *  host is unreachable — it never settles — so without this the page span
+ *  forever (student stuck 30 min, 2026-08-25). Sized to cover the retries
+ *  below with room to spare. */
+const SESSION_BUDGET_MS = 20_000;
 /** When to admit on screen that this is taking longer than it should, and
  *  give the student a way out instead of a spinner that tells them nothing. */
 const SLOW_NOTICE_MS = 5_000;
+/** setSession holds the auth lock across a network round-trip. Anything else
+ *  in this origin that wants the lock waits `lockAcquireTimeout` (5s, see
+ *  GoTrueClient) and then STEALS it, killing our call. AuthProvider no longer
+ *  competes (it sits this route out), but another open tab still can — Web
+ *  Locks are per-origin, not per-page. The thief finishes fast, so a retry
+ *  lands cleanly. */
+const SET_SESSION_ATTEMPTS = 2;
+
+function describe(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Lock contention is retryable. A bad token or a dead host is not. */
+function isLockContention(err: unknown): boolean {
+  const name = err instanceof Error ? err.name : "";
+  return (
+    name.includes("LockAcquireTimeout") ||
+    /stole it|acquire timeout/i.test(describe(err))
+  );
+}
 
 /** Every failure path leaves with a code AND a detail, so a screenshot of
  *  the login screen is enough to route the ticket. */
@@ -21,93 +41,109 @@ function failToLogin(code: string, detail?: string): void {
   window.location.href = `/login${query}`;
 }
 
+type Tokens = { access_token: string; refresh_token: string };
+
+/** Returns null on success, or a human-readable failure reason. */
+async function setSessionWithRetry(
+  supabase: ReturnType<typeof createClient>,
+  tokens: Tokens
+): Promise<string | null> {
+  let last = "unknown error";
+  for (let attempt = 0; attempt < SET_SESSION_ATTEMPTS; attempt++) {
+    try {
+      const { error } = await supabase.auth.setSession(tokens);
+      if (!error) return null;
+      last = error.message;
+      if (!isLockContention(error)) return last;
+    } catch (err) {
+      // NavigatorLockAcquireTimeoutError is a plain Error, not an AuthError,
+      // so setSession rethrows it instead of returning it in `error`.
+      last = describe(err);
+      if (!isLockContention(err)) return last;
+    }
+    await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+  }
+  return last;
+}
+
 export default function AuthCompletePage() {
   const [slow, setSlow] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
-    let settled = false;
-    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+    let done = false;
+
     const slowTimer = setTimeout(() => setSlow(true), SLOW_NOTICE_MS);
-
-    // Read the pending session from the cookie
-    const cookies = document.cookie.split("; ");
-    const pendingCookie = cookies.find((c) => c.startsWith("pending_session="));
-
-    if (!pendingCookie) {
+    const budgetTimer = setTimeout(() => {
+      if (done) return;
+      done = true;
       clearTimeout(slowTimer);
-      // The handoff cookie is set with maxAge 60 in the OAuth callback.
-      // Arriving here without it almost always means the student reloaded
-      // this page after it expired, not that the callback failed.
       failToLogin(
-        "session_expired",
-        "handoff cookie missing or expired (60s limit)"
+        "session_timeout",
+        `no response from auth host after ${SESSION_BUDGET_MS / 1000}s`
       );
-      return;
-    }
+    }, SESSION_BUDGET_MS);
 
-    try {
-      const sessionData = JSON.parse(
-        decodeURIComponent(pendingCookie.split("=").slice(1).join("="))
+    const clearTimers = () => {
+      clearTimeout(slowTimer);
+      clearTimeout(budgetTimer);
+    };
+
+    void (async () => {
+      // Read the pending session from the cookie
+      const cookies = document.cookie.split("; ");
+      const pendingCookie = cookies.find((c) =>
+        c.startsWith("pending_session=")
       );
 
-      timeoutTimer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(slowTimer);
+      if (!pendingCookie) {
+        if (done) return;
+        done = true;
+        clearTimers();
+        // The handoff cookie is set with maxAge 60 in the OAuth callback.
+        // Arriving here without it almost always means the student reloaded
+        // this page after it expired, not that the callback failed.
         failToLogin(
-          "session_timeout",
-          `no response from auth host after ${SESSION_TIMEOUT_MS / 1000}s`
+          "session_expired",
+          "handoff cookie missing or expired (60s limit)"
         );
-      }, SESSION_TIMEOUT_MS);
+        return;
+      }
 
-      supabase.auth
-        .setSession({
-          access_token: sessionData.access_token,
-          refresh_token: sessionData.refresh_token,
-        })
-        .then(({ error }) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timeoutTimer);
-          clearTimeout(slowTimer);
+      let tokens: Tokens;
+      try {
+        tokens = JSON.parse(
+          decodeURIComponent(pendingCookie.split("=").slice(1).join("="))
+        );
+      } catch (err) {
+        if (done) return;
+        done = true;
+        clearTimers();
+        failToLogin(
+          "session_failed",
+          `client: unreadable handoff cookie — ${describe(err)}`
+        );
+        return;
+      }
 
-          // Clear the temporary cookie
-          document.cookie =
-            "pending_session=; path=/; max-age=0; SameSite=Lax";
+      const failure = await setSessionWithRetry(supabase, tokens);
+      if (done) return;
+      done = true;
+      clearTimers();
 
-          if (error) {
-            failToLogin("session_failed", `client: ${error.message}`);
-          } else {
-            window.location.href = "/dashboard";
-          }
-        })
-        .catch((err: unknown) => {
-          // setSession rejects (rather than resolving with an error) when
-          // the request itself fails — DNS, TLS, blocked host. Before this
-          // branch existed the rejection was unhandled and nothing moved.
-          if (settled) return;
-          settled = true;
-          clearTimeout(timeoutTimer);
-          clearTimeout(slowTimer);
-          failToLogin(
-            "session_failed",
-            `client: ${err instanceof Error ? err.message : String(err)}`
-          );
-        });
-    } catch (err) {
-      clearTimeout(slowTimer);
-      failToLogin(
-        "session_failed",
-        `client: unreadable handoff cookie — ${
-          err instanceof Error ? err.message : String(err)
-        }`
-      );
-    }
+      // Clear the temporary cookie
+      document.cookie = "pending_session=; path=/; max-age=0; SameSite=Lax";
+
+      if (failure) {
+        failToLogin("session_failed", `client: ${failure}`);
+      } else {
+        window.location.href = "/dashboard";
+      }
+    })();
 
     return () => {
-      clearTimeout(slowTimer);
-      clearTimeout(timeoutTimer);
+      done = true;
+      clearTimers();
     };
   }, []);
 

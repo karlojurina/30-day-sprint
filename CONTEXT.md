@@ -59,20 +59,42 @@ unmapped code falls through to a generic sentence and the branch is
 lost. Both spinner gates (`auth/complete`, `AuthContext`) now have hard
 15s watchdogs; neither can hang indefinitely again.
 
-**⚠️ Client-side Supabase reachability is an OPEN, UNRESOLVED problem
-(2026-08-27).** A student in Russia completes OAuth successfully — the
-callback runs server-side and mints a valid session — then hangs
-forever on `/auth/complete`, which is the first call his *browser*
-makes directly to Supabase. Reproduces in incognito with extensions
-off and storage clean, so it is not browser state. Root cause
-UNCONFIRMED; leading theory is ISP-level blocking of the Supabase host,
-untested because we did not want to ask a paying student to install a
-VPN. v85.9 makes this failure *report itself* (15s timeout →
-`session_timeout`) but does NOT fix it. If confirmed, every
-client-side Supabase read in `StudentContext` carries the same
-exposure and the dashboard is unusable in that region — the fix would
-be a Supabase custom domain or proxying those reads through our own
-API routes. Neither is built.
+**⚠️ The auth lock steal — root cause of the 2026-08 login failures
+(diagnosed + fixed 2026-08-27, v85.10).** Any login whose `setSession`
+round-trip exceeded **5 seconds** failed outright. Mechanism:
+
+1. `/auth/complete` calls `setSession()`, which grabs the shared Web Lock
+   `lock:sb-<project-ref>-auth-token` and **holds it across a network
+   round-trip**.
+2. `AuthProvider` (mounted in the ROOT layout, so it runs on that page
+   too) calls `getSession()` and waits on the same lock.
+3. At `lockAcquireTimeout` — **5000ms**, `GoTrueClient.js:28` — the waiter
+   gives up and *steals* the lock (`locks.js:203`).
+4. `setSession` sees it lost the lock and throws
+   `Lock "…" was released because another request stole it`
+   (`locks.js:243`).
+
+React runs child effects before parent effects, so `setSession` always
+grabbed the lock first and `AuthProvider` was always the thief. Not a
+race — deterministic above 5s. The error is a plain `Error`, NOT an
+`AuthError`, so `setSession` **rethrows** it instead of returning it in
+`{ error }` — which is why it was an unhandled rejection and the page
+hung silently rather than reporting anything.
+
+Fixed by taking `AuthProvider` off the lock on `/auth/complete` (nothing
+there reads auth state; it hard-redirects, which remounts the provider
+clean), plus a retry on lock-contention errors.
+
+**Do not add a Supabase auth call to any component that renders on
+`/auth/complete`.** It will reintroduce the steal. And note the residual:
+Web Locks are **per-origin, not per-page**, so a second tab open on the
+app can still contend. The retry covers it; it is not a guarantee.
+
+Two earlier diagnoses of this were WRONG and are recorded so nobody
+re-derives them: it is not ISP/network blocking of Supabase (the
+symptom "server-side works, client-side hangs" fits both), and it is
+not duplicate Supabase clients (`@supabase/ssr` v0.10.2 already
+singletons in the browser — `createBrowserClient.js:8-14`).
 
 ## Admin Surfaces
 

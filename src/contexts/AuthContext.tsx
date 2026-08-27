@@ -8,6 +8,7 @@ import {
   useCallback,
   type ReactNode,
 } from "react";
+import { usePathname } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
 import type { Student, TeamMember } from "@/types/database";
 import type { User, Session } from "@supabase/supabase-js";
@@ -37,6 +38,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const supabase = createClient();
+
+  // /auth/complete owns the session handoff: it calls setSession(), which
+  // holds the shared auth lock across a network round-trip. If we bootstrap
+  // there too, our getSession() waits lockAcquireTimeout (5s) and then
+  // STEALS the lock, and setSession dies with "Lock ... was released because
+  // another request stole it". React runs child effects before parent ones,
+  // so we are always the thief and setSession is always the victim — any
+  // login whose round-trip exceeds 5s failed outright (2026-08-27).
+  // Nothing on that route reads auth state; it hard-redirects on completion,
+  // which remounts this provider clean. So sit it out.
+  const isSessionHandoff = usePathname() === "/auth/complete";
 
   const fetchProfile = useCallback(
     async (_userId: string) => {
@@ -72,6 +84,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
+    // Stay off the auth lock while the handoff route holds it. See the
+    // isSessionHandoff note above.
+    if (isSessionHandoff) return;
+
     // Watchdog. `loading` gates a full-screen spinner in StudentGuard and
     // the root page, and getSession() can hang indefinitely when the auth
     // host is unreachable (it never rejects). Same failure that stranded a
@@ -122,7 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(watchdog);
       subscription.unsubscribe();
     };
-  }, [supabase, fetchProfile]);
+  }, [supabase, fetchProfile, isSessionHandoff]);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();

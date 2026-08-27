@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase-browser";
+import { createClient, isLockContention } from "@/lib/supabase-browser";
 
 /** Overall budget for the handoff. setSession does NOT reject when the auth
  *  host is unreachable — it never settles — so without this the page span
@@ -21,15 +21,6 @@ const SET_SESSION_ATTEMPTS = 2;
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-/** Lock contention is retryable. A bad token or a dead host is not. */
-function isLockContention(err: unknown): boolean {
-  const name = err instanceof Error ? err.name : "";
-  return (
-    name.includes("LockAcquireTimeout") ||
-    /stole it|acquire timeout/i.test(describe(err))
-  );
 }
 
 /** Every failure path leaves with a code AND a detail, so a screenshot of

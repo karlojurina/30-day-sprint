@@ -21,3 +21,36 @@ export function createClient() {
 
   return createBrowserClient(safeUrl, safeKey);
 }
+
+/**
+ * Did this Supabase auth call die because something else took the shared
+ * auth lock? Web Locks are per-ORIGIN, so any other page or tab on this
+ * app can steal it after `lockAcquireTimeout` (5s). Retryable — unlike a
+ * bad token or an unreachable host. See "The auth lock steal" in CONTEXT.md.
+ */
+export function isLockContention(err: unknown): boolean {
+  const name = err instanceof Error ? err.name : "";
+  const message = err instanceof Error ? err.message : String(err);
+  return (
+    name.includes("LockAcquireTimeout") ||
+    /stole it|acquire timeout/i.test(message)
+  );
+}
+
+/** Run a Supabase auth call, retrying only if the lock was stolen. */
+export async function withLockRetry<T>(
+  fn: () => Promise<T>,
+  attempts = 2
+): Promise<T> {
+  let last: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      last = err;
+      if (!isLockContention(err)) throw err;
+      await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
+    }
+  }
+  throw last;
+}

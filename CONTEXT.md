@@ -52,12 +52,26 @@ Codes: `no_membership`, `session_expired` (the 60s `pending_session`
 handoff cookie was gone — usually a reloaded `/auth/complete` tab),
 `session_timeout` (auth host never answered), `session_failed`,
 `auth_failed`, `state_invalid`, `missing_params`, `callback_failed`,
-`access_denied`. Details are prefixed `server:` or `client:` so the two
-sides that both emit `session_failed` stay distinguishable. **Add a map
-entry in `src/app/login/page.tsx` whenever you add a code** — an
-unmapped code falls through to a generic sentence and the branch is
-lost. Both spinner gates (`auth/complete`, `AuthContext`) now have hard
-15s watchdogs; neither can hang indefinitely again.
+`access_denied`, `profile_load_failed`. Details are prefixed `server:`
+or `client:` so the two sides that both emit `session_failed` stay
+distinguishable. **Add a map entry in `src/app/login/page.tsx` whenever
+you add a code** — an unmapped code falls through to a generic sentence
+and the branch is lost. Both spinner gates (`auth/complete`,
+`AuthContext`) now have hard 15s watchdogs; neither can hang
+indefinitely again.
+
+**A failed auth load is NOT the same as being signed out (v85.11).**
+`AuthContext` exposes `authError`. A null student with a null
+`authError` means genuinely signed out; a null student WITH an
+`authError` means the load broke and we could not tell. `StudentGuard`
+routes the second case to `/login?error=profile_load_failed&detail=…`
+instead of a bare `/login`. Before this, `fetchProfile` had **four**
+silent exits — an unguarded `getSession()`, two bare `return`s, and a
+swallowing `catch` — and every one bounced the student to a clean login
+screen that looked exactly like a normal logout. A student who was
+correctly signed in but whose profile fetch failed was indistinguishable
+from one who simply wasn't logged in. **Any new early return in
+`fetchProfile` must return a reason string, never a bare `return`.**
 
 **⚠️ The auth lock steal — root cause of the 2026-08 login failures
 (diagnosed + fixed 2026-08-27, v85.10).** Any login whose `setSession`

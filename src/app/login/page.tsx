@@ -18,6 +18,8 @@ function LoginContent() {
     session_expired: "That sign-in attempt expired. Start again below.",
     session_timeout:
       "Couldn't reach our servers. Check your connection, then try again.",
+    profile_load_failed:
+      "Signed in, but we couldn't load your account. Try again.",
     state_mismatch: "Security check failed. Try again.",
     state_invalid: "Security check failed. Try again.",
     missing_params: "Sign-in didn't complete. Try again.",

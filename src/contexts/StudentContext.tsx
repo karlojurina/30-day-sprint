@@ -10,7 +10,7 @@ import {
   useMemo,
   type ReactNode,
 } from "react";
-import { createClient } from "@/lib/supabase-browser";
+import { createClient, getSharedSession } from "@/lib/supabase-browser";
 import { useAuth } from "./AuthContext";
 import type {
   Region,
@@ -223,9 +223,12 @@ const StudentContext = createContext<StudentContextType | null>(null);
 
 async function getAccessToken() {
   const supabase = createClient();
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
+  // Shared single-flight read. This used to call getSession() directly and
+  // runs 3-4x per dashboard load; combined with AuthContext's calls that was
+  // ~7 concurrent refreshes of an expired token, which Supabase 429s. The
+  // failed refresh then clears the session and silently signs the student
+  // out mid-load. See getSharedSession's note (2026-08-27).
+  const session = await getSharedSession(supabase);
   return session?.access_token ?? null;
 }
 

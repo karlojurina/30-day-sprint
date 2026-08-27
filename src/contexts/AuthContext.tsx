@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { usePathname } from "next/navigation";
-import { createClient, withLockRetry } from "@/lib/supabase-browser";
+import { createClient, getSharedSession } from "@/lib/supabase-browser";
 import type { Student, TeamMember } from "@/types/database";
 import type { User, Session } from "@supabase/supabase-js";
 
@@ -70,15 +70,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * session looked identical to a logged-out one (2026-08-27).
    */
   const fetchProfile = useCallback(async (): Promise<string | null> => {
-    // Get the current session token
+    // Get the current session token via the shared single-flight read, so a
+    // page load makes ONE refresh attempt rather than one per caller.
     let currentSession: Session | null;
     try {
-      const { data } = await withLockRetry(() => supabase.auth.getSession());
-      currentSession = data.session;
+      currentSession = await getSharedSession(supabase);
     } catch (err) {
       return `getSession: ${describe(err)}`;
     }
-    if (!currentSession?.access_token) return "session carried no access token";
+    // Distinguish these two — the first message used to cover both and read
+    // as if a session existed when usually none did.
+    if (!currentSession) {
+      return "session was cleared mid-load (expired token, refresh failed)";
+    }
+    if (!currentSession.access_token) return "session carried no access token";
 
     // Use API route to fetch profile (bypasses RLS issues)
     try {
@@ -133,8 +138,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
 
     // Get initial session
-    withLockRetry(() => supabase.auth.getSession())
-      .then(({ data: { session: s } }) => {
+    getSharedSession(supabase)
+      .then((s) => {
         setSession(s);
         setUser(s?.user ?? null);
         if (s?.user) {
@@ -153,9 +158,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, s) => {
+    } = supabase.auth.onAuthStateChange((event, s) => {
       setSession(s);
       setUser(s?.user ?? null);
+      // INITIAL_SESSION fires on subscribe and duplicates the bootstrap
+      // above; SIGNED_IN fires again right behind it. Honouring all three
+      // meant 3x /api/auth/me and 3x getSession per page load, which is what
+      // produced the concurrent refresh storm. Only react to real changes.
+      if (event === "INITIAL_SESSION") return;
       if (s?.user) {
         void fetchProfile().then((reason) => setAuthError(reason ?? null));
       } else {

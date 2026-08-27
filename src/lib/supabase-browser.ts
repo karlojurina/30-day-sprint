@@ -1,4 +1,5 @@
 import { createBrowserClient } from "@supabase/ssr";
+import type { Session } from "@supabase/supabase-js";
 
 /**
  * Lazily-built browser Supabase client.
@@ -35,6 +36,37 @@ export function isLockContention(err: unknown): boolean {
     name.includes("LockAcquireTimeout") ||
     /stole it|acquire timeout/i.test(message)
   );
+}
+
+let sessionInFlight: Promise<Session | null> | null = null;
+
+/**
+ * One shared getSession() for the whole app at any moment.
+ *
+ * Concurrent getSession() calls each take the shared auth lock, and when the
+ * access token has EXPIRED they each try to refresh it. Supabase rotates
+ * refresh tokens, so whichever refresh lands first invalidates the token the
+ * others are still holding — those fail, auth-js treats a failed refresh as
+ * signed-out and CLEARS the session, and the user is silently logged out
+ * mid-load. A dashboard load was firing ~7 of these (3 from AuthContext's
+ * fetchProfile, 3-4 from StudentContext's getAccessToken), which is why the
+ * failure hit returning students with an expired token and never fresh
+ * logins (2026-08-27).
+ *
+ * Callers that arrive while a read is in flight share it. Nothing is cached
+ * past resolution — this de-duplicates a burst, it does not hold state.
+ */
+export function getSharedSession(
+  client: ReturnType<typeof createClient>
+): Promise<Session | null> {
+  if (!sessionInFlight) {
+    sessionInFlight = withLockRetry(() => client.auth.getSession())
+      .then(({ data }) => data.session)
+      .finally(() => {
+        sessionInFlight = null;
+      });
+  }
+  return sessionInFlight;
 }
 
 /** Run a Supabase auth call, retrying only if the lock was stolen. */

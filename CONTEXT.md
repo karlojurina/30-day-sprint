@@ -60,6 +60,31 @@ and the branch is lost. Both spinner gates (`auth/complete`,
 `AuthContext`) now have hard 15s watchdogs; neither can hang
 indefinitely again.
 
+**⚠️ The concurrent-refresh 429 — why returning students got logged out
+(confirmed 2026-08-27, v85.12).** Console evidence: `429` on
+`/auth/v1/token?grant_type=refresh_token`.
+
+A dashboard load fired **~7 concurrent `getSession()` calls** — 3 from
+`AuthContext.fetchProfile` (bootstrap + `INITIAL_SESSION` + `SIGNED_IN`
+all triggered it) and 3-4 from `StudentContext.getAccessToken`. When the
+access token has EXPIRED, every one of them attempts a token refresh at
+once. Supabase rate-limits that endpoint → **429** → auth-js treats a
+failed refresh as signed-out and **clears the session** → the next
+`getSession()` returns null → `profile_load_failed` → bounced to
+`/login`.
+
+This is why it hit **returning** students and never fresh logins: a fresh
+login has a new token and never refreshes. It is also why it looked
+intermittent — it needs an expired token plus enough latency for the
+calls to overlap.
+
+Fixed with `getSharedSession()` in `lib/supabase-browser.ts`: one
+in-flight `getSession()` for the whole app, so a page load makes ONE
+refresh attempt. `onAuthStateChange` now ignores `INITIAL_SESSION`
+(it duplicates the bootstrap). **Never call `supabase.auth.getSession()`
+directly in a component or context — use `getSharedSession()`.** Direct
+calls reintroduce the storm.
+
 **A failed auth load is NOT the same as being signed out (v85.11).**
 `AuthContext` exposes `authError`. A null student with a null
 `authError` means genuinely signed out; a null student WITH an

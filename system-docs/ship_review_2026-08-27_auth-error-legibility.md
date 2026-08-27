@@ -127,12 +127,16 @@ above. Gate cleared.
 
 ## Go-live
 
-**Status: BLOCKED.** Two things outstanding:
+**Status: PUSHED, SMOKE TEST OUTSTANDING.**
 
-1. Sign-off on residuals R1-R5.
-2. Deploy is Lovro's — commit and push to `main`, Vercel deploys from there.
+- Residuals R1-R5 signed off by Lovro, 2026-08-27.
+- Commit `d756d2c` pushed to `main` 2026-08-27 (`be3a82d..d756d2c`).
+  Cutover method: Vercel auto-deploy from `main`.
+- **Smoke test not yet run.** Until step 1 below passes against the live
+  deployment, this change is deployed but unverified. Do not treat it as
+  shipped.
 
-**Smoke test after deploy (cannot be run from the build session):**
+**Smoke test (could not be run from the build session):**
 
 1. Sign in as a working student. Confirm you land on `/dashboard`. This is the
    happy path and the one that matters most — it proves nothing regressed.

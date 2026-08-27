@@ -270,7 +270,11 @@ export async function GET(request: NextRequest) {
 
       if (signUpError) {
         console.error("Supabase user creation failed:", signUpError);
-        return NextResponse.redirect(`${appUrl}/login?error=auth_failed`);
+        return NextResponse.redirect(
+          `${appUrl}/login?error=auth_failed&detail=${encodeURIComponent(
+            `server: ${signUpError.message}`.slice(0, 200)
+          )}`
+        );
       }
 
       userId = signUpData.user.id;
@@ -416,7 +420,15 @@ export async function GET(request: NextRequest) {
 
     if (sessionError || !sessionData.session) {
       console.error("Session creation failed:", sessionError);
-      return NextResponse.redirect(`${appUrl}/login?error=session_failed`);
+      // Tagged `server:` so a screenshot distinguishes this from the
+      // identical code emitted client-side by /auth/complete. Without
+      // the tag both sides look the same in a support ticket.
+      const detail = `server: ${sessionError?.message ?? "no session returned"}`;
+      return NextResponse.redirect(
+        `${appUrl}/login?error=session_failed&detail=${encodeURIComponent(
+          detail.slice(0, 200)
+        )}`
+      );
     }
 
     // 7. Pass session to client-side handler via temporary cookie

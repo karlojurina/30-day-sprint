@@ -44,6 +44,36 @@ Two surfaces in one Next.js app:
 (lessons, completions, streaks, discount, sprint milestones, playbook
 welcome, first-client landed, etc.).
 
+**Auth failure codes (v85.9).** Every auth path exits through
+`/login?error=<code>&detail=<what actually happened>`, and the login
+screen now renders the raw code unconditionally — a screenshot of that
+line is enough to route a ticket without asking the student for logs.
+Codes: `no_membership`, `session_expired` (the 60s `pending_session`
+handoff cookie was gone — usually a reloaded `/auth/complete` tab),
+`session_timeout` (auth host never answered), `session_failed`,
+`auth_failed`, `state_invalid`, `missing_params`, `callback_failed`,
+`access_denied`. Details are prefixed `server:` or `client:` so the two
+sides that both emit `session_failed` stay distinguishable. **Add a map
+entry in `src/app/login/page.tsx` whenever you add a code** — an
+unmapped code falls through to a generic sentence and the branch is
+lost. Both spinner gates (`auth/complete`, `AuthContext`) now have hard
+15s watchdogs; neither can hang indefinitely again.
+
+**⚠️ Client-side Supabase reachability is an OPEN, UNRESOLVED problem
+(2026-08-27).** A student in Russia completes OAuth successfully — the
+callback runs server-side and mints a valid session — then hangs
+forever on `/auth/complete`, which is the first call his *browser*
+makes directly to Supabase. Reproduces in incognito with extensions
+off and storage clean, so it is not browser state. Root cause
+UNCONFIRMED; leading theory is ISP-level blocking of the Supabase host,
+untested because we did not want to ask a paying student to install a
+VPN. v85.9 makes this failure *report itself* (15s timeout →
+`session_timeout`) but does NOT fix it. If confirmed, every
+client-side Supabase read in `StudentContext` carries the same
+exposure and the dashboard is unusable in that region — the fix would
+be a Supabase custom domain or proxying those reads through our own
+API routes. Neither is built.
+
 ## Admin Surfaces
 
 | Path | What it is |

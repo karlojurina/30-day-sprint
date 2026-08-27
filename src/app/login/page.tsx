@@ -10,10 +10,18 @@ function LoginContent() {
   const error = searchParams.get("error");
   const detail = searchParams.get("detail");
 
+  // Every code any auth path can emit. Keep this in sync with the
+  // `?error=` redirects in api/auth/whop/callback and auth/complete —
+  // an unmapped code renders the useless generic fallback below.
   const errorMessages: Record<string, string> = {
     no_membership: "Active EcomTalent membership required.",
-    session_expired: "Session expired. Try again.",
+    session_expired: "That sign-in attempt expired. Start again below.",
+    session_timeout:
+      "Couldn't reach our servers. Check your connection, then try again.",
     state_mismatch: "Security check failed. Try again.",
+    state_invalid: "Security check failed. Try again.",
+    missing_params: "Sign-in didn't complete. Try again.",
+    access_denied: "Sign-in was cancelled on Whop.",
     auth_failed: "Authentication failed. Try again.",
     callback_failed: "Something broke. Try again.",
     session_failed: "Couldn't create your session. Try again.",
@@ -89,11 +97,13 @@ function LoginContent() {
               <p className="text-[14px] text-[var(--color-danger)]">
                 {errorMessages[error] || "Something broke. Try again."}
               </p>
-              {detail && (
-                <p className="mt-1 text-[11px] text-[var(--color-danger)]/70 break-all font-mono">
-                  {detail}
-                </p>
-              )}
+              {/* The code always renders, detail when we have one. A
+                  screenshot of this line is enough to route the ticket
+                  without a round-trip asking the student for logs. */}
+              <p className="mt-1 text-[11px] text-[var(--color-danger)]/70 break-all font-mono">
+                {error}
+                {detail ? ` — ${detail}` : ""}
+              </p>
             </motion.div>
           )}
 

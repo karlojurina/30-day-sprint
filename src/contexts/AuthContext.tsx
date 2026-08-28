@@ -11,6 +11,7 @@ import {
 } from "react";
 import { usePathname } from "next/navigation";
 import { createClient, getSharedSession } from "@/lib/supabase-browser";
+import { createCallGate } from "@/lib/call-gate";
 import type { Student, TeamMember } from "@/types/database";
 import type { User, Session } from "@supabase/supabase-js";
 
@@ -35,6 +36,11 @@ interface AuthState {
 }
 
 const AuthContext = createContext<AuthState | null>(null);
+
+/** Nothing legitimate needs the profile more than once every 10s. Module-level
+ *  so it survives remounts — see the note in lib/call-gate.ts. */
+const PROFILE_MIN_INTERVAL_MS = 10_000;
+const profileGate = createCallGate("fetchProfile", PROFILE_MIN_INTERVAL_MS);
 
 function describe(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -73,7 +79,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * was indistinguishable from a genuine non-student. That is how a broken
    * session looked identical to a logged-out one (2026-08-27).
    */
-  const fetchProfile = useCallback(async (): Promise<string | null> => {
+  const fetchProfile = useCallback(async (
+    trigger: string
+  ): Promise<string | null> => {
+    // Hard cap, whatever called us. Skipping is safe: the state we would have
+    // written is at most PROFILE_MIN_INTERVAL_MS old. Not an error — return
+    // null so the caller does not surface a failure the student can't act on.
+    if (!profileGate.allow(trigger)) return null;
+
     // Get the current session token via the shared single-flight read, so a
     // page load makes ONE refresh attempt rather than one per caller.
     let currentSession: Session | null;
@@ -148,7 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(s?.user ?? null);
         lastUserIdRef.current = s?.user?.id ?? null;
         if (s?.user) {
-          fetchProfile().then(finish, (err) => finish(describe(err)));
+          fetchProfile("bootstrap").then(finish, (err) => finish(describe(err)));
         } else {
           // Genuinely signed out. Not an error — no reason attached.
           finish();
@@ -186,7 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       lastUserIdRef.current = nextUserId;
 
       if (s?.user) {
-        void fetchProfile().then((reason) => setAuthError(reason ?? null));
+        void fetchProfile(event).then((reason) => setAuthError(reason ?? null));
       } else {
         setStudent(null);
         setTeamMember(null);

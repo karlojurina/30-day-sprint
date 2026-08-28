@@ -104,6 +104,39 @@ login succeeds — `setSession` uses NO margin (`:2795-2802`) while
 Supabase → Authentication → Sessions, and by asking the student what
 time his device says.
 
+**⚠️ Call gates — the cap that does NOT depend on knowing the cause
+(v85.14).** `src/lib/call-gate.ts`. A student's tab called `/api/auth/me`
+and `/api/student/data` roughly **once per second for 72 seconds** on
+2026-08-27 — about **800 Supabase queries from one tab** (each
+`/api/student/data` fans out to ~11 table reads). The refresh storm
+drained Supabase's token bucket, the 429 deleted his session, and he was
+bounced to `/login`.
+
+**Five fixes chased the TRIGGER of that loop and none was confirmed.**
+This one doesn't try. `fetchProfile` is capped at once per 10s and the
+background `refreshFromServer` at once per 5s, whatever calls them. A
+runaway becomes one call per interval instead of seventy. Gates are
+MODULE-level, never refs — a remount-driven loop would reset a ref and
+the cap would never hold.
+
+`refreshFromServer` throttles **by default**; user-initiated callers
+(`toggle-lesson`, `toggle-action`, `submit-quiz`, `force-sync`) pass
+`{ throttled: false }` because capping those would visibly stall the UI.
+Default-on means a new automatic caller is capped without anyone
+remembering to.
+
+**Blocked calls report themselves** to `POST /api/client-event` (one line
+per 30s per gate, never per call), which logs to Vercel as
+`[client-event]`. **This is the first client-side visibility this app has
+ever had** — every diagnosis before it depended on a student sending
+screenshots. If the loop survives the cap, that log line names the
+trigger.
+
+**STILL UNKNOWN: what drives the loop.** Candidate worth checking first —
+`StudentContext.tsx:509` calls `setStudent(fresh.student)` with a fresh
+object on every refresh, and the data effect depends on `[student]`, so
+each refresh re-triggers a full fetch. A closed cycle was never traced.
+
 **A failed auth load is NOT the same as being signed out (v85.11).**
 `AuthContext` exposes `authError`. A null student with a null
 `authError` means genuinely signed out; a null student WITH an

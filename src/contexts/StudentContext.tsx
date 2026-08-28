@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { createClient, getSharedSession } from "@/lib/supabase-browser";
+import { createCallGate } from "@/lib/call-gate";
 import { useAuth } from "./AuthContext";
 import type {
   Region,
@@ -218,6 +219,17 @@ interface StudentContextType {
     fetchedWhopIds?: string[];
   }>;
 }
+
+/** Hard cap on the background /api/student/data refetch. Each call fans out
+ *  to ~11 Supabase queries, and the focus/visibility path below was explicitly
+ *  unthrottled — a student's tab issued ~800 queries in 72 seconds on
+ *  2026-08-27. Module-level so remounts can't reset it. User-initiated
+ *  refetches (toggling a lesson, submitting a quiz) do NOT go through this. */
+const STUDENT_DATA_MIN_INTERVAL_MS = 5_000;
+const studentDataGate = createCallGate(
+  "refreshFromServer",
+  STUDENT_DATA_MIN_INTERVAL_MS,
+);
 
 const StudentContext = createContext<StudentContextType | null>(null);
 
@@ -455,7 +467,18 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   // so the debug panel stays live AND so an admin-side discount
   // approval picks up on the next tab-refocus instead of going stale
   // until full page refresh.
-  const refreshFromServer = useCallback(async (token: string) => {
+  const refreshFromServer = useCallback(async (
+    token: string,
+    trigger = "unknown",
+    opts: { throttled?: boolean } = {},
+  ) => {
+    // Background refetches are capped; anything the student actually clicked
+    // opts out, because throttling those would visibly stall the UI (a streak
+    // that doesn't tick after toggling a lesson). Default is THROTTLED so a
+    // new automatic caller is capped without anyone remembering to.
+    // Skipping a background refresh is safe — worst case the view is a few
+    // seconds stale until the next focus.
+    if (opts.throttled !== false && !studentDataGate.allow(trigger)) return;
     const dataRes = await fetch("/api/student/data", {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -570,7 +593,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
-      await refreshFromServer(token);
+      await refreshFromServer(token, "silent-sync");
     } catch {
       // silent — errors are persisted server-side for admin review
     }
@@ -590,7 +613,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       const json = await res.json().catch(() => null);
       // Always re-read the student row so the panel reflects the latest
       // diagnostic columns even when the sync itself errored.
-      await refreshFromServer(token);
+      await refreshFromServer(token, "force-sync", { throttled: false });
       if (!res.ok) {
         return {
           ok: false as const,
@@ -629,7 +652,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       if (document.visibilityState !== "visible") return;
       runSilentSync();
       const token = await getAccessToken();
-      if (token) await refreshFromServer(token);
+      if (token) await refreshFromServer(token, "visibility");
     };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
@@ -869,7 +892,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           // streak stayed stale until a hard reload, so the
           // celebration never fired in real use. Best-effort: failure
           // doesn't roll back the toggle.
-          void refreshFromServer(token);
+          void refreshFromServer(token, "toggle-lesson", { throttled: false });
           // v53 (Phase 5) - signal AchievementsButton to re-poll the
           // unlocks (server-side evaluator runs inside the route, so
           // the row may already exist).
@@ -970,7 +993,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           // v50.4 — mark-action-shipped also calls updateStudentStreak
           // server-side. Refresh so streak.current bumps on the client
           // and the dashboard's celebration effect picks it up.
-          void refreshFromServer(token);
+          void refreshFromServer(token, "toggle-action", { throttled: false });
           // v53 (Phase 5) - signal AchievementsButton to re-poll.
           if (typeof window !== "undefined")
             window.dispatchEvent(new Event("et:achievements-changed"));
@@ -1147,7 +1170,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       }
       // v50.4 — submit-quiz also ticks the streak server-side. Refresh
       // so the dashboard's celebration effect can fire.
-      void refreshFromServer(token);
+      void refreshFromServer(token, "submit-quiz", { throttled: false });
       // v53 (Phase 5) - signal AchievementsButton to re-poll.
       if (typeof window !== "undefined")
         window.dispatchEvent(new Event("et:achievements-changed"));

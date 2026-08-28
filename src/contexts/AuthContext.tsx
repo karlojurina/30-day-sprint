@@ -6,6 +6,7 @@ import {
   useEffect,
   useState,
   useCallback,
+  useRef,
   type ReactNode,
 } from "react";
 import { usePathname } from "next/navigation";
@@ -46,6 +47,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [teamMember, setTeamMember] = useState<TeamMember | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  /** Last identity we loaded a profile for. Guards against refetching on
+   *  token events, which is what produced the refresh loop. */
+  const lastUserIdRef = useRef<string | null>(null);
 
   const supabase = createClient();
 
@@ -142,6 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((s) => {
         setSession(s);
         setUser(s?.user ?? null);
+        lastUserIdRef.current = s?.user?.id ?? null;
         if (s?.user) {
           fetchProfile().then(finish, (err) => finish(describe(err)));
         } else {
@@ -161,11 +166,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = supabase.auth.onAuthStateChange((event, s) => {
       setSession(s);
       setUser(s?.user ?? null);
-      // INITIAL_SESSION fires on subscribe and duplicates the bootstrap
-      // above; SIGNED_IN fires again right behind it. Honouring all three
-      // meant 3x /api/auth/me and 3x getSession per page load, which is what
-      // produced the concurrent refresh storm. Only react to real changes.
-      if (event === "INITIAL_SESSION") return;
+
+      // Re-fetch on IDENTITY changes only, never on token events.
+      //
+      // TOKEN_REFRESHED fires after EVERY successful refresh
+      // (auth-js GoTrueClient.js:3888) and is replayed into every other tab
+      // over the BroadcastChannel (GoTrueClient.js:193-196). Calling
+      // fetchProfile here re-enters getSession, which refreshes AGAIN if the
+      // stored session still reads as expired (GoTrueClient.js:2333-2335) —
+      // an unbounded, RTT-paced refresh loop that drains Supabase's 30-token
+      // burst bucket. The resulting 429 is non-retryable (lib/fetch.js:16),
+      // so auth-js calls _removeSession() and the student is silently signed
+      // out. That is the 2026-08-27 lockout. The identity has not changed on
+      // a token event, so there is nothing to refetch.
+      if (event === "INITIAL_SESSION" || event === "TOKEN_REFRESHED") return;
+
+      const nextUserId = s?.user?.id ?? null;
+      if (nextUserId && nextUserId === lastUserIdRef.current) return;
+      lastUserIdRef.current = nextUserId;
+
       if (s?.user) {
         void fetchProfile().then((reason) => setAuthError(reason ?? null));
       } else {

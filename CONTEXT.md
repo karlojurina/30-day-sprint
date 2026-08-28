@@ -60,32 +60,51 @@ and the branch is lost. Both spinner gates (`auth/complete`,
 `AuthContext`) now have hard 15s watchdogs; neither can hang
 indefinitely again.
 
-**⚠️ The concurrent-refresh 429 — why returning students got logged out
-(confirmed 2026-08-27, v85.12).** Console evidence: `429` on
-`/auth/v1/token?grant_type=refresh_token`.
+**⚠️ The 429 logout — ROOT CAUSE, confirmed by source-level trace
+(v85.13, 2026-08-28).** Two independent defects, both now fixed:
 
-A dashboard load fired **~7 concurrent `getSession()` calls** — 3 from
-`AuthContext.fetchProfile` (bootstrap + `INITIAL_SESSION` + `SIGNED_IN`
-all triggered it) and 3-4 from `StudentContext.getAccessToken`. When the
-access token has EXPIRED, every one of them attempts a token refresh at
-once. Supabase rate-limits that endpoint → **429** → auth-js treats a
-failed refresh as signed-out and **clears the session** → the next
-`getSession()` returns null → `profile_load_failed` → bounced to
-`/login`.
+**1. One 429 deletes the session.** auth-js treats only 502/503/504 as
+retryable (`auth-js lib/fetch.js:16`). A 429 becomes a fatal
+`AuthApiError`, and `_callRefreshToken` responds by calling
+`_removeSession()` (`GoTrueClient.js:3897-3898`) — wiping the auth
+cookie and emitting SIGNED_OUT. The next read returns null, which is
+the `session was cleared mid-load` message students saw. **There is no
+volume requirement: a single rate-limited refresh is enough.** Fixed by
+a `global.fetch` interceptor in `lib/supabase-browser.ts` that rewrites
+a 429 on `/auth/v1/token` to a 503 (retryable, session preserved) with
+a 60s cooldown so retries cost no network.
 
-This is why it hit **returning** students and never fresh logins: a fresh
-login has a new token and never refreshes. It is also why it looked
-intermittent — it needs an expired token plus enough latency for the
-calls to overlap.
+**2. A TOKEN_REFRESHED feedback loop generated the 429.**
+`onAuthStateChange` re-fetched the profile on token events.
+TOKEN_REFRESHED fires after EVERY refresh (`GoTrueClient.js:3888`) and
+is replayed into every other tab over a BroadcastChannel
+(`:193-196`). Each one called `fetchProfile` → `getSession` → refresh
+if the stored session still read as expired (`:2333-2335`) →
+TOKEN_REFRESHED again. Unbounded, RTT-paced, and enough to drain
+Supabase's 30-token burst bucket. Fixed by re-fetching only on
+**identity** change, never on a token event.
 
-Fixed with `getSharedSession()` in `lib/supabase-browser.ts`: one
-in-flight `getSession()` for the whole app, so a page load makes ONE
-refresh attempt. `onAuthStateChange` now ignores `INITIAL_SESSION`
-(it duplicates the bootstrap). **Never call `supabase.auth.getSession()`
-directly in a component or context — use `getSharedSession()`.** Direct
-calls reintroduce the storm.
+**CORRECTION — v85.12's premise was false.** It claimed concurrent
+`getSession()` calls each fire their own refresh. They never did:
+`@supabase/ssr` caches one browser client
+(`createBrowserClient.js:8,11-15`), `GoTrueClient` single-flights
+refresh (`:3875-3877`), and `__loadSession` re-reads storage inside
+the lock (`:2307-2337`). N concurrent calls produce at most ONE POST to
+`/token`. `getSharedSession` is kept (it saves redundant cookie reads)
+but does NOT prevent refresh storms. Do not re-derive that theory.
 
-**A failed auth load is NOT the same as being signed out (v85.11).**
+**STILL UNPROVEN — what makes a just-refreshed session read as
+expired.** Every expiry check uses the LOCAL clock against
+`EXPIRY_MARGIN_MS` = 90s (`GoTrueClient.js:2333-2335`,
+`lib/constants.js:6,9,13`). Two candidates: (a) the student's device
+clock runs fast by more than `jwt_exp − 90s`, which also explains why
+login succeeds — `setSession` uses NO margin (`:2795-2802`) while
+`__loadSession` uses 90s; or (b) `jwt_exp` is configured at or under
+~90s, making every token born expired. Settled by reading
+Supabase → Authentication → Sessions, and by asking the student what
+time his device says.
+
+**A failed auth load is NOT the same as being signed out (v85.11).****A failed auth load is NOT the same as being signed out (v85.11).**
 `AuthContext` exposes `authError`. A null student with a null
 `authError` means genuinely signed out; a null student WITH an
 `authError` means the load broke and we could not tell. `StudentGuard`

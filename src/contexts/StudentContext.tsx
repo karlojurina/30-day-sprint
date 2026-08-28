@@ -223,11 +223,9 @@ const StudentContext = createContext<StudentContextType | null>(null);
 
 async function getAccessToken() {
   const supabase = createClient();
-  // Shared single-flight read. This used to call getSession() directly and
-  // runs 3-4x per dashboard load; combined with AuthContext's calls that was
-  // ~7 concurrent refreshes of an expired token, which Supabase 429s. The
-  // failed refresh then clears the session and silently signs the student
-  // out mid-load. See getSharedSession's note (2026-08-27).
+  // Shared single-flight read — saves redundant cookie reads and lock
+  // acquisitions across the 3-4 calls a dashboard load makes. It does NOT
+  // prevent refresh storms; see the correction on getSharedSession.
   const session = await getSharedSession(supabase);
   return session?.access_token ?? null;
 }

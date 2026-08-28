@@ -20,7 +20,57 @@ export function createClient() {
     url && /^https?:\/\//i.test(url) ? url : "https://placeholder.supabase.co";
   const safeKey = key || "placeholder-anon-key";
 
-  return createBrowserClient(safeUrl, safeKey);
+  return createBrowserClient(safeUrl, safeKey, {
+    global: { fetch: rateLimitSafeFetch },
+  });
+}
+
+/** Set when /auth/v1/token has 429'd; suppresses further calls until it lapses. */
+let tokenRateLimitedUntil = 0;
+
+/**
+ * A 429 on token refresh must NOT sign the student out.
+ *
+ * auth-js only treats 502/503/504 as retryable (auth-js lib/fetch.js:16). A 429
+ * therefore becomes a fatal AuthApiError, and _callRefreshToken responds by
+ * calling _removeSession() (GoTrueClient.js:3897-3898) — so ONE rate-limited
+ * refresh silently deletes the session and bounces the student to /login.
+ * That is the 2026-08-27 lockout, exactly.
+ *
+ * We hand auth-js a 503 instead: retryable, session preserved. The cooldown
+ * matters — without it auth-js would retry straight back into a drained bucket
+ * (GoTrueClient.js:3724-3740); with it those retries cost no network at all.
+ * Also covers a Cloudflare 429, whose HTML body would otherwise throw an
+ * equally-fatal AuthUnknownError (lib/fetch.js:27-32).
+ */
+async function rateLimitSafeFetch(
+  input: RequestInfo | URL,
+  init?: RequestInit
+): Promise<Response> {
+  const url =
+    typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : (input as Request).url;
+  const isTokenEndpoint = url.includes("/auth/v1/token");
+
+  const backOff = () =>
+    new Response('{"error":"rate_limited"}', {
+      status: 503,
+      headers: { "content-type": "application/json" },
+    });
+
+  if (isTokenEndpoint && Date.now() < tokenRateLimitedUntil) return backOff();
+
+  const res = await fetch(input as RequestInfo, init);
+
+  if (isTokenEndpoint && res.status === 429) {
+    // Supabase's /token bucket refills at ~0.5/s from a capacity of 30.
+    tokenRateLimitedUntil = Date.now() + 60_000;
+    return backOff();
+  }
+  return res;
 }
 
 /**
@@ -41,20 +91,22 @@ export function isLockContention(err: unknown): boolean {
 let sessionInFlight: Promise<Session | null> | null = null;
 
 /**
- * One shared getSession() for the whole app at any moment.
+ * One shared in-flight getSession() read for the whole app.
  *
- * Concurrent getSession() calls each take the shared auth lock, and when the
- * access token has EXPIRED they each try to refresh it. Supabase rotates
- * refresh tokens, so whichever refresh lands first invalidates the token the
- * others are still holding — those fail, auth-js treats a failed refresh as
- * signed-out and CLEARS the session, and the user is silently logged out
- * mid-load. A dashboard load was firing ~7 of these (3 from AuthContext's
- * fetchProfile, 3-4 from StudentContext's getAccessToken), which is why the
- * failure hit returning students with an expired token and never fresh
- * logins (2026-08-27).
+ * CORRECTION (2026-08-28): this was originally written believing concurrent
+ * getSession() calls each fired their own token refresh. They never did.
+ * @supabase/ssr caches a single browser client (createBrowserClient.js:8,
+ * :11-15), GoTrueClient single-flights refresh via `refreshingDeferred`
+ * (GoTrueClient.js:3875-3877), and __loadSession re-reads storage inside the
+ * lock so later callers see the session the first one just refreshed
+ * (GoTrueClient.js:2307-2337). N concurrent calls have always produced at
+ * most ONE POST to /auth/v1/token.
  *
- * Callers that arrive while a read is in flight share it. Nothing is cached
- * past resolution — this de-duplicates a burst, it does not hold state.
+ * Keep this: it still avoids redundant cookie reads and lock acquisitions.
+ * But do NOT rely on it to prevent a refresh storm — it cannot, because it
+ * only merges CONCURRENT callers, and the real loop was sequential
+ * (TOKEN_REFRESHED -> fetchProfile -> getSession -> refresh -> repeat).
+ * That loop is fixed in AuthContext, and a 429 is defanged in createClient.
  */
 export function getSharedSession(
   client: ReturnType<typeof createClient>

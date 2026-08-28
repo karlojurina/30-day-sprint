@@ -104,7 +104,7 @@ login succeeds — `setSession` uses NO margin (`:2795-2802`) while
 Supabase → Authentication → Sessions, and by asking the student what
 time his device says.
 
-**A failed auth load is NOT the same as being signed out (v85.11).****A failed auth load is NOT the same as being signed out (v85.11).**
+**A failed auth load is NOT the same as being signed out (v85.11).**
 `AuthContext` exposes `authError`. A null student with a null
 `authError` means genuinely signed out; a null student WITH an
 `authError` means the load broke and we could not tell. `StudentGuard`

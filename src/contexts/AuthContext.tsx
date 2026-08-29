@@ -80,12 +80,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * session looked identical to a logged-out one (2026-08-27).
    */
   const fetchProfile = useCallback(async (
-    trigger: string
+    trigger: string,
+    opts: { gated?: boolean } = {},
   ): Promise<string | null> => {
     // Hard cap, whatever called us. Skipping is safe: the state we would have
     // written is at most PROFILE_MIN_INTERVAL_MS old. Not an error — return
     // null so the caller does not surface a failure the student can't act on.
-    if (!profileGate.allow(trigger)) return null;
+    //
+    // The BOOTSTRAP call is never gated. It runs once per page load by
+    // construction and cannot loop, and gating it opens a race: if SIGNED_IN
+    // fires before getSharedSession resolves, the event handler closes the
+    // gate, bootstrap's call is blocked, returns null, and finish(null) ends
+    // the load with student still null — which StudentGuard reads as "not a
+    // student" and bounces to /login. Slow connections make that ordering
+    // more likely, i.e. exactly the students already struggling (2026-08-28).
+    if (opts.gated !== false && !profileGate.allow(trigger)) return null;
 
     // Get the current session token via the shared single-flight read, so a
     // page load makes ONE refresh attempt rather than one per caller.
@@ -161,7 +170,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(s?.user ?? null);
         lastUserIdRef.current = s?.user?.id ?? null;
         if (s?.user) {
-          fetchProfile("bootstrap").then(finish, (err) => finish(describe(err)));
+          fetchProfile("bootstrap", { gated: false }).then(
+            finish,
+            (err) => finish(describe(err)),
+          );
         } else {
           // Genuinely signed out. Not an error — no reason attached.
           finish();

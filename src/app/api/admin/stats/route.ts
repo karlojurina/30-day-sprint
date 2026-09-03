@@ -203,8 +203,11 @@ export async function GET(request: NextRequest) {
     // added in Whop that this code does not know about, or Whop changed
     // per-product attribution — both silent, both make the per-product view
     // under-report while looking entirely normal.
+    // Runs whenever the view is unfiltered — NOT only when gross_revenue is
+    // one of the chosen tiles. It is the page's integrity guard, so it must
+    // not switch itself off because the founder rearranged his tiles.
     let reconciliation: Reconciliation | null = null;
-    if (!product && metrics.includes("gross_revenue")) {
+    if (!product) {
       reconciliation = await reconcileProducts(
         Object.values(WHOP_PRODUCTS),
         window.from,

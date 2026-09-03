@@ -66,6 +66,8 @@ type SavedView = {
     metrics: { key: string; product: string | null }[];
     granularity: Granularity;
     range: string;
+    from?: string;
+    to?: string;
   } | null;
   invalid: string | null;
 };
@@ -241,6 +243,7 @@ export function StatsClient() {
             })),
             granularity,
             range,
+            ...(range === "custom" ? { from: customFrom, to: customTo } : {}),
           },
         }),
       });
@@ -259,6 +262,10 @@ export function StatsClient() {
     if (!v.layout) return;
     setMetrics(v.layout.metrics.map((m) => m.key));
     setGranularity(v.layout.granularity);
+    if (v.layout.range === "custom" && v.layout.from && v.layout.to) {
+      setCustomFrom(v.layout.from);
+      setCustomTo(v.layout.to);
+    }
     setRange(v.layout.range);
     const firstProduct = v.layout.metrics.find((m) => m.product)?.product ?? null;
     setProduct(firstProduct);

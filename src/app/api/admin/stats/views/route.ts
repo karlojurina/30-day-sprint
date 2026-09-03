@@ -21,7 +21,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireStatsOwner, isAuthFailure } from "@/lib/admin-auth";
 import { WHOP_METRICS } from "@/lib/whop-stats-catalog";
-import { isStatsRange } from "@/lib/whop-stats";
+import { isStatsRange, resolveCustomRange } from "@/lib/whop-stats";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +32,9 @@ export type SavedLayout = {
   metrics: { key: string; product: string | null }[];
   granularity: "day" | "week" | "month";
   range: string;
+  /** Present only when range === "custom". Calendar dates, UTC. */
+  from?: string;
+  to?: string;
 };
 
 function noStore(res: NextResponse): NextResponse {
@@ -77,6 +80,18 @@ function parseLayout(raw: unknown): { layout: SavedLayout } | { reason: string }
   if (g !== "day" && g !== "week" && g !== "month") {
     return { reason: "layout.granularity must be day|week|month" };
   }
+  // A custom range is a legitimate thing to save — it is the whole point of
+  // being able to reconcile an arbitrary window against Whop's dashboard. It
+  // carries its own from/to, validated by the SAME resolver the route uses so
+  // a stored window can never be one the route would reject.
+  if (o.range === "custom") {
+    const from = typeof o.from === "string" ? o.from : "";
+    const to = typeof o.to === "string" ? o.to : "";
+    const resolved = resolveCustomRange(from, to);
+    if (!resolved.ok) return { reason: `layout.range: ${resolved.reason}` };
+    return { layout: { metrics, granularity: g, range: "custom", from, to } };
+  }
+
   if (!isStatsRange(o.range)) return { reason: "layout.range is not a known preset" };
 
   return { layout: { metrics, granularity: g, range: o.range } };

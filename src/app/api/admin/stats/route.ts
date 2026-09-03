@@ -184,6 +184,9 @@ export async function GET(request: NextRequest) {
             tile: {
               ...tile,
               points: rollupPoints(key, tile.points, granularity),
+              // Rolled up identically so the dashed reference line shares
+              // the current line's bucketing and the two are comparable.
+              previousPoints: rollupPoints(key, tile.previousPoints, granularity),
             } satisfies TileResult,
           };
         }

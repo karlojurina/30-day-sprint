@@ -16,6 +16,7 @@ import { createClient, getSharedSession } from "@/lib/supabase-browser";
 import {
   WHOP_METRICS,
   WHOP_METRIC_NAMES,
+  formatMetric,
   WHOP_PICKABLE_METRICS,
   WHOP_WITHHELD_METRICS,
   WHOP_PRODUCTS,
@@ -123,6 +124,10 @@ export function StatsClient() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
+  // Table view. Not decoration: a value must never be reachable ONLY by
+  // hovering a chart, and a table of daily figures is also the most
+  // directly comparable form against Whop's own dashboard.
+  const [asTable, setAsTable] = useState(false);
 
   const [views, setViews] = useState<SavedView[]>([]);
   const [viewsError, setViewsError] = useState<string | null>(null);
@@ -263,6 +268,19 @@ export function StatsClient() {
     await loadViews();
   };
 
+  const shortDate = (iso: string) =>
+    new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+  const currentLabel = data
+    ? `${shortDate(data.range.from)} – ${shortDate(data.range.to)}`
+    : "Current";
+  const previousLabel = data
+    ? `${shortDate(data.range.previous.from)} – ${shortDate(data.range.previous.to)}`
+    : "Previous";
+
   const productLabel =
     PRODUCT_OPTIONS.find((p) => p.value === product)?.label ?? "All products";
 
@@ -331,6 +349,14 @@ export function StatsClient() {
               ]}
               value={granularity}
               onChange={setGranularity}
+            />
+            <Tabs<"chart" | "table">
+              tabs={[
+                { value: "chart", label: "Charts" },
+                { value: "table", label: "Table" },
+              ]}
+              value={asTable ? "table" : "chart"}
+              onChange={(v) => setAsTable(v === "table")}
             />
             <Button onClick={() => setPicking((v) => !v)}>
               {picking ? "Done" : "Add metric"}
@@ -472,12 +498,128 @@ export function StatsClient() {
             title="No metrics selected"
             description="Use “Add metric” to choose from Whop's catalogue."
           />
+        ) : asTable ? (
+          /* TABLE VIEW — the WCAG-clean twin of the charts. Every value the
+             charts encode visually is here as text, aligned with
+             tabular-nums (the one place equal-width digits belong). */
+          <Card padding={0} style={{ overflowX: "auto" }}>
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 12,
+                fontVariantNumeric: "tabular-nums",
+              }}
+            >
+              <caption
+                style={{
+                  ...T.meta,
+                  captionSide: "top",
+                  textAlign: "left",
+                  padding: "12px 14px 8px",
+                }}
+              >
+                {currentLabel} · {data?.granularity ?? granularity} buckets · UTC
+              </caption>
+              <thead>
+                <tr>
+                  <th
+                    scope="col"
+                    style={{
+                      ...T.eyebrow,
+                      textAlign: "left",
+                      padding: "8px 14px",
+                      borderBottom: "1px solid var(--color-border)",
+                      position: "sticky",
+                      left: 0,
+                      background: "var(--color-bg-card)",
+                    }}
+                  >
+                    Date
+                  </th>
+                  {metrics.map((k) => (
+                    <th
+                      key={k}
+                      scope="col"
+                      style={{
+                        ...T.eyebrow,
+                        textAlign: "right",
+                        padding: "8px 14px",
+                        borderBottom: "1px solid var(--color-border)",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {WHOP_METRIC_NAMES[k] ?? k}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const first = metrics
+                    .map((k) => data?.tiles[k])
+                    .find((t) => t?.status === "ok") as
+                    | Extract<TileResult, { status: "ok" }>
+                    | undefined;
+                  if (!first) return null;
+                  return first.points.map((p, i) => (
+                    <tr key={p.t}>
+                      <th
+                        scope="row"
+                        style={{
+                          textAlign: "left",
+                          padding: "6px 14px",
+                          fontWeight: 500,
+                          color: "var(--color-text-secondary)",
+                          borderBottom: "1px solid var(--color-border)",
+                          whiteSpace: "nowrap",
+                          position: "sticky",
+                          left: 0,
+                          background: "var(--color-bg-card)",
+                        }}
+                      >
+                        {new Date(p.t * 1000).toISOString().slice(0, 10)}
+                      </th>
+                      {metrics.map((k) => {
+                        const t = data?.tiles[k];
+                        const v =
+                          t?.status === "ok" ? (t.points[i]?.v ?? null) : null;
+                        return (
+                          <td
+                            key={k}
+                            style={{
+                              textAlign: "right",
+                              padding: "6px 14px",
+                              color:
+                                v == null
+                                  ? "var(--color-text-tertiary)"
+                                  : "var(--color-text-primary)",
+                              borderBottom: "1px solid var(--color-border)",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {t?.status !== "ok"
+                              ? "—"
+                              : v == null
+                                ? "no data"
+                                : formatMetric(k, v)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ));
+                })()}
+              </tbody>
+            </table>
+          </Card>
         ) : (
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-              gap: 12,
+              // 2-across. Charts with real axes need width; three narrow
+              // columns is what made these read as sparklines.
+              gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))",
+              gap: 14,
               opacity: loading ? 0.55 : 1,
               transition: "opacity 120ms ease",
             }}
@@ -490,6 +632,8 @@ export function StatsClient() {
                   data?.tiles[k] ?? { status: "error", reason: "timeout" }
                 }
                 granularity={data?.granularity ?? granularity}
+                currentLabel={currentLabel}
+                previousLabel={previousLabel}
                 onRemove={() =>
                   setMetrics((cur) => cur.filter((x) => x !== k))
                 }

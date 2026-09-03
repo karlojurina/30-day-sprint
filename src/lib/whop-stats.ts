@@ -64,6 +64,8 @@ export type TileResult =
       value: number | null;
       previousValue: number | null;
       points: MetricPoint[];
+      /** The comparison window's series, for the dashed reference line. */
+      previousPoints: MetricPoint[];
       /** Set when Whop's earliest returned bucket is later than requested. */
       historyTruncated?: { requestedFrom: string; actualFrom: string };
       /** Set when the final bucket covers an incomplete period. */
@@ -212,6 +214,7 @@ export async function fetchMetricSeries(args: {
     value,
     previousValue,
     points: cur.points,
+    previousPoints: "error" in prev ? [] : prev.points,
   };
 
   // Whop's history window moves forward over time. A saved view asking

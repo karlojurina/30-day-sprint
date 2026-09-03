@@ -53,7 +53,13 @@ async function rateLimitSafeFetch(
       : input instanceof URL
         ? input.href
         : (input as Request).url;
-  const isTokenEndpoint = url.includes("/auth/v1/token");
+  // Match the REFRESH grant only. A bare "/auth/v1/token" also matches
+  // grant_type=password, so an armed cooldown would reject a correct password
+  // for 60s — /admin/login is a client-side nav, so the module cooldown survives
+  // it and the error renders as "Invalid email or password". The shield only
+  // needs the refresh path: _removeSession() on a fatal error is reached solely
+  // from _callRefreshToken (GoTrueClient.js:3897-3898).
+  const isTokenEndpoint = url.includes("/auth/v1/token?grant_type=refresh_token");
 
   const backOff = () =>
     new Response('{"error":"rate_limited"}', {

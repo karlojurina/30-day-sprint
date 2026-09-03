@@ -593,7 +593,15 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
-      await refreshFromServer(token, "silent-sync");
+      // NOT throttled: onVisible fires runSilentSync() and refreshFromServer()
+      // together, and "visibility" takes the 5s gate at t=0 with PRE-sync data.
+      // By the time the Whop round-trip above finishes, this refresh — the one
+      // that actually carries the new completion — is inside the window and gets
+      // dropped, so a lesson the student just watched doesn't tick until the next
+      // focus. runSilentSync is independently 30s-throttled and stamps
+      // lastSyncAtRef before any await, so this adds at most one extra
+      // /api/student/data per 30s per tab.
+      await refreshFromServer(token, "silent-sync", { throttled: false });
     } catch {
       // silent — errors are persisted server-side for admin review
     }

@@ -28,6 +28,11 @@ should follow on every task. Stable across the life of the project.
 - **Surgical changes.** Touch only what you must. Don't refactor adjacent
   code, rewrite comments, or reformat. Match existing style. Every
   changed line should trace directly to the request. (Karpathy)
+- **Reuse before you build.** Before writing a new helper, component,
+  hook, or type, search for one that already exists and use it.
+  Duplicate logic is the main way an AI-built codebase rots. If the
+  framework or stdlib already does the job, don't add a dependency or
+  hand-roll an abstraction.
 - **Demand elegance, balanced.** For non-trivial changes, pause and ask
   "is there a more elegant way?" If a fix feels hacky, step back and
   implement the clean solution. Skip this for simple, obvious fixes —

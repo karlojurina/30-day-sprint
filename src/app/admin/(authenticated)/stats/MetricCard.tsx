@@ -155,7 +155,10 @@ export function MetricCard({
   };
 
   return (
-    <Card padding={16}>
+    <Card
+      padding={16}
+      style={{ display: "flex", flexDirection: "column", height: "100%" }}
+    >
       {header}
 
       <div className="flex items-baseline" style={{ gap: 10, flexWrap: "wrap" }}>
@@ -189,14 +192,17 @@ export function MetricCard({
         />
       </div>
 
-      {/* Caveats are printed on the card. An unstated caveat is how a number
-          gets trusted when it should not be. */}
-      <div style={{ ...T.meta, marginTop: 10, lineHeight: 1.5 }}>
+      {/* METRIC-SPECIFIC caveats only. An unstated caveat is how a number
+          gets trusted when it should not be — but a caveat repeated on every
+          card is just noise, so window-level ones (an incomplete final
+          period) live on the page header instead.
+          marginTop:auto pins this block to the card bottom so it lines up
+          across a row instead of floating under whichever chart is shortest. */}
+      <div style={{ ...T.meta, marginTop: "auto", paddingTop: 10, lineHeight: 1.5 }}>
         {spec?.agg === "RATIO" && <div>Recomputed per window, not summed.</div>}
         {(spec?.agg === "LEVEL_FIRST" || spec?.agg === "LEVEL_LAST") && (
           <div>Point-in-time level — the latest day in range, never a total.</div>
         )}
-        {tile.trailingPartial && <div>Final period is incomplete (shaded).</div>}
         {tile.historyTruncated && (
           <div>
             Whop has no data before {tile.historyTruncated.actualFrom} (asked from{" "}

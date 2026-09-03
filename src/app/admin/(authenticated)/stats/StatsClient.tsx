@@ -294,8 +294,6 @@ export function StatsClient() {
     ? `${shortDate(data.range.previous.from)} – ${shortDate(data.range.previous.to)}`
     : "Previous";
 
-  const productLabel =
-    PRODUCT_OPTIONS.find((p) => p.value === product)?.label ?? "All products";
 
   return (
     <AdminPage>
@@ -304,7 +302,17 @@ export function StatsClient() {
         description="Whop revenue, split by product. Whop removed this from their own dashboard; these figures come straight from their ledger."
         meta={
           data
-            ? `${data.range.from} → ${data.range.to} · vs ${data.range.previous.from} → ${data.range.previous.to} · ${productLabel} · UTC`
+            ? [
+                `Compared with ${shortDate(data.range.previous.from)} – ${shortDate(
+                  data.range.previous.to,
+                )}`,
+                data.range.trailingPartial
+                  ? "final period still incomplete"
+                  : null,
+                "UTC",
+              ]
+                .filter(Boolean)
+                .join(" · ")
             : undefined
         }
         actions={

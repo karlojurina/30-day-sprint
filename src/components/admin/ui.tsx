@@ -203,7 +203,7 @@ export function Card({
 }) {
   const base: React.CSSProperties = {
     background: "var(--color-bg-card)",
-    borderRadius: 10,
+    borderRadius: "var(--radius-card)",
     padding,
     cursor: onClick || href ? "pointer" : "default",
     textDecoration: "none",
@@ -370,7 +370,7 @@ function buttonStyle(
     padding: pad,
     fontSize: fs,
     fontWeight: 600,
-    borderRadius: 8,
+    borderRadius: "var(--radius-chip)",
     border: "1px solid transparent",
     cursor: busy ? "wait" : "pointer",
     opacity: busy ? 0.6 : 1,
@@ -474,7 +474,7 @@ export function IconButton({
       style={{
         width: 28,
         height: 28,
-        borderRadius: 8,
+        borderRadius: "var(--radius-chip)",
         background: "transparent",
         border: "none",
         cursor: "pointer",
@@ -552,7 +552,7 @@ export function Tabs<T extends string>({
       style={{
         background: "var(--color-bg-elevated)",
         border: "1px solid var(--color-border)",
-        borderRadius: 10,
+        borderRadius: "var(--radius-control)",
         padding: 3,
         gap: 2,
       }}
@@ -570,7 +570,7 @@ export function Tabs<T extends string>({
               fontSize: 13,
               fontWeight: active ? 600 : 500,
               letterSpacing: "-0.006em",
-              borderRadius: 8,
+              borderRadius: "var(--radius-chip)",
               border: "none",
               cursor: "pointer",
               background: active ? "var(--color-bg-card)" : "transparent",
@@ -685,7 +685,7 @@ export function Modal({
         className="surface-elevated"
         style={{
           background: "var(--color-bg-card)",
-          borderRadius: 12,
+          borderRadius: "var(--radius-sheet)",
           width: "100%",
           maxWidth,
           maxHeight: "85vh",
@@ -709,7 +709,7 @@ export function Toast({ message }: { message: string }) {
         bottom: 24,
         right: 24,
         padding: "10px 14px",
-        borderRadius: 10,
+        borderRadius: "var(--radius-card)",
         background: "var(--color-bg-card)",
         border: "1px solid var(--color-border)",
         color: "var(--color-text-primary)",

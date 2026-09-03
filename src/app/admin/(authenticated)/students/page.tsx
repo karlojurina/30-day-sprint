@@ -415,7 +415,7 @@ export default function StudentsPage() {
                           width: `${percent}%`,
                           background: "var(--color-accent-dark)",
                           transition:
-                            "width 250ms cubic-bezier(0.25,0.1,0.25,1)",
+                            "width 250ms var(--ease-default)",
                         }}
                       />
                     </div>

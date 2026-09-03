@@ -709,7 +709,7 @@ function primaryBtnStyle(disabled: boolean): React.CSSProperties {
     letterSpacing: "-0.005em",
     cursor: disabled ? "default" : "pointer",
     opacity: disabled ? 0.6 : 1,
-    transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+    transition: "all 150ms var(--ease-default)",
   };
 }
 
@@ -725,7 +725,7 @@ function secondaryBtnStyle(disabled: boolean): React.CSSProperties {
     letterSpacing: "-0.005em",
     cursor: disabled ? "default" : "pointer",
     opacity: disabled ? 0.6 : 1,
-    transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+    transition: "all 150ms var(--ease-default)",
   };
 }
 
@@ -754,7 +754,7 @@ function overrideBtnStyle(disabled: boolean): React.CSSProperties {
     letterSpacing: "-0.005em",
     cursor: disabled ? "default" : "pointer",
     opacity: disabled ? 0.6 : 1,
-    transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+    transition: "all 150ms var(--ease-default)",
   };
 }
 
@@ -774,7 +774,7 @@ function adVerifyStyle(
     cursor: disabled ? "default" : "pointer",
     opacity: disabled ? 0.6 : 1,
     whiteSpace: "nowrap",
-    transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+    transition: "all 150ms var(--ease-default)",
   };
 }
 

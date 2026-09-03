@@ -125,7 +125,7 @@ export function StudentCard({
             height: "100%",
             width: `${Math.min(100, progressPercent)}%`,
             background: "var(--color-accent)",
-            transition: "width 250ms cubic-bezier(0.25, 0.1, 0.25, 1)",
+            transition: "width 250ms var(--ease-default)",
           }}
         />
       </div>

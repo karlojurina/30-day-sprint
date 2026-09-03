@@ -158,7 +158,7 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
         style={{
           background: "rgba(20, 20, 24, 0.30)",
           backdropFilter: "blur(2px)",
-          animation: "overlay-in 0.25s cubic-bezier(0.25, 0.1, 0.25, 1) both",
+          animation: "overlay-in 0.25s var(--ease-default) both",
           border: "none",
           padding: 0,
         }}
@@ -175,7 +175,7 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
           background: "var(--color-bg-secondary)",
           borderLeft: "1px solid var(--color-border)",
           boxShadow: "-24px 0 64px rgba(20,20,24,0.18), -2px 0 8px rgba(20,20,24,0.06)",
-          animation: "slide-in-right 0.32s cubic-bezier(0.25, 0.1, 0.25, 1) both",
+          animation: "slide-in-right 0.32s var(--ease-default) both",
         }}
       >
         {loading || !student ? (
@@ -309,7 +309,7 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
                             width: `${pct}%`,
                             background: "var(--color-accent)",
                             transition:
-                              "width 250ms cubic-bezier(0.25, 0.1, 0.25, 1)",
+                              "width 250ms var(--ease-default)",
                           }}
                         />
                       </div>

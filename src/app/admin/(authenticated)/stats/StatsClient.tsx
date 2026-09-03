@@ -21,8 +21,9 @@ import {
   WHOP_WITHHELD_METRICS,
   WHOP_PRODUCTS,
 } from "@/lib/whop-stats-catalog";
-import { STATS_RANGES, type TileResult } from "@/lib/whop-stats";
+import { STATS_RANGES, WHOP_HISTORY_START, type TileResult } from "@/lib/whop-stats";
 import { MetricCard } from "./MetricCard";
+import { DateRangePicker } from "./DateRangePicker";
 
 /**
  * /admin/stats — the client shell.
@@ -100,9 +101,12 @@ const PRODUCT_OPTIONS: { value: string | null; label: string }[] = [
 const selectStyle: React.CSSProperties = {
   background: "var(--color-bg-elevated)",
   border: "1px solid var(--color-border)",
-  borderRadius: 8,
-  padding: "6px 10px",
+  borderRadius: "var(--radius-control)",
+  height: 34, // matches DateRangePicker's trigger so the row aligns
+  paddingInline: 10,
   fontSize: 13,
+  fontWeight: 500,
+  letterSpacing: "var(--track-subhead)",
   color: "var(--color-text-primary)",
   cursor: "pointer",
 };
@@ -111,9 +115,11 @@ export function StatsClient() {
   const supabase = useMemo(() => createClient(), []);
 
   const [range, setRange] = useState<string>("last_28d");
-  // Calendar-date STRINGS, straight from <input type="date">. Deliberately
-  // never parsed into a Date in the browser — that is what makes the window
-  // timezone-proof (see resolveCustomRange in src/lib/whop-stats.ts).
+  // Calendar-date STRINGS ("YYYY-MM-DD"), emitted by DateRangePicker.
+  // Deliberately never parsed into a Date here — that is what keeps the
+  // window timezone-proof for a UTC+2 user between 00:00 and 02:00 local.
+  // The server re-validates and rejects rather than clamping
+  // (resolveCustomRange in src/lib/whop-stats.ts).
   const [customFrom, setCustomFrom] = useState<string>("");
   const [customTo, setCustomTo] = useState<string>("");
   const [granularity, setGranularity] = useState<Granularity>("day");
@@ -296,39 +302,24 @@ export function StatsClient() {
         }
         actions={
           <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
-            <select
-              aria-label="Date range"
-              value={range}
-              onChange={(e) => setRange(e.target.value)}
-              style={selectStyle}
-            >
-              {[...STATS_RANGES, "custom"].map((r) => (
-                <option key={r} value={r}>
-                  {RANGE_LABELS[r] ?? r}
-                </option>
-              ))}
-            </select>
-            {range === "custom" && (
-              <span className="flex items-center" style={{ gap: 6 }}>
-                <input
-                  type="date"
-                  aria-label="Start date"
-                  value={customFrom}
-                  max={customTo || undefined}
-                  onChange={(e) => setCustomFrom(e.target.value)}
-                  style={selectStyle}
-                />
-                <span style={T.meta}>to</span>
-                <input
-                  type="date"
-                  aria-label="End date"
-                  value={customTo}
-                  min={customFrom || undefined}
-                  onChange={(e) => setCustomTo(e.target.value)}
-                  style={selectStyle}
-                />
-              </span>
-            )}
+            <DateRangePicker
+              range={range}
+              presets={STATS_RANGES.map((r) => ({
+                value: r,
+                label: RANGE_LABELS[r] ?? r,
+              }))}
+              customFrom={customFrom}
+              customTo={customTo}
+              resolvedFrom={data?.range.from}
+              resolvedTo={data?.range.to}
+              historyStart={WHOP_HISTORY_START}
+              onPreset={(v) => setRange(v)}
+              onCustom={(f, t) => {
+                setCustomFrom(f);
+                setCustomTo(t);
+                setRange("custom");
+              }}
+            />
             <select
               aria-label="Product"
               value={product ?? ""}
@@ -449,14 +440,31 @@ export function StatsClient() {
                         ? "var(--color-fill-secondary)"
                         : "transparent",
                       border: "1px solid var(--color-border)",
-                      borderRadius: 8,
-                      padding: "6px 10px",
+                      borderRadius: "var(--radius-chip)",
+                      padding: "8px 10px",
                       cursor: "pointer",
                       fontSize: 12,
                       color: "var(--color-text-primary)",
                     }}
                   >
-                    {on ? "✓ " : ""}
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        display: "inline-flex",
+                        width: 12,
+                        marginRight: 6,
+                        verticalAlign: "-1px",
+                        color: "var(--color-accent-dark)",
+                      }}
+                    >
+                      {on && (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" strokeWidth={2.5}
+                             strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M20 6L9 17l-5-5" />
+                        </svg>
+                      )}
+                    </span>
                     {WHOP_METRIC_NAMES[k] ?? k}
                     {!spec?.product && (
                       <span style={{ ...T.meta, marginLeft: 6 }}>
@@ -621,7 +629,7 @@ export function StatsClient() {
               gridTemplateColumns: "repeat(auto-fill, minmax(420px, 1fr))",
               gap: 14,
               opacity: loading ? 0.55 : 1,
-              transition: "opacity 120ms ease",
+              transition: "opacity var(--duration-quick) var(--ease-default)",
             }}
           >
             {metrics.map((k) => (

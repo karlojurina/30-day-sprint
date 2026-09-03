@@ -407,7 +407,7 @@ function AdminLessonsBody() {
                         fontSize: 12,
                         color: "var(--color-text-tertiary)",
                         transform: isOpen ? "rotate(180deg)" : "none",
-                        transition: "transform 150ms ease",
+                        transition: "transform var(--duration-quick) var(--ease-default)",
                         display: "inline-block",
                         opacity: ratingList.length > 0 ? 1 : 0.3,
                       }}

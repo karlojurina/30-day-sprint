@@ -341,7 +341,7 @@ export default function AdminTeamPage() {
                   alignItems: "center",
                   gap: 12,
                   opacity: isPending ? 0.6 : 1,
-                  transition: "opacity 120ms ease",
+                  transition: "opacity var(--duration-quick) var(--ease-default)",
                 }}
               >
                 <div>

@@ -241,7 +241,7 @@ export default function SetPasswordPage() {
                 letterSpacing: "-0.011em",
                 cursor: loading ? "default" : "pointer",
                 opacity: loading ? 0.7 : 1,
-                transition: "all 150ms cubic-bezier(0.25,0.1,0.25,1)",
+                transition: "all 150ms var(--ease-default)",
                 marginTop: 4,
               }}
             >
@@ -329,7 +329,7 @@ function FormField({
           color: "var(--color-text-primary)",
           letterSpacing: "-0.006em",
           outline: "none",
-          transition: "border-color 150ms cubic-bezier(0.25,0.1,0.25,1)",
+          transition: "border-color 150ms var(--ease-default)",
         }}
         onFocus={(e) =>
           (e.currentTarget.style.borderColor = "var(--color-accent)")

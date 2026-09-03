@@ -360,7 +360,7 @@ function NavLeafItem({
           ? "var(--color-text-primary)"
           : "var(--color-text-secondary)",
         textDecoration: "none",
-        transition: "color 120ms ease",
+        transition: "color var(--duration-quick) var(--ease-default)",
         height: "100%",
       }}
     >
@@ -391,7 +391,7 @@ function NavLeafItem({
           height: 2,
           background: "transparent",
           borderRadius: 2,
-          transition: "background 150ms ease",
+          transition: "background var(--duration-quick) var(--ease-default)",
         }}
       />
     </Link>
@@ -491,7 +491,7 @@ function NavGroupItem({
           aria-hidden="true"
           style={{
             transform: open ? "rotate(180deg)" : "rotate(0deg)",
-            transition: "transform 150ms ease",
+            transition: "transform var(--duration-quick) var(--ease-default)",
           }}
         >
           <path d="M6 9l6 6 6-6" />
@@ -507,7 +507,7 @@ function NavGroupItem({
             height: 2,
             background: "transparent",
             borderRadius: 2,
-            transition: "background 150ms ease",
+            transition: "background var(--duration-quick) var(--ease-default)",
           }}
         />
       </button>
@@ -556,7 +556,7 @@ function NavGroupItem({
                   background: isActive
                     ? "var(--color-fill-secondary)"
                     : "transparent",
-                  transition: "background 120ms ease, color 120ms ease",
+                  transition: "background var(--duration-quick) var(--ease-default), color var(--duration-quick) var(--ease-default)",
                 }}
               >
                 {c.label}

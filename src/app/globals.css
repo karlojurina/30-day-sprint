@@ -79,6 +79,52 @@
   --duration-default: 250ms;
   --duration-complex: 350ms;
 
+  /* ────────────────────────────────────────────────────────────
+     RADIUS SYSTEM (v86.3)
+
+     An audit of src/app/admin found EIGHT distinct borderRadius
+     values in use with no system behind them — 8 (x31), 10 (x29),
+     12 (x15), 6 (x9), 999 (x6), 2 (x5), 7 (x4), 4 (x4), including a
+     stray 7. That is the "8px button next to a 12px input next to a
+     16px card" tell: it reads as accumulated decisions rather than
+     one intention.
+
+     Four steps, macOS-Settings face. Every new surface uses these;
+     existing values migrate as their component is next touched
+     (see the propagation list in _admin/prds/revenue-stats/).
+     ──────────────────────────────────────────────────────────── */
+  --radius-chip: 8px; /* pills, tags, tiny controls */
+  --radius-control: 12px; /* buttons, inputs, selects */
+  --radius-card: 16px; /* cards, panels, popovers */
+  --radius-sheet: 20px; /* modals, sheets */
+  --radius-pill: 999px; /* fully round: avatars, segmented tracks */
+
+  /* ────────────────────────────────────────────────────────────
+     TYPE LADDER (v86.3) — iOS HIG utility scale.
+
+     Also unsystematised before this: 8+ ad-hoc fontSize values.
+     Sizes are fixed (not fluid) because dense UI wants spatial
+     predictability. Tracking tightens as size grows — that
+     relationship is the single biggest "feels Apple" signal, and
+     the admin was already doing it by hand in 122 places.
+     ──────────────────────────────────────────────────────────── */
+  --text-caption-2: 11px;
+  --text-caption-1: 12px;
+  --text-footnote: 13px;
+  --text-subhead: 14px;
+  --text-body: 15px;
+  --text-headline: 17px;
+  --text-title-3: 22px;
+  --text-title-2: 28px;
+  --text-title-1: 34px;
+
+  --track-caption: 0.06em; /* positive: uppercase eyebrows only */
+  --track-body: -0.005em;
+  --track-subhead: -0.008em;
+  --track-headline: -0.011em;
+  --track-title: -0.022em;
+  --track-display: -0.03em;
+
   /* Paper grain noise — kept for the chart canvas only */
   --bg-noise: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.9 0 0 0 0 0.86 0 0 0 0 0.78 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }

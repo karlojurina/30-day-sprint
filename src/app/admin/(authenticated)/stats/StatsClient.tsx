@@ -82,8 +82,8 @@ const DEFAULT_METRICS = [
 ];
 
 const RANGE_LABELS: Record<string, string> = {
+  today: "Today",
   last_7d: "Last 7 days",
-  last_28d: "Last 28 days",
   last_30d: "Last 30 days",
   last_90d: "Last 90 days",
   this_month: "This month",
@@ -116,7 +116,7 @@ const selectStyle: React.CSSProperties = {
 export function StatsClient() {
   const supabase = useMemo(() => createClient(), []);
 
-  const [range, setRange] = useState<string>("last_28d");
+  const [range, setRange] = useState<string>("last_30d");
   // Calendar-date STRINGS ("YYYY-MM-DD"), emitted by DateRangePicker.
   // Deliberately never parsed into a Date here — that is what keeps the
   // window timezone-proof for a UTC+2 user between 00:00 and 02:00 local.

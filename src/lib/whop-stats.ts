@@ -41,10 +41,24 @@ import {
 
 const WHOP_STATS_BASE = "https://api.whop.com/api/v1/stats";
 
-/** Concurrency ceiling. Measured: 120 concurrent never 429'd, but Whop's
- *  documented Cloudflare ceiling is ~10 req/sec from one origin and a
- *  wedged pool is worse than a slow one. 8 gave 40 calls in ~1.0-1.6s. */
-const POOL_SIZE = 8;
+/**
+ * Concurrency ceiling.
+ *
+ * Per-call latency to Whop is ~425ms p50 / 493ms p90 (n=24, measured after
+ * TLS warmup). That is network RTT, not compute — Whop's own x-runtime is
+ * 30-60ms — so it cannot be optimised away. What CAN be optimised is the
+ * number of sequential WAVES, which is ceil(calls / pool).
+ *
+ * A default unfiltered load is 18 calls: 6 tiles x 2 windows, plus 6 for the
+ * reconciliation self-check. At the previous pool of 8 that was 3 waves,
+ * ~1.28s. At 20 it is ONE wave, ~0.43s — which also makes the self-check
+ * effectively free, and that matters now it runs unconditionally (v86.4).
+ *
+ * Safe: 120 concurrent requests were issued during research without a single
+ * 429 or Retry-After. The worst case here is the 12-tile cap unfiltered,
+ * 12 x 2 + 6 = 30 calls = 2 waves.
+ */
+const POOL_SIZE = 20;
 
 export type TileErrorReason =
   | "auth"
@@ -330,8 +344,8 @@ export function rollupPoints(
 // ============================================================================
 
 export const STATS_RANGES = [
+  "today",
   "last_7d",
-  "last_28d",
   "last_30d",
   "last_90d",
   "this_month",
@@ -380,13 +394,15 @@ export function resolveRange(range: StatsRange, now = new Date()): ResolvedRange
   let trailingPartial = true;
 
   switch (range) {
+    case "today":
+      // A single day. Always partial until the day closes, and the
+      // comparison is yesterday.
+      fromMs = today;
+      toMs = today;
+      break;
     case "last_7d":
       toMs = today;
       fromMs = today - 6 * DAY_MS;
-      break;
-    case "last_28d":
-      toMs = today;
-      fromMs = today - 27 * DAY_MS;
       break;
     case "last_30d":
       toMs = today;
@@ -504,18 +520,26 @@ export async function reconcileProducts(
   productIds: string[],
   from: string,
   to: string,
+  /**
+   * The account-level gross_revenue series, if the caller already fetched it
+   * as a tile. Passing it removes one duplicate request per load — the tile
+   * fan-out and this check were asking for the identical thing.
+   */
+  accountPoints?: MetricPoint[],
 ): Promise<Reconciliation> {
   const sum = (r: RawSeries | { error: TileErrorReason }) =>
     "error" in r
       ? null
       : r.points.reduce((s, p) => s + (p.v ?? 0), 0);
 
-  const [acct, ...parts] = await pooled([
-    () => fetchOne("gross_revenue", from, to, null),
-    ...productIds.map((p) => () => fetchOne("gross_revenue", from, to, p)),
-  ]);
+  const parts = await pooled(
+    productIds.map((p) => () => fetchOne("gross_revenue", from, to, p)),
+  );
 
-  const account = sum(acct);
+  const account =
+    accountPoints !== undefined
+      ? accountPoints.reduce((s, p) => s + (p.v ?? 0), 0)
+      : sum(await fetchOne("gross_revenue", from, to, null));
   // If ANY part failed we cannot claim the invariant holds or fails — an
   // unknown is not a pass. Report it as not-ok with nulls rather than
   // comparing against a short sum, which would fabricate a difference.

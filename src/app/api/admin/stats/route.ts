@@ -10,7 +10,7 @@
  * so a role check would silently widen access to gross revenue and MRR.
  *
  * Query params:
- *   range       one of STATS_RANGES (default "last_28d"). A NAMED preset
+ *   range       one of STATS_RANGES (default "last_30d"), or "custom". A NAMED preset
  *               only; raw from/to is deliberately not accepted, because
  *               every existing admin date helper evaluates in the browser
  *               and is a day off in UTC+2, and a malformed window returns
@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
   // Custom dates are validated strictly and REJECTED on any problem — never
   // clamped into a different window that would return plausible numbers for
   // dates nobody asked for.
-  const rangeParam = sp.get("range") ?? "last_28d";
+  const rangeParam = sp.get("range") ?? "last_30d";
   let window;
   if (rangeParam === "custom") {
     const resolved = resolveCustomRange(
@@ -208,10 +208,16 @@ export async function GET(request: NextRequest) {
     // not switch itself off because the founder rearranged his tiles.
     let reconciliation: Reconciliation | null = null;
     if (!product) {
+      // Hand the check the account series we already fetched, when we have
+      // it, so the two are not both asking Whop for the identical thing.
+      const grossTile = tiles["gross_revenue"];
       reconciliation = await reconcileProducts(
         Object.values(WHOP_PRODUCTS),
         window.from,
         window.to,
+        grossTile?.status === "ok" && granularity === "day"
+          ? grossTile.points
+          : undefined,
       );
     }
 

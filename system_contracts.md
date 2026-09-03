@@ -350,6 +350,58 @@ When adding a new table, append it here. When deleting a field, scan
 - Older waypoint model. Superseded by `regions`/`lessons`. Kept for
   archived dashboards.
 
+### `stats_saved_views` (v86)
+
+**Owner:** the founder-only `/admin/stats` surface. Nothing else reads or
+writes it.
+
+**Stable contract:** `id` (uuid), `owner_id` (uuid → `team_members.id`),
+`name` (text), `layout` (jsonb), `status` (`active` | `archived`),
+`created_at`, `updated_at`, `archived_at`.
+
+`layout` shape, validated on both write and read against
+`src/lib/whop-stats-catalog.ts`:
+```
+{ metrics: [{ key: string, product: string | null }],
+  granularity: "day" | "week" | "month",
+  range: <one of STATS_RANGES> }
+```
+An unknown metric key is **rejected**, never silently dropped — quietly
+discarding a tile would make a saved view lose a metric with no signal.
+
+**Depended on by:** `GET/PUT/DELETE /api/admin/stats/views` only.
+
+**Produces:** nothing consumed by another system. **Consumes:** nothing.
+This is a leaf.
+
+**RLS is deliberately different from every other table here:**
+`public.current_user_is_stats_owner()` (immutable `auth.uid()` match),
+NOT `public.current_user_is_team()`. Do not "fix" it to match the others.
+
+---
+
+### Whop Stats API (external, read-only) (v86)
+
+**Owner:** Whop. **Interface:** `GET https://api.whop.com/api/v1/stats/{key}`.
+
+**We consume:** `account_id`, `from`, `to`, `interval`, `product`.
+**It produces:** `{ data: { points: [{ timestamp, value: number|null }],
+currency?, totals? } }` — or `{ error: { type, message } }` — or,
+intermittently, a non-JSON HTML 500 page.
+
+**Load-bearing constraints (all verified live 2026-09-03):**
+- We send `interval=day` and NOTHING ELSE. Coarser intervals mislabel
+  partial buckets as whole periods and disagree on level semantics
+  (MRR = first day of bucket, `paid_active_members` = last day).
+  Rollup happens in `rollupPoints()`.
+- `from`/`to` are INCLUSIVE on both ends.
+- `data.totals` exists on only 2 of 64 metrics and is the correct
+  whole-window figure for ratios — do not derive those from points.
+- Percent values are PRE-SCALED (1.6 means 1.6%).
+- No revenue from this API is ever persisted.
+
+---
+
 ## How to use this when making a change
 
 1. Find the table you're changing.

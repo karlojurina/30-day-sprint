@@ -203,6 +203,7 @@ singletons in the browser — `createBrowserClient.js:8-14`).
 | `/admin/insights` | Progress + retention insights |
 | `/admin/discord` | Day-28 DM toggles, preview |
 | `/admin/settings` | Admin config (booking link, program link, etc.) |
+| `/admin/stats` | **Whop revenue, FOUNDER-ONLY (v86).** The per-product money tracking Whop removed from their own dashboard UI. Catalog-driven: any of Whop's 64 Stats metrics as a tile, 23 of them filterable by product, 20 months of history (from 2025-02), date-range presets + previous-period delta + daily/weekly/monthly, saved layouts. **The only dynamic (`ƒ`) page under `(authenticated)`** — it awaits `cookies()` and checks `isStatsOwner(user.id)`, so it is not prerendered and not client-gated like the other 17. Nothing is stored; every figure is read live. See `system-docs/plan_2026-09-03_revenue-stats-page.md`. |
 | `/journal/[studentId]` | Student daily-notes journal (read-only for team) |
 
 **Launch cohort only (v75.51):** every admin metric surface (dashboard, /admin/students, /admin/journey, /admin/not-activated, /admin/insights, /admin/discounts) filters to the LAUNCH COHORT — students whose `first_paid_at >= ADMIN_STUDENT_JOIN_CUTOFF` (2026-05-25). Pre-launch / legacy customers are excluded from operational surfaces. The previous "All members | New students" scope toggle (v75.13–v75.50) was removed because it produced inconsistent reads across surfaces and obscured the actual launch-retention signal. CSM crons and the day-28 DM also filter via their own (independent) day-30 sprint-window filter (`csmSprintWindowCutoffIso()`).
@@ -263,6 +264,17 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
 - Day-28 DM preview (`/api/admin/preview-day28-dm`)
 - Ad-submissions verification gate
   (`/api/admin/verify-ad-submissions`)
+- `GET /api/admin/stats` (v86) — **founder-only** revenue proxy for
+  /admin/stats. Gated by `requireStatsOwner()` (id allowlist, NOT role).
+  Params: `range` (named preset only — raw from/to is deliberately not
+  accepted), `granularity`, `metrics` (max 12), optional `product`.
+  Returns per-tile discriminated unions (`ok` / `no_data` / `error` with a
+  closed-union reason), the resolved window, both windows' values, and a
+  `credentialFailure` rollup. `no-store` + `Vary: Authorization` on every
+  response including the 401s. `maxDuration = 30` (deliberately NOT the
+  house 300 — this is an interactive page load).
+- `GET/PUT/DELETE /api/admin/stats/views` (v86) — founder-only saved tile
+  layouts in `stats_saved_views`. Views are archived, never deleted.
 - v75.38 + v75.45: `/api/admin/kpis` and `/api/admin/insights/progress` routes deleted (the M2 helper centralized + insights now fetches snapshots client-direct)
 
 **Discounts** (all require auth post-v75.31)
@@ -368,6 +380,25 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
   `daily_progress_snapshots`: the rebuild RPC deletes+reinserts that
   table and point-in-time canceling state can't be recomputed — a
   column there would be wiped on every "Refresh everything".
+
+- `stats_saved_views` (v86) — saved tile layouts for the founder-only
+  `/admin/stats` page. Holds only WHICH metrics are on screen and how
+  they are arranged; **no revenue figure is stored here or anywhere
+  else in this schema.** `layout` is `jsonb` (not text) so a corrupt
+  payload is rejected by Postgres at write time rather than surfacing
+  as a render crash. Views are archived (`status`), never deleted, so a
+  layout that broke the page stays inspectable.
+  **The only table in this schema whose RLS is NOT role-blind:** its
+  policy is `public.current_user_is_stats_owner()`, which keys on the
+  immutable `auth.users` id. Every other table grants read via
+  `current_user_is_team()`, meaning a CSM's JWT can select from it —
+  copy the stats-owner predicate, not `current_user_is_team()`, for
+  anything that ever holds or describes money.
+  Rejected reusing `admin_config` for this: its read policy is
+  team-wide AND `/admin/settings:55` does an unfiltered `select("*")`
+  with the browser client and renders every row as an editable
+  `<input>`, so a layout blob would have been readable and corruptible
+  by the CSM.
 - `cron_runs` (v82) — audit log for ALL six cron invocations. Captures route_name, started_at, finished_at, auth_status, status (running/success/failed/auth_failed), error_message, rows_affected. Written by every cron handler via `src/lib/cron-auth.ts`. Use to answer "did Vercel fire this cron in the last 24h?" — separable from sync_runs which only covers sync-whop.
 - `achievements` — catalog of 17 unlockable achievements (v53)
 - `student_achievements` — per-student unlock rows + `achievement_unlock_stats`
@@ -414,7 +445,7 @@ Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` 
 | File | Owns |
 |------|------|
 | `supabase-browser.ts` / `supabase-server.ts` | Client construction |
-| `admin-auth.ts` | Team auth gate for API routes |
+| `admin-auth.ts` | Team auth gate for API routes. v86: also `STATS_ALLOWED_USER_IDS` / `isStatsOwner()` / `requireStatsOwner()` — the revenue-visibility allowlist, keyed on the **immutable** `auth.users` id, never on `team_members.role` (role is mutable: any founder can grant `founder` via `PATCH /api/admin/team-members/[id]`). One definition, consumed by both the page gate and the API gate. |
 | `whop.ts` / `whop-members.ts` / `whop-sync-runner.ts` | Whop HTTP + sync. v75.53: the sync self-heals NULL `first_paid_at` via a bounded cross-product lookup (shared with the backfill). **v75.59 LOAD-BEARING: every upsert row carries the IDENTICAL full column set, preserving by VALUE — never reintroduce a conditional row key.** postgrest-js unions batch keys and PostgREST NULLs omitted columns on conflict-update (the 2026-06-11 wipe: 638 `first_paid_at` + 67 `whop_plan_id` + ~48 `cancel_scheduled_at` erased); a tripwire aborts the sync on any non-uniform key set. v75.60/61: `canceled_at` backfill tries past cycle-end, then past `expires_at` (refund revocations), then stamps the observation moment — a churned student can never stay invisible to the churn trend. |
 | `pkce.ts` | OAuth PKCE helpers |
 | `csm-triggers.ts` | Trigger metric registry + evaluator. v76: `is_canceling` condition (cancel_scheduled_at + still active) available in the /admin/templates TriggerBuilder — powers the save-the-sale "Canceling" task template. v85.1: CANCELING SUPPRESSION — for canceling students every built-in trigger returns null (`snapshotIsCanceling` wrap on the registry) and `evaluateCustomTrigger` only matches configs referencing `is_canceling`; check-csm-tasks 3c + check-na-tasks reinforce it, so canceling students hold exactly one task: the save-the-sale one. |
@@ -425,6 +456,8 @@ Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` 
 | `quiz.ts` | Quiz scoring (legacy single quiz) |
 | `region-quizzes.ts` | Region-quiz scoring + format dispatch (v54/v65/v69/v70) |
 | `progress.ts` | Shared progress / completion derivations + `isPlaybookUnlocked` (gate helper, v75.16) |
+| `whop-stats-catalog.ts` (v86) | The live-probed spec for all 64 Whop Stats metrics (`unit`, `agg`, `intervals`, `degradesToDay`, `product`, `maxWindowDays`, `historyStart`, `sparse`, `nullable`, `hasTotals`, `usable`, `note`) + `aggregate()` — **the ONLY place a Whop series collapses to a number**, and it throws on an unknown key. Also `formatMetric()` (percent values are PRE-SCALED; there is no scaling factor in the file), `WHOP_PICKABLE_METRICS` (52), `WHOP_WITHHELD_METRICS` (12 — `churned_revenue` is unreproducible, `partner_*` 403, `trial_conversion_rate`/`ad_spend` always empty). |
+| `whop-stats.ts` (v86) | Whop Stats client. **Only ever requests `interval=day`** — every coarser interval in that API has a verified bucket-semantics bug that fails into a plausible number (partial bucket labelled as a whole period; MRR/ARR bucket = FIRST day of period; `paid_active_members` = LAST day; 3 metrics silently downgrade `hour`→day). Week/month rollup happens here in `rollupPoints()`. Also `resolveRange()` (UTC-only, named presets), `coerceGranularity()`, `pooled()` (concurrency 8). Status is checked before parsing and `JSON.parse` is guarded — `whopFetchWithRetry` returns a failed Response rather than throwing, and Whop's envelope is intermittently non-JSON HTML. |
 | `admin/metrics-definitions.ts` | Canonical predicates for admin metrics: `isActiveMember` (active + past_due), `isPayingMember` (active member on a `PAYING_WHOP_PLAN_IDS` plan), `isInLaunchCohort` (first_paid_at >= cutoff, NO joined_at fallback post-v75.28), `isMonth2Converted` (cohort student who reached day 30 and didn't cancel before then, v75.38/v75.42), `isInMonth2Cohort` (denominator companion), `isCanceling` (cancel_scheduled_at set + still active, v75.47). Scope-toggle helpers deleted in v75.51. |
 | `supabase-pagination.ts` (v75.27) | `fetchAllRowsPaginated(thunk)` — calls `.range(0,999)`, `.range(1000,1999)`, etc. until a page returns less than 1000 rows. Bypasses PostgREST's silent server-side max-rows cap. Returns empty data on error (not partial) so silent truncation can't sneak through. EVERY bulk fetch on admin surfaces should use this. |
 | `cron-auth.ts` (v75.37) | `verifyCronAuth(request)` + `logCronStart`/`logCronFinish` — shared auth check (whitespace-trimmed against drift) + audit-log writes to `cron_runs`. All 6 cron handlers use this; replaces the per-route inline `Bearer ${process.env.CRON_SECRET}` check. |

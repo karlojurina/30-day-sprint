@@ -1,0 +1,581 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AdminPage,
+  PageHeader,
+  Section,
+  Card,
+  Pill,
+  Tabs,
+  Button,
+  EmptyState,
+  T,
+} from "@/components/admin/ui";
+import { createClient, getSharedSession } from "@/lib/supabase-browser";
+import {
+  WHOP_METRICS,
+  WHOP_METRIC_NAMES,
+  WHOP_PICKABLE_METRICS,
+  WHOP_WITHHELD_METRICS,
+  WHOP_PRODUCTS,
+} from "@/lib/whop-stats-catalog";
+import { STATS_RANGES, type TileResult } from "@/lib/whop-stats";
+import { MetricCard } from "./MetricCard";
+
+/**
+ * /admin/stats — the client shell.
+ *
+ * Holds no revenue of its own: every number comes from
+ * GET /api/admin/stats, which is independently gated. This component
+ * owns the controls, the tile grid, and saved layouts.
+ */
+
+type Granularity = "day" | "week" | "month";
+
+type StatsResponse = {
+  range: {
+    key: string;
+    from: string;
+    to: string;
+    previous: { from: string; to: string };
+    trailingPartial: boolean;
+  };
+  granularity: Granularity;
+  granularityCoerced: boolean;
+  product: string | null;
+  tiles: Record<string, TileResult>;
+  reconciliation: {
+    ok: boolean;
+    account: number | null;
+    productSum: number | null;
+    difference: number | null;
+    productCount: number;
+  } | null;
+  credentialFailure: string | null;
+  available: string[];
+  computed_at: string;
+};
+
+type SavedView = {
+  id: string;
+  name: string;
+  layout: {
+    metrics: { key: string; product: string | null }[];
+    granularity: Granularity;
+    range: string;
+  } | null;
+  invalid: string | null;
+};
+
+const DEFAULT_METRICS = [
+  "gross_revenue",
+  "net_revenue",
+  "monthly_recurring_revenue",
+  "annual_recurring_revenue",
+  "paid_active_members",
+  "product_new_users",
+];
+
+const RANGE_LABELS: Record<string, string> = {
+  last_7d: "Last 7 days",
+  last_28d: "Last 28 days",
+  last_30d: "Last 30 days",
+  last_90d: "Last 90 days",
+  this_month: "This month",
+  last_month: "Last month",
+  last_12m: "Last 12 months",
+  all_time: "All time",
+};
+
+const PRODUCT_OPTIONS: { value: string | null; label: string }[] = [
+  { value: null, label: "All products" },
+  { value: WHOP_PRODUCTS.ecomtalent, label: "ecomtalent" },
+  { value: WHOP_PRODUCTS.et_brands, label: "ecomtalent for brands" },
+  { value: WHOP_PRODUCTS.apex_free, label: "Apex (free)" },
+];
+
+const selectStyle: React.CSSProperties = {
+  background: "var(--color-bg-elevated)",
+  border: "1px solid var(--color-border)",
+  borderRadius: 8,
+  padding: "6px 10px",
+  fontSize: 13,
+  color: "var(--color-text-primary)",
+  cursor: "pointer",
+};
+
+export function StatsClient() {
+  const supabase = useMemo(() => createClient(), []);
+
+  const [range, setRange] = useState<string>("last_28d");
+  const [granularity, setGranularity] = useState<Granularity>("day");
+  const [product, setProduct] = useState<string | null>(null);
+  const [metrics, setMetrics] = useState<string[]>(DEFAULT_METRICS);
+
+  const [data, setData] = useState<StatsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+
+  const [views, setViews] = useState<SavedView[]>([]);
+  const [viewsError, setViewsError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Guards against an out-of-order response overwriting a newer one when the
+  // founder changes the range twice quickly.
+  const seqRef = useRef(0);
+
+  const token = useCallback(async () => {
+    const session = await getSharedSession(supabase);
+    return session?.access_token ?? null;
+  }, [supabase]);
+
+  const load = useCallback(async () => {
+    const seq = ++seqRef.current;
+    setLoading(true);
+    setError(null);
+    try {
+      const t = await token();
+      if (!t) {
+        setError("Your session expired. Reload the page.");
+        return;
+      }
+      const params = new URLSearchParams({
+        range,
+        granularity,
+        metrics: metrics.join(","),
+      });
+      if (product) params.set("product", product);
+
+      const res = await fetch(`/api/admin/stats?${params}`, {
+        headers: { Authorization: `Bearer ${t}` },
+      });
+      const json = await res.json().catch(() => null);
+      if (seq !== seqRef.current) return; // a newer request already landed
+      if (!res.ok) {
+        setError(json?.error ?? `Request failed (${res.status})`);
+        return;
+      }
+      setData(json as StatsResponse);
+    } catch {
+      if (seq === seqRef.current) setError("Could not reach the server.");
+    } finally {
+      if (seq === seqRef.current) setLoading(false);
+    }
+  }, [range, granularity, metrics, product, token]);
+
+  const loadViews = useCallback(async () => {
+    try {
+      const t = await token();
+      if (!t) return;
+      const res = await fetch("/api/admin/stats/views", {
+        headers: { Authorization: `Bearer ${t}` },
+      });
+      if (!res.ok) {
+        // A missing table (migration not applied yet) must not break the
+        // page — the tiles are independent of saved views.
+        setViewsError("Saved views unavailable.");
+        return;
+      }
+      const json = await res.json();
+      setViews(json.views ?? []);
+      setViewsError(null);
+    } catch {
+      setViewsError("Saved views unavailable.");
+    }
+  }, [token]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  useEffect(() => {
+    void loadViews();
+  }, [loadViews]);
+
+  const saveView = async () => {
+    const name = window.prompt("Name this view");
+    if (!name) return;
+    setSaving(true);
+    try {
+      const t = await token();
+      if (!t) return;
+      const res = await fetch("/api/admin/stats/views", {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${t}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name,
+          layout: {
+            metrics: metrics.map((k) => ({
+              key: k,
+              product: WHOP_METRICS[k]?.product ? product : null,
+            })),
+            granularity,
+            range,
+          },
+        }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => null);
+        setViewsError(j?.error ?? "Could not save view.");
+        return;
+      }
+      await loadViews();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const applyView = (v: SavedView) => {
+    if (!v.layout) return;
+    setMetrics(v.layout.metrics.map((m) => m.key));
+    setGranularity(v.layout.granularity);
+    setRange(v.layout.range);
+    const firstProduct = v.layout.metrics.find((m) => m.product)?.product ?? null;
+    setProduct(firstProduct);
+  };
+
+  const archiveView = async (id: string) => {
+    const t = await token();
+    if (!t) return;
+    await fetch(`/api/admin/stats/views?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${t}` },
+    });
+    await loadViews();
+  };
+
+  const productLabel =
+    PRODUCT_OPTIONS.find((p) => p.value === product)?.label ?? "All products";
+
+  return (
+    <AdminPage>
+      <PageHeader
+        title="Stats"
+        description="Whop revenue, split by product. Whop removed this from their own dashboard; these figures come straight from their ledger."
+        meta={
+          data
+            ? `${data.range.from} → ${data.range.to} · vs ${data.range.previous.from} → ${data.range.previous.to} · ${productLabel} · UTC`
+            : undefined
+        }
+        actions={
+          <div className="flex items-center" style={{ gap: 8, flexWrap: "wrap" }}>
+            <select
+              aria-label="Date range"
+              value={range}
+              onChange={(e) => setRange(e.target.value)}
+              style={selectStyle}
+            >
+              {STATS_RANGES.map((r) => (
+                <option key={r} value={r}>
+                  {RANGE_LABELS[r] ?? r}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Product"
+              value={product ?? ""}
+              onChange={(e) => setProduct(e.target.value || null)}
+              style={selectStyle}
+            >
+              {PRODUCT_OPTIONS.map((p) => (
+                <option key={p.label} value={p.value ?? ""}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+            <Tabs<Granularity>
+              tabs={[
+                { value: "day", label: "Daily" },
+                { value: "week", label: "Weekly" },
+                { value: "month", label: "Monthly" },
+              ]}
+              value={granularity}
+              onChange={setGranularity}
+            />
+            <Button onClick={() => setPicking((v) => !v)}>
+              {picking ? "Done" : "Add metric"}
+            </Button>
+          </div>
+        }
+      />
+
+      {/* One banner instead of twelve identical "unavailable" tiles when the
+          credential itself is the problem. */}
+      {data?.credentialFailure && (
+        <Card padding={14} style={{ marginBottom: 20 }}>
+          <div className="flex items-center" style={{ gap: 10 }}>
+            <Pill tone="danger">every metric failed</Pill>
+            <span style={T.body}>
+              {data.credentialFailure === "scope"
+                ? "The Whop API key is missing the stats:read scope."
+                : "Whop rejected the API key. It may have been rotated."}
+            </span>
+          </div>
+        </Card>
+      )}
+
+      {/* SELF-CHECK BANNER. Silent only when the invariant holds — a check
+          nobody sees is not a check. When it fails, the per-product tiles are
+          under-reporting and the difference is the size of the omission. */}
+      {data?.reconciliation && !data.reconciliation.ok && (
+        <Card padding={14} style={{ marginBottom: 20 }}>
+          <div className="flex items-center" style={{ gap: 10, flexWrap: "wrap" }}>
+            <Pill tone="danger">self-check failed</Pill>
+            <span style={T.body}>
+              {data.reconciliation.difference == null
+                ? "Could not verify the per-product split against the account total (a request failed). Treat per-product figures as unconfirmed."
+                : `Per-product gross revenue does not add up to the account total — off by ${data.reconciliation.difference.toLocaleString(
+                    "en-US",
+                    { style: "currency", currency: "USD" },
+                  )} across ${data.reconciliation.productCount} known products. Whop most likely has a product this page does not know about, so the per-product view is under-reporting by that amount. The account-level figures are still correct.`}
+            </span>
+          </div>
+        </Card>
+      )}
+
+      {data?.granularityCoerced && (
+        <Card padding={12} style={{ marginBottom: 20 }}>
+          <span style={T.meta}>
+            Range too long for daily points — showing {data.granularity}ly
+            buckets.
+          </span>
+        </Card>
+      )}
+
+      {error && (
+        <Card padding={14} style={{ marginBottom: 20 }}>
+          <div className="flex items-center" style={{ gap: 10 }}>
+            <Pill tone="danger">error</Pill>
+            <span style={T.body}>{error}</span>
+            <Button onClick={() => void load()}>Retry</Button>
+          </div>
+        </Card>
+      )}
+
+      {picking && (
+        <Section eyebrow="Add a metric" count={WHOP_PICKABLE_METRICS.length}>
+          <Card padding={14}>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))",
+                gap: 6,
+              }}
+            >
+              {WHOP_PICKABLE_METRICS.map((k) => {
+                const on = metrics.includes(k);
+                const spec = WHOP_METRICS[k];
+                return (
+                  <button
+                    key={k}
+                    onClick={() =>
+                      setMetrics((cur) =>
+                        cur.includes(k)
+                          ? cur.filter((x) => x !== k)
+                          : cur.length >= 12
+                            ? cur
+                            : [...cur, k],
+                      )
+                    }
+                    style={{
+                      textAlign: "left",
+                      background: on
+                        ? "var(--color-fill-secondary)"
+                        : "transparent",
+                      border: "1px solid var(--color-border)",
+                      borderRadius: 8,
+                      padding: "6px 10px",
+                      cursor: "pointer",
+                      fontSize: 12,
+                      color: "var(--color-text-primary)",
+                    }}
+                  >
+                    {on ? "✓ " : ""}
+                    {WHOP_METRIC_NAMES[k] ?? k}
+                    {!spec?.product && (
+                      <span style={{ ...T.meta, marginLeft: 6 }}>
+                        account only
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ ...T.meta, marginTop: 12, lineHeight: 1.5 }}>
+              Max 12 tiles. {WHOP_WITHHELD_METRICS.length} of Whop&apos;s 64
+              metrics are withheld — either not revenue-related, or not
+              reproducible (e.g. <code>churned_revenue</code> returns different
+              values for the same day depending on the window asked for).
+            </div>
+          </Card>
+        </Section>
+      )}
+
+      <Section
+        eyebrow={loading ? "Loading" : "Metrics"}
+        count={metrics.length}
+        action={
+          <div className="flex items-center" style={{ gap: 8 }}>
+            <Button onClick={() => void saveView()} disabled={saving}>
+              Save this view
+            </Button>
+          </div>
+        }
+      >
+        {metrics.length === 0 ? (
+          <EmptyState
+            title="No metrics selected"
+            description="Use “Add metric” to choose from Whop's catalogue."
+          />
+        ) : (
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
+              gap: 12,
+              opacity: loading ? 0.55 : 1,
+              transition: "opacity 120ms ease",
+            }}
+          >
+            {metrics.map((k) => (
+              <MetricCard
+                key={k}
+                metricKey={k}
+                tile={
+                  data?.tiles[k] ?? { status: "error", reason: "timeout" }
+                }
+                granularity={data?.granularity ?? granularity}
+                onRemove={() =>
+                  setMetrics((cur) => cur.filter((x) => x !== k))
+                }
+              />
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Section eyebrow="Saved views" count={views.length}>
+        {viewsError && (
+          <div style={{ ...T.meta, marginBottom: 8 }}>{viewsError}</div>
+        )}
+        {views.length === 0 && !viewsError ? (
+          <EmptyState
+            title="No saved views yet"
+            description="Arrange the tiles you want, then “Save this view”."
+          />
+        ) : (
+          <div className="flex" style={{ gap: 8, flexWrap: "wrap" }}>
+            {views.map((v) => (
+              <Card key={v.id} padding={12}>
+                <div className="flex items-center" style={{ gap: 10 }}>
+                  <button
+                    onClick={() => applyView(v)}
+                    disabled={!v.layout}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      cursor: v.layout ? "pointer" : "not-allowed",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "var(--color-text-primary)",
+                      padding: 0,
+                    }}
+                  >
+                    {v.name}
+                  </button>
+                  {v.invalid && <Pill tone="warning">needs attention</Pill>}
+                  <button
+                    onClick={() => void archiveView(v.id)}
+                    aria-label={`Archive ${v.name}`}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      color: "var(--color-text-tertiary)",
+                      fontSize: 13,
+                      padding: 0,
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+                {v.invalid && (
+                  <div style={{ ...T.meta, marginTop: 4 }}>{v.invalid}</div>
+                )}
+              </Card>
+            ))}
+          </div>
+        )}
+      </Section>
+
+      <Section eyebrow="How these are calculated">
+        <Card padding={14}>
+          <details>
+            <summary
+              style={{
+                cursor: "pointer",
+                ...T.bodyDim,
+                marginBottom: 8,
+              }}
+            >
+              Where the numbers come from, and what they do not mean
+            </summary>
+            <div style={{ ...T.meta, lineHeight: 1.7 }}>
+              <p>
+                Every figure is read live from Whop&apos;s Stats API for
+                account <code>biz_sijEdQzBJ7eVv2</code>. Nothing is stored, so
+                nothing can drift out of date.
+              </p>
+              <p style={{ marginTop: 8 }}>
+                <strong>We only ever ask Whop for daily points</strong> and do
+                the weekly/monthly rollup here. Whop&apos;s own coarse buckets
+                are unreliable in five separately verified ways — most
+                dangerously, a partial period is labelled as a whole one
+                (10-20 August at monthly returns $49,447 stamped &ldquo;1
+                August&rdquo;, when August was $136,964).
+              </p>
+              <p style={{ marginTop: 8 }}>
+                <strong>MRR and ARR are levels, not totals.</strong> They show
+                the latest day in range, never a sum. They also restate
+                retroactively as refunds and disputes land, so a past
+                month&apos;s MRR can move; gross revenue does not.
+              </p>
+              <p style={{ marginTop: 8 }}>
+                <strong>Blank is not zero.</strong> A tile shows a number, or
+                &ldquo;no data in this window&rdquo;, or &ldquo;unavailable&rdquo;
+                with a reason. A failed request can never render as $0, and a
+                missing day is drawn as a gap in the line.
+              </p>
+              <p style={{ marginTop: 8 }}>
+                <strong>Scope.</strong> These are whole-account figures across
+                every payer and every product, with no launch-cohort filter — so
+                &ldquo;paid active members&rdquo; here will be higher than the
+                same words elsewhere in /admin, which counts only launch-cohort
+                students. Percentages arrive pre-scaled from Whop and are shown
+                exactly as given.
+              </p>
+              <p style={{ marginTop: 8 }}>
+                <strong>Self-check.</strong> Whenever gross revenue is on
+                screen with no product filter, this page also fetches each
+                product separately and confirms the parts still add up to the
+                account total. They matched to the cent on 2026-09-03. If they
+                ever stop matching, a red banner appears at the top — that is
+                the signal a product exists in Whop that this page has never
+                heard of, which would otherwise make the per-product split
+                quietly under-report.
+              </p>
+              <p style={{ marginTop: 8 }}>
+                All dates are UTC. Whop&apos;s ranges include both endpoints.
+              </p>
+            </div>
+          </details>
+        </Card>
+      </Section>
+    </AdminPage>
+  );
+}

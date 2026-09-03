@@ -29,7 +29,7 @@ const WHOP_MEMBERSHIPS_BASE = "https://api.whop.com/api/v2";
  * with jitter. Caps total wait at ~60s per attempt. Returns the
  * final Response (which may still be 429 if the last attempt failed).
  */
-async function whopFetchWithRetry(
+export async function whopFetchWithRetry(
   url: string,
   headers: HeadersInit,
   maxRetries = 5,

@@ -98,6 +98,17 @@ const navEntries: NavEntry[] = [
     icon: <path d="M3 3v18h18M7 14l3-3 3 3 5-5" />,
   },
   {
+    // v86 — Whop revenue, founder-only. Gated three ways: this flag hides
+    // the tab, the page itself is a dynamic server component that checks
+    // isStatsOwner(), and /api/admin/stats re-checks independently. The
+    // flag is cosmetics; the other two are the actual gate.
+    type: "leaf",
+    href: "/admin/stats",
+    label: "Stats",
+    founderOnly: true,
+    icon: <path d="M12 2v20M2 12h20M4.5 7.5l15 9M4.5 16.5l15-9" />,
+  },
+  {
     type: "leaf",
     href: "/admin/templates",
     label: "Templates",
@@ -218,12 +229,20 @@ function AdminTopNav() {
             clipped at the nav boundary and never appeared visibly.
             Now that there are only 7 top-level items they fit
             comfortably without horizontal scroll. */}
+        {/* v86 — minWidth:0 added when the founder-only Stats tab made this
+            an 8-item nav for one account. Without it the grid's 1fr columns
+            refuse to shrink below min-content, so the header widens past the
+            viewport and the whole page gains a horizontal scrollbar — and
+            because the 8th item is founderOnly, only Karlo would ever see it
+            and there'd be nobody to report it. Still NO overflowX here: that
+            creates a clipping context and kills the dropdowns (see :214). */}
         <nav
           className="flex items-stretch"
           style={{
             gap: 0,
             height: 60,
             justifySelf: "center",
+            minWidth: 0,
           }}
         >
           {navEntries.map((entry) => {

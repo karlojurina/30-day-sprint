@@ -170,6 +170,7 @@ IF NOT EXISTS, CREATE OR REPLACE VIEW, etc).
 ## Common pitfalls — read this if you're about to:
 
 ### Add a new admin surface
+**Applies to STUDENT-OPERATIONS surfaces — see the money-surface carve-out below.**
 1. NO scope toggle. Filter `gte('first_paid_at', ADMIN_STUDENT_JOIN_CUTOFF)`
    unconditionally.
 2. Filter `in('whop_plan_id', PAYING_WHOP_PLAN_IDS_ARRAY)` for any
@@ -177,6 +178,44 @@ IF NOT EXISTS, CREATE OR REPLACE VIEW, etc).
 3. Wrap ALL bulk fetches in `fetchAllRowsPaginated`.
 4. Read completion counts from `student_progress_counts` view, NOT
    from raw `student_lesson_completions` rows.
+
+### Add a MONEY surface — the carve-out (added v86, 2026-09-03)
+Rules 1 and 2 above are **wrong for anything reporting revenue**, and
+following them produces an understated figure that looks entirely
+plausible. Verified live 2026-09-03:
+
+- `ADMIN_STUDENT_JOIN_CUTOFF` (2026-05-25) excludes roughly **772 real
+  payers** — every pre-launch customer plus every NULL `first_paid_at`
+  row (this file's own notes at :63 and :324 count them).
+- `PAYING_WHOP_PLAN_IDS` holds **2 of the account's 46 paid plans**.
+  It is missing a second $97 plan (`plan_UoKS5Tjqvp0Cj`), a second
+  $970 annual (`plan_TQcycixm7Wf3J`), and **all 35 paid plans on
+  `prod_bGNf1u02RruKC` "ecomtalent for brands"** — the $997 tier is
+  minted per deal as `quick_link` plans, so a static list can never
+  hold it. See `system-docs/whop_plan_inventory_2026-09-03.md`.
+
+So for a money surface:
+1. **Do NOT import** `isInLaunchCohort`, `isPayingMember`,
+   `isActiveMember`, `isInMonth2Cohort`, `ADMIN_STUDENT_JOIN_CUTOFF`,
+   `PAYING_WHOP_PLAN_IDS`, or `daily_progress_snapshots`. Their presence
+   in revenue code is the code-review fail condition.
+2. Scope by the **payment's own timestamp**, across **every payer ever**.
+3. Read the paying-plan set **live** from `GET /api/v1/plans`; never
+   hardcode it. Unrecognised plans go in a visible "Unclassified" bucket,
+   never silently dropped.
+4. Prefer reading money from Whop's ledger over deriving it locally.
+   **Never** compute revenue as headcount × price: membership rows carry
+   no money field at all, `past_due` counts as paying, `trialing` maps to
+   active, and 15 users currently hold memberships on both products and
+   are deduped to one row.
+5. Gate on the immutable `auth.users` id, not on `team_members.role`
+   (role is mutable — any founder can grant `founder`). Use
+   `isStatsOwner()` / `public.current_user_is_stats_owner()`.
+6. Every tile needs three visually distinct states: a value,
+   "no data in this window", and "could not load". A failed fetch must
+   never render as `0`.
+
+Reference implementation: `/admin/stats` (v86).
 
 ### Add a new metric
 1. Add a canonical helper to `src/lib/admin/metrics-definitions.ts`.

@@ -538,3 +538,110 @@ export async function reconcileProducts(
     productCount: productIds.length,
   };
 }
+
+// ============================================================================
+// CUSTOM RANGE (v86.1)
+//
+// The route originally accepted NAMED PRESETS ONLY, on purpose: every existing
+// admin date helper evaluates in the browser (insights/progress/page.tsx:114
+// `new Date().toISOString()`), which returns yesterday in UTC+2 between 00:00
+// and 02:00 local — and a malformed window does not error, it returns a clean
+// 200 with `points: []`, indistinguishable from "no revenue".
+//
+// Custom ranges are now allowed because they are the only way to reconcile
+// this page against Whop's own dashboard for an arbitrary window. The safety
+// property is preserved by two rules:
+//
+//   1. The client sends CALENDAR DATE STRINGS, never Date objects. An
+//      <input type="date"> yields "YYYY-MM-DD" with no timezone applied, and
+//      those strings are passed through verbatim. No Date is constructed in
+//      the browser at any point, so there is no local-midnight to be wrong
+//      about.
+//   2. Validation here is strict and REJECTS rather than clamping. A window
+//      that is malformed, reversed, in the future, or outside Whop's history
+//      returns an error the UI shows — it never silently becomes a different
+//      window that returns plausible numbers for dates nobody asked for.
+// ============================================================================
+
+/** Longest custom window. Matches coerceGranularity's month threshold. */
+const MAX_CUSTOM_SPAN_DAYS = 800;
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export type CustomRangeResult =
+  | { ok: true; range: ResolvedRange }
+  | { ok: false; reason: string };
+
+/**
+ * Validate and resolve an explicit from/to pair.
+ *
+ * @param now Injectable for tests. Defaults to the server clock.
+ */
+export function resolveCustomRange(
+  from: string,
+  to: string,
+  now = new Date(),
+): CustomRangeResult {
+  if (!ISO_DATE.test(from) || !ISO_DATE.test(to)) {
+    return { ok: false, reason: "Dates must be YYYY-MM-DD." };
+  }
+
+  const fromMs = Date.parse(`${from}T00:00:00Z`);
+  const toMs = Date.parse(`${to}T00:00:00Z`);
+
+  // Catches real calendar nonsense that matches the regex, e.g. 2026-02-31.
+  if (Number.isNaN(fromMs) || Number.isNaN(toMs)) {
+    return { ok: false, reason: "That is not a real date." };
+  }
+  if (new Date(fromMs).toISOString().slice(0, 10) !== from) {
+    return { ok: false, reason: `${from} is not a real date.` };
+  }
+  if (new Date(toMs).toISOString().slice(0, 10) !== to) {
+    return { ok: false, reason: `${to} is not a real date.` };
+  }
+
+  if (fromMs > toMs) {
+    return { ok: false, reason: "Start date is after the end date." };
+  }
+
+  const todayMs = utcMidnight(now);
+  if (toMs > todayMs) {
+    return {
+      ok: false,
+      reason: `End date is in the future. Whop has no data past ${iso(todayMs)}.`,
+    };
+  }
+
+  const historyMs = Date.parse(`${WHOP_HISTORY_START}T00:00:00Z`);
+  if (fromMs < historyMs) {
+    return {
+      ok: false,
+      reason: `Whop's history starts ${WHOP_HISTORY_START}; nothing exists before that.`,
+    };
+  }
+
+  const spanDays = Math.round((toMs - fromMs) / DAY_MS) + 1; // inclusive
+  if (spanDays > MAX_CUSTOM_SPAN_DAYS) {
+    return {
+      ok: false,
+      reason: `That window is ${spanDays} days. Maximum is ${MAX_CUSTOM_SPAN_DAYS}.`,
+    };
+  }
+
+  const previousTo = fromMs - DAY_MS;
+  const previousFrom = previousTo - (spanDays - 1) * DAY_MS;
+
+  return {
+    ok: true,
+    range: {
+      from,
+      to,
+      previousFrom: iso(previousFrom),
+      previousTo: iso(previousTo),
+      // A custom window ending today is still partially complete. Ending on
+      // any earlier date, it is not — which is what makes this usable for
+      // reconciling against a figure Whop already finalised.
+      trailingPartial: toMs === todayMs,
+    },
+  };
+}

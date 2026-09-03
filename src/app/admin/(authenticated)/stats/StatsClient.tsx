@@ -86,6 +86,7 @@ const RANGE_LABELS: Record<string, string> = {
   last_month: "Last month",
   last_12m: "Last 12 months",
   all_time: "All time",
+  custom: "Custom range…",
 };
 
 const PRODUCT_OPTIONS: { value: string | null; label: string }[] = [
@@ -109,6 +110,11 @@ export function StatsClient() {
   const supabase = useMemo(() => createClient(), []);
 
   const [range, setRange] = useState<string>("last_28d");
+  // Calendar-date STRINGS, straight from <input type="date">. Deliberately
+  // never parsed into a Date in the browser — that is what makes the window
+  // timezone-proof (see resolveCustomRange in src/lib/whop-stats.ts).
+  const [customFrom, setCustomFrom] = useState<string>("");
+  const [customTo, setCustomTo] = useState<string>("");
   const [granularity, setGranularity] = useState<Granularity>("day");
   const [product, setProduct] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<string[]>(DEFAULT_METRICS);
@@ -141,11 +147,19 @@ export function StatsClient() {
         setError("Your session expired. Reload the page.");
         return;
       }
+      if (range === "custom" && (!customFrom || !customTo)) {
+        setLoading(false);
+        return; // wait for both dates rather than firing a half-built window
+      }
       const params = new URLSearchParams({
         range,
         granularity,
         metrics: metrics.join(","),
       });
+      if (range === "custom") {
+        params.set("from", customFrom);
+        params.set("to", customTo);
+      }
       if (product) params.set("product", product);
 
       const res = await fetch(`/api/admin/stats?${params}`, {
@@ -163,7 +177,7 @@ export function StatsClient() {
     } finally {
       if (seq === seqRef.current) setLoading(false);
     }
-  }, [range, granularity, metrics, product, token]);
+  }, [range, granularity, metrics, product, customFrom, customTo, token]);
 
   const loadViews = useCallback(async () => {
     try {
@@ -270,12 +284,33 @@ export function StatsClient() {
               onChange={(e) => setRange(e.target.value)}
               style={selectStyle}
             >
-              {STATS_RANGES.map((r) => (
+              {[...STATS_RANGES, "custom"].map((r) => (
                 <option key={r} value={r}>
                   {RANGE_LABELS[r] ?? r}
                 </option>
               ))}
             </select>
+            {range === "custom" && (
+              <span className="flex items-center" style={{ gap: 6 }}>
+                <input
+                  type="date"
+                  aria-label="Start date"
+                  value={customFrom}
+                  max={customTo || undefined}
+                  onChange={(e) => setCustomFrom(e.target.value)}
+                  style={selectStyle}
+                />
+                <span style={T.meta}>to</span>
+                <input
+                  type="date"
+                  aria-label="End date"
+                  value={customTo}
+                  min={customFrom || undefined}
+                  onChange={(e) => setCustomTo(e.target.value)}
+                  style={selectStyle}
+                />
+              </span>
+            )}
             <select
               aria-label="Product"
               value={product ?? ""}
@@ -427,7 +462,12 @@ export function StatsClient() {
           </div>
         }
       >
-        {metrics.length === 0 ? (
+        {range === "custom" && (!customFrom || !customTo) ? (
+          <EmptyState
+            title="Pick both dates"
+            description="Whop's ranges include both endpoints, so 1-30 November is the whole month."
+          />
+        ) : metrics.length === 0 ? (
           <EmptyState
             title="No metrics selected"
             description="Use “Add metric” to choose from Whop's catalogue."

@@ -33,6 +33,7 @@ import {
   resolveRange,
   coerceGranularity,
   isStatsRange,
+  resolveCustomRange,
   reconcileProducts,
   type TileResult,
   type Reconciliation,
@@ -89,11 +90,29 @@ export async function GET(request: NextRequest) {
 
   const sp = request.nextUrl.searchParams;
 
+  // range=custom takes explicit from/to. Everything else is a named preset.
+  // Custom dates are validated strictly and REJECTED on any problem — never
+  // clamped into a different window that would return plausible numbers for
+  // dates nobody asked for.
   const rangeParam = sp.get("range") ?? "last_28d";
-  if (!isStatsRange(rangeParam)) {
+  let window;
+  if (rangeParam === "custom") {
+    const resolved = resolveCustomRange(
+      sp.get("from") ?? "",
+      sp.get("to") ?? "",
+    );
+    if (!resolved.ok) {
+      return noStore(
+        NextResponse.json({ error: resolved.reason }, { status: 400 }),
+      );
+    }
+    window = resolved.range;
+  } else if (!isStatsRange(rangeParam)) {
     return noStore(
       NextResponse.json({ error: "Unknown range" }, { status: 400 }),
     );
+  } else {
+    window = resolveRange(rangeParam);
   }
 
   const gParam = sp.get("granularity") ?? "day";
@@ -140,7 +159,6 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const window = resolveRange(rangeParam);
   const { granularity, coerced } = coerceGranularity(
     gParam,
     window.from,

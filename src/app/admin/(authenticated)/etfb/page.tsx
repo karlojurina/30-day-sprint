@@ -327,6 +327,12 @@ export default function BrandOwnersPage() {
       </div>
 
       <Section eyebrow="Needs review" count={snap.reviewSeats.length}>
+        <div style={{ ...T.bodyDim, marginBottom: 10 }}>
+          People with <strong>free course access</strong> whose brand owner has
+          stopped paying. Remove them in Whop and they drop off this list
+          automatically. <strong>Keep</strong> means leave this person alone —
+          it is reversible, and kept people move to their own section below.
+        </div>
         {snap.reviewSeats.length === 0 ? (
           <EmptyState
             title="Nobody to remove"
@@ -348,10 +354,16 @@ export default function BrandOwnersPage() {
                 }}
               >
                 <div style={{ minWidth: 0 }}>
-                  <div style={T.body}>{s.email ?? s.membershipId}</div>
+                  <div style={T.body}>{s.email || s.membershipId}</div>
                   <div style={{ ...T.meta, marginTop: 2 }}>
-                    via {s.ownerName ?? s.ownerEmail ?? "unknown owner"} · joined{" "}
-                    {fmtDate(s.joinedIso)}
+                    {/* || not ?? — Whop stores an EMPTY STRING for names it
+                        does not have, which ?? does not fall through. 14 of the
+                        seeded owners are in that state and rendered blank. */}
+                    via{" "}
+                    <strong>
+                      {s.ownerName || s.ownerEmail || "owner not recorded"}
+                    </strong>{" "}
+                    (no longer paying) · this person joined {fmtDate(s.joinedIso)}
                     {s.discordUsername ? ` · @${s.discordUsername}` : ""}
                   </div>
                   {/* The membership id is the ONLY unambiguous handle for the
@@ -375,7 +387,7 @@ export default function BrandOwnersPage() {
                         size="sm"
                         variant="subtle"
                         busy={busy === `/api/admin/etfb/links/${s.linkPlanId}/owner`}
-                        title={`Confirm that this link really belongs to ${s.ownerName ?? s.ownerEmail ?? "this owner"}`}
+                        title={`Confirm that this link really belongs to ${s.ownerName || s.ownerEmail || "this owner"}`}
                         onClick={() =>
                           void post(
                             `/api/admin/etfb/links/${s.linkPlanId}/owner`,
@@ -400,10 +412,15 @@ export default function BrandOwnersPage() {
                   <Button
                     size="sm"
                     variant="ghost"
-                    href={`https://whop.com/dashboard/${"biz_sijEdQzBJ7eVv2"}/members?query=${encodeURIComponent(s.email ?? s.membershipId)}`}
-                    title="Opens the Whop members list filtered to this person. Check the membership id above before cancelling anything."
+                    title="Copies this person's membership id. Paste it into Whop's member search — it is the only unambiguous handle for the exact access to cancel."
+                    onClick={() => {
+                      void navigator.clipboard
+                        ?.writeText(s.membershipId)
+                        .then(() => setToast(`Copied ${s.membershipId} — paste it into Whop's member search`))
+                        .catch(() => setToast(s.membershipId));
+                    }}
                   >
-                    Find in Whop
+                    Copy ID
                   </Button>
                 </div>
               </div>
@@ -431,7 +448,7 @@ export default function BrandOwnersPage() {
                 }}
               >
                 <div style={{ minWidth: 0 }}>
-                  <div style={T.body}>{o.email ?? o.whopUserId}</div>
+                  <div style={T.body}>{o.email || o.whopUserId}</div>
                   <div style={{ ...T.meta, marginTop: 2 }}>
                     renews {fmtDate(o.cycleEndIso)}
                   </div>
@@ -454,7 +471,7 @@ export default function BrandOwnersPage() {
           <div style={{ display: "grid", gap: 6 }}>
             {endingSoon.map((o) => (
               <div key={o.whopUserId} style={T.body}>
-                {o.email ?? o.whopUserId}{" "}
+                {o.email || o.whopUserId}{" "}
                 <span style={T.meta}>
                   · access ends {fmtDate(o.cycleEndIso)} ·{" "}
                   {o.link ? `${o.link.seatsUsed} on their link` : "no link"}
@@ -489,7 +506,7 @@ export default function BrandOwnersPage() {
               >
                 <div style={{ minWidth: 0 }}>
                   <div style={T.body}>
-                    {l.ownerName ?? l.ownerEmail ?? l.planId}
+                    {l.ownerName || l.ownerEmail || l.planId}
                   </div>
                   <div style={{ ...T.meta, marginTop: 2 }}>
                     {l.seatsUsed} on this link · {l.planId}
@@ -538,7 +555,7 @@ export default function BrandOwnersPage() {
                 }}
               >
                 <div style={T.body}>
-                  {k.email ?? k.membershipId}{" "}
+                  {k.email || k.membershipId}{" "}
                   <span style={T.meta}>· {k.membershipId}</span>
                 </div>
                 <Button

@@ -380,6 +380,83 @@ NOT `public.current_user_is_team()`. Do not "fix" it to match the others.
 
 ---
 
+### `etfb_team_links` (v87)
+
+**Owner:** the `/admin/etfb` Brand Owners surface. Nothing else reads or
+writes it.
+
+**What it is for:** one row per free team-seat checkout link (a Whop plan
+under the Apex product `prod_vCHZUO8dU4ts2`), recording which ETfB BRAND
+OWNER it was minted for. That single fact exists nowhere else — Whop knows
+the plans, the memberships and the money, but the owner→link relationship
+lived only in a free-text `internal_notes` field until this table.
+
+**Stable contract:** `plan_id` (text PK, the Whop plan id),
+`owner_whop_user_id` (text, Whop user id), `owner_name`, `owner_email`,
+`status` (`active` | `needs_owner` | `archived` | `out_of_scope` | `error`),
+`attribution_method` (`minted_by_app` | `whop_username_label` |
+`discord_handle_label` | `owner_redeemed_own_link` | `exact_owner_name` |
+`manual` | `out_of_scope`), `attribution_confidence` (`certain` | `confirm`
+| `manual`), `note`, `minted_by` (uuid → `team_members.id`), `created_at`,
+`imported_at`, `confirmed_at`, `confirmed_by`, `archived_at`, `errored_at`,
+`updated_at`.
+
+**`owner_whop_user_id` is TEXT and is deliberately NOT a foreign key to
+`students`.** Brand owners are not students. `students.whop_user_id` is
+UNIQUE, so a person who is both would collapse into one row with one
+membership — and every admin surface filters `students` by a join-date
+cutoff and a 2-plan paying allowlist that has nothing to do with this
+population.
+
+**LOAD-BEARING: `etfb_team_links_one_active_per_owner`**, a partial unique
+index on `owner_whop_user_id where status='active'`. One active link per
+owner. Without it a retried or double-clicked mint creates a second Whop
+plan, the owner's team splits across two links, and a later revocation
+silently misses half of them. This has already happened by hand twice
+(`liaoant18888`, `michael51ce`).
+
+**An `archived` link can still hold live seats.** Archiving retires the link;
+it does not revoke the people already on it. Any derivation over seats must
+NOT filter by link status, or those people become invisible.
+
+**Depended on by:** `GET /api/admin/etfb`, `POST /api/admin/etfb/links`,
+`POST /api/admin/etfb/links/[planId]/owner`.
+
+**Produces:** owner attribution consumed only by the ETfB surface.
+**Consumes:** nothing. Owners, seats and subscription state are read LIVE
+from Whop at request time and are deliberately not cached here.
+
+---
+
+### `etfb_seat_decisions` (v87)
+
+**Owner:** the `/admin/etfb` Brand Owners surface.
+
+**What it is for:** a human override on ONE seat — "leave this person alone"
+or "hide them until a date". Absence of a row is the normal case; a seat
+revoked in Whop simply stops being valid and drops out of the live read, so
+"done" needs no row here.
+
+**Stable contract:** `membership_id` (text PK, the Whop membership id),
+`plan_id` (text → `etfb_team_links.plan_id`), `decision` (`keep` |
+`snoozed` | `revoked`), `reason`, `snooze_until`, `decided_by` (uuid →
+`team_members.id`), `decided_at`, `revoked_at`, `revoke_error`,
+`created_at`, `updated_at`.
+
+**PER-SEAT, NEVER PER-LINK.** `plan_P9yx1m1HdHfMt` holds 29 valid seats on a
+10-seat plan and they do not all belong to that link's owner — one belongs
+to a currently-paying owner. A link-level decision would be wrong by
+construction.
+
+**`revoked` is declared but never written by v1.** Revocation is done by a
+human in Whop. The state exists so the future revoke button needs no
+migration.
+
+**Depended on by:** `GET /api/admin/etfb`,
+`POST /api/admin/etfb/seats/[membershipId]/decision`.
+
+---
+
 ### Whop Stats API (external, read-only) (v86)
 
 **Owner:** Whop. **Interface:** `GET https://api.whop.com/api/v1/stats/{key}`.

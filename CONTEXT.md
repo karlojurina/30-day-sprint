@@ -204,6 +204,7 @@ singletons in the browser — `createBrowserClient.js:8-14`).
 | `/admin/discord` | Day-28 DM toggles, preview |
 | `/admin/settings` | Admin config (booking link, program link, etc.) |
 | `/admin/stats` | **Whop revenue, FOUNDER-ONLY (v86).** The per-product money tracking Whop removed from their own dashboard UI. Catalog-driven: any of Whop's 64 Stats metrics as a tile, 23 of them filterable by product, 20 months of history (from 2025-02), date-range presets + previous-period delta + daily/weekly/monthly, saved layouts. **The only dynamic (`ƒ`) page under `(authenticated)`** — it awaits `cookies()` and checks `isStatsOwner(user.id)`, so it is not prerendered and not client-gated like the other 17. Nothing is stored; every figure is read live. See `system-docs/plan_2026-09-03_revenue-stats-page.md`. |
+| `/admin/etfb` | **Brand Owners (v87).** Every ETfB brand owner, their subscription state and cycle-end date, the free team link minted for them, and who redeemed it. When an owner stops paying their seats surface in a review list. Mints links via `POST /api/v2/plans`, so `owner ↔ link` is a real column, not a parsed label. TEAM-WIDE (`requireTeam`, no role list) — Astrid is `csm` and the founder/admin pattern would lock her out. Everything is read LIVE from Whop; nothing about owners or seats is cached. No revoke button in v1 by design. |
 | `/journal/[studentId]` | Student daily-notes journal (read-only for team) |
 
 **Launch cohort only (v75.51):** every admin metric surface (dashboard, /admin/students, /admin/journey, /admin/not-activated, /admin/insights, /admin/discounts) filters to the LAUNCH COHORT — students whose `first_paid_at >= ADMIN_STUDENT_JOIN_CUTOFF` (2026-05-25). Pre-launch / legacy customers are excluded from operational surfaces. The previous "All members | New students" scope toggle (v75.13–v75.50) was removed because it produced inconsistent reads across surfaces and obscured the actual launch-retention signal. CSM crons and the day-28 DM also filter via their own (independent) day-30 sprint-window filter (`csmSprintWindowCutoffIso()`).
@@ -275,6 +276,19 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
   house 300 — this is an interactive page load).
 - `GET/PUT/DELETE /api/admin/stats/views` (v86) — founder-only saved tile
   layouts in `stats_saved_views`. Views are archived, never deleted.
+- `GET /api/admin/etfb` (v87) — the Brand Owners snapshot. Team-wide
+  (`requireTeam`, no role whitelist). Reads Whop live: ETfB + Apex plans and
+  memberships, joined to `etfb_team_links`. Every section is a discriminated
+  union — a failed Whop read returns `state:"error"`, **never an empty list**,
+  because an empty list reads as "nothing to do". `no-store` + `Vary:
+  Authorization`, `maxDuration = 30`.
+- `POST /api/admin/etfb/links` (v87) — mint a 10-seat team link. **Idempotent:**
+  returns the owner's existing active link and calls Whop zero times if one
+  exists. Refuses to mint for anyone without a valid paid ETfB membership.
+- `POST /api/admin/etfb/links/[planId]/owner` (v87) — assign or confirm a link's
+  owner. A 23505 (the one-active-link-per-owner index) surfaces as a 409.
+- `POST /api/admin/etfb/seats/[membershipId]/decision` (v87) — per-seat `keep` /
+  `snoozed`, or `null` to clear. Never revokes; that is done by a human in Whop.
 - v75.38 + v75.45: `/api/admin/kpis` and `/api/admin/insights/progress` routes deleted (the M2 helper centralized + insights now fetches snapshots client-direct)
 
 **Discounts** (all require auth post-v75.31)
@@ -399,6 +413,23 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
   with the browser client and renders every row as an editable
   `<input>`, so a layout blob would have been readable and corruptible
   by the CSM.
+- `etfb_team_links` (v87) — one row per free team-seat checkout link (a Whop
+  plan under the Apex product), recording which BRAND OWNER it was minted for.
+  That fact exists nowhere else. Keyed on `plan_id`; `owner_whop_user_id` is
+  **text and deliberately NOT a FK to `students`** — brand owners are not
+  students and `students.whop_user_id` is UNIQUE. LOAD-BEARING partial unique
+  index `one_active_per_owner` guarantees one active link per owner; without it
+  a retried mint splits a team across two links and a later revocation misses
+  half of them. An `archived` link can still hold live seats, so seat
+  derivations must not filter by link status. Seeded with all 118 pre-existing
+  links (2026-09-10): 66 matched by Whop username in the label, 22 by exact
+  owner name (`confidence='confirm'`, flagged in the UI until a human agrees),
+  17 because the owner had redeemed their own link, 2 by Discord handle, 1 by
+  hand, 9 archived as never-used, 1 marked `out_of_scope` (the Evolve partner
+  link `plan_t4VXohAMYT669`, 383 seats — a partnership, never a leak).
+- `etfb_seat_decisions` (v87) — a human override on ONE seat (`keep` /
+  `snoozed`). PER-SEAT, never per-link. `revoked` is declared but never written
+  by v1.
 - `cron_runs` (v82) — audit log for ALL six cron invocations. Captures route_name, started_at, finished_at, auth_status, status (running/success/failed/auth_failed), error_message, rows_affected. Written by every cron handler via `src/lib/cron-auth.ts`. Use to answer "did Vercel fire this cron in the last 24h?" — separable from sync_runs which only covers sync-whop.
 - `achievements` — catalog of 17 unlockable achievements (v53)
 - `student_achievements` — per-student unlock rows + `achievement_unlock_stats`
@@ -458,6 +489,7 @@ Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` 
 | `progress.ts` | Shared progress / completion derivations + `isPlaybookUnlocked` (gate helper, v75.16) |
 | `whop-stats-catalog.ts` (v86) | The live-probed spec for all 64 Whop Stats metrics (`unit`, `agg`, `intervals`, `degradesToDay`, `product`, `maxWindowDays`, `historyStart`, `sparse`, `nullable`, `hasTotals`, `usable`, `note`) + `aggregate()` — **the ONLY place a Whop series collapses to a number**, and it throws on an unknown key. Also `formatMetric()` (percent values are PRE-SCALED; there is no scaling factor in the file), `WHOP_PICKABLE_METRICS` (52), `WHOP_WITHHELD_METRICS` (12 — `churned_revenue` is unreproducible, `partner_*` 403, `trial_conversion_rate`/`ad_spend` always empty). |
 | `whop-stats.ts` (v86) | Whop Stats client. **Only ever requests `interval=day`** — every coarser interval in that API has a verified bucket-semantics bug that fails into a plausible number (partial bucket labelled as a whole period; MRR/ARR bucket = FIRST day of period; `paid_active_members` = LAST day; 3 metrics silently downgrade `hour`→day). Week/month rollup happens here in `rollupPoints()`. Also `resolveRange()` (UTC-only, named presets), `coerceGranularity()`, `pooled()` (concurrency 8). Status is checked before parsing and `JSON.parse` is guarded — `whopFetchWithRetry` returns a failed Response rather than throwing, and Whop's envelope is intermittently non-JSON HTML. |
+| `etfb.ts` (v87) | ETfB Brand Owners: live Whop reads, team-link minting, and the pure derivations behind `/admin/etfb`. **Deliberately shares no pagination code with `whop-members.ts`** — that module's `per_page` defect truncates at ~5,000 of 8,192 rows, and coupling to it would inherit the bug. Uses `per=` (max 50) and THROWS on all three silent Whop traps: an ignored filter (checked both row-level and against a **live-read** account total, never a hardcoded one — the total moved 8188→8192 within a day), stalled pagination, and page-cap truncation. Also `buildInternalNote()` / `parseInternalNote()`, the `ETFB \| name \| username \| user_id \| plan_id` label written onto every minted plan as a human-readable mirror of the DB row. |
 | `admin/metrics-definitions.ts` | Canonical predicates for admin metrics: `isActiveMember` (active + past_due), `isPayingMember` (active member on a `PAYING_WHOP_PLAN_IDS` plan), `isInLaunchCohort` (first_paid_at >= cutoff, NO joined_at fallback post-v75.28), `isMonth2Converted` (cohort student who reached day 30 and didn't cancel before then, v75.38/v75.42), `isInMonth2Cohort` (denominator companion), `isCanceling` (cancel_scheduled_at set + still active, v75.47). Scope-toggle helpers deleted in v75.51. |
 | `supabase-pagination.ts` (v75.27) | `fetchAllRowsPaginated(thunk)` — calls `.range(0,999)`, `.range(1000,1999)`, etc. until a page returns less than 1000 rows. Bypasses PostgREST's silent server-side max-rows cap. Returns empty data on error (not partial) so silent truncation can't sneak through. EVERY bulk fetch on admin surfaces should use this. |
 | `cron-auth.ts` (v75.37) | `verifyCronAuth(request)` + `logCronStart`/`logCronFinish` — shared auth check (whitespace-trimmed against drift) + audit-log writes to `cron_runs`. All 6 cron handlers use this; replaces the per-route inline `Bearer ${process.env.CRON_SECRET}` check. |

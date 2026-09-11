@@ -98,6 +98,17 @@ const navEntries: NavEntry[] = [
     icon: <path d="M3 3v18h18M7 14l3-3 3 3 5-5" />,
   },
   {
+    // v87 — ETfB brand owners + their free team-seat links.
+    // DELIBERATELY neither founderOnly nor csmHidden: this is Astrid's tool
+    // and she is role='csm'. Either flag would hide her own work queue.
+    type: "leaf",
+    href: "/admin/etfb",
+    label: "Brand Owners",
+    icon: (
+      <path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-4h6v4M9 11h.01M15 11h.01" />
+    ),
+  },
+  {
     // v86 — Whop revenue, founder-only. Gated three ways: this flag hides
     // the tab, the page itself is a dynamic server component that checks
     // isStatsOwner(), and /api/admin/stats re-checks independently. The

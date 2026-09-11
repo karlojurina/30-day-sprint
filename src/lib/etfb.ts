@@ -717,3 +717,195 @@ export function deriveLinksToClose(
     }))
     .sort((a, b) => b.seatsUsed - a.seatsUsed);
 }
+
+// ─────────────────────── owner-first view (v87.3) ───────────────────────
+//
+// The page was originally seat-first: one flat list of 104 people. That mirrors
+// how the data is stored and not how the job is done. Astrid does not think
+// "here are 104 individuals", she thinks "this brand left, remove their team".
+// So the unit here is the OWNER, and every seat hangs off one.
+//
+// Three states, because each implies exactly one action and no other:
+//   canceled  — act now: close the link, remove their people
+//   canceling — nothing yet; a date to watch
+//   active    — nothing, unless they have no link, in which case: create one
+
+export type OwnerState = "active" | "canceling" | "canceled";
+
+export interface OwnerSeat {
+  membershipId: string;
+  email: string | null;
+  discordUsername: string | null;
+  joinedIso: string | null;
+  decision: string | null;
+}
+
+export interface OwnerRow {
+  whopUserId: string;
+  name: string | null;
+  email: string | null;
+  state: OwnerState;
+  cycleEndIso: string | null;
+  link: {
+    planId: string;
+    label: string | null;
+    checkoutUrl: string;
+    attributionMethod: string;
+    attributionConfidence: string;
+    linkStatus: string;
+    /** false once the link is archived in Whop — nothing left to close. */
+    canClose: boolean;
+  } | null;
+  /** People to remove. Already filtered by every exclusion rule. */
+  seats: OwnerSeat[];
+  /** People on the link who are deliberately NOT actionable, and why. */
+  protectedSeats: { membershipId: string; email: string | null; why: string }[];
+}
+
+/**
+ * One row per brand owner, carrying their state, their link and their people.
+ *
+ * Reuses deriveReviewSeats for the actionable set, so every exclusion rule
+ * (Evolve, self-paying seat holders, keep/snooze, owner still paying) applies
+ * exactly as before — this changes presentation, never who is safe to remove.
+ */
+export function deriveOwnerRows(input: {
+  etfbMemberships: WhopMembership[];
+  apexMemberships: WhopMembership[];
+  apexPlans: WhopPlan[];
+  plansById: Map<string, WhopPlan>;
+  links: TeamLinkRow[];
+  payingOwnerIds: Set<string>;
+  decisions: SeatDecisionRow[];
+  nowIso: string;
+}): OwnerRow[] {
+  const {
+    etfbMemberships, apexMemberships, apexPlans, plansById,
+    links, payingOwnerIds, decisions, nowIso,
+  } = input;
+
+  const labelByPlan = new Map(apexPlans.map((p) => [p.id, p.internal_notes ?? null]));
+  const visByPlan = new Map(apexPlans.map((p) => [p.id, p.visibility]));
+  const decisionBySeat = new Map(decisions.map((d) => [d.membership_id, d]));
+
+  // Best ETfB membership per user: a live one wins, then the longest cycle.
+  const bestMembership = new Map<string, WhopMembership>();
+  for (const m of etfbMemberships) {
+    const plan = plansById.get(m.plan);
+    if (!plan || priceOf(plan) <= 0) continue;
+    const cur = bestMembership.get(m.user);
+    if (
+      !cur ||
+      (m.valid && !cur.valid) ||
+      (m.valid === cur.valid &&
+        (m.renewal_period_end ?? 0) > (cur.renewal_period_end ?? 0))
+    ) {
+      bestMembership.set(m.user, m);
+    }
+  }
+
+  const actionable = deriveReviewSeats(
+    apexMemberships, links, payingOwnerIds, decisions, nowIso,
+  );
+  const actionableByPlan = new Map<string, ReviewSeat[]>();
+  for (const s of actionable) {
+    const arr = actionableByPlan.get(s.linkPlanId) ?? [];
+    arr.push(s);
+    actionableByPlan.set(s.linkPlanId, arr);
+  }
+
+  // Every owner we know of: anyone paying, plus anyone who owns a link.
+  const ownerIds = new Set<string>(payingOwnerIds);
+  for (const l of links) {
+    if (l.owner_whop_user_id && l.status !== "out_of_scope") {
+      ownerIds.add(l.owner_whop_user_id);
+    }
+  }
+
+  const linkByOwner = new Map<string, TeamLinkRow>();
+  for (const l of links) {
+    if (!l.owner_whop_user_id || l.status === "out_of_scope") continue;
+    const cur = linkByOwner.get(l.owner_whop_user_id);
+    if (!cur || (cur.status !== "active" && l.status === "active")) {
+      linkByOwner.set(l.owner_whop_user_id, l);
+    }
+  }
+
+  const rows: OwnerRow[] = [];
+  for (const uid of ownerIds) {
+    const m = bestMembership.get(uid);
+    const link = linkByOwner.get(uid) ?? null;
+
+    const state: OwnerState = !payingOwnerIds.has(uid)
+      ? "canceled"
+      : m?.cancel_at_period_end
+        ? "canceling"
+        : "active";
+
+    const seats = link ? (actionableByPlan.get(link.plan_id) ?? []) : [];
+
+    // Anyone on the link we deliberately are NOT offering up, with the reason.
+    // Shown so a suppressed person is visible rather than simply absent.
+    const protectedSeats: OwnerRow["protectedSeats"] = [];
+    if (link) {
+      const actionableIds = new Set(seats.map((s) => s.membershipId));
+      for (const seat of apexMemberships) {
+        if (seat.plan !== link.plan_id || !seat.valid) continue;
+        if (actionableIds.has(seat.id)) continue;
+        const d = decisionBySeat.get(seat.id);
+        protectedSeats.push({
+          membershipId: seat.id,
+          email: seat.email,
+          why: payingOwnerIds.has(seat.user)
+            ? "pays for EcomTalent for Brands themselves"
+            : d?.decision === "keep"
+              ? "marked keep"
+              : d?.decision === "snoozed"
+                ? "snoozed"
+                : "owner still paying",
+        });
+      }
+    }
+
+    rows.push({
+      whopUserId: uid,
+      name: link?.owner_name || null,
+      email: m?.email || link?.owner_email || null,
+      state,
+      cycleEndIso: m?.renewal_period_end
+        ? new Date(m.renewal_period_end * 1000).toISOString()
+        : null,
+      link: link
+        ? {
+            planId: link.plan_id,
+            label: labelByPlan.get(link.plan_id) ?? null,
+            checkoutUrl: `https://whop.com/checkout/${link.plan_id}`,
+            attributionMethod: link.attribution_method,
+            attributionConfidence: link.attribution_confidence,
+            linkStatus: link.status,
+            canClose:
+              link.status === "active" &&
+              visByPlan.get(link.plan_id) !== "archived",
+          }
+        : null,
+      seats: seats.map((s) => ({
+        membershipId: s.membershipId,
+        email: s.email,
+        discordUsername: s.discordUsername,
+        joinedIso: s.joinedIso,
+        decision: null,
+      })),
+      protectedSeats,
+    });
+  }
+
+  // Canceled first (the work), then canceling (coming), then active (reference).
+  // Within each, most people first — biggest impact at the top.
+  const order: Record<OwnerState, number> = { canceled: 0, canceling: 1, active: 2 };
+  return rows.sort(
+    (a, b) =>
+      order[a.state] - order[b.state] ||
+      b.seats.length - a.seats.length ||
+      (a.name || a.email || "").localeCompare(b.name || b.email || ""),
+  );
+}

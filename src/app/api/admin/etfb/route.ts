@@ -30,6 +30,7 @@ import {
   deriveReviewSeats,
   deriveUnrecordedLinks,
   deriveLinksToClose,
+  deriveOwnerRows,
   type WhopPlan,
   type TeamLinkRow,
   type SeatDecisionRow,
@@ -142,6 +143,19 @@ export async function GET(request: NextRequest) {
     const keptIds = new Set(
       decisions.filter((d) => d.decision === "keep").map((d) => d.membership_id),
     );
+    // v87.3 — the owner-first view. One row per brand owner carrying their
+    // state, their link and their people, replacing four separate flat lists.
+    const ownerRows = deriveOwnerRows({
+      etfbMemberships,
+      apexMemberships,
+      apexPlans,
+      plansById,
+      links,
+      payingOwnerIds,
+      decisions,
+      nowIso: new Date().toISOString(),
+    });
+
     const keptSeats = apexMemberships
       .filter((m) => m.valid && keptIds.has(m.id))
       .map((m) => ({
@@ -161,6 +175,7 @@ export async function GET(request: NextRequest) {
         needsOwner: links
           .filter((l) => l.status === "needs_owner")
           .map((l) => ({ planId: l.plan_id, note: l.note })),
+        ownerRows,
         linksToClose,
         keptSeats,
         needsConfirm: links.filter(
@@ -182,6 +197,9 @@ export async function GET(request: NextRequest) {
           ).length,
           linksToClose: linksToClose.length,
           keptSeats: keptSeats.length,
+          canceledOwners: ownerRows.filter((o) => o.state === "canceled").length,
+          cancelingOwners: ownerRows.filter((o) => o.state === "canceling").length,
+          activeOwners: ownerRows.filter((o) => o.state === "active").length,
         },
       }),
     );

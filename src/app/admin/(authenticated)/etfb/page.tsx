@@ -63,6 +63,7 @@ interface ReviewSeat {
   ownerEmail: string | null;
   attributionMethod: string;
   attributionConfidence: string;
+  linkLabel: string | null;
   heldBy: "unknown_person" | "self_paying_owner" | "unknown_link";
 }
 type Snapshot =
@@ -82,6 +83,7 @@ type Snapshot =
         ownerEmail: string | null;
         seatsUsed: number;
         attributionConfidence: string;
+        linkLabel: string | null;
       }[];
       keptSeats: {
         membershipId: string;
@@ -99,6 +101,18 @@ type Snapshot =
       };
     }
   | { state: "error"; message: string };
+
+/** Plain-language version of attribution_method, so the evidence on the row is
+ *  legible to someone who has never read the schema. */
+const HOW_MATCHED: Record<string, string> = {
+  whop_username_label: "Whop username in the label",
+  discord_handle_label: "Discord handle in the label",
+  owner_redeemed_own_link: "the owner used this link themselves",
+  exact_owner_name: "name match only — please verify",
+  minted_by_app: "created here, owner certain",
+  manual: "set by hand",
+  unrecorded_link: "no link record",
+};
 
 const fmtDate = (s: string | null) =>
   s ? new Date(s).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : "—";
@@ -370,8 +384,13 @@ export default function BrandOwnersPage() {
                       person about to lose access. Without it the removal is
                       done by searching an email in Whop, which can resolve to
                       several memberships including a live paid subscription. */}
+                  <div style={{ ...T.meta, marginTop: 2 }}>
+                    link label in Whop:{" "}
+                    <strong>{s.linkLabel || "(blank)"}</strong> · matched by{" "}
+                    {HOW_MATCHED[s.attributionMethod] ?? s.attributionMethod}
+                  </div>
                   <div
-                    style={{ ...T.meta, marginTop: 2, opacity: 0.75, userSelect: "all" }}
+                    style={{ ...T.meta, marginTop: 2, opacity: 0.7, userSelect: "all" }}
                   >
                     {s.membershipId} · seat on {s.linkPlanId}
                   </div>
@@ -509,6 +528,9 @@ export default function BrandOwnersPage() {
                     {l.ownerName || l.ownerEmail || l.planId}
                   </div>
                   <div style={{ ...T.meta, marginTop: 2 }}>
+                    link label in Whop: <strong>{l.linkLabel || "(blank)"}</strong>
+                  </div>
+                  <div style={{ ...T.meta, marginTop: 2, opacity: 0.7 }}>
                     {l.seatsUsed} on this link · {l.planId}
                   </div>
                 </div>

@@ -105,7 +105,7 @@ export async function GET(request: NextRequest) {
       links,
       apexMemberships,
     );
-    const reviewSeats = deriveReviewSeats(
+    const reviewSeatsRaw = deriveReviewSeats(
       apexMemberships,
       links,
       payingOwnerIds,
@@ -113,12 +113,28 @@ export async function GET(request: NextRequest) {
       new Date().toISOString(),
     );
     const unrecorded = deriveUnrecordedLinks(apexPlans, links);
-    const linksToClose = deriveLinksToClose(
+
+    // The label as it stands in Whop RIGHT NOW, not what we recorded at import.
+    // This is the evidence the attribution was derived from, so showing it lets
+    // a human check our answer instead of taking it on trust.
+    const labelByPlan = new Map(
+      apexPlans.map((p) => [p.id, p.internal_notes ?? null]),
+    );
+    const reviewSeats = reviewSeatsRaw.map((r) => ({
+      ...r,
+      linkLabel: labelByPlan.get(r.linkPlanId) ?? null,
+    }));
+
+    const linksToCloseRaw = deriveLinksToClose(
       links,
       payingOwnerIds,
       apexPlans,
       apexMemberships,
     );
+    const linksToClose = linksToCloseRaw.map((l) => ({
+      ...l,
+      linkLabel: labelByPlan.get(l.planId) ?? null,
+    }));
 
     // Seats a human has exempted. Returned so the decision is VISIBLE and
     // reversible — an invisible permanent exemption on a tool whose whole job

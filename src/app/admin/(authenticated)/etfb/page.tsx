@@ -132,13 +132,13 @@ type Snapshot =
 /** Plain-language version of attribution_method, so the evidence on the row is
  *  legible to someone who has never read the schema. */
 const HOW_MATCHED: Record<string, string> = {
-  whop_username_label: "Whop username in the label",
-  discord_handle_label: "Discord handle in the label",
-  owner_redeemed_own_link: "the owner used this link themselves",
-  exact_owner_name: "name match only — please verify",
-  minted_by_app: "created here, owner certain",
-  manual: "set by hand",
-  unrecorded_link: "no link record",
+  whop_username_label: "matched on the Whop username in the label",
+  discord_handle_label: "matched on the Discord handle in the label",
+  owner_redeemed_own_link: "the owner redeemed it themselves",
+  exact_owner_name: "matched on the name only, please verify",
+  minted_by_app: "created here, so the owner is certain",
+  manual: "the owner was set by hand",
+  unrecorded_link: "no link record exists",
 };
 
 const fmtDate = (s: string | null) =>
@@ -503,7 +503,7 @@ export default function BrandOwnersPage() {
                         <strong style={{ color: "var(--color-text-primary)" }}>
                           {o.link.label || "(no label)"}
                         </strong>{" "}
-                        · owner identified by{" "}
+                        ·{" "}
                         {HOW_MATCHED[o.link.attributionMethod] ??
                           o.link.attributionMethod}{" "}
                         · {o.seats.length}{" "}

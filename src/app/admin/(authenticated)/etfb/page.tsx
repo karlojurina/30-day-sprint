@@ -105,6 +105,11 @@ interface LinkRow {
   seats: OwnerSeat[];
   seatsTotal: number;
   protectedSeats: { membershipId: string; email: string | null; why: string }[];
+  sharesDomainWithPayingOwner: {
+    membershipId: string;
+    email: string | null;
+    matchesOwnerEmail: string;
+  }[];
 }
 
 type TabKey = LinkState | "new";
@@ -427,30 +432,68 @@ export default function BrandOwnersPage() {
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
-            style={{ ...T.cardTitle, textDecoration: "none" }}
+            style={{ ...T.heading, textDecoration: "none", display: "block" }}
           >
             {l.label || "(no note)"}
           </a>
-          <div style={{ ...T.meta, marginTop: 3 }}>
+
+          {/* 13px, not 11px. This is the line that carries the judgement, and
+              it was set as byline meta. */}
+          <div style={{ ...T.bodyDim, marginTop: 4 }}>
             {l.owner?.email ?? "owner not established"}
+            {/* "not paying" is dropped inside Need to remove — the tab already
+                says it — and the "of N" total is noise next to the count. */}
             {l.state === "needs_removal" &&
-              ` · not paying · ${l.seats.length} to remove of ${l.seatsTotal}`}
+              ` · ${l.seats.length} to remove`}
             {l.state === "cancelling" &&
               ` · access ends ${fmtDate(l.owner?.cycleEndIso ?? null)}`}
             {l.state === "active" && ` · paying · ${l.seatsTotal} on this link`}
             {l.state === "archived" && ` · closed · ${l.seatsTotal} still on it`}
             {l.state === "unknown_owner" && ` · ${l.seatsTotal} on this link`}
           </div>
-          <div style={{ ...T.meta, marginTop: 2, opacity: 0.7 }}>
-            identified by {HOW_MATCHED[l.attributionMethod] ?? l.attributionMethod}
+
+          <div style={{ marginTop: 8, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <Pill tone={unconfirmed ? "warning" : "neutral"}>
+              {HOW_MATCHED[l.attributionMethod] ?? l.attributionMethod}
+            </Pill>
+            {l.protectedSeats.length > 0 && (
+              <Pill tone="success">
+                {l.protectedSeats.length} kept back
+              </Pill>
+            )}
+            {l.sharesDomainWithPayingOwner.length > 0 && (
+              <Pill tone="danger">check: same company as a paying brand</Pill>
+            )}
           </div>
+
+          {/* The partner case. Shown in full because acting on it wrongly cuts
+              off someone whose business partner is still paying. */}
+          {l.sharesDomainWithPayingOwner.length > 0 && (
+            <div style={{ ...T.bodyDim, marginTop: 6, maxWidth: "70ch" }}>
+              {l.sharesDomainWithPayingOwner
+                .map(
+                  (x) =>
+                    `${x.email} shares a company domain with ${x.matchesOwnerEmail}, who is still paying`,
+                )
+                .join(" · ")}
+              . Check whether they are the same business before removing anyone.
+            </div>
+          )}
+
+          {l.protectedSeats.length > 0 && (
+            <div style={{ ...T.meta, marginTop: 6, maxWidth: "70ch" }}>
+              Already kept back:{" "}
+              {l.protectedSeats
+                .map((x) => `${x.email || x.membershipId} (${x.why})`)
+                .join(" · ")}
+            </div>
+          )}
         </div>
 
         <div
           style={{ display: "flex", alignItems: "center", gap: 8 }}
           onClick={(e) => e.stopPropagation()}
         >
-          {unconfirmed && <Pill tone="warning">unconfirmed</Pill>}
           {l.seats.length > 0 && (
             <Button
               size="sm"

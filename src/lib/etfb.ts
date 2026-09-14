@@ -942,6 +942,22 @@ export function whopMembershipsUrlForPlan(
   return `${base}?${params.join("&")}`;
 }
 
+/** Free mail providers — a shared domain here means nothing. Deliberately
+ *  conservative: a provider missing from this list only ever produces an extra
+ *  flag for a human to dismiss, never a missed one. */
+const FREEMAIL = new Set([
+  "gmail.com","googlemail.com","yahoo.com","yahoo.co.uk","yahoo.fr","yahoo.com.au",
+  "hotmail.com","hotmail.co.uk","hotmail.fr","outlook.com","outlook.es","live.com",
+  "live.com.au","icloud.com","me.com","proton.me","protonmail.com","aol.com",
+  "gmx.de","gmx.net","web.de","mail.com","yandex.ru","msn.com","qq.com",
+  "naver.com","free.fr","orange.fr","seznam.cz","abv.bg","mail.ru","zoho.com",
+]);
+
+const domainOf = (email: string | null | undefined) => {
+  const d = (email || "").toLowerCase().split("@")[1];
+  return d && !FREEMAIL.has(d) ? d : null;
+};
+
 export type LinkState =
   | "needs_removal" // owner stopped paying, link still live — the work
   | "cancelling" // owner cancelling, access ends at cycle end
@@ -969,6 +985,21 @@ export interface LinkRow {
   /** Every valid seat on the link, including protected ones. */
   seatsTotal: number;
   protectedSeats: { membershipId: string; email: string | null; why: string }[];
+  /**
+   * People on the removal list whose company email domain matches a brand owner
+   * who IS currently paying.
+   *
+   * The case Lovro named: two partners, one buys ETfB, the other joins through
+   * their link; the first cancels and the second buys. Where the second partner
+   * is the same Whop user they are already excluded outright. Where they are a
+   * DIFFERENT account, nothing connects them but the domain — so this flags it
+   * for a human rather than guessing. A flag, never an exclusion.
+   */
+  sharesDomainWithPayingOwner: {
+    membershipId: string;
+    email: string | null;
+    matchesOwnerEmail: string;
+  }[];
 }
 
 export function deriveLinkRows(input: {
@@ -1012,6 +1043,14 @@ export function deriveLinkRows(input: {
     const arr = actionableByPlan.get(s.linkPlanId) ?? [];
     arr.push(s);
     actionableByPlan.set(s.linkPlanId, arr);
+  }
+
+  // Domains belonging to brand owners who are paying RIGHT NOW.
+  const payingDomains = new Map<string, string>();
+  for (const m of etfbMemberships) {
+    if (!payingOwnerIds.has(m.user)) continue;
+    const d = domainOf(m.email);
+    if (d && !payingDomains.has(d)) payingDomains.set(d, m.email as string);
   }
 
   const rows: LinkRow[] = [];
@@ -1095,6 +1134,15 @@ export function deriveLinkRows(input: {
       })),
       seatsTotal: allValid.length,
       protectedSeats,
+      sharesDomainWithPayingOwner: seats
+        .map((x) => {
+          const d = domainOf(x.email);
+          const owner = d ? payingDomains.get(d) : undefined;
+          return owner
+            ? { membershipId: x.membershipId, email: x.email, matchesOwnerEmail: owner }
+            : null;
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null),
     });
   }
 

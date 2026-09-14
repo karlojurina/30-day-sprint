@@ -363,6 +363,7 @@ function buttonStyle(
   variant: ButtonVariant,
   size: ButtonSize,
   busy: boolean,
+  disabled = false,
 ): React.CSSProperties {
   const pad = size === "sm" ? "5px 12px" : "8px 16px";
   const fs = size === "sm" ? 12 : 13;
@@ -372,8 +373,8 @@ function buttonStyle(
     fontWeight: 600,
     borderRadius: "var(--radius-chip)",
     border: "1px solid transparent",
-    cursor: busy ? "wait" : "pointer",
-    opacity: busy ? 0.6 : 1,
+    cursor: busy ? "wait" : disabled ? "not-allowed" : "pointer",
+    opacity: busy ? 0.6 : disabled ? 0.4 : 1,
     letterSpacing: "-0.005em",
     display: "inline-flex",
     alignItems: "center",
@@ -432,7 +433,7 @@ export function Button({
   disabled?: boolean;
   title?: string;
 }) {
-  const style = buttonStyle(variant, size, busy);
+  const style = buttonStyle(variant, size, busy, disabled);
   if (href) {
     return (
       <Link href={href} style={style} title={title}>
@@ -704,6 +705,7 @@ export function Modal({
 export function Toast({ message }: { message: string }) {
   return (
     <div
+      role="status"
       style={{
         position: "fixed",
         bottom: 24,

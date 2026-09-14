@@ -26,9 +26,8 @@ import {
   AdminPage,
   PageHeader,
   Section,
-  Stat,
-  Pill,
   Button,
+  Toast,
   T,
 } from "@/components/admin/ui";
 
@@ -89,28 +88,6 @@ interface OwnerRow {
   seats: OwnerSeat[];
   protectedSeats: { membershipId: string; email: string | null; why: string }[];
 }
-
-/** The three groups, in the order the work actually happens: act, watch, ignore. */
-const GROUPS = [
-  {
-    state: "canceled" as const,
-    eyebrow: "Cancelled — remove their people",
-    blurb:
-      "These brands have stopped paying. Close the link so nobody new can use it, then remove the people below in Whop. They drop off this list automatically once removed.",
-  },
-  {
-    state: "canceling" as const,
-    eyebrow: "Cancelling — nothing to do yet",
-    blurb:
-      "These brands have cancelled but still have access until their cycle ends. Their team keeps access until then. They will move to Cancelled on their own.",
-  },
-  {
-    state: "active" as const,
-    eyebrow: "Active",
-    blurb:
-      "Paying brands. Nothing to do unless one has no link yet — then create one and send it to them.",
-  },
-];
 
 type Snapshot =
   | { state: "no_data"; reason: string }
@@ -174,14 +151,20 @@ export default function BrandOwnersPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const toggle = (id: string) =>
-    setExpanded((prev) => {
+  /** Membership ids ticked off during this session. Local only, never sent —
+   *  the app still changes nobody's access. It exists so that coming back from
+   *  Whop you can see where you got to. A tick clears itself once a refresh
+   *  proves that person is actually gone. */
+  const [done, setDone] = useState<Set<string>>(new Set());
+  const markDone = (id: string) =>
+    setDone((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+  /** Cancelling and Active are reference, not work. Collapsed by default. */
+  const [refOpen, setRefOpen] = useState(false);
 
   const token = useCallback(async () => {
     const {
@@ -212,7 +195,14 @@ export default function BrandOwnersPage() {
         headers: { Authorization: `Bearer ${await token()}` },
       });
       const raw = await res.text();
-      setSnap(JSON.parse(raw) as Snapshot);
+      const next = JSON.parse(raw) as Snapshot;
+      setSnap(next);
+      if (next.state === "ok") {
+        const live = new Set(
+          next.ownerRows.flatMap((o) => o.seats.map((x) => x.membershipId)),
+        );
+        setDone((prev) => new Set([...prev].filter((id) => live.has(id))));
+      }
     } catch (err) {
       setSnap({
         state: "error",
@@ -337,102 +327,157 @@ export default function BrandOwnersPage() {
   }
 
 
+  /* ── Derived view state ──────────────────────────────────────────────
+     Only "cancelled" is work. Cancelling is explicitly nothing-to-do-yet and
+     Active is nothing-to-do, so they sit below a divider as reference. */
+
+  const untrustworthy = snap.unresolvedPlans.length > 0;
+
+  const cancelled = snap.ownerRows
+    .filter((o) => o.state === "canceled")
+    .sort((a, b) => b.seats.length - a.seats.length);
+  const watching = snap.ownerRows.filter((o) => o.state === "canceling");
+  const activeRows = snap.ownerRows
+    .filter((o) => o.state === "active")
+    .sort((a, b) => Number(!!a.link) - Number(!!b.link));
+
+  const peopleLeft = cancelled.reduce(
+    (n, o) => n + o.seats.filter((x) => !done.has(x.membershipId)).length,
+    0,
+  );
+  const readAt = new Date(snap.generatedAt).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const jobLine =
+    cancelled.length === 0
+      ? "Every brand owner with a team link is paying."
+      : `${cancelled.length} ${cancelled.length === 1 ? "owner" : "owners"} to clear · ` +
+        `${peopleLeft} ${peopleLeft === 1 ? "person" : "people"} to remove in Whop`;
+
+  const copyAll = (o: OwnerRow) => {
+    void navigator.clipboard
+      ?.writeText(o.seats.map((x) => x.membershipId).join("\n"))
+      .then(() => setToast(`Copied ${o.seats.length} membership ids`))
+      .catch(() => setToast("Could not reach the clipboard"));
+  };
+
+  const refCount = watching.length + activeRows.length + snap.keptSeats.length;
+
   return (
     <AdminPage>
       <PageHeader
         title="Brand Owners"
-        description="EcomTalent for Brands owners, their team links, and who is on them."
-        meta={`Live from Whop · ${new Date(snap.generatedAt).toLocaleTimeString()}`}
-        actions={<Button onClick={() => void load()} busy={loading}>Refresh</Button>}
+        description={jobLine}
+        meta={`Read live from Whop at ${readAt}`}
+        actions={
+          <Button onClick={() => void load()} busy={loading}>
+            Refresh
+          </Button>
+        }
       />
 
-      <div
-        className="grid grid-cols-1 md:grid-cols-3"
-        style={{ gap: 12, marginBottom: 20 }}
-      >
-        <Stat
-          label="Cancelled"
-          value={snap.counts.canceledOwners}
-          sublabel={`${snap.counts.seatsToReview} people to remove`}
-          tone={snap.counts.seatsToReview > 0 ? "danger" : "default"}
-        />
-        <Stat
-          label="Cancelling"
-          value={snap.counts.cancelingOwners}
-          sublabel="access ends at cycle end"
-          tone={snap.counts.cancelingOwners > 0 ? "warn" : "default"}
-        />
-        <Stat
-          label="Active"
-          value={snap.counts.activeOwners}
-          sublabel={
-            snap.counts.ownersWithoutLink > 0
-              ? `${snap.counts.ownersWithoutLink} still need a link`
-              : "all have a link"
-          }
-        />
-      </div>
+      {/* The one thing that has to be read before anything is clicked. It used
+          to render at the very bottom of the page, under every action button —
+          a warning you reach only after the mistake is available. */}
+      {untrustworthy && (
+        <div
+          role="alert"
+          style={{
+            border: "1px solid var(--color-danger)",
+            background: "color-mix(in oklab, var(--color-danger) 7%, transparent)",
+            borderRadius: "var(--radius-card)",
+            padding: "14px 16px",
+            marginBottom: 24,
+          }}
+        >
+          <div style={{ ...T.body, fontWeight: 600, color: "var(--color-danger)" }}>
+            {snap.unresolvedPlans.length}{" "}
+            {snap.unresolvedPlans.length === 1 ? "plan" : "plans"} could not be
+            read from Whop.
+          </div>
+          <div style={{ ...T.bodyDim, marginTop: 4, maxWidth: "68ch" }}>
+            Some owners may be showing as cancelled when they are not. Closing a
+            link or pulling someone out of Whop right now could cut off a brand
+            that is still paying, so every action on this page is off until this
+            clears. Refresh; if it persists, the Whop read is the problem.
+          </div>
+        </div>
+      )}
 
-      {GROUPS.map(({ state, eyebrow, blurb }) => {
-        const rows = snap.ownerRows.filter((o) => o.state === state);
-        if (rows.length === 0) return null;
-        return (
-          <Section key={state} eyebrow={eyebrow} count={rows.length}>
-            <div style={{ ...T.bodyDim, marginBottom: 10 }}>{blurb}</div>
-            <div style={{ display: "grid", gap: 8 }}>
-              {rows.map((o) => {
-                const open = expanded.has(o.whopUserId);
-                const who = o.name || o.email || o.whopUserId;
-                return (
+      {cancelled.length === 0 ? (
+        <Section eyebrow="Nothing to remove">
+          <div style={T.body}>{jobLine}</div>
+          <div style={{ ...T.bodyDim, marginTop: 4 }}>
+            This is a live read from Whop at {readAt}, not a cached or empty
+            list.
+          </div>
+        </Section>
+      ) : (
+        <Section
+          eyebrow="Cancelled — remove their people in Whop"
+          count={cancelled.length}
+        >
+          <div style={{ display: "grid", gap: 12 }}>
+            {cancelled.map((o) => {
+              const who = o.name || o.email || o.whopUserId;
+              const unconfirmed =
+                o.link?.attributionConfidence === "confirm";
+              const alreadyClosed = !!o.link && !o.link.canClose;
+              const remaining = o.seats.filter(
+                (x) => !done.has(x.membershipId),
+              ).length;
+              return (
+                <div
+                  key={o.whopUserId}
+                  style={{
+                    border: "1px solid var(--color-border)",
+                    borderRadius: "var(--radius-card)",
+                    background: "var(--color-bg-card)",
+                    padding: 16,
+                  }}
+                >
                   <div
-                    key={o.whopUserId}
                     style={{
-                      border: "1px solid var(--color-border)",
-                      borderRadius: 8,
-                      overflow: "hidden",
+                      display: "flex",
+                      alignItems: "flex-start",
+                      justifyContent: "space-between",
+                      gap: 16,
                     }}
                   >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: 12,
-                        padding: "10px 12px",
-                        cursor: "pointer",
-                      }}
-                      onClick={() => toggle(o.whopUserId)}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <div style={T.body}>
-                          <span style={{ opacity: 0.5, marginRight: 8 }}>
-                            {open ? "▾" : "▸"}
-                          </span>
-                          {who}
+                    <div style={{ minWidth: 0 }}>
+                      <div style={T.cardTitle}>{who}</div>
+                      {o.email && o.email !== who && (
+                        <div style={{ ...T.bodyDim, marginTop: 2 }}>
+                          {o.email}
                         </div>
-                        <div style={{ ...T.meta, marginTop: 2, paddingLeft: 20 }}>
-                          {o.state === "canceled" &&
-                            (o.seats.length > 0
-                              ? `${o.seats.length} ${o.seats.length === 1 ? "person" : "people"} to remove`
-                              : "nobody on their link")}
-                          {o.state === "canceling" &&
-                            `access ends ${fmtDate(o.cycleEndIso)}`}
-                          {o.state === "active" &&
-                            (o.link ? "link sent" : "no link yet")}
-                        </div>
-                      </div>
-                      <div
-                        style={{ display: "flex", alignItems: "center", gap: 8 }}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {o.link?.attributionConfidence === "confirm" && (
-                          <Pill tone="warning">owner unconfirmed</Pill>
-                        )}
-                        {o.state === "canceled" && o.link?.canClose && (
+                      )}
+                    </div>
+                    <div style={{ flexShrink: 0 }}>
+                      {alreadyClosed ? (
+                        <span style={T.meta}>
+                          Link closed
+                          {remaining > 0
+                            ? ` · ${remaining} still to remove in Whop`
+                            : ""}
+                        </span>
+                      ) : (
+                        o.link && (
                           <Button
                             size="sm"
-                            variant="danger"
-                            busy={busy === `/api/admin/etfb/links/${o.link.planId}/archive`}
+                            variant="subtle"
+                            disabled={untrustworthy || unconfirmed}
+                            title={
+                              unconfirmed
+                                ? "Confirm the owner before closing their link"
+                                : untrustworthy
+                                  ? "Off until the unreadable plans clear"
+                                  : "Stops anyone new redeeming it. Nobody loses access."
+                            }
+                            busy={
+                              busy ===
+                              `/api/admin/etfb/links/${o.link.planId}/archive`
+                            }
                             onClick={() =>
                               void post(
                                 `/api/admin/etfb/links/${o.link!.planId}/archive`,
@@ -443,106 +488,174 @@ export default function BrandOwnersPage() {
                           >
                             Close link
                           </Button>
-                        )}
-                        {o.state === "active" && !o.link && (
-                          <Button
-                            size="sm"
-                            busy={busy === o.whopUserId}
-                            onClick={() => void mint(o.whopUserId)}
-                          >
-                            Create link
-                          </Button>
-                        )}
+                        )
+                      )}
+                    </div>
+                  </div>
+
+                  {/* The evidence. This is the line you read to decide whether
+                      this link really belongs to this owner, so it is set as
+                      content rather than as 11px tertiary meta. */}
+                  <div style={{ ...T.bodyDim, marginTop: 12 }}>
+                    {o.link ? (
+                      <>
+                        Link{" "}
+                        <strong style={{ color: "var(--color-text-primary)" }}>
+                          {o.link.label || "(no label)"}
+                        </strong>{" "}
+                        · owner identified by{" "}
+                        {HOW_MATCHED[o.link.attributionMethod] ??
+                          o.link.attributionMethod}{" "}
+                        · {o.seats.length}{" "}
+                        {o.seats.length === 1 ? "person" : "people"}
+                      </>
+                    ) : (
+                      "No team link was ever minted for this owner."
+                    )}
+                  </div>
+
+                  {unconfirmed && (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        padding: "12px 14px",
+                        borderRadius: "var(--radius-chip)",
+                        background: "var(--color-bg-elevated)",
+                        border: "1px solid var(--color-border-strong)",
+                      }}
+                    >
+                      <div style={{ ...T.body, fontWeight: 600 }}>
+                        Not certain this link is theirs.
+                      </div>
+                      <div
+                        style={{ ...T.bodyDim, marginTop: 2, maxWidth: "62ch" }}
+                      >
+                        It was matched on the name alone. Confirm it before
+                        closing anything or removing anyone — if the match is
+                        wrong, these are somebody else&rsquo;s staff.
+                      </div>
+                      <div style={{ marginTop: 10 }}>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          disabled={untrustworthy}
+                          busy={
+                            busy ===
+                            `/api/admin/etfb/links/${o.link!.planId}/owner`
+                          }
+                          onClick={() =>
+                            void post(
+                              `/api/admin/etfb/links/${o.link!.planId}/owner`,
+                              { ownerWhopUserId: o.whopUserId, confirm: true },
+                              "Owner confirmed",
+                            )
+                          }
+                        >
+                          Confirm this is right
+                        </Button>
                       </div>
                     </div>
+                  )}
 
-                    {open && (
-                      <div
-                        style={{
-                          borderTop: "1px solid var(--color-border)",
-                          padding: "10px 12px",
-                          background: "var(--color-surface-2, rgba(0,0,0,0.02))",
-                        }}
-                      >
-                        <div style={{ ...T.meta, marginBottom: 8 }}>
-                          {o.email ? `${o.email} · ` : ""}
-                          {o.link ? (
-                            <>
-                              link labelled <strong>{o.link.label || "(blank)"}</strong>{" "}
-                              · owner identified by{" "}
-                              {HOW_MATCHED[o.link.attributionMethod] ??
-                                o.link.attributionMethod}
-                              {o.link.attributionConfidence === "confirm" && (
-                                <>
-                                  {" "}
-                                  <Button
-                                    size="sm"
-                                    variant="subtle"
-                                    busy={busy === `/api/admin/etfb/links/${o.link.planId}/owner`}
-                                    onClick={() =>
-                                      void post(
-                                        `/api/admin/etfb/links/${o.link!.planId}/owner`,
-                                        { ownerWhopUserId: o.whopUserId, confirm: true },
-                                        "Owner confirmed",
-                                      )
-                                    }
-                                  >
-                                    Confirm this is right
-                                  </Button>
-                                </>
-                              )}
-                            </>
-                          ) : (
-                            "no team link"
-                          )}
-                        </div>
-
-                        {o.seats.length === 0 && o.protectedSeats.length === 0 && (
-                          <div style={T.bodyDim}>Nobody has used this link.</div>
-                        )}
-
-                        {o.seats.map((p) => (
+                  {o.seats.length === 0 ? (
+                    <div style={{ ...T.bodyDim, marginTop: 12 }}>
+                      Nobody ever used this link.
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        borderTop: "1px solid var(--color-border)",
+                      }}
+                    >
+                      {o.seats.map((x, i) => {
+                        const isDone = done.has(x.membershipId);
+                        return (
                           <div
-                            key={p.membershipId}
+                            key={x.membershipId}
                             style={{
                               display: "flex",
                               alignItems: "center",
-                              justifyContent: "space-between",
                               gap: 12,
-                              padding: "6px 0",
+                              padding: "10px 0",
+                              borderBottom:
+                                i === o.seats.length - 1
+                                  ? "none"
+                                  : "1px solid var(--color-border)",
                             }}
                           >
-                            <div style={{ minWidth: 0 }}>
-                              <div style={T.body}>{p.email || p.membershipId}</div>
+                            <input
+                              type="checkbox"
+                              checked={isDone}
+                              onChange={() => markDone(x.membershipId)}
+                              aria-label={`Mark ${x.email || x.membershipId} as removed in Whop`}
+                              title="Tick once you have removed them in Whop"
+                              style={{
+                                width: 16,
+                                height: 16,
+                                flexShrink: 0,
+                                cursor: "pointer",
+                                accentColor: "var(--color-accent-dark)",
+                              }}
+                            />
+                            <div
+                              style={{
+                                minWidth: 0,
+                                flex: 1,
+                                opacity: isDone ? 0.45 : 1,
+                              }}
+                            >
                               <div
-                                style={{ ...T.meta, opacity: 0.7, userSelect: "all" }}
+                                style={{
+                                  ...T.body,
+                                  textDecoration: isDone
+                                    ? "line-through"
+                                    : "none",
+                                }}
                               >
-                                {p.membershipId} · joined {fmtDate(p.joinedIso)}
-                                {p.discordUsername ? ` · @${p.discordUsername}` : ""}
+                                {x.email || x.membershipId}
+                              </div>
+                              <div
+                                style={{
+                                  ...T.meta,
+                                  marginTop: 2,
+                                  userSelect: "all",
+                                }}
+                              >
+                                {x.membershipId} · joined {fmtDate(x.joinedIso)}
+                                {x.discordUsername
+                                  ? ` · @${x.discordUsername}`
+                                  : ""}
                               </div>
                             </div>
-                            <div style={{ display: "flex", gap: 6 }}>
+                            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
                               <Button
                                 size="sm"
                                 variant="ghost"
                                 title="Copy this membership id to paste into Whop"
                                 onClick={() => {
                                   void navigator.clipboard
-                                    ?.writeText(p.membershipId)
-                                    .then(() => setToast(`Copied ${p.membershipId}`))
-                                    .catch(() => setToast(p.membershipId));
+                                    ?.writeText(x.membershipId)
+                                    .then(() =>
+                                      setToast(`Copied ${x.membershipId}`),
+                                    )
+                                    .catch(() => setToast(x.membershipId));
                                 }}
                               >
                                 Copy ID
                               </Button>
                               <Button
                                 size="sm"
-                                variant="subtle"
-                                busy={busy === `/api/admin/etfb/seats/${p.membershipId}/decision`}
+                                variant="ghost"
+                                disabled={untrustworthy}
+                                busy={
+                                  busy ===
+                                  `/api/admin/etfb/seats/${x.membershipId}/decision`
+                                }
                                 title="Leave this person alone — reversible"
                                 onClick={() =>
                                   void post(
-                                    `/api/admin/etfb/seats/${p.membershipId}/decision`,
+                                    `/api/admin/etfb/seats/${x.membershipId}/decision`,
                                     { decision: "keep", planId: o.link?.planId },
                                     "Kept",
                                   )
@@ -552,102 +665,205 @@ export default function BrandOwnersPage() {
                               </Button>
                             </div>
                           </div>
-                        ))}
-
-                        {o.protectedSeats.length > 0 && (
-                          <div style={{ ...T.meta, marginTop: 8, opacity: 0.8 }}>
-                            Not offered for removal:{" "}
-                            {o.protectedSeats
-                              .map((x) => `${x.email || x.membershipId} (${x.why})`)
-                              .join(" · ")}
-                          </div>
+                        );
+                      })}
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: 12,
+                          marginTop: 10,
+                        }}
+                      >
+                        <span style={T.meta}>
+                          {remaining === 0
+                            ? "All ticked off."
+                            : `${remaining} of ${o.seats.length} still to remove`}
+                        </span>
+                        {o.seats.length > 1 && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => copyAll(o)}
+                          >
+                            Copy all {o.seats.length} IDs
+                          </Button>
                         )}
                       </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </Section>
-        );
-      })}
+                    </div>
+                  )}
 
-      {snap.keptSeats.length > 0 && (
-        <Section eyebrow="Kept" count={snap.keptSeats.length}>
-          <div style={{ ...T.bodyDim, marginBottom: 10 }}>
-            Deliberately left alone. Undo puts them back in their owner&rsquo;s list.
-          </div>
-          <div style={{ display: "grid", gap: 6 }}>
-            {snap.keptSeats.map((k) => (
-              <div
-                key={k.membershipId}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
-                }}
-              >
-                <div style={T.body}>{k.email || k.membershipId}</div>
-                <Button
-                  size="sm"
-                  variant="subtle"
-                  busy={busy === `/api/admin/etfb/seats/${k.membershipId}/decision`}
-                  onClick={() =>
-                    void post(
-                      `/api/admin/etfb/seats/${k.membershipId}/decision`,
-                      { decision: null },
-                      "Back in the list",
-                    )
-                  }
-                >
-                  Undo
-                </Button>
-              </div>
-            ))}
+                  {o.protectedSeats.length > 0 && (
+                    <div style={{ marginTop: 14 }}>
+                      <div style={T.eyebrow}>Not offered for removal</div>
+                      <div style={{ marginTop: 6, display: "grid", gap: 4 }}>
+                        {o.protectedSeats.map((x) => (
+                          <div key={x.membershipId} style={T.meta}>
+                            {x.email || x.membershipId} — {x.why}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </Section>
       )}
 
-      {(snap.unresolvedPlans.length > 0 ||
-        snap.unrecordedLinks.length > 0 ||
-        snap.counts.seatsOnUnrecordedLinks > 0) && (
-        <Section eyebrow="Needs attention">
-          {snap.unresolvedPlans.length > 0 && (
-            <div style={{ ...T.body, color: "var(--color-danger, #dc2626)" }}>
-              {snap.unresolvedPlans.length} plan(s) could not be read from Whop.
-              Some owners may be shown as cancelled when they are not — do not
-              act on this page until this reads zero.
-            </div>
-          )}
-          {snap.unrecordedLinks.length > 0 && (
-            <div style={T.body}>
-              {snap.unrecordedLinks.length} link(s) exist in Whop but are not
-              recorded here, holding {snap.counts.seatsOnUnrecordedLinks} people.
-            </div>
-          )}
-        </Section>
-      )}
-
-      {toast && (
-        <div
-          role="status"
-          style={{
-            position: "fixed",
-            bottom: 20,
-            left: "50%",
-            transform: "translateX(-50%)",
-            padding: "10px 16px",
-            borderRadius: 8,
-            border: "1px solid var(--color-border)",
-            background: "var(--color-surface, #111)",
-            ...T.body,
-          }}
+      {/* ── Reference. Neither group is work, so neither competes with it. ── */}
+      {refCount > 0 && (
+        <Section
+          eyebrow="Reference — nothing to do here"
+          action={
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setRefOpen((v) => !v)}
+            >
+              {refOpen ? "Hide" : `Show ${refCount}`}
+            </Button>
+          }
+          style={{ borderTop: "1px solid var(--color-border)", paddingTop: 24 }}
         >
-          {toast}
-        </div>
+          {refOpen && (
+            <div style={{ display: "grid", gap: 24 }}>
+              {watching.length > 0 && (
+                <div>
+                  <div style={T.eyebrow}>Cancelling · {watching.length}</div>
+                  <div
+                    style={{ ...T.bodyDim, margin: "6px 0 8px", maxWidth: "68ch" }}
+                  >
+                    Cancelled, but still inside a cycle they paid for. Their team
+                    keeps access until it ends, then they move up to Cancelled on
+                    their own.
+                  </div>
+                  {watching.map((o) => (
+                    <div
+                      key={o.whopUserId}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        padding: "6px 0",
+                      }}
+                    >
+                      <span style={T.body}>
+                        {o.name || o.email || o.whopUserId}
+                      </span>
+                      <span style={T.meta}>
+                        access ends {fmtDate(o.cycleEndIso)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {activeRows.length > 0 && (
+                <div>
+                  <div style={T.eyebrow}>Active · {activeRows.length}</div>
+                  <div
+                    style={{ ...T.bodyDim, margin: "6px 0 8px", maxWidth: "68ch" }}
+                  >
+                    Paying. The only thing to do here is mint a link for anyone
+                    who has not got one yet.
+                  </div>
+                  {activeRows.map((o) => (
+                    <div
+                      key={o.whopUserId}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        padding: "6px 0",
+                      }}
+                    >
+                      <span style={T.body}>
+                        {o.name || o.email || o.whopUserId}
+                      </span>
+                      {o.link ? (
+                        <span style={T.meta}>link sent</span>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="subtle"
+                          disabled={untrustworthy}
+                          busy={busy === o.whopUserId}
+                          onClick={() => void mint(o.whopUserId)}
+                        >
+                          Create link
+                        </Button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {snap.keptSeats.length > 0 && (
+                <div>
+                  <div style={T.eyebrow}>Kept · {snap.keptSeats.length}</div>
+                  <div
+                    style={{ ...T.bodyDim, margin: "6px 0 8px", maxWidth: "68ch" }}
+                  >
+                    Deliberately left alone. Undo puts them back in their
+                    owner&rsquo;s list.
+                  </div>
+                  {snap.keptSeats.map((k) => (
+                    <div
+                      key={k.membershipId}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        padding: "6px 0",
+                      }}
+                    >
+                      <span style={T.body}>{k.email || k.membershipId}</span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={untrustworthy}
+                        busy={
+                          busy ===
+                          `/api/admin/etfb/seats/${k.membershipId}/decision`
+                        }
+                        onClick={() =>
+                          void post(
+                            `/api/admin/etfb/seats/${k.membershipId}/decision`,
+                            { decision: null },
+                            "Back in the list",
+                          )
+                        }
+                      >
+                        Undo
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {(snap.unrecordedLinks.length > 0 ||
+                snap.counts.seatsOnUnrecordedLinks > 0) && (
+                <div>
+                  <div style={T.eyebrow}>Unrecorded links</div>
+                  <div style={{ ...T.bodyDim, marginTop: 6, maxWidth: "68ch" }}>
+                    {snap.unrecordedLinks.length} link(s) exist in Whop but are
+                    not recorded here, holding{" "}
+                    {snap.counts.seatsOnUnrecordedLinks} people. Nobody on them
+                    can be attributed to an owner, so they never appear above.
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </Section>
       )}
 
+      {toast && <Toast message={toast} />}
     </AdminPage>
   );
 }

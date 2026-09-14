@@ -31,6 +31,7 @@ import {
   deriveUnrecordedLinks,
   deriveLinksToClose,
   deriveOwnerRows,
+  deriveLinkRows,
   type WhopPlan,
   type TeamLinkRow,
   type SeatDecisionRow,
@@ -156,6 +157,20 @@ export async function GET(request: NextRequest) {
       nowIso: new Date().toISOString(),
     });
 
+    // v87.6 — link-first. One row per team link, which is the object Lovro
+    // actually works from (his Whop checkout-links screen). ownerRows is kept
+    // because the "new" filter needs owners who have NO link at all.
+    const linkRows = deriveLinkRows({
+      etfbMemberships,
+      apexMemberships,
+      apexPlans,
+      plansById,
+      links,
+      payingOwnerIds,
+      decisions,
+      nowIso: new Date().toISOString(),
+    });
+
     const keptSeats = apexMemberships
       .filter((m) => m.valid && keptIds.has(m.id))
       .map((m) => ({
@@ -176,6 +191,7 @@ export async function GET(request: NextRequest) {
           .filter((l) => l.status === "needs_owner")
           .map((l) => ({ planId: l.plan_id, note: l.note })),
         ownerRows,
+        linkRows,
         linksToClose,
         keptSeats,
         needsConfirm: links.filter(
@@ -200,6 +216,10 @@ export async function GET(request: NextRequest) {
           canceledOwners: ownerRows.filter((o) => o.state === "canceled").length,
           cancelingOwners: ownerRows.filter((o) => o.state === "canceling").length,
           activeOwners: ownerRows.filter((o) => o.state === "active").length,
+          needsRemoval: linkRows.filter((l) => l.state === "needs_removal").length,
+          peopleToRemove: linkRows
+            .filter((l) => l.state === "needs_removal")
+            .reduce((n, l) => n + l.seats.length, 0),
         },
       }),
     );

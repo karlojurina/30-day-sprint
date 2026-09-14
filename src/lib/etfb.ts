@@ -909,3 +909,204 @@ export function deriveOwnerRows(input: {
       (a.name || a.email || "").localeCompare(b.name || b.email || ""),
   );
 }
+
+// ─────────────────────── link-first view (v87.6) ───────────────────────
+//
+// The unit is the LINK, because that is the screen Lovro actually works from.
+// His Whop checkout-links list shows Product + Notes; the manual step is
+// "check whether that owner still has an active subscription". So this page is
+// that same list plus the one column Whop cannot give him — and everything else
+// on a row has to justify itself against that.
+//
+// Owner-first (v87.3) was still one layer off: it made the owner the object and
+// the link an attribute, which hid any second link an owner held and had no
+// place at all for an archived one.
+
+/** Whop's own filtered membership view for a single link. Everyone who joined
+ *  through it, ready to terminate one by one — which is where removal actually
+ *  happens, permanently, outside this app.
+ *
+ *  This URL was pasted from a browser sitting on that screen and clicked to
+ *  verify. It is NOT derived from docs or guessed from the API shape: a
+ *  "Find in Whop" button shipped on 2026-09-11 with an invented URL and 404'd
+ *  within a minute of the page being opened (commit 21f3659). The only variable
+ *  here is the plan id. */
+export function whopMembershipsUrlForPlan(
+  planId: string,
+  companyId = "biz_sijEdQzBJ7eVv2",
+  status: "active" | "all" = "active",
+): string {
+  const base = `https://whop.com/dashboard/${companyId}/users/memberships`;
+  const params = [`memberships%3Aplan_ids=${planId}`];
+  if (status === "active") params.push(`memberships%3Amembership_status=active`);
+  return `${base}?${params.join("&")}`;
+}
+
+export type LinkState =
+  | "needs_removal" // owner stopped paying, link still live — the work
+  | "cancelling" // owner cancelling, access ends at cycle end
+  | "active" // owner paying, nothing to do
+  | "archived" // retired; may still hold people
+  | "unknown_owner"; // link exists, owner not established
+
+export interface LinkRow {
+  planId: string;
+  /** The Whop "Notes" field — what Lovro reads to identify a link. */
+  label: string | null;
+  whopUrl: string;
+  checkoutUrl: string;
+  state: LinkState;
+  owner: {
+    whopUserId: string;
+    name: string | null;
+    email: string | null;
+    cycleEndIso: string | null;
+  } | null;
+  attributionMethod: string;
+  attributionConfidence: string;
+  /** People safe to remove. Empty unless the owner has stopped paying. */
+  seats: OwnerSeat[];
+  /** Every valid seat on the link, including protected ones. */
+  seatsTotal: number;
+  protectedSeats: { membershipId: string; email: string | null; why: string }[];
+}
+
+export function deriveLinkRows(input: {
+  etfbMemberships: WhopMembership[];
+  apexMemberships: WhopMembership[];
+  apexPlans: WhopPlan[];
+  plansById: Map<string, WhopPlan>;
+  links: TeamLinkRow[];
+  payingOwnerIds: Set<string>;
+  decisions: SeatDecisionRow[];
+  nowIso: string;
+}): LinkRow[] {
+  const {
+    etfbMemberships, apexMemberships, apexPlans, plansById,
+    links, payingOwnerIds, decisions, nowIso,
+  } = input;
+
+  const planById = new Map(apexPlans.map((p) => [p.id, p]));
+  const decisionBySeat = new Map(decisions.map((d) => [d.membership_id, d]));
+
+  const bestMembership = new Map<string, WhopMembership>();
+  for (const m of etfbMemberships) {
+    const plan = plansById.get(m.plan);
+    if (!plan || priceOf(plan) <= 0) continue;
+    const cur = bestMembership.get(m.user);
+    if (
+      !cur ||
+      (m.valid && !cur.valid) ||
+      (m.valid === cur.valid &&
+        (m.renewal_period_end ?? 0) > (cur.renewal_period_end ?? 0))
+    ) {
+      bestMembership.set(m.user, m);
+    }
+  }
+
+  const actionable = deriveReviewSeats(
+    apexMemberships, links, payingOwnerIds, decisions, nowIso,
+  );
+  const actionableByPlan = new Map<string, ReviewSeat[]>();
+  for (const s of actionable) {
+    const arr = actionableByPlan.get(s.linkPlanId) ?? [];
+    arr.push(s);
+    actionableByPlan.set(s.linkPlanId, arr);
+  }
+
+  const rows: LinkRow[] = [];
+  for (const l of links) {
+    // The Evolve partnership link is not a team link and never appears here.
+    if (l.status === "out_of_scope") continue;
+
+    const plan = planById.get(l.plan_id);
+    const uid = l.owner_whop_user_id;
+    const m = uid ? bestMembership.get(uid) : undefined;
+    const archivedInWhop = plan?.visibility === "archived";
+
+    // ARCHIVED IS CHECKED FIRST, before unknown_owner. An archived link is
+    // closed regardless of whether we ever established its owner, and putting
+    // unknown_owner first pushed two dead links into "Need to remove" — noise
+    // on the one tab that is supposed to be pure work.
+    let state: LinkState;
+    if (l.status === "archived" || archivedInWhop) {
+      // Checked FIRST, before unknown_owner: an archived link is closed whether
+      // or not we ever established its owner. The other order pushed two dead
+      // links into "Need to remove", which is the one tab that must be pure work.
+      state = "archived";
+    } else if (!uid) {
+      state = "unknown_owner";
+    } else if (!payingOwnerIds.has(uid)) {
+      state = "needs_removal";
+    } else if (m?.cancel_at_period_end) {
+      state = "cancelling";
+    } else {
+      state = "active";
+    }
+
+    const seats = actionableByPlan.get(l.plan_id) ?? [];
+    const allValid = apexMemberships.filter(
+      (x) => x.plan === l.plan_id && x.valid,
+    );
+    const actionableIds = new Set(seats.map((s) => s.membershipId));
+    const protectedSeats = allValid
+      .filter((x) => !actionableIds.has(x.id))
+      .map((x) => {
+        const d = decisionBySeat.get(x.id);
+        return {
+          membershipId: x.id,
+          email: x.email,
+          why: payingOwnerIds.has(x.user)
+            ? "pays for EcomTalent for Brands themselves"
+            : d?.decision === "keep"
+              ? "marked keep"
+              : d?.decision === "snoozed"
+                ? "snoozed"
+                : "owner still paying",
+        };
+      });
+
+    rows.push({
+      planId: l.plan_id,
+      // Whop's live Notes value is the source of truth for the label — if
+      // someone renames a link over there, this follows.
+      label: plan?.internal_notes || l.owner_name || l.owner_email || null,
+      whopUrl: whopMembershipsUrlForPlan(l.plan_id),
+      checkoutUrl: `https://whop.com/checkout/${l.plan_id}`,
+      state,
+      owner: uid
+        ? {
+            whopUserId: uid,
+            name: l.owner_name || null,
+            email: m?.email || l.owner_email || null,
+            cycleEndIso: m?.renewal_period_end
+              ? new Date(m.renewal_period_end * 1000).toISOString()
+              : null,
+          }
+        : null,
+      attributionMethod: l.attribution_method,
+      attributionConfidence: l.attribution_confidence,
+      seats: seats.map((s) => ({
+        membershipId: s.membershipId,
+        email: s.email,
+        discordUsername: s.discordUsername,
+        joinedIso: s.joinedIso,
+        decision: null,
+      })),
+      seatsTotal: allValid.length,
+      protectedSeats,
+    });
+  }
+
+  // Most people first inside each state — biggest impact at the top.
+  const order: Record<LinkState, number> = {
+    needs_removal: 0, unknown_owner: 1, cancelling: 2, active: 3, archived: 4,
+  };
+  return rows.sort(
+    (a, b) =>
+      order[a.state] - order[b.state] ||
+      b.seats.length - a.seats.length ||
+      b.seatsTotal - a.seatsTotal ||
+      (a.label || "").localeCompare(b.label || ""),
+  );
+}

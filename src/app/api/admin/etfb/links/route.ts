@@ -27,6 +27,7 @@ import {
   fetchUnfilteredMembershipTotal,
   derivePayingOwnerIds,
   mintTeamLink,
+  fetchMemberIdForMembership,
 } from "@/lib/etfb";
 
 export const dynamic = "force-dynamic";
@@ -109,12 +110,20 @@ export async function POST(request: NextRequest) {
 
     // 4. Record ownership. Whop is already written at this point; a failure
     //    here surfaces as an unrecorded link on the snapshot, never silently.
+    // One extra request so the new link gets an owner page from day one,
+    // rather than waiting for a backfill. Failure here is not fatal — the row
+    // still records the owner, it just has no owner-page link yet.
+    const ownerMemberId = ownerMembership
+      ? await fetchMemberIdForMembership(ownerMembership.id)
+      : null;
+
     const { error: insErr } = await auth.supabase
       .from("etfb_team_links")
       .insert({
         plan_id: minted.planId,
         owner_whop_user_id: ownerWhopUserId,
         owner_email: ownerMembership?.email ?? null,
+        owner_member_id: ownerMemberId,
         status: "active",
         attribution_method: "minted_by_app",
         attribution_confidence: "certain",

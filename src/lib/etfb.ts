@@ -434,6 +434,8 @@ export async function archiveTeamLink(planId: string): Promise<void> {
 export interface TeamLinkRow {
   plan_id: string;
   owner_whop_user_id: string | null;
+  /** Whop MEMBER id (mber_…). Keys the owner's dashboard page — see v88. */
+  owner_member_id?: string | null;
   owner_name: string | null;
   owner_email: string | null;
   status: string;
@@ -958,6 +960,37 @@ const domainOf = (email: string | null | undefined) => {
   return d && !FREEMAIL.has(d) ? d : null;
 };
 
+/** The owner's page in Whop — the screen used to confirm a brand has really
+ *  stopped paying. Keyed on the MEMBER id (mber_…), which is a different thing
+ *  from the user id we store and from a membership id. Pattern pasted from a
+ *  browser, same discipline as whopMembershipsUrlForPlan. */
+export function whopOwnerUrl(
+  memberId: string,
+  companyId = "biz_sijEdQzBJ7eVv2",
+): string {
+  return `https://whop.com/dashboard/${companyId}/users/${memberId}/`;
+}
+
+/** Resolve one owner's member id at mint time. Only v1 exposes it, and every
+ *  v1 list filter is silently ignored, so a single-membership lookup is the
+ *  only cheap path — one request rather than an 82-page walk. */
+export async function fetchMemberIdForMembership(
+  membershipId: string,
+): Promise<string | null> {
+  const res = await whopFetchWithRetry(
+    `${API}/api/v1/memberships/${membershipId}`,
+    authHeaders(),
+    2,
+  );
+  if (!res.ok) return null;
+  try {
+    const body = (await res.json()) as { member?: { id?: string } };
+    return body.member?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export type LinkState =
   | "needs_removal" // owner stopped paying, link still live — the work
   | "cancelling" // owner cancelling, access ends at cycle end
@@ -977,6 +1010,8 @@ export interface LinkRow {
     name: string | null;
     email: string | null;
     cycleEndIso: string | null;
+    /** Whop's page for this owner. Null when no member id is on record. */
+    whopUrl: string | null;
   } | null;
   attributionMethod: string;
   attributionConfidence: string;
@@ -1120,6 +1155,9 @@ export function deriveLinkRows(input: {
             email: m?.email || l.owner_email || null,
             cycleEndIso: m?.renewal_period_end
               ? new Date(m.renewal_period_end * 1000).toISOString()
+              : null,
+            whopUrl: l.owner_member_id
+              ? whopOwnerUrl(l.owner_member_id)
               : null,
           }
         : null,

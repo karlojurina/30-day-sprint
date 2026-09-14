@@ -99,6 +99,7 @@ interface LinkRow {
     name: string | null;
     email: string | null;
     cycleEndIso: string | null;
+    whopUrl: string | null;
   } | null;
   attributionMethod: string;
   attributionConfidence: string;
@@ -407,12 +408,21 @@ export default function BrandOwnersPage() {
             ? archivedLinks
             : [];
 
+  /** One click, two tabs: the people on this link, and the owner's page so the
+   *  "they stopped paying" claim can be confirmed against Whop rather than
+   *  taken from us. The owner tab opens FIRST so the link tab ends up focused —
+   *  that is the one being worked in. */
+  const openBoth = (l: LinkRow) => {
+    if (l.owner?.whopUrl) window.open(l.owner.whopUrl, "_blank", "noopener");
+    window.open(l.whopUrl, "_blank", "noopener");
+  };
+
   const renderLink = (l: LinkRow) => {
     const unconfirmed = l.attributionConfidence === "confirm";
     return (
       <div
         key={l.planId}
-        onClick={() => window.open(l.whopUrl, "_blank", "noopener")}
+        onClick={() => openBoth(l)}
         style={{
           border: "1px solid var(--color-border)",
           borderRadius: "var(--radius-card)",
@@ -440,7 +450,20 @@ export default function BrandOwnersPage() {
           {/* 13px, not 11px. This is the line that carries the judgement, and
               it was set as byline meta. */}
           <div style={{ ...T.bodyDim, marginTop: 4 }}>
-            {l.owner?.email ?? "owner not established"}
+            {l.owner?.whopUrl ? (
+              <a
+                href={l.owner.whopUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                style={{ color: "inherit" }}
+                title="Open this brand owner in Whop to confirm their subscription"
+              >
+                {l.owner.email ?? l.owner.whopUserId}
+              </a>
+            ) : (
+              (l.owner?.email ?? "owner not established")
+            )}
             {/* "not paying" is dropped inside Need to remove — the tab already
                 says it — and the "of N" total is noise next to the count. */}
             {l.state === "needs_removal" &&

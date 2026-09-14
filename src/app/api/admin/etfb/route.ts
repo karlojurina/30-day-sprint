@@ -32,6 +32,7 @@ import {
   deriveLinksToClose,
   deriveOwnerRows,
   deriveLinkRows,
+  fetchMemberIdForMembership,
   type WhopPlan,
   type TeamLinkRow,
   type SeatDecisionRow,
@@ -156,6 +157,36 @@ export async function GET(request: NextRequest) {
       decisions,
       nowIso: new Date().toISOString(),
     });
+
+    // SELF-HEAL the owner member id (v88). Links minted by the app resolve it
+    // at mint time, but a failed lookup there — or a link created by hand in
+    // Whop — leaves it null with nothing to fix it. Only v1 exposes member ids
+    // and every v1 list filter is silently ignored, so a full walk is 82+ pages
+    // and cannot happen on a page load. A single-membership lookup is one
+    // request, so heal a bounded few per load and they fill in over a session.
+    // Same shape as the first_paid_at recovery in the Whop sync.
+    const HEAL_CAP = 8;
+    const needsMemberId = links
+      .filter((l) => l.owner_whop_user_id && !l.owner_member_id)
+      .slice(0, HEAL_CAP);
+    if (needsMemberId.length > 0) {
+      await Promise.all(
+        needsMemberId.map(async (l) => {
+          const om = etfbMemberships.find(
+            (m) => m.user === l.owner_whop_user_id && m.valid,
+          ) ?? etfbMemberships.find((m) => m.user === l.owner_whop_user_id);
+          if (!om) return;
+          const memberId = await fetchMemberIdForMembership(om.id);
+          if (!memberId) return;
+          l.owner_member_id = memberId; // reflected in this response too
+          await auth.supabase
+            .from("etfb_team_links")
+            .update({ owner_member_id: memberId })
+            .eq("plan_id", l.plan_id)
+            .is("owner_member_id", null); // never overwrite a set value
+        }),
+      );
+    }
 
     // v87.6 — link-first. One row per team link, which is the object Lovro
     // actually works from (his Whop checkout-links screen). ownerRows is kept

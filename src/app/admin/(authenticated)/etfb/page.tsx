@@ -201,6 +201,10 @@ export default function BrandOwnersPage() {
   const [toast, setToast] = useState<string | null>(null);
   /** Exclusive filters — pick one, see only that. Defaults to the work. */
   const [tab, setTab] = useState<TabKey>("needs_removal");
+  const [query, setQuery] = useState("");
+  /** Links ticked for bulk close. Cleared whenever the filter changes, so a
+   *  selection can never survive out of sight of the person who made it. */
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const token = useCallback(async () => {
     const {
@@ -434,7 +438,17 @@ export default function BrandOwnersPage() {
           gap: 12,
         }}
       >
-        <div style={{ minWidth: 0 }}>
+        {closeable(l) && (
+          <input
+            type="checkbox"
+            checked={selected.has(l.planId)}
+            onChange={() => toggleSel(l.planId)}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={`Select ${l.label ?? l.planId} for closing`}
+            style={{ width: 16, height: 16, flexShrink: 0, cursor: "pointer" }}
+          />
+        )}
+        <div style={{ minWidth: 0, flex: 1 }}>
           {/* The Notes value — what identifies a link on Whop's own screen.
               A real anchor so middle-click, copy-link and keyboard all work. */}
           <a
@@ -572,6 +586,72 @@ export default function BrandOwnersPage() {
     );
   };
 
+  /** Matches the label, the owner email and the plan id. The label is what
+   *  Lovro reads on Whop's own screen, so it is the obvious thing to type. */
+  const matches = (l: LinkRow) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      (l.label ?? "").toLowerCase().includes(q) ||
+      (l.owner?.email ?? "").toLowerCase().includes(q) ||
+      l.planId.toLowerCase().includes(q)
+    );
+  };
+
+  /** A link can be closed only when its owner is established AND confirmed —
+   *  the same rule the single Close button enforces. Selection must not be a
+   *  way around it. */
+  const closeable = (l: LinkRow) =>
+    (l.state === "needs_removal" || l.state === "unknown_owner") &&
+    l.attributionConfidence !== "confirm" &&
+    !untrustworthy;
+
+  const toggleSel = (planId: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(planId)) next.delete(planId);
+      else next.add(planId);
+      return next;
+    });
+
+  /** Closes the ticked links one at a time, reporting honestly on partial
+   *  failure. Sequential on purpose: these are writes to Whop, and a burst of
+   *  27 concurrent archive calls is how you find a rate limit the hard way. */
+  const closeSelected = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBusy("bulk");
+    let ok = 0;
+    const failed: string[] = [];
+    try {
+      const t = await token();
+      for (const planId of ids) {
+        try {
+          const res = await fetch(`/api/admin/etfb/links/${planId}/archive`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${t}`, "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          });
+          if (res.ok) ok++;
+          else failed.push(planId);
+        } catch {
+          failed.push(planId);
+        }
+        setToast(`Closing… ${ok + failed.length} of ${ids.length}`);
+      }
+      setToast(
+        failed.length === 0
+          ? `Closed ${ok} ${ok === 1 ? "link" : "links"}`
+          : `Closed ${ok}. ${failed.length} failed and are still open: ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? "…" : ""}`,
+      );
+      setSelected(new Set());
+      await load();
+    } finally {
+      setBusy(null);
+      setTimeout(() => setToast(null), 9000);
+    }
+  };
+
   const copyAll = (l: LinkRow) => {
     void navigator.clipboard
       ?.writeText(l.seats.map((x) => x.membershipId).join("\n"))
@@ -623,36 +703,110 @@ export default function BrandOwnersPage() {
         </div>
       )}
 
-      <div style={{ marginBottom: 16 }}>
-        <Tabs tabs={TABS} value={tab} onChange={setTab} />
+      <div
+        style={{
+          marginBottom: 16,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <Tabs
+          tabs={TABS}
+          value={tab}
+          onChange={(v) => {
+            setTab(v);
+            setSelected(new Set());
+          }}
+        />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search a brand, email or plan id…"
+          aria-label="Search links"
+          style={{
+            flex: "1 1 240px",
+            maxWidth: 340,
+            padding: "7px 11px",
+            fontSize: 13,
+            color: "var(--color-text-primary)",
+            background: "var(--color-bg-elevated)",
+            border: "1px solid var(--color-border)",
+            borderRadius: "var(--radius-control)",
+            outline: "none",
+          }}
+        />
+        {query && (
+          <Button size="sm" variant="ghost" onClick={() => setQuery("")}>
+            Clear
+          </Button>
+        )}
       </div>
+
+      {selected.size > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            padding: "10px 14px",
+            marginBottom: 12,
+            border: "1px solid var(--color-border)",
+            background: "var(--color-bg-elevated)",
+            borderRadius: "var(--radius-card)",
+          }}
+        >
+          <div style={T.body}>
+            {selected.size} {selected.size === 1 ? "link" : "links"} selected
+            <span style={{ ...T.bodyDim, marginLeft: 8 }}>
+              closing stops new redemptions; it removes nobody
+            </span>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+              Clear
+            </Button>
+            <Button
+              size="sm"
+              variant="subtle"
+              busy={busy === "bulk"}
+              onClick={() => void closeSelected()}
+            >
+              Close {selected.size}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {tab === "needs_removal" ? (
         <>
           <Section
             eyebrow="Remove these people in Whop"
-            count={withPeople.length}
+            count={withPeople.filter(matches).length}
           >
-            {withPeople.length === 0 ? (
+            {withPeople.filter(matches).length === 0 ? (
               <div style={T.body}>
-                Nobody to remove. Every open link belonging to a brand that
-                stopped paying is empty.
+                {query
+                  ? `Nothing matching “${query}”.`
+                  : "Nobody to remove. Every open link belonging to a brand that stopped paying is empty."}
               </div>
             ) : (
               <div style={{ display: "grid", gap: 8 }}>
-                {withPeople.map(renderLink)}
+                {withPeople.filter(matches).map(renderLink)}
               </div>
             )}
           </Section>
 
           {emptyDead.length > 0 && (
-            <Section eyebrow="Just close these — nobody used them" count={emptyDead.length}>
+            <Section eyebrow="Just close these — nobody used them" count={emptyDead.filter(matches).length}>
               <div style={{ ...T.bodyDim, marginBottom: 10 }}>
                 The brand stopped paying and nobody ever redeemed the link.
                 Nothing to remove; closing it stops it being used later.
               </div>
               <div style={{ display: "grid", gap: 8 }}>
-                {emptyDead.map(renderLink)}
+                {emptyDead.filter(matches).map(renderLink)}
               </div>
             </Section>
           )}
@@ -698,13 +852,15 @@ export default function BrandOwnersPage() {
       ) : (
         <Section
           eyebrow={TABS.find((t) => t.value === tab)?.label ?? ""}
-          count={rows.length}
+          count={rows.filter(matches).length}
         >
-          {rows.length === 0 ? (
-            <div style={T.body}>Nothing here.</div>
+          {rows.filter(matches).length === 0 ? (
+            <div style={T.body}>
+              {query ? `Nothing matching “${query}”.` : "Nothing here."}
+            </div>
           ) : (
             <div style={{ display: "grid", gap: 8 }}>
-              {rows.map(renderLink)}
+              {rows.filter(matches).map(renderLink)}
             </div>
           )}
         </Section>

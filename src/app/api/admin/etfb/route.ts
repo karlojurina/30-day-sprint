@@ -145,19 +145,6 @@ export async function GET(request: NextRequest) {
     const keptIds = new Set(
       decisions.filter((d) => d.decision === "keep").map((d) => d.membership_id),
     );
-    // v87.3 — the owner-first view. One row per brand owner carrying their
-    // state, their link and their people, replacing four separate flat lists.
-    const ownerRows = deriveOwnerRows({
-      etfbMemberships,
-      apexMemberships,
-      apexPlans,
-      plansById,
-      links,
-      payingOwnerIds,
-      decisions,
-      nowIso: new Date().toISOString(),
-    });
-
     // SELF-HEAL the owner member id (v88). Links minted by the app resolve it
     // at mint time, but a failed lookup there — or a link created by hand in
     // Whop — leaves it null with nothing to fix it. Only v1 exposes member ids
@@ -187,6 +174,19 @@ export async function GET(request: NextRequest) {
         }),
       );
     }
+
+    // v87.3 — the owner-first view. One row per brand owner carrying their
+    // state, their link and their people, replacing four separate flat lists.
+    const ownerRows = deriveOwnerRows({
+      etfbMemberships,
+      apexMemberships,
+      apexPlans,
+      plansById,
+      links,
+      payingOwnerIds,
+      decisions,
+      nowIso: new Date().toISOString(),
+    });
 
     // v87.6 — link-first. One row per team link, which is the object Lovro
     // actually works from (his Whop checkout-links screen). ownerRows is kept

@@ -505,6 +505,15 @@ export default function BrandOwnersPage() {
 
           {/* The partner case. Shown in full because acting on it wrongly cuts
               off someone whose business partner is still paying. */}
+          {l.state === "unknown_owner" && (
+            <div style={{ ...T.bodyDim, marginTop: 6, maxWidth: "70ch" }}>
+              No owner is recorded for this link, so it cannot be closed from
+              here — closing a link whose brand is unknown risks cutting off one
+              that is still paying. Open it in Whop to see who is on it, then
+              set the owner directly in the database.
+            </div>
+          )}
+
           {l.sharesDomainWithPayingOwner.length > 0 && (
             <div style={{ ...T.bodyDim, marginTop: 6, maxWidth: "70ch" }}>
               {l.sharesDomainWithPayingOwner
@@ -559,7 +568,7 @@ export default function BrandOwnersPage() {
               Confirm owner
             </Button>
           )}
-          {(l.state === "needs_removal" || l.state === "unknown_owner") && (
+          {l.state === "needs_removal" && l.owner && (
             <Button
               size="sm"
               variant="subtle"
@@ -602,7 +611,8 @@ export default function BrandOwnersPage() {
    *  the same rule the single Close button enforces. Selection must not be a
    *  way around it. */
   const closeable = (l: LinkRow) =>
-    (l.state === "needs_removal" || l.state === "unknown_owner") &&
+    l.state === "needs_removal" && // NOT unknown_owner — see below
+    l.owner !== null && // the docstring always claimed this; the code did not
     l.attributionConfidence !== "confirm" &&
     !untrustworthy;
 
@@ -618,8 +628,26 @@ export default function BrandOwnersPage() {
    *  failure. Sequential on purpose: these are writes to Whop, and a burst of
    *  27 concurrent archive calls is how you find a rate limit the hard way. */
   const closeSelected = async () => {
-    const ids = [...selected];
-    if (ids.length === 0) return;
+    if (untrustworthy) return; // re-checked here, not just at render
+    // Trust the CURRENT snapshot, not the set. Anything that has stopped being
+    // closeable since it was ticked is dropped and reported, never closed
+    // quietly — the server does not backstop this (the archive route validates
+    // only the plan id prefix and out_of_scope).
+    const stillCloseable = new Set(
+      snap.linkRows.filter(closeable).map((l) => l.planId),
+    );
+    const ids = [...selected].filter((id) => stillCloseable.has(id));
+    const skipped = [...selected].filter((id) => !stillCloseable.has(id));
+    if (ids.length === 0) {
+      setToast(
+        skipped.length > 0
+          ? `Nothing closed — all ${skipped.length} are no longer closeable. Refresh and re-check.`
+          : "Nothing selected",
+      );
+      setSelected(new Set());
+      setTimeout(() => setToast(null), 8000);
+      return;
+    }
     setBusy("bulk");
     let ok = 0;
     const failed: string[] = [];
@@ -639,10 +667,14 @@ export default function BrandOwnersPage() {
         }
         setToast(`Closing… ${ok + failed.length} of ${ids.length}`);
       }
+      const skippedNote =
+        skipped.length > 0
+          ? ` ${skipped.length} were skipped because they are no longer closeable.`
+          : "";
       setToast(
         failed.length === 0
-          ? `Closed ${ok} ${ok === 1 ? "link" : "links"}`
-          : `Closed ${ok}. ${failed.length} failed and are still open: ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? "…" : ""}`,
+          ? `Closed ${ok} ${ok === 1 ? "link" : "links"}.${skippedNote}`
+          : `Closed ${ok}. ${failed.length} failed and are still open: ${failed.slice(0, 3).join(", ")}${failed.length > 3 ? "…" : ""}.${skippedNote}`,
       );
       setSelected(new Set());
       await load();
@@ -722,7 +754,13 @@ export default function BrandOwnersPage() {
         />
         <input
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            // Clearing here is the point, not housekeeping: without it you can
+            // tick three links, type a query that hides them, and "Close 3"
+            // still fires on rows that are no longer on screen.
+            setSelected(new Set());
+          }}
           placeholder="Search a brand, email or plan id…"
           aria-label="Search links"
           style={{
@@ -738,13 +776,20 @@ export default function BrandOwnersPage() {
           }}
         />
         {query && (
-          <Button size="sm" variant="ghost" onClick={() => setQuery("")}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setQuery("");
+              setSelected(new Set());
+            }}
+          >
             Clear
           </Button>
         )}
       </div>
 
-      {selected.size > 0 && (
+      {selected.size > 0 && !untrustworthy && (
         <div
           style={{
             display: "flex",
@@ -771,6 +816,7 @@ export default function BrandOwnersPage() {
             <Button
               size="sm"
               variant="subtle"
+              disabled={untrustworthy}
               busy={busy === "bulk"}
               onClick={() => void closeSelected()}
             >
@@ -863,6 +909,27 @@ export default function BrandOwnersPage() {
               {rows.filter(matches).map(renderLink)}
             </div>
           )}
+        </Section>
+      )}
+
+      {snap.unrecordedLinks.length > 0 && (
+        <Section eyebrow="Links in Whop that are not recorded here">
+          <div style={{ ...T.bodyDim, maxWidth: "72ch" }}>
+            {snap.unrecordedLinks.length}{" "}
+            {snap.unrecordedLinks.length === 1 ? "link exists" : "links exist"} on
+            the Apex product with no row here, holding{" "}
+            {snap.counts.seatsOnUnrecordedLinks}{" "}
+            {snap.counts.seatsOnUnrecordedLinks === 1 ? "person" : "people"}.
+            They were created outside this tool, or a mint failed after Whop had
+            already made the plan. Nothing above accounts for them.
+          </div>
+          <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
+            {snap.unrecordedLinks.map((u) => (
+              <div key={u.planId} style={{ ...T.meta, userSelect: "all" }}>
+                {u.planId} · {u.internalNotes || "(no note)"}
+              </div>
+            ))}
+          </div>
         </Section>
       )}
 

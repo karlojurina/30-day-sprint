@@ -1058,6 +1058,36 @@ export function whopOwnerUrl(
   return `https://whop.com/dashboard/${companyId}/users/${memberId}/`;
 }
 
+/**
+ * Fetch an owner's human-readable identity: display name and Whop username.
+ *
+ * /api/v2/members/{whopUserId} is the only place this exists. A membership
+ * carries no name — which is why the mint route wrote "?" into both label
+ * slots of the internal note until v88.
+ *
+ * Non-fatal by design: a failed lookup returns nulls and buildInternalNote
+ * falls back to "?". A cosmetic label must never block a mint.
+ */
+export async function fetchOwnerIdentity(
+  whopUserId: string,
+): Promise<{ name: string | null; username: string | null }> {
+  try {
+    const res = await whopFetch(
+      `${API}/api/v2/members/${encodeURIComponent(whopUserId)}`,
+      authHeaders(),
+      Date.now() + 6_000,
+    );
+    if (!res.ok) return { name: null, username: null };
+    const body = (await res.json()) as {
+      name?: string | null;
+      username?: string | null;
+    };
+    return { name: body.name ?? null, username: body.username ?? null };
+  } catch {
+    return { name: null, username: null };
+  }
+}
+
 /** Resolve one owner's member id at mint time. Only v1 exposes it, and every
  *  v1 list filter is silently ignored, so a single-membership lookup is the
  *  only cheap path — one request rather than an 82-page walk. */

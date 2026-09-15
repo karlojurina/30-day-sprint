@@ -24,7 +24,7 @@ import {
   TEAM_SEAT_PRODUCT_ID,
   fetchUnfilteredMembershipTotal,
   fetchMembershipsForProduct,
-  fetchPlansForProduct,
+  fetchAllPlans,
   derivePayingOwnerIds,
   deriveOwners,
   deriveReviewSeats,
@@ -69,13 +69,16 @@ export async function GET(request: NextRequest) {
     // silently-ignored filter throws instead of returning the whole account.
     const unfilteredTotal = await fetchUnfilteredMembershipTotal();
 
-    const [etfbPlans, apexPlans, etfbMemberships, apexMemberships] =
-      await Promise.all([
-        fetchPlansForProduct(ETFB_PRODUCT_ID),
-        fetchPlansForProduct(TEAM_SEAT_PRODUCT_ID),
-        fetchMembershipsForProduct(ETFB_PRODUCT_ID, unfilteredTotal),
-        fetchMembershipsForProduct(TEAM_SEAT_PRODUCT_ID, unfilteredTotal),
-      ]);
+    // Plans are fetched ONCE and filtered twice. /api/v2/plans has no product
+    // filter, so two per-product calls pulled the same 4 pages twice — 8
+    // requests for nothing, on a key shared with the crons.
+    const [allPlans, etfbMemberships, apexMemberships] = await Promise.all([
+      fetchAllPlans(),
+      fetchMembershipsForProduct(ETFB_PRODUCT_ID, unfilteredTotal),
+      fetchMembershipsForProduct(TEAM_SEAT_PRODUCT_ID, unfilteredTotal),
+    ]);
+    const etfbPlans = allPlans.filter((p) => p.product === ETFB_PRODUCT_ID);
+    const apexPlans = allPlans.filter((p) => p.product === TEAM_SEAT_PRODUCT_ID);
 
     const plansById = new Map<string, WhopPlan>(
       [...etfbPlans, ...apexPlans].map((p) => [p.id, p]),

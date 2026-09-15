@@ -10,8 +10,8 @@
  * be imported by, whop-members.ts / whop-sync-runner.ts. Those own the student
  * sync and carry a known pagination defect (`per_page`, truncating at ~5,000 of
  * 8,188 memberships). Sharing code with them would couple this surface to that
- * bug. The single exception is `whopFetchWithRetry`, a pure 429-backoff helper
- * with no pagination logic in it.
+ * bug. It shares NO code with them at all — including the retry helper, for
+ * the reason set out above whopFetch().
  *
  * THREE VERIFIED WHOP TRAPS THIS FILE DEFENDS AGAINST — each fails SILENTLY
  * with HTTP 200, which is why every one has an explicit assertion:
@@ -29,7 +29,76 @@
  * team cut off.
  */
 
-import { whopFetchWithRetry } from "@/lib/whop-members";
+/**
+ * DELIBERATELY NOT using whopFetchWithRetry from whop-members.ts.
+ *
+ * That helper honours Whop's Retry-After header UNCAPPED
+ * (whop-members.ts:49-52). A Retry-After of 60 means a 60-second sleep inside
+ * a route whose maxDuration is 30 — Vercel kills the function mid-flight and
+ * serves its own plain-text error page, which the browser then tries to parse
+ * as JSON. That is the "Unexpected token 'A', \"An error o\"..." failure.
+ *
+ * It is the right behaviour for a cron with a 300s ceiling. It is wrong for an
+ * interactive page load, and that file is off-limits to this build because the
+ * student sync depends on it. So this module does its own, with two limits the
+ * shared one has no reason to want: a hard per-request timeout, and a wall
+ * clock for the whole read so we fail with our own JSON before the platform
+ * fails with its HTML.
+ */
+
+/** Per-request ceiling. Whop normally answers in ~500ms. */
+const REQUEST_TIMEOUT_MS = 8_000;
+/** Whole-read ceiling, comfortably inside maxDuration = 30. */
+const READ_BUDGET_MS = 20_000;
+
+class WhopBudgetError extends Error {}
+
+async function whopFetch(
+  url: string,
+  headers: HeadersInit,
+  deadline: number,
+): Promise<Response> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (Date.now() > deadline) {
+      throw new WhopBudgetError(
+        "[etfb] Whop did not answer within the time budget for a page load. " +
+          "This is usually rate limiting after heavy use — wait a minute and refresh.",
+      );
+    }
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { headers, signal: ac.signal });
+      if (res.status !== 429) return res;
+      // Capped, and never past the deadline — the whole point of not reusing
+      // the shared helper.
+      const ra = parseInt(res.headers.get("retry-after") ?? "", 10);
+      const wait = Math.min(
+        isNaN(ra) ? 1_000 * 2 ** attempt : ra * 1_000,
+        3_000,
+        Math.max(0, deadline - Date.now()),
+      );
+      if (wait <= 0) {
+        throw new WhopBudgetError(
+          "[etfb] Whop is rate limiting and there is no time left to wait it " +
+            "out. Wait a minute and refresh.",
+        );
+      }
+      await new Promise((r) => setTimeout(r, wait));
+    } catch (err) {
+      if (err instanceof WhopBudgetError) throw err;
+      if ((err as Error)?.name === "AbortError") {
+        throw new Error(
+          `[etfb] Whop did not respond within ${REQUEST_TIMEOUT_MS / 1000}s.`,
+        );
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error("[etfb] Whop kept rate limiting after 3 attempts.");
+}
 
 // ─────────────────────────── constants ───────────────────────────
 
@@ -128,8 +197,10 @@ async function fetchAllPages<T extends Record<string, unknown>>(
     filterField?: keyof T & string;
     filterValue?: string;
     unfilteredTotal?: number;
+    deadline?: number;
   } = {},
 ): Promise<T[]> {
+  const deadline = opts.deadline ?? Date.now() + READ_BUDGET_MS;
   const rows: T[] = [];
   const seenFirstIds = new Set<string>();
   // Whop's own count of what this query matches. Reconciled against what we
@@ -146,7 +217,7 @@ async function fetchAllPages<T extends Record<string, unknown>>(
     // retry and honours an uncapped Retry-After; against maxDuration=30 the
     // backoff alone can outlive the function. Two retries fails fast and
     // visibly instead of being killed mid-flight with no error to show.
-    const res = await whopFetchWithRetry(`${API}${path}?${qs}`, authHeaders(), 2);
+    const res = await whopFetch(`${API}${path}?${qs}`, authHeaders(), deadline);
     if (!res.ok) {
       throw new Error(
         `[etfb] ${path} page ${page} failed: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`,
@@ -253,9 +324,10 @@ async function fetchAllPages<T extends Record<string, unknown>>(
  * the filter-inertness tripwire the moment the account grows.
  */
 export async function fetchUnfilteredMembershipTotal(): Promise<number> {
-  const res = await whopFetchWithRetry(
+  const res = await whopFetch(
     `${API}/api/v2/memberships?per=1&page=1`,
     authHeaders(),
+    Date.now() + READ_BUDGET_MS,
   );
   if (!res.ok) throw new Error(`[etfb] baseline read failed: ${res.status}`);
   const body = (await res.json()) as PageEnvelope<WhopMembership>;
@@ -266,14 +338,29 @@ export async function fetchUnfilteredMembershipTotal(): Promise<number> {
   return total;
 }
 
-export async function fetchPlansForProduct(
-  productId: string,
-): Promise<WhopPlan[]> {
+/**
+ * Every plan on the account, in one read.
+ *
+ * /api/v2/plans has no product filter, so a per-product fetch pulls all 181
+ * plans and throws most away. The route needs two products, so calling it twice
+ * cost 8 requests for the same 4 pages of data — real rate-limit pressure for
+ * nothing, on a key that is shared with the crons.
+ */
+export async function fetchAllPlans(deadline?: number): Promise<WhopPlan[]> {
   return fetchAllPages<WhopPlan & Record<string, unknown>>(
     "/api/v2/plans",
     {},
-    {},
-  ).then((all) => all.filter((p) => p.product === productId));
+    { deadline },
+  );
+}
+
+/** Convenience over fetchAllPlans. Prefer fetching once and filtering twice. */
+export async function fetchPlansForProduct(
+  productId: string,
+): Promise<WhopPlan[]> {
+  return fetchAllPlans().then((all) =>
+    all.filter((p) => p.product === productId),
+  );
 }
 
 export async function fetchMembershipsForProduct(
@@ -977,10 +1064,10 @@ export function whopOwnerUrl(
 export async function fetchMemberIdForMembership(
   membershipId: string,
 ): Promise<string | null> {
-  const res = await whopFetchWithRetry(
+  const res = await whopFetch(
     `${API}/api/v1/memberships/${membershipId}`,
     authHeaders(),
-    2,
+    Date.now() + 6_000,
   );
   if (!res.ok) return null;
   try {

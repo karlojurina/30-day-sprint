@@ -88,6 +88,15 @@ type LinkState =
 
 interface LinkRow {
   planId: string;
+  /** Present in the payload, deliberately NOT rendered. The FILTER that
+   *  produces it stays — it keeps a self-paying customer out of a bulk removal,
+   *  and Lovro has observed Whop ejecting such a person from Discord when their
+   *  free Apex seat is revoked (they rejoin fine, but it is a support message).
+   *  The DISPLAY is noise: the workflow is "owner cancels, remove everyone on
+   *  the link", and the roster is one click away on the checkout link. Kept in
+   *  the API for diagnosing a "why 3 and not 5" question. */
+  // protectedSeats — see above
+
   /** Whop's "Notes" field — what identifies a link on Whop's own screen. */
   label: string | null;
   /** Whop's membership list filtered to this link. Verified by paste, not guessed. */
@@ -493,11 +502,6 @@ export default function BrandOwnersPage() {
             <Pill tone={unconfirmed ? "warning" : "neutral"}>
               {HOW_MATCHED[l.attributionMethod] ?? l.attributionMethod}
             </Pill>
-            {l.protectedSeats.length > 0 && (
-              <Pill tone="success">
-                {l.protectedSeats.length} kept back
-              </Pill>
-            )}
             {l.sharesDomainWithPayingOwner.length > 0 && (
               <Pill tone="danger">check: same company as a paying brand</Pill>
             )}
@@ -526,14 +530,6 @@ export default function BrandOwnersPage() {
             </div>
           )}
 
-          {l.protectedSeats.length > 0 && (
-            <div style={{ ...T.meta, marginTop: 6, maxWidth: "70ch" }}>
-              Already kept back:{" "}
-              {l.protectedSeats
-                .map((x) => `${x.email || x.membershipId} (${x.why})`)
-                .join(" · ")}
-            </div>
-          )}
         </div>
 
         <div

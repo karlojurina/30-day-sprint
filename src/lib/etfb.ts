@@ -427,6 +427,10 @@ export interface MintedLink {
   planId: string;
   checkoutUrl: string;
   internalNote: string;
+  /** Resolved inside mintTeamLink, returned so the caller can store it without
+   *  a second lookup — and without being able to get it wrong. */
+  ownerName: string | null;
+  ownerUsername: string | null;
 }
 
 /**
@@ -442,12 +446,28 @@ export interface MintedLink {
  * uniform across all nine distinguishing fields.
  */
 export async function mintTeamLink(input: {
-  ownerName: string | null;
-  ownerUsername: string | null;
   ownerWhopUserId: string;
   ownerPlanId: string | null;
 }): Promise<MintedLink> {
-  const internalNote = buildInternalNote(input);
+  // The identity lookup lives HERE, not at the call site, and ownerName /
+  // ownerUsername are deliberately not parameters any more.
+  //
+  // They were, and on 2026-09-15 the route passed literal null for both. The
+  // types allowed it — `string | null` made "no label" a legal state — so
+  // nothing failed and nothing warned, and every link minted for weeks carried
+  // `ETFB | ? | ? | user_… | plan_…`. With no parameter there is nothing left
+  // for a future caller to get wrong.
+  //
+  // Non-fatal by design: a failed lookup leaves the label slots as "?" rather
+  // than blocking a mint. A link with a poor label is recoverable; a brand
+  // owner who cannot be given one is not.
+  const identity = await fetchOwnerIdentity(input.ownerWhopUserId);
+  const internalNote = buildInternalNote({
+    ownerName: identity.name,
+    ownerUsername: identity.username,
+    ownerWhopUserId: input.ownerWhopUserId,
+    ownerPlanId: input.ownerPlanId,
+  });
 
   // Deliberately a bare fetch, NOT whopFetchWithRetry. That helper retries on
   // 429, and a retried CREATE can mint a second plan if the first actually
@@ -495,6 +515,8 @@ export async function mintTeamLink(input: {
     planId: plan.id,
     checkoutUrl: `https://whop.com/checkout/${plan.id}`,
     internalNote,
+    ownerName: identity.name,
+    ownerUsername: identity.username,
   };
 }
 

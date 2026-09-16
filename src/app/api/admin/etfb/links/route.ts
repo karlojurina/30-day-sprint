@@ -26,7 +26,6 @@ import {
   fetchPlansForProduct,
   fetchUnfilteredMembershipTotal,
   derivePayingOwnerIds,
-  fetchOwnerIdentity,
   mintTeamLink,
   fetchMemberIdForMembership,
 } from "@/lib/etfb";
@@ -101,15 +100,10 @@ export async function POST(request: NextRequest) {
       (m) => m.user === ownerWhopUserId && m.valid,
     );
 
-    // 3. Create in Whop.
-    // The owner's name and username live only on the member record - a
-    // membership carries neither. Non-fatal: a failed lookup leaves the note's
-    // label slots as "?" rather than blocking the mint.
-    const ownerIdentity = await fetchOwnerIdentity(ownerWhopUserId);
-
+    // 3. Create in Whop. mintTeamLink resolves the owner's name and username
+    //    itself and hands them back — the caller cannot pass them, so it cannot
+    //    pass them wrong. See the comment on mintTeamLink.
     const minted = await mintTeamLink({
-      ownerName: ownerIdentity.name,
-      ownerUsername: ownerIdentity.username,
       ownerWhopUserId,
       ownerPlanId: ownerMembership?.plan ?? null,
     });
@@ -128,7 +122,7 @@ export async function POST(request: NextRequest) {
       .insert({
         plan_id: minted.planId,
         owner_whop_user_id: ownerWhopUserId,
-        owner_name: ownerIdentity.name,
+        owner_name: minted.ownerName,
         owner_email: ownerMembership?.email ?? null,
         owner_member_id: ownerMemberId,
         status: "active",

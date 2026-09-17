@@ -8,9 +8,10 @@
  *
  * DELIBERATELY SELF-CONTAINED. This module does not import from, and must not
  * be imported by, whop-members.ts / whop-sync-runner.ts. Those own the student
- * sync and carry a known pagination defect (`per_page`, truncating at ~5,000 of
- * 8,188 memberships). Sharing code with them would couple this surface to that
- * bug. It shares NO code with them at all — including the retry helper, for
+ * sync. They carried a `per_page` pagination defect (Whop ignores that
+ * parameter and serves 10 rows/page) that was fixed in v89; this module stays
+ * self-contained so a future defect there cannot reach this surface. It
+ * shares NO code with them at all — including the retry helper, for
  * the reason set out above whopFetch().
  *
  * THREE VERIFIED WHOP TRAPS THIS FILE DEFENDS AGAINST — each fails SILENTLY
@@ -289,7 +290,7 @@ async function fetchAllPages<T extends Record<string, unknown>>(
       throw new Error(
         `[etfb] ${path} exceeded MAX_PAGES (${MAX_PAGES}). Refusing to return ` +
           `a truncated list — this is the failure mode that silently capped the ` +
-          `student sync at 5,000 of 8,188 rows.`,
+          `student sync mid-walk.`,
       );
     }
   }
@@ -320,7 +321,7 @@ async function fetchAllPages<T extends Record<string, unknown>>(
 /**
  * The account-wide membership count, read live.
  *
- * Deliberately not a constant. Hardcoding today's 8,188 would quietly disarm
+ * Deliberately not a constant. Hardcoding today's total would quietly disarm
  * the filter-inertness tripwire the moment the account grows.
  */
 export async function fetchUnfilteredMembershipTotal(): Promise<number> {

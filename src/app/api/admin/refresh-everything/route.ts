@@ -88,9 +88,22 @@ export async function POST(request: NextRequest) {
   // the service-role client (auth.supabase here is service-role for
   // a team member) executes with the function owner's permissions.
   const rebuildStart = Date.now();
+  // v89: BOUNDED to the last 2 days. This used to pass '2026-01-01',
+  // which made rebuild_daily_snapshots() delete and re-derive the entire
+  // series from each student's CURRENT membership_status — a survivorship
+  // curve that can never fall. Measured 2026-09-17: 194 days (2026-01-01
+  // to 2026-07-13) still carry that back-projection, while 66 days from
+  // 2026-07-14 onward are genuine point-in-time rows the nightly cron
+  // collected one at a time. Those 66 days survived ONLY because this
+  // call has not succeeded since 2026-07-13. Never widen this range
+  // without passing an explicit p_end_date that stops short of collected
+  // history. Repairing the old range is a deliberate, backed-up one-off.
+  const rebuildFrom = new Date(Date.now() - 2 * 86_400_000)
+    .toISOString()
+    .slice(0, 10);
   try {
     const { error } = await auth.supabase.rpc("rebuild_daily_snapshots", {
-      p_start_date: "2026-01-01",
+      p_start_date: rebuildFrom,
     });
     summary.rebuild = error ? { error: error.message } : { ok: true };
   } catch (e) {

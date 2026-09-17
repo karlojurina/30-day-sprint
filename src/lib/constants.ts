@@ -13,14 +13,28 @@ export const WHOP_API_BASE = "https://api.whop.com/api/v1";
 // dashboard, lessons, achievements) — they're just invisible to
 // admin and don't trigger outreach.
 //
-// If you add a new PAID plan in Whop, add its ID here AND update
-// the matching list in supabase/migrations/2026_v79_whop_plan_id.sql
-// (rebuild_daily_snapshots RPC). The sync runner logs a warning
-// each night for any plan_id outside this set so we notice if a
-// new paid plan slips by un-listed.
+// This list lives in THREE places and they must agree:
+//   1. here
+//   2. v_paying_plans in supabase/migrations/2026_v89_point_in_time_snapshots.sql
+//      (the live rebuild_daily_snapshots RPC)
+//   3. the hardcoded whop_plan_id IN (...) lists in
+//      supabase/diagnostics/admin-health.sql
+// Change one without the others and the live numbers move while the
+// trend lines underneath them do not. The sync runner logs a warning
+// each night for any plan_id outside this set so we notice if a new
+// paid plan slips by un-listed.
+//
+// v89 (2026-09-16 decision): the $97 monthly plan ONLY. Removed
+// plan_fMMqxAljrzu75 ($970/365d, 7 valid members) and deliberately did
+// not add plan_VFDntXQf9cYMo ($700/365d, 32 valid members). Dropping the
+// last annual plan also makes the hardcoded 30-day renewal cycle in
+// metrics-definitions.ts cycleEndMs() correct rather than a bug: every
+// student left in the Month-2 cohort is now on a 30-day plan.
+// This list does NOT gate student access — MembershipBlockOverlay reads
+// membership_status only — so removing a plan hides people from admin
+// surfaces without ever locking anyone out of the product.
 export const PAYING_WHOP_PLAN_IDS = new Set<string>([
   "plan_4ZrwR4PmBsVsx",
-  "plan_fMMqxAljrzu75",
 ]);
 
 /**

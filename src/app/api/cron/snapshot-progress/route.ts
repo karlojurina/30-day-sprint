@@ -285,41 +285,25 @@ export async function GET(request: NextRequest) {
       },
       { onConflict: "snapshot_date" },
     ),
-    supabase.from("daily_progress_snapshots").upsert(
-      {
-        snapshot_date: yesterday.date,
-        active_students: activeAll.length,
-        total_completions: allCompletions,
-        avg_progress: avgAll,
-        active_count: activeAll.length,
-        joined_count: yesterdayCounts.joined_all,
-        churned_count: yesterdayCounts.churned_all,
-        avg_progress_cohort: avgCohort,
-        active_count_cohort: activeCohort.length,
-        joined_count_cohort: yesterdayCounts.joined_cohort,
-        churned_count_cohort: yesterdayCounts.churned_cohort,
-      },
-      { onConflict: "snapshot_date" },
-    ),
-    supabase.from("daily_progress_snapshots").upsert(
-      {
-        snapshot_date: today.date,
-        active_students: activeAll.length,
-        total_completions: allCompletions,
-        avg_progress: avgAll,
-        active_count: activeAll.length,
-        joined_count: todayCounts.joined_all,
-        churned_count: todayCounts.churned_all,
-        avg_progress_cohort: avgCohort,
-        active_count_cohort: activeCohort.length,
-        joined_count_cohort: todayCounts.joined_cohort,
-        churned_count_cohort: todayCounts.churned_cohort,
-      },
-      { onConflict: "snapshot_date" },
-    ),
   ]);
 
-  const upsertErr = upsertBoth.find((r) => r.error)?.error;
+  // v89: daily_progress_snapshots is no longer written here. It used to be
+  // upserted with activeCohort.length — a live, membership_status-derived
+  // count stamped onto BOTH yesterday and today. rebuild_daily_snapshots
+  // now derives the same columns point-in-time from first_paid_at and
+  // canceled_at, so two writers with two different definitions would
+  // disagree and the numbers would flip every time someone pressed
+  // Refresh. One definition, one writer: the RPC owns this table and the
+  // cron owns canceling_snapshots (which genuinely cannot be recomputed).
+  const rebuildFrom = new Date(Date.now() - 86_400_000)
+    .toISOString()
+    .slice(0, 10);
+  const { error: rebuildErr } = await supabase.rpc("rebuild_daily_snapshots", {
+    p_start_date: rebuildFrom,
+  });
+
+  const upsertErr =
+    upsertBoth.find((r) => r.error)?.error ?? rebuildErr ?? undefined;
   if (upsertErr) {
     await logCronFinish(runId, "failed", { error: upsertErr.message });
     return NextResponse.json({ error: upsertErr.message }, { status: 500 });

@@ -101,7 +101,7 @@ SELECT
   END AS verdict
 FROM students
 WHERE membership_status IN ('active','past_due')
-  AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx','plan_fMMqxAljrzu75')
+  AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx')
   AND first_paid_at IS NULL;
 
 
@@ -114,7 +114,7 @@ SELECT id, whop_user_id, email, name, membership_status, whop_plan_id,
        joined_at, first_paid_at, csm_exempt, created_at
 FROM students
 WHERE membership_status IN ('active','past_due')
-  AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx','plan_fMMqxAljrzu75')
+  AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx')
   AND first_paid_at IS NULL
 ORDER BY joined_at ASC
 LIMIT 200;
@@ -129,11 +129,11 @@ SELECT
   COUNT(*) FILTER (
     WHERE cancel_scheduled_at IS NOT NULL
       AND membership_status IN ('active','past_due')
-      AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx','plan_fMMqxAljrzu75')
+      AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx')
   ) AS canceling_still_active_paying,
   COUNT(*) FILTER (
     WHERE canceled_at IS NOT NULL
-      AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx','plan_fMMqxAljrzu75')
+      AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx')
   ) AS churned_terminal_paying,
   COUNT(*) FILTER (
     WHERE canceled_at IS NOT NULL
@@ -164,7 +164,7 @@ WITH live AS (
   FROM students
   WHERE whop_membership_id IS NOT NULL
     AND membership_status IN ('active','past_due')
-    AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx','plan_fMMqxAljrzu75')
+    AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx')
     AND first_paid_at >= timestamptz '2026-05-25 00:00:00+00'
 ),
 snap AS (
@@ -199,7 +199,7 @@ cohort AS (
   SELECT id
   FROM students
   WHERE membership_status IN ('active','past_due')
-    AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx','plan_fMMqxAljrzu75')
+    AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx')
     AND first_paid_at >= timestamptz '2026-05-25 00:00:00+00'
 ),
 sum_completions AS (
@@ -249,7 +249,7 @@ WITH cohort AS (
   FROM students
   WHERE first_paid_at IS NOT NULL
     AND first_paid_at >= timestamptz '2026-05-25 00:00:00+00'
-    AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx','plan_fMMqxAljrzu75')
+    AND whop_plan_id IN ('plan_4ZrwR4PmBsVsx')
 ),
 den AS (
   SELECT * FROM cohort WHERE day30 <= now()
@@ -330,7 +330,7 @@ WHERE t.status = 'open'
         s.csm_exempt = true
      OR s.membership_status <> 'active'
      OR s.whop_plan_id IS NULL
-     OR s.whop_plan_id NOT IN ('plan_4ZrwR4PmBsVsx','plan_fMMqxAljrzu75')
+     OR s.whop_plan_id NOT IN ('plan_4ZrwR4PmBsVsx')
      OR s.first_paid_at IS NULL
      OR s.first_paid_at < timestamptz '2026-05-25 00:00:00+00'
   );
@@ -351,7 +351,7 @@ WHERE t.status = 'open'
         s.csm_exempt = true
      OR s.membership_status <> 'active'
      OR s.whop_plan_id IS NULL
-     OR s.whop_plan_id NOT IN ('plan_4ZrwR4PmBsVsx','plan_fMMqxAljrzu75')
+     OR s.whop_plan_id NOT IN ('plan_4ZrwR4PmBsVsx')
      OR s.first_paid_at IS NULL
      OR s.first_paid_at < timestamptz '2026-05-25 00:00:00+00'
   )
@@ -381,7 +381,7 @@ WHERE dr.status = 'approved';
 
 -- ==========================================================================
 -- unknown_paying_plans
--- INVARIANT 1 allowlist drift: active members on a whop_plan_id that is NOT in the allowlist ('plan_4ZrwR4PmBsVsx','plan_fMMqxAljrzu75', src/lib/constants.ts:21-24). If a NEW paid plan was created in Whop but not added to PAYING_WHOP_PLAN_IDS (and the matching SQL arrays in the v79/v80/v81 RPC), those members are silently excluded from EVERY operational surface — dashboard, M2, CSM crons, discounts. The sync runner logs a warning per unknown plan; this query surfaces it from the DB directly.
+-- INVARIANT 1 allowlist drift: active members on a whop_plan_id that is NOT in the allowlist ('plan_4ZrwR4PmBsVsx', src/lib/constants.ts:21-24). If a NEW paid plan was created in Whop but not added to PAYING_WHOP_PLAN_IDS (and v_paying_plans in the v89 RPC, plus this file), those members are silently excluded from EVERY operational surface — dashboard, M2, CSM crons, discounts. The sync runner logs a warning per unknown plan; this query surfaces it from the DB directly.
 -- EXPECTED: Only known FREE/promo/partner plan ids here (those are intentionally non-paying and excluded by design). RED-FLAG if you see a plan id that should be a PAID plan with a meaningful member count and a recent latest_join — that means a new paid plan launched in Whop and was never added to PAYING_WHOP_PLAN_IDS + the SQL arrays, so its members are invisible to admin. Cross-check any unfamiliar plan id against Whop's plan list.
 -- ==========================================================================
 SELECT whop_plan_id,
@@ -391,7 +391,7 @@ SELECT whop_plan_id,
 FROM students
 WHERE membership_status IN ('active','past_due')
   AND whop_plan_id IS NOT NULL
-  AND whop_plan_id NOT IN ('plan_4ZrwR4PmBsVsx','plan_fMMqxAljrzu75')
+  AND whop_plan_id NOT IN ('plan_4ZrwR4PmBsVsx')
 GROUP BY whop_plan_id
 ORDER BY active_members_on_unknown_plan DESC;
 
@@ -421,3 +421,34 @@ LEFT JOIN daily_progress_snapshots dps ON dps.snapshot_date = ed.day
 ORDER BY ed.day DESC;
 
 
+-- ---------------------------------------------------------------------
+-- INVARIANT 8 (v89): snapshot continuity.
+--
+-- Since v89, active_count_cohort is point-in-time: a student counts on
+-- day d if they had paid by d and had not cancelled as of d. Entry uses
+-- the same column as joined_count_cohort and exit the same column as
+-- churned_count_cohort, so the three MUST reconcile exactly:
+--
+--   active(d) - active(d-1) = joined(d) - churned(d)
+--
+-- Any row returned here means the series is internally inconsistent and
+-- the chart is lying again. Expect ZERO rows.
+--
+-- Note: rows spanning the 2026-07-13/2026-07-14 seam may legitimately
+-- fail until the pre-July range is repaired, because days on or before
+-- 2026-07-13 are still the v81 back-projection.
+-- ---------------------------------------------------------------------
+SELECT a.snapshot_date,
+       a.active_count_cohort  AS active_today,
+       b.active_count_cohort  AS active_prev,
+       a.joined_count_cohort  AS joined_today,
+       a.churned_count_cohort AS churned_today,
+       (a.active_count_cohort - b.active_count_cohort)
+         - (a.joined_count_cohort - a.churned_count_cohort) AS discrepancy
+FROM daily_progress_snapshots a
+JOIN daily_progress_snapshots b
+  ON b.snapshot_date = a.snapshot_date - 1
+WHERE (a.active_count_cohort - b.active_count_cohort)
+        <> (a.joined_count_cohort - a.churned_count_cohort)
+  AND a.snapshot_date > DATE '2026-07-14'
+ORDER BY a.snapshot_date;

@@ -279,7 +279,7 @@ When adding a new table, append it here. When deleting a field, scan
   - paying = `whop_plan_id IN PAYING_WHOP_PLAN_IDS` (v79; the
     plan-IDs are duplicated in the RPC since SQL can't read TS
     constants — when you change one, change the other)
-  - cohort = `joined_at >= ADMIN_STUDENT_JOIN_CUTOFF`
+  - cohort = `first_paid_at >= ADMIN_STUDENT_JOIN_CUTOFF` (moved from `joined_at` in v80; `joined_at` is the CURRENT cycle start, so a returning customer would wrongly re-enter the cohort)
   - churned_count = `canceled_at::date = day` (NOT `updated_at` —
     that fires on every sync)
 

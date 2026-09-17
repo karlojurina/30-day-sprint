@@ -187,11 +187,17 @@ export async function* listMembershipsForProduct(
   while (page <= maxPages) {
     // Throttle: 200ms between pages → max ~5 req/sec from this loop.
     // Whop's Cloudflare layer rate-limits at ~10 req/sec so this
-    // stays well under. Adds ~10s to a 56-page sync (acceptable).
+    // stays well under. ~16s on a 78-page sync (acceptable).
     if (page > 1) await new Promise((r) => setTimeout(r, 200));
+    // v89: `per=`, NOT `per_page=`. Whop v2 silently ignores `per_page`
+    // and serves 10 rows/page regardless; `per` is honoured up to 50.
+    // Measured 2026-09-17 against prod_eE7r6SXa3H0MX: per_page=50 gives
+    // total_page 389, per=50 gives total_page 78. Identical data, a
+    // fifth of the requests, and it moves the 500-page cap from ~1,100
+    // memberships away to ~21,000 away.
     const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?product_id=${encodeURIComponent(
       productId,
-    )}&page=${page}&per_page=${perPage}`;
+    )}&page=${page}&per=${perPage}`;
     const res = await whopFetchWithRetry(url, headers);
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -208,6 +214,21 @@ export async function* listMembershipsForProduct(
       };
     };
     const items = Array.isArray(json.data) ? json.data : [];
+    // v89: Whop silently ignores an INVALID product_id — HTTP 200 and the
+    // entire account comes back (verified live 2026-09-17: a plan_ id in
+    // this slot returns all 8,291 rows instead of the product's 3,881).
+    // This loop yields whatever it is handed and applies no product check
+    // of its own, so a bad id would quietly turn `students` into an
+    // account-wide mirror. Fail instead.
+    const foreign = items.filter((m) => m.product && m.product !== productId);
+    if (foreign.length > 0) {
+      const others = Array.from(new Set(foreign.map((m) => m.product)));
+      throw new Error(
+        `Whop product_id filter not honoured for ${productId}: page ${page} ` +
+          `returned ${foreign.length}/${items.length} rows for other products ` +
+          `(${others.slice(0, 3).join(", ")}). Refusing to sync an unfiltered list.`,
+      );
+    }
     for (const item of items) {
       yield item;
     }
@@ -218,6 +239,16 @@ export async function* listMembershipsForProduct(
     const totalPage = json.pagination?.total_page ?? currentPage;
     if (currentPage >= totalPage) break;
     page = currentPage + 1;
+    // v89: refuse to return a truncated list, same rule as etfb.ts. Exiting
+    // silently at the cap is precisely how a partial sync becomes
+    // indistinguishable from a complete one — the runner would upsert the
+    // rows it saw and log status='success'.
+    if (page > maxPages) {
+      throw new Error(
+        `Whop memberships walk for ${productId} exceeded maxPages (${maxPages}); ` +
+          `Whop reported ${totalPage} pages. Refusing to return a truncated list.`,
+      );
+    }
   }
 }
 

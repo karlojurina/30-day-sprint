@@ -607,6 +607,21 @@ export default function BrandOwnersPage() {
     );
   };
 
+  /** The New tab renders ownerRows, not linkRows, so `matches` above cannot
+   *  reach it — `rows` is [] on that tab. Without this, typing in the search
+   *  box did nothing at all while you were looking at New. Matches the same
+   *  things you can see on the row: email, name, Discord handle, user id. */
+  const ownerMatches = (o: OwnerRow) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      (o.email ?? "").toLowerCase().includes(q) ||
+      (o.name ?? "").toLowerCase().includes(q) ||
+      (o.discordUsername ?? "").toLowerCase().includes(q) ||
+      o.whopUserId.toLowerCase().includes(q)
+    );
+  };
+
   /** A link can be closed only when its owner is established AND confirmed —
    *  the same rule the single Close button enforces. Selection must not be a
    *  way around it. */
@@ -865,12 +880,19 @@ export default function BrandOwnersPage() {
           )}
         </>
       ) : tab === "new" ? (
-        <Section eyebrow="Paying, no link yet" count={newOwners.length}>
-          {newOwners.length === 0 ? (
-            <div style={T.body}>Every paying brand has a link.</div>
+        <Section
+          eyebrow="Paying, no link yet"
+          count={newOwners.filter(ownerMatches).length}
+        >
+          {newOwners.filter(ownerMatches).length === 0 ? (
+            <div style={T.body}>
+              {query
+                ? `Nothing matching “${query}”.`
+                : "Every paying brand has a link."}
+            </div>
           ) : (
             <div style={{ display: "grid", gap: 8 }}>
-              {newOwners.map((o) => (
+              {newOwners.filter(ownerMatches).map((o) => (
                 <div
                   key={o.whopUserId}
                   style={{

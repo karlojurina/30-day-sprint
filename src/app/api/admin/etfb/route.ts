@@ -33,6 +33,7 @@ import {
   deriveOwnerRows,
   deriveLinkRows,
   fetchMemberIdForMembership,
+  whopOwnerUrl,
   type WhopPlan,
   type TeamLinkRow,
   type SeatDecisionRow,
@@ -190,6 +191,30 @@ export async function GET(request: NextRequest) {
       decisions,
       nowIso: new Date().toISOString(),
     });
+
+    // v89.1 — a brand owner with no link yet has no owner_member_id, so no
+    // profile URL, so the New tab could only print their email as dead text.
+    // Resolve a bounded number per load so Astrid can click straight through.
+    // Bounded for the same reason the heal above is: maxDuration here is 30,
+    // and this is one Whop call per owner. Not persisted — there is no link
+    // row to hang it on until she creates one, and once she does the heal
+    // above stores it properly.
+    const NEW_OWNER_URL_CAP = 8;
+    const needsOwnerUrl = ownerRows
+      .filter((o) => o.state === "active" && !o.link && !o.whopUrl)
+      .slice(0, NEW_OWNER_URL_CAP);
+    if (needsOwnerUrl.length > 0) {
+      await Promise.all(
+        needsOwnerUrl.map(async (o) => {
+          const om =
+            etfbMemberships.find((m) => m.user === o.whopUserId && m.valid) ??
+            etfbMemberships.find((m) => m.user === o.whopUserId);
+          if (!om) return;
+          const memberId = await fetchMemberIdForMembership(om.id);
+          if (memberId) o.whopUrl = whopOwnerUrl(memberId);
+        }),
+      );
+    }
 
     // v87.6 — link-first. One row per team link, which is the object Lovro
     // actually works from (his Whop checkout-links screen). ownerRows is kept

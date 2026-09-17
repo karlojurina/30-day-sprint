@@ -130,6 +130,10 @@ interface OwnerRow {
   email: string | null;
   state: "active" | "canceling" | "canceled";
   cycleEndIso: string | null;
+  /** The owner's own Discord handle, for reaching a new brand directly. */
+  discordUsername: string | null;
+  /** Their page in the Whop dashboard. Null when it could not be resolved. */
+  whopUrl: string | null;
   link: {
     planId: string;
     label: string | null;
@@ -680,6 +684,13 @@ export default function BrandOwnersPage() {
     }
   };
 
+  const copyText = (text: string, said: string) => {
+    void navigator.clipboard
+      ?.writeText(text)
+      .then(() => setToast(said))
+      .catch(() => setToast("Could not reach the clipboard"));
+  };
+
   const copyAll = (l: LinkRow) => {
     void navigator.clipboard
       ?.writeText(l.seats.map((x) => x.membershipId).join("\n"))
@@ -873,19 +884,75 @@ export default function BrandOwnersPage() {
                   }}
                 >
                   <div style={{ minWidth: 0 }}>
-                    <div style={T.cardTitle}>{o.email || o.whopUserId}</div>
+                    {o.whopUrl ? (
+                      <a
+                        href={o.whopUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ ...T.cardTitle, color: "inherit" }}
+                        title="Open this brand owner in Whop"
+                      >
+                        {o.email || o.whopUserId}
+                      </a>
+                    ) : (
+                      <div style={T.cardTitle}>{o.email || o.whopUserId}</div>
+                    )}
                     <div style={{ ...T.meta, marginTop: 3 }}>
                       paying · renews {fmtDate(o.cycleEndIso)}
                     </div>
                   </div>
-                  <Button
-                    size="sm"
-                    disabled={untrustworthy}
-                    busy={busy === o.whopUserId}
-                    onClick={() => void mint(o.whopUserId)}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      flexShrink: 0,
+                    }}
                   >
-                    Create link
-                  </Button>
+                    {/* Click to copy, so reaching a new brand on Discord does
+                        not require a detour through Whop to find the handle. */}
+                    {o.discordUsername ? (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          copyText(
+                            o.discordUsername as string,
+                            `Copied @${o.discordUsername}`,
+                          )
+                        }
+                        title="Copy this owner's Discord handle"
+                        style={{
+                          font: "inherit",
+                          fontSize: 13,
+                          fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                          padding: "4px 9px",
+                          border: "1px solid var(--color-border)",
+                          borderRadius: "var(--radius-pill, 999px)",
+                          background: "transparent",
+                          color: "inherit",
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        @{o.discordUsername}
+                      </button>
+                    ) : (
+                      <span
+                        style={{ ...T.meta, whiteSpace: "nowrap" }}
+                        title="This owner has no Discord account linked in Whop"
+                      >
+                        no Discord
+                      </span>
+                    )}
+                    <Button
+                      size="sm"
+                      disabled={untrustworthy}
+                      busy={busy === o.whopUserId}
+                      onClick={() => void mint(o.whopUserId)}
+                    >
+                      Create link
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>

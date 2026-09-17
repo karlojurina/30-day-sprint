@@ -868,6 +868,14 @@ export interface OwnerRow {
     /** false once the link is archived in Whop — nothing left to close. */
     canClose: boolean;
   } | null;
+  /** The owner's own Discord handle, read straight off their ETfB
+   *  membership. Lets Astrid message a new brand without a detour
+   *  through Whop to find it. Null when they never linked Discord. */
+  discordUsername: string | null;
+  /** The owner's page in the Whop dashboard. Needs a `mber_` id, which
+   *  lives on the link row — so owners who have no link yet start null
+   *  and the GET route resolves a bounded number of them per load. */
+  whopUrl: string | null;
   /** People to remove. Already filtered by every exclusion rule. */
   seats: OwnerSeat[];
   /** People on the link who are deliberately NOT actionable, and why. */
@@ -986,6 +994,10 @@ export function deriveOwnerRows(input: {
       state,
       cycleEndIso: m?.renewal_period_end
         ? new Date(m.renewal_period_end * 1000).toISOString()
+        : null,
+      discordUsername: m?.discord?.username ?? null,
+      whopUrl: link?.owner_member_id
+        ? whopOwnerUrl(link.owner_member_id)
         : null,
       link: link
         ? {

@@ -15,6 +15,7 @@ import {
 } from "@/lib/whop-members";
 import { unsignState } from "@/lib/pkce";
 import { syncWatchProgress } from "@/app/api/student/_lib/watch-sync";
+import { evaluateAchievements } from "@/lib/achievements";
 import { createClient } from "@supabase/supabase-js";
 
 export async function GET(request: NextRequest) {
@@ -390,9 +391,34 @@ export async function GET(request: NextRequest) {
     //     to block the redirect forever, but we do want to capture Whop
     //     errors into whop_last_sync_error so they're visible in the UI.
     if (upsertedStudent?.id) {
+      // v89.2 — evaluate achievements once the sync has landed.
+      //
+      // syncWatchProgress mirrors the student's completed Whop lessons into
+      // student_lesson_completions, and this is the ONLY place that happens
+      // for a student who never toggles anything themselves. Achievements
+      // were previously evaluated only on toggle-lesson, mark-action-shipped,
+      // submit-quiz and the manual refresh — so a student whose entire
+      // progress arrived through this sync earned nothing. Measured
+      // 2026-09-18: 182 students in the launch cohort held a real completion
+      // with no First Steps badge, a quarter of everyone who had completed
+      // anything.
+      //
+      // Chained onto the sync rather than run beside it, so it always sees
+      // the rows the sync just wrote. It stays INSIDE the existing 2.5s race
+      // below, so login is never slowed beyond the budget that was already
+      // there; a student who times out is picked up on their next login or
+      // their next action.
       const syncPromise = syncWatchProgress({
         studentId: upsertedStudent.id,
         whopUserId: userInfo.sub,
+      }).then(async (syncResult) => {
+        try {
+          await evaluateAchievements(supabase, upsertedStudent.id);
+        } catch (err) {
+          // Never let an achievement failure break a login.
+          console.error("[callback] evaluateAchievements failed:", err);
+        }
+        return syncResult;
       });
       const timeoutPromise = new Promise<null>((resolve) =>
         setTimeout(() => resolve(null), 2500)

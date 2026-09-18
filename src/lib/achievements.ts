@@ -144,13 +144,27 @@ export const ACHIEVEMENT_RULES: AchievementRule[] = [
   },
   {
     id: "unbroken",
-    // 30-day streak with no break since Day 1. We approximate "since
-    // Day 1" by requiring uniqueActiveDaysSinceJoin >= dayNumber AND
-    // currentStreak >= 30 (the streak hasn't been broken since the
-    // beginning).
+    // v90 — REDEFINED. Was "30-day streak with no break since Day 1", which
+    // rewarded slowness: a student who finished the sprint in 6 days could
+    // never earn it, and one who logged in daily for a month without
+    // finishing could. Backwards for a sprint whose whole point is to get
+    // people to lock in and finish fast. 0 students ever held the old
+    // version.
+    //
+    // Now: finish the entire sprint without ever breaking your streak.
+    // currentStreak >= dayNumber means every single day since their first
+    // payment has been an active day, so the streak has never been broken.
+    // Evaluated at the moment they finish, and sticky afterwards, so the
+    // streak lapsing later does not take it away.
+    //
+    // Known false negative, accepted: a student whose progress arrives in
+    // one bulk watch-sync has all their completions stamped at sync time,
+    // collapsing many days of real work into one active day. They will not
+    // earn this. Under-awarding a prestige badge is the right way to be
+    // wrong.
     evaluate: (s) =>
-      s.currentStreak >= 30 &&
-      s.uniqueActiveDaysSinceJoin >= Math.min(s.dayNumber, 30),
+      REGION_IDS.every((r) => regionComplete(s, r)) &&
+      s.currentStreak >= s.dayNumber,
   },
   {
     id: "perfect_run",
@@ -237,6 +251,22 @@ export async function buildAchievementSnapshot(
       bounty_access_claimed_at: string | null;
     } | null) ?? { bounty_access_claimed_at: null };
   const discount = discountRes.data as { created_at: string } | null;
+
+  // v90: these reads had no error check at all, so a failed query was
+  // indistinguishable from a student with no data. Behaviour is deliberately
+  // unchanged — regionComplete() already returns false for an empty region,
+  // so a bad read under-awards rather than over-awards, and the next write
+  // path retries. This only makes the failure visible.
+  if (lessonsRes.error) {
+    console.error(
+      `[achievements] lessons read failed for student=${studentId}: ${lessonsRes.error.message}`,
+    );
+  }
+  if (completionsRes.error) {
+    console.error(
+      `[achievements] completions read failed for student=${studentId}: ${completionsRes.error.message}`,
+    );
+  }
 
   const lessonsById = new Map<
     string,

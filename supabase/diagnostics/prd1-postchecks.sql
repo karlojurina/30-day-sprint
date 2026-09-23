@@ -140,6 +140,50 @@ select 61, 'v95 · discount_requests.gate_lesson_id exists and is nullable', 'te
   coalesce((select data_type||'|'||is_nullable from information_schema.columns
     where table_name='discount_requests' and column_name='gate_lesson_id'), '(missing)')
 
+-- ─────────────── v96 · the destructive RPC is locked down ───────────────
+--
+-- THE MOST IMPORTANT ROWS IN THIS FILE. Before v96, anyone holding the anon
+-- key that ships in every browser could call rebuild_daily_snapshots with a
+-- wide date range and permanently destroy 66 days of collected point-in-time
+-- analytics. Granted to `authenticated` since v36; never revoked from PUBLIC.
+union all
+select 70, 'v96 · SECURITY · anon CANNOT execute the destructive rebuild RPC', 'false',
+  has_function_privilege('anon','public.rebuild_daily_snapshots(date,date)','execute')::text
+union all
+select 71, 'v96 · SECURITY · students CANNOT execute it either', 'false',
+  has_function_privilege('authenticated','public.rebuild_daily_snapshots(date,date)','execute')::text
+union all
+select 72, 'v96 · service_role still CAN (every real caller uses it)', 'true',
+  has_function_privilege('service_role','public.rebuild_daily_snapshots(date,date)','execute')::text
+union all
+-- If the old single-argument version ever came back it would carry the old
+-- UNBOUNDED delete and its own grants.
+select 73, 'v96 · exactly one signature (the unbounded one stays dropped)', '1',
+  (select count(*)::text from pg_proc where proname = 'rebuild_daily_snapshots')
+union all
+select 74, 'v96 · the 30-day floor is present in the function body', 'true',
+  coalesce((select (pg_get_functiondef(oid) like '%more than 30 days back%')::text
+              from pg_proc where proname = 'rebuild_daily_snapshots' limit 1), '(missing)')
+
+-- ─────────────── v97 · the heartbeat trusts nothing from the client ───────────────
+union all
+select 75, 'v97 · SECURITY · anon still CANNOT execute the heartbeat RPC', 'false',
+  has_function_privilege('anon','public.record_lesson_heartbeat(text,numeric,numeric,numeric,boolean)','execute')::text
+union all
+select 76, 'v97 · students still CAN (the player needs it)', 'true',
+  has_function_privilege('authenticated','public.record_lesson_heartbeat(text,numeric,numeric,numeric,boolean)','execute')::text
+union all
+-- The `+ 2` grace term became a per-call inflation floor once p_force bypassed
+-- the rate limit. Its absence is the fix.
+select 77, 'v97 · the clock-skew grace term is GONE (no inflation on replay)', 'true',
+  coalesce((select (pg_get_functiondef(oid) like '%v_elapsed, v_max_delta%')::text
+              from pg_proc where proname = 'record_lesson_heartbeat' limit 1), '(missing)')
+union all
+-- The 95% decision must use the CATALOG duration, never the client's.
+select 78, 'v97 · the 95% check uses the catalog duration only', 'true',
+  coalesce((select (pg_get_functiondef(oid) like '%v_lesson_dur is not null and v_lesson_dur > 0%')::text
+              from pg_proc where proname = 'record_lesson_heartbeat' limit 1), '(missing)')
+
 -- ─────────────── THE LIVE APP MUST NOT HAVE MOVED ───────────────
 union all
 select 80, 'LIVE · lessons table still has its 65 rows', '65',
@@ -173,6 +217,12 @@ select 93, 'INFO · max completed_count (must be <= 64, >64 means the denominato
 union all
 select 94, 'INFO · watch rows so far (0 until the player ships)', 'INFO',
   (select count(*)::text from student_lesson_watch)
+union all
+-- The 66 days v96 now protects. If the earliest date moved forward, something
+-- destroyed history.
+select 95, 'INFO · snapshot rows + earliest date (must NOT have moved forward)', 'INFO',
+  (select count(*)::text || ' rows, earliest ' || coalesce(min(snapshot_date)::text, 'none')
+     from daily_progress_snapshots)
 )
 select
   n as "#",
@@ -189,7 +239,21 @@ order by n;
 
 
 -- ============================================================
--- OPTIONAL SECOND STEP — this one WRITES, so it is separate.
+-- SECOND STEP — the one check that cannot be read-only.
+--
+-- v96's guard must REFUSE a wide range rather than silently narrow it. Run
+-- this one line; an ERROR is the PASS.
+--
+--   select public.rebuild_daily_snapshots('2026-01-01'::date, current_date);
+--
+--   EXPECT: ERROR  "refusing to rebuild from 2026-01-01 — more than 30 days back"
+--
+--   Before v96 that exact call would have destroyed 66 days of collected
+--   history. If it returns a NUMBER instead of an error, stop and tell me.
+-- ============================================================
+
+-- ============================================================
+-- OPTIONAL THIRD STEP — this one WRITES, so it is separate.
 --
 -- Re-runs the snapshot builder for the last two days and shows that the
 -- numbers are unchanged and that total_lessons is now recorded. It deletes

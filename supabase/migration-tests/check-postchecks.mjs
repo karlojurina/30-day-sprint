@@ -57,7 +57,9 @@ await db.exec(seed)
 for (const f of ['2026_v92_progress_predicate_and_lessons_v2_columns.sql',
                  '2026_v93_lesson_watch_telemetry.sql',
                  '2026_v94_catalog_next_staging.sql',
-                 '2026_v95_discount_window_config.sql']) {
+                 '2026_v95_discount_window_config.sql',
+                 '2026_v96_lock_down_rebuild_snapshots.sql',
+                 '2026_v97_heartbeat_trust_nothing.sql']) {
   await db.exec(read(M, f))
 }
 

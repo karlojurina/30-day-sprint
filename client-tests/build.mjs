@@ -10,7 +10,7 @@ function gen(srcRel, outRel, rewrites = []) {
   let s = fs.readFileSync(src, 'utf8')
   s = s.replace('"use client";\n', '')
   for (const [from, to] of rewrites) s = s.split(from).join(to)
-  if (s.includes('@/lib/')) throw new Error(`an unrewritten @/lib import remains in ${srcRel}`)
+  if (s.includes('@/')) throw new Error(`an unrewritten @/ import remains in ${srcRel}`)
   fs.writeFileSync(out, s)
   console.log(`generated ${outRel} from the real source`)
 }
@@ -22,3 +22,9 @@ gen('../src/lib/world/watch-heartbeat.ts', './_gen/watch-heartbeat.ts', [
 
 // watch-rules.ts has no imports at all, so it copies across untouched.
 gen('../src/lib/world/watch-rules.ts', './_gen/watch-rules.ts')
+
+// catalog.ts imports only a TYPE, which --experimental-strip-types erases.
+gen('../src/lib/world/catalog.ts', './_gen/catalog.ts', [
+  ['import type { StudentLessonWatch } from "@/types/database";\n', ''],
+  ['StudentLessonWatch', 'unknown'],
+])

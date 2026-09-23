@@ -1,2 +1,3 @@
 client-tests/_gen/watch-heartbeat.ts
 client-tests/_gen/watch-rules.ts
+client-tests/_gen/catalog.ts

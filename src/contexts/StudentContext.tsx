@@ -193,6 +193,14 @@ interface StudentContextType {
   markWatched: (lessonId: string) => void;
   /** Which catalog the payload came from: "" (live) or "_next" (staging). */
   catalogSuffix: string;
+  /**
+   * Set when the initial /api/student/data fetch failed. Until now that error
+   * was only console.error'd (:607), so a failed request and a genuinely empty
+   * course looked identical to every consumer — the world would render an
+   * empty continent with nothing to retry and nothing logged anywhere a human
+   * would see.
+   */
+  loadError: string | null;
   /** Upsert a rating for a lesson. Optimistic; server reconciles
    *  in the background. */
   rateLesson: (
@@ -295,6 +303,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     Map<string, StudentLessonWatch>
   >(new Map());
   const [catalogSuffix, setCatalogSuffix] = useState<string>("");
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   /**
    * Merge server rows into the local map WITHOUT ever walking a monotonic
@@ -606,6 +615,9 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         });
       } catch (err) {
         console.error("Failed to fetch student data:", err);
+        setLoadError(
+          err instanceof Error ? err.message : "Could not load your course.",
+        );
       }
       setLoading(false);
     }
@@ -1802,6 +1814,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         patchWatchProgress,
         markWatched,
         catalogSuffix,
+        loadError,
         refreshWatchProgress,
         syncDiagnostics,
         forceSync,

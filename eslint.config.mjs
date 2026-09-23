@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated + stub files for the Node test harness. They run under
+    // `node --experimental-strip-types`, so they use explicit .ts import
+    // extensions and keep unused stub parameters that mirror the real
+    // signatures they stand in for. Neither is app code.
+    "client-tests/_gen/**",
   ]),
 ]);
 

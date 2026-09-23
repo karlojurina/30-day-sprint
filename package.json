@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:client": "node client-tests/build.mjs && node --experimental-strip-types client-tests/watch-heartbeat.test.mjs",
+    "test:migrations": "npm --prefix supabase/migration-tests test"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.2",

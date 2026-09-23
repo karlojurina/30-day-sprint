@@ -1,7 +1,6 @@
-"use client";
 
-import { createClient } from "@/lib/supabase-browser";
-import { createCallGate } from "@/lib/call-gate";
+import { createClient } from "./stub-supabase.ts";
+import { createCallGate } from "./stub-call-gate.ts";
 
 /**
  * Turns the player's firehose into a survivable number of database writes.

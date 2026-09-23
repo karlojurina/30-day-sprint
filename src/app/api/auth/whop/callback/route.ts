@@ -16,6 +16,7 @@ import {
 import { unsignState } from "@/lib/pkce";
 import { syncWatchProgress } from "@/app/api/student/_lib/watch-sync";
 import { evaluateAchievements } from "@/lib/achievements";
+import { updateStudentStreak } from "@/app/api/student/_lib/update-streak";
 import { createClient } from "@supabase/supabase-js";
 
 export async function GET(request: NextRequest) {
@@ -413,6 +414,12 @@ export async function GET(request: NextRequest) {
         whopUserId: userInfo.sub,
       }).then(async (syncResult) => {
         try {
+          // Streak FIRST, then achievements — the same order the other three
+          // write paths use (toggle-lesson:56, mark-action-shipped:133,
+          // refresh-watch-sync:54). Without it the streak is whatever it was
+          // before this sync, so streak_7 / streak_14 / unbroken get judged
+          // against a stale value and silently under-award.
+          await updateStudentStreak(supabase, upsertedStudent.id);
           await evaluateAchievements(supabase, upsertedStudent.id);
         } catch (err) {
           // Never let an achievement failure break a login.

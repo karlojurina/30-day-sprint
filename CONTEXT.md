@@ -9,6 +9,16 @@ For *the product / what each surface does for the user* see
 This document is **the live map** of the app. Updated at the moment any
 structure changes.
 
+> **Paused 2026-09-22 — the REBUILD.** The whole course is being re-recorded
+> (110+ lessons, self-hosted video) and this app is being rebuilt around it.
+> Lovro is away from it for at least a week.
+> - **Open items / uncommitted work / blocked decisions:**
+>   [system-docs/open_items_2026-09-22.md](system-docs/open_items_2026-09-22.md)
+>   — includes a 7-line bug fix sitting uncommitted in the working tree.
+> - **Why the rebuild exists (Gate 1 memo + 2026-09-22 addendum):**
+>   `../_admin/memos/sprint_rebuild.md`
+> - **The 3D world map prototype:** `../_admin/research/world-gen/README.md`
+
 ## What this is
 
 Two surfaces in one Next.js app:

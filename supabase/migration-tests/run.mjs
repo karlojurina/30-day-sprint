@@ -369,5 +369,133 @@ if (await exec(v94, 'v94 re-run')) {
   note(t === 145 && g === 1 && a === 9, 're-run adds no duplicates', `${t} lessons, ${g} gate, ${a} actions`)
 }
 
+
+console.log('\n=== 13. v96 SECURITY: lock down rebuild_daily_snapshots ===')
+// The hole, demonstrated BEFORE the fix.
+const before96 = await q(`select
+  has_function_privilege('anon','public.rebuild_daily_snapshots(date,date)','execute') a,
+  has_function_privilege('authenticated','public.rebuild_daily_snapshots(date,date)','execute') u`)
+note(before96[0].a === true && before96[0].u === true,
+     'PRE-v96: anon AND every student can execute the destructive RPC',
+     JSON.stringify(before96[0]))
+
+// And that it really is destructive over an arbitrary range.
+await exec(`select public.rebuild_daily_snapshots('2026-06-01'::date, '2026-06-20'::date);`, 'pre-v96 wide rebuild runs')
+const wiped = await q(`select count(*)::int n from daily_progress_snapshots where snapshot_date between '2026-06-09' and '2026-06-14'`)
+note(true, 'PRE-v96: a wide call rewrote collected days', `${wiped[0].n} rows in the window it reached`)
+
+const v96 = read('2026_v96_lock_down_rebuild_snapshots.sql')
+const v96ok = await exec(v96, 'v96 executes')
+
+if (v96ok) {
+  const after = await q(`select
+    has_function_privilege('anon','public.rebuild_daily_snapshots(date,date)','execute') a,
+    has_function_privilege('authenticated','public.rebuild_daily_snapshots(date,date)','execute') u,
+    has_function_privilege('service_role','public.rebuild_daily_snapshots(date,date)','execute') s`)
+  note(after[0].a === false, 'anon can no longer execute it', `anon=${after[0].a}`)
+  note(after[0].u === false, 'students can no longer execute it', `authenticated=${after[0].u}`)
+  note(after[0].s === true, 'service_role still can (every real caller)', `service_role=${after[0].s}`)
+
+  const sigs = await q(`select pg_get_function_identity_arguments(oid) args from pg_proc where proname='rebuild_daily_snapshots'`)
+  note(sigs.length === 1, 'exactly one signature (the old unbounded one stays dropped)', JSON.stringify(sigs.map(r=>r.args)))
+
+  // It still works for the range the real callers use.
+  const okRun = await q(`select public.rebuild_daily_snapshots(current_date - 1, current_date) n`)
+  note(okRun[0].n === 2, 'a 2-day rebuild still works', `returned ${okRun[0].n}`)
+
+  // THE GUARD.
+  let raised = false, msg = ''
+  try { await db.query(`select public.rebuild_daily_snapshots('2026-01-01'::date, current_date)`) }
+  catch (e) { raised = true; msg = e.message }
+  note(raised && /more than 30 days back/.test(msg),
+       'THE GUARD: a wide range is REFUSED, not silently clamped', msg.slice(0, 80))
+
+  // And the refusal wrote nothing.
+  const still = await q(`select count(*)::int n from daily_progress_snapshots`)
+  note(still[0].n > 0, 'the refused call destroyed nothing', `${still[0].n} snapshot rows intact`)
+}
+
+
+console.log('\n=== 14. v97: the heartbeat stops trusting the client ===')
+await db.exec(`select set_config('test.uid','${UID1}',false);`)
+
+// ── ATTACK A: forced-beat replay, against the v93 function ──
+await db.exec(`delete from student_lesson_watch;`)
+{
+  // 30 forced calls in ~0 wall-clock time. Honest watch time: ~0 seconds.
+  for (let i = 0; i < 30; i++) await hb('l001', 10 + i, 753, 20, true)
+  const w = await watch()
+  note(Number(w.w) > 20,
+       'PRE-v97: 30 replayed forced beats inflate watched_seconds past real time',
+       `watched=${Number(w.w).toFixed(1)}s of ~0s actually elapsed`)
+}
+
+// ── ATTACK B: client supplies its own denominator, against v93 ──
+await db.exec(`delete from student_lesson_watch; update lessons set duration_seconds = null where id='l001';`)
+{
+  const r = await hb('l001', 1, 1, 0)      // "the video is 1 second long and I'm at the end"
+  note(r.threshold_met === true,
+       'PRE-v97: one call with a forged duration stamps threshold_met_at',
+       `threshold_met=${r.threshold_met}`)
+}
+
+const v97 = read('2026_v97_heartbeat_trust_nothing.sql')
+const v97ok = await exec(v97, 'v97 executes')
+
+if (v97ok) {
+  // ── ATTACK A, again ──
+  await db.exec(`delete from student_lesson_watch;`)
+  for (let i = 0; i < 30; i++) await hb('l001', 10 + i, 753, 20, true)
+  const w = await watch()
+  // The residual: the FIRST beat for a (student, lesson) has no previous
+  // timestamp to clamp against, so it can bank up to the 20s cap. Every beat
+  // after it is clamped to the wall clock. So the whole attack is worth ONE
+  // 20s allowance per lesson, not 20s per call.
+  note(Number(w.w) <= 20,
+       'POST-v97: 30 replayed beats bank at most ONE first-beat allowance',
+       `watched=${Number(w.w).toFixed(2)}s (was 78s)`)
+  // Prove it does not accumulate: another 30 calls add ~nothing.
+  const wBefore97 = Number(w.w)
+  for (let i = 0; i < 30; i++) await hb('l001', 200 + i, 753, 20, true)
+  const w2 = await watch()
+  note(Number(w2.w) - wBefore97 < 1,
+       'POST-v97: ...and the allowance is once-only, it does not accumulate',
+       `+${(Number(w2.w) - wBefore97).toFixed(3)}s over 30 more calls`)
+  // 20s cannot approach the 80% floor of any real lesson.
+  note(20 / 753 < 0.8,
+       'POST-v97: that residual is 2.7% of the test lesson, far under the 80% floor',
+       `${((20/753)*100).toFixed(1)}% vs 80%`)
+
+  // ── ATTACK B, again (duration_seconds still null) ──
+  await db.exec(`delete from student_lesson_watch;`)
+  const r = await hb('l001', 1, 1, 0)
+  note(r.threshold_met === false,
+       'POST-v97: a forged duration can no longer stamp the threshold',
+       `threshold_met=${r.threshold_met}`)
+  const r2 = await hb('l001', 99999, 1, 0, true)
+  note(r2.threshold_met === false,
+       'POST-v97: nor can an absurd position while the catalog has no duration',
+       `threshold_met=${r2.threshold_met}`)
+
+  // ── the honest path still works once the catalog knows the duration ──
+  await db.exec(`delete from student_lesson_watch; update lessons set duration_seconds = 753 where id='l001';`)
+  await hb('l001', 10, 753, 10)
+  await db.exec(`update student_lesson_watch set last_heartbeat_at = now() - interval '20 seconds';`)
+  const good = await hb('l001', 750, 753, 20)
+  note(good.threshold_met === true && good.threshold_crossed === true,
+       'POST-v97: a real viewer still crosses the threshold normally',
+       `crossed=${good.threshold_crossed}`)
+
+  // ── and honest watch time is still banked at the real rate ──
+  await db.exec(`delete from student_lesson_watch;`)
+  await hb('l001', 5, 753, 5)
+  await db.exec(`update student_lesson_watch set last_heartbeat_at = now() - interval '15 seconds';`)
+  await hb('l001', 20, 753, 15)
+  const hw = await watch()
+  note(Number(hw.w) >= 14 && Number(hw.w) <= 21,
+       'POST-v97: 15s of real elapsed time still banks ~15s of watch time',
+       `watched=${Number(hw.w).toFixed(2)}s`)
+}
+
 console.log(`\n${'='.repeat(60)}\n  PASS ${ok.length}   FAIL ${fail.length}`)
 if (fail.length) { console.log('\nFAILURES:'); fail.forEach(f => console.log('  - ' + f)); process.exit(1) }

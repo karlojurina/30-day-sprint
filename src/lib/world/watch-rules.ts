@@ -97,7 +97,16 @@ export function judgeWatch(
     return { complete: false, reason: "no_watch_row", positionRatio: 0, playedRatio: 0, durationSeconds: null };
   }
 
-  const duration = catalogDurationSeconds ?? num(row.reported_duration_seconds);
+  // v97: the CATALOG's duration only. `reported_duration_seconds` is written
+  // by the browser through the heartbeat RPC, so falling back to it let the
+  // client choose its own denominator — send 1, play 1 second, complete a
+  // 24-minute lesson. It is kept on the row for display and diagnostics and
+  // is deliberately not consulted here.
+  //
+  // This means a lesson with a video but no duration_seconds cannot be
+  // completed. That is the correct failure: blocking a completion is
+  // recoverable, forging one is not. PRD 2's Bunny sync is what fills it.
+  const duration = catalogDurationSeconds;
   if (duration === null || duration <= 0) {
     return { complete: false, reason: "no_duration", positionRatio: 0, playedRatio: 0, durationSeconds: null };
   }

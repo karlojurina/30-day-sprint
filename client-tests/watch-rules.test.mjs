@@ -55,8 +55,16 @@ ok(judgeWatch(row({ max_position_seconds: 900, watched_seconds: 900 }), null).re
 ok(judgeWatch(row({ max_position_seconds: 900, watched_seconds: 900 }), 0).reason === 'no_duration',
    'zero duration -> no_duration')
 {
+  // v97: the client's own reported duration must NOT decide anything. It is
+  // written by the browser through the heartbeat RPC, so falling back to it
+  // let a student send duration=1, play one second and complete a 24-minute
+  // lesson. Blocking a completion is recoverable; forging one is not.
   const v = judgeWatch(row({ max_position_seconds: 750, watched_seconds: 740, reported_duration_seconds: D }), null)
-  ok(v.complete, 'falls back to the player-reported duration when the catalog has none')
+  ok(!v.complete && v.reason === 'no_duration',
+     'a client-reported duration CANNOT stand in for the catalog\'s')
+  const forged = judgeWatch(row({ max_position_seconds: 1, watched_seconds: 1, reported_duration_seconds: 1, threshold_met_at: 'x' }), null)
+  ok(!forged.complete && forged.reason === 'no_duration',
+     'the forge-your-own-denominator attack returns no_duration, not complete')
 }
 {
   // The catalog must win: a player misreporting a 10s duration would otherwise

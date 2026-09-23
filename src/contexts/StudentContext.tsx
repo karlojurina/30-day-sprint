@@ -14,6 +14,7 @@ import { createClient, getSharedSession } from "@/lib/supabase-browser";
 import { createCallGate } from "@/lib/call-gate";
 import { useAuth } from "./AuthContext";
 import type {
+  StudentLessonWatch,
   Region,
   Lesson,
   StudentLessonCompletion,
@@ -171,6 +172,27 @@ interface StudentContextType {
   // lesson id. Read-mostly; the LessonSheet writes via rateLesson()
   // once the student is done with the lesson.
   lessonRatings: Map<string, { stars: number; comment: string | null }>;
+
+  // v93 — video watch telemetry, keyed by lesson id. Present only for
+  // lessons the student has actually opened. Read by the player to resume
+  // where they left off and by the area screen to draw the in-progress
+  // state. NOT the source of truth for "done" — that stays in `completions`,
+  // written server-side after the API route re-reads the watch row.
+  watchProgress: Map<string, StudentLessonWatch>;
+  /** Merge one lesson's telemetry in locally, from a heartbeat response. */
+  patchWatchProgress: (
+    lessonId: string,
+    patch: Partial<StudentLessonWatch>,
+  ) => void;
+  /**
+   * Record locally that a watch lesson just completed. Called after the
+   * server confirms the 95% crossing; keeps the UI honest until the next
+   * refresh and registers the lesson with the recently-toggled guard so a
+   * lagging read replica can't undo it.
+   */
+  markWatched: (lessonId: string) => void;
+  /** Which catalog the payload came from: "" (live) or "_next" (staging). */
+  catalogSuffix: string;
   /** Upsert a rating for a lesson. Optimistic; server reconciles
    *  in the background. */
   rateLesson: (
@@ -268,6 +290,81 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     Map<string, { stars: number; comment: string | null }>
   >(new Map());
 
+  // v93 — watch telemetry. Keyed by lesson_id.
+  const [watchProgress, setWatchProgress] = useState<
+    Map<string, StudentLessonWatch>
+  >(new Map());
+  const [catalogSuffix, setCatalogSuffix] = useState<string>("");
+
+  /**
+   * Merge server rows into the local map WITHOUT ever walking a monotonic
+   * field backwards.
+   *
+   * Same race as v74's completion merge, different shape: a heartbeat is
+   * written by the RPC and the very next /api/student/data may be served by
+   * a read replica that hasn't caught up, which would visibly rewind the
+   * student's playhead. max_position_seconds, watched_seconds and
+   * threshold_met_at are monotonic by definition, so the larger value always
+   * wins. last_position_seconds is NOT monotonic (scrubbing back is normal)
+   * and takes the server's value.
+   */
+  function mergeWatchProgress(
+    prev: Map<string, StudentLessonWatch>,
+    rows: StudentLessonWatch[],
+  ): Map<string, StudentLessonWatch> {
+    const out = new Map(prev);
+    for (const row of rows) {
+      const local = out.get(row.lesson_id);
+      if (!local) {
+        out.set(row.lesson_id, row);
+        continue;
+      }
+      out.set(row.lesson_id, {
+        ...row,
+        max_position_seconds: Math.max(
+          local.max_position_seconds,
+          row.max_position_seconds,
+        ),
+        watched_seconds: Math.max(local.watched_seconds, row.watched_seconds),
+        threshold_met_at: local.threshold_met_at ?? row.threshold_met_at,
+      });
+    }
+    return out;
+  }
+
+  const patchWatchProgress = useCallback(
+    (lessonId: string, patch: Partial<StudentLessonWatch>) => {
+      setWatchProgress((prev) => {
+        const out = new Map(prev);
+        const local = out.get(lessonId);
+        const base: StudentLessonWatch = local ?? {
+          lesson_id: lessonId,
+          max_position_seconds: 0,
+          last_position_seconds: 0,
+          watched_seconds: 0,
+          reported_duration_seconds: null,
+          threshold_met_at: null,
+          last_heartbeat_at: new Date().toISOString(),
+        };
+        out.set(lessonId, {
+          ...base,
+          ...patch,
+          max_position_seconds: Math.max(
+            base.max_position_seconds,
+            patch.max_position_seconds ?? 0,
+          ),
+          watched_seconds: Math.max(
+            base.watched_seconds,
+            patch.watched_seconds ?? 0,
+          ),
+          threshold_met_at: base.threshold_met_at ?? patch.threshold_met_at ?? null,
+        });
+        return out;
+      });
+    },
+    [],
+  );
+
   function foldLessonRatings(
     rows: Array<{ lesson_id: string; stars: number; comment: string | null }>,
   ): Map<string, { stars: number; comment: string | null }> {
@@ -347,6 +444,53 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  /**
+   * v93 — a watch lesson just completed itself.
+   *
+   * Called after /api/student/lesson-watched confirms the crossing, never
+   * from the player's own reckoning: the route re-reads student_lesson_watch
+   * server-side and applies the played-seconds floor, so the client is
+   * reflecting a decision, not making one.
+   *
+   * Reuses the v74 recently-toggled guard for exactly the same reason it
+   * exists: the completion is written server-side microseconds earlier, and
+   * the refresh that follows can be served by a replica that hasn't caught
+   * up, which would tick the lesson back to incomplete in front of the
+   * student.
+   *
+   * A compound lesson (requires_action) may ALREADY have a row whose action
+   * half shipped first. Stamping completed_at on the existing row is what
+   * makes isLessonComplete() true for it; inserting a second row would
+   * violate the (student_id, lesson_id) unique constraint.
+   */
+  const markWatched = useCallback(
+    (lessonId: string) => {
+      if (!student) return;
+      markRecentlyToggled(lessonId);
+      setCompletions((prev) => {
+        const existing = prev.find((c) => c.lesson_id === lessonId);
+        if (existing) {
+          if (existing.completed_at) return prev;
+          const stamped = new Date().toISOString();
+          return prev.map((c) =>
+            c.lesson_id === lessonId ? { ...c, completed_at: stamped } : c,
+          );
+        }
+        const optimistic: StudentLessonCompletion = {
+          id: crypto.randomUUID(),
+          student_id: student.id,
+          lesson_id: lessonId,
+          completed_at: new Date().toISOString(),
+          action_completed_at: null,
+          skipped_at: null,
+          discord_message_link: null,
+        };
+        return [...prev, optimistic];
+      });
+    },
+    [student],
+  );
+
   const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostics>({
     lastSyncAt: null,
     fetchedCount: null,
@@ -412,6 +556,13 @@ export function StudentProvider({ children }: { children: ReactNode }) {
             }>,
           ),
         );
+        setWatchProgress((prev) =>
+          mergeWatchProgress(
+            prev,
+            (data.watchProgress ?? []) as StudentLessonWatch[],
+          ),
+        );
+        setCatalogSuffix((data.catalogSuffix as string | undefined) ?? "");
         setStreak({
           current: (data.streaks as StudentStreaks | null)?.current_streak ?? 0,
           longest: (data.streaks as StudentStreaks | null)?.longest_streak ?? 0,
@@ -557,6 +708,13 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         }>,
       ),
     );
+    setWatchProgress((prev) =>
+      mergeWatchProgress(
+        prev,
+        (fresh.watchProgress ?? []) as StudentLessonWatch[],
+      ),
+    );
+    setCatalogSuffix((fresh.catalogSuffix as string | undefined) ?? "");
     setStreak({
       current: (fresh.streaks as StudentStreaks | null)?.current_streak ?? 0,
       longest: (fresh.streaks as StudentStreaks | null)?.longest_streak ?? 0,
@@ -1640,6 +1798,10 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         submitRegionQuiz,
         lessonRatings,
         rateLesson,
+        watchProgress,
+        patchWatchProgress,
+        markWatched,
+        catalogSuffix,
         refreshWatchProgress,
         syncDiagnostics,
         forceSync,

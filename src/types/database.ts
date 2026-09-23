@@ -259,7 +259,40 @@ export interface Region {
 // V3: Lessons replace Tasks
 export type LessonType = "watch" | "action" | "setup";
 
-export interface Lesson {
+/**
+ * A role a lesson plays, replacing the hard-coded ids that used to encode it
+ * (`lesson.id === "l057"`, PLAYBOOK_UNLOCK_LESSON_ID). Set by v92 on the live
+ * catalog and carried by every `_next` row. At most one lesson holds each key
+ * — enforced by a partial unique index, not by convention.
+ */
+export type LessonFeatureKey = "bounty_access" | "playbook_unlock";
+
+/**
+ * The six columns v92 added to `lessons`, and which `lessons_next` carries
+ * from birth. Shared so the cutover copy is a plain column-listed INSERT and
+ * so both catalog shapes type-check against the same video plumbing.
+ */
+export interface LessonV2Columns {
+  /**
+   * False = this lesson is outside the progress denominator. Replaces the
+   * `'l057'` literal that was copied into 4 SQL objects and 8 TS files, none
+   * of which imported a shared constant. Today exactly one lesson sets it.
+   */
+  counts_toward_progress: boolean;
+  feature_key: LessonFeatureKey | null;
+  /** Bunny Stream video GUID. Null = not recorded yet (the normal state while the course is being filmed). */
+  bunny_video_id: string | null;
+  /**
+   * Real runtime in seconds — the denominator for the 95% watched rule.
+   * `duration_label` ("14m") is a display string and cannot be used for it.
+   */
+  duration_seconds: number | null;
+  /** Set when Bunny reports the encode finished. GUID set + this null = still encoding. */
+  video_ready_at: string | null;
+  updated_at: string;
+}
+
+export interface Lesson extends LessonV2Columns {
   id: string;
   region_id: RegionId;
   day: number;
@@ -298,6 +331,74 @@ export interface Lesson {
    */
   lesson_group_id: string | null;
   created_at: string;
+}
+
+/**
+ * A row from `lessons_next` — the v2 catalog the rebuilt world reads until
+ * cutover. Deliberately NOT `Lesson`: the v2 shape has no `day` (the course
+ * has no clock), no `duration_label`, no `is_boss`, and no `whop_lesson_id`,
+ * and its `sort_order` is GLOBAL rather than per-day.
+ *
+ * `region_id` is `string`, not `RegionId`. The 4-region union is a live-app
+ * type; the new catalog has 8 areas (`a1`..`a8`) and widening `RegionId` in
+ * place would ripple through 17 sites that still assume exactly four.
+ */
+export interface CatalogLesson extends LessonV2Columns {
+  id: string;
+  region_id: string;
+  /** `'action'` is retired as a type — an action item is a property of a lesson, not a kind of one. */
+  type: "watch" | "setup";
+  title: string;
+  description: string | null;
+  /** GLOBAL 1..N across the whole course. Orders everything; prev/next walks it. */
+  sort_order: number;
+  /** THE action-item flag. Replaces the `/^Action Item:/i` title regex. */
+  requires_action: boolean;
+  action_brief: string | null;
+  is_optional: boolean;
+  /** The discount gate. At most one lesson in the catalog sets this. */
+  is_gate: boolean;
+  lesson_group_id: string | null;
+  discord_channel: string | null;
+  created_at: string;
+}
+
+/** A row from `regions_next`. `terrain`, `landmark_label` and `rail_at` are art-direction outputs and stay null until that conversation happens. */
+export interface CatalogRegion {
+  id: string;
+  order_num: number;
+  name: string;
+  subtitle: string | null;
+  tagline: string | null;
+  terrain: string | null;
+  landmark_label: string | null;
+  rail_at: number | null;
+  quiz_format: string | null;
+  is_discount_gate: boolean;
+  created_at: string;
+}
+
+/**
+ * Per-student-per-lesson video watch telemetry (v93). A MEASUREMENT; the
+ * decision "this lesson is done" stays in `student_lesson_completions`.
+ *
+ * Written only by the `record_lesson_heartbeat` RPC — there is no client
+ * write policy on the table, so these cannot be forged from the browser.
+ * The API route re-reads the row server-side before completing a lesson
+ * rather than trusting anything the player reported.
+ */
+export interface StudentLessonWatch {
+  lesson_id: string;
+  /** Furthest point reached. Only ever moves forward; what the 95% rule reads. */
+  max_position_seconds: number;
+  /** Where the playhead was on the last beat. What "resume where you left off" reads. */
+  last_position_seconds: number;
+  /** Seconds actually played, from wall-clock-clamped deltas. The honesty floor behind free scrubbing. */
+  watched_seconds: number;
+  reported_duration_seconds: number | null;
+  /** Stamped once, when 95% was first reached. Never cleared. */
+  threshold_met_at: string | null;
+  last_heartbeat_at: string;
 }
 
 export interface StudentLessonCompletion {

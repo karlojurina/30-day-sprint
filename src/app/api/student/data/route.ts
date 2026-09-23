@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import {
+  CATALOG_TABLE_SUFFIX,
+  IS_STAGING_CATALOG,
+  LESSONS_TABLE,
+  REGIONS_TABLE,
+} from "@/lib/catalog-tables";
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -46,9 +52,18 @@ export async function GET(request: NextRequest) {
     dmLogRes,
     regionQuizRes,
     lessonRatingsRes,
+    // v93 — per-lesson video watch telemetry. At most one row per lesson the
+    // student has opened (<=146), comfortably under Supabase's 1000-row cap.
+    watchProgressRes,
   ] = await Promise.all([
-    supabase.from("regions").select("*").order("order_num"),
-    supabase.from("lessons").select("*").order("day").order("sort_order"),
+    supabase.from(REGIONS_TABLE).select("*").order("order_num"),
+    // The v2 catalog has no `day` column — the new course has no clock — and
+    // its sort_order is GLOBAL rather than per-day, so it needs no secondary
+    // key. Ordering the v1 catalog by sort_order alone would reshuffle the
+    // live map, so the two genuinely differ.
+    IS_STAGING_CATALOG
+      ? supabase.from(LESSONS_TABLE).select("*").order("sort_order")
+      : supabase.from(LESSONS_TABLE).select("*").order("day").order("sort_order"),
     supabase
       .from("student_lesson_completions")
       .select("*")
@@ -119,6 +134,17 @@ export async function GET(request: NextRequest) {
       .from("student_lesson_ratings")
       .select("lesson_id, stars, comment, created_at, updated_at")
       .eq("student_id", student.id),
+    // v93 — explicit column list, not select(*): the row also carries
+    // heartbeat_count and first_played_at, which the client has no use for.
+    // The client reads max/last position to resume playback and draw the
+    // in-progress state; it never decides completion from these numbers
+    // (api/student/lesson-watched re-reads them server-side for that).
+    supabase
+      .from("student_lesson_watch")
+      .select(
+        "lesson_id, max_position_seconds, last_position_seconds, watched_seconds, reported_duration_seconds, threshold_met_at, last_heartbeat_at",
+      )
+      .eq("student_id", student.id),
   ]);
 
   // Masked course ID for the sync debug panel — enough to verify in the
@@ -134,6 +160,11 @@ export async function GET(request: NextRequest) {
     student,
     regions: regionsRes.data ?? [],
     lessons: lessonsRes.data ?? [],
+    watchProgress: watchProgressRes.data ?? [],
+    // Which catalog produced the rows above. The world renders a "not
+    // recorded yet" slot for lessons with no video, and this tells the client
+    // whether it is looking at the real course or the staging placeholders.
+    catalogSuffix: CATALOG_TABLE_SUFFIX,
     completions: completionsRes.data ?? [],
     discountRequest: discountRes.data ?? null,
     quizzes: quizzesRes.data ?? [],

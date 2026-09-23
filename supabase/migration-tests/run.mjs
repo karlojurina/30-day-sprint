@@ -497,5 +497,53 @@ if (v97ok) {
        `watched=${Number(hw.w).toFixed(2)}s`)
 }
 
+
+console.log('\n=== 15. D1, tested properly (the check I got wrong) ===')
+{
+  const D1SQL = fs.readFileSync(fileURLToPath(new URL('../diagnostics/d1-region-shift.sql', import.meta.url)), 'utf8')
+    .split('\n').filter(l => !l.trim().startsWith('--')).join('\n')
+
+  // The seed already contains S5, whose ONLY completion is l057 — the
+  // membership case row 92 CAN see.
+  let r = await q(D1SQL)
+  const baseline = Number(r[0].affected_students)
+  const row92Baseline = (await q(`select count(*)::int n from student_current_region r
+     where not exists (select 1 from student_progress_counts c where c.student_id = r.student_id)`))[0].n
+  note(baseline === 1 && row92Baseline === 1,
+       'baseline: one l057-only student, visible to BOTH checks',
+       `corrected=${baseline} row92=${row92Baseline}`)
+
+  // Now construct the EXACT case prd1-postchecks row 92 is blind to: a student
+  // with r1..r3 completions AND l057 (which lives in r4), but no other r4
+  // lesson. They are in BOTH views, so a membership check cannot see them —
+  // but their current_region moves from r4 to r3 under the filter.
+  await db.exec(`
+    insert into students (id, supabase_user_id, first_paid_at, whop_plan_id, membership_status)
+    values ('00000000-0000-0000-0000-0000000000d1'::uuid,
+            '00000000-0000-0000-0000-0000000000d1'::uuid,
+            '2026-06-01 10:00:00+00'::timestamptz, 'plan_4ZrwR4PmBsVsx', 'active');
+    insert into student_lesson_completions (student_id, lesson_id, completed_at) values
+      ('00000000-0000-0000-0000-0000000000d1'::uuid, 'l001', '2026-06-10 10:00:00+00'),
+      ('00000000-0000-0000-0000-0000000000d1'::uuid, 'l033', '2026-06-10 10:00:00+00'),
+      ('00000000-0000-0000-0000-0000000000d1'::uuid, 'l057', '2026-06-10 10:00:00+00');
+  `)
+
+  // THE POINT: row 92 does not move, because this student is in BOTH views.
+  const blind = (await q(`select count(*)::int n from student_current_region r
+     where not exists (select 1 from student_progress_counts c where c.student_id = r.student_id)`))[0].n
+  note(blind === row92Baseline,
+       'row 92 does NOT move — the new student is in both views, so it is blind to them',
+       `row92 ${row92Baseline} -> ${blind}`)
+
+  r = await q(D1SQL)
+  note(Number(r[0].affected_students) === baseline + 1,
+       'the corrected query DOES move, catching the region shift',
+       `corrected ${baseline} -> ${r[0].affected_students}`)
+  note(/r4 -> r3/.test(r[0].shifts), 'and names the actual shift', r[0].shifts)
+
+  // Clean up so later assertions are unaffected.
+  await db.exec(`delete from students where id = '00000000-0000-0000-0000-0000000000d1'::uuid;`)
+}
+
 console.log(`\n${'='.repeat(60)}\n  PASS ${ok.length}   FAIL ${fail.length}`)
 if (fail.length) { console.log('\nFAILURES:'); fail.forEach(f => console.log('  - ' + f)); process.exit(1) }

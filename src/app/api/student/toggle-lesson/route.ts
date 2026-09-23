@@ -39,6 +39,35 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
+  // v93 — watch lessons complete themselves.
+  //
+  // This route marks a lesson done on the student's say-so, which is correct
+  // for setup/action lessons (they ARE self-reported) and wrong for a watch
+  // lesson once the app hosts the video: it would let anyone tick off a
+  // 24-minute lesson with one fetch from devtools. Completion for those goes
+  // through /api/student/lesson-watched, which re-reads the telemetry.
+  //
+  // Safe for the live dashboard, verified rather than assumed: both
+  // toggleLesson() call sites in LessonSheet.tsx are non-watch. :861 is behind
+  // `!isWatchType`, and :578 is the discount gate l049, which the canonical
+  // catalog (v20:427) defines as type 'action'.
+  //
+  // Fails OPEN on a read error. The guard defends against a hand-crafted
+  // request, not against an honest student, and a transient database blip must
+  // not stop someone ticking off a lesson they really did finish.
+  const { data: guardLesson, error: guardError } = await supabase
+    .from("lessons")
+    .select("type")
+    .eq("id", lessonId)
+    .maybeSingle();
+
+  if (!guardError && guardLesson?.type === "watch") {
+    return NextResponse.json(
+      { error: "Watch lessons complete themselves." },
+      { status: 400 },
+    );
+  }
+
   // Check if lesson is already completed
   const { data: existing } = await supabase
     .from("student_lesson_completions")

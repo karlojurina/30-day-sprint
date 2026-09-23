@@ -47,8 +47,12 @@ export interface LessonPlayerProps {
   lessonId: string;
   /** Catalog duration when known. The player reports its own as a fallback. */
   durationSeconds?: number | null;
-  /** Fires once, when the SERVER says 95% was crossed. Wired to completion in W4. */
-  onThresholdCrossed?: (lessonId: string) => void;
+  /**
+   * Fires after the SERVER has confirmed the lesson complete — never on the
+   * player's own reckoning. `newAchievements` is whatever the completion chain
+   * unlocked, for the caller to celebrate.
+   */
+  onCompleted?: (lessonId: string, newAchievements: string[]) => void;
   className?: string;
 }
 
@@ -62,10 +66,10 @@ type LoadState =
 export function LessonPlayer({
   lessonId,
   durationSeconds = null,
-  onThresholdCrossed,
+  onCompleted,
   className,
 }: LessonPlayerProps) {
-  const { watchProgress, patchWatchProgress } = useStudent();
+  const { watchProgress, patchWatchProgress, markWatched } = useStudent();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
   const [playedPct, setPlayedPct] = useState(0);
 
@@ -76,12 +80,56 @@ export function LessonPlayer({
   // under the student's feet.
   const resumeAtRef = useRef<number>(0);
   const resumedRef = useRef(false);
+  const completedRef = useRef(false);
+
+  /**
+   * Ask the server to ratify the crossing.
+   *
+   * The player does NOT decide this. The route re-reads student_lesson_watch —
+   * the table no browser can write — and applies the played-seconds floor
+   * itself. All this does is ask, and reflect the answer.
+   */
+  const claimCompletion = useCallback(async () => {
+    if (completedRef.current) return;
+    completedRef.current = true;
+    try {
+      const token = await getAccessToken();
+      if (!token) return;
+      const res = await fetch("/api/student/lesson-watched", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ lessonId }),
+      });
+      if (!res.ok) {
+        completedRef.current = false;
+        return;
+      }
+      const body = await res.json();
+      if (!body?.completed) {
+        // The floor was not met — usually the student scrubbed to the end.
+        // Not an error and not worth a message: they can keep watching and
+        // the next crossing will ask again.
+        completedRef.current = false;
+        return;
+      }
+      markWatched(lessonId);
+      onCompleted?.(lessonId, (body.newAchievements as string[]) ?? []);
+      // The achievements modal listens for this already.
+      window.dispatchEvent(new CustomEvent("et:achievements-changed"));
+    } catch {
+      completedRef.current = false;
+    }
+  }, [lessonId, markWatched, onCompleted]);
 
   // ── 1. Mint the URL ──────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     setState({ kind: "loading" });
     resumedRef.current = false;
+    completedRef.current = false;
 
     const existing = watchProgress.get(lessonId);
     const last = Number(existing?.last_position_seconds ?? 0);
@@ -162,7 +210,9 @@ export function LessonPlayer({
           last_heartbeat_at: new Date().toISOString(),
         });
       },
-      onThresholdCrossed: () => onThresholdCrossed?.(lessonId),
+      onThresholdCrossed: () => {
+        void claimCompletion();
+      },
     });
     beatRef.current = beat;
 
@@ -182,7 +232,7 @@ export function LessonPlayer({
       onPause: () => beat.flush("pause"),
       onEnded: () => beat.flush("ended"),
     });
-  }, [lessonId, durationSeconds, onThresholdCrossed, patchWatchProgress]);
+  }, [lessonId, durationSeconds, claimCompletion, patchWatchProgress]);
 
   // ── 3. Never lose the last position to a tab close ───────────────────
   useEffect(() => {

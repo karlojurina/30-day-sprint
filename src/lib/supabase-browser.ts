@@ -127,6 +127,20 @@ export function getSharedSession(
   return sessionInFlight;
 }
 
+/**
+ * The access token for the current session, or null.
+ *
+ * StudentContext has had a module-local copy of exactly this since v46. This
+ * is the same three lines, exported so new code outside that file (the lesson
+ * player, the world routes) does not grow a third copy. StudentContext's own
+ * copy is deliberately left alone — it is on the live dashboard's hot path and
+ * this is not the change to risk it on. W15 unifies them.
+ */
+export async function getAccessToken(): Promise<string | null> {
+  const session = await getSharedSession(createClient());
+  return session?.access_token ?? null;
+}
+
 /** Run a Supabase auth call, retrying only if the lock was stolen. */
 export async function withLockRetry<T>(
   fn: () => Promise<T>,

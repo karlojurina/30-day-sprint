@@ -46,3 +46,36 @@ export const REGIONS_TABLE = `regions${CATALOG_TABLE_SUFFIX}` as
 export const LESSONS_TABLE = `lessons${CATALOG_TABLE_SUFFIX}` as
   | "lessons"
   | "lessons_next";
+
+/**
+ * Which SHAPE the live catalog has — which is not the same question as which
+ * TABLE it lives in, and conflating them is a silent, total failure.
+ *
+ * The v1 catalog orders by (day, sort_order): `sort_order` there means "order
+ * within a day". The v2 catalog has no `day` column at all — the new course
+ * has no clock — and its `sort_order` is global 1..N.
+ *
+ * At cutover the v2 rows are copied INTO `lessons`, so CATALOG_TABLE_SUFFIX
+ * goes back to "" while the shape stays v2. A query that keyed its ordering on
+ * the table name would then order by `day`, and once v99 drops that column
+ * PostgREST returns an error, the route's `?? []` swallows it, and every
+ * student gets an empty course with nothing logged anywhere. That is the exact
+ * believable-nothing failure this project keeps hitting, so the two facts are
+ * tracked separately.
+ *
+ * Set CATALOG_SHAPE=v2 in the same Vercel change that clears
+ * CATALOG_TABLE_SUFFIX on cutover night.
+ */
+const RAW_SHAPE = (process.env.CATALOG_SHAPE ?? "").trim();
+
+if (!["", "v1", "v2"].includes(RAW_SHAPE)) {
+  throw new Error(
+    `CATALOG_SHAPE must be "", "v1" or "v2", got ${JSON.stringify(RAW_SHAPE)}.`,
+  );
+}
+
+/**
+ * True when the catalog has the v2 shape. The staging tables are always v2;
+ * after cutover the real tables are too, and CATALOG_SHAPE says so.
+ */
+export const CATALOG_IS_V2 = IS_STAGING_CATALOG || RAW_SHAPE === "v2";

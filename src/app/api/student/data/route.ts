@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
+  CATALOG_IS_V2,
   CATALOG_TABLE_SUFFIX,
-  IS_STAGING_CATALOG,
   LESSONS_TABLE,
   REGIONS_TABLE,
 } from "@/lib/catalog-tables";
@@ -57,11 +57,14 @@ export async function GET(request: NextRequest) {
     watchProgressRes,
   ] = await Promise.all([
     supabase.from(REGIONS_TABLE).select("*").order("order_num"),
-    // The v2 catalog has no `day` column — the new course has no clock — and
-    // its sort_order is GLOBAL rather than per-day, so it needs no secondary
-    // key. Ordering the v1 catalog by sort_order alone would reshuffle the
-    // live map, so the two genuinely differ.
-    IS_STAGING_CATALOG
+    // Keyed on the catalog SHAPE, never on the table name — after cutover the
+    // name is back to "lessons" while the shape is v2. The v2 catalog has no
+    // `day` column (the new course has no clock) and its sort_order is global;
+    // the v1 catalog's sort_order means "order within a day", so ordering it by
+    // sort_order alone would reshuffle the live map. MapMockup.tsx:2816
+    // renders lessons.map() without re-sorting, so this ordering is
+    // load-bearing rather than cosmetic.
+    CATALOG_IS_V2
       ? supabase.from(LESSONS_TABLE).select("*").order("sort_order")
       : supabase.from(LESSONS_TABLE).select("*").order("day").order("sort_order"),
     supabase

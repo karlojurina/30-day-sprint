@@ -49,6 +49,8 @@ declare global {
     __worldHide?: (prefix: string) => number;
     /** Harness only: every object name in the loaded scene. */
     __worldNames?: () => string[];
+    /** Harness only: the scrollY that reaches a given rail depth. */
+    __worldScrollFor?: (depth: number) => number;
   }
 }
 
@@ -110,6 +112,7 @@ function DevWorld() {
           });
           return [...names].sort();
         };
+        window.__worldScrollFor = (d: number) => scene.scrollYForDepth(d);
         window.__worldReady = true;
       })
       .catch((e) => {

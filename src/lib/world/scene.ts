@@ -51,6 +51,20 @@ const SMOOTHING = 6.0;
 /** How far above its landmark a marker floats, in CSS pixels. */
 const MARKER_LIFT_PX = 26;
 
+/**
+ * The rail STOPS here, not at 1.0.
+ *
+ * The last area's stop is ~0.83 (v99), and the camera keeps climbing past it:
+ * by depth 1.0 it is ~170 units above the peaks looking at empty sky and
+ * distant ridge bands, with the whole world behind it. Scrolling to the bottom
+ * of the page landed there — the final sixth of the scroll was a view of
+ * nothing.
+ *
+ * Mapping the full scroll onto 0..MAX means the bottom of the page IS the last
+ * place, with a little room to look past it, and no part of the scroll is dead.
+ */
+const MAX_RAIL_DEPTH = 0.88;
+
 export interface AreaAnchor {
   id: string;
   /** 0..1 along the rail. */
@@ -291,7 +305,7 @@ export class WorldScene {
     // lit geometry: their faces point away from the sun, so shading them left
     // the nearest band near-black against the sky. They carry a deliberate
     // emission at their own colour, and this strip must not take it away.
-    const GLOWS = /^(Pin\d|RidgeMat\d|LM_LighthouseLampMat)$/;
+    const GLOWS = /^(Pin\d|RidgeMat\d|(Sea|Lake|Pond)Mat|LM_LighthouseLampMat)$/;
     let cleaned = 0;
     root.traverse((o) => {
       const mesh = o as THREE.Mesh;
@@ -387,6 +401,22 @@ export class WorldScene {
     this.paused = paused;
   }
 
+  /**
+   * The scrollY that puts the camera at `depth`.
+   *
+   * A rail DEPTH and a scroll FRACTION stopped being the same number the
+   * moment the rail was capped at MAX_RAIL_DEPTH, and everything that stores a
+   * depth (rail_at in the database, auto-travel, the render harness) has to go
+   * through here. Using a depth as a scroll fraction now lands ~15% short,
+   * which looks like "the camera drifts" rather than like a unit error.
+   */
+  scrollYForDepth(depth: number): number {
+    const max = document.body.scrollHeight - window.innerHeight;
+    if (max <= 0) return 0;
+    const t = Math.min(1, Math.max(0, depth / MAX_RAIL_DEPTH));
+    return t * max;
+  }
+
   /** Jump straight to a depth with no easing (reduced-motion, or a deep link). */
   snapTo(depth: number) {
     this.currentDepth = depth;
@@ -395,7 +425,9 @@ export class WorldScene {
 
   private scrollDepth(): number {
     const max = document.body.scrollHeight - window.innerHeight;
-    return max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+    if (max <= 0) return 0;
+    const t = Math.min(1, Math.max(0, window.scrollY / max));
+    return t * MAX_RAIL_DEPTH;
   }
 
   private projectMarkers(): ProjectedMarker[] {

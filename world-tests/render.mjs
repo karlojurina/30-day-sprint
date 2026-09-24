@@ -30,7 +30,7 @@ const VIEWPORTS = [
 // The real rail stops for areas 1, 4 and 8 (v99), not round numbers —
 // a marker that is in frame at 0.5 tells us nothing about where a student
 // actually parks.
-const DEPTHS = [0.0708, 0.4151, 0.8302]
+const DEPTHS = [0.6863, 0.8302, 1.0]  // the pond stop, the summit stop, and the very bottom of the page
 
 fs.mkdirSync(OUT, { recursive: true })
 
@@ -70,9 +70,12 @@ try {
 
     for (const d of DEPTHS) {
       // Trap 2: drive it by SCROLLING, not by setting a variable.
+      // Through the scene's own conversion — a rail depth is not a scroll
+      // fraction once the rail is capped.
       await page.evaluate((depth) => {
-        const max = document.body.scrollHeight - window.innerHeight
-        window.scrollTo(0, depth * max)
+        const y = window.__worldScrollFor ? window.__worldScrollFor(depth)
+                : depth * (document.body.scrollHeight - window.innerHeight)
+        window.scrollTo(0, y)
       }, d)
       // Let the exponential smoothing settle (6.0/s => ~1s is plenty).
       await new Promise((r) => setTimeout(r, 1800))

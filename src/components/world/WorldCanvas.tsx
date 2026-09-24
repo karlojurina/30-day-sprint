@@ -147,7 +147,10 @@ export function WorldCanvas({
 
     const max = document.body.scrollHeight - window.innerHeight;
     if (max <= 0) return;
-    const to = target.depth * max;
+    // Through the scene, because a rail depth is not a scroll fraction — the
+    // rail is capped at MAX_RAIL_DEPTH so the bottom of the page is the last
+    // place rather than a view of empty sky past it.
+    const to = sceneRef.current?.scrollYForDepth(target.depth) ?? target.depth * max;
 
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     if (reduced) {

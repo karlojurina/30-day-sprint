@@ -40,7 +40,12 @@ function fallbackDepth(index: number, total: number): number {
 
 type Phase = "loading" | "ready" | "failed" | "nowebgl";
 
-export function WorldCanvas() {
+export function WorldCanvas({
+  parkedAreaId = null,
+}: {
+  /** Set by a child route (the area screen) to hold the camera at its stop. */
+  parkedAreaId?: string | null;
+}) {
   const router = useRouter();
   const { areas, areaProgress, currentAreaId, loading, loadError, isEmpty } =
     useWorldCatalog();
@@ -104,6 +109,19 @@ export function WorldCanvas() {
     return () => scene.onFrame(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchorsKey]);
+
+  // ── Park at an area's stop while its screen is open, and dim behind it.
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (!parkedAreaId) {
+      scene.setParked(null);
+      return;
+    }
+    const target = anchors.find((a) => a.id === parkedAreaId);
+    scene.setParked(target ? target.depth : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parkedAreaId, anchorsKey]);
 
   // ── Stop rendering when the tab is hidden. A backgrounded rAF loop still
   //    burns a phone battery for a world nobody is looking at.
@@ -183,18 +201,32 @@ export function WorldCanvas() {
         style={{ position: "fixed", inset: 0, zIndex: 0, background: "#1d1826" }}
       />
 
-      {/* The scroll range. pointer-events:none so the markers above stay clickable. */}
+      {/* The scroll range. pointer-events:none so the markers above stay
+          clickable. Collapsed while parked, so the page behind an area screen
+          cannot be scrolled out from under it. */}
       <div
         style={{
           position: "relative",
-          height: "640vh",
+          height: parkedAreaId ? "100vh" : "640vh",
           zIndex: 1,
           pointerEvents: "none",
         }}
       />
 
       {/* Markers. Real buttons, projected each frame. */}
-      <div style={{ position: "fixed", inset: 0, zIndex: 3, pointerEvents: "none" }}>
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 3,
+          pointerEvents: "none",
+          // The area screen is the surface while it is open; its markers would
+          // float over the panel and steal clicks.
+          opacity: parkedAreaId ? 0 : 1,
+          transition: "opacity 250ms ease",
+        }}
+        aria-hidden={parkedAreaId ? "true" : undefined}
+      >
         {markers.map((m) => {
           const area = areaById.get(m.id);
           if (!area) return null;
@@ -214,7 +246,7 @@ export function WorldCanvas() {
                 // Hidden rather than unmounted: unmounting and remounting eight
                 // buttons every frame would thrash focus and break tabbing.
                 opacity: m.visible ? 0.35 + m.proximity * 0.65 : 0,
-                pointerEvents: m.visible ? "auto" : "none",
+                pointerEvents: m.visible && !parkedAreaId ? "auto" : "none",
                 display: "flex",
                 alignItems: "center",
                 gap: 8,

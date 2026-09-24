@@ -12,13 +12,14 @@
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 const BASE = process.env.BASE_URL || 'http://localhost:3111'
 // Relative to THIS file, not cwd — running from inside world-tests was
 // producing world-tests/world-tests/shots.
-const OUT = process.env.OUT_DIR || path.join(path.dirname(new URL(import.meta.url).pathname), 'shots')
+const OUT = process.env.OUT_DIR || path.join(path.dirname(fileURLToPath(import.meta.url)), 'shots')
 
 // The two aspect ratios that have already bitten once: Lovro's split screen
 // and his ultrawide.

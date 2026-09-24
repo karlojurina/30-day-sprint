@@ -28,8 +28,10 @@ export interface CatalogLessonLike {
   region_id: string;
   type: string;
   title: string;
+  description: string | null;
   sort_order: number;
   requires_action: boolean;
+  action_brief: string | null;
   is_optional: boolean;
   is_gate: boolean;
   counts_toward_progress: boolean;

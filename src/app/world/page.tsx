@@ -1,16 +1,8 @@
-"use client";
-
-import dynamic from "next/dynamic";
-
 /**
- * ssr:false is required, not preferred. WebGLRenderer touches `window` and
- * `document` in its constructor, so any server render of this tree throws.
+ * The world itself is drawn by WorldStage in the layout, so this route renders
+ * nothing. It exists so /world is a real address the student can land on and
+ * return to.
  */
-const WorldCanvas = dynamic(
-  () => import("@/components/world/WorldCanvas").then((m) => m.WorldCanvas),
-  { ssr: false },
-);
-
 export default function WorldPage() {
-  return <WorldCanvas />;
+  return null;
 }

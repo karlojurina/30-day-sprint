@@ -305,7 +305,7 @@ export class WorldScene {
     // lit geometry: their faces point away from the sun, so shading them left
     // the nearest band near-black against the sky. They carry a deliberate
     // emission at their own colour, and this strip must not take it away.
-    const GLOWS = /^(Pin\d|RidgeMat\d|(Sea|Lake|Pond)Mat|LM_LighthouseLampMat)$/;
+    const GLOWS = /^(Pin\d|RidgeMat\d|(Lake|Pond)Mat|LM_LighthouseLampMat)$/;
     let cleaned = 0;
     root.traverse((o) => {
       const mesh = o as THREE.Mesh;

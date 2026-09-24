@@ -30,7 +30,7 @@ const VIEWPORTS = [
 // The real rail stops for areas 1, 4 and 8 (v99), not round numbers —
 // a marker that is in frame at 0.5 tells us nothing about where a student
 // actually parks.
-const DEPTHS = [0.6863, 0.8302, 1.0]  // the pond stop, the summit stop, and the very bottom of the page
+const DEPTHS = [0.0708, 0.3000, 0.8302]  // the pond stop, the summit stop, and the very bottom of the page
 
 fs.mkdirSync(OUT, { recursive: true })
 

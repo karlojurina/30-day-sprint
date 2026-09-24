@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { notFound } from "next/navigation";
+import { Suspense } from "react";
+import { notFound, useSearchParams } from "next/navigation";
 import { Panel } from "@/components/world/AreaScreen";
 import { AreaLessonList } from "@/components/world/AreaLessonList";
 import type { CatalogLessonLike } from "@/lib/world/catalog";
@@ -18,7 +18,12 @@ import type { CatalogLessonLike } from "@/lib/world/catalog";
  */
 export default function DevAreaPage() {
   if (process.env.NODE_ENV !== "development") notFound();
-  return <DevArea />;
+  // useSearchParams suspends, so it needs a boundary.
+  return (
+    <Suspense fallback={null}>
+      <DevArea />
+    </Suspense>
+  );
 }
 
 function make(n: number, prefix: string): CatalogLessonLike[] {
@@ -68,16 +73,11 @@ function make(n: number, prefix: string): CatalogLessonLike[] {
 }
 
 function DevArea() {
-  // Read the query param AFTER mount. Reading window.location during render
-  // makes the server and client disagree and React throws a hydration
-  // mismatch — which also means the screenshot would capture a re-rendered
-  // tree rather than the real one.
-  const [size, setSize] = useState(25);
-  useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("size") === "8") {
-      setSize(8);
-    }
-  }, []);
+  // useSearchParams, not window.location. Reading window during render makes
+  // the server and client disagree (a hydration mismatch, which also means the
+  // screenshot captures a re-rendered tree); setState in an effect avoids that
+  // but trips react-hooks/set-state-in-effect. This does neither.
+  const size = useSearchParams().get("size") === "8" ? 8 : 25;
   const lessons = make(size, "a5");
   const done = new Set(lessons.slice(0, Math.floor(size * 0.4)).map((l) => l.id));
   const partial = lessons[Math.floor(size * 0.4)]?.id;

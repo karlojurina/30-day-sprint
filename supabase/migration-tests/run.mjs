@@ -545,5 +545,63 @@ console.log('\n=== 15. D1, tested properly (the check I got wrong) ===')
   await db.exec(`delete from students where id = '00000000-0000-0000-0000-0000000000d1'::uuid;`)
 }
 
+
+console.log('\n=== 16. v98: the filter D1 wrongly withheld ===')
+{
+  const regionBefore = await q(`select student_id::text, current_region from student_current_region order by 1`)
+  const v98 = read('2026_v98_current_region_counts_toward_progress.sql')
+  const v98ok = await exec(v98, 'v98 executes')
+  if (v98ok) {
+    const regionAfter = await q(`select student_id::text, current_region from student_current_region order by 1`)
+    // In THIS seed, S5's only completion is l057 — so the filter DOES move
+    // them here, which is exactly the population production turned out not to
+    // have. That difference is the point: the safety case for v98 is the
+    // MEASUREMENT against production (0 affected), not an assumption.
+    const gone = regionBefore.filter(b => !regionAfter.some(a => a.student_id === b.student_id))
+    note(gone.length === 1 && gone[0].student_id.endsWith('5'),
+         'harness seed HAS an l057-only student, so the filter drops them here',
+         `dropped ${gone.length} (production measured 0)`)
+    const moved = regionAfter.filter(a => {
+      const b = regionBefore.find(x => x.student_id === a.student_id)
+      return b && b.current_region !== a.current_region
+    })
+    note(moved.length === 0, 'nobody else moved region', `${moved.length} moved`)
+
+    const opts98 = await q(`select reloptions::text from pg_class where relname='student_current_region'`)
+    note(opts98[0].reloptions === '{security_invoker=on}', 'security_invoker preserved', opts98[0].reloptions)
+    const anon98 = await q(`select has_table_privilege('anon','public.student_current_region','select') a`)
+    note(anon98[0].a === false, 'anon still revoked', `anon=${anon98[0].a}`)
+
+    // The two progress views now agree on which lessons count.
+    const disagree = await q(`select count(*)::int n from student_current_region r
+       where not exists (select 1 from student_progress_counts c where c.student_id = r.student_id)`)
+    note(disagree[0].n === 0,
+         'the two progress views no longer disagree about what counts', `${disagree[0].n} disagreements`)
+  }
+}
+
+console.log('\n=== 17. the self-selecting test-lesson stamp ===')
+{
+  const stampSql = fs.readFileSync(fileURLToPath(new URL('../diagnostics/stamp-test-lesson.sql', import.meta.url)), 'utf8')
+  const stampOnly = stampSql.split('-- What it picked:')[0]
+  const s1 = await exec(stampOnly, 'stamp runs')
+  if (s1) {
+    const r = await q(`select id, type, duration_seconds from lessons where bunny_video_id is not null`)
+    note(r.length === 1, 'exactly one lesson stamped', JSON.stringify(r))
+    note(r[0].type === 'watch', 'and it is a WATCH lesson (the RPC requires it)', r[0].type)
+    note(r[0].duration_seconds === 753, 'with the real duration (required since v97)', `${r[0].duration_seconds}s`)
+    // Idempotent: re-running must not violate the partial unique index.
+    const s2 = await exec(stampOnly, 'stamp re-runs without a unique violation')
+    if (s2) {
+      const r2 = await q(`select count(*)::int n from lessons where bunny_video_id is not null`)
+      note(r2[0].n === 1, 're-run still leaves exactly one', `${r2[0].n}`)
+    }
+    // And the RPC accepts it end to end.
+    await db.exec(`select set_config('test.uid','${UID1}',false); delete from student_lesson_watch;`)
+    const beat = await hb(r[0].id, 10, 753, 5)
+    note(beat.accepted === true, 'the heartbeat RPC accepts the stamped lesson', `accepted=${beat.accepted}`)
+  }
+}
+
 console.log(`\n${'='.repeat(60)}\n  PASS ${ok.length}   FAIL ${fail.length}`)
 if (fail.length) { console.log('\nFAILURES:'); fail.forEach(f => console.log('  - ' + f)); process.exit(1) }

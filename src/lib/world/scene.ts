@@ -28,8 +28,14 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
  *      4600) — wider than the world is deep — so nothing was ever hazed.
  */
 
-/** Blender Z-up exported Y-up: a Blender point (x, y, z) arrives as (x, z, -y). */
-const LEN_Y = 1500.0;
+/**
+ * Blender Z-up exported Y-up: a Blender point (x, y, z) arrives as (x, z, -y).
+ *
+ * MUST MATCH `LEN_Y` in ridge.py. Everything about the camera rail is derived
+ * from it, so a mismatch does not error — it silently puts the camera in the
+ * wrong place at every depth, which is far worse.
+ */
+const LEN_Y = 2000.0;
 
 /** TIME_TABLE["sunset"] in ridge.py, converted linear -> sRGB. */
 const SKY_TOP = 0x565a8c;
@@ -42,10 +48,20 @@ const MAX_PIXEL_RATIO = 1.75;
 /** Delta-time corrected. This damping is the difference between a glide and a snap. */
 const SMOOTHING = 6.0;
 
+/** How far above its landmark a marker floats, in CSS pixels. */
+const MARKER_LIFT_PX = 26;
+
 export interface AreaAnchor {
   id: string;
   /** 0..1 along the rail. */
   depth: number;
+  /**
+   * The landmark mesh this area is marked by, e.g. "LM_Viaduct". When the glb
+   * contains it, the marker pins to the LANDMARK rather than to the rail's
+   * centre line — which is the difference between eight places and a column of
+   * pills floating down the middle of a painting.
+   */
+  landmark?: string | null;
 }
 
 export interface ProjectedMarker {
@@ -69,6 +85,7 @@ export class WorldScene {
   private renderer: THREE.WebGLRenderer | null = null;
   private scene: THREE.Scene | null = null;
   private camera: THREE.PerspectiveCamera | null = null;
+  private sky: THREE.Mesh | null = null;
   private raf = 0;
   private lastTime = 0;
   private ready = false;
@@ -82,6 +99,8 @@ export class WorldScene {
 
   private anchors: AreaAnchor[] = [];
   private frameCb: FrameCallback | null = null;
+  /** Resolved landmark positions, filled once the glb is in. */
+  private landmarkAt = new Map<string, THREE.Vector3>();
 
   private readonly scratch = new THREE.Vector3();
   private readonly camForward = new THREE.Vector3();
@@ -141,6 +160,7 @@ export class WorldScene {
     );
     sky.frustumCulled = false;
     scene.add(sky);
+    this.sky = sky;
 
     const sun = new THREE.DirectionalLight(0xffa25c, 2.4);
     sun.position.set(320, 190, -3000); // low and deep: backlit sunset
@@ -170,15 +190,56 @@ export class WorldScene {
   }
 
   /**
-   * The world point an area's marker sits on: what the camera would be LOOKING
-   * AT from that area's stop. So a marker is dead centre when you are parked
-   * there and recedes into the haze ahead of that.
+   * Where an area's marker sits in the world.
+   *
+   * Prefers the LANDMARK itself — the lighthouse, the viaduct, the jetty —
+   * because navigation by memory ("the viaduct one") is the entire reason the
+   * silhouettes exist, and a marker floating over open ground names nothing.
+   *
+   * Falls back to the rail's look-at point when the glb has no such mesh,
+   * which keeps the world usable against an older export rather than dropping
+   * markers on the floor.
    */
-  private anchorWorldPosition(depth: number, out: THREE.Vector3) {
+  private anchorWorldPosition(a: AreaAnchor, out: THREE.Vector3) {
+    if (a.landmark) {
+      const at = this.landmarkAt.get(a.landmark);
+      if (at) {
+        out.copy(at);
+        return;
+      }
+    }
+    const depth = a.depth;
     const by = -LEN_Y * 0.615 + depth * (LEN_Y * 1.06);
     const height = 108 + depth * 96 + Math.max(0, depth - 0.45) * 210;
     const drop = Math.tan(THREE.MathUtils.degToRad(5.2 + depth * 2.2)) * 900;
     out.set(0, height - drop, -by - 900);
+  }
+
+  /**
+   * Find every LM_* mesh and record where its TOP is.
+   *
+   * Uses the bounding box rather than the object's origin: several landmarks
+   * are built with their origin at the base (the obelisk, the jetty), so
+   * origin-anchoring would put their markers in the dirt.
+   */
+  private indexLandmarks(root: THREE.Object3D) {
+    const box = new THREE.Box3();
+    root.traverse((o) => {
+      if (!o.name.startsWith("LM_")) return;
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      box.setFromObject(mesh);
+      if (box.isEmpty()) return;
+      const top = new THREE.Vector3(
+        (box.min.x + box.max.x) / 2,
+        box.max.y,
+        (box.min.z + box.max.z) / 2,
+      );
+      const existing = this.landmarkAt.get(o.name);
+      // A landmark can be several meshes (the lighthouse and its lamp); keep
+      // the highest point so the marker clears the whole silhouette.
+      if (!existing || top.y > existing.y) this.landmarkAt.set(o.name, top);
+    });
   }
 
   /**
@@ -225,7 +286,12 @@ export class WorldScene {
 
   /** See trap 1 in the header. Only the pins and the lighthouse lamp may glow. */
   private stripHazeEmissive(root: THREE.Object3D): number {
-    const GLOWS = /^(Pin\d|LM_LighthouseLampMat)$/;
+    // RidgeMat\d is here for the OPPOSITE reason to the others. The distant
+    // ridges are meant to be flat silhouettes (the Firewatch look) rather than
+    // lit geometry: their faces point away from the sun, so shading them left
+    // the nearest band near-black against the sky. They carry a deliberate
+    // emission at their own colour, and this strip must not take it away.
+    const GLOWS = /^(Pin\d|RidgeMat\d|LM_LighthouseLampMat)$/;
     let cleaned = 0;
     root.traverse((o) => {
       const mesh = o as THREE.Mesh;
@@ -250,6 +316,9 @@ export class WorldScene {
         (gltf) => {
           if (this.disposed || !this.scene) return resolve();
           this.scene.add(gltf.scene);
+          // Before instanceRepeats() collapses meshes and detaches them from
+          // the graph, which would lose the LM_ names.
+          this.indexLandmarks(gltf.scene);
           const stripped = this.stripHazeEmissive(gltf.scene);
           if (stripped) {
             console.warn(
@@ -276,6 +345,32 @@ export class WorldScene {
 
   setAnchors(anchors: AreaAnchor[]) {
     this.anchors = anchors;
+    const missing = anchors
+      .filter((a) => a.landmark && !this.landmarkAt.has(a.landmark))
+      .map((a) => a.landmark);
+    if (missing.length && this.ready) {
+      // Not fatal — those markers fall back to the rail — but silent would be
+      // worse than loud, because the failure looks like "the markers drifted".
+      console.warn("[world] landmarks not in the glb:", missing.join(", "));
+    }
+  }
+
+  /** Which LM_* meshes the loaded world actually contains. */
+  landmarkNames(): string[] {
+    return [...this.landmarkAt.keys()].sort();
+  }
+
+  /**
+   * The raw scene graph. FOR THE RENDER HARNESS ONLY — nothing in the app
+   * calls this.
+   *
+   * It exists because "what is that dark shape" has come up three times now,
+   * and the only honest way to answer it is to hide candidates one at a time
+   * and re-measure. Reasoning about a render is exactly what produced three
+   * wrong diagnoses on this project before the harness existed.
+   */
+  debugScene(): THREE.Scene | null {
+    return this.scene;
   }
 
   onFrame(cb: FrameCallback | null) {
@@ -313,7 +408,7 @@ export class WorldScene {
     camera.getWorldDirection(this.camForward);
 
     return this.anchors.map((a) => {
-      this.anchorWorldPosition(a.depth, this.scratch);
+      this.anchorWorldPosition(a, this.scratch);
       // Behind the camera? project() wraps those to a mirrored on-screen point,
       // which would put area 1's marker in front of you at the summit.
       const toAnchor = this.scratch.clone().sub(camera.position);
@@ -322,7 +417,12 @@ export class WorldScene {
 
       this.scratch.project(camera);
       const x = (this.scratch.x * 0.5 + 0.5) * w;
-      const y = (-this.scratch.y * 0.5 + 0.5) * h;
+      // Lift the pill clear of the silhouette in SCREEN pixels, not in world
+      // units. A fixed world offset is a fixed screen offset only at one
+      // distance: at 26 units it put the label on the landmark behind when you
+      // were close to a near one, because the same 26 units is ~170px in the
+      // foreground and ~8px in the haze.
+      const y = (-this.scratch.y * 0.5 + 0.5) * h - MARKER_LIFT_PX;
       const onScreen = x >= -80 && x <= w + 80 && y >= -80 && y <= h + 80;
 
       return {
@@ -361,6 +461,18 @@ export class WorldScene {
 
       if (this.ready && this.scene && this.camera && this.renderer) {
         this.placeCamera(this.currentDepth);
+        // THE SKY FOLLOWS THE CAMERA. It is a sphere of radius 5000; left at
+        // the origin, its far wall sits 5000 + |camera.z| away, and once the
+        // rail got longer (LEN_Y 1500 -> 2000) that reached 6080 — past the
+        // camera's 6000 far plane. The sky was then CLIPPED in the direction
+        // of travel and the clear colour showed through as a pure-black wedge
+        // above the skyline. It reads exactly like a dark mountain, which is
+        // why it survived several looks; the pixels are (0,0,0), and nothing
+        // in this world is that colour.
+        //
+        // Centring it on the camera makes the radius a constant distance and
+        // immune to any future change to the rail's length.
+        this.sky?.position.copy(this.camera.position);
         this.renderer.render(this.scene, this.camera);
       }
       this.frameCb?.(this.currentDepth, this.projectMarkers());

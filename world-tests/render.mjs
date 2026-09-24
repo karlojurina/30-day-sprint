@@ -27,7 +27,10 @@ const VIEWPORTS = [
   { name: 'split-1691x1278', width: 1691, height: 1278 },
   { name: 'ultrawide-3428x1230', width: 3428, height: 1230 },
 ]
-const DEPTHS = [0, 0.5, 0.95]
+// The real rail stops for areas 1, 4 and 8 (v99), not round numbers —
+// a marker that is in frame at 0.5 tells us nothing about where a student
+// actually parks.
+const DEPTHS = [0.0708, 0.4151, 0.8302]
 
 fs.mkdirSync(OUT, { recursive: true })
 
@@ -110,9 +113,11 @@ try {
         }
       })
       const markers = await page.evaluate(() => (window.__worldMarkers || []).filter((m) => m.visible).length)
+    const lms = await page.evaluate(() => window.__worldLandmarks || [])
       const actualDepth = await page.evaluate(() => window.__worldDepth)
       results.push({ vp: vp.name, depth: d, actualDepth, markers, probe, file })
       console.log(`  depth ${d} -> settled ${Number(actualDepth).toFixed(3)}, ${markers} markers visible`)
+      if (d === DEPTHS[0]) console.log(`     landmarks in the glb: ${lms.join(", ") || "(none)"}`)
       console.log(`     bottomL ${probe.bottomLeft}  bottomC ${probe.bottomCentre}  bottomR ${probe.bottomRight}`)
       console.log(`     midRow  ${probe.midRow}   topC ${probe.topCentre}`)
     }

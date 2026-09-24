@@ -53,9 +53,21 @@ export interface Area {
   id: string;
   order: number;
   name: string;
-  /** Art-direction output. Null until that conversation happens. */
+  /**
+   * The silhouette that marks this place — "Viaduct", "Jetty". Shown to the
+   * student as a small eyebrow, because navigating by memory ("the viaduct
+   * one") is the entire reason the landmarks exist.
+   */
   landmarkLabel: string | null;
-  /** Scroll depth of this area's stop on the rail, 0..1. Art-direction output. */
+  /**
+   * The mesh in world.glb, derived by convention as `LM_` + the label with
+   * spaces removed. ONE column instead of two, which means the label cannot
+   * drift away from the thing it names — but it also means the label is not
+   * free text: renaming it renames the mesh it looks for. ridge.py's
+   * `_mesh_from_bm(bm, "LM_Viaduct", ...)` is the other half of the contract.
+   */
+  landmarkMesh: string | null;
+  /** Scroll depth of this area's stop on the rail, 0..1. */
   railAt: number | null;
 }
 
@@ -120,7 +132,12 @@ export function buildWorldCatalog({
       order: r.order_num,
       name: r.name,
       landmarkLabel: r.landmark_label ?? null,
-      railAt: r.rail_at ?? null,
+      landmarkMesh: r.landmark_label
+        ? "LM_" + r.landmark_label.replace(/\s+/g, "")
+        : null,
+      railAt: r.rail_at === null || r.rail_at === undefined
+        ? null
+        : Number(r.rail_at),
     }));
 
   const areaById = new Map(areas.map((a) => [a.id, a]));

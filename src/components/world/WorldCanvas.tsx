@@ -60,8 +60,11 @@ export function WorldCanvas({
   const anchors: AreaAnchor[] = areas.map((a, i) => ({
     id: a.id,
     depth: a.railAt ?? fallbackDepth(i, areas.length),
+    landmark: a.landmarkMesh,
   }));
-  const anchorsKey = anchors.map((a) => `${a.id}:${a.depth}`).join(",");
+  const anchorsKey = anchors
+    .map((a) => `${a.id}:${a.depth}:${a.landmark ?? ""}`)
+    .join(",");
 
   // ── Mount the scene once. Never on every render: a second WebGL context
   //    would be created before the first is disposed and the tab dies.

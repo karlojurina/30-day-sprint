@@ -25,15 +25,17 @@ import {
  * never the real file.
  */
 
-const AREAS = [
-  "Introduction",
-  "Fundamentals",
-  "Video Ads I",
-  "Video Ads II",
-  "Static Ads",
-  "AI Ads & Content",
-  "Creative Strategy",
-  "Job Board",
+// name, landmark mesh, rail depth — the real values, so the dev harness
+// exercises the same anchoring the app will. Depths come from check_geom.py.
+const AREAS: Array<[string, string, number]> = [
+  ["Introduction",     "LM_Lighthouse", 0.0708],
+  ["Fundamentals",     "LM_Windmill",   0.1934],
+  ["Video Ads I",      "LM_Bridge",     0.3000],
+  ["Video Ads II",     "LM_Viaduct",    0.4151],
+  ["Static Ads",       "LM_Watchtower", 0.5236],
+  ["AI Ads & Content", "LM_Cairn",      0.6321],
+  ["Creative Strategy","LM_Jetty",      0.6863],
+  ["Job Board",        "LM_Obelisk",    0.8302],
 ];
 
 declare global {
@@ -42,6 +44,11 @@ declare global {
     __worldError?: string;
     __worldDepth?: number;
     __worldMarkers?: ProjectedMarker[];
+    __worldLandmarks?: string[];
+    /** Harness only: hide every object whose name starts with `prefix`. Returns how many. */
+    __worldHide?: (prefix: string) => number;
+    /** Harness only: every object name in the loaded scene. */
+    __worldNames?: () => string[];
   }
 }
 
@@ -58,9 +65,10 @@ function DevWorld() {
     const stage = stageRef.current;
     if (!stage) return;
 
-    const anchors: AreaAnchor[] = AREAS.map((_, i) => ({
+    const anchors: AreaAnchor[] = AREAS.map(([, mesh, depth], i) => ({
       id: `a${i + 1}`,
-      depth: 0.02 + (i / (AREAS.length - 1)) * 0.93,
+      depth,
+      landmark: mesh,
     }));
 
     let scene: WorldScene;
@@ -80,6 +88,28 @@ function DevWorld() {
     scene
       .load("/world/world.glb")
       .then(() => {
+        // Surface what the glb actually contains, so a renamed or missing
+        // landmark shows up as a fact rather than as "the markers drifted".
+        window.__worldLandmarks = scene.landmarkNames();
+        window.__worldHide = (prefix: string) => {
+          const sc = scene.debugScene();
+          let n = 0;
+          sc?.traverse((o) => {
+            if (o.name.startsWith(prefix) && o.visible) {
+              o.visible = false;
+              n++;
+            }
+          });
+          return n;
+        };
+        window.__worldNames = () => {
+          const sc = scene.debugScene();
+          const names = new Set<string>();
+          sc?.traverse((o) => {
+            if (o.name) names.add(o.name.replace(/[._]\d+$/, ""));
+          });
+          return [...names].sort();
+        };
         window.__worldReady = true;
       })
       .catch((e) => {
@@ -115,7 +145,7 @@ function DevWorld() {
               whiteSpace: "nowrap",
             }}
           >
-            {AREAS[i]}
+            {AREAS[i]?.[0]}
           </div>
         ))}
       </div>

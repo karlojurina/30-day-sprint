@@ -23,6 +23,9 @@ gen('../src/lib/world/watch-heartbeat.ts', './_gen/watch-heartbeat.ts', [
 // watch-rules.ts has no imports at all, so it copies across untouched.
 gen('../src/lib/world/watch-rules.ts', './_gen/watch-rules.ts')
 
+// access.ts reads process.env at module load; parseIds/isAllowed are pure.
+gen('../src/lib/world/access.ts', './_gen/access.ts')
+
 // catalog.ts imports only a TYPE, which --experimental-strip-types erases.
 gen('../src/lib/world/catalog.ts', './_gen/catalog.ts', [
   ['import type { StudentLessonWatch } from "@/types/database";\n', ''],

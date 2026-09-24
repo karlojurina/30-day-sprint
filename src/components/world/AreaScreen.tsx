@@ -80,6 +80,22 @@ export function AreaScreen({ areaId }: { areaId: string }) {
         </p>
       )}
 
+      {/* One honest line about readiness, instead of a badge on every row.
+          Shown only while some of the area is unrecorded, so it disappears by
+          itself once filming catches up rather than needing to be removed. */}
+      {(() => {
+        const watchable = lessons.filter((l) => l.type === "watch");
+        const ready = watchable.filter((l) => hasVideo(l.id)).length;
+        if (watchable.length === 0 || ready === watchable.length) return null;
+        return (
+          <p style={{ margin: "10px 0 0", opacity: 0.5, font: "400 12px ui-sans-serif, system-ui, sans-serif" }}>
+            {ready === 0
+              ? "None of these are recorded yet."
+              : `${ready} of ${watchable.length} recorded so far.`}
+          </p>
+        );
+      })()}
+
       <div style={{ height: 3, borderRadius: 2, background: "rgba(246,239,230,.12)", margin: "16px 0 4px" }}>
         <div style={{ height: "100%", width: `${p.ratio * 100}%`, borderRadius: 2, background: "rgba(232,168,106,.85)" }} />
       </div>

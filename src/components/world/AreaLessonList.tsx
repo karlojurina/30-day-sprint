@@ -78,6 +78,28 @@ export function AreaLessonList({
                   border: s.done ? "none" : "1px solid rgba(246,239,230,.3)",
                 }}
               />
+              {/* The POSITIVE signal, and only where it is true.
+                  "Not recorded yet" used to sit on every row — which, while
+                  the course is being filmed, is every row but one, and a badge
+                  on everything carries no information. Confirmed on real data:
+                  17 of 18 rows wore it. The message still appears in the
+                  player, which is where a student actually meets the absence.
+                  This marks the handful that ARE ready instead. */}
+              {s.hasVideo && l.type === "watch" && (
+                <span
+                  aria-label="Ready to watch"
+                  title="Ready to watch"
+                  style={{
+                    flexShrink: 0,
+                    width: 0,
+                    height: 0,
+                    marginLeft: -3,
+                    borderTop: "4px solid transparent",
+                    borderBottom: "4px solid transparent",
+                    borderLeft: "6px solid rgba(232,168,106,.9)",
+                  }}
+                />
+              )}
               <span style={{ flex: 1, minWidth: 0, font: "500 14px/1.35 ui-sans-serif, system-ui, sans-serif" }}>
                 {l.title}
                 {/* requires_action is THE action-item flag. The old map read
@@ -86,9 +108,6 @@ export function AreaLessonList({
                   <span style={badgeStyle} title="This one has something to ship">
                     milestone
                   </span>
-                )}
-                {!s.hasVideo && l.type === "watch" && (
-                  <span style={{ ...badgeStyle, opacity: 0.5 }}>not recorded yet</span>
                 )}
               </span>
               <span style={{ opacity: 0.5, font: "400 12px ui-sans-serif, system-ui, sans-serif", flexShrink: 0 }}>

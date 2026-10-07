@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { AreaScreen } from "@/components/world/AreaScreen";
+import { PlaceRoute } from "@/components/world/PlaceRoute";
 
 export default function AreaPage({
   params,
@@ -9,5 +9,5 @@ export default function AreaPage({
   params: Promise<{ areaId: string }>;
 }) {
   const { areaId } = use(params);
-  return <AreaScreen areaId={areaId} />;
+  return <PlaceRoute areaId={areaId} />;
 }

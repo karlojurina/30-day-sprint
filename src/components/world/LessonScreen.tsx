@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useWorldCatalog } from "@/lib/world/useWorldCatalog";
@@ -8,6 +8,7 @@ import { useWorldStage } from "@/components/world/WorldStage";
 import { useStudent } from "@/contexts/StudentContext";
 import { LessonPlayer } from "@/components/world/LessonPlayer";
 import { Panel } from "@/components/world/AreaScreen";
+import { mapIsSilent, useMapModel } from "@/components/world/useMapModel";
 
 /**
  * A lesson: the video, and what happens when it finishes.
@@ -18,47 +19,65 @@ import { Panel } from "@/components/world/AreaScreen";
  * task re-evaluation. This component only reflects the answer.
  *
  * It never decides completion itself, and deliberately has no way to.
+ *
+ * It opens over the map, which holds still underneath: the stage reads the
+ * same address and pauses it. Every link here is built by the stage and leaves
+ * the page scroll alone, because the page scroll is the map's camera.
  */
 export function LessonScreen({
   areaId,
   lessonId,
+  devComplete = false,
 }: {
   areaId: string;
   lessonId: string;
+  /**
+   * Development harness only: a button that marks the lesson watched with no
+   * video and no server. The real routes never pass it.
+   */
+  devComplete?: boolean;
 }) {
   const router = useRouter();
-  const { parkAt } = useWorldStage();
-  const { areas, lessonsByArea, lessonById, loading } = useWorldCatalog();
-  const { completedLessonIds } = useStudent();
+  const stage = useWorldStage();
+  const { areas, lessonsByArea, lessonById, hasVideo } = useWorldCatalog();
+  const { status } = useMapModel();
+  // While the course is loading, or did not arrive, the host's card says so.
+  const silent = mapIsSilent(status);
+  const { completedLessonIds, markWatched } = useStudent();
   const [justCompleted, setJustCompleted] = useState<string[] | null>(null);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
 
-  useEffect(() => {
-    parkAt(areaId);
-    return () => parkAt(null);
-  }, [areaId, parkAt]);
+  const placeHref = stage.href(areaId);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") router.push(`/world/${areaId}`);
+      if (e.key === "Escape") router.push(placeHref, { scroll: false });
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [router, areaId]);
+  }, [router, placeHref]);
 
   const onCompleted = useCallback((_id: string, achievements: string[]) => {
     setJustCompleted(achievements);
   }, []);
 
-  if (loading) return null;
-
   const area = areas.find((a) => a.id === areaId);
   const lesson = lessonById(lessonId);
+  const shown = !silent && !!area && !!lesson;
+
+  // The map behind this page is inert while it is open, so the keyboard starts
+  // here. preventScroll: a focus must never move the page, and so the camera.
+  useEffect(() => {
+    if (shown) headingRef.current?.focus({ preventScroll: true });
+  }, [shown, lessonId]);
+
+  if (silent) return null;
 
   if (!area || !lesson) {
     return (
       <Panel>
         <p style={{ margin: 0, opacity: 0.8 }}>That lesson isn&apos;t here.</p>
-        <Link href={`/world/${areaId}`} style={backStyle}>
+        <Link href={placeHref} scroll={false} style={backStyle}>
           ← Back
         </Link>
       </Panel>
@@ -73,16 +92,16 @@ export function LessonScreen({
   return (
     <Panel>
       <nav style={{ opacity: 0.55, font: "500 12px ui-sans-serif, system-ui, sans-serif", marginBottom: 10 }}>
-        <Link href="/world" style={{ color: "inherit", textDecoration: "none" }}>
+        <Link href={stage.href()} scroll={false} style={{ color: "inherit", textDecoration: "none" }}>
           World
         </Link>
         {" / "}
-        <Link href={`/world/${areaId}`} style={{ color: "inherit", textDecoration: "none" }}>
+        <Link href={placeHref} scroll={false} style={{ color: "inherit", textDecoration: "none" }}>
           {area.name}
         </Link>
       </nav>
 
-      <h1 style={{ margin: "0 0 14px", font: "700 20px/1.2 ui-sans-serif, system-ui, sans-serif", letterSpacing: "-0.015em" }}>
+      <h1 ref={headingRef} tabIndex={-1} style={{ margin: "0 0 14px", font: "700 20px/1.2 ui-sans-serif, system-ui, sans-serif", letterSpacing: "-0.015em" }}>
         {lesson.title}
       </h1>
 
@@ -90,6 +109,7 @@ export function LessonScreen({
         <LessonPlayer
           lessonId={lesson.id}
           durationSeconds={lesson.duration_seconds}
+          recorded={hasVideo(lesson.id)}
           onCompleted={onCompleted}
         />
       ) : (
@@ -118,15 +138,33 @@ export function LessonScreen({
       )}
 
       <div style={{ marginTop: 18, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <Link href={`/world/${areaId}`} style={backStyle}>
+        <Link href={placeHref} scroll={false} style={backStyle}>
           ← {area.name}
         </Link>
         <span style={{ flex: 1 }} />
+        {devComplete && (
+          <button
+            type="button"
+            onClick={() => markWatched(lesson.id)}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 9,
+              font: "500 12px ui-sans-serif, system-ui, sans-serif",
+              border: "1px dashed rgba(246,239,230,.3)",
+              background: "transparent",
+              color: "rgba(246,239,230,.7)",
+              cursor: "pointer",
+            }}
+          >
+            Mark watched (dev)
+          </button>
+        )}
         {/* Enabled by the SERVER's completion, read back through the context —
             never by the player's own reckoning. */}
         {next && (
           <Link
-            href={done ? `/world/${areaId}/${next.id}` : "#"}
+            href={done ? stage.href(areaId, next.id) : "#"}
+            scroll={false}
             aria-disabled={!done}
             onClick={(e) => {
               if (!done) e.preventDefault();

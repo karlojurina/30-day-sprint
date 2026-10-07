@@ -62,7 +62,7 @@ export interface SyncDiagnostics {
   whopCourseIdMasked: string | null;
 }
 
-interface StudentContextType {
+export interface StudentContextType {
   // Raw data
   regions: Region[];
   lessons: Lesson[];
@@ -261,7 +261,7 @@ const studentDataGate = createCallGate(
   STUDENT_DATA_MIN_INTERVAL_MS,
 );
 
-const StudentContext = createContext<StudentContextType | null>(null);
+export const StudentContext = createContext<StudentContextType | null>(null);
 
 async function getAccessToken() {
   const supabase = createClient();

@@ -1,3 +1,4 @@
+import { Bricolage_Grotesque } from "next/font/google";
 import { StudentGuard } from "@/components/auth/StudentGuard";
 import { StudentProvider } from "@/contexts/StudentContext";
 import { MembershipBlockOverlay } from "@/components/onboarding/MembershipBlockOverlay";
@@ -10,14 +11,26 @@ import { WorldAccessGate } from "@/components/world/WorldAccessGate";
  * membership gate — because /world must not become a way around any of them.
  *
  * WorldAccessGate sits OUTSIDE WorldStage on purpose: someone who is not on
- * the preview allowlist must be redirected before the canvas mounts, so they
- * never begin downloading 4 MB of glb on a phone.
+ * the preview allowlist must be redirected before the map mounts, so they
+ * never begin loading it.
  *
  * WorldStage sits inside the provider and outside the children, so the canvas
  * survives navigation into an area and into a lesson. App Router does not
  * remount layouts, so the world is parsed once per visit rather than once per
  * back-press.
+ *
+ * The font is scoped to the world: the map and the screens over it read
+ * Bricolage Grotesque through --font-v2-display (JetBrains Mono comes from the
+ * root layout's variable). Same call as app/dev/world-v6/page.tsx.
  */
+
+const display = Bricolage_Grotesque({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-v2-display",
+  axes: ["opsz"],
+});
+
 export default function WorldLayout({
   children,
 }: {
@@ -27,7 +40,9 @@ export default function WorldLayout({
     <StudentGuard>
       <StudentProvider>
         <WorldAccessGate>
-          <WorldStage>{children}</WorldStage>
+          <div className={display.variable}>
+            <WorldStage>{children}</WorldStage>
+          </div>
         </WorldAccessGate>
         <MembershipBlockOverlay />
       </StudentProvider>

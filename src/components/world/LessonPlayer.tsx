@@ -48,6 +48,11 @@ export interface LessonPlayerProps {
   /** Catalog duration when known. The player reports its own as a fallback. */
   durationSeconds?: number | null;
   /**
+   * False when the catalog already knows there is no video behind this lesson.
+   * The player then shows "Not recorded yet." and asks the server for nothing.
+   */
+  recorded?: boolean;
+  /**
    * Fires after the SERVER has confirmed the lesson complete — never on the
    * player's own reckoning. `newAchievements` is whatever the completion chain
    * unlocked, for the caller to celebrate.
@@ -66,6 +71,7 @@ type LoadState =
 export function LessonPlayer({
   lessonId,
   durationSeconds = null,
+  recorded = true,
   onCompleted,
   className,
 }: LessonPlayerProps) {
@@ -126,6 +132,8 @@ export function LessonPlayer({
 
   // ── 1. Mint the URL ──────────────────────────────────────────────────
   useEffect(() => {
+    // Nothing to mint for a lesson that has not been filmed.
+    if (!recorded) return;
     let cancelled = false;
     setState({ kind: "loading" });
     resumedRef.current = false;
@@ -188,7 +196,7 @@ export function LessonPlayer({
     // every heartbeat would be a request storm, and the resume point is meant
     // to be read once per mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lessonId]);
+  }, [lessonId, recorded]);
 
   // ── 2. Attach the protocol + the heartbeat ───────────────────────────
   const attach = useCallback(() => {
@@ -277,18 +285,18 @@ export function LessonPlayer({
     background: "rgba(0,0,0,0.6)",
   };
 
-  if (state.kind === "loading") {
+  if (!recorded || state.kind === "not-recorded") {
     return (
       <div className={className} style={frame}>
-        <Centered>Loading…</Centered>
+        <Centered>Not recorded yet.</Centered>
       </div>
     );
   }
 
-  if (state.kind === "not-recorded") {
+  if (state.kind === "loading") {
     return (
       <div className={className} style={frame}>
-        <Centered>Not recorded yet.</Centered>
+        <Centered>Loading…</Centered>
       </div>
     );
   }

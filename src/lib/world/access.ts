@@ -66,3 +66,10 @@ export function canSeeWorld(studentId: string | null | undefined): boolean {
 /** Where to send everyone else. Becomes '/world' at cutover. */
 export const STUDENT_HOME =
   process.env.NEXT_PUBLIC_STUDENT_HOME?.trim() || "/dashboard";
+
+/**
+ * How the map treats the places past the student's own. "open" lets every
+ * place be scrolled to and entered. Default chosen by Lovro on 2026-10-07; the
+ * choice between open, look and locked stays his and Karlo's.
+ */
+export const WORLD_LOCK_MODE = "open" as const;

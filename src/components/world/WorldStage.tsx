@@ -2,64 +2,84 @@
 
 import {
   createContext,
-  useCallback,
   useContext,
   useMemo,
-  useState,
   type ReactNode,
 } from "react";
-import dynamic from "next/dynamic";
+import { useSelectedLayoutSegments } from "next/navigation";
+import { WorldMap } from "@/components/world/WorldMap";
 
 /**
- * Owns the canvas, and lives in the LAYOUT rather than a page.
+ * Owns the map, and lives in the LAYOUT rather than a page.
  *
  * App Router does not remount layouts on navigation, so the world survives the
- * trip into an area and into a lesson and back. The alternative — canvas on the
- * page — would re-download and re-parse 4 MB of glb on every back-press, and
- * rebuild the whole WebGL context with it.
+ * trip into an area and into a lesson and back. The alternative — the map on
+ * the page — would rebuild the scene and its whole WebGL context on every
+ * back-press.
  *
- * The context exists so a child ROUTE can tell the canvas where to hold. The
- * area screen parks the camera at its own stop; leaving hands the rail back to
- * the scroll position.
+ * THE ADDRESS IS THE ONLY SOURCE OF TRUTH FOR WHAT IS OPEN. This reads the
+ * route segments below the layout it sits in: the first names the open place,
+ * the second the open lesson. No page sets either through an effect, so a page
+ * mounting and unmounting can never flicker the map.
+ *
+ * `base` is where the layout is mounted. Every link under the stage is built
+ * with href(), never with a literal "/world", so the same screens run under
+ * another path.
  */
 
-const WorldCanvas = dynamic(
-  () => import("@/components/world/WorldCanvas").then((m) => m.WorldCanvas),
-  {
-    // Required, not preferred: WebGLRenderer touches window and document in its
-    // constructor, so any server render of this tree throws.
-    ssr: false,
-  },
-);
+export interface WorldStageValue {
+  base: string;
+  /** The place the address names, or null on the map itself. */
+  openAreaId: string | null;
+  /** The lesson the address names, or null. */
+  lessonId: string | null;
+  /** href() is the map, href(a) a place, href(a, l) a lesson. */
+  href(areaId?: string | null, lessonId?: string | null): string;
+}
 
-interface WorldStageValue {
-  /** Hold the camera at this area's stop. null hands control back to scroll. */
-  parkAt: (areaId: string | null) => void;
-  parkedAreaId: string | null;
+function hrefFor(base: string): WorldStageValue["href"] {
+  return (areaId, lessonId) => {
+    if (!areaId) return base;
+    if (!lessonId) return `${base}/${areaId}`;
+    return `${base}/${areaId}/${lessonId}`;
+  };
 }
 
 const WorldStageContext = createContext<WorldStageValue | null>(null);
 
+const NO_STAGE: WorldStageValue = {
+  base: "/world",
+  openAreaId: null,
+  lessonId: null,
+  href: hrefFor("/world"),
+};
+
 export function useWorldStage(): WorldStageValue {
   const ctx = useContext(WorldStageContext);
-  // Not a throw: the phone path view (W10) renders the same routes with no
-  // canvas behind them, and a missing stage there is normal, not a bug.
-  return ctx ?? { parkAt: () => {}, parkedAreaId: null };
+  // Not a throw: a screen rendered with no stage above it still gets working
+  // links, and a missing stage there is normal, not a bug.
+  return ctx ?? NO_STAGE;
 }
 
-export function WorldStage({ children }: { children: ReactNode }) {
-  const [parkedAreaId, setParkedAreaId] = useState<string | null>(null);
-  const parkAt = useCallback((areaId: string | null) => {
-    setParkedAreaId(areaId);
-  }, []);
+export function WorldStage({
+  children,
+  base = "/world",
+}: {
+  children: ReactNode;
+  base?: string;
+}) {
+  const segments = useSelectedLayoutSegments();
+  const openAreaId = segments[0] ?? null;
+  const lessonId = segments[1] ?? null;
+  const href = useMemo(() => hrefFor(base), [base]);
   const value = useMemo(
-    () => ({ parkAt, parkedAreaId }),
-    [parkAt, parkedAreaId],
+    () => ({ base, openAreaId, lessonId, href }),
+    [base, openAreaId, lessonId, href],
   );
 
   return (
     <WorldStageContext.Provider value={value}>
-      <WorldCanvas parkedAreaId={parkedAreaId} />
+      <WorldMap />
       {children}
     </WorldStageContext.Provider>
   );

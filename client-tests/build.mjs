@@ -31,3 +31,6 @@ gen('../src/lib/world/catalog.ts', './_gen/catalog.ts', [
   ['import type { StudentLessonWatch } from "@/types/database";\n', ''],
   ['StudentLessonWatch', 'unknown'],
 ])
+
+// map-model.ts imports only TYPES from ./catalog, which --experimental-strip-types erases.
+gen('../src/lib/world/map-model.ts', './_gen/map-model.ts')

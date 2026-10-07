@@ -1,0 +1,585 @@
+{
+ "version": 1,
+ "width": 1920,
+ "height": 1080,
+ "made": "2026-09-29T03:20:26.312Z",
+ "quality": 0.8,
+ "posters": [
+  {
+   "id": "k0",
+   "stop": -1,
+   "file": "k0.webp",
+   "bytes": 125600,
+   "markers": [
+    {
+     "id": "a1",
+     "fx": 0.62004,
+     "fy": 0.69006,
+     "visible": true,
+     "proximity": 0.843
+    },
+    {
+     "id": "a2",
+     "fx": 0.5188,
+     "fy": 0.62629,
+     "visible": true,
+     "proximity": 0.428
+    },
+    {
+     "id": "a3",
+     "fx": 0.55438,
+     "fy": 0.57959,
+     "visible": false,
+     "proximity": 0.157
+    },
+    {
+     "id": "a4",
+     "fx": 0.74857,
+     "fy": 0.61333,
+     "visible": false,
+     "proximity": 0.104
+    },
+    {
+     "id": "a5",
+     "fx": 0.95123,
+     "fy": 0.55156,
+     "visible": false,
+     "proximity": 0
+    },
+    {
+     "id": "a6",
+     "fx": 0.66741,
+     "fy": 0.50232,
+     "visible": false,
+     "proximity": 0
+    },
+    {
+     "id": "a7",
+     "fx": 0.53683,
+     "fy": 0.38325,
+     "visible": false,
+     "proximity": 0
+    },
+    {
+     "id": "a8",
+     "fx": 0.64212,
+     "fy": 0.46296,
+     "visible": false,
+     "proximity": 0
+    }
+   ]
+  },
+  {
+   "id": "a1",
+   "stop": 0,
+   "file": "a1.webp",
+   "bytes": 178192,
+   "markers": [
+    {
+     "id": "a1",
+     "fx": 0.67006,
+     "fy": 0.51757,
+     "visible": true,
+     "proximity": 1
+    },
+    {
+     "id": "a2",
+     "fx": 0.42854,
+     "fy": 0.57928,
+     "visible": true,
+     "proximity": 0.592
+    },
+    {
+     "id": "a3",
+     "fx": 0.47125,
+     "fy": 0.5435,
+     "visible": false,
+     "proximity": 0.322
+    },
+    {
+     "id": "a4",
+     "fx": 0.67439,
+     "fy": 0.58476,
+     "visible": false,
+     "proximity": 0.264
+    },
+    {
+     "id": "a5",
+     "fx": 0.85965,
+     "fy": 0.53426,
+     "visible": false,
+     "proximity": 0
+    },
+    {
+     "id": "a6",
+     "fx": 0.58167,
+     "fy": 0.48806,
+     "visible": false,
+     "proximity": 0
+    },
+    {
+     "id": "a7",
+     "fx": 0.45575,
+     "fy": 0.3729,
+     "visible": false,
+     "proximity": 0
+    },
+    {
+     "id": "a8",
+     "fx": 0.55438,
+     "fy": 0.46009,
+     "visible": false,
+     "proximity": 0
+    }
+   ]
+  },
+  {
+   "id": "a2",
+   "stop": 1,
+   "file": "a2.webp",
+   "bytes": 171692,
+   "markers": [
+    {
+     "id": "a1",
+     "fx": -0.05609,
+     "fy": 0.8267,
+     "visible": false,
+     "proximity": 0.688
+    },
+    {
+     "id": "a2",
+     "fx": 0.55778,
+     "fy": 0.25118,
+     "visible": true,
+     "proximity": 1
+    },
+    {
+     "id": "a3",
+     "fx": 0.26481,
+     "fy": 0.58529,
+     "visible": false,
+     "proximity": 0.763
+    },
+    {
+     "id": "a4",
+     "fx": 0.61576,
+     "fy": 0.734,
+     "visible": false,
+     "proximity": 0.654
+    },
+    {
+     "id": "a5",
+     "fx": 0.70263,
+     "fy": 0.70473,
+     "visible": false,
+     "proximity": 0.225
+    },
+    {
+     "id": "a6",
+     "fx": 0.33151,
+     "fy": 0.61769,
+     "visible": false,
+     "proximity": 0.017
+    },
+    {
+     "id": "a7",
+     "fx": 0.15823,
+     "fy": 0.45046,
+     "visible": false,
+     "proximity": 0
+    },
+    {
+     "id": "a8",
+     "fx": 0.26408,
+     "fy": 0.60311,
+     "visible": false,
+     "proximity": 0
+    }
+   ]
+  },
+  {
+   "id": "a3",
+   "stop": 2,
+   "file": "a3.webp",
+   "bytes": 96298,
+   "markers": [
+    {
+     "id": "a1",
+     "fx": 0.72483,
+     "fy": 0.69966,
+     "visible": false,
+     "proximity": 0.408
+    },
+    {
+     "id": "a2",
+     "fx": 0.76654,
+     "fy": 0.61262,
+     "visible": false,
+     "proximity": 0.755
+    },
+    {
+     "id": "a3",
+     "fx": 0.65301,
+     "fy": 0.06667,
+     "visible": true,
+     "proximity": 0.979
+    },
+    {
+     "id": "a4",
+     "fx": -0.03288,
+     "fy": 0.37198,
+     "visible": false,
+     "proximity": 0.876
+    },
+    {
+     "id": "a5",
+     "fx": -5.32458,
+     "fy": -1.48432,
+     "visible": false,
+     "proximity": 0.572
+    },
+    {
+     "id": "a6",
+     "fx": 1.06281,
+     "fy": 1.16684,
+     "visible": false,
+     "proximity": 0.5
+    },
+    {
+     "id": "a7",
+     "fx": 0.75512,
+     "fy": 1.21027,
+     "visible": false,
+     "proximity": 0.29
+    },
+    {
+     "id": "a8",
+     "fx": 0.88954,
+     "fy": 1.01177,
+     "visible": false,
+     "proximity": 0
+    }
+   ]
+  },
+  {
+   "id": "a4",
+   "stop": 3,
+   "file": "a4.webp",
+   "bytes": 80220,
+   "markers": [
+    {
+     "id": "a1",
+     "fx": -1.19861,
+     "fy": 0.92021,
+     "visible": false,
+     "proximity": 0.436
+    },
+    {
+     "id": "a2",
+     "fx": -0.10249,
+     "fy": 0.74306,
+     "visible": false,
+     "proximity": 0.719
+    },
+    {
+     "id": "a3",
+     "fx": 0.47986,
+     "fy": 0.56135,
+     "visible": true,
+     "proximity": 0.839
+    },
+    {
+     "id": "a4",
+     "fx": 0.66685,
+     "fy": 0.5979,
+     "visible": true,
+     "proximity": 1
+    },
+    {
+     "id": "a5",
+     "fx": -0.23347,
+     "fy": 0.95663,
+     "visible": false,
+     "proximity": 0.728
+    },
+    {
+     "id": "a6",
+     "fx": 7.00284,
+     "fy": -5.43654,
+     "visible": false,
+     "proximity": 0.471
+    },
+    {
+     "id": "a7",
+     "fx": 2.35663,
+     "fy": -0.58634,
+     "visible": false,
+     "proximity": 0.208
+    },
+    {
+     "id": "a8",
+     "fx": 36.54918,
+     "fy": -23.66532,
+     "visible": false,
+     "proximity": 0
+    }
+   ]
+  },
+  {
+   "id": "a5",
+   "stop": 4,
+   "file": "a5.webp",
+   "bytes": 77376,
+   "markers": [
+    {
+     "id": "a1",
+     "fx": 2.54418,
+     "fy": -0.34864,
+     "visible": false,
+     "proximity": 0.335
+    },
+    {
+     "id": "a2",
+     "fx": 10.7692,
+     "fy": -2.52059,
+     "visible": false,
+     "proximity": 0.531
+    },
+    {
+     "id": "a3",
+     "fx": -3.48577,
+     "fy": 0.95883,
+     "visible": false,
+     "proximity": 0.639
+    },
+    {
+     "id": "a4",
+     "fx": -6.46926,
+     "fy": 2.84043,
+     "visible": false,
+     "proximity": 0.766
+    },
+    {
+     "id": "a5",
+     "fx": 0.61106,
+     "fy": 0.55923,
+     "visible": true,
+     "proximity": 0.983
+    },
+    {
+     "id": "a6",
+     "fx": 0.44561,
+     "fy": 0.06667,
+     "visible": true,
+     "proximity": 0.653
+    },
+    {
+     "id": "a7",
+     "fx": 0.39806,
+     "fy": -0.23603,
+     "visible": false,
+     "proximity": 0.419
+    },
+    {
+     "id": "a8",
+     "fx": 0.85251,
+     "fy": -0.12848,
+     "visible": false,
+     "proximity": 0.123
+    }
+   ]
+  },
+  {
+   "id": "a6",
+   "stop": 5,
+   "file": "a6.webp",
+   "bytes": 166468,
+   "markers": [
+    {
+     "id": "a1",
+     "fx": 2.45125,
+     "fy": 0.36502,
+     "visible": false,
+     "proximity": 0.234
+    },
+    {
+     "id": "a2",
+     "fx": 3.35262,
+     "fy": 0.11547,
+     "visible": false,
+     "proximity": 0.471
+    },
+    {
+     "id": "a3",
+     "fx": 4.81651,
+     "fy": -0.12183,
+     "visible": false,
+     "proximity": 0.627
+    },
+    {
+     "id": "a4",
+     "fx": 2.29692,
+     "fy": 0.22589,
+     "visible": false,
+     "proximity": 0.687
+    },
+    {
+     "id": "a5",
+     "fx": 0.74546,
+     "fy": 0.68886,
+     "visible": false,
+     "proximity": 0.83
+    },
+    {
+     "id": "a6",
+     "fx": 0.58042,
+     "fy": 0.08796,
+     "visible": true,
+     "proximity": 0.947
+    },
+    {
+     "id": "a7",
+     "fx": 0.58175,
+     "fy": 0.01863,
+     "visible": true,
+     "proximity": 0.718
+    },
+    {
+     "id": "a8",
+     "fx": 1.50552,
+     "fy": 0.1773,
+     "visible": false,
+     "proximity": 0.429
+    }
+   ]
+  },
+  {
+   "id": "a7",
+   "stop": 6,
+   "file": "a7.webp",
+   "bytes": 59760,
+   "markers": [
+    {
+     "id": "a1",
+     "fx": -2.60439,
+     "fy": -0.85297,
+     "visible": false,
+     "proximity": 0.39
+    },
+    {
+     "id": "a2",
+     "fx": -2.46651,
+     "fy": -1.08604,
+     "visible": false,
+     "proximity": 0.547
+    },
+    {
+     "id": "a3",
+     "fx": -3.16139,
+     "fy": -1.70558,
+     "visible": false,
+     "proximity": 0.646
+    },
+    {
+     "id": "a4",
+     "fx": 54.32578,
+     "fy": 34.54268,
+     "visible": false,
+     "proximity": 0.644
+    },
+    {
+     "id": "a5",
+     "fx": 1.87594,
+     "fy": 1.41149,
+     "visible": false,
+     "proximity": 0.677
+    },
+    {
+     "id": "a6",
+     "fx": 1.5037,
+     "fy": 1.40982,
+     "visible": false,
+     "proximity": 0.865
+    },
+    {
+     "id": "a7",
+     "fx": 0.63101,
+     "fy": 0.47185,
+     "visible": true,
+     "proximity": 0.999
+    },
+    {
+     "id": "a8",
+     "fx": -0.22621,
+     "fy": 0.49477,
+     "visible": false,
+     "proximity": 0.747
+    }
+   ]
+  },
+  {
+   "id": "a8",
+   "stop": 7,
+   "file": "a8.webp",
+   "bytes": 85674,
+   "markers": [
+    {
+     "id": "a1",
+     "fx": 0.75252,
+     "fy": 0.42452,
+     "visible": false,
+     "proximity": 0.251
+    },
+    {
+     "id": "a2",
+     "fx": 0.79182,
+     "fy": 0.39471,
+     "visible": false,
+     "proximity": 0.393
+    },
+    {
+     "id": "a3",
+     "fx": 0.80171,
+     "fy": 0.3861,
+     "visible": false,
+     "proximity": 0.487
+    },
+    {
+     "id": "a4",
+     "fx": 0.69637,
+     "fy": 0.37362,
+     "visible": false,
+     "proximity": 0.506
+    },
+    {
+     "id": "a5",
+     "fx": 0.50217,
+     "fy": 0.3947,
+     "visible": false,
+     "proximity": 0.599
+    },
+    {
+     "id": "a6",
+     "fx": 0.72131,
+     "fy": 0.40166,
+     "visible": false,
+     "proximity": 0.747
+    },
+    {
+     "id": "a7",
+     "fx": 1.14743,
+     "fy": 0.72703,
+     "visible": false,
+     "proximity": 0.81
+    },
+    {
+     "id": "a8",
+     "fx": 0.54884,
+     "fy": 0.16546,
+     "visible": true,
+     "proximity": 0.992
+    }
+   ]
+  }
+ ]
+}

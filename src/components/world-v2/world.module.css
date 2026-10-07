@@ -1,0 +1,1272 @@
+/*
+ * /dev/world-v2. Scoped to .root: globals.css still styles the live student
+ * dashboard and is not touched. Token names and values are .impeccable.md's,
+ * declared here until W9 moves them into globals.css.
+ */
+
+.root {
+  --color-surface-0: #1d1826;
+  --color-surface-1: #241c22;
+  --color-surface-2: #2b2331;
+  --color-surface-3: #352c3c;
+  --color-ink: #f6efe6;
+  --color-ink-2: #c9b9a8;
+  --color-ink-3: #8e7f72;
+  --color-line: rgba(246, 239, 230, 0.16);
+  --color-line-strong: rgba(246, 239, 230, 0.3);
+  --color-accent: #e8a86a;
+  --color-accent-strong: #f0b77e;
+  --color-accent-deep: #c98a4e;
+  --color-accent-soft: rgba(232, 168, 106, 0.14);
+  --color-on-accent: #1d1826;
+  --color-milestone: #9297d0;
+  --color-milestone-soft: rgba(146, 151, 208, 0.16);
+  --shadow-ink: rgba(20, 15, 18, 0.62);
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --display: var(--font-v2-display), ui-sans-serif, system-ui, sans-serif;
+  --mono: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular", monospace;
+  --gutter: 40px;
+  --stem: 24px;
+
+  position: relative;
+  min-height: 100svh;
+  isolation: isolate;
+  background: var(--color-surface-0);
+  color: var(--color-ink);
+  font-family: var(--display);
+  font-weight: 400;
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.root button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.root {
+  /* Focus ring: full-strength ink with a dark halo either side, so it clears
+     3:1 on the peach sky and on the dark chrome alike. The 30% ink ring it
+     replaces measured 1.2-2.5:1 against its own background. */
+  --focus-ring: 2px solid var(--color-ink);
+  --focus-halo: 0 0 0 5px rgba(29, 24, 38, 0.92);
+}
+
+.root :focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: var(--focus-halo);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── The world ─────────────────────────────────────────────── */
+
+.stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: var(--color-surface-0);
+}
+
+.spacer {
+  height: 640vh;
+  pointer-events: none;
+}
+
+/* Legibility at the two edges where text sits. Not a scrim: the middle of the
+   frame, where the places are, is untouched. The bottom half is its own layer
+   so it can fade with the NEXT block and the dock when a place is open: it
+   darkened the lower 40% of every parked landmark. */
+.shade {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(29, 24, 38, 0.34) 0%, rgba(29, 24, 38, 0) 13%);
+}
+
+.shade::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: var(--shade-bottom, 1);
+  background: linear-gradient(
+    180deg,
+    rgba(29, 24, 38, 0) 60%,
+    rgba(29, 24, 38, 0.36) 82%,
+    rgba(29, 24, 38, 0.62) 100%
+  );
+}
+
+/* ── Header ────────────────────────────────────────────────── */
+
+.header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 6;
+  height: 72px;
+  padding: 0 var(--gutter);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--color-ink);
+  text-shadow: 0 1px 14px var(--shadow-ink);
+}
+
+.mark {
+  display: block;
+  color: var(--color-ink);
+}
+
+.markSun {
+  fill: var(--color-accent);
+}
+
+.progress {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-2);
+  text-shadow: 0 1px 12px var(--shadow-ink);
+}
+
+.progress b {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.progressLine {
+  display: block;
+  width: 72px;
+  height: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--color-line-strong);
+}
+
+.progressLine i {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+  transform-origin: left center;
+}
+
+/* ── Next ──────────────────────────────────────────────────── */
+
+/* Bottom edge sits clear of the Next.js dev badge, which owns the corner. */
+.next {
+  position: fixed;
+  left: var(--gutter);
+  bottom: 64px;
+  z-index: 4;
+  width: 300px;
+  will-change: transform, opacity;
+}
+
+.nextEyebrow {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 10.5px/1 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  text-shadow: 0 1px 12px var(--shadow-ink);
+}
+
+.nextEyebrow::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+
+.nextArea {
+  margin: 14px 0 10px;
+  font-size: clamp(21px, 3.3vw, 31px);
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.018em;
+  text-shadow: 0 2px 18px var(--shadow-ink);
+}
+
+.nextLesson {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--color-ink-2);
+  text-shadow: 0 1px 12px var(--shadow-ink);
+}
+
+.num {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-accent);
+}
+
+.primary {
+  margin-top: 20px;
+  width: 100%;
+  height: 46px;
+  padding: 0 16px 0 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  border-radius: 9px;
+  background: var(--color-accent);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  transition:
+    background-color 180ms var(--ease),
+    transform 180ms var(--ease);
+}
+
+.root .primary {
+  color: var(--color-on-accent);
+}
+
+.primary:hover {
+  background: var(--color-accent-strong);
+}
+
+.primary:active {
+  background: var(--color-accent-deep);
+  transform: translateY(1px);
+}
+
+.arrow,
+.arrowBack {
+  flex: 0 0 auto;
+  transition: transform 180ms var(--ease);
+}
+
+.arrowBack {
+  transform: scaleX(-1);
+}
+
+.primary:hover .arrow {
+  transform: translateX(2px);
+}
+
+/* ── Markers ───────────────────────────────────────────────── */
+
+.markers {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  will-change: opacity;
+}
+
+.marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.root .marker:focus-visible {
+  outline: none;
+}
+
+/* A permanent stacking context, so switching a marker between text, dot and
+   hidden (an opacity change) never counts as a layout change. Measured: the
+   trace showed each switch invalidating layout without it. */
+.pin,
+.stem,
+.label {
+  z-index: 0;
+}
+
+.pin {
+  position: absolute;
+  left: -6px;
+  top: -6px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-ink);
+  background-clip: padding-box;
+  border: 2.5px solid rgba(29, 24, 38, 0.5);
+  box-shadow: 0 1px 8px rgba(20, 15, 18, 0.3);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms var(--ease), transform 180ms var(--ease);
+}
+
+/* A 40px hit target around a 12px dot. */
+.pin::before {
+  content: "";
+  position: absolute;
+  inset: -16.5px;
+  border-radius: 50%;
+}
+
+.stem {
+  position: absolute;
+  left: -0.5px;
+  top: calc(-1 * var(--stem));
+  width: 1px;
+  height: calc(var(--stem) - 6px);
+  background: rgba(246, 239, 230, 0.6);
+  opacity: 0;
+  transition: opacity 200ms var(--ease);
+}
+
+.label {
+  position: absolute;
+  left: 0;
+  bottom: var(--stem);
+  transform: translateX(-50%);
+  height: 30px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  border-radius: 9px;
+  border: 1px solid var(--color-line);
+  background: var(--color-surface-1);
+  font-size: 13px;
+  font-weight: 550;
+  letter-spacing: -0.005em;
+  color: var(--color-ink);
+  box-shadow: 0 6px 18px rgba(20, 15, 18, 0.28);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 200ms var(--ease),
+    background-color 150ms var(--ease),
+    border-color 150ms var(--ease);
+}
+
+.marker[data-mode="text"] .label,
+.marker[data-mode="text"] .stem {
+  opacity: 1;
+}
+
+.marker[data-mode="text"] .label,
+.marker[data-mode="text"] .pin,
+.marker[data-mode="dot"] .pin {
+  pointer-events: auto;
+}
+
+.marker[data-mode="text"] .pin,
+.marker[data-mode="dot"] .pin {
+  opacity: 1;
+}
+
+.marker[data-state="done"] .pin,
+.marker[data-state="current"] .pin {
+  background: var(--color-accent);
+}
+
+/* The current area is one of the two things allowed to emit light: three
+   gentle pulses each time it comes into view, then still. A pulse that never
+   stops costs a style pass on every frame and reads as nagging. */
+.marker[data-state="current"][data-mode="text"] .pin::after,
+.marker[data-state="current"][data-mode="dot"] .pin::after {
+  content: "";
+  position: absolute;
+  inset: -2.5px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-accent);
+  animation: pulse 2.6s var(--ease) 3 both;
+}
+
+.marker[data-state="current"] .stem {
+  background: var(--color-accent);
+}
+
+.marker[data-state="current"] .label {
+  border-color: rgba(232, 168, 106, 0.72);
+}
+
+.marker:hover .label,
+.marker:focus-visible .label {
+  background: var(--color-surface-3);
+  border-color: var(--color-line-strong);
+}
+
+.marker[data-state="current"]:hover .label,
+.marker[data-state="current"]:focus-visible .label {
+  border-color: var(--color-accent);
+}
+
+.marker[data-mode="dot"]:hover .pin,
+.marker[data-mode="dot"]:focus-visible .pin {
+  transform: scale(1.35);
+}
+
+.marker[data-mode="text"]:focus-visible .label,
+.marker[data-mode="dot"]:focus-visible .pin {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: var(--focus-halo);
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(2.8);
+    opacity: 0;
+  }
+}
+
+/* ── Scroll cue ────────────────────────────────────────────── */
+
+.cue {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 168px;
+  z-index: 3;
+  margin: 0 auto;
+  width: max-content;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  font: 600 10px/1 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-2);
+  text-shadow: 0 1px 12px var(--shadow-ink);
+  pointer-events: none;
+}
+
+.cueLine {
+  display: block;
+  width: 1px;
+  height: 26px;
+  background: linear-gradient(var(--color-ink-2), rgba(201, 185, 168, 0));
+  transform-origin: top center;
+  /* Four passes, then it rests as a still line (backwards fill returns it to
+     the base style). Nothing on this page loops forever. */
+  animation: cue 2.4s var(--ease) 4 backwards;
+}
+
+.cue[data-off] .cueLine {
+  animation: none;
+}
+
+@keyframes cue {
+  0% {
+    transform: scaleY(0);
+    opacity: 1;
+  }
+  55% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scaleY(1);
+    opacity: 0;
+  }
+}
+
+/* ── Dock ──────────────────────────────────────────────────── */
+
+/* The number row lines up with the bottom of the Continue button. */
+.dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 56px;
+  z-index: 4;
+  margin: 0 auto;
+  width: 440px;
+  will-change: transform, opacity;
+}
+
+.dockHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 28px;
+  padding: 0 2px;
+  text-shadow: 0 1px 12px var(--shadow-ink);
+}
+
+.dockNum {
+  font: 600 10.5px/1 var(--mono);
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-accent);
+}
+
+.dockName {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-ink);
+}
+
+.enter {
+  margin-left: auto;
+  height: 28px;
+  padding: 0 2px 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font-size: 13px;
+  font-weight: 600;
+  transition:
+    opacity 180ms var(--ease),
+    color 150ms var(--ease);
+}
+
+.root .enter {
+  color: var(--color-ink-2);
+}
+
+.root .enter:hover {
+  color: var(--color-accent);
+}
+
+.enter:hover .arrow {
+  transform: translateX(2px);
+}
+
+.enter[data-hidden] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Reached by keyboard while a stop was hovered: never an invisible focus. */
+.enter[data-hidden]:focus-visible {
+  opacity: 1;
+}
+
+.track {
+  position: relative;
+  height: 44px;
+  margin-top: 4px;
+}
+
+.trackLine,
+.trackDone {
+  position: absolute;
+  left: 0;
+  top: 13px;
+  height: 1px;
+}
+
+.trackLine {
+  right: 0;
+  background: var(--color-line-strong);
+}
+
+.trackDone {
+  background: var(--color-accent);
+}
+
+.caret {
+  position: absolute;
+  left: -1px;
+  top: 5px;
+  width: 2px;
+  height: 17px;
+  border-radius: 1px;
+  background: var(--color-ink);
+  will-change: transform;
+}
+
+.stop {
+  position: absolute;
+  top: 0;
+  z-index: 1;
+  width: 40px;
+  height: 44px;
+  margin-left: -20px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.stopDot {
+  margin-top: 9px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-ink-3);
+  background: var(--color-surface-0);
+  transition: transform 180ms var(--ease);
+}
+
+.stop[data-state="done"] .stopDot {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.stop[data-state="current"] .stopDot {
+  border: 2px solid var(--color-accent);
+}
+
+.stopNum {
+  margin-top: 8px;
+  font: 600 10px/1 var(--mono);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-3);
+  transition: color 150ms var(--ease);
+}
+
+.stop[aria-current] .stopNum,
+.stop:hover .stopNum,
+.stop:focus-visible .stopNum {
+  color: var(--color-ink);
+}
+
+.stop:hover .stopDot,
+.stop:focus-visible .stopDot {
+  transform: scale(1.3);
+}
+
+/* ── Footer ────────────────────────────────────────────────── */
+
+.footer {
+  position: fixed;
+  right: var(--gutter);
+  bottom: 20px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font: 500 10px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+.footer a {
+  padding: 6px 0;
+  color: var(--color-ink-2);
+  text-decoration: none;
+  transition: color 150ms var(--ease);
+}
+
+.footer a:hover {
+  color: var(--color-ink);
+}
+
+/* ── Panel: the place you zoomed into ──────────────────────── */
+
+.panel {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 5;
+  width: 420px;
+  max-width: calc(100vw - 48px);
+  background: var(--color-surface-0);
+  transform: translate3d(calc(-100% - 220px), 0, 0);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+/* The soft edge onto the world. Rides with the panel. */
+.panel::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 100%;
+  width: 200px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    rgba(29, 24, 38, 1) 0%,
+    rgba(29, 24, 38, 0.86) 14%,
+    rgba(29, 24, 38, 0.58) 36%,
+    rgba(29, 24, 38, 0.26) 62%,
+    rgba(29, 24, 38, 0.07) 84%,
+    rgba(29, 24, 38, 0) 100%
+  );
+}
+
+.panelInner {
+  position: relative;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 104px 36px 48px var(--gutter);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+  will-change: transform, opacity;
+}
+
+.view[data-dir="fwd"] {
+  animation: viewIn 380ms var(--ease) both;
+}
+
+.view[data-dir="back"] {
+  animation: viewBack 380ms var(--ease) both;
+}
+
+@keyframes viewIn {
+  from {
+    opacity: 0;
+    transform: translate3d(28px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes viewBack {
+  from {
+    opacity: 0;
+    transform: translate3d(-28px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.back {
+  height: 36px;
+  margin-left: -10px;
+  padding: 0 12px 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font-size: 13px;
+  font-weight: 500;
+  transition:
+    background-color 150ms var(--ease),
+    color 150ms var(--ease);
+}
+
+.root .back {
+  color: var(--color-ink-2);
+}
+
+.root .back:hover {
+  color: var(--color-ink);
+  background: var(--color-surface-2);
+}
+
+.back:hover .arrowBack {
+  transform: scaleX(-1) translateX(2px);
+}
+
+.panelEyebrow {
+  margin: 30px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 10.5px/1 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+.accent {
+  color: var(--color-accent);
+}
+
+.sep {
+  opacity: 0.55;
+}
+
+.panelTitle {
+  margin: 14px 0 0;
+  font-size: 31px;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.018em;
+  outline: none;
+}
+
+.root .panelTitle:focus-visible {
+  outline: none;
+}
+
+.desc {
+  margin: 12px 0 0;
+  max-width: 34ch;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--color-ink-2);
+}
+
+.areaProgress {
+  margin: 26px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font: 600 11px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-2);
+  white-space: nowrap;
+}
+
+.bar {
+  flex: 1;
+  height: 2px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--color-line);
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+  transform-origin: left center;
+}
+
+.lessons {
+  list-style: none;
+  margin: 22px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.lessons li {
+  border-bottom: 1px solid var(--color-line);
+}
+
+.lesson {
+  width: calc(100% + 16px);
+  margin: 0 -8px;
+  min-height: 48px;
+  padding: 11px 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 500;
+  transition: background-color 150ms var(--ease);
+}
+
+.lesson:hover {
+  background: var(--color-surface-2);
+}
+
+.lesson[data-state="done"] {
+  color: var(--color-ink-2);
+}
+
+.lessonMark {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-ink-3);
+}
+
+.lesson[data-state="done"] .lessonMark {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+/* Ready to watch: a small right-pointing triangle, only where true. */
+.lesson[data-state="next"] .lessonMark {
+  width: 0;
+  height: 0;
+  border-radius: 0;
+  border-style: solid;
+  border-width: 5px 0 5px 8px;
+  border-color: transparent transparent transparent var(--color-accent);
+}
+
+.lessonNum {
+  flex: 0 0 22px;
+  font: 600 10.5px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-3);
+}
+
+.lessonTitle {
+  flex: 1;
+  min-width: 0;
+}
+
+.nextTag {
+  flex: 0 0 auto;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font: 600 10px/1 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.more {
+  margin: 14px 0 0;
+  font: 500 11px/1.4 var(--mono);
+  color: var(--color-ink-3);
+}
+
+.feature {
+  margin-top: 22px;
+  min-height: 43px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 9px;
+  background: var(--color-milestone-soft);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.diamond {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  transform: rotate(45deg);
+  background: var(--color-milestone);
+}
+
+.video {
+  margin-top: 24px;
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  border: 1px solid var(--color-line);
+  background: var(--color-surface-2);
+}
+
+.play {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-accent);
+}
+
+.play::after {
+  content: "";
+  margin-left: 4px;
+  border-style: solid;
+  border-width: 8px 0 8px 13px;
+  border-color: transparent transparent transparent var(--color-accent);
+}
+
+.upNext {
+  margin-top: 16px;
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+  background: none;
+  text-align: left;
+  transition:
+    background-color 150ms var(--ease),
+    border-color 150ms var(--ease);
+}
+
+.upNext:hover {
+  background: var(--color-surface-2);
+  border-color: var(--color-line-strong);
+}
+
+.upNext:hover .arrow {
+  transform: translateX(2px);
+}
+
+.upNextLabel {
+  font: 600 10px/1 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+.upNextTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+/* ── Loading ───────────────────────────────────────────────── */
+
+.loading {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--color-surface-0);
+  font: 600 10.5px/1 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+  transition:
+    opacity 700ms var(--ease),
+    visibility 0s linear 700ms;
+}
+
+.loading[data-done] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.loading[data-done] .loadingLine {
+  animation: none;
+}
+
+.loadingLine {
+  width: 64px;
+  height: 1px;
+  background: var(--color-accent);
+  transform-origin: left center;
+  animation: loading 1.4s var(--ease) infinite alternate;
+}
+
+@keyframes loading {
+  from {
+    transform: scaleX(0.15);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* ── List view: narrow screens and no WebGL ────────────────── */
+
+.root[data-view="list"] .header {
+  position: absolute;
+  padding: 0 22px;
+}
+
+.list {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 104px 22px 80px;
+}
+
+.note {
+  margin: 0 0 28px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--color-ink-2);
+}
+
+.listNext {
+  padding-bottom: 8px;
+}
+
+.areaList {
+  list-style: none;
+  margin: 40px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--color-line);
+}
+
+.areaList li {
+  border-bottom: 1px solid var(--color-line);
+}
+
+.areaRow {
+  width: 100%;
+  min-height: 72px;
+  padding: 14px 4px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border: 0;
+  background: none;
+  text-align: left;
+}
+
+.rowNum {
+  flex: 0 0 24px;
+  font: 600 11px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-3);
+}
+
+.areaRow[data-state="current"] .rowNum {
+  color: var(--color-accent);
+}
+
+.rowText {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.rowName {
+  font-size: 19px;
+  line-height: 1.15;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.rowMeta {
+  font: 600 10px/1 var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+.rowDot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-ink-3);
+}
+
+.areaRow[data-state="done"] .rowDot {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.areaRow[data-state="current"] .rowDot {
+  border: 2px solid var(--color-accent);
+}
+
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px 22px 48px;
+  background: var(--color-surface-0);
+  animation: sheetIn 320ms var(--ease) both;
+}
+
+@keyframes sheetIn {
+  from {
+    opacity: 0;
+    transform: translate3d(24px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.root[data-view="list"] .footer {
+  position: absolute;
+  left: 22px;
+  right: auto;
+  bottom: 28px;
+}
+
+/* ── Sizes ─────────────────────────────────────────────────── */
+
+@media (width < 1100px) {
+  .root {
+    --gutter: 28px;
+  }
+
+  .next {
+    width: 264px;
+  }
+
+  .dock {
+    left: auto;
+    right: var(--gutter);
+    margin: 0;
+    width: 400px;
+  }
+
+  .cue {
+    left: auto;
+    right: var(--gutter);
+    width: 400px;
+  }
+}
+
+@media (min-width: 2200px) {
+  .root {
+    --gutter: 56px;
+  }
+
+  .dock {
+    width: 520px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root *,
+  .root *::before,
+  .root *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

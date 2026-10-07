@@ -1,0 +1,12 @@
+/** Preview fixtures only. No student data or completion writes. */
+export const AREAS = [
+  { name: "Introduction", landmark: "The lighthouse", lessons: 8, done: 8, description: "Get your bearings. Build the foundation for the work ahead.", topics: ["Welcome to EcomTalent", "How to use the course", "Your creative workspace", "What good looks like"] },
+  { name: "Fundamentals", landmark: "The windmill", lessons: 10, done: 10, description: "Understand why people buy, and what makes an ad work.", topics: ["The job of an ad", "Understanding your audience", "Offers and positioning", "Reading an ad account"] },
+  { name: "Video Ads I", landmark: "The stone bridge", lessons: 22, done: 4, description: "Turn a strong idea into a video people stop scrolling for.", topics: ["Anatomy of a winning video", "Research before you edit", "Finding your angle", "Building a swipe file", "Writing a hook that lands", "From hook to story", "Your first video ad"] },
+  { name: "Video Ads II", landmark: "The viaduct", lessons: 22, done: 0, description: "Refine the craft. Build variations, test ideas, and improve the edit.", topics: ["Editing for attention", "Pacing and rhythm", "Sound that supports the story", "Building useful variations"] },
+  { name: "Static Ads", landmark: "The watchtower", lessons: 25, done: 0, description: "Make a single frame do the work. Clear message, strong execution.", topics: ["One frame, one idea", "Visual hierarchy", "Copy and composition", "Design your first static ad"] },
+  { name: "AI Ads & Content", landmark: "The cairn", lessons: 22, done: 0, description: "Bring new tools into a process you already understand.", topics: ["Where AI fits in your workflow", "Art direction and references", "Creating useful variations", "From generation to finished ad"] },
+  { name: "Creative Strategy", landmark: "The lakeside jetty", lessons: 21, done: 0, description: "Connect the creative work to a plan. Find out what to make next, and why.", topics: ["From research to strategy", "Building a creative brief", "A testing plan that teaches you", "Reading the results"] },
+  { name: "Job Board", landmark: "The summit", lessons: 14, done: 0, description: "Put your skills to work. Build your portfolio and land paid client work.", topics: ["A portfolio that shows your thinking", "Finding the right brands", "Your first outreach", "Working with your first client"] },
+] as const;
+export const CURRENT_AREA = 2;

@@ -143,8 +143,12 @@ When adding a new table, append it here. When deleting a field, scan
 ### `regions`
 - **Depends on:** —
 - **Depended on by:** `lessons.region_id`, `MapMockup`, `StudentContext`,
-  any region-aware UI
+  any region-aware UI, the `student_current_region` view (since v92 it
+  joins `regions` and picks a student's furthest region by `order_num`),
+  `src/lib/world/catalog.ts` (sorts areas by `order_num`)
 - **Stable contract:** `id` (r1–r4), `name`, `order_num`
+- **Note:** this table has no `landmark_label` or `rail_at` column.
+  Only `regions_next` has them.
 
 ### `lessons`
 - **Depends on:** `regions`
@@ -152,10 +156,88 @@ When adding a new table, append it here. When deleting a field, scan
   `MapMockup`, `ScenePathOverlay`, `LessonSheet`, `RegionSidePanel`,
   `StudentContext`, `src/lib/csm-triggers.ts`
   (`lesson_shipped`, `lesson_watched`, `region_completion_pct`),
-  discount eligibility (action items)
+  discount eligibility (action items). Added by v92 to v97: the SQL
+  function `record_lesson_heartbeat` (the id must exist here as a
+  `watch` lesson with a `bunny_video_id`; it reads `duration_seconds`),
+  the views `student_progress_counts` and `student_current_region` and
+  the function `rebuild_daily_snapshots` (they read `requires_action`
+  and filter on `counts_toward_progress`, the second view from v98),
+  `POST /api/student/toggle-lesson` (reads `type` to refuse a `watch`
+  lesson), and, while the catalog switch names this table,
+  `GET /api/student/data`, `POST /api/student/video-token` and
+  `POST /api/student/lesson-watched`
 - **Stable contract:** `id`, `region_id`, `day`, `sort_order`, `type`
-  (watch/action/quiz), `requires_action`, `whop_lesson_id`, `title`,
-  `is_gate`, `is_optional`
+  (`watch` / `action` / `setup`, the CHECK constraint from v3),
+  `requires_action`, `whop_lesson_id`, `title`, `is_gate`,
+  `is_optional`, and from v92: `counts_toward_progress` (boolean,
+  default true), `feature_key` (text, unique where set),
+  `bunny_video_id` (text, unique where set), `duration_seconds` (int,
+  null or above 0), `video_ready_at`, `updated_at`
+- **`duration_seconds` decides completion (v97).** A `watch` lesson
+  with a `bunny_video_id` and no `duration_seconds` cannot be completed
+  by watching: `record_lesson_heartbeat` and `judgeWatch`
+  (`src/lib/world/watch-rules.ts`) both measure against the catalog's
+  duration and nothing else.
+- **`counts_toward_progress` and `feature_key` (v92).** v92 set
+  `counts_toward_progress` false and `feature_key` `bounty_access` on
+  `l057`, and `feature_key` `playbook_unlock` on `l078`. The SQL views
+  and the snapshot function read `counts_toward_progress`; the world's
+  catalog and map model read both columns. The dashboard code still
+  uses the lesson ids in `src/lib/constants.ts`
+  (`SPRINT_EXCLUDED_LESSON_IDS`, `PLAYBOOK_UNLOCK_LESSON_ID`), so a
+  change to one must be made in the other.
+
+### `regions_next` (v94)
+- **Owner:** the course rebuild (branch `world-engine`). The staging
+  copy of `regions` for the eight-area course.
+- **Depends on:** nothing
+- **Written by:** migrations only. v94 creates and seeds it; v99 sets
+  `landmark_label`, `rail_at` and `terrain`. Nothing in `src/` writes
+  it.
+- **Depended on by:** `lessons_next.region_id`. While
+  `CATALOG_TABLE_SUFFIX` is `_next`: `GET /api/student/data` returns
+  these rows as `regions`, and through it `StudentContext` (so
+  `/dashboard` as well as `/world`), `src/lib/world/catalog.ts` and the
+  world map.
+- **Stable contract:** `id` (`a1` to `a8`), `order_num` (unique; it is
+  what orders the areas, the id text never is), `name`. Also present:
+  `subtitle`, `tagline`, `terrain`, `landmark_label`, `rail_at`,
+  `quiz_format`, `is_discount_gate`, `created_at`.
+- **Note:** `landmark_label` and `rail_at` hold the first prototype
+  map's values (v99: Lighthouse to Obelisk). `catalog.ts` still turns
+  them into `landmarkLabel`, `landmarkMesh` and `railAt`, and the only
+  reader of those is the unmounted `WorldCanvas.tsx`. The v6 map takes
+  its landmark words and its stops from `src/lib/world-v6/layout.ts`.
+- **Note:** RLS on, with one select policy for any signed-in user.
+
+### `lessons_next` (v94)
+- **Owner:** the course rebuild (branch `world-engine`). The staging
+  copy of `lessons`.
+- **Depends on:** `regions_next` (foreign key on `region_id`, cascade
+  on delete)
+- **Written by:** migrations only (v94). Nothing in `src/` writes it.
+- **Depended on by:** while `CATALOG_TABLE_SUFFIX` is `_next`:
+  `GET /api/student/data` (returns these rows as `lessons`),
+  `POST /api/student/video-token` and `POST /api/student/lesson-watched`
+  (both look the lesson up here), and through the data route
+  `StudentContext`, `src/lib/world/catalog.ts`,
+  `src/lib/world/map-model.ts` and the world map.
+- **Stable contract:** `id`, `region_id`, `type` (`watch` / `setup`
+  only; `action` is not allowed here), `title`, `description`,
+  `sort_order` (unique, 1 to N across the whole course),
+  `requires_action`, `action_brief` (required when `requires_action`
+  is true), `is_optional`, `is_gate` (at most one row may be true),
+  `lesson_group_id`, `discord_channel`, `counts_toward_progress`,
+  `feature_key` (unique where set), `bunny_video_id` (unique where
+  set), `duration_seconds` (null or above 0), `video_ready_at`,
+  `created_at`, `updated_at`. It has no `day`, `duration_label`,
+  `whop_lesson_id` or `is_boss`.
+- **Note:** nothing can complete a lesson that exists only here.
+  `student_lesson_completions.lesson_id` references `lessons(id)`, and
+  `record_lesson_heartbeat` looks the lesson up in `lessons`.
+- **Note:** RLS on, with one select policy for any signed-in user, so
+  every `bunny_video_id` stored here is readable by any signed-in
+  student.
 
 ### `quizzes` + `quiz_questions`
 - **Depends on:** `regions`
@@ -193,6 +275,11 @@ When adding a new table, append it here. When deleting a field, scan
 - **Stable contract:** keys `program_login_link`, `discord_invite_link`
   (v51 dropped `astrid_booking_link` + `karlo_walkthrough_video_link`
   when D1.A/D1.B were merged into a single D1)
+- **A key with no reader (v95):** `discount_window_days`, seeded `14`.
+  No code reads it; the discount routes use `DISCOUNT_WINDOW_DAYS` in
+  `src/lib/constants.ts`. `/admin/settings` lists every row of this
+  table as an editable field and saves through `PUT /api/admin/config`,
+  so the key can be edited there and the edit changes nothing.
 
 ## Student state
 
@@ -202,9 +289,48 @@ When adding a new table, append it here. When deleting a field, scan
   `actionShippedLessonIds`), `src/lib/csm-triggers.ts`
   (`region_completion_pct`, `lesson_shipped`, `lesson_watched`,
   `progress_ratio`), `src/lib/streak.ts`, discount eligibility,
-  CSM cron snapshot builder
+  CSM cron snapshot builder. Added by v92 and v93:
+  `POST /api/student/lesson-watched` (stamps `completed_at` through
+  `stampWatchCompletion` in `src/lib/complete-lesson.ts`), and the SQL
+  function `lesson_is_complete`, through which the views
+  `student_progress_counts` and `student_current_region` and the
+  function `rebuild_daily_snapshots` read `completed_at`,
+  `action_completed_at` and `skipped_at`
 - **Stable contract:** `student_id`, `lesson_id`, `completed_at`,
   `action_completed_at`, `discord_message_link`, `skipped_at`
+- **Note:** `lesson_id` references `lessons(id)` (v3). A lesson that
+  exists only in `lessons_next` cannot have a row here.
+
+### `student_lesson_watch` (v93)
+- **Owner:** the lesson video player under `/world` (branch
+  `world-engine`). It holds a measurement of watching. The decision
+  that a lesson is done stays in `student_lesson_completions`.
+- **Depends on:** `students` (foreign key, cascade on delete). There
+  is no foreign key on `lesson_id`, on purpose; the writer checks the
+  id against `lessons` on every call.
+- **Written by:** the SQL function `record_lesson_heartbeat` and
+  nothing else. The table has two select policies (a student reads
+  their own rows, the team reads all) and no insert, update or delete
+  policy, so no browser can write a row even with a valid session.
+- **Depended on by:** `GET /api/student/data` (returns the student's
+  rows as `watchProgress`), `StudentContext` (`watchProgress`),
+  `LessonPlayer` (resumes from `last_position_seconds`),
+  `src/lib/world/catalog.ts` (an unfinished lesson with a row counts
+  as in progress), `POST /api/student/lesson-watched` (re-reads the
+  row and decides completion through `judgeWatch` in
+  `src/lib/world/watch-rules.ts`), the `achievement_unlock_stats` view
+  (v93: a row here is one of the three things that put a launch-cohort
+  student in its denominator)
+- **Stable contract:** `student_id` + `lesson_id` (primary key),
+  `max_position_seconds` (the furthest point reached; it only moves
+  forward), `last_position_seconds` (where the playhead was on the last
+  beat), `watched_seconds` (seconds really played, summed from clamped
+  deltas), `reported_duration_seconds` (what the player reported; kept
+  for display and for clamping the position, and it decides nothing
+  since v97), `heartbeat_count`, `first_played_at`,
+  `last_heartbeat_at`, `threshold_met_at` (stamped once, when the
+  furthest position first reaches 95% of the catalog's
+  `duration_seconds`; never cleared)
 
 ### `daily_notes`
 - **Depends on:** `students`
@@ -228,6 +354,9 @@ When adding a new table, append it here. When deleting a field, scan
   status checks where applicable)
 - **Stable contract:** `student_id`, `status`
   (pending/approved/rejected/applied), `promo_code`, `created_at`
+- **Added in v95, unused:** `gate_lesson_id` (text, nullable, no
+  foreign key on purpose): the lesson that was the discount gate when
+  the request was decided. Nothing in `src/` reads or writes it.
 
 ### `discount_feedback_questions` + `discount_feedback_responses`
 - **Depends on:** `discount_requests`
@@ -273,6 +402,17 @@ When adding a new table, append it here. When deleting a field, scan
   (`active_count_cohort`, `joined_count_cohort`,
   `churned_count_cohort`, `avg_progress_cohort`, added v77). The
   scope toggle in admin picks which column family to render.
+- **Added in v92:** `total_lessons` (int): the number of `lessons` rows
+  with `counts_toward_progress` that `avg_progress` was divided by on
+  that date. Null on rows written before v92.
+- **Writer (v92, v96):** the function
+  `rebuild_daily_snapshots(p_start_date, p_end_date)`. Since v92 it
+  counts only lessons with `counts_toward_progress` and decides "done"
+  through `lesson_is_complete`. Since v96 only `service_role` may
+  execute it, and it raises when `p_start_date` is more than 30 days
+  back. Its three callers use the service-role key: the
+  `snapshot-progress` cron, `/api/admin/rebuild-snapshots` and
+  `/api/admin/refresh-everything`.
 - **Filter rules** applied by `snapshot-progress` cron + the
   `rebuild_daily_snapshots()` RPC:
   - "active" = `membership_status IN ('active', 'past_due')`
@@ -476,6 +616,262 @@ intermittently, a non-JSON HTML 500 page.
   whole-window figure for ratios — do not derive those from points.
 - Percent values are PRE-SCALED (1.6 means 1.6%).
 - No revenue from this API is ever persisted.
+
+---
+
+## SQL functions and views (progress and watching)
+
+Defined by migrations v92 to v98, whose files exist only on branch
+`world-engine`. Whether v98 is applied to production is unconfirmed;
+`supabase/diagnostics/v6-wiring-preflight.sql` is the read-only query
+that settles it.
+
+### `lesson_is_complete` (function, v92)
+- **What it is:** the one SQL rule for "is this lesson done", the twin
+  of `isLessonComplete()` in `src/lib/progress.ts`. Change both or
+  neither.
+- **Signature:** `lesson_is_complete(p_requires_action boolean,
+  p_completed_at timestamptz, p_action_completed_at timestamptz,
+  p_skipped_at timestamptz, p_as_of date default null) returns boolean`
+- **Rule:** done when skipped; or watched (`completed_at`) for a
+  lesson with no action item; or watched and shipped
+  (`action_completed_at`) for a lesson with one. With `p_as_of` set,
+  every stamp must also fall on or before that date.
+- **Depends on:** nothing. It takes values and reads no table.
+- **Depended on by:** the views `student_progress_counts` and
+  `student_current_region`, and `rebuild_daily_snapshots` (which passes
+  the day as `p_as_of`)
+
+### `record_lesson_heartbeat` (function, v93, tightened in v97)
+- **What it is:** the only writer of `student_lesson_watch`.
+- **Signature:** `record_lesson_heartbeat(p_lesson_id text,
+  p_position_seconds numeric, p_reported_duration numeric default null,
+  p_delta_seconds numeric default 0, p_force boolean default false)
+  returns jsonb`. Security definer. Execute is granted to
+  `authenticated` and revoked from `public` and `anon`.
+- **Called by:** the browser, through `supabase.rpc()` in
+  `src/lib/world/watch-heartbeat.ts`. Nothing else calls it.
+- **Depends on:** `students` (it finds the caller's row from
+  `auth.uid()`; no student id is passed in) and `lessons` (the id must
+  exist there with `type = 'watch'` and a `bunny_video_id`; it reads
+  `duration_seconds`). It looks in `lessons` and never in
+  `lessons_next`.
+- **What it does with its inputs:** clamps the position into
+  `[0, duration]`; clamps the played-seconds delta to the wall-clock
+  time since the last beat, 20 seconds at most; refuses a beat less
+  than 5 seconds after the last one unless `p_force` is true or the
+  beat crosses the threshold. It stamps `threshold_met_at` when the
+  furthest position reaches 95% of `lessons.duration_seconds`, and
+  uses only that catalog duration for the decision (v97). A lesson
+  with no `duration_seconds` never crosses.
+- **Returns (stable contract, typed as `HeartbeatResult` in
+  `watch-heartbeat.ts`):** `accepted`, `reason` (`rate_limited` on a
+  refusal), `max_position_seconds`, `last_position_seconds`,
+  `watched_seconds`, `duration_seconds` (the row's
+  `reported_duration_seconds`), `threshold_met`, `threshold_crossed`
+  (true on exactly one call per lesson, the beat that crossed 95%; the
+  player uses that edge to call `POST /api/student/lesson-watched`
+  once). A refusal carries `accepted`, `reason`,
+  `max_position_seconds`, `watched_seconds`, `threshold_met` and
+  `threshold_crossed` only.
+- **Raises:** `42501` when the caller has no student row; `22023` when
+  the lesson is not a playable watch lesson.
+
+### `student_progress_counts` (view)
+- **What it is:** one row per student who has at least one completed
+  lesson that counts toward progress: `student_id`, `completed_count`.
+- **Depends on:** `student_lesson_completions`, `lessons`
+  (`counts_toward_progress`, `requires_action`), `lesson_is_complete`
+- **Written by:** nobody; it is a view. Its current definition is
+  v92's.
+- **Depended on by:** the admin pages `/admin`, `/admin/students`,
+  `/admin/journey` and `/admin/insights/progress`,
+  `src/lib/useJourneyPaceCounts.ts`, `src/lib/day28-embed.ts`,
+  `/api/cron/snapshot-progress`, `/api/admin/backfill-achievements`.
+  Nothing under `/world` reads it.
+- **Stable contract:** `student_id`, `completed_count`.
+  `completed_count` must stay `integer` (the `::int` cast in the view),
+  because `create or replace view` cannot change a column's type.
+  `security_invoker = on`; select is granted to `authenticated` and
+  revoked from `anon`.
+
+### `student_current_region` (view)
+- **What it is:** one row per student: `student_id`, `current_region`,
+  the furthest region by `regions.order_num` in which the student has
+  a completed lesson that counts toward progress.
+- **Depends on:** `student_lesson_completions`, `lessons`, `regions`
+  (`order_num`), `lesson_is_complete`
+- **Written by:** nobody; it is a view. v92 made it order by
+  `regions.order_num` (it had sorted the region id as text) and use
+  the shared rule. v98 added the `counts_toward_progress` filter.
+- **Depended on by:** `/admin/journey`,
+  `src/lib/useJourneyPaceCounts.ts`. Nothing under `/world` reads it.
+- **Stable contract:** `student_id`, `current_region` (text).
+  `security_invoker = on`; select is granted to `authenticated` and
+  revoked from `anon`.
+- **Unconfirmed:** until v98 is applied, the live view is v92's, which
+  has no `counts_toward_progress` filter and so also counts `l057`.
+
+---
+
+## The world's in-memory contracts (branch `world-engine`)
+
+TypeScript shapes passed between modules in the browser. Nothing here
+is stored. Each has one writer. The path from the database to the map
+is: `GET /api/student/data`, `StudentContext`, `useWorldCatalog()`,
+`buildMapModel()`, `sourceData()`, `WorldMap`, `WorldV6`.
+
+### `MapModel` (`src/lib/world/map-model.ts`)
+- **Written by:** `buildMapModel()` and nothing else.
+- **Built from:** `{ areas, lessonsByArea, completedLessonIds }`: the
+  catalog's areas in route order, its lessons per area, and the
+  student's completed lesson ids.
+- **Read by:** `useMapModel()` (`src/components/world/useMapModel.ts`)
+  and `sourceData()` (`src/components/world-v6/source.ts`). `WorldMap`
+  gets it through those two.
+- **Shape:**
+  ```ts
+  export const MAP_PLACES = 8;
+
+  export interface MapLesson {
+    id: string;
+    title: string;
+    minutes: number | null;
+    action: boolean;
+    done: boolean;
+    hasVideo: boolean;
+  }
+
+  export interface MapFeature {
+    id: string;
+    title: string;
+    key: string | null;
+    done: boolean;
+  }
+
+  export interface MapArea {
+    id: string;
+    name: string;
+    lessons: MapLesson[];
+    features: MapFeature[];
+    done: number;
+  }
+
+  export type MapModel =
+    | {
+        ok: true;
+        areas: MapArea[];
+        place: number;
+        placeNext: number;
+        doneTotal: number;
+        total: number;
+      }
+    | { ok: false; reason: "empty" | "shape" };
+  ```
+- **Rules its readers rely on:** a lesson with
+  `counts_toward_progress` is one of the area's `lessons`; any other
+  is one of its `features` and is in no total. `reason` is `empty`
+  when there are no areas or no lessons at all, and `shape` when the
+  catalog does not have exactly eight areas. `place` is the index of
+  the first area with a counting lesson left, or 8 when none is left.
+  `placeNext` is the index of the first undone lesson in that area, or
+  -1. `minutes` is null when the catalog has no `duration_seconds`,
+  otherwise whole minutes with a floor of 1. `hasVideo` is true only
+  for a `watch` lesson with a `bunny_video_id`.
+
+### `WorldSource` (`src/components/world-v6/source.ts`)
+- **Written by:** `WorldMap` (`src/components/world/WorldMap.tsx`) and
+  nothing else. It joins `sourceData(model, WORLD_LOCK_MODE)` with the
+  address from the stage and four callbacks.
+- **Read by:** `WorldV6`, and `contentOf()` in
+  `src/components/world-v6/content.ts`, which hands the names and
+  counts down to the map's parts. With no source, `WorldV6` runs on
+  its fixture (the development page).
+- **Shape:**
+  ```ts
+  export interface WorldSource {
+    areas: readonly StudyArea[];
+    study: Study;
+    total: number;
+    lock: LockMode;
+    minutes(k: number, i: number): number | null;
+    isDone(k: number, i: number): boolean;
+    openK: number | null;
+    paused: boolean;
+    onOpenArea(k: number): void;
+    onCloseArea(): void;
+    onWatch(k: number, i: number): void;
+    onFeature(k: number): void;
+  }
+
+  export interface SourceData {
+    areas: StudyArea[];
+    study: Study;
+    total: number;
+    lessonIds: string[][];
+    featureIds: (string | null)[];
+    minutes: (number | null)[][];
+    done: boolean[][];
+  }
+
+  export function sourceData(model: ReadyModel, lock: LockMode): SourceData
+  ```
+  `ReadyModel` is `Extract<MapModel, { ok: true }>`. `StudyArea`,
+  `Study` and `LockMode` (`"open" | "look" | "locked"`) are declared in
+  `src/components/world-v6/study.ts`.
+- **Rules its reader relies on:** `areas` always has eight entries;
+  each one's `id`, `landmark`, `mesh` and `depth` come from
+  `STUDY_AREAS` (so from `src/lib/world-v6/layout.ts`) and its name,
+  lesson count, titles, action items and feature row from the model.
+  `k` is a place index 0 to 7 and `i` a lesson index inside it.
+  `openK` is the place the address names, or null. `paused` is true
+  while the address names a lesson. Only the first feature row of an
+  area is shown.
+- **What the callbacks may do:** the map changes no progress and never
+  navigates by itself. `WorldMap` turns each callback into one address
+  change with `router.push(..., { scroll: false })`: `onOpenArea(k)`
+  to the place, `onCloseArea()` to the map, `onWatch(k, i)` and
+  `onFeature(k)` to the lesson page.
+
+### The stage context, `useWorldStage()` (`src/components/world/WorldStage.tsx`)
+- **Written by:** `WorldStage` and nothing else, from
+  `useSelectedLayoutSegments()` and its `base` prop (default
+  `/world`). No page sets any of it.
+- **Read by:** `WorldMap`, `PlaceRoute`, `LessonScreen`
+- **Shape:**
+  ```ts
+  export interface WorldStageValue {
+    base: string;
+    openAreaId: string | null;
+    lessonId: string | null;
+    href(areaId?: string | null, lessonId?: string | null): string;
+  }
+  ```
+- **Rules its readers rely on:** `openAreaId` is the first route
+  segment below the layout and `lessonId` the second. `href()` is the
+  map, `href(a)` a place, `href(a, l)` a lesson. With no `WorldStage`
+  above it the hook returns `{ base: "/world", openAreaId: null,
+  lessonId: null, href }` and does not throw.
+
+### `useMapModel()` (`src/components/world/useMapModel.ts`)
+- **Written by:** the hook itself, from `useWorldCatalog()` and
+  `useStudent().completedLessonIds`.
+- **Read by:** `WorldMap`, `PlaceRoute`, `LessonScreen`
+- **Shape:**
+  ```ts
+  export type MapStatus = "loading" | "error" | "empty" | "shape" | "ready";
+  export type ReadyMapModel = Extract<MapModel, { ok: true }>;
+
+  export function useMapModel(): { status: MapStatus; model: ReadyMapModel | null }
+  export function mapIsSilent(status: MapStatus): boolean
+  ```
+- **Rules its readers rely on:** `model` is set only when `status` is
+  `ready`. `mapIsSilent` is true for `loading`, `error` and `empty`;
+  in those three the routes drawn over the map render nothing, and the
+  host's card is the whole message. In `shape` a lesson page still
+  opens. A failed catalog query and a refused data request both arrive
+  as `empty` today: the data route answers 200 with empty rows, and
+  `StudentContext` sets no error on a non-OK response.
 
 ---
 

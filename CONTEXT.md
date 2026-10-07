@@ -9,15 +9,86 @@ For *the product / what each surface does for the user* see
 This document is **the live map** of the app. Updated at the moment any
 structure changes.
 
-> **Paused 2026-09-22 — the REBUILD.** The whole course is being re-recorded
-> (110+ lessons, self-hosted video) and this app is being rebuilt around it.
-> Lovro is away from it for at least a week.
-> - **Open items / uncommitted work / blocked decisions:**
->   [system-docs/open_items_2026-09-22.md](system-docs/open_items_2026-09-22.md)
->   — includes a 7-line bug fix sitting uncommitted in the working tree.
-> - **Why the rebuild exists (Gate 1 memo + 2026-09-22 addendum):**
->   `../_admin/memos/sprint_rebuild.md`
-> - **The 3D world map prototype:** `../_admin/research/world-gen/README.md`
+> **The course rebuild lives on branch `world-engine`, and this document
+> describes that branch.** `main` holds none of the rebuild: no `/world`
+> route, no `video-token` or `lesson-watched` route, no migration file
+> from v92 on (checked with git on 2026-10-07). Both PRDs record `main`
+> as the production branch.
+>
+> On `world-engine` the app has a second student home, `/world`: a 3D
+> map of the rebuilt eight-area course. It sits behind a closed
+> allowlist (`src/lib/world/access.ts`). A student who is not on the
+> list is sent to `/dashboard`, and an unset list admits nobody.
+> `/dashboard` stays the default student home.
+>
+> - **Why the rebuild exists, and how it was designed:**
+>   `../_admin/memos/sprint_rebuild.md` (the memo),
+>   `../_admin/prds/rebuild-engine/` (PRD 1, the engine: the catalog
+>   switch, video, watch tracking) and `../_admin/prds/world-v6-wiring/`
+>   (the PRD that put the v6 map into `/world`). Each PRD folder has a
+>   `project_log.md`. Where a build stands is recorded in those folders.
+> - **The map's own records:** `world_overnight_log.md` (every decision
+>   taken while the map was built, numbered), `world_art_bible_v6.md`
+>   (how each place is built, and the frame budgets) and `.impeccable.md`
+>   (the student-side design source of truth).
+> - **The first prototype map** is still in the tree and mounted by
+>   nothing a student can reach: `src/components/world/WorldCanvas.tsx`,
+>   `src/lib/world/scene.ts`, `public/world/` and the development page
+>   `src/app/dev/world/`. Its generator and notes are in
+>   `../_admin/research/world-gen/README.md`.
+> - **A dated record from before the rebuild:**
+>   [system-docs/open_items_2026-09-22.md](system-docs/open_items_2026-09-22.md).
+>   Its first item (the uncommitted streak fix) has since been committed,
+>   so check each item before relying on it.
+
+**Kind:** A composite system: an application (the student and team
+screens under `src/app`, behind a login) and a service (the scheduled
+jobs under `src/app/api/cron` and the webhooks under
+`src/app/api/webhooks`). The two ship as one Next.js deployment and
+write one Supabase database.
+
+**Proved by:** Only in part. The standard asks an application for a
+browser smoke through the real login with a disposable identity plus
+live invariants over its views, and a service for tests on every
+change, a live probe of the deployed service and its noticer firing on
+a forced failure (`../documentation_standard.md`, section 4). What
+exists here, checked on 2026-10-07:
+
+- **Application.** No browser smoke goes through the real login, and no
+  disposable identity exists. No invariant runs against live data.
+  What exists is narrower. `node world-tests/v6-app.mjs` walks the
+  `/world` screens in a real browser on a login-free development
+  harness with a pretend student, so it proves those screens and
+  nothing about login, the server or `/dashboard`.
+  `npm run test:client` covers the world's pure modules. The files in
+  `supabase/diagnostics/` are SQL that someone pastes into the Supabase
+  SQL editor by hand. All are read-only checks except
+  `stamp-test-lesson.sql`, which puts the test video's id on one live
+  lesson.
+- **Service.** `npm run test:migrations` runs migrations v92 to v98 on
+  a local Postgres, among them the heartbeat function and the snapshot
+  rebuild. No test covers a cron route or a webhook handler, and
+  nothing runs any test automatically on a change (the repo has no CI
+  configuration). No probe checks the deployed crons: `cron_runs`
+  records every invocation and `supabase/diagnostics/admin-health.sql`
+  reads it by hand. No noticer fires when a cron fails.
+
+Every harness and its command is under [Testing](#testing).
+
+## Parts
+
+| Part | Kind | Code lives at | Writes |
+|------|------|---------------|--------|
+| Student and team screens | application | Pages under `src/app/` (`login`, `auth`, `dashboard`, `world`, `admin`, `journal`) and the request handlers they call under `src/app/api/` (`auth`, `student`, `discounts`, `admin`, `client-event`) | Everything a signed-in person changes. It is the only writer of `student_lesson_watch` (through the `record_lesson_heartbeat` function), `student_quiz_attempts`, `student_region_quiz`, `student_lesson_ratings`, `discount_requests`, `templates`, `stats_saved_views`, `etfb_team_links` and `etfb_seat_decisions`. |
+| Scheduled jobs and webhooks | service | `src/app/api/cron/` (six routes, five of them scheduled in `vercel.json`) and `src/app/api/webhooks/` (`whop`, `adbounty`) | It is the only writer of `disengagement_alerts`, `canceling_snapshots`, `student_dm_log`, `cron_runs` and `student_milestones.bounty_access_claimed_at`. |
+
+Both parts write `students`, `tasks`, `student_lesson_completions`,
+`student_milestones` and `sync_runs`, and both call the
+`rebuild_daily_snapshots` function that writes
+`daily_progress_snapshots`. The one-writer rule of a composite system
+does not hold for those tables.
+[system_contracts.md](system_contracts.md) names the writers where it
+matters.
 
 ## What this is
 
@@ -27,7 +98,8 @@ Two surfaces in one Next.js app:
   regions, lessons, action items, streaks, discount window, region
   to-dos) and `/dashboard/playbook` (Map 2: post-sprint hub with 3
   always-on cards, each opening a full HTML article in an iframe —
-  v72).
+  v72). On branch `world-engine` there is also `/world`, the map of the
+  rebuilt course, for allowlisted students only.
 - **Team-facing** — `/admin` (Karlo + CSM team): kanban, students,
   templates, discounts, alerts, insights, discord settings.
 
@@ -39,6 +111,11 @@ Two surfaces in one Next.js app:
   watch-history sync (direct HTTP, no SDK)
 - **GSAP** — map camera animation
 - **Framer Motion** — celebrations, overlays
+- **three.js** (`three` 0.169): the 3D world map under `/world`. It is
+  loaded with a dynamic import, so a phone, which gets the list view,
+  never downloads it.
+- **Bunny Stream**: lesson video for `/world`, played through signed
+  embed URLs
 - **Vercel** — hosting + cron jobs + Analytics
 
 ## Student Surfaces
@@ -49,6 +126,22 @@ Two surfaces in one Next.js app:
 | `/auth/callback` + `/auth/complete` | OAuth callback + post-auth landing |
 | `/dashboard` | The map (overview + 4 regions). Auto-redirects to `/dashboard/playbook` once the student has completed `PLAYBOOK_UNLOCK_LESSON_ID` (l078, the last R4 watch lesson) unless `?map=1` is passed. |
 | `/dashboard/playbook` | Map 2 hub. Two unlock paths (v75.16, see `isPlaybookUnlocked` in `src/lib/progress.ts`): standard sprint completion of l078 ("How I Approach Research / Coming Up With Ad Ideas"), OR legacy auto-unlock (`joined_at >= 30 days ago` AND completion ratio >= 0.80) — for older customers who passed the action-item phase before our platform existed. Bounty Access (`bounty_access_claimed_at`) is a SEPARATE milestone and does NOT unlock the Playbook. |
+| `/world` | Branch `world-engine`, allowlisted students only. The world map. The layout (`src/app/world/layout.tsx`) wraps the same `StudentGuard`, `StudentProvider` and `MembershipBlockOverlay` as the dashboard, plus `WorldAccessGate` (the allowlist) and `WorldStage`. `WorldStage` mounts the map host `WorldMap` once, so the map stays mounted while the address moves between the three routes. The page itself renders nothing. `WorldMap` shows the v6 map (`WorldV6`) with the student's own areas, lesson titles and finished lessons once the catalog has loaded and has exactly eight areas. In every other state it shows one plain card and loads no 3D: loading, "Your course didn't load.", "There are no lessons here yet.", or "The new course isn't switched on here yet." Under 760 px wide, or when the 3D fails to start, the same component shows a list view; on a machine that cannot draw the 3D it shows still posters from `public/world-v6/posters/`. |
+| `/world/[areaId]` | A place's own address. The route (`PlaceRoute`) renders nothing for an area the catalog has: `WorldStage` reads the same address and the map opens that place's panel. For an unknown area it shows "That place isn't on the map." with a link back. Opening or closing a place inside the map changes the address without moving the page scroll, because the page scroll is the map's camera. |
+| `/world/[areaId]/[lessonId]` | The lesson page (`LessonScreen`), drawn over the paused map: a back link to the place, an eyebrow (the area's number, the lesson's position in the area, the minutes when the catalog has them), the lesson title, the video player for a `watch` lesson (`LessonPlayer`, which shows "Not recorded yet." and calls no server when the lesson has no video), the description or a setup line for any other type, the Milestone box when the lesson has an action item, and a Next lesson link that is enabled once the lesson is in `completedLessonIds`. Escape returns to the place. An unknown area or lesson shows "That lesson isn't here." Nothing under `/world` can complete an action item or a setup lesson today. |
+
+**Development-only pages for the world** (both return `notFound()`
+outside `NODE_ENV === "development"`):
+
+| Path | What it is for |
+|------|----------------|
+| `/dev/world-v6` | The v6 map alone, on fixture data, with the TUNE panel (lock mode, where the pretend student is, the scroll length of every stretch). No `StudentProvider` and no request to `/api/*`. `node world-tests/v6-ui.mjs checks` drives this page. |
+| `/dev/world-app` | The three `/world` routes with a pretend student and no login: the same `WorldStage`, `WorldMap`, `PlaceRoute` and `LessonScreen`, with `FixtureStudentProvider` in place of the auth guard, `StudentProvider` and the access gate. Presets by query string (`?p=p0`, `mid`, `last`, `ooo`, `all`; `?catalog=loading`, `error`, `empty`, `shape`). It makes no network request. `node world-tests/v6-app.mjs` drives this page. |
+
+Older development pages for the map's earlier versions are still in
+`src/app/dev/` (`world`, `world-v2` to `world-v5`, `world-codex`,
+`area`), and `/dev/world-v6/camera` shows the v6 scene with no
+interface for the camera render checks.
 
 **State:** `AuthContext` (session + student row), `StudentContext`
 (lessons, completions, streaks, discount, sprint milestones, playbook
@@ -117,8 +210,10 @@ time his device says.
 **⚠️ Call gates — the cap that does NOT depend on knowing the cause
 (v85.14).** `src/lib/call-gate.ts`. A student's tab called `/api/auth/me`
 and `/api/student/data` roughly **once per second for 72 seconds** on
-2026-08-27 — about **800 Supabase queries from one tab** (each
-`/api/student/data` fans out to ~11 table reads). The refresh storm
+2026-08-27 — about **800 Supabase queries from one tab** (that figure
+assumed ~11 table reads per `/api/student/data` call; the route made
+16 at the time and makes 17 on this branch: `students` first, then 16
+in parallel). The refresh storm
 drained Supabase's token bucket, the 429 deleted his session, and he was
 bounced to `/login`.
 
@@ -143,7 +238,7 @@ screenshots. If the loop survives the cap, that log line names the
 trigger.
 
 **STILL UNKNOWN: what drives the loop.** Candidate worth checking first —
-`StudentContext.tsx:509` calls `setStudent(fresh.student)` with a fresh
+`StudentContext.tsx:695` calls `setStudent(fresh.student)` with a fresh
 object on every refresh, and the data effect depends on `[student]`, so
 each refresh re-triggers a full fetch. A closed cycle was never traced.
 
@@ -239,7 +334,31 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
 - `POST /api/auth/team/login` — admin password login
 
 **Student mutations** (Bearer token, RLS-respecting)
-- `POST /api/student/toggle-lesson` — mark/unmark watch completion
+- `POST /api/student/toggle-lesson`: tick or untick a completion on the
+  student's own say-so, for lessons that are not `watch` lessons. Since
+  v93 it answers 400 ("Watch lessons complete themselves.") when the
+  lesson's `type` in the live `lessons` table is `watch`. If that lookup
+  errors it lets the request through.
+- `POST /api/student/video-token`: body `{ lessonId }`. Returns a signed
+  Bunny Stream embed URL that lasts 4 hours, as `{ embedUrl, expires,
+  durationSeconds }`. It is the only place a playable video URL is
+  made. 403 unless `students.membership_status` is `active`; 404 with
+  `notRecorded: true` when the lesson is not a `watch` lesson or has no
+  `bunny_video_id`; 500 when the Bunny env vars are missing. Reads the
+  lesson from the catalog the switch names.
+- `POST /api/student/lesson-watched`: body `{ lessonId }` and nothing
+  else. The server re-reads `student_lesson_watch` and decides against
+  the catalog's `duration_seconds`: the furthest position must have
+  reached 95% of it (or the row already carries `threshold_met_at`),
+  and the played seconds must reach the floor (`WATCH_PLAYED_FLOOR`,
+  default 0.8). A lesson with no `duration_seconds` is never complete.
+  400 when the lesson is not a `watch` lesson. On a yes it stamps
+  `student_lesson_completions.completed_at` and runs the streak, CSM
+  reactivation, achievements and task re-evaluation chain, then
+  answers `{ completed: true, newAchievements }`. On a no it answers
+  `{ completed: false, reason, positionRatio, playedRatio, playedFloor }`.
+  Calling it again on a finished lesson writes nothing. It makes no
+  membership check; the paywall is on `video-token`.
 - `POST /api/student/mark-action-shipped` — toggle `action_completed_at`
 - `POST /api/student/skip-lesson` — mark optional lesson skipped
 - `POST /api/student/save-action-link` — Discord submission URL
@@ -252,7 +371,10 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
 - `POST /api/student/dismiss-why-youre-here` — final WYH card dismissed (v51)
 - `POST /api/student/submit-region-quiz` — region-quiz attempt (v65). One round-trip per completed attempt: updates last/best score, increments attempts, stamps `quiz_passed_at` on first attempt at ≥ 50%. Replaces v54's mark-region-quiz-passed + increment-region-quiz-attempts split.
 - `POST /api/student/refresh-watch-sync` — force a Whop watch-history pull
-- `GET  /api/student/data` — full snapshot for the dashboard
+- `GET  /api/student/data` — full snapshot for the dashboard and for
+  `/world`. It reads the catalog through the switch in
+  `src/lib/catalog-tables.ts` and returns `watchProgress` (the
+  student's `student_lesson_watch` rows) and `catalogSuffix` with it.
 
 **Admin**
 - CRUD on templates (`/api/admin/templates`, `/api/admin/templates/[id]`),
@@ -323,12 +445,19 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
 - `GET /api/cron/snapshot-progress` — write `daily_progress_snapshots`
 - `GET /api/cron/day28-dm` — fire day-28 Discord DM
 
-**Public**
-- `GET /api/tasks/[taskId]` — public task lookup (CSM dashboard links)
-
 ## Database — Active Tables
 
 See [system_contracts.md](system_contracts.md) for who depends on whom.
+
+Migrations v92 to v99 belong to the course rebuild, and their files
+exist only on branch `world-engine`. They are pasted into the Supabase
+SQL editor by hand. The rebuild-engine project log records v92 to v95
+as applied to production on 2026-09-23, and the post-checks
+(`supabase/diagnostics/prd1-postchecks.sql`, which covers v92 to v97)
+as passing against production on 2026-09-24. Whether v98 and v99 are
+applied is unconfirmed; `supabase/diagnostics/v6-wiring-preflight.sql`
+is the read-only query that settles it. What this section says about
+those migrations comes from their text.
 
 **Identity / accounts**
 - `team_members` — founder/admin/CSM accounts (Supabase auth-linked)
@@ -337,8 +466,11 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
   membership_status, etc. Per-function state lives in the sibling
   tables below.
   - **`membership_status` is the sole dashboard access gate.**
-    `MembershipBlockOverlay` (mounted on `/dashboard/layout.tsx`) hard-
-    blocks on anything other than `'active'` and never asks Whop. So a
+    `MembershipBlockOverlay` (mounted on `/dashboard/layout.tsx`, and
+    on `/world/layout.tsx` on branch `world-engine`) hard-blocks on
+    anything other than `'active'` and never asks Whop.
+    `POST /api/student/video-token` applies the same test on the
+    server before it signs a video URL. So a
     stale value here locks out a fully paid student while every Whop-
     native module keeps working. One row, but a Whop user may hold
     SEVERAL memberships (re-subscribe, refund + rebuy, free-plan claim,
@@ -357,6 +489,54 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 - `regions` — R1–R4 metadata
 - `lessons` — canonical lesson list (id, region, day, sort_order,
   watch vs action, `whop_lesson_id`, etc.)
+  - v92 added six columns. `counts_toward_progress` (boolean, default
+    true; false on `l057`): the SQL progress views and the snapshot
+    function count only lessons where it is true. `feature_key` (text,
+    unique where set; `bounty_access` on `l057`, `playbook_unlock` on
+    `l078`). `bunny_video_id` (text, unique where set): the Bunny
+    Stream video id, null when no video exists. `duration_seconds`
+    (int, above 0 when set): the real runtime, which the watched rule
+    needs. `video_ready_at` (timestamptz). `updated_at` (timestamptz,
+    kept by a trigger).
+- `regions_next` + `lessons_next` (v94): the staging catalog for the
+  rebuilt course. The migration seeds 8 areas (`a1` to `a8`:
+  Introduction, Fundamentals, Video Ads I, Video Ads II, Static Ads,
+  AI Ads & Content, Creative Strategy, Job Board) and 145 placeholder
+  lessons (`a1l01` to `a8l14`), 144 of which count toward progress.
+  `a7l22` is the Ad Bounty row (`type` `setup`,
+  `counts_toward_progress` false, `feature_key` `bounty_access`),
+  `a5l25` is the discount gate, and nine lessons have
+  `requires_action`. `lessons_next` has no `day` column, its
+  `sort_order` runs 1 to N across the whole course, and its `type` is
+  `watch` or `setup` only. `regions_next` also has `landmark_label`,
+  `rail_at` and `terrain`; v99 filled them with the first prototype
+  map's values (Lighthouse to Obelisk), and the v6 map reads none of
+  the three. Any signed-in user can read both tables and nothing in
+  the app writes them. These counts are the migration's; production
+  rows were not read for this document.
+
+  **Which catalog the app reads is one server-side switch.**
+  `src/lib/catalog-tables.ts` turns the env var `CATALOG_TABLE_SUFFIX`
+  (empty or `_next`; any other value throws when the module loads)
+  into `REGIONS_TABLE` and `LESSONS_TABLE`. Three routes read the
+  catalog through those names: `GET /api/student/data`,
+  `POST /api/student/video-token` and `POST /api/student/lesson-watched`.
+  Everything else (the crons, the admin pages, the achievements code,
+  the discount routes, `toggle-lesson`) reads `lessons` and `regions`
+  by name. `StudentContext` gets its catalog only from
+  `/api/student/data`, so a deployment with the suffix set serves the
+  staging catalog to `/dashboard` as well as to `/world`. A second env
+  var, `CATALOG_SHAPE` (empty, `v1` or `v2`), says whether the catalog
+  has the v2 shape (no `day`, one `sort_order` for the whole course).
+  The staging tables always count as v2, and the data route picks its
+  ordering from that.
+
+  **A staging lesson cannot be completed.**
+  `student_lesson_completions.lesson_id` references `lessons(id)`, and
+  the `record_lesson_heartbeat` function accepts only a lesson that
+  exists in `lessons` as a `watch` lesson with a video. A lesson that
+  exists only in `lessons_next` can be listed and opened, and nothing
+  can mark it done.
 - `quizzes` + `quiz_questions` — per-region quizzes
 - `playbook_nodes` — Map 2 hub cards (3 rows as of v72:
   pb_submit_bounties, pb_build_portfolio, pb_apply_job_board). Each
@@ -366,6 +546,10 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
   milestone node was dropped (v72).
 - `templates` — CSM DM templates (built-in + custom, with `trigger_config`)
 - `admin_config` — key/value app config (program link, Discord invite, etc.)
+  - v95 added the key `discount_window_days` (seeded `14`). No code
+    reads it: the discount routes use `DISCOUNT_WINDOW_DAYS` in
+    `src/lib/constants.ts`. It still appears as an editable row on
+    `/admin/settings`, where changing it changes nothing.
 
 **Student state (per-student rows — one table per function, v46)**
 - `student_milestones` — onboarding + sprint progression
@@ -383,6 +567,16 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 - `student_dm_log` — outbound DM-sent flags (day28_dm_sent_at; extend
   as new DM flows ship)
 - `student_lesson_completions` — watch + action shipping state per lesson
+- `student_lesson_watch` (v93): video watch telemetry, one row per
+  student per lesson: `max_position_seconds`, `last_position_seconds`,
+  `watched_seconds`, `reported_duration_seconds`, `heartbeat_count`,
+  `first_played_at`, `last_heartbeat_at`, `threshold_met_at`. It is a
+  measurement. The decision that a lesson is done stays in
+  `student_lesson_completions`. Its only writer is the
+  `record_lesson_heartbeat` SQL function (v93, tightened in v97), which
+  the browser calls directly about every 15 seconds of playback. The
+  table has read policies only, so no client can write a row. There is
+  no foreign key on `lesson_id`.
 - `daily_notes` — one row per student per day
 - `lesson_notes` — per-lesson note
 - `student_quiz_attempts` — quiz attempts
@@ -390,12 +584,15 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
 - `month_reviews` — month-end student review
 - `discount_requests` + `discount_feedback_questions` +
   `discount_feedback_responses` — discount flow
+  - v95 added `discount_requests.gate_lesson_id` (text, no foreign
+    key): the lesson that was the discount gate when the request was
+    decided. No code reads or writes it yet.
 - `disengagement_alerts` — auto-generated churn alerts
 - `tasks` — CSM task queue (per-student, per-scenario, links to
   `templates`). v85 added `outcome` (replied/no_reply/NULL, manual CSM
   tap on the Sent tab) + `outcome_at` + `outcome_by` — Phase 0 of the
   retention overhaul's feedback loop.
-- `daily_progress_snapshots` — one aggregate row per DAY (PK `snapshot_date`), not per student. Written solely by the `rebuild_daily_snapshots` RPC since v89; values are point-in-time, derived from `first_paid_at` / `canceled_at`. v77 added cohort columns (`active_count_cohort`, `joined_count_cohort`, `churned_count_cohort`, `avg_progress_cohort`). After v75.51 (scope toggle removed), only the `_cohort` columns are read by the UI; the legacy non-cohort columns are still written for historical continuity. v89 made every past day point-in-time (was: recomputed from each student's CURRENT membership_status, which made the active line monotone and unable to show churn), bounded the rebuild with `p_end_date`, and made the RPC the SOLE writer — the snapshot cron now calls it instead of upserting its own values, so there is one definition of 'active'. `canceling_snapshots` remains the cron's, and the RPC cannot see it. v81 aligned the cron + RPC + dashboard avg_progress formula on the canonical isLessonComplete + l057 exclusion (single source of truth).
+- `daily_progress_snapshots` — one aggregate row per DAY (PK `snapshot_date`), not per student. Written solely by the `rebuild_daily_snapshots` RPC since v89; values are point-in-time, derived from `first_paid_at` / `canceled_at`. v77 added cohort columns (`active_count_cohort`, `joined_count_cohort`, `churned_count_cohort`, `avg_progress_cohort`). After v75.51 (scope toggle removed), only the `_cohort` columns are read by the UI; the legacy non-cohort columns are still written for historical continuity. v89 made every past day point-in-time (was: recomputed from each student's CURRENT membership_status, which made the active line monotone and unable to show churn), bounded the rebuild with `p_end_date`, and made the RPC the SOLE writer — the snapshot cron now calls it instead of upserting its own values, so there is one definition of 'active'. `canceling_snapshots` remains the cron's, and the RPC cannot see it. v81 aligned the cron + RPC + dashboard avg_progress formula on the canonical isLessonComplete + l057 exclusion (single source of truth). v92 added the column `total_lessons`: the number of lessons with `counts_toward_progress` that `avg_progress` was divided by on that date (null on rows written before v92), and the RPC now decides "done" through the shared SQL function `lesson_is_complete`. v96 made the RPC executable by `service_role` only and made it raise when asked to start more than 30 days back.
 - `sync_runs` — audit log for the Whop community sync (v77). One row per attempt with source (cron / admin-button), status (success/failed), counts (fetched/inserted/updated/skipped/errors), duration_ms, error_message. Team-read RLS. Use to answer "did sync run last night?" without digging Vercel logs.
 - `canceling_snapshots` (v84) — one row per day: how many launch-cohort
   paying students were in Whop's "Canceling" state at snapshot time.
@@ -441,7 +638,8 @@ See [system_contracts.md](system_contracts.md) for who depends on whom.
   `snoozed`). PER-SEAT, never per-link. `revoked` is declared but never written
   by v1.
 - `cron_runs` (v82) — audit log for ALL six cron invocations. Captures route_name, started_at, finished_at, auth_status, status (running/success/failed/auth_failed), error_message, rows_affected. Written by every cron handler via `src/lib/cron-auth.ts`. Use to answer "did Vercel fire this cron in the last 24h?" — separable from sync_runs which only covers sync-whop.
-- `achievements` — catalog of 17 unlockable achievements (v53)
+- `achievements` — catalog of 16 unlockable achievements (v53 seeded
+  17; v56 deleted `streak_30`; `src/lib/achievements.ts` holds 16 rules)
 - `student_achievements` — per-student unlock rows + `achievement_unlock_stats`
   view exposing global unlock % (v53)
 - `student_region_quiz` — per-(student, region) quiz_passed_at +
@@ -516,13 +714,51 @@ Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` 
 | `useJourneyPaceCounts.ts` | Admin Journey pace tile data |
 | `map/` | Map geometry (path math, region bounds) |
 | `sop-templates.ts` | SOP scaffolding |
+| `catalog-tables.ts` | Which catalog the app reads. `CATALOG_TABLE_SUFFIX` becomes `REGIONS_TABLE` and `LESSONS_TABLE`; `CATALOG_SHAPE` becomes `CATALOG_IS_V2`. It throws when the module loads on any value outside the allowed ones, because a wrong table name would return an empty catalog with no error anywhere. |
+| `complete-lesson.ts` | `stampWatchCompletion()` stamps the watch half of a completion and is safe to call twice. `afterCompletionWrite()` runs what follows a completion, in order: streak, CSM reactivation, achievements, open-task re-evaluation, each best-effort. Only `POST /api/student/lesson-watched` calls them; `toggle-lesson` still carries its own copy of the same four calls. |
+| `world/access.ts` | Who may see `/world`. `canSeeWorld(studentId)` is true when `NEXT_PUBLIC_WORLD_LIVE` is `true` or the id is in `NEXT_PUBLIC_WORLD_PREVIEW_IDS`; an unset list admits nobody. Also `STUDENT_HOME` (`NEXT_PUBLIC_STUDENT_HOME`, default `/dashboard`) and `WORLD_LOCK_MODE` (`"open"`). It is a convenience gate in the browser; video URLs and completions are guarded on the server. |
+| `world/bunny-player.ts` | `attachBunnyPlayer()` talks to the Bunny Stream iframe over `postMessage` (the player.js protocol, written out here with no library): play, pause, seek, and the play, pause, ended, timeupdate and seeked events. It accepts a message only from that iframe's own window and from Bunny's host. |
+| `world/bunny-sign.ts` | Server only. `signBunnyEmbed()` builds the signed embed URL (`sha256(tokenKey + videoId + expires)`); `EMBED_TTL_SECONDS` is 4 hours. |
+| `world/catalog.ts` | The boundary between the world and the curriculum. `buildWorldCatalog()` turns lessons, regions, the completed ids and the watch rows into a `WorldCatalog`: areas sorted by `order_num`, lessons per area sorted by `sort_order`, progress per area, `hasVideo`, `lessonById`, the gate lesson. It reads only the fields both catalog shapes carry, never `day`. |
+| `world/map-model.ts` | Pure. `buildMapModel()` turns the catalog and the completed ids into what the map shows: per area the lessons that count and the "feature" rows that do not, the student's place and next lesson, the totals. It answers `empty` or `shape` for a catalog the eight-place map cannot draw (`MAP_PLACES` is 8). |
+| `world/scene.ts` | The first prototype map's three.js scene. Used only by `src/components/world/WorldCanvas.tsx` and the development page `/dev/world`; mounted by nothing a student can reach. |
+| `world/useWorldCatalog.ts` | The hook form of `catalog.ts`: reads `StudentContext` and returns the `WorldCatalog` plus `loading` and `loadError`. |
+| `world/watch-heartbeat.ts` | `createWatchHeartbeat()` turns the player's roughly 3.7 time updates a second into one `record_lesson_heartbeat` call per 15 seconds of playback, plus a forced one on pause, end, tab hidden and unmount. It counts played seconds and treats a jump of more than 1.5 seconds as a seek. |
+| `world/watch-rules.ts` | `judgeWatch()`: the server's rule for "watched". Position at 95% (`WATCH_POSITION_THRESHOLD`, the same number the SQL function holds) and played seconds at or above `WATCH_PLAYED_FLOOR` (an env var of the same name, default 0.8), both measured against the catalog's duration. |
+| `world-v6/` | The v6 map's 3D scene, 30 files. `scene.ts` is the scene itself: the camera on its rail, the click-in "park" view, the frame loop, and the calls the interface makes (`setWorldProgress`, `setProgress`, `setLock`, `setPaused`, `park`, `celebrate`). `layout.ts` is pure data: where the eight places are, their landmark words, the camera's route and the scroll budget of every stretch. `progress.ts` holds `WorldProgress`, the one shape the scene needs about a student (lessons per area, lessons done per area, the current area, the next lesson). `poster.ts` is poster mode: still renders of the opening and the eight stops for a machine that cannot draw the 3D. `quality.ts` holds the four quality tiers, picks one from the GPU's name and the canvas size, and proposes a step down when frames run slow. The rest are the camera rail (`rail.ts`), the terrain (`terrain.ts`), the contract between the scene and its modules (`modules.ts`), performance plumbing (`perf.ts`) and the art modules that build the places, the light, the water, the forest, the sky and the progress lanterns. `src/lib/` also still holds `world-v2/` to `world-v5/` and `world-codex/`, the earlier versions, which only their own development pages use. |
+
+### The world's components (`src/components/`)
+
+| File | Owns |
+|------|------|
+| `world/WorldStage.tsx` | Mounted by the `/world` layout. Reads the route segments below it: the first names the open place, the second the open lesson. Provides that as `useWorldStage()` (`base`, `openAreaId`, `lessonId`, `href()`), and renders `WorldMap` and then the route's children. The address is the only source of truth for what is open. |
+| `world/WorldMap.tsx` | The map's host. Joins the catalog, the student's finished lessons and the address into the one input `WorldV6` takes (`WorldSource`), and turns the map's four callbacks into address changes. Shows one of four plain cards when the catalog is not ready. It writes nothing. |
+| `world/useMapModel.ts` | `useMapModel()` names the five states the world can be in (`loading`, `error`, `empty`, `shape`, `ready`) for the host and for the routes drawn over it. |
+| `world/PlaceRoute.tsx` | What `/world/[areaId]` renders: nothing for a known area, a card for an unknown one. |
+| `world/LessonScreen.tsx` | The lesson page (see Student Surfaces). It reflects the server's answer about completion and has no way to decide it. |
+| `world/LessonPlayer.tsx` | The video player: asks `video-token` for a URL, resumes from `last_position_seconds`, feeds the heartbeat, and asks `lesson-watched` to confirm when the server reports the 95% crossing. |
+| `world/AreaScreen.tsx` | Exports `Panel`, the full-screen layer with one card that the lesson page and the two "not here" messages are drawn in. |
+| `world/WorldAccessGate.tsx` | Sends anyone `canSeeWorld()` refuses to `STUDENT_HOME`, and renders nothing until it knows. |
+| `world/WorldCanvas.tsx` | The first prototype map (loads `public/world/world.glb`). Only the development page `/dev/world` mounts it. |
+| `world/AreaLessonList.tsx` | The lesson rows of the earlier area screen. Only the development page `/dev/area` uses it. |
+| `world-v6/WorldV6.tsx` | The v6 map and everything drawn over it: the header, the card beside the student's place, the chip, the place panel, the timeline, the done card, the phone list view and poster mode. `WorldV6({ source })`: with a `source` it shows a real student and reports clicks to its host; with none it is the development page on fixture data. |
+| `world-v6/source.ts` | `WorldSource`, the map's one input, and `sourceData()`, which builds its data half from a `MapModel`. |
+| `world-v6/content.ts` | `WorldContent`: the names, counts, titles and minutes the map's parts read, from the fixture or from the source, handed down through a React context. |
+| `world-v6/study.ts` | The fixture for `/dev/world-v6`, and the `StudyArea`, `Study` and `LockMode` types the source reuses. Place ids, landmark words and meshes come from `src/lib/world-v6/layout.ts`. |
+| `world-v6/cardPlace.ts` | Where the card and the panel sit so they never cover the landmark, and the leader line that joins them to it. |
+| `world-v6/labels.ts` | Which place markers show as a text label and which as a dot, laid out once per frame. |
+| `world-v6/tuning.ts` + `world-v6/TuningPanel.tsx` | The development TUNE panel and its saved state. Rendered only when the map has no source. |
+| `world-v6/bench.ts` | `?bench=1` on the development page: the map runs its own route and reports frame times. |
+| `world-v6/world.module.css` | The map's styles, scoped to `.root`. |
+| `world-v6/tokens.module.css` | The world's colour, type, panel and focus-ring tokens as one `.tokens` class. The map's root carries it beside `.root`, and so does the wrapper of every screen drawn over the map or in its place. The values stay here until they move to `src/app/globals.css`. |
+| `world/world-ui.module.css` | The styles of the lesson page, the two "not here" cards and the four catalog cards. Every colour and font in it is a token from `tokens.module.css`. |
 
 ## State Management
 
 | Context | Scope | What it provides |
 |---------|-------|-----------------|
 | `AuthContext` | Global | `user`, `session`, `student`, `teamMember`, `isStudent`, `isTeam`, `signOut()`, `setStudent()` |
-| `StudentContext` | `/dashboard`, `/dashboard/playbook` | Lessons, completions, streaks, discount state (NULL `first_paid_at` blocks claim post-v75.26), sprint milestones, playbook welcome, first-client landed, action-shipped toggles, etc. |
+| `StudentContext` | `/dashboard`, `/dashboard/playbook`, and on branch `world-engine` also `/world` and its two child routes (mounted by `src/app/world/layout.tsx`) | Lessons, completions, streaks, discount state (NULL `first_paid_at` blocks claim post-v75.26), sprint milestones, playbook welcome, first-client landed, action-shipped toggles, etc. For the world it also provides `watchProgress`, `patchWatchProgress`, `markWatched`, `catalogSuffix` and `loadError`. |
 | ~~`AdminScopeContext`~~ | — | Removed in v75.51. Cohort is the only admin view; no toggle. |
 
 ## Integrations
@@ -530,9 +766,57 @@ Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` 
 | Integration | Used for | Env vars |
 |-------------|----------|----------|
 | Supabase | DB + auth + RLS | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` |
-| Whop | OAuth, promo codes, watch sync, membership webhooks | `WHOP_CLIENT_ID`, `WHOP_CLIENT_SECRET`, `WHOP_API_KEY`, `WHOP_WEBHOOK_SECRET`, `WHOP_COMPANY_ID`, `WHOP_PRODUCT_ID` |
+| Whop | OAuth, promo codes, watch sync, membership webhooks | `WHOP_CLIENT_ID`, `WHOP_API_KEY`, `WHOP_WEBHOOK_SECRET`, `WHOP_COMPANY_ID`, `WHOP_PRODUCT_ID`. No code reads `WHOP_CLIENT_SECRET`, which this row used to list: the OAuth flow is PKCE and sends no secret. |
 | Discord | Day-28 DM, churn DMs | `DISCORD_BOT_TOKEN` |
+| Bunny Stream (branch `world-engine`) | Lesson video for `/world`. The server signs a short-lived embed URL per request (`POST /api/student/video-token`); the browser never holds the key. | `BUNNY_STREAM_LIBRARY_ID`, `BUNNY_STREAM_TOKEN_KEY` |
 | Vercel | Hosting + cron + analytics | `vercel.json` |
+
+**The world's own settings** (branch `world-engine`, names only):
+
+| Env var | Read by | What it sets |
+|---------|---------|--------------|
+| `CATALOG_TABLE_SUFFIX` | `src/lib/catalog-tables.ts` | Which catalog the app reads: empty for `lessons` and `regions`, `_next` for the staging pair. Server side. |
+| `CATALOG_SHAPE` | `src/lib/catalog-tables.ts` | Empty, `v1` or `v2`: whether the catalog has the v2 shape. Server side. |
+| `NEXT_PUBLIC_WORLD_PREVIEW_IDS` | `src/lib/world/access.ts` | The allowlist: student ids, comma separated. Unset admits nobody. |
+| `NEXT_PUBLIC_WORLD_LIVE` | `src/lib/world/access.ts` | `true` opens `/world` to every student. |
+| `NEXT_PUBLIC_STUDENT_HOME` | `src/lib/world/access.ts` | Where a student who may not see the world is sent. Default `/dashboard`. |
+| `WATCH_PLAYED_FLOOR` | `src/lib/world/watch-rules.ts` | The share of a lesson that must have been played for it to count as watched. Default 0.8. Server side. |
+
+A `NEXT_PUBLIC_` value is built into the browser bundle, so changing
+one takes a new build.
+
+The tables above are not the full list. The code also reads
+`ADBOUNTY_WEBHOOK_SECRET`, `CRON_SECRET`, `DISCORD_TEAM_WEBHOOK_URL`,
+`DISCORD_TEST_DM_RECIPIENT`, `NEXT_PUBLIC_APP_URL`,
+`NEXT_PUBLIC_INTRO_VIDEO_URL`, `NEXT_PUBLIC_KARLO_INTRO_VIDEO_URL`,
+`PKCE_COOKIE_SECRET`, `STUDENT_AUTH_SECRET`, `WHOP_BYPASS_EMAILS`,
+`WHOP_BYPASS_USER_IDS`, `WHOP_COURSE_ID` and `WHOP_DISCOUNT_PLAN_IDS`
+(from `grep -rhoE 'process\.env\.[A-Z_0-9]+' src/` on 2026-10-07).
+
+## Testing
+
+No test runner is installed and nothing runs on a push. Each harness
+below is a script someone starts by hand, from `30-day-sprint/` unless
+the row says otherwise. Node 22 runs the TypeScript directly
+(`--experimental-strip-types`).
+
+| Harness | Command | Needs the dev server | What it covers |
+|---------|---------|----------------------|----------------|
+| Client tests | `npm run test:client` | No | The world's pure modules, run from the real source files: `watch-heartbeat`, `watch-rules`, `catalog`, `access`, `map-model` (`client-tests/`). |
+| Migration tests | `npm run test:migrations` (once before the first run: `npm install` in `supabase/migration-tests/`) | No | Migrations v92 to v98 on a local Postgres (PGlite): the SQL runs, a second run changes nothing, column types and progress numbers stay put, and the heartbeat function holds against a hostile caller. v99 is not covered. |
+| Offline v6 map tests | `node --import ./world-tests/v6-ts-resolve.mjs --experimental-strip-types --no-warnings world-tests/<file>` for `v6-route.mjs`, `v6-cave.mjs`, `v6-gate.mjs`, `v6-locked.mjs` and `v6-a2-foundations.test.mjs`. `v6-rail.test.mjs` takes the same flags plus `--expose-gc`. | No | The map's route, camera rail, cave, gate, locked stretches and quality logic, measured from `src/lib/world-v6/` with no browser. Each exits 1 on a failed check. |
+| Dev map page checks | `node world-tests/v6-ui.mjs checks` | Yes, on port 3111 | The interface of `/dev/world-v6`. The script launches Chrome with a software renderer (SwiftShader), so the page runs in poster mode: it covers the interface and leaves the live 3D path uncovered. |
+| World browser proof | `node world-tests/v6-app.mjs` (`--only 3,5,18` for some rows) | Yes, on port 3111 | 20 rows on `/dev/world-app`, on the real GPU: arrival, Watch, finishing a lesson and a place, deep links, unknown addresses, the phone view, poster mode, reduced motion, the four not-ready cards. It takes about 3 minutes, and three gaps print as NOT COVERED (a real login with a real video, other browsers and devices, the `look` and `locked` modes with a real student). |
+
+The two browser scripts need `npm install` once in `world-tests/`
+(`puppeteer-core`) and Google Chrome installed at its default macOS
+path. Start the dev server with `PORT=3111 npm run dev`; `BASE_URL`
+overrides the address the scripts open. Screenshots land in
+`world-tests/shots/`, which git ignores.
+
+`world-tests/` also holds the render and measurement scripts used
+while the map was built (`v2-*` to `v6-*`). `world-tests/README.md`
+explains the folder and its two traps.
 
 ## Other docs in this repo
 
@@ -547,6 +831,12 @@ Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` 
 - [AGENTS.md](AGENTS.md) — Next.js 16 agent rules (read for any
   Next.js-API-specific work).
 - `README.md` — repo intro for new devs.
+- [.impeccable.md](.impeccable.md): the student-side design source of
+  truth (the world, tokens, type, the progress interface).
+- [world_art_bible_v6.md](world_art_bible_v6.md): how each of the
+  eight places is built, and the map's frame budgets.
+- [world_overnight_log.md](world_overnight_log.md): the numbered
+  record of every decision taken while the map was built.
 
 ## How to do common things
 
@@ -556,6 +846,8 @@ Schedules live in `vercel.json`. All six routes use the shared `verifyCronAuth` 
 | Add a new CSM trigger metric | `src/lib/csm-triggers.ts` (`METRICS` registry + `evalCondition`) + type union in `src/types/database.ts` |
 | Add a new student-state field | First check CLAUDE.md "table-level bounded contexts" — it probably belongs in its own table, not on `students` |
 | Touch the map's camera | `src/components/mockup/MapMockup.tsx` (`transformRef` + `applyTransform`) |
+| Change what the world map shows for a student | `src/lib/world/map-model.ts` (the rules) and `src/components/world-v6/source.ts` (the map's input). `system_contracts.md` has both shapes. |
+| Change where a place is, its landmark word or the camera's route | `src/lib/world-v6/layout.ts`, then the offline v6 map tests |
 | Add a new DM template | `/admin/templates` (UI, not migration) |
 | Run a one-off DB change | New migration in `supabase/migrations/`, idempotent |
 | Update CONTEXT.md | When you add/rename/delete a route, table, context, or lib module |

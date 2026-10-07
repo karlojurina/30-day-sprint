@@ -2304,6 +2304,21 @@
   margin-top: 12px;
 }
 
+/* With a source the feature row is a button to its own page (WorldV6
+   PanelBody): the same plaque, with .root button's font reset put back. */
+.root button.feature {
+  width: 100%;
+  border: 0;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  transition: background-color 150ms var(--ease);
+}
+
+.root button.feature:hover {
+  background: rgba(146, 151, 208, 0.24);
+}
+
 .panel .video {
   margin-top: 14px;
 }

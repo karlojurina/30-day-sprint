@@ -13,17 +13,18 @@ import {
 } from "react";
 import type { Rail } from "@/lib/world-v6/rail";
 import type { AreaAnchor, ProjectedMarker, WorldFrame, WorldScene } from "@/lib/world-v6/scene";
+import { STUDY_AREAS, isAction, lessonTitle, pad2, studyFor, type Study, type StudyArea } from "./study";
+import type { WorldSource } from "./source";
 import {
-  STUDY_AREAS,
-  TOTAL_LESSONS,
-  isAction,
-  lessonMinutes,
-  lessonTitle,
-  pad2,
-  studyFor,
-  worldProgressOf,
-  type Study,
-} from "./study";
+  WorldContentContext,
+  contentOf,
+  lessonDone,
+  lessonLength,
+  placeMinutes,
+  progressOf,
+  useContent,
+  type WorldContent,
+} from "./content";
 import { areaShare, type WorldProgress } from "@/lib/world-v6/progress";
 import { SKY_MARKS } from "@/lib/world-v6/layout";
 import { CARD_HINTS, anchorCard, placeCard, placePanel, type Box, type Placement } from "./cardPlace";
@@ -90,9 +91,23 @@ import s from "./world.module.css";
  * positioned from the frame loop only when they change (cardPlace.ts), never
  * per frame, and go solid (no backdrop filter) at tiers 2 and 3 and in poster
  * mode.
+ *
+ * A SOURCE (2026-10-07, world_v6_wiring_prd.md WI-2). With no props this is
+ * the dev page described above. Given a `source` (source.ts) it shows that
+ * student in the app: the words and counts come from the source (content.ts),
+ * the lock and the frontier too, and no tuning is read from or saved to
+ * localStorage. It changes no progress and opens no lesson itself: opening and
+ * closing a place, Watch, a panel row and the feature row call the source,
+ * whose host changes the address, and one effect brings the component to
+ * source.openK. While source.paused (a lesson page is open over the map) the
+ * scene draws nothing, the root is inert, and new progress waits until it
+ * closes. The TUNE panel, the footer links and the bench exist only without a
+ * source. Geometry (N, ANCHORS, slotOf, the depths) reads STUDY_AREAS either way.
  */
 
 const N = STUDY_AREAS.length;
+/** The window.__world* test hooks: every build but production. */
+const HOOKS = process.env.NODE_ENV !== "production";
 const NARROW_QUERY = "(width < 760px)";
 /** Final pass C: the place whose click-in goes through the telescope (scene.ts TEL_PARK_PLACE, a7). */
 const TEL_K = SKY_MARKS.findIndex((m) => m.id === "a7");
@@ -245,9 +260,13 @@ interface Harness {
   __worldUi?: () => unknown;
   /** The WorldProgress the scene was last given. */
   __worldProgress?: () => WorldProgress | null;
+  /** How many times this page has called scene.celebrate(). */
+  __worldCelebrations?: number;
   /** ?bench=1: the results, once the bench has run. */
   __worldBench?: BenchResult | null;
 }
+/** Where the hooks go: the window, or in a production build an object nobody else holds. */
+const harness = () => (HOOKS ? window : {}) as unknown as Harness & Record<string, unknown>;
 const GETTER_HOOKS = ["__worldDepth", "__worldMarkers", "__worldFrame", "__worldFrameCount"] as const;
 const PLAIN_HOOKS = [
   "__worldReady",
@@ -266,11 +285,15 @@ const PLAIN_HOOKS = [
   "__worldPoster",
   "__worldUi",
   "__worldProgress",
+  "__worldCelebrations",
 ] as const;
 
 /** A transparent pixel: the landing poster's fallback below 760 px, where the page is a list and needs no poster. */
 const BLANK_GIF = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 const NP = POSTER_IDS.length;
+
+/** The scene draws nothing while the tab is hidden, or while a lesson page is open over the map (source.paused). */
+const scenePaused = (source: WorldSource | undefined) => document.hidden || !!source?.paused;
 
 function copyMarkers(ms: readonly ProjectedMarker[] | undefined) {
   return (ms ?? []).map((m) => ({ id: m.id, x: m.x, y: m.y, visible: m.visible, proximity: m.proximity }));
@@ -280,7 +303,20 @@ type View = "unknown" | "world" | "list";
 type Phase = "loading" | "ready" | "failed";
 type Dir = "none" | "fwd" | "back";
 
-export function WorldV6() {
+export function WorldV6({ source }: { source?: WorldSource } = {}) {
+  // The course's words and counts, for the map and every component under it (content.ts).
+  const content = useMemo(() => contentOf(source), [source]);
+  return (
+    <WorldContentContext.Provider value={content}>
+      <WorldV6View source={source} content={content} />
+    </WorldContentContext.Provider>
+  );
+}
+
+function WorldV6View({ source, content }: { source: WorldSource | undefined; content: WorldContent }) {
+  const hasSource = source !== undefined;
+  /** A lesson page is open over the map (always false on the dev page). */
+  const paused = source?.paused ?? false;
   const narrow = useSyncExternalStore(subscribeNarrow, getNarrow, getUnknown);
   const reduced = useSyncExternalStore(subscribeReduced, getReduced, getFalse);
   const [phase, setPhase] = useState<Phase>("loading");
@@ -298,8 +334,19 @@ export function WorldV6() {
   const [hint, setHint] = useState<{ k: number; seq: number } | null>(null);
   // The server render and the first client render use the defaults; the
   // stored tuning is read once mounted (localStorage is client only).
-  const [tuning, setTuning] = useState<Tuning>(DEFAULT_TUNING);
+  const [devTuning, setTuning] = useState<Tuning>(DEFAULT_TUNING);
   const [tuningLoaded, setTuningLoaded] = useState(false);
+  // With a source nothing is tuned: the default pacing, the source's lock, and
+  // the frontier where its student is. It goes to the scene the same way.
+  const sourceLock = source?.lock;
+  const sourceFrontier = source?.study.current;
+  const tuning = useMemo<Tuning>(
+    () =>
+      sourceLock === undefined || sourceFrontier === undefined
+        ? devTuning
+        : { ...DEFAULT_TUNING, lock: sourceLock, frontier: sourceFrontier },
+    [devTuning, sourceLock, sourceFrontier],
+  );
   // Cheap laptops: poster mode (poster.ts), the landing poster, and ?bench=1.
   const [poster, setPoster] = useState<{ reason: string; kind: PosterKind | null; headless: boolean; canTry: boolean } | null>(null);
   const [posterReady, setPosterReady] = useState(false);
@@ -310,10 +357,12 @@ export function WorldV6() {
   const posterImgs = useRef<Array<HTMLImageElement | null>>([]);
   const manifestRef = useRef<PosterManifest | null>(null);
 
-  const study = useMemo(
+  const fixtureStudy = useMemo(
     () => studyFor(tuning.frontier, tuning.finished, tuning.partial, tuning.lock),
     [tuning.frontier, tuning.finished, tuning.partial, tuning.lock],
   );
+  const study = source ? source.study : fixtureStudy;
+  const areas = content.areas;
 
   const view: View = narrow === null ? "unknown" : narrow || phase === "failed" ? "list" : "world";
 
@@ -379,6 +428,9 @@ export function WorldV6() {
   const applyRef = useRef<((f: WorldFrame) => void) | null>(null);
   const studyRef = useRef<Study>(study);
   const tuningRef = useRef<Tuning>(tuning);
+  /** The source and its areas, for the callbacks and the frame loop (undefined: the dev page). */
+  const sourceRef = useRef<WorldSource | undefined>(source);
+  const areasRef = useRef<readonly StudyArea[]>(areas);
   /** The tuning and progress the scene last got, so only what changed is sent. */
   const appliedRef = useRef<Tuning | null>(null);
   const progressRef = useRef(-1);
@@ -435,16 +487,32 @@ export function WorldV6() {
     studyRef.current = study;
   }, [study]);
 
+  useLayoutEffect(() => {
+    sourceRef.current = source;
+    areasRef.current = areas;
+  }, [source, areas]);
+
+  // A lesson page opened over the map, or closed (source.paused; never on the
+  // dev page): the scene stops drawing, or wakes before the held progress goes in.
+  useLayoutEffect(() => {
+    sceneRef.current?.setPaused(scenePaused(sourceRef.current));
+  }, [paused]);
+
   // ── Tuning. Read once mounted; every later change is saved and, if the
   // pacing or the lock moved the scroll range, the camera is kept in place.
+  // With a source there is no stored tuning to wait for.
   useEffect(() => {
-    const stored = loadTuning();
-    if (!sameTuning(stored, DEFAULT_TUNING)) setTuning(stored);
+    if (!hasSource) {
+      const stored = loadTuning();
+      if (!sameTuning(stored, DEFAULT_TUNING)) setTuning(stored);
+    }
     setTuningLoaded(true);
-  }, []);
+  }, [hasSource]);
 
   const updateTuning = useCallback((patch: Partial<Tuning> | "reset") => {
     const prev = tuningRef.current;
+    // With a source the tuning is the source's: nothing to change, nothing stored.
+    if (sourceRef.current) return prev;
     const next = patch === "reset" ? DEFAULT_TUNING : sanitize({ ...prev, ...patch }, prev);
     if (sameTuning(prev, next)) return prev;
     tuningRef.current = next;
@@ -469,6 +537,8 @@ export function WorldV6() {
       const sc = sceneRef.current as (WorldScene & { celebrate?: (area: number) => void }) | null;
       if (!sc) return;
       if (typeof sc.celebrate === "function") {
+        const w = harness();
+        w.__worldCelebrations = (w.__worldCelebrations ?? 0) + 1;
         try {
           sc.celebrate(k);
         } catch (e) {
@@ -490,11 +560,23 @@ export function WorldV6() {
   const sendProgress = useCallback(
     (scene: WorldScene, st: Study) => {
       const u = ui.current;
-      const wp = worldProgressOf(st);
+      const wp = progressOf(areasRef.current, st);
       const prev = u.wp;
       u.wp = wp;
       scene.setWorldProgress(wp);
-      if (
+      let justDone = -1;
+      if (sourceRef.current) {
+        // A real student can finish any place, and more than one between two
+        // sends (a lesson page was open): the first that went from under 100% to 100%.
+        if (prev && u.live) {
+          for (let k = 0; k < N; k++) {
+            if (areaShare(prev, k) < 1 && areaShare(wp, k) >= 1) {
+              justDone = k;
+              break;
+            }
+          }
+        }
+      } else if (
         prev &&
         u.live &&
         prev.current < N &&
@@ -502,7 +584,10 @@ export function WorldV6() {
         areaShare(prev, prev.current) < 1 &&
         areaShare(wp, prev.current) >= 1
       ) {
-        celebrate(prev.current);
+        justDone = prev.current;
+      }
+      if (justDone >= 0) {
+        celebrate(justDone);
       } else if (u.doneK >= 0 && areaShare(wp, u.doneK) < 1) {
         // The tuning took that place back below 100%: no done card for it.
         u.doneK = -1;
@@ -540,6 +625,8 @@ export function WorldV6() {
       // The scroll range changed under an open place: come home by depth, not by pixels.
       if (u.locked) u.savedMax = -1;
     }
+    // A lesson page is open over the map: the progress waits, and goes in once when it closes.
+    if (sourceRef.current?.paused) return;
     // setLock also puts the places past the frontier in mist (look mode).
     if (!was || progressRef.current !== st.progress) {
       progressRef.current = st.progress;
@@ -556,7 +643,9 @@ export function WorldV6() {
     // A place that just became locked cannot stay open (the scene has already refused it).
     const u = ui.current;
     if (u.open >= 0 && !u.closing && tuning.lock !== "open" && u.open > tuning.frontier) closeAreaRef.current?.();
-  }, [tuning, applyTuning]);
+    // With a source the study moves without the tuning (a lesson watched), and
+    // `paused` turning false sends what was held. On the dev page neither adds a run.
+  }, [tuning, study, paused, applyTuning]);
 
   /** Dev (TUNE): the next lesson at the student's place counts as watched; the last one finishes the place. */
   const watchNext = useCallback(() => {
@@ -564,7 +653,7 @@ export function WorldV6() {
     const st = studyRef.current;
     const k = st.place;
     if (k >= N) return;
-    const n = STUDY_AREAS[k].lessons;
+    const n = areasRef.current[k].lessons;
     if (st.done[k] + 1 < n) updateTuning({ frontier: k, partial: st.done[k] + 1 });
     else updateTuning({ finished: Math.max(t.finished, k + 1), frontier: Math.min(N - 1, k + 1), partial: 0 });
   }, [updateTuning]);
@@ -688,6 +777,9 @@ export function WorldV6() {
       setDir("none");
       setClosing(false);
       sceneRef.current?.park(STUDY_AREAS[idx].id);
+      // With a source the address follows, unless it is the address that opened this place.
+      const src = sourceRef.current;
+      if (src && src.openK !== idx) src.onOpenArea(idx);
     },
     [cancelTween, lock, showHint],
   );
@@ -712,6 +804,9 @@ export function WorldV6() {
     if (u.open === -1 || u.closing) return;
     u.closing = true;
     setClosing(true);
+    // With a source the address follows, unless it is the address that closed this place.
+    const src = sourceRef.current;
+    if (src && src.openK !== null) src.onCloseArea();
     const scene = sceneRef.current;
     // The camera flies home to the depth the page scroll says, so the scroll
     // goes back on the saved depth first (it is still locked while flying).
@@ -742,6 +837,12 @@ export function WorldV6() {
 
   const openLesson = useCallback((i: number) => {
     const u = ui.current;
+    // With a source a lesson is a page of the host's: the panel's placeholder view never opens.
+    const src = sourceRef.current;
+    if (src) {
+      if (u.open >= 0) src.onWatch(u.open, i);
+      return;
+    }
     u.lesson = i;
     u.lessonReturn = -1;
     setDir("fwd");
@@ -752,6 +853,12 @@ export function WorldV6() {
   const watch = useCallback(
     (k: number, i: number, el: HTMLElement | null) => {
       if (k < 0 || k >= N) return;
+      // With a source: ask for the lesson's page and change nothing here (the address opens the place).
+      const src = sourceRef.current;
+      if (src) {
+        if (i >= 0) src.onWatch(k, i);
+        return;
+      }
       openArea(k, el, i);
       if (ui.current.open === k && i >= 0) openLesson(i);
     },
@@ -765,6 +872,32 @@ export function WorldV6() {
     setDir("back");
     setLesson(null);
   }, []);
+
+  /**
+   * With a source the address says which place is open (source.openK): bring
+   * the component to it. Nothing is reported back, since openArea and
+   * closeArea skip the callback when the source already says so. The world
+   * view waits for the scene, which calls this again once it is live; the list
+   * view acts at once.
+   */
+  const reconcile = useCallback(
+    (inWorld: boolean) => {
+      const src = sourceRef.current;
+      if (!src) return;
+      const u = ui.current;
+      const want = src.openK ?? -1;
+      // Already there, or already closing toward it.
+      if (want === (u.closing ? -1 : u.open)) return;
+      if (inWorld && !u.live) return;
+      if (want < 0) closeArea();
+      else openArea(want, null);
+    },
+    [openArea, closeArea],
+  );
+  const openK = source ? source.openK : null;
+  useEffect(() => {
+    if (view !== "unknown") reconcile(view === "world");
+  }, [openK, view, reconcile]);
 
   // ── Dock travel: tween the page scroll, the camera glides after it.
   // `instant` jumps (the tuning panel's jump row).
@@ -939,7 +1072,7 @@ export function WorldV6() {
     const stage = stageRef.current;
     if (!stage) return;
     const u = ui.current;
-    const w = window as unknown as Harness & Record<string, unknown>;
+    const w = harness();
     const layout = layoutRef.current ?? (layoutRef.current = new LabelLayout(N));
     const depths = depthsRef.current;
     const sizes = sizesRef.current;
@@ -1056,6 +1189,7 @@ export function WorldV6() {
     const leaderEl = leaderRef.current;
     const leaderPinEl = leaderPinRef.current;
     w.__worldView = "world";
+    w.__worldCelebrations = 0;
     // The card waits for the scroll to stop; the scene may sleep once the camera settles, so look again then.
     const onScrollRest = () => {
       u.scrollAt = performance.now();
@@ -1505,7 +1639,7 @@ export function WorldV6() {
       appliedRef.current = t;
       progressRef.current = studyRef.current.progress;
       sc.setProgress(progressRef.current);
-      u.wp = worldProgressOf(studyRef.current);
+      u.wp = progressOf(areasRef.current, studyRef.current);
       sc.setWorldProgress(u.wp);
       offTier = sc.onQualityTier((tierNow) => {
         if (!disposed) setTier(tierNow);
@@ -1514,7 +1648,7 @@ export function WorldV6() {
       sc.bindSpacer(spacerRef.current);
       sc.setAnchors(ANCHORS);
       sc.onFrame(onFrame);
-      sc.setPaused(document.hidden);
+      sc.setPaused(scenePaused(sourceRef.current));
       sc.start();
 
       try {
@@ -1542,6 +1676,8 @@ export function WorldV6() {
         if (u.closing) finalizeClose();
         else sc.park(STUDY_AREAS[u.open].id);
       }
+      // With a source: the place the address names opens now that the scene can fly there.
+      reconcile(true);
 
       Object.defineProperty(w, "__worldDepth", { configurable: true, get: () => lastFrame.current?.depth });
       Object.defineProperty(w, "__worldFrameCount", { configurable: true, get: () => u.frames });
@@ -1573,7 +1709,7 @@ export function WorldV6() {
             n++;
           }
         });
-        sc.setPaused(document.hidden);
+        sc.setPaused(scenePaused(sourceRef.current));
         return n;
       };
       w.__worldNames = () => {
@@ -1608,7 +1744,7 @@ export function WorldV6() {
           const r = label.getBoundingClientRect();
           out.push({
             id: STUDY_AREAS[k].id,
-            name: STUDY_AREAS[k].name,
+            name: areasRef.current[k].name,
             current: k === st.current,
             locked: st.locked[k],
             left: r.left,
@@ -1712,17 +1848,21 @@ export function WorldV6() {
       // the render harnesses keep the page where they put it.
       const arrive = query.get("arrive");
       const automated = typeof navigator !== "undefined" && navigator.webdriver && arrive !== "1";
-      if (arrive !== "0" && !automated && query.get("bench") !== "1" && window.scrollY < 2) {
+      // With a source: no bench, and no arrival when the address already names
+      // a place (it has just opened, above) or while a lesson page is open.
+      const src = sourceRef.current;
+      const benching = !src && query.get("bench") === "1";
+      if (arrive !== "0" && !automated && !benching && window.scrollY < 2 && !(src && src.openK !== null)) {
         window.clearTimeout(u.arriveTimer);
         u.arriveTimer = window.setTimeout(() => {
           // Final pass E: a student with every place done travels to the arch (the ending, decision 55).
           const k = Math.min(studyRef.current.place, N - 1);
-          if (!disposed && window.scrollY < 2 && u.open < 0) travel(k);
+          if (!disposed && window.scrollY < 2 && u.open < 0 && !sourceRef.current?.paused) travel(k);
         }, ARRIVE_DELAY_MS);
       }
 
       // ?bench=1: run the route alone and show what this machine did.
-      if (query.get("bench") === "1") {
+      if (benching) {
         setBench({ status: "Starting", result: null, copied: "" });
         await new Promise((r) => setTimeout(r, 1200));
         if (disposed) return;
@@ -1774,11 +1914,11 @@ export function WorldV6() {
       lastFrame.current = null;
       applyRef.current = null;
     };
-  }, [view, tuningLoaded, openArea, closeArea, finalizeClose, applyTuning, writeRide, showPosterLayer, loadManifest, revealLive, travel, stepSnap]);
+  }, [view, tuningLoaded, openArea, closeArea, finalizeClose, applyTuning, writeRide, showPosterLayer, loadManifest, revealLive, travel, stepSnap, reconcile]);
 
   // The tuning hooks work on the list view too, so they live outside the scene effect.
   useEffect(() => {
-    const w = window as unknown as Harness;
+    const w = harness();
     w.__worldTuning = () => tuningRef.current;
     w.__worldTune = updateTuning;
     return () => {
@@ -1788,13 +1928,13 @@ export function WorldV6() {
   }, [updateTuning]);
 
   useEffect(() => {
-    if (view === "list") (window as unknown as Harness).__worldView = "list";
+    if (view === "list") harness().__worldView = "list";
   }, [view]);
 
   // ── Pause when the tab is hidden: a background rAF loop still burns battery.
   useEffect(() => {
     if (view !== "world") return;
-    const onVisibility = () => sceneRef.current?.setPaused(document.hidden);
+    const onVisibility = () => sceneRef.current?.setPaused(scenePaused(sourceRef.current));
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [view]);
@@ -1899,6 +2039,8 @@ export function WorldV6() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // A lesson page is open over the map: the key is its own.
+      if (sourceRef.current?.paused) return;
       const u = ui.current;
       if (u.open === -1 || u.closing) return;
       e.preventDefault();
@@ -1926,7 +2068,7 @@ export function WorldV6() {
   const isOpen = openIdx !== null;
   const current = study.current;
   const place = study.place;
-  const placeArea = place < N ? STUDY_AREAS[place] : null;
+  const placeArea = place < N ? areas[place] : null;
 
   // The arrival card's body. When the student's place moves on (the place the
   // card sits beside was just finished and the done card takes over), the old
@@ -1988,8 +2130,8 @@ export function WorldV6() {
 
   const nameWithState = (k: number) =>
     study.locked[k]
-      ? `${STUDY_AREAS[k].name}, locked`
-      : `${STUDY_AREAS[k].name}, ${study.done[k]} of ${STUDY_AREAS[k].lessons} lessons done`;
+      ? `${areas[k].name}, locked`
+      : `${areas[k].name}, ${study.done[k]} of ${areas[k].lessons} lessons done`;
 
   return (
     <main
@@ -2001,6 +2143,9 @@ export function WorldV6() {
       data-poster={posterReady || undefined}
       data-tier={tier}
       data-solid={tier >= 2 || poster !== null || undefined}
+      // A lesson page is open over the map (source.paused): nothing here takes a click, a key or a reader.
+      inert={paused || undefined}
+      aria-hidden={paused || undefined}
     >
       <h1 className={s.srOnly}>Course map</h1>
 
@@ -2124,7 +2269,7 @@ export function WorldV6() {
                     {placeArea.name}
                   </span>
                   <span className={s.prog}>
-                    <Ticks n={placeArea.lessons} done={study.done[place]} next={study.placeNext} />
+                    <Ticks k={place} n={placeArea.lessons} done={study.done[place]} next={study.placeNext} />
                     <PlaceCount k={place} done={study.done[place]} short />
                   </span>
                 </span>
@@ -2146,7 +2291,7 @@ export function WorldV6() {
           </div>
 
           <div ref={markersRef} className={s.markers} inert={isOpen || loading}>
-            {STUDY_AREAS.map((a, k) => (
+            {areas.map((a, k) => (
               <button
                 key={a.id}
                 ref={(el) => {
@@ -2185,8 +2330,8 @@ export function WorldV6() {
 
           {/* The timeline: the eight places, the student's highlighted, the camera's caret. */}
           <nav ref={timelineRef} className={s.timeline} aria-label="Places" inert={isOpen || loading}>
-            <span className={s.tlCount} aria-label={`${study.doneTotal} of ${TOTAL_LESSONS} lessons done`}>
-              <b>{study.doneTotal}</b>/{TOTAL_LESSONS}
+            <span className={s.tlCount} aria-label={`${study.doneTotal} of ${content.total} lessons done`}>
+              <b>{study.doneTotal}</b>/{content.total}
             </span>
             <div ref={trackRef} className={s.track}>
               <span className={s.trackLine} aria-hidden="true" />
@@ -2196,7 +2341,7 @@ export function WorldV6() {
                 style={{ transform: `scaleX(${place >= N ? 1 : (place + 0.5) / N})` }}
               />
               <span ref={caretRef} className={s.caret} aria-hidden="true" />
-              {STUDY_AREAS.map((a, k) => (
+              {areas.map((a, k) => (
                 <button
                   key={a.id}
                   ref={(el) => {
@@ -2230,7 +2375,7 @@ export function WorldV6() {
               <span className={s.hint} role="status">
                 <span key={hint.seq} className={s.hintIn}>
                   <Lock />
-                  Finish {STUDY_AREAS[current].name} first
+                  Finish {areas[current].name} first
                 </span>
               </span>
             )}
@@ -2323,7 +2468,7 @@ export function WorldV6() {
           aria-label={placeArea ? `Place ${place + 1} of ${N}, ${placeArea.name}` : "Every place done"}
         >
           <span className={s.courseSegs} aria-hidden="true">
-            {STUDY_AREAS.map((a, k) => (
+            {areas.map((a, k) => (
               <span key={a.id} className={s.courseSeg} data-state={study.state[k]} style={{ flexGrow: a.lessons }}>
                 <i style={{ transform: `scaleX(${study.done[k] / a.lessons})` }} />
               </span>
@@ -2343,7 +2488,7 @@ export function WorldV6() {
             <NextBlock study={study} onWatch={(el) => watch(place, study.placeNext, el)} />
           </section>
           <ol className={s.areaList}>
-            {STUDY_AREAS.map((a, k) => (
+            {areas.map((a, k) => (
               <li key={a.id}>
                 <button
                   ref={(el) => {
@@ -2379,33 +2524,35 @@ export function WorldV6() {
         </section>
       )}
 
-      {/* Dev only: the builds to compare against, and the tuning panel. The
-          panel stays usable while a place is open, so progress can be changed
-          while looking at it (the steps rising at 6). */}
-      <footer ref={footerRef} className={s.footer}>
-        <span className={s.footLinks} inert={isOpen || loading}>
-          <Link href="/dev/world-v3">V3</Link>
-          <Link href="/dev/world-codex">Astra</Link>
-        </span>
-        {view === "world" && (
-          <TuningPanel
-            inert={loading}
-            tuning={tuning}
-            ready={phase === "ready"}
-            readoutRef={setReadout}
-            rideRef={setRide}
-            onChange={updateTuning}
-            onJump={(k) => travel(k, true)}
-            onTier={(t) => sceneRef.current?.setQualityTier(t)}
-            posterOn={poster !== null}
-            onWatchNext={watchNext}
-            onPoster={(on) => {
-              if (on) sceneRef.current?.setPoster(true);
-              else tryLive();
-            }}
-          />
-        )}
-      </footer>
+      {/* Dev only (never with a source): the builds to compare against, and the
+          tuning panel. The panel stays usable while a place is open, so progress
+          can be changed while looking at it (the steps rising at 6). */}
+      {!hasSource && (
+        <footer ref={footerRef} className={s.footer}>
+          <span className={s.footLinks} inert={isOpen || loading}>
+            <Link href="/dev/world-v3">V3</Link>
+            <Link href="/dev/world-codex">Astra</Link>
+          </span>
+          {view === "world" && (
+            <TuningPanel
+              inert={loading}
+              tuning={tuning}
+              ready={phase === "ready"}
+              readoutRef={setReadout}
+              rideRef={setRide}
+              onChange={updateTuning}
+              onJump={(k) => travel(k, true)}
+              onTier={(t) => sceneRef.current?.setQualityTier(t)}
+              posterOn={poster !== null}
+              onWatchNext={watchNext}
+              onPoster={(on) => {
+                if (on) sceneRef.current?.setPoster(true);
+                else tryLive();
+              }}
+            />
+          )}
+        </footer>
+      )}
 
       {view !== "list" && (
         <div className={s.loading} data-done={phase === "ready" || undefined} role="status" aria-live="polite">
@@ -2419,6 +2566,7 @@ export function WorldV6() {
 
 /** Phones (the list view): the student's place and its next lesson. */
 function NextBlock({ study, onWatch }: { study: Study; onWatch: (el: HTMLElement) => void }) {
+  const c = useContent();
   const k = study.place;
   // Final pass E: the finished card's wording.
   if (k >= N) {
@@ -2430,23 +2578,26 @@ function NextBlock({ study, onWatch }: { study: Study; onWatch: (el: HTMLElement
       </>
     );
   }
-  const a = STUDY_AREAS[k];
+  const a = c.areas[k];
   const i = study.placeNext;
+  const length = lessonLength(c, k, i);
   return (
     <>
       <p className={s.nextEyebrow}>Next</p>
       <h2 className={s.nextArea}>{a.name}</h2>
       {/* Final pass: the card's count line, so the phone carries what the card does. */}
       <p className={`${s.prog} ${s.listProg}`}>
-        <Ticks n={a.lessons} done={study.done[k]} next={i} />
+        <Ticks k={k} n={a.lessons} done={study.done[k]} next={i} />
         <PlaceCount k={k} done={study.done[k]} />
       </p>
       <p className={s.nextLesson}>
         <span className={s.num}>{i + 1}</span>
         <span className={s.t}>{lessonTitle(a, i)}</span>
-        <span className={s.dur} data-action={isAction(a, i) || undefined}>
-          {isAction(a, i) ? "Action" : `${lessonMinutes(k, i)} min`}
-        </span>
+        {length !== null && (
+          <span className={s.dur} data-action={isAction(a, i) || undefined}>
+            {length}
+          </span>
+        )}
       </p>
       <button
         type="button"
@@ -2552,7 +2703,8 @@ const SKY_NAMES = SKY_MARKS.map((m) => m.shape.replace(/\b\w/g, (c) => c.toUpper
 
 /** The line under the telescope: which constellations the student has put in the sky. */
 function SkyCaption({ study }: { study: Study }) {
-  const names = STUDY_AREAS.map((a, k) => (study.done[k] >= a.lessons ? SKY_NAMES[k] : null)).filter((x): x is string => !!x);
+  const { areas } = useContent();
+  const names = areas.map((a, k) => (study.done[k] >= a.lessons ? SKY_NAMES[k] : null)).filter((x): x is string => !!x);
   return (
     <>
       <span className={s.lensEyebrow}>
@@ -2563,23 +2715,16 @@ function SkyCaption({ study }: { study: Study }) {
   );
 }
 
-/** One tick per lesson: watched ones filled, the next one outlined. */
-function Ticks({ n, done, next }: { n: number; done: number; next: number }) {
+/** One tick per lesson of place k: watched ones filled, the next one outlined. */
+function Ticks({ k, n, done, next }: { k: number; n: number; done: number; next: number }) {
+  const c = useContent();
   return (
     <span className={s.ticks} aria-hidden="true">
       {Array.from({ length: n }, (_, i) => (
-        <i key={i} data-t={i < done ? "d" : i === next ? "n" : undefined} />
+        <i key={i} data-t={lessonDone(c, k, i, done) ? "d" : i === next ? "n" : undefined} />
       ))}
     </span>
   );
-}
-
-/** Total minutes of a place's watch lessons. */
-function placeMinutes(k: number): number {
-  const a = STUDY_AREAS[k];
-  let m = 0;
-  for (let i = 0; i < a.lessons; i++) if (!isAction(a, i)) m += lessonMinutes(k, i);
-  return m;
 }
 
 /**
@@ -2587,14 +2732,18 @@ function placeMinutes(k: number): number {
  * phone (at progress 0 the chip said "0 of 8" beside a card saying "8 lessons
  * · 65 min"). Nothing watched: the place's size. Otherwise how far and what
  * is left; `short` (the chip) drops "· 4 to go", which pushed it into the
- * timeline's count at 1366.
+ * timeline's count at 1366. With a source that does not know the minutes, the
+ * size is the lesson count alone.
  */
 function PlaceCount({ k, done, short = false }: { k: number; done: number; short?: boolean }) {
-  const n = STUDY_AREAS[k].lessons;
+  const c = useContent();
+  const n = c.areas[k].lessons;
   if (done === 0) {
+    const m = placeMinutes(c, k);
+    const min = m === null ? 0 : Math.round(m / 5) * 5;
     return (
       <span>
-        {n} lessons · {Math.round(placeMinutes(k) / 5) * 5} min
+        {n} lessons{min > 0 ? ` · ${min} min` : ""}
       </span>
     );
   }
@@ -2608,10 +2757,12 @@ function PlaceCount({ k, done, short = false }: { k: number; done: number; short
 
 /** The arrival card (B's s1, A's Watch): where, how far, the next lesson, one button. */
 function CardBody({ k, study, onWatch }: { k: number; study: Study; onWatch: (el: HTMLElement) => void }) {
-  const a = STUDY_AREAS[k];
+  const c = useContent();
+  const a = c.areas[k];
   const done = study.done[k];
   const i = study.placeNext;
   const action = isAction(a, i);
+  const length = lessonLength(c, k, i);
   return (
     <>
       <p className={s.eyebrow}>
@@ -2621,16 +2772,18 @@ function CardBody({ k, study, onWatch }: { k: number; study: Study; onWatch: (el
       </p>
       <h2 className={s.cardTitle}>{a.name}</h2>
       <p className={s.prog}>
-        <Ticks n={a.lessons} done={done} next={i} />
+        <Ticks k={k} n={a.lessons} done={done} next={i} />
         <PlaceCount k={k} done={done} />
       </p>
       <p className={s.nextline}>
         <span className={s.k}>Next</span>
         <span className={s.num}>{i + 1}</span>
         <span className={s.t}>{lessonTitle(a, i)}</span>
-        <span className={s.dur} data-action={action || undefined}>
-          {action ? "Action" : `${lessonMinutes(k, i)} min`}
-        </span>
+        {length !== null && (
+          <span className={s.dur} data-action={action || undefined}>
+            {length}
+          </span>
+        )}
       </p>
       <button
         type="button"
@@ -2651,12 +2804,13 @@ function CardBody({ k, study, onWatch }: { k: number; study: Study; onWatch: (el
  * watch, so it has no button, only a plain line on how to rewatch.
  */
 function FinishedBody({ study }: { study: Study }) {
+  const { areas } = useContent();
   return (
     <>
       <p className={s.eyebrow}>
         <span className={s.here} aria-hidden="true" />
         <span className={s.accent}>{pad2(N)}</span>
-        {STUDY_AREAS[N - 1].landmark}
+        {areas[N - 1].landmark}
         <span className={s.eyebrowEnd}>Done</span>
       </p>
       <h2 className={s.cardTitle}>Every place done.</h2>
@@ -2668,17 +2822,18 @@ function FinishedBody({ study }: { study: Study }) {
 
 /** The course's count, one bar segment per place (the header's), for the finished card and the phone. */
 function FinishedCount({ study, className }: { study: Study; className?: string }) {
+  const { areas, total } = useContent();
   return (
     <p className={className ? `${s.prog} ${className}` : s.prog}>
       <span className={`${s.courseSegs} ${s.finishedSegs}`} aria-hidden="true">
-        {STUDY_AREAS.map((a, k) => (
+        {areas.map((a, k) => (
           <span key={a.id} className={s.courseSeg} data-state={study.state[k]} style={{ flexGrow: a.lessons }}>
             <i style={{ transform: `scaleX(${study.done[k] / a.lessons})` }} />
           </span>
         ))}
       </span>
       <span>
-        <b>{study.doneTotal}</b> of {TOTAL_LESSONS} lessons
+        <b>{study.doneTotal}</b> of {total} lessons
       </span>
     </p>
   );
@@ -2699,7 +2854,8 @@ function DoneBody({
   finished: Study | null;
   onStart: () => void;
 }) {
-  const a = STUDY_AREAS[k];
+  const { areas } = useContent();
+  const a = areas[k];
   if (finished) {
     return (
       <>
@@ -2716,9 +2872,9 @@ function DoneBody({
     );
   }
   // The first place not done (-1: none left), and the last place this update finished.
-  const next = nextK >= 0 ? STUDY_AREAS[nextK] : null;
+  const next = nextK >= 0 ? areas[nextK] : null;
   const title =
-    last <= k ? `${a.name} done.` : last === k + 1 ? `${a.name} and ${STUDY_AREAS[last].name} done.` : `${a.name} to ${STUDY_AREAS[last].name} done.`;
+    last <= k ? `${a.name} done.` : last === k + 1 ? `${a.name} and ${areas[last].name} done.` : `${a.name} to ${areas[last].name} done.`;
   return (
     <>
       <p className={s.eyebrow}>
@@ -2765,7 +2921,8 @@ function PanelBody({
   lessonHeadingRef: RefObject<HTMLHeadingElement | null>;
   rowRefs: RefObject<Array<HTMLButtonElement | null>>;
 }) {
-  const a = STUDY_AREAS[idx];
+  const c = useContent();
+  const a = c.areas[idx];
   const done = study.done[idx];
   const nextIdx = idx === study.place ? study.placeNext : -1;
   const setRow = (i: number) => (el: HTMLButtonElement | null) => {
@@ -2773,7 +2930,7 @@ function PanelBody({
   };
 
   if (lesson !== null) {
-    const action = isAction(a, lesson);
+    const length = lessonLength(c, idx, lesson);
     return (
       <div className={s.view} data-dir={dir} key={`lesson-${lesson}`}>
         <div className={s.panelTop}>
@@ -2787,7 +2944,7 @@ function PanelBody({
           <span className={s.accent}>{lesson + 1}</span>
           <span className={s.sep}>/</span>
           {a.lessons}
-          <span className={s.eyebrowEnd}>{action ? "Action" : `${lessonMinutes(idx, lesson)} min`}</span>
+          {length !== null && <span className={s.eyebrowEnd}>{length}</span>}
         </p>
         <h2 ref={lessonHeadingRef} id="v4-panel-title" className={s.panelTitle} tabIndex={-1}>
           {lessonTitle(a, lesson)}
@@ -2806,7 +2963,12 @@ function PanelBody({
     );
   }
 
-  const fold = done >= 2 && !showWatched;
+  // The run of watched lessons from the top, which folds into one row. On the
+  // dev page that is every watched lesson; a real student can also have
+  // watched one further down, and that one keeps its own row.
+  let lead = 0;
+  while (lead < a.lessons && lessonDone(c, idx, lead, done)) lead++;
+  const fold = lead >= 2 && !showWatched;
   const rows: React.ReactNode[] = [];
   if (fold) {
     rows.push(
@@ -2814,16 +2976,17 @@ function PanelBody({
         <button type="button" className={s.row} data-state="fold" onClick={onShowWatched}>
           <span className={s.mark} data-m="d" aria-hidden="true" />
           <span className={s.rowN} aria-hidden="true" />
-          <span className={s.rowT}>{done >= a.lessons ? `All ${a.lessons} watched` : `Lessons 1 to ${done} watched`}</span>
+          <span className={s.rowT}>{lead >= a.lessons ? `All ${a.lessons} watched` : `Lessons 1 to ${lead} watched`}</span>
           <span className={s.rowEnd}>Show</span>
         </button>
       </li>,
     );
   }
-  for (let i = fold ? done : 0; i < a.lessons; i++) {
+  for (let i = fold ? lead : 0; i < a.lessons; i++) {
     const title = lessonTitle(a, i);
     const action = isAction(a, i);
-    const state = i < done ? "done" : i === nextIdx ? "next" : action ? "action" : "todo";
+    const length = lessonLength(c, idx, i);
+    const state = lessonDone(c, idx, i, done) ? "done" : i === nextIdx ? "next" : action ? "action" : "todo";
     if (state === "next") {
       rows.push(
         <li key={i} className={s.nextRow}>
@@ -2833,9 +2996,11 @@ function PanelBody({
           </span>
           <span className={s.rowT}>
             {title}
-            <span className={s.rowSub} data-action={action || undefined}>
-              {action ? "Action" : `${lessonMinutes(idx, i)} min`}
-            </span>
+            {length !== null && (
+              <span className={s.rowSub} data-action={action || undefined}>
+                {length}
+              </span>
+            )}
           </span>
           <button
             ref={setRow(i)}
@@ -2866,9 +3031,11 @@ function PanelBody({
             {i + 1}
           </span>
           <span className={s.rowT}>{title}</span>
-          <span className={s.rowEnd} data-action={action || undefined}>
-            {action ? "Action" : `${lessonMinutes(idx, i)} min`}
-          </span>
+          {length !== null && (
+            <span className={s.rowEnd} data-action={action || undefined}>
+              {length}
+            </span>
+          )}
         </button>
       </li>,
     );
@@ -2891,19 +3058,26 @@ function PanelBody({
       <h2 ref={headingRef} id="v4-panel-title" className={s.panelTitle} tabIndex={-1}>
         {a.name}
       </h2>
-      <p className={s.desc}>{a.description}</p>
+      {a.description && <p className={s.desc}>{a.description}</p>}
       <p className={s.prog}>
-        <Ticks n={a.lessons} done={done} next={nextIdx} />
+        <Ticks k={idx} n={a.lessons} done={done} next={nextIdx} />
         {/* Final pass D: the card's wording (a place not started read "0 of 25 · 25 to go"). */}
         <PlaceCount k={idx} done={done} />
       </p>
       <ol className={s.rows}>{rows}</ol>
-      {a.feature && (
-        <div className={s.feature}>
-          <span className={s.diamond} aria-hidden="true" />
-          {a.feature.title}
-        </div>
-      )}
+      {/* With a source the feature row opens its own page; on the dev page it is a plain line. */}
+      {a.feature &&
+        (c.onFeature ? (
+          <button type="button" className={s.feature} onClick={() => c.onFeature?.(idx)}>
+            <span className={s.diamond} aria-hidden="true" />
+            {a.feature.title}
+          </button>
+        ) : (
+          <div className={s.feature}>
+            <span className={s.diamond} aria-hidden="true" />
+            {a.feature.title}
+          </div>
+        ))}
     </div>
   );
 }

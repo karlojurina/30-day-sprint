@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { WorldV6 } from "@/components/world-v6/WorldV6";
 import { sourceData, type WorldSource } from "@/components/world-v6/source";
+import tokens from "@/components/world-v6/tokens.module.css";
 import { useWorldStage } from "@/components/world/WorldStage";
 import { useMapModel, type ReadyMapModel } from "@/components/world/useMapModel";
 import { STUDENT_HOME, WORLD_LOCK_MODE } from "@/lib/world/access";
 import { posterSrc } from "@/lib/world-v6/poster";
+import u from "@/components/world/world-ui.module.css";
 
 /**
  * The map's host: joins the catalog, the student and the address to the map.
@@ -24,7 +26,8 @@ import { posterSrc } from "@/lib/world-v6/poster";
  * size each get a plain card here and load no 3D (useMapModel names the five
  * states, and the routes over the map read the same ones).
  *
- * Styling is structural only, as on the screens beside it.
+ * The cards wear the map's own floating panel, as the screens beside them do
+ * (world-ui.module.css).
  */
 export function WorldMap() {
   const { status, model } = useMapModel();
@@ -32,7 +35,7 @@ export function WorldMap() {
   if (status === "loading") {
     return (
       <Card kind="loading" poster>
-        <p role="status" style={{ margin: 0 }}>
+        <p role="status" className={u.message}>
           Loading the world…
         </p>
       </Card>
@@ -42,7 +45,7 @@ export function WorldMap() {
   if (status === "error") {
     return (
       <Card kind="error">
-        <p style={{ margin: "0 0 14px" }}>Your course didn&apos;t load.</p>
+        <p className={u.message}>Your course didn&apos;t load.</p>
         <RetryButton />
       </Card>
     );
@@ -53,7 +56,7 @@ export function WorldMap() {
     // request arrive today (useMapModel), so this card offers the retry too.
     return (
       <Card kind="empty">
-        <p style={{ margin: "0 0 14px" }}>There are no lessons here yet.</p>
+        <p className={u.message}>There are no lessons here yet.</p>
         <RetryButton />
       </Card>
     );
@@ -62,10 +65,9 @@ export function WorldMap() {
   if (status === "shape" || !model) {
     return (
       <Card kind="shape">
-        <p style={{ margin: "0 0 14px" }}>
-          The new course isn&apos;t switched on here yet.
-        </p>
-        <Link href={STUDENT_HOME} style={actionStyle}>
+        <p className={u.message}>The new course isn&apos;t switched on here yet.</p>
+        <Link href={STUDENT_HOME} className={u.link}>
+          <span aria-hidden="true">←</span>
           Back to your course
         </Link>
       </Card>
@@ -77,7 +79,7 @@ export function WorldMap() {
 
 function RetryButton() {
   return (
-    <button type="button" onClick={() => window.location.reload()} style={actionStyle}>
+    <button type="button" onClick={() => window.location.reload()} className={u.primary}>
       Try again
     </button>
   );
@@ -129,45 +131,11 @@ function Card({
   return (
     <div
       data-world-card={kind}
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 4,
-        display: "grid",
-        placeItems: "center",
-        padding: 20,
-        background: poster
-          ? `#241C22 center/cover no-repeat url(${posterSrc("k0")})`
-          : "#241C22",
-      }}
+      className={`${tokens.tokens} ${u.ground}`}
+      // The landing's still view, behind the loading card only.
+      style={poster ? { backgroundImage: `url(${posterSrc("k0")})` } : undefined}
     >
-      <div
-        style={{
-          background: "rgba(20,15,18,.72)",
-          border: "1px solid rgba(246,239,230,.16)",
-          borderRadius: 14,
-          padding: "18px 22px",
-          textAlign: "center",
-          backdropFilter: "blur(6px)",
-          maxWidth: "min(90vw, 420px)",
-          color: "#F6EFE6",
-          font: "400 14px/1.6 ui-sans-serif, system-ui, sans-serif",
-        }}
-      >
-        {children}
-      </div>
+      <div className={`${u.card} ${u.note}`}>{children}</div>
     </div>
   );
 }
-
-const actionStyle: React.CSSProperties = {
-  display: "inline-block",
-  padding: "9px 18px",
-  borderRadius: 9,
-  border: "1px solid rgba(246,239,230,.3)",
-  background: "transparent",
-  color: "#F6EFE6",
-  cursor: "pointer",
-  textDecoration: "none",
-  font: "600 13px ui-sans-serif, system-ui, sans-serif",
-};

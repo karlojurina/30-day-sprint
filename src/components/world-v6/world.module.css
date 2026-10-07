@@ -1,7 +1,8 @@
 /*
  * /dev/world-v6 (copied from /dev/world-v3, additions at the end). Scoped to .root: globals.css still styles the live student
  * dashboard and is not touched. Token names and values are .impeccable.md's,
- * declared here until W9 moves them into globals.css.
+ * declared in tokens.module.css (the root element carries both classes) until
+ * W9 moves them into globals.css.
  *
  * V3 chrome: the world's own palette (sand light, plum dusk, warm ink), mono
  * small caps for every label that names a place, and map pins with stems.
@@ -11,36 +12,6 @@
  */
 
 .root {
-  --color-surface-0: #1d1826;
-  --color-surface-1: #241c22;
-  --color-surface-2: #2b2331;
-  --color-surface-3: #352c3c;
-  --color-ink: #f6efe6;
-  --color-ink-2: #c9b9a8;
-  --color-ink-3: #8e7f72;
-  --color-line: rgba(246, 239, 230, 0.16);
-  --color-line-strong: rgba(246, 239, 230, 0.3);
-  --color-accent: #e8a86a;
-  --color-accent-strong: #f0b77e;
-  --color-accent-deep: #c98a4e;
-  --color-accent-soft: rgba(232, 168, 106, 0.14);
-  --color-on-accent: #1d1826;
-  --color-milestone: #9297d0;
-  --color-milestone-soft: rgba(146, 151, 208, 0.16);
-  --shadow-ink: rgba(20, 15, 18, 0.62);
-  /* Map plaques and dock tags: opaque plum, so a name reads over snow or sea. */
-  --plaque: #211b29;
-  --plaque-line: rgba(246, 239, 230, 0.16);
-  /* The backing behind the NEXT block and the dock: warm dusk, not black. */
-  --backing: 24, 18, 26;
-  --glow: rgba(232, 168, 106, 0.55);
-
-  --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --display: var(--font-v2-display), ui-sans-serif, system-ui, sans-serif;
-  --mono: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular", monospace;
-  --gutter: 40px;
-  --stem: 24px;
-
   position: relative;
   min-height: 100svh;
   isolation: isolate;
@@ -57,14 +28,6 @@
   color: inherit;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-}
-
-.root {
-  /* Focus ring: full-strength ink with a dark halo either side, so it clears
-     3:1 on the peach sky and on the dark chrome alike. The 30% ink ring it
-     replaces measured 1.2-2.5:1 against its own background. */
-  --focus-ring: 2px solid var(--color-ink);
-  --focus-halo: 0 0 0 5px rgba(29, 24, 38, 0.92);
 }
 
 .root :focus-visible {

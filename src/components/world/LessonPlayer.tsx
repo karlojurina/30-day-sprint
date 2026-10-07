@@ -11,6 +11,7 @@ import {
   createWatchHeartbeat,
   type WatchHeartbeat,
 } from "@/lib/world/watch-heartbeat";
+import u from "@/components/world/world-ui.module.css";
 
 /**
  * A lesson video, played in the app, measured while it plays.
@@ -273,21 +274,13 @@ export function LessonPlayer({
   }, [lessonId]);
 
   // ── Render ───────────────────────────────────────────────────────────
-  // Styling here is structural only. The design system (W9) and the
-  // art-direction conversation set the actual look; nothing below encodes a
-  // palette decision that talk has not made yet.
-  const frame: React.CSSProperties = {
-    position: "relative",
-    width: "100%",
-    aspectRatio: "16 / 9",
-    borderRadius: 12,
-    overflow: "hidden",
-    background: "rgba(0,0,0,0.6)",
-  };
+  // The frame and its type are the map's (world-ui.module.css). The tokens
+  // they read are set on the lesson page's wrapper (Panel in AreaScreen.tsx).
+  const frame = className ? `${u.frame} ${className}` : u.frame;
 
   if (!recorded || state.kind === "not-recorded") {
     return (
-      <div className={className} style={frame}>
+      <div className={frame}>
         <Centered>Not recorded yet.</Centered>
       </div>
     );
@@ -295,7 +288,7 @@ export function LessonPlayer({
 
   if (state.kind === "loading") {
     return (
-      <div className={className} style={frame}>
+      <div className={frame}>
         <Centered>Loading…</Centered>
       </div>
     );
@@ -303,7 +296,7 @@ export function LessonPlayer({
 
   if (state.kind === "blocked") {
     return (
-      <div className={className} style={frame}>
+      <div className={frame}>
         <Centered>Your membership is inactive, so this lesson is locked.</Centered>
       </div>
     );
@@ -311,7 +304,7 @@ export function LessonPlayer({
 
   if (state.kind === "error") {
     return (
-      <div className={className} style={frame}>
+      <div className={frame}>
         <Centered>{state.message}</Centered>
       </div>
     );
@@ -319,7 +312,7 @@ export function LessonPlayer({
 
   return (
     <div className={className}>
-      <div style={frame}>
+      <div className={u.frame}>
         <iframe
           ref={iframeRef}
           src={state.embedUrl}
@@ -328,7 +321,7 @@ export function LessonPlayer({
           loading="lazy"
           allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen"
           allowFullScreen
-          style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0 }}
+          className={u.frameVideo}
         />
       </div>
       {/* The app's own progress line. Bunny's scrub bar is inside the iframe
@@ -339,37 +332,14 @@ export function LessonPlayer({
         aria-valuemax={100}
         aria-valuenow={Math.round(playedPct * 100)}
         aria-label="Lesson progress"
-        style={{ height: 3, marginTop: 8, borderRadius: 2, background: "rgba(255,255,255,0.12)" }}
+        className={u.bar}
       >
-        <div
-          style={{
-            height: "100%",
-            width: `${playedPct * 100}%`,
-            borderRadius: 2,
-            background: "currentColor",
-            transition: "width 200ms linear",
-          }}
-        />
+        <div className={u.barFill} style={{ transform: `scaleX(${playedPct})` }} />
       </div>
     </div>
   );
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        display: "grid",
-        placeItems: "center",
-        padding: 16,
-        textAlign: "center",
-        fontSize: 14,
-        opacity: 0.75,
-      }}
-    >
-      {children}
-    </div>
-  );
+  return <div className={u.frameNote}>{children}</div>;
 }

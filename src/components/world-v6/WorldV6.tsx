@@ -48,6 +48,7 @@ import {
   type PosterManifest,
 } from "@/lib/world-v6/poster";
 import { benchText, runBench, type BenchResult } from "./bench";
+import tokens from "./tokens.module.css";
 import s from "./world.module.css";
 
 /**
@@ -2187,7 +2188,7 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
 
   return (
     <main
-      className={s.root}
+      className={`${tokens.tokens} ${s.root}`}
       data-view={view}
       data-open={isOpen || undefined}
       data-lock={tuning.lock}

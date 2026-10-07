@@ -5,6 +5,7 @@ import { useWorldCatalog } from "@/lib/world/useWorldCatalog";
 import { useWorldStage } from "@/components/world/WorldStage";
 import { Panel } from "@/components/world/AreaScreen";
 import { mapIsSilent, useMapModel } from "@/components/world/useMapModel";
+import u from "@/components/world/world-ui.module.css";
 
 /**
  * What a place's address renders.
@@ -24,18 +25,12 @@ export function PlaceRoute({ areaId }: { areaId: string }) {
   if (areas.some((a) => a.id === areaId)) return null;
 
   return (
-    <Panel>
-      <p style={{ margin: 0, opacity: 0.8 }}>That place isn&apos;t on the map.</p>
-      <Link href={stage.href()} scroll={false} style={linkStyle}>
+    <Panel note>
+      <p className={u.message}>That place isn&apos;t on the map.</p>
+      <Link href={stage.href()} scroll={false} className={u.link}>
+        <span aria-hidden="true">←</span>
         Back to the world
       </Link>
     </Panel>
   );
 }
-
-const linkStyle: React.CSSProperties = {
-  display: "inline-block",
-  color: "rgba(246,239,230,.75)",
-  font: "500 13px ui-sans-serif, system-ui, sans-serif",
-  textDecoration: "none",
-};

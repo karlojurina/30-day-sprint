@@ -1,0 +1,59 @@
+/*
+ * The world's tokens, as one class. Names and values are .impeccable.md's.
+ * They live in this file until PRD 1's token work moves them into globals.css
+ * (world_v6_wiring_prd.md, design call D12).
+ *
+ * Two kinds of element carry it. The map's root (WorldV6, beside .root of
+ * world.module.css). And the wrapper of every screen drawn over the map or in
+ * its place: the lesson page, the two "not here" cards and the four catalog
+ * cards (src/components/world/world-ui.module.css).
+ *
+ * The selector is wrapped in :where() so it weighs nothing. world.module.css
+ * sets --gutter again on .root inside two media queries (under 1100px wide and
+ * from 2200px). A plain .tokens would tie with those rules, and the winner
+ * would be whichever stylesheet the bundler emitted last. At zero weight .root
+ * wins in any order, as it did when both lived in one file.
+ */
+
+:where(.tokens) {
+  --color-surface-0: #1d1826;
+  --color-surface-1: #241c22;
+  --color-surface-2: #2b2331;
+  --color-surface-3: #352c3c;
+  --color-ink: #f6efe6;
+  --color-ink-2: #c9b9a8;
+  --color-ink-3: #8e7f72;
+  --color-line: rgba(246, 239, 230, 0.16);
+  --color-line-strong: rgba(246, 239, 230, 0.3);
+  --color-accent: #e8a86a;
+  --color-accent-strong: #f0b77e;
+  --color-accent-deep: #c98a4e;
+  --color-accent-soft: rgba(232, 168, 106, 0.14);
+  --color-on-accent: #1d1826;
+  --color-milestone: #9297d0;
+  --color-milestone-soft: rgba(146, 151, 208, 0.16);
+  --shadow-ink: rgba(20, 15, 18, 0.62);
+  /* Map plaques and dock tags: opaque plum, so a name reads over snow or sea. */
+  --plaque: #211b29;
+  --plaque-line: rgba(246, 239, 230, 0.16);
+  /* The backing behind the NEXT block and the dock: warm dusk, not black. */
+  --backing: 24, 18, 26;
+  --glow: rgba(232, 168, 106, 0.55);
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --display: var(--font-v2-display), ui-sans-serif, system-ui, sans-serif;
+  --mono: var(--font-jetbrains-mono), ui-monospace, "SFMono-Regular", monospace;
+  --gutter: 40px;
+  --stem: 24px;
+
+  /* Added with the move. The floating panel over the world, from
+     .impeccable.md's recipe: its ground and its shadow. */
+  --panel-bg: rgba(20, 15, 18, 0.8);
+  --panel-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+
+  /* Focus ring: full-strength ink with a dark halo either side, so it clears
+     3:1 on the peach sky and on the dark chrome alike. The 30% ink ring it
+     replaces measured 1.2-2.5:1 against its own background. */
+  --focus-ring: 2px solid var(--color-ink);
+  --focus-halo: 0 0 0 5px rgba(29, 24, 38, 0.92);
+}

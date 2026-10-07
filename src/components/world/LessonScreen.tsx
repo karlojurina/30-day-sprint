@@ -9,6 +9,8 @@ import { useStudent } from "@/contexts/StudentContext";
 import { LessonPlayer } from "@/components/world/LessonPlayer";
 import { Panel } from "@/components/world/AreaScreen";
 import { mapIsSilent, useMapModel } from "@/components/world/useMapModel";
+import { pad2 } from "@/components/world-v6/study";
+import u from "@/components/world/world-ui.module.css";
 
 /**
  * A lesson: the video, and what happens when it finishes.
@@ -23,6 +25,13 @@ import { mapIsSilent, useMapModel } from "@/components/world/useMapModel";
  * It opens over the map, which holds still underneath: the stage reads the
  * same address and pauses it. Every link here is built by the stage and leaves
  * the page scroll alone, because the page scroll is the map's camera.
+ *
+ * It wears the map's own panel, type and shapes (world-ui.module.css). The
+ * eyebrow says where the lesson sits: the place's number in route order, then
+ * "Lesson i of n" among the place's lessons that count toward progress, the
+ * minutes when the catalog has a length, and the action mark on an action
+ * item. A lesson that does not count (the Ad Bounty row) gets the place's
+ * number and name only.
  */
 export function LessonScreen({
   areaId,
@@ -75,10 +84,11 @@ export function LessonScreen({
 
   if (!area || !lesson) {
     return (
-      <Panel>
-        <p style={{ margin: 0, opacity: 0.8 }}>That lesson isn&apos;t here.</p>
-        <Link href={placeHref} scroll={false} style={backStyle}>
-          ← Back
+      <Panel note>
+        <p className={u.message}>That lesson isn&apos;t here.</p>
+        <Link href={placeHref} scroll={false} className={u.link}>
+          <span aria-hidden="true">←</span>
+          Back
         </Link>
       </Panel>
     );
@@ -89,19 +99,48 @@ export function LessonScreen({
   const next = index >= 0 ? siblings[index + 1] : undefined;
   const done = completedLessonIds.has(lessonId);
 
+  // The eyebrow. `position` stays 0 for a lesson that is not one of the place's
+  // counting lessons, and the eyebrow then names the place.
+  const areaNumber = areas.indexOf(area) + 1;
+  const counting = siblings.filter((l) => l.counts_toward_progress);
+  const position = counting.findIndex((l) => l.id === lessonId) + 1;
+  const minutes = position > 0 ? minutesOf(lesson.duration_seconds) : null;
+
   return (
     <Panel>
-      <nav style={{ opacity: 0.55, font: "500 12px ui-sans-serif, system-ui, sans-serif", marginBottom: 10 }}>
-        <Link href={stage.href()} scroll={false} style={{ color: "inherit", textDecoration: "none" }}>
-          World
-        </Link>
-        {" / "}
-        <Link href={placeHref} scroll={false} style={{ color: "inherit", textDecoration: "none" }}>
+      <div className={u.top}>
+        <Link href={placeHref} scroll={false} className={u.back}>
+          <span aria-hidden="true">←</span>
           {area.name}
         </Link>
-      </nav>
+        <kbd className={u.esc}>Esc</kbd>
+      </div>
 
-      <h1 ref={headingRef} tabIndex={-1} style={{ margin: "0 0 14px", font: "700 20px/1.2 ui-sans-serif, system-ui, sans-serif", letterSpacing: "-0.015em" }}>
+      <p className={u.eyebrow}>
+        <span className={u.num}>{pad2(areaNumber)}</span>
+        <span aria-hidden="true">·</span>
+        {position > 0 ? (
+          <span>
+            Lesson {position} of {counting.length}
+          </span>
+        ) : (
+          <span>{area.name}</span>
+        )}
+        {minutes !== null && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>{minutes} min</span>
+          </>
+        )}
+        {position > 0 && lesson.requires_action && (
+          <span className={u.action}>
+            <span className={u.diamond} aria-hidden="true" />
+            Action
+          </span>
+        )}
+      </p>
+
+      <h1 ref={headingRef} tabIndex={-1} className={u.title}>
         {lesson.title}
       </h1>
 
@@ -111,95 +150,75 @@ export function LessonScreen({
           durationSeconds={lesson.duration_seconds}
           recorded={hasVideo(lesson.id)}
           onCompleted={onCompleted}
+          className={u.player}
         />
       ) : (
-        <p style={{ margin: 0, opacity: 0.7, font: "400 14px/1.6 ui-sans-serif, system-ui, sans-serif" }}>
+        <p className={u.body}>
           {lesson.description ?? "Nothing to watch here — this one is a setup step."}
         </p>
       )}
 
       {lesson.requires_action && (
-        <div
-          style={{
-            marginTop: 16,
-            padding: "13px 15px",
-            borderRadius: 10,
-            border: "1px solid rgba(232,168,106,.3)",
-            background: "rgba(232,168,106,.07)",
-          }}
-        >
-          <p style={{ margin: "0 0 6px", font: "700 11px/1 ui-sans-serif, system-ui, sans-serif", letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(232,168,106,.95)" }}>
+        <div className={u.milestone}>
+          <p className={u.milestoneLabel}>
+            <span className={u.diamond} aria-hidden="true" />
             Milestone
           </p>
-          <p style={{ margin: 0, font: "400 13px/1.55 ui-sans-serif, system-ui, sans-serif", opacity: 0.85 }}>
-            {lesson.action_brief}
-          </p>
+          <p className={u.milestoneBrief}>{lesson.action_brief}</p>
         </div>
       )}
 
-      <div style={{ marginTop: 18, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <Link href={placeHref} scroll={false} style={backStyle}>
-          ← {area.name}
-        </Link>
-        <span style={{ flex: 1 }} />
-        {devComplete && (
-          <button
-            type="button"
-            onClick={() => markWatched(lesson.id)}
-            style={{
-              padding: "10px 12px",
-              borderRadius: 9,
-              font: "500 12px ui-sans-serif, system-ui, sans-serif",
-              border: "1px dashed rgba(246,239,230,.3)",
-              background: "transparent",
-              color: "rgba(246,239,230,.7)",
-              cursor: "pointer",
-            }}
-          >
-            Mark watched (dev)
-          </button>
-        )}
-        {/* Enabled by the SERVER's completion, read back through the context —
-            never by the player's own reckoning. */}
-        {next && (
-          <Link
-            href={done ? stage.href(areaId, next.id) : "#"}
-            scroll={false}
-            aria-disabled={!done}
-            onClick={(e) => {
-              if (!done) e.preventDefault();
-            }}
-            style={{
-              padding: "10px 16px",
-              borderRadius: 9,
-              textDecoration: "none",
-              font: "600 13px ui-sans-serif, system-ui, sans-serif",
-              border: "1px solid rgba(232,168,106,.45)",
-              background: done ? "rgba(232,168,106,.9)" : "transparent",
-              color: done ? "#1d1826" : "rgba(246,239,230,.4)",
-              cursor: done ? "pointer" : "not-allowed",
-            }}
-          >
-            Next lesson
-          </Link>
-        )}
-      </div>
-
-      {done && (
-        <p style={{ margin: "14px 0 0", font: "500 13px ui-sans-serif, system-ui, sans-serif", color: "rgba(232,168,106,.95)" }}>
-          Done.
-          {justCompleted && justCompleted.length > 0 && (
-            <> You unlocked {justCompleted.length} achievement{justCompleted.length === 1 ? "" : "s"}.</>
+      {(done || devComplete || next) && (
+        <div className={u.foot}>
+          {done && (
+            <p className={u.done}>
+              <span className={u.doneDot} aria-hidden="true" />
+              <span>
+                Done.
+                {justCompleted && justCompleted.length > 0 && (
+                  <span className={u.gained}>
+                    {" "}
+                    You unlocked {justCompleted.length} achievement{justCompleted.length === 1 ? "" : "s"}.
+                  </span>
+                )}
+              </span>
+            </p>
           )}
-        </p>
+          <div className={u.actions}>
+            {devComplete && (
+              <button type="button" onClick={() => markWatched(lesson.id)} className={u.dev}>
+                Mark watched (dev)
+              </button>
+            )}
+            {/* Enabled by the SERVER's completion, read back through the context —
+                never by the player's own reckoning. */}
+            {next && (
+              <Link
+                href={done ? stage.href(areaId, next.id) : "#"}
+                scroll={false}
+                aria-disabled={!done}
+                onClick={(e) => {
+                  if (!done) e.preventDefault();
+                }}
+                className={u.primary}
+              >
+                Next lesson
+                <span aria-hidden="true">→</span>
+              </Link>
+            )}
+          </div>
+        </div>
       )}
     </Panel>
   );
 }
 
-const backStyle: React.CSSProperties = {
-  display: "inline-block",
-  color: "rgba(246,239,230,.75)",
-  font: "500 13px ui-sans-serif, system-ui, sans-serif",
-  textDecoration: "none",
-};
+/**
+ * Whole minutes, rounded the way the map rounds them (minutesOf in
+ * lib/world/map-model.ts, which is private to that file), so the eyebrow and
+ * the map's card agree. Null when the catalog has no length: none is invented.
+ */
+function minutesOf(durationSeconds: number | null): number | null {
+  if (durationSeconds === null || !(durationSeconds > 0)) return null;
+  return Math.max(1, Math.round(durationSeconds / 60));
+}

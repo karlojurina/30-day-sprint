@@ -217,6 +217,32 @@ const READ_PANEL = () => {
   }
 }
 
+/**
+ * Which layers of the map's interface can be seen (null: not in the DOM). A
+ * layer is not seen when its computed visibility is hidden, or when it or
+ * anything above it inside the map has opacity 0. Under a lesson page every
+ * one of them must be false: only the picture stays.
+ */
+const LAYERS = () => {
+  const main = document.querySelector('main')
+  const seen = (el) => {
+    if (!el || !main) return null
+    if (getComputedStyle(el).visibility !== 'visible') return false
+    for (let e = el; e && e !== main.parentElement; e = e.parentElement) if (Number(getComputedStyle(e).opacity) === 0) return false
+    return true
+  }
+  const q = (s) => document.querySelector(s)
+  return {
+    card: seen(q('main section[data-side]:not([aria-label="Place done"])')),
+    markers: seen(q('main button[data-mode]')?.parentElement ?? null),
+    timeline: seen(q('main nav[aria-label="Places"]')),
+    header: seen(q('main header')),
+    panel: seen(q('main section[aria-labelledby="v4-panel-title"]')),
+    list: seen(q('main ol')?.closest('main > div') ?? null),
+    sheet: seen(q('main section[role="dialog"]')),
+  }
+}
+
 /** Do the words on the page (scripts and styles left out) match the pattern? */
 const SAYS = (source) => {
   let text = ''
@@ -709,6 +735,26 @@ try {
       r.check('the map root is inert', s.inert === true, s.inert)
       r.values.notRecordedShown = /Not recorded yet\./.test(s.outside)
       r.values.shot = await r.shot('lesson-over-map')
+      // Only the picture stays under the lesson page; back on the map, the interface is there again.
+      const under = await page.evaluate(LAYERS)
+      await click(page, FIND.backLink, `${APP}/a4`, { what: 'row 3: the back link' })
+      await waitPath(page, `${APP}/a4`, 'row 3, back')
+      await waitPanel(page, 3, 'row 3, back')
+      const atPlace = await page.evaluate(LAYERS)
+      await closePlace(page, 'row 3, back')
+      await restAt(page, 3, 'row 3, after closing')
+      await waitCard(page, 'row 3, after closing')
+      const onMap = await page.evaluate(LAYERS)
+      r.check(
+        'under the lesson page the card, the markers, the timeline and the header are not visible (nor the place panel)',
+        under.card === false && under.markers === false && under.timeline === false && under.header === false && under.panel !== true,
+        under,
+      )
+      r.check(
+        'back on the map they are visible again (the panel and the header at the place, then the card, the markers, the timeline and the header)',
+        atPlace.panel === true && atPlace.header === true && onMap.card === true && onMap.markers === true && onMap.timeline === true && onMap.header === true,
+        { atThePlace: atPlace, onTheMap: onMap },
+      )
     })
 
     // 4 ── Finish a lesson, go back
@@ -725,6 +771,12 @@ try {
       await click(page, FIND.backLink, `${APP}/a4`, { what: 'row 4: the back link' })
       await waitPath(page, `${APP}/a4`, 'row 4')
       await waitPanel(page, 3, 'row 4')
+      // Read before anything else is clicked: where the keyboard is once the lesson page has closed.
+      const focus = await page.evaluate(() => {
+        const panel = document.querySelector('main section[aria-labelledby="v4-panel-title"]')
+        const at = document.activeElement
+        return { inPanel: !!panel && !!at && panel.contains(at), on: at ? (at.getAttribute('aria-label') ?? at.id ?? at.tagName) : null }
+      })
       await waitFor(page, () => window.__worldProgress?.()?.done[3] === 19, { timeout: 8000, soft: true, what: 'row 4: progress' })
       const s = await page.evaluate(SNAP)
       const panel = await readPanel(page, 'row 4')
@@ -744,6 +796,7 @@ try {
         s.done === null && s.doneK === -1 && s.celebrations === 0 && after.done === null,
         { withPanelOpen: s.done, doneK: s.doneK, celebrations: s.celebrations, afterClosing: after.done },
       )
+      r.check('after the return, focus is inside the panel', focus.inPanel === true, focus)
       r.values.folded = panel.folded
       r.values.cardAfterClosing = card?.text ?? null
     })
@@ -830,8 +883,10 @@ try {
     // 7 ── Deep link to a place
     await runRow(7, nameOf(7), async (r) => {
       const page = await r.open(url('/a6', { p: 'mid', arrive: 1, poster: 'off' }))
-      // Watch the camera from the moment the map is live until well after the arrival would have run
-      // (it starts 900 ms after ready and lands within about 2 s).
+      // The map puts the page scroll on place 6's stop before it opens the place (the page loaded at
+      // the top), so the place opens from its own stop and closes back to it. Watch the camera from
+      // the moment the map is live until well after the arrival would have run (it starts 900 ms
+      // after ready and lands within about 2 s): it must never be at place 4.
       const depths = []
       let maxY = 0
       let readyAt = null
@@ -866,16 +921,30 @@ try {
       }
       if (readyAt === null) throw new Error('row 7: the map never reported ready')
       const s = await page.evaluate(SNAP)
+      const a6Y = await page.evaluate(() => Math.round(window.__worldScrollFor(window.__worldDepthFor('a6'))))
       const nearA4 = depths.filter((x) => Math.abs(x.d - x.a4) < 0.01).length
       const range = depths.length ? `${f(Math.min(...depths.map((x) => x.d)))} to ${f(Math.max(...depths.map((x) => x.d)))}` : 'none'
       r.check('the place 6 panel opens after load', s.panel?.title === NAMES[5] && s.parked === 'a6' && s.park >= 0.999, { panel: s.panel?.title ?? null, parked: s.parked, park: s.park })
       r.check('the address is still /a6', s.path === `${APP}/a6`, s.path)
+      r.check("the page scroll is on place 6's stop", Math.abs(s.y - a6Y) <= 2, `scrollY ${s.y} with the place open, the stop is at ${a6Y}; the most it read after ready was ${maxY}`)
       r.check(
         'no arrival travel ran: the camera never visits place 4',
         depths.length > 20 && nearA4 === 0,
-        `${depths.length} reads over ${Math.round((Date.now() - readyAt) / 100) / 10} s after ready; rail depth ${range}; place 4 is at ${f(depths[0]?.a4)}; reads at place 4: ${nearA4}; scrollY never past ${maxY}`,
+        `${depths.length} reads over ${Math.round((Date.now() - readyAt) / 100) / 10} s after ready; rail depth ${range}; place 4 is at ${f(depths[0]?.a4)}; reads at place 4: ${nearA4}`,
       )
       r.values.shot = await r.shot('deep-link-place')
+      // Closing it leaves the camera at place 6's stop, not back at the opening frame.
+      await closePlace(page, 'row 7')
+      const rest = await restAt(page, 5, 'row 7, after closing')
+      await sleep(600) // the labels come back once the camera rests
+      const closed = await page.evaluate(SNAP)
+      r.check(
+        "after Escape the address is the base and the camera rests at place 6's stop",
+        closed.path === APP && closed.panel === null && Math.abs(closed.y - a6Y) <= 2,
+        `path ${closed.path}; depth ${f(rest.d)}, the stop is at ${f(rest.t)}; scrollY ${closed.y}, the stop is at ${a6Y}`,
+      )
+      r.values.afterClosing = { card: closed.card?.title ?? null, chip: closed.chip }
+      r.values.shotClosed = await r.shot('deep-link-place-closed')
     })
 
     // 8 ── Deep link to a lesson
@@ -895,6 +964,8 @@ try {
       await waitPanel(page, 5, 'row 8, after Escape')
       const atPlace = await page.evaluate(SNAP)
       const a4Y = await page.evaluate(() => Math.round(window.__worldScrollFor(window.__worldDepthFor('a4'))))
+      const a6Y = await page.evaluate(() => Math.round(window.__worldScrollFor(window.__worldDepthFor('a6'))))
+      r.values.shotAfterEscape = await r.shot('deep-link-lesson-closed')
       const underLesson = probe
       if (typeof probe.f0 !== 'number') {
         // The scene was not live under the lesson page, so the counter could not be read then.
@@ -918,6 +989,9 @@ try {
         `scrollY ${underLesson.y0} then ${underLesson.y1} 1.5 s later; an arrival would have put it on ${a4Y}`,
       )
       r.check('Escape makes the address /a6 with its panel', atPlace.path === `${APP}/a6` && atPlace.panel?.title === NAMES[5], { path: atPlace.path, panel: atPlace.panel?.title ?? null })
+      // The scroll goes to the place's stop only once the lesson page has closed: nothing moves behind a lesson.
+      r.check('the page stays at the top under the lesson page', underLesson.y0 < 2 && underLesson.y1 < 2, `scrollY ${underLesson.y0} then ${underLesson.y1}`)
+      r.check("after Escape the page scroll is on place 6's stop", Math.abs(atPlace.y - a6Y) <= 2, `scrollY ${atPlace.y}, the stop is at ${a6Y}`)
       r.values.sceneLiveUnderTheLesson = !!liveUnder
     })
 
@@ -1077,17 +1151,21 @@ try {
       await waitLesson(page, lessonTitle(4, 19), 'row 15')
       await sleep(500)
       const lesson = await page.evaluate(SNAP)
+      const under = await page.evaluate(LAYERS)
       r.values.shotLesson = await r.shot('phone-lesson')
       await click(page, FIND.backLink, `${APP}/a4`, { what: 'row 15: the back link', scroll: 'page' })
       await waitPath(page, `${APP}/a4`, 'row 15, back')
       await waitPanel(page, 3, 'row 15, back')
       const back = await page.evaluate(SNAP)
+      const backLayers = await page.evaluate(LAYERS)
       r.check('the list view, with the real names and counts', same(list.rows, wantRows), list.rows)
       r.check('the Next block says Video Ads II and 18 of 22', list.nextTitle === 'Video Ads II' && /(^|\D)18 of 22/.test(list.nextText), list.nextText)
       r.check('no canvas in the DOM', list.canvases === 0 && back.canvases === 0, `${list.canvases} at load, ${back.canvases} at the end`)
       r.check('a row opens the sheet and the address becomes /a4', sheet.path === `${APP}/a4` && sheet.panel?.role === 'dialog' && sheet.panel?.title === 'Video Ads II', { path: sheet.path, panel: sheet.panel })
       r.check('Watch opens the lesson page', lesson.path === `${APP}/a4/a4l19` && lesson.lesson?.title === lessonTitle(4, 19), { path: lesson.path, title: lesson.lesson?.title ?? null })
       r.check('back returns to the sheet', back.path === `${APP}/a4` && back.panel?.title === 'Video Ads II', { path: back.path, panel: back.panel })
+      r.check('under the lesson page the list, the sheet and the header are not visible', under.list === false && under.sheet === false && under.header === false, under)
+      r.check('after the return they are visible again', backLayers.list === true && backLayers.sheet === true && backLayers.header === true, backLayers)
     })
 
     // 16 ── Poster mode

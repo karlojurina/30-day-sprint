@@ -2518,3 +2518,20 @@
   outline: none;
   box-shadow: none;
 }
+
+/* ── A lesson page is open over the map ──────────────────────── */
+
+/* With a source, WorldV6 makes the root inert while source.paused. Only the
+   picture stays behind the lesson page then: the frozen 3D frame or the
+   posters, their soft shade, the telescope's lens, and on phones the place's
+   picture. Every layer of the interface goes, at once (no transition out, so
+   nothing shows through the lesson page's scrim for a frame). When the page
+   closes each layer comes back by its own rule: the card and the chip fade in
+   as they always do, the rest is simply there. Layers whose opacity the frame
+   loop writes inline (the timeline, the markers, the panel) are hidden by
+   visibility alone. The dev page has no source, so its root is never inert. */
+.root[inert] > :not(.stage, .snap, .poster, .spacer, .shade, .lens, .phoneWorld) {
+  visibility: hidden;
+  opacity: 0;
+  transition: none;
+}

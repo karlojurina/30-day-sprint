@@ -101,8 +101,12 @@ import s from "./world.module.css";
  * whose host changes the address, and one effect brings the component to
  * source.openK. While source.paused (a lesson page is open over the map) the
  * scene draws nothing, the root is inert, and new progress waits until it
- * closes. The TUNE panel, the footer links and the bench exist only without a
- * source. Geometry (N, ANCHORS, slotOf, the depths) reads STUDY_AREAS either way.
+ * closes; the stylesheet hides every layer of the interface under an inert
+ * root, so only the picture is left behind the lesson. A place the address
+ * named at load opens from its own stop (the scroll is put there first), and
+ * focus goes into the panel when a lesson page closes over an open place. The
+ * TUNE panel, the footer links and the bench exist only without a source.
+ * Geometry (N, ANCHORS, slotOf, the depths) reads STUDY_AREAS either way.
  */
 
 const N = STUDY_AREAS.length;
@@ -477,6 +481,10 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
     doneK: -1,
     /** The progress the scene last got. */
     wp: null as WorldProgress | null,
+    /** With a source: the place the address named when the page loaded, until it has opened (reconcile); else -1. */
+    seedK: source?.openK ?? -1,
+    /** That place is waiting under a lesson page, and the page scroll is locked for it (reconcile). */
+    seedHold: false,
   });
 
   useEffect(() => {
@@ -873,32 +881,6 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
     setLesson(null);
   }, []);
 
-  /**
-   * With a source the address says which place is open (source.openK): bring
-   * the component to it. Nothing is reported back, since openArea and
-   * closeArea skip the callback when the source already says so. The world
-   * view waits for the scene, which calls this again once it is live; the list
-   * view acts at once.
-   */
-  const reconcile = useCallback(
-    (inWorld: boolean) => {
-      const src = sourceRef.current;
-      if (!src) return;
-      const u = ui.current;
-      const want = src.openK ?? -1;
-      // Already there, or already closing toward it.
-      if (want === (u.closing ? -1 : u.open)) return;
-      if (inWorld && !u.live) return;
-      if (want < 0) closeArea();
-      else openArea(want, null);
-    },
-    [openArea, closeArea],
-  );
-  const openK = source ? source.openK : null;
-  useEffect(() => {
-    if (view !== "unknown") reconcile(view === "world");
-  }, [openK, view, reconcile]);
-
   // ── Dock travel: tween the page scroll, the camera glides after it.
   // `instant` jumps (the tuning panel's jump row).
   const travel = useCallback(
@@ -956,6 +938,62 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
     },
     [cancelTween, fadeSnap, showHint],
   );
+
+  /**
+   * With a source the address says which place is open (source.openK): bring
+   * the component to it. Nothing is reported back, since openArea and
+   * closeArea skip the callback when the source already says so. The world
+   * view waits for the scene, which calls this again once it is live; the list
+   * view acts at once.
+   *
+   * A place the address named at load (a deep link) opens with the page still
+   * at the top, so the camera would fly in from the opening frame and home to
+   * it on close, with no arrival after. The scroll is put on the place's stop
+   * first (travel's instant jump), so it opens from its own stop and closes
+   * back to it. Under a lesson page that waits until the page closes: nothing
+   * moves behind a lesson. The page scroll is locked for the wait, as it is
+   * under any lesson page, so the page is still at the top when it ends.
+   */
+  const reconcile = useCallback(
+    (inWorld: boolean) => {
+      const src = sourceRef.current;
+      if (!src) return;
+      const u = ui.current;
+      const want = src.openK ?? -1;
+      // The lesson page a place was waiting under has closed: the wait's scroll lock goes.
+      if (u.seedHold && !src.paused) {
+        u.seedHold = false;
+        unlock();
+      }
+      // Already there, or already closing toward it.
+      if (want === (u.closing ? -1 : u.open)) return;
+      if (inWorld && !u.live) return;
+      if (want < 0) {
+        closeArea();
+        return;
+      }
+      if (inWorld && want === u.seedK && u.open === -1 && window.scrollY < 2) {
+        if (src.paused) {
+          if (!u.locked) {
+            lock();
+            u.seedHold = true;
+          }
+          return;
+        }
+        travel(want, true);
+      }
+      u.seedK = -1;
+      openArea(want, null);
+      // Once it is open the scroll lock is the open place's.
+      if (u.open === want) u.seedHold = false;
+    },
+    [openArea, closeArea, travel, lock, unlock],
+  );
+  const openK = source ? source.openK : null;
+  useEffect(() => {
+    if (view !== "unknown") reconcile(view === "world");
+    // `paused`: a place that waited under a lesson page opens when the page closes.
+  }, [openK, view, paused, reconcile]);
 
   /**
    * Long travel, per rendered frame: copy the frame the student sees, show it
@@ -1994,12 +2032,26 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
   }, [view, phase, study]);
 
   // ── Focus: into the panel on open, back to the trigger once the camera is home.
+  // With a source a place can open under a lesson page, where the root is inert
+  // and nothing in it takes focus: the step waits for the page to close. A
+  // lesson page closing over a place that was already open does the same, so
+  // the keyboard lands in the panel (the sheet on phones) and not on <body>:
+  // on the next lesson's Watch when the place has one, else on its heading.
+  const wasPaused = useRef(paused);
   useEffect(() => {
     const u = ui.current;
+    const back = wasPaused.current && !paused;
+    wasPaused.current = paused;
     if (openIdx !== null) {
-      if (!u.pendingFocus) return;
+      if (paused || (!u.pendingFocus && !back)) return;
       u.pendingFocus = false;
-      const target = u.focusLesson >= 0 ? rowRefs.current[u.focusLesson] : headingRef.current;
+      const st = studyRef.current;
+      const next = openIdx === st.place ? st.placeNext : -1;
+      const target = back
+        ? ((next >= 0 ? rowRefs.current[next] : null) ?? headingRef.current)
+        : u.focusLesson >= 0
+          ? rowRefs.current[u.focusLesson]
+          : headingRef.current;
       target?.focus({ preventScroll: true });
       return;
     }
@@ -2014,7 +2066,7 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
     if (target && box && (box === cardRef.current || box === doneElRef.current || box === chipRef.current) && box.dataset.show === undefined) target = null;
     target = target ?? stopRefs.current[idx] ?? listRowRefs.current[idx] ?? null;
     target?.focus({ preventScroll: true });
-  }, [openIdx]);
+  }, [openIdx, paused]);
 
   const prevView = useRef<View>(view);
   useEffect(() => {

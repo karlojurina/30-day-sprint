@@ -61,7 +61,9 @@
 --      unread. They are dropped with the cutover's cleanup.
 --   4. lesson_videos.lesson_id has no foreign key, on purpose. The heartbeat
 --      still looks the lesson up in public.lessons, so a row for a staging
---      lesson (lessons_next) makes nothing playable before cutover.
+--      lesson (lessons_next) cannot be WATCHED-AND-COUNTED before cutover: on a
+--      deployment reading the staging catalog the route hands out its address
+--      and the video plays, but every heartbeat for it is refused here.
 --
 -- RESIDUALS, measured in the harness (supabase/migration-tests/run.mjs,
 -- section 18)
@@ -198,7 +200,8 @@ begin
   --    v100: playable means the lesson has a row in lesson_videos. Through v97
   --    this line read lessons.bunny_video_id. The lesson itself is still
   --    looked up in public.lessons, so a lesson_videos row for a staging
-  --    lesson (lessons_next) plays nothing before cutover.
+  --    lesson (lessons_next) records nothing before cutover (it can play on a
+  --    deployment reading the staging catalog; it cannot count).
   select l.duration_seconds into v_lesson_dur
     from public.lessons l
    where l.id = p_lesson_id

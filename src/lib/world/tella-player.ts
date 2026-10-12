@@ -10,15 +10,23 @@ import { TELLA_ORIGIN } from "./tella";
  * the real player on 2026-10-12 (tella_player_prd.md, section 11, rows 1 to
  * 6):
  *
- *   messages in   : ready, playbackState, timeUpdate
+ *   messages in   : ready, playbackState, timeUpdate (and a `pointerDown`
+ *                   when the viewer clicks inside the player, which the
+ *                   parser drops as an unknown type)
  *   timeUpdate    : every 250 ms while playing (longest gap 252 ms); the step
- *                   is 0.25 s at 1x, 0.50 s at 2x, 0.62 s at 2.5x
- *   ready         : about 3 s after the frame loads
+ *                   is 0.25 s at 1x, 0.50 s at 2x, 0.62 s at 2.5x. None
+ *                   arrives before play, not even after a seek
+ *   ready         : 1.4 to 3.8 s into the page, just after one
+ *                   playbackState "idle" with `duration: 0`. It came BEFORE
+ *                   the frame's own `load` event in 20 of 21 loads, so
+ *                   nothing may be timed from `load`
  *   the end       : a last timeUpdate just short of the duration, then
  *                   playbackState "stopped" carrying `duration: 0`
- *   a refused video: no message at all (the frame shows "No access")
- *   commands out  : play, pause, seek; a seek sent after `ready` and before
- *                   the first play starts playback there
+ *   a refused video: no message at all (the frame shows "No access", or
+ *                   Tella's 404 page for an id no video has)
+ *   commands out  : play, pause, seek. A seek sent after `ready` does not
+ *                   start playback; when play is pressed, playback starts
+ *                   there
  *
  * NO "seeked" MESSAGE WAS SEEN. A skip showed up as "stalled", "playing" and
  * then one large step between two timeUpdates (2.96 s to 23.17 s). The

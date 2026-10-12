@@ -46,9 +46,9 @@ import u from "@/components/world/world-ui.module.css";
  * the progress line.
  *
  * IT NEVER TAKES A VIDEO DOWN. A player that has said nothing 12 seconds after
- * its frame loaded gets a line under it saying it did not load, and the frame
- * stays where it is. On a slow connection that player may still arrive, and
- * the first thing it says removes the line.
+ * its frame was put on the page gets a line under it saying it did not load,
+ * and the frame stays where it is. On a slow connection that player may still
+ * arrive, and the first thing it says removes the line.
  *
  * Seeking is FREE — Lovro's call. Across ~145 lessons a seek-lock is friction
  * on every honest student to inconvenience a dishonest one for ten seconds.
@@ -61,9 +61,15 @@ import u from "@/components/world/world-ui.module.css";
 const RESUME_THRESHOLD_S = 10;
 
 /**
- * How long the player may stay silent after its frame has loaded before the
- * page says the video did not load. Measured on the real player: "ready"
- * about 3 seconds after the load. A refused video never says anything.
+ * How long the player may stay silent, from the moment its frame is put on the
+ * page, before the page says the video did not load. A refused video never
+ * says anything.
+ *
+ * Counted from the frame's mount and not from its `load` event. Measured on
+ * the real player over 21 loads: "ready" came BEFORE the frame's `load` in 20
+ * of them (by 0.07 to 3.67 s), so `load` is no starting line, and a frame
+ * whose `load` never fires (Tella unreachable, a blocker extension) would
+ * never have been told on.
  */
 const NO_LOAD_MS = 12_000;
 
@@ -116,6 +122,21 @@ function resumePoint(row: StudentLessonWatch | undefined): number {
   return isFinite(last) && last > RESUME_THRESHOLD_S ? last : 0;
 }
 
+/**
+ * How full the progress line starts: where a reopened lesson will pick up, as
+ * a share of its length. The catalog's length, or failing that the one the
+ * player reported on the earlier visit, which is the order the line uses once
+ * the video plays. 0 when there is nothing to resume or no length is known.
+ */
+function resumeFraction(
+  resumeAt: number,
+  durationSeconds: number | null,
+  row: StudentLessonWatch | undefined,
+): number {
+  const d = durationSeconds ?? Number(row?.reported_duration_seconds ?? 0);
+  return resumeAt > 0 && isFinite(d) && d > 0 ? Math.min(1, resumeAt / d) : 0;
+}
+
 function notCountedText({ playedRatio, playedFloor }: Refusal): string {
   // Rounded down, so it can never read "80%" against a floor of 80% it has not met.
   const watched = Math.floor(playedRatio * 100);
@@ -144,20 +165,22 @@ function LessonVideo({
   // Beside "ready", never in place of it: the frame loaded and the player has
   // said nothing for 12 seconds. The frame stays mounted.
   const [noLoad, setNoLoad] = useState(false);
-  const [playedPct, setPlayedPct] = useState(0);
   // The last answer to a claim, kept only while it is a refusal for too
   // little played. It is what the note under the progress line reads.
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   // Read once at mount so a refresh mid-lesson cannot move the resume point
   // under the student's feet.
   const [resumeAt] = useState(() => resumePoint(watchProgress.get(lessonId)));
+  // The line starts where the lesson will pick up. It used to start at 0 on a
+  // reopened lesson and jump when play was pressed, which read as "nothing
+  // watched" until then.
+  const [playedPct, setPlayedPct] = useState(() =>
+    resumeFraction(resumeAt, durationSeconds, watchProgress.get(lessonId)),
+  );
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const beatRef = useRef<WatchHeartbeat | null>(null);
-  /** The player has said something, anything, since its frame was attached. */
-  const heardRef = useRef(false);
   const resumedRef = useRef(false);
-  const noLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completedRef = useRef(false);
   const claimInFlightRef = useRef(false);
   const lastClaimAtRef = useRef<number | null>(null);
@@ -340,19 +363,29 @@ function LessonVideo({
   useLayoutEffect(() => {
     const iframe = iframeRef.current;
     if (!embedUrl || !iframe) return;
-    heardRef.current = false;
 
     const beat = startBeat();
     beatRef.current = beat;
 
+    // Tella says nothing at all when it refuses a video (a lost lock, a site
+    // that is not on its list), so silence is the only signal there is. The
+    // player has 12 seconds from here, the moment its frame is on the page,
+    // to say something. If it has not, the line goes up under the progress
+    // line. The frame is left alone: a slow player can still arrive.
+    let spoke = false;
+    let noLoadTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      noLoadTimer = null;
+      setNoLoad(true);
+    }, NO_LOAD_MS);
+
     // The player said something. Whatever it was, the video is there: the
     // 12 second timer is off, and the line it may already have put up goes.
     const heard = () => {
-      if (heardRef.current) return;
-      heardRef.current = true;
-      if (noLoadTimerRef.current !== null) {
-        clearTimeout(noLoadTimerRef.current);
-        noLoadTimerRef.current = null;
+      if (spoke) return;
+      spoke = true;
+      if (noLoadTimer !== null) {
+        clearTimeout(noLoadTimer);
+        noLoadTimer = null;
       }
       setNoLoad(false);
     };
@@ -360,8 +393,8 @@ function LessonVideo({
     const player: TellaPlayerHandle = attachTellaPlayer(iframe, {
       onReady: () => {
         heard();
-        // Measured: a seek sent after "ready" and before the first play
-        // starts playback there.
+        // Measured on the real player: the seek does not start playback by
+        // itself. When the student presses play, it starts there.
         if (!resumedRef.current && resumeAt > 0) {
           resumedRef.current = true;
           player.seekTo(resumeAt);
@@ -380,10 +413,7 @@ function LessonVideo({
     });
 
     return () => {
-      if (noLoadTimerRef.current !== null) {
-        clearTimeout(noLoadTimerRef.current);
-        noLoadTimerRef.current = null;
-      }
+      if (noLoadTimer !== null) clearTimeout(noLoadTimer);
       // The last position, on the way out. A heartbeat that never heard a
       // position has nothing to say and writes nothing.
       beat.flush("unmount");
@@ -445,20 +475,6 @@ function LessonVideo({
     };
   }, []);
 
-  // Tella says nothing at all when it refuses a video (a lost lock, a site
-  // that is not on its list), so silence is the only signal there is. The
-  // frame's own `load` fires either way, and from there the player has 12
-  // seconds to say something. If it has not, the line goes up under the
-  // frame. The frame is left alone: a slow player can still arrive.
-  function onFrameLoad() {
-    if (heardRef.current) return;
-    if (noLoadTimerRef.current !== null) clearTimeout(noLoadTimerRef.current);
-    noLoadTimerRef.current = setTimeout(() => {
-      noLoadTimerRef.current = null;
-      if (!heardRef.current) setNoLoad(true);
-    }, NO_LOAD_MS);
-  }
-
   // ── Render ───────────────────────────────────────────────────────────
   // The frame and its type are the map's (world-ui.module.css). The tokens
   // they read are set on the lesson page's wrapper (Panel in AreaScreen.tsx).
@@ -502,7 +518,6 @@ function LessonVideo({
         <iframe
           ref={iframeRef}
           src={state.embedUrl}
-          onLoad={onFrameLoad}
           title="Lesson video"
           referrerPolicy="strict-origin-when-cross-origin"
           allow="autoplay; fullscreen; picture-in-picture"

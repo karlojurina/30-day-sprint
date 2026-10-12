@@ -3,6 +3,15 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { StudentContext, type StudentContextType } from "@/contexts/StudentContext";
 import type { CatalogLessonLike, CatalogRegionLike } from "@/lib/world/catalog";
+import type { StudentLessonWatch } from "@/types/database";
+import {
+  createFixtureServer,
+  FixtureTransportContext,
+  VIDEO_LESSON_IDS,
+  type DevVideos,
+  type FixtureCall,
+  type FixtureWatchRow,
+} from "./fixtureTransport";
 
 /**
  * The pretend student behind /dev/world-app (world_v6_wiring_prd.md, Work Item 4).
@@ -13,12 +22,21 @@ import type { CatalogLessonLike, CatalogRegionLike } from "@/lib/world/catalog";
  * of the staging seed (migration 2026_v94_catalog_next_staging.sql), and
  * "watched" is a Set held in React state.
  *
+ * THREE LESSONS CAN HAVE A REAL VIDEO (tella_player_prd.md, Work Item 4). When
+ * the layout hands down two Tella video ids (`devVideos`, read from
+ * .env.local on the server), a2l01 and a2l02 play them and a2l03 points at an
+ * id no video has. The player's three calls are answered by the stand-in
+ * server in fixtureTransport.ts, so this app is still asked for nothing; the
+ * only request that leaves the page is the frame loading from Tella. Without
+ * the ids no lesson has a video, as before.
+ *
  * Only the fields the world tree reads are supplied: useWorldCatalog reads
  * lessons, regions, completedLessonIds, watchProgress, loading and loadError;
  * WorldMap and LessonScreen read completedLessonIds; LessonScreen and
  * LessonPlayer call markWatched; LessonPlayer reads watchProgress and
- * patchWatchProgress. Anything else on StudentContextType is absent, which is
- * what the cast below admits to.
+ * patchWatchProgress (kept here the way StudentProvider keeps them, so a
+ * lesson left halfway resumes). Anything else on StudentContextType is absent,
+ * which is what the cast below admits to.
  *
  * The query string is read once, when the layout mounts. The stage's links
  * carry no query, so the preset has to survive every navigation inside the
@@ -36,7 +54,9 @@ import type { CatalogLessonLike, CatalogRegionLike } from "@/lib/world/catalog";
  *   ?catalog=shape     only the first four areas and their lessons
  *
  * For the browser run: window.__fixture.complete(id) marks a lesson watched,
- * window.__fixture.completed() lists what is watched.
+ * window.__fixture.completed() lists what is watched, window.__fixture.watch
+ * holds the stand-in server's watch rows by lesson id, and
+ * window.__fixture.calls every call the player made to it.
  */
 
 const AREAS = [
@@ -107,7 +127,7 @@ function buildRows(areaCount: number): Rows {
         is_gate: id === GATE_ID,
         counts_toward_progress: true,
         feature_key: null,
-        // No lesson has a video, so the player is never asked to play.
+        // No video here. The three lessons that can have one get it in withVideos().
         has_video: false,
         // Area 1 only, so the map shows minutes there and hides them everywhere else.
         duration_seconds: k === 1 ? 300 + 61 * n : null,
@@ -132,6 +152,16 @@ function buildRows(areaCount: number): Rows {
 const FULL = buildRows(AREAS.length);
 const FIRST_FOUR = buildRows(4);
 const NONE: Rows = { regions: [], lessons: [] };
+
+/** The same rows, with a video of `seconds` on the three video lessons. */
+function withVideos(rows: Rows, seconds: number): Rows {
+  return {
+    regions: rows.regions,
+    lessons: rows.lessons.map((l) =>
+      VIDEO_LESSON_IDS.includes(l.id) ? { ...l, has_video: true, duration_seconds: seconds } : l,
+    ),
+  };
+}
 
 /** Lessons `from`..`to` (1-based, inclusive) of area k. */
 function span(k: number, from: number, to: number): string[] {
@@ -168,13 +198,11 @@ function catalogMode(name: string | null): CatalogMode {
   return name === "loading" || name === "error" || name === "empty" || name === "shape" ? name : "ready";
 }
 
-/** No lesson has been opened in a player, so there is no watch telemetry. */
-const NO_WATCH: ReadonlyMap<string, never> = new Map<string, never>();
-const noop = () => {};
-
 interface FixtureHook {
   complete(id: string): void;
   completed(): string[];
+  watch: Record<string, FixtureWatchRow>;
+  calls: FixtureCall[];
 }
 type FixtureWindow = Window & { __fixture?: FixtureHook };
 
@@ -182,7 +210,14 @@ type FixtureWindow = Window & { __fixture?: FixtureHook };
 const subscribeNever = () => () => {};
 const noServerQuery = () => null;
 
-export function FixtureStudentProvider({ children }: { children: ReactNode }) {
+export function FixtureStudentProvider({
+  children,
+  devVideos = null,
+}: {
+  children: ReactNode;
+  /** The two test videos from .env.local, or null when they are not set. */
+  devVideos?: DevVideos | null;
+}) {
   // The query string as it was when this provider mounted. null on the server
   // and while hydrating (the server render has no query), so the first paint
   // is the loading state, as it is under StudentProvider.
@@ -214,31 +249,83 @@ export function FixtureStudentProvider({ children }: { children: ReactNode }) {
     setWatched((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
   }, []);
 
+  // What the player has been told about its own watching, kept the way
+  // StudentProvider keeps it (patchWatchProgress in StudentContext.tsx): the
+  // furthest point and the played seconds only ever grow, and the 95% stamp is
+  // never taken back. Empty until a lesson with a video is played.
+  const [watchProgress, setWatchProgress] = useState<ReadonlyMap<string, StudentLessonWatch>>(
+    () => new Map(),
+  );
+  const patchWatchProgress = useCallback(
+    (lessonId: string, patch: Partial<StudentLessonWatch>) => {
+      setWatchProgress((prev) => {
+        const out = new Map(prev);
+        const base: StudentLessonWatch = out.get(lessonId) ?? {
+          lesson_id: lessonId,
+          max_position_seconds: 0,
+          last_position_seconds: 0,
+          watched_seconds: 0,
+          reported_duration_seconds: null,
+          threshold_met_at: null,
+          last_heartbeat_at: new Date().toISOString(),
+        };
+        out.set(lessonId, {
+          ...base,
+          ...patch,
+          max_position_seconds: Math.max(base.max_position_seconds, patch.max_position_seconds ?? 0),
+          watched_seconds: Math.max(base.watched_seconds, patch.watched_seconds ?? 0),
+          threshold_met_at: base.threshold_met_at ?? patch.threshold_met_at ?? null,
+        });
+        return out;
+      });
+    },
+    [],
+  );
+
+  // The stand-in server: made once, so its rows live as long as the page does.
+  // The ids come down from the server once and do not change under it.
+  const [server] = useState(() => createFixtureServer({ videos: devVideos, markWatched }));
+
   useEffect(() => {
     const w = window as FixtureWindow;
     w.__fixture = {
       complete: markWatched,
       completed: () => [...completedLessonIds].sort(),
+      watch: server.watch,
+      calls: server.calls,
     };
     return () => {
       delete w.__fixture;
     };
-  }, [completedLessonIds, markWatched]);
+  }, [completedLessonIds, markWatched, server]);
 
-  const value = useMemo(() => {
-    const rows = mode === "ready" ? FULL : mode === "shape" ? FIRST_FOUR : NONE;
-    return {
-      lessons: rows.lessons,
-      regions: rows.regions,
-      completedLessonIds,
-      watchProgress: NO_WATCH,
-      loading: mode === null || mode === "loading",
-      loadError: mode === "error" ? LOAD_ERROR : null,
-      patchWatchProgress: noop,
-      markWatched,
-      catalogSuffix: "_next",
-    } as unknown as StudentContextType;
-  }, [mode, completedLessonIds, markWatched]);
+  // The catalog rows, made once per mode: a heartbeat changes watchProgress
+  // and must not hand the map a new list of lessons.
+  const videoSeconds = devVideos?.seconds ?? null;
+  const rows = useMemo(() => {
+    const base = mode === "ready" ? FULL : mode === "shape" ? FIRST_FOUR : NONE;
+    return videoSeconds === null ? base : withVideos(base, videoSeconds);
+  }, [mode, videoSeconds]);
 
-  return <StudentContext.Provider value={value}>{children}</StudentContext.Provider>;
+  const value = useMemo(
+    () =>
+      ({
+        lessons: rows.lessons,
+        regions: rows.regions,
+        completedLessonIds,
+        watchProgress,
+        loading: mode === null || mode === "loading",
+        loadError: mode === "error" ? LOAD_ERROR : null,
+        patchWatchProgress,
+        markWatched,
+        catalogSuffix: "_next",
+      }) as unknown as StudentContextType,
+    [rows, mode, completedLessonIds, watchProgress, patchWatchProgress, markWatched],
+  );
+
+  return (
+    <StudentContext.Provider value={value}>
+      <FixtureTransportContext.Provider value={server.transport}>{children}</FixtureTransportContext.Provider>
+    </StudentContext.Provider>
+  );
 }

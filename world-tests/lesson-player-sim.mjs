@@ -15,8 +15,9 @@
  * loaded into headless Chrome with React's development build and driven
  * through whole visits to a lesson: watched through, skipped then watched at
  * 2.5x, a completion claim that is refused, held back, failed or slow (D11),
- * a resumed lesson, a video that says nothing (D12), the other messages, a
- * change of lesson, and the real transport's two requests. A real browser
+ * a resumed lesson, a video that says nothing or whose frame never loads
+ * (D12, D13), the other messages, a change of lesson, and the real
+ * transport's two requests. A real browser
  * supplies the things a Node test cannot: real frames, real `postMessage`
  * origins and sources, real timers, React's effects and StrictMode.
  *
@@ -105,8 +106,17 @@ function supabaseStandIn(require, module, exports) {
   exports.getAccessToken = async () => 'test-session-token'
 }
 
-/** Runs before anything else in the page: counts live message listeners and records every timer. */
+/** Runs before anything else in the page: counts live message listeners, records every timer, and times the frame. */
 function prelude() {
+  // When the frame was put on the page, and when (if ever) its `load` fired.
+  window.__frame = { addedAt: null, loadedAt: null }
+  new MutationObserver(() => {
+    if (window.__frame.addedAt === null && document.querySelector('iframe')) window.__frame.addedAt = Math.round(performance.now())
+  }).observe(document.documentElement, { childList: true, subtree: true })
+  document.addEventListener('load', (e) => {
+    if (e.target && e.target.tagName === 'IFRAME' && window.__frame.loadedAt === null) window.__frame.loadedAt = Math.round(performance.now())
+  }, true)
+
   window.__listeners = { live: 0, added: 0 }
   const add = window.addEventListener.bind(window)
   const remove = window.removeEventListener.bind(window)
@@ -145,7 +155,10 @@ function prelude() {
   }
   window.clearTimeout = (id) => {
     const rec = window.__timers.find((r) => r.id === id && r.state === 'live')
-    if (rec) rec.state = 'cleared'
+    if (rec) {
+      rec.state = 'cleared'
+      rec.clearedAt = Math.round(performance.now())
+    }
     return clear(id)
   }
 }
@@ -403,8 +416,13 @@ ${Object.entries(modules).map(([name, src]) => `__defs[${JSON.stringify(name)}] 
 __req('harness');
 `
 const PAGE = '<!doctype html><meta charset="utf-8"><title>lesson player sim</title><body><div id="root"></div><script src="/bundle.js"></script></body>'
-const frameHtml = ({ mode = 'normal', readyDelay = 300 } = {}) =>
-  `<!doctype html><meta charset="utf-8"><body style="margin:0;background:#111;color:#eee;font:14px sans-serif">stand-in player<script>(${standInPlayer.toString()})(${D}, ${JSON.stringify(mode)}, ${readyDelay});</script></body>`
+/**
+ * The frame's document. With `holdLoadMs` it carries an image that is answered
+ * that much later, so the player says "ready" well before the frame's `load`
+ * fires, which is what the real player was measured to do in 20 loads of 21.
+ */
+const frameHtml = ({ mode = 'normal', readyDelay = 300, holdLoadMs = 0 } = {}) =>
+  `<!doctype html><meta charset="utf-8"><body style="margin:0;background:#111;color:#eee;font:14px sans-serif">stand-in player<script>(${standInPlayer.toString()})(${D}, ${JSON.stringify(mode)}, ${readyDelay});</script>${holdLoadMs ? '<img src="/held-back.png" alt="">' : ''}</body>`
 
 // ── The runner ───────────────────────────────────────────────────────
 let pass = 0
@@ -430,7 +448,14 @@ async function open({ frame, api } = {}) {
     if (url === `${PAGE_ORIGIN}/bundle.js`) return req.respond({ status: 200, contentType: 'application/javascript', body: BUNDLE })
     if (url.startsWith('https://www.tella.tv/video/')) {
       requests.push({ frame: true, url, referer: req.headers().referer ?? null })
+      // "hang": never answered, like a host that cannot be reached. The frame's `load` never fires.
+      if (frame?.mode === 'hang') return undefined
       return req.respond({ status: 200, contentType: 'text/html', body: frameHtml(frame) })
+    }
+    if (url === 'https://www.tella.tv/held-back.png') {
+      // Answered late, and the page may be gone by then.
+      setTimeout(() => req.respond({ status: 404, contentType: 'text/plain', body: '' }).catch(() => {}), frame?.holdLoadMs ?? 0)
+      return undefined
     }
     if (url.startsWith(`${PAGE_ORIGIN}/api/`)) {
       const route = new URL(url).pathname
@@ -496,6 +521,8 @@ async function open({ frame, api } = {}) {
     },
     /** The page's own clock, the one the log and the timers are stamped with. */
     now: () => page.evaluate(() => performance.now()),
+    /** When the frame was put on the page and when its `load` fired (null = it has not), on that clock. */
+    frameTimes: () => page.evaluate(() => window.__frame),
     /** Errors, unhandled rejections and anything React wrote to console.error. */
     trouble: async () => [...(await s.log()).filter((e) => ['window-error', 'unhandled-rejection', 'console-error'].includes(e.kind)).map((e) => e.message), ...pageErrors],
     close: () => page.close(),
@@ -763,6 +790,7 @@ section('S4', 'resume where the student left off', async () => {
     await sleep(900)
     const got = await f.evaluate(() => window.__got)
     ok(got.length === 1 && got[0].m.type === 'seek' && got[0].m.time === 12 && got[0].origin === PAGE_ORIGIN, 'one seek to the stored position, after "ready"', show(got))
+    ok((await s.dom()).bar === 60, 'D13: before play, the progress line already shows the stored position (12 s of 20)', `bar ${(await s.dom()).bar}`)
     ok((await s.of('beat')).length === 0 && (await s.of('claim')).length === 0, 'opening it wrote nothing and claimed nothing')
     // Leave without pressing play: the stored position must survive.
     await s.unmount()
@@ -779,7 +807,28 @@ section('S4', 'resume where the student left off', async () => {
     await sleep(700)
     const beats = await s.of('beat')
     ok(beats.length === 1 && beats[0].pos > 12 && beats[0].pos < 13 && beats[0].delta === 0, 'playing starts from there: the first heartbeat is just past 12 s and carries no played time', show(beats.map((b) => [b.pos, b.delta])))
-    ok((await s.dom()).bar >= 60, 'the progress line shows the resumed position', `bar ${(await s.dom()).bar}`)
+    ok((await s.dom()).bar > 60, 'and the progress line moves on from the stored position', `bar ${(await s.dom()).bar}`)
+    await s.close()
+  }
+  {
+    // No length in the catalog: the one the player reported on the earlier visit is used.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l04', durationSeconds: null, seedWatch: half.seedWatch })
+    await s.frame()
+    await sleep(600)
+    ok((await s.dom()).bar === 60, 'D13: with no length in the catalog, the line starts from the length the player reported last time', `bar ${(await s.dom()).bar}`)
+    await s.close()
+  }
+  for (const [what, cfg] of [
+    ['never opened', {}],
+    ['left 5 s in', { seedWatch: [['a2l04', { ...half.seedWatch[0][1], max_position_seconds: 5, last_position_seconds: 5, watched_seconds: 5 }]] }],
+    ['past 95% and complete', { seedCompleted: ['a2l04'], seedWatch: stored('a2l04', { position: 19.9, watched: 19.9, met: true }).seedWatch }],
+  ]) {
+    const s = await open()
+    await s.mount({ lessonId: 'a2l04', ...cfg })
+    const f = await s.frame()
+    await sleep(600)
+    ok((await s.dom()).bar === 0 && (await f.evaluate(() => window.__got)).length === 0, `D13: a lesson with nothing to resume (${what}) starts its line at 0 and is sent no seek`, `bar ${(await s.dom()).bar}`)
     await s.close()
   }
 })
@@ -789,23 +838,23 @@ section('S5', 'D12: a video that has not answered gets a line under it and stays
   const s = await open({ frame: { mode: 'silent' } })
   await s.mount({ lessonId: 'a2l05', strict: true, unstable: true })
   const f = await s.frame()
-  // The 12 s run from the frame's load, which is when the timer is set.
+  // The 12 s run from the moment the frame is put on the page, which is when the timer is set.
   await s.until(async () => (await s.timers()).noLoad.length === 1)
-  const loaded = (await s.timers()).noLoad[0]?.setAt ?? 0
-  await sleep(Math.max(0, loaded + 10_500 - (await s.now())))
+  const mounted = (await s.timers()).noLoad[0]?.setAt ?? 0
+  await sleep(Math.max(0, mounted + 10_500 - (await s.now())))
   let d = await s.dom()
-  ok(d.iframe !== null && noLoadLine(d) === null, 'D12: 10.5 s after the frame loaded there is no line yet')
+  ok(d.iframe !== null && noLoadLine(d) === null, 'D12: 10.5 s after the frame is put on the page there is no line yet')
   await s.until(async () => noLoadLine(await s.dom()) !== null, 4000)
   d = await s.dom()
   const line = noLoadLine(d)
   const fired = (await s.timers()).noLoad[0]
   ok(line && line.cls === 'barNote' && line.tag === 'P' && fired?.state === 'fired' && fired.firedAt - fired.setAt >= 12_000 && fired.firedAt - fired.setAt < 12_300,
-     'D12: the line appears at 12 s, role="status", in the PRD\'s words', `${fired?.firedAt - fired?.setAt} ms after the load; ${show(d.statuses)}`)
+     'D12: the line appears at 12 s, role="status", in the PRD\'s words', `${fired?.firedAt - fired?.setAt} ms after the frame was put on the page; ${show(d.statuses)}`)
   ok(d.iframe && d.iframe.connected && d.iframe.src === EMBED && d.iframes === 1 && s.requests.filter((r) => r.frame).length === 1 && d.listeners === 1,
      'D12: the frame is still in the document, never reloaded, and still listened to', `${d.iframes} frame, requested ${s.requests.filter((r) => r.frame).length} time, ${d.listeners} listener`)
   ok((await s.of('beat')).length === 0 && (await s.of('claim')).length === 0, 'no heartbeat and no claim for a video that has not played')
   // 14 s: the player speaks at last. Not "ready": any message will do.
-  await sleep(Math.max(0, loaded + 14_000 - (await s.now())))
+  await sleep(Math.max(0, mounted + 14_000 - (await s.now())))
   ok(noLoadLine(await s.dom()) !== null, 'D12: at 14 s the line is still there')
   await f.evaluate(() => window.__player.say({ type: 'playbackState', state: 'idle', currentTime: 0, duration: 20 }))
   await s.until(async () => noLoadLine(await s.dom()) === null, 2000)
@@ -816,7 +865,9 @@ section('S5', 'D12: a video that has not answered gets a line under it and stays
   d = await s.dom()
   ok((await s.of('beat')).length === 1 && d.bar > 0 && noLoadLine(d) === null, 'D12: the slow video then plays and is counted like any other', `${(await s.of('beat')).length} heartbeat, bar ${d.bar}`)
   const t = (await s.timers()).noLoad
-  ok(t.length === 1 && t[0].state === 'fired', 'D12: one 12 s timer was set, at the frame\'s load', show(t.map((x) => x.state)))
+  const times = await s.frameTimes()
+  ok(t.length === 1 && t[0].state === 'fired' && times.addedAt !== null && Math.abs(t[0].setAt - times.addedAt) <= 50 && times.loadedAt !== null && t[0].setAt <= times.loadedAt,
+     'D13: one 12 s timer was set, the moment the frame was put on the page and before its load', `set ${t[0]?.setAt - times.addedAt} ms from the frame going in; its load fired ${times.loadedAt - times.addedAt} ms after`)
   ok((await s.trouble()).length === 0, 'no error, no React warning', (await s.trouble()).join(' | ').slice(0, 300))
   await s.close()
 })
@@ -830,7 +881,7 @@ section('S5', 'D12: the two sides of the 12 s', async () => {
     await s.until(async () => (await s.timers()).noLoad.length === 1)
     await sleep(Math.max(0, ((await s.timers()).noLoad[0]?.setAt ?? 0) + 13_500 - (await s.now())))
     const t = (await s.timers()).noLoad
-    ok(noLoadLine(await s.dom()) === null && t.length === 1 && t[0].state === 'cleared', 'D12: a "ready" 9 s after the frame loads ends the timer: no line at 13.5 s', show(t.map((x) => x.state)))
+    ok(noLoadLine(await s.dom()) === null && t.length === 1 && t[0].state === 'cleared', 'D12: a "ready" 9 s after the frame is put on the page ends the timer: no line at 13.5 s', show(t.map((x) => x.state)))
     await s.close()
   }
   {
@@ -844,6 +895,41 @@ section('S5', 'D12: the two sides of the 12 s', async () => {
     await s.unmount()
     await sleep(300)
     ok((await s.of('beat')).length === 0 && (await s.dom()).listeners === 0, 'leaving it sends no heartbeat and takes the listener off window')
+    await s.close()
+  }
+})
+
+section('S5', 'D13: the 12 s do not wait for the frame\'s load', async () => {
+  {
+    // The frame's request is never answered, so its `load` never fires.
+    const s = await open({ frame: { mode: 'hang' } })
+    await s.mount({ lessonId: 'a2l05', strict: true, unstable: true })
+    await s.until(async () => (await s.timers()).noLoad.length === 1)
+    const mounted = (await s.timers()).noLoad[0]?.setAt ?? 0
+    await sleep(Math.max(0, mounted + 10_500 - (await s.now())))
+    const early = noLoadLine(await s.dom())
+    await s.until(async () => noLoadLine(await s.dom()) !== null, 4000)
+    const d = await s.dom()
+    const fired = (await s.timers()).noLoad[0]
+    const times = await s.frameTimes()
+    ok(early === null && noLoadLine(d) !== null && fired?.state === 'fired' && fired.firedAt - fired.setAt >= 12_000 && fired.firedAt - fired.setAt < 12_300 && times.loadedAt === null,
+       'D13: a frame whose load never fires still gets the line 12 s after it is put on the page', `${fired?.firedAt - fired?.setAt} ms; load fired: ${times.loadedAt !== null}`)
+    ok(d.iframe && d.iframe.connected && d.iframes === 1 && s.requests.filter((r) => r.frame).length === 1 && (await s.of('beat')).length === 0 && (await s.of('claim')).length === 0,
+       'D13: that frame stays in the document, asked for once, and nothing is written or claimed')
+    ok((await s.trouble()).length === 0, 'no error, no React warning', (await s.trouble()).join(' | ').slice(0, 300))
+    await s.close()
+  }
+  {
+    // What the real player does: "ready" first, the frame's `load` seconds later.
+    const s = await open({ frame: { readyDelay: 300, holdLoadMs: 2500 } })
+    await s.mount({ lessonId: 'a2l05', strict: true })
+    await s.until(async () => (await s.frameTimes()).loadedAt !== null, 8000)
+    await sleep(500)
+    const t = (await s.timers()).noLoad
+    const times = await s.frameTimes()
+    ok(t.length === 1 && t[0].state === 'cleared' && times.loadedAt !== null && t[0].clearedAt < times.loadedAt && noLoadLine(await s.dom()) === null,
+       'D13: "ready" before the frame\'s load, as the real player does it: "ready" ends the timer and the late load starts nothing',
+       `"ready" ended it ${t[0]?.clearedAt - t[0]?.setAt} ms in; the load fired ${times.loadedAt - times.addedAt} ms in; ${t.length} timer in all`)
     await s.close()
   }
 })

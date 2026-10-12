@@ -262,7 +262,10 @@ await db.exec(`update student_lesson_watch set last_heartbeat_at = now() - inter
 const wBefore = Number((await watch()).w)
 j = await hb('l001', 100, 753, 9999)
 w = await watch()
-note(j.accepted === true && (Number(w.w) - wBefore) === 20,
+// Compared in hundredths, the column's own precision. As floats this failed
+// about one run in forty: when the forced beat above landed 5 ms late it left
+// watched_seconds at 17.01, and 37.01 - 17.01 is 19.999999999999996 in IEEE 754.
+note(j.accepted === true && Math.round((Number(w.w) - wBefore) * 100) === 2000,
      'forged delta 9999 grows watched_seconds by exactly the 20s cap', `+${(Number(w.w)-wBefore).toFixed(2)}`)
 
 // --- threshold crossing, immediately (must bypass the limiter) ---
@@ -441,6 +444,11 @@ await db.exec(`delete from student_lesson_watch; update lessons set duration_sec
 
 const v97 = read('2026_v97_heartbeat_trust_nothing.sql')
 const v97ok = await exec(v97, 'v97 executes')
+// Captured the moment v97 has run, for section 18: the v100 undo has to put
+// back exactly this, character for character.
+const defAfterV97 = v97ok
+  ? (await q(`select pg_get_functiondef('public.record_lesson_heartbeat'::regproc) as d`))[0].d
+  : null
 
 if (v97ok) {
   // ── ATTACK A, again ──
@@ -600,6 +608,395 @@ console.log('\n=== 17. the self-selecting test-lesson stamp ===')
     await db.exec(`select set_config('test.uid','${UID1}',false); delete from student_lesson_watch;`)
     const beat = await hb(r[0].id, 10, 753, 5)
     note(beat.accepted === true, 'the heartbeat RPC accepts the stamped lesson', `accepted=${beat.accepted}`)
+  }
+}
+
+
+console.log('\n=== 18. v100: lesson_videos (private) + the heartbeat counts up to 2.5x, and the undo ===')
+// Runs LAST on purpose. From v100 on a lesson is playable only when it has a
+// lesson_videos row, so every heartbeat test above (which stamps
+// bunny_video_id) has to finish first. Tests below insert lesson_videos rows.
+{
+  const V97F  = '2026_v97_heartbeat_trust_nothing.sql'
+  const V100F = '2026_v100_lesson_videos_and_speed.sql'
+  // lift() and read() resolve against migrations/, and the undo folder sits
+  // beside it. A file in undo/ is never run in sequence with the migrations.
+  const UNDOF = '../undo/2026_v100_undo.sql'
+  // "The function", in v97's own extent: from its create line through the
+  // last of its three revoke/grant lines.
+  const FN_START = 'create or replace function public.record_lesson_heartbeat('
+  const FN_END   = 'to authenticated;'
+  const SIG   = 'public.record_lesson_heartbeat(text,numeric,numeric,numeric,boolean)'
+  const EVERY = 'select, insert, update, delete, truncate, references, trigger'
+  // Well-formed FAKE ids. A real Tella id is the video itself and this
+  // repository is public, so a real one never goes in a tracked file.
+  const VID = n => `vid_testaaaaaaaaaaaa${String(n).padStart(2, '0')}`
+  const BUNNY = 'l064'   // a watch lesson that carries a bunny_video_id: playable under v97
+  const PLAIN = 'l001'   // a watch lesson with no bunny_video_id: playable only under v100
+
+  // exec() records a failure and stays quiet on success. These runs are
+  // themselves on the PRD's list, so a success is recorded too.
+  // A file that fails inside its own begin/commit leaves the session in an
+  // aborted transaction. Roll it back, so the assertions after it report what
+  // is true instead of all failing on "transaction is aborted".
+  const ran = async (sql, label) => {
+    const done = await exec(sql, label)
+    if (done) note(true, label); else await db.exec('rollback;').catch(() => {})
+    return done
+  }
+  const fnDef = async () => (await q(`select pg_get_functiondef('public.record_lesson_heartbeat'::regproc) as d`))[0].d
+  const fnFacts = async () => JSON.stringify((await q(`select
+       has_function_privilege('anon', '${SIG}', 'execute') as anon,
+       has_function_privilege('authenticated', '${SIG}', 'execute') as authenticated,
+       (select count(*)::int from pg_proc where proname = 'record_lesson_heartbeat') as signatures,
+       (select bool_and(prosecdef) from pg_proc where proname = 'record_lesson_heartbeat') as definer`))[0])
+  const watchRows = async () => JSON.stringify(await q(`select * from student_lesson_watch order by student_id, lesson_id`))
+  const videoRows = async () => JSON.stringify(await q(`select * from public.lesson_videos order by lesson_id`))
+  const tableGone = async () => (await q(`select to_regclass('public.lesson_videos') is null as gone`))[0].gone
+  const tableFacts = async () => (await q(`select
+       (select relrowsecurity from pg_class where oid = 'public.lesson_videos'::regclass) as rls,
+       (select count(*)::int from pg_policies where schemaname = 'public' and tablename = 'lesson_videos') as policies,
+       has_table_privilege('anon', 'public.lesson_videos', '${EVERY}') as anon,
+       has_table_privilege('authenticated', 'public.lesson_videos', '${EVERY}') as authenticated,
+       (select count(*)::int from pg_class c, aclexplode(c.relacl) a
+         where c.oid = 'public.lesson_videos'::regclass
+           and a.grantee in ('anon'::regrole, 'authenticated'::regrole)) as acl_rows,
+       (select count(*)::int from pg_trigger
+         where tgrelid = 'public.lesson_videos'::regclass and not tgisinternal) as triggers,
+       (select count(*)::int from public.lesson_videos) as n`))[0]
+  const isPrivate = t => t.rls === true && t.policies === 0 && t.anon === false && t.authenticated === false && t.acl_rows === 0
+  const watchOf = async lesson => (await db.query(
+    `select max_position_seconds::float8 mx, watched_seconds::float8 w, heartbeat_count hc,
+            threshold_met_at is not null met
+       from student_lesson_watch
+      where lesson_id = $1 and student_id = '${UID1}'::uuid`, [lesson])).rows[0] ?? { mx: NaN, w: NaN, hc: 0, met: false }
+  // hb() for the calls that are EXPECTED to go through. A raise comes back as
+  // a value, so it fails its own assertion instead of ending the whole run.
+  const raised = e => ({ accepted: false, raised: `${e.code}: ${e.message.slice(0, 70)}` })
+  const beat = (...a) => hb(...a).catch(raised)
+  const show = r => r.raised ?? `accepted=${r.accepted}`
+  // One transaction, so now() does not move between the two statements: the
+  // beat lands EXACTLY `seconds` after the one before it, and the credit can
+  // be asserted to the hundredth instead of inside a tolerance.
+  const hbAfter = (seconds, lesson, pos, dur, delta, force = false) => db.transaction(async tx => {
+    await tx.query(`update student_lesson_watch set last_heartbeat_at = now() - interval '${Number(seconds)} seconds'
+                     where lesson_id = $1`, [lesson])
+    return (await tx.query(`select public.record_lesson_heartbeat($1,$2,$3,$4,$5) as j`, [lesson, pos, dur, delta, force])).rows[0].j
+  }).catch(raised)
+  // What one call added to watched_seconds.
+  const credit = async (lesson, fn) => {
+    const was = (await watchOf(lesson)).w
+    const r = await fn()
+    return { r, got: (await watchOf(lesson)).w - was }
+  }
+  const asRole = async (role, fn) => {
+    await db.exec(`set role ${role};`)
+    try { return await fn() } finally { await db.exec(`reset role;`) }
+  }
+  const rejects = async (sql, label, code, constraint) => {
+    try { await db.query(sql); note(false, label, 'did NOT raise') }
+    catch (e) { note(e.code === code && e.constraint === constraint, label, `${e.code} ${e.constraint ?? e.message.slice(0, 60)}`) }
+  }
+  // Code only: comments and blank lines out, so two versions of the function
+  // can be compared on what they DO.
+  const code = s => s.split('\n').map(l => l.replace(/--.*$/, '').trimEnd()).filter(l => l.trim()).join('\n')
+  // The commented post-checks at the foot of a file, as runnable statements:
+  // every line under POST-CHECKS that starts with `--` and four spaces, minus
+  // the EXPECT lines. Run here so Lovro is never handed a query that errors.
+  const postChecks = text => text.slice(text.indexOf('\n-- POST-CHECKS'))
+    .split('\n').filter(l => /^--    (?!EXPECT)/.test(l)).map(l => l.slice(2)).join('\n')
+    .split(';').map(s => s.trim()).filter(Boolean)
+  const runPostChecks = async text => {
+    const out = []
+    for (const s of postChecks(text)) out.push((await q(s))[0])
+    return out
+  }
+  const allTrue = row => !!row && Object.values(row).length > 0 && Object.values(row).every(v => v === true)
+
+  // ── the seam ──
+  // Supabase grants ALL on every new table in public to anon, authenticated
+  // and service_role (default privileges). The harness roles are bare, so
+  // without this the "no privilege" assertions below would pass on a table
+  // nobody was ever granted anything on. With it, they measure v100's REVOKE.
+  await db.exec(`alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+                 create table public._born_open (id int);`)
+  const born = (await q(`select has_table_privilege('anon','public._born_open','select') anon,
+                                has_table_privilege('authenticated','public._born_open','select') authenticated`))[0]
+  await db.exec(`drop table public._born_open;`)
+  note(born.anon === true && born.authenticated === true,
+       'harness seam: a new public table is born readable by anon and authenticated, as on Supabase', JSON.stringify(born))
+
+  // ── fixtures of this section's own, so it does not lean on what 17 left ──
+  await db.exec(`
+    select set_config('test.uid','${UID1}',false);
+    update lessons set bunny_video_id = null, video_ready_at = null where bunny_video_id is not null;
+    update lessons set bunny_video_id = '00000000-0000-4000-8000-0000000000b1', duration_seconds = 753 where id = '${BUNNY}';
+    update lessons set duration_seconds = 753 where id = '${PLAIN}';`)
+
+  // ── BEFORE ──
+  const defBefore = await fnDef()
+  note(defAfterV97 !== null && defBefore === defAfterV97,
+       'nothing between v97 and v100 touched record_lesson_heartbeat', `${defBefore.length} characters`)
+  const factsBefore = await fnFacts()
+  const watchBefore = await watchRows()
+  const lessonsBefore = JSON.stringify(await q(`select * from lessons order by id`))
+
+  const v100 = read(V100F)
+  const undo = read(UNDOF)
+
+  if (await ran(v100, '(1) v100 executes')) {
+    // ── what must not move ──
+    note(await fnFacts() === factsBefore,
+         'the RPC keeps its one signature, its grants and security definer', factsBefore)
+    note(await watchRows() === watchBefore,
+         'v100 leaves student_lesson_watch untouched', `${JSON.parse(watchBefore).length} row(s)`)
+    note(JSON.stringify(await q(`select * from lessons order by id`)) === lessonsBefore,
+         'v100 leaves lessons untouched (the Bunny columns stay, D7)', `${JSON.parse(lessonsBefore).length} rows`)
+
+    // ── (2) the table is private ──
+    let t = await tableFacts()
+    note(t.rls === true && t.policies === 0,
+         '(2) lesson_videos has RLS on and zero policies', `rls=${t.rls} policies=${t.policies}`)
+    note(t.anon === false && t.authenticated === false && t.acl_rows === 0,
+         '(2) anon and authenticated hold no privilege of any kind on it',
+         `anon=${t.anon} authenticated=${t.authenticated} acl rows=${t.acl_rows}`)
+    const shape = (await q(`select column_name c, data_type t, is_nullable n from information_schema.columns
+                             where table_schema = 'public' and table_name = 'lesson_videos' order by ordinal_position`))
+      .map(c => `${c.c}:${c.t}:${c.n}`).join(' ')
+    note(shape === 'lesson_id:text:NO tella_video_id:text:NO lock_status:text:NO lock_detail:text:YES '
+                 + 'lock_checked_at:timestamp with time zone:YES created_at:timestamp with time zone:NO '
+                 + 'updated_at:timestamp with time zone:NO',
+         'lesson_videos has the seven columns of the PRD', shape)
+
+    // ── (4) playable now means "has a lesson_videos row" ──
+    await db.exec(`delete from student_lesson_watch;`)
+    await raises(() => hb(BUNNY, 10, 753, 5),
+                 '(4) a watch lesson with a bunny_video_id and NO lesson_videos row is refused', '22023')
+    await db.exec(`insert into public.lesson_videos (lesson_id, tella_video_id) values ('${BUNNY}', '${VID(1)}');`)
+    const born100 = (await q(`select lock_status, lock_detail, lock_checked_at from public.lesson_videos where lesson_id = '${BUNNY}'`))[0]
+    note(born100.lock_status === 'unchecked' && born100.lock_detail === null && born100.lock_checked_at === null,
+         'a new lesson_videos row starts as unchecked', JSON.stringify(born100))
+    const withRow = await beat(BUNNY, 10, 753, 5)
+    note(withRow.accepted === true, '(4) ...and with a lesson_videos row the same lesson is accepted', show(withRow))
+
+    await db.exec(`insert into public.lesson_videos (lesson_id, tella_video_id) values ('${PLAIN}', '${VID(2)}');`)
+    const plainBunny = (await q(`select bunny_video_id from lessons where id = '${PLAIN}'`))[0].bunny_video_id
+    // An honest first beat: the player writes the row the moment playback
+    // starts, with nothing banked yet.
+    const first = await beat(PLAIN, 0, 753, 0)
+    note(plainBunny === null && first.accepted === true,
+         'a watch lesson with a lesson_videos row and NO bunny_video_id is accepted (the Bunny column is no longer read)',
+         `bunny_video_id=${plainBunny} ${show(first)}`)
+
+    await db.exec(`insert into public.lesson_videos (lesson_id, tella_video_id) values ('l003', '${VID(3)}');`)
+    await raises(() => hb('l003', 10, 753, 5),
+                 "a non-watch lesson (type='action') is still refused, lesson_videos row or not", '22023')
+    if (v94ok) {
+      // No foreign key: the table takes a staging id. The heartbeat still
+      // looks the lesson up in public.lessons, so the row plays nothing.
+      const stg = (await q(`select id from lessons_next where type = 'watch' and id not in (select id from lessons)
+                             order by sort_order limit 1`))[0].id
+      await db.exec(`insert into public.lesson_videos (lesson_id, tella_video_id) values ('${stg}', '${VID(4)}');`)
+      await raises(() => hb(stg, 10, 753, 5),
+                   `a staging lesson (${stg}, in lessons_next only) is still refused, lesson_videos row or not (engine D2)`, '22023')
+    }
+
+    // ── (3) the constraints fire ──
+    await rejects(`insert into public.lesson_videos (lesson_id, tella_video_id) values ('l005', 'abc')`,
+                  "(3) a bad id ('abc') is rejected by the format check", '23514', 'lesson_videos_tella_id_format')
+    const malformed = ['https://www.tella.tv/video/vid_testaaaaaaaaaaaa09/embed', 'vid_TESTAAAAAAAAAAAA09',
+                       '00000000-0000-4000-8000-0000000000b1', 'vid_short', ' vid_testaaaaaaaaaaaa09',
+                       'vid_testaaaaaaaaaaaa09\n', 'vid_testaaaaaaaaaaaa09/embed', '']
+    let refused = 0
+    for (const bad of malformed) {
+      try { await db.query(`insert into public.lesson_videos (lesson_id, tella_video_id) values ('l005', $1)`, [bad]) }
+      catch (e) { if (e.code === '23514' && e.constraint === 'lesson_videos_tella_id_format') refused++ }
+    }
+    note(refused === malformed.length,
+         '(3) ...and so are a URL, an upper-case id, a Bunny GUID, a short id, stray whitespace, a trailing path and an empty string',
+         `${refused}/${malformed.length} refused`)
+    await rejects(`insert into public.lesson_videos (lesson_id, tella_video_id) values ('l005', '${VID(1)}')`,
+                  '(3) a duplicate id is rejected by the unique constraint', '23505', 'lesson_videos_tella_id_unique')
+    await rejects(`insert into public.lesson_videos (lesson_id, tella_video_id, lock_status) values ('l005', '${VID(9)}', 'public')`,
+                  '(3) a bad lock_status is rejected by its check', '23514', 'lesson_videos_lock_status_check')
+    await rejects(`insert into public.lesson_videos (lesson_id, tella_video_id) values ('${BUNNY}', '${VID(9)}')`,
+                  'a second video for the same lesson is rejected by the primary key', '23505', 'lesson_videos_pkey')
+
+    // ── the trigger: what the lock check's write does to the row ──
+    await db.exec(`
+      insert into public.lesson_videos (lesson_id, tella_video_id, updated_at) values ('l004', '${VID(5)}', '2000-01-01 00:00:00+00');
+      update public.lesson_videos set lock_status = 'locked', lock_checked_at = now() where lesson_id = 'l004';`)
+    const trg = (await q(`select lock_status, updated_at > '2020-01-01'::timestamptz as moved
+                            from public.lesson_videos where lesson_id = 'l004'`))[0]
+    note(trg.lock_status === 'locked' && trg.moved === true,
+         'an update moves updated_at (the trigger on set_updated_at())', JSON.stringify(trg))
+
+    // ── (2) again, by trying it ──
+    for (const role of ['anon', 'authenticated']) {
+      await asRole(role, () => raises(() => db.query(`select tella_video_id from public.lesson_videos`),
+                                      `(2) as ${role}: reading lesson_videos directly is refused`, '42501'))
+    }
+
+    // ── the function is v97's text with the PRD's four changes and no others ──
+    const v97code  = code(lift(V97F, FN_START, FN_END))
+    const v100code = code(lift(V100F, FN_START, FN_END))
+    const swaps = [
+      ['and l.bunny_video_id is not null;',
+       'and exists (select 1 from public.lesson_videos v where v.lesson_id = l.id);'],
+      ['  v_max_delta  constant numeric := 20;',
+       '  v_max_delta  constant numeric := 60;\n  v_speed_cap  constant numeric := 2.5;'],
+      ['least(coalesce(p_delta_seconds, 0), v_elapsed, v_max_delta)',
+       'least(coalesce(p_delta_seconds, 0), v_elapsed * v_speed_cap, v_max_delta)'],
+      // (d), in its two halves: the new constant, declared just above
+      // v_min_gap, and the first-beat branch reading it instead of v_max_delta.
+      ['  v_min_gap    constant numeric := 5;',
+       '  v_first_delta constant numeric := 20;\n  v_min_gap    constant numeric := 5;'],
+      ['least(coalesce(p_delta_seconds, 0), v_max_delta)',
+       'least(coalesce(p_delta_seconds, 0), v_first_delta)'],
+    ]
+    const eachOnce = swaps.every(([from]) => v97code.split(from).length === 2)
+    const wanted = swaps.reduce((s, [from, to]) => s.replace(from, () => to), v97code)
+    const wl = wanted.split('\n'), gl = v100code.split('\n')
+    const at = wl.findIndex((l, i) => l !== gl[i])
+    note(eachOnce && v100code === wanted,
+         "v100's function is v97's with exactly the PRD's four changes, comments aside",
+         v100code === wanted ? `${gl.length} lines of code, ${gl.length - code(lift(V97F, FN_START, FN_END)).split('\n').length} added`
+                             : `first difference at code line ${at + 1}: ${JSON.stringify(gl[at])} vs ${JSON.stringify(wl[at])}`)
+
+    // ── (5) the clock, at up to 2.5x ──
+    let c = await credit(PLAIN, () => hbAfter(15, PLAIN, 15, 753, 15))
+    note(c.r.accepted === true && c.got === 15,
+         'normal speed is unchanged: 15 s after the last beat, a delta of 15 is credited 15', `+${c.got}`)
+    c = await credit(PLAIN, () => hbAfter(15, PLAIN, 52.5, 753, 37.5))
+    note(c.r.accepted === true && c.got === 37.5,
+         '(5) at 2.5x: 15 s after the last beat, a delta of 37.5 is credited in full', `+${c.got}`)
+    c = await credit(PLAIN, () => hbAfter(15, PLAIN, 97.5, 753, 45))
+    note(c.r.accepted === true && c.got === 37.5,
+         '(5) faster than 2.5x: 15 s after the last beat, a delta of 45 is credited 37.5', `+${c.got}`)
+    c = await credit(PLAIN, () => hbAfter(60, PLAIN, 300, 753, 500))
+    note(c.r.accepted === true && c.got === 60,
+         '(5) the cap on one beat: 60 s after the last beat, a delta of 500 is credited 60', `+${c.got}`)
+
+    // ── (6) a faker gains nothing ──
+    // The bound on the 30 replays is the rule itself, 2.5x the clock that
+    // really passed, plus a hundredth of rounding per beat (0.3 s). A fixed
+    // number of seconds would be a guess at how fast this machine is.
+    const t6 = performance.now()
+    c = await credit(PLAIN, () => beat(PLAIN, 310, 753, 60, true))
+    note(c.r.accepted === true && c.got < 0.5,
+         '(6) a forced replay with no time passed is credited under 0.5 s', `+${c.got.toFixed(3)} of the 60 it asked for`)
+    c = await credit(PLAIN, async () => { let r; for (let i = 0; i < 30; i++) r = await beat(PLAIN, 311 + i, 753, 60, true); return r })
+    const wall6 = (performance.now() - t6) / 1000
+    note(c.r.accepted === true && c.got <= 2.5 * wall6 + 0.3,
+         '(6) ...and 30 more forced replays, asking for 1800 s, add no more than 2.5x the clock they took',
+         `+${c.got.toFixed(3)} s in ${(wall6 * 1000).toFixed(0)} ms`)
+
+    // ── (7) the result is the contract of PRD section 8 ──
+    const keys = o => Object.keys(o).sort().join(',')
+    const ACCEPTED = 'accepted,duration_seconds,last_position_seconds,max_position_seconds,threshold_crossed,threshold_met,watched_seconds'
+    const LIMITED  = 'accepted,max_position_seconds,reason,threshold_crossed,threshold_met,watched_seconds'
+    const limited = await beat(PLAIN, 350, 753, 5)
+    note(first.accepted === true && keys(first) === ACCEPTED && c.r.accepted === true && keys(c.r) === ACCEPTED,
+         '(7) an accepted result carries exactly the seven keys of PRD section 8 (first beat and later beat)', keys(c.r))
+    note(limited.accepted === false && limited.reason === 'rate_limited' && keys(limited) === LIMITED,
+         '(7) a rate-limited result carries exactly the six keys of PRD section 8', keys(limited))
+
+    // ── the private table does not lock the student out of the RPC ──
+    await db.exec(`update student_lesson_watch set last_heartbeat_at = now() - interval '15 seconds' where lesson_id = '${PLAIN}';`)
+    const asStudent = await asRole('authenticated', () => beat(PLAIN, 360, 753, 10))
+    note(asStudent.accepted === true,
+         'as authenticated: the RPC still works, because security definer reads the private table for it',
+         show(asStudent))
+
+    // ── (10) the first beat keeps v97's 20 s and does not inherit the 60 ──
+    // A first beat has no earlier timestamp, so the clock cannot clamp it. Read
+    // from v_max_delta (60) it let ONE forged call pass both rules on any
+    // lesson of 75 s or less. v_first_delta holds it at 20, as under v97.
+    await db.exec(`delete from student_lesson_watch where lesson_id = '${PLAIN}';`)
+    const tR = performance.now()
+    await beat(PLAIN, 10, 753, 9999)
+    const banked = (await watchOf(PLAIN)).w
+    for (let i = 0; i < 30; i++) await beat(PLAIN, 11 + i, 753, 9999, true)
+    const banked30 = (await watchOf(PLAIN)).w
+    const wallR = (performance.now() - tR) / 1000
+    note(banked === 20 && banked30 - banked <= 2.5 * wallR + 0.3,
+         '(10) a forged first beat (no row yet, a delta of 9999) is credited exactly 20 s, once; 30 replays after it add no more than 2.5x the clock',
+         `first=${banked} s (${((banked / 753) * 100).toFixed(1)}% of this 753 s lesson), then +${(banked30 - banked).toFixed(3)} s in ${(wallR * 1000).toFixed(0)} ms`)
+    await db.exec(`update lessons set duration_seconds = 67 where id = 'l002';
+                   insert into public.lesson_videos (lesson_id, tella_video_id) values ('l002', '${VID(6)}');`)
+    const forged = await beat('l002', 67, 67, 9999)
+    const fw = await watchOf('l002')
+    note(forged.threshold_met === true && fw.w === 20 && fw.w / 67 < 0.8,
+         '(10) on a 67 s lesson one forged call at the last second reaches the 95% point but NOT the 80% played floor (20/67 = 29.9%)',
+         `threshold_met=${forged.threshold_met} played=${fw.w} s = ${((fw.w / 67) * 100).toFixed(1)}% (at the 60 s cap it was 89.6%)`)
+
+    // ── (1) hand-run files get re-run ──
+    const rowsBefore = await videoRows()
+    const def100 = await fnDef()
+    if (await ran(v100, '(1) v100 re-executes')) {
+      t = await tableFacts()
+      note(await videoRows() === rowsBefore && t.triggers === 1 && await fnDef() === def100,
+           're-run keeps every lesson_videos row, one trigger and the same function', `${t.n} rows, ${t.triggers} trigger`)
+      note(isPrivate(t) && await fnFacts() === factsBefore,
+           're-run leaves the table private and the RPC grants as they were', JSON.stringify(t))
+    }
+    {
+      let rows = null, err = ''
+      try { rows = await runPostChecks(v100) } catch (e) { err = e.message }
+      note(rows !== null && rows.length === 2 && allTrue(rows[0]) && Object.keys(rows[0]).length === 10,
+           "v100's own commented post-checks run, and the first comes back all true",
+           rows ? `${Object.keys(rows[0]).length} columns; ${JSON.stringify(rows[1])}` : err)
+    }
+
+    // ── (8) the undo ──
+    const v97fn  = lift(V97F, FN_START, FN_END)
+    const undoFn = lift(UNDOF, FN_START, FN_END)
+    note(undoFn === v97fn && v97fn.includes('and l.bunny_video_id is not null;') && v97fn.endsWith(FN_END),
+         "(8) the undo file's function text equals the text lift() takes from the v97 file",
+         `${v97fn.split('\n').length} lines, ${v97fn.length} characters`)
+    const rest = code(undo.replace(undoFn, () => '')).replace(/\s+/g, ' ').trim()
+    note(rest === 'begin; drop table if exists public.lesson_videos; commit;',
+         'outside that function the undo holds one statement, the drop', rest)
+
+    const watchBeforeUndo = await watchRows()
+    if (await ran(undo, '(8) the undo executes')) {
+      note(await tableGone(), '(8) lesson_videos is gone')
+      const defUndone = await fnDef()
+      note(defAfterV97 !== null && defUndone === defAfterV97,
+           '(8) record_lesson_heartbeat is character for character what it was right after v97',
+           `${defUndone.length} characters`)
+      note(await fnFacts() === factsBefore, 'the undo leaves the signature and the grants as they were', factsBefore)
+      note(await watchRows() === watchBeforeUndo,
+           'the undo leaves student_lesson_watch untouched', `${JSON.parse(watchBeforeUndo).length} row(s)`)
+
+      // v97's behaviour is back, not just its text.
+      await db.exec(`update student_lesson_watch set last_heartbeat_at = now() - interval '30 seconds';`)
+      const back = await beat(BUNNY, 20, 753, 5)
+      note(back.accepted === true,
+           'after the undo the Bunny rule is back: the stamped lesson is accepted with no lesson_videos table',
+           show(back))
+      await raises(() => hb(PLAIN, 20, 753, 5), '...and the lesson with no bunny_video_id is refused again', '22023')
+      c = await credit(BUNNY, () => hbAfter(15, BUNNY, 60, 753, 37.5))
+      note(c.r.accepted === true && c.got === 15,
+           '...and a 2.5x beat is credited at clock speed again (15 of 37.5)', `+${c.got}`)
+
+      if (await ran(undo, 'the undo re-executes')) {
+        note(await tableGone() && await fnDef() === defAfterV97, 'a second undo changes nothing')
+      }
+      let rows = null, err = ''
+      try { rows = await runPostChecks(undo) } catch (e) { err = e.message }
+      note(rows !== null && rows.length === 1 && allTrue(rows[0]) && Object.keys(rows[0]).length === 6,
+           "the undo's own commented post-checks run and come back all true",
+           rows ? `${Object.keys(rows[0]).length} columns` : err)
+    }
+
+    // ── (9) and forward again ──
+    if (await ran(v100, '(9) v100 applies again after the undo')) {
+      t = await tableFacts()
+      note(await fnDef() === def100, 'the function is the one v100 installed the first time')
+      note(isPrivate(t) && t.triggers === 1 && t.n === 0,
+           'lesson_videos is back, private, and EMPTY: the undo dropped its rows', JSON.stringify(t))
+    }
   }
 }
 

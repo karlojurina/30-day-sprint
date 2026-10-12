@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { TELLA_ORIGIN, WATCH_SPEED_CAP, isTellaVideoId, tellaEmbedUrl } from './_gen/tella.ts'
-import { judgeLock } from './_gen/tella-lock.ts'
+import { judgeLock, watchLessonSeconds } from './_gen/tella-lock.ts'
 
 let pass = 0
 let skipped = 0
@@ -92,6 +92,8 @@ const S = {
   absent: (d) => `"${d}" is missing from its domain list, so it will not play there.`,
   downloads: 'Downloads are switched on.',
   length: (a, b) => `The video is ${a} s long and the catalog says ${b} s, so the 95% rule is measuring the wrong length.`,
+  noLength: 'The catalog has no length for this lesson, so it can never be counted.',
+  noLesson: 'No watch lesson has this id.',
 }
 function verdictIs(v, status, problems, label) {
   ok(v.status === status && same(v.problems, problems), label,
@@ -132,8 +134,10 @@ verdictIs(judgeLock(facts({ durationSeconds: 69.5 }), EXPECTED, 67), 'locked', [
   'a difference of 2.5 s is reported')
 verdictIs(judgeLock(facts({ durationSeconds: 64.4 }), EXPECTED, 67), 'locked', [S.length(64, 67)],
   'a video shorter than the catalog by 2.6 s is reported')
-verdictIs(judgeLock(facts(), EXPECTED, null), 'locked', [],
-  'no length in the catalog -> nothing to compare, nothing said')
+// Was "nothing to compare, nothing said" until 2026-10-12. A lesson with no
+// length in the catalog can never reach 95% of it, so it is now reported.
+verdictIs(judgeLock(facts(), EXPECTED, null), 'locked', [S.noLength],
+  'no length in the catalog -> still locked, and said: it can never be counted')
 verdictIs(judgeLock(facts({ durationSeconds: null }), EXPECTED, 753), 'locked', [],
   'no length from Tella -> nothing to compare, nothing said')
 
@@ -171,6 +175,84 @@ verdictIs(judgeLock(facts({ allowedEmbedDomains: [APP], durationSeconds: 900 }),
 verdictIs(judgeLock(facts({ linkScope: 'public', allowedEmbedDomains: [] }), EXPECTED, 67), 'open',
   [S.scope('public'), S.noList],
   'a copy as Tella makes it (public, no list) -> open, two sentences')
+
+console.log('\n=== judgeLock: the catalog rules (a lesson that can never be finished) ===')
+// The fourth argument is what the catalog says about the row's lesson id:
+// 'watch' (the default), 'none' or 'unread'.
+verdictIs(judgeLock(facts(), EXPECTED, 67, 'watch'), 'locked', [],
+  'a watch lesson with a matching length, said out loud -> the same as the default')
+verdictIs(judgeLock(facts(), EXPECTED, 0), 'locked', [S.noLength],
+  'a length of 0 is no length')
+verdictIs(judgeLock(facts(), EXPECTED, NaN), 'locked', [S.noLength],
+  'a length that is not a number is no length')
+verdictIs(judgeLock(facts({ durationSeconds: null }), EXPECTED, null), 'locked', [S.noLength],
+  'no length on either side -> the catalog\'s is the one reported')
+verdictIs(judgeLock(facts(), EXPECTED, null, 'none'), 'locked', [S.noLesson],
+  'no watch lesson has this id -> still locked, and said')
+verdictIs(judgeLock(facts(), EXPECTED, 753, 'none'), 'locked', [S.noLesson],
+  'no watch lesson has this id -> the length is not looked at, one sentence')
+verdictIs(judgeLock(facts(), EXPECTED, null, 'unread'), 'locked', [],
+  'the catalog could not be read -> nothing is said about it')
+verdictIs(judgeLock(facts(), EXPECTED, 753, 'unread'), 'locked', [],
+  'the catalog could not be read -> a length passed anyway is not compared')
+verdictIs(judgeLock(facts({ allowedEmbedDomains: [PREVIEW, APP, 'localhost'] }), EXPECTED, null, 'unread'), 'open', [S.extra('localhost')],
+  'the catalog could not be read -> the lock rules still run')
+verdictIs(judgeLock(facts({ linkScope: 'public', downloadsEnabled: true }), EXPECTED, null), 'open',
+  [S.scope('public'), S.downloads, S.noLength],
+  'an open video with no catalog length -> open, the catalog sentence last')
+verdictIs(judgeLock(facts({ allowedEmbedDomains: [APP] }), EXPECTED, null, 'none'), 'locked',
+  [S.absent(PREVIEW), S.noLesson],
+  'a missing site and an unknown lesson -> locked with two sentences')
+verdictIs(judgeLock(null, EXPECTED, null), 'missing', [S.gone, S.noLength],
+  'Tella has no video AND the catalog has no length -> missing, both said')
+verdictIs(judgeLock(null, EXPECTED, 67, 'none'), 'missing', [S.gone, S.noLesson],
+  'Tella has no video AND no watch lesson has the id -> missing, both said')
+verdictIs(judgeLock(null, EXPECTED, 753), 'missing', [S.gone],
+  'Tella has no video -> there is no length to compare, one sentence')
+
+console.log('\n=== watchLessonSeconds: which ids have a watch lesson, and how long ===')
+{
+  // Made-up catalog rows, the three columns the lock check reads.
+  const staging = [
+    { id: 'a1l01', type: 'watch', duration_seconds: 300 },
+    { id: 'a1l02', type: 'watch', duration_seconds: null },
+    { id: 'a1l03', type: 'setup', duration_seconds: 120 },
+    { id: 'shared', type: 'watch', duration_seconds: 400 },
+    { id: 'shared-null', type: 'watch', duration_seconds: 400 },
+    { id: 'staging-watch', type: 'watch', duration_seconds: 90 },
+  ]
+  const live = [
+    { id: 'l041', type: 'watch', duration_seconds: '753' },
+    { id: 'l042', type: 'action', duration_seconds: null },
+    { id: 'l043', type: 'watch', duration_seconds: 0 },
+    { id: 'shared', type: 'watch', duration_seconds: 500 },
+    { id: 'shared-null', type: 'watch', duration_seconds: null },
+    { id: 'staging-watch', type: 'setup', duration_seconds: 10 },
+  ]
+  const m = watchLessonSeconds([staging, live])
+  ok(m.get('a1l01') === 300, 'a watch lesson has its length', `a1l01 -> ${m.get('a1l01')}`)
+  ok(m.has('a1l02') && m.get('a1l02') === null, 'a watch lesson with no length is there, holding null')
+  ok(!m.has('a1l03'), 'a setup lesson is not a watch lesson, whatever length it carries')
+  ok(!m.has('l042'), 'an action lesson is not a watch lesson')
+  ok(!m.has('nowhere'), 'an id in neither table has no entry')
+  ok(m.get('l041') === 753, 'a length that arrives as a string is read as a number', `l041 -> ${m.get('l041')}`)
+  ok(m.has('l043') && m.get('l043') === null, 'a length of 0 is no length')
+  ok(m.get('shared') === 500, 'an id in both tables takes the later table\'s length (the live one)', `shared -> ${m.get('shared')}`)
+  ok(m.has('shared-null') && m.get('shared-null') === null, 'and takes its missing length too: live is what 95% is measured against')
+  ok(m.get('staging-watch') === 90, 'a watch lesson in one table stays one when the other table has the id as something else', `staging-watch -> ${m.get('staging-watch')}`)
+  ok(watchLessonSeconds([]).size === 0 && watchLessonSeconds([[], []]).size === 0, 'no tables or empty tables -> an empty map')
+
+  // The whole path the lock check takes for one row: look the id up, then judge.
+  const judgeRow = (lessonId) => judgeLock(facts(), EXPECTED, m.get(lessonId) ?? null, m.has(lessonId) ? 'watch' : 'none')
+  verdictIs(judgeRow('nowhere'), 'locked', [S.noLesson],
+    'a video row whose lesson id is in neither catalog table -> reported')
+  verdictIs(judgeRow('l042'), 'locked', [S.noLesson],
+    'a video row on a lesson that exists but is not a watch lesson -> reported with the same sentence')
+  verdictIs(judgeRow('a1l02'), 'locked', [S.noLength],
+    'a video row on a watch lesson with no length -> reported, with the other sentence')
+  verdictIs(judgeRow('a1l01'), 'locked', [S.length(67, 300)],
+    'a video row on a watch lesson with the wrong length -> the length rule as before')
+}
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}   SKIP ${skipped}`)
 if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1) }

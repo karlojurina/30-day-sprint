@@ -3,7 +3,7 @@
  * browser against a stand-in player and a stand-in server.
  * (_admin/prds/tella-player/tella_player_prd.md, section 12.)
  *
- *   node world-tests/lesson-player-sim.mjs            every section, about 3 minutes
+ *   node world-tests/lesson-player-sim.mjs            every section, about 5 minutes
  *   node world-tests/lesson-player-sim.mjs S3 S5      only the sections named
  *
  * Run it from the app root (30-day-sprint). Nothing has to be running: no dev
@@ -14,10 +14,14 @@
  * watch-heartbeat.ts, tella.ts, lesson-transport.ts and call-gate.ts. It is
  * loaded into headless Chrome with React's development build and driven
  * through whole visits to a lesson: watched through, skipped then watched at
- * 2.5x, a completion claim that is refused, held back, failed or slow (D11),
- * a resumed lesson, a video that says nothing or whose frame never loads
- * (D12, D13), the other messages, a change of lesson, and the real
- * transport's two requests. A real browser
+ * 2.5x, a completion claim that is refused, held back, failed or slow (D11,
+ * D17), a resumed lesson, a video that says nothing or whose frame never
+ * loads (D12, D13), the other messages, a change of lesson, the real
+ * transport's two requests, a lesson that ends without reaching its 95%
+ * point, told from the position whatever word the player ends on, and an
+ * end heartbeat that fails (D14, D17), a lesson that the
+ * catalog disowns for a moment while it plays (D19), and a page whose main
+ * thread is held up while the video plays on (D16). A real browser
  * supplies the things a Node test cannot: real frames, real `postMessage`
  * origins and sources, real timers, React's effects and StrictMode.
  *
@@ -190,14 +194,18 @@ function harness(require, module, exports, D, EMBED) {
     rows: new Map(),
     floor: 0.8,
     embed: { ok: true, embedUrl: EMBED },
+    /** The catalog's length for the lesson: what the 95% point and the played floor are measured against. */
+    duration: D,
     /** How many claims fail as a request, counted down. */
     claimFails: 0,
+    /** How many forced heartbeats fail as a call, counted down. */
+    failForcedBeats: 0,
     /** How long each claim's answer takes, first claim first. Empty = at once. */
     claimDelaysMs: [],
     beat(a) {
       const now = Date.now()
       const prev = server.rows.get(a.p_lesson_id)
-      const pos = Math.min(Math.max(0, a.p_position_seconds), D)
+      const pos = Math.min(Math.max(0, a.p_position_seconds), server.duration)
       let elapsed = null
       let delta
       let newMax
@@ -210,7 +218,7 @@ function harness(require, module, exports, D, EMBED) {
         newMax = pos
       }
       const hadThresh = Boolean(prev && prev.thresh)
-      const crosses = !hadThresh && newMax >= 0.95 * D
+      const crosses = !hadThresh && newMax >= 0.95 * server.duration
       if (prev && elapsed < 5 && !a.p_force && !crosses) {
         return { accepted: false, reason: 'rate_limited', max_position_seconds: prev.max, watched_seconds: prev.watched, threshold_met: hadThresh, threshold_crossed: false }
       }
@@ -224,7 +232,7 @@ function harness(require, module, exports, D, EMBED) {
     judge(id) {
       const row = server.rows.get(id)
       if (!row) return { completed: false, reason: 'no_watch_row', playedRatio: 0, playedFloor: server.floor }
-      const playedRatio = Number((row.watched / D).toFixed(4))
+      const playedRatio = Number((row.watched / server.duration).toFixed(4))
       if (!row.thresh) return { completed: false, reason: 'position_short', playedRatio, playedFloor: server.floor }
       if (playedRatio < server.floor - 1e-9) return { completed: false, reason: 'played_short', playedRatio, playedFloor: server.floor }
       return { completed: true, newAchievements: ['first_lesson'] }
@@ -237,6 +245,11 @@ function harness(require, module, exports, D, EMBED) {
         return server.embed
       },
       heartbeat: async (args) => {
+        if (args.p_force && server.failForcedBeats > 0) {
+          server.failForcedBeats--
+          note('beat-failed', { pos: Number(args.p_position_seconds.toFixed(2)), delta: Number(args.p_delta_seconds.toFixed(3)) })
+          return { data: null, error: { message: 'the stand-in call failed' } }
+        }
         const result = server.beat(args)
         note('beat', { pos: Number(args.p_position_seconds.toFixed(2)), delta: Number(args.p_delta_seconds.toFixed(3)), force: args.p_force, accepted: result.accepted, met: result.threshold_met, watched: Number(result.watched_seconds.toFixed(2)) })
         return { data: result, error: null }
@@ -276,15 +289,17 @@ function harness(require, module, exports, D, EMBED) {
   }
   function App({ cfg }) {
     const [lessonId, setLessonId] = React.useState(cfg.lessonId)
+    const [recorded, setRecorded] = React.useState(cfg.recorded === undefined ? true : cfg.recorded)
     React.useEffect(() => {
       window.__setLesson = setLessonId
+      window.__setRecorded = setRecorded
     }, [])
     const transport = cfg.realTransport ? undefined : (cfg.unstable ? makeTransport() : stableTransport)
     const onCompleted = (id, achievements) => note('onCompleted', { id, achievements })
     return h(Provider, { cfg }, h(LessonPlayer, {
       lessonId,
       durationSeconds: cfg.durationSeconds === undefined ? D : cfg.durationSeconds,
-      recorded: cfg.recorded === undefined ? true : cfg.recorded,
+      recorded,
       transport, onCompleted, className: 'player',
     }))
   }
@@ -313,6 +328,10 @@ function harness(require, module, exports, D, EMBED) {
  * `seek` out; a position report every 250 ms while playing; at the end a last
  * report just short of the length, then "stopped" with `duration: 0`. A
  * "silent" one says nothing until it is told to, like a refused video.
+ *
+ * The real player was since measured ending a video with "paused" in place of
+ * "stopped" (one run in four, on a replay), so this one can be told to do
+ * that, and to say "stopped" or "paused" at a position of the test's choosing.
  */
 function standInPlayer(D, mode, readyDelay) {
   let t = 0
@@ -325,8 +344,15 @@ function standInPlayer(D, mode, readyDelay) {
   // times the speed per report instead, for the sections whose arithmetic has
   // to come out the same on a busy machine.
   let steady = false
+  // The word it ends on, and a position at which to say "paused" or "stopped" once.
+  let lastWord = 'stopped'
+  let haltAt = null
   const post = (m) => parent.postMessage(m, '*')
-  const state = (s) => post({ type: 'playbackState', state: s, currentTime: t, duration: s === 'stopped' ? 0 : D })
+  window.__states = []
+  const state = (s) => {
+    window.__states.push(s)
+    post({ type: 'playbackState', state: s, currentTime: t, duration: s === 'stopped' ? 0 : D })
+  }
   window.__got = []
   function tick() {
     const now = performance.now()
@@ -337,10 +363,17 @@ function standInPlayer(D, mode, readyDelay) {
       post({ type: 'timeUpdate', currentTime: D - 0.05, duration: D })
       playing = false
       clearInterval(timer)
-      state('stopped')
+      state(lastWord)
       return
     }
     post({ type: 'timeUpdate', currentTime: t, duration: D })
+    if (haltAt !== null && t >= haltAt.position) {
+      const word = haltAt.word
+      haltAt = null
+      playing = false
+      clearInterval(timer)
+      state(word)
+    }
   }
   function play() {
     if (playing) return
@@ -367,6 +400,18 @@ function standInPlayer(D, mode, readyDelay) {
     play, pause, say: post,
     setRate: (r) => { rate = r },
     steady: () => { steady = true },
+    /** The video will end on "paused", not "stopped". */
+    endWithPause: () => { lastWord = 'paused' },
+    /** Plays on and says `word` ("paused" or "stopped") on reaching `position`. */
+    playUntil: (position, word) => {
+      haltAt = { position, word }
+      play()
+    },
+    /** Stops reporting without a word, as a player whose page has hung would. No "paused", so no forced heartbeat. */
+    freeze: () => {
+      playing = false
+      clearInterval(timer)
+    },
     /** The student drags the player's own scrub bar. */
     jump: (to) => {
       t = to
@@ -481,7 +526,7 @@ async function open({ frame, api } = {}) {
     text: () => page.evaluate(() => document.getElementById('root').innerText.trim()),
     row: (id) => page.evaluate((k) => {
       const r = window.__h.server.rows.get(k)
-      return r ? { lastPos: r.lastPos, ratio: Number((r.watched / 20).toFixed(3)), wouldComplete: window.__h.server.judge(k).completed } : null
+      return r ? { lastPos: r.lastPos, ratio: Number((r.watched / window.__h.server.duration).toFixed(3)), wouldComplete: window.__h.server.judge(k).completed } : null
     }, id),
     /** The timers the component set. The claim timer is at most 10 s; the no-load timer is exactly 12 s. */
     timers: async () => {
@@ -538,6 +583,8 @@ const CLOCKS_MS = 10
 const tenSeconds = (gap) => gap >= 10_000 - CLOCKS_MS && gap < 10_400
 const noteLine = (dom) => dom.statuses.find((x) => x.text.startsWith('Not marked as watched yet.')) ?? null
 const noLoadLine = (dom) => dom.statuses.find((x) => x.text === NO_LOAD) ?? null
+const ENDED_SHORT = "This lesson finished but didn't register. Tell the team so we can fix it."
+const endedLine = (dom) => dom.statuses.find((x) => x.text === ENDED_SHORT) ?? null
 /** A stored row past the 95% point and not complete, as the page's context and the server both hold it. */
 const stored = (id, { position, watched, met }) => ({
   seedRows: [[id, { max: position, lastPos: position, watched, thresh: met, count: 5 }]],
@@ -754,29 +801,106 @@ section('S3', 'D11: leaving the page ends the timer', async () => {
   await s.close()
 })
 
-section('S3', 'D11: a request that failed is made again, and opening a lesson claims once', async () => {
+/**
+ * The start of the D17 claim sections: the stored row is fully played but not
+ * yet past 95%, and the lesson is played from 18.2 s to its end. The first
+ * report (18.45 s) is short of 95%, so the only heartbeat past it is the one
+ * at the end, and the claim it makes is the only one anything will ask for.
+ */
+async function playTheLastTwoSeconds(s, f) {
+  await sleep(700)
+  await f.evaluate(() => { window.__player.steady(); window.__player.jump(18.2); window.__player.play() })
+  await s.until(async () => (await s.of('claim')).length === 1)
+  await sleep(300)
+}
+
+section('S3', 'D17: a claim whose request fails is made again when the 10 s end', async () => {
   const s = await open()
-  // The stored row is past 95% and fully played, and the lesson is not complete: the claim on mount. It fails.
-  await s.mount({ lessonId: 'a2l03', strict: true, unstable: true, server: { claimFails: 1 }, ...stored('a2l03', { position: 19.9, watched: 19.8, met: true }) })
+  await s.mount({ lessonId: 'a2l15', strict: true, unstable: true, server: { claimFails: 1 }, ...stored('a2l15', { position: 18, watched: 19, met: false }) })
   const f = await s.frame()
-  await sleep(900)
-  ok((await s.of('claim')).length === 1 && (await s.timers()).claim.length === 0,
-     'opening a lesson whose stored row is past 95% claims once, and StrictMode\'s second run sets no timer', `${(await s.of('claim')).length} claim, ${(await s.timers()).claim.length} timers`)
-  ok((await s.of('claim-answer'))[0]?.failed === true && (await s.of('markWatched')).length === 0 && noteLine(await s.dom()) === null, 'that request failed: nothing is marked and there is nothing to say')
-  ok((await f.evaluate(() => window.__got)).length === 0, 'a lesson past 95% is not resumed: no seek was sent')
-  // One heartbeat past 95% inside the wait, then the player is left alone.
-  await f.evaluate(() => { window.__player.jump(2); window.__player.play() })
-  await sleep(1200)
-  await f.evaluate(() => window.__player.pause())
-  await sleep(600)
-  ok((await s.of('claim')).length === 1 && (await s.timers()).claim.length === 1, 'D11: a heartbeat past 95% inside the wait does not claim; it sets the timer', `${(await s.timers()).claim.length} timer`)
-  const claim1 = (await s.of('claim'))[0]
+  await playTheLastTwoSeconds(s, f)
+  let log = await s.log()
+  const past = log.filter((e) => e.kind === 'beat' && e.met)
+  ok(past.length === 1 && past[0].force && log.filter((e) => e.kind === 'claim').length === 1 && log.find((e) => e.kind === 'claim-answer')?.failed === true,
+     'D17: the video ends, the heartbeat at the end is the only one past 95%, and the one claim it makes fails as a request', `${past.length} heartbeat past 95%, ${log.filter((e) => e.kind === 'claim').length} claim`)
+  ok((await s.of('markWatched')).length === 0 && (await s.dom()).statuses.length === 0, 'D17: nothing is marked and there is nothing to say')
+  const armed = (await s.timers()).claim
+  ok(armed.length === 1 && armed[0].state === 'live' && armed[0].delay > 9000, 'D17: the failed request set the one timer, for the rest of the 10 s', show(armed.map((t) => [t.delay, t.state])))
+  // Nothing else happens: the player is left alone.
+  const claim1 = log.find((e) => e.kind === 'claim')
   await sleep(Math.max(0, claim1.at + 10_600 - (await s.now())))
-  const claims = await s.of('claim')
-  ok(claims.length === 2 && tenSeconds(claims[1].at - claims[0].at) && (await s.of('markWatched')).length === 1,
-     'D11: the failed request is made again when the wait ends, and the lesson is counted', `${claims.length === 2 ? claims[1].at - claims[0].at : '?'} ms after the first`)
+  log = await s.log()
+  const claims = log.filter((e) => e.kind === 'claim')
+  ok(claims.length === 2 && tenSeconds(claims[1].at - claims[0].at) && log.filter((e) => e.kind === 'beat').length === 2,
+     'D17: with nothing else happening, the claim is made again when the 10 s end', `${claims.length === 2 ? claims[1].at - claims[0].at : '?'} ms after the first; ${log.filter((e) => e.kind === 'beat').length} heartbeats in all`)
+  ok(log.filter((e) => e.kind === 'markWatched').length === 1 && log.filter((e) => e.kind === 'onCompleted').length === 1, 'D17: and the lesson is counted')
   ok((await s.trouble()).length === 0, 'no error, no React warning', (await s.trouble()).join(' | ').slice(0, 300))
   await s.close()
+})
+
+section('S3', 'D17: a claim that keeps failing is not asked for ever', async () => {
+  const s = await open()
+  await s.mount({ lessonId: 'a2l16', server: { claimFails: 99 }, ...stored('a2l16', { position: 18, watched: 19, met: false }) })
+  const f = await s.frame()
+  await playTheLastTwoSeconds(s, f)
+  const claim1 = (await s.of('claim'))[0]
+  await sleep(Math.max(0, claim1.at + 30_600 - (await s.now())))
+  let claims = await s.of('claim')
+  const gaps = claims.slice(1).map((c, i) => c.at - claims[i].at)
+  ok(claims.length === 4 && gaps.every(tenSeconds), 'D17: a request that keeps failing is made three more times, 10 s apart', `${claims.length} requests; gaps ${gaps.join(', ')} ms`)
+  await sleep(12_000)
+  claims = await s.of('claim')
+  const timers = (await s.timers()).claim
+  ok(claims.length === 4 && timers.length === 3 && timers.every((t) => t.state === 'fired'), 'D17: and then it is left alone: no fifth request, no timer waiting', `${claims.length} requests, timers ${show(timers.map((t) => t.state))}`)
+  // One heartbeat past 95%, and only one (the player then goes quiet without
+  // pausing, so there is no second heartbeat to hold back and set the timer
+  // that way). It asks, and the count starts again with it.
+  await f.evaluate(() => { window.__player.jump(18.5); window.__player.play() })
+  await s.until(async () => (await s.of('claim')).length === 5, 4000)
+  await f.evaluate(() => window.__player.freeze())
+  await sleep(600)
+  const after = (await s.timers()).claim
+  ok((await s.of('claim')).length === 5 && (await s.of('beat')).filter((b) => b.met).length === 2 && after.length === 4 && after[3].state === 'live',
+     'D17: a later heartbeat past 95% still asks, and starts the count again: its failed request sets the timer', `${(await s.of('claim')).length} requests, timers ${show(after.map((t) => t.state))}`)
+  ok((await s.trouble()).length === 0, 'no error, no React warning', (await s.trouble()).join(' | ').slice(0, 300))
+  await s.close()
+})
+
+section('S3', 'D17: a claim that fails on opening the lesson, and opening a lesson claims once', async () => {
+  {
+    const s = await open()
+    // The stored row is past 95% and fully played, and the lesson is not complete: the claim on mount. It fails.
+    await s.mount({ lessonId: 'a2l03', strict: true, unstable: true, server: { claimFails: 1 }, ...stored('a2l03', { position: 19.9, watched: 19.8, met: true }) })
+    const f = await s.frame()
+    await sleep(900)
+    ok((await s.of('claim')).length === 1 && (await s.timers()).claim.length === 1,
+       'opening a lesson whose stored row is past 95% claims once; the request failed, so one timer is set', `${(await s.of('claim')).length} claim, ${(await s.timers()).claim.length} timer`)
+    ok((await s.of('claim-answer'))[0]?.failed === true && (await s.of('markWatched')).length === 0 && noteLine(await s.dom()) === null, 'that request failed: nothing is marked and there is nothing to say')
+    ok((await f.evaluate(() => window.__got)).length === 0, 'a lesson past 95% is not resumed: no seek was sent')
+    // One heartbeat past 95% inside the wait, then the player is left alone.
+    await f.evaluate(() => { window.__player.jump(2); window.__player.play() })
+    await sleep(1200)
+    await f.evaluate(() => window.__player.pause())
+    await sleep(600)
+    ok((await s.of('claim')).length === 1 && (await s.timers()).claim.length === 1, 'D11: a heartbeat past 95% inside the wait does not claim, and there is still one timer', `${(await s.timers()).claim.length} timer`)
+    const claim1 = (await s.of('claim'))[0]
+    await sleep(Math.max(0, claim1.at + 10_600 - (await s.now())))
+    const claims = await s.of('claim')
+    ok(claims.length === 2 && tenSeconds(claims[1].at - claims[0].at) && (await s.of('markWatched')).length === 1,
+       'D17: the failed request is made again when the wait ends, and the lesson is counted', `${claims.length === 2 ? claims[1].at - claims[0].at : '?'} ms after the first`)
+    ok((await s.trouble()).length === 0, 'no error, no React warning', (await s.trouble()).join(' | ').slice(0, 300))
+    await s.close()
+  }
+  {
+    // The same opening with a claim that is answered (a refusal): StrictMode runs the mount effect twice, and the second run must set no timer.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l03', strict: true, unstable: true, ...stored('a2l03', { position: 19.9, watched: 10, met: true }) })
+    await s.frame()
+    await sleep(900)
+    ok((await s.of('claim')).length === 1 && (await s.timers()).claim.length === 0 && noteLine(await s.dom())?.text === notCounted(50),
+       'opening a lesson whose claim is refused claims once, shows the note, and StrictMode\'s second run sets no timer', `${(await s.of('claim')).length} claim, ${(await s.timers()).claim.length} timers`)
+    await s.close()
+  }
 })
 
 // ── S4 ───────────────────────────────────────────────────────────────
@@ -1024,6 +1148,292 @@ section('S8', 'no transport prop: the real one, against stand-in routes', async 
     ok((await s.text()) === want, `lesson-video ${answer.status} ${show(answer.body)} -> "${want}"`, await s.text())
     await s.close()
   }
+})
+
+// ── S9: the end of the video (D14, D17) ──────────────────────────────
+section('S9', 'D14: a lesson that ends and is still not past 95%', async () => {
+  {
+    // The catalog says 26 s. The video is 20 s: its end is at 77%.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l20', strict: true, unstable: true, durationSeconds: 26, server: { duration: 26 } })
+    const f = await s.frame()
+    await sleep(700)
+    await f.evaluate(() => { window.__player.steady(); window.__player.jump(18.2); window.__player.play() })
+    await sleep(1200)
+    ok(endedLine(await s.dom()) === null, 'D14: while it plays there is no line')
+    await s.until(async () => endedLine(await s.dom()) !== null, 4000)
+    const d = await s.dom()
+    const line = endedLine(d)
+    const log = await s.log()
+    const end = log.filter((e) => e.kind === 'beat').find((b) => b.force)
+    ok(line && line.cls === 'barNote' && line.tag === 'P' && end && end.accepted && end.met === false,
+       'D14: a lesson whose catalog length is 30% longer than its video shows the line at the end, role="status", in the PRD\'s words', show(d.statuses))
+    ok(log.filter((e) => e.kind === 'claim').length === 0 && (await s.timers()).claim.length === 0 && noteLine(d) === null && d.iframe !== null,
+       'D14: and no claim is made, no timer is set, and the frame stays', `${log.filter((e) => e.kind === 'claim').length} claims`)
+    ok((await s.trouble()).length === 0, 'no error, no React warning', (await s.trouble()).join(' | ').slice(0, 300))
+    await s.close()
+  }
+  {
+    // The length is put right while the student is still there, and they play the end again.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l21', durationSeconds: 26, server: { duration: 26 } })
+    const f = await s.frame()
+    await sleep(700)
+    await f.evaluate(() => { window.__player.steady(); window.__player.jump(18.2); window.__player.play() })
+    await s.until(async () => endedLine(await s.dom()) !== null, 5000)
+    const shown = endedLine(await s.dom()) !== null
+    await s.page.evaluate(() => { window.__h.server.duration = 20 })
+    await f.evaluate(() => { window.__player.jump(17); window.__player.play() })
+    await s.until(async () => endedLine(await s.dom()) === null, 6000)
+    ok(shown && endedLine(await s.dom()) === null, 'D14: a later answer that is past 95% takes the line away')
+    await s.close()
+  }
+  {
+    // The right length: the same two seconds, and the line never shows.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l22', strict: true, ...stored('a2l22', { position: 18, watched: 19, met: false }) })
+    const f = await s.frame()
+    await sleep(700)
+    await f.evaluate(() => { window.__player.steady(); window.__player.jump(18.2); window.__player.play() })
+    let seen = false
+    await s.until(async () => { seen = seen || endedLine(await s.dom()) !== null; return (await s.of('markWatched')).length === 1 }, 6000)
+    await sleep(500)
+    ok(!seen && endedLine(await s.dom()) === null && (await s.of('markWatched')).length === 1, 'D14: a lesson with the right length never shows the line, and is counted')
+    await s.close()
+  }
+  {
+    // The end adds nothing new to the heartbeat just before it: no call is made for it, and the line still shows.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l23', durationSeconds: 26, server: { duration: 26 } })
+    const f = await s.frame()
+    await sleep(700)
+    await f.evaluate(() => { window.__player.steady(); window.__player.jump(19.6); window.__player.play() })
+    await s.until(async () => endedLine(await s.dom()) !== null, 4000)
+    const beats = await s.of('beat')
+    ok(endedLine(await s.dom()) !== null && beats.length === 1 && !beats[0].force,
+       'D14: when the end adds nothing to the heartbeat just before it, the line still shows, from that heartbeat\'s answer', `${beats.length} heartbeat, at ${beats[0]?.pos} s`)
+    await s.close()
+  }
+})
+
+section('S9', 'D14: the end is told from the position, not from the word the player uses', async () => {
+  const states = (f) => f.evaluate(() => window.__states)
+  {
+    // The video ends on "paused" (as the real player was measured to, one run in four). The catalog is 30% too long.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l50', strict: true, unstable: true, durationSeconds: 26, server: { duration: 26 } })
+    const f = await s.frame()
+    await sleep(700)
+    await f.evaluate(() => { window.__player.steady(); window.__player.endWithPause(); window.__player.jump(18.2); window.__player.play() })
+    await s.until(async () => endedLine(await s.dom()) !== null, 5000)
+    const said = await states(f)
+    const end = (await s.of('beat')).find((b) => b.force)
+    ok(endedLine(await s.dom()) !== null && said[said.length - 1] === 'paused' && !said.includes('stopped') && end && end.pos === 19.95 && end.met === false,
+       'D14: a video that ends on "paused" at its last position, on a lesson whose catalog length is 30% too long, shows the line', `the player said ${said.join(', ')}; the end heartbeat was at ${end?.pos} s`)
+    ok((await s.of('claim')).length === 0, 'D14: and no claim is made', `${(await s.of('claim')).length} claims`)
+    ok((await s.trouble()).length === 0, 'no error, no React warning', (await s.trouble()).join(' | ').slice(0, 300))
+    await s.close()
+  }
+  {
+    // The same ending, on a lesson whose length is right.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l51', strict: true, ...stored('a2l51', { position: 18, watched: 19, met: false }) })
+    const f = await s.frame()
+    await sleep(700)
+    await f.evaluate(() => { window.__player.steady(); window.__player.endWithPause(); window.__player.jump(18.2); window.__player.play() })
+    let seen = false
+    await s.until(async () => { seen = seen || endedLine(await s.dom()) !== null; return (await s.of('markWatched')).length === 1 }, 6000)
+    await sleep(500)
+    const said = await states(f)
+    ok(!seen && endedLine(await s.dom()) === null && (await s.of('markWatched')).length === 1 && said[said.length - 1] === 'paused' && !said.includes('stopped'),
+       'D14: the same ending on a lesson with the right length: counted, and never the line', `the player said ${said.join(', ')}`)
+    await s.close()
+  }
+  {
+    // The too-long lesson again, and four halts that are not the end, or are.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l52', strict: true, unstable: true, durationSeconds: 26, server: { duration: 26 } })
+    const f = await s.frame()
+    await sleep(700)
+    const forced = async () => (await s.of('beat')).filter((b) => b.force)
+    const haltAt = async (position, word, count) => {
+      await f.evaluate((p, w) => { window.__player.playUntil(p, w) }, position, word)
+      await s.until(async () => (await forced()).length === count, 5000)
+      await sleep(500)
+      const beats = await forced()
+      return { beat: beats[beats.length - 1], line: endedLine(await s.dom()) !== null, count: beats.length }
+    }
+    await f.evaluate(() => { window.__player.steady(); window.__player.jump(5) })
+    const mid = await haltAt(6, 'stopped', 1)
+    ok(mid.count === 1 && mid.beat?.pos === 6 && mid.beat.accepted && !mid.beat.met && !mid.line,
+       'D14: a "stopped" in the middle of the video forces a heartbeat and does not show the line', `heartbeat at ${mid.beat?.pos} s of a 20 s video`)
+    const pause = await haltAt(7, 'paused', 2)
+    ok(pause.count === 2 && pause.beat?.pos === 7 && !pause.line, 'D14: an ordinary pause in the middle does not show it either, as before', `heartbeat at ${pause.beat?.pos} s`)
+    await f.evaluate(() => window.__player.jump(17.5))
+    const early = await haltAt(18.25, 'paused', 3)
+    ok(early.count === 3 && early.beat?.pos === 18.25 && !early.line, 'D14: a pause 1.75 s before the end is still an ordinary pause', `heartbeat at ${early.beat?.pos} s`)
+    const late = await haltAt(18.75, 'stopped', 4)
+    ok(late.count === 4 && late.beat?.pos === 18.75 && late.line, 'D14: a "stopped" or "paused" inside the last 1.5 s is the end: the line shows', `heartbeat at ${late.beat?.pos} s`)
+    ok((await s.of('claim')).length === 0 && (await s.trouble()).length === 0, 'no claim, no error, no React warning', (await s.trouble()).join(' | ').slice(0, 300))
+    await s.close()
+  }
+  {
+    // Two messages that name one place while the last position reported is another. Neither is the end.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l54', durationSeconds: 26, server: { duration: 26 } })
+    const f = await s.frame()
+    await sleep(700)
+    const forced = async () => (await s.of('beat')).filter((b) => b.force)
+    // Paused at 7 s, and then a "paused" that names 19.9 s: the scrub bar dragged to the end while paused, no position reported from there.
+    await f.evaluate(() => { window.__player.steady(); window.__player.jump(6); window.__player.playUntil(7, 'paused') })
+    await s.until(async () => (await forced()).length === 1, 5000)
+    await f.evaluate(() => window.__player.say({ type: 'playbackState', state: 'paused', currentTime: 19.9, duration: 20 }))
+    await sleep(700)
+    ok(endedLine(await s.dom()) === null && (await forced()).length === 1,
+       'D14: a "paused" that names the end while the last position reported is 7 s is not the end: no line', `${(await forced()).length} forced heartbeat, at ${(await forced())[0]?.pos} s`)
+    // Played to 19.25 s, and then a "stopped" that names 0 s.
+    await f.evaluate(() => { window.__player.jump(18.5); window.__player.playUntil(19.25, 'paused') })
+    await s.until(async () => (await forced()).length === 2, 5000)
+    await s.until(async () => endedLine(await s.dom()) !== null, 3000)
+    const shown = endedLine(await s.dom()) !== null
+    ok(shown, 'D14: paused 0.75 s before the end, both positions agree: the line shows')
+    await s.close()
+  }
+  {
+    // A "stopped" that names 0 s while the last position reported is the end is not taken for the end.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l55', durationSeconds: 26, server: { duration: 26 } })
+    const f = await s.frame()
+    await sleep(700)
+    await f.evaluate(() => { window.__player.steady(); window.__player.jump(18.6); window.__player.play() })
+    await s.until(async () => (await s.of('beat')).length === 1, 4000)
+    await sleep(600)
+    await f.evaluate(() => { window.__player.freeze(); window.__player.say({ type: 'playbackState', state: 'stopped', currentTime: 0, duration: 0 }) })
+    await s.until(async () => (await s.of('beat')).some((b) => b.force), 3000)
+    await sleep(500)
+    ok(endedLine(await s.dom()) === null && (await s.of('beat')).some((b) => b.force),
+       'D14: a "stopped" that names 0 s after positions near the end forces a heartbeat and is not taken for the end')
+    await s.close()
+  }
+  {
+    // A "paused" that carries no position at all, near the end: it is placed by the last position reported.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l53', durationSeconds: 26, server: { duration: 26 } })
+    const f = await s.frame()
+    await sleep(700)
+    await f.evaluate(() => { window.__player.steady(); window.__player.jump(18.6); window.__player.play() })
+    await s.until(async () => (await s.of('beat')).length === 1, 4000)
+    await f.evaluate(() => { window.__player.freeze(); window.__player.say({ type: 'playbackState', state: 'paused' }) })
+    await s.until(async () => endedLine(await s.dom()) !== null, 3000)
+    ok(endedLine(await s.dom()) !== null, 'D14: a "paused" with no position in it is placed by the last position reported')
+    await s.close()
+  }
+})
+
+section('S9', 'D14 and D17: the heartbeat at the end fails', async () => {
+  {
+    // The catalog is 30% too long AND the end heartbeat fails. No line on a failure; the retry 2 s later lands, and then the line.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l24', strict: true, unstable: true, durationSeconds: 26, server: { duration: 26, failForcedBeats: 1 } })
+    const f = await s.frame()
+    await sleep(700)
+    await f.evaluate(() => { window.__player.steady(); window.__player.jump(18.2); window.__player.play() })
+    await s.until(async () => (await s.of('beat-failed')).length === 1, 5000)
+    const failed = (await s.of('beat-failed'))[0]
+    await sleep(1200)
+    ok(failed && endedLine(await s.dom()) === null && (await s.of('beat')).length === 1,
+       'D14: a failed end heartbeat does not show the line', `failed at ${failed?.pos} s; ${(await s.of('beat')).length} heartbeat has landed`)
+    await s.until(async () => (await s.of('beat')).length === 2, 4000)
+    const retry = (await s.of('beat'))[1]
+    await sleep(300)
+    ok(retry && retry.force && retry.at - failed.at >= 2000 - CLOCKS_MS && retry.at - failed.at < 2400 && retry.pos === failed.pos && retry.delta === failed.delta,
+       'D17: the failed end heartbeat is sent again 2 s later, with the same position and played seconds', `${retry ? retry.at - failed.at : '?'} ms later`)
+    ok(endedLine(await s.dom()) !== null, 'D14: and when that one lands still short of 95%, the line shows')
+    ok((await s.trouble()).length === 0, 'no error, no React warning', (await s.trouble()).join(' | ').slice(0, 300))
+    await s.close()
+  }
+  {
+    // The right length, and the end heartbeat (the only one past 95%) fails.
+    const s = await open()
+    await s.mount({ lessonId: 'a2l25', strict: true, unstable: true, server: { failForcedBeats: 1 }, ...stored('a2l25', { position: 18, watched: 19, met: false }) })
+    const f = await s.frame()
+    await sleep(700)
+    await f.evaluate(() => { window.__player.steady(); window.__player.jump(18.2); window.__player.play() })
+    await s.until(async () => (await s.of('beat-failed')).length === 1, 5000)
+    const failed = (await s.of('beat-failed'))[0]
+    await sleep(1200)
+    ok((await s.of('claim')).length === 0 && (await s.of('markWatched')).length === 0, 'D17: the heartbeat at the end fails: nothing is past 95% yet, and nothing is claimed')
+    await s.until(async () => (await s.of('markWatched')).length === 1, 4000)
+    const log = await s.log()
+    const landed = log.filter((e) => e.kind === 'beat').find((b) => b.force)
+    ok(landed && landed.met && landed.at - failed.at >= 2000 - CLOCKS_MS && landed.at - failed.at < 2400 && log.filter((e) => e.kind === 'markWatched').length === 1 && endedLine(await s.dom()) === null,
+       'D17: it is sent again 2 s later with nothing else happening, and the lesson is counted', `${landed ? landed.at - failed.at : '?'} ms later`)
+    await s.close()
+  }
+})
+
+// ── S10: the catalog disowns a playing lesson for a moment (D19) ─────
+section('S10', 'D19: `recorded` turns false and true again while the video plays', async () => {
+  const s = await open()
+  await s.mount({ lessonId: 'a2l30', strict: true, unstable: true })
+  const f = await s.frame()
+  await sleep(700)
+  await f.evaluate(() => window.__player.play())
+  await sleep(1300)
+  await s.page.evaluate(() => { document.querySelector('iframe').__theSameOne = true })
+  const before = { asked: (await s.of('getEmbed')).length, bar: (await s.dom()).bar }
+  // A refresh of the student's data says the lesson has no video.
+  await s.page.evaluate(() => window.__setRecorded(false))
+  await sleep(600)
+  const off = await s.page.evaluate(() => ({ same: document.querySelector('iframe')?.__theSameOne === true, text: document.getElementById('root').innerText }))
+  ok(off.same && !off.text.includes('Not recorded yet.'), 'D19: with `recorded` false under a playing video, the frame stays and "Not recorded yet." is not shown')
+  // The next refresh is healthy.
+  await s.page.evaluate(() => window.__setRecorded(true))
+  await sleep(900)
+  const d = await s.dom()
+  const on = await s.page.evaluate(() => document.querySelector('iframe')?.__theSameOne === true)
+  ok(on && d.iframes === 1 && s.requests.filter((r) => r.frame).length === 1 && d.listeners === 1 && d.listenersAdded === 1,
+     'D19: back to true, it is the same frame element, loaded once, with the one listener it always had', `${d.iframes} frame, requested ${s.requests.filter((r) => r.frame).length} time, ${d.listenersAdded} listener added in all`)
+  ok((await s.of('getEmbed')).length === before.asked, 'D19: and the address was not asked for again', `${(await s.of('getEmbed')).length} asks`)
+  ok(d.bar > before.bar, 'D19: position reports are still heard: the progress line has moved on', `bar ${before.bar} -> ${d.bar}`)
+  const beatsBefore = (await s.of('beat')).length
+  await f.evaluate(() => window.__player.pause())
+  await sleep(600)
+  const beats = await s.of('beat')
+  ok(beats.length === beatsBefore + 1 && beats[beats.length - 1].force && beats[beats.length - 1].delta > 2,
+     'D19: and a heartbeat still goes, carrying what was played through the flip', `delta ${beats[beats.length - 1]?.delta} s at ${beats[beats.length - 1]?.pos} s`)
+  ok((await s.trouble()).length === 0, 'no error, no React warning', (await s.trouble()).join(' | ').slice(0, 300))
+  await s.close()
+})
+
+// ── S11: a busy page (D16) ───────────────────────────────────────────
+section('S11', 'D16: the page is busy for a second at a time while the video plays at 1.5x', async () => {
+  // The frame is on another site, so it is another process: it goes on
+  // playing and reporting while this page's main thread is held. The reports
+  // pile up and are handled back to back when the page is free again, the
+  // first with a 1 s gap behind it and the rest with none.
+  const s = await open()
+  await s.mount({ lessonId: 'a2l40', strict: true, unstable: true })
+  const f = await s.frame()
+  await sleep(700)
+  await f.evaluate(() => { window.__player.setRate(1.5); window.__player.play() })
+  const hold = () => s.page.evaluate(() => { const until = performance.now() + 1000; while (performance.now() < until) { /* busy */ } })
+  await sleep(2000)
+  await hold()
+  await sleep(2500)
+  await hold()
+  await sleep(2500)
+  await f.evaluate(() => window.__player.pause())
+  await s.until(async () => (await s.of('beat')).some((b) => b.force), 4000)
+  const beats = await s.of('beat')
+  const first = beats[0]
+  const last = beats[beats.length - 1]
+  const played = last.pos - first.pos
+  // Both figures are logged to two decimals, so they may differ by the rounding. One lost report would be 0.375 s.
+  ok(beats.length === 2 && last.force && played > 12 && Math.abs(last.watched - played) <= 0.02,
+     'D16: every report is played time, the ones handled back to back after a stall included', `credited ${last?.watched} s of the ${played.toFixed(2)} s played`)
+  ok((await s.trouble()).length === 0, 'no error, no React warning', (await s.trouble()).join(' | ').slice(0, 300))
+  await s.close()
 })
 
 // ── Run ──────────────────────────────────────────────────────────────

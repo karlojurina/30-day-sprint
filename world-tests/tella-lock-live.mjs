@@ -16,7 +16,16 @@
  *
  * READ-ONLY, AND TWO REQUESTS: one GET https://api.tella.com/v1/videos/{id}
  * for each of the two test videos. It writes nothing, to Tella or anywhere
- * else, and it does not touch Supabase, the app or Discord.
+ * else, and it does not touch Supabase, the app or Discord. Each request
+ * gives up after 10 s (the limit is in tella-api.ts), and the script prints
+ * how long Tella took to answer.
+ *
+ * There is no catalog here, so the script stands in for it: both videos are
+ * judged as a watch lesson 67 s long, which is what the stamp script writes
+ * for the two test lessons (supabase/diagnostics/stamp-tella-test-lessons.sql).
+ * Judged with no length they would be reported as lessons that can never be
+ * counted. Should a test video be re-recorded at another length, this script
+ * fails on the length rule, and the stamp's 67 is wrong by the same amount.
  *
  * It reads TELLA_API_KEY, DEV_TELLA_VIDEO_ID ("video A") and
  * DEV_TELLA_VIDEO_ID_2 ("video B") from .env.local by parsing the file.
@@ -59,6 +68,8 @@ const PREVIEW = '30-day-sprint-smkv-git-world-engine-karlojurinas-projects.verce
 const PRODUCTION = '30-day-sprint-smkv.vercel.app'
 /** The same spacing the lock check keeps between its calls to Tella. */
 const CALL_GAP_MS = 700
+/** The length the catalog holds for the two test lessons once they are stamped. */
+const CATALOG_SECONDS = 67
 
 function readEnvLocal() {
   const file = new URL('../.env.local', import.meta.url)
@@ -100,7 +111,8 @@ function finish() {
   process.exit(0)
 }
 
-say('Lesson video lock check, live. Read-only: 2 GET requests to api.tella.com.\n')
+say('Lesson video lock check, live. Read-only: 2 GET requests to api.tella.com.')
+say(`Judged as watch lessons ${CATALOG_SECONDS} s long, the length the stamp script gives the two test lessons.\n`)
 
 // Nothing is sent unless all three values are there and well formed.
 if (!apiKey) expectation(false, 'TELLA_API_KEY is set in .env.local')
@@ -117,26 +129,28 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 say('=== what Tella says ===')
 for (const [i, v] of VIDEOS.entries()) {
   if (i > 0) await sleep(CALL_GAP_MS)
+  const askedAt = performance.now()
+  const took = () => `${Math.round(performance.now() - askedAt)} ms`
   try {
     v.facts = await fetchTellaVideoFacts(v.id, apiKey)
     v.asked = true
     say(v.facts === null
-      ? `  ${v.name}  404, Tella does not have it`
+      ? `  ${v.name}  404, Tella does not have it (answered in ${took()})`
       : `  ${v.name}  access "${v.facts.linkScope}", ${v.facts.allowedEmbedDomains.length} site(s) on its list, ` +
-        `downloads ${v.facts.downloadsEnabled || v.facts.rawDownloadsEnabled ? 'ON' : 'off'}, ${v.facts.durationSeconds} s`)
+        `downloads ${v.facts.downloadsEnabled || v.facts.rawDownloadsEnabled ? 'ON' : 'off'}, ${v.facts.durationSeconds} s (answered in ${took()})`)
   } catch (err) {
     v.asked = false
     v.askError = err instanceof Error ? err.message : String(err)
-    say(`  ${v.name}  could not be asked: ${v.askError}`)
+    say(`  ${v.name}  could not be asked: ${v.askError} (after ${took()})`)
   }
 }
 
-/** The verdict for each video against one list of expected sites, printed. No catalog length here, so the length rule stays quiet. */
+/** The verdict for each video against one list of expected sites, printed. The catalog is the stand-in described at the top: a watch lesson, 67 s. */
 function judgeAll(title, expectedDomains) {
   say(`\n=== ${title} ===`)
   return VIDEOS.map((v) => {
     const verdict = v.asked
-      ? judgeLock(v.facts, expectedDomains, null)
+      ? judgeLock(v.facts, expectedDomains, CATALOG_SECONDS, 'watch')
       : { status: 'error', problems: [`Tella could not be asked: ${v.askError}`] }
     say(`  ${v.name}  ${verdict.status}`)
     if (verdict.problems.length === 0) say('             (no problem)')

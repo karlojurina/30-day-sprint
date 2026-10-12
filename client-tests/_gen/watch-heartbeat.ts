@@ -29,29 +29,53 @@ import { WATCH_SPEED_CAP } from "./tella.ts";
 /**
  * THE PER-REPORT RULE. A forward step between two position reports is played
  * time when the clock allows it: the video may not move faster than
- * WATCH_SPEED_CAP times the seconds since the last report, plus a little
- * slack. Anything larger is a skip, and anything backwards is a scrub.
+ * WATCH_SPEED_CAP times the clock. Anything larger is a skip, and anything
+ * backwards is a scrub.
  *
- * It used to be "a step of at most 1.5s", which counts VIDEO seconds with no
- * clock in it. That was right at 1x and silently wrong above it: the server
- * credited at most the clock seconds that had passed, so a lesson watched at
- * 2x banked half of itself and could never reach the played floor.
+ * It is kept as an ALLOWANCE THAT CARRIES OVER. Every report adds the clock
+ * seconds since the last one, times the speed cap, to a budget. A forward
+ * step counts when it fits in the budget, and then uses it up. A step that
+ * does not fit counts for nothing and leaves the budget as it is.
+ *
+ * The first version judged each gap alone ("this step against this gap").
+ * That fails the moment the page is busy: when the main thread is held for
+ * more than a quarter second, two queued reports are handled back to back,
+ * the second sees a gap near 0 and an allowance of only the slack, and its
+ * step is refused. Reproduced with this module: at 1.5x with a 1 s stall
+ * every 5 s, 80.4% of the watching was credited. The clock time of the stall
+ * was real; with a budget it is still there for the reports that follow.
+ *
+ * Before that it was "a step of at most 1.5s", which counts VIDEO seconds
+ * with no clock in it. That was right at 1x and silently wrong above it: the
+ * server credited at most the clock seconds that had passed, so a lesson
+ * watched at 2x banked half of itself and could never reach the played floor.
  *
  * Measured on Tella's player (2026-10-12), reports 250 ms apart:
  *   1x    step 0.25 s
  *   2x    step 0.503 s (largest 0.521)
  *   2.5x  step 0.621 s (largest 0.643)
- * The rule allows 0.25 * 2.5 + 0.35 = 0.975 s at that gap, so every speed on
- * the player's menu counts and a +20 s skip, which arrives as one step, does
- * not.
+ * A report adds 0.25 * 2.5 = 0.625 s to the budget, so every speed on the
+ * player's menu counts, and a +20 s skip, which arrives as one step, does not.
  *
- * The gap is capped at 2 s. A tab that was throttled or asleep reports late
- * and in one large step; whatever it says, at most 2 * 2.5 + 0.35 = 5.35 s of
- * it is taken as played.
+ * The budget starts at 0.35 s with the first report and after a seek: room
+ * for a report that lands a little early. It never holds more than 5.35 s
+ * (2 s of clock at the top speed, plus that start), however long nothing was
+ * reported. A tab that was asleep, or a long pause, cannot be turned into a
+ * skip of more than that.
  */
-const MAX_TICK_GAP_S = 2;
-/** Room for timer jitter: a report that lands a few milliseconds early. */
-const TICK_SLACK_S = 0.35;
+const BUDGET_START_S = 0.35;
+const BUDGET_MAX_S = 5.35;
+/** Float slack on "does the step fit": 0.1 + 0.2 is not 0.3. */
+const BUDGET_EPSILON_S = 1e-9;
+
+/**
+ * A FORCED beat that fails is sent again after these waits, then given up.
+ * Forced beats are the ones nothing follows (the pause, the end of the video,
+ * the tab going away), so a failed one used to be the last word: the beat at
+ * the end of a short lesson is usually the one that crosses 95%, and when it
+ * failed nothing was sent again while the student stayed on the page.
+ */
+const RETRY_AFTER_MS = [2_000, 5_000, 10_000];
 
 /** ~50 writes per full lesson. See the table in the research doc. */
 const THROTTLE_MS = 15_000;
@@ -60,8 +84,11 @@ const THROTTLE_MS = 15_000;
  * Hard backstop against a runaway loop, independent of what calls us. Module
  * level on purpose — a per-instance gate resets on every remount and never
  * holds, which is exactly how the 2026-08-27 refresh storm got through.
- * 400ms cannot block anything real: routine beats are 15s apart and forced
- * beats are event-driven and rare.
+ * Routine beats are 15s apart and forced beats are event-driven and rare, so
+ * 400ms seldom blocks anything real. It can, though: a video that ends within
+ * 400ms of a routine beat has its end beat held back here. A forced beat the
+ * gate holds back is therefore sent again like one that failed (see
+ * RETRY_AFTER_MS), not dropped.
  */
 const heartbeatGate = createCallGate("watch-heartbeat", 400);
 
@@ -77,11 +104,28 @@ export interface HeartbeatResult {
   threshold_crossed: boolean;
 }
 
+/** Which beat an answer belongs to. */
+export interface HeartbeatBeat {
+  /**
+   * Why the beat was sent: "throttle", or the reason handed to `flush`
+   * ("pause", "ended", "visibilitychange", "pagehide", "unmount"). A retry
+   * keeps the reason of the beat it retries.
+   */
+  reason: string;
+  force: boolean;
+  /**
+   * True when nothing was sent. A forced beat had nothing new to say since
+   * the last accepted one, so that one's answer is given again under this
+   * beat's name: it is still the answer.
+   */
+  repeated?: boolean;
+}
+
 export interface WatchHeartbeatOptions {
   lessonId: string;
   /** Catalog duration, when known. Trusted over whatever the player reports. */
   durationSeconds?: number | null;
-  onResult?: (result: HeartbeatResult) => void;
+  onResult?: (result: HeartbeatResult, beat: HeartbeatBeat) => void;
   /** Fired once, on the beat the server says crossed the threshold. */
   onThresholdCrossed?: () => void;
   /**
@@ -136,13 +180,15 @@ export function createWatchHeartbeat(
    * pause or tab-hide — the exact write whose whole job is recording the final
    * position. Queue it and run it when the current one lands.
    */
-  let pending: { force: boolean; reason: string } | null = null;
+  let pending: { reason: string; retry: boolean } | null = null;
 
   let position = 0;
   let duration: number | null = opts.durationSeconds ?? null;
   let lastTickPosition: number | null = null;
   /** The clock at the last position report (or seek). What the per-report rule measures from. */
   let lastTickAt = 0;
+  /** Video seconds the clock has allowed and no step has used yet. See THE PER-REPORT RULE. */
+  let budget = 0;
 
   /** Real seconds played since the last ACCEPTED write. Never reset on a refusal. */
   let playedSinceWrite = 0;
@@ -157,9 +203,39 @@ export function createWatchHeartbeat(
    */
   let lastWriteAt = 0;
   let lastSentPosition: number | null = null;
+  /** The answer to the last accepted beat. Given again when a forced beat has nothing new to say. */
+  let lastAccepted: HeartbeatResult | null = null;
   let crossedFired = false;
 
-  async function write(force: boolean, reason: string) {
+  /** The one timer for a failed forced beat, and how many retries that beat has had. */
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let retriesUsed = 0;
+
+  function stopRetrying() {
+    if (retryTimer !== null) clearTimeout(retryTimer);
+    retryTimer = null;
+    retriesUsed = 0;
+  }
+
+  function retryLater(reason: string, wasRetry: boolean) {
+    if (destroyed) return;
+    // A forced beat of its own (a new pause, the end) starts its own count.
+    // Only the retries of one beat are counted against the three.
+    if (!wasRetry) retriesUsed = 0;
+    if (retryTimer !== null) clearTimeout(retryTimer);
+    retryTimer = null;
+    if (retriesUsed >= RETRY_AFTER_MS.length) return;
+    const wait = RETRY_AFTER_MS[retriesUsed];
+    retriesUsed += 1;
+    retryTimer = setTimeout(() => {
+      retryTimer = null;
+      // Whatever is banked by then goes with it: the position and the played
+      // seconds are the module's, not the failed beat's.
+      void write(true, reason, true);
+    }, wait);
+  }
+
+  async function write(force: boolean, reason: string, retry = false) {
     if (destroyed) return;
     if (inFlight) {
       // ONLY forced beats are queued. A throttled one that arrives mid-flight
@@ -168,7 +244,7 @@ export function createWatchHeartbeat(
       // write count — the ~0.25s of playback that accrues during the in-flight
       // window reads as "something changed", and every write drew a second one
       // straight after it.
-      if (force) pending = { force: true, reason };
+      if (force) pending = { reason, retry };
       return;
     }
 
@@ -189,13 +265,28 @@ export function createWatchHeartbeat(
     // Forced too: pause, visibilitychange and pagehide can all fire within a
     // few milliseconds of each other, and after the first there is genuinely
     // nothing left to tell the server.
-    if (nothingChanged) return;
+    if (nothingChanged) {
+      // A forced beat still gets its answer: the last accepted one, which is
+      // what the server would say again. Without it the beat at the END of a
+      // video has no answer at all when a write landed a moment before it,
+      // and the caller cannot tell "the end is not past 95%" from "the end
+      // has not been heard about yet".
+      if (force && lastAccepted) {
+        opts.onResult?.(lastAccepted, { reason, force, repeated: true });
+      }
+      return;
+    }
 
-    if (!heartbeatGate.allow(reason)) return;
+    if (!heartbeatGate.allow(reason)) {
+      if (force) retryLater(reason, retry);
+      return;
+    }
 
     const sentDelta = playedSinceWrite;
     const sentPosition = position;
     inFlight = true;
+
+    let result: HeartbeatResult | null = null;
     try {
       const { data, error } = await rpc({
         p_lesson_id: opts.lessonId,
@@ -204,44 +295,62 @@ export function createWatchHeartbeat(
         p_delta_seconds: sentDelta,
         p_force: force,
       });
+      if (!error && data) result = data;
+    } catch {
+      // A call that throws is a call that failed. Handled with the error
+      // answer, below.
+    }
 
-      if (error || !data) {
+    try {
+      // Moved on ANY completed round trip: accepted, refused or FAILED.
+      // Leaving it unmoved on a refusal meant the throttle stayed satisfied
+      // and the next timeupdate (~250ms later) tried again immediately — a
+      // retry storm of roughly a dozen calls against the server's own 5s
+      // limiter. Leaving it unmoved on a failure did the same against a
+      // database call that kept erroring: measured, 120 calls in 60 s, held
+      // to that only by the 400ms gate. Nothing is lost by waiting: the delta
+      // stays banked and the position is retained, so the next beat carries
+      // everything this one did.
+      lastWriteAt = now();
+
+      if (result === null) {
         // Losing a beat is survivable by design — the next one carries the
         // same position and the accumulated delta. Deliberately silent: a
         // toast on every transient network blip would be worse than the blip.
+        // An ordinary beat is tried again by the throttle, 15s on. A forced
+        // one has nothing coming after it, so it gets its own retries.
+        if (force) retryLater(reason, retry);
         return;
       }
 
-      const result = data;
-      // Moved on ANY completed round trip, accepted or refused. Leaving it
-      // unmoved on a refusal meant the throttle stayed satisfied and the next
-      // timeupdate (~250ms later) tried again immediately — a retry storm of
-      // roughly a dozen calls against the server's own 5s limiter. Nothing is
-      // lost by waiting: the delta stays banked and the position is retained,
-      // so the next beat carries everything the refused one did.
-      lastWriteAt = now();
+      // The call got through, so whatever a failed forced beat still had to
+      // say has now been said, or will be by the throttle.
+      stopRetrying();
+
       if (result.accepted) {
         lastSentPosition = sentPosition;
+        lastAccepted = result;
         // Only now is the delta safely banked. A refused beat keeps it, so a
         // rate-limited write never silently discards watch time.
         playedSinceWrite = Math.max(0, playedSinceWrite - sentDelta);
       }
 
-      opts.onResult?.(result);
+      opts.onResult?.(result, { reason, force });
 
       if (result.threshold_crossed && !crossedFired) {
         crossedFired = true;
         opts.onThresholdCrossed?.();
       }
     } catch {
-      // Same reasoning as the error branch.
+      // Only a callback can throw here. That is the caller's trouble, and it
+      // must not stop the heartbeat or pass for a failed beat.
     } finally {
       inFlight = false;
       const queued = pending;
       pending = null;
       // Terminates: the retry runs with pending already cleared, and only a
       // forced beat can re-queue.
-      if (queued && !destroyed) void write(true, queued.reason);
+      if (queued && !destroyed) void write(true, queued.reason, queued.retry);
     }
   }
 
@@ -261,15 +370,21 @@ export function createWatchHeartbeat(
       }
 
       const at = now();
-      if (lastTickPosition !== null) {
+      if (lastTickPosition === null) {
+        budget = BUDGET_START_S;
+      } else {
+        // What the clock allows is added first, whatever the step turns out
+        // to be. A clock that stepped backwards adds nothing.
+        const gapSeconds = Math.max(0, (at - lastTickAt) / 1000);
+        budget = Math.min(budget + gapSeconds * WATCH_SPEED_CAP, BUDGET_MAX_S);
+
         const delta = positionSeconds - lastTickPosition;
-        // Forward, and no further than the clock allows at the top speed.
-        // Backwards deltas are scrubs and contribute nothing.
-        const allowed =
-          Math.min((at - lastTickAt) / 1000, MAX_TICK_GAP_S) * WATCH_SPEED_CAP +
-          TICK_SLACK_S;
-        if (delta > 0 && delta <= allowed) {
+        // Forward, and no further than the budget. Backwards deltas are
+        // scrubs and contribute nothing. A step that does not fit is a skip:
+        // it counts for nothing, and the budget is left for real playing.
+        if (delta > 0 && delta <= budget + BUDGET_EPSILON_S) {
           playedSinceWrite += delta;
+          budget = Math.max(0, budget - delta);
         }
       }
       lastTickPosition = positionSeconds;
@@ -285,11 +400,13 @@ export function createWatchHeartbeat(
       if (destroyed) return;
       if (!isFinite(positionSeconds) || positionSeconds < 0) return;
       // Re-anchor so the jump itself is never counted as watch time. The
-      // clock is re-anchored with it: the next report is measured from the
-      // seek, not from the last report before it, so a long pause before a
-      // seek cannot lend its gap to whatever comes after.
+      // clock is re-anchored with it and the budget starts over: the next
+      // report is measured from the seek, so neither a long pause before a
+      // seek nor an allowance saved up before it can be spent on whatever
+      // comes after.
       lastTickPosition = positionSeconds;
       lastTickAt = now();
+      budget = BUDGET_START_S;
       position = positionSeconds;
     },
 
@@ -300,6 +417,7 @@ export function createWatchHeartbeat(
 
     destroy() {
       destroyed = true;
+      stopRetrying();
     },
   };
 }

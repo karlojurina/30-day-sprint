@@ -837,7 +837,7 @@ console.log('\n=== 18. v100: lesson_videos (private) + the heartbeat counts up t
                                       `(2) as ${role}: reading lesson_videos directly is refused`, '42501'))
     }
 
-    // ── the function is v97's text with the PRD's four changes and no others ──
+    // ── the function is v97's text with the PRD's five changes and no others ──
     const v97code  = code(lift(V97F, FN_START, FN_END))
     const v100code = code(lift(V100F, FN_START, FN_END))
     const swaps = [
@@ -853,15 +853,61 @@ console.log('\n=== 18. v100: lesson_videos (private) + the heartbeat counts up t
        '  v_first_delta constant numeric := 20;\n  v_min_gap    constant numeric := 5;'],
       ['least(coalesce(p_delta_seconds, 0), v_max_delta)',
        'least(coalesce(p_delta_seconds, 0), v_first_delta)'],
+      // (e) the lock of D15: one new line, straight after the "no student" check.
+      ["      using errcode = '42501';\n  end if;",
+       "      using errcode = '42501';\n  end if;\n  perform pg_advisory_xact_lock(hashtextextended(v_student_id::text || ':' || p_lesson_id, 0));"],
     ]
     const eachOnce = swaps.every(([from]) => v97code.split(from).length === 2)
     const wanted = swaps.reduce((s, [from, to]) => s.replace(from, () => to), v97code)
     const wl = wanted.split('\n'), gl = v100code.split('\n')
     const at = wl.findIndex((l, i) => l !== gl[i])
     note(eachOnce && v100code === wanted,
-         "v100's function is v97's with exactly the PRD's four changes, comments aside",
+         "v100's function is v97's with exactly the PRD's five changes, comments aside",
          v100code === wanted ? `${gl.length} lines of code, ${gl.length - code(lift(V97F, FN_START, FN_END)).split('\n').length} added`
                              : `first difference at code line ${at + 1}: ${JSON.stringify(gl[at])} vs ${JSON.stringify(wl[at])}`)
+
+    // ── D15: one call at a time for each (student, lesson) ──
+    // THE RACE ITSELF IS NOT REPRODUCED HERE, and cannot be: PGlite has one
+    // connection, so two calls are never in flight together. Before the lock,
+    // calls fired at the same instant each read the watch row before any of
+    // them committed and each was credited in full. What this harness can
+    // show, and does:
+    //   * the lock is in the INSTALLED function, once, after the student
+    //     lookup and before the row is read;
+    //   * a call really holds it, on its own (student, lesson) key, until its
+    //     transaction ends and no longer;
+    //   * the second caller's arithmetic, run by hand further down, credits 0.
+    // Sequential behaviour must not have moved. Nothing new checks that: the
+    // (5), (6), (7) and (10) assertions below are the ones that passed before
+    // the lock went in, and they now run against the function that has it.
+    const LOCK = "perform pg_advisory_xact_lock(hashtextextended(v_student_id::text || ':' || p_lesson_id, 0));"
+    {
+      const live = await fnDef()
+      const at = {
+        student:   live.indexOf('where s.supabase_user_id = auth.uid()'),
+        noStudent: live.indexOf("using errcode = '42501'"),
+        lock:      live.indexOf(LOCK),
+        lesson:    live.indexOf('from public.lessons l'),
+        row:       live.indexOf('from public.student_lesson_watch'),
+      }
+      note(live.split('pg_advisory_xact_lock(').length === 2 && !live.includes('pg_advisory_lock(')
+           && at.student > 0 && at.noStudent > at.student && at.lock > at.noStudent && at.lock < at.lesson && at.lock < at.row,
+           'D15: the installed function takes the advisory lock once, after the student lookup and before the watch row is read',
+           JSON.stringify(at))
+      const held = await db.transaction(async tx => {
+        const j = (await tx.query(`select public.record_lesson_heartbeat($1,$2,$3,$4,$5) as j`, [PLAIN, 1, 753, 0, true])).rows[0].j
+        const l = (await tx.query(`
+          select count(*)::int as n, bool_and(granted) as granted, bool_and(mode = 'ExclusiveLock') as exclusive,
+                 bool_and(((classid::bigint << 32) | objid::bigint) = hashtextextended('${UID1}:${PLAIN}', 0)) as own_key
+            from pg_locks where locktype = 'advisory' and pid = pg_backend_pid()`)).rows[0]
+        return { j, l }
+      }).catch(e => ({ j: raised(e), l: {} }))
+      const afterCommit = (await q(`select count(*)::int n from pg_locks where locktype = 'advisory'`))[0].n
+      note(held.j.accepted === true && held.l.n === 1 && held.l.granted === true && held.l.exclusive === true
+           && held.l.own_key === true && afterCommit === 0,
+           'D15: a call holds one exclusive lock, keyed on its own student and lesson, until its transaction ends and not after',
+           `in the transaction: ${JSON.stringify(held.l)}; after it: ${afterCommit} lock(s)`)
+    }
 
     // ── (5) the clock, at up to 2.5x ──
     let c = await credit(PLAIN, () => hbAfter(15, PLAIN, 15, 753, 15))
@@ -930,6 +976,56 @@ console.log('\n=== 18. v100: lesson_videos (private) + the heartbeat counts up t
          '(10) on a 67 s lesson one forged call at the last second reaches the 95% point but NOT the 80% played floor (20/67 = 29.9%)',
          `threshold_met=${forged.threshold_met} played=${fw.w} s = ${((fw.w / 67) * 100).toFixed(1)}% (at the 60 s cap it was 89.6%)`)
 
+    // ── D15: the second caller's arithmetic, one call after another ──
+    // What the lock turns a parallel burst into: each later call reads the
+    // row the earlier one committed, while its own now() is still the instant
+    // it was fired. Here that is one transaction (so every call has the SAME
+    // now()), or a row stamped 50 ms AHEAD of now() (the later call was fired
+    // a little before the earlier one). No two calls overlap; this is the
+    // arithmetic of the caller that waited, and nothing more.
+    const oneInstant = (lesson, setup, calls) => db.transaction(async tx => {
+      const row = async () => (await tx.query(
+        `select watched_seconds::float8 as w, extract(epoch from (last_heartbeat_at - now()))::float8 as ahead
+           from student_lesson_watch where lesson_id = '${lesson}' and student_id = '${UID1}'::uuid`)).rows[0] ?? { w: 0, ahead: null }
+      if (setup) await tx.query(setup)
+      const out = []
+      for (const [pos, dur, delta, force] of calls) {
+        const was = (await row()).w
+        const j = (await tx.query(`select public.record_lesson_heartbeat($1,$2,$3,$4,$5) as j`, [lesson, pos, dur, delta, force])).rows[0].j
+        const now = await row()
+        out.push({ j, got: now.w - was, ahead: now.ahead })
+      }
+      return out
+    }).catch(e => calls.map(() => ({ j: raised(e), got: NaN, ahead: NaN })))
+    {
+      // The reviewer's trace: wait 24 s, then fire calls of 60 together.
+      const b = await oneInstant(PLAIN,
+        `update student_lesson_watch set last_heartbeat_at = now() - interval '24 seconds' where lesson_id = '${PLAIN}'`,
+        [[400, 753, 60, false], [401, 753, 60, true], [402, 753, 60, true], [403, 753, 60, false]])
+      note(b[0].j.accepted === true && b[0].got === 60 && b[1].j.accepted === true && b[1].got === 0
+           && b[2].j.accepted === true && b[2].got === 0 && b[3].j.accepted === false && b[3].j.reason === 'rate_limited' && b[3].got === 0,
+           "D15: the reviewer's trace served one call at a time: 24 s after the last beat, four calls of 60 are credited 60 between them, not 240; the unforced one gets the rate-limit answer",
+           b.map(x => x.j.raised ?? `+${x.got}`).join(' '))
+      // The later call was fired 50 ms BEFORE the earlier one's stamp.
+      const e = await oneInstant(PLAIN,
+        `update student_lesson_watch set last_heartbeat_at = now() + interval '50 milliseconds' where lesson_id = '${PLAIN}'`,
+        [[410, 753, 60, false], [411, 753, 60, true]])
+      note(e[0].j.accepted === false && e[0].j.reason === 'rate_limited' && e[0].got === 0
+           && e[1].j.accepted === true && e[1].got === 0,
+           'D15: a later caller whose now() is 50 ms BEFORE the stamp it finds is credited exactly 0, never a negative amount; unforced, it is rate limited',
+           e.map(x => x.j.raised ?? `+${x.got}`).join(' '))
+      note(Math.abs(e[0].ahead - 0.05) < 1e-6 && e[1].ahead === 0,
+           'RESIDUAL (reported, not fixed here): that FORCED call then writes its own, earlier, start time into last_heartbeat_at, 50 ms back from the beat it found',
+           `stamp ahead of now() by ${e[0].ahead} s before the forced call, ${e[1].ahead} s after it`)
+      // Three first calls together, at the last second of the 67 s lesson.
+      const f = await oneInstant('l002', `delete from student_lesson_watch where lesson_id = 'l002'`,
+        [[67, 67, 9999, false], [67, 67, 9999, true], [67, 67, 9999, true]])
+      const total = f.reduce((a, x) => a + x.got, 0)
+      note(f[0].j.accepted === true && f[0].got === 20 && f[1].got === 0 && f[2].got === 0 && total / 67 < 0.8,
+           'D15: three first calls at the last second of a 67 s lesson, served one at a time, bank 20 s between them (29.9%), not 60 (89.6%)',
+           f.map(x => x.j.raised ?? `+${x.got}`).join(' '))
+    }
+
     // ── (1) hand-run files get re-run ──
     const rowsBefore = await videoRows()
     const def100 = await fnDef()
@@ -943,7 +1039,7 @@ console.log('\n=== 18. v100: lesson_videos (private) + the heartbeat counts up t
     {
       let rows = null, err = ''
       try { rows = await runPostChecks(v100) } catch (e) { err = e.message }
-      note(rows !== null && rows.length === 2 && allTrue(rows[0]) && Object.keys(rows[0]).length === 10,
+      note(rows !== null && rows.length === 2 && allTrue(rows[0]) && Object.keys(rows[0]).length === 11,
            "v100's own commented post-checks run, and the first comes back all true",
            rows ? `${Object.keys(rows[0]).length} columns; ${JSON.stringify(rows[1])}` : err)
     }
@@ -955,11 +1051,35 @@ console.log('\n=== 18. v100: lesson_videos (private) + the heartbeat counts up t
          "(8) the undo file's function text equals the text lift() takes from the v97 file",
          `${v97fn.split('\n').length} lines, ${v97fn.length} characters`)
     const rest = code(undo.replace(undoFn, () => '')).replace(/\s+/g, ' ').trim()
-    note(rest === 'begin; drop table if exists public.lesson_videos; commit;',
-         'outside that function the undo holds one statement, the drop', rest)
+    const guard = rest.slice(0, rest.indexOf('$guard$;') + 8)
+    note(rest.startsWith('do $guard$') && rest === guard + ' begin; drop table if exists public.lesson_videos; commit;'
+         && guard.includes("execute 'select count(*) from public.lesson_videos' into v_rows")
+         && !/\b(drop|delete|update|insert|alter|create|truncate|grant|revoke)\b/i.test(guard.replace(/'[^']*'/g, "''")),
+         'outside that function the undo holds a guard that only counts, and one statement, the drop',
+         rest.slice(guard.length).trim())
+
+    // ── D19: the undo will not drop the only record of which video is whose ──
+    {
+      const rowsThen = await videoRows()
+      const n = JSON.parse(rowsThen).length
+      let refusal = null
+      try { await db.exec(undo) } catch (e) { refusal = e; await db.exec('rollback;').catch(() => {}) }
+      const said = refusal ? `${refusal.message} ${refusal.detail ?? ''} ${refusal.hint ?? ''}` : ''
+      note(refusal !== null && refusal.code === 'P0001' && n > 0 && said.includes(`holds ${n} row(s)`)
+           && said.includes('select lesson_id, tella_video_id from public.lesson_videos')
+           && said.includes('delete from public.lesson_videos') && /Nothing was changed/.test(said) && !/vid_/.test(said),
+           'D19: with rows in lesson_videos the undo refuses: it says how many, gives the select that saves them, says to delete them, and prints no video id',
+           refusal ? said.slice(0, 44) : 'it ran')
+      note(!(await tableGone()) && await videoRows() === rowsThen && await fnDef() === def100 && await fnFacts() === factsBefore,
+           "D19: ...and the refused undo changed nothing: the table, its rows and v100's function are all still there", `${n} rows`)
+      // What the message says to do. (The harness's ids are fakes; nothing to
+      // save.) Skipped when the undo wrongly ran: the table is gone by then,
+      // and the two assertions above have already said so.
+      if (!(await tableGone())) await db.exec(`delete from public.lesson_videos;`)
+    }
 
     const watchBeforeUndo = await watchRows()
-    if (await ran(undo, '(8) the undo executes')) {
+    if (await ran(undo, '(8) with the table emptied, the undo executes')) {
       note(await tableGone(), '(8) lesson_videos is gone')
       const defUndone = await fnDef()
       note(defAfterV97 !== null && defUndone === defAfterV97,
@@ -985,7 +1105,7 @@ console.log('\n=== 18. v100: lesson_videos (private) + the heartbeat counts up t
       }
       let rows = null, err = ''
       try { rows = await runPostChecks(undo) } catch (e) { err = e.message }
-      note(rows !== null && rows.length === 1 && allTrue(rows[0]) && Object.keys(rows[0]).length === 6,
+      note(rows !== null && rows.length === 1 && allTrue(rows[0]) && Object.keys(rows[0]).length === 7,
            "the undo's own commented post-checks run and come back all true",
            rows ? `${Object.keys(rows[0]).length} columns` : err)
     }
@@ -995,7 +1115,7 @@ console.log('\n=== 18. v100: lesson_videos (private) + the heartbeat counts up t
       t = await tableFacts()
       note(await fnDef() === def100, 'the function is the one v100 installed the first time')
       note(isPrivate(t) && t.triggers === 1 && t.n === 0,
-           'lesson_videos is back, private, and EMPTY: the undo dropped its rows', JSON.stringify(t))
+           'lesson_videos is back, private and empty', JSON.stringify(t))
     }
   }
 }
@@ -1308,16 +1428,43 @@ console.log('\n=== 19. the morning kit: stamp, prove, unstamp the Tella test les
            r.ok ? v.map(x => x.lesson_id).join(', ') : r.said.slice(0, 80))
     }
 
-    // ── two other test videos, without an unstamp in between ──
-    // The header says to unstamp with the old ids first. If that is skipped
-    // and the pick has not moved, the old rows are replaced, not doubled, and
-    // a lock verdict that belonged to the old video does not survive.
-    await db.exec(`update public.lesson_videos set lock_status = 'locked', lock_detail = 'old verdict', lock_checked_at = now();`)
+    // ── D19: the stamp never replaces a video it did not put there ──
+    // The two test videos are on N0 and N1. Give N1 a THIRD fake id, as if a
+    // real lesson video sat on a lesson the stamp is about to pick. N0 still
+    // holds this file's own video, so step 1 has work to do before the
+    // refusal, and the refusal has to take that work back.
+    await db.exec(`update public.lesson_videos
+                      set tella_video_id = '${FAKE(9)}', lock_status = 'locked', lock_detail = 'a verdict about the real video', lock_checked_at = now()
+                    where lesson_id = '${N1}';`)
+    let asItWas = await world()
+    r = await run(paste(stampRaw, FAKE(1), FAKE(2)))
+    v = await videos()
+    note(!r.ok && r.code === 'P0001' && r.said.includes(`Lesson ${N1} already has a video`) && !r.said.includes(N0)
+         && /Nothing was changed/.test(r.said) && !/vid_/.test(r.said),
+         'D19: a picked lesson holding a third video makes the stamp refuse; the message names that lesson and no video id',
+         r.ok ? 'it ran' : r.said.slice(0, 60))
+    note(await world() === asItWas && holds(N1) === FAKE(9) && holds(N0) === FAKE(1),
+         "D19: ...and nothing changed: the third video's row is untouched, and the file's own row on the other lesson is back")
+
+    // Two other test videos with no unstamp in between. The old pair now looks
+    // like videos the file did not put there, so it stops. (Before D19 it
+    // replaced them, and this assertion said so.)
+    await db.exec(`update public.lesson_videos set tella_video_id = '${FAKE(2)}' where lesson_id = '${N1}';`)
+    asItWas = await world()
     r = await run(paste(stampRaw, FAKE(3), FAKE(4)))
     v = await videos()
-    note(r.ok && v.length === 2 && holds(N0) === FAKE(3) && holds(N1) === FAKE(4)
+    note(!r.ok && r.code === 'P0001' && r.said.includes(N0) && r.said.includes(N1)
+         && /unstamp-tella-test-lessons\.sql with the OLD ids/.test(r.said) && !/vid_/.test(r.said)
+         && await world() === asItWas && holds(N0) === FAKE(1) && holds(N1) === FAKE(2),
+         'stamped with two other videos and no unstamp between: the stamp refuses, names both lessons and the unstamp file, and the old rows stay as they were',
+         r.ok ? 'it ran' : r.said.slice(0, 60))
+    // The way the header says to do it.
+    const tookBack = await run(paste(unstampRaw, FAKE(1), FAKE(2)))
+    r = await run(paste(stampRaw, FAKE(3), FAKE(4)))
+    v = await videos()
+    note(tookBack.ok && r.ok && v.length === 2 && holds(N0) === FAKE(3) && holds(N1) === FAKE(4)
          && v.every(x => x.lock_status === 'unchecked' && x.lock_detail === null && x.lock_checked_at === null),
-         'stamped with two other videos and no unstamp between: the old rows are replaced, still two rows, back to unchecked',
+         'unstamped with the OLD ids first, the two other videos go on: two rows, both unchecked',
          r.ok ? `${v.length} rows` : r.said.slice(0, 80))
     r = await run(paste(unstampRaw, FAKE(3), FAKE(4)))
     v = await videos()

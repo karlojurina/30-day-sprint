@@ -20,7 +20,10 @@ import { TELLA_ORIGIN } from "./tella.ts";
  *                   the frame's own `load` event in 20 of 21 loads, so
  *                   nothing may be timed from `load`
  *   the end       : a last timeUpdate just short of the duration, then
- *                   playbackState "stopped" carrying `duration: 0`
+ *                   playbackState "stopped" carrying `duration: 0`. NOT
+ *                   ALWAYS: on one replay the last message was "paused" at
+ *                   the end position and no "stopped" followed. Tell the end
+ *                   by position, never by the word (LessonPlayer does)
  *   a refused video: no message at all (the frame shows "No access", or
  *                   Tella's 404 page for an id no video has)
  *   commands out  : play, pause, seek. A seek sent after `ready` does not

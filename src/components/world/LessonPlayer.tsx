@@ -8,6 +8,7 @@ import {
 } from "@/lib/world/tella-player";
 import {
   createWatchHeartbeat,
+  type HeartbeatBeat,
   type HeartbeatResult,
   type WatchHeartbeat,
 } from "@/lib/world/watch-heartbeat";
@@ -43,7 +44,10 @@ import u from "@/components/world/world-ui.module.css";
  * re-reads the telemetry server-side and applies the played-seconds floor. A
  * component cannot be trusted with that and is not asked to be. It keeps
  * asking until the answer is yes, and when the answer is no it says so under
- * the progress line.
+ * the progress line. When a video has played to its end and the server still
+ * does not see the 95% point, it says that too: the catalog's length for the
+ * lesson is missing or too long, no claim can ever be made, and only the team
+ * can fix it.
  *
  * IT NEVER TAKES A VIDEO DOWN. A player that has said nothing 12 seconds after
  * its frame was put on the page gets a line under it saying it did not load,
@@ -76,8 +80,41 @@ const NO_LOAD_MS = 12_000;
 /** The least time between two requests to count the same lesson. */
 const CLAIM_COOLDOWN_MS = 10_000;
 
+/**
+ * How many times a claim whose REQUEST failed is made again by the timer
+ * alone, 10 seconds apart, before it is left to the next heartbeat or the
+ * next visit. A request that fails for good (signed out, a route that is
+ * down) must not be repeated for as long as the page stays open. A heartbeat
+ * past 95% starts the count again.
+ */
+const CLAIM_RETRIES = 3;
+
 const NO_LOAD_TEXT =
   "This video didn't load. Refresh the page. If it keeps happening, tell the team.";
+
+const ENDED_SHORT_TEXT =
+  "This lesson finished but didn't register. Tell the team so we can fix it.";
+
+/**
+ * How close to the player's own length a "paused" or "stopped" has to be to
+ * count as the end of the video.
+ *
+ * The end is told from the POSITION, not from the state's name. Measured on
+ * the real player: at the true end of a 67.26 s video it reported "stopped"
+ * at 67.27 in three runs and "paused" at 67.27 in a fourth (a replay), with
+ * no "stopped" in the 60 s after. And nothing says a "stopped" can only come
+ * at the end. The length is the one the player reports with its positions,
+ * never the catalog's: the catalog's being wrong is the very case the line
+ * above exists for.
+ *
+ * Two positions have to be that close: the one the "paused" or "stopped"
+ * itself carries, and the last one the player reported while playing, which
+ * is the one the heartbeat sends. If only the first were asked, a student who
+ * paused in the middle and dragged to the end would be "at the end" with a
+ * heartbeat that still speaks for the middle, and its answer (not past 95%)
+ * would put the line up on a lesson there is nothing wrong with.
+ */
+const END_WINDOW_S = 1.5;
 
 export interface LessonPlayerProps {
   lessonId: string;
@@ -86,6 +123,7 @@ export interface LessonPlayerProps {
   /**
    * False when the catalog already knows there is no video behind this lesson.
    * The player then shows "Not recorded yet." and asks the server for nothing.
+   * Once a video is on the page, a false here is ignored: see the render.
    */
   recorded?: boolean;
   /**
@@ -165,6 +203,9 @@ function LessonVideo({
   // Beside "ready", never in place of it: the frame loaded and the player has
   // said nothing for 12 seconds. The frame stays mounted.
   const [noLoad, setNoLoad] = useState(false);
+  // The video played to its end and the server's answer to the heartbeat for
+  // that end still says the 95% point is not reached.
+  const [endedShort, setEndedShort] = useState(false);
   // The last answer to a claim, kept only while it is a refusal for too
   // little played. It is what the note under the progress line reads.
   const [refusal, setRefusal] = useState<Refusal | null>(null);
@@ -192,6 +233,8 @@ function LessonVideo({
   const claimTimerRef = useRef<{ arm(waitMs: number): void; clear(): void } | null>(null);
   /** That timer came due while an answer was still on its way. */
   const claimOwedRef = useRef(false);
+  /** Claim requests that have failed since the last heartbeat past 95%. */
+  const claimFailuresRef = useRef(0);
 
   /**
    * Ask the server to count the lesson as watched.
@@ -217,6 +260,11 @@ function LessonVideo({
    * is made then if the lesson is still not complete. The timer is cleared
    * when the lesson completes and when the player unmounts. (The timer itself
    * is in the mount effect, section 4.)
+   *
+   * A REQUEST THAT FAILED IS OWED TOO. The claim made by the heartbeat at the
+   * end of a video has nothing coming after it either, so when that request
+   * fails the same timer is set for the end of the 10 seconds. Three times at
+   * most (CLAIM_RETRIES), until a heartbeat past 95% starts the count again.
    */
   const claim = useEffectEvent(async () => {
     if (completedRef.current || completedLessonIds.has(lessonId)) return;
@@ -243,6 +291,7 @@ function LessonVideo({
     claimInFlightRef.current = false;
     const owed = claimOwedRef.current;
     claimOwedRef.current = false;
+    if (answer === null) claimFailuresRef.current += 1;
 
     if (answer?.completed) {
       completedRef.current = true;
@@ -268,9 +317,15 @@ function LessonVideo({
       );
     }
 
-    // The timer came due while this answer was on its way, so the 10 seconds
-    // are already up: the request that was owed is made now.
-    if (owed) claimTimerRef.current?.arm(0);
+    // Two reasons to ask again without waiting for a heartbeat. The timer
+    // came due while this answer was on its way, so the 10 seconds are already
+    // up and the request that was owed is made now. Or the request failed,
+    // and it is made again when the 10 seconds end.
+    const failedAgain =
+      answer === null && claimFailuresRef.current <= CLAIM_RETRIES;
+    if (owed || failedAgain) {
+      claimTimerRef.current?.arm(Math.max(0, at + CLAIM_COOLDOWN_MS - Date.now()));
+    }
   });
 
   // The callbacks below are Effect Events for one reason: each reads the props
@@ -278,10 +333,24 @@ function LessonVideo({
   // an effect to run again. An effect that re-ran here would ask for the
   // address a second time or tear the player down in the middle of a lesson.
 
-  const askForEmbed = useEffectEvent(() => transport.getEmbed(lessonId));
+  // null when a video is already on the page: it is kept, and not asked for
+  // again. `recorded` can turn false and true again under a playing video (a
+  // refresh of the student's data whose read of the videos failed answers "no
+  // video" for every lesson), and that must change nothing.
+  const askForEmbed = useEffectEvent(
+    async (): Promise<EmbedAnswer | null> =>
+      state.kind === "ready" ? null : transport.getEmbed(lessonId),
+  );
 
-  const onBeatResult = useEffectEvent((r: HeartbeatResult) => {
+  const onBeatResult = useEffectEvent((r: HeartbeatResult, beat: HeartbeatBeat) => {
     if (!r.accepted) return;
+    // The end of the video has been heard about and is still not past 95%:
+    // say so. Any later answer that is past it takes the line away again.
+    if (r.threshold_met) setEndedShort(false);
+    else if (beat.reason === "ended") setEndedShort(true);
+    // An answer given a second time (the beat had nothing new to say) has
+    // already been acted on.
+    if (beat.repeated) return;
     patchWatchProgress(lessonId, {
       lesson_id: lessonId,
       max_position_seconds: Number(r.max_position_seconds),
@@ -293,7 +362,11 @@ function LessonVideo({
     });
     // `threshold_met`, not `threshold_crossed`: the crossing is true on one
     // heartbeat only, and a claim hung on it is made once.
-    if (r.threshold_met) void claim();
+    if (r.threshold_met) {
+      // A heartbeat is something happening: failed requests are counted from here.
+      claimFailuresRef.current = 0;
+      void claim();
+    }
   });
 
   const startBeat = useEffectEvent(() =>
@@ -301,7 +374,7 @@ function LessonVideo({
       lessonId,
       durationSeconds,
       rpc: transport.heartbeat,
-      onResult: (r) => onBeatResult(r),
+      onResult: (r, beat) => onBeatResult(r, beat),
     }),
   );
 
@@ -327,13 +400,13 @@ function LessonVideo({
     let cancelled = false;
 
     (async () => {
-      let answer: EmbedAnswer;
+      let answer: EmbedAnswer | null;
       try {
         answer = await askForEmbed();
       } catch {
         answer = { ok: false, kind: "error" };
       }
-      if (cancelled) return;
+      if (cancelled || answer === null) return;
 
       if (answer.ok) {
         setState({ kind: "ready", embedUrl: answer.embedUrl });
@@ -366,6 +439,12 @@ function LessonVideo({
 
     const beat = startBeat();
     beatRef.current = beat;
+
+    // What the player last said about itself: the video's length (as it
+    // reports it with each position) and where it was. "Has it ended" is
+    // read off these two.
+    let playerLength: number | null = null;
+    let lastPosition: number | null = null;
 
     // Tella says nothing at all when it refuses a video (a lost lock, a site
     // that is not on its list), so silence is the only signal there is. The
@@ -400,13 +479,24 @@ function LessonVideo({
           player.seekTo(resumeAt);
         }
       },
-      onState: (playback) => {
+      onState: (playback, seconds) => {
         heard();
-        if (playback === "paused") beat.flush("pause");
-        else if (playback === "stopped") beat.flush("ended");
+        if (playback !== "paused" && playback !== "stopped") return;
+        // Either one forces a heartbeat. Which of the two it is called
+        // depends on where the player is, not on which word it used: see
+        // END_WINDOW_S. The answer to an "ended" one is what can put up the
+        // "finished but didn't register" line.
+        const length = playerLength;
+        const atTheEnd = (position: number | null) =>
+          length !== null && position !== null && position >= length - END_WINDOW_S;
+        // A state that carries no position is placed by the last one reported.
+        const ended = atTheEnd(lastPosition) && (seconds === null || atTheEnd(seconds));
+        beat.flush(ended ? "ended" : "pause");
       },
       onTimeUpdate: (seconds, playerDuration) => {
         heard();
+        lastPosition = seconds;
+        if (playerDuration !== null && playerDuration > 0) playerLength = playerDuration;
         beat.tick(seconds, playerDuration);
         showProgress(seconds, playerDuration);
       },
@@ -480,7 +570,11 @@ function LessonVideo({
   // they read are set on the lesson page's wrapper (Panel in AreaScreen.tsx).
   const frame = className ? `${u.frame} ${className}` : u.frame;
 
-  if (!recorded || state.kind === "not-recorded") {
+  // `recorded` going false counts only while there is no video on the page.
+  // Under a playing one it used to take the frame away, and the frame that
+  // came back with the same address had no listener: it played from 0,
+  // nothing was heard and nothing counted.
+  if (state.kind === "not-recorded" || (!recorded && state.kind !== "ready")) {
     return (
       <div className={frame}>
         <Centered>Not recorded yet.</Centered>
@@ -541,6 +635,12 @@ function LessonVideo({
       {noLoad && (
         <p role="status" className={u.barNote}>
           {NO_LOAD_TEXT}
+        </p>
+      )}
+      {/* The video ended and the server still does not see its 95% point. */}
+      {endedShort && !completedLessonIds.has(lessonId) && (
+        <p role="status" className={u.barNote}>
+          {ENDED_SHORT_TEXT}
         </p>
       )}
       {/* Shown while the last answer to a claim is "not enough of it was

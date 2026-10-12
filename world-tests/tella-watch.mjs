@@ -535,14 +535,36 @@ const waitPosition = (page, seconds, from, what, timeout) =>
     what: `${what}: the video did not reach ${seconds} s`,
   })
 
-/** Wait for "stopped" at or after index `from`. Returns the message. */
+/**
+ * Wait for the END of the video at or after index `from`. Returns the message.
+ *
+ * The real player usually ends on "stopped" and sometimes on "paused" (seen
+ * 2026-10-12 on a replay: timeUpdate 67.20, then playbackState "paused" at
+ * 67.27 and no "stopped" in the next 60 s). So the end is told by position:
+ * a "stopped" or "paused" that sits in the last 1.5 s of the video, after a
+ * position report from there. A "paused" anywhere else is an ordinary pause
+ * (the player sends one at 0 after a seek to 0 from the end). The name is
+ * kept; the message's own `state` says which word the player used.
+ */
 const waitStopped = (page, from, what, timeout) =>
-  waitFor(page, (i) => window.__probe.msgs.slice(i).find((m) => m.type === 'playbackState' && m.state === 'stopped') ?? null, {
-    arg: from,
-    timeout,
-    poll: 200,
-    what: `${what}: the player never said "stopped"`,
-  })
+  waitFor(
+    page,
+    ({ i, end }) => {
+      const tail = window.__probe.msgs.slice(i)
+      let near = false
+      for (const m of tail) {
+        if (m.type === 'timeUpdate') near = m.t >= end
+        else if (m.type === 'playbackState' && (m.state === 'stopped' || m.state === 'paused') && near && (m.t === null || m.t === undefined || m.t >= end)) return m
+      }
+      return null
+    },
+    {
+      arg: { i: from, end: SECONDS - 1.5 },
+      timeout,
+      poll: 200,
+      what: `${what}: the player never reached the end (neither "stopped" nor "paused" in the last 1.5 s)`,
+    },
+  )
 
 const waitCompleted = (page, lessonId, what, timeout) =>
   waitFor(page, (id) => window.__fixture?.completed().includes(id), { arg: lessonId, timeout, what: `${what}: ${lessonId} was not marked watched` })
@@ -902,7 +924,7 @@ try {
       r.values.reports = `${reports.length} position reports from ${f(first.t)} to ${f(reports.at(-1)?.t)} s (the player says the video is ${f(reports.at(-1)?.d, 3)} s) in ${f(clock, 1)} clock s`
       r.values.heartbeats = beatsOf(s.calls).map((c) => `${f(c.position, 1)} s +${f(c.credited, 1)}${c.force ? ' forced' : ''}${c.accepted ? '' : ' REFUSED'}`)
       r.values.claims = claimsOf(s.calls).map((c) => `${c.completed ? 'completed' : c.reason} at ${pct(c.playedRatio)}`)
-      r.values.atTheEnd = `"stopped" at ${f(stopped.t)} s; the end heartbeat ${end.heartbeatAfterMs} ms later; the completion ${end.completedAfterMs} ms after "stopped"`
+      r.values.atTheEnd = `"${stopped.state}" at ${f(stopped.t)} s; the end heartbeat ${end.heartbeatAfterMs} ms later; the completion ${end.completedAfterMs} ms after "stopped"`
       r.values.beforePlay = q
     })
 
@@ -937,7 +959,7 @@ try {
         note ? { note: note.box, bar: s.bar?.box ?? null, frame: s.frame, type: `${note.size}, ${note.color}` } : null,
       )
       r.check('the frame is still there', s.frames === 1, s.frames)
-      r.values.skip = `seek to ${SECONDS - 3} s, first report at ${f(first.t)} s, "stopped" at ${f(stopped.t)} s`
+      r.values.skip = `seek to ${SECONDS - 3} s, first report at ${f(first.t)} s, "${stopped.state}" at ${f(stopped.t)} s`
       r.values.row = s.row ? `furthest ${pct(s.row.max_position_seconds / SECONDS)}, really watched ${f(s.row.watched_seconds)} s (${pct(s.row.watched_seconds / SECONDS)})` : null
       r.values.claims = claims.map((c) => `${c.completed ? 'completed' : c.reason} at ${pct(c.playedRatio)}, ${c.at - stopped.at} ms from "stopped"`)
       r.values.noteFirstRead = early.lines[0]?.text ?? null
@@ -970,8 +992,8 @@ try {
       r.check('the claim was made again and answered yes', claims.length >= 2 && claims.at(-1)?.completed === true && claims[0].completed === false, claims.map((c) => `${c.completed ? 'completed' : c.reason} at ${pct(c.playedRatio)}`))
       r.check('the note is gone', s.lines.length === 0, s.lines.length ? s.lines.map((l) => l.text) : 'none')
       r.check('"Next lesson" is enabled', s.next?.disabled === 'false', s.next)
-      r.values.skip = `first report at ${f(skip.first.t)} s, "stopped" at ${f(skip.stopped.t)} s`
-      r.values.again = `seek 0 then play: first report at ${f(first.t)} s; completed with the video at ${f(landed?.t)} s, ${f((Date.now() - t0) / 1000, 0)} clock s after the seek; "stopped" at ${f(stopped.t)} s`
+      r.values.skip = `first report at ${f(skip.first.t)} s, "${skip.stopped.state}" at ${f(skip.stopped.t)} s`
+      r.values.again = `seek 0 then play: first report at ${f(first.t)} s; completed with the video at ${f(landed?.t)} s, ${f((Date.now() - t0) / 1000, 0)} clock s after the seek; "${stopped.state}" at ${f(stopped.t)} s`
       r.values.row = s.row ? `really watched ${f(s.row.watched_seconds)} s (${pct(s.row.watched_seconds / SECONDS)}), ${s.row.heartbeat_count} heartbeats` : null
     })
 

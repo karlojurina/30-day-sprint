@@ -18,6 +18,9 @@
 --   2. Picks the two watch lessons FEWEST students have completed, breaking
 --      ties toward the end of the course, so the test rows land where nobody
 --      is working. Same ordering as stamp-test-lesson.sql.
+--      If a lesson it picked already has a video that is not one of your two
+--      test videos, it STOPS and changes nothing. It never replaces a video
+--      it did not put there.
 --   3. Sets their duration_seconds to 67, the length of both test videos, and
 --      writes their lesson_videos rows: the first id on the first lesson.
 --   4. Ends with a select of the two lessons and the path that opens each one
@@ -44,9 +47,8 @@
 -- second run can move to another lesson. The lesson it leaves is put back
 -- first, and the final select says so.
 --   * To switch to two other test videos, take the old ones back first: the
---     unstamp file, with the OLD ids.
---   * A picked lesson that already has a lesson_videos row from something
---     else gets that row REPLACED by the test video.
+--     unstamp file, with the OLD ids. If you skip that, this file sees the
+--     old pair as videos it did not put there, and stops.
 --
 -- TO TAKE IT BACK: unstamp-tella-test-lessons.sql, with the same two ids.
 -- Needs migration 2026_v100_lesson_videos_and_speed.sql to have run.
@@ -67,8 +69,9 @@ declare
   c_bunny_test_video constant text := '09ff6d92-1312-4b96-bc3b-75b5edbcab34';
   c_bunny_seconds    constant int  := 753;
 
-  v_earlier text[];
-  v_lessons text[];
+  v_earlier  text[];
+  v_lessons  text[];
+  v_occupied text[];
 begin
   v_video_1 := btrim(v_video_1, E' \t\r\n');
   v_video_2 := btrim(v_video_2, E' \t\r\n');
@@ -130,6 +133,24 @@ begin
     raise exception 'Fewer than two watch lessons exist, so there is nothing to stamp. Nothing was changed.';
   end if;
 
+  -- Step 1 removed this file's own rows. A row still sitting on a picked
+  -- lesson therefore holds some OTHER video, and a lesson_videos row is the
+  -- only record of which video belongs to which lesson. Stop. The raise also
+  -- undoes step 1, so nothing at all is changed. The message names the lesson
+  -- and never a video.
+  select array_agg(v.lesson_id order by v.lesson_id)
+    into v_occupied
+    from public.lesson_videos v
+   where v.lesson_id = any (v_lessons);
+
+  if v_occupied is not null then
+    raise exception '% a video that is not one of your two test videos: a real lesson video, or a test video from another pair. This file does not replace a video it did not put there. If it is an old test video, run unstamp-tella-test-lessons.sql with the OLD ids first. Nothing was changed.',
+      case when array_length(v_occupied, 1) = 1
+           then 'Lesson ' || v_occupied[1] || ' already has'
+           else 'Lessons ' || array_to_string(v_occupied, ' and ') || ' already have'
+      end;
+  end if;
+
   -- 3. Stamp them. REQUIRED: since v97 a lesson with a video and no
   --    duration_seconds cannot be completed by anyone.
   update public.lessons
@@ -138,12 +159,7 @@ begin
 
   insert into public.lesson_videos (lesson_id, tella_video_id)
   values (v_lessons[1], v_video_1),
-         (v_lessons[2], v_video_2)
-  on conflict (lesson_id) do update
-    set tella_video_id  = excluded.tella_video_id,
-        lock_status     = 'unchecked',
-        lock_detail     = null,
-        lock_checked_at = null;
+         (v_lessons[2], v_video_2);
 
   -- 4. Hand the LESSON ids to the select below. The video ids stay in here.
   perform set_config('tella_kit.stamped', array_to_string(v_lessons, ','), false);

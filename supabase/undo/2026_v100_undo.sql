@@ -4,7 +4,18 @@
 -- NOT A MIGRATION. A file in supabase/undo/ is never run in sequence with
 -- supabase/migrations/. This one is run by hand, and only to take v100 back.
 --
--- WHAT IT DOES
+-- ⚠ IT REFUSES WHILE lesson_videos HOLDS A ROW. Those rows are the only
+--   record of which Tella video belongs to which lesson: they are in no
+--   other table, and never in the repository, which is public. With even one
+--   row in the table the file stops, says how many there are, and changes
+--   nothing. To go on:
+--     1. save them:    select lesson_id, tella_video_id
+--                        from public.lesson_videos order by lesson_id;
+--        (keep the result somewhere private; never commit it)
+--     2. delete them:  delete from public.lesson_videos;
+--     3. run this file again.
+--
+-- WHAT IT DOES, once the table is empty
 --   1. Puts record_lesson_heartbeat back to v97's text. The function below was
 --      copied by a script out of
 --      supabase/migrations/2026_v97_heartbeat_trust_nothing.sql, from its
@@ -15,14 +26,12 @@
 --      function it had straight after v97.
 --   2. Drops public.lesson_videos, with its trigger and its constraints.
 --
--- ⚠ WHAT YOU LOSE
---   * Every row of lesson_videos. Which lesson plays which Tella video is
---     recorded nowhere else in this database, and never in the repository,
---     which is public. Save the rows first if you will want them back:
---       select lesson_id, tella_video_id from public.lesson_videos order by 1;
+-- WHAT YOU LOSE
 --   * Watching faster than 1x stops counting in full. v97 credits at most one
 --     second of video per second of clock and at most 20 s a beat, so the 80%
 --     played rule cannot be met above 1.25x.
+--   * v97 has no lock: calls fired at the same instant are each credited in
+--     full again, 20 s a call.
 --   * The heartbeat goes back to asking for lessons.bunny_video_id. A lesson
 --     that only has a Tella video is refused with 22023 on every beat, so it
 --     cannot be completed by watching. The Tella build's server routes read
@@ -33,9 +42,27 @@
 --   student_lesson_watch and student_lesson_completions. Every watch row and
 --   every completion written while v100 was live stays as it is.
 --
--- Idempotent: a second run ends in the same state. v100 can be run again
--- after it. Wrapped in a transaction.
+-- Safe to run again: a second run finds no table, skips the check, and ends
+-- in the same state. v100 can be run again after it.
 -- ============================================================
+
+-- ─────────────── 0. Refuse while the table holds a row ───────────────
+--
+-- On its own, ahead of the transaction: when it stops the file, nothing has
+-- been started and nothing is left open. The message gives the count and
+-- never a video id.
+do $guard$
+declare
+  v_rows bigint;
+begin
+  if to_regclass('public.lesson_videos') is not null then
+    execute 'select count(*) from public.lesson_videos' into v_rows;
+    if v_rows > 0 then
+      raise exception 'public.lesson_videos holds % row(s), and this file will not drop them: they are the only record of which video belongs to which lesson. Save them first (select lesson_id, tella_video_id from public.lesson_videos order by lesson_id). Then delete them (delete from public.lesson_videos) and run this file again. Nothing was changed.', v_rows;
+    end if;
+  end if;
+end
+$guard$;
 
 begin;
 
@@ -214,7 +241,7 @@ grant execute on function public.record_lesson_heartbeat(text, numeric, numeric,
 -- ─────────────── 2. The table v100 added ───────────────
 --
 -- After the function, so nothing still points at the table when it goes. Its
--- trigger and its constraints go with it.
+-- trigger and its constraints go with it. It is empty: step 0 saw to that.
 drop table if exists public.lesson_videos;
 
 commit;
@@ -233,6 +260,8 @@ commit;
 --        like '%v_elapsed, v_max_delta%'                                    as v97_clamp_back,
 --      pg_get_functiondef('public.record_lesson_heartbeat'::regproc)
 --        not like '%v_speed_cap%'                                           as speed_cap_gone,
+--      pg_get_functiondef('public.record_lesson_heartbeat'::regproc)
+--        not like '%pg_advisory_xact_lock%'                                 as lock_gone,
 --      not has_function_privilege('anon',
 --        'public.record_lesson_heartbeat(text,numeric,numeric,numeric,boolean)',
 --        'execute')                                                         as anon_cannot_call,
@@ -240,4 +269,7 @@ commit;
 --        'public.record_lesson_heartbeat(text,numeric,numeric,numeric,boolean)',
 --        'execute')                                                         as student_can_call;
 --    EXPECT: every column true.
+--
+--  If the file stopped with "holds N row(s)", nothing was changed, and this
+--  query comes back with every one of the first five columns false.
 -- ============================================================

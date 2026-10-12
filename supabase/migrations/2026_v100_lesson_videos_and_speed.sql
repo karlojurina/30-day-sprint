@@ -8,7 +8,7 @@
 -- WHAT THIS FILE DOES
 --   1. Creates public.lesson_videos: one row per lesson that has a video,
 --      holding the Tella video id and what the last lock check found.
---   2. Replaces record_lesson_heartbeat. The text is v97's with four changes:
+--   2. Replaces record_lesson_heartbeat. The text is v97's with five changes:
 --      (a) a lesson is playable when it has a lesson_videos row
 --          (v97 asked for lessons.bunny_video_id);
 --      (b) the cap on one beat goes from 20 to 60 seconds, and a new constant
@@ -18,7 +18,10 @@
 --          least(delta, elapsed, 20);
 --      (d) the first beat for a student and lesson keeps v97's cap of 20
 --          seconds, in a new constant v_first_delta, so it does not inherit
---          the 60 of (b).
+--          the 60 of (b);
+--      (e) each call takes a lock on its (student, lesson) pair for the length
+--          of its transaction, so calls fired at the same instant are served
+--          one after another and only the first is credited.
 --      The signature, the keys it returns and its grants are unchanged.
 --
 -- WHY THE ID GETS ITS OWN TABLE
@@ -85,10 +88,26 @@
 --     nothing is credited the same as an honest student at top speed, so
 --     forging 80% of a lesson costs 32% of its length in waiting, less the
 --     20 s above. That is by design: it is the price of counting 2.5x at all.
+--   * The clamp and the lock of (e) are both PER LESSON. A client can run
+--     several lessons side by side and be credited 2.5 times the clock on
+--     each of them. Not closed here.
+--   * Parallel calls on ONE lesson: closed by (e), and that part is NOT
+--     measured. The harness has a single connection, so it cannot fire two
+--     calls at once. It checks that the lock is taken, with the right key,
+--     for the length of the transaction, and it runs the second caller's
+--     arithmetic by hand. Before (e), calls fired together were each credited
+--     in full: three parallel first calls banked 3 x 20 s, enough to complete
+--     a 67 s lesson with no waiting. v97 had the same race.
+--   * A FORCED call that started a few milliseconds before the beat stored
+--     ahead of it is credited nothing, and then writes its own, earlier,
+--     start time into last_heartbeat_at. The next beat is credited 2.5 times
+--     those milliseconds a second time. How often two calls are served in
+--     the reverse of their start order was not measured. Not closed here;
+--     last_heartbeat_at = greatest(w.last_heartbeat_at, now()) would close it.
 --
 -- UNDO: supabase/undo/2026_v100_undo.sql. It is never run in sequence with the
--- migrations. It puts v97's function back and DROPS lesson_videos with every
--- id in it.
+-- migrations. It puts v97's function back and drops lesson_videos, and it
+-- refuses to do either while the table still holds a row.
 --
 -- Idempotent. Wrapped in a transaction.
 -- ============================================================
@@ -139,7 +158,7 @@ drop trigger if exists trg_lesson_videos_updated_at on public.lesson_videos;
 create trigger trg_lesson_videos_updated_at before update on public.lesson_videos
   for each row execute function public.set_updated_at();
 
--- ─────────────── 2. The heartbeat: v97's text, four changes ───────────────
+-- ─────────────── 2. The heartbeat: v97's text, five changes ───────────────
 
 create or replace function public.record_lesson_heartbeat(
   p_lesson_id         text,
@@ -194,6 +213,28 @@ begin
     raise exception 'record_lesson_heartbeat: no student for the current user'
       using errcode = '42501';
   end if;
+
+  -- v100: one call at a time for each (student, lesson).
+  -- Without this, calls fired at the same instant each read the watch row
+  -- further down before any of them has committed. Each works out its delta
+  -- from that same read, and the upsert in step 7 ADDS every one of them:
+  -- three parallel first calls banked 3 x 20 s, and N parallel later calls
+  -- N times their delta. v97 had the same race.
+  -- With the lock, the later call waits on this line until the earlier one
+  -- has committed, and only then reads the row. now() is the START time of
+  -- the transaction, so the waiting does not move it: the later call's now()
+  -- is still the instant it was fired, which is about the instant the
+  -- earlier call wrote into last_heartbeat_at. Its v_elapsed comes out at
+  -- about zero, or below zero. Step 5 credits 2.5 times that: a few
+  -- hundredths of a second at most, and greatest(0, ...) keeps a negative
+  -- one at nothing. (clock_timestamp() here would count the wait as
+  -- watching.)
+  -- An honest double call, two tabs or a retry, gets the rate-limit answer
+  -- of step 6 and writes nothing. A forced one is accepted and adds about
+  -- nothing.
+  -- The lock ends with the transaction. It is per lesson: it does nothing
+  -- about several lessons run side by side.
+  perform pg_advisory_xact_lock(hashtextextended(v_student_id::text || ':' || p_lesson_id, 0));
 
   -- 2. Is this a real, playable watch lesson? (Blocks telemetry spam against
   --    arbitrary ids, and stops a non-watch lesson being completed this way.)
@@ -368,6 +409,8 @@ commit;
 --        like '%v_elapsed * v_speed_cap, v_max_delta%'                      as has_speed_cap,
 --      pg_get_functiondef('public.record_lesson_heartbeat'::regproc)
 --        like '%coalesce(p_delta_seconds, 0), v_first_delta))%'             as first_beat_has_own_cap,
+--      pg_get_functiondef('public.record_lesson_heartbeat'::regproc)
+--        like '%perform pg_advisory_xact_lock(hashtextextended(v_student_id%' as takes_the_lock,
 --      not has_function_privilege('anon',
 --        'public.record_lesson_heartbeat(text,numeric,numeric,numeric,boolean)',
 --        'execute')                                                         as anon_cannot_call,

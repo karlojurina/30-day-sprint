@@ -164,7 +164,7 @@ When adding a new table, append it here. When deleting a field, scan
   the function `rebuild_daily_snapshots` (they read `requires_action`
   and filter on `counts_toward_progress`, the second view from v98),
   `POST /api/student/toggle-lesson` (reads `type` to refuse a `watch`
-  lesson), `GET /api/cron/check-lesson-videos` (reads `id` and
+  lesson), `GET /api/cron/check-lesson-videos` (reads `id`, `type` and
   `duration_seconds`, by name), and, while the catalog switch names
   this table, `GET /api/student/data`,
   `POST /api/student/lesson-video` and
@@ -191,8 +191,12 @@ When adding a new table, append it here. When deleting a field, scan
   `judgeWatch` (`src/lib/world/watch-rules.ts`) both measure against
   the catalog's duration and nothing else. Nothing fills it for a Tella
   video. It is set by hand when the lesson's `lesson_videos` row goes
-  in, and the lock check reports a length that differs from Tella's by
-  more than 2 seconds.
+  in. The lock check reports a lesson that has a video and no length,
+  and a length that differs from Tella's by more than 2 seconds. On the
+  lesson page, a video that plays to its end on a lesson with no
+  length, or with one too long for its 95% point to be reached, gets
+  the line "This lesson finished but didn't register. Tell the team so
+  we can fix it."
 - **`counts_toward_progress` and `feature_key` (v92).** v92 set
   `counts_toward_progress` false and `feature_key` `bounty_access` on
   `l057`, and `feature_key` `playbook_unlock` on `l078`. The SQL views
@@ -237,7 +241,7 @@ When adding a new table, append it here. When deleting a field, scan
   (both look the lesson up here), and through the data route
   `StudentContext`, `src/lib/world/catalog.ts`,
   `src/lib/world/map-model.ts` and the world map. Whatever the switch
-  says, `GET /api/cron/check-lesson-videos` reads `id` and
+  says, `GET /api/cron/check-lesson-videos` reads `id`, `type` and
   `duration_seconds` here by name.
 - **Stable contract:** `id`, `region_id`, `type` (`watch` / `setup`
   only; `action` is not allowed here), `title`, `description`,
@@ -278,14 +282,27 @@ When adding a new table, append it here. When deleting a field, scan
   (`lesson_id`, `tella_video_id`); the morning kit's stamp and unstamp
   files are that same hand, for the two test lessons.
   `GET /api/cron/check-lesson-videos` updates `lock_status`,
-  `lock_detail` and `lock_checked_at` and no other column. No route a
-  student can reach writes it.
+  `lock_detail` and `lock_checked_at` and no other column, and its
+  update is filtered on `lesson_id` AND `tella_video_id`, so a verdict
+  lands only on a row that still holds the video Tella was asked
+  about. No route a student can reach writes it.
+- **Guarded against the two files that could erase a row:** the rows
+  are the only record of which video belongs to which lesson (no other
+  table has it, and the repository never does).
+  `supabase/undo/2026_v100_undo.sql` refuses to run while the table
+  holds any row: it raises before its transaction starts, gives the
+  count and the select that saves the rows, and changes nothing.
+  `supabase/diagnostics/stamp-tella-test-lessons.sql` refuses when a
+  lesson it picked already holds a video that is not one of the two
+  test ids; it inserts and no longer overwrites. Neither message holds
+  a video id.
 - **Depended on by:** `POST /api/student/lesson-video` (reads
   `tella_video_id` for one lesson), `GET /api/student/data` (reads
   `lesson_id` only, to attach `has_video`), the SQL function
   `record_lesson_heartbeat` (a lesson is playable only when it has a
   row here), `GET /api/cron/check-lesson-videos` (reads `lesson_id` and
-  `tella_video_id` of every row)
+  `tella_video_id` of every row, ordered by `lock_checked_at` with the
+  rows never checked first)
 - **Stable contract:** `lesson_id` (text, primary key, so one video per
   lesson), `tella_video_id` (text, not null, unique, so one lesson per
   video; it must match `^vid_[a-z0-9]{10,64}$`, the same pattern as
@@ -300,18 +317,23 @@ When adding a new table, append it here. When deleting a field, scan
     every site on that list is an expected one, and downloads are off.
     A `locked` row can still carry sentences in `lock_detail`: an
     expected site missing from the list (the lesson will not play
-    there), or a length more than 2 seconds away from the catalog's
-    (the 95% rule measures the wrong length).
+    there), a length more than 2 seconds away from the catalog's (the
+    95% rule measures the wrong length), a `watch` lesson the catalog
+    has no length for (it can never be counted), or a row whose
+    `lesson_id` no `watch` lesson has. The last two are about the
+    catalog. They are added whatever Tella answered, a 404 included,
+    so an `open` or `missing` row can carry them too. An `error` row
+    carries only the reason Tella could not be asked.
   - `open`: Tella serves the video more widely than the rule allows.
     Its access is something other than "Embed only", or it has no
     domain list, or a site on the list is not an expected one
     (`localhost` counts), or downloads are on.
   - `missing`: Tella answered 404 for the id. It no longer has the
     video.
-  - `error`: Tella could not be asked on that run (a failed request,
-    an answer that was not a 200 or a 404, or a 200 without the video's
-    settings or its download switches). It says nothing about the video
-    itself.
+  - `error`: Tella could not be asked on that run (no answer within 10
+    seconds, a failed request, an answer that was not a 200 or a 404,
+    or a 200 without the video's settings or its download switches).
+    It says nothing about the video itself.
 - **Private:** RLS is on with NO policy, and every privilege is
   revoked from `anon` and `authenticated`, so a browser query is
   refused for any account. The service role reads it for the
@@ -550,7 +572,7 @@ When adding a new table, append it here. When deleting a field, scan
 - **Stable contract:** `id`, `route_name` (`sync-whop` /
   `snapshot-progress` / `check-engagement` / `check-csm-tasks` /
   `check-na-tasks` / `day28-dm` / `check-lesson-videos`, the last one
-  from the unscheduled lock check, which has never run),
+  from the unscheduled lock check, which has never run for real),
   `started_at`, `finished_at`,
   `auth_status` (`ok` / `no_secret_configured` / `missing_header` /
   `mismatch`), `status` (`running` / `success` / `failed` /
@@ -753,7 +775,7 @@ read-only query that settles it. v100 has not been run on production.
   exist there with `type = 'watch'`; it reads `duration_seconds`) and,
   since v100, `lesson_videos` (the lesson must have a row there). It
   looks in `lessons` and never in `lessons_next`.
-- **What changed inside in v100** (v97's text with four changes):
+- **What changed inside in v100** (v97's text with five changes):
   - Playable now means "has a `lesson_videos` row". Through v97 it
     meant "has a `bunny_video_id`", which the function no longer reads.
   - A beat after the first is credited at most 2.5 seconds of video
@@ -767,6 +789,36 @@ read-only query that settles it. v100 has not been run on production.
     a constant of its own (`v_first_delta`). It has no earlier beat for
     the clock to measure from, and at 60 one forged call would have
     passed both rules on any lesson of 75 seconds or less.
+  - Each call takes a lock on its own student and lesson, right after
+    the student lookup and before the watch row is read:
+    `pg_advisory_xact_lock(hashtextextended(v_student_id::text || ':'
+    || p_lesson_id, 0))`. It is held to the end of the transaction, so
+    calls fired at the same instant are served one at a time. The
+    later call reads the row only after the earlier one has committed.
+    Its `now()` is still the instant it was fired, so the clock it is
+    measured by comes out at about zero and it is credited about
+    nothing. Without the lock each call read the row before any had
+    committed and each was credited in full: three first calls fired
+    together banked 60 seconds, which completes a 67 second lesson.
+    v97 has the same race at 20 seconds a call.
+- **What is proven about the lock, and what is not** (migration
+  tests, section 18): the installed function takes the lock once, in
+  that place; a call holds one exclusive lock keyed on its own student
+  and lesson until its transaction ends and none after it; and callers
+  served one at a time are credited as one (four calls of 60 seconds,
+  24 seconds after the last beat, get 60 between them; a later caller
+  whose `now()` is 50 ms before the stamp it finds gets exactly 0;
+  three first calls at the end of a 67 second lesson bank 20 seconds,
+  29.9%). NOT proven: the race itself. The harness has one connection
+  and cannot fire two calls at the same instant, so no test shows two
+  real callers waiting on each other, and nothing has run on
+  production.
+- **Known and left open** (v100's header): the lock and the clamp are
+  per lesson, so several lessons run side by side are each credited
+  2.5 times the clock. A forced call that started a few milliseconds
+  before the beat stored ahead of it is credited nothing and then
+  writes its own, earlier, start time into `last_heartbeat_at`, so the
+  next beat is credited 2.5 times those milliseconds a second time.
 - **What it does with its inputs:** clamps the position into
   `[0, duration]`; clamps the played-seconds delta as above; refuses a
   beat less than 5 seconds after the last one unless `p_force` is true
@@ -792,9 +844,10 @@ read-only query that settles it. v100 has not been run on production.
   which made one request and stopped at a refusal.
 - **Raises:** `42501` when the caller has no student row; `22023` when
   the lesson is not a playable watch lesson.
-- **Undo:** `supabase/undo/2026_v100_undo.sql` puts v97's text back and
-  drops `lesson_videos`. It is run by hand and never in sequence with
-  the migrations.
+- **Undo:** `supabase/undo/2026_v100_undo.sql` puts v97's text back
+  (with no lock and no 2.5x credit) and drops `lesson_videos`. It
+  refuses to do either while that table holds a row. It is run by hand
+  and never in sequence with the migrations.
 
 ### `student_progress_counts` (view)
 - **What it is:** one row per student who has at least one completed
@@ -910,47 +963,137 @@ called against a database or run on a deployment.
 
 ### `GET /api/cron/check-lesson-videos` (the lesson video lock check)
 - **What it is:** a job that asks Tella whether every lesson video is
-  still locked. NOT scheduled: `vercel.json` has no line for it, and it
-  runs only when someone calls it. It has never executed.
+  still locked, and whether the catalog can count the lesson it belongs
+  to. NOT scheduled: `vercel.json` has no line for it, and it runs only
+  when someone calls it. It has never run for real. Its route file has
+  run against stand-ins (`node world-tests/lock-check-sim.mjs`).
 - **Consumes:** `Authorization: Bearer <CRON_SECRET>` (through
   `verifyCronAuth`), and the environment values `TELLA_API_KEY` and
   `TELLA_EMBED_DOMAINS` (hosts a real lesson may be embedded on, comma
   separated; trimmed and compared in lower case).
-- **Depends on:** `lesson_videos` (every row), `lessons` and
-  `lessons_next` (`id`, `duration_seconds`, both by name; the live
-  table wins a shared id), Tella's API through
+- **Depends on:** `lesson_videos` (every row: `lesson_id`,
+  `tella_video_id`, read in the order of `lock_checked_at`, the rows
+  never checked first, then `lesson_id`), `lessons_next` and `lessons`
+  (`id`, `type`, `duration_seconds`, both by name, the live table read
+  last so it wins a shared id), Tella's API through
   `fetchTellaVideoFacts()` (`GET https://api.tella.com/v1/videos/{id}`
-  with the key as a bearer token; it reads `video.durationSeconds` and
-  `video.settings.{linkScope, allowedEmbedDomains, downloadsEnabled,
-  rawDownloadsEnabled}`), `judgeLock()` in
+  with the key as a bearer token, given up after 10 seconds; it reads
+  `video.durationSeconds` and `video.settings.{linkScope,
+  allowedEmbedDomains, downloadsEnabled, rawDownloadsEnabled}`),
+  `judgeLock()` and `watchLessonSeconds()` in
   `src/lib/world/tella-lock.ts`, `cron_runs`, and `postTeamAlert()`
   (`DISCORD_TEAM_WEBHOOK_URL`)
+- **The judging contract** (`src/lib/world/tella-lock.ts`, pure):
+  ```ts
+  export type LockStatus = "locked" | "open" | "missing" | "error";
+  export type CatalogLesson = "watch" | "none" | "unread";
+  export interface LockVerdict { status: LockStatus; problems: string[]; }
+  export interface TellaVideoFacts {
+    linkScope: string | null;
+    allowedEmbedDomains: string[];
+    downloadsEnabled: boolean;
+    rawDownloadsEnabled: boolean;
+    durationSeconds: number | null;
+  }
+  export interface CatalogLessonRow {
+    id: string;
+    type: string | null;
+    duration_seconds: number | string | null;
+  }
+
+  export function judgeLock(
+    facts: TellaVideoFacts | null,          // null: Tella answered 404
+    expectedDomains: readonly string[],
+    catalogDurationSeconds: number | null,
+    catalogLesson: CatalogLesson = "watch",
+  ): LockVerdict
+
+  export function watchLessonSeconds(
+    tables: readonly (readonly CatalogLessonRow[])[],
+  ): Map<string, number | null>
+  ```
+  `catalogLesson` is what the catalog says about the row's lesson.
+  `"watch"`: a `watch` lesson has this id, and its length is passed
+  beside it (null when the catalog has none). `"none"`: no `watch`
+  lesson has this id, in either catalog table. `"unread"`: a catalog
+  table could not be read and the id was not found in the other, so
+  nothing is said about the catalog. Two sentences come from it and
+  neither changes the status: "No watch lesson has this id." and "The
+  catalog has no length for this lesson, so it can never be counted."
+  `watchLessonSeconds` holds an entry for every `watch` lesson, null
+  when it has no length, and no entry for any other id.
 - **Produces:**
-  - 200 `{ checked, locked, open, missing, error, problems: [{
-    lessonId, status, problems: string[] }] }`. The first five are
-    counts. `problems` lists every lesson whose verdict has at least
-    one sentence, a `locked` one included. No video id is in the body.
+  - 200 `{ checked, locked, open, missing, error, notReached,
+    problems: [{ lessonId, status, problems: string[] }] }`. `locked`,
+    `open`, `missing` and `error` are counts and `checked` is their
+    sum. `notReached` is the videos that got no verdict this run: the
+    ones not asked about before the 270 seconds were up, and the rows
+    that changed while the run was on. `checked + notReached` is the
+    number of rows read at the start. `problems` lists every lesson
+    whose verdict has at least one sentence, a `locked` one included.
+    No video id is in the body.
   - 401 `{ error: "Unauthorized", reason }` without the right secret.
   - 500 `{ error: "Lock check not configured" }` when either
     environment value is missing or the domain list is empty.
   - 500 `{ error: <message> }` when the `lesson_videos` read fails or
     the run throws.
-- **Side effects:** one update per `lesson_videos` row (`lock_status`,
-  `lock_detail`, `lock_checked_at`). One `cron_runs` row per call,
-  finished as `failed` when a verdict could not be written or the
-  alert could not be delivered, with `rows_affected` set to the
-  verdicts written. One `postTeamAlert` call when `problems` is not
-  empty: the title "Lesson videos need attention" and one line per
-  lesson, cut at 3,800 characters.
+- **Side effects:**
+  - One update per video asked about (`lock_status`, `lock_detail`,
+    `lock_checked_at`), filtered on `lesson_id` AND `tella_video_id`.
+    When that update touches no row, the row was changed or deleted
+    during the run: the verdict is dropped whole, counted under
+    `notReached`, and the row keeps what it had.
+  - One `cron_runs` row per call. It ends as `success` only when every
+    video got a verdict, every verdict was written, the catalog was
+    read in full and any alert went out. It ends as `failed`, with a
+    message naming each cause, when the run stopped asking at 270
+    seconds, when a row changed during the run, when a catalog table
+    could not be read, when a verdict could not be written, or when
+    the alert could not be delivered. `cron_runs` has no status
+    between the two, so a partial run is a failed one.
+    `rows_affected` is the verdicts written. A refused call (no
+    secret, a wrong one) is recorded with its reason.
+  - One `postTeamAlert` call when any lesson has a problem, and also
+    when the run has something to say about itself: videos not
+    reached, or a catalog table it could not read. The title is
+    "Lesson videos need attention". The run's own lines come first and
+    are never cut; then one line per lesson, cut at whole lines to
+    stay under 3,800 characters.
 - **Rules its readers rely on:** it trusts nothing it stored; every
-  run asks Tella about every video, 700 ms apart, so a second run
-  writes the same verdicts. A video Tella could not be asked about
-  becomes `error` and the run goes on. The body, the Discord message
-  and the logs identify a video by its lesson id only.
+  run asks Tella about every video again, so a second run writes the
+  same verdicts. One request starts at least 700 ms after the one
+  before it started (86 a minute at most; Tella allows 100). No
+  request starts later than 270 seconds after the run began, which
+  leaves 30 seconds before Vercel's 300 second limit for the request
+  under way, its write, the alert and the `cron_runs` row. What one
+  run did not reach, the next run asks about first. A video Tella
+  could not be asked about becomes `error` and the run goes on. While
+  a catalog table is unread, a lesson the run cannot find is not
+  called unknown. The body, the Discord message and the logs identify
+  a video by its lesson id only.
 - **Limits:** it sees a video's settings and cannot see whether Tella
   still acts on them (`CONTEXT.md`, rule 4, is the manual check for
-  that). `maxDuration` is 300 seconds, and by the builder's estimate,
-  never measured, about 250 videos would not fit in one run.
+  that). How many videos fit in one run is arithmetic in the route's
+  header and was never measured on Vercel: about 385 at 0.7 seconds a
+  video, about 190 at 1.4 seconds a video (the pace two requests from
+  a laptop suggest), and 27 on a day when every request runs into its
+  10 second limit. The course's 145 fit as long as Tella answers in
+  about 1.6 seconds or less on average.
+- **Proven and unproven:** `node world-tests/lock-check-sim.mjs` runs
+  this route file, `tella-lock.ts`, `tella-api.ts`, `cron-auth.ts` and
+  `discord.ts` as they are against stand-ins for `fetch`, the Supabase
+  client, `NextResponse` and the clock: 89 checks passed on
+  2026-10-12. They cover the refusals, one row of every kind, a row
+  swapped or deleted during a run, the 270 second budget and
+  `notReached`, the pace, the alert and its cut, a catalog table that
+  cannot be read, a write that fails, an alert that does not go out,
+  what `cron_runs` says after each, and that no video id or key is in
+  any answer, alert, `cron_runs` row or log line.
+  Unproven: everything a stand-in stands for. How supabase-js and
+  PostgREST treat the order and the two filters, row level security,
+  how long a write takes, Tella's real answers from Vercel, Discord
+  accepting the message, and Vercel's own clock have never been
+  exercised, because the route has never run for real.
 
 ---
 
@@ -959,9 +1102,9 @@ called against a database or run on a deployment.
 TypeScript shapes passed between modules in the browser. Nothing here
 is stored. Each has one writer. The path from the database to the map
 is: `GET /api/student/data`, `StudentContext`, `useWorldCatalog()`,
-`buildMapModel()`, `sourceData()`, `WorldMap`, `WorldV6`. The last two
-entries belong to the lesson player: `LessonTransport`, and the
-messages it trades with Tella's frame.
+`buildMapModel()`, `sourceData()`, `WorldMap`, `WorldV6`. The last
+three entries belong to the lesson player: `LessonTransport`, the
+watch heartbeat, and the messages it trades with Tella's frame.
 
 ### `MapModel` (`src/lib/world/map-model.ts`)
 - **Written by:** `buildMapModel()` and nothing else.
@@ -1157,10 +1300,105 @@ messages it trades with Tella's frame.
   `supabase.rpc("record_lesson_heartbeat")`; when one is given, the
   heartbeat module creates no Supabase client. `claim` of the real
   transport calls `POST /api/student/lesson-watched` and returns null
-  when the request failed, which the player treats as nothing to show.
+  when the request failed. The player shows nothing for a null and
+  makes the request again when its 10 seconds between claims are up,
+  three times at most, and starts that count again on the next
+  heartbeat past 95%.
   A refusal is `completed: false` with the route's `reason`; the
   player shows its "not marked as watched" line only for
   `played_short` with both `playedRatio` and `playedFloor` present.
+  The interface itself did not change with decisions D14 to D19.
+
+### The watch heartbeat (`src/lib/world/watch-heartbeat.ts`)
+- **What it is:** the object that turns the player's position reports
+  into calls to `record_lesson_heartbeat`, and the answers it hands
+  back to its caller.
+- **Written by:** `createWatchHeartbeat()` and nothing else. It is the
+  only code that calls the database function.
+- **Read by:** `LessonPlayer`, which feeds it `tick` and `flush` and
+  reads every answer through `onResult`
+- **Shape:**
+  ```ts
+  export interface HeartbeatResult {
+    accepted: boolean;
+    reason?: string;
+    max_position_seconds: number;
+    last_position_seconds?: number;
+    watched_seconds: number;
+    duration_seconds?: number | null;
+    threshold_met: boolean;
+    threshold_crossed: boolean;
+  }
+
+  export interface HeartbeatBeat {
+    reason: string;      // "throttle", or the reason handed to flush()
+    force: boolean;
+    repeated?: boolean;  // nothing was sent; the last accepted answer again
+  }
+
+  export interface WatchHeartbeatOptions {
+    lessonId: string;
+    durationSeconds?: number | null;
+    onResult?: (result: HeartbeatResult, beat: HeartbeatBeat) => void;
+    onThresholdCrossed?: () => void;
+    rpc?: (args: {
+      p_lesson_id: string;
+      p_position_seconds: number;
+      p_reported_duration: number | null;
+      p_delta_seconds: number;
+      p_force: boolean;
+    }) => Promise<{ data: HeartbeatResult | null; error: unknown }>;
+    now?: () => number;
+  }
+
+  export interface WatchHeartbeat {
+    tick(positionSeconds: number, playerDuration: number | null): void;
+    noteSeek(positionSeconds: number): void;
+    flush(reason: string): void;
+    destroy(): void;
+  }
+
+  export function createWatchHeartbeat(opts: WatchHeartbeatOptions): WatchHeartbeat
+  ```
+- **Rules its caller relies on:**
+  - `onResult` has a second argument since 2026-10-12. `beat.reason`
+    says which beat the answer belongs to: `throttle` for a routine
+    one, or the reason given to `flush` (`LessonPlayer` uses `pause`,
+    `ended`, `visibilitychange`, `pagehide`, `unmount`). A retry keeps
+    the reason of the beat it retries. `LessonPlayer` reads
+    `beat.reason === "ended"` to know the answer is about the end of
+    the video.
+  - A forced beat with nothing new to say since the last accepted
+    beat sends nothing, and `onResult` gets that last accepted answer
+    again with `beat.repeated` true. With no accepted beat yet, it is
+    sent. The caller must not act twice on a repeated answer;
+    `LessonPlayer` uses it only for the "finished but didn't register"
+    line.
+  - A routine beat goes out once per 15 seconds of reports, and the
+    first report writes at once. A beat asked for while another is on
+    its way is queued when it is forced and dropped when it is routine.
+  - A forced beat whose call fails or throws, or that the 400 ms call
+    gate holds back, is sent again after 2, 5 and 10 seconds and then
+    given up. Each retry carries whatever is banked by then. A beat
+    that lands, or `destroy()`, ends the retries. A routine beat that
+    fails sets no timer: the throttle sends the next one.
+  - Any completed call moves the throttle clock, a failed one
+    included, so a database call that keeps failing is tried every 15
+    seconds. A refused or failed beat keeps its played seconds banked,
+    and the next beat carries them.
+  - Nothing is written before a position has been reported.
+  - Played seconds are counted as an allowance that carries over:
+    each report adds 2.5 times the clock seconds since the last one to
+    a budget capped at 5.35 seconds, and a forward step counts when it
+    fits in the budget, which it then uses up. The budget starts at
+    0.35 seconds with the first report and after `noteSeek`. `noteSeek`
+    has no caller today.
+  - A callback that throws does not stop the heartbeat and is not
+    taken for a failed beat.
+- **Proven and unproven:** `client-tests/watch-heartbeat.test.mjs`, 91
+  checks on 2026-10-12, runs this file from the real source with a
+  stand-in for the database call and the clock. It has never called
+  the real database function on production.
 
 ### The Tella player messages (`src/lib/world/tella-player.ts`)
 - **What it is:** what Tella's player and the lesson page say to each
@@ -1215,9 +1453,19 @@ messages it trades with Tella's frame.
   on once. No `timeUpdate` arrives before play. The end
   is a last `timeUpdate` just short of the duration, then
   `playbackState` `stopped` carrying `duration: 0`, so a duration of 0
-  or less is read as null and never replaces the last real one. A
+  or less is read as null and never replaces the last real one.
+  The page does NOT take the word `stopped` for the end of the video:
+  on one replay the real player's last message was `paused` at the end
+  position and no `stopped` followed. A `stopped` or a `paused` is the
+  end when both its own position and the last position reported are
+  within 1.5 s of the player's own last reported length (never the
+  catalog's, which is the thing that may be wrong). That one forces a
+  heartbeat with the reason `ended`, and the answer to that beat
+  decides whether the "finished but didn't register" line shows. A
+  `stopped` or `paused` anywhere else forces an ordinary heartbeat. A
   video Tella refuses sends no message at all, which is why the page
-  waits 12 seconds and reads silence as "didn't load". No "seeked"
+  waits 12 seconds from the moment the frame is on it and reads
+  silence as "didn't load". No "seeked"
   message was seen: a skip showed up as `stalled`, `playing` and then
   one large step between two `timeUpdate`s. A `timeUpdate` with no usable position is dropped
   whole, and an unknown type or state parses to null. A `seekTo`
@@ -1229,10 +1477,13 @@ messages it trades with Tella's frame.
   `seeking` is in the type and was not among the states seen in the
   measurement.
 - **Proven and unproven:** the component met Tella's real player in
-  the development harness on 2026-10-12 and all nine rows of
-  `world-tests/tella-watch.mjs` passed. It has never run through a
-  real login, on another browser or device, or in a background tab. Tella can change a message name without
-  notice; that script is the check written to catch it.
+  the development harness on 2026-10-12, and all nine rows of
+  `world-tests/tella-watch.mjs` passed, also on the code as it stands
+  after decisions D14 to D19 (`PASS 9  FAIL 0  NOT COVERED 5`, 23:38 to
+  23:45). It has never run through a real login, on another
+  browser or device, or in a background tab. Tella can change a
+  message name without notice; that script is the check written to
+  catch it.
 
 ---
 

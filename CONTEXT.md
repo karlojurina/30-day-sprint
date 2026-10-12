@@ -28,15 +28,18 @@ structure changes.
 >   (the PRD that put the v6 map into `/world`) and
 >   `../_admin/prds/tella-player/` (the PRD that moved lesson video from
 >   Bunny Stream to Tella embeds on 2026-10-12, with its measurements of
->   Tella's player and its decisions D1 to D12). Each PRD folder has a
+>   Tella's player and its decisions D1 to D19). Each PRD folder has a
 >   `project_log.md`. Where a build stands is recorded in those folders.
 > - **Nothing from the Tella build has run on production.** Migration
 >   v100 is not applied there, `POST /api/student/lesson-video` has
 >   never been called against a database, the lock check has never
->   executed, and the player has met Tella's real player only in the
->   development harness (all nine rows of `tella-watch.mjs` passed there
->   on 2026-10-12), never through a login. Every Tella statement below comes from the
->   code, the local tests and the PRD's measurements.
+>   executed for real (its route file has run only against stand-ins),
+>   and the player has met Tella's real player only in the development
+>   harness, never through a login. On the code as it stands after decisions D14 to D19,
+>   `tella-watch.mjs` ended `PASS 9  FAIL 0  NOT COVERED 5` (run
+>   2026-10-12, 23:38 to 23:45).
+>   Every Tella statement below comes from the code, the local tests
+>   and the PRD's measurements.
 > - **The map's own records:** `world_overnight_log.md` (every decision
 >   taken while the map was built, numbered), `world_art_bible_v6.md`
 >   (how each place is built, and the frame budgets) and `.impeccable.md`
@@ -85,16 +88,19 @@ exists here, checked on 2026-10-07, and for the lesson video on
 - **Service.** `npm run test:migrations` runs migrations v92 to v98 and
   v100 on a local Postgres, among them the heartbeat function, the
   snapshot rebuild, v100's undo and the morning kit. No test covers a
-  cron route or a webhook handler, and nothing runs any test
-  automatically on a change (the repo has no CI configuration). The
-  lock check's judging rules are covered by `npm run test:client`, and
-  `node world-tests/tella-lock-live.mjs` ran them once against two real
-  Tella videos; the route around them (`check-lesson-videos`) has never
-  run. No probe checks the deployed crons: `cron_runs` records every
-  invocation and `supabase/diagnostics/admin-health.sql` reads it by
-  hand. No noticer fires when a cron fails. The lock check is the one
-  job with an alert wired in (`postTeamAlert`), and that alert has never
-  been sent.
+  webhook handler, and one cron route has a test:
+  `node world-tests/lock-check-sim.mjs` runs the lock check's real
+  route file against stand-ins for the database, Tella, Discord and the
+  clock. Nothing runs any test automatically on a change (the repo has
+  no CI configuration). The lock check's judging rules are also covered
+  by `npm run test:client`, and `node world-tests/tella-lock-live.mjs`
+  ran them against two real Tella videos; the route itself
+  (`check-lesson-videos`) has never run for real. No probe checks the
+  deployed crons: `cron_runs` records every invocation and
+  `supabase/diagnostics/admin-health.sql` reads it by hand. No noticer
+  fires when a cron fails. The lock check is the one job with an alert
+  wired in (`postTeamAlert`), and that alert has never been sent to
+  Discord.
 
 Every harness and its command is under [Testing](#testing).
 
@@ -152,7 +158,7 @@ Two surfaces in one Next.js app:
 | `/dashboard/playbook` | Map 2 hub. Two unlock paths (v75.16, see `isPlaybookUnlocked` in `src/lib/progress.ts`): standard sprint completion of l078 ("How I Approach Research / Coming Up With Ad Ideas"), OR legacy auto-unlock (`joined_at >= 30 days ago` AND completion ratio >= 0.80) — for older customers who passed the action-item phase before our platform existed. Bounty Access (`bounty_access_claimed_at`) is a SEPARATE milestone and does NOT unlock the Playbook. |
 | `/world` | Branch `world-engine`, allowlisted students only. The world map. The layout (`src/app/world/layout.tsx`) wraps the same `StudentGuard`, `StudentProvider` and `MembershipBlockOverlay` as the dashboard, plus `WorldAccessGate` (the allowlist) and `WorldStage`. `WorldStage` mounts the map host `WorldMap` once, so the map stays mounted while the address moves between the three routes. The page itself renders nothing. `WorldMap` shows the v6 map (`WorldV6`) with the student's own areas, lesson titles and finished lessons once the catalog has loaded and has exactly eight areas. In every other state it shows one plain card and loads no 3D: loading, "Your course didn't load.", "There are no lessons here yet.", or "The new course isn't switched on here yet." Under 760 px wide, or when the 3D fails to start, the same component shows a list view; on a machine that cannot draw the 3D it shows still posters from `public/world-v6/posters/`. |
 | `/world/[areaId]` | A place's own address. The route (`PlaceRoute`) renders nothing for an area the catalog has: `WorldStage` reads the same address and the map opens that place's panel. For an unknown area it shows "That place isn't on the map." with a link back. Opening or closing a place inside the map changes the address without moving the page scroll, because the page scroll is the map's camera. |
-| `/world/[areaId]/[lessonId]` | The lesson page (`LessonScreen`), drawn over the paused map: a back link to the place, an eyebrow (the area's number, the lesson's position in the area, the minutes when the catalog has them), the lesson title, the video player for a `watch` lesson (`LessonPlayer`, which shows "Not recorded yet." and calls no server when the lesson has no video; with a video it shows Tella's frame, the app's own progress line under it, and under that a line of text when the video has not loaded or when the lesson reached its end and was not counted), the description or a setup line for any other type, the Milestone box when the lesson has an action item, and a Next lesson link that is enabled once the lesson is in `completedLessonIds`. Escape returns to the place. An unknown area or lesson shows "That lesson isn't here." Nothing under `/world` can complete an action item or a setup lesson today. |
+| `/world/[areaId]/[lessonId]` | The lesson page (`LessonScreen`), drawn over the paused map: a back link to the place, an eyebrow (the area's number, the lesson's position in the area, the minutes when the catalog has them), the lesson title, the video player for a `watch` lesson (`LessonPlayer`, which shows "Not recorded yet." and calls no server when the lesson has no video; with a video it shows Tella's frame, the app's own progress line under it, and under that up to three lines of text: when the video has not loaded, when the video played to its end and the server still does not see the lesson's 95% point, and when the lesson was not counted because too little of it was played), the description or a setup line for any other type, the Milestone box when the lesson has an action item, and a Next lesson link that is enabled once the lesson is in `completedLessonIds`. Escape returns to the place. An unknown area or lesson shows "That lesson isn't here." Nothing under `/world` can complete an action item or a setup lesson today. |
 
 **Development-only pages for the world** (both return `notFound()`
 outside `NODE_ENV === "development"`):
@@ -490,9 +496,10 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
 - `GET /api/cron/check-lesson-videos`: the lesson video lock check. It
   asks Tella about every row of `lesson_videos`, writes what it found
   on the row and posts to the team's Discord channel when a video has a
-  problem. It is NOT in `vercel.json`: it runs only when someone calls
-  it with the cron secret, and it has never run. The Cron Jobs table
-  says what would switch it on.
+  problem or the run did not get through every video. It is NOT in
+  `vercel.json`: it runs only when someone calls it with the cron
+  secret, and it has never run for real. The Cron Jobs table says what
+  would switch it on.
 
 ## Database — Active Tables
 
@@ -577,9 +584,10 @@ this section says about those migrations comes from their text.
   `POST /api/student/lesson-video` and `POST /api/student/lesson-watched`.
   Everything else (the crons, the admin pages, the achievements code,
   the discount routes, `toggle-lesson`) reads `lessons` and `regions`
-  by name. The lock check reads `duration_seconds` from both `lessons`
-  and `lessons_next`, each by name. `StudentContext` gets its catalog
-  only from `/api/student/data`, so a deployment with the suffix set serves the
+  by name. The lock check reads `type` and `duration_seconds` from both
+  `lessons` and `lessons_next`, each by name. `StudentContext` gets its
+  catalog only from `/api/student/data`, so a deployment with the
+  suffix set serves the
   staging catalog to `/dashboard` as well as to `/world`. A second env
   var, `CATALOG_SHAPE` (empty, `v1` or `v2`), says whether the catalog
   has the v2 shape (no `day`, one `sort_order` for the whole course).
@@ -611,7 +619,14 @@ this section says about those migrations comes from their text.
     puts a lesson's row in and sets `lessons.duration_seconds` with it.
     A lesson with a row here and no duration plays and can never be
     completed. The lock check writes `lock_status`, `lock_detail` and
-    `lock_checked_at`. Nothing a student can reach writes the table.
+    `lock_checked_at`, and only on a row that still holds the video it
+    asked Tella about. Nothing a student can reach writes the table.
+  - **The rows are the only record of which video belongs to which
+    lesson.** They are in no other table and never in the repository.
+    Two files that are run by hand refuse to destroy one: the undo
+    stops while the table holds any row, and the stamp stops when a
+    lesson it picked already holds a video it did not put there (both
+    below).
   - **Why the id is not a column on `lessons`.** With Tella the id is
     the video's address. Every account that is signed in can read
     every column of `lessons` and `lessons_next` (their select policy
@@ -664,9 +679,9 @@ this section says about those migrations comes from their text.
   seconds of playback. The table has read policies only, so no client
   can write a row. There is no foreign key on `lesson_id`.
   - **`record_lesson_heartbeat` as v100 leaves it** (v100 has not been
-    run on production). A lesson is playable when it exists in
-    `lessons` as a `watch` lesson and has a row in `lesson_videos`. Any
-    other id is refused with `22023`. A beat after the first is
+    run on production). It is v97's text with five changes. A lesson is
+    playable when it exists in `lessons` as a `watch` lesson and has a
+    row in `lesson_videos`. Any other id is refused with `22023`. A beat after the first is
     credited at most 2.5 seconds of video for each second of clock
     since the beat before it, and at most 60 seconds in one beat. The
     first beat for a student and lesson has no earlier beat to be
@@ -674,9 +689,23 @@ this section says about those migrations comes from their text.
     of Tella's speed menu, so a lesson watched at 2x or 2.5x can reach
     the 80% played floor, which it could not under v97. The same number
     is `WATCH_SPEED_CAP` in `src/lib/world/tella.ts`, and a client test
-    reads the migration file to hold the two together. The signature,
-    the grants, the 5 second rate limit, the 95% stamp and the keys it
-    returns are v97's.
+    reads the migration file to hold the two together. The fifth change
+    is a lock. Right after it has found the student, each call takes
+    `pg_advisory_xact_lock` on its own student and lesson for the
+    length of its transaction, so calls fired at the same instant are
+    served one at a time and only the first is credited. Without it
+    each of them read the watch row before any had committed, and each
+    was credited in full: three first calls fired together banked 60
+    seconds, enough to complete a 67 second lesson. v97 has the same
+    race. The race itself was never reproduced. The test database has
+    one connection and cannot fire two calls at once, so the tests
+    check that the lock is taken, with the right key, until the
+    transaction ends, and they run the later callers' arithmetic one
+    call after another. The lock is per lesson: several lessons run
+    side by side are each credited 2.5 times the clock, and that is
+    left open (tella-player project log, the 22:41 entry). The
+    signature, the grants, the 5 second rate limit, the 95% stamp and
+    the keys it returns are v97's.
 - `daily_notes` — one row per student per day
 - `lesson_notes` — per-lesson note
 - `student_quiz_attempts` — quiz attempts
@@ -764,12 +793,16 @@ is never run in sequence with the migrations: someone pastes it into
 the Supabase SQL editor by hand, and only to undo.
 
 - `2026_v100_undo.sql`: puts `record_lesson_heartbeat` back to v97's
-  text and drops `lesson_videos` with every row in it. The function
-  text was copied by a script out of the v97 file, and the migration
-  tests check that the database ends with the function it had straight
-  after v97, character for character. Which lesson plays which video
-  is recorded nowhere else, so save the rows before running it. Run it
-  only together with putting the app back on the build from before
+  text and drops `lesson_videos`. It refuses to do either while the
+  table holds a row: it stops before anything is started, says how many
+  rows there are and changes nothing. Which lesson plays which video is
+  recorded nowhere else, so the way through is the one its message
+  gives: save the rows somewhere private with the select it prints,
+  delete them, and run the file again. The function text was copied by
+  a script out of the v97 file, and the migration tests check that the
+  database ends with the function it had straight after v97, character
+  for character. That function has no lock and no 2.5x credit. Run the
+  undo only together with putting the app back on the build from before
   Tella: the Tella build's routes read the table it drops. Watch rows
   and completions are left as they are, and v100 can be run again
   after it.
@@ -787,7 +820,12 @@ one.
   `duration_seconds` to 67 (the length of both test videos) and ends
   with the two `/world/...` paths to open. It takes back any earlier
   run of itself first, and it stops and changes nothing while a
-  placeholder is left in. `old_watch_rows` in its result should be 0 on
+  placeholder is left in. It also stops and changes nothing when a
+  lesson it picked already holds a video that is not one of the two
+  test videos. It no longer replaces a video it did not put there, and
+  its message names the lesson and no video. To switch to two other
+  test videos, run the unstamp with the old ids first.
+  `old_watch_rows` in its result should be 0 on
   both rows; anything else means the lesson was watched before and the
   proof would not start from zero.
 - `tella-proof.sql`: one select that writes nothing and needs no
@@ -818,7 +856,7 @@ production picks is not known.
 | `check-csm-tasks` | every 2h at :15 (v85.5) | Evaluate `templates.trigger_config` → `tasks`. Includes auto-dismiss for orphan tasks (v75.19). v85.1: 3c also dismisses any non-canceling-aware open task for a canceling student ("save-the-sale flow owns this student"). |
 | `check-na-tasks` | every 2h at :20 (v85.5) | Not-Activated escalation (Day 3/5/7/10) |
 | `day28-dm` | NO cron trigger (removed pre-v85; route retained) | Day-28 Discord DM route still exists for manual/preview fire, but nothing schedules it — the platform currently sends zero automated student DMs. |
-| `check-lesson-videos` | NO cron trigger (built 2026-10-12, never run) | The lesson video lock check. For every row of `lesson_videos` it asks Tella's API for the video's settings (one request per video, 700 ms apart), judges them with `judgeLock` against `TELLA_EMBED_DOMAINS` and the catalog's `duration_seconds`, and writes `lock_status`, `lock_detail` and `lock_checked_at` on the row. When any video has a problem it posts one message to the team's Discord channel (`postTeamAlert`). It trusts nothing it stored: every run asks Tella about every video again. A video Tella could not be asked about becomes `error` and the run carries on. It answers 500 "Lock check not configured" when `TELLA_API_KEY` or `TELLA_EMBED_DOMAINS` is missing. It runs only when someone calls it with the cron secret. Two things would switch it on, and both wait for Lovro's decision: a line for it in `vercel.json`, and both values set on the deployment that runs it (the PRD's ship order puts `TELLA_EMBED_DOMAINS` on Production). Its time is an estimate that was never measured: 175 to 230 s for 145 videos against a 300 s limit, and about 250 videos would not fit in one run. |
+| `check-lesson-videos` | NO cron trigger (built 2026-10-12; it has never run for real) | The lesson video lock check. It reads every row of `lesson_videos`, longest unchecked first, and asks Tella's API for each video's settings: one request per video, each started at least 700 ms after the one before, each given up after 10 s. It judges the answer with `judgeLock` against `TELLA_EMBED_DOMAINS` and against the catalog (the lesson's `duration_seconds`, and whether a `watch` lesson with that id exists at all). It writes `lock_status`, `lock_detail` and `lock_checked_at` on the row, and only on a row that still holds the video it asked about. It stops asking 270 s after it started, 30 s before Vercel would kill the function, and reports what it has: the videos it did not get to are counted as `notReached` and are the first ones asked about on the next run. It posts one message to the team's Discord channel (`postTeamAlert`) when any lesson has a problem, and also when the run was partial: videos not reached, or a catalog table it could not read. Such a run ends as `failed` in `cron_runs`, with a message saying what was left. It trusts nothing it stored: every run asks Tella about every video again. A video Tella could not be asked about becomes `error` and the run carries on. It answers 500 "Lock check not configured" when `TELLA_API_KEY` or `TELLA_EMBED_DOMAINS` is missing. It runs only when someone calls it with the cron secret. Two things would switch it on, and both wait for Lovro's decision: a line for it in `vercel.json`, and both values set on the deployment that runs it (the PRD's ship order puts `TELLA_EMBED_DOMAINS` on Production). How many videos fit in one run is arithmetic from the route's header and was never measured on Vercel. At 0.7 s a video, the pace the spacing allows, the course's 145 take about 100 s and about 385 fit. At about 1.4 s a video (two requests timed from a laptop at 0.9 s and 1.5 s, the write assumed at 0.2 s) they take about 3 min 25 s and about 190 fit. On a day when every request runs into its 10 s limit, 27 are asked and the rest are reported as not reached. The 145 fit as long as Tella answers in about 1.6 s or less on average. `node world-tests/lock-check-sim.mjs` runs the route's own logic against stand-ins (see Testing). |
 
 v85.5 chain each 2h cycle: sync :00 (fresh cancel flags + completions,
 worst case done ~:05) → engagement :10 (alerts) → csm-tasks :15 →
@@ -870,15 +908,15 @@ Schedules live in `vercel.json`. All seven routes use the shared `verifyCronAuth
 | `complete-lesson.ts` | `stampWatchCompletion()` stamps the watch half of a completion and is safe to call twice. `afterCompletionWrite()` runs what follows a completion, in order: streak, CSM reactivation, achievements, open-task re-evaluation, each best-effort. Only `POST /api/student/lesson-watched` calls them; `toggle-lesson` still carries its own copy of the same four calls. |
 | `world/access.ts` | Who may see `/world`. `canSeeWorld(studentId)` is true when `NEXT_PUBLIC_WORLD_LIVE` is `true` or the id is in `NEXT_PUBLIC_WORLD_PREVIEW_IDS`; an unset list admits nobody. Also `STUDENT_HOME` (`NEXT_PUBLIC_STUDENT_HOME`, default `/dashboard`) and `WORLD_LOCK_MODE` (`"open"`). It is a convenience gate in the browser; video addresses and completions are guarded on the server. |
 | `world/tella.ts` | The small facts about Tella that both sides share, with no imports. `TELLA_ORIGIN` (`https://www.tella.tv`, the only origin the player listens to and posts to), `WATCH_SPEED_CAP` (2.5, the same number as `v_speed_cap` in the SQL function), `isTellaVideoId()` (the pattern of the table's check constraint) and `tellaEmbedUrl(id)`, which builds `https://www.tella.tv/video/{id}/embed?title=0&b=0&wt=0&a=0&o=1` and throws on a malformed id without repeating it. The five switches hide the creator's name and Tella's own links; the reactions row stays. |
-| `world/tella-lock.ts` | Pure. `judgeLock(facts, expectedDomains, catalogDurationSeconds)` decides whether a video is still locked and says why in plain sentences. `missing` when Tella has no such video. `open` when access is anything but "Embed only", when there is no domain list, when a site on the list is not an expected one (`localhost` included), or when downloads are on. `locked` otherwise. Two findings add a sentence and leave the status alone: an expected site missing from the list, and a length more than 2 s away from the catalog's. |
-| `world/tella-api.ts` | Server only. `fetchTellaVideoFacts(videoId, apiKey)` makes the one read the lock check needs, `GET https://api.tella.com/v1/videos/{id}`. It returns null on a 404, throws on any other answer that is not a 200, and throws on a 200 that has no settings or no download switches, so an answer nobody could read never comes out as "locked". A missing access level or domain list is handed on, and `judgeLock` reports it as `open`. Nothing it throws names the video or the key. The key can read and change every video in the workspace. Its only caller in the app is the lock check. |
+| `world/tella-lock.ts` | Pure. `judgeLock(facts, expectedDomains, catalogDurationSeconds, catalogLesson)` decides whether a video is still locked and says why in plain sentences. `missing` when Tella has no such video. `open` when access is anything but "Embed only", when there is no domain list, when a site on the list is not an expected one (`localhost` included), or when downloads are on. `locked` otherwise. Four findings add a sentence and leave the status alone. Two are about the video: an expected site missing from the list, and a length more than 2 s away from the catalog's. Two are about the catalog, added on 2026-10-12 because either makes a lesson impossible to finish: a `watch` lesson with no length ("The catalog has no length for this lesson, so it can never be counted.") and a row whose id no `watch` lesson has ("No watch lesson has this id."). The catalog rules run whatever Tella answered, a 404 included. The fourth argument says what the catalog knows about the lesson: `"watch"` (the default), `"none"`, or `"unread"` when a catalog table could not be read, and then nothing is said about the catalog. `watchLessonSeconds(tables)` builds the length of every `watch` lesson by id from the catalog rows it is handed; a later table wins an id two tables share, so the caller passes the live table last. |
+| `world/tella-api.ts` | Server only. `fetchTellaVideoFacts(videoId, apiKey)` makes the one read the lock check needs, `GET https://api.tella.com/v1/videos/{id}`. One request, reading the answer included, is given up after 10 s. It returns null on a 404, throws on any other answer that is not a 200, and throws on a 200 that has no settings or no download switches, so an answer nobody could read never comes out as "locked". A missing access level or domain list is handed on, and `judgeLock` reports it as `open`. A timeout, a failure to reach Tella and an answer that is not JSON each throw a sentence written in this file; an error from the network layer is never passed on in its own words. Nothing it throws names the video or the key. The key can read and change every video in the workspace. Its only caller in the app is the lock check. |
 | `world/tella-player.ts` | Tella's player protocol over `postMessage`, written out with no library. `parseTellaMessage()` is pure and reads the three messages the player sends (`ready`, `playbackState`, `timeUpdate`); a duration of 0 or less counts as no duration, because Tella sends 0 with "stopped". `attachTellaPlayer(iframe, events)` listens on `window`, accepts a message only from that iframe's own window and only from `TELLA_ORIGIN`, and posts the three commands (`play`, `pause`, `seek`) to that origin. A seek asked for before `ready` is sent when `ready` arrives. It replaced `bunny-player.ts`. |
 | `world/lesson-transport.ts` | The three calls the lesson player makes, behind one interface (`LessonTransport`): `getEmbed`, `heartbeat` and `claim`. `realLessonTransport` is the one `/world` uses: `POST /api/student/lesson-video` and `POST /api/student/lesson-watched` with the session token, and the real heartbeat call. Neither request throws; a failure comes back as an answer. The interface exists so the development harness can stand in for the server. |
 | `world/catalog.ts` | The boundary between the world and the curriculum. `buildWorldCatalog()` turns lessons, regions, the completed ids and the watch rows into a `WorldCatalog`: areas sorted by `order_num`, lessons per area sorted by `sort_order`, progress per area, `hasVideo`, `lessonById`, the gate lesson. It reads only the fields both catalog shapes carry, never `day`. Since 2026-10-12 `hasVideo(id)` reads the `has_video` boolean the data route attaches to each lesson. The catalog holds no video id, and `videoIdFor` is gone. |
 | `world/map-model.ts` | Pure. `buildMapModel()` turns the catalog and the completed ids into what the map shows: per area the lessons that count and the "feature" rows that do not, the student's place and next lesson, the totals. It answers `empty` or `shape` for a catalog the eight-place map cannot draw (`MAP_PLACES` is 8). A lesson's `hasVideo` is true for a `watch` lesson whose `has_video` is true. |
 | `world/scene.ts` | The first prototype map's three.js scene. Used only by `src/components/world/WorldCanvas.tsx` and the development page `/dev/world`; mounted by nothing a student can reach. |
 | `world/useWorldCatalog.ts` | The hook form of `catalog.ts`: reads `StudentContext` and returns the `WorldCatalog` plus `loading` and `loadError`. |
-| `world/watch-heartbeat.ts` | `createWatchHeartbeat()` turns the player's position reports (Tella's player sends one every 250 ms while it plays) into one `record_lesson_heartbeat` call per 15 seconds of playback, plus a forced one on pause, end, tab hidden and unmount. Changed on 2026-10-12 in three ways. It counts played seconds by the clock: a forward step between two reports counts when it is no larger than 2.5 times the seconds since the last report (that gap capped at 2 s) plus 0.35 s, so every speed on Tella's menu counts and a skip, which arrives as one large step, does not. The old rule was "a step of at most 1.5 seconds". It writes nothing until a position has been reported, so a lesson opened and left without playing no longer overwrites the stored resume point with 0. And it takes two new options, `rpc` and `now`, so a test or the harness can stand in for the database call and the clock; when `rpc` is given it creates no Supabase client. |
+| `world/watch-heartbeat.ts` | `createWatchHeartbeat()` turns the player's position reports (Tella's player sends one every 250 ms while it plays) into one `record_lesson_heartbeat` call per 15 seconds of playback, plus a forced one on pause, end, tab hidden and unmount. It counts played seconds by the clock, as an allowance that carries over. Every report adds 2.5 times the clock seconds since the last one to a budget that never holds more than 5.35 s. A forward step counts when it fits in the budget, and then uses it up. A step that does not fit is a skip: it counts for nothing and leaves the budget as it is. So every speed on Tella's menu counts, a busy page that handles two reports back to back loses nothing, and a skip, which arrives as one large step, counts for nothing. The budget starts at 0.35 s with the first report and after a seek. The first version of the rule judged each gap alone and credited 80.4% of a lesson watched at 1.5x with a 1 s stall every 5 s. It writes nothing until a position has been reported, so a lesson opened and left without playing does not overwrite the stored resume point with 0. A forced beat that fails, or that the 400 ms call gate holds back, is sent again after 2, 5 and 10 s and then given up. Any beat that fails moves the throttle clock, so a database call that keeps failing is tried every 15 s (it was measured at 120 calls a minute). `onResult(result, beat)` tells the caller which beat an answer belongs to: `beat.reason` is `throttle` or the reason handed to `flush`, and `beat.force` says whether it was forced. A forced beat with nothing new to say sends nothing and is answered with the last accepted answer, marked `repeated`. The options `rpc` and `now` let a test or the harness stand in for the database call and the clock; when `rpc` is given it creates no Supabase client. |
 | `world/watch-rules.ts` | `judgeWatch()`: the server's rule for "watched". Position at 95% (`WATCH_POSITION_THRESHOLD`, the same number the SQL function holds) and played seconds at or above `WATCH_PLAYED_FLOOR` (an env var of the same name, default 0.8), both measured against the catalog's duration. |
 | `world-v6/` | The v6 map's 3D scene, 30 files. `scene.ts` is the scene itself: the camera on its rail, the click-in "park" view, the frame loop, and the calls the interface makes (`setWorldProgress`, `setProgress`, `setLock`, `setPaused`, `park`, `celebrate`). `layout.ts` is pure data: where the eight places are, their landmark words, the camera's route and the scroll budget of every stretch. `progress.ts` holds `WorldProgress`, the one shape the scene needs about a student (lessons per area, lessons done per area, the current area, the next lesson). `poster.ts` is poster mode: still renders of the opening and the eight stops for a machine that cannot draw the 3D. `quality.ts` holds the four quality tiers, picks one from the GPU's name and the canvas size, and proposes a step down when frames run slow. The rest are the camera rail (`rail.ts`), the terrain (`terrain.ts`), the contract between the scene and its modules (`modules.ts`), performance plumbing (`perf.ts`) and the art modules that build the places, the light, the water, the forest, the sky and the progress lanterns. `src/lib/` also still holds `world-v2/` to `world-v5/` and `world-codex/`, the earlier versions, which only their own development pages use. |
 
@@ -891,7 +929,7 @@ Schedules live in `vercel.json`. All seven routes use the shared `verifyCronAuth
 | `world/useMapModel.ts` | `useMapModel()` names the five states the world can be in (`loading`, `error`, `empty`, `shape`, `ready`) for the host and for the routes drawn over it. |
 | `world/PlaceRoute.tsx` | What `/world/[areaId]` renders: nothing for a known area, a card for an unknown one. |
 | `world/LessonScreen.tsx` | The lesson page (see Student Surfaces). It reflects the server's answer about completion and has no way to decide it. It takes an optional `transport` and hands it to the player; `/world` passes none. |
-| `world/LessonPlayer.tsx` | The video player. It asks for the lesson's embed address, puts Tella's frame on the page, attaches `tella-player.ts` in the same commit that mounts the frame, resumes from `last_position_seconds` when that is past 10 s and the lesson is not past 95%, and feeds the heartbeat. Once a heartbeat comes back accepted with the 95% point reached, it asks `lesson-watched` to count the lesson, and it keeps asking on later heartbeats until the answer is yes: one request at a time, at most one every 10 s, and a request the wait holds back is made when the wait ends. It also asks once on opening a lesson whose stored row is already past 95%. A refusal for too little played puts a line under the progress line saying how much was watched and how much is needed. A player that has said nothing 12 s after its frame was put on the page gets a line under the progress line (the clock runs from the mount because Tella's `ready` was measured to arrive before the frame's own `load` event in 20 of 21 loads, and a frame that never loads must still get the line), and the frame stays on the page. A reopened lesson's progress line starts at its stored position. Its three calls go through a `LessonTransport` (default `realLessonTransport`). The wording of the two lines is in `.impeccable.md`. |
+| `world/LessonPlayer.tsx` | The video player. It asks for the lesson's embed address, puts Tella's frame on the page, attaches `tella-player.ts` in the same commit that mounts the frame, resumes from `last_position_seconds` when that is past 10 s and the lesson is not past 95%, and feeds the heartbeat. Once a heartbeat comes back accepted with the 95% point reached, it asks `lesson-watched` to count the lesson, and it keeps asking on later heartbeats until the answer is yes: one request at a time, at most one every 10 s, and a request the wait holds back is made when the wait ends. A request that fails is made again by the same timer when the 10 s end, three times at most, and the count starts again on the next heartbeat past 95%. It also asks once on opening a lesson whose stored row is already past 95%. Three lines can show under the progress line. A refusal for too little played says how much was watched and how much is needed. A video that played to its end while the server's answer to that last heartbeat still says the 95% point is not reached says the lesson finished and did not register; that state means the catalog's length for the lesson is missing or too long, and only the team can fix it. A player that has said nothing 12 s after its frame was put on the page says the video did not load (the clock runs from the mount because Tella's `ready` was measured to arrive before the frame's own `load` event in 20 of 21 loads, and a frame that never loads must still get the line), and the frame stays on the page. A reopened lesson's progress line starts at its stored position. Once a video is on the page it stays there: `recorded` turning false under it removes nothing, and the address is not asked for again. Its three calls go through a `LessonTransport` (default `realLessonTransport`). The wording of the three lines is in `.impeccable.md`. |
 | `world/AreaScreen.tsx` | Exports `Panel`, the full-screen layer with one card that the lesson page and the two "not here" messages are drawn in. |
 | `world/WorldAccessGate.tsx` | Sends anyone `canSeeWorld()` refuses to `STUDENT_HOME`, and renders nothing until it knows. |
 | `world/WorldCanvas.tsx` | The first prototype map (loads `public/world/world.glb`). Only the development page `/dev/world` mounts it. |
@@ -969,8 +1007,9 @@ is a published video. Ids are pasted in the Supabase SQL editor (into
 `lesson_videos`, or over the placeholders of the morning kit) or kept
 in `.env.local`, which git ignores. The code keeps to the rule:
 `tellaEmbedUrl()` and `tella-api.ts` never repeat an id in an error,
-the routes log lesson ids, and the lessons payload carries `has_video`
-with no id. A fake sample such as `vid_doesnotexist0000000000` is
+the routes log lesson ids, the lessons payload carries `has_video`
+with no id, and the undo and the stamp file refuse with a row count or
+a lesson id. A fake sample such as `vid_doesnotexist0000000000` is
 fine.
 
 **2. `localhost` is never an allowed domain on a real lesson.** Any
@@ -1021,11 +1060,12 @@ the row says otherwise. Node 22 runs the TypeScript directly
 
 | Harness | Command | Needs the dev server | What it covers |
 |---------|---------|----------------------|----------------|
-| Client tests | `npm run test:client` | No | Seven suites, run from the real source files in `client-tests/`. On 2026-10-12: 235 checks, 0 failed: `watch-heartbeat` 43, `watch-rules` 16, `catalog` 22, `access` 12, `map-model` 34, `tella` 46, `tella-player` 62. The two new suites prove the id pattern, the exact embed address, that `WATCH_SPEED_CAP` and the SQL file's `v_speed_cap` are the same number, every rule of `judgeLock`, the message parser, and who `attachTellaPlayer` listens to and posts to. The heartbeat suite now proves that reports 250 ms apart count at 1x, 2x and 2.5x and that a skip does not. It proves nothing in a browser, nothing about what Tella's real player sends, and no route or database. |
-| Migration tests | `npm run test:migrations` (once before the first run: `npm install` in `supabase/migration-tests/`) | No | Migrations v92 to v98 and v100 on a local Postgres (PGlite). On 2026-10-12: 177 assertions, 0 failed. The SQL runs, a second run changes nothing, column types and progress numbers stay put, and the heartbeat function holds against a hostile caller. For v100 (section 18): `lesson_videos` is private and its three constraints hold, a lesson with no `lesson_videos` row is refused, a 2.5x beat is credited in full, the 60 s cap and the first beat's 20 s hold, and a forced replay with no time passed gains under half a second. For the undo: it restores v97's function character for character, drops the table, runs twice, and v100 applies again after it. For the morning kit (section 19): stamp, proof and unstamp run in order with fake ids, the stamp and the unstamp refuse a placeholder left in, no result shows a video id, and the unstamp leaves `lesson_videos` empty. v99 is not covered. It proves nothing about production: how Supabase grants a new table to `service_role`, or the SQL editor running a block and a select on one connection. |
-| Lesson player simulation | `node world-tests/lesson-player-sim.mjs` (`S3 S5` for some sections) | No. No database, no login and no network either | The real `LessonPlayer.tsx`, `tella-player.ts`, `watch-heartbeat.ts`, `tella.ts`, `lesson-transport.ts` and `call-gate.ts`, loaded into headless Chrome and driven through whole visits to a lesson: watched through, skipped then watched at 2.5x, a claim that is refused, held back, failed or slow, a resumed lesson, a video that says nothing, a change of lesson, and the real transport's two requests. 93 checks on 2026-10-12, run after the last change to the component. About 3 minutes. It proves nothing about what Tella really sends or obeys: the frame is a stand-in written from the PRD's contract, and the server is a stand-in too. |
-| Lock check, live | `node world-tests/tella-lock-live.mjs` | No. It needs the network and `TELLA_API_KEY`, `DEV_TELLA_VIDEO_ID` and `DEV_TELLA_VIDEO_ID_2` in `.env.local` | `fetchTellaVideoFacts` and `judgeLock` from the real source against the two real test videos: two `GET` requests to Tella's API that change nothing, and nothing written anywhere. It expects both videos `open` with one problem naming `localhost`, and both `locked` once `localhost` is expected. It prints neither the key nor an id. It proves nothing about the cron route around that logic (the table read, the writes, the alert), and the `missing` verdict has only run against a stubbed answer. |
-| Tella browser proof | `node world-tests/tella-watch.mjs` | Yes, on port 3111, with `DEV_TELLA_VIDEO_ID` and `DEV_TELLA_VIDEO_ID_2` in `.env.local`, and the network | The real `LessonPlayer` against Tella's real player, on `/dev/world-app` with a pretend student and a stand-in for the server. Nine rows from the PRD's path table: watched start to finish (T1), skipped to the last 3 s (T2), skipped then watched from the start (T3), watched at 2.5x from the player's own menu (T4), left at about 20 s and resumed (T5), a video Tella refuses (T6), a lesson with no video (T7), no request to `/api/student/*` and a paused map while playing (T8), and `v6-app.mjs` still passing (T9). Five gaps print as NOT COVERED: the real route, database function and completion on production (G1), a lapsed member or a caller with no login being refused (G2), other browsers, devices and a real click (G3), a background tab (G4), the alert reaching Discord (G5). |
+| Client tests | `npm run test:client` | No | Seven suites, run from the real source files in `client-tests/`. On 2026-10-12, after decisions D14 to D19: 312 checks, 0 failed: `watch-heartbeat` 91, `watch-rules` 16, `catalog` 22, `access` 12, `map-model` 34, `tella` 75, `tella-player` 62. The `tella` suite proves the id pattern, the exact embed address, that `WATCH_SPEED_CAP` and the SQL file's `v_speed_cap` are the same number, every rule of `judgeLock` with its two catalog sentences, and `watchLessonSeconds`. The `tella-player` suite proves the message parser, and who `attachTellaPlayer` listens to and posts to. The heartbeat suite proves that reports 250 ms apart count at 1x, 2x and 2.5x and that a skip does not, that reports handled back to back after a 1 s stall lose nothing, that the allowance never holds more than 5.35 s, that a forced beat that fails or is held back by the gate is sent again after 2, 5 and 10 s and then given up, that a failing database call is tried every 15 s, and that each answer comes with the beat it answers. It proves nothing in a browser, nothing about what Tella's real player sends, and no route or database. |
+| Migration tests | `npm run test:migrations` (once before the first run: `npm install` in `supabase/migration-tests/`) | No | Migrations v92 to v98 and v100 on a local Postgres (PGlite). On 2026-10-12, after decisions D14 to D19: 188 assertions, 0 failed. The SQL runs, a second run changes nothing, column types and progress numbers stay put, and the heartbeat function holds against a hostile caller. For v100 (section 18): `lesson_videos` is private and its three constraints hold, a lesson with no `lesson_videos` row is refused, a 2.5x beat is credited in full, the 60 s cap and the first beat's 20 s hold, a forced replay with no time passed gains under half a second, and the function is v97's with exactly five changes. For the lock: the function takes it once, after the student lookup and before the watch row is read; a call holds one exclusive lock, keyed on its own student and lesson, until its transaction ends; and calls served one at a time are credited as one (four calls of 60 s get 60 s between them, and three first calls at the end of a 67 s lesson bank 20 s). The race the lock closes is NOT reproduced: the harness has one connection and cannot fire two calls at the same instant. For the undo: with rows in the table it refuses, says how many and changes nothing; with the table emptied it restores v97's function character for character, drops the table, runs twice, and v100 applies again after it. For the morning kit (section 19): stamp, proof and unstamp run in order with fake ids, the stamp and the unstamp refuse a placeholder left in, the stamp refuses when a lesson it picked holds a video that is not one of the two test ids, no result shows a video id, and the unstamp leaves `lesson_videos` empty. v99 is not covered. It proves nothing about production: how Supabase grants a new table to `service_role`, or the SQL editor running a block and a select on one connection. |
+| Lesson player simulation | `node world-tests/lesson-player-sim.mjs` (`S3 S5` for some sections) | No. No database, no login and no network either | The real `LessonPlayer.tsx`, `tella-player.ts`, `watch-heartbeat.ts`, `tella.ts`, `lesson-transport.ts` and `call-gate.ts`, loaded into headless Chrome and driven through whole visits to a lesson: watched through, skipped then watched at 2.5x, a claim that is refused, held back, failed or slow, a resumed lesson, a video that says nothing or whose frame never loads, a change of lesson, the real transport's two requests, a lesson that ends without reaching its 95% point, an end heartbeat that fails, a lesson the catalog disowns for a moment while it plays, and a page whose main thread is held up while the video plays on. 138 checks on the code as it stands after decisions D14 to D19 (run 2026-10-12). About 5 minutes. It proves nothing about what Tella really sends or obeys: the frame is a stand-in written from the PRD's contract, and the server is a stand-in too. |
+| Lock check, live | `node world-tests/tella-lock-live.mjs` | No. It needs the network and `TELLA_API_KEY`, `DEV_TELLA_VIDEO_ID` and `DEV_TELLA_VIDEO_ID_2` in `.env.local` | `fetchTellaVideoFacts` and `judgeLock` from the real source against the two real test videos: two `GET` requests to Tella's API that change nothing, each given up after 10 s, and nothing written anywhere. It has no catalog to read, so it judges both videos as a `watch` lesson 67 s long, the length the stamp file gives the two test lessons; it fails on the length rule if a test video is recorded again at another length. It expects both videos `open` with one problem naming `localhost`, and both `locked` once `localhost` is expected. It prints how long Tella took to answer, and neither the key nor an id. It proves nothing about the cron route around that logic (the table read, the writes, the alert), and the `missing` verdict has only run against a stubbed answer. Its last recorded run (project log, 22:19) was before it judged against a catalog length; it was not run again for this document. |
+| Lock check simulation | `node world-tests/lock-check-sim.mjs` | No. No database, no network and no `.env.local` either | The lock check's real route file (`src/app/api/cron/check-lesson-videos/route.ts`) with the real `tella-lock.ts`, `tella-api.ts`, `cron-auth.ts` and `discord.ts`, loaded as they are and run against stand-ins for `fetch`, the Supabase client, `NextResponse` and the clock. On 2026-10-12: 89 checks, 0 failed, in under a second. It proves the route's own logic: the refusals (401 without the secret, 500 without the key or the domain list, 500 when the table of videos cannot be read); one row of every kind with its verdict, its sentences and what is written; the write filtered on the lesson and the video; a row swapped or deleted while the run is on; the 270 s budget, with no request started after it, `notReached` saying how many were left and the next run starting with them; the pace of one request per 700 ms, 86 a minute at most; when the alert is sent, what it says and its cut at whole lines under Discord's limit; a catalog table that cannot be read, a write that fails and an alert that does not go out, with what `cron_runs` says after each; and that no video id and no key is in any answer, alert, `cron_runs` row or log line. It proves nothing about real Supabase (how supabase-js and PostgREST treat the order and the two filters, row level security, how long a write takes), real Tella, real Discord or Vercel's clock. Every timing in it is an input on a pretend clock, so it confirms the arithmetic of how many videos fit and measures nothing. |
+| Tella browser proof | `node world-tests/tella-watch.mjs` | Yes, on port 3111, with `DEV_TELLA_VIDEO_ID` and `DEV_TELLA_VIDEO_ID_2` in `.env.local`, and the network | The real `LessonPlayer` against Tella's real player, on `/dev/world-app` with a pretend student and a stand-in for the server. Nine rows from the PRD's path table: watched start to finish (T1), skipped to the last 3 s (T2), skipped then watched from the start (T3), watched at 2.5x from the player's own menu (T4), left at about 20 s and resumed (T5), a video Tella refuses (T6), a lesson with no video (T7), no request to `/api/student/*` and a paused map while playing (T8), and `v6-app.mjs` still passing (T9). Five gaps print as NOT COVERED: the real route, database function and completion on production (G1), a lapsed member or a caller with no login being refused (G2), other browsers, devices and a real click (G3), a background tab (G4), the alert reaching Discord (G5). On the code as it stands after decisions D14 to D19: `PASS 9  FAIL 0  NOT COVERED 5` (run 2026-10-12, 23:38 to 23:45). The script tells the end of a video by position, because the real player was seen to end one replay on `paused` with no `stopped` after it; a run made before that change failed row T3 on the wait alone, with the lesson correctly counted on the page. |
 | Offline v6 map tests | `node --import ./world-tests/v6-ts-resolve.mjs --experimental-strip-types --no-warnings world-tests/<file>` for `v6-route.mjs`, `v6-cave.mjs`, `v6-gate.mjs`, `v6-locked.mjs` and `v6-a2-foundations.test.mjs`. `v6-rail.test.mjs` takes the same flags plus `--expose-gc`. | No | The map's route, camera rail, cave, gate, locked stretches and quality logic, measured from `src/lib/world-v6/` with no browser. Each exits 1 on a failed check. |
 | Dev map page checks | `node world-tests/v6-ui.mjs checks` | Yes, on port 3111 | The interface of `/dev/world-v6`. The script launches Chrome with a software renderer (SwiftShader), so the page runs in poster mode: it covers the interface and leaves the live 3D path uncovered. |
 | World browser proof | `node world-tests/v6-app.mjs` (`--only 3,5,18` for some rows) | Yes, on port 3111 | 20 rows on `/dev/world-app`, on the real GPU: arrival, Watch, finishing a lesson and a place, deep links, unknown addresses, the phone view, poster mode, reduced motion, the four not-ready cards. It takes about 3 minutes, and three gaps print as NOT COVERED (a real login with a real video, other browsers and devices, the `look` and `locked` modes with a real student). |

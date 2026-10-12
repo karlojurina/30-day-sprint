@@ -1,3 +1,4 @@
+-- SUPERSEDED: this file belongs to the Bunny player. The Tella player's test lessons are picked and stamped by stamp-tella-test-lessons.sql and taken back by unstamp-tella-test-lessons.sql.
 -- ============================================================
 -- Stamp ONE real lesson with the Bunny test video.
 --

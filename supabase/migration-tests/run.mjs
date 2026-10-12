@@ -1000,5 +1000,334 @@ console.log('\n=== 18. v100: lesson_videos (private) + the heartbeat counts up t
   }
 }
 
+
+console.log('\n=== 19. the morning kit: stamp, prove, unstamp the Tella test lessons ===')
+// Three files from supabase/diagnostics that the owner runs by hand against
+// production. They are run here the way the SQL editor runs them: the whole
+// file at once, and the rows of its LAST statement are what he sees.
+{
+  const D = fileURLToPath(new URL('../diagnostics/', import.meta.url))
+  const file = f => fs.readFileSync(D + f, 'utf8')
+  const stampRaw   = file('stamp-tella-test-lessons.sql')
+  const unstampRaw = file('unstamp-tella-test-lessons.sql')
+  const proofSql   = file('tella-proof.sql')
+  const P1 = 'REPLACE_WITH_TEST_VIDEO_ID_1', P2 = 'REPLACE_WITH_TEST_VIDEO_ID_2'
+  // Well-formed FAKE ids, as in section 18. Never a real one.
+  const FAKE = n => `vid_kitfakeaaaaaaaaa${String(n).padStart(2, '0')}`
+  // The Bunny test video stamp-test-lesson.sql stamps. Already in that file.
+  const BUNNY_TEST = '09ff6d92-1312-4b96-bc3b-75b5edbcab34'
+  const SID = n => `00000000-0000-0000-0000-00000000000${n}`
+  const OWNER = SID(1)   // the account that watches; UID1 is its login
+  const paste = (sql, a, b) => sql.replace(P1, () => a).replace(P2, () => b)
+  const times = (text, sub) => text.split(sub).length - 1
+
+  const run = async sql => {
+    try {
+      const last = (await db.exec(sql)).at(-1)
+      return { ok: true, rows: last.rows, cols: last.fields.map(f => f.name) }
+    } catch (e) {
+      await db.exec('rollback;').catch(() => {})
+      return { ok: false, rows: [], cols: [], code: e.code, said: `${e.message} ${e.detail ?? ''} ${e.hint ?? ''}` }
+    }
+  }
+  const beat = (...a) => hb(...a).catch(e => ({ accepted: false, raised: `${e.code}: ${e.message.slice(0, 70)}` }))
+  const videos = () => q(`select lesson_id, tella_video_id, lock_status, lock_detail, lock_checked_at
+                            from public.lesson_videos order by lesson_id`)
+  const lessonOf = async id => (await q(`select id, region_id, duration_seconds, bunny_video_id from lessons where id = '${id}'`))[0]
+  const mine = async () => JSON.stringify({
+    watch: await q(`select * from student_lesson_watch order by student_id, lesson_id`),
+    done:  await q(`select student_id, lesson_id, completed_at from student_lesson_completions order by student_id, lesson_id`),
+  })
+  const world = async () => JSON.stringify({
+    lessons: await q(`select * from lessons order by id`),
+    videos:  await q(`select * from public.lesson_videos order by lesson_id`),
+  }) + await mine()
+  // The pick, written a second time and a different way: plain rows out of
+  // the database, the ordering done here. When this and the file's SQL agree
+  // it is because both follow the rule, and neither is a copy of the other.
+  const leastCompleted = async () => (await q(`
+      select l.id, l.sort_order,
+             (select count(*)::int from student_lesson_completions c
+               where c.lesson_id = l.id and c.completed_at is not null) as done
+        from lessons l where l.type = 'watch'`))
+    .sort((a, b) => a.done - b.done || b.sort_order - a.sort_order || (a.id < b.id ? 1 : -1))
+    .slice(0, 2).map(r => r.id)
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+  // Rows a person is shown must never carry a video id.
+  const noVideoId = rows => !/vid_/.test(JSON.stringify(rows))
+
+  // ── the files themselves ──
+  note([stampRaw, unstampRaw].every(t => times(t, P1) === 1 && times(t, P2) === 1) && times(proofSql, 'REPLACE_WITH') === 0,
+       'each placeholder appears exactly once in the stamp file and in the unstamp file; the proof has none')
+  note(![stampRaw, unstampRaw, proofSql].some(t => /vid_[a-z0-9]{10,}/.test(t)),
+       'none of the three files holds anything shaped like a video id')
+  const heads = ['stamp-test-lesson.sql', 'pick-test-lesson.sql'].map(f => file(f).split('\n'))
+  note(heads.every(l => /^-- SUPERSEDED/.test(l[0]) && /Bunny player/.test(l[0])
+                        && /stamp-tella-test-lessons\.sql/.test(l[0]) && l[1].startsWith('-- ====')),
+       'the two Bunny files open with one line saying they are superseded by the Tella files')
+  const proofCode = proofSql.split('\n').filter(l => !l.trim().startsWith('--')).join('\n').trim()
+  note(/^select\b/i.test(proofCode) && times(proofCode, ';') === 1
+       && !/\b(insert|update|delete|drop|alter|create|truncate|grant|set_config)\b/i.test(proofCode),
+       'tella-proof.sql is one select and writes nothing')
+
+  if (!(await q(`select to_regclass('public.lesson_videos') is not null as y`))[0].y) {
+    note(false, 'section 19 needs v100 applied', 'public.lesson_videos is missing')
+  } else {
+    // ── a production-shaped starting point ──
+    await db.exec(`
+      select set_config('test.uid','${UID1}',false);
+      delete from student_lesson_watch;
+      delete from public.lesson_videos;
+      update lessons set bunny_video_id = null, video_ready_at = null, duration_seconds = null;`)
+    const [T0, T1] = await leastCompleted()
+    // Every OTHER watch lesson gets one completion, from a student who had
+    // none. Production has this margin and the bare seed does not: without it
+    // the proof's own completion below would lift a test lesson out of the
+    // bottom two and move the pick. That move is tested on purpose further on.
+    await db.exec(`insert into student_lesson_completions (student_id, lesson_id, completed_at)
+                   select '${SID(7)}'::uuid, l.id, '2026-06-10 10:00:00+00' from lessons l
+                    where l.type = 'watch' and l.id not in ('${T0}', '${T1}');`)
+    // And one student SKIPPED the first of the two: a completion row with no
+    // completed_at. The pick counts completions, so this must not move it.
+    await db.exec(`insert into student_lesson_completions (student_id, lesson_id, completed_at, skipped_at)
+                   values ('${SID(2)}'::uuid, '${T0}', null, '2026-06-11 10:00:00+00');`)
+    // The Bunny stamp, put on by its own file, as it was on production.
+    await db.exec(file('stamp-test-lesson.sql').split('-- What it picked:')[0])
+    {
+      const a = await lessonOf(T0), b = await lessonOf(T1)
+      note(a.bunny_video_id === BUNNY_TEST && a.duration_seconds === 753
+           && b.bunny_video_id === null && b.duration_seconds === null && same(await leastCompleted(), [T0, T1]),
+           'seed: of the two least-completed watch lessons, one carries the Bunny test stamp (753 s) and one has no duration',
+           `${T0} (Bunny, 753, skipped once) and ${T1} (none)`)
+    }
+
+    // ── a half-edited file refuses, and says nothing it was given ──
+    const untouched = await world()
+    let r = await run(stampRaw)
+    note(!r.ok && r.code === 'P0001' && /Placeholder 1 was not replaced/.test(r.said),
+         'the stamp file refuses to run with its placeholders unreplaced', r.ok ? 'it ran' : r.said.slice(0, 70))
+    r = await run(stampRaw.replace(P1, () => FAKE(1)))
+    note(!r.ok && r.code === 'P0001' && /Placeholder 2 was not replaced/.test(r.said),
+         '...and with only the first one replaced', r.ok ? 'it ran' : r.said.slice(0, 70))
+    const link = `https://www.tella.tv/video/${FAKE(1)}/embed`
+    const bad = [await run(paste(stampRaw, link, FAKE(2))),          // a pasted link
+                 await run(paste(stampRaw, FAKE(1), 'vid_TOOSHORT')), // not an id
+                 await run(paste(stampRaw, FAKE(1), FAKE(1)))]        // the same id twice
+    note(bad.every(b => !b.ok && b.code === 'P0001' && /Nothing was changed/.test(b.said))
+         && /not a Tella video id/.test(bad[0].said) && /not a Tella video id/.test(bad[1].said) && /same video id/.test(bad[2].said)
+         && bad.every(b => !b.said.includes(FAKE(1)) && !b.said.includes(FAKE(2)) && !b.said.includes('tella.tv') && !b.said.includes('TOOSHORT')),
+         '...and with a pasted link, a malformed id, or the same id twice; no message repeats what was pasted',
+         bad.map(b => b.ok ? 'it ran' : b.said.slice(0, 34)).join(' | '))
+    r = await run(unstampRaw)
+    note(!r.ok && r.code === 'P0001' && /Placeholder 1 was not replaced/.test(r.said),
+         'the unstamp file refuses the same way', r.ok ? 'it ran' : r.said.slice(0, 70))
+    note(await world() === untouched, 'none of the refused runs changed anything')
+
+    // ── stamp ──
+    const rest = async () => JSON.stringify({
+      others: await q(`select * from lessons where id not in ('${T0}', '${T1}') order by id`),
+      two:    await q(`select id, region_id, day, type, title, sort_order, bunny_video_id from lessons where id in ('${T0}', '${T1}') order by id`),
+    }) + await mine()
+    const restBefore = await rest()
+    r = await run(paste(stampRaw, FAKE(1), FAKE(2)))
+    let v = await videos()
+    const holds = id => v.find(x => x.lesson_id === id)?.tella_video_id
+    const both67 = async () => (await lessonOf(T0)).duration_seconds === 67 && (await lessonOf(T1)).duration_seconds === 67
+    note(r.ok && v.length === 2 && same(v.map(x => x.lesson_id).sort(), [T0, T1].sort()),
+         'the stamp leaves exactly two lesson_videos rows, on the two least-completed watch lessons',
+         r.ok ? v.map(x => x.lesson_id).join(', ') : r.said.slice(0, 80))
+    note(holds(T0) === FAKE(1) && holds(T1) === FAKE(2) && v.every(x => x.lock_status === 'unchecked'),
+         'the first id is on the first lesson and the second on the second, both unchecked')
+    note(await both67(), 'both durations are 67')
+    const SCOLS = 'test_lesson,lesson_id,region_id,title,duration_now,open_in_the_app,old_watch_rows,before_this_run'
+    note(r.rows.length === 2 && r.cols.join(',') === SCOLS
+         && same(r.rows.map(x => [x.test_lesson, x.lesson_id]), [[1, T0], [2, T1]])
+         && r.rows.every(x => x.open_in_the_app === `/world/${x.region_id}/${x.lesson_id}` && /^r\d$/.test(x.region_id)
+                              && x.duration_now === 67 && !!x.title && x.old_watch_rows === 0
+                              && /nothing was stamped before/.test(x.before_this_run)),
+         "the stamp's final select has two rows: lesson, region, title, the 67 now set, and the /world/... path",
+         r.rows.map(x => x.open_in_the_app).join(' , '))
+    note(r.rows.length === 2 && noVideoId(r.rows) && !r.cols.some(c => /video|tella|vid/i.test(c)),
+         '...and no column that could hold a video id', r.cols.join(','))
+    note(await rest() === restBefore,
+         'the stamp touches nothing else: no other lesson, nothing else on the two lessons, no watch row, no completion')
+
+    // ── proof ──
+    const proof = async () => { const res = await db.query(proofSql); return { rows: res.rows, cols: res.fields.map(f => f.name) } }
+    let p = await proof()
+    note(p.rows.length === 0, 'the proof runs and is empty before anything was watched', `${p.rows.length} rows`)
+    // Three beats on the second test lesson: play starts, 20 s later the
+    // player is at 0:40 having played 40 s, 10 s after that it is at 1:06
+    // having played 20 more. Each delta is inside 2.5x the clock, so each is
+    // credited whole and the numbers below are exact.
+    const b1 = await beat(T1, 0, 67, 0)
+    await db.exec(`update student_lesson_watch set last_heartbeat_at = now() - interval '20 seconds' where lesson_id = '${T1}';`)
+    const b2 = await beat(T1, 40, 67, 40)
+    await db.exec(`update student_lesson_watch set last_heartbeat_at = now() - interval '10 seconds' where lesson_id = '${T1}';`)
+    const b3 = await beat(T1, 66, 67, 20)
+    note(b1.accepted === true && b2.accepted === true && b3.accepted === true && b3.threshold_met === true,
+         'the heartbeat function accepts beats on a stamped lesson and stamps its 95% point',
+         [b1, b2, b3].map(b => b.raised ?? `accepted=${b.accepted}`).join(' | '))
+    p = await proof()
+    const PCOLS = 'lesson_id,furthest_seconds,really_watched_seconds,lesson_seconds,furthest_pct,watched_pct,'
+                + 'heartbeats,first_played_at,last_heartbeat_at,threshold_met_at,completed_at,counted'
+    const row = p.rows[0] ?? {}
+    note(p.rows.length === 1 && p.cols.join(',') === PCOLS && row.lesson_id === T1
+         && Number(row.furthest_seconds) === 66 && Number(row.really_watched_seconds) === 60 && row.lesson_seconds === 67
+         && Number(row.furthest_pct) === 98.5 && Number(row.watched_pct) === 89.6 && row.heartbeats === 3
+         && row.first_played_at instanceof Date && row.last_heartbeat_at instanceof Date && row.threshold_met_at instanceof Date
+         && row.completed_at === null && row.counted === false,
+         'the proof shows one row: furthest 66 s (98.5%), really watched 60 s (89.6%) of 67, 3 heartbeats, 95% stamped, counted false',
+         `furthest=${row.furthest_seconds} (${row.furthest_pct}%) watched=${row.really_watched_seconds} (${row.watched_pct}%) of ${row.lesson_seconds}, counted=${row.counted}`)
+    note(p.rows.length === 1 && !p.cols.some(c => /student|email|user|video|tella/i.test(c))
+         && !/vid_|@|[0-9a-f]{8}-[0-9a-f]{4}-/.test(JSON.stringify(p.rows)),
+         'the proof shows no student id, no email and no video id')
+    // A completion ROW is not yet a completion: a skipped lesson has a row
+    // with skipped_at and no completed_at.
+    await db.exec(`insert into student_lesson_completions (student_id, lesson_id, completed_at, skipped_at) values ('${OWNER}'::uuid, '${T1}', null, now());`)
+    p = await proof()
+    note(p.rows.length === 1 && p.rows[0].counted === false && p.rows[0].completed_at === null,
+         'a completion row with no completed_at (a skip) does not make counted true', `counted=${p.rows[0]?.counted}`)
+    await db.exec(`delete from student_lesson_completions where student_id = '${OWNER}'::uuid and lesson_id = '${T1}';
+                   insert into student_lesson_completions (student_id, lesson_id, completed_at) values ('${OWNER}'::uuid, '${T1}', now());`)
+    p = await proof()
+    note(p.rows.length === 1 && p.rows[0].counted === true && p.rows[0].completed_at instanceof Date,
+         'after a completion row is inserted for it, counted is true', `counted=${p.rows[0]?.counted}`)
+    // Another account finishes the FIRST test lesson; this account only opens it.
+    await db.exec(`
+      insert into student_lesson_completions (student_id, lesson_id, completed_at) values ('${SID(8)}'::uuid, '${T0}', now());
+      update student_lesson_watch set last_heartbeat_at = now() - interval '5 minutes' where lesson_id = '${T1}';`)
+    await beat(T0, 5, 67, 0)
+    p = await proof()
+    note(p.rows.length === 2 && p.rows[0].lesson_id === T0 && p.rows[0].counted === false && p.rows[0].completed_at === null
+         && p.rows[1].lesson_id === T1 && p.rows[1].counted === true,
+         "another student's completion of the same lesson does not count, and the newest row comes first",
+         p.rows.map(x => `${x.lesson_id}:${x.counted}`).join(' '))
+
+    // ── stamp again ──
+    const mineBefore = await mine()
+    const stillSame = same(await leastCompleted(), [T0, T1])
+    r = await run(paste(stampRaw, ` ${FAKE(1)}\t`, `${FAKE(2)}  `))
+    v = await videos()
+    note(stillSame && r.ok && v.length === 2 && holds(T0) === FAKE(1) && holds(T1) === FAKE(2) && await both67()
+         && same(r.rows.map(x => x.lesson_id), [T0, T1]),
+         'stamp again (ids pasted with stray spaces this time): the same two lessons, still two rows, the same video on each',
+         r.ok ? v.map(x => x.lesson_id).join(', ') : r.said.slice(0, 80))
+    note(r.rows.length === 2 && r.rows.every(x => /earlier run was taken back first/.test(x.before_this_run)
+                                                  && x.before_this_run.includes(T0) && x.before_this_run.includes(T1))
+         && noVideoId(r.rows),
+         '...and its result says the earlier run was taken back first', r.rows[0]?.before_this_run)
+    note(r.rows.length === 2 && r.rows.every(x => x.old_watch_rows === 1),
+         '...and that both test lessons now carry an old watch row, so a second proof on them would not start from zero',
+         r.rows.map(x => `${x.lesson_id}: ${x.old_watch_rows}`).join(', '))
+    note(await mine() === mineBefore, 'a second stamp leaves the watch rows and the completions alone')
+
+    // ── unstamp ──
+    r = await run(paste(unstampRaw, FAKE(1), FAKE(2)))
+    v = await videos()
+    note(r.ok && v.length === 0, 'after the unstamp lesson_videos is empty', r.ok ? `${v.length} rows` : r.said.slice(0, 80))
+    {
+      const a = await lessonOf(T0), b = await lessonOf(T1)
+      note(a.duration_seconds === 753 && a.bunny_video_id === BUNNY_TEST && b.duration_seconds === null,
+           'the durations are back: 753 on the lesson that carries the Bunny test stamp, empty on the other',
+           `${T0}=${a.duration_seconds} ${T1}=${b.duration_seconds}`)
+    }
+    const UCOLS = 'lesson_id,region_id,title,duration_now,what_happened'
+    const said = id => r.rows.find(x => x.lesson_id === id) ?? {}
+    note(r.rows.length === 2 && r.cols.join(',') === UCOLS
+         && said(T0).duration_now === 753 && /put back to 753 \(the Bunny test stamp\)/.test(said(T0).what_happened)
+         && said(T1).duration_now === null && /put back to empty/.test(said(T1).what_happened)
+         && r.rows.every(x => !!x.title && /^r\d$/.test(x.region_id)) && noVideoId(r.rows),
+         "the unstamp's final select names the two lessons it put back and what each got, with no video id",
+         r.rows.map(x => `${x.lesson_id}: ${x.what_happened}`).join(' | '))
+    note(await mine() === mineBefore, 'the unstamp leaves the watch rows and the completions alone')
+    // The proof's header says to run it BEFORE the unstamp. This is why.
+    p = await proof()
+    {
+      const of = id => p.rows.find(x => x.lesson_id === id) ?? {}
+      note(p.rows.length === 2
+           && of(T1).lesson_seconds === null && of(T1).furthest_pct === null && of(T1).watched_pct === null && of(T1).counted === true
+           && of(T0).lesson_seconds === 753 && Number(of(T0).furthest_pct) === 0.7 && Number(of(T0).watched_pct) === 0,
+           'after the unstamp the proof still lists both rows, measured against the duration that was put back (empty, or 753)',
+           `${T1}: of ${of(T1).lesson_seconds} -> ${of(T1).furthest_pct}% | ${T0}: 5 s of ${of(T0).lesson_seconds} -> ${of(T0).furthest_pct}%`)
+    }
+    const afterUnstamp = await world()
+    r = await run(paste(unstampRaw, FAKE(1), FAKE(2)))
+    note(r.ok && await world() === afterUnstamp && r.rows.length === 1 && r.rows[0].lesson_id === null
+         && /Nothing to take back/.test(r.rows[0].what_happened),
+         'a second unstamp changes nothing and says so', r.ok ? r.rows[0]?.what_happened : r.said.slice(0, 80))
+
+    // ── the optional deletes at the foot of the unstamp file ──
+    // Commented in the file. Uncommented here, because a delete nobody ran is
+    // a delete nobody tested, and these lessons are live: the wrong WHERE
+    // would wipe every student's completion of them.
+    const optional = unstampRaw.slice(unstampRaw.indexOf('\n-- OPTIONAL'))
+      .split('\n').filter(l => /^--    /.test(l)).map(l => l.slice(2)).join('\n')
+    r = await run(optional)
+    note(times(optional, 'delete from') === 2 && !r.ok && await mine() === mineBefore,
+         "the unstamp's optional deletes, left with their placeholders, fail and delete nothing",
+         r.ok ? 'they ran' : r.said.slice(0, 60))
+    const tally = async () => (await q(`select
+        (select count(*)::int from student_lesson_watch       where student_id = '${OWNER}'::uuid and lesson_id in ('${T0}', '${T1}')) as my_watch,
+        (select count(*)::int from student_lesson_completions where student_id = '${OWNER}'::uuid and lesson_id in ('${T0}', '${T1}')) as my_done,
+        (select count(*)::int from student_lesson_completions where student_id = '${OWNER}'::uuid and lesson_id not in ('${T0}', '${T1}')) as my_other_done,
+        (select count(*)::int from student_lesson_completions where student_id <> '${OWNER}'::uuid) as others_done,
+        (select count(*)::int from student_lesson_completions where student_id = '${SID(8)}'::uuid and lesson_id = '${T0}') as other_on_same_lesson`))[0]
+    const had = await tally()
+    r = await run(optional.replaceAll('REPLACE_WITH_LESSON_ID_1', T0).replaceAll('REPLACE_WITH_LESSON_ID_2', T1)
+                          .replaceAll('REPLACE_WITH_YOUR_STUDENT_ID', OWNER))
+    const has = await tally()
+    note(r.ok && had.my_watch === 2 && had.my_done === 1 && has.my_watch === 0 && has.my_done === 0
+         && has.my_other_done === had.my_other_done && has.others_done === had.others_done && has.other_on_same_lesson === 1,
+         "filled in, they delete that one account's rows on the two lessons and nothing else: another student's completion of the same lesson stays",
+         r.ok ? JSON.stringify(has) : r.said.slice(0, 80))
+
+    // ── when the pick moves ──
+    // Stamp, then let four more students finish the Bunny-stamped lesson, so
+    // it is no longer one of the two least completed. The next stamp has to
+    // put that lesson back (753, no row) and land on the new pair. This is
+    // the only way step 1 of the stamp file is really exercised: when the
+    // same two lessons are picked again, a broken step 1 is hidden by step 3.
+    r = await run(paste(stampRaw, FAKE(1), FAKE(2)))
+    const firstPair = (await videos()).map(x => x.lesson_id)
+    await db.exec([3, 4, 5, 6].map(n =>
+      `insert into student_lesson_completions (student_id, lesson_id, completed_at) values ('${SID(n)}'::uuid, '${T0}', now());`).join('\n'))
+    const [N0, N1] = await leastCompleted()
+    r = await run(paste(stampRaw, FAKE(1), FAKE(2)))
+    v = await videos()
+    {
+      const left = await lessonOf(T0)
+      note(r.ok && firstPair.includes(T0) && ![N0, N1].includes(T0)
+           && left.duration_seconds === 753 && !v.some(x => x.lesson_id === T0),
+           'when completions move the pick, the lesson left behind is put back: 753 again and no lesson_videos row',
+           `${T0}=${left.duration_seconds}; pick moved from ${firstPair.join(', ')} to ${N0}, ${N1}`)
+      note(r.ok && v.length === 2 && holds(N0) === FAKE(1) && holds(N1) === FAKE(2)
+           && (await lessonOf(N0)).duration_seconds === 67 && (await lessonOf(N1)).duration_seconds === 67
+           && same(r.rows.map(x => x.lesson_id), [N0, N1]) && r.rows.every(x => x.before_this_run.includes(T0)),
+           '...and the two videos are on the new pair, first id on the first, still exactly two rows',
+           r.ok ? v.map(x => x.lesson_id).join(', ') : r.said.slice(0, 80))
+    }
+
+    // ── two other test videos, without an unstamp in between ──
+    // The header says to unstamp with the old ids first. If that is skipped
+    // and the pick has not moved, the old rows are replaced, not doubled, and
+    // a lock verdict that belonged to the old video does not survive.
+    await db.exec(`update public.lesson_videos set lock_status = 'locked', lock_detail = 'old verdict', lock_checked_at = now();`)
+    r = await run(paste(stampRaw, FAKE(3), FAKE(4)))
+    v = await videos()
+    note(r.ok && v.length === 2 && holds(N0) === FAKE(3) && holds(N1) === FAKE(4)
+         && v.every(x => x.lock_status === 'unchecked' && x.lock_detail === null && x.lock_checked_at === null),
+         'stamped with two other videos and no unstamp between: the old rows are replaced, still two rows, back to unchecked',
+         r.ok ? `${v.length} rows` : r.said.slice(0, 80))
+    r = await run(paste(unstampRaw, FAKE(3), FAKE(4)))
+    v = await videos()
+    note(r.ok && v.length === 0 && (await lessonOf(N0)).duration_seconds === null && (await lessonOf(N1)).duration_seconds === null
+         && (await lessonOf(T0)).duration_seconds === 753
+         && (await q(`select count(*)::int n from lessons where duration_seconds = 67`))[0].n === 0,
+         'the last unstamp leaves lesson_videos empty and no lesson at 67',
+         r.ok ? `${v.length} rows` : r.said.slice(0, 80))
+  }
+}
+
 console.log(`\n${'='.repeat(60)}\n  PASS ${ok.length}   FAIL ${fail.length}`)
 if (fail.length) { console.log('\nFAILURES:'); fail.forEach(f => console.log('  - ' + f)); process.exit(1) }

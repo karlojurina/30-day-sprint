@@ -55,6 +55,8 @@ export async function GET(request: NextRequest) {
     // v93 — per-lesson video watch telemetry. At most one row per lesson the
     // student has opened (<=146), comfortably under Supabase's 1000-row cap.
     watchProgressRes,
+    // v100 — which lessons have a video. Lesson ids only, see below.
+    lessonVideosRes,
   ] = await Promise.all([
     supabase.from(REGIONS_TABLE).select("*").order("order_num"),
     // Keyed on the catalog SHAPE, never on the table name — after cutover the
@@ -148,7 +150,30 @@ export async function GET(request: NextRequest) {
         "lesson_id, max_position_seconds, last_position_seconds, watched_seconds, reported_duration_seconds, threshold_met_at, last_heartbeat_at",
       )
       .eq("student_id", student.id),
+    // v100 — explicit column, NEVER select(*) here. The row also carries
+    // tella_video_id, and with Tella the id IS the video's address. This
+    // route has no membership check, so an id in this payload would hand the
+    // whole course to any logged-in account. The id leaves the server only
+    // through api/student/lesson-video. One row per recorded lesson, about
+    // 150 for the whole course, under Supabase's 1000-row cap.
+    supabase.from("lesson_videos").select("lesson_id"),
   ]);
+
+  if (lessonVideosRes.error) {
+    // Without this line a failed read looks exactly like a course with no
+    // videos: every lesson renders "Not recorded yet" and nothing says why.
+    console.error(
+      `[student/data] lesson_videos read failed: ${lessonVideosRes.error.message}`,
+    );
+  }
+  const lessonIdsWithVideo = new Set(
+    (lessonVideosRes.data ?? []).map((v) => v.lesson_id as string),
+  );
+  // The client learns THAT a lesson has a video, never which one.
+  const lessons = (lessonsRes.data ?? []).map((lesson) => ({
+    ...lesson,
+    has_video: lessonIdsWithVideo.has(lesson.id),
+  }));
 
   // Masked course ID for the sync debug panel — enough to verify in the
   // UI that the right env var is wired without leaking the full ID.
@@ -162,7 +187,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     student,
     regions: regionsRes.data ?? [],
-    lessons: lessonsRes.data ?? [],
+    lessons,
     watchProgress: watchProgressRes.data ?? [],
     // Which catalog produced the rows above. The world renders a "not
     // recorded yet" slot for lessons with no video, and this tells the client

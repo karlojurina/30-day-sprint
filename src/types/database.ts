@@ -280,20 +280,31 @@ export interface LessonV2Columns {
    */
   counts_toward_progress: boolean;
   feature_key: LessonFeatureKey | null;
-  /** Bunny Stream video GUID. Null = not recorded yet (the normal state while the course is being filmed). */
+  /**
+   * Bunny Stream video GUID. The column still exists and the app no longer
+   * reads it: since 2026-10-12 lesson videos are Tella embeds, kept in the
+   * private `lesson_videos` table (see `Lesson.has_video`).
+   */
   bunny_video_id: string | null;
   /**
    * Real runtime in seconds — the denominator for the 95% watched rule.
    * `duration_label` ("14m") is a display string and cannot be used for it.
    */
   duration_seconds: number | null;
-  /** Set when Bunny reports the encode finished. GUID set + this null = still encoding. */
+  /** Set when Bunny reports the encode finished. Like `bunny_video_id`, still a column and no longer read. */
   video_ready_at: string | null;
   updated_at: string;
 }
 
 export interface Lesson extends LessonV2Columns {
   id: string;
+  /**
+   * True when the lesson has a video. Not a column: /api/student/data attaches
+   * it to every lesson it returns, from the private `lesson_videos` table. A
+   * row read straight from `lessons` does not carry it. The video's id is
+   * never on a lesson; only /api/student/lesson-video gives out an address.
+   */
+  has_video?: boolean;
   region_id: RegionId;
   day: number;
   type: LessonType;

@@ -108,7 +108,7 @@ function buildRows(areaCount: number): Rows {
         counts_toward_progress: true,
         feature_key: null,
         // No lesson has a video, so the player is never asked to play.
-        bunny_video_id: null,
+        has_video: false,
         // Area 1 only, so the map shows minutes there and hides them everywhere else.
         duration_seconds: k === 1 ? 300 + 61 * n : null,
       };

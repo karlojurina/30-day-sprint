@@ -33,7 +33,7 @@ function seed(over = {}) {
         requires_action: ACTIONS.has(id), action_brief: ACTIONS.has(id) ? 'Placeholder brief' : null,
         is_optional: false, is_gate: id === 'a5l25',
         counts_toward_progress: !pond, feature_key: pond ? 'bounty_access' : null,
-        bunny_video_id: null, duration_seconds: null,
+        has_video: false, duration_seconds: null,
         ...(over[id] ?? {}),
       })
     }
@@ -103,19 +103,19 @@ console.log('\n=== a lesson that does not count never changes a total ===')
 console.log('\n=== minutes and videos ===')
 {
   const m = model([], {
-    a1l01: { duration_seconds: 753, bunny_video_id: 'guid-1' },
+    a1l01: { duration_seconds: 753, has_video: true },
     a1l02: { duration_seconds: 20 },
     a1l03: { duration_seconds: 0 },
-    a1l04: { duration_seconds: 89, bunny_video_id: 'guid-4', type: 'setup' },
+    a1l04: { duration_seconds: 89, has_video: true, type: 'setup' },
   })
   const L = m.areas[0].lessons
   ok(L[0].minutes === 13, '753 s is 13 minutes', String(L[0].minutes))
   ok(L[1].minutes === 1, 'never under 1 minute', String(L[1].minutes))
   ok(L[2].minutes === null && L[4].minutes === null, 'no duration means no minutes, not a guess')
   ok(L[3].minutes === 1, '89 s rounds to 1', String(L[3].minutes))
-  ok(L[0].hasVideo === true, 'a watch lesson with a video id has a video')
+  ok(L[0].hasVideo === true, 'a watch lesson with has_video has a video')
   ok(L[1].hasVideo === false, 'a duration alone is not a video')
-  ok(L[3].hasVideo === false, 'a video id on a non-watch lesson is not playable')
+  ok(L[3].hasVideo === false, 'has_video on a non-watch lesson is not playable')
 }
 
 console.log('\n=== catalogs the map cannot draw ===')

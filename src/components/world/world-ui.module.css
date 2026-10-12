@@ -295,6 +295,17 @@
   transition: transform 200ms linear;
 }
 
+/* The lines under the bar: a video that has not answered, and a lesson that
+   reached its end and was not counted (how much has played, how much it
+   needs). */
+.barNote {
+  margin: 8px 0 0;
+  max-width: 68ch;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--color-ink-2);
+}
+
 /* ── A setup step's text, and the milestone ────────────────── */
 
 .body {

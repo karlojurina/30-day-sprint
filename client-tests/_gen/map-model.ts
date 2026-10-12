@@ -100,7 +100,7 @@ export function buildMapModel(input: MapModelInput): MapModel {
           minutes: minutesOf(l.duration_seconds),
           action: l.requires_action,
           done: isDone,
-          hasVideo: l.type === "watch" && !!l.bunny_video_id,
+          hasVideo: l.type === "watch" && Boolean(l.has_video),
         });
         if (isDone) done++;
       } else {

@@ -1,32 +1,57 @@
 
-import { createClient } from "./stub-supabase.ts";
+import { createClient as createStubClient } from "./stub-supabase.ts";
+export let clientsCreated = 0;
+function createClient() { clientsCreated++; return createStubClient(); }
 import { createCallGate } from "./stub-call-gate.ts";
+import { WATCH_SPEED_CAP } from "./tella.ts";
 
 /**
  * Turns the player's firehose into a survivable number of database writes.
  *
- * MEASURED, not guessed: the Bunny player emits timeupdate ~3.7 times a
- * second, which is ~2,817 events for one 12-minute lesson. Writing those would
- * be 2,817 rows of pressure per lesson view, per student. At a 15s throttle it
- * is ~50 writes, and a student who loses power mid-lesson loses at most 15
- * seconds of position. Normal exits (pause, ended, tab hidden, navigation)
- * force an immediate write, so only a crash costs anything at all.
+ * MEASURED, not guessed: Tella's player reports its position every 250 ms
+ * while it plays (2026-10-12, longest gap 252 ms), which is ~2,880 reports
+ * for one 12-minute lesson. Writing those would be 2,880 rows of pressure per
+ * lesson view, per student. At a 15s throttle it is ~50 writes, and a student
+ * who loses power mid-lesson loses at most 15 seconds of position. Normal
+ * exits (pause, ended, tab hidden, navigation) force an immediate write, so
+ * only a crash costs anything at all.
  *
  * WHAT THE SERVER DOES WITH THIS, so the numbers here are not misread:
  * `record_lesson_heartbeat` treats every field as hostile. It re-derives the
  * student from auth.uid(), clamps position into [0, duration], clamps the
- * played-seconds delta to the wall-clock time that actually elapsed, and
- * refuses beats less than 5s apart unless they are forced or would cross the
- * 95% threshold. Nothing here can make a lesson complete that was not watched;
- * this module's job is fidelity and frugality, not trust.
+ * played-seconds delta to WATCH_SPEED_CAP times the wall-clock time that
+ * actually elapsed, and refuses beats less than 5s apart unless they are
+ * forced or would cross the 95% threshold. Nothing here can make a lesson
+ * complete that was not watched; this module's job is fidelity and frugality,
+ * not trust.
  */
 
 /**
- * A timeupdate gap larger than this is a SEEK, not watching. The player fires
- * ~3.7×/s, so a real gap is ~0.27s; 1.5s leaves generous room for a stuttering
- * tab without ever counting a scrub as watch time. Ported from IntroVideoGate.
+ * THE PER-REPORT RULE. A forward step between two position reports is played
+ * time when the clock allows it: the video may not move faster than
+ * WATCH_SPEED_CAP times the seconds since the last report, plus a little
+ * slack. Anything larger is a skip, and anything backwards is a scrub.
+ *
+ * It used to be "a step of at most 1.5s", which counts VIDEO seconds with no
+ * clock in it. That was right at 1x and silently wrong above it: the server
+ * credited at most the clock seconds that had passed, so a lesson watched at
+ * 2x banked half of itself and could never reach the played floor.
+ *
+ * Measured on Tella's player (2026-10-12), reports 250 ms apart:
+ *   1x    step 0.25 s
+ *   2x    step 0.503 s (largest 0.521)
+ *   2.5x  step 0.621 s (largest 0.643)
+ * The rule allows 0.25 * 2.5 + 0.35 = 0.975 s at that gap, so every speed on
+ * the player's menu counts and a +20 s skip, which arrives as one step, does
+ * not.
+ *
+ * The gap is capped at 2 s. A tab that was throttled or asleep reports late
+ * and in one large step; whatever it says, at most 2 * 2.5 + 0.35 = 5.35 s of
+ * it is taken as played.
  */
-const MAX_TICK_DELTA_S = 1.5;
+const MAX_TICK_GAP_S = 2;
+/** Room for timer jitter: a report that lands a few milliseconds early. */
+const TICK_SLACK_S = 0.35;
 
 /** ~50 writes per full lesson. See the table in the research doc. */
 const THROTTLE_MS = 15_000;
@@ -59,6 +84,21 @@ export interface WatchHeartbeatOptions {
   onResult?: (result: HeartbeatResult) => void;
   /** Fired once, on the beat the server says crossed the threshold. */
   onThresholdCrossed?: () => void;
+  /**
+   * Stands in for the database call. Default: the real
+   * `supabase.rpc("record_lesson_heartbeat", args)`. When this is given, no
+   * Supabase client is created at all, so a test or the login-free harness
+   * can run the whole module with no network and no session.
+   */
+  rpc?: (args: {
+    p_lesson_id: string;
+    p_position_seconds: number;
+    p_reported_duration: number | null;
+    p_delta_seconds: number;
+    p_force: boolean;
+  }) => Promise<{ data: HeartbeatResult | null; error: unknown }>;
+  /** The clock, in milliseconds. Default `Date.now`. */
+  now?: () => number;
 }
 
 export interface WatchHeartbeat {
@@ -74,7 +114,19 @@ export interface WatchHeartbeat {
 export function createWatchHeartbeat(
   opts: WatchHeartbeatOptions,
 ): WatchHeartbeat {
-  const supabase = createClient();
+  // Read through, not captured: a test may swap Date.now after this runs.
+  const now = opts.now ?? (() => Date.now());
+
+  // The real call. The Supabase client is built on the first write, and only
+  // on this path: a heartbeat that was handed its own `rpc` never makes one.
+  let supabase: ReturnType<typeof createClient> | null = null;
+  const rpc: NonNullable<WatchHeartbeatOptions["rpc"]> =
+    opts.rpc ??
+    (async (args) => {
+      supabase ??= createClient();
+      const { data, error } = await supabase.rpc("record_lesson_heartbeat", args);
+      return { data: (data as HeartbeatResult | null) ?? null, error };
+    });
 
   let destroyed = false;
   let inFlight = false;
@@ -89,6 +141,8 @@ export function createWatchHeartbeat(
   let position = 0;
   let duration: number | null = opts.durationSeconds ?? null;
   let lastTickPosition: number | null = null;
+  /** The clock at the last position report (or seek). What the per-report rule measures from. */
+  let lastTickAt = 0;
 
   /** Real seconds played since the last ACCEPTED write. Never reset on a refusal. */
   let playedSinceWrite = 0;
@@ -109,14 +163,22 @@ export function createWatchHeartbeat(
     if (destroyed) return;
     if (inFlight) {
       // ONLY forced beats are queued. A throttled one that arrives mid-flight
-      // is simply dropped: the next timeupdate is ~270ms away and re-checks
+      // is simply dropped: the next timeupdate is ~250ms away and re-checks
       // the throttle, so nothing is lost. Queueing them instead doubled the
-      // write count — the ~0.27s of playback that accrues during the in-flight
+      // write count — the ~0.25s of playback that accrues during the in-flight
       // window reads as "something changed", and every write drew a second one
       // straight after it.
       if (force) pending = { force: true, reason };
       return;
     }
+
+    // Nothing to say at all: no position has been reported, so the player has
+    // not played. Only a forced beat can get here (tab hidden, unmount, a
+    // video that never loaded being taken down), and it used to write
+    // position 0: a watch row for a lesson that was opened and never started,
+    // and, on a lesson already begun, the stored resume point overwritten
+    // with 0.
+    if (lastTickPosition === null) return;
 
     // Nothing new to say. Skips the duplicate beats that pause +
     // visibilitychange + pagehide fire within the same few milliseconds.
@@ -135,7 +197,7 @@ export function createWatchHeartbeat(
     const sentPosition = position;
     inFlight = true;
     try {
-      const { data, error } = await supabase.rpc("record_lesson_heartbeat", {
+      const { data, error } = await rpc({
         p_lesson_id: opts.lessonId,
         p_position_seconds: sentPosition,
         p_reported_duration: duration,
@@ -150,14 +212,14 @@ export function createWatchHeartbeat(
         return;
       }
 
-      const result = data as HeartbeatResult;
+      const result = data;
       // Moved on ANY completed round trip, accepted or refused. Leaving it
       // unmoved on a refusal meant the throttle stayed satisfied and the next
-      // timeupdate (~270ms later) tried again immediately — a retry storm of
+      // timeupdate (~250ms later) tried again immediately — a retry storm of
       // roughly a dozen calls against the server's own 5s limiter. Nothing is
       // lost by waiting: the delta stays banked and the position is retained,
       // so the next beat carries everything the refused one did.
-      lastWriteAt = Date.now();
+      lastWriteAt = now();
       if (result.accepted) {
         lastSentPosition = sentPosition;
         // Only now is the delta safely banked. A refused beat keeps it, so a
@@ -198,18 +260,23 @@ export function createWatchHeartbeat(
         duration = playerDuration;
       }
 
+      const at = now();
       if (lastTickPosition !== null) {
         const delta = positionSeconds - lastTickPosition;
-        // Forward, and small enough to be real playback rather than a jump.
+        // Forward, and no further than the clock allows at the top speed.
         // Backwards deltas are scrubs and contribute nothing.
-        if (delta > 0 && delta <= MAX_TICK_DELTA_S) {
+        const allowed =
+          Math.min((at - lastTickAt) / 1000, MAX_TICK_GAP_S) * WATCH_SPEED_CAP +
+          TICK_SLACK_S;
+        if (delta > 0 && delta <= allowed) {
           playedSinceWrite += delta;
         }
       }
       lastTickPosition = positionSeconds;
+      lastTickAt = at;
       position = positionSeconds;
 
-      if (Date.now() - lastWriteAt >= THROTTLE_MS) {
+      if (at - lastWriteAt >= THROTTLE_MS) {
         void write(false, "throttle");
       }
     },
@@ -217,8 +284,12 @@ export function createWatchHeartbeat(
     noteSeek(positionSeconds: number) {
       if (destroyed) return;
       if (!isFinite(positionSeconds) || positionSeconds < 0) return;
-      // Re-anchor so the jump itself is never counted as watch time.
+      // Re-anchor so the jump itself is never counted as watch time. The
+      // clock is re-anchored with it: the next report is measured from the
+      // seek, not from the last report before it, so a long pause before a
+      // seek cannot lend its gap to whatever comes after.
       lastTickPosition = positionSeconds;
+      lastTickAt = now();
       position = positionSeconds;
     },
 

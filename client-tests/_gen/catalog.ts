@@ -36,7 +36,13 @@ export interface CatalogLessonLike {
   is_gate: boolean;
   counts_toward_progress: boolean;
   feature_key: string | null;
-  bunny_video_id: string | null;
+  /**
+   * True when the lesson has a video behind it. Attached by
+   * /api/student/data from the private `lesson_videos` table; it is not a
+   * column. The video's id is never part of a lesson row: it leaves the server
+   * only through /api/student/lesson-video, one lesson at a time.
+   */
+  has_video?: boolean;
   duration_seconds: number | null;
 }
 
@@ -93,7 +99,6 @@ export interface WorldCatalog {
    * decision, and this is the single place it will be made.
    */
   isAreaReachable(areaId: string): boolean;
-  videoIdFor(lessonId: string): string | null;
   hasVideo(lessonId: string): boolean;
   /** First lesson, in global order, that is not yet complete. */
   nextLesson: CatalogLessonLike | null;
@@ -202,8 +207,7 @@ export function buildWorldCatalog({
     areaProgress,
     currentAreaId,
     isAreaReachable: () => true,
-    videoIdFor: (lessonId) => byId.get(lessonId)?.bunny_video_id ?? null,
-    hasVideo: (lessonId) => Boolean(byId.get(lessonId)?.bunny_video_id),
+    hasVideo: (lessonId) => Boolean(byId.get(lessonId)?.has_video),
     nextLesson,
     gateLesson: lessons.find((l) => l.is_gate) ?? null,
     lessonById: (lessonId) => byId.get(lessonId) ?? null,

@@ -1,16 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { getAccessToken } from "@/lib/supabase-browser";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 import { useStudent } from "@/contexts/StudentContext";
 import {
-  attachBunnyPlayer,
-  type BunnyPlayerHandle,
-} from "@/lib/world/bunny-player";
+  attachTellaPlayer,
+  type TellaPlayerHandle,
+} from "@/lib/world/tella-player";
 import {
   createWatchHeartbeat,
+  type HeartbeatResult,
   type WatchHeartbeat,
 } from "@/lib/world/watch-heartbeat";
+import {
+  realLessonTransport,
+  type ClaimAnswer,
+  type EmbedAnswer,
+  type LessonTransport,
+} from "@/lib/world/lesson-transport";
+import type { StudentLessonWatch } from "@/types/database";
 import u from "@/components/world/world-ui.module.css";
 
 /**
@@ -23,26 +30,48 @@ import u from "@/components/world/world-ui.module.css";
  *
  * Three jobs, in order of how badly each fails if it is wrong:
  *
- *   1. Never show a video to someone who should not see it. The URL is minted
- *      server-side per request by /api/student/video-token, which checks
- *      membership. This component cannot construct a playable URL on its own
- *      and does not hold the key that would let it.
+ *   1. Never show a video to someone who should not see it. The address comes
+ *      from /api/student/lesson-video, which checks membership and reads the
+ *      video's id from a table no browser can read. This component is handed
+ *      one address, for one lesson, and knows no id of its own.
  *   2. Resume where the student left off. Anything else is a tax on every
  *      lesson longer than one sitting.
  *   3. Report what was watched, honestly and cheaply. See watch-heartbeat.ts.
  *
- * WHAT THIS DELIBERATELY DOES NOT DO: decide that a lesson is complete. It
- * reports the server's own `threshold_crossed` upward via onThresholdCrossed;
- * the completion decision is made by a route that re-reads the telemetry
- * server-side and applies the played-seconds floor. A component cannot be
- * trusted with that and is not asked to be.
+ * WHAT THIS DELIBERATELY DOES NOT DO: decide that a lesson is complete. Once a
+ * heartbeat comes back saying the 95% point is reached, it asks a route that
+ * re-reads the telemetry server-side and applies the played-seconds floor. A
+ * component cannot be trusted with that and is not asked to be. It keeps
+ * asking until the answer is yes, and when the answer is no it says so under
+ * the progress line.
+ *
+ * IT NEVER TAKES A VIDEO DOWN. A player that has said nothing 12 seconds after
+ * its frame loaded gets a line under it saying it did not load, and the frame
+ * stays where it is. On a slow connection that player may still arrive, and
+ * the first thing it says removes the line.
  *
  * Seeking is FREE — Lovro's call. Across ~145 lessons a seek-lock is friction
  * on every honest student to inconvenience a dishonest one for ten seconds.
  * The honesty floor lives server-side instead, where it costs nobody anything.
+ *
+ * The three calls it makes (the address, the heartbeat, the claim) go through
+ * a `LessonTransport`, so the login-free harness can stand in for the server.
  */
 
 const RESUME_THRESHOLD_S = 10;
+
+/**
+ * How long the player may stay silent after its frame has loaded before the
+ * page says the video did not load. Measured on the real player: "ready"
+ * about 3 seconds after the load. A refused video never says anything.
+ */
+const NO_LOAD_MS = 12_000;
+
+/** The least time between two requests to count the same lesson. */
+const CLAIM_COOLDOWN_MS = 10_000;
+
+const NO_LOAD_TEXT =
+  "This video didn't load. Refresh the page. If it keeps happening, tell the team.";
 
 export interface LessonPlayerProps {
   lessonId: string;
@@ -59,6 +88,11 @@ export interface LessonPlayerProps {
    * unlocked, for the caller to celebrate.
    */
   onCompleted?: (lessonId: string, newAchievements: string[]) => void;
+  /**
+   * What the player talks to. Left out everywhere but the development
+   * harness, which passes a stand-in for the server.
+   */
+  transport?: LessonTransport;
   className?: string;
 }
 
@@ -69,179 +103,295 @@ type LoadState =
   | { kind: "blocked" }
   | { kind: "error"; message: string };
 
-export function LessonPlayer({
+/** What the server said when it would not count the lesson for too little played. */
+interface Refusal {
+  playedRatio: number;
+  playedFloor: number;
+}
+
+/** Where to pick up: the last position, unless it is near the start or the lesson is past 95%. */
+function resumePoint(row: StudentLessonWatch | undefined): number {
+  if (!row || row.threshold_met_at) return 0;
+  const last = Number(row.last_position_seconds ?? 0);
+  return isFinite(last) && last > RESUME_THRESHOLD_S ? last : 0;
+}
+
+function notCountedText({ playedRatio, playedFloor }: Refusal): string {
+  // Rounded down, so it can never read "80%" against a floor of 80% it has not met.
+  const watched = Math.floor(playedRatio * 100);
+  const needed = Math.round(playedFloor * 100);
+  return `Not marked as watched yet. You've watched ${watched}% of this lesson and it needs ${needed}%. Skipped parts don't count.`;
+}
+
+export function LessonPlayer(props: LessonPlayerProps) {
+  // Keyed on the lesson: a different lesson is a different player. Nothing
+  // carries over from the last one (the load state, the resume point, what
+  // was already asked of the server), and no effect has to reset it.
+  return <LessonVideo key={props.lessonId} {...props} />;
+}
+
+function LessonVideo({
   lessonId,
   durationSeconds = null,
   recorded = true,
   onCompleted,
+  transport = realLessonTransport,
   className,
 }: LessonPlayerProps) {
-  const { watchProgress, patchWatchProgress, markWatched } = useStudent();
+  const { watchProgress, completedLessonIds, patchWatchProgress, markWatched } =
+    useStudent();
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  // Beside "ready", never in place of it: the frame loaded and the player has
+  // said nothing for 12 seconds. The frame stays mounted.
+  const [noLoad, setNoLoad] = useState(false);
   const [playedPct, setPlayedPct] = useState(0);
-
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const playerRef = useRef<BunnyPlayerHandle | null>(null);
-  const beatRef = useRef<WatchHeartbeat | null>(null);
+  // The last answer to a claim, kept only while it is a refusal for too
+  // little played. It is what the note under the progress line reads.
+  const [refusal, setRefusal] = useState<Refusal | null>(null);
   // Read once at mount so a refresh mid-lesson cannot move the resume point
   // under the student's feet.
-  const resumeAtRef = useRef<number>(0);
+  const [resumeAt] = useState(() => resumePoint(watchProgress.get(lessonId)));
+
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const beatRef = useRef<WatchHeartbeat | null>(null);
+  /** The player has said something, anything, since its frame was attached. */
+  const heardRef = useRef(false);
   const resumedRef = useRef(false);
+  const noLoadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completedRef = useRef(false);
+  const claimInFlightRef = useRef(false);
+  const lastClaimAtRef = useRef<number | null>(null);
+  /**
+   * The one timer for a claim that was held back. It is made, and ended, by
+   * the mount effect below; null before that effect runs and after unmount, so
+   * nothing can be scheduled then.
+   */
+  const claimTimerRef = useRef<{ arm(waitMs: number): void; clear(): void } | null>(null);
+  /** That timer came due while an answer was still on its way. */
+  const claimOwedRef = useRef(false);
 
   /**
-   * Ask the server to ratify the crossing.
+   * Ask the server to count the lesson as watched.
    *
    * The player does NOT decide this. The route re-reads student_lesson_watch —
    * the table no browser can write — and applies the played-seconds floor
    * itself. All this does is ask, and reflect the answer.
+   *
+   * IT KEEPS ASKING. It used to ask once, on the single heartbeat the server
+   * marked as the crossing. When that one answer was no (the usual cause: the
+   * student dragged to the end first and watched properly afterwards) nothing
+   * asked again, on that visit or after a reload. Now every accepted heartbeat
+   * past the 95% point asks, and so does opening a lesson whose stored row is
+   * already past it. Three things hold a request back: an answer still on its
+   * way, a lesson already complete, and an attempt less than 10 seconds ago.
+   *
+   * A REQUEST HELD BACK IS OWED, NOT DROPPED. The heartbeat sent when a video
+   * ends is the one most likely to land inside the 10 seconds, and nothing
+   * comes after it. Dropped, that lesson stayed uncounted until it was
+   * reopened, with the note still showing the earlier, lower figure. So a
+   * request held back by an answer in flight or by the 10 seconds sets one
+   * timer for the end of the 10 seconds, never a second one, and the request
+   * is made then if the lesson is still not complete. The timer is cleared
+   * when the lesson completes and when the player unmounts. (The timer itself
+   * is in the mount effect, section 4.)
    */
-  const claimCompletion = useCallback(async () => {
-    if (completedRef.current) return;
-    completedRef.current = true;
+  const claim = useEffectEvent(async () => {
+    if (completedRef.current || completedLessonIds.has(lessonId)) return;
+    const at = Date.now();
+    const wait =
+      lastClaimAtRef.current === null
+        ? 0
+        : lastClaimAtRef.current + CLAIM_COOLDOWN_MS - at;
+    if (claimInFlightRef.current || wait > 0) {
+      claimTimerRef.current?.arm(wait);
+      return;
+    }
+
+    claimInFlightRef.current = true;
+    lastClaimAtRef.current = at;
+    let answer: ClaimAnswer | null = null;
     try {
-      const token = await getAccessToken();
-      if (!token) return;
-      const res = await fetch("/api/student/lesson-watched", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ lessonId }),
-      });
-      if (!res.ok) {
-        completedRef.current = false;
-        return;
-      }
-      const body = await res.json();
-      if (!body?.completed) {
-        // The floor was not met — usually the student scrubbed to the end.
-        // Not an error and not worth a message: they can keep watching and
-        // the next crossing will ask again.
-        completedRef.current = false;
-        return;
-      }
+      answer = await transport.claim(lessonId);
+    } catch {
+      // A transport that throws is a failed request.
+    }
+    // Deliberately not a `finally`: the React compiler gives up on a component
+    // that has one, and its lint rules then pass this file without reading it.
+    claimInFlightRef.current = false;
+    const owed = claimOwedRef.current;
+    claimOwedRef.current = false;
+
+    if (answer?.completed) {
+      completedRef.current = true;
+      claimTimerRef.current?.clear();
+      setRefusal(null);
       markWatched(lessonId);
-      onCompleted?.(lessonId, (body.newAchievements as string[]) ?? []);
+      onCompleted?.(lessonId, answer.newAchievements ?? []);
       // The achievements modal listens for this already.
       window.dispatchEvent(new CustomEvent("et:achievements-changed"));
-    } catch {
-      completedRef.current = false;
+      return;
     }
-  }, [lessonId, markWatched, onCompleted]);
 
-  // ── 1. Mint the URL ──────────────────────────────────────────────────
+    // A null answer is a failed request: nothing to show. Any other answer is
+    // a refusal. When the floor was not met (usually the student skipped
+    // ahead) the note says how far off it is, and they can keep watching.
+    if (answer) {
+      setRefusal(
+        answer.reason === "played_short" &&
+          typeof answer.playedRatio === "number" &&
+          typeof answer.playedFloor === "number"
+          ? { playedRatio: answer.playedRatio, playedFloor: answer.playedFloor }
+          : null,
+      );
+    }
+
+    // The timer came due while this answer was on its way, so the 10 seconds
+    // are already up: the request that was owed is made now.
+    if (owed) claimTimerRef.current?.arm(0);
+  });
+
+  // The callbacks below are Effect Events for one reason: each reads the props
+  // and the context as they are when it runs, so none of them is a reason for
+  // an effect to run again. An effect that re-ran here would ask for the
+  // address a second time or tear the player down in the middle of a lesson.
+
+  const askForEmbed = useEffectEvent(() => transport.getEmbed(lessonId));
+
+  const onBeatResult = useEffectEvent((r: HeartbeatResult) => {
+    if (!r.accepted) return;
+    patchWatchProgress(lessonId, {
+      lesson_id: lessonId,
+      max_position_seconds: Number(r.max_position_seconds),
+      last_position_seconds: Number(r.last_position_seconds ?? r.max_position_seconds),
+      watched_seconds: Number(r.watched_seconds),
+      reported_duration_seconds: r.duration_seconds ?? null,
+      threshold_met_at: r.threshold_met ? new Date().toISOString() : null,
+      last_heartbeat_at: new Date().toISOString(),
+    });
+    // `threshold_met`, not `threshold_crossed`: the crossing is true on one
+    // heartbeat only, and a claim hung on it is made once.
+    if (r.threshold_met) void claim();
+  });
+
+  const startBeat = useEffectEvent(() =>
+    createWatchHeartbeat({
+      lessonId,
+      durationSeconds,
+      rpc: transport.heartbeat,
+      onResult: (r) => onBeatResult(r),
+    }),
+  );
+
+  const showProgress = useEffectEvent(
+    (seconds: number, playerDuration: number | null) => {
+      const d = durationSeconds ?? playerDuration;
+      if (d && d > 0) setPlayedPct(Math.min(1, seconds / d));
+    },
+  );
+
+  const claimStoredCrossing = useEffectEvent(() => {
+    if (!recorded) return;
+    // React's development double mount runs this twice. The second run must
+    // not read as a heartbeat held back, which would set the timer.
+    if (lastClaimAtRef.current !== null) return;
+    if (watchProgress.get(lessonId)?.threshold_met_at) void claim();
+  });
+
+  // ── 1. Ask for the address ───────────────────────────────────────────
   useEffect(() => {
-    // Nothing to mint for a lesson that has not been filmed.
+    // Nothing to ask for a lesson that has not been filmed.
     if (!recorded) return;
     let cancelled = false;
-    setState({ kind: "loading" });
-    resumedRef.current = false;
-    completedRef.current = false;
-
-    const existing = watchProgress.get(lessonId);
-    const last = Number(existing?.last_position_seconds ?? 0);
-    resumeAtRef.current =
-      existing && !existing.threshold_met_at && isFinite(last) && last > RESUME_THRESHOLD_S
-        ? last
-        : 0;
 
     (async () => {
+      let answer: EmbedAnswer;
       try {
-        const token = await getAccessToken();
-        if (!token) {
-          if (!cancelled) setState({ kind: "error", message: "Not signed in." });
-          return;
-        }
-        const res = await fetch("/api/student/video-token", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ lessonId }),
-        });
-        if (cancelled) return;
-
-        if (res.status === 403) {
-          setState({ kind: "blocked" });
-          return;
-        }
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          // Not an error state: this is every lesson that has not been filmed.
-          if (body?.notRecorded) {
-            setState({ kind: "not-recorded" });
-            return;
-          }
-          setState({
-            kind: "error",
-            message: typeof body?.error === "string" ? body.error : "Could not load the video.",
-          });
-          return;
-        }
-        const body = await res.json();
-        setState({ kind: "ready", embedUrl: body.embedUrl as string });
+        answer = await askForEmbed();
       } catch {
-        if (!cancelled) {
-          setState({ kind: "error", message: "Could not load the video." });
-        }
+        answer = { ok: false, kind: "error" };
+      }
+      if (cancelled) return;
+
+      if (answer.ok) {
+        setState({ kind: "ready", embedUrl: answer.embedUrl });
+      } else if (answer.kind === "error") {
+        setState({
+          kind: "error",
+          message: answer.message ?? "Could not load the video.",
+        });
+      } else {
+        // "not-recorded" is not an error state: it is every lesson that has
+        // not been filmed. "blocked" is a membership that is not active.
+        setState({ kind: answer.kind });
       }
     })();
 
     return () => {
       cancelled = true;
     };
-    // watchProgress is intentionally NOT a dependency: re-minting the URL on
-    // every heartbeat would be a request storm, and the resume point is meant
-    // to be read once per mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lessonId, recorded]);
+  }, [recorded]);
 
   // ── 2. Attach the protocol + the heartbeat ───────────────────────────
-  const attach = useCallback(() => {
+  // Keyed on the address, and a LAYOUT effect: it runs in the same commit
+  // that puts the frame in the page, before the browser can deliver anything
+  // the frame says. This used to happen on the frame's `load`, which left a
+  // stretch of time in which the player could speak with nobody listening.
+  const embedUrl = state.kind === "ready" ? state.embedUrl : null;
+  useLayoutEffect(() => {
     const iframe = iframeRef.current;
-    if (!iframe) return;
+    if (!embedUrl || !iframe) return;
+    heardRef.current = false;
 
-    const beat = createWatchHeartbeat({
-      lessonId,
-      durationSeconds,
-      onResult: (r) => {
-        if (!r.accepted) return;
-        patchWatchProgress(lessonId, {
-          lesson_id: lessonId,
-          max_position_seconds: Number(r.max_position_seconds),
-          last_position_seconds: Number(r.last_position_seconds ?? r.max_position_seconds),
-          watched_seconds: Number(r.watched_seconds),
-          reported_duration_seconds: r.duration_seconds ?? null,
-          threshold_met_at: r.threshold_met ? new Date().toISOString() : null,
-          last_heartbeat_at: new Date().toISOString(),
-        });
-      },
-      onThresholdCrossed: () => {
-        void claimCompletion();
-      },
-    });
+    const beat = startBeat();
     beatRef.current = beat;
 
-    playerRef.current = attachBunnyPlayer(iframe, {
+    // The player said something. Whatever it was, the video is there: the
+    // 12 second timer is off, and the line it may already have put up goes.
+    const heard = () => {
+      if (heardRef.current) return;
+      heardRef.current = true;
+      if (noLoadTimerRef.current !== null) {
+        clearTimeout(noLoadTimerRef.current);
+        noLoadTimerRef.current = null;
+      }
+      setNoLoad(false);
+    };
+
+    const player: TellaPlayerHandle = attachTellaPlayer(iframe, {
       onReady: () => {
-        if (!resumedRef.current && resumeAtRef.current > 0) {
+        heard();
+        // Measured: a seek sent after "ready" and before the first play
+        // starts playback there.
+        if (!resumedRef.current && resumeAt > 0) {
           resumedRef.current = true;
-          playerRef.current?.seekTo(resumeAtRef.current);
+          player.seekTo(resumeAt);
         }
       },
-      onTimeUpdate: (seconds, playerDuration) => {
-        beat.tick(seconds, playerDuration);
-        const d = durationSeconds ?? playerDuration;
-        if (d && d > 0) setPlayedPct(Math.min(1, seconds / d));
+      onState: (playback) => {
+        heard();
+        if (playback === "paused") beat.flush("pause");
+        else if (playback === "stopped") beat.flush("ended");
       },
-      onSeeked: (seconds) => beat.noteSeek(seconds),
-      onPause: () => beat.flush("pause"),
-      onEnded: () => beat.flush("ended"),
+      onTimeUpdate: (seconds, playerDuration) => {
+        heard();
+        beat.tick(seconds, playerDuration);
+        showProgress(seconds, playerDuration);
+      },
     });
-  }, [lessonId, durationSeconds, claimCompletion, patchWatchProgress]);
+
+    return () => {
+      if (noLoadTimerRef.current !== null) {
+        clearTimeout(noLoadTimerRef.current);
+        noLoadTimerRef.current = null;
+      }
+      // The last position, on the way out. A heartbeat that never heard a
+      // position has nothing to say and writes nothing.
+      beat.flush("unmount");
+      beat.destroy();
+      beatRef.current = null;
+      player.destroy();
+    };
+  }, [embedUrl, resumeAt]);
 
   // ── 3. Never lose the last position to a tab close ───────────────────
   useEffect(() => {
@@ -263,15 +413,51 @@ export function LessonPlayer({
     };
   }, []);
 
+  // ── 4. A lesson already past 95% that was never counted ──────────────
+  // Once, on mount. Without it a student whose only claim was refused on an
+  // earlier visit would have to reach a new heartbeat before anything asked.
+  // The same effect owns the timer for a claim that was held back: it makes
+  // it, and ends it on the way out.
   useEffect(() => {
-    return () => {
-      beatRef.current?.flush("unmount");
-      beatRef.current?.destroy();
-      beatRef.current = null;
-      playerRef.current?.destroy();
-      playerRef.current = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    claimTimerRef.current = {
+      arm(waitMs) {
+        // Never more than one. And none while a request is already owed to
+        // the answer in flight.
+        if (timer !== null || claimOwedRef.current) return;
+        timer = setTimeout(() => {
+          timer = null;
+          // The 10 seconds are up and the last answer has still not landed.
+          // No second request beside it: it is made the moment that lands.
+          if (claimInFlightRef.current) claimOwedRef.current = true;
+          else void claim();
+        }, Math.max(0, waitMs));
+      },
+      clear() {
+        if (timer !== null) clearTimeout(timer);
+        timer = null;
+      },
     };
-  }, [lessonId]);
+    claimStoredCrossing();
+    return () => {
+      claimTimerRef.current?.clear();
+      claimTimerRef.current = null;
+    };
+  }, []);
+
+  // Tella says nothing at all when it refuses a video (a lost lock, a site
+  // that is not on its list), so silence is the only signal there is. The
+  // frame's own `load` fires either way, and from there the player has 12
+  // seconds to say something. If it has not, the line goes up under the
+  // frame. The frame is left alone: a slow player can still arrive.
+  function onFrameLoad() {
+    if (heardRef.current) return;
+    if (noLoadTimerRef.current !== null) clearTimeout(noLoadTimerRef.current);
+    noLoadTimerRef.current = setTimeout(() => {
+      noLoadTimerRef.current = null;
+      if (!heardRef.current) setNoLoad(true);
+    }, NO_LOAD_MS);
+  }
 
   // ── Render ───────────────────────────────────────────────────────────
   // The frame and its type are the map's (world-ui.module.css). The tokens
@@ -316,15 +502,15 @@ export function LessonPlayer({
         <iframe
           ref={iframeRef}
           src={state.embedUrl}
-          onLoad={attach}
+          onLoad={onFrameLoad}
           title="Lesson video"
-          loading="lazy"
-          allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen"
+          referrerPolicy="strict-origin-when-cross-origin"
+          allow="autoplay; fullscreen; picture-in-picture"
           allowFullScreen
           className={u.frameVideo}
         />
       </div>
-      {/* The app's own progress line. Bunny's scrub bar is inside the iframe
+      {/* The app's own progress line. Tella's scrub bar is inside the iframe
           and says nothing about how much of the LESSON is done. */}
       <div
         role="progressbar"
@@ -336,6 +522,19 @@ export function LessonPlayer({
       >
         <div className={u.barFill} style={{ transform: `scaleX(${playedPct})` }} />
       </div>
+      {/* The player has said nothing for 12 seconds. The frame above stays. */}
+      {noLoad && (
+        <p role="status" className={u.barNote}>
+          {NO_LOAD_TEXT}
+        </p>
+      )}
+      {/* Shown while the last answer to a claim is "not enough of it was
+          played" and the lesson is still not complete. */}
+      {refusal !== null && !completedLessonIds.has(lessonId) && (
+        <p role="status" className={u.barNote}>
+          {notCountedText(refusal)}
+        </p>
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { useWorldCatalog } from "@/lib/world/useWorldCatalog";
 import { useWorldStage } from "@/components/world/WorldStage";
 import { useStudent } from "@/contexts/StudentContext";
 import { LessonPlayer } from "@/components/world/LessonPlayer";
+import type { LessonTransport } from "@/lib/world/lesson-transport";
 import { Panel } from "@/components/world/AreaScreen";
 import { mapIsSilent, useMapModel } from "@/components/world/useMapModel";
 import { pad2 } from "@/components/world-v6/study";
@@ -37,6 +38,7 @@ export function LessonScreen({
   areaId,
   lessonId,
   devComplete = false,
+  transport,
 }: {
   areaId: string;
   lessonId: string;
@@ -45,6 +47,12 @@ export function LessonScreen({
    * video and no server. The real routes never pass it.
    */
   devComplete?: boolean;
+  /**
+   * Development harness only: what the player talks to in place of the
+   * server. The real routes never pass it, and the player then uses the real
+   * calls.
+   */
+  transport?: LessonTransport;
 }) {
   const router = useRouter();
   const stage = useWorldStage();
@@ -150,6 +158,7 @@ export function LessonScreen({
           durationSeconds={lesson.duration_seconds}
           recorded={hasVideo(lesson.id)}
           onCompleted={onCompleted}
+          transport={transport}
           className={u.player}
         />
       ) : (

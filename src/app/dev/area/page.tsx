@@ -67,7 +67,7 @@ function make(n: number, prefix: string): CatalogLessonLike[] {
     is_gate: i === n - 1,
     counts_toward_progress: true,
     feature_key: null,
-    bunny_video_id: i % 3 === 0 ? "fake-guid" : null,
+    has_video: i % 3 === 0,
     duration_seconds: 300 + ((i * 137) % 900),
   }));
 }
@@ -103,7 +103,7 @@ function DevArea() {
             done: done.has(id),
             position: id === partial ? 260 : 0,
             reportedDuration: null,
-            hasVideo: Boolean(lessons.find((l) => l.id === id)?.bunny_video_id),
+            hasVideo: Boolean(lessons.find((l) => l.id === id)?.has_video),
           })}
         />
       </Panel>

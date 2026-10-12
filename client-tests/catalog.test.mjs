@@ -15,7 +15,7 @@ const L = (id, region_id, sort_order, o = {}) => ({
   type: 'watch', title: id,
   requires_action: false, is_optional: false, is_gate: false,
   counts_toward_progress: true, feature_key: null,
-  bunny_video_id: null, duration_seconds: null,
+  has_video: false, duration_seconds: null,
   ...o,
 })
 const R = (id, order_num, name, o = {}) => ({ id, order_num, name, ...o })
@@ -124,16 +124,21 @@ console.log('\n=== video lookups + a lesson whose area is missing ===')
 {
   const c = buildWorldCatalog({
     lessons: [
-      L('a1l01', 'a1', 1, { bunny_video_id: 'guid-1' }),
+      L('a1l01', 'a1', 1, { has_video: true }),
       L('a1l02', 'a1', 2),
       L('orphan', 'a99', 3),        // region_id with no matching region row
+      L('a1l04', 'a1', 4, { has_video: undefined }),   // a row read straight from the table: no such field
     ],
     regions: [R('a1', 1, 'One')],
     completedLessonIds: new Set(), watchProgress: new Map(),
   })
-  ok(c.hasVideo('a1l01') && c.videoIdFor('a1l01') === 'guid-1', 'videoIdFor finds the GUID')
-  ok(!c.hasVideo('a1l02') && c.videoIdFor('a1l02') === null, 'no GUID reads as no video')
-  ok(c.videoIdFor('nope') === null, 'an unknown lesson is null, not a crash')
+  ok(c.hasVideo('a1l01') === true, 'has_video: true reads as a video')
+  ok(c.hasVideo('a1l02') === false && c.hasVideo('a1l04') === false,
+     'has_video false, or not there at all, reads as no video')
+  ok(c.hasVideo('nope') === false, 'an unknown lesson has no video, not a crash')
+  // The id is the video's address. The catalog is in every browser, so it
+  // must have no way to hand one out.
+  ok(!('videoIdFor' in c), 'the catalog offers no way to ask for a video id')
   ok(c.areaOf('a1l01')?.id === 'a1', 'areaOf resolves')
   ok(c.areaOf('orphan') === null, 'an orphan lesson has no area...')
   ok(c.lessonsByArea.get('a99')?.length === 1,

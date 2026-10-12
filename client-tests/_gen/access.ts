@@ -16,8 +16,9 @@
  *   * What /world shows — area names and lesson titles — is the same catalog
  *     /dashboard already shows that student.
  *   * The things that ARE sensitive stay gated server-side and are untouched:
- *     video URLs need an active membership (video-token), completions need the
- *     telemetry to back them (lesson-watched), and every table is behind RLS.
+ *     a video's address needs an active membership (lesson-video), completions
+ *     need the telemetry to back them (lesson-watched), and every table is
+ *     behind RLS.
  * Its job is to stop 845 students stumbling into a half-built UI, nothing more.
  *
  * CLOSED BY DEFAULT. An unset or empty variable admits nobody, so forgetting to

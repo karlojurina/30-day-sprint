@@ -105,7 +105,9 @@ export function judgeWatch(
   //
   // This means a lesson with a video but no duration_seconds cannot be
   // completed. That is the correct failure: blocking a completion is
-  // recoverable, forging one is not. PRD 2's Bunny sync is what fills it.
+  // recoverable, forging one is not. Nothing fills duration_seconds
+  // automatically: it is set by hand when the lesson's video row goes in, and
+  // the lock check reports one that does not match the video's length.
   const duration = catalogDurationSeconds;
   if (duration === null || duration <= 0) {
     return { complete: false, reason: "no_duration", positionRatio: 0, playedRatio: 0, durationSeconds: null };

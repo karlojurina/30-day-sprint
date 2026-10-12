@@ -1,6 +1,6 @@
 // Rewrites the real module's path aliases to local stubs so Node can run it
 // with --experimental-strip-types. The LOGIC under test is the real file,
-// copied byte for byte apart from the two import lines.
+// copied byte for byte apart from its import lines.
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
@@ -15,9 +15,18 @@ function gen(srcRel, outRel, rewrites = []) {
   console.log(`generated ${outRel} from the real source`)
 }
 
+// The Supabase import becomes the stub, wrapped in a counter. The stub cannot
+// say whether a client was ever built, and "a heartbeat that is handed its own
+// rpc builds none" is one of the things the test has to prove. The counter is
+// the only code in the generated file that is not in the source.
 gen('../src/lib/world/watch-heartbeat.ts', './_gen/watch-heartbeat.ts', [
-  ['from "@/lib/supabase-browser"', 'from "./stub-supabase.ts"'],
+  ['import { createClient } from "@/lib/supabase-browser";',
+   'import { createClient as createStubClient } from "./stub-supabase.ts";\n' +
+   'export let clientsCreated = 0;\n' +
+   'function createClient() { clientsCreated++; return createStubClient(); }'],
   ['from "@/lib/call-gate"', 'from "./stub-call-gate.ts"'],
+  // Node needs the extension on a relative import; the bundler does not.
+  ['from "./tella"', 'from "./tella.ts"'],
 ])
 
 // watch-rules.ts has no imports at all, so it copies across untouched.
@@ -34,3 +43,13 @@ gen('../src/lib/world/catalog.ts', './_gen/catalog.ts', [
 
 // map-model.ts imports only TYPES from ./catalog, which --experimental-strip-types erases.
 gen('../src/lib/world/map-model.ts', './_gen/map-model.ts')
+
+// tella.ts and tella-lock.ts have no imports at all, so they copy across untouched.
+gen('../src/lib/world/tella.ts', './_gen/tella.ts')
+gen('../src/lib/world/tella-lock.ts', './_gen/tella-lock.ts')
+
+// tella-player.ts imports one constant from tella.ts. It touches `window`
+// only inside attachTellaPlayer, so the parser runs under Node as it is.
+gen('../src/lib/world/tella-player.ts', './_gen/tella-player.ts', [
+  ['from "./tella"', 'from "./tella.ts"'],
+])

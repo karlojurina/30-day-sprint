@@ -17,11 +17,12 @@ import {
  * gets exactly the same answer as the player does, which is the point.
  *
  * NO MEMBERSHIP CHECK HERE, deliberately, and it is not an oversight. The
- * paywall sits on PLAYBACK: /api/student/video-token refuses to mint a URL for
- * anyone whose membership is not active, so a lapsed student generates no
- * heartbeats. This route only ratifies watching that already happened. Gating
- * it too would mean a student whose card fails in the last minute of a lesson
- * loses the lesson they just watched, which is punishing the wrong person.
+ * paywall sits on PLAYBACK: /api/student/lesson-video refuses to give a
+ * video's address to anyone whose membership is not active, so a lapsed
+ * student generates no heartbeats. This route only ratifies watching that
+ * already happened. Gating it too would mean a student whose card fails in
+ * the last minute of a lesson loses the lesson they just watched, which is
+ * punishing the wrong person.
  *
  * Idempotent: calling it repeatedly on a finished lesson returns the same
  * answer and writes nothing new.

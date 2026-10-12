@@ -14,18 +14,31 @@ or `npm run test:client`.
 ## How it stays honest
 
 `build.mjs` copies the **real** `src/lib/world/watch-heartbeat.ts` and rewrites
-exactly two lines — the `@/lib/supabase-browser` and `@/lib/call-gate` imports —
-to point at local stubs. Everything else is byte-for-byte the shipping source.
-If the test passed against a retyped copy it would be testing a fiction.
+its three import lines and nothing else: `@/lib/supabase-browser` and
+`@/lib/call-gate` point at local stubs, and `./tella` gains the `.ts` Node
+needs. The Supabase stub is wrapped in a three-line counter, so the test can
+prove that a heartbeat handed its own `rpc` never builds a client. That
+counter is the only code in the generated file that is not in the source.
+Everything else is byte-for-byte the shipping source. If the test passed
+against a retyped copy it would be testing a fiction.
+
+The other modules under test are copied the same way (`build.mjs` lists them,
+with what each one needed rewritten). A copy that still holds an `@/` import
+stops the build.
 
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.
 
 `Date.now` is monkeypatched so 12 minutes of playback runs in milliseconds, and
-`playFor()` simulates the player's real ~3.7 ticks/second **and yields to the
-event loop between ticks** — without that, in-flight requests never resolve and
-the test measures a situation that cannot happen in a browser.
+`playFor()` simulates a player reporting ~3.7 times a second **and yields to
+the event loop between ticks** — without that, in-flight requests never resolve
+and the test measures a situation that cannot happen in a browser. 3.7 a second
+was the first player's measured rate, and sections 1 to 9 keep it so their
+assertions stand as written. Sections 10 to 17 were added for Tella's player,
+which reports every 250 ms: they use the steps measured on it at 1x, 2x and
+2.5x and hand the heartbeat its own `rpc` and clock (one control in section 16
+leaves the `rpc` out on purpose).
 
 ## What it caught
 

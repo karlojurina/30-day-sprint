@@ -3,9 +3,11 @@ import type { TellaVideoFacts } from "./tella-lock";
 /**
  * Tella's API, the one read the lock check needs.
  *
- * SERVER ONLY. `TELLA_API_KEY` can read and change every video in the
- * workspace, so it must never reach the browser, a client component or a log
- * line. Its only caller is api/cron/check-lesson-videos.
+ * SERVER ONLY. `TELLA_API_KEY` can read every video in the workspace and
+ * change the ones uploaded from its own login (measured 2026-10-13: a change
+ * to another member's video answers 404), so it must never reach the browser,
+ * a client component or a log line. Its only caller is
+ * api/cron/check-lesson-videos.
  *
  * Measured on the live API on 2026-10-12: `GET /v1/videos/{id}` answers 200
  * with the video's length and its `settings`; the list endpoint carries

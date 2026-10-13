@@ -32,6 +32,19 @@
  *     and the arch with room; it leaves the shaft through its collar cell,
  *     levelling; the a3 stop frames the mouth from inside, the a4 stop the
  *     lift's cage; the tunnel scrolls by quickly;
+ *   - 2026-10-13, a3 TO a4 IN THE OPEN (Lovro: "the camera between Video Ads 1
+ *     and Video Ads 2 goes into the cave for no reason. Just going straight
+ *     from Video Ads 1 screen to Video Ads 2 and giving it a nice path"): the
+ *     camera's pass through the cave is gone and so are its checks above (the
+ *     cave samples inside the void, through the curtain and the arch with
+ *     room, the pass's length). In their place: no key of kind "cave" and no
+ *     underground stretch anywhere; the route stays out of the cave's void
+ *     and north of the curtain; along the a3 -> a4 move the clearance from
+ *     rock, the view turning one way only (about 117 degrees, no step or
+ *     scroll rate over its limit), the falls in the frame at every key and
+ *     every sample, sky in every frame and no ground close up. The cave's
+ *     own geometry checks stay (it is still built): the rock cover over it,
+ *     the mouth behind the curtain;
  *   - grey pass 3 leftovers: the flight takes 200-300 vh; the star look has
  *     the observatory in the lower part of the frame; the Great Tree is whole
  *     in frame at a6.
@@ -456,14 +469,15 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
   check("the turn at the pool to a3: <= 90 vh, <= 20 vh of it only rock, ending facing the falls (within 25 of the bearing to them: final pass, the falls sit right of centre with the gorge on the panel's side)", turnVh <= 90 && rockVh <= 20 && offFalls <= 25, `${r1(turnVh)} vh, rock ${r1(rockVh)} vh, bearing ${r1(endB)} (${r1(offFalls)} off the falls)`);
   check("the ride: pitch changes <= 2.5 deg per vh (lip to the falls)", maxRate <= 2.5, `max ${maxRate.toFixed(2)} deg/vh at s ${Math.round(maxAt)}`);
   // Round 1: the cave exit to a4, and a4 to the burst, each one move.
-  const exitS = sAtKey(L.ROUTE_MARKS.exit);
+  // 2026-10-13: there is no cave exit; the way up starts at the a3 stop.
+  const a3S = sAtKey(PLACES[2].trail);
   const a4S = sAtKey(PLACES[3].trail);
   const burstS = sAtKey(L.ROUTE_MARKS.burst);
-  const upVh = vhAt(rail, a4S) - vhAt(rail, exitS);
+  const upVh = vhAt(rail, a4S) - vhAt(rail, a3S);
   const hikeVh = vhAt(rail, burstS) - vhAt(rail, a4S);
   report.hikeVh = r1(hikeVh);
   report.upVh = r1(upVh);
-  check("the way up: cave exit to a4 <= 200 vh, a4 to the burst <= 200 vh at the default pacing", upVh <= 200 && hikeVh <= 200, `${r1(upVh)} vh / ${r1(hikeVh)} vh`);
+  check("the way up: a3 to a4 <= 200 vh, a4 to the burst <= 200 vh at the default pacing", upVh <= 200 && hikeVh <= 200, `${r1(upVh)} vh / ${r1(hikeVh)} vh`);
   // Facing where it goes after a4: from just past a4 to the burst, the view
   // stays within 60 of the travel heading.
   const offTravel = (sa, sb) => {
@@ -476,60 +490,217 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
   };
   const w2 = offTravel(sAtKey(L.ROUTE_MARKS.traverse + 0.5), burstS);
   check("the traverse faces where it goes (view within 60 of the travel heading, a4 to the burst)", w2.v <= 60, `traverse to burst ${JSON.stringify(w2)}`);
-  // Final pass (Lovro: "directly up to video ads 2 without doing any turning
-  // stuff"): a3 to a4 is one move. The view turns one way only (no run of
-  // 5 degrees or more against it), 150 degrees at most in all, and never
-  // faster than 1.6 degrees per vh once the dwell at a3 is behind it (round 1:
-  // 423 degrees, four changes of direction, 11 degrees per vh in the cave).
+  // 2026-10-13 (Lovro: "the camera between Video Ads 1 and Video Ads 2 goes
+  // into the cave for no reason. Just going straight from Video Ads 1 screen
+  // to Video Ads 2 and giving it a nice path"): a3 to a4 is ONE move across
+  // the gorge, in the open. It replaces the final pass's "go in and then
+  // directly up" (the dolly into the curtain, the loop past the camp, back
+  // out through the water, then the pull back), whose own checks here were:
+  // the view turning one way, <= 150 degrees, <= 1.6 degrees per vh, and some
+  // of the falls in frame from out of the cave to a4.
   {
+    const F = WORLD.falls;
     const sa = rail.stopS[2];
     const sb = rail.stopS[3];
-    const vhA = vhAt(rail, sa);
-    let prev = rail.bearingAtS(sa);
+    const a4Key = PLACES[3].trail;
+    /** Route distance on the rail at a (fractional) key index. */
+    const railSAtKey = (k) => {
+      let lo = 0;
+      let hi = rail.length;
+      for (let i = 0; i < 60; i++) {
+        const m = (lo + hi) / 2;
+        if (rail.tAtS(m) < k / (nK - 1)) lo = m;
+        else hi = m;
+      }
+      return (lo + hi) / 2;
+    };
+    // 1. No cave on the route.
+    const caveKeys = TRAIL_KIND.filter((k) => k === "cave").length;
+    let underSamples = 0;
+    for (let s = 0; s <= rail.length; s += 2) if (L.UNDERGROUND.includes(rail.kindAtS(s))) underSamples++;
+    const oldMarks = ["cave", "camp", "exit", "back"].filter((m) => m in L.ROUTE_MARKS);
+    check(
+      "no cave on the route: no key of kind cave, CAVE_KEYS empty, no stretch of an UNDERGROUND kind, the marks cave / camp / exit / back retired",
+      caveKeys === 0 && L.CAVE_KEYS.first === -1 && L.CAVE_KEYS.last === -1 && underSamples === 0 && oldMarks.length === 0,
+      `${caveKeys} cave keys, CAVE_KEYS ${L.CAVE_KEYS.first}..${L.CAVE_KEYS.last}, ${underSamples} underground samples, old marks still named: ${oldMarks.join(", ") || "none"}`,
+    );
+    // 2. Clearance along the move, on the rail as the scene has it (terrain
+    //    follow on): over the ground by TRAIL_CLEAR (the dense check above
+    //    covers it; the figure is repeated here for the stretch), never within
+    //    40 of rock at the camera's own height, outside the cave's void, and
+    //    well north of the curtain.
+    {
+      let over = { v: Infinity };
+      let rock = { v: Infinity };
+      let cave = { v: -Infinity };
+      let curtain = { v: Infinity };
+      for (let s = sa; s <= sb; s += 3) {
+        railG.sampleS(s, pose);
+        const { x, y, z } = pose.position;
+        const at = { s: Math.round(s - sa), p: [x, y, z].map(Math.round) };
+        const f = railG.tAtS(s) * (nK - 1);
+        const i0 = Math.min(nK - 2, Math.floor(f));
+        const need = L.TRAIL_CLEAR[i0] + (L.TRAIL_CLEAR[i0 + 1] - L.TRAIL_CLEAR[i0]) * (f - i0);
+        const o = y - groundAt(x, z) - need;
+        if (o < over.v) over = { v: r1(o), need: r1(need), ...at };
+        const c = cliffDistance(x, y, z, 120);
+        if (c < rock.v) rock = { v: c, ...at };
+        const m = L.caveMargin(x, y, z);
+        if (m > cave.v) cave = { v: r1(m), ...at };
+        const cz = L.fallsCurtainAt(Math.min(F.top[1], Math.max(F.bottom[1], y)))[1];
+        if (cz - z < curtain.v) curtain = { v: r1(cz - z), ...at };
+      }
+      report.a3a4Clear = { over, rock, cave, curtain };
+      check(
+        "a3 to a4: clear all the way (>= TRAIL_CLEAR - 1 over the ground, >= 40 from rock at its own height, >= 200 outside the cave's void, >= 250 north of the curtain)",
+        over.v >= -1 && rock.v >= 40 && cave.v <= -200 && curtain.v >= 250,
+        `least over the ground ${JSON.stringify(over)}, nearest rock ${JSON.stringify(rock)}, nearest to the cave ${JSON.stringify(cave)}, nearest to the curtain ${JSON.stringify(curtain)}`,
+      );
+    }
+    // 3. The view turns one way only. From a3 to 90 units before a4 (three
+    //    times the rail's view blur) the bearing never goes back by more than
+    //    0.05 degrees between samples 2 apart. Inside those last 90 units the
+    //    blur lets a4's own next turn in (the traverse turns left at once): the
+    //    view settles back a few degrees onto the stop. That settle is a4's and
+    //    the next stretch's, which this move does not touch (the cave pass had
+    //    it too: 4.4 degrees); it must stay under 5.
     let total = 0;
-    let run = 0;
-    let sign = 0;
-    const runs = [];
+    let against = 0;
+    let settle = 0;
+    let peak = -Infinity;
+    let step = { v: 0 };
+    let stepAtStop = { v: 0 };
     let fastest = { v: 0 };
-    for (let s = sa + 2; s <= sb; s += 2) {
-      const b = rail.bearingAtS(s);
-      const d = ((b - prev + 540) % 360) - 180;
-      prev = b;
-      total += Math.abs(d);
-      const sg = Math.abs(d) < 0.02 ? 0 : Math.sign(d);
-      if (sg && sign && sg !== sign) {
-        runs.push(run);
-        run = 0;
+    {
+      const vhA = vhAt(rail, sa);
+      let prev = rail.bearingAtS(sa);
+      for (let s = sa + 2; s <= sb; s += 2) {
+        const b = rail.bearingAtS(s);
+        const d = ((b - prev + 540) % 360) - 180;
+        prev = b;
+        total += Math.abs(d);
+        if (s <= sb - 90) against = Math.max(against, -d);
+        peak = Math.max(peak, b);
+        if (s - sa <= 90 || sb - s <= 90) {
+          if (Math.abs(d) > stepAtStop.v) stepAtStop = { v: +Math.abs(d).toFixed(2), s: Math.round(s - sa) };
+        } else if (Math.abs(d) > step.v) step = { v: +Math.abs(d).toFixed(2), s: Math.round(s - sa) };
+        const dv = vhAt(rail, s) - vhAt(rail, s - 2);
+        if (vhAt(rail, s) - vhA > 12 && dv > 1e-6 && Math.abs(d) / dv > fastest.v) fastest = { v: +(Math.abs(d) / dv).toFixed(2), s: Math.round(s - sa), vh: r1(vhAt(rail, s)) };
       }
-      if (sg) {
-        sign = sg;
-        run += d;
-      }
-      const dv = vhAt(rail, s) - vhAt(rail, s - 2);
-      if (vhAt(rail, s) - vhA > 12 && dv > 1e-6 && Math.abs(d) / dv > fastest.v) fastest = { v: +(Math.abs(d) / dv).toFixed(2), s: Math.round(s), vh: r1(vhAt(rail, s)) };
+      settle = peak - rail.bearingAtS(sb);
     }
-    runs.push(run);
-    const against = runs.filter((r) => Math.abs(r) >= 5).length - 1;
-    report.a3a4 = { total: r1(total), runs: runs.map(r1), fastest };
-    check("a3 to a4: one move, the view turning one way (no run of 5+ degrees against it), <= 150 degrees in all, <= 1.6 deg per vh past a3's dwell", against <= 0 && total <= 150 && fastest.v <= 1.6, `total ${r1(total)} deg, runs ${JSON.stringify(runs.filter((r) => Math.abs(r) >= 1).map(r1))}, fastest ${JSON.stringify(fastest)}`);
-    // Every frame of the way out has the falls in it: from the cave's last key
-    // to a4 the middle of the falls projects inside the frame (16:9).
-    let outOf = null;
-    const F = WORLD.falls;
-    for (let s = sAtKey(L.CAVE_KEYS.last); s <= sb && !outOf; s += 6) {
-      rail.sampleS(s, pose);
-      const cam = camOf(pose.position.clone(), pose.target.clone(), ASPECT, rail.fovAtS(s));
-      // Some part of the falls, foot to lip (close under the curtain only its foot shows).
-      let seen = false;
-      for (let k = 0; k <= 4 && !seen; k++) {
-        const y = F.bottom[1] + 10 + ((F.top[1] - F.bottom[1] - 20) * k) / 4;
-        const [cx, cz] = L.fallsCurtainAt(y);
-        const v = proj(cam, cx, y, cz);
-        if (v.z < 1 && Math.abs(v.x) <= 0.95 && Math.abs(v.y) <= 0.95) seen = true;
+    const net = rail.bearingAtS(sb) - rail.bearingAtS(sa);
+    const keyTurn = L.TRAIL_VIEW[a4Key].bearing - L.TRAIL_VIEW[a3Key].bearing;
+    let keysRise = true;
+    for (let k = a3Key; k < a4Key; k++) if (!(L.TRAIL_VIEW[k + 1].bearing > L.TRAIL_VIEW[k].bearing)) keysRise = false;
+    report.a3a4 = { total: r1(total), net: r1(net), keyTurn, against: +against.toFixed(3), settle: r1(settle), step, stepAtStop, fastest };
+    check(
+      "a3 to a4: the view turns one way only (every key's bearing above the last; on the rail never back by more than 0.05 degrees until 90 units before a4; a4's own settle under 5)",
+      keysRise && against <= 0.05 && settle < 5,
+      `keys rising ${keysRise}; most against the turn ${against.toFixed(3)} deg; the settle onto a4 ${r1(settle)} deg`,
+    );
+    // 4. How much it turns and how fast. The keys turn 116.5 (128 at a3 to
+    //    244.5 at a4); the rail, blurred at both stops, 110 to 120 net and at
+    //    most 125 counting the settle. Between samples 2 apart no step turns
+    //    more than 0.4 degrees (0.2 per unit; passing the falls ~340 away needs
+    //    0.16), except within 90 units of either stop, where the neighbouring
+    //    turn runs through the stop (the pool turn's end at a3, the traverse's
+    //    start at a4: 0.7; the camera is in its dwell there, so it is slow in
+    //    scroll). Past a3's dwell the turn stays under 1.4 degrees per vh at
+    //    the default pacing (the cave pass: 1.42).
+    check(
+      "a3 to a4: about 117 degrees in all (keys 116.5; the rail 110-120 net, <= 125 with the settle), no step of 2 units over 0.4 degrees (0.7 within 90 units of a stop), <= 1.4 deg per vh past a3's dwell",
+      Math.abs(keyTurn - 116.5) < 1e-9 && net >= 110 && net <= 120 && total <= 125 && step.v <= 0.4 && stepAtStop.v <= 0.7 && fastest.v <= 1.4,
+      `keys ${keyTurn} deg, rail net ${r1(net)} deg, ${r1(total)} deg with the settle; largest step ${JSON.stringify(step)}, within 90 units of a stop ${JSON.stringify(stepAtStop)}; fastest ${JSON.stringify(fastest)}`,
+    );
+    // 5. The falls in the frame, at the two shapes that matter (16:9 and
+    //    Lovro's 1691 x 1278, the narrower). At every key from a3 to a4, on the
+    //    rail's own pose and lens: the falls' middle inside the middle of the
+    //    frame and their lip under the top edge; from a3 to the last key that
+    //    passes the falls (the last with its own pace) the foot at the pool is
+    //    in the frame too, so the falls are whole, lip to pool; and at a4 they
+    //    are whole again with their middle at x 0.4-0.6, the pool on the frame's
+    //    bottom, as the stop has framed them since B9.
+    {
+      const mid = (F.top[1] + F.bottom[1]) / 2;
+      const [mx, mz] = L.fallsCurtainAt(mid);
+      const lastPass = L.TRAIL_PACE.reduce((a, pc, i) => (i > a3Key && i < a4Key && pc !== L.PACE.walk ? i : a), a3Key);
+      const bad = [];
+      const rows = [];
+      for (let k = a3Key; k <= a4Key; k++) {
+        const s = k === a3Key ? sa : k === a4Key ? sb : railSAtKey(k);
+        rail.sampleS(s, pose);
+        const row = { key: k };
+        for (const [name, aspect] of [["16:9", ASPECT], ["1691:1278", 1691 / 1278]]) {
+          const cam = camOf(pose.position.clone(), pose.target.clone(), aspect, rail.fovAtS(s));
+          const xy = (x, y, z) => {
+            const v = proj(cam, x, y, z);
+            return v.z < 1 ? [(v.x + 1) / 2, (1 - v.y) / 2] : null;
+          };
+          const m = xy(mx, mid, mz);
+          const lip = xy(F.top[0], F.top[1], F.top[2]);
+          const foot = xy(F.bottom[0], F.bottom[1], F.bottom[2]);
+          const whole = k <= lastPass || k === a4Key;
+          const ok = m && lip && foot && m[0] >= 0.38 && m[0] <= 0.75 && m[1] >= 0.3 && m[1] <= 0.85 && lip[1] >= 0.03 && lip[0] >= 0.05 && lip[0] <= 0.95 && (!whole || foot[1] <= 1) && (k !== a4Key || (m[0] >= 0.4 && m[0] <= 0.6));
+          if (!ok) bad.push({ key: k, shape: name, mid: m && m.map((v) => +v.toFixed(2)), lipY: lip && +lip[1].toFixed(2), footY: foot && +foot[1].toFixed(2), whole });
+          if (name === "1691:1278") Object.assign(row, { x: m && +m[0].toFixed(2), lip: lip && +lip[1].toFixed(2), foot: foot && +foot[1].toFixed(2) });
+        }
+        rows.push(row);
       }
-      if (!seen) outOf = { s: Math.round(s) };
+      report.a3a4Falls = rows;
+      check(
+        `a3 to a4: the falls in the frame at every key (their middle at x 0.38-0.75, the lip under the top edge; whole, lip to pool, from a3 to key ${lastPass} and at a4)`,
+        bad.length === 0,
+        bad.length ? `${bad.length} off, first ${JSON.stringify(bad[0])}` : `at 1691x1278, key: middle x / lip y / foot y: ${rows.map((r) => `${r.key}: ${r.x} / ${r.lip} / ${r.foot}`).join(", ")}`,
+      );
+      // And between the keys: at every sample the falls' middle is inside the
+      // frame (5% in from every edge), there is sky in the frame (>= 5% of a
+      // coarse ray grid misses the ground), no more than 15% of it is ground
+      // nearer than 150, and the view looks up (6 to 14 degrees): never a bare
+      // wall, never the ground.
+      let out = null;
+      let sky = { v: Infinity };
+      let near = { v: 0 };
+      let pitch = [Infinity, -Infinity];
+      const up = new THREE.Vector3(0, 1, 0);
+      for (let s = sa; s <= sb; s += 6) {
+        rail.sampleS(s, pose);
+        const fov = rail.fovAtS(s);
+        const aspect = 1691 / 1278;
+        const cam = camOf(pose.position.clone(), pose.target.clone(), aspect, fov);
+        const v = proj(cam, mx, mid, mz);
+        if (!out && !(v.z < 1 && Math.abs(v.x) <= 0.9 && Math.abs(v.y) <= 0.9)) out = { s: Math.round(s - sa), x: +((v.x + 1) / 2).toFixed(2), y: +((1 - v.y) / 2).toFixed(2) };
+        const pt = rail.pitchAtS(s);
+        pitch = [Math.min(pitch[0], pt), Math.max(pitch[1], pt)];
+        if (Math.round((s - sa) / 6) % 3) continue;
+        const p = pose.position;
+        const f = pose.target.clone().sub(p).normalize();
+        const r = new THREE.Vector3().crossVectors(f, up).normalize();
+        const u = new THREE.Vector3().crossVectors(r, f);
+        const th = Math.tan(((fov / 2) * Math.PI) / 180);
+        let nSky = 0;
+        let nNear = 0;
+        let n = 0;
+        for (let j = 0; j < 12; j++) {
+          for (let i = 0; i < 16; i++) {
+            const d = f.clone().addScaledVector(r, ((2 * (i + 0.5)) / 16 - 1) * th * aspect).addScaledVector(u, (1 - (2 * (j + 0.5)) / 12) * th).normalize();
+            n++;
+            let hit = 0;
+            for (let t = 4; t <= 5000 && !hit; t += t < 400 ? 8 : 40) if (p.y + d.y * t <= terrainHeight(p.x + d.x * t, p.z + d.z * t)) hit = t;
+            if (!hit) nSky++;
+            else if (hit <= 150) nNear++;
+          }
+        }
+        if (nSky / n < sky.v) sky = { v: +(nSky / n).toFixed(3), s: Math.round(s - sa) };
+        if (nNear / n > near.v) near = { v: +(nNear / n).toFixed(3), s: Math.round(s - sa) };
+      }
+      report.a3a4Frames = { out, sky, near, pitch: pitch.map(r1) };
+      check(
+        "a3 to a4: between the keys too: the falls' middle inside the frame at every sample, sky in every frame (>= 5%), ground nearer than 150 on <= 15% of it, the view looking up 6-14 degrees",
+        !out && sky.v >= 0.05 && near.v <= 0.15 && pitch[0] >= -14 && pitch[1] <= -6,
+        `${out ? `the falls leave the frame at ${JSON.stringify(out)}` : "the falls in every sample"}; least sky ${JSON.stringify(sky)}; most near ground ${JSON.stringify(near)}; pitch ${r1(pitch[0])} to ${r1(pitch[1])}`,
+      );
     }
-    check("a3 to a4: some of the falls stays in frame from out of the cave to a4 (the pull back)", !outOf, outOf ?? "every sample");
   }
   // The crest: the camera comes over the gully's top already facing north (the saddle and the lake).
   let crestSpan = 0;
@@ -538,27 +709,26 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
 }
 
 // ── The cave (v6: mirrored behind the falls on the south wall; the mine is gone) ─
+// 2026-10-13: the camera no longer enters it (see the a3 -> a4 checks above).
+// It is still built, so its geometry checks stay (2 and 3: the rock cover, the
+// mouth behind the curtain); what the camera did in it is replaced by what it
+// must not do: enter the void, or cross the curtain.
 {
   const C = L.CAVE;
   const CB = L.CAVE_BUILD;
   const F = WORLD.falls;
-  // 1. Inside the void, or in open air.
-  let inMin = { v: Infinity };
-  const bad = [];
-  let nCave = 0;
+  // 1. The whole route stays out of the cave: no sample of the curve inside
+  //    the void (the ride comes nearest, down in front of the curtain), and
+  //    none below the terrain's surface anywhere.
+  let nearest = { v: -Infinity };
+  let underground = 0;
   for (const d of dense) {
-    if (!L.UNDERGROUND.includes(d.kind)) continue;
-    nCave++;
     const { x, y, z } = d.p;
     const m = L.caveMargin(x, y, z);
-    if (m >= 3) {
-      if (m < inMin.v) inMin = { v: r1(m), s: Math.round(d.s), p: d.p.toArray().map(Math.round) };
-      continue;
-    }
-    const open = y > terrainHeight(x, z) && y - groundAt(x, z) >= 15 && cliffDistance(x, y, z, 10) > 8;
-    if (!open) bad.push({ s: Math.round(d.s), margin: r1(m), p: d.p.toArray().map(Math.round) });
+    if (m > nearest.v) nearest = { v: r1(m), s: Math.round(d.s), kind: d.kind, p: d.p.toArray().map(Math.round) };
+    if (y < terrainHeight(x, z)) underground++;
   }
-  check("cave: every cave sample is inside the void (>= 3 from its walls) or in open air (>= 15 up, >= 8 from rock)", bad.length === 0 && nCave > 50, bad.length ? `${bad.length} bad, first ${JSON.stringify(bad.slice(0, 3))}` : `${nCave} samples; closest to a wall ${JSON.stringify(inMin)}`);
+  check("cave: the route never enters it (every sample outside the void, none under the terrain's surface)", nearest.v < 0 && underground === 0, `nearest to the void ${JSON.stringify(nearest)} (negative is outside); ${underground} samples under the surface`);
   // 2. Rock cover over the hall and the side passage, except at the portals.
   let coverMin = { v: Infinity };
   const hallTop = (r) => CB.floorY + Math.max(CB.mouthH, CB.hallH * Math.sqrt(Math.max(0, 1 - r * r)));
@@ -593,22 +763,22 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
     if (!(cz < face - 3)) hidden = false;
   }
   check("cave: the mouth is behind the curtain (curtain >= 3 in front of it, wider by >= 5 each side)", hidden && F.width / 2 >= C.mouthHalfW + 5, `curtain half width ${F.width / 2}, arch ${C.mouthHalfW}`);
-  // The camera goes through the curtain and the arch with room (heading south, +z).
-  let curtainX = null;
-  let archAt = null;
-  for (let i = 1; i < dense.length; i++) {
+  // 2026-10-13: the camera used to go through the curtain and the arch with
+  // room (heading south, +z), twice. Now it must never cross the curtain: no
+  // step of the route goes from the gorge's side of the falling water to the
+  // cliff's side within the curtain's width (the ride comes over the lip
+  // above the water, then down in front of it, >= 8 away, checked with the
+  // clearances; so only steps below the lip count).
+  let crossed = null;
+  for (let i = 1; i < dense.length && !crossed; i++) {
     const a = dense[i - 1].p;
     const b = dense[i].p;
-    if (a.y > F.top[1] + 20 || b.y > F.top[1] + 20) continue;
+    if (a.y > F.top[1] - 5 || b.y > F.top[1] - 5) continue;
     const [, czA] = L.fallsCurtainAt(a.y);
     const [, czB] = L.fallsCurtainAt(b.y);
-    if (curtainX === null && a.z < czA && b.z >= czB && Math.abs(b.x - F.top[0]) < F.width) curtainX = { x: r1(b.x - F.top[0]), y: r1(b.y), s: Math.round(dense[i].s) };
-    const fA = C.footZ + (a.y - C.floorY) / 9;
-    const fB = C.footZ + (b.y - C.floorY) / 9;
-    if (archAt === null && a.z < fA && b.z >= fB && Math.abs(b.x - C.x) < 60) archAt = { side: r1(C.mouthHalfW - Math.abs(b.x - C.x)), sill: r1(b.y - C.floorY), head: r1(C.floorY + C.mouthH - b.y), s: Math.round(dense[i].s) };
+    if (a.z < czA !== b.z < czB && Math.abs(b.x - F.top[0]) < F.width) crossed = { x: r1(b.x - F.top[0]), y: r1(b.y), s: Math.round(dense[i].s) };
   }
-  check("cave: the camera goes through the curtain within its width (>= 15 from its edges)", curtainX !== null && Math.abs(curtainX.x) <= F.width / 2 - 15, curtainX);
-  check("cave: the camera goes through the arch with >= 10 each side and >= 10 under its head", archAt !== null && archAt.side >= 10 && archAt.head >= 10 && archAt.sill >= 10, archAt);
+  check("cave: the camera never crosses the curtain", crossed === null, crossed ?? "no step of the route crosses the falling water");
   // 4. a3: inside the hall, the whole mouth in frame from inside.
   const camAt = (i) => camOf(v3(TRAIL[PLACES[i].trail]), v3(LOOK[PLACES[i].trail]), ASPECT, L.TRAIL_FOV[PLACES[i].trail]);
   const inF = (cam, x, y, z) => {
@@ -626,10 +796,8 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
   const mid = proj(c3, F.bottom[0], (F.top[1] + F.bottom[1]) / 2, (F.top[2] + F.bottom[2]) / 2);
   const midX = (mid.x + 1) / 2;
   check("a3 stop: outside the cave, the whole falls in frame (lip corners and the foot at the pool), their middle at x 0.5-0.75", L.caveMargin(...a3Stop) < 0 && a3Stop[1] > terrainHeight(a3Stop[0], a3Stop[2]) + 20 && a3In === fallsPts.length && midX >= 0.5 && midX <= 0.75, `margin ${r1(L.caveMargin(...a3Stop))}, ${a3In}/${fallsPts.length} falls points in frame, middle at x ${midX.toFixed(2)}`);
-  // 5. Short and bright at both ends; the flight is long.
-  const caveVh = vhAt(rail, sAtKey(L.CAVE_KEYS.last)) - vhAt(rail, sAtKey(L.CAVE_KEYS.first));
-  report.cave = { caveVh: r1(caveVh) };
-  check("cave: the pass through the cave (the curtain in, the camp, the curtain out) <= 120 vh at the default pacing", caveVh <= 120, `${r1(caveVh)} vh`);
+  // 5. The flight is long. (2026-10-13: "the pass through the cave <= 120 vh"
+  //    stood here; there is no pass.)
   const [f0, f1] = rail.flightS;
   const flightVh = vhAt(rail, f1) - vhAt(rail, f0);
   check("the flight takes 200-300 vh (2-3 screens) at the default pacing, its own budget", flightVh >= 200 && flightVh <= 300 && Math.abs(flightVh - L.FLIGHT_VH) < 0.5, `${r1(flightVh)} vh (FLIGHT_VH ${L.FLIGHT_VH})`);

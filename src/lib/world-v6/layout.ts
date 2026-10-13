@@ -13,11 +13,17 @@
  *   the stream from the Upper Falls (a cascade on the west massif's east
  *   shoulder) runs along the south shelf to the lip of the big falls, which
  *   pour NORTH off the gorge's SOUTH wall, away from the trail. The camera
- *   rides down with the water, turns round over the pool and goes through the
- *   curtain into the cave behind it (a3), out a side passage east of the
- *   falls, over the river on a fallen log, and climbs the gorge's north wall
- *   to a rock spur with the Trail Hut (a4), with the whole falls across the
- *   gorge. A rising traverse east and a gully up the Climb's rim bring it to
+ *   rides down with the water and turns round over the pool to the pool's
+ *   west end, OUTSIDE the falls (a3). From there it crosses the gorge in one
+ *   move: east past the falls along the gorge's north side, the view turning
+ *   with them, then pulling back and rising to a rock spur on the north wall
+ *   with the Trail Hut (a4), the whole falls across the gorge. The cave behind
+ *   the falls, its side passage, the fallen log over the river and the
+ *   switchbacks up the north wall are all still in the world (the trail on
+ *   the ground, PATH, runs through them); since 2026-10-13 the camera uses
+ *   none of them (Lovro: "the camera between Video Ads 1 and Video Ads 2 goes
+ *   into the cave for no reason").
+ *   A rising traverse east and a gully up the Climb's rim bring it to
  *   the ridge (the burst, locked), the saddle and the meadow down to the
  *   Mirror Lake (a5); west through the Glowing Forest to the Great Tree (a6);
  *   up the floating steps to the Sky Island (a7, the sky frame); over the rope
@@ -30,8 +36,10 @@
  * stretch), PACE (slower in the ride and on the rise, faster in the hike and
  * the flight), the KEYS table (camera positions, bearing, pitch, lens) and
  * LOOK_DIST. world-tests/v6-route.mjs checks clearance, sight lines, the
- * ride, the cave, the steps, the bridge, the flight, the Gate and the lake
- * reflection; v6-locked.mjs checks the locked stretches against v5.
+ * ride, the a3 to a4 move, the steps, the bridge, the flight, the Gate and the
+ * lake reflection; v6-cave.mjs that the cave is still built as it was and
+ * that the route stays out of it; v6-locked.mjs the locked stretches against
+ * v5.
  */
 
 /**
@@ -64,9 +72,6 @@ export type PlaceId = "a1" | "a2" | "a3" | "a4" | "a5" | "a6" | "a7" | "a8";
  *   hike    up the gorge's north wall and along it: >= KEY_CLEAR over the ground
  *   climb   up the gully to the ridge and the burst (heights exact)
  *   rise    up the floating steps, looking up at the island
- *   cave    through the curtain into the cave (CAVE) and out its side passage
- *           (CAVE_EXIT); inside the void (caveMargin) or, outside it, >= 15
- *           over the pool and >= 8 from rock
  *   sky     on an island top (Sky Island, Gate isle), >= KEY_CLEAR over it
  *   bridge  walking the rope bridge: BRIDGE_EYE above its deck
  *   board   on foot at the bounty isle and onto / off your airship's deck
@@ -74,18 +79,31 @@ export type PlaceId = "a1" | "a2" | "a3" | "a4" | "a5" | "a6" | "a7" | "a8";
  *   tunnel, shaft  RETIRED with the mine: no key uses them. They stay in the
  *           type only so modules that still name them compile (forest.ts);
  *           their owners drop them in phase B.
+ *   cave    RETIRED 2026-10-13 (Lovro: "the camera between Video Ads 1 and
+ *           Video Ads 2 goes into the cave for no reason. Just going straight
+ *           from Video Ads 1 screen to Video Ads 2 and giving it a nice
+ *           path"): no key uses it. It was the pass through the curtain into
+ *           the cave (CAVE) and back out: inside the void (caveMargin) or,
+ *           outside it, >= 15 over the pool and >= 8 from rock. The cave
+ *           itself is still built and dressed. The kind stays in the type so
+ *           the modules that name it compile and behave as before for a route
+ *           with no such key (PACE, NO_TERRAIN_FOLLOW, UNDERGROUND and
+ *           CAVE_KEYS here; rail.ts, scene.ts's underground(), forest.ts,
+ *           light.ts's cave light): each of them is simply never switched on.
  */
 export type TrailKind = "walk" | "dive" | "hike" | "climb" | "rise" | "sky" | "bridge" | "board" | "flight" | "cave";
 
 /** Kinds the rail must NOT lift over the ground or the islands' keep-out domes:
  *  their heights are exact (the ride, the gully up to the burst, the bridge's
- *  deck, the bounty isle, the ship, and the cave, which runs BELOW
- *  terrainHeight by design, see CAVE). */
+ *  deck, the bounty isle, the ship, and the cave, which ran BELOW
+ *  terrainHeight by design, see CAVE; "cave" is retired, see TrailKind). */
 export const NO_TERRAIN_FOLLOW: readonly TrailKind[] = ["dive", "climb", "bridge", "board", "flight", "cave"];
 
 /** Kinds that run inside the cave's void (CAVE, CAVE_EXIT): the camera is
  *  under the terrain surface there, which is drawn front faces only, so the
- *  void's own walls are all that the camera sees. */
+ *  void's own walls are all that the camera sees.
+ *  RETIRED 2026-10-13 with the "cave" kind (see TrailKind): no key is of a
+ *  kind listed here, so no part of the route is underground. */
 export const UNDERGROUND: readonly TrailKind[] = ["cave"];
 
 export interface Place {
@@ -168,6 +186,15 @@ export const OBSERVATORY = { x: -2052, y: 1650, z: -1560, facing: 125 } as const
  * stretches are unchanged, a3 -> a4 is 2.0 screens (the dwell and the dolly to
  * the curtain 0.5, the cave 0.4, the pull back 1.1); the tail 90 -> 110 so it
  * is a screen; 1,990 vh in all (tuning.ts's storage key bumped to "final").
+ * 2026-10-13 (Lovro: no cave between Video Ads 1 and 2): a3 -> a4 is one move
+ * across the gorge, 1,221 units where the cave pass and the pull back were
+ * 1,674, so a4's budget goes 200 -> 150: 1.5 screens, 12.3 vh per 100 units
+ * stop to stop (it was 11.9; a2 -> a3 is 14.5 and a4 -> a5 13.3) and 10.2 from
+ * the "crossing" mark to "wall", clear of both dwells, as the walks either
+ * side of it (8.1 to 10.6). At 140 the view's fastest turn is 1.3 degrees
+ * per vh (150: 1.25) and the middle 9.5; at 160 the middle is 11.0, slower
+ * than those walks. 1,940 vh in all (tuning.ts's storage key bumped to
+ * "direct").
  */
 const PLACE_DEFS: ReadonlyArray<Omit<Place, "trail">> = [
   { id: "a1", module: "Introduction", place: "The Landing", landmark: "Signpost", mesh: "LM_Signpost",
@@ -176,13 +203,14 @@ const PLACE_DEFS: ReadonlyArray<Omit<Place, "trail">> = [
   { id: "a2", module: "Fundamentals", place: "Base Camp", landmark: "Lookout", mesh: "LM_Lookout",
     pos: { x: 340, y: 150, z: 2760 }, light: "afternoon", scrollVh: 160, height: 70 },
   // The waterfall's base: where the falling water meets the pool (WORLD.falls.bottom).
-  // The stop is in the cave behind the curtain (CAVE), looking back out through
-  // the water; the landmark is still the falls themselves.
+  // The stop stands OUTSIDE, at the pool's west end (A3_VIEW; round 1 and the
+  // final pass moved it out of the cave). The cave behind the curtain (CAVE)
+  // is still in the world; since 2026-10-13 the camera never enters it.
   { id: "a3", module: "Video Ads I", place: "The Falls, and the cave behind them", landmark: "Waterfall", mesh: "LM_Waterfall",
     pos: { x: -100, y: 61.5, z: 1689 }, light: "late-afternoon", scrollVh: 300, height: 344 },
   // v6: the Trail Hut on the rock spur halfway up the gorge's north wall.
   { id: "a4", module: "Video Ads II", place: "The Gorge Trail", landmark: "Trail Hut", mesh: "LM_TrailHut",
-    pos: { x: TRAIL_HUT.x, y: TRAIL_HUT.y, z: TRAIL_HUT.z }, light: "gorge-sunset", scrollVh: 200, height: 30 },
+    pos: { x: TRAIL_HUT.x, y: TRAIL_HUT.y, z: TRAIL_HUT.z }, light: "gorge-sunset", scrollVh: 150, height: 30 },
   // The boathouse stands at the end of a jetty, on the water.
   { id: "a5", module: "Static Ads", place: "The Mirror Lake", landmark: "Boathouse", mesh: "LM_Boathouse",
     pos: { x: 1150, y: 564, z: -420 }, light: "sunset", scrollVh: 280, height: 40 },
@@ -866,6 +894,7 @@ export const PACE: Readonly<Record<TrailKind, number>> = {
   flight: 0.5,
   // Final pass: 1.7 -> 1.2, so the two passes through the curtain (in, and
   // back out) go by in a few frames each instead of a smear of cream.
+  // RETIRED 2026-10-13 with the kind (see TrailKind): no key is paced by it.
   cave: 1.2,
 };
 
@@ -887,21 +916,35 @@ interface Key {
   stop?: PlaceId;
   /** Vertical lens at this key, degrees (KEY_FOV); default STOP_FOV / DESIGN_FOV. */
   fov?: number;
-  /** Scroll pace at this key, overriding PACE[kind] (the cave hall: HALL_PACE). */
+  /** Scroll pace at this key, overriding PACE[kind] (the keys that pass the falls: FALLS_PACE). */
   pace?: number;
 }
 const K = (x: number, y: number, z: number, bearing: number, pitch: number, kind: TrailKind = "walk", stop?: PlaceId, fov?: number): Key =>
   ({ x, y, z, bearing, pitch, kind, stop, fov });
 /** Final pass D: the camp in the cave hall is walked slower than the two
  *  passes through the curtain (PACE.cave), so the camp holds the frame for a
- *  while and the view's turn toward it stays gentle. */
-const HALL_PACE = 3;
-const H = (k: Key): Key => ({ ...k, pace: HALL_PACE });
+ *  while and the view's turn toward it stays gentle.
+ *  RETIRED 2026-10-13 with the cave pass (see TrailKind "cave"): no key has
+ *  this pace. Kept, and exported so it is not an unused name, for whoever
+ *  brings the camera back into the hall; the H(...) wrapper that put it on a
+ *  row went with the rows. */
+export const HALL_PACE = 3;
 /** The keys either side of the curtain: quicker than PACE.cave, so the slow
  *  hall (its pace blurs ~70 units along the rail) doesn't stretch the two
- *  passes through the water. */
-const CURTAIN_PACE = 0.7;
-const F = (k: Key): Key => ({ ...k, pace: CURTAIN_PACE });
+ *  passes through the water.
+ *  RETIRED 2026-10-13 with the cave pass, as HALL_PACE (its wrapper was F). */
+export const CURTAIN_PACE = 0.7;
+/**
+ * 2026-10-13, the a3 -> a4 move: the keys that pass the falls (the camera
+ * ~340 from the curtain, the view turning with them at ~0.15 degrees per unit)
+ * are walked slower than PACE.walk, so the view turns at an even rate in
+ * scroll. At a walk's pace the turn peaked at 1.5 degrees per vh abeam of the
+ * falls; with this it holds 0.75 to 1.25 from a3 to the Trail Hut's bench
+ * (the cave pass peaked at 1.42). The camera does 7 to 9 units per vh past the
+ * falls and 12 on the pull back (the walks either side of the stretch: 9 to 12).
+ */
+const FALLS_PACE = 1.4;
+const S = (k: Key): Key => ({ ...k, pace: FALLS_PACE });
 
 // The rise: keys along the steps' line, `d` horizontal units past the foot, `up` above the line.
 const stepLine = (d: number, up: number): [number, number, number] => {
@@ -1074,40 +1117,62 @@ const KEYS: readonly Key[] = [
   // the whole falls on the right wall at x ~0.7, the gorge and its sky on the
   // left. Its click in is the authored PARK_VIEWS.a3.
   K(A3_VIEW.x, A3_VIEW.y, A3_VIEW.z, A3_VIEW.bearing, A3_VIEW.pitch, "walk", "a3", A3_VIEW.fov),
-  // Scroll on (final pass, Lovro: "go in and then directly up to video ads 2
-  // without doing any turning stuff"): straight ahead into the curtain and the
-  // cave, to the camp's string lights, and back out through the water the way
-  // it came, still facing in; then the camera pulls back and rises across the
-  // gorge to the Trail Hut's bench with the whole falls in front of it the
-  // whole way. The view only ever turns right, ~120 degrees from a3 to a4 in
-  // one slow sweep; round 1 turned 423 with four changes of direction (a 153
-  // degree whip round the hall, then a climb up the dark rock).
-  // Final pass D (the verifier: from ~640 to 662 vh the camera faced the
-  // hall's bare south wall, a flat fog room, with the camp off the right
-  // edge): the loop is shallow and stays ~90-110 north east of the camp (the
-  // tent, the fire, the string lights and the lanterns sit in the hall's
-  // south west), in on the west side clear of the hanging lantern, across,
-  // and back out on the east side, looking a little down at the camp the
-  // whole way (4 below level) while the view keeps turning right, 178 to 214:
-  // the camp drifts from the right of the frame to the left, never out of it.
-  // The four keys deep in the hall walk slower (H, HALL_PACE) and the keys
-  // either side of the curtain quicker (F, CURTAIN_PACE), so the camp holds
-  // the frame for ~20 vh while each pass through the water stays ~3 vh
-  // (shots/v6/finalD/route).
-  K(-205, 112, 1480, 154, -5, "walk", undefined, 52),
-  M("cave", F(K(-112, 94, 1664, 178, -1, "cave", undefined, 50))),
-  F(K(-110, 96, 1722, 186, 2, "cave", undefined, 50)),
-  K(-108, 98, 1748, 190.5, 4, "cave", undefined, 50),
-  H(K(-98, 100, 1762, 194.5, 4, "cave", undefined, 50)),
-  M("camp", H(K(-84, 101, 1764, 198.5, 4, "cave", undefined, 50))),
-  H(K(-71, 102, 1754, 202.5, 4, "cave", undefined, 50)),
-  H(K(-66, 103, 1734, 206.5, 4, "cave", undefined, 50)),
-  F(K(-68, 104, 1710, 209.5, 3, "cave", undefined, 50)),
-  F(K(-75, 107, 1686, 212, 1, "cave", undefined, 50)),
-  M("exit", F(K(-84, 118, 1626, 214, -5, "cave", undefined, 50))),
-  M("back", K(10, 170, 1536, 216, -8, "walk", undefined, 50)),
-  K(210, 236, 1418, 224, -7, "walk", undefined, 50),
-  M("wall", K(430, 290, 1330, 234, -7, "walk", undefined, 50)),
+  // a3 TO a4, ONE MOVE (2026-10-13, Lovro: "the camera between Video Ads 1 and
+  // Video Ads 2 goes into the cave for no reason. Just going straight from
+  // Video Ads 1 screen to Video Ads 2 and giving it a nice path"). From the a3
+  // view the camera drifts east along the gorge's north side, ~340 from the
+  // curtain, the falls passing on its right and kept at x 0.63 to 0.67 (0.69
+  // at the stop; the panel is on the left), lip to pool in the frame through a
+  // wide lens while they are close; then it pulls back and rises to the Trail
+  // Hut's bench and the falls slide to the middle as the hut comes in on the
+  // right. The view turns right only, 128 to 244.5, 0.75 to 1.25 degrees per
+  // vh all the way to the bench (S: FALLS_PACE on the keys that pass the falls);
+  // it never faces a wall with no falls or sky in it, never the ground.
+  // WHAT IT WAS, from the final pass (decision 53) until then: a dolly from a3
+  // straight into the curtain, ten "cave" keys (through the water, a shallow
+  // loop past the camp's string lights in the hall, back out through the
+  // water), the mark "back" in front of the falls, then the pull back and rise
+  // across the gorge. That was Lovro's own earlier call ("go in and then
+  // directly up to video ads 2 without doing any turning stuff", decision 46);
+  // this one replaces it. The old rows are in git at 0ad0646 and their frames
+  // in world-tests/shots/v6/a3a4/before/. The cave, its camp and its side
+  // passage are still built (blocks.ts, dress-underground.ts). From outside
+  // the curtain hides them: at 280 or more away the gaps in the water show
+  // dark, so nothing on the route shows the camp any more.
+  // 15 ROWS ON PURPOSE, as many as the cave pass had: rocks.ts (HERO_KEYS)
+  // and cover.ts (BAND) read TRAIL by raw index (39, 43, 44), so a4 and every
+  // key after it must keep its index or hero rocks and a grass band move to
+  // other cameras. Drop rows here only together with those two tables.
+  // HERO_KEYS 32 to 35 are rows of this stretch: 35 is "wall", and 32 to 34,
+  // the three before it, reach no rock that "wall" does not (they were the
+  // cave's exit and the pull back's first two keys).
+  // Thirteen rows from a3 to "wall", 56 apart (the first 43 from the stop and
+  // 68 from the second), then the last two of the old pull back where they
+  // stood: "wall" keeps its place (the bench's rocks stay as they are) and
+  // turns 9 less (the falls still on the right there), the row before a4 is
+  // untouched, so the arrival and a4's frame are today's.
+  // The first row is what aims the a3 stop: the rail blurs a stop's view with
+  // its neighbours', and with this row 43 out at 137.5 / -10.5 the stop is
+  // still aimed 126.1 / -11.8, as it was with the dolly's first key after it,
+  // and the pitch settles to the pass's -10.7 without overshooting it.
+  K(-287, 131, 1396, 137.5, -10.5, "walk", undefined, 58),
+  K(-222, 133, 1376, 148, -10.6, "walk", undefined, 58),
+  S(K(-167, 136, 1366, 157, -10.7, "walk", undefined, 58)),
+  // Square on to the falls, due north of the curtain: the whole drop, the
+  // foam and the pool, the rim's trees against the sky.
+  M("crossing", S(K(-111, 141, 1358, 166, -10.7, "walk", undefined, 57.5))),
+  S(K(-56, 147, 1352, 174.5, -10.6, "walk", undefined, 57.5)),
+  S(K(-1, 155, 1350, 183, -10.3, "walk", undefined, 57)),
+  S(K(54, 165, 1351, 190.5, -9.8, "walk", undefined, 56.5)),
+  S(K(109, 178, 1352, 198, -9.2, "walk", undefined, 55.5)),
+  S(K(163, 194, 1353, 204, -8.6, "walk", undefined, 54.5)),
+  // The rise: 0.35 up per unit along, the falls shrinking, the massif and
+  // the Upper Falls coming up over the south rim.
+  K(217, 212, 1352, 209.5, -8, "walk", undefined, 53.5),
+  K(270, 231, 1349, 214, -7.5, "walk", undefined, 52.5),
+  K(321, 251, 1346, 218, -7.2, "walk", undefined, 51.5),
+  K(374, 271, 1340, 221.5, -7, "walk", undefined, 50.5),
+  M("wall", K(430, 290, 1330, 225, -7, "walk", undefined, 50)),
   K(624, 324, 1262, 240, -8, "walk", undefined, 49),
   // a4 (bible 1.10): east of the bench on the wall, 24 over it, ~280 from the
   // Trail Hut, which stands 16 right of the falls (hut x ~0.65, falls ~0.42).
@@ -1258,6 +1323,12 @@ export const TRAIL_VIEW: ReadonlyArray<{ bearing: number; pitch: number }> = KEY
  * "back" is new (the pull back from the curtain), "exit" is the last key of
  * the cave pass (back out through the curtain) and "wall" is on the pull back
  * under the Trail Hut's bench.
+ * 2026-10-13 (the camera no longer enters the cave, see KEYS): "cave", "camp",
+ * "exit" and "back" are RETIRED with the rows they named; nothing may read
+ * them (light.ts read "cave" and "exit": its anchor is "wall" now;
+ * v6-strip.mjs's frames moved to the new stretch). "crossing" is back with a
+ * new meaning: the key square on to the falls, due north of the curtain, on
+ * the a3 -> a4 move. "wall" is where it was.
  */
 export const ROUTE_MARKS: Readonly<Record<string, number>> = Object.fromEntries(
   KEYS.flatMap((k, i) => (MARK_OF.has(k) ? [[MARK_OF.get(k) as string, i] as [string, number]] : [])),
@@ -1286,7 +1357,11 @@ export const FLIGHT_KEYS = rangeOf("flight");
 /** Final pass: in through the curtain, round the camp in the hall and back
  *  out through the curtain, facing in (a3 stands outside, before it). The
  *  side passage stays in the world (the trail's way out) but the camera no
- *  longer uses it. */
+ *  longer uses it.
+ *  RETIRED 2026-10-13 with the "cave" kind (see TrailKind): no key is a cave
+ *  key, so this is { first: -1, last: -1 }, and light.ts's cave light, which
+ *  reads it, is never switched on. Kept for the modules and tests that import
+ *  it. */
 export const CAVE_KEYS = rangeOf("cave");
 /** The first run of "hike" keys. Round 1: the traverse after a4 (the camera
  *  no longer hikes up to a4; it crosses the gorge and climbs the rock). */

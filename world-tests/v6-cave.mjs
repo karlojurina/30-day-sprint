@@ -1,21 +1,33 @@
 /**
  * v6 cave (world_art_bible_v6.md 1.7, 1.8, 5.1): the cave behind the falls on
- * the gorge's south wall, its side passage, and the locked click-in view.
+ * the gorge's south wall and its side passage.
  *
  *   node --import ./world-tests/v6-ts-resolve.mjs --experimental-strip-types --no-warnings world-tests/v6-cave.mjs
  *
- * On the rail as the scene builds it (createRail, the scene's ground):
- *   - every sample of a "cave" stretch is inside the void (caveMargin >= 3)
- *     or in open air (>= 15 over the ground or the pool, >= 8 from rock);
+ * 2026-10-13 (Lovro: "the camera between Video Ads 1 and Video Ads 2 goes into
+ * the cave for no reason. Just going straight from Video Ads 1 screen to Video
+ * Ads 2 and giving it a nice path"): the camera no longer enters the cave. The
+ * cave itself stays in the world, built and dressed as it was. So this test
+ * turned round: it used to prove the camera's pass through the cave (every
+ * sample of the "cave" stretch inside the void, and the pass coming after a3);
+ * now it proves the cave is still there and that the route stays out of it.
+ *
+ *   - the cave still builds: blocks.ts's two shells (the hall with its mouth,
+ *     and the side passage) come out with their triangles, mirrored into the
+ *     world where layout CAVE and CAVE_EXIT put them. (The camp, the lamps and
+ *     the lit walls are dress-underground.ts's, which needs a browser: the
+ *     dev page's moduleStats() has its figures.)
  *   - the mouth is behind the curtain (the curtain lands >= 3 in front of the
  *     arch at every height and is >= 5 wider each side);
  *   - the terrain stays >= CAVE_COVER over the hall and the side passage except
  *     at the two portals, and each portal breaks the surface (open air there);
  *   - the side passage is 60-100 long inside the rock, rises east, and opens
  *     on the cliff face 70-110 east of the curtain's east edge;
- *   - round 1 (decision 46): the cave's click-in view is no longer locked and
- *     a3 stands outside; the camera passes through the cave after it: the
- *     curtain, the camp's side of the hall, and out along the side passage.
+ *   - the route never enters the cave: no key of kind "cave" (layout
+ *     CAVE_KEYS is empty), and on the rail as the scene builds it (createRail,
+ *     the scene's ground) no stretch is of an UNDERGROUND kind, every sample
+ *     is outside the void (caveMargin < 0) and above the terrain's surface,
+ *     and a3 stands outside.
  * Exit code 1 on any failure.
  */
 import * as THREE from "three";
@@ -23,6 +35,7 @@ import * as L from "../src/lib/world-v6/layout.ts";
 import { terrainHeight } from "../src/lib/world-v6/terrain.ts";
 import { createRail } from "../src/lib/world-v6/rail.ts";
 import { railGround } from "../src/lib/world-v6/scene.ts";
+import { install as installBlocks } from "../src/lib/world-v6/blocks.ts";
 
 let failures = 0;
 const check = (name, pass, value) => {
@@ -33,53 +46,37 @@ const r1 = (v) => Math.round(v * 10) / 10;
 const C = L.CAVE;
 const CB = L.CAVE_BUILD;
 const F = L.WORLD.falls;
-const P = L.WORLD.pool;
 
-const rail = createRail();
-rail.setGround(railGround);
-const pose = { position: new THREE.Vector3(), target: new THREE.Vector3() };
-const n = L.TRAIL.length;
-function sAtKey(f) {
-  let lo = 0;
-  let hi = rail.length;
-  for (let i = 0; i < 60; i++) {
-    const m = (lo + hi) / 2;
-    if (rail.tAtS(m) < f / (n - 1)) lo = m;
-    else hi = m;
-  }
-  return (lo + hi) / 2;
-}
-function rockWithin(x, y, z, r) {
-  for (let d = 2; d <= r; d += 2) {
-    for (let a = 0; a < 32; a++) {
-      const th = (a / 32) * Math.PI * 2;
-      if (terrainHeight(x + Math.cos(th) * d, z + Math.sin(th) * d) > y) return true;
-    }
-  }
-  return false;
-}
-
-// 1. The camera in the cave stretch.
+// 1. The cave still builds.
 {
-  const s0 = sAtKey(L.CAVE_KEYS.first) - 10;
-  const s1 = sAtKey(L.CAVE_KEYS.last) + 10;
-  const bad = [];
-  let inside = 0;
-  let closest = { v: Infinity };
-  for (let s = s0; s <= s1; s += 2) {
-    rail.sampleS(s, pose);
-    const { x, y, z } = pose.position;
-    const m = L.caveMargin(x, y, z);
-    if (m >= 3) {
-      inside++;
-      if (m < closest.v) closest = { v: r1(m), p: [x, y, z].map(Math.round) };
-      continue;
-    }
-    const ground = Math.hypot(x - P.x, z - P.z) < P.r ? P.y : terrainHeight(x, z);
-    const open = y - ground >= 15 && !rockWithin(x, y, z, 8);
-    if (!open) bad.push({ s: Math.round(s), m: r1(m), p: [x, y, z].map(Math.round) });
-  }
-  check("the rail through the cave: inside the void (>= 3) or in open air (>= 15 up, >= 8 from rock)", bad.length === 0 && inside > 40, bad.length ? `${bad.length} bad, first ${JSON.stringify(bad.slice(0, 3))}` : `${inside} samples inside; closest to a wall ${JSON.stringify(closest)}`);
+  const scene = new THREE.Scene();
+  const blocks = installBlocks({ scene, camera: new THREE.PerspectiveCamera(), reducedMotion: true });
+  scene.add(blocks.root);
+  scene.updateMatrixWorld(true);
+  const shell = (name) => {
+    const o = blocks.root.getObjectByName(name);
+    if (!o || !o.isMesh) return null;
+    const g = o.geometry;
+    const box = new THREE.Box3().setFromObject(o);
+    return { tris: (g.index ? g.index.count : g.getAttribute("position").count) / 3, box };
+  };
+  const hall = shell("Mine_Cave");
+  const passage = shell("Mine_Tunnel");
+  const inBox = (b, x, y, z, pad) => !!b && x >= b.min.x - pad && x <= b.max.x + pad && y >= b.min.y - pad && y <= b.max.y + pad && z >= b.min.z - pad && z <= b.max.z + pad;
+  // The hall: its floor's ellipse and the top of its dome, and the mouth's sill at the cliff's foot.
+  const hallPts = [
+    [C.hallX - C.rx * 0.9, C.floorY + 4, C.hallZ],
+    [C.hallX + C.rx * 0.9, C.floorY + 4, C.hallZ],
+    [C.hallX, C.floorY + 4, C.hallZ + C.rz * 0.9],
+    [C.hallX, C.floorY + C.hallH - 4, C.hallZ],
+    [C.x, C.floorY + 4, C.footZ],
+  ];
+  const hallOk = !!hall && hall.tris >= 1000 && hallPts.every((p) => inBox(hall.box, p[0], p[1], p[2], 2));
+  // The side passage: every point of its centreline, at eye height.
+  const passOk = !!passage && passage.tris >= 300 && L.CAVE_EXIT.every((p) => inBox(passage.box, p[0], p[1] + L.CAVE_EXIT_EYE, p[2], 2));
+  const fmt = (s) => (s ? `${s.tris} triangles, x ${Math.round(s.box.min.x)}..${Math.round(s.box.max.x)}, y ${Math.round(s.box.min.y)}..${Math.round(s.box.max.y)}, z ${Math.round(s.box.min.z)}..${Math.round(s.box.max.z)}` : "MISSING");
+  check("the cave still builds: the hall's shell (with its mouth) and the side passage's, where layout CAVE and CAVE_EXIT put them", hallOk && passOk, `hall ${fmt(hall)}; passage ${fmt(passage)}`);
+  blocks.dispose();
 }
 // 2. The mouth behind the curtain.
 {
@@ -125,13 +122,33 @@ function rockWithin(x, y, z, r) {
   const opens = terrainHeight(O.x, O.z - 10) < O.y;
   check("the side passage: 60-100 inside the rock, rising east, opening on the cliff face 70-110 east of the curtain's east edge", len >= 60 && len <= 100 && rises && opens && O.x - eastEdge >= 70 && O.x - eastEdge <= 110, `${Math.round(len)} in rock, rises ${rises}, open air in front ${opens}, ${Math.round(O.x - eastEdge)} east of the curtain`);
 }
-// 4. Round 1: a3 is outside the cave, and the pass-through comes after it.
+// 4. The route never enters the cave.
 {
+  const rail = createRail();
+  rail.setGround(railGround);
+  const pose = { position: new THREE.Vector3(), target: new THREE.Vector3() };
+  const caveKeys = L.TRAIL_KIND.filter((k) => k === "cave").length;
+  let underKind = 0;
+  let below = 0;
+  let nearest = { v: -Infinity };
+  let n = 0;
+  for (let s = 0; s <= rail.length; s += 2) {
+    n++;
+    if (L.UNDERGROUND.includes(rail.kindAtS(s))) underKind++;
+    rail.sampleS(s, pose);
+    const { x, y, z } = pose.position;
+    if (y < terrainHeight(x, z)) below++;
+    const m = L.caveMargin(x, y, z);
+    if (m > nearest.v) nearest = { v: r1(m), s: Math.round(s), kind: rail.kindAtS(s), p: [x, y, z].map(Math.round) };
+  }
+  check(
+    "the route never enters the cave: no key of kind cave (CAVE_KEYS empty), no stretch of an UNDERGROUND kind, every sample of the rail outside the void and above the terrain's surface",
+    caveKeys === 0 && L.CAVE_KEYS.first === -1 && L.CAVE_KEYS.last === -1 && underKind === 0 && below === 0 && nearest.v < 0,
+    `${caveKeys} cave keys, CAVE_KEYS ${L.CAVE_KEYS.first}..${L.CAVE_KEYS.last}; of ${n} samples ${underKind} of an underground kind, ${below} under the surface; nearest to the void ${JSON.stringify(nearest)} (negative is outside)`,
+  );
   const a3 = L.PLACES[2];
   const p = L.TRAIL[a3.trail];
-  const out = L.caveMargin(...p) < 0 && p[1] > terrainHeight(p[0], p[2]);
-  const after = L.CAVE_KEYS.first > a3.trail && L.CAVE_KEYS.last > L.CAVE_KEYS.first;
-  check("a3 stands outside the cave and the pass-through (the cave keys) comes after it", out && after, `a3 key ${a3.trail}, cave keys ${L.CAVE_KEYS.first}-${L.CAVE_KEYS.last}`);
+  check("a3 stands outside the cave, in the open", L.caveMargin(...p) < 0 && p[1] > terrainHeight(p[0], p[2]), `a3 key ${a3.trail} at ${p.join(", ")}: ${r1(-L.caveMargin(...p))} from the void, ${Math.round(p[1] - terrainHeight(p[0], p[2]))} over the ground`);
 }
 console.log(failures ? `\n${failures} check(s) FAILED` : "\ncave: all pass");
 process.exit(failures ? 1 : 0);

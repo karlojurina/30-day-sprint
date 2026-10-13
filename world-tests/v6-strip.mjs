@@ -47,6 +47,14 @@ const want = (k) => (named.length === 0 && MODES.includes(k)) || named.includes(
  * the rock up to a4 (32-38), the traverse and the gully (39-44), the burst (45);
  * from the key after the burst on, v5's rows (v6-locked.mjs). v6-perf.mjs and
  * v6-overdraw.mjs read STRIP_FRAMES from this source.
+ * 2026-10-13 (Lovro: "the camera between Video Ads 1 and Video Ads 2 goes into
+ * the cave for no reason"): the camera no longer enters the cave. From a3
+ * (key 21) it crosses the gorge in one move, past the falls and up to a4 (key
+ * 37); the seven frames between the two stops follow it. The marks "cave",
+ * "camp", "exit" and "back" are retired in layout.ts; "crossing" (key 25) is
+ * the key square on to the falls and "wall" (key 35) is under the Trail Hut's
+ * bench. A frame's name takes "+offset" only, so the frames before a mark are
+ * named from the stop ("a3+3").
  */
 // Round 1: the key count is read from the page (layout TRAIL) when the world
 // opens; 86 is only the fallback. A frame's optional third field names it
@@ -66,19 +74,20 @@ const STRIP_FRAMES = [
   [16, "the ride: falling with the water, looking down it", "fall+1"],
   [18, "the ride: levelling out over the pool", "pool"],
   [20, "the turn at the pool, round the upper gorge", "pool+2"],
-  [22, "a3 the whole falls, from outside", "stop:a3"],
-  // Final pass E (the verifier): the approach to the curtain and the rise
-  // from the sheet after the exit, the two heaviest frames of round D, so
-  // v6-perf measures them on every run. Both numbers match their keys today
-  // (a3 is key 21, exit is key 32).
-  [22.5, "the approach to the curtain", "a3+1.5"],
-  [24.4, "through the curtain, into the cave", "cave+0.4"],
-  [26, "the cave: past the camp", "camp"],
-  [31, "out of the side passage onto the cliff face", "exit"],
-  [32, "rising from the sheet after the exit"],
-  [33.5, "across the gorge toward the spur", "crossing+1.5"],
-  [36.5, "up the rock, turning to the falls", "wall+1.5"],
-  [38, "a4 the Trail Hut", "stop:a4"],
+  [21, "a3 the whole falls, from outside", "stop:a3"],
+  // 2026-10-13: a3 to a4 in one move across the gorge (no cave). These seven
+  // replace the cave pass's seven (the approach to the curtain, through the
+  // curtain, past the camp, out again, rising from the sheet, across the
+  // gorge, up the rock), so every later frame keeps its place in the sheets.
+  // The numbers match the keys today (a3 is key 21, crossing 25, wall 35, a4 37).
+  [22, "leaving a3: east along the gorge, the falls on the right", "a3+1"],
+  [24, "coming up square on to the falls", "a3+3"],
+  [25, "square on to the falls: lip to pool", "crossing"],
+  [27.5, "past the falls, the view turning with them", "crossing+2.5"],
+  [30, "the last key that passes the falls, starting to rise", "crossing+5"],
+  [33, "pulling back and rising across the gorge", "crossing+8"],
+  [35.5, "under the Trail Hut's bench, the falls sliding to the middle", "wall+0.5"],
+  [37, "a4 the Trail Hut", "stop:a4"],
   [39.5, "the traverse, facing ahead", "traverse+0.5"],
   [42.6, "the gully, the notch of sky", "gully+0.6"],
   [45, "bursting out on the ridge", "burst"],
@@ -102,8 +111,8 @@ const STRIP_FRAMES = [
   [84.6, "the tail: through the arch into the sun"],
 ];
 const STRIP_SHEETS = [
-  ["sheet-strip-1.png", 0, 12, "the opening to the side passage's exit"],
-  ["sheet-strip-2.png", 12, 24, "the crossing, the hike and a4 to the Great Tree"],
+  ["sheet-strip-1.png", 0, 12, "the opening to the start of the move past the falls"],
+  ["sheet-strip-2.png", 12, 24, "square on to the falls, the rise and a4 to the Great Tree"],
   ["sheet-strip-3.png", 24, 35, "the rise, the sky island, the flight and the Gate"],
 ];
 /**

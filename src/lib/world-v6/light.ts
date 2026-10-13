@@ -552,16 +552,34 @@ export interface LightWaypoint {
  * so a change to the route (keys added or removed) moves the light with it.
  * The raw numbers these replace (11, 23, 32.5, 38, 42, 43.6, 45) had already
  * drifted after round 1: 38 fell on a4 and was dropped.
- *   stream .. a3|cave      late-afternoon: from a third of the way from the
+ *   stream .. a3           late-afternoon: from a third of the way from the
  *                          stream to the lip, the lip, the ride, the turn at
  *                          the pool and a3 hold one sun (285 / 11, the mist
- *                          lit ahead left), until halfway from a3 to the cave
- *   exit - 0.5 .. gully    gorge-sunset: the sun is low in the WNW (300 / 6)
- *                          by the time the camera leaves the cave's side
- *                          passage (hidden behind the cave's own light, which
- *                          ends at CAVE_KEYS.last), and stays there up to a4
- *                          (hikeTo, just before it) and along the traverse to
- *                          the gully's foot
+ *                          lit ahead left)
+ *   a3 .. wall             the blend to gorge-sunset, eased at both ends: it
+ *                          starts as the camera leaves the a3 stop and is
+ *                          done by the "wall" mark, under the Trail Hut's
+ *                          bench: the sun sinks 5 degrees and swings 15 while
+ *                          the camera passes the falls and pulls away from
+ *                          them (about 790 units, two thirds of the move)
+ *   wall .. gully          gorge-sunset: the sun is low in the WNW (300 / 6)
+ *                          from the "wall" mark (a hold) up to a4 (hikeTo,
+ *                          just before it) and along the traverse to the
+ *                          gully's foot, so the last third of the move and
+ *                          the arrival are in a4's light, as they were.
+ *                          2026-10-13 (Lovro: the camera no longer goes into
+ *                          the cave between Video Ads 1 and 2): there were
+ *                          two anchors here, late-afternoon until "halfway
+ *                          from a3 to the cave" (turnTo) and gorge-sunset
+ *                          from "exit - 0.5" (exitOut), and the blend between
+ *                          them ran out of sight under the cave's own light.
+ *                          Both marks are retired. The blend runs in the
+ *                          open now, so it is as long and as soft as the
+ *                          move allows: turnTo is gone (the a3 stop is the
+ *                          late-afternoon hold it starts from) and exitOut
+ *                          became wallTo, a hold (as a pass-through the
+ *                          change stopped dead at 1.8 times its mean rate:
+ *                          unseen in the dark, a visible stop in the open)
  *   gully .. burst (0.53)  sunset-cliff: the sun swings to 228 inside the
  *                          gully, where its walls hide the swing
  *   burst                  half sunset-cliff, half sunset: v5's burst sat
@@ -583,8 +601,7 @@ const between = (a: number, b: number, t: number) => a + (b - a) * t;
 const V6_WAYPOINT_KEYS = {
   opening: 0,
   streamFrom: between(markKey("stream"), markKey("lip"), 1 / 3),
-  turnTo: between(placeKey("a3"), markKey("cave"), 0.5),
-  exitOut: markKey("exit") - 0.5,
+  wallTo: markKey("wall"),
   hikeTo: placeKey("a4") - 0.5,
   traverseTo: markKey("gully"),
   gully: between(markKey("gully"), markKey("burst"), 1.6 / 3),
@@ -594,8 +611,7 @@ export const LIGHT_WAYPOINTS: ReadonlyArray<LightWaypoint> = [
   // Fix round 1: the opening's clearer air, held at key 0, eased into a1.
   { key: V6_WAYPOINT_KEYS.opening, light: "opening-gold", hold: true },
   { key: V6_WAYPOINT_KEYS.streamFrom, light: "late-afternoon", hold: false },
-  { key: V6_WAYPOINT_KEYS.turnTo, light: "late-afternoon", hold: false },
-  { key: V6_WAYPOINT_KEYS.exitOut, light: "gorge-sunset", hold: false },
+  { key: V6_WAYPOINT_KEYS.wallTo, light: "gorge-sunset", hold: true },
   { key: V6_WAYPOINT_KEYS.hikeTo, light: "gorge-sunset", hold: false },
   { key: V6_WAYPOINT_KEYS.traverseTo, light: "gorge-sunset", hold: false },
   { key: V6_WAYPOINT_KEYS.gully, light: "sunset-cliff", hold: false },
@@ -646,6 +662,13 @@ const FOREST_DIM = { fill: 0.7, ambient: 0.6, moon: 0.5, exposure: 0.45 } as con
  *           opening (CAVE_KEYS.first + 5.6 .. last - 0.5); the sun once the
  *           camera is out on the cliff face (last - 1.0 .. last - 0.35)
  * v6 removed the mine: its tunnel key and the shaft's blend are gone.
+ * RETIRED 2026-10-13 (Lovro: "the camera between Video Ads 1 and Video Ads 2
+ * goes into the cave for no reason"): the route has no "cave" key (layout
+ * CAVE_KEYS is { first: -1, last: -1 }), so undergroundAt() is [0, 0] at every
+ * depth and this key is never blended in. The cave is still built and
+ * dressed; what shows of it through the gaps in the curtain is lit by the
+ * daylight key of the moment and its own lamps, as it was from the a3 stop.
+ * The key and the blend stay for whoever brings the camera back inside.
  */
 export const UNDERGROUND = {
   cave: {
@@ -675,7 +698,8 @@ const underLinear = (k: (typeof UNDERGROUND)["cave"]) => ({
 });
 let UNDER_CAVE: ReturnType<typeof underLinear> | null = null;
 
-/** How far into the cave the camera is at railU u: [fill and fog weight, sun-out weight]. */
+/** How far into the cave the camera is at railU u: [fill and fog weight, sun-out weight].
+ *  [0, 0] everywhere while the route has no cave keys (retired 2026-10-13, see UNDERGROUND). */
 export function undergroundAt(u: number): [number, number] {
   if (CAVE_KEYS.first < 0 || CAVE_KEYS.last <= CAVE_KEYS.first) return [0, 0];
   const k = u * (TRAIL.length - 1);

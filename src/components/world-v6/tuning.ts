@@ -58,8 +58,13 @@ export const DEFAULT_TUNING: Tuning = {
 // turn after the Trail Hut, the tail 110 -> 60 now that it ends at the arch),
 // so pacing restarts from the defaults under :finalB; lock and progress carry
 // over from :final first.
-const KEY = "world-v6:tuning:finalB";
-const OLD_KEYS = ["world-v6:tuning:final", "world-v6:tuning:r1", "world-v6:tuning:p3", "world-v6:tuning"] as const;
+// 2026-10-13 (Lovro: no cave between Video Ads 1 and 2): the Video Ads II
+// stretch is one move across the gorge now, a quarter shorter, and its budget
+// went 200 -> 150 (1,990 -> 1,940 vh in all), so a :finalB save would spend
+// the old budget on the new stretch: pacing restarts from the defaults under
+// :direct; lock and progress carry over from :finalB first.
+const KEY = "world-v6:tuning:direct";
+const OLD_KEYS = ["world-v6:tuning:finalB", "world-v6:tuning:final", "world-v6:tuning:r1", "world-v6:tuning:p3", "world-v6:tuning"] as const;
 const LOCKS: readonly LockMode[] = ["open", "look", "locked"];
 const N = PLACES.length;
 

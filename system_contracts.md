@@ -189,9 +189,12 @@ When adding a new table, append it here. When deleting a field, scan
   with a video (a row in `lesson_videos`) and no `duration_seconds`
   cannot be completed by watching: `record_lesson_heartbeat` and
   `judgeWatch` (`src/lib/world/watch-rules.ts`) both measure against
-  the catalog's duration and nothing else. Nothing fills it for a Tella
-  video. It is set by hand when the lesson's `lesson_videos` row goes
-  in. The lock check reports a lesson that has a video and no length,
+  the catalog's duration and nothing else. No code in the app fills
+  it. For a lesson whose id is shaped like `a3l07` (a course id) the
+  video load sets it, in the same transaction as the lesson's
+  `lesson_videos` row, and empties it when the lesson is not in the
+  load's list. Only for any other id is it set by hand when the row
+  goes in. The lock check reports a lesson that has a video and no length,
   and a length that differs from Tella's by more than 2 seconds. On the
   lesson page, a video that plays to its end on a lesson with no
   length, or with one too long for its 95% point to be reached, gets
@@ -210,9 +213,16 @@ When adding a new table, append it here. When deleting a field, scan
 - **Owner:** the course rebuild (branch `world-engine`). The staging
   copy of `regions` for the eight-area course.
 - **Depends on:** nothing
-- **Written by:** migrations only. v94 creates and seeds it; v99 sets
-  `landmark_label`, `rail_at` and `terrain`. Nothing in `src/` writes
-  it.
+- **Written by:** migrations, each on its own columns, and one undo
+  file. v94 creates and seeds it; v99 sets `landmark_label`, `rail_at`
+  and `terrain`; v101 sets `name` on the 8 rows and no other column (the
+  course's own names: Introduction, Marketing Fundamentals, Video Ads
+  I, Video Ads II, Static Ads, AI Ads + Content, Creative Strategy, How
+  To Land Clients). `supabase/undo/2026_v101_undo.sql` puts v94's names
+  back by running v94's own seed statement again, which sets `name` and
+  `order_num`. Nothing in `src/` writes it. v101 has not been run on
+  production (2026-10-13): until it is, production holds v94's names
+  (Fundamentals, AI Ads & Content and Job Board for a2, a6 and a8).
 - **Depended on by:** `lessons_next.region_id`. While
   `CATALOG_TABLE_SUFFIX` is `_next`: `GET /api/student/data` returns
   these rows as `regions`, and through it `StudentContext` (so
@@ -234,7 +244,32 @@ When adding a new table, append it here. When deleting a field, scan
   copy of `lessons`.
 - **Depends on:** `regions_next` (foreign key on `region_id`, cascade
   on delete)
-- **Written by:** migrations only (v94). Nothing in `src/` writes it.
+- **Written by:** SQL pasted into the Supabase SQL editor, and nothing
+  in `src/`. v94 created and seeded it. Two files write it now, each
+  on its own columns, and an undo file takes the first back.
+  - **Migration v101** (`2026_v101_course_catalog.sql`, generated from
+    `supabase/catalog/course_catalog.json` by `npm run build:catalog`)
+    rewrites the rows in place over v94's placeholder seed. It owns
+    `id`, `region_id`, `type`, `title`, `description`, `sort_order`,
+    `requires_action`, `action_brief`, `is_optional`, `is_gate`,
+    `lesson_group_id`, `discord_channel`, `counts_toward_progress` and
+    `feature_key`. It never writes `duration_seconds`,
+    `bunny_video_id`, `video_ready_at` or `created_at`, so a row that
+    exists keeps its own. A row whose id the course does not have is
+    deleted. After it the table holds the data file's 141 rows, 140 of
+    them counting toward progress, in 8 areas of 8, 11, 25, 17, 26, 22,
+    19 and 13.
+  - **The video load** (`supabase/diagnostics/load-lesson-videos.sql`,
+    run as a filled private copy) owns `duration_seconds` on every
+    lesson whose id is shaped like `a3l07`: it sets it on a listed
+    lesson, which is always a `watch` lesson, and empties it on every
+    one that is not listed, whatever its type. It writes no other
+    column here. It reads `title`: it refuses a list in which a title
+    differs from the title the lesson has here.
+  - `supabase/undo/2026_v101_undo.sql` deletes every row and runs v94's
+    seed statements again.
+  - Neither v101 nor the load has been run on production (2026-10-13).
+    Until v101 is, production holds v94's 145 placeholder lessons.
 - **Depended on by:** while `CATALOG_TABLE_SUFFIX` is `_next`:
   `GET /api/student/data` (returns these rows as `lessons`),
   `POST /api/student/lesson-video` and `POST /api/student/lesson-watched`
@@ -263,6 +298,13 @@ When adding a new table, append it here. When deleting a field, scan
   and the video would play, and every heartbeat would be refused with
   `22023`, so nothing is recorded (read from the code; the refusal is
   in the migration tests, the route was never run).
+- **Note:** `lesson_videos` and `student_lesson_watch` name a lesson by
+  its `id` with no foreign key. v101 refuses, changing nothing, to
+  retitle or delete a lesson that a row of either table points at, to
+  turn a lesson that has a `lesson_videos` row into a lesson that is
+  not a `watch` lesson, and to run while a `lesson_videos` row sits on
+  a course-shaped id that has no lesson here. Its undo refuses while a
+  row of either table points at any id shaped like `a3l07`.
 - **Note:** RLS on, with one select policy for any signed-in user, so
   every column stored here is readable by any account that is signed
   in. That is why a Tella video id is kept in `lesson_videos`.
@@ -277,18 +319,42 @@ When adding a new table, append it here. When deleting a field, scan
   key, on purpose: until the cutover the table may hold ids from both
   `lessons` and `lessons_next`. The foreign key to `lessons` is handed
   forward to the cutover.
-- **Written by:** two writers, on different columns. A person, by hand
-  in the Supabase SQL editor, inserts, changes and deletes rows
-  (`lesson_id`, `tella_video_id`); the morning kit's stamp and unstamp
-  files are that same hand, for the two test lessons.
-  `GET /api/cron/check-lesson-videos` updates `lock_status`,
-  `lock_detail` and `lock_checked_at` and no other column, and its
-  update is filtered on `lesson_id` AND `tella_video_id`, so a verdict
-  lands only on a row that still holds the video Tella was asked
-  about. No route a student can reach writes it.
+- **Written by:** three writers. No route a student can reach writes
+  it.
+  - **The video load** (`supabase/diagnostics/load-lesson-videos.sql`)
+    owns the rows whose `lesson_id` is shaped like `a3l07`, the
+    course's lessons. The tracked file is a template that holds no id
+    and refuses to run. A tool outside this repository
+    (`clients/ecom-university/tools/tella/` in the owner's workspace)
+    writes a filled private copy, and a person pastes that into the
+    Supabase SQL editor. A row of its list has four columns: lesson
+    id, the lesson's title, video id, seconds. It refuses a list in
+    which a title differs from the title that lesson has in the
+    catalog, so a list made for another version of the course cannot
+    go in. Its list is the whole truth for those ids: it
+    inserts a row for a listed lesson, and when the list gives a lesson
+    another video it replaces `tella_video_id`, sets `lock_status` back
+    to `unchecked` and empties `lock_detail` and `lock_checked_at`. A
+    row that already holds the listed video is not touched. A course
+    lesson that is not listed loses its row. It never writes a row on
+    any other id. In the same transaction it writes `duration_seconds`
+    on `lessons_next` and `lessons` for the same ids, so a course
+    lesson has a length exactly when it has a video. It has not been
+    run on production (2026-10-13).
+  - **A person, by hand** in the Supabase SQL editor, inserts, changes
+    and deletes rows on any other id (`lesson_id`, `tella_video_id`);
+    the morning kit's stamp and unstamp files are that same hand, for
+    the two test lessons.
+  - **`GET /api/cron/check-lesson-videos`** updates `lock_status`,
+    `lock_detail` and `lock_checked_at` and no other column, and its
+    update is filtered on `lesson_id` AND `tella_video_id`, so a
+    verdict lands only on a row that still holds the video Tella was
+    asked about.
 - **Guarded against the two files that could erase a row:** the rows
-  are the only record of which video belongs to which lesson (no other
-  table has it, and the repository never does).
+  are the database's only record of which video belongs to which
+  lesson (no other table has it, and the repository never does). For
+  the course's lessons the same pairs are also in the Tella tool's
+  private files, outside this repository.
   `supabase/undo/2026_v100_undo.sql` refuses to run while the table
   holds any row: it raises before its transaction starts, gives the
   count and the select that saves the rows, and changes nothing.
@@ -302,7 +368,15 @@ When adding a new table, append it here. When deleting a field, scan
   `record_lesson_heartbeat` (a lesson is playable only when it has a
   row here), `GET /api/cron/check-lesson-videos` (reads `lesson_id` and
   `tella_video_id` of every row, ordered by `lock_checked_at` with the
-  rows never checked first)
+  rows never checked first). Three SQL files read `lesson_id` when the
+  table exists: migration v101 and `supabase/undo/2026_v101_undo.sql`
+  (v101 refuses while a row points at a lesson it would retitle,
+  delete or turn into a lesson that is not a `watch` lesson, or sits
+  on a course-shaped id that has no lesson in `lessons_next`; the undo
+  refuses while a row points at any course-shaped id) and
+  `supabase/diagnostics/course-catalog-check.sql` (read only; three of
+  its four checks read the video rows, the newest one counting video
+  rows on lessons that are not `watch` lessons)
 - **Stable contract:** `lesson_id` (text, primary key, so one video per
   lesson), `tella_video_id` (text, not null, unique, so one lesson per
   video; it must match `^vid_[a-z0-9]{10,64}$`, the same pattern as
@@ -345,8 +419,12 @@ When adding a new table, append it here. When deleting a field, scan
   commit message, a log line or an error message. The repository is
   public and the id is the video's address. `CONTEXT.md` has the rule
   and its reason ("Lesson videos on Tella: the rules").
-- **Note:** a row does not make a lesson completable by itself.
-  `lessons.duration_seconds` has to be set with it.
+- **Note:** a row does not make a lesson completable by itself. The
+  lesson's `duration_seconds` has to be set with it. The video load
+  does that for a course lesson; for any other lesson
+  `lessons.duration_seconds` is set by hand. Before the cutover a
+  course lesson cannot be completed either way (the `lessons_next`
+  entry says why).
 - **Unproven:** whether production grants a new table to `service_role`
   by default. The routes and the lock check need it. v100's commented
   post-check has a column for it (`service_reads_and_writes`) and the
@@ -1077,8 +1155,11 @@ called against a database or run on a deployment.
   header and was never measured on Vercel: about 385 at 0.7 seconds a
   video, about 190 at 1.4 seconds a video (the pace two requests from
   a laptop suggest), and 27 on a day when every request runs into its
-  10 second limit. The course's 145 fit as long as Tella answers in
-  about 1.6 seconds or less on average.
+  10 second limit. The header reckons with 145 videos, the size of
+  v94's placeholder course, and 145 fit as long as Tella answers in
+  about 1.6 seconds or less on average. The real course has 141
+  lessons and 115 of them have a video in Tella (2026-10-13), so a
+  full load is fewer rows than that.
 - **Proven and unproven:** `node world-tests/lock-check-sim.mjs` runs
   this route file, `tella-lock.ts`, `tella-api.ts`, `cron-auth.ts` and
   `discord.ts` as they are against stand-ins for `fetch`, the Supabase

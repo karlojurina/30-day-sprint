@@ -12,11 +12,19 @@
 --   Under "insert into _load values" stands one placeholder line. The tool
 --   puts the rows in its place, one per lesson, the last one closed with a
 --   semicolon:
---     ('a1l01', '<video id>', 756),
---     ('a1l02', '<video id>', 431);
---   That is: the lesson id, the Tella video id, the length in whole seconds.
+--     ('a1l01', 'Welcome to Ecom University', '<video id>', 756),
+--     ('a1l07', 'Why You''re Not Behind', '<video id>', 431);
+--   That is: the lesson id, the lesson's title as the tool read it from the
+--   course's data file, the Tella video id, the length in whole seconds.
+--   Every single quote inside a title is written twice.
 --   A Tella video id is vid_ followed by 10 to 64 lower-case letters and
 --   digits: no link, no spaces, no capitals.
+--
+-- WHY THE TITLE IS IN THE LIST
+--   A lesson id is a place in the course. When the course changes, the same
+--   id can come to name another lesson. The title ties each row to the lesson
+--   the video was matched with: the file refuses when the catalog has another
+--   title under that id, and the videos cannot land on the wrong lessons.
 --
 -- WHAT IT DOES
 --   The list is the whole truth about the course's videos. After this file
@@ -30,8 +38,8 @@
 --      changed, start as 'unchecked' with no detail, so the next lock check
 --      judges the video that is really there.
 --   4. Sets duration_seconds on every listed lesson, in lessons_next and in
---      lessons, and empties it on every other watch lesson of the course. A
---      course lesson has a length exactly when it has a video.
+--      lessons, and empties it on every other lesson of the course, whatever
+--      its type. A course lesson has a length exactly when it has a video.
 --   5. Ends with a table: what this run did, then one row per area of the
 --      staging catalog. It shows numbers only, never an id of a lesson or of
 --      a video.
@@ -39,8 +47,9 @@
 -- WHAT COUNTS AS A COURSE LESSON
 --   An id shaped like a3l07: a, the area 1 to 8, l, two digits. A row of
 --   lesson_videos on any other id, such as a test stamp on the live lesson
---   l004, is never read and never written, and neither is that lesson's
---   length.
+--   l004, is never written, and neither is that lesson's length. One guard
+--   reads those rows: it looks whether a video of the list already sits on
+--   one of them, and when it does the file refuses and names that lesson.
 --
 -- WHEN IT REFUSES, changing nothing
 --   * the placeholder line is still there;
@@ -53,12 +62,17 @@
 --   * a lesson is in the list twice, or a video is;
 --   * a length is empty, 0 or below;
 --   * a lesson in the list is in neither catalog, or is not a watch lesson;
+--   * a title in the list is not the title the catalog has for that lesson:
+--     lessons_next when the lesson is there, lessons when it is only there.
+--     The list was made for another version of the course;
 --   * a video in the list already sits on a lesson outside the course. That
 --     is a test stamp, and unstamp-tella-test-lessons.sql takes it off.
---   No message repeats a video id. A message says WHICH lessons only when
---   their ids are shaped like course lesson ids: at most 10 of them, then
---   "and N more". Anything else found in the lesson column is counted and
---   never repeated, because a video id may have been pasted there.
+--   No message repeats a video id or a title. Four of them say WHICH
+--   lessons, by id: a lesson twice, a lesson in neither catalog, a lesson
+--   that is not a watch lesson, a lesson with another title. They name only
+--   ids shaped like course lesson ids, at most 10 of them, then "and N more".
+--   Anything else found in the lesson column is counted and never repeated,
+--   because a video id may have been pasted there.
 --
 -- SAFE TO RUN AGAIN. With the same list a second run changes nothing: no
 -- row, no lock_status, no updated_at.
@@ -73,11 +87,11 @@
 
 begin;
 
-create temp table _load (lesson_id text, tella_video_id text, seconds int) on commit drop;
+create temp table _load (lesson_id text, title text, tella_video_id text, seconds int) on commit drop;
 
 -- ▼▼▼ THE ROWS GO HERE, IN PLACE OF THE ONE LINE UNDER "values" ▼▼▼
 insert into _load values
-  ('REPLACE_WITH_ROWS', 'REPLACE_WITH_ROWS', 0);
+  ('REPLACE_WITH_ROWS', 'REPLACE_WITH_ROWS', 'REPLACE_WITH_ROWS', 0);
 -- ▲▲▲ nothing below this line changes ▲▲▲
 
 do $load$
@@ -95,11 +109,11 @@ declare
   v_removed bigint;
 begin
   -- ─────────────── The list is checked before anything is written ───────────────
-  -- A message never repeats a video id, and never a lesson id of the wrong
+  -- A message never repeats a video id, a title, or a lesson id of the wrong
   -- shape. See the header.
 
   if exists (select 1 from _load n
-              where n.lesson_id ~ 'REPLACE_WITH' or n.tella_video_id ~ 'REPLACE_WITH') then
+              where n.lesson_id ~ 'REPLACE_WITH' or n.title ~ 'REPLACE_WITH' or n.tella_video_id ~ 'REPLACE_WITH') then
     raise exception 'The placeholder line was not replaced with the rows. This file is the template: the file to run is the filled copy the Tella tool writes. Nothing was changed.';
   end if;
 
@@ -169,6 +183,22 @@ begin
     raise exception '% lesson(s) of the list are not watch lessons: %. Only a watch lesson can hold a video. Nothing was changed.', v_n, v_which;
   end if;
 
+  -- Every row carries the title its video was matched with. The catalog's
+  -- title is the one in lessons_next when the lesson is there, and the one in
+  -- lessons when it is only there. Another title under the same id means the
+  -- course has changed since the list was made.
+  select count(*), array_agg(n.lesson_id order by n.lesson_id) filter (where n.lesson_id ~ c_course)
+    into v_n, v_ids
+    from _load n
+   where n.title is distinct from coalesce(
+           (select l.title from public.lessons_next l where l.id = n.lesson_id),
+           (select l.title from public.lessons l where l.id = n.lesson_id));
+  if v_n > 0 then
+    v_which := coalesce(array_to_string(v_ids[1:10], ', '), 'none that can be named')
+               || case when cardinality(v_ids) > 10 then ' and ' || (cardinality(v_ids) - 10) || ' more' else '' end;
+    raise exception '% lesson(s) of the list carry another title than the catalog has under that id: %. This list was made for another version of the course. Run the match and the sql command of the Tella tool again, and paste the file it writes. Nothing was changed.', v_n, v_which;
+  end if;
+
   -- A video of the list that sits on a lesson outside the course. The lesson
   -- named here comes out of lesson_videos, and it is a live lesson.
   select count(*), string_agg(v.lesson_id, ', ' order by v.lesson_id)
@@ -235,18 +265,17 @@ begin
    where l.id = n.lesson_id
      and l.duration_seconds is distinct from n.seconds;
 
-  -- A watch lesson of the course that has no video has no length.
+  -- A lesson of the course that has no video has no length, whatever its
+  -- type.
   update public.lessons_next l
      set duration_seconds = null
    where l.id ~ c_course
-     and l.type = 'watch'
      and l.duration_seconds is not null
      and not exists (select 1 from _load n where n.lesson_id = l.id);
 
   update public.lessons l
      set duration_seconds = null
    where l.id ~ c_course
-     and l.type = 'watch'
      and l.duration_seconds is not null
      and not exists (select 1 from _load n where n.lesson_id = l.id);
 
@@ -261,9 +290,12 @@ commit;
 
 -- What it did. This is the table the SQL editor shows.
 with did as (
-  -- The four numbers of this run. They are read only when the block above
-  -- set them in the last five minutes, so numbers left on the connection by
-  -- an earlier run are never shown as this run's.
+  -- The four numbers of this run. They are read only when a block like the
+  -- one above set them on this connection in the last five minutes. Pasted
+  -- and run in one go, that block is this run's, and the numbers are its own.
+  -- Sent statement by statement on a session that is used again, the select
+  -- can show the numbers of an earlier run that is less than five minutes
+  -- old. with_video and with_length are counted from the tables either way.
   select string_to_array(current_setting('course_load.did', true), ',') as n
    where coalesce(nullif(current_setting('course_load.at', true), ''), '2000-01-01')::timestamptz
          > clock_timestamp() - interval '5 minutes'
@@ -305,4 +337,5 @@ select t.line, t.name, t.loaded, t.new_rows, t.changed_videos, t.removed_rows,
 --
 -- If the file ran without an error and the first row shows no numbers under
 -- loaded, the block and this select did not share a session. The load still
--- happened: with_video and with_length say so.
+-- happened: with_video and with_length say so, and they are always read from
+-- the tables.

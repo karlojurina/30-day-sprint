@@ -23,7 +23,8 @@
 // that are not in the order a1 to a8; a type other than watch or setup; a
 // title that is empty, untrimmed or over 120 characters; no gate or more
 // than one; two lessons of one area outside the lesson count; a feature key
-// on two lessons; a brief with a link in it.
+// on two lessons; a brief with a link in it (http, www., or a bare domain
+// such as discord.gg/x).
 //
 // The undo's seed statements are copied out of v94's own file. Nothing in
 // them is typed here, so the undo cannot drift from what v94 really seeds.
@@ -46,6 +47,9 @@ const LESSON_ID = /^a[1-8]l[0-9]{2}$/
 // The same pattern as text, for the SQL this script writes.
 const LESSON_ID_SQL = '^a[1-8]l[0-9]{2}$'
 const TITLE_MAX = 120
+// A link in a brief: http, www., or a bare domain, which is a word, a dot and
+// one of these endings with nothing joined on after it (discord.gg/x).
+const LINK = /http|www\.|\w\.(?:com|gg|io|net|org|app|co|tv)\b/i
 // How far step 4 of the migration moves every sort_order out of the way.
 const PARKED = 100000
 
@@ -116,7 +120,7 @@ function problems(c) {
 
     if (l.action_brief !== undefined) {
       if (!isText(l.action_brief) || l.action_brief.trim() === '') out.push(`The brief of lesson ${id} is empty. Leave the brief out when the lesson is not an action item.`)
-      else if (/http/i.test(l.action_brief)) out.push(`The brief of lesson ${id} holds a link. A brief is plain text with no link in it.`)
+      else if (LINK.test(l.action_brief)) out.push(`The brief of lesson ${id} holds a link. A brief is plain text with no link in it.`)
     }
     if (l.feature_key !== undefined && (!isText(l.feature_key) || l.feature_key.trim() === '')) {
       out.push(`The feature key of lesson ${id} is empty. Leave it out when the lesson has none.`)
@@ -322,6 +326,12 @@ const migration = `${RULE}
 --     that this file would retitle or delete. Both tables name a lesson by
 --     its id alone, so such a row would end up on another lesson. The
 --     message lists the lessons and says what to do.
+--   * A lesson that has a row in lesson_videos would stop being a watch
+--     lesson. Only a watch lesson plays a video.
+--   * A row of lesson_videos sits on a course lesson id (an id like a3l07)
+--     that has no lesson in lessons_next yet. This file would create that
+--     lesson, and the row would become its video without anyone having
+--     matched the two.
 --
 -- OPERATIONAL CONSEQUENCES, stated plainly
 --   1. A deployment that reads the staging catalog (CATALOG_TABLE_SUFFIX =
@@ -381,14 +391,16 @@ ${head('2. No video row and no watch row may lose its lesson')}
 
 do ${GUARD}
 declare
-  -- Every lesson this file writes: its id and its title.
+  -- Every lesson this file writes: its id, its title and its type.
   v_new constant text[] := array[
-${rows.map(r => `    [${sq(r.id)}, ${sq(r.title)}]`).join(',\n')}
+${rows.map(r => `    [${sq(r.id)}, ${sq(r.title)}, ${sq(r.type)}]`).join(',\n')}
   ];
   v_videos    text[];
   v_watched   text[];
   v_on_videos text;
   v_on_watch  text;
+  v_no_watch  text;
+  v_waiting   text;
 begin
   if to_regclass('public.lesson_videos') is not null then
     execute 'select array_agg(distinct lesson_id) from public.lesson_videos' into v_videos;
@@ -405,9 +417,30 @@ begin
                  from generate_subscripts(v_new, 1) as i) n on n.id = l.id
    where n.id is null or n.title is distinct from l.title;
 
+  -- Same id, same title, and the lesson would stop being a watch lesson.
+  select string_agg(l.id, ', ' order by l.sort_order) into v_no_watch
+    from public.lessons_next l
+    join (select v_new[i][1] as id, v_new[i][3] as type
+            from generate_subscripts(v_new, 1) as i) n on n.id = l.id
+   where l.id = any (v_videos) and l.type = 'watch' and n.type <> 'watch';
+
+  -- A video row on a course lesson id that has no lesson yet.
+  select string_agg(v.id, ', ' order by v.id) into v_waiting
+    from unnest(v_videos) as v(id)
+   where v.id ~ '${LESSON_ID_SQL}'
+     and not exists (select 1 from public.lessons_next l where l.id = v.id);
+
   if v_on_videos is not null or v_on_watch is not null then
     raise exception 'This file would retitle or delete lessons that other rows point at. With a video row in lesson_videos: %. With a watch row in student_lesson_watch: %. Those rows name a lesson by its id, so afterwards they would sit on another lesson or on none. To go on, delete those rows, run this file again, and then load the videos again with supabase/diagnostics/load-lesson-videos.sql, which is written from the new catalog. Nothing was changed.',
       coalesce(v_on_videos, 'none'), coalesce(v_on_watch, 'none');
+  end if;
+
+  if v_no_watch is not null then
+    raise exception 'This file would turn lessons that have a video row into lessons that are not watch lessons: %. Only a watch lesson plays a video. To go on, delete the rows of those lessons from public.lesson_videos and run this file again. Nothing was changed.', v_no_watch;
+  end if;
+
+  if v_waiting is not null then
+    raise exception 'public.lesson_videos holds rows on course lesson ids that have no lesson in public.lessons_next: %. A video row names a lesson by its id, so each of them would become the video of whatever lesson this file puts under that id. To go on, delete those rows, run this file again, and then load the videos with supabase/diagnostics/load-lesson-videos.sql. Nothing was changed.', v_waiting;
   end if;
 end
 ${GUARD};

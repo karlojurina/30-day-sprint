@@ -10,7 +10,7 @@
 --   One row per area of the staging catalog (regions_next, lessons_next) and
 --   a total: how many lessons, how many count toward progress, how many are
 --   action items, how many have a video row, how many have a length.
---   Then three checks. On those rows the number found is in the rows column,
+--   Then four checks. On those rows the number found is in the rows column,
 --   and each should read 0:
 --     placeholder_titles
 --         lessons still titled like v94's seed ("Fundamentals · lesson 3").
@@ -21,15 +21,18 @@
 --         watch lessons, in either catalog, that have a video row and no
 --         duration_seconds. Nobody can complete such a lesson (v100,
 --         consequence 2).
+--     video_rows_on_lessons_that_are_not_watch
+--         video rows whose lesson, in either catalog, has another type than
+--         watch. The lesson page never plays them.
 --
 -- Read the VERDICT column. INFO is a number to read. PASS is a check that
 -- holds. Anything else needs a look.
 --
 -- WHAT TO EXPECT
 --   After v101:      rows 8, 11, 25, 17, 26, 22, 19, 13 and 141 in total,
---                    with_video and with_length 0, three times PASS.
+--                    with_video and with_length 0, four times PASS.
 --   After the load:  with_video and with_length equal on every row, at the
---                    number of lessons that have a video, three times PASS.
+--                    number of lessons that have a video, four times PASS.
 --
 -- HOW IT READS lesson_videos
 --   Only when the table exists, so the file also runs where migration
@@ -38,6 +41,10 @@
 --   read, and none can appear in the result.
 --   If the block and the select did not share a session, the select says so
 --   in its verdict column. It does not report 0 videos.
+--   The select takes what the block read only when that is under five
+--   minutes old. Pasted and run in one go, it is this run's. Sent statement
+--   by statement on a session that is used again, the select alone can show
+--   the lessons an earlier run read less than five minutes before.
 -- ============================================================
 
 do $read$
@@ -52,9 +59,9 @@ begin
     perform set_config('course_check.videos', 'read', false);
     perform set_config('course_check.video_lessons', coalesce(v_lessons, ''), false);
   end if;
-  -- When this was read. The select trusts the two settings above only when
-  -- this is recent, so a value left on the connection by an earlier run is
-  -- never taken for today's.
+  -- When this was read. The select takes the two settings above only when
+  -- this is under five minutes old, so a value left on the connection long
+  -- ago is not taken for this run's.
   perform set_config('course_check.read_at', clock_timestamp()::text, false);
 end
 $read$;
@@ -123,6 +130,19 @@ checks as (
          end,
          n.why
     from not_checked n
+  union all
+  select 2004, 'video_rows_on_lessons_that_are_not_watch',
+         'video rows on a lesson that is not a watch lesson',
+         case when n.why is null then
+           (select count(distinct w.id)::int
+              from video v,
+                   (select id from public.lessons_next where type <> 'watch'
+                    union all
+                    select id from public.lessons where type <> 'watch') w
+             where w.id = any (v.lesson_ids))
+         end,
+         n.why
+    from not_checked n
 )
 select t.item, t.name, t.rows, t.counting, t.action_items, t.with_video, t.with_length, t.verdict
   from (
@@ -144,4 +164,4 @@ select t.item, t.name, t.rows, t.counting, t.action_items, t.with_video, t.with_
       from checks c
   ) t
  order by t.place;
--- EXPECT: 12 rows. Rows 1 to 9 are INFO. The last three are PASS.
+-- EXPECT: 13 rows. Rows 1 to 9 are INFO. The last four are PASS.

@@ -1638,6 +1638,10 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
     ['two gates',                         c => { c.lessons[0].gate = true },            'must mark exactly one lesson as the gate. It marks 2'],
     ['a brief with a link',               c => { c.lessons.find(l => l.id === 'a5l08').action_brief += ' https://example.com/brief' },
                                                                                          'The brief of lesson a5l08 holds a link'],
+    ['a brief with a bare domain (discord.gg/x)', c => { c.lessons.find(l => l.id === 'a5l08').action_brief += ' Then join discord.gg/x' },
+                                                                                         'The brief of lesson a5l08 holds a link'],
+    ['a brief with a www address (www.x.com)', c => { c.lessons.find(l => l.id === 'a5l08').action_brief += ' It is on www.x.com' },
+                                                                                         'The brief of lesson a5l08 holds a link'],
     ["a lesson outside its area's block", outOfItsBlock,                                 'The lessons of area a2 do not sit in one block'],
     ['7 areas',                           c => { c.areas.pop() },                        'must list exactly 8 areas, a1 to a8, in that order. It lists 7'],
     ['the a8 block listed first',         c => { c.lessons = [...c.lessons.filter(l => l.area === 'a8'), ...c.lessons.filter(l => l.area !== 'a8')] },
@@ -1647,6 +1651,15 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
     note(g.code === 2 && g.said.includes(sentence) && /Nothing was written/.test(g.said) && onDisk() === generated,
          `the generator refuses a data file with ${what}: it says so and writes nothing`,
          g.said.split('\n').find(l => l.includes(sentence))?.trim().slice(0, 88) ?? `exit ${g.code}`)
+    // A generator that failed to refuse has just written the two tracked
+    // files from a bad copy of the data. The assertion above has said so.
+    // Put the files back as they were, so the run leaves the repository as it
+    // found it and the sections below test the real files.
+    if (onDisk() !== generated) {
+      const [migrationWas, undoWas] = generated.split('\u0000')
+      fs.writeFileSync(M + V101F, migrationWas)
+      fs.writeFileSync(UNDO_PATH, undoWas)
+    }
   }
   fs.rmSync(tmp, { recursive: true, force: true })
 
@@ -1739,6 +1752,13 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
          && r.said.includes(`With a video row in lesson_videos: ${KEEPS}.`),
          'a copy without that lesson is refused the same way', refusal(r))
     note(await everything() === asItWas, '...and nothing was changed')
+    // The same lesson under the same id and the same title, as a setup lesson.
+    const asSetup = v101.split('\n').map(l => l.includes(`'${KEEPS}',`) ? l.replace("'watch'", "'setup'") : l).join('\n')
+    r = await runFile(db, asSetup)
+    note(countOf(asSetup, "'setup'") - countOf(v101, "'setup'") === 2 && unchanged(r)
+         && r.said.includes(`would turn lessons that have a video row into lessons that are not watch lessons: ${KEEPS}.`)
+         && await everything() === asItWas,
+         'a copy that turns a lesson with a video into a setup lesson, same id and same title, is refused: it names the lesson and nothing was changed', refusal(r))
 
     // ── the undo refuses while a row points at a course lesson ──
     r = await runFile(db, undo)
@@ -1824,16 +1844,17 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
 
     // ── course-catalog-check.sql ──
     const CHECK_COLS = 'item,name,rows,counting,action_items,with_video,with_length,verdict'
-    const THREE = ['placeholder_titles', 'video_rows_on_unknown_lessons', 'watch_lessons_with_video_and_no_length']
+    const FOUR = ['placeholder_titles', 'video_rows_on_unknown_lessons', 'watch_lessons_with_video_and_no_length',
+                  'video_rows_on_lessons_that_are_not_watch']
     const areaLines = (rows, videos) => sameJson(
       rows.slice(0, 9).map(x => [x.item, x.name, x.rows, x.counting, x.action_items, x.with_video, x.with_length, x.verdict]),
       wantTable().map(w => [w.area, w.name, w.rows, w.counting, w.action_items, videos, 0, 'INFO']))
     const before20 = await everything()
     r = await runFile(db, checkSql)
-    note(r.ok && r.cols.join(',') === CHECK_COLS && r.rows.length === 12 && areaLines(r.rows, 0)
-         && sameJson(r.rows.slice(9).map(x => [x.item, x.rows, x.verdict]), THREE.map(t => [t, 0, 'PASS']))
+    note(r.ok && r.cols.join(',') === CHECK_COLS && r.rows.length === 13 && areaLines(r.rows, 0)
+         && sameJson(r.rows.slice(9).map(x => [x.item, x.rows, x.verdict]), FOUR.map(t => [t, 0, 'PASS']))
          && !/vid_/.test(JSON.stringify(r.rows)) && await everything() === before20,
-         'course-catalog-check.sql after v101: 8 areas and a total as the data file has them, 0 and PASS on its three checks, and it changes nothing',
+         'course-catalog-check.sql after v101: 8 areas and a total as the data file has them, 0 and PASS on its four checks, and it changes nothing',
          r.ok ? r.rows.slice(9).map(x => `${x.item}=${x.rows}`).join(' ') : r.said)
     // A check that has never been seen to move proves nothing. One planted
     // row for each, inside a transaction that is rolled back.
@@ -1841,14 +1862,17 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
       const planted = await db.transaction(async tx => {
         await tx.exec(`
           update lessons_next set title = 'Introduction · lesson 1' where id = 'a1l01';
-          insert into public.lesson_videos (lesson_id, tella_video_id) values ('nowhere01', '${FAKE(3)}'), ('a1l02', '${FAKE(4)}');`)
+          insert into public.lesson_videos (lesson_id, tella_video_id)
+          values ('nowhere01', '${FAKE(3)}'), ('a1l02', '${FAKE(4)}'), ('a5l22', '${FAKE(5)}');`)
         const rows = (await tx.exec(checkSql)).at(-1).rows
         await tx.rollback()
         return rows
       }).catch(e => [{ item: e.message }])
-      note(sameJson(planted.slice(9).map(x => [x.item, x.rows, x.verdict]), THREE.map(t => [t, 1, 'LOOK: expected 0']))
-           && planted[0].with_video === 1 && planted[8].with_video === 1 && await everything() === before20,
-           '...and each of the three checks moves: with one planted row each they read 1 and say LOOK',
+      // A placeholder title, a video on an id no catalog has, a video on the
+      // watch lesson a1l02 with no length, a video on the setup lesson a5l22.
+      note(sameJson(planted.slice(9).map(x => [x.item, x.rows, x.verdict]), FOUR.map(t => [t, 1, 'LOOK: expected 0']))
+           && planted[0].with_video === 1 && planted[4].with_video === 1 && planted[8].with_video === 2 && await everything() === before20,
+           '...and each of the four checks moves: with one planted row each they read 1 and say LOOK, the video on a setup lesson among them',
            planted.slice(9).map(x => `${x.item}=${x.rows}`).join(' '))
       const noTable = await db.transaction(async tx => {
         await tx.exec(`drop table public.lesson_videos;`)
@@ -1856,16 +1880,17 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
         await tx.rollback()
         return rows
       }).catch(e => [{ item: e.message }])
-      note(noTable.length === 12 && areaLines(noTable, null) && noTable[9].rows === 0 && noTable[9].verdict === 'PASS'
+      note(noTable.length === 13 && areaLines(noTable, null) && noTable[9].rows === 0 && noTable[9].verdict === 'PASS'
+           && noTable.slice(10).length === 3
            && noTable.slice(10).every(x => x.rows === null && /^NOT CHECKED: public\.lesson_videos does not exist/.test(x.verdict))
            && (await q(`select to_regclass('public.lesson_videos') is not null as y`))[0].y && await everything() === before20,
-           'where lesson_videos does not exist the check still runs: with_video is empty and the two video checks say NOT CHECKED',
+           'where lesson_videos does not exist the check still runs: with_video is empty and the three video checks say NOT CHECKED',
            noTable[10]?.verdict?.slice(0, 50) ?? noTable[0]?.item)
       // The select alone, as if the block above it had run on another
       // connection. It must say so. It must not report 0 videos.
       await db.exec(`select set_config('course_check.read_at', '', false);`)
       const alone = await rowsOn(db, checkSql.slice(checkSql.indexOf('\nwith video as (')))
-      note(alone.length === 12 && alone[0].with_video === null
+      note(alone.length === 13 && alone[0].with_video === null && alone.slice(10).length === 3
            && alone.slice(10).every(x => x.rows === null && /^NOT CHECKED: the block at the top/.test(x.verdict)),
            'the select on its own, without the block that reads lesson_videos, says NOT CHECKED and reports no 0',
            alone[10]?.verdict?.slice(0, 50))
@@ -1910,6 +1935,24 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
       note(await isTheCourse(d, r), '...and with those rows gone it runs (student_lesson_watch there, lesson_videos not: v100 has not run)', refusal(r))
       await d.close()
     }
+    {
+      // lesson_videos as v100 creates it, lifted from the v100 file, over the
+      // placeholder seed. One row waits on a2l11: the seed's second area ends
+      // at a2l10, and v101 would create a2l11 and hand it that video. The
+      // other row is on a live lesson's id and is none of v101's business.
+      const d = await secondDatabase(lift('2026_v100_lesson_videos_and_speed.sql', 'create table if not exists public.lesson_videos ('))
+      await d.exec(`insert into public.lesson_videos (lesson_id, tella_video_id) values ('a2l11', '${FAKE(8)}'), ('l004', '${FAKE(9)}');`)
+      const state = async () => await staging(d) + JSON.stringify(await rowsOn(d, `select * from public.lesson_videos order by lesson_id`))
+      const was = await state()
+      r = await runFile(d, v101)
+      note(unchanged(r) && r.said.includes('rows on course lesson ids that have no lesson in public.lessons_next: a2l11.') && await state() === was,
+           'second database, with a video row waiting on a2l11, a lesson v101 would create: v101 refuses, names the id and changes nothing', refusal(r))
+      await d.exec(`delete from public.lesson_videos where lesson_id = 'a2l11';`)
+      r = await runFile(d, v101)
+      note(await isTheCourse(d, r) && (await rowsOn(d, `select lesson_id from public.lesson_videos`)).map(x => x.lesson_id).join() === 'l004',
+           '...and with that row gone it runs, past the video row on the live lesson l004', refusal(r))
+      await d.close()
+    }
   }
 }
 
@@ -1922,14 +1965,19 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
   const template = diagnostic('load-lesson-videos.sql')
   const checkSql = diagnostic('course-catalog-check.sql')
   const v101 = read(V101F)
-  const PLACEHOLDER = "  ('REPLACE_WITH_ROWS', 'REPLACE_WITH_ROWS', 0);"
-  // The one way a list gets into the file: the placeholder line is replaced
-  // by the rows, the last one closed with a semicolon.
-  const fill = rows => template.replace(PLACEHOLDER, () =>
-    rows.map(([lesson, video, seconds]) => `  ('${lesson}', '${video}', ${seconds})`).join(',\n') + ';')
+  const PLACEHOLDER = "  ('REPLACE_WITH_ROWS', 'REPLACE_WITH_ROWS', 'REPLACE_WITH_ROWS', 0);"
   // Made-up ids only, every one of them vid_loadfake and then letters and
   // digits. NEVER a real id.
   const FAKE = LOADFAKE
+  const titleOf = lesson => COURSE.lessons.find(l => l.id === lesson)?.title ?? 'A Lesson The Course Does Not Have'
+  // A row of the list: lesson id, title, video id, seconds. The title is the
+  // data file's for that lesson unless another one is given.
+  const row = (lesson, video, seconds, title = titleOf(lesson)) => [lesson, title, video, seconds]
+  // The one way a list gets into the file: the placeholder line is replaced
+  // by the rows, every single quote in a title doubled, the last row closed
+  // with a semicolon.
+  const fill = rows => template.replace(PLACEHOLDER, () =>
+    rows.map(([lesson, title, video, seconds]) => `  ('${lesson}', '${title.replaceAll("'", "''")}', '${video}', ${seconds})`).join(',\n') + ';')
   const COURSE_ID = /^a[1-8]l[0-9]{2}$/
   const RESULT_COLS = 'line,name,loaded,new_rows,changed_videos,removed_rows,lessons,with_video,with_length'
 
@@ -1955,11 +2003,11 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
       && sameJson(r.rows.slice(1), COURSE.areas.map(a => ({ line: a.id, name: a.name, loaded: null, new_rows: null, changed_videos: null,
                                removed_rows: null, lessons: COURSE.lessons.filter(l => l.area === a.id).length, with_video: per(a.id), with_length: per(a.id) })))
   }
-  // lesson_videos and the lengths say exactly what the list says.
+  // lesson_videos and the staging lengths say exactly what the list says.
   const follows = async list => {
-    const rows = await courseVideos()
-    return sameJson(rows.map(v => [v.lesson_id, v.tella_video_id]), [...list].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([l, v]) => [l, v]))
-      && sameJson(await lengths(), Object.fromEntries([...list].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([l, , s]) => [l, s])))
+    const byLesson = [...list].sort((a, b) => a[0] < b[0] ? -1 : 1)
+    return sameJson((await courseVideos()).map(v => [v.lesson_id, v.tella_video_id]), byLesson.map(([lesson, , video]) => [lesson, video]))
+      && sameJson(await lengths(), Object.fromEntries(byLesson.map(([lesson, , , seconds]) => [lesson, seconds])))
   }
   const said = r => r.ok ? 'it ran' : `${r.code}: ${r.said.slice(0, 64)}`
   // A refusal: our own raise, its sentence, "Nothing was changed." at the
@@ -1977,9 +2025,10 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
   }
 
   // ── the template itself ──
-  note(countOf(template, PLACEHOLDER) === 1 && countOf(template, 'REPLACE_WITH_ROWS') === 2
-       && template.includes('insert into _load values\n' + PLACEHOLDER + '\n'),
-       'the template holds its placeholder line exactly once, straight after "insert into _load values"')
+  note(countOf(template, PLACEHOLDER) === 1 && countOf(template, 'REPLACE_WITH_ROWS') === 3
+       && template.includes('insert into _load values\n' + PLACEHOLDER + '\n')
+       && template.includes('create temp table _load (lesson_id text, title text, tella_video_id text, seconds int) on commit drop;'),
+       'the template holds its placeholder line exactly once, four columns wide, straight after "insert into _load values"')
   note(!/vid_[a-z0-9]{10,}/.test(template)
        && template.split('\n').filter(l => l.includes('vid_')).every(l => l.startsWith('--') || l.includes("'^vid_[a-z0-9]{10,64}$'")),
        'the template holds nothing shaped like a video id: vid_ appears in its header and in the one pattern',
@@ -2005,9 +2054,10 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
     const stampBefore = await stamp()
     const liveBefore = JSON.stringify(await q(`select * from lessons order by id`))
 
-    // 5 lessons over 3 areas.
-    const LIST = [['a1l01', FAKE(1), 756], ['a1l02', FAKE(2), 431], ['a3l01', FAKE(3), 600], ['a3l02', FAKE(4), 1289], ['a8l13', FAKE(5), 98]]
-    const but = (lesson, video, seconds) => [...LIST.slice(0, 4), [lesson, video, seconds]]
+    // 5 lessons over 3 areas. One title holds an apostrophe (a1l07, "Why
+    // You're Not Behind") and two hold $$$ (a6l14 and a6l15).
+    const LIST = [row('a1l01', FAKE(1), 756), row('a1l07', FAKE(2), 431), row('a6l14', FAKE(3), 600), row('a6l15', FAKE(4), 1289), row('a8l13', FAKE(5), 98)]
+    const but = (lesson, video, seconds, title) => [...LIST.slice(0, 4), row(lesson, video, seconds, title)]
 
     // ── a list that is wrong changes nothing ──
     await refuses('the template as tracked, its placeholder line not replaced, is refused', template,
@@ -2018,7 +2068,7 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
     await refuses("a lesson id that is not a course lesson id is refused: a live lesson's id, a ninth area, a video id in the lesson column",
                   ['l004', 'a9l01', FAKE(7)].map(bad => fill(but(bad, FAKE(5), 98))), 'not a course lesson id', ['l004', 'a9l01'])
     await refuses('a lesson that is in the list twice is refused, and the message says which lesson',
-                  fill([...LIST, ['a1l01', FAKE(6), 10]]), '1 lesson(s) are in the list more than once: a1l01. A lesson has one video')
+                  fill([...LIST, row('a1l01', FAKE(6), 10)]), '1 lesson(s) are in the list more than once: a1l01. A lesson has one video')
     await refuses('a video that is in the list twice is refused',
                   fill(but('a8l13', FAKE(1), 98)), '1 video(s) are in the list more than once')
     await refuses('a length of 0, a length below 0 and an empty length are refused',
@@ -2030,10 +2080,17 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
     // 12 lessons the catalog does not have, a1l09 to a1l20. The message names
     // the first 10 and counts the rest.
     await refuses('a message names 10 lessons at most, then says how many more: 12 unknown lessons read "... a1l18 and 2 more"',
-                  fill([...LIST, ...Array.from({ length: 12 }, (_, i) => [`a1l${String(9 + i).padStart(2, '0')}`, FAKE(20 + i), 60])]),
+                  fill([...LIST, ...Array.from({ length: 12 }, (_, i) => row(`a1l${String(9 + i).padStart(2, '0')}`, FAKE(20 + i), 60))]),
                   '12 lesson(s) of the list are in neither public.lessons_next nor public.lessons: '
                   + 'a1l09, a1l10, a1l11, a1l12, a1l13, a1l14, a1l15, a1l16, a1l17, a1l18 and 2 more. The list was written',
                   ['a1l19', 'a1l20'])
+    // The right lesson id, the right video, and the title of another version
+    // of the course. Without the $$$ it is not the title the catalog has.
+    await refuses('a list with one wrong title is refused: the message names the lesson, says the list is for another version of the course, and repeats no title',
+                  fill(LIST.map(x => x[0] === 'a6l14' ? row('a6l14', FAKE(3), 600, 'Our Private AI UGC Workflow') : x)),
+                  '1 lesson(s) of the list carry another title than the catalog has under that id: a6l14. This list was made for another version of the course. '
+                  + 'Run the match and the sql command of the Tella tool again',
+                  ['Our Private AI UGC Workflow', titleOf('a6l14')])
 
     // ── first load ──
     const otherColumns = async () => JSON.stringify(
@@ -2047,6 +2104,9 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
     note(reads(r, LIST, [5, 5, 0, 0]),
          'its result says 5 loaded, 5 new, 0 changed, 0 removed, then lessons, videos and lengths per area, and shows no id',
          r.ok ? `${did(r).join('/')}; ${r.rows.slice(1).map(x => `${x.line}:${x.with_video}`).join(' ')}` : said(r))
+    note(fill(LIST).includes("  ('a1l07', 'Why You''re Not Behind', '") && fill(LIST).includes("  ('a6l14', 'Our Private $$$ AI UGC Workflow', '")
+         && r.ok && ['a1l07', 'a6l14', 'a6l15'].every(id => rows.some(v => v.lesson_id === id)),
+         'a title with an apostrophe (written twice in the list) and titles with $$$ pass the title check: their lessons are loaded')
     note(await otherColumns() === otherBefore && JSON.stringify(await q(`select * from lessons order by id`)) === liveBefore,
          'the load writes duration_seconds on lessons_next and nothing else there, and nothing on the live lessons')
 
@@ -2054,11 +2114,11 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
     {
       const c = await runFile(db, checkSql)
       const per = a => LIST.filter(([lesson]) => lesson.startsWith(a + 'l')).length
-      note(c.ok && c.rows.length === 12
+      note(c.ok && c.rows.length === 13
            && sameJson(c.rows.slice(0, 8).map(x => [x.item, x.with_video, x.with_length]), COURSE.areas.map(a => [a.id, per(a.id), per(a.id)]))
            && c.rows[8].with_video === 5 && c.rows[8].with_length === 5
            && c.rows.slice(9).every(x => x.rows === 0 && x.verdict === 'PASS') && !/vid_/.test(JSON.stringify(c.rows)),
-           'course-catalog-check.sql after the load: with_video and with_length agree on every row (5 in total), 0 and PASS on its three checks',
+           'course-catalog-check.sql after the load: with_video and with_length agree on every row (5 in total), 0 and PASS on its four checks',
            c.ok ? c.rows.slice(0, 9).map(x => `${x.item}:${x.with_video}/${x.with_length}`).join(' ') : c.said)
     }
 
@@ -2084,27 +2144,42 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
                       set lock_status = 'locked', lock_detail = 'judged by hand', lock_checked_at = now()
                     where lesson_id ~ '^a[1-8]l[0-9]{2}$';`)
     const locked = Object.fromEntries((await courseVideos()).map(v => [v.lesson_id, JSON.stringify(v)]))
-    let list = LIST.map(row => row[0] === 'a3l01' ? ['a3l01', FAKE(6), 612] : row)
+    let list = LIST.map(x => x[0] === 'a6l14' ? row('a6l14', FAKE(6), 612) : x)
     r = await runFile(db, fill(list))
     rows = await courseVideos()
     {
-      const swapped = rows.find(v => v.lesson_id === 'a3l01') ?? {}
+      const swapped = rows.find(v => v.lesson_id === 'a6l14') ?? {}
       note(reads(r, list, [5, 0, 1, 0]) && await follows(list)
            && swapped.lock_status === 'unchecked' && swapped.lock_detail === null && swapped.lock_checked_at === null
-           && rows.filter(v => v.lesson_id !== 'a3l01').every(v => v.lock_status === 'locked' && JSON.stringify(v) === locked[v.lesson_id]),
+           && rows.filter(v => v.lesson_id !== 'a6l14').every(v => v.lock_status === 'locked' && JSON.stringify(v) === locked[v.lesson_id]),
            'a lesson gets another video: its row is back to unchecked with the detail cleared and the new length set; the other four keep locked and are not touched',
            r.ok ? `${did(r).join('/')}; ${rows.map(v => `${v.lesson_id}:${v.lock_status}`).join(' ')}` : said(r))
     }
 
     // ── a lesson drops out of the list ──
-    list = list.filter(row => row[0] !== 'a1l02')
+    list = list.filter(x => x[0] !== 'a1l07')
     r = await runFile(db, fill(list))
-    note(reads(r, list, [4, 0, 0, 1]) && await follows(list) && await rowOf('a1l02') === undefined && !('a1l02' in await lengths()),
+    note(reads(r, list, [4, 0, 0, 1]) && await follows(list) && await rowOf('a1l07') === undefined && !('a1l07' in await lengths()),
          'a lesson drops out of the list: its row is deleted and its length is empty again', r.ok ? did(r).join('/') : said(r))
+
+    // ── a length on a lesson that has no video ──
+    // A setup lesson and a watch lesson, neither in the list, each given a
+    // length by hand. A course lesson has a length exactly when it has a
+    // video, whatever its type, so the next load empties both.
+    await db.exec(`update lessons_next set duration_seconds = 300 where id in ('a5l22', 'a2l03');`)
+    {
+      const typeOf = Object.fromEntries((await q(`select id, type from lessons_next where id in ('a5l22', 'a2l03')`)).map(x => [x.id, x.type]))
+      const had = await lengths()
+      r = await runFile(db, fill(list))
+      note(typeOf.a5l22 === 'setup' && typeOf.a2l03 === 'watch' && had.a5l22 === 300 && had.a2l03 === 300
+           && reads(r, list, [4, 0, 0, 0]) && await follows(list) && !('a5l22' in await lengths()) && !('a2l03' in await lengths()),
+           'a course lesson that is not in the list loses its length whatever its type: a setup lesson and a watch lesson that carried 300 s are both emptied',
+           r.ok ? `lengths left: ${Object.keys(await lengths()).join(' ')}` : said(r))
+    }
 
     // ── a video moves to another lesson ──
     // The video on a8l13 is now listed under a8l12, and a8l13 is not listed.
-    list = list.map(row => row[0] === 'a8l13' ? ['a8l12', FAKE(5), 98] : row)
+    list = list.map(x => x[0] === 'a8l13' ? row('a8l12', FAKE(5), 98) : x)
     r = await runFile(db, fill(list))
     note(reads(r, list, [4, 1, 0, 1]) && await follows(list)
          && (await videos()).filter(v => v.tella_video_id === FAKE(5)).map(v => v.lesson_id).join() === 'a8l12',
@@ -2112,18 +2187,18 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
          r.ok ? did(r).join('/') : said(r))
     // Two lessons trade videos. Each video is wanted by the lesson that does
     // not hold it yet, which is the order a unique constraint trips on.
-    list = list.map(([lesson, video, seconds]) => [lesson, lesson === 'a1l01' ? FAKE(4) : lesson === 'a3l02' ? FAKE(1) : video, seconds])
+    list = list.map(([lesson, title, video, seconds]) => [lesson, title, lesson === 'a1l01' ? FAKE(4) : lesson === 'a6l15' ? FAKE(1) : video, seconds])
     r = await runFile(db, fill(list))
     rows = await courseVideos()
     note(reads(r, list, [4, 0, 2, 0]) && await follows(list)
-         && ['a1l01', 'a3l02'].every(id => rows.find(v => v.lesson_id === id)?.lock_status === 'unchecked'),
+         && ['a1l01', 'a6l15'].every(id => rows.find(v => v.lesson_id === id)?.lock_status === 'unchecked'),
          '...and two lessons can trade videos in one list: both rows change, both are unchecked', r.ok ? did(r).join('/') : said(r))
 
     // ── the test stamp on the live lesson ──
     note(await stamp() === stampBefore && JSON.stringify(await q(`select * from lessons order by id`)) === liveBefore,
          'through every load the test stamp on the live lesson l004 is untouched: its row, its lock verdict and its length of 67')
     await refuses('a list that holds the video stamped on a live lesson is refused: the message names that lesson and says to unstamp it first',
-                  fill([...list, ['a2l01', FAKE(90), 300]]),
+                  fill([...list, row('a2l01', FAKE(90), 300)]),
                   '1 video(s) of the list already sit on a lesson outside the course: l004. That is a test stamp on a live lesson: unstamp it first')
 
     // ── what the app then sees ──
@@ -2145,8 +2220,8 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
         return video ? { video: video.tella_video_id, durationSeconds: lesson.duration_seconds ?? null } : 'not recorded'
       }
       const found = await Promise.all(list.map(([lesson]) => lookup(lesson)))
-      note(sameJson(found, list.map(([, video, seconds]) => ({ video, durationSeconds: seconds })))
-           && await lookup('a1l02') === 'not recorded' && await lookup('a5l22') === 'not recorded',
+      note(sameJson(found, list.map(([, , video, seconds]) => ({ video, durationSeconds: seconds })))
+           && await lookup('a1l07') === 'not recorded' && await lookup('a5l22') === 'not recorded',
            "the video route's lookup finds the id and the length of each loaded lesson, and nothing for a lesson that is not in the list",
            `${found.filter(x => x !== 'not recorded').length} found`)
     }
@@ -2158,6 +2233,39 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
                  'a heartbeat for a loaded STAGING lesson is still refused before the cutover (v100, consequence 4)', '22023')
     note((await q(`select count(*)::int n from student_lesson_watch where lesson_id ~ '^a[1-8]l[0-9]{2}$'`))[0].n === 0,
          '...and it left no watch row behind')
+
+    // ── course lessons in the LIVE table, as after a cutover ──
+    // The load writes lengths into `lessons` as well as lessons_next. Before
+    // the cutover no course lesson is in `lessons`, so those two statements
+    // match nothing and could be broken unseen. Two live lessons with course
+    // ids: a2l01 copied from the staging catalog, so it is in both tables,
+    // and a1l09, which is in `lessons` only.
+    {
+      const LIVE_ONLY = 'A Lesson Added After The Cutover'
+      await db.exec(`
+        insert into lessons (id, region_id, day, type, title, sort_order)
+        select id, 'r4', 30, type, title, 9000 + sort_order from lessons_next where id = 'a2l01';
+        insert into lessons (id, region_id, day, type, title, sort_order) values ('a1l09', 'r4', 30, 'watch', '${LIVE_ONLY}', 9999);`)
+      const liveLengths = async () => Object.fromEntries(
+        (await q(`select id, duration_seconds from lessons where id in ('a1l09', 'a2l01', 'l004') order by id`)).map(x => [x.id, x.duration_seconds]))
+      const withLive = [...list, row('a2l01', FAKE(40), 500), row('a1l09', FAKE(41), 77, LIVE_ONLY)]
+      r = await runFile(db, fill(withLive))
+      note(r.ok && sameJson(await liveLengths(), { a1l09: 77, a2l01: 500, l004: 67 }) && (await lengths()).a2l01 === 500
+           && (await rowOf('a1l09'))?.tella_video_id === FAKE(41) && (await rowOf('a2l01'))?.tella_video_id === FAKE(40),
+           'with course lessons in the live table: a listed lesson gets its length in lessons too (a2l01 in both tables, a1l09 in lessons only), and l004 keeps its 67',
+           r.ok ? JSON.stringify(await liveLengths()) : said(r))
+      await refuses('a lesson that is only in the live table is held to the title it has there',
+                    fill([...list, row('a2l01', FAKE(40), 500), row('a1l09', FAKE(41), 77, 'Some Other Title')]),
+                    '1 lesson(s) of the list carry another title than the catalog has under that id: a1l09.', ['Some Other Title', LIVE_ONLY])
+      r = await runFile(db, fill(list))
+      note(r.ok && sameJson(await liveLengths(), { a1l09: null, a2l01: null, l004: 67 }) && await follows(list)
+           && await rowOf('a1l09') === undefined && await stamp() === stampBefore,
+           'dropped from the list, both lose their length in lessons and their video row; the live lesson l004 keeps its 67 and its stamp',
+           r.ok ? JSON.stringify(await liveLengths()) : said(r))
+      await db.exec(`delete from lessons where id in ('a1l09', 'a2l01');`)
+      note(JSON.stringify(await q(`select * from lessons order by id`)) === liveBefore,
+           '...and with those two test lessons taken out again the live table is as it was before the section')
+    }
 
     // ── a database where v100 has not run ──
     {
@@ -2206,16 +2314,20 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
       const [head, foot] = template.split(PLACEHOLDER)
       const filled = text !== null && text.startsWith(head) && text.endsWith(foot) && !text.includes('REPLACE_WITH_ROWS')
       const lines = filled ? text.slice(head.length, text.length - foot.length).split('\n') : []
-      const parsed = lines.map(l => /^  \('(a[1-8]l[0-9]{2})', '(vid_[a-z0-9]{10,64})', ([1-9][0-9]*)\)[,;]$/.exec(l))
-      const real = parsed.every(Boolean) ? parsed.map(m => [m[1], m[2], Number(m[3])]) : []
+      // One row: ('a1l01', 'A Title, Its Quotes Doubled', 'vid_…', 756)
+      const parsed = lines.map(l => /^  \('(a[1-8]l[0-9]{2})', '((?:[^']|'')*)', '(vid_[a-z0-9]{10,64})', ([1-9][0-9]*)\)[,;]$/.exec(l))
+      const real = parsed.every(Boolean) ? parsed.map(m => [m[1], m[2].replaceAll("''", "'"), m[3], Number(m[4])]) : []
       note(filled && real.length > 0 && lines.slice(0, -1).every(l => l.endsWith(',')) && lines.at(-1).endsWith(';'),
-           'LESSON_VIDEOS_SQL: the file is the template with its placeholder line replaced by well-formed rows',
+           'LESSON_VIDEOS_SQL: the file is the template with its placeholder line replaced by well-formed rows of four columns',
            text === null ? 'the file could not be read' : `${parsed.filter(Boolean).length} of ${lines.length} lines are rows`)
       if (real.length) {
-        // Our own raises never hold a video id (asserted above). A lesson id
-        // they may name is no secret, so they may be shown. Anything else is
-        // shown as its code alone.
+        // Our own raises never hold a video id or a title (asserted above).
+        // A lesson id they may name is no secret, so they may be shown.
+        // Anything else is shown as its code alone.
         const safe = x => x.ok ? 'it ran' : x.code === 'P0001' ? x.said.slice(0, 80) : `it raised ${x.code}`
+        note(real.every(([lesson, title]) => title === titleOf(lesson)),
+             "LESSON_VIDEOS_SQL: every row carries the title the data file has for its lesson",
+             `${real.filter(([lesson, title]) => title === titleOf(lesson)).length} of ${real.length} titles agree`)
         // The state v101 leaves: no video row on a course lesson, no length.
         await db.exec(`delete from public.lesson_videos where lesson_id ~ '^a[1-8]l[0-9]{2}$';
                        update lessons_next set duration_seconds = null where duration_seconds is not null;`)
@@ -2226,7 +2338,7 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
         note(x.ok && await follows(real) && have.length === real.length && have.every(v => v.lock_status === 'unchecked'),
              'LESSON_VIDEOS_SQL: lesson_videos holds exactly the rows of the file on course lessons, all unchecked',
              x.ok ? `${have.length} rows for the ${real.length} in the file` : safe(x))
-        note(x.ok && real.every(([lesson, , seconds]) => watch.has(lesson) && lens[lesson] === seconds) && Object.keys(lens).length === real.length,
+        note(x.ok && real.every(([lesson, , , seconds]) => watch.has(lesson) && lens[lesson] === seconds) && Object.keys(lens).length === real.length,
              'LESSON_VIDEOS_SQL: every one is on a watch lesson that now has its length, and no other lesson has one',
              `${Object.keys(lens).length} lengths`)
         note(reads(x, real, [real.length, real.length, 0, 0]),
@@ -2239,8 +2351,8 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
              x.ok ? did(x).join('/') : safe(x))
         const c = await runFile(db, checkSql)
         note(c.ok && c.rows[8]?.with_video === real.length && c.rows[8]?.with_length === real.length
-             && c.rows.slice(9).every(k => k.rows === 0 && k.verdict === 'PASS') && !/vid_/.test(JSON.stringify(c.rows)),
-             'LESSON_VIDEOS_SQL: course-catalog-check.sql then reads the same count with a video and with a length, and PASS three times',
+             && c.rows.slice(9).length === 4 && c.rows.slice(9).every(k => k.rows === 0 && k.verdict === 'PASS') && !/vid_/.test(JSON.stringify(c.rows)),
+             'LESSON_VIDEOS_SQL: course-catalog-check.sql then reads the same count with a video and with a length, and PASS four times',
              c.ok ? `${c.rows[8]?.with_video} with a video, ${c.rows[8]?.with_length} with a length` : `it raised ${c.code}`)
       }
     }

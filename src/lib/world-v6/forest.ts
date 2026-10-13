@@ -36,7 +36,7 @@
  * camera moved, trees are sorted into 250 unit cells, a cell outside the view
  * or past the fog is skipped whole, each tree left is frustum tested, given
  * its level, and its matrix, tint and cell copied in; count set, only the used
- * range uploaded. Underground (the cave) nothing is drawn.
+ * range uploaded.
  *
  * PLACEMENT (v5 3.1, counts per v6 2.1). A jittered 16 unit grid, a density
  * mask clumped by low frequency noise, densest on mid slopes, none on water,
@@ -167,6 +167,11 @@ const ZONES: readonly Zone[] = [
   { name: "Z3", x: 0, z: 1750, r: 750, mult: 1.0, mix: [0.25, 0.4, 0.25, 0.05, 0.05], aspen: false, shrub: 0.25 },
   { name: "Z4", x: 1470, z: 600, r: 650, mult: 1.1, mix: [0.45, 0.15, 0.2, 0.12, 0.03], aspen: true, shrub: 0.3 },
   { name: "Z5", x: 700, z: -350, r: 1500, mult: 1.05, mix: [0.55, 0.1, 0.2, 0.1, 0.02], aspen: true, shrub: 0.2 },
+];
+/** [x, z, x, z] of the two stretches of trail the forest still keeps clear on the pool's south bank (see pathD). */
+const OLD_BANK_TRAIL: ReadonlyArray<readonly [number, number, number, number]> = [
+  [40, 1690, 64, 1640],
+  [64, 1640, 62, 1608],
 ];
 const BACKDROP: Zone = { name: "BG", x: 0, z: 0, r: 1, mult: 0.55, mix: [0.5, 0.1, 0.35, 0.05, 0], aspen: false, shrub: 0 };
 
@@ -979,6 +984,16 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
     if (a.under || a.y > 1000 || b.y > 1000) continue;
     pathD.segment(a.x, a.z, b.x, b.z, 60);
   }
+  // The trail's old line on the pool's south bank, from the cliff's foot to
+  // the log (it came out of the cave's side passage there until the cave was
+  // removed, 2026-10-13; the trail now reaches the log from the pool's shore).
+  // The trees are dealt below in ONE random sequence for the whole world and
+  // scaled by ONE sum of every candidate's weight, so a corridor that moves
+  // here by 30 units deals every tree south of the gorge again. Until the
+  // forest is dealt again on purpose it keeps this corridor clear as it was;
+  // no tree stands or falls because of it (v6-cave-drop: every tree is where
+  // it stood).
+  for (const [ax, az, bx, bz] of OLD_BANK_TRAIL) pathD.segment(ax, az, bx, bz, 60);
   const brookD = new Grid(999);
   brookD.polyline(BROOK, 60);
   brookD.polyline(STREAM, 60);
@@ -1607,7 +1622,6 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   const lastCam = new Float32Array(32).fill(NaN);
   const camPos = new THREE.Vector3();
   let firstFrame = true;
-  let hidden = false;
   let lastCompactMs = 0;
   let visibleTrees = 0;
   let nearTrees = 0;
@@ -1615,7 +1629,6 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   const planes = new Float32Array(24);
   const visCells = new Int32Array(Math.max(1, NC));
   const visDist = new Float32Array(Math.max(1, NC));
-  const kindAt = (u: number): TrailKind => TRAIL_KIND[Math.min(nK - 1, Math.max(0, Math.floor(u * nK)))];
 
   const put = (si: number, o: number, core: boolean) => {
     const s = slots[si];
@@ -1754,7 +1767,7 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
     for (const s of slots) {
       const m = s.mesh;
       m.count = s.count;
-      m.visible = s.count > 0 && !hidden;
+      m.visible = s.count > 0;
       if (s.count > 0) {
         const im = m.instanceMatrix;
         im.clearUpdateRanges();
@@ -1805,23 +1818,16 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
       shared.uSunDir.value.copy(ctx.sunDir).normalize();
       shared.uSunColor.value.copy(ctx.sunColor);
       shared.uMagic.value = probeMat.color.r;
-      const kind = kindAt(ctx.railU());
-      const under = kind === "cave";
       let changed = false;
-      if (under !== hidden) {
-        hidden = under;
-        group.visible = !hidden;
-        changed = true;
-      }
-      if (!hidden && (firstFrame || camChanged())) {
+      if (firstFrame || camChanged()) {
         firstFrame = false;
         compact();
         changed = true;
       }
-      return changed || (!hidden && !ctx.reducedMotion && visibleTrees > 0);
+      return changed || (!ctx.reducedMotion && visibleTrees > 0);
     },
     isAnimating() {
-      return !hidden && !ctx.reducedMotion && visibleTrees > 0;
+      return !ctx.reducedMotion && visibleTrees > 0;
     },
     setQuality(t: QualityTier) {
       applyTier(t);
@@ -1859,9 +1865,9 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
         lod1: lodCounts[1],
         lod2: lodCounts[2],
         near: nearTrees,
-        triangles: hidden ? 0 : drawnTris(),
-        calls: hidden ? 0 : drawnCalls(),
-        instances: hidden ? 0 : slots.reduce((s, sl) => s + (sl.mesh.visible ? sl.count : 0), 0),
+        triangles: drawnTris(),
+        calls: drawnCalls(),
+        instances: slots.reduce((s, sl) => s + (sl.mesh.visible ? sl.count : 0), 0),
         cells: NC,
         slots: JSON.stringify(Object.fromEntries(slots.map((s) => [s.mesh.name, s.mesh.visible ? s.count : 0]))),
         zones: JSON.stringify(zoneCounts),

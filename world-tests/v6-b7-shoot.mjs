@@ -117,7 +117,7 @@ try {
   const ms = await page.evaluate(() => {
     const all = window.__worldV6Debug.moduleStats();
     const pick = {};
-    for (const [k, v] of Object.entries(all)) if (/gorge|underground/i.test(k)) pick[k] = v;
+    for (const [k, v] of Object.entries(all)) if (/gorge/i.test(k)) pick[k] = v;
     return pick;
   });
   console.log("moduleStats", JSON.stringify(ms));

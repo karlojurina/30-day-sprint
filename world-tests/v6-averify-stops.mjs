@@ -31,7 +31,7 @@ const FRAMES = [
   ["k0", "the opening (key 0)", "UpperFalls_StandIn", -1],
   ["a1", "a1 Introduction · The Landing", "LM_Signpost", 0],
   ["a2", "a2 Fundamentals · Base Camp", "LM_Lookout", 1],
-  ["a3", "a3 Video Ads I · the cave", "LM_Waterfall", 2],
+  ["a3", "a3 Video Ads I · the falls", "LM_Waterfall", 2],
   ["a4", "a4 Video Ads II · The Gorge Trail", "LM_TrailHut", 3],
   ["a5", "a5 Static Ads · The Mirror Lake", "LM_Boathouse", 4],
   ["a6", "a6 AI Ads & Content · The Glowing Forest", "LM_GreatTree", 5],

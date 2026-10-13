@@ -1,5 +1,5 @@
 /**
- * Detail pass 3, the falls: render the dive and cave keys and dump what draws there.
+ * Detail pass 3, the falls: render the dive keys and the turn at the pool and dump what draws there.
  *
  *   node world-tests/v6-water.mjs <tag> [keys...]          frames at 960x600 (default 12 14 16.6 19 20.6 23)
  *   node world-tests/v6-water.mjs <tag> layers <key>       the same key with each water layer hidden in turn
@@ -154,9 +154,9 @@ for (const key of keys) {
     });
     await frames(3);
     await page.screenshot({ path: path.join(OUT, `${tag}-k${key}-probe.png`) });
-    await setHidden(["UG_Mist", "FallsSpray"], true);
+    await setHidden(["FallsSpray"], true);
     await page.screenshot({ path: path.join(OUT, `${tag}-k${key}-probe-nomist.png`) });
-    await setHidden(["UG_Mist", "FallsSpray"], false);
+    await setHidden(["FallsSpray"], false);
     await page.evaluate(() => {
       window.__probeBy("Landmark_a3_Water").material.uniforms.uFoamC.value.copy(window.__probeWas[0]);
       window.__probeBy("Pool").material.uniforms.uFoam.value.copy(window.__probeWas[1]);
@@ -165,8 +165,7 @@ for (const key of keys) {
   if (mode === "layers") {
     for (const [lab, names] of [
       ["nocurtain", ["Landmark_a3_Water"]],
-      ["nomist", ["UG_Mist", "FallsSpray"]],
-      ["noglow", ["UG_Glow"]],
+      ["nomist", ["FallsSpray"]],
       ["nopool", ["Pool"]],
     ]) {
       await setHidden(names, true);

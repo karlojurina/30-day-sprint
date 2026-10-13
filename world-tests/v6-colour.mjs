@@ -36,7 +36,7 @@ const FRAMES = [
   [2, "a1", "a1 Landing · afternoon-gold", "open"],
   [6, "a2", "a2 Base Camp · afternoon", "open"],
   [14, "dive", "the dive · late-afternoon", "open"],
-  [23, "a3", "a3 the cave · cave", "under"],
+  [23, "a3", "a3 the falls · late-afternoon", "open"],
   [31, "a4", "a4 the Mine Lift · mine", "under"],
   [37.15, "shaft", "shaft exit · sunset-cliff", "open"],
   [43, "a5", "a5 Mirror Lake · sunset", "open"],

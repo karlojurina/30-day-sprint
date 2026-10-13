@@ -149,9 +149,10 @@ out.fallsTop = {
 // 2. Video Ads I to II.
 out.a3toA4 = {
   whole: yawProfile(info.stopS[2], info.stopS[3]),
-  a3ToCave: yawProfile(info.stopS[2], S(M.cave)),
-  cave: yawProfile(S(M.cave), S(M.exit)),
-  exitToA4: yawProfile(S(M.exit), info.stopS[3]),
+  // 2026-10-13: the marks "cave" and "exit" went with the camera's pass through the cave; the move is cut at "crossing" and "wall".
+  a3ToCrossing: yawProfile(info.stopS[2], S(M.crossing)),
+  crossingToWall: yawProfile(S(M.crossing), S(M.wall)),
+  wallToA4: yawProfile(S(M.wall), info.stopS[3]),
 };
 // 3. After Video Ads II: the turn before the ridge top (the burst).
 out.a4toRidge = {

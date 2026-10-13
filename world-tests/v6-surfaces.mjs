@@ -32,7 +32,7 @@ const NAMED = {
   dive1: [14, "the dive: tipping over"],
   dive: [16.6, "sinking, the pool rising"],
   pool: [19, "level at the pool"],
-  a3: [23, "a3 the cave"],
+  a3: [23, "a3 the falls"],
   collar: [37.15, "bursting out on the ridge"],
   shelf: [38.6, "the rim shelf, facing the saddle"],
   meadow: [40.5, "the saddle and the meadow"],

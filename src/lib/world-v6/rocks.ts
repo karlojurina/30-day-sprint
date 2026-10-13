@@ -51,7 +51,7 @@ import { terrainHeight } from "./terrain";
  *                     with families on their benches, the gully with slanted
  *                     groups standing on its walls. The Sky Island's underside
  *                     keeps v5's sheets unchanged (the rise is locked).
- * Hero rocks: within 150 of an eye level camera (HERO_KEYS) the K1 and K3
+ * Hero rocks: within 150 of an eye level camera (HERO_SPOTS) the K1 and K3
  * pieces use chamfered variants (every edge bevelled ~4 percent, the bevel
  * strip painted lighter: the drybrushed edge), 150 to 400 triangles.
  *
@@ -260,7 +260,7 @@ const PAL_DEFS: Record<string, PalDef> = {
   day: { az: 245, el: 14, top: 0xc8b898, lit: 0xb49c7e, shade: 0x627088, floor: 0.16 },
   // The stream, the lip, the ride, the pool, the falls wall.
   late: { az: 285, el: 11, top: 0xc8ae8c, lit: 0xb89878, shade: 0x5c6274, floor: 0.16 },
-  // The exit, the crossing, the hike, a4, the traverse: side lit from the right.
+  // The crossing, the hike, a4, the traverse: side lit from the right.
   gorge: { az: 300, el: 6, top: 0xc8a482, lit: 0xbc9676, shade: 0x564e5c, floor: 0.18 },
   // The gully and the burst.
   cliff: { az: 228, el: 5, top: 0xc0a080, lit: 0xb49474, shade: 0x5a546c, floor: 0.2 },
@@ -706,13 +706,34 @@ class Soup {
 
 /** Nothing comes within this of the camera's route (plus the rock's own size). */
 const RAIL_CLEAR = 30;
-/** The eye level cameras (bible 2.2 hero rocks): the opening, a1, the stream, the lip, the cave exit, the crossing, the ledge, the gully. */
-const HERO_KEYS = [0, 1, 2, 11, 12, 13, 32, 33, 34, 35, 39, 43, 44];
+/**
+ * Where the camera passes at eye level (bible 2.2 hero rocks), as points in
+ * the world: [x, y, z] of the camera there. They are copies of the route's
+ * keys (layout KEYS) and on purpose not read from it by number: the rocks
+ * belong to these places, and a key added or removed anywhere else on the
+ * route must not hand the hero rocks to whichever key takes the old number
+ * (2026-10-13: the a3 to a4 reroute nearly did). world-tests/v6-route.mjs
+ * fails if a spot no longer lies on the route, which is when to move it.
+ */
+export const HERO_SPOTS: ReadonlyArray<readonly [number, number, number]> = [
+  [1692, 30, 5030], // the opening
+  [1420, 28, 4700], // the glide in over the bay
+  [1369, 21, 4437], // a1, the Landing
+  [-85, 452, 1990], // down the stream
+  [-100, 440, 1862],
+  [-102, 422, 1792], // the lip
+  [270, 231, 1349], // the climb to the north wall, past the ledge's west end
+  [321, 251, 1346],
+  [374, 271, 1340],
+  [430, 290, 1330],
+  [1080, 470, 1196], // the traverse east of the ledge
+  [1436, 668, 1092], // the gully
+  [1436.09, 668, 1041.5625], // the gully's top
+];
 const HERO_R = 150;
 function heroAt(x: number, y: number, z: number): boolean {
-  for (const i of HERO_KEYS) {
-    const p = TRAIL[i];
-    if (p && Math.hypot(p[0] - x, p[1] - y, p[2] - z) < HERO_R) return true;
+  for (const p of HERO_SPOTS) {
+    if (Math.hypot(p[0] - x, p[1] - y, p[2] - z) < HERO_R) return true;
   }
   return false;
 }
@@ -725,6 +746,41 @@ export interface RockAnchor {
 }
 /** Every rock family placed, for cover.ts (tall grass and a shrub round the anchors). */
 export const rockAnchors: RockAnchor[] = [];
+
+/**
+ * cover.ts plants a ring of grass round every rock that has a footprint and
+ * seeds each ring with the rock's number. A rock's number is its count within
+ * its own place, from that place's fixed start, so a rock added or removed in
+ * one place never renumbers the rings of another. Until 2026-10-13 the number
+ * was the rock's index in the whole footprint list; the starts below are what
+ * that index was at each place then, so pinning it moved no blade of grass. A
+ * place that grows past the next one's start only gives two rings far apart
+ * the same number, which nobody can see.
+ */
+const RING_START = {
+  opening: 0,
+  landing: 3,
+  valley: 20,
+  stream: 129,
+  northWall: 201,
+  gully: 243,
+  pool: 267,
+  hike: 359,
+  saddle: 416,
+  lake: 584,
+  island: 642,
+  gate: 684,
+} as const;
+export type RockPlace = keyof typeof RING_START;
+/** One entry per rock footprint this module registered, in the same order (cover.ts lines the two lists up by that). */
+export const rockRings: Array<{ place: RockPlace; n: number }> = [];
+let ringPlace: RockPlace = "opening";
+let ringNo = 0;
+/** The rocks placed from here on belong to `place`. */
+function ringsFrom(place: RockPlace): void {
+  ringPlace = place;
+  ringNo = RING_START[place];
+}
 
 const M = new THREE.Matrix4();
 const Q = new THREE.Quaternion();
@@ -792,7 +848,10 @@ function rock(soup: Soup, key: KitKey, x: number, z: number, hw: number, pal: Pa
   soup.put(p, M, pal, 0.94 + rand() * 0.12, o.hard);
   soup.rocks++;
   if (hero) soup.heroes++;
-  if (o.foot ?? hw > 1.5) addFootprint({ x, z, r: hw * 1.05, kind: "rock" });
+  if (o.foot ?? hw > 1.5) {
+    addFootprint({ x, z, r: hw * 1.05, kind: "rock" });
+    rockRings.push({ place: ringPlace, n: ringNo++ });
+  }
   return g - hWorld * sink + hWorld;
 }
 
@@ -902,11 +961,13 @@ function place(): Built {
   let families = 0;
   let modules = 0;
   rockAnchors.length = 0;
+  rockRings.length = 0;
   const F = (soup: Soup, x: number, z: number, size: number, seed: number, o?: FamilyOpts) => {
     if (family(soup, x, z, size, seed, o)) families++;
   };
   const stop = (id: string) => PLACES.find((p) => p.id === id)!;
 
+  ringsFrom("opening");
   // ── The opening (bible 1.1): the islet's boulder family, the near layer of the most important frame ──
   // Three hull boulders on the islet's east half (the glide from key 0 passes
   // ~30 west of its centre), tops 20 to 35 over the sea so they reach up into
@@ -940,6 +1001,7 @@ function place(): Built {
     families++;
   }
 
+  ringsFrom("landing");
   // ── a1, the Landing (bible 1.2): the tide line: pebbles and a few warm families, no black rocks ──
   {
     const a1 = stop("a1");
@@ -984,6 +1046,7 @@ function place(): Built {
     }
   }
 
+  ringsFrom("valley");
   // ── The valley and a2 (bible 1.3): a near family lower right at a2, families on the trail bends, outcrops ──
   {
     const a2 = stop("a2");
@@ -1030,6 +1093,7 @@ function place(): Built {
     }
   }
 
+  ringsFrom("stream");
   // ── The stream to the lip (bible 1.4): boulders in the rapids, slabs on the banks, the lip's teeth ──
   {
     const rand = mulberry(3301);
@@ -1129,6 +1193,7 @@ function place(): Built {
     }
   }
 
+  ringsFrom("northWall");
   // ── The north wall's bands (terrain.ts NORTH_BANDS: a talus foot 30 out
   // rising 16, then bands 28 deep, each a 70 cliff over its first 40 percent
   // and a bench behind): rock families along each bench just behind the cliff's
@@ -1173,6 +1238,7 @@ function place(): Built {
     }
   }
 
+  ringsFrom("gully");
   // ── The gully (bible 1.11): slanted groups standing on both walls, leaning in, a notch of sky between ──
   {
     const G = WORLD.gully;
@@ -1222,7 +1288,8 @@ function place(): Built {
     }
   }
 
-  // ── The pool, the cave exit, the crossing's talus fan (bible 1.8) ──
+  ringsFrom("pool");
+  // ── The pool, the south bank, the crossing's talus fan (bible 1.8) ──
   {
     const pool = WORLD.pool;
     // Round the pool's east and west sides, never between the ride and the water.
@@ -1247,7 +1314,7 @@ function place(): Built {
       F(soups.gorge, x, z, 10 + rand() * 10, 7800 + k, { lead: rand() < 0.3 ? "K4" : undefined });
       placed++;
     }
-    // Round the cave exit on the falls side of the river, off the trail.
+    // On the falls side of the river between the pool and the cliff's foot, off the trail.
     for (const [x, z, s, k] of [
       [100, 1668, 11, 1],
       [128, 1610, 9, 2],
@@ -1255,15 +1322,20 @@ function place(): Built {
     ] as const) F(soups.gorge, x, z, s, 7900 + k);
   }
 
+  ringsFrom("hike");
   // ── The hike and the a4 ledge (bible 1.9, 1.10) ──
   {
     const rand = mulberry(8801);
     // Families beside the switchback bends (the cairns are dress-gorge.ts's).
+    // Seeded by the bend's own count: the first bend was the trail's point 26
+    // when these were placed, hence 8826, and a point added to or taken from
+    // the trail anywhere before the bends must not re-deal them.
+    let bend = 0;
     for (let i = 0; i < PATH.length - 1; i++) {
       const b = PATH[i];
       if (!(b.x > 200 && b.x < 460 && b.z > 1200 && b.z < 1300 && b.y > 70 && b.y < 310)) continue;
       const a = rand() * Math.PI * 2;
-      F(soups.gorge, b.x + Math.cos(a) * 42, b.z + Math.sin(a) * 42, 8 + rand() * 5, 8800 + i);
+      F(soups.gorge, b.x + Math.cos(a) * 42, b.z + Math.sin(a) * 42, 8 + rand() * 5, 8826 + bend++);
     }
     // The ledge's rock lip: slabs and rocks along the bench's outer edge, the
     // near side of the a4 frame, dark across the bottom; clear of the hut and
@@ -1306,6 +1378,7 @@ function place(): Built {
     }
   }
 
+  ringsFrom("saddle");
   // ── The rim shelf round the gully's top, the saddle and the meadow (bible 1.12) ──
   {
     const sx = WORLD.gully.x;
@@ -1351,6 +1424,7 @@ function place(): Built {
     }
   }
 
+  ringsFrom("lake");
   // ── The Mirror Lake (locked composition): framing lower left at a5, the shore, the rock islet with a bush (still 2) ──
   {
     const a5 = stop("a5");
@@ -1388,6 +1462,7 @@ function place(): Built {
     }
   }
 
+  ringsFrom("island");
   // ── The Sky Island: v5's underside sheets (the rise is locked), rim families by moonlight ──
   {
     const I = WORLD.island;
@@ -1477,6 +1552,7 @@ function place(): Built {
     }
   }
 
+  ringsFrom("gate");
   // ── The Gate isle's brow (bible 1.20): a few families near the rim, clear of the arch, the dock and the causeway ──
   {
     const I = WORLD.gateIsle;

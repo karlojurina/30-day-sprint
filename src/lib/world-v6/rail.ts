@@ -120,7 +120,7 @@ export const RAIL_TUNING = {
   /** Terrain follow: keep the camera this high over the ground in its footprint,
    *  at most (v6: layout TRAIL_CLEAR per key, 20 at and beside the stops and at
    *  the opening, 35 elsewhere, linear between keys; the lower wins).
-   *  Off on the kinds in layout NO_TERRAIN_FOLLOW (dive, climb, bridge, board, flight, cave). */
+   *  Off on the kinds in layout NO_TERRAIN_FOLLOW (dive, climb, bridge, board, flight). */
   camClear: 35,
   footR: 24,
   /** Smooth-max window of the lift, world units each way. */

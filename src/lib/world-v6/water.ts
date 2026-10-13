@@ -27,9 +27,11 @@ import { NOISE_GLSL, RIVER_HW, brookHalfW, clamp01, lightStateOf, lin, smooth, s
  *              shader with a dark shallow band and a pale line at the shore.
  *   Falls      "Landmark_a3_Water": the curtain on WORLD.falls, falling the way
  *              water falls (CURTAIN), three unequal falls, wiggling streaks at
- *              three scales, gaps, foam heads, a glassy tongue at the lip. From
- *              the cave (uBack) "CurtainBack" takes over: the same sheet, opaque
- *              and drawn first, so nothing behind it is shaded (a3's cost).
+ *              three scales, gaps, foam heads, a glassy tongue at the lip.
+ *              Nothing stands behind it but the cliff: the cave is gone
+ *              (2026-10-13, layout.ts "The cave that was here"), and with it
+ *              the sheet's look from behind ("CurtainBack") and the parting as
+ *              the camera walked through at the mouth.
  *              water.ts owns the curtain's material in every view: if another
  *              module swaps it, update() puts it back.
  *   Pool       "Pool": a displaced polar disc, white water boiling at the impact
@@ -80,8 +82,6 @@ const WATER_C = {
   teal: "#2a4e54",
   jade: "#58877f",
 } as const;
-/** The day beyond the curtain, seen from the cave (the late-afternoon gorge), lifted above 1 to read as light. */
-const GLOW_DAY = new THREE.Color("#f2c898").multiplyScalar(1.1);
 
 // ── Tunables ─────────────────────────────────────────────────────────────────
 
@@ -572,9 +572,9 @@ void main() {
 const CURTAIN_FRAG = /* glsl */ `
 #include <common>
 #include <fog_pars_fragment>
-uniform float uTime, uBack, uSunSide, uSunFront, uDay, uPass, uCamD;
+uniform float uTime, uSunSide, uSunFront, uDay, uCamD;
 uniform vec2 uThru;
-uniform vec3 uLit, uShade, uSky, uSkyHi, uFoamC, uGlow, uTeal, uJadeC;
+uniform vec3 uLit, uShade, uSky, uSkyHi, uFoamC, uTeal, uJadeC;
 varying vec2 vUv;
 varying float vDrop;
 varying vec3 vSheet;
@@ -613,69 +613,14 @@ void main() {
   // The ribbons weave as they fall (bible 2.4): a slow sine of the drop and time
   // moves the pattern across before it is sampled, more the further it has fallen.
   float wig = ( 0.02 * sin( y * 9.0 + uTime * 1.3 ) + 0.01 * sin( y * 23.0 - uTime * 2.1 ) ) * smoothstep( 0.04, 0.3, y );
-#ifndef CURTAIN_BACK
   // Final pass C: close up the weave calms (at 60 to 120 away it swung the
   // ribbons into wide waves, the draped satin of the exit and back marks).
   wig *= 1.0 - 0.7 * ( 1.0 - smoothstep( 90.0, 320.0, length( vWc - cameraPosition ) ) );
-#endif
   float x = vUv.x + wig;
   float isMain = 1.0 - vSheet.z;
   float dist = length( vWc - cameraPosition );
   float e = min( vUv.x, 1.0 - vUv.x );
 
-#ifdef CURTAIN_BACK
-  // Seen from behind (the cave): a window of backlit water, opaque, drawn first.
-  float near = 1.0 - smoothstep( 110.0, 320.0, dist );
-  float k1 = sNoise( vec2( x * 7.0, ph * 0.42 ) );
-  float k1n = sNoise( vec2( x * 17.0 + 5.0, ph * 0.5 + 9.0 ) );
-  float k2 = sNoise( vec2( x * mix( 23.0, 41.0, near ) + 7.0, ph * 0.9 + 3.0 ) );
-  float k3 = sNoise( vec2( x * mix( 71.0, 97.0, near ) + 19.0, ph * 1.8 + 11.0 ) );
-  float f3 = ( 1.0 - clamp( fwidth( x * 80.0 ) * 1.3, 0.0, 1.0 ) ) * smoothstep( 45.0, 70.0, dist );
-  float st2 = cStep( 0.5, k2 );
-  float st3 = cStep( 0.56, k3 ) * f3;
-  float bodyN = mix( cStep( 0.5, k1 ), cStep( 0.5, k1n ), near );
-  float n = clamp( bodyN * 0.42 + st2 * 0.36 + st3 * 0.22, 0.0, 1.0 );
-  float tone = cStep( 0.3, n ) * 0.5 + cStep( 0.64, n ) * 0.5;
-  float brk = smoothstep( 0.0, 0.14, y );
-  float fhN = sNoise( vec2( x * 6.5 + 3.0, ph * 0.75 ) ) * 0.8 + k2 * 0.2;
-  float heads = cStep( 0.66, fhN ) * brk;
-  float torn = ( k2 - 0.5 ) * 0.03 + ( sNoise( vec2( ph * 1.3, 2.0 ) ) - 0.5 ) * 0.015;
-  float g1w = 0.042 * ( 1.0 - smoothstep( 0.0, 0.3, y ) );
-  float g2w = 0.028 * ( 1.0 - smoothstep( 0.0, 0.2, y ) );
-  float g1 = ( 1.0 - smoothstep( g1w * 0.4, g1w + 0.006, abs( x - 0.33 + torn ) ) ) * smoothstep( 0.0, 0.012, g1w );
-  float g2 = ( 1.0 - smoothstep( g2w * 0.4, g2w + 0.006, abs( x - 0.67 - torn ) ) ) * smoothstep( 0.0, 0.012, g2w );
-  float slotN = sNoise( vec2( x * 13.0 + 41.0, y * 1.6 + 3.0 ) ) + ( k2 - 0.5 ) * 0.1 + ( k3 - 0.5 ) * 0.05;
-  float slots = cStep( 0.68, slotN ) * smoothstep( 0.08, 0.2, y ) * ( 1.0 - smoothstep( 0.86, 0.95, y ) );
-  float onSheet = isMain * step( 0.0, vDrop ) * ( 1.0 - heads );
-  float gaps = max( max( g1, g2 ), slots ) * onSheet;
-  float rag = smoothstep( 0.0, 0.03 + 0.09 * k1 + 0.03 * k2, e );
-  // The day beyond is painted in (a peach sky over a dark jagged gorge and tree
-  // line), bent by the ribbons and seen clearest where the water is thin or split.
-  vec3 dir = normalize( vWc - cameraPosition );
-  float az = atan( dir.x, dir.z );
-  float el = dir.y / max( length( dir.xz ), 0.001 );
-  el += ( st2 - 0.5 ) * 0.008;
-  float ridge = 0.075 + 0.03 * sNoise( vec2( az * 4.0, 1.0 ) ) + 0.012 * sNoise( vec2( az * 11.0, 4.0 ) );
-  float tip = 1.0 - abs( fract( az * 70.0 + 0.3 * sNoise( vec2( az * 6.0, 7.0 ) ) ) - 0.5 ) * 2.0;
-  ridge += max( 0.0, tip * 1.7 - 0.7 ) * 0.018 * step( 0.4, sNoise( vec2( az * 3.0, 11.0 ) ) );
-  float skyK = cStep( ridge, el );
-  vec3 sky = mix( vec3( 1.45, 0.86, 0.5 ), vec3( 1.2, 1.0, 0.82 ), smoothstep( ridge, ridge + 0.3, el ) );
-  float band2 = cStep( ridge - 0.07 + 0.03 * sNoise( vec2( az * 7.0, 17.0 ) ), el );
-  vec3 gorge = mix( vec3( 0.03, 0.026, 0.04 ), vec3( 0.085, 0.07, 0.1 ), band2 );
-  vec3 world = mix( gorge, sky, skyK );
-  float strands = st2 * 0.6 + st3 * 0.4;
-  vec3 strandC = vec3( 0.78, 0.92, 1.1 ) * mix( 0.45, 1.25, strands );
-  vec3 water = mix( world, strandC, 0.15 + 0.6 * tone );
-  // Pulses of thicker water and foam heads falling past: bright clots backlit by
-  // the day, so the sheet reads as falling, never as blinds.
-  float pulseB = cStep( 0.6, sNoise( vec2( x * 3.1 + 1.7, ph * 1.5 ) ) );
-  water = mix( water, strandC * 1.12, pulseB * 0.35 );
-  water = mix( water, uGlow * 1.2, heads * 0.8 );
-  vec3 col = mix( water, world, gaps * mix( 1.0, 0.2, skyK ) );
-  // Near the sheet's torn sides the rock behind it shows dark.
-  col = mix( vec3( 0.03, 0.028, 0.034 ), col, rag );
-  gl_FragColor = vec4( col, 1.0 );
-#else
   // The front (v5's detail pass 3, which Lovro liked, plus the weave): three
   // unequal falls split by two painted rock ribs, each three flat tones in long
   // ribbons (thin strands dark teal, the body teal grey, lit ribbons cream on
@@ -872,7 +817,7 @@ void main() {
   float crown = smoothstep( 0.0, 0.2, fn - ( 1.0 - fz * 0.8 ) ) + cStep( 0.975, y );
   col = mix( col, mix( uFoamC * 1.15 + midC * 0.25, uFoamC * 2.0, clamp( crown, 0.0, 1.0 ) ), foam );
   col *= uDay;
-  // Opaque (the lit cave is right behind the sheet at the pool); ragged sides.
+  // Opaque; ragged sides.
   float rag = cStep( 0.018 + 0.05 * s1, e );
   float a = 0.985 * rag;
   // Final pass B: the sheet's sides tear into separate falling strands with
@@ -885,40 +830,20 @@ void main() {
   col = mix( col, litC * 1.08, ( cStep( 0.0, sideZ * 0.8 - strandN + 0.06 ) - sideGap ) * 0.6 );
   // Island falls: long, thinning into the clouds over the last 15 percent with noise.
   a *= 1.0 - vSheet.z * smoothstep( 0.82, 1.0, y + ( s2 - 0.5 ) * 0.12 );
-  // Passing through the curtain toward the cave: the day glows through.
-  col = mix( col, uGlow * mix( 0.55, 1.0, t2 ), uBack * 0.6 );
 #ifdef CURTAIN_CUT
   // The main falls: opaque and drawn first, cut at its torn sides, so nothing
-  // behind it is shaded (key 23: the terrain and the cave behind cost ~0.9 ms).
+  // behind it is shaded.
   if ( a < 0.5 ) discard;
-  // Walking through at the cave mouth (uPass: the camera low, close in front,
-  // inside the sheet's width; never on the ride, which passes 17-28 in front
-  // but 136+ high): near the camera the sheet parts in falling streaks, so the
-  // cave shows through on the way in and out instead of a frame of flat cream.
-  if ( uPass > 0.0 ) {
-    // Final pass B: the parting starts at 40 (was 48): its pixel cost was a
-    // little over the cap at 3 transit frames. The strands left standing are
-    // thin (about 5x narrower) and light, so passing through reads as falling
-    // water; the wide dark strands read as cage bars at the cave mark.
-    float cut = uPass * ( 1.0 - smoothstep( 12.0, 40.0, dist ) );
-    float gN = sNoiseF( vec2( X * 1.1, ph * 1.3 ) ) * 0.65 + sNoiseF( vec2( X * 2.9 + 7.0, ph * 2.4 + 3.0 ) ) * 0.35;
-    if ( gN < cut * 1.1 - 0.05 ) discard;
-    col = mix( col, uFoamC * mix( 0.8, 1.02, lit ) * uDay, cut * 0.55 );
-    // Final pass D: going through the falls is a moment (the frames 20 to 110
-    // in front of the sheet were wall to wall cream streaks). As the camera
-    // closes in (uCamD, one value per frame) the sheet breaks into bright
-    // falling clots of spray with gaps that show the cave and the camp's
-    // lights behind it, droplets hang in the gaps, and the spray blooms white
-    // as the camera crosses. The clots keep one size on screen (zs).
-  }
   // Final pass D: going through the falls is a moment (the frames 20 to 110
   // in front of the sheet were wall to wall cream streaks). uThru (one value
   // per frame, set in update()): x how far the pass through has come (0 at
   // 110 in front, 1 inside 20), y the camera's distance to the sheet. The
   // sheet rips into long falling strands of bright spray with gaps that show
-  // the cave and the camp's lights behind it, droplets hang in the gaps, and
-  // the spray blooms white as the camera crosses. zs keeps the rips one size
-  // on screen as the camera closes in.
+  // the wet cliff behind it, droplets hang in the gaps, and the spray blooms
+  // white close in. zs keeps the rips one size on screen as the camera closes
+  // in. (Made for the walk through the falls into the cave, which is gone;
+  // the foot of the ride still comes within 75 of the sheet, where it is on
+  // at up to 0.04.)
   if ( uThru.x > 0.0 ) {
     float thru = uThru.x;
     float bloom = smoothstep( 0.55, 1.0, thru );
@@ -940,7 +865,6 @@ void main() {
   gl_FragColor = vec4( col, 1.0 );
 #else
   gl_FragColor = vec4( col, a );
-#endif
 #endif
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -1416,12 +1340,9 @@ function puffGeometry(list: Puff[]): THREE.InstancedBufferGeometry {
 /**
  * scene.userData.water, for the other look modules:
  *   swash          the sea's wash phase (the same object as the `swash` export).
- *   curtainUniforms the curtain's live uniforms (uGlow: the day behind the
- *                  curtain seen from the cave, for the cave's wet sheen).
  */
 export interface WaterApi {
   swash: { value: number };
-  curtainUniforms: Record<string, { value: unknown }>;
 }
 
 // ── Install ──────────────────────────────────────────────────────────────────
@@ -1498,7 +1419,7 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   sea.position.set((WORLD.minX + WORLD.maxX) / 2, WORLD.seaLevel, (WORLD.minZ + WORLD.maxZ) / 2);
   // Cheap laptops (overdraw): the sea is the backmost solid under the whole
   // world, so it draws after every other solid (the sky, light.ts, is 1000):
-  // where land, the cave or an island covers it, its fragments fail the depth
+  // where land or an island covers it, its fragments fail the depth
   // test instead of being shaded (a3 average 2.15 -> 2.03, a7 too).
   sea.renderOrder = 900;
   root.add(sea);
@@ -1710,40 +1631,34 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
     uSky: { value: skyLo },
     uSkyHi: { value: skyHi },
     uFoamC: { value: lin(WATER_C.foam) },
-    uGlow: { value: GLOW_DAY.clone() },
     uTeal: { value: lin(WATER_C.teal) },
     uJadeC: { value: lin(WATER_C.jade) },
   };
-  const backU = { value: 0 };
-  // Final pass: the walk through the curtain at the cave mouth (update() sets it).
-  const passU = { value: 0 };
-  /** Final pass C: the camera's distance in front of the sheet on the walk through (1e4 elsewhere), for the close threads' scale. */
+  /** Final pass C: the camera's distance in front of the sheet when it is low and close (1e4 elsewhere), for the close threads' scale. */
   const camDU = { value: 1e4 };
   /** Final pass D: the pass through the falls (x 0-1) and the camera's distance to the sheet (y), for the spray (CURTAIN_FRAG). */
   const thruU = { value: new THREE.Vector2(0, 1e4) };
   const fallH = F.top[1] - F.bottom[1];
-  const curtainMatOf = (name: string, mode: "front" | "back" | "blend"): THREE.ShaderMaterial => {
+  const curtainMatOf = (name: string, mode: "front" | "blend"): THREE.ShaderMaterial => {
     const m = new THREE.ShaderMaterial({
       name,
       fog: true,
-      // The main falls, front and back (the cave): opaque, drawn first, so the
-      // gorge, the sky and the cave behind them are never shaded. The island
-      // falls: blended, for their fade into the clouds.
+      // The main falls: opaque, drawn first, so the cliff behind them is
+      // never shaded. The island falls: blended, for their fade into the clouds.
       transparent: mode === "blend",
       depthWrite: true,
       side: THREE.DoubleSide,
-      defines: mode === "back" ? { CURTAIN_BACK: "" } : mode === "front" ? { CURTAIN_CUT: "" } : {},
+      defines: mode === "front" ? { CURTAIN_CUT: "" } : {},
       uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog]),
       vertexShader: CURTAIN_VERT,
       fragmentShader: CURTAIN_FRAG,
     });
     // Shared by reference: applyLight() drives these.
-    Object.assign(m.uniforms, curtainU, { uTime: fallsTime, uBack: backU, uPass: passU, uCamD: camDU, uThru: thruU });
+    Object.assign(m.uniforms, curtainU, { uTime: fallsTime, uCamD: camDU, uThru: thruU });
     mats.push(m);
     return m;
   };
   const curtainMat = curtainMatOf("SurfCurtain", "front");
-  const curtainBackMat = curtainMatOf("SurfCurtainBack", "back");
   const islandFallsMat = curtainMatOf("SurfIslandFalls", "blend");
 
   // The main sheet, built round the Falls' place (its landmark group's origin).
@@ -1802,12 +1717,6 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
   const curtain = new THREE.Mesh(curtainGeo, curtainMat);
   curtain.name = "Landmark_a3_Water";
   curtain.renderOrder = -1;
-  // The cave's view of it: the same sheet, opaque, drawn before every opaque
-  // (renderOrder -1), so the gorge, the sky and the spray behind it are never shaded.
-  const curtainBack = new THREE.Mesh(curtainGeo, curtainBackMat);
-  curtainBack.name = "CurtainBack";
-  curtainBack.renderOrder = -1;
-  curtainBack.visible = false;
   // Into the Falls' landmark group when it exists (it sits at the place's
   // base, unturned); until blocks.ts builds it, under the root at the place.
   const lmFalls = root.getObjectByName(a3.mesh);
@@ -1818,7 +1727,7 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
     curtain.position.copy(a3Pos);
     root.add(curtain);
   }
-  meshes.push(curtain, curtainBack);
+  meshes.push(curtain);
 
   // The pool: a polar disc a little wider than the pool (the bank clips it),
   // displaced near the impact.
@@ -2146,7 +2055,6 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
     curtainU.uDay.value = 0.3 + 0.7 * (s ? clamp01(0.35 * s.hemiIntensity + 0.75 * dayK) : 1);
     curtainU.uLit.value.copy(lin(WATER_C.curtainLit)).lerp(tmpC.copy(sc).multiplyScalar(0.95), 0.2);
     curtainU.uShade.value.copy(lin(WATER_C.curtainShade)).lerp(skyLo, 0.25);
-    curtainU.uGlow.value.copy(GLOW_DAY);
     // Puffs: lit by the sun's colour, shaded in the sky's; dimmer at night.
     puffU.uLitC.value.copy(lin(WATER_C.foam)).lerp(tmpC.copy(sc), 0.35).multiplyScalar(0.25 + 0.75 * curtainU.uDay.value);
     puffU.uShadeC.value.copy(skyHi).lerp(skyLo, 0.5).multiplyScalar(0.72 * curtainU.uDay.value);
@@ -2210,7 +2118,7 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
   };
   let animating = false;
 
-  const api: WaterApi = { swash, curtainUniforms: { ...curtainU, uTime: fallsTime, uBack: backU } };
+  const api: WaterApi = { swash };
   scene.userData.water = api;
 
   let tris = 0;
@@ -2225,17 +2133,13 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
   stats.upperFallsTris = (upperGeo.index ? upperGeo.index.count : 0) / 3;
   // sea, ribbons, curtain (front or back), pool, spray, plume, upper falls, tarn, island falls, island mist
   stats.drawCallsAdded = 1 + ribbons.length + 9;
-  stats.programs = "sea, flow, curtain, curtain back, island falls, pool, puff, upper";
+  stats.programs = "sea, flow, curtain, island falls, pool, puff, upper";
   stats.installMs = Math.round(performance.now() - t0);
 
   let restored = 0;
   return {
     name: "water",
     afterAll() {
-      // blocks.ts has moved the curtain into LM_Waterfall: the cave's copy sits beside it.
-      const parent = curtain.parent ?? root;
-      parent.add(curtainBack);
-      curtainBack.position.copy(curtain.position);
       // The real Upper Falls replace blocks.ts's stand-in.
       const standIn = root.getObjectByName("UpperFalls_StandIn") ?? scene.getObjectByName("UpperFalls_StandIn");
       if (standIn) standIn.visible = false;
@@ -2244,7 +2148,7 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
     update(t: number): boolean {
       let changed = applyLight();
       // water.ts owns the curtain's look in every view (bible 4.0, 4.8): another
-      // module that swaps its material (v5's cave dressing did) gets it back.
+      // module that swaps its material gets it back.
       if (curtain.material !== curtainMat) {
         curtain.material = curtainMat;
         restored++;
@@ -2253,27 +2157,14 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
       const cam = ctx.camera;
       cam.updateMatrixWorld();
       camPos.setFromMatrixPosition(cam.matrixWorld);
-      // Behind the curtain (in the cave, looking out) it glows with the day beyond.
-      // v6: behind = against the flow from the curtain (the cave side), and only
-      // within the curtain's width (the side passage's exit is not "behind").
+      // Where the camera is from the sheet: `behind` against the flow (negative
+      // in front of it, in the gorge), `side` across it from its middle.
       const behind = -(camPos.z - fallsCurtainAt(Math.min(camPos.y, F.top[1]))[1]) * FLOW_DIR[1] - (camPos.x - F.top[0]) * FLOW_DIR[0];
       const side = Math.abs((camPos.x - F.top[0]) * FLOW_ACROSS[0] + (camPos.z - F.top[2]) * FLOW_ACROSS[1]);
-      const back = camPos.y < 260 ? smooth(-2, 14, behind) * (1 - smooth(70, 110, side)) : 0;
-      if (back !== backU.value) {
-        backU.value = back;
-        changed = true;
-      }
-      // The walk through the curtain (the cave passes run 92-115 high; the ride
-      // down the falls stays 136+ high while it is this close in front).
-      const pass = (1 - smooth(118, 130, camPos.y)) * (1 - smooth(40, 70, -behind)) * (1 - smooth(55, 80, side));
-      if (pass !== passU.value) {
-        passU.value = pass;
-        changed = true;
-      }
       const camD = camPos.y < 130 && side < 110 ? Math.max(Math.abs(behind), 1) : 1e4;
-      // Final pass D: the pass through the falls, gated on the camera looking
+      // Final pass D: close in front of the falls, gated on the camera looking
       // level-ish (the ride down the falls looks 40-71 degrees down, 136+ high)
-      // and below the lip's stream (405+), so only the walks in and out get it.
+      // and below the lip's stream (405+): the foot of the ride, as it levels out.
       cam.getWorldDirection(fwdV);
       const thruD = Math.max(Math.abs(behind), 1);
       const thruGate = (1 - smooth(150, 175, camPos.y)) * (1 - smooth(0.25, 0.38, -fwdV.y)) * (1 - smooth(55, 80, side));
@@ -2297,16 +2188,6 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
       }
       if (camD !== camDU.value) {
         camDU.value = camD;
-        changed = true;
-      }
-      // In the cave the opaque copy draws; the pool, spray and plume are behind it.
-      const inCave = back > 0.98;
-      if (inCave !== curtainBack.visible) {
-        curtainBack.visible = inCave;
-        curtain.visible = !inCave;
-        poolMesh.visible = !inCave;
-        spray.visible = !inCave;
-        plume.visible = !inCave;
         changed = true;
       }
       // The zones (blocks.ts's rules): the ridge crest runs at z 690-1000 and
@@ -2336,7 +2217,7 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
         time.value = t;
         swash.value = t * SWASH_RATE;
       }
-      const fallsOn = south && (inCave || (inView(fallsSphere, 3000) && fallsVisible()) || inView(plumeSphere, 6000));
+      const fallsOn = south && ((inView(fallsSphere, 3000) && fallsVisible()) || inView(plumeSphere, 6000));
       if (fallsOn || (sky && inView(islandFallsSphere, 4000))) moving = true;
       animating = moving;
       return changed || moving;

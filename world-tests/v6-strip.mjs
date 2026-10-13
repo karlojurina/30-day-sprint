@@ -48,7 +48,8 @@ const want = (k) => (named.length === 0 && MODES.includes(k)) || named.includes(
  * from the key after the burst on, v5's rows (v6-locked.mjs). v6-perf.mjs and
  * v6-overdraw.mjs read STRIP_FRAMES from this source.
  * 2026-10-13 (Lovro: "the camera between Video Ads 1 and Video Ads 2 goes into
- * the cave for no reason"): the camera no longer enters the cave. From a3
+ * the cave for no reason"): the camera no longer enters the cave (and since
+ * decision 66 of the same day there is no cave in the world). From a3
  * (key 21) it crosses the gorge in one move, past the falls and up to a4 (key
  * 37); the seven frames between the two stops follow it. The marks "cave",
  * "camp", "exit" and "back" are retired in layout.ts; "crossing" (key 25) is

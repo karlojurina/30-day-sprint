@@ -59,7 +59,7 @@ const BUDGET = {
 const FRAME_TARGETS = [
   [/ride|over the edge|tipping|sinking|falling/i, 6.0],
   [/turn at the pool|the turn/i, 6.0],
-  [/cave|a3/i, 6.0],
+  [/a3/i, 6.0],
   [/ledge|a4/i, 5.5],
   [/hike|switchback/i, 5.0],
   [/gate|arch|tail|a8/i, 4.0],
@@ -317,7 +317,7 @@ if (mode === "route") {
   say(`  module install at load (sum of moduleStats().install) ${install ?? "n/a"} ms: ${result.summary.install.verdict}`);
   say(`FAILS over the hard cap: ${result.summary.fails.length}${result.summary.fails.length ? "\n  " + result.summary.fails.join("\n  ") : ""}`);
 } else if (mode === "bpr") {
-  const pick = want ? chosen : chosen.filter((p) => p.id.startsWith("stop") || /ride|pool|turn|cave|opening/i.test(p.label));
+  const pick = want ? chosen : chosen.filter((p) => p.id.startsWith("stop") || /ride|pool|turn|opening/i.test(p.label));
   for (const p of pick) {
     await at(p.depth);
     const per = [];

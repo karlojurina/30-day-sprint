@@ -28,22 +28,20 @@
  *     SHIP.camUp through the flight, has no speed or turn step anywhere
  *     (cast-off and docking ease), keeps the camera standing on its deck
  *     while it eases, banks no more than shipBankMax, and allocates nothing.
- *   - grey pass 3: the cave, tunnel and shaft samples are inside the mine's
- *     voids (layout caveMargin) or in open air, with terrain follow on; the
- *     flight is its own scroll stretch (FLIGHT_VH), a8 sits after it, and it
- *     retunes on its own (setPacing's 10th value) without moving the path.
- *     2026-10-13 (Lovro: no cave between Video Ads 1 and 2): the camera no
- *     longer enters the cave and layout's "cave" kind is retired, so the
- *     check is now that the rail has NO sample of an UNDERGROUND kind and
- *     none under the terrain's surface (v6-cave.mjs proves the cave is still
- *     built and that the route stays out of its void).
+ *   - grey pass 3: the flight is its own scroll stretch (FLIGHT_VH), a8 sits
+ *     after it, and it retunes on its own (setPacing's 10th value) without
+ *     moving the path.
+ *     2026-10-13: the cave behind the falls is gone from the world (decision
+ *     66; the camera had left it the same day), and with it the "cave" kind
+ *     and the checks that its samples were inside the void. What is left of
+ *     them: no sample of the rail is under the terrain's surface.
  */
 import * as THREE from "three";
 import { createRail } from "../src/lib/world-v6/rail.ts";
 import * as L from "../src/lib/world-v6/layout.ts";
 import { terrainHeight } from "../src/lib/world-v6/terrain.ts";
 
-const { PLACES, WORLD, TAIL_VH, FLIGHT_VH, NO_TERRAIN_FOLLOW, UNDERGROUND } = L;
+const { PLACES, WORLD, TAIL_VH, FLIGHT_VH, NO_TERRAIN_FOLLOW } = L;
 const failures = [];
 function check(ok, what, detail) {
   console.log(`  ${ok ? "PASS" : "FAIL"}  ${what}${detail !== undefined ? "  (" + detail + ")" : ""}`);
@@ -213,7 +211,6 @@ function cliffDistance(x, y, z, maxR = 80) {
   const N = 6000;
   let walk = { v: Infinity };
   let dive = { v: Infinity };
-  let mine = { bad: 0, n: 0, first: null };
   let below = 0;
   for (let i = 0; i <= N; i++) {
     const s = (i / N) * rail.length;
@@ -221,18 +218,6 @@ function cliffDistance(x, y, z, maxR = 80) {
     const { x, y, z } = pose.position;
     const above = y - surface(x, z);
     if (y < terrainHeight(x, z)) below++;
-    if (UNDERGROUND.includes(rail.kindAtS(s))) {
-      // Grey pass 3: under the terrain by design. Inside a void, or in open
-      // air (>= 15 up, nothing higher within 8), as v4-route.mjs rules it.
-      mine.n++;
-      const inside = L.caveMargin(x, y, z) >= 3;
-      const open = above >= 15 && cliffDistance(x, y, z, 10) > 8;
-      if (!inside && !open) {
-        mine.bad++;
-        if (!mine.first) mine.first = { s: Math.round(s), kind: rail.kindAtS(s), p: [x, y, z].map(Math.round) };
-      }
-      continue;
-    }
     if (rail.kindAtS(s) === "dive") {
       const c = cliffDistance(x, y, z);
       const v = above < 0 ? -1 : c;
@@ -245,12 +230,10 @@ function cliffDistance(x, y, z, maxR = 80) {
       if (above - need < walk.v) walk = { v: above - need, s: Math.round(s), kind: rail.kindAtS(s), p: [x, y, z].map(Math.round), need: f1(need) };
     }
   }
-  // 2026-10-13: this was "the cave and its side passage: inside the void or in
-  // open air, with terrain follow on" (mine.bad === 0 over more than 50 cave
-  // samples). The camera no longer goes underground anywhere: there must be
-  // no such sample at all, and none under the terrain's surface.
-  check(mine.n === 0 && below === 0, "no part of the rail is underground (the cave pass is retired): no sample of an UNDERGROUND kind, none under the terrain's surface", `${mine.n} of an underground kind, ${below} under the surface, of ${N + 1} samples`);
-  check(walk.v >= -1, "every sample above ground (not the ride, the cave or the gully) >= TRAIL_CLEAR (35; 20 at and beside the stops) over the ground or water", `min margin ${f1(walk.v)} at s ${walk.s} (${walk.kind}, needs ${walk.need}) ${JSON.stringify(walk.p)}`);
+  // 2026-10-13: there is nothing under the ground any more (the cave is gone
+  // from the world): no sample of the rail may be under the terrain's surface.
+  check(below === 0, "no part of the rail is underground: no sample under the terrain's surface", `${below} under the surface, of ${N + 1} samples`);
+  check(walk.v >= -1, "every sample above ground (not the ride or the gully) >= TRAIL_CLEAR (35; 20 at and beside the stops) over the ground or water", `min margin ${f1(walk.v)} at s ${walk.s} (${walk.kind}, needs ${walk.need}) ${JSON.stringify(walk.p)}`);
   check(dive.v >= 15, "the dive stays >= 15 from the cliff face and above ground", `min ${dive.v} at s ${dive.s} ${JSON.stringify(dive.p)}`);
   // Terrain follow should be doing nothing on this layout (the route check cleared every key by hand).
   const bare = createRail();

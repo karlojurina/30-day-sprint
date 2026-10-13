@@ -5,7 +5,7 @@
  *
  * Items:
  *   k<key>          a fractional TRAIL key (railU = key / (n - 1)), e.g. k28.5
- *   m<name>[+off]   a named frame from layout ROUTE_MARKS (plus a key offset), e.g. mlip, mcave+0.5
+ *   m<name>[+off]   a named frame from layout ROUTE_MARKS (plus a key offset), e.g. mlip, mcrossing+0.5
  *   stop:<id>       the stop's exact depth (stopDepths()), e.g. stop:a3
  *   park:<id>       the stop's click-in view, e.g. park:a3
  *   pose:x,y,z,bearing,pitch[,fov]   a free debug pose (scene.debugPose), for trying frames

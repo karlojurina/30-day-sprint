@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { createRail, type Rail, type RailPose } from "./rail";
 import * as Layout from "./layout";
-import { PLACES, STEPS, WORLD, ISLAND_DEPTH, BOUNTY_DEPTH, GATE_DEPTH, SHIP, fallsCurtainAt, CAVE, CAVE_EXIT_OPENING, CAVE_EXIT_HALF_W, CAVE_EXIT_H } from "./layout";
+import { PLACES, STEPS, WORLD, ISLAND_DEPTH, BOUNTY_DEPTH, GATE_DEPTH, SHIP, fallsCurtainAt } from "./layout";
 import { buildTerrainGeometry, terrainHeight } from "./terrain";
 import type { InstallFn, LandmarkBase, LockMode, LockState, ModuleSpec, ShipPose, WorldCtx, WorldModule } from "./modules";
 import { Governor, PIXEL_RATIO_FLOOR, TIER2_HOLD_MS, TIER_CONTENT_STEP, WORST_TO_OPENING_RATIO, headroomCheck, median, nearLine, pickTier, recallTier, refineTier, rememberTier, tierSpec, type QualityTier } from "./quality";
@@ -49,19 +49,16 @@ import { NO_PROGRESS, sameProgress, type WorldProgress } from "./progress";
  *     solver stands on the floating isles' tops (parkSurface), so the Guild
  *     Hall park is solved against the Harbour Isle, not the ground 1,000 below.
  *
- *   - Grey pass 3, the mine: the terrain MESH is cut open at the mine's two
- *     portals (layout CAVE, SHAFT): the cave's mouth in the falls patch and
- *     the shaft's collar cell in the main grid. terrainHeight is unchanged.
- *     a3 and a4 are underground (RAIL_PARK): their park is the rail's own
- *     stop pose, and a flight to or from it does not arc up through the rock.
- *     setPacing takes the flight's budget as a 10th value or as flightVh.
+ *   - Grey pass 3: setPacing takes the flight's budget as a 10th value or as
+ *     flightVh. (The mine of that pass went with v6; the cave behind the falls
+ *     that outlived it, with the terrain mesh cut open at its two portals and
+ *     the flights that glided along the rail to an underground stop, was
+ *     removed on 2026-10-13, see layout.ts "The cave that was here".)
  *
- *   - v6 (world_art_bible_v6.md 4.3 step 3): the mine is gone. The terrain
- *     mesh is cut at the cave's two portals (the mouth behind the curtain on
- *     the falls cliff, now the gorge's SOUTH wall, and the side passage's exit
- *     ~90 east of it); the finer patch (FALLS_PATCH) covers the falls cliff,
- *     the pool and the north wall the hike climbs. Only a3 is underground (RAIL_PARK). The Gate isle replaces the
- *     Harbour Isle. Every module's afterAll(ctx) runs after all installed, in
+ *   - v6 (world_art_bible_v6.md 4.3 step 3): the finer patch (FALLS_PATCH)
+ *     covers the falls cliff, the pool and the north wall the hike climbs. The
+ *     terrain mesh is whole: every place stands above ground. The Gate isle
+ *     replaces the Harbour Isle. Every module's afterAll(ctx) runs after all installed, in
  *     install order. ctx.quality / onQuality carry the tier (quality.ts).
  *     The tail's progress through the arch is frame.tail (0..1) and
  *     ctx.placeCoord() - 7.
@@ -118,20 +115,9 @@ const LOOK_DIST = 600;
  * flight). The scene alone sizes the spacer from this
  * (bindSpacer).
  */
-// v6: a3's end is in the side passage looking out at the sunlit opening; a4's
-// on the traverse just past the spur, looking down the gorge; a6's behind the
+// v6: a4's end is on the traverse just past the spur, looking down the gorge; a6's behind the
 // first floating step; a7's past the bridge head (world-tests/v6-lockpeek.mjs).
 const LOCK_PEEK_UNITS: readonly number[] = [380, 900, 95, 150, 457, 607, 780];
-/**
- * Grey pass 3: places whose stop is underground (the cave, the mine). Their
- * park is the rail's own stop pose (the park solver stands on the terrain
- * surface, which is rock above them), and a flight to or from it does not
- * arc (the arc clears the ground under a straight line, which here would lift
- * the camera up through the cliff).
- */
-// Round 1: a3 stands outside the falls now (layout A3_VIEW, PARK_VIEWS), so no
-// stop is underground any more; the list stays for any place that goes back in.
-const RAIL_PARK: readonly string[] = [];
 /**
  * v6 (bible 1.17): the a7 park flies through the telescope. From the rail the
  * camera rises over the dome, runs along the top of the tube past its rings,
@@ -162,40 +148,6 @@ const TEL_PARK_DIP = 0.25;
 const TEL_PARK_LOOK_OFF: readonly [number, number] = [3.5, 1];
 
 /**
- * Detail pass 3: the outside world is not drawn while the camera is inside the
- * mountain (the cave, the tunnel, the shaft). Measured 2026-09-26 by hiding
- * each group alone at keys 21 to 36.5: every group here drew 0 pixels, while
- * the terrain alone is 170k triangles in every one of those frames, and the
- * shaft top (key 36.5) drew 533k with the Mirror Lake's reflection pass.
- * Underground = the camera stands UNDER_MARGIN or more below the terrain
- * surface (on the rail that is keys 21.1 to 36.53 and nowhere else; the park
- * and arc flights keep the camera above ground), and the cave mouth is not in
- * view: the a3 stop looks back out through the curtain at the gorge (43k
- * terrain pixels), so the mouth in the frustum within CAVE_PORTAL_REACH shows
- * everything. Applied inside each main-camera render (scene.onBeforeRender),
- * restored after it, so modules and harness renders never see it stick.
- */
-const OUTDOOR_GROUPS: readonly string[] = [
-  "Terrain", "Terrain:falls", "Terrain:mirror", "River", "Stream", "Brook", "V5Rocks", "V5Cover", "V5Shore",
-  "Forest", "DressSky", "DressGate", "MirrorLake", "LightClouds", "LifeBirds", "LifeSoft", "LifeAirships",
-  // v6 (C1): the phase B groups that draw outside the mountain.
-  "V6Cover", "DressGorge", "Sea", "GlowStream", "Water_sky", "CloudBillboards", "NightSky", "LifeGlow",
-];
-const UNDER_MARGIN = 9;
-// v6: the mouth faces north (-z) now (layout CAVE, mirrored): the box spans
-// from the curtain in front of it to the arch's top leaning back into the cliff.
-const CAVE_PORTAL = new THREE.Box3(
-  new THREE.Vector3(CAVE.x - CAVE.mouthHalfW - 12, CAVE.floorY - 12, CAVE.footZ - 20),
-  new THREE.Vector3(CAVE.x + CAVE.mouthHalfW + 12, CAVE.floorY + CAVE.mouthH + 12, CAVE.footZ + 15),
-);
-/** v6: the side passage's opening on the cliff face (layout CAVE_EXIT_OPENING). */
-const EXIT_PORTAL = new THREE.Box3(
-  new THREE.Vector3(CAVE_EXIT_OPENING.x - CAVE_EXIT_HALF_W - 10, CAVE_EXIT_OPENING.y - 10, CAVE_EXIT_OPENING.z - 16),
-  new THREE.Vector3(CAVE_EXIT_OPENING.x + CAVE_EXIT_HALF_W + 10, CAVE_EXIT_OPENING.y + CAVE_EXIT_H + 10, CAVE_EXIT_OPENING.z + 14),
-);
-const CAVE_PORTAL_REACH = 500;
-
-/**
  * The modules installed when the page passes none: the light (sky, clouds,
  * time of day, the Mirror Lake) and the grey blocks (landmarks, sets, falls,
  * steps, lanterns, mist). Pass modules: [] for the bare grey terrain.
@@ -212,7 +164,6 @@ const DEFAULT_MODULES: ReadonlyArray<ModuleSpec> = [
   ["clouds", () => import("./clouds")],
   ["nightsky", () => import("./nightsky")],
   ["dress-shore", () => import("./dress-shore")],
-  ["dress-underground", () => import("./dress-underground")],
   ["dress-gorge", () => import("./dress-gorge")],
   ["dress-lakeforest", () => import("./dress-lakeforest")],
   ["dress-sky", () => import("./dress-sky")],
@@ -253,8 +204,7 @@ const FOG_DEFAULT_NEAR = 1400;
 const FOG_DEFAULT_FAR = 9000;
 /**
  * camera.far = rampEnd x FAR_PER_RAMP, so the ramp is also the cull, never
- * under FAR_MIN: underground the ramp ends in a few hundred units and a far
- * plane there would open the tunnel onto the sky dome behind it.
+ * under FAR_MIN.
  */
 const FAR_PER_RAMP = 1.02;
 const FAR_MIN = 4000;
@@ -1606,21 +1556,8 @@ export class WorldScene {
   private parkDistance = 0;
   private parkPending = false;
   private lastPark: ParkResult | null = null;
-  /** The current park is a RAIL_PARK place's own rail pose (no arc to or from it). */
-  private parkOnRail = false;
-  /**
-   * Grey pass 3: a flight with either end underground (the cave, the tunnel,
-   * the shaft) glides along the rail by depth instead of flying a line, which
-   * would cut through the rock. Its off-rail ends (an outdoor park pose) ride
-   * as offsets from the rail that fade in the first and last 30%.
-   */
-  private flightRail = false;
   private flightFromDepth = 0;
   private flightToDepth = 0;
-  private readonly fromOff = new THREE.Vector3();
-  private readonly fromOffLook = new THREE.Vector3();
-  private readonly toOff = new THREE.Vector3();
-  private readonly toOffLook = new THREE.Vector3();
   /** The rail depth the camera's pose belongs to (rail, parked, or mid-flight). */
   private poseDepth = 0;
   /** The depth of the anchor the camera is parked at. */
@@ -1668,13 +1605,6 @@ export class WorldScene {
   private readonly v3 = new THREE.Vector3();
   private readonly v4 = new THREE.Vector3();
   private readonly fogRange = { near: 0, far: 0 };
-  /** Detail pass 3: OUTDOOR_GROUPS as found after the modules installed, and those hidden for the render in flight. */
-  private outdoor: THREE.Object3D[] | null = null;
-  private readonly outdoorHidden: THREE.Object3D[] = [];
-  private readonly zoneFrustum = new THREE.Frustum();
-  private readonly zoneMat = new THREE.Matrix4();
-  private readonly zoneCentre = CAVE_PORTAL.getCenter(new THREE.Vector3());
-  private zoneUnder = false;
 
   // Observers and listeners
   private resizeObserver: ResizeObserver | null = null;
@@ -1916,16 +1846,6 @@ export class WorldScene {
     root.name = "World";
     scene.add(root);
     this.worldRoot = root;
-    // Detail pass 3: no outside world inside the mountain (OUTDOOR_GROUPS).
-    // Runs before three builds the render list; the lake's nested reflection
-    // render (another camera) is left alone.
-    scene.onBeforeRender = (_r, _s, cam) => {
-      if (cam === this.camera) this.hideOutdoor();
-    };
-    scene.onAfterRender = (_r, _s, cam) => {
-      if (cam === this.camera) this.showOutdoor();
-    };
-
     this.rail.setGround(railGround);
     this.currentS = this.rail.sOfDepth(this.currentDepth);
     if (this.headless) {
@@ -2599,8 +2519,7 @@ export class WorldScene {
     this.wake();
   }
 
-  /** The terrain from terrain.ts, grey, with the finer patches (PATCHES) cut in
-   *  and the cave's two portals (the mouth and the side passage's exit) cut out. */
+  /** The terrain from terrain.ts, grey, with the finer patches (PATCHES) cut in. */
   private addTerrain(root: THREE.Object3D) {
     const main = buildTerrainGeometry();
     const mat = new THREE.MeshLambertMaterial({ vertexColors: true, name: "TerrainGrey" });
@@ -2676,53 +2595,6 @@ export class WorldScene {
         patch.computeBoundingSphere();
       } else {
         console.warn("[world-v6] terrain patch grid mismatch; seam not snapped", pi, pos.count, (pnx + 1) * (pnz + 1));
-      }
-      // The cave's portals, cut out of the falls cliff: every steep patch
-      // triangle whose centre is inside the mouth's arch (behind the curtain,
-      // the cliff leaning back 1 in 9 into +z) or the exit's opening. The
-      // gorge floor in front of them (flat, max y under the sill + 3) is kept.
-      if (pi === 0) {
-        const tri = patch.getIndex()!.array as Uint32Array;
-        const out = new Uint32Array(tri.length);
-        let n = 0;
-        const P = patch.getAttribute("position") as THREE.BufferAttribute;
-        const E = CAVE_EXIT_OPENING;
-        for (let t = 0; t < tri.length; t += 3) {
-          const a = tri[t];
-          const b = tri[t + 1];
-          const c = tri[t + 2];
-          const cx = (P.getX(a) + P.getX(b) + P.getX(c)) / 3;
-          const cy = (P.getY(a) + P.getY(b) + P.getY(c)) / 3;
-          const cz = (P.getZ(a) + P.getZ(b) + P.getZ(c)) / 3;
-          const top = Math.max(P.getY(a), P.getY(b), P.getY(c));
-          // Final pass C (the art judge: "the cave mark reads as cage bars"):
-          // at the mouth the cliff rises ~115 inside one 8 unit row of cells,
-          // so each cell's two triangles are slivers from the sill to ~180.
-          // The one whose centre sat under the arch's top was cut and its
-          // twin, centre above it, stayed: a row of tall rock bars across
-          // the whole mouth, a few units from the lens on both passes. A
-          // sliver that reaches down into the arch (its lowest corner under
-          // the arch's top) goes too; the hall's ceiling hides the taller
-          // opening from inside and the curtain hides it from outside.
-          const low = Math.min(P.getY(a), P.getY(b), P.getY(c));
-          const inMouth =
-            Math.abs(cx - CAVE.x) < CAVE.mouthHalfW &&
-            (cy < CAVE.floorY + CAVE.mouthH || (low < CAVE.floorY + CAVE.mouthH - 20 && top - low > 60)) &&
-            top > CAVE.floorY + 3 &&
-            cz < CAVE.footZ + CAVE.mouthH / 9 + 8 &&
-            cz > CAVE.footZ - 8;
-          const inExit =
-            Math.abs(cx - E.x) < CAVE_EXIT_HALF_W - 1 &&
-            cy < E.y + CAVE_EXIT_H - 2 &&
-            top > E.y + 2 &&
-            cz < E.z + 12 &&
-            cz > E.z - 8;
-          if (inMouth || inExit) continue;
-          out[n++] = a;
-          out[n++] = b;
-          out[n++] = c;
-        }
-        patch.setIndex(new THREE.BufferAttribute(out.slice(0, n), 1));
       }
       const pm = new THREE.Mesh(patch, mat);
       pm.name = pi === 0 ? "Terrain:falls" : `Terrain:patch${pi}`;
@@ -3384,14 +3256,11 @@ export class WorldScene {
     this.progTo = toRail ? 0 : 1;
     this.switchDip = !toRail && this.parkProgress >= 0.999;
     let dest: THREE.Vector3;
-    let destLook: THREE.Vector3;
     if (toRail) {
       this.railLookPose(this.currentDepth, this.v1, this.v2);
       dest = this.v1;
-      destLook = this.v2;
     } else {
       dest = this.parkPos;
-      destLook = this.parkLook;
     }
     this.flightFromDepth = this.poseDepth;
     this.flightToDepth = toRail ? this.currentDepth : this.parkDepth;
@@ -3411,31 +3280,8 @@ export class WorldScene {
       for (const q of pts) if (!Number.isFinite(q.x + q.y + q.z)) q.copy(this.parkPos);
       this.telCurve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
       this.flightTelescope = true;
-      this.flightRail = false;
       this.flightArc = 0;
       this.flightDuration = this.reducedMotion ? 0 : TEL_PARK_T;
-      this.mode = "flight";
-      this.dirty = true;
-      this.wake();
-      return;
-    }
-    this.flightRail = this.underground(this.flightFromDepth) || this.underground(this.flightToDepth);
-    if (this.flightRail) {
-      this.railLookPose(this.flightFromDepth, this.v3, this.v4);
-      this.fromOff.copy(this.fromPos).sub(this.v3);
-      this.fromOffLook.copy(this.fromLook).sub(this.v4);
-      this.railLookPose(this.flightToDepth, this.v3, this.v4);
-      this.toOff.copy(dest).sub(this.v3);
-      this.toOffLook.copy(destLook).sub(this.v4);
-      // The glide's length is the route's, so a long one takes the long flight's time.
-      const along = Math.abs(this.rail.sOfDepth(this.flightToDepth) - this.rail.sOfDepth(this.flightFromDepth));
-      const dist = along + this.fromOff.length() + this.toOff.length();
-      this.flightArc = 0;
-      this.flightDuration = this.reducedMotion
-        ? 0
-        : FLIGHT_T_MIN +
-          (FLIGHT_T_MAX - FLIGHT_T_MIN) * clamp01(dist / FLIGHT_FAR) +
-          FLIGHT_T_EXTRA * clamp01((dist - FLIGHT_FAR) / (FLIGHT_VERY_FAR - FLIGHT_FAR));
       this.mode = "flight";
       this.dirty = true;
       this.wake();
@@ -3454,26 +3300,24 @@ export class WorldScene {
     // at most 0.25 of the hop, and the apex never passes 80 over the highest
     // ground under the line, nor 0.35 of a hop under 300.
     let arc = 0;
-    if (!this.parkOnRail) {
-      const hd = Math.hypot(dest.x - this.fromPos.x, dest.z - this.fromPos.z);
-      const clear = Math.min(FLIGHT_ARC_CLEAR, 0.25 * hd);
-      let topGround = -Infinity;
-      for (let k = 1; k < 48; k++) {
-        const f = k / 48;
-        const x = this.fromPos.x + (dest.x - this.fromPos.x) * f;
-        const z = this.fromPos.z + (dest.z - this.fromPos.z) * f;
-        const y = this.fromPos.y + (dest.y - this.fromPos.y) * f;
-        const g = surfaceHeight(x, z);
-        topGround = Math.max(topGround, g);
-        // sin(pi f) is how much of the arc this point gets.
-        const s = Math.sin(Math.PI * f);
-        const need = g + clear * s - y;
-        if (need > 0 && s > 0.2) arc = Math.max(arc, need / s);
-      }
-      const midY = (this.fromPos.y + dest.y) / 2;
-      arc = Math.min(arc, Math.max(0, topGround + FLIGHT_ARC_CLEAR - midY));
-      if (hd < 300) arc = Math.min(arc, 0.35 * hd);
+    const hd = Math.hypot(dest.x - this.fromPos.x, dest.z - this.fromPos.z);
+    const clear = Math.min(FLIGHT_ARC_CLEAR, 0.25 * hd);
+    let topGround = -Infinity;
+    for (let k = 1; k < 48; k++) {
+      const f = k / 48;
+      const x = this.fromPos.x + (dest.x - this.fromPos.x) * f;
+      const z = this.fromPos.z + (dest.z - this.fromPos.z) * f;
+      const y = this.fromPos.y + (dest.y - this.fromPos.y) * f;
+      const g = surfaceHeight(x, z);
+      topGround = Math.max(topGround, g);
+      // sin(pi f) is how much of the arc this point gets.
+      const s = Math.sin(Math.PI * f);
+      const need = g + clear * s - y;
+      if (need > 0 && s > 0.2) arc = Math.max(arc, need / s);
     }
+    const midY = (this.fromPos.y + dest.y) / 2;
+    arc = Math.min(arc, Math.max(0, topGround + FLIGHT_ARC_CLEAR - midY));
+    if (hd < 300) arc = Math.min(arc, 0.35 * hd);
     this.flightArc = arc;
     this.flightDuration = this.reducedMotion
       ? 0
@@ -3512,7 +3356,6 @@ export class WorldScene {
     const full = a?.landmark ? this.landmarks.get(a.landmark) : undefined;
     const camera = this.camera;
     if (!a || !camera) return;
-    this.parkOnRail = RAIL_PARK.includes(anchorId);
     this.parkDepth = this.depthFor(anchorId);
     this.parkFov = FOV;
     const pi = this.anchors.findIndex((x) => x.id === anchorId);
@@ -3523,7 +3366,6 @@ export class WorldScene {
       this.telPoint(end[0], end[1], this.parkPos);
       this.parkLook.copy(this.parkPos).addScaledVector(this.telEndDir, LOOK_DIST);
       this.parkDistance = LOOK_DIST;
-      this.parkOnRail = false;
       this.lastPark = null;
       return;
     }
@@ -3537,11 +3379,10 @@ export class WorldScene {
       this.parkFov = authored.fov ?? FOV;
       this.parkLook.set(Math.sin(b) * Math.cos(p), -Math.sin(p), -Math.cos(b) * Math.cos(p)).multiplyScalar(LOOK_DIST).add(this.parkPos);
       this.parkDistance = LOOK_DIST;
-      this.parkOnRail = false;
       this.lastPark = null;
       return;
     }
-    if (!full || this.parkOnRail) {
+    if (!full) {
       this.railLookPose(this.depthFor(anchorId), this.parkPos, this.parkLook);
       this.parkDistance = LOOK_DIST;
       this.lastPark = null;
@@ -3583,11 +3424,6 @@ export class WorldScene {
   }
 
   // ── Camera ─────────────────────────────────────────────────────────────────
-
-  /** Is the rail at this depth in the cave, the tunnel or the shaft? */
-  private underground(depth: number): boolean {
-    return (Layout.UNDERGROUND as readonly string[]).includes(this.rail.kindAtS(this.rail.sOfDepth(depth)));
-  }
 
   private railLookPose(depth: number, outPos: THREE.Vector3, outLook: THREE.Vector3) {
     this.rail.sample(depth, this.railPose);
@@ -3664,47 +3500,6 @@ export class WorldScene {
         }
         this.flightNow = 1;
       }
-    } else if (this.flightRail) {
-      this.flightElapsed += dt;
-      const T = this.flightDuration;
-      const s = T <= 0 ? 1 : clamp01(this.flightElapsed / T);
-      const q = flightEase(s);
-      this.flightNow = q;
-      // Closing: the rail end is wherever the scroll is now.
-      const toDepth = this.flightToRail ? this.currentDepth : this.flightToDepth;
-      const sa = this.rail.sOfDepth(this.flightFromDepth);
-      const d = this.rail.depthOfS(sa + (this.rail.sOfDepth(toDepth) - sa) * q);
-      this.poseDepth = d;
-      this.railLookPose(d, this.camPos, this.camLook);
-      const w0 = 1 - smoothstep01(q / 0.3);
-      const w1 = this.flightToRail ? 0 : smoothstep01((q - 0.7) / 0.3);
-      this.camPos.addScaledVector(this.fromOff, w0).addScaledVector(this.toOff, w1);
-      this.camLook.addScaledVector(this.fromOffLook, w0).addScaledVector(this.toOffLook, w1);
-      this.parkProgress = this.switchDip
-        ? 1 - PARK_SWITCH_DIP * Math.sin(Math.PI * q)
-        : this.progFrom + (this.progTo - this.progFrom) * q;
-      if (s < 1 && (w0 > 0 || w1 > 0) && !this.underground(d)) {
-        const g = terrainHeight(this.camPos.x, this.camPos.z) + PARK_CLEARANCE;
-        const y = smoothMax(this.camPos.y, g, 20);
-        this.camLook.y += y - this.camPos.y;
-        this.camPos.y = y;
-      }
-      if (s >= 1) {
-        if (this.flightToRail) {
-          this.mode = "rail";
-          this.parkProgress = 0;
-          this.placeOnRail(this.currentDepth);
-          this.poseDepth = this.currentDepth;
-        } else {
-          this.mode = "parked";
-          this.parkProgress = 1;
-          this.camPos.copy(this.parkPos);
-          this.camLook.copy(this.parkLook);
-          this.poseDepth = this.parkDepth;
-        }
-        this.switchDip = false;
-        this.flightNow = 1;
-      }
     } else {
       this.flightElapsed += dt;
       const T = this.flightDuration;
@@ -3774,44 +3569,6 @@ export class WorldScene {
       camera.fov = fov;
       camera.updateProjectionMatrix();
     }
-  }
-
-  /** Is the camera inside the mountain with no way out in view (see OUTDOOR_GROUPS)? */
-  private insideMountain(cam: THREE.PerspectiveCamera): boolean {
-    const p = cam.position;
-    if (terrainHeight(p.x, p.z) - p.y < UNDER_MARGIN) return false;
-    if (p.distanceTo(this.zoneCentre) < CAVE_PORTAL_REACH) {
-      this.zoneMat.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
-      this.zoneFrustum.setFromProjectionMatrix(this.zoneMat);
-      if (this.zoneFrustum.intersectsBox(CAVE_PORTAL) || this.zoneFrustum.intersectsBox(EXIT_PORTAL)) return false;
-    }
-    return true;
-  }
-
-  private hideOutdoor() {
-    this.showOutdoor();
-    const scene = this.scene;
-    const camera = this.camera;
-    if (!this.ready || !scene || !camera) return;
-    if (!this.outdoor) {
-      const found: THREE.Object3D[] = [];
-      for (const pool of [this.worldRoot?.children ?? [], scene.children]) {
-        for (const o of pool) if (OUTDOOR_GROUPS.includes(o.name)) found.push(o);
-      }
-      this.outdoor = found;
-    }
-    this.zoneUnder = this.insideMountain(camera);
-    if (!this.zoneUnder) return;
-    for (const o of this.outdoor) {
-      if (!o.visible) continue;
-      o.visible = false;
-      this.outdoorHidden.push(o);
-    }
-  }
-
-  private showOutdoor() {
-    for (const o of this.outdoorHidden) o.visible = true;
-    this.outdoorHidden.length = 0;
   }
 
   private updateFog() {
@@ -4504,7 +4261,6 @@ export class WorldScene {
     const out: Record<string, unknown> = {
       install: { ...this.moduleReport },
       standIns: this.standIns.slice(),
-      zone: { underground: this.zoneUnder, outdoorGroups: this.outdoor?.map((o) => o.name) ?? null },
       quality: this.qualityInfo(),
     };
     for (const rec of this.modules) {

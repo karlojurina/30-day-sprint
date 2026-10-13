@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { Reflector } from "three/examples/jsm/objects/Reflector.js";
-import { CAVE_KEYS, FLIGHT_KEYS, PLACES, ROUTE_MARKS, TAIL_KEYS, TRAIL, WORLD, type LightKey } from "./layout";
+import { FLIGHT_KEYS, PLACES, ROUTE_MARKS, TAIL_KEYS, TRAIL, WORLD, type LightKey } from "./layout";
 import { terrainHeight } from "./terrain";
 
 /**
@@ -237,7 +237,7 @@ export const LIGHTS: Record<LightName, LightKeyframe> = {
     lampGlow: 0.55, magicGlow: 0.3,
   },
   /**
-   * v6 (bible 1.0, 2.6): the cave's exit, the log crossing, the hike and a4.
+   * v6 (bible 1.0, 2.6): the log crossing, the hike and a4.
    * The sun low in the west-north-west (az 300, el 6) lights the falls and the
    * north-west planes of the gorge from the right of the a4 view; the gorge's
    * shade takes the violet of the sky (hemisphere fill from the mid sky, at a
@@ -644,92 +644,10 @@ export const LIGHT_HOLD = 0.08;
  */
 const FOREST_DIM = { fill: 0.7, ambient: 0.6, moon: 0.5, exposure: 0.45 } as const;
 
-// ── Tuning: the cave behind the falls ──────────────────────────────────────
-
-/**
- * The cave behind the falls (a3) and its side passage out onto the cliff face
- * (bible 1.7, 1.8). The terrain casts no shadows, so above ground's sun and
- * sky light would light the rock from inside as if it were outdoors. Inside,
- * this key takes over the fill (hemisphere, ambient), the haze and fog and the
- * exposure, and the sun, the moon and the rim go out. The light you see is
- * the lit curtain (the brightest thing in view) and dress-underground's own
- * lamps; the fill is a warm, low bounce off the wet rock, enough that the hall
- * reads as rock and shape (v5's was black, and "everything we look at is super
- * dark" was Lovro's first note).
- * Blend, by TRAIL key k (railU x (keys - 1)), all smoothsteps (C1):
- *   in      0 -> 1 as the curtain fills the frame (CAVE_KEYS.first + 0.2 .. + 0.62)
- *   out     the fill and fog come back along the side passage toward the bright
- *           opening (CAVE_KEYS.first + 5.6 .. last - 0.5); the sun once the
- *           camera is out on the cliff face (last - 1.0 .. last - 0.35)
- * v6 removed the mine: its tunnel key and the shaft's blend are gone.
- * RETIRED 2026-10-13 (Lovro: "the camera between Video Ads 1 and Video Ads 2
- * goes into the cave for no reason"): the route has no "cave" key (layout
- * CAVE_KEYS is { first: -1, last: -1 }), so undergroundAt() is [0, 0] at every
- * depth and this key is never blended in. The cave is still built and
- * dressed; what shows of it through the gaps in the curtain is lit by the
- * daylight key of the moment and its own lamps, as it was from the a3 stop.
- * The key and the blend stay for whoever brings the camera back inside.
- */
-export const UNDERGROUND = {
-  cave: {
-    ambient: 0x7a6e66, ambientIntensity: 0.22, hemiSky: 0x9aa4ae, hemiGround: 0x3a302a, hemiIntensity: 0.2,
-    // Final pass D: a deep warm umber air (was near black grey 0x1c1816, never
-    // reached: the ramp started past the walls).
-    haze: 0x1c100a, exposure: 0.9,
-    look: {
-      // C1 (B7): the ramp started past the hall's walls (240) so they kept their
-      // rock colour, but the walls' baked bounce light then sat under one even
-      // beige haze (judge C: the camp 2.5). Final pass D: the ramp starts 20 out
-      // and ends at 280, so the air is clear round the camera and the walls
-      // (60 to 170 away) fall into a deep warm dark; the lanterns and the camp
-      // carry against it. A warmer, deeper grade (gain toward red, gamma 0.85,
-      // saturation 1.12) instead of the flat grey one. A/B: shots/v6/finalD/light.
-      nearShade: 0x120a06, rampStart: 20, rampEnd: 280, hazeBase: 0, hazeFall: 1, hazeOn: 0, sunLobe: 0, fogCap: 0.85,
-      lift: [0.004, 0.002, 0.006], gain: [1.04, 1.0, 0.94], gamma: 0.85, sat: 1.12, halo: 0x000000, haloAmt: 0, haloDeg: 0, haloHalf: 1,
-    } satisfies LookKey,
-  },
-} as const;
-const UNDER_COLORS = ["ambient", "hemiSky", "hemiGround", "haze"] as const;
-const UNDER_NUMBERS = ["ambientIntensity", "hemiIntensity", "exposure"] as const;
-const underLinear = (k: (typeof UNDERGROUND)["cave"]) => ({
-  colors: Object.fromEntries(UNDER_COLORS.map((f) => [f, new THREE.Color().setHex(k[f])])) as Record<(typeof UNDER_COLORS)[number], THREE.Color>,
-  numbers: k as Record<(typeof UNDER_NUMBERS)[number], number>,
-  look: linearLook(k.look, null),
-});
-let UNDER_CAVE: ReturnType<typeof underLinear> | null = null;
-
-/** How far into the cave the camera is at railU u: [fill and fog weight, sun-out weight].
- *  [0, 0] everywhere while the route has no cave keys (retired 2026-10-13, see UNDERGROUND). */
-export function undergroundAt(u: number): [number, number] {
-  if (CAVE_KEYS.first < 0 || CAVE_KEYS.last <= CAVE_KEYS.first) return [0, 0];
-  const k = u * (TRAIL.length - 1);
-  const F = CAVE_KEYS.first;
-  const L = CAVE_KEYS.last;
-  // Under the curtain's cover: it fills the frame from ~0.3 before the crossing (~0.55).
-  const into = smoothstep(F + 0.2, F + 0.62, k);
-  const w = into * (1 - smoothstep(Math.min(F + 5.6, L - 1.5), L - 0.5, k));
-  const sunOut = into * (1 - smoothstep(L - 1.0, L - 0.35, k));
-  return [w, sunOut];
-}
-
-/** Lays the cave's light over a blended state (in place). */
-function applyUnderground(u: number, out: LightState): LightState {
-  const [w, sunOut] = undergroundAt(u);
-  out.under = w;
-  if (w <= 0 && sunOut <= 0) return out;
-  UNDER_CAVE ??= underLinear(UNDERGROUND.cave);
-  const C = UNDER_CAVE;
-  for (const f of UNDER_COLORS) (out[f] as THREE.Color).lerp(C.colors[f], w);
-  for (const f of UNDER_NUMBERS) out[f] += (C.numbers[f] - out[f]) * w;
-  // The cave's look (ramp, grade, near shade) blends in with the fill.
-  for (const f of LOOK_COLORS) out[f].lerp(C.look.colors[f], w);
-  for (const f of LOOK_NUMBERS) out[f] += (C.look.numbers[f] - out[f]) * w;
-  const lit = 1 - sunOut;
-  out.sunIntensity *= lit;
-  out.moonIntensity *= lit;
-  out.rimIntensity *= lit;
-  return out;
-}
+// The cave behind the falls had a light of its own here (a key that took over
+// the fill, the haze, the fog and the exposure inside it and put the sun out,
+// blended in by the route's "cave" keys). It went with the cave on 2026-10-13
+// (layout.ts "The cave that was here"); commit 0d18ea7 has it.
 
 // ── Tuning: sky, stars, clouds, lake ────────────────────────────────────────
 
@@ -884,7 +802,8 @@ export interface LightState {
   /** Live multipliers on the tagged glow materials (see the header). */
   lampGlow: number;
   magicGlow: number;
-  /** 0..1: how far underground the light is (UNDERGROUND). */
+  /** How far underground the light is. Always 0 since the cave went (2026-10-13): no place is
+   *  underground. clouds.ts, nightsky.ts and life.ts still multiply by 1 - under; it goes with their reads. */
   under: number;
   /** v5 look (LOOKS). fogNear / fogFar above are the ramp's start and end. */
   nearShade: THREE.Color;
@@ -1214,7 +1133,7 @@ export function blendTrack(u: number, track: readonly LightTrackStop[], placeU: 
   dirFromAngles(lerpAz(a.sunAz, b.sunAz, k), sunEl, out.sunDir);
   dirFromAngles(lerpAz(a.moonAz, b.moonAz, k), a.moonEl + (b.moonEl - a.moonEl) * k, out.moonDir);
   dirFromAngles(lerpAz(a.moonLightAz, b.moonLightAz, k), a.moonLightEl + (b.moonLightEl - a.moonLightEl) * k, out.moonLightDir);
-  return applyTail(u, applyUnderground(u, out));
+  return applyTail(u, out);
 }
 
 // ── The tail: through the arch into the sun (bible 1.20, decision 10) ──────
@@ -1618,12 +1537,12 @@ function buildRamps(s: LightState, away: THREE.DataTexture, sunTex: THREE.DataTe
   const hz = s.haze;
   // The far end is the sky at the horizon: with haloFog it carries the halo
   // (skyCpu at 0 degrees), so the farthest ridge or cloud meets the sky above
-  // it in one colour. Underground the far end is the dark, not the sky outside.
+  // it in one colour.
   const hf = s.haloAmt * s.haloFog * (1 - smoothstep(0, Math.max(0.2, s.haloHalf), Math.abs(s.haloDeg)));
-  _endAway.copy(s.skyHorizon).lerp(s.halo, hf).lerp(hz, s.under);
-  _endSun.copy(s.skyGlow).lerp(s.halo, hf).lerp(hz, s.under);
+  _endAway.copy(s.skyHorizon).lerp(s.halo, hf);
+  _endSun.copy(s.skyGlow).lerp(s.halo, hf);
   // The sun's colour only while it is up (at night the sun side is plain haze).
-  const up = smoothstep(-6, 1, s.sunEl) * (1 - s.under);
+  const up = smoothstep(-6, 1, s.sunEl);
   _sg.copy(hz).lerp(s.sunGlow, up);
   const A = _awayStops;
   A[0].copy(ns);
@@ -2211,13 +2130,6 @@ export function install(ctx: LightCtx): LightModule {
       const cam = ctx.camera;
       const camMoved = !cam.position.equals(lastCam) || !cam.quaternion.equals(lastQuat);
       const uChanged = !(u === lastU);
-      // Underground the fog is ours on every frame: the scene writes its own
-      // schedule before the modules update, and on a still frame (the falls
-      // and the torches keep the loop running) that would lift the dark.
-      if (!uChanged && state.under > 0 && handle.fogDistances && fog) {
-        fog.near = state.fogNear;
-        fog.far = state.fogFar;
-      }
       // New materials (a module adding objects late) get the fog and grade
       // uniforms within a few frames; the glow levels follow u.
       if (!uChanged && ++walkTick >= WALK_EVERY) {
@@ -2294,7 +2206,6 @@ export function install(ctx: LightCtx): LightModule {
         rampEnd: Math.round(fw.fwRamp.value.y),
         lampGlow: Math.round(state.lampGlow * 1e3) / 1e3,
         magicGlow: Math.round(state.magicGlow * 1e3) / 1e3,
-        under: Math.round(state.under * 1e3) / 1e3,
         forestDim: Math.round(forestNow * 1e3) / 1e3,
         cloudTriangles: cloudIndexUp.count / 3,
         u: Math.round(state.u * 1e4) / 1e4,
@@ -2467,11 +2378,11 @@ export function install(ctx: LightCtx): LightModule {
     fw.fwRamp.value.w = s.hazeOn;
     fw.fwHaze.value.set(s.hazeBase, s.hazeFall);
     fw.fwSunDir.value.copy(s.sunDir);
-    fw.fwLobe.value.copy(s.sunGlow).multiplyScalar(s.sunLobe * smoothstep(-6, 1, s.sunEl) * (1 - s.under));
+    fw.fwLobe.value.copy(s.sunGlow).multiplyScalar(s.sunLobe * smoothstep(-6, 1, s.sunEl));
     fw.fwLift.value.set(s.liftR, s.liftG, s.liftB);
     fw.fwGain.value.set(s.gainR - 1, s.gainG - 1, s.gainB - 1);
     fw.fwGS.value.set(s.gamma - 1, s.sat - 1);
-    fw.fwAdd.value = s.fogAdd * (1 - s.under);
+    fw.fwAdd.value = s.fogAdd;
     lakeMat.uniforms.uDeep.value.copy(s.water);
     // The lake's colour when it is too far to reflect: the sky a little above the horizon.
     skyCpu(s, tmpDir.set(0, 0.18, -1).normalize(), lakeMat.uniforms.uSkyTint.value);
@@ -2489,7 +2400,7 @@ export function install(ctx: LightCtx): LightModule {
     if (inside <= 0) return 0;
     const low = 1 - smoothstep(220, 450, p.y - terrainHeight(p.x, p.z));
     const night = 1 - smoothstep(-3, 3, state.sunEl);
-    return inside * low * night * (1 - state.under);
+    return inside * low * night;
   }
 
   /** Lays FOREST_DIM over the lights applyState() set (runs on every moved frame). */
@@ -2541,15 +2452,11 @@ export function install(ctx: LightCtx): LightModule {
   // Harness only: the built track, so a render can try a key's values in the
   // page (edit track[i].key, then setU(null)) without a rebuild.
   (handle as LightModule & { debugTrack?: LightTrackStop[] }).debugTrack = track;
-  // Harness only: build a track key from raw rows (debugKey), and swap the
-  // cave's light (debugUnder), so a render can A/B values in one page load.
+  // Harness only: build a track key from raw rows (debugKey), so a render can
+  // A/B values in one page load.
   Object.assign(handle, {
     debugKey: (k: LightKeyframe, look: LookKey) => linearKey(k, look),
-    debugRows: () => ({ LIGHTS, LIGHTS_BETWEEN, LOOKS, UNDERGROUND }),
-    debugUnder: (k: (typeof UNDERGROUND)["cave"]) => {
-      UNDER_CAVE = underLinear(k);
-      lastU = NaN;
-    },
+    debugRows: () => ({ LIGHTS, LIGHTS_BETWEEN, LOOKS }),
   });
   if (ctx.quality) handle.setQuality?.(ctx.quality);
   // First frame: apply the light at the current railU right away.

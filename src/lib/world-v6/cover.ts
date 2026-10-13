@@ -1,9 +1,9 @@
 import * as THREE from "three";
-import { GATE, PLACES, STREAM, TRAIL, TRAIL_FOV, TRAIL_VIEW, WORLD, magicAt } from "./layout";
+import { GATE, PLACES, STREAM, TRAIL, WORLD, magicAt } from "./layout";
 import { NO_REFLECT_LAYER } from "./light";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
 import type { QualityTier } from "./quality";
-import { groundY, gridSlope, isWater, rnd, rockAnchors, smooth, trailDistFast as trailDist } from "./rocks";
+import { groundY, gridSlope, isWater, rnd, rockAnchors, rockRings, smooth, trailDistFast as trailDist, type RockPlace } from "./rocks";
 import { all as allFootprints, blocked } from "./footprints";
 import { gateIsleTop } from "./dress-gate";
 import { GRASS_ATLAS_SIZE, getGrassAtlas, grassAtlasStats, grassCell, type GrassCell, type GrassKind } from "./grass-atlas";
@@ -256,6 +256,8 @@ interface CardInst {
   val: number;
   /** Extra root darkening (drift heart), 0..1. */
   deep: number;
+  /** The clump's number among the clumps of its part of the world (NUMBERS): its place in its cell's thinning order. */
+  n: number;
 }
 interface GlowInst {
   kind: GlowId;
@@ -344,8 +346,86 @@ const islandTopY = (x: number, z: number) => WORLD.island.y + 42 * Math.exp(-((x
 
 // ── The scatter ──────────────────────────────────────────────────────────────
 
+/**
+ * Where each part of the world starts numbering its drifts and clumps:
+ * [seq, ord] (see scatter). A number seeds a clump's shape and its place in
+ * its cell's thinning order, nothing else. Until 2026-10-13 one count ran
+ * through the whole world, so a clump added at the pool renumbered every
+ * clump planted after it, as far as the Gate isle; the starts below are what
+ * that count was at each part then, so pinning them moved no blade of grass.
+ * A part that grows past the next one's start only gives two clumps far apart
+ * the same number, which nobody can see; inside one part a change still
+ * renumbers what that part plants after it.
+ */
+const NUMBERS = {
+  // The shelf south of the gorge, in three bands of its grid's rows.
+  streamShelf: [0, 0],
+  valley: [1093, 987],
+  coast: [10108, 9417],
+  streamBanks: [14062, 13018],
+  // The gorge, in three bands of its grid's rows.
+  ledge: [14313, 13243],
+  gorgeFloor: [14500, 13401],
+  pool: [15808, 14564],
+  // The collar's grid, in two bands.
+  lakeMeadow: [16469, 15143],
+  saddle: [17201, 15749],
+  lakeShore: [17780, 16209],
+  forestFloor: [19296, 17576],
+  island: [22270, 19978],
+  bountyIsle: [23570, 21217],
+  // The rings round the rocks, by the rocks' own places (rocks.ts RING_START), then dress-gorge's cairns.
+  "ring:opening": [23670, 21305],
+  "ring:landing": [23693, 21316],
+  "ring:valley": [23813, 21411],
+  "ring:stream": [25621, 22790],
+  "ring:northWall": [26654, 23601],
+  "ring:gully": [26998, 23787],
+  "ring:pool": [27244, 23941],
+  "ring:hike": [28558, 24905],
+  "ring:saddle": [28887, 25046],
+  "ring:lake": [31261, 26875],
+  "ring:island": [31689, 27182],
+  "ring:gate": [31689, 27182],
+  "ring:cairns": [31806, 27272],
+  // The near band, one part per camera (NEAR_BAND).
+  "band:opening": [31843, 27296],
+  "band:glide": [31873, 27296],
+  "band:a1": [31903, 27296],
+  "band:a2": [32037, 27400],
+  "band:stream": [32290, 27623],
+  "band:traverse": [32347, 27650],
+  islet: [32347, 27650],
+  /** The Gate isle's clumps are numbered after everything else (ord only). */
+  gateIsle: [0, 27659],
+} as const;
+type Part = keyof typeof NUMBERS;
+/** The ring number of the first rock footprint that is not rocks.ts's own (dress-gorge's cairns): 693 of its rocks had one on 2026-10-13. */
+const CAIRN_RING_START = 693;
+
+/**
+ * The near band's cameras: where the camera stands low and what it sees, as
+ * points in the world (x, y, z, compass bearing, pitch positive down, lens).
+ * They are copies of the route's keys (layout KEYS) and on purpose not read
+ * from it by number: the band belongs to these places, and a key added or
+ * removed anywhere else on the route must not hand it to whichever key takes
+ * the old number. `seed` is the key's number when the band was planted (it
+ * seeds the drifts, nothing more). world-tests/v6-route.mjs fails if a camera
+ * here no longer lies on the route, which is when to move it.
+ */
+export const NEAR_BAND: ReadonlyArray<{ part: Part; seed: number; x: number; y: number; z: number; bearing: number; pitch: number; fov: number }> = [
+  { part: "band:opening", seed: 0, x: 1692, y: 30, z: 5030, bearing: 328, pitch: -9, fov: 34 },
+  { part: "band:glide", seed: 1, x: 1420, y: 28, z: 4700, bearing: 330, pitch: -9, fov: 39 },
+  { part: "band:a1", seed: 2, x: 1369, y: 21, z: 4437, bearing: 333.5, pitch: -9.5, fov: 38 },
+  { part: "band:a2", seed: 7, x: 330, y: 130, z: 2930, bearing: 359, pitch: -18, fov: 42 },
+  { part: "band:stream", seed: 12, x: -100, y: 440, z: 1862, bearing: 15, pitch: 2, fov: 31 },
+  { part: "band:traverse", seed: 39, x: 1080, y: 470, z: 1196, bearing: 148, pitch: 2, fov: 42 },
+];
+
 interface ScatterOut {
   cards: CardInst[];
+  /** The part of the world each card was planted in (NUMBERS), in the cards' order. */
+  parts: Part[];
   glow: GlowInst[];
   drifts: Array<{ x: number; z: number; r: number; amount: number }>;
   rejectedByFootprints: number;
@@ -357,7 +437,25 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
   const drifts: ScatterOut["drifts"] = [];
   let rejected = 0;
   const railD = makeRailGrid();
+  // Numbers: `seq` counts drifts and clumps (it seeds each one's shape), `ord`
+  // counts clumps (CardInst.n). Each part of the world starts both at its own
+  // fixed numbers (NUMBERS), so nothing here is numbered by what came before
+  // it somewhere else.
   let seq = 0;
+  let ord = 0;
+  let planting: Part = "streamShelf";
+  const parts: Part[] = [];
+  const numbersFrom = (part: Part) => {
+    planting = part;
+    [seq, ord] = NUMBERS[part];
+  };
+  /** A grid's rows start a new part where they cross into it: [the z its rows start at, the part], in the rows' order (z rising). */
+  const rowParts = (list: ReadonlyArray<readonly [number, Part]>) => {
+    let k = -1;
+    return (z: number) => {
+      while (k + 1 < list.length && z >= list[k + 1][0]) numbersFrom(list[++k][1]);
+    };
+  };
   // Fix round 1 (install budget): the ground as the terrain mesh draws it,
   // read from its grids (a few array reads). rocks.ts groundY calls the
   // analytic terrainHeight for every point inside the falls patch, and
@@ -431,16 +529,19 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
         head: isReed ? REED_HEAD : kit.head ?? kit.tip,
         val: 0.88 + 0.22 * rnd(k, 307),
         deep: 1 - rel,
+        n: ord++,
       });
+      parts.push(planting);
     }
     if (pts.length >= 3 && (opts.shade ?? 0.24) > 0) drifts.push({ x: cx, z: cz, r: R * 1.15, amount: opts.shade ?? 0.24 });
     return pts.length;
   };
 
   /** Jittered grid of drift centres over a box; fn decides each (r = a hash 0..1). */
-  const centres = (x0: number, x1: number, z0: number, z1: number, step: number, seed: number, fn: (x: number, z: number, r: number) => void) => {
+  const centres = (x0: number, x1: number, z0: number, z1: number, step: number, seed: number, fn: (x: number, z: number, r: number) => void, row?: (z: number) => void) => {
     let i = 0;
     for (let z = z0; z < z1; z += step) {
+      row?.(z);
       for (let x = x0; x < x1; x += step) {
         i++;
         const jx = x + (rnd(i, seed) - 0.5) * step * 0.9;
@@ -531,8 +632,9 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
       else if (u < 0.85) drift(x, z, 10 + 14 * c, 10 + Math.floor(12 * r), KITS.meadowShort);
       else drift(x, z, 8 + 8 * c, 8 + Math.floor(8 * r), pick(FLOWERS_WILD, rnd(seq, 16)), { shade: 0.2 });
     }
-  });
+  }, rowParts([[1780, "streamShelf"], [2050, "valley"], [3300, "coast"]]));
   // The stream's banks, all the way to the lip: ferns and tall grass drifts.
+  numbersFrom("streamBanks");
   for (let i = 0; i < STREAM.length - 1; i++) {
     const a = STREAM[i];
     const b = STREAM[i + 1];
@@ -567,7 +669,7 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
     const ledge = !floor && sl < 0.9;
     if (floor && r < (0.35 + 0.45 * wet) * keep) drift(x, z, 8 + 10 * r, 7 + Math.floor(9 * r), KITS.gorgeFern, { maxSlope: 0.65, shade: 0.14 });
     else if (ledge && r < (0.2 + 0.3 * wet) * keep) drift(x, z, 6 + 8 * r, 5 + Math.floor(6 * r), wet > 0.4 ? KITS.gorgeFern : KITS.dryShort, { maxSlope: 0.95, shade: 0.14 });
-  });
+  }, rowParts([[1180, "ledge"], [1300, "gorgeFloor"], [1554, "pool"]]));
   // ── The collar, the rim shelf, the saddle and the meadow down to the lake ──
   centres(1000, 2000, -330, 1140, 50, 51, (x, z, r) => {
     const keep = railKeep(x, z, 360, 950);
@@ -586,9 +688,10 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
     if (u < 0.5) drift(x, z, 12 + 16 * c, 10 + Math.floor(14 * r), z > 560 ? KITS.collar : KITS.meadowTall, { maxSlope: 0.7 });
     else if (u < 0.88) drift(x, z, 10 + 14 * c, 10 + Math.floor(12 * r), z > 560 ? KITS.dryShort : KITS.meadowShort, { maxSlope: 0.7 });
     else drift(x, z, 8 + 8 * c, 8 + Math.floor(8 * r), pick(FLOWERS_WILD, rnd(seq, 53)), { shade: 0.2 });
-  });
+  }, rowParts([[-330, "lakeMeadow"], [560, "saddle"]]));
   // ── a5: tall golden grass on the shore, reeds at the water's edge ──
   {
+    numbersFrom("lakeShore");
     const L = WORLD.lake;
     const n = 170;
     for (let i = 0; i < n; i++) {
@@ -611,6 +714,7 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
   }
   // ── a6: the glowing floor by magicAt (v5's clusters), dark ferns elsewhere ──
   {
+    numbersFrom("forestFloor");
     const Fo = WORLD.forest;
     const put = (kind: GlowId, cx: number, cz: number, R: number, n: number, s0: number, s1: number, tip: THREE.Color, head: THREE.Color, seed: number) => {
       for (let j = 0; j < n; j++) {
@@ -650,6 +754,7 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
   }
   // ── a7: pale gold drifts on the Sky Island, clustered on the rim, the centre open ──
   {
+    numbersFrom("island");
     const I = WORLD.island;
     const O = stops.a7.pos;
     // Final pass B (judge: evenly dotted tufts): fewer, bigger drifts (a
@@ -668,6 +773,7 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
   }
   // The bounty isle's top: the same pale gold.
   {
+    numbersFrom("bountyIsle");
     const B = WORLD.bountyIsle;
     centres(B.x - B.r, B.x + B.r, B.z - B.r, B.z + B.r, 34, 93, (x, z, r) => {
       if (Math.hypot(x - B.x, z - B.z) > B.r - 22) return;
@@ -679,8 +785,17 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
   {
     const rocks = allFootprints().filter((f) => f.kind === "rock" && !f.line);
     const anchors = rocks.length ? rocks.map((f) => ({ x: f.x, z: f.z, r: f.r })) : rockAnchors.map((a) => ({ x: a.x, z: a.z, r: a.r }));
-    for (let i = 0; i < anchors.length; i++) {
-      const A = anchors[i];
+    // Each ring is seeded by its rock's number in the rock's own place
+    // (rocks.ts rockRings: its rocks are the first rock footprints, in the
+    // order it placed them); the rock footprints after those are dress-gorge's
+    // cairns, numbered on from CAIRN_RING_START.
+    let ringOf: RockPlace | "cairns" | null = null;
+    for (let j = 0; j < anchors.length; j++) {
+      const A = anchors[j];
+      const ring = rocks.length && j < rockRings.length ? rockRings[j] : null;
+      const place = ring ? ring.place : "cairns";
+      if (place !== ringOf) numbersFrom(`ring:${(ringOf = place)}`);
+      const i = ring ? ring.n : rocks.length ? CAIRN_RING_START + j - rockRings.length : j;
       if (A.r < 4) continue;
       const g0 = gY(A.x, A.z);
       if (isWater(A.x, A.z, g0) || railKeep(A.x, A.z, 400, 1000) <= 0) continue;
@@ -697,20 +812,19 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
   }
   // ── The near band: big drifts where the ground first enters a low stop's frame ──
   {
-    const BAND: Array<[number, Kit[]]> = [
+    const BAND: Partial<Record<Part, Kit[]>> = {
       // The opening's islet: full dry grass clumps (the thin dune cells read as spikes there).
-      [0, [KITS.coastTall, KITS.coastShort]],
-      [1, [KITS.coastTall, KITS.coastShort]],
-      [2, [KITS.dune, KITS.coastTall]],
-      [7, [...FLOWERS_A2, KITS.meadowTall, KITS.meadowShort]],
-      [12, [KITS.meadowTall, KITS.fern]],
-      [39, [KITS.dryShort, KITS.gorgeFern]],
-    ];
-    for (const [key, kits] of BAND) {
-      if (key >= TRAIL.length) continue;
-      const [cx, cy, cz] = TRAIL[key];
-      const v = TRAIL_VIEW[key];
-      const fov = TRAIL_FOV[key] ?? 40;
+      "band:opening": [KITS.coastTall, KITS.coastShort],
+      "band:glide": [KITS.coastTall, KITS.coastShort],
+      "band:a1": [KITS.dune, KITS.coastTall],
+      "band:a2": [...FLOWERS_A2, KITS.meadowTall, KITS.meadowShort],
+      "band:stream": [KITS.meadowTall, KITS.fern],
+      "band:traverse": [KITS.dryShort, KITS.gorgeFern],
+    };
+    for (const { part, seed: key, x: cx, y: cy, z: cz, fov, ...v } of NEAR_BAND) {
+      const kits = BAND[part];
+      if (!kits) continue;
+      numbersFrom(part);
       const camH = cy - Math.max(gY(cx, cz), 0);
       // Pitch is positive DOWN in KEYS (a2's -10 looks up): the frame's bottom
       // edge sits fov/2 + pitch below level, and the ground enters it at d0.
@@ -735,6 +849,7 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
   // near flank, at the foot of the boulder family, on the ground as drawn (the
   // islet is a coarse mound; the heightfield under it is higher and rounder).
   if (surf) {
+    numbersFrom("islet");
     const islet: Kit = { ...KITS.coastTall, hMin: 13, hMax: 18 };
     const onIslet = (x: number, z: number) => surf.drawnHeight(x, z);
     // Between and in front of the boulders' footprints (rocks.ts), where the mound is above the sea.
@@ -748,7 +863,19 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
       drift(x, z, 3, 2, islet, { yAt: onIslet, shade: 0, accept: (_x, _z, g) => g > 0.5 });
     }
   }
-  return { cards, glow, drifts, rejectedByFootprints: rejected };
+  return { cards, parts, glow, drifts, rejectedByFootprints: rejected };
+}
+
+/**
+ * For world-tests/v6-route.mjs: the scatter alone, on the analytic ground and
+ * with no meshes (so it runs in node, after rocks.ts has placed its rocks):
+ * every clump as [x, z, height, yaw, number, the part that planted it]. The
+ * test moves things in one place and proves the clumps of every other part
+ * keep these values.
+ */
+export function scatterForTests(): Array<readonly [number, number, number, number, number, string]> {
+  const out = scatter(undefined as unknown as WorldCtx, undefined);
+  return out.cards.map((c, i) => [c.x, c.z, c.h, c.yaw, c.n, out.parts[i]] as const);
 }
 
 /**
@@ -846,6 +973,7 @@ function makeDownProbe(targets: THREE.Object3D[], yMin: number, yMax: number, ce
 
 /** The Gate isle's top (B8's mesh, probed from above), on a 30 unit grid; clumps drift there. */
 function gateIsleCards(ctx: WorldCtx, surf: SurfacesApi | undefined, into: CardInst[]): number {
+  let ord: number = NUMBERS.gateIsle[1];
   const G = WORLD.gateIsle;
   const targets: THREE.Object3D[] = [];
   ctx.root.traverse((o) => {
@@ -885,7 +1013,7 @@ function gateIsleCards(ctx: WorldCtx, surf: SurfacesApi | undefined, into: CardI
         const pink = cliff > 0.5 && rnd(i * 17 + k, 101) < 0.6;
         const cell = grassCell(pink ? "flowerRed" : rnd(i * 17 + k, 102) < 0.5 ? "short" : "short2");
         const h = (pink ? 4.5 : 4) + 3 * rnd(i * 17 + k, 103);
-        into.push({ x: px, y: y - 0.3, z: pz, h, w: h * cell.aspect, yaw: rnd(i * 17 + k, 104) * Math.PI, cell, tip: TIP.gate, head: FLOWER.pink, val: 0.9 + 0.2 * rnd(i, 105), deep: 0.3 });
+        into.push({ x: px, y: y - 0.3, z: pz, h, w: h * cell.aspect, yaw: rnd(i * 17 + k, 104) * Math.PI, cell, tip: TIP.gate, head: FLOWER.pink, val: 0.9 + 0.2 * rnd(i, 105), deep: 0.3, n: ord++ });
         placed++;
       }
     }
@@ -1042,7 +1170,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   };
 
   /** Build one layer from records sorted into cells and shuffled inside each (so a density share thins evenly). */
-  function makeLayer<T extends { x: number; y: number; z: number }>(
+  function makeLayer<T extends { x: number; y: number; z: number; n?: number }>(
     name: string,
     recs: T[],
     geo: THREE.BufferGeometry,
@@ -1055,7 +1183,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     if (!recs.length) return null;
     const key = (p: T) => Math.floor(p.x / CELL) * 100000 + Math.floor(p.z / CELL);
     const sorted = recs
-      .map((r, i) => ({ r, k: key(r), s: rnd(i, 777) }))
+      .map((r, i) => ({ r, k: key(r), s: rnd(r.n ?? i, 777) }))
       .sort((a, b) => a.k - b.k || a.s - b.s)
       .map((o) => o.r);
     const N = sorted.length;

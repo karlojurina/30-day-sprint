@@ -1,7 +1,7 @@
 /**
  * A1: where every TRAIL key sits in the scroll at the default pacing, in vh
  * (one screen = 100 vh), and the scroll between named keys (the ride, the
- * turn, the hike from the cave exit to the burst).
+ * turn, the way from the a3 stop up to the burst).
  *
  *   node --import ./world-tests/v6-ts-resolve.mjs --experimental-strip-types --no-warnings world-tests/v6-a1-pace.mjs
  */
@@ -33,12 +33,12 @@ const stop = (id) => L.PLACES.find((p) => p.id === id).trail;
 const lip = L.DIVE_KEYS.first;
 const turnFrom = lip + 6;
 const turnTo = lip + 10;
-const exitKey = L.CAVE_KEYS.last + 1;
+const a3Key = stop("a3");
 const burst = L.CLIMB_KEYS.first + 2;
 const span = (a, b) => (vhAt(b) - vhAt(a)).toFixed(0);
 console.log(`\ntotal ${totalVh} vh`);
 console.log(`the ride, lip (k${lip}) to level over the pool (k${turnFrom}): ${span(lip, turnFrom)} vh`);
 console.log(`the turn at the pool (k${turnFrom} to k${turnTo}): ${span(turnFrom, turnTo)} vh`);
-console.log(`cave exit (k${exitKey}) to a4 (k${stop("a4")}): ${span(exitKey, stop("a4"))} vh`);
+console.log(`a3 (k${a3Key}) to a4 (k${stop("a4")}): ${span(a3Key, stop("a4"))} vh`);
 console.log(`a4 to the burst (k${burst}): ${span(stop("a4"), burst)} vh`);
-console.log(`cave exit to the burst: ${span(exitKey, burst)} vh (override: at most ~250)`);
+console.log(`a3 to the burst: ${span(a3Key, burst)} vh`);

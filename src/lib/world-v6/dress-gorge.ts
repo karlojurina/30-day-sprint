@@ -1,12 +1,13 @@
 import * as THREE from "three";
-import { CAVE_EXIT_OPENING, PATH, PLACES, TRAIL_HUT, WORLD, caveMargin } from "./layout";
+import { PATH, PLACES, TRAIL_HUT, WORLD } from "./layout";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
 import { addFootprint, addPathLine } from "./footprints";
 import { terrainHeight } from "./terrain";
+import { trailDist } from "./rocks";
 
 /**
  * v6 gorge dressing (world_art_bible_v6.md 1.4 to 1.11, B7): everything built
- * by hand between the lip and the ridge, outside the cave.
+ * by hand between the lip and the ridge.
  *
  *   LM_TrailHut  the Trail Hut (a4's landmark, "Gorge:hut"): log walls with
  *                pale chinking, a shingled gable roof with a lit ridge and
@@ -25,13 +26,14 @@ import { terrainHeight } from "./terrain";
  *                cairn at each bend; the gully's stone steps and fixed rope;
  *                the cairn at the gully's top; the fallen spruce over the
  *                river below the pool (lit worn top, broken stubs, root
- *                plate); a blazed post at the lip; ferns at the cave's exit.
+ *                plate); a blazed post at the lip; a rockfall at the cliff's
+ *                foot east of the falls and ferns on the bank below it.
  *   Gorge:glow   the hut's window panes (lamp glow, levelled by light.ts).
  *
  * Every solid piece registers a footprint (footprints.ts). Stock Lambert and
  * Basic materials with fog, so light.ts's ramp and grade reach them. 3 draw
- * calls, drawn only while the camera is in or over the gorge (not inside the
- * cave, not north of the ridge).
+ * calls, drawn only while the camera is in or over the gorge (not north of
+ * the ridge).
  */
 
 type RGB = readonly [number, number, number];
@@ -497,7 +499,7 @@ function logBridge(k: Kit, a: V3, b: V3): void {
     const p0: V3 = [a[0] + dx * t0, a[1] + (b[1] - a[1]) * t0, a[2] + dz * t0];
     const p1: V3 = [a[0] + dx * t1, a[1] + (b[1] - a[1]) * t1, a[2] + dz * t1];
     // Weathered silver-brown bark in value breaks (a black log crossed the
-    // side passage's exit view: judge round 1).
+    // view from the south bank: judge round 1).
     k.beam(p0, p1, r0 * 2, r0 * 2, i % 2 ? P.barkLit : lin(0x7a6d60), "cyl8", 0.08, 0.2);
     // Worn walking strip along the top.
     k.beam([p0[0], p0[1] + r0 * 0.93, p0[2]], [p1[0], p1[1] + r0 * 0.9, p1[2]], r0 * 0.95, 0.4, lin(0xc4b49e), "box", 0.1);
@@ -694,8 +696,12 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   stats.handrailPosts = posts;
   stats.handrailRopes = ropes;
 
-  // Cairns at the bends that stand on real ground.
+  // Cairns at the bends that stand on real ground. Each is seeded by its
+  // bend's number counted from the log's south end, which was the trail's
+  // point 23 when they were built: a point added to or taken from the trail
+  // before the log must not rebuild them.
   let cairns = 0;
+  const seedOf = (i: number) => i - PATH.findIndex((p) => Math.abs(p.x - 62) < 1 && Math.abs(p.z - 1608) < 1) + 23;
   for (let i = 1; i + 1 < PATH.length; i++) {
     const p = PATH[i];
     if (p.x < 100 || p.x > 1500 || p.z < 1000 || p.z > 1700 || p.y < 60) continue;
@@ -708,7 +714,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     const cx = p.x + 9;
     const cz = p.z - 7;
     if (Math.hypot(cx - hx, cz - hz) < 30) continue;
-    cairn(kSet, cx, cz, 7 + rnd(i, 7) * 3, i);
+    cairn(kSet, cx, cz, 7 + rnd(seedOf(i), 7) * 3, seedOf(i));
     addFootprint({ x: cx, z: cz, r: 4, kind: "rock" });
     cairns++;
   }
@@ -762,9 +768,9 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
 
   // The log over the river, below the pool.
   {
-    // The root plate on the far (north) bank: from the cave's exit the log's
+    // The root plate on the far (north) bank: from the south bank the log's
     // thin broken top points at you and the plate stands against the lit far
-    // side (root end south, it filled the exit's view with a black disc).
+    // side (root end south, it filled that view with a black disc).
     const a: V3 = [49.5, 64.8, 1528];
     const b: V3 = [63.5, 64.2, 1614];
     logBridge(kSet, a, b);
@@ -814,11 +820,13 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     stats.brinkRocks = rocks.length;
   }
 
-  // Final pass B: the side passage is closed by a rockfall (the camera no
-  // longer uses it, decision 53; its end stood out of the wall as a pillar and
-  // the terrain's opening showed the sea through it from the a3 park).
+  // A rockfall at the foot of the falls cliff, 140 east of the falls' middle. It was
+  // heaped here to close the cave's side passage (final pass B); the cave and
+  // its passage went on 2026-10-13 (layout.ts "The cave that was here") and
+  // the cliff is whole behind it. It stays as what it looks like, rock come
+  // down off the wall: the a3 stop and its click in view are composed with it.
   {
-    const O = CAVE_EXIT_OPENING;
+    const O = { x: 40, y: 72.5, z: 1690, bearing: 16 };
     const b = (O.bearing * Math.PI) / 180;
     const ox = Math.sin(b);
     const oz = -Math.cos(b);
@@ -838,12 +846,15 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       const z = O.z + az * ac + oz * out;
       kSet.add("dode", T(x, O.y + up, z, w, h, d, b + (rnd(i, 371) - 0.5) * 0.8, (rnd(i, 372) - 0.5) * 0.4, (rnd(i, 373) - 0.5) * 0.3), i % 2 ? P.stoneWarm : warmDark, 0.16);
     });
-    stats.exitRockfall = heap.length;
+    stats.rockfall = heap.length;
   }
 
-  // Ferns at the cave's exit and on the wet bank below it.
+  // Ferns round the rockfall and on the wet bank below it. None on the trail:
+  // a fern keeps its own reach clear of the trail's line plus 4 (the trail
+  // crosses this bank from the pool's shore to the log since 2026-10-13).
   {
-    const O = CAVE_EXIT_OPENING;
+    const O = { x: 40, z: 1690 };
+    const onTrail = (x: number, z: number, size: number) => trailDist(x, z) < 4 + size;
     let n = 0;
     for (let i = 0; i < 26; i++) {
       const ang = rnd(i, 81) * Math.PI * 2;
@@ -853,17 +864,21 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       const g = G(x, z);
       if (g > 75 || g < 60.5) continue;
       if (Math.hypot(x - 57, z - 1575) < 16) continue;
-      fern(kLeaf, x, z, 3.2 + rnd(i, 83) * 2.6, i);
+      const size = 3.2 + rnd(i, 83) * 2.6;
+      if (onTrail(x, z, size)) continue;
+      fern(kLeaf, x, z, size, i);
       n++;
     }
-    // And on the pool's wet east shore, in the spray, beside the trail to the cave.
+    // And on the pool's wet east shore, in the spray.
     for (let i = 0; i < 20; i++) {
       const x = -52 + rnd(i, 84) * 60;
       const z = 1590 + rnd(i, 85) * 90;
       const g = G(x, z);
       if (g > 72 || g < 60.5) continue;
       if (Math.hypot(x - WORLD.pool.x, z - WORLD.pool.z) < WORLD.pool.r + 4) continue;
-      fern(kLeaf, x, z, 3 + rnd(i, 86) * 2.4, 200 + i);
+      const size = 3 + rnd(i, 86) * 2.4;
+      if (onTrail(x, z, size)) continue;
+      fern(kLeaf, x, z, size, 200 + i);
       n++;
     }
     stats.ferns = n;
@@ -891,7 +906,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   stats.calls = meshes.length;
   stats.buildMs = Math.round(performance.now() - t0);
 
-  // ── Frame loop: draw the set only in or over the gorge, never from inside the cave. ──
+  // ── Frame loop: draw the set only in or over the gorge. ──
   const camPos = new THREE.Vector3();
   const gorgeSet = meshes.filter((m) => m.parent === root);
   let on = true;
@@ -899,8 +914,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     name: "dress-gorge",
     update(): boolean {
       ctx.camera.getWorldPosition(camPos);
-      const inCave = caveMargin(camPos.x, camPos.y, camPos.z) > 0 && camPos.x < 20;
-      const want = !inCave && camPos.z > 700 && camPos.z < 2600 && camPos.y < 1100;
+      const want = camPos.z > 700 && camPos.z < 2600 && camPos.y < 1100;
       if (want === on) return false;
       on = want;
       for (const m of gorgeSet) m.visible = want;

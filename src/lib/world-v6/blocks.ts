@@ -1,14 +1,6 @@
 import * as THREE from "three";
 import {
   BRIDGE,
-  // v6: the cave is built in its BUILD frame (v5's, the mouth facing +z) and
-  // hung under a mirror matrix into the world (layout CAVE_MIRROR_Z); the
-  // side passage out of it is swept like v5's tunnel.
-  CAVE_BUILD as CAVE,
-  CAVE_EXIT_BUILD as TUNNEL,
-  CAVE_EXIT_H as TUNNEL_H,
-  CAVE_EXIT_HALF_W as TUNNEL_HALF_W,
-  CAVE_MIRROR_Z,
   FLIGHT_KEYS,
   GATE,
   GATE_CAUSEWAY,
@@ -45,11 +37,10 @@ import type { ShipPose } from "./modules";
  *     ("Landmark_a3_Water"): water.ts installs first and builds every
  *     water surface, the falls, the pool, the spray and the island falls
  *     included; this module only moves the curtain into the landmark.
- *   - the cave's source shells (Zone_mine, under the cave's mirror matrix):
- *     the hall behind the curtain and the side passage out of it (v6: the
- *     mine's tunnel, shaft and headframe are gone) as closed inward-facing
- *     shells. They are never drawn: dress-underground.ts reads them at
- *     install, bakes its light into copies and owns the flames and lamps.
+ *   - nothing under the ground: the mine's tunnel, shaft and headframe went
+ *     with v6, and the cave behind the falls (the hall's and the side
+ *     passage's shells, Zone_mine) was removed on 2026-10-13 (layout.ts "The
+ *     cave that was here").
  *   - the walk to the Mirror Lake (Set_meadow): the brook's footbridge.
  *   - the floating steps (a6 -> a7): drifting and bobbing, each settling into
  *     line as the camera approaches, driven by ctx.routeU() (dress-lakeforest
@@ -480,506 +471,6 @@ function buildFallsSet(p: Place, parts: PlaceParts): void {
   void parts;
 }
 
-// ── The cave behind the falls and its side passage (v6: the mine is gone) ──
-//
-// v6: everything in this section is in the cave's BUILD frame (layout
-// CAVE_BUILD, CAVE_EXIT_BUILD, imported here as CAVE and TUNNEL): v5's cave
-// behind a falls on the gorge's north wall. Zone_mine hangs it into the world
-// under caveMirrorMatrix (z -> CAVE_MIRROR_Z - z); "the tunnel" below is the
-// short side passage out to the cliff face east of the curtain.
-//
-// HOW IT IS BUILT. The mine is three voids under the terrain (layout.ts CAVE,
-// TUNNEL, SHAFT). The terrain is drawn front faces only, so from inside a void
-// the ground above is see-through: every surface the camera sees down here is
-// built here, as a CLOSED shell whose faces point INTO the void. Three shells:
-// the hall (an elliptical floor, a wall, a dome), the tunnel (a swept arch)
-// and the shaft (four walls and a floor), plus the short tube of the cave's
-// mouth out to the cliff face behind the curtain. Where a passage meets a
-// room, the passage's tube starts a few units INSIDE the room, and the room's
-// wall has a hole cut on its own grid that is a little SMALLER than the tube's
-// profile: no ray from inside can slip out between the two. Faces pointing
-// inward also means that, from outside, any part of a shell that pokes
-// through the ground is invisible.
-//
-// v5: these shells are never drawn. dress-underground.ts reads their
-// triangles and colours at install, re-bakes the light into them (torches,
-// lanterns, the ripples near the mouth, the shaft's daylight) and draws its
-// own copies; it also owns the cage, the flames and the lamps.
-
-/** One side of the cave mouth's arch: [offset from the centre line, height over the sill], outermost first. */
-const MOUTH_ARCH: ReadonlyArray<readonly [number, number]> = [[CAVE.mouthHalfW, 0], [CAVE.mouthHalfW, 46], [33, 56], [20, 61.5]];
-/** One side of the tunnel's arch over its floor, outermost first. */
-const TUNNEL_ARCH: ReadonlyArray<readonly [number, number]> = [[TUNNEL_HALF_W, 0], [TUNNEL_HALF_W, 9], [TUNNEL_HALF_W, 17], [9, 23], [4, TUNNEL_H - 0.4]];
-/** The tunnel's and the mouth's floors sit this far over the room floors they overlap (no z-fighting). */
-const FLOOR_LIFT = 0.3;
-
-/** Height of an arch (MOUTH_ARCH / TUNNEL_ARCH) at `a` from its centre line; -Infinity outside it. */
-function archTop(arch: ReadonlyArray<readonly [number, number]>, a: number): number {
-  const n = arch.length;
-  if (a > arch[0][0] + 1e-9) return -Infinity;
-  if (a <= arch[n - 1][0]) return arch[n - 1][1];
-  for (let i = n - 1; i > 0; i--) {
-    const [s0, h0] = arch[i];
-    const [s1, h1] = arch[i - 1];
-    if (a >= s0 && a <= s1) return s1 === s0 ? Math.max(h0, h1) : h0 + ((h1 - h0) * (a - s0)) / (s1 - s0);
-  }
-  return arch[0][1];
-}
-/** The closed profile of an arch (both sides), for sweeping: floor edge first. */
-function archLoop(arch: ReadonlyArray<readonly [number, number]>): [number, number][] {
-  return [...arch.map(([s, h]) => [s, h] as [number, number]), ...arch.slice().reverse().map(([s, h]) => [-s, h] as [number, number])];
-}
-
-/** Smooth value noise, 0..1. */
-function vnoise(x: number, y: number, z: number): number {
-  const xi = Math.floor(x);
-  const yi = Math.floor(y);
-  const zi = Math.floor(z);
-  const s = (t: number) => t * t * (3 - 2 * t);
-  const u = s(x - xi);
-  const v = s(y - yi);
-  const w = s(z - zi);
-  const h = (a: number, b: number, c: number) => rnd(a * 157.31 + b * 113.97 + c * 71.43, 9.1);
-  const l = (a: number, b: number, t: number) => a + (b - a) * t;
-  return l(
-    l(l(h(xi, yi, zi), h(xi + 1, yi, zi), u), l(h(xi, yi + 1, zi), h(xi + 1, yi + 1, zi), u), v),
-    l(l(h(xi, yi, zi + 1), h(xi + 1, yi, zi + 1), u), l(h(xi, yi + 1, zi + 1), h(xi + 1, yi + 1, zi + 1), u), v),
-    w,
-  );
-}
-/** Rock colour at a point: blotches and strata, so the rock reads as it slides past. */
-function rockAt(x: number, y: number, z: number, base: RGB, k = 1, strata = 0.14): RGB {
-  const n = vnoise(x * 0.06, y * 0.09, z * 0.06);
-  const band = Math.sin(y * 0.13 + vnoise(x * 0.02, y * 0.015, z * 0.02) * 5);
-  const f = (0.8 + 0.34 * n) * (1 + strata * band) * k;
-  return [base[0] * f, base[1] * f, base[2] * f];
-}
-
-/** A quad turned to face `inside` (the shells are seen only from within). */
-function quadIn(b: Builder, a: V3, bb: V3, c: V3, d: V3, col: RGB, inside: V3): void {
-  const ux = bb[0] - a[0];
-  const uy = bb[1] - a[1];
-  const uz = bb[2] - a[2];
-  const vx = c[0] - a[0];
-  const vy = c[1] - a[1];
-  const vz = c[2] - a[2];
-  const nx = uy * vz - uz * vy;
-  const ny = uz * vx - ux * vz;
-  const nz = ux * vy - uy * vx;
-  const mx = (a[0] + c[0]) / 2;
-  const my = (a[1] + c[1]) / 2;
-  const mz = (a[2] + c[2]) / 2;
-  if (nx * (inside[0] - mx) + ny * (inside[1] - my) + nz * (inside[2] - mz) >= 0) b.quad(a, bb, c, d, col);
-  else b.quad(a, d, c, bb, col);
-}
-
-/** A triangle turned to face `inside`. */
-function triIn(b: Builder, a: V3, bb: V3, c: V3, col: RGB, inside: V3): void {
-  const ux = bb[0] - a[0];
-  const uy = bb[1] - a[1];
-  const uz = bb[2] - a[2];
-  const vx = c[0] - a[0];
-  const vy = c[1] - a[1];
-  const vz = c[2] - a[2];
-  const nx = uy * vz - uz * vy;
-  const ny = uz * vx - ux * vz;
-  const nz = ux * vy - uy * vx;
-  const mx = (a[0] + bb[0] + c[0]) / 3;
-  const my = (a[1] + bb[1] + c[1]) / 3;
-  const mz = (a[2] + bb[2] + c[2]) / 3;
-  if (nx * (inside[0] - mx) + ny * (inside[1] - my) + nz * (inside[2] - mz) >= 0) b.tri(a, bb, c, col);
-  else b.tri(a, c, bb, col);
-}
-
-interface MineParts {
-  cave: Builder;
-  tunnel: Builder;
-}
-
-/** The cave's mirror (layout CAVE_MIRROR_Z): build frame -> world. Its own inverse. */
-export const caveMirrorMatrix = (): THREE.Matrix4 => new THREE.Matrix4().makeScale(1, 1, -1).setPosition(0, 0, CAVE_MIRROR_Z);
-
-/** A wall torch's bracket (its flame and light are dress-underground.ts's), `out` the unit vector from the wall into the void. */
-function torch(m: MineParts, into: Builder, x: number, y: number, z: number, ox: number, oz: number): void {
-  into.beam(x - ox * 1.2, y - 2.6, z - oz * 1.2, x + ox * 0.6, y + 0.4, z + oz * 0.6, 0.7, 0.7, C.woodDark);
-  into.add(U.cyl6, T(x + ox * 0.7, y + 0.6, z + oz * 0.7, 0.75, 1.2, 0.75), C.woodDark, 0);
-}
-
-/**
- * The cave behind the falls: the hall, the mouth's tube out to the cliff face,
- * the rock frame round the arch outside (it hides the terrain cut's jagged
- * edge behind the curtain), and the set: a lantern on a post to the right of
- * the mouth as the a3 stop sees it, a mine cart on the rails running out of
- * the tunnel, crates, fallen blocks and a few stalactites clear of the camera.
- */
-function buildCave(m: MineParts): void {
-  const b = m.cave;
-  const CV = CAVE;
-  const [t0x, t0y, t0z] = TUNNEL[0];
-  const [t1x, , t1z] = TUNNEL[1];
-  const tl = Math.hypot(t1x - t0x, t1z - t0z);
-  const tdx = (t1x - t0x) / tl;
-  const tdz = (t1z - t0z) / tl;
-  // Right of the direction of travel.
-  const tnx = -tdz;
-  const tnz = tdx;
-  const ell = (th: number): [number, number] => [CV.hallX + CV.rx * Math.cos(th), CV.hallZ + CV.rz * Math.sin(th)];
-  const ellR = (x: number, z: number) => Math.hypot((x - CV.hallX) / CV.rx, (z - CV.hallZ) / CV.rz);
-  const ellZ = (x: number) => CV.hallZ + CV.rz * Math.sqrt(Math.max(0, 1 - ((x - CV.hallX) / CV.rx) ** 2));
-  const roofAt = (r: number) => CV.floorY + Math.max(CV.mouthH, CV.hallH * Math.sqrt(Math.max(0, 1 - r * r)));
-  const sOf = (x: number, z: number) => (x - t0x) * tnx + (z - t0z) * tnz;
-
-  // Columns round the hall: 44 even, plus exact lines at the edges of the two holes.
-  const special: number[] = [];
-  const mouthOff = [CV.mouthHalfW - 0.4, 32.7, 19.8];
-  for (const o of mouthOff) for (const sg of [-1, 1]) special.push(Math.acos((CV.x + sg * o - CV.hallX) / CV.rx));
-  const tunOff = [TUNNEL_HALF_W - 0.3, 8.8, 3.9];
-  for (const o of tunOff) {
-    for (const sg of [-1, 1]) {
-      let lo = -1.2;
-      let hi = 0.8;
-      for (let i = 0; i < 50; i++) {
-        const mid = (lo + hi) / 2;
-        const [x, z] = ell(mid);
-        if (sOf(x, z) < sg * o) lo = mid;
-        else hi = mid;
-      }
-      special.push((lo + hi) / 2);
-    }
-  }
-  const cols = [...special];
-  for (let k = 0; k < 44; k++) {
-    const th = (k / 44) * Math.PI * 2 - Math.PI;
-    if (special.every((s) => Math.abs(s - th) > 0.035)) cols.push(th);
-  }
-  cols.sort((a, c) => a - c);
-  // Wall rows (over the floor): exact rows at the tops of the two holes' steps.
-  const WALL = [0, 8, 16.7, 22.7, 25.3, 33, 40, 45.7, 50.5, 55.7, 61.2, CV.mouthH];
-  const DOME = [0.92, 0.84, 0.74, 0.63, 0.5, 0.36, 0.22, 0.09];
-  const inside: V3 = [CV.hallX, CV.floorY + 40, CV.hallZ];
-
-  const inMouth = (x: number, h: number, z: number) => z > CV.hallZ + 40 && Math.abs(x - CV.x) <= CV.mouthHalfW - 0.3 && h <= archTop(MOUTH_ARCH, Math.abs(x - CV.x)) - 0.2;
-  const inTunnel = (x: number, h: number, z: number) => {
-    const s = sOf(x, z);
-    return x > CV.hallX + 60 && Math.abs(s) <= TUNNEL_HALF_W - 0.2 && h <= archTop(TUNNEL_ARCH, Math.abs(s)) - 0.2;
-  };
-  // No noise near the holes' edges (they must stay exact) or on the floor line.
-  const calm = (x: number, h: number, z: number) =>
-    (z > CV.hallZ + 30 && Math.abs(x - CV.x) < CV.mouthHalfW + 7 && h < CV.mouthH + 1) ||
-    (x > CV.hallX + 50 && Math.abs(sOf(x, z)) < TUNNEL_HALF_W + 7 && h < TUNNEL_H + 6);
-
-  const nc = cols.length;
-  // Vertex grid: rows = wall rows, then dome rings; one apex.
-  const grid: V3[][] = [];
-  const raw: V3[][] = [];
-  for (let j = 0; j < WALL.length + DOME.length; j++) {
-    const row: V3[] = [];
-    const rawRow: V3[] = [];
-    for (let i = 0; i < nc; i++) {
-      const th = cols[i];
-      let x: number;
-      let y: number;
-      let z: number;
-      if (j < WALL.length) {
-        [x, z] = ell(th);
-        y = CV.floorY + WALL[j];
-      } else {
-        const r = DOME[j - WALL.length];
-        x = CV.hallX + CV.rx * r * Math.cos(th);
-        z = CV.hallZ + CV.rz * r * Math.sin(th);
-        y = roofAt(r) - 0.6;
-      }
-      rawRow.push([x, y, z]);
-      const h = y - CV.floorY;
-      let amp = j === 0 ? 0 : j < WALL.length ? 3.6 : 5;
-      if (j < WALL.length && calm(x, h, z)) amp = 0;
-      if (amp > 0) {
-        const n = vnoise(x * 0.07, y * 0.07, z * 0.07) * 0.7 + vnoise(x * 0.19, y * 0.19, z * 0.19) * 0.3;
-        const dx = inside[0] - x;
-        const dy = j < WALL.length ? 0 : inside[1] - y;
-        const dz = inside[2] - z;
-        const dl = Math.hypot(dx, dy, dz) || 1;
-        x += (dx / dl) * amp * n;
-        y += (dy / dl) * amp * n;
-        z += (dz / dl) * amp * n;
-      }
-      row.push([x, y, z]);
-    }
-    grid.push(row);
-    raw.push(rawRow);
-  }
-  const apex: V3 = [CV.hallX, CV.floorY + CV.hallH - 1.5, CV.hallZ];
-  for (let j = 0; j < grid.length - 1; j++) {
-    for (let i = 0; i < nc; i++) {
-      const i2 = (i + 1) % nc;
-      if (j < WALL.length - 1) {
-        const corners = [raw[j][i], raw[j][i2], raw[j + 1][i2], raw[j + 1][i]];
-        if (corners.every((p) => inMouth(p[0], p[1] - CV.floorY, p[2]))) continue;
-        if (corners.every((p) => inTunnel(p[0], p[1] - t0y, p[2]))) continue;
-      }
-      const a = grid[j][i];
-      const c = grid[j + 1][i2];
-      const wet = a[2] > CV.hallZ + 55 ? 0.78 : 1;
-      const col = j < WALL.length - 1 ? rockAt(a[0], a[1], a[2], C.rock, wet) : rockAt(a[0], a[1], a[2], C.rockDark, 1.08);
-      quadIn(b, a, grid[j][i2], c, grid[j + 1][i], col, inside);
-    }
-  }
-  const top = grid[grid.length - 1];
-  for (let i = 0; i < nc; i++) triIn(b, top[i], top[(i + 1) % nc], apex, rockAt(apex[0], apex[1], apex[2], C.rockDark), inside);
-
-  // The floor: rings in to a centre, rising a little in the middle.
-  const FLOOR = [1, 0.72, 0.44, 0.18];
-  const fl: V3[][] = FLOOR.map((r, k) =>
-    cols.map((th) => {
-      const x = CV.hallX + CV.rx * r * Math.cos(th);
-      const z = CV.hallZ + CV.rz * r * Math.sin(th);
-      return [x, CV.floorY + (k === 0 ? 0 : 0.4 + 1.4 * vnoise(x * 0.05, 3.3, z * 0.05)), z] as V3;
-    }),
-  );
-  const up = (p: V3): V3 => [p[0], p[1] + 20, p[2]];
-  for (let k = 0; k < FLOOR.length - 1; k++) {
-    for (let i = 0; i < nc; i++) {
-      const i2 = (i + 1) % nc;
-      const a = fl[k][i];
-      quadIn(b, a, fl[k][i2], fl[k + 1][i2], fl[k + 1][i], rockAt(a[0], a[1], a[2], [0.3, 0.29, 0.27], 1, 0.05), up(a));
-    }
-  }
-  const fc: V3 = [CV.hallX, CV.floorY + 1.6, CV.hallZ];
-  const last = fl[FLOOR.length - 1];
-  for (let i = 0; i < nc; i++) {
-    const a = last[i];
-    const c = last[(i + 1) % nc];
-    triIn(b, a, c, fc, [0.3, 0.29, 0.27], up(a));
-  }
-
-  // ── The mouth: a short tube from inside the hall out to the cliff face ──
-  const loop = archLoop(MOUTH_ARCH).map(([s, h]) => [s, h === 0 ? FLOOR_LIFT : h] as [number, number]);
-  const faceZ = (h: number) => CV.footZ + 2.5 - h / 9;
-  const ringsZ = [(s: number) => ellZ(CV.x + s) - 3, (s: number, h: number) => (ellZ(CV.x + s) - 3 + faceZ(h)) / 2, (_s: number, h: number) => faceZ(h)];
-  const mouthIn: V3 = [CV.x, CV.floorY + 30, CV.footZ - 6];
-  const mv = ringsZ.map((zf, r) =>
-    loop.map(([s, h]) => {
-      let x = CV.x + s;
-      let y = CV.floorY + h;
-      const z = zf(s, h);
-      if (r === 1 && h > 1) {
-        // A little unevenness in the middle ring, inward only.
-        const n = vnoise(x * 0.1, y * 0.1, z * 0.1) * 2.2;
-        const dl = Math.hypot(mouthIn[0] - x, mouthIn[1] - y) || 1;
-        x += ((mouthIn[0] - x) / dl) * n;
-        y += ((mouthIn[1] - y) / dl) * n;
-      }
-      return [x, y, z] as V3;
-    }),
-  );
-  for (let r = 0; r < mv.length - 1; r++) {
-    for (let k = 0; k < loop.length; k++) {
-      const k2 = (k + 1) % loop.length;
-      const a = mv[r][k];
-      const floor = loop[k][1] <= FLOOR_LIFT && loop[k2][1] <= FLOOR_LIFT;
-      const col = floor ? [0.28, 0.28, 0.27] as RGB : rockAt(a[0], a[1], a[2], C.rockDark, 0.95);
-      quadIn(b, a, mv[r][k2], mv[r + 1][k2], mv[r + 1][k], col, [CV.x, CV.floorY + 30, a[2]]);
-    }
-  }
-
-  // ── Outside: rock blocks round the arch on the cliff face, over the cut's edge ──
-  for (let h = 6; h <= 58; h += 11) {
-    for (const sg of [-1, 1]) {
-      const x = CV.x + sg * (CV.mouthHalfW + 5 + rnd(h, 81 + sg) * 3);
-      const y = CV.floorY + h;
-      const r = 8 + rnd(h, 83 + sg) * 3;
-      b.add(U.dode, T(x, y, faceZ(h) - 1, r * 0.9, r, 5, x + h), C.rockDark);
-    }
-  }
-  for (let x = -36; x <= 36; x += 12) {
-    const h = CV.mouthH + 4 + rnd(x, 85) * 3;
-    const r = 8 + rnd(x, 86) * 3;
-    b.add(U.dode, T(CV.x + x, CV.floorY + h, faceZ(h) - 1, r, r * 0.8, 5, x), C.rockDark);
-  }
-
-  // ── The set ──
-  // The lantern: a post to the right of the mouth as the a3 stop sees it
-  // (bearing ~214 from CAVE_VIEW, 16 in from the wall), its lamp toward the hall.
-  const lx = -137;
-  const lz = 1266;
-  const fy = CV.floorY;
-  b.add(U.box, T(lx, fy + 11, lz, 1.5, 22, 1.5), C.woodDark);
-  b.add(U.box, T(lx + 2.6, fy + 21.5, lz, 6.4, 0.9, 0.9), C.woodDark);
-  b.add(U.box, T(lx + 5, fy + 18.6, lz, 2.8, 3.8, 2.8), C.woodDark, 0);
-  b.add(U.cone4, T(lx + 5, fy + 21.2, lz, 2.4, 1.4, 2.4, 45 * DEG), C.roof, 0);
-  // Stones and a crate at the post's foot.
-  b.add(U.dode, T(lx - 7, fy + 2.2, lz + 6, 5, 3.6, 5, 1), C.rockDark);
-  b.add(U.box, T(lx + 4, fy + 2.5, lz + 7, 5, 5, 5, 0.4), C.woodPale);
-  // v6: the mine's rails and cart are gone; the hidden camp's crates sit clear
-  // of the side passage's entry (the hall's east side).
-  b.add(U.box, T(-44, fy + 3, 1226, 6, 6, 6, 0.3), C.woodPale);
-  b.add(U.box, T(-37, fy + 2.4, 1236, 4.8, 4.8, 4.8, 1.1), C.wood);
-  b.add(U.box, T(-46, fy + 7.4, 1227, 4, 3, 4, 0.7), C.wood);
-  // Fallen blocks round the hall's west and north, clear of the camera's line.
-  for (let k = 0; k < 9; k++) {
-    const th = Math.PI * (0.62 + k * 0.105);
-    const r = 0.8 + rnd(k, 87) * 0.1;
-    const x = CV.hallX + CV.rx * r * Math.cos(th);
-    const z = CV.hallZ + CV.rz * r * Math.sin(th);
-    const s = 4 + rnd(k, 88) * 6;
-    b.add(U.dode, T(x, fy + s * 0.35, z, s, s * 0.7, s, k), C.rockDark);
-  }
-  // Stalactites off the dome, well above the camera (it rides at 86-96).
-  for (let k = 0; k < 14; k++) {
-    const th = rnd(k, 89) * Math.PI * 2;
-    const r = 0.55 + rnd(k, 90) * 0.3;
-    const x = CV.hallX + CV.rx * r * Math.cos(th);
-    const z = CV.hallZ + CV.rz * r * Math.sin(th);
-    const yTop = roofAt(r) - 2;
-    const len = 6 + rnd(k, 91) * 9;
-    if (yTop - len < CV.floorY + 46 || ellR(x, z) > 0.9) continue;
-    b.add(U.cone6, T(x, yTop - len / 2, z, 1.8 + rnd(k, 92) * 1.6, len, 1.8 + rnd(k, 92) * 1.6, th, Math.PI), C.rock, 0.1);
-  }
-}
-
-/**
- * The tunnel: an arch swept along TUNNEL, from inside the hall to 2 inside
- * the shaft; timber sets (two posts and a cap) every ~12, rails and sleepers,
- * and six torches on alternate walls, the last one lighting the lift's foot.
- */
-function buildTunnel(m: MineParts): void {
-  const b = m.tunnel;
-  const pts = TUNNEL;
-  const segLen: number[] = [];
-  let L = 0;
-  for (let i = 0; i < pts.length - 1; i++) {
-    const l = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][2] - pts[i][2]);
-    segLen.push(l);
-    L += l;
-  }
-  const END = L;
-  /** Floor centre, direction and right vector at arc length a (beyond the ends: straight on). */
-  const at = (a: number) => {
-    let i = 0;
-    let acc = 0;
-    while (i < segLen.length - 1 && a > acc + segLen[i]) acc += segLen[i++];
-    const p = pts[i];
-    const q = pts[i + 1];
-    const u = (a - acc) / segLen[i];
-    const dx = (q[0] - p[0]) / segLen[i];
-    const dz = (q[2] - p[2]) / segLen[i];
-    let ddx = dx;
-    let ddz = dz;
-    // Near a vertex, lean the rings toward the mean direction (mitred joints).
-    if (u > 0.9 && i < segLen.length - 1) {
-      const r = pts[i + 2];
-      const l2 = segLen[i + 1];
-      const w = (u - 0.9) / 0.2;
-      ddx = dx + ((r[0] - q[0]) / l2 - dx) * w;
-      ddz = dz + ((r[2] - q[2]) / l2 - dz) * w;
-    } else if (u < 0.1 && i > 0) {
-      const o = pts[i - 1];
-      const l0 = segLen[i - 1];
-      const w = (0.1 - u) / 0.2;
-      ddx = dx + ((p[0] - o[0]) / l0 - dx) * w;
-      ddz = dz + ((p[2] - o[2]) / l0 - dz) * w;
-    }
-    const dl = Math.hypot(ddx, ddz);
-    ddx /= dl;
-    ddz /= dl;
-    return { x: p[0] + (q[0] - p[0]) * u, y: p[1] + (q[1] - p[1]) * u + FLOOR_LIFT, z: p[2] + (q[2] - p[2]) * u, dx: ddx, dz: ddz, rx: -ddz, rz: ddx };
-  };
-  const loop = archLoop(TUNNEL_ARCH);
-  const CV = CAVE;
-  const inHallBy = (x: number, z: number) => (1 - Math.hypot((x - CV.hallX) / CV.rx, (z - CV.hallZ) / CV.rz)) * Math.min(CV.rx, CV.rz);
-  // Ring positions along the tunnel: the first starts 3 inside the hall, per vertex.
-  const arcs: number[] = [0];
-  for (let a = 12; a < END - 6; a += 12) arcs.push(a);
-  arcs.push(END);
-  const rings: V3[][] = arcs.map((a, ri) => {
-    const f = at(a);
-    return loop.map(([s, h]) => {
-      let x = f.x + f.rx * s;
-      let z = f.z + f.rz * s;
-      let y = f.y + h;
-      if (ri === 0) {
-        // Walk back along the axis until the point is 3 inside the hall.
-        let t = 0;
-        while (inHallBy(x - f.dx * t, z - f.dz * t) < 3 && t < 60) t += 0.5;
-        x -= f.dx * t;
-        z -= f.dz * t;
-      } else if (ri > 1 && ri < arcs.length - 2 && h > 1) {
-        const n = vnoise(x * 0.09, y * 0.09, z * 0.09) * 1.5;
-        const cx = f.x - x;
-        const cy = f.y + 12 - y;
-        const cz = f.z - z;
-        const dl = Math.hypot(cx, cy, cz) || 1;
-        x += (cx / dl) * n;
-        y += (cy / dl) * n;
-        z += (cz / dl) * n;
-      }
-      return [x, y, z] as V3;
-    });
-  });
-  for (let r = 0; r < rings.length - 1; r++) {
-    const f = at((arcs[r] + arcs[r + 1]) / 2);
-    const ins: V3 = [f.x, f.y + 13, f.z];
-    for (let k = 0; k < loop.length; k++) {
-      const k2 = (k + 1) % loop.length;
-      const a = rings[r][k];
-      const floor = loop[k][1] === 0 && loop[k2][1] === 0;
-      const col = floor ? rockAt(a[0], a[1], a[2], [0.27, 0.25, 0.23], 1, 0.04) : rockAt(a[0], a[1], a[2], [0.36, 0.33, 0.3]);
-      quadIn(b, a, rings[r][k2], rings[r + 1][k2], rings[r + 1][k], col, ins);
-    }
-  }
-  // Timber sets every 12, clear of both ends.
-  for (let a = 18; a < L - 22; a += 12) {
-    const f = at(a);
-    for (const s of [-10.3, 10.3]) b.beam(f.x + f.rx * s, f.y, f.z + f.rz * s, f.x + f.rx * s, f.y + 18.4, f.z + f.rz * s, 1.5, 1.5, C.wood);
-    b.beam(f.x - f.rx * 11.2, f.y + 19, f.z - f.rz * 11.2, f.x + f.rx * 11.2, f.y + 19, f.z + f.rz * 11.2, 1.6, 1.7, C.woodDark);
-  }
-  // v6: no rails. Two torches, alternate walls (the passage is ~90 long and
-  // the daylight at its far end does the rest).
-  const TORCH_AT = [22, L * 0.55];
-  TORCH_AT.forEach((a, k) => {
-    const f = at(a);
-    const sg = k % 2 ? -1 : 1;
-    torch(m, b, f.x + f.rx * sg * 11.6, f.y + 15, f.z + f.rz * sg * 11.6, -f.rx * sg, -f.rz * sg);
-  });
-}
-
-/**
- * v6: the side passage's opening on the cliff face, from outside (build
- * frame): rock blocks round the arch over the terrain cut's jagged edge, as
- * round the mouth.
- */
-function buildExitFrame(m: MineParts): void {
-  const b = m.tunnel;
-  const e = TUNNEL[TUNNEL.length - 1];
-  const q = TUNNEL[TUNNEL.length - 2];
-  const l = Math.hypot(e[0] - q[0], e[2] - q[2]);
-  const dx = (e[0] - q[0]) / l;
-  const dz = (e[2] - q[2]) / l;
-  // The face: a few units back from the passage's end.
-  const fx = e[0] - dx * 7;
-  const fz = e[2] - dz * 7;
-  const rx = -dz;
-  const rz = dx;
-  for (let h = 4; h <= 30; h += 8.5) {
-    for (const sg of [-1, 1]) {
-      const r = 7 + rnd(h, 71 + sg) * 3;
-      const o = TUNNEL_HALF_W + 4 + rnd(h, 73 + sg) * 2;
-      b.add(U.dode, T(fx + rx * o * sg, e[1] + h, fz + rz * o * sg, r * 0.9, r, 5, h), C.rockDark);
-    }
-  }
-  for (let s2 = -12; s2 <= 12; s2 += 8) {
-    const r = 7 + rnd(s2, 75) * 3;
-    b.add(U.dode, T(fx + rx * s2, e[1] + TUNNEL_H + 3 + rnd(s2, 76) * 2, fz + rz * s2, r, r * 0.8, 5, s2), C.rockDark);
-  }
-}
-
-/** a3: the cave's shells (the hall and the side passage), built in the cave's build frame. */
-function buildCaveShells(m: MineParts): void {
-  buildCave(m);
-  buildTunnel(m);
-  buildExitFrame(m);
-}
-
 /**
  * v6, a4: a grey stand-in Trail Hut (LM_TrailHut) at real scale on the spur,
  * its door and bench toward the falls (TRAIL_HUT.facing). dress-gorge.ts
@@ -1076,7 +567,7 @@ interface Anim {
   flame?: { x: number; y: number; z: number };
   boat?: { x: number; y: number; z: number; bearing: number };
   lookoutLamp?: { x: number; y: number; z: number };
-  /** The mine's headframe lamp (lit once place 4 is done). */
+  /** The Trail Hut's lamp by its door (lit once place 4 is done). */
   headLamp?: { x: number; y: number; z: number };
   airships?: { x: number; y: number; z: number; heading: number; kind: "yours" | "loop" }[];
 }
@@ -1110,11 +601,6 @@ export function install(ctx: BlocksCtx): BlocksModule {
   };
 
   const anim: Anim = {};
-  const TUNNEL_O = { x: 16, y: 70, z: 1275 };
-  const mine: MineParts = {
-    cave: new Builder({ x: CAVE.hallX, y: CAVE.floorY, z: CAVE.hallZ }),
-    tunnel: new Builder(TUNNEL_O),
-  };
   const lmGroups: THREE.Group[] = [];
   const perPlace: Record<string, number> = {};
   for (const p of PLACES) {
@@ -1130,7 +616,6 @@ export function install(ctx: BlocksCtx): BlocksModule {
         break;
       case "a3":
         buildFallsSet(p, parts);
-        buildCaveShells(mine);
         break;
       case "a4":
         buildTrailHut(p, parts, anim);
@@ -1166,24 +651,6 @@ export function install(ctx: BlocksCtx): BlocksModule {
   perPlace.meadow = Math.round(meadowB.tris);
 
   // v6 (C1): the Upper Falls' grey stand-in is gone; water.ts draws the real cascade.
-
-  // ── The cave: its shells in their own zone, mirrored into the world ──
-  const mineZone = new THREE.Group();
-  mineZone.name = "Zone_mine";
-  mineZone.matrixAutoUpdate = false;
-  mineZone.matrix.copy(caveMirrorMatrix());
-  root.add(mineZone);
-  const mineMesh = (b: Builder, o: { x: number; y: number; z: number }, mat: THREE.Material, name: string) => {
-    const mesh = addMesh(mineZone, b.build(), mat, name);
-    mesh.position.set(o.x, o.y, o.z);
-    return mesh;
-  };
-  // Source shells for dress-underground.ts (it hides them and draws its own lit copies).
-  mineMesh(mine.cave, { x: CAVE.hallX, y: CAVE.floorY, z: CAVE.hallZ }, solid, "Mine_Cave");
-  mineMesh(mine.tunnel, TUNNEL_O, solid, "Mine_Tunnel");
-  perPlace.mine = Math.round(mine.cave.tris + mine.tunnel.tris);
-  /** Where the cave is worth drawing from (world): the gorge round the falls. */
-  const MINE_BOX = { x0: -700, x1: 900, z0: 1200, z1: 2300, y1: 950 };
 
   // ── The falls' curtain: water.ts's, moved into the Falls' landmark ──
   // water.ts installs before this module and leaves the curtain under the
@@ -1591,14 +1058,11 @@ export function install(ctx: BlocksCtx): BlocksModule {
     const meadow = camPos.z < 1000 || (camPos.z < 1400 && camPos.y > 560);
     // The Gate isle: once the camera is past the head of the rope bridge.
     const harbour = camPos.z < -2100;
-    // The mine: from the gorge (its mouth is behind the curtain) to the top of the shaft.
-    const mineOn = camPos.x > MINE_BOX.x0 && camPos.x < MINE_BOX.x1 && camPos.z > MINE_BOX.z0 && camPos.z < MINE_BOX.z1 && camPos.y < MINE_BOX.y1;
-    if (sky !== skyZone.visible || south !== southZone.visible || meadow !== meadowZone.visible || harbour !== harbourZone.visible || mineOn !== mineZone.visible) {
+    if (sky !== skyZone.visible || south !== southZone.visible || meadow !== meadowZone.visible || harbour !== harbourZone.visible) {
       skyZone.visible = sky;
       southZone.visible = south;
       meadowZone.visible = meadow;
       harbourZone.visible = harbour;
-      mineZone.visible = mineOn;
       changed = true;
     }
 

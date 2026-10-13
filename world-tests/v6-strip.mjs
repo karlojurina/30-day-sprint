@@ -87,7 +87,7 @@ const STRIP_FRAMES = [
   [24, "over the pool's east shore, the log ahead", "a3+3"],
   [25.5, "crossing the river on the log", "a3+4.5"],
   [27.5, "the talus fan, the trail and its lanterns ahead", "crossing+1.5"],
-  [29, "up the north wall, under the bench's cliff", "crossing+3"],
+  [29.5, "on the ladder up the north wall (decision 68), half way", "crossing+3.5"],
   [31.5, "on the bench, the Trail Hut ahead", "wall+0.5"],
   [34.5, "the turn at the bench's edge, out over the gorge", "wall+3.5"],
   [37, "a4 the Trail Hut", "stop:a4"],

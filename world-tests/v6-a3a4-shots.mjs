@@ -8,6 +8,15 @@
  *                                                           position the sets in <dir>/F, <dir>/W and <dir>/fly
  *                                                           one above the other -> <dir>/compare.png
  *                                                           (dir defaults to shots/v6/a3a4-trail)
+ *   node world-tests/v6-a3a4-shots.mjs ladder before|after  the rise up the north wall (decision 68, the ladder):
+ *                                                           8 frames by route key from the fan's top to the "wall"
+ *                                                           mark on the bench's west end (r0..r7), the a3 and a4
+ *                                                           stops (a3, a4) and, for "after", three views of the
+ *                                                           ladder from off the route (i0..i2) -> shots/v6/ladder/
+ *                                                           before|after/ (LADDER_DIR overrides shots/v6/ladder).
+ *                                                           At another size (W, H) it writes the rise only, into
+ *                                                           before|after/<W>/.
+ *   node world-tests/v6-a3a4-shots.mjs ladder pairs         before | after for the 8 rise frames -> shots/v6/ladder/pairs.png
  *
  * The walk along the trail (decision 67, 2026-10-13) was rendered with N=14
  * (16 frames, both stops included) into shots/v6/a3a4-trail/F (facing forward,
@@ -46,6 +55,39 @@ const browser = await puppeteer.launch({
   args: ["--use-angle=metal", "--enable-gpu", "--ignore-gpu-blocklist", "--no-sandbox", "--hide-scrollbars"],
   protocolTimeout: 300000,
 });
+const LADDER = process.argv[2] === "ladder" ? process.argv[3] : null;
+const LADDER_DIR = path.resolve(process.env.LADDER_DIR || path.join(HERE, "shots/v6/ladder"));
+/** The ladder's three inspection views, off the route (x, y, z, bearing, pitch down, lens). */
+const LADDER_VIEWS = [
+  { name: "i0", label: "from the gorge floor, looking up it", x: 300, y: 82, z: 1330, bearing: 35, pitch: -32, fov: 62 },
+  { name: "i1", label: "from across the gorge, the whole wall", x: 330, y: 330, z: 1640, bearing: 0, pitch: 12, fov: 50 },
+  { name: "i2", label: "from over the bench's lip, looking down it", x: 414, y: 328, z: 1248, bearing: 214, pitch: 62, fov: 70 },
+];
+if (LADDER === "pairs") {
+  // The rise before the ladder and after it, side by side, from the frames on disk.
+  const sets = ["before", "after"].map((d) => ({ d, ...JSON.parse(fs.readFileSync(path.join(LADDER_DIR, d, "frames.json"), "utf8")) }));
+  const rise = sets.map((q) => q.frames.filter((f) => /^r\d/.test(f.name)));
+  const cellW = 760;
+  const cellH = Math.round((cellW * sets[0].h) / sets[0].w);
+  const png = (d, name) => `data:image/png;base64,${fs.readFileSync(path.join(LADDER_DIR, d, name + ".png")).toString("base64")}`;
+  try {
+    let html = `<html><body style="margin:0;background:#15171a;font:12px/1.35 -apple-system,Helvetica,sans-serif;color:#e8e4dc"><div style="padding:8px;font-weight:600;font-size:15px">The rise up the north wall, ${sets[0].w}x${sets[0].h}: before the ladder (left) and after (right), the same eight route keys</div><div style="display:grid;grid-template-columns:repeat(2,${cellW}px);gap:6px;padding:6px">`;
+    for (let i = 0; i < rise[0].length; i++)
+      for (let k = 0; k < 2; k++) {
+        const f = rise[k][i];
+        html += `<div><img src="${png(sets[k].d, f.name)}" style="width:${cellW}px;height:${cellH}px;display:block"><div style="padding:2px 2px 6px"><b>${sets[k].d} ${f.name}</b> · key ${f.key} · ${f.vh} vh · cam ${f.cam.join(", ")} · bearing ${f.bearing} · pitch ${f.pitch}</div></div>`;
+      }
+    html += "</div></body></html>";
+    const pg = await browser.newPage();
+    await pg.setViewport({ width: 2 * (cellW + 6) + 6, height: 900 });
+    await pg.setContent(html, { waitUntil: "load" });
+    await pg.screenshot({ path: path.join(LADDER_DIR, "pairs.png"), fullPage: true });
+    console.log(`wrote ${path.join(LADDER_DIR, "pairs.png")}: ${rise[0].length} pairs`);
+  } finally {
+    await browser.close();
+  }
+  process.exit(0);
+}
 if (process.argv[2] === "compare") {
   // Frames already on disk, one set above the other for each position.
   const DIR = path.resolve(process.argv[3] || path.join(HERE, "shots/v6/a3a4-trail"));
@@ -122,17 +164,46 @@ try {
   });
   console.log(`a3 at ${(route.d3 * route.total).toFixed(1)} vh, a4 at ${(route.d4 * route.total).toFixed(1)} vh (the stretch ${route.budget} vh); ${route.keys} keys, a3 key ${route.a3Key}, a4 key ${route.a4Key}; ${W}x${H}`);
 
+  // The ladder (decision 68): the rise by route key, the two stops, and the views from off the route.
+  const ladderPlan = LADDER
+    ? await page.evaluate(() => {
+        const sc = window.__worldV6Debug;
+        const r = sc.debugRail();
+        const L = sc.ctx.layout;
+        const n = L.TRAIL.length;
+        const dAt = (k) => {
+          let lo = 0;
+          let hi = r.length;
+          for (let i = 0; i < 60; i++) {
+            const m = (lo + hi) / 2;
+            if (r.tAtS(m) < k / (n - 1)) lo = m;
+            else hi = m;
+          }
+          return r.depthOfS((lo + hi) / 2);
+        };
+        const wall = L.ROUTE_MARKS.wall;
+        const d = sc.stopDepths();
+        const out = [];
+        for (let i = 0; i < 8; i++) out.push({ name: `r${i}`, d: dAt(wall - 3 + (3 * i) / 7) });
+        out.push({ name: "a3", d: d[2] }, { name: "a4", d: d[3] });
+        return { out, dRise: dAt(wall - 1.5) };
+      })
+    : null;
+  const big = W === 1691 && H === 1278;
+  const OUT_L = LADDER ? path.join(LADDER_DIR, LADDER, big ? "" : String(W)) : OUT;
+  if (LADDER) fs.mkdirSync(OUT_L, { recursive: true });
+  const plan = LADDER ? ladderPlan.out.filter((q) => big || /^r/.test(q.name)) : Array.from({ length: N + 2 }, (_, i) => ({ name: `f${String(i).padStart(2, "0")}`, d: route.d3 + ((route.d4 - route.d3) * i) / (N + 1) }));
   const rows = [];
-  for (let i = 0; i <= N + 1; i++) {
-    const d = route.d3 + ((route.d4 - route.d3) * i) / (N + 1);
+  for (let i = 0; i < plan.length; i++) {
+    const d = plan[i].d;
     await page.evaluate((d) => {
       const sc = window.__worldV6Debug;
       window.scrollTo(0, sc.scrollYForDepth(d));
       sc.seedDepth(d);
     }, d);
     await frames(4);
-    const name = `f${String(i).padStart(2, "0")}`;
-    await page.screenshot({ path: path.join(OUT, name + ".png") });
+    const name = plan[i].name;
+    await page.screenshot({ path: path.join(OUT_L, name + ".png") });
     const info = await page.evaluate(
       (d, aspect) => {
         const sc = window.__worldV6Debug;
@@ -183,28 +254,48 @@ try {
     rows.push({ name, ...info });
     console.log(`${name}  ${String(info.vh).padStart(6)} vh  s ${String(info.s).padStart(5)}  key ${String(info.key).padStart(5)}  ${info.kind.padEnd(5)} cam ${info.cam.join(", ").padEnd(16)} bearing ${String(info.bearing).padStart(5)}  pitch ${String(info.pitch).padStart(5)}  lens ${info.fov}  falls mid ${info.falls.mid ? info.falls.mid.join(" / ") : "behind"}`);
   }
-  fs.writeFileSync(path.join(OUT, "frames.json"), JSON.stringify({ w: W, h: H, ...route, frames: rows }, null, 1));
+  if (LADDER === "after" && big) {
+    // The ladder from off the route, in the light of the middle of the rise.
+    for (const v of LADDER_VIEWS) {
+      await page.evaluate(
+        (d, v) => {
+          const sc = window.__worldV6Debug;
+          window.scrollTo(0, sc.scrollYForDepth(d));
+          sc.seedDepth(d);
+          sc.debugPose(v);
+        },
+        ladderPlan.dRise,
+        v,
+      );
+      await sleep(900);
+      await page.screenshot({ path: path.join(OUT_L, v.name + ".png") });
+      rows.push({ name: v.name, label: v.label, vh: +(ladderPlan.dRise * route.total).toFixed(1), s: 0, key: 0, kind: "off the route", cam: [v.x, v.y, v.z], bearing: v.bearing, pitch: v.pitch, fov: v.fov, falls: {}, triangles: 0, calls: 0 });
+      console.log(`${v.name}  ${v.label}: cam ${v.x}, ${v.y}, ${v.z}  bearing ${v.bearing}  pitch ${v.pitch}  lens ${v.fov}`);
+    }
+    await page.evaluate(() => window.__worldV6Debug.debugPose(null));
+  }
+  fs.writeFileSync(path.join(OUT_L, "frames.json"), JSON.stringify({ w: W, h: H, ...route, frames: rows }, null, 1));
 
   // The contact sheet, in order.
   const cols = 4;
   const cellW = 560;
   const cellH = Math.round((cellW * H) / W);
   const html = `<html><body style="margin:0;background:#15171a;font:12px/1.35 -apple-system,Helvetica,sans-serif;color:#e8e4dc">
-<div style="padding:8px 8px 0;font-weight:600;font-size:14px">a3 (Video Ads I) to a4 (Video Ads II), ${W}x${H}, ${rows.length} frames evenly spaced in scroll (${rows[0].vh} to ${rows[rows.length - 1].vh} vh)</div>
+<div style="padding:8px 8px 0;font-weight:600;font-size:14px">${LADDER ? `The rise up the north wall, ${LADDER} the ladder, ${W}x${H}: r0..r7 by route key from the fan's top to the bench's west end, then the two stops${LADDER === "after" && big ? " and the ladder from off the route" : ""}` : `a3 (Video Ads I) to a4 (Video Ads II), ${W}x${H}, ${rows.length} frames evenly spaced in scroll (${rows[0].vh} to ${rows[rows.length - 1].vh} vh)`}</div>
 <div style="display:grid;grid-template-columns:repeat(${cols},${cellW}px);gap:6px;padding:6px">
 ${rows
   .map(
-    (r, i) => `<div><img src="data:image/png;base64,${fs.readFileSync(path.join(OUT, r.name + ".png")).toString("base64")}" style="width:${cellW}px;height:${cellH}px;display:block">
-<div style="padding:3px 2px 2px"><b>${r.name}${i === 0 ? " · the a3 stop" : i === rows.length - 1 ? " · the a4 stop" : ""}</b> · ${r.vh} vh · ${r.kind}<br>cam ${r.cam.join(", ")} · bearing ${r.bearing} · pitch ${r.pitch} · lens ${r.fov}</div></div>`,
+    (r, i) => `<div><img src="data:image/png;base64,${fs.readFileSync(path.join(OUT_L, r.name + ".png")).toString("base64")}" style="width:${cellW}px;height:${cellH}px;display:block">
+<div style="padding:3px 2px 2px"><b>${r.name}${LADDER ? (r.label ? " · " + r.label : r.name === "a3" ? " · the a3 stop" : r.name === "a4" ? " · the a4 stop" : ` · key ${r.key}`) : i === 0 ? " · the a3 stop" : i === rows.length - 1 ? " · the a4 stop" : ""}</b> · ${r.vh} vh · ${r.kind}<br>cam ${r.cam.join(", ")} · bearing ${r.bearing} · pitch ${r.pitch} · lens ${r.fov}</div></div>`,
   )
   .join("")}
 </div></body></html>`;
   const p2 = await browser.newPage();
   await p2.setViewport({ width: cols * (cellW + 6) + 6, height: Math.ceil(rows.length / cols) * (cellH + 46) + 40 });
   await p2.setContent(html, { waitUntil: "load" });
-  await p2.screenshot({ path: path.join(OUT, "sheet.png"), fullPage: true });
+  await p2.screenshot({ path: path.join(OUT_L, "sheet.png"), fullPage: true });
   await p2.close();
-  console.log(`wrote ${rows.length} frames, frames.json and sheet.png to ${OUT}`);
+  console.log(`wrote ${rows.length} frames, frames.json and sheet.png to ${OUT_L}`);
   if (errors.length) console.log(`page errors: ${errors.length}, first: ${errors[0]}`);
 } finally {
   await browser.close();

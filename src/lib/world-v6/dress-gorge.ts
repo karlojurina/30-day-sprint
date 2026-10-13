@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { PATH, PLACES, TRAIL_HUT, WORLD } from "./layout";
+import { LADDER, PATH, PLACES, TRAIL_HUT, WORLD, ladderSections } from "./layout";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
 import { addFootprint, addPathLine } from "./footprints";
 import { terrainHeight } from "./terrain";
@@ -27,7 +27,9 @@ import { trailDist } from "./rocks";
  *                the cairn at the gully's top; the fallen spruce over the
  *                river below the pool (lit worn top, broken stubs, root
  *                plate); a blazed post at the lip; a rockfall at the cliff's
- *                foot east of the falls and ferns on the bank below it.
+ *                foot east of the falls and ferns on the bank below it; the
+ *                ladder up the bench's south-west face (decision 68: three
+ *                sections with two plank landings, layout LADDER).
  *   Gorge:glow   the hut's window panes (lamp glow, levelled by light.ts).
  *
  * Every solid piece registers a footprint (footprints.ts). Stock Lambert and
@@ -532,6 +534,102 @@ function logBridge(k: Kit, a: V3, b: V3): void {
   }
 }
 
+// ── The ladder up the north wall (decision 68) ──────────────────────────────
+
+/**
+ * The ladder: weathered rails, pale split rungs (the wall's foot is in shade
+ * at this hour and the rungs are what has to read from the fan), and a plank
+ * landing on two braces with a guard rail where one section hands over to the
+ * next. Sized to be seen from 40 to 250 away, not to scale: rails 1.5 thick
+ * and rungs every 6.7 where a person is 14 tall. No footprints: one would
+ * deal the grass of the whole band again (cover.ts), and nothing grows on the
+ * face it stands on.
+ */
+function ladder(k: Kit): number {
+  const t0 = k.tris;
+  const m = new THREE.Matrix4();
+  const X = new THREE.Vector3();
+  const Y = new THREE.Vector3();
+  const Z = new THREE.Vector3();
+  const c = new THREE.Vector3();
+  /** A box with its own axes: x along `ax` (sx long), y along `ay`, z along `az`, centred on `at`. */
+  const obox = (at: THREE.Vector3, ax: THREE.Vector3, ay: THREE.Vector3, az: THREE.Vector3, sx: number, sy: number, sz: number, col: RGB, vary = 0.08) =>
+    k.add("box", m.makeBasis(X.copy(ax).multiplyScalar(sx), Y.copy(ay).multiplyScalar(sy), Z.copy(az).multiplyScalar(sz)).setPosition(at), col, vary);
+  const secs = ladderSections(G);
+  const hw = LADDER.width / 2;
+  const up = new THREE.Vector3(0, 1, 0);
+  secs.forEach((sec, i) => {
+    const E = new THREE.Vector3(sec.east[0], 0, sec.east[1]);
+    const A = new THREE.Vector3(...sec.a);
+    const B = new THREE.Vector3(...sec.b);
+    const d = B.clone().sub(A);
+    const len = d.length();
+    d.divideScalar(len);
+    const o = new THREE.Vector3().crossVectors(E, d).normalize(); // out of the face, square to the ladder
+    // Rails: sunk 1.5 at the foot, standing 6.5 over a landing and 9 over the bench's lip (the hand holds).
+    const over = i === secs.length - 1 ? 9 : 6.5;
+    const sunk = i === 0 ? 2 : 0.5;
+    for (const side of [-1, 1]) {
+      c.copy(A).addScaledVector(d, (len + over - sunk) / 2).addScaledVector(E, side * hw);
+      obox(c.clone(), E, d, o, 1.5, len + over + sunk, 1.7, i % 2 ? P.worn : P.barkLit, 0.1);
+    }
+    // Rungs: split wood nailed across the front of the rails, a little out of
+    // true and a hand longer than the ladder is wide. Two faces each (upper
+    // and lower; the back is against the rails), pale so they read in shade.
+    const n = Math.floor((len - 4) / 6.7);
+    for (let r = 0; r <= n; r++) {
+      const t = 4 + r * 6.7;
+      const kk = 0.9 + 0.2 * rnd(i * 40 + r, 91);
+      const col: RGB = [P.split[0] * kk, P.split[1] * kk, P.split[2] * kk];
+      const tilt = (rnd(i * 40 + r, 92) - 0.5) * 0.9;
+      const cl = A.clone().addScaledVector(d, t - tilt).addScaledVector(E, -hw - 1.5 - rnd(i * 40 + r, 93) * 0.7);
+      const cr = A.clone().addScaledVector(d, t + tilt).addScaledVector(E, hw + 1.5 + rnd(i * 40 + r, 94) * 0.7);
+      const v = (p: THREE.Vector3, du: number, dout: number): V3 => [p.x + d.x * du + o.x * dout, p.y + d.y * du + o.y * dout, p.z + d.z * du + o.z * dout];
+      const lt = v(cl, 0.75, 0.2);
+      const rt = v(cr, 0.75, 0.2);
+      const la = v(cl, 0, 1.25);
+      const ra = v(cr, 0, 1.25);
+      const lb = v(cl, -0.75, 0.2);
+      const rb = v(cr, -0.75, 0.2);
+      k.tri(lt, la, ra, col);
+      k.tri(lt, ra, rt, col);
+      k.tri(la, lb, rb, col);
+      k.tri(la, rb, ra, col);
+    }
+    // The landing where this section hands over to the next: two planks on two braces, a guard rail on the open side.
+    if (i + 1 < secs.length) {
+      const nx = secs[i + 1];
+      const y = sec.b[1];
+      const O = new THREE.Vector3(sec.out[0], 0, sec.out[1]);
+      // From the outer rail of this section to the outer rail of the next, hard against the rock (1.6 into it).
+      const side = LADDER.step < 0 ? -1 : 1;
+      const w0 = new THREE.Vector3(sec.b[0], y, sec.b[2]).addScaledVector(E, -side * (hw + 1.6)).addScaledVector(O, -3.3);
+      const w1 = new THREE.Vector3(nx.a[0], y, nx.a[2]).addScaledVector(E, side * (hw + 1.6)).addScaledVector(O, -3.3);
+      const along = w1.clone().sub(w0);
+      const span = along.length();
+      along.divideScalar(span);
+      const outward = new THREE.Vector3().crossVectors(along, up).normalize();
+      if (outward.dot(O) < 0) outward.negate();
+      const mid = w0.clone().add(w1).multiplyScalar(0.5);
+      const deep = 9.6;
+      for (const j of [0, 1]) {
+        c.copy(mid).addScaledVector(outward, deep * (0.25 + 0.5 * j)).addScaledVector(up, -0.5);
+        obox(c.clone(), along, up, outward, span, 0.9, deep / 2 - 0.35, j ? P.worn : P.plank, 0.1);
+      }
+      for (const f of [0.2, 0.8]) {
+        const top = w0.clone().addScaledVector(along, span * f).addScaledVector(outward, deep - 0.8).addScaledVector(up, -1);
+        const base = w0.clone().addScaledVector(along, span * f).addScaledVector(outward, 2.4).addScaledVector(up, -9);
+        k.beam([top.x, top.y, top.z], [base.x, base.y, base.z], 1.1, 1.1, P.post, "box", 0.15);
+      }
+      const g0 = w0.clone().addScaledVector(outward, deep - 0.7);
+      const g1 = w1.clone().addScaledVector(outward, deep - 0.7);
+      for (const g of [g0, g1]) obox(g.clone().addScaledVector(up, 2.6), along, up, outward, 1.1, 6.2, 1.1, P.post, 0.15);
+      obox(g0.clone().add(g1).multiplyScalar(0.5).addScaledVector(up, 5.2), along, up, outward, span + 1.2, 0.9, 0.9, P.rope, 0.06);
+    }
+  });
+  return k.tris - t0;
+}
+
 // ── Install ──────────────────────────────────────────────────────────────────
 
 export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
@@ -883,6 +981,10 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     }
     stats.ferns = n;
   }
+
+  // The ladder up the bench's south-west face (decision 68), in the set's own mesh: no draw call of its own.
+  stats.ladderTriangles = Math.round(ladder(kSet));
+  stats.ladderSections = LADDER.levels.length - 1;
 
   addMesh(root, kSet, wood, "Gorge:set", setO).renderOrder = -7;
   addMesh(root, kLeaf, leaf, "Gorge:ferns", setO);

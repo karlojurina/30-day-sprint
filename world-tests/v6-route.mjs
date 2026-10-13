@@ -527,16 +527,43 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
       between.length === 15 && between.every((k) => k === "trail") && TRAIL.length === 85,
       `${between.length} rows (${[...new Set(between)].join(", ")}), ${TRAIL.length} keys in all`,
     );
-    // 3. On the trail. The visible trail is PATH where surfaces.ts paints it
-    //    (both ends of a segment within 25 of the ground), from the pool's
-    //    shore to the traverse's first leg past the bench. The camera comes down onto it at the
-    //    shore and stays within 12 of it past the fan's top (x 200), 36 to 60
-    //    over the ground as far as the fan (x 150; from there it lifts for the
-    //    wall); leaves it up the wall (the two lower switchback legs hang off
-    //    the heightfield, unpainted); is back within 12 of it over the bench;
-    //    and stays within 27 to the stop, which stands 21 off it (it rounds the
-    //    boulder family at the wall's foot east of the hut by the bench's outer
-    //    edge). The rail with terrain follow has its own distances: its stops.
+    // 3. On the trail, then on the ladder (decision 68). The visible trail is
+    //    PATH where surfaces.ts paints it (both ends of a segment within 25 of
+    //    the ground), from the pool's shore to the traverse's first leg past
+    //    the bench. The camera comes down onto it at the shore and stays
+    //    within 12 of it past the fan's top (x 200), 36 to 65 over the ground
+    //    as far as the fan (x 150). The strip turns in to the wall's foot
+    //    there and stops; the wall behind it is stepped and tops out 150 short
+    //    of the bench. The camera WALKS ON along the gorge's floor, 50 to 80
+    //    over it (the height it has at the fan's top, rising to the first
+    //    landing's as it reaches the ladder), to the ladder on the bench's
+    //    south-west face (layout LADDER and ladderSections, built by
+    //    dress-gorge.ts), and goes UP THE LADDER: from the first landing's
+    //    height until it is over the bench it is within 45 of the ladder's
+    //    line (the ladder at the camera's own height; over its top, the
+    //    top). Then it is back within 12 of the strip on the
+    //    bench and within 27 to the stop, which stands 21 off it (it rounds
+    //    the boulder family at the wall's foot east of the hut by the bench's
+    //    outer edge). Until decision 68 this stretch was a rise through the
+    //    air, 321 units off the strip; the rule that allowed it is gone.
+    //    The rail with terrain follow has its own distances: its stops.
+    const ladder = L.ladderSections(terrainHeight);
+    /** Distance to the ladder's line (its sections end to end); a camera above its top is measured to the top. */
+    const ladderD = (x, y0, z) => {
+      const y = Math.min(y0, ladder[ladder.length - 1].b[1]);
+      let best = Infinity;
+      for (let i = 0; i < ladder.length; i++) {
+        const A = ladder[i].a;
+        const B = i + 1 < ladder.length ? ladder[i + 1].a : ladder[i].b;
+        for (const [p, q] of [[A, ladder[i].b], [ladder[i].b, B]]) {
+          const d = [q[0] - p[0], q[1] - p[1], q[2] - p[2]];
+          const L2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2] || 1;
+          const u = Math.min(1, Math.max(0, ((x - p[0]) * d[0] + (y - p[1]) * d[1] + (z - p[2]) * d[2]) / L2));
+          best = Math.min(best, Math.hypot(x - p[0] - d[0] * u, y - p[1] - d[1] * u, z - p[2] - d[2] * u));
+        }
+      }
+      return best;
+    };
     {
       const iShore = PATH.findIndex((q) => q.under) + 1;
       const iEnd = PATH.findIndex((q) => Math.abs(q.x - 900) < 1 && Math.abs(q.z - 1090) < 1); // the traverse's first leg: the a4 stop stands beside it
@@ -554,13 +581,17 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
         }
         return best;
       };
-      let phase = 0; // 0 coming down to the shore, 1 on the floor's strip, 2 up the wall, 3 on the bench
+      const landing = L.LADDER.levels[1];
+      let phase = 0; // 0 coming down to the shore, 1 on the floor's strip, 2 the floor walk to the ladder, 3 on the ladder, 4 on the bench
       let on = null;
       let left = null;
+      let foot = null;
+      let top = null;
       let back = null;
-      let wall = { v: 0 };
+      let rungs = { v: 0 };
       let bench = { v: 0 };
       const high = [Infinity, -Infinity];
+      const floor = [Infinity, -Infinity];
       const ga = railG.stopS[2];
       const gb = railG.stopS[3];
       for (let s = ga; s <= gb; s += 3) {
@@ -585,28 +616,88 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
           left = at;
         }
         if (phase === 2) {
-          if (!(g > 295 && d <= 12)) {
-            if (d > wall.v) wall = { v: r1(d), ...at };
+          if (y < landing) {
+            floor[0] = Math.min(floor[0], y - g);
+            floor[1] = Math.max(floor[1], y - g);
             continue;
           }
           phase = 3;
-          back = at;
+          foot = { ...at, ladder: r1(ladderD(x, y, z)) };
         }
-        if (phase === 3 && d > bench.v) bench = { v: r1(d), ...at };
+        if (phase === 3) {
+          if (g < 295) {
+            const dl = ladderD(x, y, z);
+            if (dl > rungs.v) rungs = { v: r1(dl), ...at };
+            continue;
+          }
+          phase = 4;
+          top = at;
+        }
+        if (phase === 4) {
+          if (back === null) {
+            if (d > 12) continue;
+            back = at;
+          }
+          if (d > bench.v) bench = { v: r1(d), ...at };
+        }
       }
-      report.a3a4Trail = { strip: strip.map(([a, b]) => [a.x, a.z, b.x, b.z]), on, left, back, wall, bench, high: high.map(Math.round) };
+      report.a3a4Trail = { strip: strip.map(([a, b]) => [a.x, a.z, b.x, b.z]), on, left, foot, top, back, rungs, bench, high: high.map(Math.round), floor: floor.map(Math.round) };
       check(
-        "a3 to a4: on the trail (within 12 of the painted strip from the pool's shore to past the fan's top, 36 to 60 over the ground as far as the fan; off it only up the wall, for less than 340 units; back on it over the bench and within 27 to the stop)",
-        phase === 3 && on.p[0] <= 20 && left.p[0] >= 200 && back.s - left.s < 340 && bench.v <= 27 && high[0] >= 36 && high[1] <= 60,
-        `on the strip ${JSON.stringify(on)}; leaves it ${JSON.stringify(left)}; furthest from it up the wall ${JSON.stringify(wall)}; back on it ${JSON.stringify(back)} (${back && left ? back.s - left.s : "?"} units off it); furthest from it on the bench ${JSON.stringify(bench)}; ${Math.round(high[0])} to ${Math.round(high[1])} over the ground from the shore to the fan`,
+        "a3 to a4: on the trail, then on the ladder (within 12 of the painted strip from the pool's shore to past the fan's top, 36 to 65 over the ground as far as the fan; then along the gorge's floor, 50 to 80 over it, to the ladder; within 45 of the ladder's line from its first landing to the bench; back on the strip there within 60 units and within 27 of it to the stop)",
+        phase === 4 && back !== null && on.p[0] <= 20 && left.p[0] >= 200 && floor[0] >= 50 && floor[1] <= 80 && foot.ladder <= 45 && rungs.v <= 45 && back.s - top.s <= 60 && bench.v <= 27 && high[0] >= 36 && high[1] <= 65,
+        `on the strip ${JSON.stringify(on)}; leaves it ${JSON.stringify(left)}; ${Math.round(floor[0])} to ${Math.round(floor[1])} over the floor to the ladder; at the first landing's height ${JSON.stringify(foot)}; furthest from the ladder's line on the way up ${JSON.stringify(rungs)}; over the bench ${JSON.stringify(top)}; back on the strip ${JSON.stringify(back)}; furthest from it on the bench ${JSON.stringify(bench)}; ${Math.round(high[0])} to ${Math.round(high[1])} over the ground from the shore to the fan`,
       );
+      // The ladder itself (dress-gorge.ts builds what ladderSections says): three
+      // sections of about 80, leaning 82 to 87 degrees on the face they climb,
+      // the foot on the gorge's floor, the top at the bench's lip, each stood
+      // 1.5 to 4.5 off the rock, and no boulder's footprint reaching its rails
+      // in plan (the nearest, the lip rock half way up at (382, 1252), ends
+      // 1.9 short of the first section; what shows of it stands 8 clear).
+      {
+        const [ux, uz] = [Math.sin((L.LADDER.bearing * Math.PI) / 180), -Math.cos((L.LADDER.bearing * Math.PI) / 180)];
+        const rows = ladder.map((q) => {
+          const run = Math.hypot(q.b[0] - q.a[0], q.b[2] - q.a[2]);
+          const rise = q.b[1] - q.a[1];
+          // How far the rock is behind each end, along the way into the face.
+          const behind = (p) => {
+            let t = 0;
+            while (t < 12 && terrainHeight(p[0] + ux * t, p[2] + uz * t) < p[1]) t += 0.1;
+            return +t.toFixed(1);
+          };
+          return { len: r1(Math.hypot(run, rise)), lean: r1((Math.atan2(rise, run) * 180) / Math.PI), from: q.a.map(Math.round), to: q.b.map(Math.round), off: [behind(q.a), behind(q.b)] };
+        });
+        const footG = terrainHeight(ladder[0].a[0], ladder[0].a[2]);
+        const last = ladder[ladder.length - 1].b;
+        const lipG = terrainHeight(last[0] + ux * 8, last[2] + uz * 8);
+        const FP = await import("../src/lib/world-v6/footprints.ts");
+        const R = await import("../src/lib/world-v6/rocks.ts");
+        FP.resetFootprints();
+        R.install({ root: new THREE.Group(), camera: new THREE.PerspectiveCamera() });
+        let rock = { v: Infinity };
+        for (const f of FP.all()) {
+          for (const q of ladder) {
+            const dx = q.b[0] - q.a[0];
+            const dz = q.b[2] - q.a[2];
+            const u = Math.min(1, Math.max(0, ((f.x - q.a[0]) * dx + (f.z - q.a[2]) * dz) / (dx * dx + dz * dz || 1)));
+            const gap = Math.hypot(f.x - q.a[0] - dx * u, f.z - q.a[2] - dz * u) - f.r - L.LADDER.width / 2;
+            if (gap < rock.v) rock = { v: r1(gap), at: [Math.round(f.x), Math.round(f.z)], r: r1(f.r) };
+          }
+        }
+        report.ladder = { rows, footG: r1(footG), lipG: r1(lipG), rock };
+        check(
+          "the ladder: three sections of 78 to 82, leaning 82 to 87 degrees, stood 1.5 to 4.5 off the rock at each end, the foot on the gorge's floor (60 to 62), the bench (299 to 301) behind the top, and no boulder's footprint reaching its rails (a gap of 1 or more)",
+          rows.length === 3 && rows.every((q) => q.len >= 78 && q.len <= 82 && q.lean >= 82 && q.lean <= 87 && q.off.every((o) => o >= 1.5 && o <= 4.5)) && footG >= 60 && footG <= 62 && lipG >= 299 && lipG <= 301 && rock.v >= 1,
+          `${JSON.stringify(rows)}; ground at the foot ${r1(footG)}, 8 behind the top ${r1(lipG)}; nearest boulder ${JSON.stringify(rock)}`,
+        );
+      }
     }
     // 4. Clearance, on the rail as the scene has it (terrain follow on): over
     //    the ground by TRAIL_CLEAR all the way (the dense check above covers
-    //    it; the figure is repeated here), and never nearer than 30 to ground
-    //    that stands higher than the camera (the wall under the bench, on the
-    //    way up: 40). This reads the heightfield only: the boulders, the hut,
-    //    the posts and the trees are judged on the rendered frames.
+    //    it; the figure is repeated here), and never nearer than 20 to ground
+    //    that stands higher than the camera (on the ladder the face is 24
+    //    away; it was 40 when the camera rose through the air, before decision
+    //    68). This reads the heightfield only: the boulders, the hut, the
+    //    posts, the trees and the ladder are judged on the rendered frames.
     {
       let over = { v: Infinity };
       let rock = { v: Infinity };
@@ -624,7 +715,7 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
         if (c < rock.v) rock = { v: c, ...at };
       }
       report.a3a4Clear = { over, rock };
-      check("a3 to a4: clear all the way (>= TRAIL_CLEAR - 1 over the ground, >= 30 from any ground higher than the camera)", over.v >= -1 && rock.v >= 30, `least over the ground ${JSON.stringify(over)}, nearest rock ${JSON.stringify(rock)}`);
+      check("a3 to a4: clear all the way (>= TRAIL_CLEAR - 1 over the ground, >= 20 from any ground higher than the camera)", over.v >= -1 && rock.v >= 20, `least over the ground ${JSON.stringify(over)}, nearest rock ${JSON.stringify(rock)}`);
     }
     // 5 and 6 judge the VIEW, and there are two views for this walk (decision
     //    67): Version F, facing forward, is in the layout; Version W, watching
@@ -697,28 +788,57 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
       );
     }
     if (version === "F") {
-      // 5F. The turns: three, and slow. In all under 410 degrees (left 135 down
-      //     over the pool and onto the log, right 80 over the fan and up the
-      //     wall, right 165 at the bench's end: the reveal; the rest is the two
-      //     stops' own settling). No step of 2 units turns more than 2.4
+      // 5F. The turns: three, and slow. In all under 420 degrees (left 135 down
+      //     over the pool and onto the log, right 35 over the fan, 12 back left
+      //     to face the ladder and 30 right coming off its top onto the bench
+      //     (decision 68; it was one right turn of 80 up the wall), right 165
+      //     at the bench's end: the reveal; the rest is the two stops' own
+      //     settling). No step of 2 units turns more than 2.4
       //     degrees (the reveal is nearly a turn on the spot, walked at a
       //     crawl), and 60 clear of the stops the view never turns faster than
       //     2.7 degrees per vh at the default pacing (it measures 2.6 in the
       //     reveal and 2.5 at the log and on the fan: the three turns are paced
       //     alike, which is what Q's paces on the rows are for).
-      check("a3 to a4 (F, facing forward): the turns are few and slow (under 410 degrees in all, no step of 2 units over 2.4 degrees, <= 2.7 degrees per vh 60 clear of the stops)", total < 410 && step.v <= 2.4 && fastest.v <= 2.7, `${r1(total)} degrees in all; largest step ${JSON.stringify(step)}; fastest ${JSON.stringify(fastest)}`);
+      check("a3 to a4 (F, facing forward): the turns are few and slow (under 420 degrees in all, no step of 2 units over 2.4 degrees, <= 2.7 degrees per vh 60 clear of the stops)", total < 420 && step.v <= 2.4 && fastest.v <= 2.7, `${r1(total)} degrees in all; largest step ${JSON.stringify(step)}; fastest ${JSON.stringify(fastest)}`);
       // 6F. Facing forward, then the reveal. From the pool's shore to the Trail
       //     Hut the view stays within 50 degrees of the way the camera travels
-      //     (it leads into each corner). The falls are behind it from the log
+      //     (it leads into each corner). On the ladder (decision 68) the camera
+      //     travels up, so there is no way ahead to face: wherever it climbs
+      //     steeper than 45 degrees the rule is that the ladder is in the
+      //     frame, the part of it level with the camera within the middle 90
+      //     percent of the frame's width. The falls are behind it from the log
       //     on: their middle is out of the frame until the turn at the bench's
       //     end brings it in, for good, 60 to 200 units before a4.
       const sShore = railSAt(L.ROUTE_MARKS.crossing - 1);
       const sHut = railSAt(L.ROUTE_MARKS.wall + 1);
       let off = { v: 0 };
+      let climbed = 0;
+      let ladderX = [Infinity, -Infinity];
+      const q2 = { position: new THREE.Vector3(), target: new THREE.Vector3() };
       for (let s = sShore; s <= sHut; s += 4) {
+        rail.sampleS(s, pose);
+        rail.sampleS(s + 2, q2);
+        const run = Math.hypot(q2.position.x - pose.position.x, q2.position.z - pose.position.z);
+        if (Math.abs(q2.position.y - pose.position.y) > run) {
+          // Climbing: where the ladder is in the frame, at the camera's own height.
+          climbed += 4;
+          const y = Math.min(ladder[ladder.length - 1].b[1], Math.max(ladder[0].a[1], pose.position.y));
+          const sec = ladder.find((q) => y <= q.b[1]) ?? ladder[ladder.length - 1];
+          const t = (y - sec.a[1]) / (sec.b[1] - sec.a[1]);
+          const v = proj(camOf(pose.position.clone(), pose.target.clone(), 1691 / 1278, rail.fovAtS(s)), sec.a[0] + (sec.b[0] - sec.a[0]) * t, y, sec.a[2] + (sec.b[2] - sec.a[2]) * t);
+          const x = v.z < 1 ? (v.x + 1) / 2 : -1;
+          ladderX = [Math.min(ladderX[0], x), Math.max(ladderX[1], x)];
+          continue;
+        }
         const d = Math.abs((((rail.bearingAtS(s) - rail.headingAtS(s)) % 360) + 540) % 360 - 180);
         if (d > off.v) off = { v: r1(d), s: Math.round(s - sa) };
       }
+      report.a3a4Ladder = { climbed, ladderX: ladderX.map((v) => +v.toFixed(2)) };
+      check(
+        "a3 to a4 (F): on the ladder the ladder is in the frame (150 to 280 units climbed steeper than 45 degrees, the ladder level with the camera at x 0.05 to 0.95 of the frame throughout)",
+        climbed >= 150 && climbed <= 280 && ladderX[0] >= 0.05 && ladderX[1] <= 0.95,
+        `${climbed} units climbed steeper than 45 degrees; the ladder at x ${ladderX.map((v) => v.toFixed(2)).join(" to ")} of the frame`,
+      );
       let hidden = true;
       for (let s = railSAt(L.ROUTE_MARKS.crossing); s <= sHut; s += 6) if (inFrame(s)) hidden = false;
       let sReveal = sb;
@@ -1485,18 +1605,18 @@ async function shoot(html, file, w, h) {
   };
   // Decision 67: four of the spots are the keys of the flight from a3 to a4
   // (decision 65), which the walk along the trail replaced. They stay where
-  // they are: the rocks within 150 of them (the wall under the bench's west
-  // end) are still the ones the camera climbs past, 31 to 71 away, and moving
-  // a spot swaps plain rocks for chamfered ones or back, which is a change to
-  // the scenery nobody asked for. So: those four within 75 of the route, every
-  // other spot within 5.
+  // they are: moving a spot swaps plain rocks for chamfered ones or back,
+  // which is a change to the scenery nobody asked for. Since decision 68 the
+  // camera walks the floor under them and climbs the ladder beside them (56
+  // to 115 away; with the rise through the air it was 31 to 71). So: those
+  // four within 120 of the route, every other spot within 5.
   const RETIRED_FLIGHT = [[270, 231, 1349], [321, 251, 1346], [374, 271, 1340], [430, 290, 1330]];
   const retired = (p) => RETIRED_FLIGHT.some((q) => q[0] === p[0] && q[1] === p[1] && q[2] === p[2]);
   const heroOff = R.HERO_SPOTS.filter((p) => !retired(p)).map((p) => r1(offRoute(p[0], p[1], p[2])));
   const oldOff = R.HERO_SPOTS.filter(retired).map((p) => r1(offRoute(p[0], p[1], p[2])));
   check(
-    "pinned: every hero rock spot (rocks.ts HERO_SPOTS) lies within 5 of the camera's route (the four of the retired flight up the north wall: within 75)",
-    Math.max(...heroOff) <= 5 && oldOff.length === 4 && Math.max(...oldOff) <= 75,
+    "pinned: every hero rock spot (rocks.ts HERO_SPOTS) lies within 5 of the camera's route (the four of the retired flight up the north wall: within 120)",
+    Math.max(...heroOff) <= 5 && oldOff.length === 4 && Math.max(...oldOff) <= 120,
     { spots: heroOff.length, worst: Math.max(...heroOff), retiredFlight: oldOff },
   );
   const bandOff = C.NEAR_BAND.map((c) => r1(offRoute(c.x, c.y, c.z)));

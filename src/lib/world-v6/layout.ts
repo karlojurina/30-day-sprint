@@ -16,7 +16,8 @@
  *   rides down with the water and turns round over the pool to the pool's
  *   west end, OUTSIDE the falls (a3). From there it takes the trail on the
  *   ground (PATH, decision 67): down over the pool to its east shore, across
- *   the river on the fallen log, over the talus fan, up the north wall and
+ *   the river on the fallen log, over the talus fan, along the wall's foot
+ *   and up the ladder on the bench's south-west face (LADDER, decision 68),
  *   along the bench past the Trail Hut, facing the way it goes, and turns
  *   round at the bench's end to the hut and the whole falls across the gorge
  *   (a4). There is no cave: the one behind the falls was removed on
@@ -124,6 +125,77 @@ export interface Place {
 export const TRAIL_HUT = { x: 548, y: 300, z: 1234, facing: 234 } as const;
 
 /**
+ * The ladder up the north wall (decision 68, 2026-10-13, Lovro: "let's just
+ * make a ladder going up the mountain just so it doesn't look like we're
+ * flying"). It stands on the south-west face of the Trail Hut's bench, the
+ * one place where the wall goes from the gorge's floor (60) to the bench
+ * (300) in a single face: 240 up in 27 across, 83 to 86 degrees, with no
+ * ledge on it. West of it the wall is stepped (150, 225) and tops out 150
+ * short of the bench; the ground under the camera's old rise was the flat
+ * floor. So: three ladders of 80, each one `step` further east along the
+ * face than the one below, with a plank landing where they meet, the way a
+ * trail crew would hang them. The first stands on the floor at `foot`; the
+ * last comes over the bench's lip 13 from the lesson lantern at its west end,
+ * where the painted trail runs on.
+ * `bearing` is the way up the face (compass, into the wall); `levels` the
+ * ground heights where the sections start and end. dress-gorge.ts builds it
+ * from ladderSections below and v6-route.mjs holds the camera to its line.
+ */
+export const LADDER = { foot: { x: 384.6, z: 1272 }, bearing: 31, step: 7.5, levels: [60.5, 140, 220, 299.6], width: 6.5 } as const;
+
+/** One section of the ladder: its foot and its top, on the rails' centre line, and the way it faces. */
+export interface LadderSection {
+  /** Foot and top of the section, between its two rails. */
+  a: readonly [number, number, number];
+  b: readonly [number, number, number];
+  /** Unit vectors: east along the face, and out of the face (level). */
+  east: readonly [number, number];
+  out: readonly [number, number];
+}
+
+/**
+ * Where the ladder's sections stand (LADDER), read off the ground: each runs
+ * from the face at its lower level to the face at its upper one, stood off
+ * the rock by a rail's depth plus however far the rock bulges in front of the
+ * straight line between the two (the top section's face bulges 2). `ground`
+ * is the terrain's height at (x, z): the scene and the tests pass the same.
+ */
+export function ladderSections(ground: (x: number, z: number) => number): LadderSection[] {
+  const b = (LADDER.bearing * Math.PI) / 180;
+  const ux = Math.sin(b);
+  const uz = -Math.cos(b);
+  const east: [number, number] = [-uz, ux];
+  const at = (e: number, s: number): [number, number] => [LADDER.foot.x + east[0] * e + ux * s, LADDER.foot.z + east[1] * e + uz * s];
+  /** How far up the face's line (level distance from the foot's line) the ground reaches height y. */
+  const faceAt = (e: number, y: number): number => {
+    let lo = -6;
+    let hi = 45;
+    for (let i = 0; i < 40; i++) {
+      const m = (lo + hi) / 2;
+      const [x, z] = at(e, m);
+      if (ground(x, z) < y) lo = m;
+      else hi = m;
+    }
+    return (lo + hi) / 2;
+  };
+  const out: LadderSection[] = [];
+  for (let i = 0; i + 1 < LADDER.levels.length; i++) {
+    const y0 = LADDER.levels[i];
+    const y1 = LADDER.levels[i + 1];
+    const e = i * LADDER.step;
+    const s0 = faceAt(e, y0);
+    const s1 = faceAt(e, y1);
+    let bulge = 0;
+    for (let k = 1; k < 8; k++) bulge = Math.max(bulge, s0 + ((s1 - s0) * k) / 8 - faceAt(e, y0 + ((y1 - y0) * k) / 8));
+    const off = 1.7 + bulge;
+    const [ax, az] = at(e, s0 - off);
+    const [bx, bz] = at(e, s1 - off);
+    out.push({ a: [ax, y0, az], b: [bx, y1, bz], east, out: [-ux, -uz] });
+  }
+  return out;
+}
+
+/**
  * The Stone Arch (a8, LM_StoneArch) on the Gate isle's north-west brow. Its
  * axis (the way through) points along `axis` (compass), the airship's docking
  * line, and the sunrise (az 322, el 4) sits inside the opening from a8.
@@ -192,6 +264,13 @@ export const OBSERVATORY = { x: -2052, y: 1650, z: -1560, facing: 125 } as const
  * down the falls is 32 to 34). Stop to stop that is 18.1, where a2 -> a3 is
  * 14.5 and a4 -> a5 13.3: the price of the turning. 2,070 vh in all
  * (tuning.ts's storage key bumped to "trail").
+ * 2026-10-13, later still (decision 68, the ladder): the same 280. The
+ * stretch is 1,636 units now (the camera walks the floor to the ladder's
+ * foot and climbs 230 where it rose 1,546 through the air), so stop to stop
+ * it is 17.1; a3 to "crossing" 18.1, "crossing" to "wall" 8.8, "wall" to a4
+ * 30.2. The ladder itself, from its first landing to the bench, takes 18 vh.
+ * The view's fastest turn is 2.7 degrees per vh, which is the limit: there is
+ * no scroll left in 280 to climb slower.
  */
 const PLACE_DEFS: ReadonlyArray<Omit<Place, "trail">> = [
   { id: "a1", module: "Introduction", place: "The Landing", landmark: "Signpost", mesh: "LM_Signpost",
@@ -1001,25 +1080,38 @@ const KEYS: readonly Key[] = [
   // with the trail leading on from its far end; in the last turn it
   // looks down 11 to 14, so the sweep passes over the gorge's floor and the
   // river the camera came up from, with the far rim and the sky above it.
-  // WHERE IT IS NOT ON THE TRAIL (measured on the rail, v6-route.mjs holds
-  // it). The descent from the stop: the trail starts at the shore, 399 units
-  // and 79 vh in (a3's dwell is in that). The wall: the trail's two lower
-  // switchback legs hang off the heightfield and are not painted, so at the
-  // fan's top the camera lifts off (740 units in it is 60 over the ground,
-  // at 807 it leaves the painted strip), rises in one line east under the
-  // bench's cliff, up to 75 from the painted third leg, and comes over the
-  // bench's lip at its west end, back on the strip at 1,128: 321 units off
-  // it, 25 vh of the 280 (31 counting the lift). On the bench it swings 27
-  // off the trail to the outer edge east of the hut (see the rocks below).
-  // Everywhere else it is within 12 of the painted strip, 38 to 54 over the
-  // ground from the shore to the fan and 36 to 51 on the bench.
+  // WHERE IT IS NOT ON THE PAINTED TRAIL (measured on the rail, v6-route.mjs
+  // holds it). The descent from the stop: the trail starts at the shore, 399
+  // units and 77 vh in (a3's dwell is in that). THE LADDER (decision 68,
+  // Lovro: "let's just make a ladder going up the mountain just so it
+  // doesn't look like we're flying"): the painted strip turns in to the
+  // wall's foot at the fan's top and stops, because the trail's two lower
+  // switchback legs hang off the heightfield. The camera leaves it there
+  // (795 units in), walks on along the gorge's floor, 56 to 78 over it, to
+  // the ladder on the bench's south-west face (LADDER above), and goes up
+  // it: from the first landing's height (951 units in) to over the bench's
+  // lip (1,182) it is 24 to 36 from the ladder's line, looking at it, and it
+  // is back on the painted strip on the bench at 1,212. That is 156 units of
+  // floor in 12 vh, 231 of ladder in 18 vh, 417 off the paint in all. Until
+  // decision 68 it rose through the air from the fan's top to the bench's
+  // lip, 321 units off the strip; its two keys were (350, 272, 1284) and
+  // (410, 338, 1275), and they are the two rows that moved: the first came
+  // down 144 to the ladder's foot, the second went 18 west to its top. The
+  // top row is paced 1.4 and both corners are cut round, because the rail
+  // test's "no speed step" check fails a sharp turn from level to straight
+  // up at walking pace. On the bench it swings 27 off the trail to the
+  // outer edge east of the hut (see the rocks below). Everywhere else it is
+  // within 12 of the painted strip, 38 to 63 over the ground from the shore
+  // to the fan and 36 to 60 on the bench (the rail lifts it 9 over the lip:
+  // the top row stands 16 over the bench, under the 35 a walk keeps).
   // WHY THESE POINTS AND HEIGHTS. rocks.ts drops any boulder family within
   // 30 (plus its size) of the route's straight segments, and three of its
   // loops deal their later rocks again when one is dropped. Every key here is
   // placed so that not one rock changes (v6-route.mjs builds rocks.ts and
   // checks it): 47 over the pool's east shore, 49 to 55 over the fan, 51 over
   // the bench's west end, and round the family at the wall's foot east of the
-  // hut by the outer edge. FIFTEEN ROWS, AS BEFORE: forest.ts samples the
+  // hut by the outer edge. The ladder's two rows keep 29 from the lip rock
+  // beside its first landing (it needs 25.7). FIFTEEN ROWS, AS BEFORE: forest.ts samples the
   // whole route 3,600 times by key number, so one row more or fewer moves
   // those samples everywhere and trees change at Base Camp. Keep the count,
   // or deal the forest again on purpose.
@@ -1046,8 +1138,8 @@ const KEYS: readonly Key[] = [
   M("crossing", Q(1.5, K(52, 100, 1538, 8, 14, "trail", undefined, 55))), // the log's north end
   Q(1.7, K(78, 110, 1490, 27, 10, "trail", undefined, 55)), // the talus fan
   Q(1.4, K(186, 128, 1352, 62, 5, "trail", undefined, 55)), // the fan's top, the wall ahead
-  K(350, 272, 1284, 84, -10, "trail", undefined, 54), // up the wall, under the bench's cliff
-  K(410, 338, 1275, 82, -5, "trail", undefined, 53), // over the bench's lip
+  K(366, 128, 1289, 50, -11, "trail", undefined, 54), // the ladder's foot, on the gorge's floor
+  Q(1.4, K(392, 316, 1274, 57, 1, "trail", undefined, 53)), // the ladder's top, coming over the bench's lip
   M("wall", K(448, 351, 1235, 78, 2, "trail", undefined, 52)), // onto the bench's west end
   Q(3, K(548, 336, 1207, 88, 4, "trail", undefined, 51)), // past the Trail Hut's door
   Q(7, K(588, 345, 1233, 110, 8, "trail", undefined, 51)), // round the boulders at the wall's foot

@@ -1,0 +1,899 @@
+{
+ "course": "Ad Creative Program",
+ "read": "2026-10-13",
+ "source": "The course as it stands in the course builder on Whop, read through Whop's API on 2026-10-13 (141 lessons, 8 chapters). The order and every title are Whop's. The split of Video Ads into two places, the place of the Ad Bounty lesson, the gate and the action briefs are decisions recorded in _admin/prds/course-catalog/course_catalog_prd.md, section 3.",
+ "areas": [
+  {
+   "id": "a1",
+   "name": "Introduction"
+  },
+  {
+   "id": "a2",
+   "name": "Marketing Fundamentals"
+  },
+  {
+   "id": "a3",
+   "name": "Video Ads I"
+  },
+  {
+   "id": "a4",
+   "name": "Video Ads II"
+  },
+  {
+   "id": "a5",
+   "name": "Static Ads"
+  },
+  {
+   "id": "a6",
+   "name": "AI Ads + Content"
+  },
+  {
+   "id": "a7",
+   "name": "Creative Strategy"
+  },
+  {
+   "id": "a8",
+   "name": "How To Land Clients"
+  }
+ ],
+ "lessons": [
+  {
+   "id": "a1l01",
+   "area": "a1",
+   "title": "Welcome to Ecom University",
+   "type": "watch"
+  },
+  {
+   "id": "a1l02",
+   "area": "a1",
+   "title": "Why Marketing + Ecom = Money Printer",
+   "type": "watch"
+  },
+  {
+   "id": "a1l03",
+   "area": "a1",
+   "title": "The Skill Stacking Effect",
+   "type": "watch"
+  },
+  {
+   "id": "a1l04",
+   "area": "a1",
+   "title": "How This Program Works",
+   "type": "watch"
+  },
+  {
+   "id": "a1l05",
+   "area": "a1",
+   "title": "How To Learn Like A Billionaire",
+   "type": "watch"
+  },
+  {
+   "id": "a1l06",
+   "area": "a1",
+   "title": "How To Lock In",
+   "type": "watch"
+  },
+  {
+   "id": "a1l07",
+   "area": "a1",
+   "title": "Why You're Not Behind",
+   "type": "watch"
+  },
+  {
+   "id": "a1l08",
+   "area": "a1",
+   "title": "You Need Resistance To Grow",
+   "type": "watch"
+  },
+  {
+   "id": "a2l01",
+   "area": "a2",
+   "title": "How Marketing Works (And Why We're Doing Ads)",
+   "type": "watch"
+  },
+  {
+   "id": "a2l02",
+   "area": "a2",
+   "title": "Direct Response Advertising Explained",
+   "type": "watch"
+  },
+  {
+   "id": "a2l03",
+   "area": "a2",
+   "title": "How Ads Are Made, Full Process",
+   "type": "watch"
+  },
+  {
+   "id": "a2l04",
+   "area": "a2",
+   "title": "How To Stay Ahead Of AI",
+   "type": "watch"
+  },
+  {
+   "id": "a2l05",
+   "area": "a2",
+   "title": "Why Are People On Social Media?",
+   "type": "watch"
+  },
+  {
+   "id": "a2l06",
+   "area": "a2",
+   "title": "Why Do People Buy Things?",
+   "type": "watch"
+  },
+  {
+   "id": "a2l07",
+   "area": "a2",
+   "title": "How To Make People Say \"This Is Literally Me\"",
+   "type": "watch"
+  },
+  {
+   "id": "a2l08",
+   "area": "a2",
+   "title": "You're Not Selling Products",
+   "type": "watch"
+  },
+  {
+   "id": "a2l09",
+   "area": "a2",
+   "title": "The Advertising Dictionary",
+   "type": "watch"
+  },
+  {
+   "id": "a2l10",
+   "area": "a2",
+   "title": "Building Your Marketing Muscle",
+   "type": "watch"
+  },
+  {
+   "id": "a2l11",
+   "area": "a2",
+   "title": "Time To Lock In",
+   "type": "watch"
+  },
+  {
+   "id": "a3l01",
+   "area": "a3",
+   "title": "Start to Greatness",
+   "type": "watch"
+  },
+  {
+   "id": "a3l02",
+   "area": "a3",
+   "title": "What an Ads Editor Actually Does",
+   "type": "watch"
+  },
+  {
+   "id": "a3l03",
+   "area": "a3",
+   "title": "What an Ad Really Is",
+   "type": "watch"
+  },
+  {
+   "id": "a3l04",
+   "area": "a3",
+   "title": "Types of Ads",
+   "type": "watch"
+  },
+  {
+   "id": "a3l05",
+   "area": "a3",
+   "title": "What Makes an Ad Work",
+   "type": "watch"
+  },
+  {
+   "id": "a3l06",
+   "area": "a3",
+   "title": "The Art of 'Show, Don't Tell'",
+   "type": "watch"
+  },
+  {
+   "id": "a3l07",
+   "area": "a3",
+   "title": "Avatar-based Editing",
+   "type": "watch"
+  },
+  {
+   "id": "a3l08",
+   "area": "a3",
+   "title": "Understanding The Hook Slap",
+   "type": "watch"
+  },
+  {
+   "id": "a3l09",
+   "area": "a3",
+   "title": "The Hook Teardown",
+   "type": "watch"
+  },
+  {
+   "id": "a3l10",
+   "area": "a3",
+   "title": "The Slippery Slope",
+   "type": "watch"
+  },
+  {
+   "id": "a3l11",
+   "area": "a3",
+   "title": "Your Editing Software",
+   "type": "watch"
+  },
+  {
+   "id": "a3l12",
+   "area": "a3",
+   "title": "Load Your Kit",
+   "type": "watch"
+  },
+  {
+   "id": "a3l13",
+   "area": "a3",
+   "title": "CapCut Starter Course",
+   "type": "watch"
+  },
+  {
+   "id": "a3l14",
+   "area": "a3",
+   "title": "Premiere Pro Starter Course",
+   "type": "watch"
+  },
+  {
+   "id": "a3l15",
+   "area": "a3",
+   "title": "Asset Management",
+   "type": "watch"
+  },
+  {
+   "id": "a3l16",
+   "area": "a3",
+   "title": "What a Brief Is & How to Work With It",
+   "type": "watch"
+  },
+  {
+   "id": "a3l17",
+   "area": "a3",
+   "title": "Your First Boss Battle",
+   "type": "watch"
+  },
+  {
+   "id": "a3l18",
+   "area": "a3",
+   "title": "A-Roll - Your First Boss Battle",
+   "type": "watch"
+  },
+  {
+   "id": "a3l19",
+   "area": "a3",
+   "title": "Music - Your First Boss Battle",
+   "type": "watch"
+  },
+  {
+   "id": "a3l20",
+   "area": "a3",
+   "title": "B-Roll - Your First Boss Battle",
+   "type": "watch"
+  },
+  {
+   "id": "a3l21",
+   "area": "a3",
+   "title": "Effects & Transitions - Your First Boss Battle",
+   "type": "watch"
+  },
+  {
+   "id": "a3l22",
+   "area": "a3",
+   "title": "Captions & Text - Your First Boss Battle",
+   "type": "watch"
+  },
+  {
+   "id": "a3l23",
+   "area": "a3",
+   "title": "SFX - Your First Boss Battle",
+   "type": "watch"
+  },
+  {
+   "id": "a3l24",
+   "area": "a3",
+   "title": "How to Submit an Action Item",
+   "type": "watch"
+  },
+  {
+   "id": "a3l25",
+   "area": "a3",
+   "title": "[ACTION ITEM] Congrats! Here's another one",
+   "type": "watch",
+   "action_brief": "Edit the entire ad all by yourself, from the brief all the way to the submission."
+  },
+  {
+   "id": "a4l01",
+   "area": "a4",
+   "title": "How to Improve Fast: Your Daily Editing Routine",
+   "type": "watch"
+  },
+  {
+   "id": "a4l02",
+   "area": "a4",
+   "title": "Editing Breakdown - UGC",
+   "type": "watch"
+  },
+  {
+   "id": "a4l03",
+   "area": "a4",
+   "title": "Editing Breakdown - Text on Screen Ad",
+   "type": "watch"
+  },
+  {
+   "id": "a4l04",
+   "area": "a4",
+   "title": "Editing Breakdown - AI VO Ad",
+   "type": "watch"
+  },
+  {
+   "id": "a4l05",
+   "area": "a4",
+   "title": "Editing Breakdown - VSL Ad",
+   "type": "watch"
+  },
+  {
+   "id": "a4l06",
+   "area": "a4",
+   "title": "Understanding Leverage Moves",
+   "type": "watch"
+  },
+  {
+   "id": "a4l07",
+   "area": "a4",
+   "title": "The Emotion Map",
+   "type": "watch"
+  },
+  {
+   "id": "a4l08",
+   "area": "a4",
+   "title": "Reading Scripts Like the Top 1%",
+   "type": "watch"
+  },
+  {
+   "id": "a4l09",
+   "area": "a4",
+   "title": "ElevenLabs: Walkthrough",
+   "type": "watch"
+  },
+  {
+   "id": "a4l10",
+   "area": "a4",
+   "title": "ElevenLabs: Masterclass V1",
+   "type": "watch"
+  },
+  {
+   "id": "a4l11",
+   "area": "a4",
+   "title": "Music Leverage",
+   "type": "watch"
+  },
+  {
+   "id": "a4l12",
+   "area": "a4",
+   "title": "The Focal Point",
+   "type": "watch"
+  },
+  {
+   "id": "a4l13",
+   "area": "a4",
+   "title": "World Building",
+   "type": "watch"
+  },
+  {
+   "id": "a4l14",
+   "area": "a4",
+   "title": "Cinematography Basics",
+   "type": "watch"
+  },
+  {
+   "id": "a4l15",
+   "area": "a4",
+   "title": "Effects & Transitions",
+   "type": "watch"
+  },
+  {
+   "id": "a4l16",
+   "area": "a4",
+   "title": "Sound Design That Feels Real",
+   "type": "watch"
+  },
+  {
+   "id": "a4l17",
+   "area": "a4",
+   "title": "The Editor's Teardown",
+   "type": "watch"
+  },
+  {
+   "id": "a5l01",
+   "area": "a5",
+   "title": "You should be a designer",
+   "type": "watch"
+  },
+  {
+   "id": "a5l02",
+   "area": "a5",
+   "title": "What are static ads?",
+   "type": "watch"
+  },
+  {
+   "id": "a5l03",
+   "area": "a5",
+   "title": "The Tools",
+   "type": "watch"
+  },
+  {
+   "id": "a5l04",
+   "area": "a5",
+   "title": "Figma - The Base",
+   "type": "watch"
+  },
+  {
+   "id": "a5l05",
+   "area": "a5",
+   "title": "Figma - Ad Design",
+   "type": "watch"
+  },
+  {
+   "id": "a5l06",
+   "area": "a5",
+   "title": "Figma - Ad Design 2",
+   "type": "watch"
+  },
+  {
+   "id": "a5l07",
+   "area": "a5",
+   "title": "Photoshop - Essentials",
+   "type": "watch"
+  },
+  {
+   "id": "a5l08",
+   "area": "a5",
+   "title": "Action item - The Backbone",
+   "type": "watch",
+   "action_brief": "You'll build a batch of 3 statics and grade it yourself with our Figma plugin."
+  },
+  {
+   "id": "a5l09",
+   "area": "a5",
+   "title": "Design Execution",
+   "type": "watch"
+  },
+  {
+   "id": "a5l10",
+   "area": "a5",
+   "title": "The anatomy of a static ad",
+   "type": "watch"
+  },
+  {
+   "id": "a5l11",
+   "area": "a5",
+   "title": "Design Fundamentals: Demo",
+   "type": "watch"
+  },
+  {
+   "id": "a5l12",
+   "area": "a5",
+   "title": "Action Item - Imitation",
+   "type": "watch",
+   "action_brief": "Your first shot at making actual ads by imitating an existing batch. The goal is accurately recreating existing creatives, while still following the technicalities covered so far."
+  },
+  {
+   "id": "a5l13",
+   "area": "a5",
+   "title": "How Static Ads Work?",
+   "type": "watch"
+  },
+  {
+   "id": "a5l14",
+   "area": "a5",
+   "title": "Meta Andromeda",
+   "type": "watch"
+  },
+  {
+   "id": "a5l15",
+   "area": "a5",
+   "title": "The Scroll & The Single Frame",
+   "type": "watch"
+  },
+  {
+   "id": "a5l16",
+   "area": "a5",
+   "title": "Study the Greats",
+   "type": "watch"
+  },
+  {
+   "id": "a5l17",
+   "area": "a5",
+   "title": "Copywriting for Statics",
+   "type": "watch"
+  },
+  {
+   "id": "a5l18",
+   "area": "a5",
+   "title": "Visual Inspiration",
+   "type": "watch"
+  },
+  {
+   "id": "a5l19",
+   "area": "a5",
+   "title": "Interpretation",
+   "type": "watch"
+  },
+  {
+   "id": "a5l20",
+   "area": "a5",
+   "title": "How to break the pattern",
+   "type": "watch"
+  },
+  {
+   "id": "a5l21",
+   "area": "a5",
+   "title": "Brand Interpretation",
+   "type": "watch"
+  },
+  {
+   "id": "a5l22",
+   "area": "a5",
+   "title": "Action Item - Brand Deck",
+   "type": "setup",
+   "action_brief": "A finished brand deck of a random brand of your choice, using the template provided, and an analysis of 5 of the brand's ads, their favorite formats and layouts."
+  },
+  {
+   "id": "a5l23",
+   "area": "a5",
+   "title": "Action Item - Static Ad Brief",
+   "type": "watch",
+   "action_brief": "Interpret a creative brief and design your own batch from scratch. It's a review by Valter and George, not the plugin."
+  },
+  {
+   "id": "a5l24",
+   "area": "a5",
+   "title": "AI in Design",
+   "type": "watch"
+  },
+  {
+   "id": "a5l25",
+   "area": "a5",
+   "title": "AI isn't replacing designers",
+   "type": "watch"
+  },
+  {
+   "id": "a5l26",
+   "area": "a5",
+   "title": "The Core Principle",
+   "type": "watch",
+   "gate": true
+  },
+  {
+   "id": "a6l01",
+   "area": "a6",
+   "title": "AI, the biggest opportunity today",
+   "type": "watch"
+  },
+  {
+   "id": "a6l02",
+   "area": "a6",
+   "title": "Limitless Creativity",
+   "type": "watch"
+  },
+  {
+   "id": "a6l03",
+   "area": "a6",
+   "title": "ACTION ITEM: Study winning AI Ads",
+   "type": "setup",
+   "action_brief": "Take 10-15 minutes of your time and look through these AI ads and gather your first thoughts."
+  },
+  {
+   "id": "a6l04",
+   "area": "a6",
+   "title": "Prompting 101: Prompt like a Million $ Operator",
+   "type": "watch"
+  },
+  {
+   "id": "a6l05",
+   "area": "a6",
+   "title": "What Actually Makes AI Ads generate $$$: Basics",
+   "type": "watch"
+  },
+  {
+   "id": "a6l06",
+   "area": "a6",
+   "title": "The Science Behind AI Animation Ads: Deep Dive",
+   "type": "watch"
+  },
+  {
+   "id": "a6l07",
+   "area": "a6",
+   "title": "The Anatomy of a Winning Ad: Half a Million in Spend",
+   "type": "watch"
+  },
+  {
+   "id": "a6l08",
+   "area": "a6",
+   "title": "Formats & Avatars",
+   "type": "watch"
+  },
+  {
+   "id": "a6l09",
+   "area": "a6",
+   "title": "How to Develop Winning Ideas: Creative Inspiration",
+   "type": "watch"
+  },
+  {
+   "id": "a6l10",
+   "area": "a6",
+   "title": "ACTION ITEM: Choose Your Visual Style",
+   "type": "setup",
+   "action_brief": "Find a visual style or ad that inspires you and save it as your reference."
+  },
+  {
+   "id": "a6l11",
+   "area": "a6",
+   "title": "Enough Theory, Let's Get Shit Done",
+   "type": "watch"
+  },
+  {
+   "id": "a6l12",
+   "area": "a6",
+   "title": "Systems & Workflows: Basics",
+   "type": "watch"
+  },
+  {
+   "id": "a6l13",
+   "area": "a6",
+   "title": "TrenchOS: Your Private AI Ads Platform",
+   "type": "watch"
+  },
+  {
+   "id": "a6l14",
+   "area": "a6",
+   "title": "Our Private $$$ AI UGC Workflow",
+   "type": "watch"
+  },
+  {
+   "id": "a6l15",
+   "area": "a6",
+   "title": "Our Private $$$ AI Animation Workflow",
+   "type": "watch"
+  },
+  {
+   "id": "a6l16",
+   "area": "a6",
+   "title": "Our Private $$$ AI B-Roll Workflow",
+   "type": "watch"
+  },
+  {
+   "id": "a6l17",
+   "area": "a6",
+   "title": "ACTION ITEM: Stop",
+   "type": "setup",
+   "action_brief": "Take 10 to 15 minutes away from the screen. Sit down, relax, and think back over what you've learned so far."
+  },
+  {
+   "id": "a6l18",
+   "area": "a6",
+   "title": "Intro + My Mental Model to Reverse-Engineer Any AI Ad",
+   "type": "watch"
+  },
+  {
+   "id": "a6l19",
+   "area": "a6",
+   "title": "ACTION ITEM: Reverse engineering",
+   "type": "setup",
+   "action_brief": "Pick one piece of content you like, then break it down. Go shot by shot."
+  },
+  {
+   "id": "a6l20",
+   "area": "a6",
+   "title": "Advanced Technique: Transitions",
+   "type": "watch"
+  },
+  {
+   "id": "a6l21",
+   "area": "a6",
+   "title": "Mastering Creative Judgment in AI Ads",
+   "type": "watch"
+  },
+  {
+   "id": "a6l22",
+   "area": "a6",
+   "title": "The Start",
+   "type": "watch"
+  },
+  {
+   "id": "a7l01",
+   "area": "a7",
+   "title": "Welcome To Creative Strategy",
+   "type": "watch"
+  },
+  {
+   "id": "a7l02",
+   "area": "a7",
+   "title": "What Is Creative Strategy?",
+   "type": "watch"
+  },
+  {
+   "id": "a7l03",
+   "area": "a7",
+   "title": "How To Be Creative?",
+   "type": "watch"
+  },
+  {
+   "id": "a7l04",
+   "area": "a7",
+   "title": "How To Strategize?",
+   "type": "watch"
+  },
+  {
+   "id": "a7l05",
+   "area": "a7",
+   "title": "Market Awareness",
+   "type": "watch"
+  },
+  {
+   "id": "a7l06",
+   "area": "a7",
+   "title": "Market Sophistication",
+   "type": "watch"
+  },
+  {
+   "id": "a7l07",
+   "area": "a7",
+   "title": "How I Made A Winning Ad From Scratch (With Proof)",
+   "type": "watch"
+  },
+  {
+   "id": "a7l08",
+   "area": "a7",
+   "title": "Winning Ad Breakdown: Episode 1",
+   "type": "watch"
+  },
+  {
+   "id": "a7l09",
+   "area": "a7",
+   "title": "Winning Ad Breakdown: Episode 2",
+   "type": "watch"
+  },
+  {
+   "id": "a7l10",
+   "area": "a7",
+   "title": "Winning Ad Breakdown: Episode 3",
+   "type": "watch"
+  },
+  {
+   "id": "a7l11",
+   "area": "a7",
+   "title": "Winning Ad Breakdown: Episode 4",
+   "type": "watch"
+  },
+  {
+   "id": "a7l12",
+   "area": "a7",
+   "title": "Winning Ad Breakdown: Episode 5",
+   "type": "watch"
+  },
+  {
+   "id": "a7l13",
+   "area": "a7",
+   "title": "Winning Ad Breakdown: Episode 6",
+   "type": "watch"
+  },
+  {
+   "id": "a7l14",
+   "area": "a7",
+   "title": "How We Use AI For Creative Strategy",
+   "type": "watch"
+  },
+  {
+   "id": "a7l15",
+   "area": "a7",
+   "title": "Your Creative Strategy Workspace",
+   "type": "watch"
+  },
+  {
+   "id": "a7l16",
+   "area": "a7",
+   "title": "CS Workspace Onboarding Walkthrough",
+   "type": "watch"
+  },
+  {
+   "id": "a7l17",
+   "area": "a7",
+   "title": "Making Your First Ad",
+   "type": "watch"
+  },
+  {
+   "id": "a7l18",
+   "area": "a7",
+   "title": "Making The Workspace Your Own",
+   "type": "watch"
+  },
+  {
+   "id": "a7l19",
+   "area": "a7",
+   "title": "How To Win On The Ad Bounty Program",
+   "type": "watch",
+   "counts": false,
+   "feature_key": "bounty_access"
+  },
+  {
+   "id": "a8l01",
+   "area": "a8",
+   "title": "Intro",
+   "type": "watch"
+  },
+  {
+   "id": "a8l02",
+   "area": "a8",
+   "title": "Communication",
+   "type": "watch"
+  },
+  {
+   "id": "a8l03",
+   "area": "a8",
+   "title": "Experience Over Money",
+   "type": "watch"
+  },
+  {
+   "id": "a8l04",
+   "area": "a8",
+   "title": "Portfolio",
+   "type": "watch"
+  },
+  {
+   "id": "a8l05",
+   "area": "a8",
+   "title": "How To Win On The Job Board",
+   "type": "watch"
+  },
+  {
+   "id": "a8l06",
+   "area": "a8",
+   "title": "Build Your Name In Public",
+   "type": "watch"
+  },
+  {
+   "id": "a8l07",
+   "area": "a8",
+   "title": "After You Apply",
+   "type": "watch"
+  },
+  {
+   "id": "a8l08",
+   "area": "a8",
+   "title": "The Call",
+   "type": "watch"
+  },
+  {
+   "id": "a8l09",
+   "area": "a8",
+   "title": "What To Charge",
+   "type": "watch"
+  },
+  {
+   "id": "a8l10",
+   "area": "a8",
+   "title": "How To Vet Clients",
+   "type": "watch"
+  },
+  {
+   "id": "a8l11",
+   "area": "a8",
+   "title": "Become Unfireable",
+   "type": "watch"
+  },
+  {
+   "id": "a8l12",
+   "area": "a8",
+   "title": "Raise Your Prices",
+   "type": "watch"
+  },
+  {
+   "id": "a8l13",
+   "area": "a8",
+   "title": "What Now?",
+   "type": "watch"
+  }
+ ]
+}

@@ -11,6 +11,9 @@
 --
 -- Read the VERDICT column. Anything that is not PASS or INFO needs attention
 -- before more work lands on top.
+--
+-- Rows 40 to 48 describe the placeholder seed of v94, and they report
+-- differences once 2026_v101_course_catalog.sql has run.
 -- ============================================================
 
 with checks(n, check_name, expected, actual) as (

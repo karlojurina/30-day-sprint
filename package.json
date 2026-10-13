@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test:client": "node client-tests/build.mjs && node --experimental-strip-types client-tests/watch-heartbeat.test.mjs && node --experimental-strip-types client-tests/watch-rules.test.mjs && node --experimental-strip-types client-tests/catalog.test.mjs && node --experimental-strip-types client-tests/access.test.mjs && node --experimental-strip-types client-tests/map-model.test.mjs && node --experimental-strip-types client-tests/tella.test.mjs && node --experimental-strip-types client-tests/tella-player.test.mjs",
-    "test:migrations": "npm --prefix supabase/migration-tests test"
+    "test:migrations": "npm --prefix supabase/migration-tests test",
+    "build:catalog": "node supabase/catalog/build-course-sql.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.2",

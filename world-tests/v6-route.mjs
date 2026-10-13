@@ -316,15 +316,15 @@ function cliffDistance(x, y, z, maxR = 80) {
   }
   report.clearance = worst;
   const keys = TRAIL.map((p, i) => ({ i, kind: TRAIL_KIND[i], above: Math.round(p[1] - groundAt(p[0], p[2])), need: L.TRAIL_CLEAR[i] }));
-  const badKeys = keys.filter((k) => ["walk", "hike", "rise", "sky"].includes(k.kind) && k.above < k.need);
-  check("key clearance >= TRAIL_CLEAR (35, or 20 at and beside the stops; walk, hike, rise, sky keys; islands count as ground)", badKeys.length === 0, badKeys.length ? badKeys : "ok");
+  const badKeys = keys.filter((k) => ["walk", "trail", "hike", "rise", "sky"].includes(k.kind) && k.above < k.need);
+  check("key clearance >= TRAIL_CLEAR (35, or 20 at and beside the stops; walk, trail, hike, rise, sky keys; islands count as ground)", badKeys.length === 0, badKeys.length ? badKeys : "ok");
   // The dense check reads the RAIL's height (terrain follow lifts the curve to
   // the clearance); the bare curve may dip between keys.
   {
     let worstRail = { v: Infinity };
     for (let s = 0; s <= railG.length; s += 4) {
       const k = railG.kindAtS(s);
-      if (!["walk", "hike", "rise", "sky"].includes(k)) continue;
+      if (!["walk", "trail", "hike", "rise", "sky"].includes(k)) continue;
       railG.sampleS(s, pose);
       const { x, y, z } = pose.position;
       const f = railG.tAtS(s) * (nK - 1);
@@ -334,7 +334,7 @@ function cliffDistance(x, y, z, maxR = 80) {
       if (v < worstRail.v) worstRail = { v: r1(v), s: Math.round(s), kind: k, p: [x, y, z].map(Math.round), need: r1(need) };
     }
     report.railClearance = worstRail;
-    check("rail clearance >= TRAIL_CLEAR - 1 (dense, as the rail lifts it: walk, hike, rise, sky)", worstRail.v >= -1, worstRail);
+    check("rail clearance >= TRAIL_CLEAR - 1 (dense, as the rail lifts it: walk, trail, hike, rise, sky)", worstRail.v >= -1, worstRail);
   }
   report.curveClearance = worst.walk;
   check("the ride and the turn stay >= 15 from any rock (dense)", worst.dive.v >= 15, worst.dive);
@@ -469,7 +469,8 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
   const hikeVh = vhAt(rail, burstS) - vhAt(rail, a4S);
   report.hikeVh = r1(hikeVh);
   report.upVh = r1(upVh);
-  check("the way up: a3 to a4 <= 200 vh, a4 to the burst <= 200 vh at the default pacing", upVh <= 200 && hikeVh <= 200, `${r1(upVh)} vh / ${r1(hikeVh)} vh`);
+  // Decision 67: a3 to a4 is the walk along the trail, 1,546 units with 400 degrees of turning: 280 vh (Version W, 120 degrees: 200).
+  check("the way up: a3 to a4 <= 300 vh, a4 to the burst <= 200 vh at the default pacing", upVh <= 300 && hikeVh <= 200, `${r1(upVh)} vh / ${r1(hikeVh)} vh`);
   // Facing where it goes after a4: from just past a4 to the burst, the view
   // stays within 60 of the travel heading.
   const offTravel = (sa, sb) => {
@@ -482,21 +483,21 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
   };
   const w2 = offTravel(sAtKey(L.ROUTE_MARKS.traverse + 0.5), burstS);
   check("the traverse faces where it goes (view within 60 of the travel heading, a4 to the burst)", w2.v <= 60, `traverse to burst ${JSON.stringify(w2)}`);
-  // 2026-10-13 (Lovro: "the camera between Video Ads 1 and Video Ads 2 goes
-  // into the cave for no reason. Just going straight from Video Ads 1 screen
-  // to Video Ads 2 and giving it a nice path"): a3 to a4 is ONE move across
-  // the gorge, in the open. It replaces the final pass's "go in and then
-  // directly up" (the dolly into the curtain, the loop past the camp, back
-  // out through the water, then the pull back), whose own checks here were:
-  // the view turning one way, <= 150 degrees, <= 1.6 degrees per vh, and some
-  // of the falls in frame from out of the cave to a4.
+  // Decision 67, 2026-10-13 (Lovro: "we have the path but we don't take it
+  // and go in the air"): a3 to a4 TAKES THE TRAIL on the ground, facing
+  // forward: down from the stop to the pool's east shore, over the log, the
+  // talus fan, up the north wall, along the bench past the Trail Hut, and a
+  // turn at the bench's end to the hut and the falls. It replaces the flight
+  // across the gorge (decision 65), whose checks stood here: the view one way
+  // only, <= 1.4 degrees per vh, the falls in every frame.
   {
     const F = WORLD.falls;
     const sa = rail.stopS[2];
     const sb = rail.stopS[3];
+    const a3Key = PLACES[2].trail;
     const a4Key = PLACES[3].trail;
     /** Route distance on the rail at a (fractional) key index. */
-    const railSAtKey = (k) => {
+    const railSAt = (k) => {
       let lo = 0;
       let hi = rail.length;
       for (let i = 0; i < 60; i++) {
@@ -515,51 +516,128 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
       unknownKinds.length === 0 && oldMarks.length === 0,
       `kinds the layout does not pace: ${unknownKinds.join(", ") || "none"}; old marks still named: ${oldMarks.join(", ") || "none"}`,
     );
-    // 2. Clearance along the move, on the rail as the scene has it (terrain
-    //    follow on): over the ground by TRAIL_CLEAR (the dense check above
-    //    covers it; the figure is repeated here for the stretch), never within
-    //    40 of rock at the camera's own height, and well north of the curtain.
+    // 2. Fifteen rows, of the kind forest.ts does not cap its trees for. The
+    //    forest samples the whole route 3,600 times by key number (so a row
+    //    more or fewer moves its samples everywhere) and cuts every tree within
+    //    70 of a "walk" or "hike" key down to the camera's height: both would
+    //    change trees, and forest.ts was not to be touched.
+    const between = TRAIL_KIND.slice(a3Key + 1, a4Key);
+    check(
+      "a3 to a4: fifteen rows, all of the kind \"trail\" (the forest keeps every tree: it samples the route by key number and cuts trees along walk and hike keys)",
+      between.length === 15 && between.every((k) => k === "trail") && TRAIL.length === 85,
+      `${between.length} rows (${[...new Set(between)].join(", ")}), ${TRAIL.length} keys in all`,
+    );
+    // 3. On the trail. The visible trail is PATH where surfaces.ts paints it
+    //    (both ends of a segment within 25 of the ground), from the pool's
+    //    shore to the traverse's first leg past the bench. The camera comes down onto it at the
+    //    shore and stays within 12 of it past the fan's top (x 200), 36 to 60
+    //    over the ground as far as the fan (x 150; from there it lifts for the
+    //    wall); leaves it up the wall (the two lower switchback legs hang off
+    //    the heightfield, unpainted); is back within 12 of it over the bench;
+    //    and stays within 27 to the stop, which stands 21 off it (it rounds the
+    //    boulder family at the wall's foot east of the hut by the bench's outer
+    //    edge). The rail with terrain follow has its own distances: its stops.
+    {
+      const iShore = PATH.findIndex((q) => q.under) + 1;
+      const iEnd = PATH.findIndex((q) => Math.abs(q.x - 900) < 1 && Math.abs(q.z - 1090) < 1); // the traverse's first leg: the a4 stop stands beside it
+      const painted = (i) => Math.abs(PATH[i].y - terrainHeight(PATH[i].x, PATH[i].z)) <= 25 && Math.abs(PATH[i + 1].y - terrainHeight(PATH[i + 1].x, PATH[i + 1].z)) <= 25;
+      const strip = [];
+      for (let i = iShore; i < iEnd; i++) if (painted(i)) strip.push([PATH[i], PATH[i + 1]]);
+      /** Distance in plan to the painted strip. */
+      const trailD = (x, z) => {
+        let best = Infinity;
+        for (const [a, b] of strip) {
+          const dx = b.x - a.x;
+          const dz = b.z - a.z;
+          const u = Math.min(1, Math.max(0, ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz)));
+          best = Math.min(best, Math.hypot(x - a.x - dx * u, z - a.z - dz * u));
+        }
+        return best;
+      };
+      let phase = 0; // 0 coming down to the shore, 1 on the floor's strip, 2 up the wall, 3 on the bench
+      let on = null;
+      let left = null;
+      let back = null;
+      let wall = { v: 0 };
+      let bench = { v: 0 };
+      const high = [Infinity, -Infinity];
+      const ga = railG.stopS[2];
+      const gb = railG.stopS[3];
+      for (let s = ga; s <= gb; s += 3) {
+        railG.sampleS(s, pose);
+        const { x, y, z } = pose.position;
+        const d = trailD(x, z);
+        const at = { s: Math.round(s - ga), p: [x, y, z].map(Math.round) };
+        const g = groundAt(x, z);
+        if (phase === 0 && d <= 12) {
+          phase = 1;
+          on = at;
+        }
+        if (phase === 1) {
+          if (d <= 12) {
+            if (x <= 150) {
+              high[0] = Math.min(high[0], y - g);
+              high[1] = Math.max(high[1], y - g);
+            }
+            continue;
+          }
+          phase = 2;
+          left = at;
+        }
+        if (phase === 2) {
+          if (!(g > 295 && d <= 12)) {
+            if (d > wall.v) wall = { v: r1(d), ...at };
+            continue;
+          }
+          phase = 3;
+          back = at;
+        }
+        if (phase === 3 && d > bench.v) bench = { v: r1(d), ...at };
+      }
+      report.a3a4Trail = { strip: strip.map(([a, b]) => [a.x, a.z, b.x, b.z]), on, left, back, wall, bench, high: high.map(Math.round) };
+      check(
+        "a3 to a4: on the trail (within 12 of the painted strip from the pool's shore to past the fan's top, 36 to 60 over the ground as far as the fan; off it only up the wall, for less than 340 units; back on it over the bench and within 27 to the stop)",
+        phase === 3 && on.p[0] <= 20 && left.p[0] >= 200 && back.s - left.s < 340 && bench.v <= 27 && high[0] >= 36 && high[1] <= 60,
+        `on the strip ${JSON.stringify(on)}; leaves it ${JSON.stringify(left)}; furthest from it up the wall ${JSON.stringify(wall)}; back on it ${JSON.stringify(back)} (${back && left ? back.s - left.s : "?"} units off it); furthest from it on the bench ${JSON.stringify(bench)}; ${Math.round(high[0])} to ${Math.round(high[1])} over the ground from the shore to the fan`,
+      );
+    }
+    // 4. Clearance, on the rail as the scene has it (terrain follow on): over
+    //    the ground by TRAIL_CLEAR all the way (the dense check above covers
+    //    it; the figure is repeated here), and never nearer than 30 to ground
+    //    that stands higher than the camera (the wall under the bench, on the
+    //    way up: 40). This reads the heightfield only: the boulders, the hut,
+    //    the posts and the trees are judged on the rendered frames.
     {
       let over = { v: Infinity };
       let rock = { v: Infinity };
-      let curtain = { v: Infinity };
-      for (let s = sa; s <= sb; s += 3) {
+      const ga = railG.stopS[2];
+      for (let s = ga; s <= railG.stopS[3]; s += 3) {
         railG.sampleS(s, pose);
         const { x, y, z } = pose.position;
-        const at = { s: Math.round(s - sa), p: [x, y, z].map(Math.round) };
+        const at = { s: Math.round(s - ga), p: [x, y, z].map(Math.round) };
         const f = railG.tAtS(s) * (nK - 1);
         const i0 = Math.min(nK - 2, Math.floor(f));
         const need = L.TRAIL_CLEAR[i0] + (L.TRAIL_CLEAR[i0 + 1] - L.TRAIL_CLEAR[i0]) * (f - i0);
         const o = y - groundAt(x, z) - need;
         if (o < over.v) over = { v: r1(o), need: r1(need), ...at };
-        const c = cliffDistance(x, y, z, 120);
+        const c = cliffDistance(x, y, z, 60);
         if (c < rock.v) rock = { v: c, ...at };
-        const cz = L.fallsCurtainAt(Math.min(F.top[1], Math.max(F.bottom[1], y)))[1];
-        if (cz - z < curtain.v) curtain = { v: r1(cz - z), ...at };
       }
-      report.a3a4Clear = { over, rock, curtain };
-      check(
-        "a3 to a4: clear all the way (>= TRAIL_CLEAR - 1 over the ground, >= 40 from rock at its own height, >= 250 north of the curtain)",
-        over.v >= -1 && rock.v >= 40 && curtain.v >= 250,
-        `least over the ground ${JSON.stringify(over)}, nearest rock ${JSON.stringify(rock)}, nearest to the curtain ${JSON.stringify(curtain)}`,
-      );
+      report.a3a4Clear = { over, rock };
+      check("a3 to a4: clear all the way (>= TRAIL_CLEAR - 1 over the ground, >= 30 from any ground higher than the camera)", over.v >= -1 && rock.v >= 30, `least over the ground ${JSON.stringify(over)}, nearest rock ${JSON.stringify(rock)}`);
     }
-    // 3. The view turns one way only. From a3 to 90 units before a4 (three
-    //    times the rail's view blur) the bearing never goes back by more than
-    //    0.05 degrees between samples 2 apart. Inside those last 90 units the
-    //    blur lets a4's own next turn in (the traverse turns left at once): the
-    //    view settles back a few degrees onto the stop. That settle is a4's and
-    //    the next stretch's, which this move does not touch (the cave pass had
-    //    it too: 4.4 degrees); it must stay under 5.
+    // 5 and 6 judge the VIEW, and there are two views for this walk (decision
+    //    67): Version F, facing forward, is in the layout; Version W, watching
+    //    the falls, is a paste-ready block in the decision log with the same
+    //    positions. The test tells them apart by how much the view turns (F
+    //    about 400 degrees, W about 123) and holds each to its own rules, so
+    //    switching is a paste and a test run. Anything in between fails both.
     let total = 0;
     let against = 0;
-    let settle = 0;
     let peak = -Infinity;
     let step = { v: 0 };
-    let stepAtStop = { v: 0 };
     let fastest = { v: 0 };
     {
-      const vhA = vhAt(rail, sa);
       let prev = rail.bearingAtS(sa);
       for (let s = sa + 2; s <= sb; s += 2) {
         const b = rail.bearingAtS(s);
@@ -568,124 +646,129 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
         total += Math.abs(d);
         if (s <= sb - 90) against = Math.max(against, -d);
         peak = Math.max(peak, b);
-        if (s - sa <= 90 || sb - s <= 90) {
-          if (Math.abs(d) > stepAtStop.v) stepAtStop = { v: +Math.abs(d).toFixed(2), s: Math.round(s - sa) };
-        } else if (Math.abs(d) > step.v) step = { v: +Math.abs(d).toFixed(2), s: Math.round(s - sa) };
+        if (Math.abs(d) > step.v) step = { v: +Math.abs(d).toFixed(2), s: Math.round(s - sa) };
         const dv = vhAt(rail, s) - vhAt(rail, s - 2);
-        if (vhAt(rail, s) - vhA > 12 && dv > 1e-6 && Math.abs(d) / dv > fastest.v) fastest = { v: +(Math.abs(d) / dv).toFixed(2), s: Math.round(s - sa), vh: r1(vhAt(rail, s)) };
+        if (s - sa > 60 && sb - s > 60 && dv > 1e-6 && Math.abs(d) / dv > fastest.v) fastest = { v: +(Math.abs(d) / dv).toFixed(2), s: Math.round(s - sa), vh: r1(vhAt(rail, s)) };
       }
-      settle = peak - rail.bearingAtS(sb);
     }
-    const net = rail.bearingAtS(sb) - rail.bearingAtS(sa);
-    const keyTurn = L.TRAIL_VIEW[a4Key].bearing - L.TRAIL_VIEW[a3Key].bearing;
-    let keysRise = true;
-    for (let k = a3Key; k < a4Key; k++) if (!(L.TRAIL_VIEW[k + 1].bearing > L.TRAIL_VIEW[k].bearing)) keysRise = false;
-    report.a3a4 = { total: r1(total), net: r1(net), keyTurn, against: +against.toFixed(3), settle: r1(settle), step, stepAtStop, fastest };
-    check(
-      "a3 to a4: the view turns one way only (every key's bearing above the last; on the rail never back by more than 0.05 degrees until 90 units before a4; a4's own settle under 5)",
-      keysRise && against <= 0.05 && settle < 5,
-      `keys rising ${keysRise}; most against the turn ${against.toFixed(3)} deg; the settle onto a4 ${r1(settle)} deg`,
-    );
-    // 4. How much it turns and how fast. The keys turn 116.5 (128 at a3 to
-    //    244.5 at a4); the rail, blurred at both stops, 110 to 120 net and at
-    //    most 125 counting the settle. Between samples 2 apart no step turns
-    //    more than 0.4 degrees (0.2 per unit; passing the falls ~340 away needs
-    //    0.16), except within 90 units of either stop, where the neighbouring
-    //    turn runs through the stop (the pool turn's end at a3, the traverse's
-    //    start at a4: 0.7; the camera is in its dwell there, so it is slow in
-    //    scroll). Past a3's dwell the turn stays under 1.4 degrees per vh at
-    //    the default pacing (the cave pass: 1.42).
-    check(
-      "a3 to a4: about 117 degrees in all (keys 116.5; the rail 110-120 net, <= 125 with the settle), no step of 2 units over 0.4 degrees (0.7 within 90 units of a stop), <= 1.4 deg per vh past a3's dwell",
-      Math.abs(keyTurn - 116.5) < 1e-9 && net >= 110 && net <= 120 && total <= 125 && step.v <= 0.4 && stepAtStop.v <= 0.7 && fastest.v <= 1.4,
-      `keys ${keyTurn} deg, rail net ${r1(net)} deg, ${r1(total)} deg with the settle; largest step ${JSON.stringify(step)}, within 90 units of a stop ${JSON.stringify(stepAtStop)}; fastest ${JSON.stringify(fastest)}`,
-    );
-    // 5. The falls in the frame, at the two shapes that matter (16:9 and
-    //    Lovro's 1691 x 1278, the narrower). At every key from a3 to a4, on the
-    //    rail's own pose and lens: the falls' middle inside the middle of the
-    //    frame and their lip under the top edge; from a3 to the last key that
-    //    passes the falls (the last with its own pace) the foot at the pool is
-    //    in the frame too, so the falls are whole, lip to pool; and at a4 they
-    //    are whole again with their middle at x 0.4-0.6, the pool on the frame's
-    //    bottom, as the stop has framed them since B9.
+    const version = total > 250 ? "F" : "W";
+    report.a3a4 = { version, total: r1(total), step, fastest, against: +against.toFixed(3), settle: r1(peak - rail.bearingAtS(sb)) };
+    // The falls in the frame: their middle, on the rail's own pose and lens.
+    const mid = (F.top[1] + F.bottom[1]) / 2;
+    const [mx, mz] = L.fallsCurtainAt(mid);
+    const inFrame = (s) => {
+      rail.sampleS(s, pose);
+      const v = proj(camOf(pose.position.clone(), pose.target.clone(), 1691 / 1278, rail.fovAtS(s)), mx, mid, mz);
+      return v.z < 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1;
+    };
+    // At a4 the falls are whole, lip to pool, their middle at x 0.4 to 0.6 and
+    // the pool on the frame's bottom, as the stop has framed them since B9.
+    const atA4 = (() => {
+      rail.sampleS(sb, pose);
+      const cam = camOf(pose.position.clone(), pose.target.clone(), ASPECT, rail.fovAtS(sb));
+      const xy = (x, y, z) => {
+        const v = proj(cam, x, y, z);
+        return v.z < 1 ? [(v.x + 1) / 2, (1 - v.y) / 2] : null;
+      };
+      const m = xy(mx, mid, mz);
+      const lip = xy(F.top[0], F.top[1], F.top[2]);
+      const foot = xy(F.bottom[0], F.bottom[1], F.bottom[2]);
+      return { whole: !!(m && lip && foot && m[0] >= 0.4 && m[0] <= 0.6 && lip[1] >= 0.03 && foot[1] <= 1), mid: m && m.map((v) => +v.toFixed(2)), lipY: lip && +lip[1].toFixed(2), footY: foot && +foot[1].toFixed(2) };
+    })();
+    // The stops stand and aim as they did. The rail blurs a stop's view with
+    // its neighbours' and lifts the camera over the ground through a 70 unit
+    // window, so the rows either side of a stop move it: with the flight
+    // (commit 9c03225) a3 stood on its key aimed 126.2 / -11.8, and a4 stood
+    // 1.6 over its key (325.6: the flight came in 24 over the bench) aimed
+    // 239.8 / -7.9. The walk's first and last rows are set to give that back:
+    // within 0.5 of a degree and 0.5 of a unit.
     {
-      const mid = (F.top[1] + F.bottom[1]) / 2;
-      const [mx, mz] = L.fallsCurtainAt(mid);
-      const lastPass = L.TRAIL_PACE.reduce((a, pc, i) => (i > a3Key && i < a4Key && pc !== L.PACE.walk ? i : a), a3Key);
-      const bad = [];
-      const rows = [];
-      for (let k = a3Key; k <= a4Key; k++) {
-        const s = k === a3Key ? sa : k === a4Key ? sb : railSAtKey(k);
-        rail.sampleS(s, pose);
-        const row = { key: k };
-        for (const [name, aspect] of [["16:9", ASPECT], ["1691:1278", 1691 / 1278]]) {
-          const cam = camOf(pose.position.clone(), pose.target.clone(), aspect, rail.fovAtS(s));
-          const xy = (x, y, z) => {
-            const v = proj(cam, x, y, z);
-            return v.z < 1 ? [(v.x + 1) / 2, (1 - v.y) / 2] : null;
-          };
-          const m = xy(mx, mid, mz);
-          const lip = xy(F.top[0], F.top[1], F.top[2]);
-          const foot = xy(F.bottom[0], F.bottom[1], F.bottom[2]);
-          const whole = k <= lastPass || k === a4Key;
-          const ok = m && lip && foot && m[0] >= 0.38 && m[0] <= 0.75 && m[1] >= 0.3 && m[1] <= 0.85 && lip[1] >= 0.03 && lip[0] >= 0.05 && lip[0] <= 0.95 && (!whole || foot[1] <= 1) && (k !== a4Key || (m[0] >= 0.4 && m[0] <= 0.6));
-          if (!ok) bad.push({ key: k, shape: name, mid: m && m.map((v) => +v.toFixed(2)), lipY: lip && +lip[1].toFixed(2), footY: foot && +foot[1].toFixed(2), whole });
-          if (name === "1691:1278") Object.assign(row, { x: m && +m[0].toFixed(2), lip: lip && +lip[1].toFixed(2), foot: foot && +foot[1].toFixed(2) });
-        }
-        rows.push(row);
-      }
-      report.a3a4Falls = rows;
+      const stop = (s) => {
+        railG.sampleS(s, pose);
+        return [railG.bearingAtS(s), railG.pitchAtS(s), pose.position.y];
+      };
+      const [b3, p3, y3] = stop(railG.stopS[2]);
+      const [b4, p4, y4] = stop(railG.stopS[3]);
+      report.a3a4Stops = { a3: [+b3.toFixed(2), +p3.toFixed(2), +y3.toFixed(2)], a4: [+b4.toFixed(2), +p4.toFixed(2), +y4.toFixed(2)] };
       check(
-        `a3 to a4: the falls in the frame at every key (their middle at x 0.38-0.75, the lip under the top edge; whole, lip to pool, from a3 to key ${lastPass} and at a4)`,
-        bad.length === 0,
-        bad.length ? `${bad.length} off, first ${JSON.stringify(bad[0])}` : `at 1691x1278, key: middle x / lip y / foot y: ${rows.map((r) => `${r.key}: ${r.x} / ${r.lip} / ${r.foot}`).join(", ")}`,
+        "a3 to a4: both stops stand and aim as they did before the walk (a3 at y 130.0 aimed 126.2 / -11.8, a4 at y 325.6 aimed 239.8 / -7.9; within 0.5)",
+        Math.abs(b3 - 126.2) <= 0.5 && Math.abs(p3 + 11.8) <= 0.5 && Math.abs(y3 - 130) <= 0.5 && Math.abs(b4 - 239.8) <= 0.5 && Math.abs(p4 + 7.9) <= 0.5 && Math.abs(y4 - 325.6) <= 0.5,
+        `a3 y ${y3.toFixed(2)} aimed ${b3.toFixed(2)} / ${p3.toFixed(2)}, a4 y ${y4.toFixed(2)} aimed ${b4.toFixed(2)} / ${p4.toFixed(2)}`,
       );
-      // And between the keys: at every sample the falls' middle is inside the
-      // frame (5% in from every edge), there is sky in the frame (>= 5% of a
-      // coarse ray grid misses the ground), no more than 15% of it is ground
-      // nearer than 150, and the view looks up (6 to 14 degrees): never a bare
-      // wall, never the ground.
-      let out = null;
-      let sky = { v: Infinity };
-      let near = { v: 0 };
-      let pitch = [Infinity, -Infinity];
-      const up = new THREE.Vector3(0, 1, 0);
-      for (let s = sa; s <= sb; s += 6) {
-        rail.sampleS(s, pose);
-        const fov = rail.fovAtS(s);
-        const aspect = 1691 / 1278;
-        const cam = camOf(pose.position.clone(), pose.target.clone(), aspect, fov);
-        const v = proj(cam, mx, mid, mz);
-        if (!out && !(v.z < 1 && Math.abs(v.x) <= 0.9 && Math.abs(v.y) <= 0.9)) out = { s: Math.round(s - sa), x: +((v.x + 1) / 2).toFixed(2), y: +((1 - v.y) / 2).toFixed(2) };
-        const pt = rail.pitchAtS(s);
-        pitch = [Math.min(pitch[0], pt), Math.max(pitch[1], pt)];
-        if (Math.round((s - sa) / 6) % 3) continue;
-        const p = pose.position;
-        const f = pose.target.clone().sub(p).normalize();
-        const r = new THREE.Vector3().crossVectors(f, up).normalize();
-        const u = new THREE.Vector3().crossVectors(r, f);
-        const th = Math.tan(((fov / 2) * Math.PI) / 180);
-        let nSky = 0;
-        let nNear = 0;
-        let n = 0;
-        for (let j = 0; j < 12; j++) {
-          for (let i = 0; i < 16; i++) {
-            const d = f.clone().addScaledVector(r, ((2 * (i + 0.5)) / 16 - 1) * th * aspect).addScaledVector(u, (1 - (2 * (j + 0.5)) / 12) * th).normalize();
-            n++;
-            let hit = 0;
-            for (let t = 4; t <= 5000 && !hit; t += t < 400 ? 8 : 40) if (p.y + d.y * t <= terrainHeight(p.x + d.x * t, p.z + d.z * t)) hit = t;
-            if (!hit) nSky++;
-            else if (hit <= 150) nNear++;
-          }
-        }
-        if (nSky / n < sky.v) sky = { v: +(nSky / n).toFixed(3), s: Math.round(s - sa) };
-        if (nNear / n > near.v) near = { v: +(nNear / n).toFixed(3), s: Math.round(s - sa) };
+    }
+    if (version === "F") {
+      // 5F. The turns: three, and slow. In all under 410 degrees (left 135 down
+      //     over the pool and onto the log, right 80 over the fan and up the
+      //     wall, right 165 at the bench's end: the reveal; the rest is the two
+      //     stops' own settling). No step of 2 units turns more than 2.4
+      //     degrees (the reveal is nearly a turn on the spot, walked at a
+      //     crawl), and 60 clear of the stops the view never turns faster than
+      //     2.7 degrees per vh at the default pacing (it measures 2.6 in the
+      //     reveal and 2.5 at the log and on the fan: the three turns are paced
+      //     alike, which is what Q's paces on the rows are for).
+      check("a3 to a4 (F, facing forward): the turns are few and slow (under 410 degrees in all, no step of 2 units over 2.4 degrees, <= 2.7 degrees per vh 60 clear of the stops)", total < 410 && step.v <= 2.4 && fastest.v <= 2.7, `${r1(total)} degrees in all; largest step ${JSON.stringify(step)}; fastest ${JSON.stringify(fastest)}`);
+      // 6F. Facing forward, then the reveal. From the pool's shore to the Trail
+      //     Hut the view stays within 50 degrees of the way the camera travels
+      //     (it leads into each corner). The falls are behind it from the log
+      //     on: their middle is out of the frame until the turn at the bench's
+      //     end brings it in, for good, 60 to 200 units before a4.
+      const sShore = railSAt(L.ROUTE_MARKS.crossing - 1);
+      const sHut = railSAt(L.ROUTE_MARKS.wall + 1);
+      let off = { v: 0 };
+      for (let s = sShore; s <= sHut; s += 4) {
+        const d = Math.abs((((rail.bearingAtS(s) - rail.headingAtS(s)) % 360) + 540) % 360 - 180);
+        if (d > off.v) off = { v: r1(d), s: Math.round(s - sa) };
       }
-      report.a3a4Frames = { out, sky, near, pitch: pitch.map(r1) };
+      let hidden = true;
+      for (let s = railSAt(L.ROUTE_MARKS.crossing); s <= sHut; s += 6) if (inFrame(s)) hidden = false;
+      let sReveal = sb;
+      while (sReveal - 2 > sHut && inFrame(sReveal - 2)) sReveal -= 2;
+      report.a3a4View = { off, hidden, revealUnits: Math.round(sb - sReveal), revealVh: r1(vhAt(rail, sb) - vhAt(rail, sReveal)), a4: atA4 };
       check(
-        "a3 to a4: between the keys too: the falls' middle inside the frame at every sample, sky in every frame (>= 5%), ground nearer than 150 on <= 15% of it, the view looking up 6-14 degrees",
-        !out && sky.v >= 0.05 && near.v <= 0.15 && pitch[0] >= -14 && pitch[1] <= -6,
-        `${out ? `the falls leave the frame at ${JSON.stringify(out)}` : "the falls in every sample"}; least sky ${JSON.stringify(sky)}; most near ground ${JSON.stringify(near)}; pitch ${r1(pitch[0])} to ${r1(pitch[1])}`,
+        "a3 to a4 (F): facing forward (view within 50 degrees of the travel heading from the pool's shore to the Trail Hut), the falls out of the frame from the log to the hut, revealed 60 to 200 units before a4 and whole in the a4 frame (middle at x 0.4-0.6, lip to pool)",
+        off.v <= 50 && hidden && sb - sReveal >= 60 && sb - sReveal <= 200 && atA4.whole,
+        `furthest off the heading ${JSON.stringify(off)}; the falls ${hidden ? "stay out of the frame" : "show"} from the log to the hut; in the frame for the last ${Math.round(sb - sReveal)} units (${r1(vhAt(rail, sb) - vhAt(rail, sReveal))} vh); at a4 (16:9) ${JSON.stringify(atA4)}`,
+      );
+    } else {
+      // 5W. One way only: every key's bearing above the last, and on the rail
+      //     the view never goes back by more than 0.05 degrees until 90 units
+      //     before a4, where the stop's own settle (the traverse turns left at
+      //     once, and the rail's blur lets that in) stays under 6. In all under
+      //     130 degrees, no step of 2 units over 1 degree, <= 2.4 per vh.
+      let keysRise = true;
+      for (let k = a3Key; k < a4Key; k++) if (!(L.TRAIL_VIEW[k + 1].bearing > L.TRAIL_VIEW[k].bearing)) keysRise = false;
+      const settle = peak - rail.bearingAtS(sb);
+      check(
+        "a3 to a4 (W, watching the falls): the view turns one way only (every key's bearing above the last; on the rail never back by more than 0.05 degrees until 90 units before a4; a4's own settle under 6), under 130 degrees in all, no step of 2 units over 1 degree, <= 2.4 degrees per vh 60 clear of the stops",
+        keysRise && against <= 0.05 && settle < 6 && total < 130 && step.v <= 1 && fastest.v <= 2.4,
+        `keys rising ${keysRise}; most against the turn ${against.toFixed(3)} deg; the settle onto a4 ${r1(settle)} deg; ${r1(total)} degrees in all; largest step ${JSON.stringify(step)}; fastest ${JSON.stringify(fastest)}`,
+      );
+      // 6W. The falls stay in the frame as much as the ground allows: their
+      //     middle is in the frame from the pool's east shore to a4 except for
+      //     one gap (close under them on the gorge floor they are too near and
+      //     too far round to hold), and whole at a4.
+      const sShore = railSAt(L.ROUTE_MARKS.crossing - 2);
+      let seen = 0;
+      let n = 0;
+      let gaps = 0;
+      let was = true;
+      let gap = [null, null];
+      for (let s = sShore; s <= sb; s += 4) {
+        const is = inFrame(s);
+        n++;
+        if (is) seen++;
+        if (!is && was) {
+          gaps++;
+          gap[0] = Math.round(s - sa);
+        }
+        if (is && !was) gap[1] = Math.round(s - sa);
+        was = is;
+      }
+      report.a3a4View = { seen: r1((seen / n) * 100), gaps, gap, a4: atA4 };
+      check(
+        "a3 to a4 (W): the falls' middle in the frame for at least 85 percent of the way from the pool's shore to a4, out of it at most once, and whole in the a4 frame (middle at x 0.4-0.6, lip to pool)",
+        seen / n >= 0.85 && gaps <= 1 && atA4.whole,
+        `in the frame ${r1((seen / n) * 100)} percent of the way; out of it ${gaps} time(s) ${gaps ? JSON.stringify(gap) : ""}; at a4 (16:9) ${JSON.stringify(atA4)}`,
       );
     }
   }
@@ -1400,8 +1483,22 @@ async function shoot(html, file, w, h) {
     }
     return best;
   };
-  const heroOff = R.HERO_SPOTS.map((p) => r1(offRoute(p[0], p[1], p[2])));
-  check("pinned: every hero rock spot (rocks.ts HERO_SPOTS) lies within 5 of the camera's route", Math.max(...heroOff) <= 5, { spots: heroOff.length, worst: Math.max(...heroOff) });
+  // Decision 67: four of the spots are the keys of the flight from a3 to a4
+  // (decision 65), which the walk along the trail replaced. They stay where
+  // they are: the rocks within 150 of them (the wall under the bench's west
+  // end) are still the ones the camera climbs past, 31 to 71 away, and moving
+  // a spot swaps plain rocks for chamfered ones or back, which is a change to
+  // the scenery nobody asked for. So: those four within 75 of the route, every
+  // other spot within 5.
+  const RETIRED_FLIGHT = [[270, 231, 1349], [321, 251, 1346], [374, 271, 1340], [430, 290, 1330]];
+  const retired = (p) => RETIRED_FLIGHT.some((q) => q[0] === p[0] && q[1] === p[1] && q[2] === p[2]);
+  const heroOff = R.HERO_SPOTS.filter((p) => !retired(p)).map((p) => r1(offRoute(p[0], p[1], p[2])));
+  const oldOff = R.HERO_SPOTS.filter(retired).map((p) => r1(offRoute(p[0], p[1], p[2])));
+  check(
+    "pinned: every hero rock spot (rocks.ts HERO_SPOTS) lies within 5 of the camera's route (the four of the retired flight up the north wall: within 75)",
+    Math.max(...heroOff) <= 5 && oldOff.length === 4 && Math.max(...oldOff) <= 75,
+    { spots: heroOff.length, worst: Math.max(...heroOff), retiredFlight: oldOff },
+  );
   const bandOff = C.NEAR_BAND.map((c) => r1(offRoute(c.x, c.y, c.z)));
   check("pinned: every near band camera (cover.ts NEAR_BAND) lies within 5 of the camera's route", Math.max(...bandOff) <= 5, { cameras: bandOff.length, worst: Math.max(...bandOff) });
 
@@ -1433,6 +1530,62 @@ async function shoot(html, file, w, h) {
   check("pinned: a key added to the route and a point to the trail move no rock (meshes, footprints, ring numbers)", iLog > 0 && after.rocks === before.rocks, { rockFootprints: before.nRocks, identical: after.rocks === before.rocks });
   const moved = sameClumps(before.clumps, after.clumps);
   check("pinned: the same edit moves no grass clump (place, height, turn, number)", moved.differ === 0, moved);
+
+  // 2b. Decision 67: the walk from a3 to a4 moved no rock. Rocks keep clear of
+  // the camera's route (rocks.ts nearRail: the keys as straight segments), and
+  // three of its loops deal their later rocks from one running stream, so a
+  // key in the wrong place drops a family and re-deals the ones after it. The
+  // walk's fifteen positions were chosen so that every verdict is what it was
+  // with the flight they replaced (decision 65); put the flight's positions
+  // back and not one rock mesh, footprint or ring number may differ.
+  // The grass does differ, in three of its parts and no other: cover.ts thins
+  // it by distance to the route (railKeep, read off a 100 unit grid), and a
+  // part deals every drift after a changed one again.
+  //   streamShelf  the shelf south of the gorge, rows z 1,936 to 2,050: the
+  //                walk comes 280 further south (the pool's east shore) than
+  //                the flight did, so a few drifts there are kept or dropped.
+  //   lakeShore    ONE of the Mirror Lake's 170 shore candidates, at (138,
+  //                148), reads 1,072 from the route where it read 1,101 (the
+  //                line is 1,100; the true distance is 1,108 either way, to
+  //                the route north of the lake: the coarse grid blends in the
+  //                bench, which the walk follows 60 to 100 further north than
+  //                the flight passed). It is planted now, and the 104
+  //                candidates after it are numbered one on: the same drifts
+  //                in the same places, their clumps dealt again.
+  //   ring:lake    the rings round the lake's rocks share cells with those.
+  // Pinning that would take cover.ts its own copy of the route (as decision 66
+  // gave rocks.ts HERO_SPOTS); cover.ts was not to be touched for the walk.
+  {
+    const FLIGHT = [
+      [-287, 131, 1396], [-222, 133, 1376], [-167, 136, 1366], [-111, 141, 1358], [-56, 147, 1352], [-1, 155, 1350], [54, 165, 1351], [109, 178, 1352],
+      [163, 194, 1353], [217, 212, 1352], [270, 231, 1349], [321, 251, 1346], [374, 271, 1340], [430, 290, 1330], [624, 324, 1262],
+    ];
+    const i0 = PLACES[2].trail + 1;
+    const n = PLACES[3].trail - i0;
+    const walk = TRAIL.slice(i0, i0 + n);
+    let flown = null;
+    if (n === FLIGHT.length) {
+      TRAIL.splice(i0, n, ...FLIGHT);
+      try {
+        flown = build();
+      } finally {
+        TRAIL.splice(i0, n, ...walk);
+      }
+    }
+    check("decision 67: the walk from a3 to a4 moves no rock (built with the flight's fifteen positions instead: the same meshes, footprints and ring numbers)", !!flown && flown.rocks === before.rocks, { rows: n, rockFootprints: before.nRocks, identical: !!flown && flown.rocks === before.rocks });
+    if (flown) {
+      const keyOf = (c) => c.join(" ");
+      const had = new Set(flown.clumps.map(keyOf));
+      const has = new Set(before.clumps.map(keyOf));
+      const gone = flown.clumps.filter((c) => !has.has(keyOf(c)));
+      const come = before.clumps.filter((c) => !had.has(keyOf(c)));
+      const byPart = {};
+      for (const c of [...gone, ...come]) byPart[c[5]] = (byPart[c[5]] || 0) + 1;
+      report.walkGrass = { flight: flown.clumps.length, walk: before.clumps.length, gone: gone.length, come: come.length, byPart };
+      const others = Object.keys(byPart).filter((k) => !["streamShelf", "lakeShore", "ring:lake"].includes(k));
+      check("decision 67: the walk changes grass in three parts only (the stream shelf's last rows, the lake's shore and the rings beside it), under 1,500 clumps of the world's", others.length === 0 && gone.length < 1500 && come.length < 1500, report.walkGrass);
+    }
+  }
 
   // 3. A crate put down on the pool's east shore (a footprint 14 across, where
   // grass grew). Clumps go where it stands; the part of the world it stands in

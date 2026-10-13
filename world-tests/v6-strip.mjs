@@ -49,7 +49,8 @@ const want = (k) => (named.length === 0 && MODES.includes(k)) || named.includes(
  * v6-overdraw.mjs read STRIP_FRAMES from this source.
  * 2026-10-13 (Lovro: "the camera between Video Ads 1 and Video Ads 2 goes into
  * the cave for no reason"): the camera no longer enters the cave (and since
- * decision 66 of the same day there is no cave in the world). From a3
+ * decision 66 of the same day there is no cave in the world; since decision
+ * 67 the camera walks the trail from a3 to a4, see STRIP_FRAMES). From a3
  * (key 21) it crosses the gorge in one move, past the falls and up to a4 (key
  * 37); the seven frames between the two stops follow it. The marks "cave",
  * "camp", "exit" and "back" are retired in layout.ts; "crossing" (key 25) is
@@ -76,18 +77,19 @@ const STRIP_FRAMES = [
   [18, "the ride: levelling out over the pool", "pool"],
   [20, "the turn at the pool, round the upper gorge", "pool+2"],
   [21, "a3 the whole falls, from outside", "stop:a3"],
-  // 2026-10-13: a3 to a4 in one move across the gorge (no cave). These seven
-  // replace the cave pass's seven (the approach to the curtain, through the
-  // curtain, past the camp, out again, rising from the sheet, across the
-  // gorge, up the rock), so every later frame keeps its place in the sheets.
-  // The numbers match the keys today (a3 is key 21, crossing 25, wall 35, a4 37).
-  [22, "leaving a3: east along the gorge, the falls on the right", "a3+1"],
-  [24, "coming up square on to the falls", "a3+3"],
-  [25, "square on to the falls: lip to pool", "crossing"],
-  [27.5, "past the falls, the view turning with them", "crossing+2.5"],
-  [30, "the last key that passes the falls, starting to rise", "crossing+5"],
-  [33, "pulling back and rising across the gorge", "crossing+8"],
-  [35.5, "under the Trail Hut's bench, the falls sliding to the middle", "wall+0.5"],
+  // 2026-10-13, decision 67: a3 to a4 on the trail (down to the pool's shore,
+  // over the log, the fan, up the wall, along the bench). Seven frames, as
+  // many as the flying move and the cave pass before it had, so every later
+  // frame keeps its place in the sheets. The numbers match the keys today
+  // (a3 is key 21, "crossing" the log's north end 26, "wall" the bench's west
+  // end 31, a4 37).
+  [22.5, "coming down from a3 over the pool", "a3+1.5"],
+  [24, "over the pool's east shore, the log ahead", "a3+3"],
+  [25.5, "crossing the river on the log", "a3+4.5"],
+  [27.5, "the talus fan, the trail and its lanterns ahead", "crossing+1.5"],
+  [29, "up the north wall, under the bench's cliff", "crossing+3"],
+  [31.5, "on the bench, the Trail Hut ahead", "wall+0.5"],
+  [34.5, "the turn at the bench's edge, out over the gorge", "wall+3.5"],
   [37, "a4 the Trail Hut", "stop:a4"],
   [39.5, "the traverse, facing ahead", "traverse+0.5"],
   [42.6, "the gully, the notch of sky", "gully+0.6"],
@@ -869,7 +871,7 @@ if (want("panel")) {
   const after = await page.evaluate(() => ({
     h: document.documentElement.scrollHeight,
     cam: window.__worldCamera(),
-    saved: JSON.parse(localStorage.getItem("world-v6:tuning") || "null"),
+    saved: JSON.parse(localStorage.getItem("world-v6:tuning:trail") || "null"), // the current TUNE key (tuning.ts KEY)
     total: document.querySelector('section[aria-label="Tuning (dev only)"] b')?.textContent,
   }));
   await page.screenshot({ path: path.join(OUT, "panel-open.png") });
@@ -882,7 +884,7 @@ if (want("panel")) {
   );
   await page.evaluate(() => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Reset everything")?.click());
   await sleep(600);
-  const reset = await page.evaluate(() => ({ h: document.documentElement.scrollHeight, saved: localStorage.getItem("world-v6:tuning") }));
+  const reset = await page.evaluate(() => ({ h: document.documentElement.scrollHeight, saved: localStorage.getItem("world-v6:tuning:trail") }));
   check("panel: Reset everything puts the page back", Math.abs(reset.h - before.h) <= 1, `height ${before.h} -> ${after.h} -> ${reset.h}, stored ${reset.saved === null ? "cleared" : reset.saved.slice(0, 60)}`);
   await page.click("footer button[aria-expanded]");
 }

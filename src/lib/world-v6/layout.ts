@@ -14,14 +14,13 @@
  *   shoulder) runs along the south shelf to the lip of the big falls, which
  *   pour NORTH off the gorge's SOUTH wall, away from the trail. The camera
  *   rides down with the water and turns round over the pool to the pool's
- *   west end, OUTSIDE the falls (a3). From there it crosses the gorge in one
- *   move: east past the falls along the gorge's north side, the view turning
- *   with them, then pulling back and rising to a rock spur on the north wall
- *   with the Trail Hut (a4), the whole falls across the gorge. The trail on
- *   the ground (PATH) goes its own way there: from the pool's east shore
- *   along the bank to the fallen log over the river, and up the north wall's
- *   switchbacks to the hut. There is no cave: the one behind the falls was
- *   removed on 2026-10-13 (see "The cave that was here").
+ *   west end, OUTSIDE the falls (a3). From there it takes the trail on the
+ *   ground (PATH, decision 67): down over the pool to its east shore, across
+ *   the river on the fallen log, over the talus fan, up the north wall and
+ *   along the bench past the Trail Hut, facing the way it goes, and turns
+ *   round at the bench's end to the hut and the whole falls across the gorge
+ *   (a4). There is no cave: the one behind the falls was removed on
+ *   2026-10-13 (see "The cave that was here").
  *   A rising traverse east and a gully up the Climb's rim bring it to
  *   the ridge (the burst, locked), the saddle and the meadow down to the
  *   Mirror Lake (a5); west through the Glowing Forest to the Great Tree (a6);
@@ -74,8 +73,18 @@ export type PlaceId = "a1" | "a2" | "a3" | "a4" | "a5" | "a6" | "a7" | "a8";
  *   bridge  walking the rope bridge: BRIDGE_EYE above its deck
  *   board   on foot at the bounty isle and onto / off your airship's deck
  *   flight  riding the airship: the camera stands on its deck (SHIP)
+ *   trail   walking the trail on the ground, from the Video Ads I stop to
+ *           the Trail Hut's bench (decision 67): for the rail a walk (it keeps
+ *           >= TRAIL_CLEAR over the ground). It is a kind of its own because
+ *           forest.ts caps every tree within 70 of a "walk" or "hike" key to
+ *           the camera's height less 18, and this stretch is 35 to 55 over
+ *           the ground with the trail's spruces 14 to 30 beside it: as "walk"
+ *           it turns 24 of the fan's trees into stumps and shrubs (measured).
+ *           forest.ts does not know "trail", so the trees stand as they are.
+ *           Do not add it to forest.ts's GROUND_KINDS without dealing the
+ *           forest again on purpose.
  */
-export type TrailKind = "walk" | "dive" | "hike" | "climb" | "rise" | "sky" | "bridge" | "board" | "flight";
+export type TrailKind = "walk" | "dive" | "hike" | "climb" | "rise" | "sky" | "bridge" | "board" | "flight" | "trail";
 
 /** Kinds the rail must NOT lift over the ground or the islands' keep-out domes:
  *  their heights are exact (the ride, the gully up to the burst, the bridge's
@@ -171,6 +180,18 @@ export const OBSERVATORY = { x: -2052, y: 1650, z: -1560, facing: 125 } as const
  * per vh (150: 1.25) and the middle 9.5; at 160 the middle is 11.0, slower
  * than those walks. 1,940 vh in all (tuning.ts's storage key bumped to
  * "direct").
+ * 2026-10-13, later (decision 67, Lovro: "we have the path but we don't take
+ * it and go in the air"): a3 -> a4 walks the trail, 1,546 units and 400
+ * degrees of turning where the flight was 1,221 and 117, so a4's budget goes
+ * 150 -> 280: 2.8 screens. From the "crossing" mark to "wall" (the fan and
+ * the way up) it goes at 9.0 vh per 100 units, as the walks either side (8.1
+ * to 10.6); the three turns are walked slower (Q on their keys) so the view
+ * never turns faster than 2.6 degrees per vh: a3 to "crossing" 18.7 vh per
+ * 100 units (the dwell, the turn down over the pool, the turn onto the log),
+ * "wall" to a4 31.1 (the bench, the turn to the falls, the dwell; the ride
+ * down the falls is 32 to 34). Stop to stop that is 18.1, where a2 -> a3 is
+ * 14.5 and a4 -> a5 13.3: the price of the turning. 2,070 vh in all
+ * (tuning.ts's storage key bumped to "trail").
  */
 const PLACE_DEFS: ReadonlyArray<Omit<Place, "trail">> = [
   { id: "a1", module: "Introduction", place: "The Landing", landmark: "Signpost", mesh: "LM_Signpost",
@@ -184,7 +205,7 @@ const PLACE_DEFS: ReadonlyArray<Omit<Place, "trail">> = [
     pos: { x: -100, y: 61.5, z: 1689 }, light: "late-afternoon", scrollVh: 300, height: 344 },
   // v6: the Trail Hut on the rock spur halfway up the gorge's north wall.
   { id: "a4", module: "Video Ads II", place: "The Gorge Trail", landmark: "Trail Hut", mesh: "LM_TrailHut",
-    pos: { x: TRAIL_HUT.x, y: TRAIL_HUT.y, z: TRAIL_HUT.z }, light: "gorge-sunset", scrollVh: 150, height: 30 },
+    pos: { x: TRAIL_HUT.x, y: TRAIL_HUT.y, z: TRAIL_HUT.z }, light: "gorge-sunset", scrollVh: 280, height: 30 },
   // The boathouse stands at the end of a jetty, on the water.
   { id: "a5", module: "Static Ads", place: "The Mirror Lake", landmark: "Boathouse", mesh: "LM_Boathouse",
     pos: { x: 1150, y: 564, z: -420 }, light: "sunset", scrollVh: 280, height: 40 },
@@ -766,6 +787,7 @@ export const PACE: Readonly<Record<TrailKind, number>> = {
   bridge: 2.2,
   board: 1.4,
   flight: 0.5,
+  trail: 1,
 };
 
 /** Clearance over the ground the rail keeps at a key (bible 1.0): 35 on the
@@ -786,22 +808,13 @@ interface Key {
   stop?: PlaceId;
   /** Vertical lens at this key, degrees (KEY_FOV); default STOP_FOV / DESIGN_FOV. */
   fov?: number;
-  /** Scroll pace at this key, overriding PACE[kind] (the keys that pass the falls: FALLS_PACE). */
+  /** Scroll pace at this key, overriding PACE[kind] (Q: the a3 -> a4 walk's turns). */
   pace?: number;
 }
 const K = (x: number, y: number, z: number, bearing: number, pitch: number, kind: TrailKind = "walk", stop?: PlaceId, fov?: number): Key =>
   ({ x, y, z, bearing, pitch, kind, stop, fov });
-/**
- * 2026-10-13, the a3 -> a4 move: the keys that pass the falls (the camera
- * ~340 from the curtain, the view turning with them at ~0.15 degrees per unit)
- * are walked slower than PACE.walk, so the view turns at an even rate in
- * scroll. At a walk's pace the turn peaked at 1.5 degrees per vh abeam of the
- * falls; with this it holds 0.75 to 1.25 from a3 to the Trail Hut's bench
- * (the cave pass peaked at 1.42). The camera does 7 to 9 units per vh past the
- * falls and 12 on the pull back (the walks either side of the stretch: 9 to 12).
- */
-const FALLS_PACE = 1.4;
-const S = (k: Key): Key => ({ ...k, pace: FALLS_PACE });
+/** A key walked at its own scroll pace (Key.pace) instead of its kind's: how the a3 -> a4 walk keeps its turns even in scroll. */
+const Q = (pace: number, k: Key): Key => ({ ...k, pace });
 
 // The rise: keys along the steps' line, `d` horizontal units past the foot, `up` above the line.
 const stepLine = (d: number, up: number): [number, number, number] => {
@@ -974,58 +987,73 @@ const KEYS: readonly Key[] = [
   // the whole falls on the right wall at x ~0.7, the gorge and its sky on the
   // left. Its click in is the authored PARK_VIEWS.a3.
   K(A3_VIEW.x, A3_VIEW.y, A3_VIEW.z, A3_VIEW.bearing, A3_VIEW.pitch, "walk", "a3", A3_VIEW.fov),
-  // a3 TO a4, ONE MOVE (2026-10-13, Lovro: "the camera between Video Ads 1 and
-  // Video Ads 2 goes into the cave for no reason. Just going straight from
-  // Video Ads 1 screen to Video Ads 2 and giving it a nice path"). From the a3
-  // view the camera drifts east along the gorge's north side, ~340 from the
-  // curtain, the falls passing on its right and kept at x 0.63 to 0.67 (0.69
-  // at the stop; the panel is on the left), lip to pool in the frame through a
-  // wide lens while they are close; then it pulls back and rises to the Trail
-  // Hut's bench and the falls slide to the middle as the hut comes in on the
-  // right. The view turns right only, 128 to 244.5, 0.75 to 1.25 degrees per
-  // vh all the way to the bench (S: FALLS_PACE on the keys that pass the falls);
-  // it never faces a wall with no falls or sky in it, never the ground.
-  // WHAT IT WAS, from the final pass (decision 53) until then: a dolly from a3
-  // straight into the curtain, ten "cave" keys (through the water, a shallow
-  // loop past the camp's string lights in the hall, back out through the
-  // water), the mark "back" in front of the falls, then the pull back and rise
-  // across the gorge. That was Lovro's own earlier call ("go in and then
-  // directly up to video ads 2 without doing any turning stuff", decision 46);
-  // this one replaces it. The old rows are in git at 0ad0646 and their frames
-  // in world-tests/shots/v6/a3a4/before/. The cave itself went the same day
-  // (see "The cave that was here").
-  // Rows may be added or removed here freely: since decision 66 no module
-  // reads a key by its number (rocks.ts HERO_SPOTS and cover.ts NEAR_BAND hold
-  // their own points in the world, four of them on this stretch, and
-  // v6-route.mjs fails if one of them is left off the route).
-  // Thirteen rows from a3 to "wall", 56 apart (the first 43 from the stop and
-  // 68 from the second), then the last two of the old pull back where they
-  // stood: "wall" keeps its place (the bench's rocks stay as they are) and
-  // turns 9 less (the falls still on the right there), the row before a4 is
-  // untouched, so the arrival and a4's frame are today's.
-  // The first row is what aims the a3 stop: the rail blurs a stop's view with
-  // its neighbours', and with this row 43 out at 137.5 / -10.5 the stop is
-  // still aimed 126.1 / -11.8, as it was with the dolly's first key after it,
-  // and the pitch settles to the pass's -10.7 without overshooting it.
-  K(-287, 131, 1396, 137.5, -10.5, "walk", undefined, 58),
-  K(-222, 133, 1376, 148, -10.6, "walk", undefined, 58),
-  S(K(-167, 136, 1366, 157, -10.7, "walk", undefined, 58)),
-  // Square on to the falls, due north of the curtain: the whole drop, the
-  // foam and the pool, the rim's trees against the sky.
-  M("crossing", S(K(-111, 141, 1358, 166, -10.7, "walk", undefined, 57.5))),
-  S(K(-56, 147, 1352, 174.5, -10.6, "walk", undefined, 57.5)),
-  S(K(-1, 155, 1350, 183, -10.3, "walk", undefined, 57)),
-  S(K(54, 165, 1351, 190.5, -9.8, "walk", undefined, 56.5)),
-  S(K(109, 178, 1352, 198, -9.2, "walk", undefined, 55.5)),
-  S(K(163, 194, 1353, 204, -8.6, "walk", undefined, 54.5)),
-  // The rise: 0.35 up per unit along, the falls shrinking, the massif and
-  // the Upper Falls coming up over the south rim.
-  K(217, 212, 1352, 209.5, -8, "walk", undefined, 53.5),
-  K(270, 231, 1349, 214, -7.5, "walk", undefined, 52.5),
-  K(321, 251, 1346, 218, -7.2, "walk", undefined, 51.5),
-  K(374, 271, 1340, 221.5, -7, "walk", undefined, 50.5),
-  M("wall", K(430, 290, 1330, 225, -7, "walk", undefined, 50)),
-  K(624, 324, 1262, 240, -8, "walk", undefined, 49),
+  // a3 TO a4, ON THE TRAIL (decision 67, 2026-10-13, Lovro: "we have the path
+  // but we don't take it and go in the air"). From the a3 view the camera
+  // comes down over the pool to its east shore, where the trail starts among
+  // Video Ads I's lanterns, crosses the river on the fallen log, walks the
+  // talus fan beside Video Ads II's lanterns and the handrail, goes up the
+  // north wall and along the bench past the Trail Hut's door, and at the
+  // bench's east end turns round to the hut and the falls: the a4 view. One
+  // move, no stop. FACING FORWARD: the view looks where the camera goes, and
+  // the last turn (right, out over the gorge) is the falls' reveal. On the
+  // log the view runs along it and looks down 16 (as far down as a walk may
+  // look: v6-rail.test.mjs holds 16.5), so the log is underfoot in the frame
+  // with the trail leading on from its far end; in the last turn it
+  // looks down 11 to 14, so the sweep passes over the gorge's floor and the
+  // river the camera came up from, with the far rim and the sky above it.
+  // WHERE IT IS NOT ON THE TRAIL (measured on the rail, v6-route.mjs holds
+  // it). The descent from the stop: the trail starts at the shore, 399 units
+  // and 79 vh in (a3's dwell is in that). The wall: the trail's two lower
+  // switchback legs hang off the heightfield and are not painted, so at the
+  // fan's top the camera lifts off (740 units in it is 60 over the ground,
+  // at 807 it leaves the painted strip), rises in one line east under the
+  // bench's cliff, up to 75 from the painted third leg, and comes over the
+  // bench's lip at its west end, back on the strip at 1,128: 321 units off
+  // it, 25 vh of the 280 (31 counting the lift). On the bench it swings 27
+  // off the trail to the outer edge east of the hut (see the rocks below).
+  // Everywhere else it is within 12 of the painted strip, 38 to 54 over the
+  // ground from the shore to the fan and 36 to 51 on the bench.
+  // WHY THESE POINTS AND HEIGHTS. rocks.ts drops any boulder family within
+  // 30 (plus its size) of the route's straight segments, and three of its
+  // loops deal their later rocks again when one is dropped. Every key here is
+  // placed so that not one rock changes (v6-route.mjs builds rocks.ts and
+  // checks it): 47 over the pool's east shore, 49 to 55 over the fan, 51 over
+  // the bench's west end, and round the family at the wall's foot east of the
+  // hut by the outer edge. FIFTEEN ROWS, AS BEFORE: forest.ts samples the
+  // whole route 3,600 times by key number, so one row more or fewer moves
+  // those samples everywhere and trees change at Base Camp. Keep the count,
+  // or deal the forest again on purpose.
+  // The first row aims the a3 stop (the rail blurs a stop's view with its
+  // neighbours'): with 140 / -9.6 there the stop is aimed 126.1 / -11.8, as
+  // it was. The last row keeps the a4 stop where it was: the rail lifts the
+  // camera over the ground through a 70 unit window, and it was the flight's
+  // approach, 24 over the bench, that had the stop standing 1.6 over its key
+  // (325.6). So the last row is 24 over the bench too, 130 before a4 and
+  // looking at the falls: the stop stands at 325.8, aimed 239.6 / -7.9 (it
+  // was 239.8 / -7.9). Nine units higher there and the stop drops to its
+  // key's 324.0, which shifts the bench in a4's foreground; 10 further north
+  // at this height and three rocks on the wall over the bench's east end go.
+  // WHAT IT WAS: until decision 67 one move through the air, east past the
+  // falls and up to the bench with the view sweeping right only (decision
+  // 65, commit 9c03225 has its fifteen rows; frames in
+  // world-tests/shots/v6/a3a4-trail/fly/). The other way to walk this trail,
+  // watching the falls the whole way, is in world_overnight_log.md decision
+  // 67 as fifteen rows ready to paste.
+  Q(1.6, K(-270, 123, 1453, 140, -9.6, "trail", undefined, 58)), // leaving the a3 view, down toward the pool
+  Q(2.4, K(-130, 110, 1546, 74, 6, "trail", undefined, 57)), // over the pool's north side
+  Q(2.9, K(-6, 109, 1627, 31, 11, "trail", undefined, 56)), // over the pool's east shore, where the trail starts
+  Q(2.6, K(55, 101, 1612, 358, 17, "trail", undefined, 56)), // the log's south end
+  M("crossing", Q(1.5, K(52, 100, 1538, 8, 14, "trail", undefined, 55))), // the log's north end
+  Q(1.7, K(78, 110, 1490, 27, 10, "trail", undefined, 55)), // the talus fan
+  Q(1.4, K(186, 128, 1352, 62, 5, "trail", undefined, 55)), // the fan's top, the wall ahead
+  K(350, 272, 1284, 84, -10, "trail", undefined, 54), // up the wall, under the bench's cliff
+  K(410, 338, 1275, 82, -5, "trail", undefined, 53), // over the bench's lip
+  M("wall", K(448, 351, 1235, 78, 2, "trail", undefined, 52)), // onto the bench's west end
+  Q(3, K(548, 336, 1207, 88, 4, "trail", undefined, 51)), // past the Trail Hut's door
+  Q(7, K(588, 345, 1233, 110, 8, "trail", undefined, 51)), // round the boulders at the wall's foot
+  Q(6.6, K(622, 345, 1231, 150, 14, "trail", undefined, 51)), // along the bench's outer edge
+  Q(5, K(662, 337, 1210, 200, 11, "trail", undefined, 50)), // back onto the trail
+  Q(2.7, K(700, 324, 1206, 238, -8.4, "trail", undefined, 49)), // the bench's east end
   // a4 (bible 1.10): east of the bench on the wall, 24 over it, ~280 from the
   // Trail Hut, which stands 16 right of the falls (hut x ~0.65, falls ~0.42).
   // Looking up 8 through a wide lens (48) pins the pool on the frame's bottom
@@ -1181,6 +1209,8 @@ export const TRAIL_VIEW: ReadonlyArray<{ bearing: number; pitch: number }> = KEY
  * anchor is "wall" now; v6-strip.mjs's frames moved to the new stretch). "crossing" is back with a
  * new meaning: the key square on to the falls, due north of the curtain, on
  * the a3 -> a4 move. "wall" is where it was.
+ * Decision 67 (the camera walks the trail): "crossing" is the log's north
+ * end and "wall" is the key on the bench's west end, at the top of the wall.
  */
 export const ROUTE_MARKS: Readonly<Record<string, number>> = Object.fromEntries(
   KEYS.flatMap((k, i) => (MARK_OF.has(k) ? [[MARK_OF.get(k) as string, i] as [string, number]] : [])),

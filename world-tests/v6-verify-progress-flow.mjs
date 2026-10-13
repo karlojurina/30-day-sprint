@@ -66,7 +66,7 @@ await page.setViewport({ width: vp[0], height: vp[1] });
 // The mid state before the page reads its tuning, so the arrival travels to a4.
 await page.evaluateOnNewDocument((t) => {
   try {
-    localStorage.setItem("world-v6:tuning:finalB", JSON.stringify(t)); // the current TUNE key (tuning.ts KEY)
+    localStorage.setItem("world-v6:tuning:trail", JSON.stringify(t)); // the current TUNE key (tuning.ts KEY)
   } catch {
     /* ignore */
   }

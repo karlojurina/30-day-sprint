@@ -79,7 +79,7 @@ const PERF_TUNES = {
 if (process.env.PERF_TUNE && PERF_TUNES[process.env.PERF_TUNE]) {
   await page.evaluateOnNewDocument((t) => {
     try {
-      localStorage.setItem("world-v6:tuning:finalB", JSON.stringify(t)); // the current TUNE key (tuning.ts KEY)
+      localStorage.setItem("world-v6:tuning:trail", JSON.stringify(t)); // the current TUNE key (tuning.ts KEY)
     } catch {
       /* ignore */
     }

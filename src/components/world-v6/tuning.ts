@@ -63,8 +63,13 @@ export const DEFAULT_TUNING: Tuning = {
 // went 200 -> 150 (1,990 -> 1,940 vh in all), so a :finalB save would spend
 // the old budget on the new stretch: pacing restarts from the defaults under
 // :direct; lock and progress carry over from :finalB first.
-const KEY = "world-v6:tuning:direct";
-const OLD_KEYS = ["world-v6:tuning:finalB", "world-v6:tuning:final", "world-v6:tuning:r1", "world-v6:tuning:p3", "world-v6:tuning"] as const;
+// 2026-10-13, later (decision 67: the camera walks the trail to the Trail
+// Hut): the Video Ads II stretch is a quarter longer and its budget went
+// 150 -> 280 (1,940 -> 2,070 vh in all), so a :direct save would spend the
+// flight's budget on the walk: pacing restarts from the defaults under
+// :trail; lock and progress carry over from :direct first.
+const KEY = "world-v6:tuning:trail";
+const OLD_KEYS = ["world-v6:tuning:direct", "world-v6:tuning:finalB", "world-v6:tuning:final", "world-v6:tuning:r1", "world-v6:tuning:p3", "world-v6:tuning"] as const;
 const LOCKS: readonly LockMode[] = ["open", "look", "locked"];
 const N = PLACES.length;
 

@@ -53,7 +53,7 @@ try {
   // through the page's own fixture key (tuning.ts KEY).
   await page.evaluateOnNewDocument(() => {
     try {
-      localStorage.setItem("world-v6:tuning:finalB", JSON.stringify({ lock: "open", frontier: 0, finished: 0, partial: 0 }));
+      localStorage.setItem("world-v6:tuning:trail", JSON.stringify({ lock: "open", frontier: 0, finished: 0, partial: 0 }));
     } catch {
       /* ignore */
     }

@@ -4,6 +4,16 @@
  *
  *   node world-tests/v6-a3a4-shots.mjs                      14 frames at 1691x1278 -> shots/v6/a3a4/
  *   OUT=<dir> W=1366 H=768 N=12 node world-tests/v6-a3a4-shots.mjs
+ *   node world-tests/v6-a3a4-shots.mjs compare [dir]        one image from frames already on disk: for each
+ *                                                           position the sets in <dir>/F, <dir>/W and <dir>/fly
+ *                                                           one above the other -> <dir>/compare.png
+ *                                                           (dir defaults to shots/v6/a3a4-trail)
+ *
+ * The walk along the trail (decision 67, 2026-10-13) was rendered with N=14
+ * (16 frames, both stops included) into shots/v6/a3a4-trail/F (facing forward,
+ * the route), W (watching the falls, the alternative in the decision log) and
+ * fly (the move it replaced, rendered from commit 9c03225), each also at
+ * 1366x768 in its 1366/ folder.
  *
  * Frames: the a3 stop, N frames evenly spaced in SCROLL between the two stops
  * (what a student scrolling at a steady speed sees), and the a4 stop: N + 2
@@ -36,6 +46,49 @@ const browser = await puppeteer.launch({
   args: ["--use-angle=metal", "--enable-gpu", "--ignore-gpu-blocklist", "--no-sandbox", "--hide-scrollbars"],
   protocolTimeout: 300000,
 });
+if (process.argv[2] === "compare") {
+  // Frames already on disk, one set above the other for each position.
+  const DIR = path.resolve(process.argv[3] || path.join(HERE, "shots/v6/a3a4-trail"));
+  const SETS = [
+    ["F", "facing forward"],
+    ["W", "watching the falls"],
+    ["fly", "the flying move (9c03225)"],
+  ].filter(([d]) => fs.existsSync(path.join(DIR, d, "frames.json")));
+  const sets = SETS.map(([d, label]) => ({ d, label, ...JSON.parse(fs.readFileSync(path.join(DIR, d, "frames.json"), "utf8")) }));
+  const n = Math.min(...sets.map((q) => q.frames.length));
+  const cols = 8;
+  const cellW = 420;
+  const cellH = Math.round((cellW * sets[0].h) / sets[0].w);
+  const img = (d, name) => `data:image/jpeg;base64,${fs.readFileSync(path.join(DIR, d, name + ".jpg")).toString("base64")}`;
+  try {
+    // Smaller copies for the sheet (the full frames stay as they are).
+    const pg = await browser.newPage();
+    for (const q of sets)
+      for (const f of q.frames.slice(0, n)) {
+        await pg.setViewport({ width: cellW * 2, height: cellH * 2 });
+        await pg.setContent(`<body style="margin:0"><img src="data:image/png;base64,${fs.readFileSync(path.join(DIR, q.d, f.name + ".png")).toString("base64")}" style="width:${cellW * 2}px;height:${cellH * 2}px;display:block">`, { waitUntil: "load" });
+        await pg.screenshot({ path: path.join(DIR, q.d, f.name + ".jpg"), type: "jpeg", quality: 82 });
+      }
+    let html = `<html><body style="margin:0;background:#15171a;font:12px/1.35 -apple-system,Helvetica,sans-serif;color:#e8e4dc"><div style="padding:8px;font-weight:600;font-size:15px">a3 (Video Ads I) to a4 (Video Ads II): ${n} positions evenly spaced in each version's own scroll. ${sets.map((q) => `${q.label}: ${Math.round(q.frames[n - 1].vh - q.frames[0].vh)} vh`).join(" · ")}</div>`;
+    for (let from = 0; from < n; from += cols) {
+      html += `<div style="display:grid;grid-template-columns:repeat(${cols},${cellW}px);gap:4px;padding:4px 4px 14px">`;
+      for (const q of sets)
+        for (let i = from; i < Math.min(n, from + cols); i++) {
+          const f = q.frames[i];
+          html += `<div><img src="${img(q.d, f.name)}" style="width:${cellW}px;height:${cellH}px;display:block"><div style="padding:2px 2px 4px"><b>${q.d} ${f.name}</b> · ${q.label} · ${Math.round(f.vh - q.frames[0].vh)} vh in · cam ${f.cam.join(", ")} · bearing ${f.bearing}</div></div>`;
+        }
+      html += "</div>";
+    }
+    html += "</body></html>";
+    await pg.setViewport({ width: cols * (cellW + 4) + 4, height: 900 });
+    await pg.setContent(html, { waitUntil: "load" });
+    await pg.screenshot({ path: path.join(DIR, "compare.png"), fullPage: true });
+    console.log(`wrote ${path.join(DIR, "compare.png")}: ${n} positions x ${sets.length} versions`);
+  } finally {
+    await browser.close();
+  }
+  process.exit(0);
+}
 const errors = [];
 try {
   const page = await browser.newPage();

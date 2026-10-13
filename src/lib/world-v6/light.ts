@@ -558,10 +558,13 @@ export interface LightWaypoint {
  *                          lit ahead left)
  *   a3 .. wall             the blend to gorge-sunset, eased at both ends: it
  *                          starts as the camera leaves the a3 stop and is
- *                          done by the "wall" mark, under the Trail Hut's
- *                          bench: the sun sinks 5 degrees and swings 15 while
- *                          the camera passes the falls and pulls away from
- *                          them (about 790 units, two thirds of the move)
+ *                          done by the "wall" mark. Since decision 67 (the
+ *                          camera walks the trail) that mark is the bench's
+ *                          west end, at the top of the wall: the sun sinks 5
+ *                          degrees and swings 15 while the camera comes down
+ *                          to the pool, crosses the log and the fan and
+ *                          climbs (1,140 units, three quarters of the walk),
+ *                          and the bench and the hut are in a4's light
  *   wall .. gully          gorge-sunset: the sun is low in the WNW (300 / 6)
  *                          from the "wall" mark (a hold) up to a4 (hikeTo,
  *                          just before it) and along the traverse to the

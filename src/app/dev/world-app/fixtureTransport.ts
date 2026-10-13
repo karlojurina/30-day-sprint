@@ -30,6 +30,16 @@ import type { HeartbeatResult } from "@/lib/world/watch-heartbeat";
  * harness layout (a server component), as a prop. The one id written here is
  * made up and matches no video: it is what "Tella refuses this one" is tested
  * with.
+ *
+ * COURSE MODE (?catalog=course; course_catalog_prd.md, section 9.H). The
+ * three video lessons below are not special there: every lesson of the real
+ * course that has a video plays test video 1, when the harness was given the
+ * ids. The stand-in holds each of those lessons to the TEST video's length
+ * wherever it judges (the heartbeat's 95% point, the claim), because that 67
+ * second clip is what plays, so a course lesson watched to the clip's end is
+ * done. The catalog rows keep the course's real lengths, so a card, a panel
+ * or the lesson page's eyebrow reading "13 min" over a 67 second clip is the
+ * course's own number and no fault.
  */
 
 /** The two real test videos and their length, as the layout read them from the environment. */
@@ -109,8 +119,14 @@ export function createFixtureServer(opts: {
   videos: DevVideos | null;
   /** The fixture's own "this lesson is watched" (FixtureStudentProvider). */
   markWatched: (lessonId: string) => void;
+  /**
+   * Course mode: the ids of the course lessons that have a video. null in
+   * every other mode. Asked on each call, because the server is made before
+   * the page has read its query string.
+   */
+  courseVideoLessons?: () => ReadonlySet<string> | null;
 }): FixtureServer {
-  const { videos, markWatched } = opts;
+  const { videos, markWatched, courseVideoLessons } = opts;
   const watch: Record<string, FixtureWatchRow> = {};
   const calls: FixtureCall[] = [];
 
@@ -123,9 +139,24 @@ export function createFixtureServer(opts: {
         ]
       : [],
   );
-  /** The fixture lesson's duration_seconds: what the catalog says, never what the player says. */
-  const catalogDuration = (lessonId: string): number | null =>
-    videos && videoIds.has(lessonId) ? videos.seconds : null;
+  /** The course's video lessons, in course mode with test videos. null otherwise. */
+  const course = (): ReadonlySet<string> | null => (videos ? (courseVideoLessons?.() ?? null) : null);
+  /** The video behind a lesson, or undefined when it has none. In course mode it is always test video 1. */
+  const videoIdOf = (lessonId: string): string | undefined => {
+    const lessons = course();
+    if (videos && lessons) return lessons.has(lessonId) ? videos.a : undefined;
+    return videoIds.get(lessonId);
+  };
+  /**
+   * The length a lesson is held to, never what the player says. The fixture
+   * lesson's duration_seconds in the default catalog; the test video's in
+   * course mode, for every lesson that plays it (COURSE MODE, at the top).
+   */
+  const catalogDuration = (lessonId: string): number | null => {
+    const lessons = course();
+    if (videos && lessons) return lessons.has(lessonId) ? videos.seconds : null;
+    return videos && videoIds.has(lessonId) ? videos.seconds : null;
+  };
 
   function beat(a: HeartbeatArgs): { result: HeartbeatResult; credited: number } {
     const now = Date.now();
@@ -208,7 +239,7 @@ export function createFixtureServer(opts: {
 
   const transport: LessonTransport = {
     async getEmbed(lessonId) {
-      const videoId = videoIds.get(lessonId);
+      const videoId = videoIdOf(lessonId);
       calls.push({ at: Date.now(), call: "getEmbed", lessonId, ok: videoId !== undefined });
       if (videoId === undefined) return { ok: false, kind: "not-recorded" };
       return { ok: true, embedUrl: tellaEmbedUrl(videoId) };
@@ -216,7 +247,7 @@ export function createFixtureServer(opts: {
 
     async heartbeat(args) {
       // The function refuses a lesson with no video (errcode 22023).
-      if (!videoIds.has(args.p_lesson_id)) {
+      if (videoIdOf(args.p_lesson_id) === undefined) {
         return {
           data: null,
           error: {

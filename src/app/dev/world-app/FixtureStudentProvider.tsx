@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type R
 import { StudentContext, type StudentContextType } from "@/contexts/StudentContext";
 import type { CatalogLessonLike, CatalogRegionLike } from "@/lib/world/catalog";
 import type { StudentLessonWatch } from "@/types/database";
+import { COURSE, COURSE_VIDEO_LESSON_IDS, coursePresetIds } from "./courseCatalog";
 import {
   createFixtureServer,
   FixtureTransportContext,
@@ -52,6 +53,16 @@ import {
  *   ?catalog=error     loadError set, no rows
  *   ?catalog=empty     no rows, no error
  *   ?catalog=shape     only the first four areas and their lessons
+ *   ?catalog=course    the real course (course_catalog_prd.md, Work Item 3)
+ *
+ * THE REAL COURSE. ?catalog=course swaps the generated catalog for the rows of
+ * courseCatalog.ts: the 8 areas and 141 lessons of
+ * supabase/catalog/course_catalog.json, with a length and a video on the
+ * lessons course-lengths.fixture.json lists. The three video lessons are not
+ * part of it: with the two ids, every lesson that has a video plays test
+ * video 1 (fixtureTransport.ts). Its presets are p0, mid (areas 1 to 3 done,
+ * lessons 1 to 9 of area 4) and all; any other name is p0.
+ * world-tests/v6-course.mjs walks it.
  *
  * For the browser run: window.__fixture.complete(id) marks a lesson watched,
  * window.__fixture.completed() lists what is watched, window.__fixture.watch
@@ -192,10 +203,17 @@ function presetIds(name: string | null): string[] {
   }
 }
 
-type CatalogMode = "ready" | "loading" | "error" | "empty" | "shape";
+type CatalogMode = "ready" | "loading" | "error" | "empty" | "shape" | "course";
 
 function catalogMode(name: string | null): CatalogMode {
-  return name === "loading" || name === "error" || name === "empty" || name === "shape" ? name : "ready";
+  return name === "loading" || name === "error" || name === "empty" || name === "shape" || name === "course"
+    ? name
+    : "ready";
+}
+
+/** The catalog mode of a query string. null before the page has read it. */
+function modeOf(search: string | null): CatalogMode | null {
+  return search === null ? null : catalogMode(new URLSearchParams(search).get("catalog"));
 }
 
 interface FixtureHook {
@@ -227,14 +245,13 @@ export function FixtureStudentProvider({
     () => (boot.search ??= window.location.search),
     noServerQuery,
   );
-  const mode = useMemo(
-    () => (search === null ? null : catalogMode(new URLSearchParams(search).get("catalog"))),
-    [search],
-  );
-  const preset = useMemo(
-    () => (search === null ? [] : presetIds(new URLSearchParams(search).get("p"))),
-    [search],
-  );
+  const mode = useMemo(() => modeOf(search), [search]);
+  const preset = useMemo(() => {
+    if (search === null) return [];
+    const name = new URLSearchParams(search).get("p");
+    // The real course has its own presets: the others count placeholder lessons.
+    return modeOf(search) === "course" ? coursePresetIds(name) : presetIds(name);
+  }, [search]);
   /** Lessons marked watched since the page loaded, on top of the preset. */
   const [watched, setWatched] = useState<ReadonlySet<string>>(() => new Set());
   // The preset and the catalog arrive in the same render, so the map first
@@ -283,8 +300,16 @@ export function FixtureStudentProvider({
   );
 
   // The stand-in server: made once, so its rows live as long as the page does.
-  // The ids come down from the server once and do not change under it.
-  const [server] = useState(() => createFixtureServer({ videos: devVideos, markWatched }));
+  // The ids come down from the server once and do not change under it. The
+  // mode is not known yet when it is made (the query string is read after
+  // hydration), so it asks for the course's video lessons on each call.
+  const [server] = useState(() =>
+    createFixtureServer({
+      videos: devVideos,
+      markWatched,
+      courseVideoLessons: () => (modeOf(boot.search) === "course" ? COURSE_VIDEO_LESSON_IDS : null),
+    }),
+  );
 
   useEffect(() => {
     const w = window as FixtureWindow;
@@ -303,6 +328,8 @@ export function FixtureStudentProvider({
   // and must not hand the map a new list of lessons.
   const videoSeconds = devVideos?.seconds ?? null;
   const rows = useMemo(() => {
+    // The real course brings its own lengths and videos: the three video lessons are not part of it.
+    if (mode === "course") return COURSE;
     const base = mode === "ready" ? FULL : mode === "shape" ? FIRST_FOUR : NONE;
     return videoSeconds === null ? base : withVideos(base, videoSeconds);
   }, [mode, videoSeconds]);

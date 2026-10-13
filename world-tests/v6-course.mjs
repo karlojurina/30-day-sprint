@@ -1,0 +1,1139 @@
+/**
+ * Course catalog, Work Item 3: the real course on the development page,
+ * walked in a real browser.
+ * (_admin/prds/course-catalog/course_catalog_prd.md, section 12, the path table.)
+ *
+ *   node world-tests/v6-course.mjs [--only 2,4]
+ *
+ * Runs against http://localhost:3111/dev/world-app?catalog=course, which must
+ * already be up (this script never starts a server). It is the harness of
+ * v6-app.mjs (the real stage, map, place route and lesson page, a pretend
+ * student, no login, no server call) with the real course in place of the
+ * generated one: src/app/dev/world-app/courseCatalog.ts builds the rows from
+ * supabase/catalog/course_catalog.json and course-lengths.fixture.json.
+ * Headless Chrome on the real GPU, autoplay allowed, muted, 1691x1278. Takes
+ * about 5 minutes (22 page loads, 23 when row 2 fails, and row 12 watches a
+ * 67 second clip in real time): run it in the background.
+ *
+ * One PASS or FAIL line per row of the table, with what was measured after it.
+ * Every row loads its own fresh page in its own browser context. The four
+ * rows a script cannot judge (G1 to G4) are printed as NOT COVERED with their
+ * reason and are never a pass. After the rows, one MEASURED line: page errors
+ * and requests to /api over every page the run opened. Exit code 1 on any FAIL.
+ *
+ * ROW 12 PLAYS A REAL VIDEO. In course mode every lesson that has a video
+ * plays the harness's test video 1, and the stand-in server holds it to that
+ * clip's length (fixtureTransport.ts, COURSE MODE). So the row presses play
+ * on a1l01, waits for the clip's end at normal speed, and the lesson must be
+ * done. Playback is driven the way world-tests/tella-watch.mjs drives it: the
+ * `play` command posted to the player's frame, and a second `message`
+ * listener on the page (window.__probe, this script's own) that records what
+ * the frame says. When the harness has no test video the lesson's frame does
+ * not mount, and the row is printed as NOT COVERED with that reason: it is
+ * never a failure and never a pass.
+ *
+ * WHAT IS EXPECTED IS WRITTEN TWICE, ON PURPOSE. The counts, the place names,
+ * the action items and the pond row below are the plan's own numbers, typed
+ * here. The lesson titles and the briefs are read from the JSON. So a change
+ * to the data file that the plan does not know about fails row 1 by name.
+ *
+ * ROW 2 CAN FAIL AND STAY FAILED. The map lays out one lantern per lesson and
+ * can put down fewer than it was asked for without saying so. When a place is
+ * short this row fails, names the place with both numbers and takes a picture
+ * of it with every lantern lit. Nothing in the map is changed to make it pass.
+ *
+ * A place's card only shows at the student's own place. So for the card of
+ * place k the pretend student is put there first: every lesson of the places
+ * before it is marked watched through window.__fixture.complete(), before the
+ * map is live, so that no done moment plays.
+ *
+ * NO VIDEO ID IS READ, PRINTED OR SAVED HERE. Row 9 asks whether the lesson
+ * video's frame is on the page and never reads its address. Every line this
+ * script prints or saves goes through scrub(), because a browser's own error
+ * text can carry one.
+ *
+ * Screenshots and results.json: world-tests/shots/v6/course/ (git-ignored).
+ * The ten a person looks at: place-N-name-parked.png for the eight places
+ * (the camera at the place's stop, the student's card up) and
+ * place-N-name-panel.png for places 3 and 5 (the place open).
+ *
+ * What a row reads, so a change in the markup is found fast:
+ *   hooks      window.__worldReady, __worldError, __worldDepth, __worldDepthFor(id),
+ *              __worldScrollFor(depth), __worldFrame, __worldProgress(),
+ *              __worldCelebrations, __worldV6Debug.moduleStats()["progress-world"]
+ *              (perArea, wanted), and the harness's window.__fixture
+ *              (complete(id), completed(), calls)
+ *   harness    [data-dev-videos], [data-dev-video-seconds] (layout.tsx: how many
+ *              test videos and how long, never which)
+ *   the card   main section[data-side][data-show], except [aria-label="Place done"]:
+ *              its h2, its tick strip (a span[aria-hidden] holding only <i>),
+ *              the count beside the strip, its button "Watch lesson 1, title"
+ *   the panel  main section[aria-labelledby="v4-panel-title"], its #v4-panel-title,
+ *              its ol > li rows (button aria-label "Lesson N, title[, action item]"
+ *              and "Watch lesson N, title"), the count line (the element before
+ *              the ol), and the pond: a button outside the ol
+ *   markers    main button[data-mode] (index = place), label = its last child
+ *   timeline   main nav[aria-label="Places"] [aria-label$="lessons done"]
+ *   lesson     the h1 outside `main`, iframe[title="Lesson video"],
+ *              [role="progressbar"][aria-label="Lesson progress"], the words
+ *              "Not recorded yet.", "Milestone" and "Done.", the "Next lesson"
+ *              link (aria-disabled), the lines under the bar (p[role="status"]
+ *              outside `main`), window.__fixture.watch[lessonId]
+ *   the player (row 12) the frame's messages: "ready", "timeUpdate" with
+ *              currentTime and duration, "playbackState" with state
+ */
+import puppeteer from 'puppeteer-core'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const HERE = path.dirname(fileURLToPath(import.meta.url))
+const APP_ROOT = path.join(HERE, '..')
+const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+const ORIGIN = process.env.BASE_URL || 'http://localhost:3111'
+const APP = '/dev/world-app'
+const OUT = path.join(HERE, 'shots', 'v6', 'course')
+fs.mkdirSync(OUT, { recursive: true })
+
+const argv = process.argv.slice(2)
+const onlyArg = argv.includes('--only') ? argv[argv.indexOf('--only') + 1] : null
+const ONLY = onlyArg ? new Set(onlyArg.split(',').map((x) => x.trim())) : null
+
+const DESKTOP = { width: 1691, height: 1278 }
+/** How close (rail depth, 0..1) the camera must be to a place's stop to count as resting there. One scroll pixel is about 4e-5. */
+const DEPTH_TOL = 6e-4
+const LOAD_MS = 80000
+const READY_MS = 70000
+/** A first visit to a route compiles it on the dev server. */
+const NAV_MS = 40000
+/** Row 3 loads the page eight times. */
+const ROW_MS = 360000
+/** Where the player's frame speaks from. An origin, never an address: no video is named by it. */
+const TELLA = 'https://www.tella.tv'
+/** The player's "ready" after its frame is on the page. */
+const PLAYER_READY_MS = 45000
+/** Before a picture: the camera is at rest and the card or panel is up; this is for the labels and whatever the scene was still bringing in. */
+const SETTLE_MS = 1800
+
+// ── The course, as the plan states it (section 3, C1 to C5) ─────────────────
+const NAMES = ['Introduction', 'Marketing Fundamentals', 'Video Ads I', 'Video Ads II', 'Static Ads', 'AI Ads + Content', 'Creative Strategy', 'How To Land Clients']
+/** Lessons that count toward progress, per place (a7l19 is the pond row and does not). */
+const COUNTING = [8, 11, 25, 17, 26, 22, 18, 13]
+const TOTAL = 140
+/** The action items: the 1-based row numbers in each place's panel. */
+const ACTION_ROWS = [[], [], [25], [], [8, 12, 22, 23], [3, 10, 17, 19], [], []]
+/** The Ad Bounty lesson: the pond's button in place 7, outside the lesson count. */
+const POND = { place: 6, id: 'a7l19', title: 'How To Win On The Ad Bounty Program' }
+
+// ── The course, as the data files hold it ───────────────────────────────────
+const CATALOG = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'supabase', 'catalog', 'course_catalog.json'), 'utf8'))
+const LENGTHS = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'src', 'app', 'dev', 'world-app', 'course-lengths.fixture.json'), 'utf8'))
+/** Per place, in route order: the lessons that count and the rows that do not, in the JSON's order. */
+const PLACES = CATALOG.areas.map((a) => {
+  const rows = CATALOG.lessons.filter((l) => l.area === a.id)
+  return { id: a.id, name: a.name, counting: rows.filter((l) => l.counts !== false), outside: rows.filter((l) => l.counts === false) }
+})
+const lessonOf = (id) => CATALOG.lessons.find((l) => l.id === id) ?? null
+/** Whole minutes, the way the map and the lesson page round them. */
+const minutesOf = (id) => (LENGTHS[id] > 0 ? Math.max(1, Math.round(LENGTHS[id] / 60)) : null)
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const f = (n, d = 4) => (typeof n === 'number' ? n.toFixed(d) : String(n))
+const same = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i])
+const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim()
+const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+/** Nothing shaped like a video id or a Tella address leaves this script. */
+const scrub = (s) =>
+  String(s)
+    .replace(/https?:\/\/[^\s"'<>)]*tella[^\s"'<>)]*/gi, '<a Tella address>')
+    .replace(/vid_[a-z0-9]+/gi, 'vid_<hidden>')
+const say = (line) => console.log(scrub(line))
+const show = (v) => {
+  const s = typeof v === 'string' ? v : JSON.stringify(v)
+  return s === undefined ? 'undefined' : s.length > 300 ? `${s.slice(0, 300)}…` : s
+}
+/** Every page of this script is the course: ?catalog=course goes on each address. */
+const url = (sub, params = {}) => `${APP}${sub}?${new URLSearchParams({ catalog: 'course', ...params }).toString()}`
+const shotName = (k, what) => `place-${k + 1}-${slug(NAMES[k])}-${what}`
+
+/** Everything the run saw, over every page it opened (the MEASURED line). */
+const tally = { pages: 0, apiStudent: [], api: [], pageErrors: [], consoleErrors: [] }
+const results = []
+
+// ── Functions that run in the page ──────────────────────────────────────────
+
+/** What is on screen, read from the DOM and the map's hooks. */
+const SNAP = () => {
+  const norm = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
+  const shown = (el) => (el && el.dataset.show !== undefined ? el : null)
+  const card = shown(document.querySelector('main section[data-side]:not([aria-label="Place done"])'))
+  const panel = document.querySelector('main section[aria-labelledby="v4-panel-title"]')
+  const tl = document.querySelector('main nav[aria-label="Places"] [aria-label$="lessons done"]')
+  const h1 = [...document.querySelectorAll('h1')].find((h) => !h.closest('main')) ?? null
+  // The words on the page outside the map: the lesson page.
+  let outside = ''
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const p = n.parentElement
+    if (!p || p.closest('main, script, style, noscript, template, nextjs-portal, next-route-announcer')) continue
+    outside += ` ${n.textContent}`
+  }
+  return {
+    path: location.pathname,
+    y: Math.round(window.scrollY),
+    card: card ? { title: norm(card.querySelector('h2')?.textContent), text: norm(card.textContent) } : null,
+    panel: panel ? norm(panel.querySelector('#v4-panel-title')?.textContent) : null,
+    count: tl?.getAttribute('aria-label') ?? null,
+    lesson: h1 ? norm(h1.textContent) : null,
+    outside: norm(outside),
+    frames: [...document.querySelectorAll('iframe')].filter((x) => !x.closest('main, nextjs-portal')).length,
+    celebrations: typeof window.__worldCelebrations === 'number' ? window.__worldCelebrations : null,
+    progress: window.__worldProgress?.() ?? null,
+    watched: window.__fixture ? window.__fixture.completed().length : null,
+  }
+}
+
+/** The student's card at place k: its name, its count, its tick strip, and where the strip sits inside it. */
+const CARD = (k) => {
+  const norm = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
+  const box = (el) => {
+    const b = el.getBoundingClientRect()
+    return { l: Math.round(b.left * 10) / 10, r: Math.round(b.right * 10) / 10, w: Math.round(b.width * 10) / 10 }
+  }
+  const card = document.querySelector('main section[data-side][data-show]:not([aria-label="Place done"])')
+  if (!card) return null
+  // One <i> per lesson and nothing else: the tick strip.
+  const strip = [...card.querySelectorAll('span[aria-hidden="true"]')].find((el) => el.children.length > 0 && [...el.children].every((c) => c.tagName === 'I')) ?? null
+  const label = document.querySelectorAll('main button[data-mode]')[k]
+  return {
+    title: norm(card.querySelector('h2')?.textContent),
+    count: strip?.nextElementSibling ? norm(strip.nextElementSibling.textContent) : null,
+    ticks: strip ? strip.children.length : 0,
+    watch: card.querySelector('button[aria-label^="Watch lesson "]')?.getAttribute('aria-label') ?? null,
+    box: box(card),
+    strip: strip ? box(strip) : null,
+    lastTick: strip?.lastElementChild ? box(strip.lastElementChild) : null,
+    label: label ? norm(label.lastElementChild?.textContent) : null,
+  }
+}
+
+/** The open place panel: its count line, its rows, and the buttons outside the list. */
+const READ_PANEL = () => {
+  const norm = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
+  const panel = document.querySelector('main section[aria-labelledby="v4-panel-title"]')
+  if (!panel) return null
+  const ol = panel.querySelector('ol')
+  const rows = []
+  let fold = null
+  for (const li of ol ? [...ol.children] : []) {
+    const foldButton = li.querySelector('button[data-state="fold"]')
+    if (foldButton) {
+      fold = norm(foldButton.textContent)
+      continue
+    }
+    const button = li.querySelector('button[aria-label]')
+    const label = button?.getAttribute('aria-label') ?? ''
+    let kind = 'unknown'
+    let n = null
+    let title = null
+    let m = /^Watch lesson (\d+), (.*)$/.exec(label)
+    if (m) {
+      kind = 'next'
+      n = Number(m[1])
+      title = m[2]
+    } else if ((m = /^Lesson (\d+), (.*?)(, watched|, action item)?$/.exec(label))) {
+      n = Number(m[1])
+      title = m[2]
+      kind = m[3] === ', watched' ? 'done' : m[3] === ', action item' ? 'action' : 'todo'
+    }
+    // What is left of the row once its number, its title and the Watch button's word are taken out: the minutes, "Action", or nothing.
+    let tail = norm(li.textContent)
+    if (n !== null && tail.startsWith(String(n))) tail = tail.slice(String(n).length)
+    if (title && tail.includes(title)) tail = tail.replace(title, '')
+    tail = norm(norm(tail).replace(/Watch$/, ''))
+    rows.push({ n, kind, title, tail })
+  }
+  return {
+    title: norm(panel.querySelector('#v4-panel-title')?.textContent),
+    count: ol?.previousElementSibling ? norm(ol.previousElementSibling.textContent) : null,
+    fold,
+    rows,
+    // After the list: the pond's row, when the place has one.
+    after: [...panel.querySelectorAll('button')].filter((b) => ol && !ol.contains(b) && (ol.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).map((b) => norm(b.textContent)),
+  }
+}
+
+/** The lanterns the map laid out, per place, and how many it was asked for (progress-world.ts, stats()). */
+const LANTERNS = () => {
+  const sc = window.__worldV6Debug
+  const st = sc && typeof sc.moduleStats === 'function' ? sc.moduleStats()['progress-world'] : null
+  if (!st || typeof st !== 'object') return null
+  return { perArea: st.perArea ?? null, wanted: st.wanted ?? null, lessonLanterns: st.lessonLanterns ?? null, placeLamps: st.placeLamps ?? null, instances: st.instances ?? null }
+}
+
+/**
+ * Row 12, installed before the page's own scripts (tella-watch.mjs's probe,
+ * the two parts this row needs): what the player's frame says, and every
+ * status line the page ever shows outside the map, kept as it is added so a
+ * line that came and went is still seen. The lines under the progress bar are
+ * among them; so is the host's "Loading the world…".
+ */
+const PROBE = (tellaOrigin) => {
+  if (window !== window.top) return
+  window.__probe = { msgs: [], lines: [] }
+  window.addEventListener('message', (e) => {
+    if (e.origin !== tellaOrigin) return
+    let d = e.data
+    if (typeof d === 'string') {
+      try {
+        d = JSON.parse(d)
+      } catch {
+        return
+      }
+    }
+    if (!d || typeof d !== 'object') return
+    window.__probe.msgs.push({
+      at: Math.round(performance.now()),
+      type: String(d.type),
+      state: typeof d.state === 'string' ? d.state : null,
+      t: typeof d.currentTime === 'number' ? d.currentTime : null,
+      d: typeof d.duration === 'number' ? d.duration : null,
+    })
+  })
+  new MutationObserver((records) => {
+    for (const rec of records) {
+      for (const node of rec.addedNodes) {
+        if (node.nodeType !== 1) continue
+        const lines = node.matches('p[role="status"]') ? [node] : [...node.querySelectorAll('p[role="status"]')]
+        for (const p of lines) {
+          const text = (p.textContent ?? '').replace(/\s+/g, ' ').trim()
+          if (text !== '' && !p.closest('main')) window.__probe.lines.push(text)
+        }
+      }
+    }
+  }).observe(document, { childList: true, subtree: true })
+}
+
+/** Post one command to the lesson's frame, the way the measured player takes them. */
+const SEND = ({ message, tellaOrigin }) => {
+  const frame = [...document.querySelectorAll('iframe[title="Lesson video"]')].find((x) => !x.closest('main'))
+  if (!frame || !frame.contentWindow) return false
+  frame.contentWindow.postMessage(message, tellaOrigin)
+  return true
+}
+
+/**
+ * The END of the video at or after message `i`: a "stopped" or a "paused" in
+ * the last 1.5 s, after a position report from there (the real player ends on
+ * either word; tella-watch.mjs, waitStopped). Returns the message, or null.
+ */
+const ENDED = ({ i, end }) => {
+  let near = false
+  for (const m of window.__probe.msgs.slice(i)) {
+    if (m.type === 'timeUpdate') near = m.t >= end
+    else if (m.type === 'playbackState' && (m.state === 'stopped' || m.state === 'paused') && near && (m.t === null || m.t >= end)) return m
+  }
+  return null
+}
+
+/** The lesson page once the video has been played: its own done state, and what the stand-in server holds for `lessonId`. */
+const WATCHED = ({ lessonId, from }) => {
+  const norm = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
+  const outside = (el) => !el.closest('main, nextjs-portal')
+  const bar = document.querySelector('[role="progressbar"][aria-label="Lesson progress"]')
+  const next = [...document.querySelectorAll('a')].filter(outside).find((a) => /Next lesson/.test(a.textContent)) ?? null
+  const fx = window.__fixture ?? null
+  let words = ''
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const p = n.parentElement
+    if (!p || p.closest('main, script, style, noscript, template, nextjs-portal, next-route-announcer')) continue
+    words += ` ${n.textContent}`
+  }
+  const reports = window.__probe.msgs.slice(from).filter((m) => m.type === 'timeUpdate')
+  return {
+    completed: fx ? fx.completed().includes(lessonId) : null,
+    saysDone: /(^| )Done\.( |$)/.test(norm(words)),
+    next: next ? { disabled: next.getAttribute('aria-disabled'), href: next.getAttribute('href') } : null,
+    linesNow: [...document.querySelectorAll('p[role="status"]')].filter(outside).map((p) => norm(p.textContent)).filter((t) => t !== ''),
+    linesEver: [...new Set(window.__probe.lines)],
+    bar: bar ? Number(bar.getAttribute('aria-valuenow')) : null,
+    row: fx && fx.watch ? (fx.watch[lessonId] ?? null) : null,
+    calls: fx && fx.calls ? fx.calls.filter((c) => c.lessonId === lessonId && c.call !== 'getEmbed') : [],
+    reports: reports.length,
+    first: reports[0] ?? null,
+    last: reports.at(-1) ?? null,
+  }
+}
+
+/** Do the words on the page (scripts and styles left out) match the pattern? */
+const SAYS = (source) => {
+  let text = ''
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const p = n.parentElement
+    if (!p || p.closest('script, style, noscript, template')) continue
+    text += ` ${n.textContent}`
+  }
+  return new RegExp(source).test(text.replace(/\s+/g, ' '))
+}
+
+/** What a row clicks. Each returns one element or null. */
+const FIND = {
+  marker: (k) => {
+    const b = document.querySelectorAll('main button[data-mode]')[k]
+    return b ? (b.dataset.mode === 'text' ? b.lastElementChild : b) : null
+  },
+  fold: () => document.querySelector('main section[aria-labelledby="v4-panel-title"] button[data-state="fold"]'),
+  pond: (title) =>
+    [...document.querySelectorAll('main section[aria-labelledby="v4-panel-title"] button')].find(
+      (b) => !b.closest('ol') && (b.textContent ?? '').replace(/\s+/g, ' ').trim() === title,
+    ) ?? null,
+}
+
+// ── Driving the page (v6-app.mjs's way) ─────────────────────────────────────
+
+/** Poll `fn` in the page until it returns something truthy. Throws (or, with soft, returns null) after `timeout`. */
+async function waitFor(page, fn, { arg, timeout = 10000, poll = 120, what, soft = false }) {
+  const t0 = Date.now()
+  for (;;) {
+    try {
+      const v = await page.evaluate(fn, arg)
+      if (v) return v
+    } catch {
+      // A page load in flight drops the context: look again.
+    }
+    if (Date.now() - t0 > timeout) {
+      if (soft) return null
+      throw new Error(`${what} (waited ${timeout} ms)`)
+    }
+    await sleep(poll)
+  }
+}
+
+async function openPage(ctx, row, urlPath, { probe = false } = {}) {
+  const page = await ctx.newPage()
+  tally.pages++
+  page.setDefaultTimeout(60000)
+  await page.setViewport({ ...DESKTOP, deviceScaleFactor: 1 })
+  if (probe) await page.evaluateOnNewDocument(PROBE, TELLA)
+  page.on('pageerror', (e) => {
+    const rec = { row: row.id, message: scrub(`${String(e.message).slice(0, 240)} :: ${(e.stack || '').split('\n').slice(1, 4).join(' <- ').slice(0, 400)}`) }
+    row.pageErrors.push(rec)
+    tally.pageErrors.push(rec)
+  })
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return
+    const t = m.text()
+    if (/GPU stall|GL Driver Message|WebGL-|swiftshader|Automatic fallback|Download the React DevTools/i.test(t)) return
+    tally.consoleErrors.push({ row: row.id, message: scrub(t.slice(0, 300)) })
+  })
+  page.on('request', (req) => {
+    let u = null
+    try {
+      u = new URL(req.url())
+    } catch {
+      return
+    }
+    // This app's own routes only, and the path only: an address on Tella's side can hold a video id.
+    if (u.origin !== ORIGIN || !u.pathname.startsWith('/api/')) return
+    const rec = { row: row.id, method: req.method(), path: u.pathname }
+    row.api.push(rec)
+    tally.api.push(rec)
+    if (u.pathname.startsWith('/api/student/')) tally.apiStudent.push(rec)
+  })
+  // Headless Chrome pauses a muted video in a hidden tab: the page under test stays in front.
+  await page.bringToFront()
+  await page.goto(`${ORIGIN}${urlPath}`, { waitUntil: 'domcontentloaded', timeout: LOAD_MS })
+  return page
+}
+
+async function ready(page, what) {
+  await waitFor(page, () => window.__worldReady === true || typeof window.__worldError === 'string', {
+    timeout: READY_MS,
+    poll: 200,
+    what: `${what}: the map never reported ready`,
+  })
+  const err = await page.evaluate(() => window.__worldError ?? null)
+  if (err) throw new Error(`${what}: the scene failed: ${err}`)
+  await page.evaluate(() => document.fonts.ready.then(() => true))
+}
+
+/** Wait until the camera has stopped at place k (0-based): its depth is the stop's and has not changed, nor has the scroll, for three reads. */
+async function restAt(page, k, what, timeout = 25000) {
+  const id = `a${k + 1}`
+  const t0 = Date.now()
+  let last = null
+  let prev = null
+  let steady = 0
+  while (Date.now() - t0 < timeout) {
+    try {
+      last = await page.evaluate(
+        (pid) => ({
+          d: typeof window.__worldDepth === 'number' ? window.__worldDepth : null,
+          t: window.__worldDepthFor ? window.__worldDepthFor(pid) : null,
+          y: Math.round(window.scrollY),
+        }),
+        id,
+      )
+    } catch {
+      last = null
+    }
+    const there = last && last.d !== null && last.t !== null && Math.abs(last.d - last.t) < DEPTH_TOL
+    if (there && prev && prev.d !== null && Math.abs(prev.d - last.d) < 1e-6 && prev.y === last.y) steady++
+    else steady = 0
+    if (steady >= 3) return { ...last, ms: Date.now() - t0 }
+    prev = last
+    await sleep(120)
+  }
+  throw new Error(
+    `${what}: the camera did not come to rest at place ${k + 1} within ${timeout} ms (depth ${f(last?.d)}, the place is at ${f(last?.t)}, scrollY ${last?.y})`,
+  )
+}
+
+/** Put the page scroll on place k's stop, the way the timeline does, and wait for the camera. */
+async function scrollToPlace(page, k, what) {
+  await page.evaluate((pid) => window.scrollTo(0, Math.round(window.__worldScrollFor(window.__worldDepthFor(pid)))), `a${k + 1}`)
+  return restAt(page, k, what)
+}
+
+async function waitCard(page, what, timeout = 15000) {
+  await waitFor(page, () => !!document.querySelector('main section[data-side][data-show]:not([aria-label="Place done"])'), {
+    timeout,
+    what: `${what}: the card did not show`,
+  })
+  await sleep(400) // its 200 ms fade
+}
+
+const waitPath = (page, pathname, what, timeout = NAV_MS) =>
+  waitFor(page, (p) => location.pathname === p, { arg: pathname, timeout, what: `${what}: the address did not become ${pathname}` })
+
+/** The panel of place k is open and the camera has arrived. */
+async function waitPanel(page, k, what, timeout = 40000) {
+  await waitFor(
+    page,
+    (name) => {
+      const p = document.querySelector('main section[aria-labelledby="v4-panel-title"]')
+      if (!p || (p.querySelector('#v4-panel-title')?.textContent ?? '').trim() !== name) return false
+      const fr = window.__worldFrame
+      return !fr || fr.parkProgress >= 0.999
+    },
+    { arg: NAMES[k], timeout, what: `${what}: the panel of place ${k + 1} (${NAMES[k]}) did not open` },
+  )
+  await sleep(300)
+}
+
+const waitNoPanel = (page, what, timeout = 25000) =>
+  waitFor(page, () => !document.querySelector('main section[aria-labelledby="v4-panel-title"]') && document.body.style.overflow !== 'hidden', {
+    timeout,
+    what: `${what}: the place did not close`,
+  })
+
+const waitLesson = (page, title, what, timeout = NAV_MS) =>
+  waitFor(
+    page,
+    (t) => {
+      const h = [...document.querySelectorAll('h1')].find((x) => !x.closest('main'))
+      return !!h && h.textContent.replace(/\s+/g, ' ').trim() === t
+    },
+    { arg: title, timeout, what: `${what}: the lesson page "${title}" did not show` },
+  )
+
+/**
+ * Click what `find` returns. A real mouse click when the element is on screen
+ * with nothing over it; a DOM click otherwise (a label the card has replaced).
+ * Returns which it was. scroll 'box' first brings the element into view inside
+ * the nearest box that scrolls by itself (the panel's list). It never scrolls
+ * the page: on the map the page scroll is the camera.
+ */
+async function click(page, find, arg, { what, scroll = 'none' }) {
+  const handle = await page.evaluateHandle(find, arg)
+  const el = handle.asElement()
+  if (!el) {
+    await handle.dispose()
+    throw new Error(`${what}: not on the page`)
+  }
+  const hit = await page.evaluate(
+    (node, scrollMode) => {
+      if (scrollMode === 'box') {
+        for (let box = node.parentElement; box && box !== document.body; box = box.parentElement) {
+          const overflowY = getComputedStyle(box).overflowY
+          if ((overflowY === 'auto' || overflowY === 'scroll') && box.scrollHeight > box.clientHeight + 1) {
+            const at = node.getBoundingClientRect()
+            const frame = box.getBoundingClientRect()
+            box.scrollTop += at.top + at.height / 2 - (frame.top + frame.height / 2)
+            break
+          }
+        }
+      }
+      const r = node.getBoundingClientRect()
+      const x = r.left + r.width / 2
+      const y = r.top + r.height / 2
+      const onScreen = r.width > 0 && r.height > 0 && x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight
+      const top = onScreen ? document.elementFromPoint(x, y) : null
+      const control = (e) => e.closest('button, a')
+      if (top && (top === node || node.contains(top) || (control(top) !== null && control(top) === control(node)))) return { via: 'mouse', x, y }
+      node.click()
+      return { via: 'dom click' }
+    },
+    el,
+    scroll,
+  )
+  await el.dispose()
+  if (hit.via === 'mouse') await page.mouse.click(hit.x, hit.y)
+  return hit.via
+}
+
+/** Travel to place k, click its label, wait for the address and the panel. */
+async function openPlace(page, k, what) {
+  await scrollToPlace(page, k, what)
+  await sleep(450) // the labels are laid out once the scroll rests
+  const via = await click(page, FIND.marker, k, { what: `${what}: the label of place ${k + 1}` })
+  await waitPath(page, `${APP}/a${k + 1}`, what)
+  await waitPanel(page, k, what)
+  return via
+}
+
+async function closePlace(page, what) {
+  await page.keyboard.press('Escape')
+  await waitPath(page, APP, what)
+  await waitNoPanel(page, what)
+}
+
+/** The panel's rows, with the folded "Lessons 1 to N watched" row opened first. */
+async function readPanel(page, what) {
+  let p = await page.evaluate(READ_PANEL)
+  if (!p) throw new Error(`${what}: no panel to read`)
+  if (p.fold) {
+    await click(page, FIND.fold, null, { what: `${what}: the folded rows` })
+    await waitFor(page, () => !document.querySelector('main section[aria-labelledby="v4-panel-title"] button[data-state="fold"]'), {
+      timeout: 5000,
+      what: `${what}: the watched rows did not unfold`,
+    })
+    p = await page.evaluate(READ_PANEL)
+  }
+  return p
+}
+
+/**
+ * Put the pretend student at place k: every counting lesson of the places
+ * before it is marked watched. Called right after the page starts loading,
+ * before the map is live, so the map takes it as where the student already
+ * was and plays no done moment.
+ */
+async function standAt(page, k, what) {
+  const ids = PLACES.slice(0, k).flatMap((p) => p.counting.map((l) => l.id))
+  await waitFor(page, () => typeof window.__fixture?.complete === 'function', { timeout: LOAD_MS, poll: 60, what: `${what}: window.__fixture did not appear` })
+  const mapWasLive = await page.evaluate((list) => {
+    const live = window.__worldReady === true
+    for (const id of list) window.__fixture.complete(id)
+    return live
+  }, ids)
+  return { marked: ids.length, mapWasLive }
+}
+
+async function shot(page, name) {
+  const file = path.join(OUT, `${name}.png`)
+  await page.screenshot({ path: file })
+  return path.relative(HERE, file)
+}
+
+// ── Rows ────────────────────────────────────────────────────────────────────
+
+function printRow(rec) {
+  const parts = rec.checks.map((c) => `${c.ok ? 'ok' : 'NOT OK'} ${c.label}: ${show(c.got)}`)
+  if (rec.notCovered) parts.unshift(rec.notCovered)
+  if (rec.error) parts.push(`STOPPED: ${rec.error}`)
+  if (Object.keys(rec.values).length) parts.push(`also: ${show(rec.values)}`)
+  say(`${rec.pass ? 'PASS' : rec.notCovered ? 'NOT COVERED' : 'FAIL'}  ${String(rec.id).padStart(2)}  ${rec.name}: ${parts.join(' | ')}`)
+}
+
+let browser = null
+
+async function runRow(id, name, fn) {
+  if (ONLY && !ONLY.has(String(id))) return
+  const rec = { id, name, pass: false, notCovered: null, checks: [], values: {}, error: null, ms: 0 }
+  const t0 = Date.now()
+  const ctx = await browser.createBrowserContext()
+  let page = null
+  const row = {
+    id,
+    api: [],
+    pageErrors: [],
+    values: rec.values,
+    check(label, ok, got) {
+      rec.checks.push({ label, ok: !!ok, got })
+      return !!ok
+    },
+    /** The row could not be run here, for a reason outside the code under test. Not a pass and not a failure. */
+    notCovered(why) {
+      rec.notCovered = why
+    },
+    /** One page at a time: a page behind another is hidden, and a hidden map pauses itself. */
+    async open(urlPath, opts) {
+      if (page) await page.close().catch(() => {})
+      page = await openPage(ctx, row, urlPath, opts)
+      return page
+    },
+    shot: (name) => shot(page, name),
+  }
+  const work = fn(row)
+  work.catch(() => {})
+  let timer = null
+  try {
+    await Promise.race([
+      work,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`row ${id}: gave up after ${ROW_MS / 1000} s`)), ROW_MS)
+      }),
+    ])
+  } catch (e) {
+    rec.error = String(e?.message ?? e)
+    if (page) {
+      try {
+        rec.values.failedShot = await shot(page, `${String(id).padStart(2, '0')}-STOPPED`)
+        rec.values.at = await page.evaluate(() => location.pathname + location.search)
+      } catch {
+        // the page is gone
+      }
+    }
+  } finally {
+    clearTimeout(timer)
+    await ctx.close().catch(() => {})
+  }
+  rec.ms = Date.now() - t0
+  // A row that stopped on an error is a failure whatever else it said.
+  if (rec.error) rec.notCovered = null
+  rec.pass = !rec.error && !rec.notCovered && rec.checks.length > 0 && rec.checks.every((c) => c.ok)
+  results.push(rec)
+  printRow(rec)
+}
+
+/**
+ * Before the rows: load the three routes once with an empty catalog (no 3D),
+ * so the dev server has compiled them and no row's first navigation waits on a
+ * compile. Returns null when the harness renders, or why it does not.
+ */
+async function warmUp() {
+  const ctx = await browser.createBrowserContext()
+  const row = { id: 'warm-up', api: [], pageErrors: [] }
+  const t0 = Date.now()
+  let page = null
+  try {
+    for (const sub of ['', '/a1', '/a1/a1l01']) {
+      if (page) await page.close().catch(() => {})
+      page = await openPage(ctx, row, `${APP}${sub}?catalog=empty`)
+      await waitFor(page, SAYS, {
+        arg: 'There are no lessons here yet\\.',
+        timeout: LOAD_MS,
+        poll: 250,
+        what: `${APP}${sub}?catalog=empty did not show the empty-catalog card`,
+      })
+    }
+    say(`warm-up: the three routes render (${Date.now() - t0} ms)`)
+    return null
+  } catch (e) {
+    let seen = ''
+    try {
+      seen = await page.evaluate(() => document.body.innerText.replace(/\s+/g, ' ').slice(0, 400))
+    } catch {
+      // no page
+    }
+    const errs = row.pageErrors.map((x) => x.message).slice(0, 2).join(' || ')
+    return `${String(e?.message ?? e)}${seen ? `; the page says: ${seen}` : ''}${errs ? `; page errors: ${errs}` : ''}`
+  } finally {
+    await ctx.close().catch(() => {})
+  }
+}
+
+const ROWS = [
+  [1, 'The map takes the real counts'],
+  [2, 'Every lesson has a lantern'],
+  [3, "Each place's card"],
+  [4, "Each place's panel"],
+  [5, 'Action items'],
+  [6, 'The pond'],
+  [7, 'The total'],
+  [8, '26 ticks fit'],
+  [9, 'A lesson page with a video'],
+  [10, 'A lesson page without a video'],
+  [11, "An action item's page"],
+  [12, 'A course lesson watched to its end'],
+]
+const nameOf = (id) => ROWS.find((r) => r[0] === id)[1]
+
+const LOOK_AT = [...NAMES.map((_, k) => `${shotName(k, 'parked')}.png`), `${shotName(2, 'panel')}.png`, `${shotName(4, 'panel')}.png`]
+const GAPS = [
+  [
+    'G1',
+    'How the 8 stops look with the real names',
+    `not a script verdict. A person looks at the ten pictures in shots/v6/course/, one by one, and writes down what was seen: ${LOOK_AT.join(', ')}.`,
+  ],
+  ['G2', 'The default page is unchanged', 'another script proves it: `node world-tests/v6-app.mjs` must still end PASS 20  FAIL 0  NOT COVERED 3.'],
+  ['G3', 'Lanterns in uncleared ground cover (C12)', 'a residual for the eye, on the same ten pictures. Not a failure.'],
+  ['G4', 'The real login, the real server', 'gap by design: /ship.'],
+]
+
+browser = await puppeteer.launch({
+  executablePath: CHROME,
+  headless: 'new',
+  // The last two are for row 12: a `play` command with no click behind it, and no sound.
+  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--no-sandbox', '--hide-scrollbars', '--autoplay-policy=no-user-gesture-required', '--mute-audio'],
+  protocolTimeout: 85000,
+})
+
+let down = null
+try {
+  down = await warmUp()
+  if (down) {
+    say(`HARNESS DOWN: ${down}`)
+    for (const [id, name] of ROWS) {
+      if (ONLY && !ONLY.has(String(id))) continue
+      const rec = { id, name, pass: false, checks: [], values: {}, error: 'not run, the harness did not render', ms: 0 }
+      results.push(rec)
+      printRow(rec)
+    }
+  } else {
+    // 1 ── The map takes the real counts
+    await runRow(1, nameOf(1), async (r) => {
+      const page = await r.open(url('', { arrive: 0, poster: 'off' }))
+      await ready(page, 'row 1')
+      const s = await page.evaluate(SNAP)
+      const inFile = PLACES.map((p) => p.counting.length)
+      r.check(`course_catalog.json holds the plan's course (${COUNTING.join(',')} counting lessons, the 8 names)`, same(inFile, COUNTING) && same(PLACES.map((p) => p.name), NAMES), {
+        counting: inFile,
+        rows: CATALOG.lessons.length,
+      })
+      r.check(`__worldProgress().lessons is ${COUNTING.join(',')}`, same(s.progress?.lessons, COUNTING), s.progress?.lessons ?? null)
+      r.values.done = s.progress?.done ?? null
+      r.values.timeline = s.count
+    })
+
+    // 2 ── Every lesson has a lantern
+    await runRow(2, nameOf(2), async (r) => {
+      const page = await r.open(url('', { arrive: 0, poster: 'off' }))
+      await ready(page, 'row 2')
+      const want = COUNTING.join(',')
+      // The scene lays the lanterns out again once it has the page's counts.
+      await waitFor(page, (w) => window.__worldV6Debug?.moduleStats?.()['progress-world']?.wanted === w, { arg: want, timeout: 15000, poll: 250, soft: true, what: 'row 2: the layout' })
+      const st = await page.evaluate(LANTERNS)
+      r.check('the map was asked for one lantern per lesson (wanted)', st?.wanted === want, st?.wanted ?? null)
+      const all = r.check('every place put down as many (perArea equals wanted)', !!st && st.perArea === st.wanted, st ? `perArea ${st.perArea}; wanted ${st.wanted}` : null)
+      r.values.lanterns = st
+      if (!st || all) return
+      // A place is short. Say which, and take its picture with every lantern lit.
+      const got = String(st.perArea).split(',').map(Number)
+      const asked = String(st.wanted).split(',').map(Number)
+      const short = asked.map((n, k) => ({ k, asked: n, got: got[k] })).filter((x) => x.got !== x.asked)
+      r.values.short = short.map((x) => `place ${x.k + 1} ${NAMES[x.k]}: ${x.got} lanterns for ${x.asked} lessons`)
+      const lit = await r.open(url('', { p: 'all', arrive: 0, poster: 'off' }))
+      await ready(lit, 'row 2, every lantern lit')
+      r.values.shots = []
+      for (const x of short) {
+        await scrollToPlace(lit, x.k, `row 2, place ${x.k + 1}`)
+        await sleep(SETTLE_MS)
+        r.values.shots.push(await r.shot(`lanterns-short-place-${x.k + 1}-${slug(NAMES[x.k])}-all-lit`))
+      }
+      r.values.litPage = await lit.evaluate(LANTERNS)
+    })
+
+    // 3 ── Each place's card
+    await runRow(3, nameOf(3), async (r) => {
+      r.values.shots = []
+      r.values.cards = []
+      for (let k = 0; k < NAMES.length; k++) {
+        const what = `row 3, place ${k + 1}`
+        const page = await r.open(url('', { arrive: 0, poster: 'off' }))
+        const stood = await standAt(page, k, what)
+        await ready(page, what)
+        await scrollToPlace(page, k, what)
+        await waitCard(page, what)
+        await sleep(SETTLE_MS)
+        const c = await page.evaluate(CARD, k)
+        const s = await page.evaluate(SNAP)
+        const n = COUNTING[k]
+        // Nothing watched in the place: "25 lessons", with the minutes after it when every lesson has a length.
+        const countOk = new RegExp(`^${n} lessons( · \\d+ min)?$`).test(c?.count ?? '')
+        r.check(`place ${k + 1}: the card says ${NAMES[k]} and ${n} lessons`, !!c && c.title === NAMES[k] && countOk && c.ticks === n, c ? `"${c.title}", "${c.count}", ${c.ticks} ticks` : null)
+        r.values.cards.push({ place: k + 1, watch: c?.watch ?? null, label: c?.label ?? null, watchedBefore: stood.marked, doneMoments: s.celebrations, mapWasLive: stood.mapWasLive })
+        r.values.shots.push(await r.shot(shotName(k, 'parked')))
+      }
+    })
+
+    // 4 ── Each place's panel
+    await runRow(4, nameOf(4), async (r) => {
+      const page = await r.open(url('', { arrive: 0, poster: 'off' }))
+      await ready(page, 'row 4')
+      r.values.shots = []
+      r.values.counts = []
+      let titles = 0
+      let wrong = []
+      for (let k = 0; k < NAMES.length; k++) {
+        const what = `row 4, place ${k + 1}`
+        await openPlace(page, k, what)
+        const p = await readPanel(page, what)
+        const want = PLACES[k].counting.map((l) => l.title)
+        const got = p.rows.map((x) => x.title)
+        const numbered = p.rows.every((x, i) => x.n === i + 1)
+        r.check(
+          `place ${k + 1}: ${COUNTING[k]} rows, the first and the last carry the JSON's titles`,
+          p.rows.length === COUNTING[k] && numbered && got[0] === want[0] && got.at(-1) === want.at(-1),
+          `${p.rows.length} rows; 1 "${got[0]}"; ${p.rows.length} "${got.at(-1)}"`,
+        )
+        titles += got.filter((t, i) => t === want[i]).length
+        wrong = wrong.concat(want.map((t, i) => (got[i] === t ? null : `${PLACES[k].counting[i].id}: "${got[i]}"`)).filter(Boolean))
+        r.values.counts.push(p.count)
+        if (k === 2 || k === 4) {
+          await sleep(SETTLE_MS)
+          r.values.shots.push(await r.shot(shotName(k, 'panel')))
+        }
+        await closePlace(page, what)
+      }
+      r.check(`every row of every panel carries the JSON's title, in the JSON's order (${TOTAL})`, titles === TOTAL && wrong.length === 0, wrong.length ? wrong.slice(0, 5) : `${titles} of ${TOTAL}`)
+    })
+
+    // 5 ── Action items
+    await runRow(5, nameOf(5), async (r) => {
+      const page = await r.open(url('', { arrive: 0, poster: 'off' }))
+      await ready(page, 'row 5')
+      const seen = []
+      for (let k = 0; k < NAMES.length; k++) {
+        const what = `row 5, place ${k + 1}`
+        await openPlace(page, k, what)
+        const p = await readPanel(page, what)
+        // A row is an action item when the panel says so twice: in its name for a screen reader, and in the word where the minutes go.
+        seen.push({ named: p.rows.filter((x) => x.kind === 'action').map((x) => x.n), worded: p.rows.filter((x) => x.tail === 'Action').map((x) => x.n) })
+        await closePlace(page, what)
+      }
+      for (const k of [2, 4, 5]) {
+        r.check(
+          `place ${k + 1}: ${ACTION_ROWS[k].length === 1 ? 'row' : 'rows'} ${ACTION_ROWS[k].join(', ')} read "Action"`,
+          same(seen[k].worded, ACTION_ROWS[k]) && same(seen[k].named, ACTION_ROWS[k]),
+          seen[k].worded,
+        )
+      }
+      const others = [0, 1, 3, 6, 7]
+      r.check(
+        'no other place has an action row',
+        others.every((k) => seen[k].worded.length === 0 && seen[k].named.length === 0),
+        others.map((k) => `place ${k + 1}: ${seen[k].worded.length}`).join(', '),
+      )
+      // The briefs behind them, in the data file: an action item is a lesson that has one.
+      const inFile = PLACES.map((p) => p.counting.map((l, i) => (l.action_brief ? i + 1 : 0)).filter(Boolean))
+      r.values.inTheJson = inFile.map((rows, k) => (rows.length ? `place ${k + 1}: ${rows.join(', ')}` : null)).filter(Boolean)
+    })
+
+    // 6 ── The pond
+    await runRow(6, nameOf(6), async (r) => {
+      const page = await r.open(url('', { arrive: 0, poster: 'off' }))
+      await ready(page, 'row 6')
+      const k = POND.place
+      r.values.open = await openPlace(page, k, 'row 6')
+      const p = await readPanel(page, 'row 6')
+      const inFile = lessonOf(POND.id)
+      r.check(
+        `course_catalog.json: ${POND.id} is "${POND.title}" and does not count`,
+        !!inFile && inFile.title === POND.title && inFile.counts === false && inFile.area === PLACES[k].id,
+        inFile ? { title: inFile.title, counts: inFile.counts ?? true, area: inFile.area } : null,
+      )
+      r.check(`place ${k + 1}: a button after the list holds "${POND.title}"`, p.after.includes(POND.title), p.after)
+      r.check(`it is not one of the ${COUNTING[k]} rows`, p.rows.length === COUNTING[k] && !p.rows.some((x) => x.title === POND.title), `${p.rows.length} rows`)
+      r.values.click = await click(page, FIND.pond, POND.title, { what: 'row 6: the pond button', scroll: 'box' })
+      await waitPath(page, `${APP}/${PLACES[k].id}/${POND.id}`, 'row 6')
+      await waitLesson(page, POND.title, 'row 6')
+      await sleep(600)
+      const s = await page.evaluate(SNAP)
+      r.check(`it opens ${APP}/${PLACES[k].id}/${POND.id}`, s.path === `${APP}/${PLACES[k].id}/${POND.id}` && s.lesson === POND.title, { path: s.path, heading: s.lesson })
+      r.values.page = s.outside.slice(0, 160)
+    })
+
+    // 7 ── The total
+    await runRow(7, nameOf(7), async (r) => {
+      const page = await r.open(url('', { p: 'all', arrive: 1, poster: 'off' }))
+      await ready(page, 'row 7')
+      const rest = await restAt(page, NAMES.length - 1, 'row 7')
+      await waitCard(page, 'row 7')
+      await sleep(600)
+      const s = await page.evaluate(SNAP)
+      r.check(`the card reads "${TOTAL} of ${TOTAL}"`, !!s.card && s.card.text.includes(`${TOTAL} of ${TOTAL} lessons`), s.card?.text ?? null)
+      r.check(`the timeline counts ${TOTAL} of ${TOTAL}`, s.count === `${TOTAL} of ${TOTAL} lessons done`, s.count)
+      r.values.card = s.card?.title ?? null
+      r.values.done = s.progress?.done ?? null
+      r.values.rest = `depth ${f(rest.d)}, the stop is at ${f(rest.t)}`
+    })
+
+    // 8 ── 26 ticks fit
+    await runRow(8, nameOf(8), async (r) => {
+      const k = 4
+      const page = await r.open(url('', { arrive: 0, poster: 'off' }))
+      r.values.stood = await standAt(page, k, 'row 8')
+      await ready(page, 'row 8')
+      await scrollToPlace(page, k, 'row 8')
+      await waitCard(page, 'row 8')
+      await sleep(600)
+      const c = await page.evaluate(CARD, k)
+      r.check(`place ${k + 1}'s card has ${COUNTING[k]} ticks`, c?.title === NAMES[k] && c?.ticks === COUNTING[k], c ? `"${c.title}", ${c.ticks} ticks` : null)
+      r.check(
+        "the tick strip's right edge is inside the card's box",
+        !!c && !!c.strip && !!c.lastTick && c.strip.l >= c.box.l && c.strip.r <= c.box.r && c.lastTick.r <= c.box.r,
+        c && c.strip && c.lastTick
+          ? `strip ${c.strip.l} to ${c.strip.r} (${c.strip.w} px), last tick ends at ${c.lastTick.r}; card ${c.box.l} to ${c.box.r} (${c.box.w} px); ${Math.round((c.box.r - c.strip.r) * 10) / 10} px to spare`
+          : null,
+      )
+    })
+
+    // 9 ── A lesson page with a video
+    await runRow(9, nameOf(9), async (r) => {
+      const id = 'a1l01'
+      const title = lessonOf(id).title
+      const page = await r.open(url(`/a1/${id}`, { arrive: 0, poster: 'off' }))
+      await waitLesson(page, title, 'row 9', LOAD_MS)
+      const videos = await page.evaluate(() => document.querySelector('[data-dev-videos]')?.getAttribute('data-dev-videos') ?? null)
+      // Whether the frame is there, and nothing about it: its address holds the video's id.
+      const frame = await waitFor(page, () => [...document.querySelectorAll('iframe[title="Lesson video"]')].some((x) => !x.closest('main')), {
+        timeout: 20000,
+        soft: true,
+        what: 'row 9: the frame',
+      })
+      await sleep(500)
+      const s = await page.evaluate(SNAP)
+      const asked = await page.evaluate(
+        (lessonId) => ({
+          bar: !!document.querySelector('[role="progressbar"][aria-label="Lesson progress"]'),
+          embed: (window.__fixture?.calls ?? []).filter((c) => c.call === 'getEmbed' && c.lessonId === lessonId).map((c) => c.ok),
+        }),
+        id,
+      )
+      r.check('the dev environment has its two test videos', videos === '2', videos === null ? 'none: DEV_TELLA_VIDEO_ID and DEV_TELLA_VIDEO_ID_2 are not both set' : videos)
+      r.check(`the heading is "${title}"`, s.lesson === title && s.path === `${APP}/a1/${id}`, { heading: s.lesson, path: s.path })
+      r.check('the player frame mounts', !!frame && asked.bar, { frame: !!frame, progressLine: asked.bar, addressAnswers: asked.embed })
+      r.values.lengthInTheFile = `${LENGTHS[id] ?? null} s`
+      r.values.eyebrowShowsIt = minutesOf(id) !== null && s.outside.includes(`${minutesOf(id)} min`)
+      r.values.page = s.outside.slice(0, 120)
+    })
+
+    // 10 ── A lesson page without a video
+    await runRow(10, nameOf(10), async (r) => {
+      const id = 'a7l01'
+      const title = lessonOf(id).title
+      const page = await r.open(url(`/a7/${id}`, { arrive: 0, poster: 'off' }))
+      await waitLesson(page, title, 'row 10', LOAD_MS)
+      await waitFor(page, SAYS, { arg: 'Not recorded yet\\.', timeout: 10000, soft: true, what: 'row 10: the not-recorded state' })
+      await sleep(1500) // long enough for a frame to have mounted, had the page asked for one
+      const s = await page.evaluate(SNAP)
+      const asked = await page.evaluate((lessonId) => (window.__fixture?.calls ?? []).filter((c) => c.lessonId === lessonId).length, id)
+      r.check(`course-lengths.fixture.json has no length for ${id}`, LENGTHS[id] === undefined, LENGTHS[id] ?? 'none')
+      r.check(`the heading is "${title}"`, s.lesson === title && s.path === `${APP}/a7/${id}`, { heading: s.lesson, path: s.path })
+      r.check('the page says "Not recorded yet." and has no player', /Not recorded yet\./.test(s.outside) && s.frames === 0, { said: /Not recorded yet\./.test(s.outside), frames: s.frames })
+      r.values.callsToTheStandInServer = asked
+      r.values.page = s.outside.slice(0, 120)
+    })
+
+    // 11 ── An action item's page
+    await runRow(11, nameOf(11), async (r) => {
+      const id = 'a5l22'
+      const lesson = lessonOf(id)
+      const page = await r.open(url(`/a5/${id}`, { arrive: 0, poster: 'off' }))
+      await waitLesson(page, lesson.title, 'row 11', LOAD_MS)
+      await sleep(500)
+      const s = await page.evaluate(SNAP)
+      r.check(`the heading is "${lesson.title}"`, s.lesson === lesson.title && s.path === `${APP}/a5/${id}`, { heading: s.lesson, path: s.path })
+      r.check('the page shows the "Milestone" box', /Milestone/.test(s.outside), /Milestone/.test(s.outside))
+      r.check("with the JSON's brief, word for word", !!lesson.action_brief && s.outside.includes(norm(lesson.action_brief)), `${norm(lesson.action_brief).slice(0, 70)}…`)
+      r.values.type = lesson.type
+      r.values.page = s.outside.slice(0, 140)
+    })
+
+    // 12 ── A course lesson watched to its end
+    await runRow(12, nameOf(12), async (r) => {
+      const id = 'a1l01'
+      const title = lessonOf(id).title
+      const nextId = PLACES[0].counting[1].id
+      const page = await r.open(url(`/a1/${id}`, { arrive: 0, poster: 'off' }), { probe: true })
+      await waitLesson(page, title, 'row 12', LOAD_MS)
+      const harness = await page.evaluate(() => {
+        const el = document.querySelector('[data-dev-videos]')
+        return { videos: el?.getAttribute('data-dev-videos') ?? null, seconds: Number(el?.getAttribute('data-dev-video-seconds')) || null }
+      })
+      const frame = await waitFor(page, () => [...document.querySelectorAll('iframe[title="Lesson video"]')].some((x) => !x.closest('main')), {
+        timeout: 20000,
+        soft: true,
+        what: 'row 12: the frame',
+      })
+      if (!frame) {
+        // No video to play is the harness's state, not the page's fault. Whether the frame mounts when there is one is row 9's.
+        r.notCovered(
+          `the page has no test video to play: the lesson's frame did not mount (the harness says ${harness.videos === null ? 'nothing, no [data-dev-videos]: DEV_TELLA_VIDEO_ID and DEV_TELLA_VIDEO_ID_2 are not both set' : `data-dev-videos="${harness.videos}"`}).`,
+        )
+        return
+      }
+      const clip = harness.seconds
+      if (!clip) throw new Error('row 12: the frame mounted but the harness does not say how long the test video is ([data-dev-video-seconds])')
+      await waitFor(page, () => window.__probe.msgs.some((m) => m.type === 'ready'), { timeout: PLAYER_READY_MS, what: 'row 12: the player never said "ready"' })
+      const from = await page.evaluate(() => window.__probe.msgs.length)
+      const t0 = Date.now()
+      if (!(await page.evaluate(SEND, { message: { type: 'play' }, tellaOrigin: TELLA }))) throw new Error('row 12: there is no lesson frame to send "play" to')
+      await waitFor(page, (i) => window.__probe.msgs.slice(i).some((m) => m.type === 'timeUpdate'), { arg: from, timeout: 20000, what: 'row 12: the player reported no position after "play"' })
+      // Normal speed: the clip's own length on the clock, and room for a slow start.
+      const ended = await waitFor(page, ENDED, {
+        arg: { i: from, end: clip - 1.5 },
+        timeout: clip * 1000 + 45000,
+        poll: 200,
+        what: `row 12: the player never reached the end of the ${clip} s clip (neither "stopped" nor "paused" in its last 1.5 s)`,
+      })
+      await waitFor(page, (lessonId) => window.__fixture?.completed().includes(lessonId), { arg: id, timeout: 20000, soft: true, what: 'row 12: done' })
+      const clock = (Date.now() - t0) / 1000
+      await sleep(700) // the "Done." line and the link
+      const s = await page.evaluate(WATCHED, { lessonId: id, from })
+      const speed = s.first && s.last && s.last.at > s.first.at ? (s.last.t - s.first.t) / ((s.last.at - s.first.at) / 1000) : null
+      const beats = s.calls.filter((c) => c.call === 'heartbeat')
+      const claims = s.calls.filter((c) => c.call === 'claim')
+      const short = /finished but didn.t register/
+      r.check(
+        `the ${clip} s clip played to its end at normal speed`,
+        !!ended && speed !== null && speed > 0.9 && speed < 1.1,
+        `"${ended.state}" at ${f(ended.t, 2)} s; ${s.reports} position reports from ${f(s.first?.t, 2)} to ${f(s.last?.t, 2)} s, ${f(speed, 3)} video s per clock s; ${f(clock, 1)} clock s from "play"`,
+      )
+      r.check('the lesson is done on the page', s.completed === true && s.saysDone, { inTheDoneSet: s.completed, saysDone: s.saysDone })
+      r.check(`"Next lesson" is lit and leads to ${nextId}`, s.next?.disabled === 'false' && s.next?.href === `${APP}/a1/${nextId}`, s.next)
+      r.check(
+        'no "finished but didn\'t register" line, at the end or at any moment before it',
+        !s.linesNow.some((t) => short.test(t)) && !s.linesEver.some((t) => short.test(t)),
+        { underTheBarNow: s.linesNow, statusLinesEver: s.linesEver },
+      )
+      r.values.heldTo = `stand-in server ${s.row?.reported_duration_seconds ?? null} s (the clip), catalog row ${LENGTHS[id] ?? null} s (the lesson)`
+      r.values.watchRow = s.row ? `furthest ${f(s.row.max_position_seconds, 2)} s, really watched ${f(s.row.watched_seconds, 2)} s, 95% point ${s.row.threshold_met_at ? 'met' : 'NOT met'}` : null
+      r.values.claims = claims.map((c) => `${c.completed ? 'completed' : c.reason} at ${f(c.playedRatio * 100, 1)}% played`)
+      // The page's own progress line divides by the catalog's length, so it ends far from full here.
+      r.values.progressLine = `aria-valuenow ${s.bar}`
+      r.values.heartbeats = beats.map((c) => `${f(c.position, 1)} s +${f(c.credited, 1)}${c.force ? ' forced' : ''}${c.accepted ? '' : ' REFUSED'}${c.met ? ' met' : ''}`)
+    })
+  }
+} finally {
+  await browser.close().catch(() => {})
+}
+
+for (const [id, name, why] of GAPS) say(`NOT COVERED  ${id}  ${name}: ${why}`)
+
+// Not a row of the table: what every page above did besides, for whoever reads the run.
+const measured = {
+  pagesOpened: tally.pages,
+  pageErrors: tally.pageErrors.length,
+  requestsToApiStudent: tally.apiStudent.length,
+  otherApiRequests: tally.api.length - tally.apiStudent.length,
+  consoleErrors: tally.consoleErrors.length,
+}
+say(`MEASURED  ${show(measured)}`)
+for (const line of [...new Set([...tally.pageErrors, ...tally.consoleErrors].map((x) => `row ${x.row}: ${x.message}`))].slice(0, 4)) say(`MEASURED  ${line}`)
+
+const passed = results.filter((x) => x.pass).length
+/** Rows that could not be run here (row 12 with no test video): counted with the gaps, never with the failures. */
+const skipped = results.filter((x) => !x.pass && x.notCovered).length
+const failed = results.length - passed - skipped
+fs.writeFileSync(
+  path.join(OUT, 'results.json'),
+  scrub(JSON.stringify({ at: new Date().toISOString(), base: `${ORIGIN}${APP}?catalog=course`, only: onlyArg, results, tally, notCovered: GAPS.map(([id, name, why]) => ({ id, name, why })) }, null, 1)),
+)
+if (ONLY) say(`partial run: rows ${[...ONLY].join(', ')} only`)
+say(`PASS ${passed}  FAIL ${failed}  NOT COVERED ${GAPS.length + skipped}`)
+if (failed) process.exitCode = 1

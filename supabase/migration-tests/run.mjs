@@ -2880,6 +2880,19 @@ const cutover = async (d, where) => {
         'v103 run again: every object and every row unchanged', said(r))
   }
 
+  // v103 alters live tables: each lock waits 5 seconds at most, and the
+  // setting ends with its transaction. (A held lock cannot be staged here:
+  // PGlite is one session, and a wait on a prepared transaction hangs it.)
+  {
+    const c = await d.clone()
+    const at = v103.indexOf('\ncommit;\n')
+    const rr = await runFile(c, v103.slice(0, at) + `\nselect set_config('test.v103_lock_timeout', current_setting('lock_timeout'), false);` + v103.slice(at))
+    const lt = (await c.query(`select current_setting('test.v103_lock_timeout', true) as inside, current_setting('lock_timeout') as after`)).rows[0]
+    await c.close()
+    say(at > 0 && rr.ok && lt.inside === '5s' && lt.after === '0',
+        "v103's transaction runs with lock_timeout 5s, and the setting is gone after its commit", rr.ok ? asJson(lt) : said(rr))
+  }
+
   // The view's value, on fixtures inside a transaction that is rolled back.
   {
     const V = n => `c2000000-0000-0000-0000-00000000000${n}`
@@ -2901,8 +2914,8 @@ const cutover = async (d, where) => {
       return rows
     }).catch(e => [{ s: e.message }])
     say(got.length === 2 && got[0].s === V(1) && got[0].last_completed_at?.toISOString() === '2026-07-03T10:00:00.000Z'
-          && got[1].s === V(4) && got[1].last_completed_at?.toISOString() === '2026-07-06T10:00:00.000Z',
-        "the view: the latest completed_at of counting done lessons (a later l057 does not count); a skipped-only student and a compound lesson half done give no row; both halves done gives its completed_at",
+          && got[1].s === V(4) && got[1].last_completed_at?.toISOString() === '2026-07-08T10:00:00.000Z',
+        "the view: the latest completed_at of counting done lessons (a later l057 does not count); a skipped-only student and a compound lesson half done give no row; both halves done gives the later of the two (the action shipped 2 days after the watch)",
         got.map(x => `${x.s.slice(-1)}:${x.last_completed_at?.toISOString?.() ?? x.s}`).join(' '))
   }
 
@@ -3075,7 +3088,9 @@ const cutover = async (d, where) => {
                               where not is_dismissed and alert_type in ('no_tasks_7d', 'no_lessons_3d')`)).map(a => a.id).sort()
     const videosByArea = Object.fromEntries((await Q(`select n.region_id as a, count(v.lesson_id)::int as k from lessons_next n
         left join lesson_videos v on v.lesson_id = n.id group by 1`)).map(x => [x.a, x.k]))
-    return { grads, logins, offTemplates, tasks, alerts, videosByArea, counts: await countsNow() }
+    // Fixture students the switch stamps and who have no milestone row yet.
+    const created = [...new Set([...grads, ...Object.keys(logins)])].filter(s => !(s in ms) && s.startsWith('c1')).sort()
+    return { grads, logins, offTemplates, tasks, alerts, videosByArea, created, counts: await countsNow() }
   }
   const milestoneOf = async s => await one(`select playbook_unlocked_at, first_sprint_login_at from student_milestones where student_id = $1`, [s])
 
@@ -3106,6 +3121,79 @@ const cutover = async (d, where) => {
         pre.ok ? `grads ${row('graduates the switch stamps')}/${want.grads.length}, tasks ${row('open tasks the switch dismisses')}/${want.tasks.length}` : said(pre))
     say(post.ok && post.rows.length > 0 && post.rows.every(x => x.verdict === 'NOT SWITCHED'),
         'the postcheck before the switch says NOT SWITCHED on every row', post.ok ? [...new Set(post.rows.map(x => x.verdict))].join(',') : said(post))
+  }
+
+  // The preflight's lists h to k, on a copy: pending requests, rejections
+  // either side of the launch (taken from discount.ts, so the SQL's cutoff
+  // cannot drift from the app's), templates with day_number, and triggers on
+  // the tables the switch writes (one made the way a dashboard webhook is).
+  {
+    const KNOWN_TRIGGERS = ['daily_progress_snapshots.trg_daily_snapshots_reset_floor', 'lesson_notes.lesson_notes_updated_at',
+      'lesson_videos.trg_lesson_videos_updated_at', 'lessons.trg_lessons_updated_at',
+      'student_lesson_ratings.trg_bump_student_lesson_ratings_updated_at', 'templates.trg_templates_updated_at']
+    const LAUNCH = /DISCOUNT_LAUNCH_DATE = "([^"]+)"/.exec(
+      fs.readFileSync(fileURLToPath(new URL('../../src/lib/world/discount.ts', import.meta.url)), 'utf8'))?.[1]
+    const justBefore = new Date(Date.parse(LAUNCH) - 1).toISOString()
+    const c = await d.clone()
+    await c.exec(`
+      insert into discount_requests (student_id, status, created_at, rejection_reason) values
+        ('${G(1)}', 'pending',  '2026-10-12 10:00:00+00', null),
+        ('${G(2)}', 'pending',  '2026-07-01 10:00:00+00', null),
+        ('${G(3)}', 'rejected', '2026-10-13 10:00:00+00', 'not every video'),
+        ('${G(4)}', 'rejected', '${LAUNCH}', null),
+        ('${G(4)}', 'rejected', '${justBefore}', 'old course'),
+        ('${G(1)}', 'approved', '2026-10-13 10:00:00+00', null);
+      insert into templates (scenario_id, bucket, title, trigger_description, is_custom, is_active, trigger_config) values
+        ('custom.cut_day_lessons', 'at_risk', 'Day and lessons', 'x', true, true,
+           '{"all":[{"metric":"day_number","op":"at_least","value":5},{"metric":"total_lessons_watched","op":"is","value":0}]}'),
+        ('custom.cut_day_region',  'at_risk', 'Day and region',  'x', true, true,
+           '{"all":[{"metric":"day_number","op":"at_least","value":7},{"metric":"region_complete","region":"r1","op":"is_not"}]}'),
+        ('custom.cut_day_off',     'at_risk', 'Day, inactive',   'x', true, false,
+           '{"all":[{"metric":"day_number","op":"at_least","value":3}]}');
+      -- base.sql leaves out v75's trigger on the ratings; production has it.
+      create trigger trg_bump_student_lesson_ratings_updated_at before update on public.student_lesson_ratings
+        for each row execute function public.set_updated_at();
+      create function public._cut_hook() returns trigger language plpgsql as $$ begin return null; end $$;
+      create trigger dashboard_webhook after delete on public.student_lesson_completions
+        for each row execute function public._cut_hook();
+      create trigger elsewhere_hook after insert on public.students
+        for each row execute function public._cut_hook();`)
+    const pre = await runFile(c, preflight)
+    const ids = (await c.query(`select id::text, student_id::text as s, status, created_at from discount_requests`)).rows
+    await c.close()
+    const idOf = (s, status, at) => ids.find(x => x.s === s && x.status === status && x.created_at.getTime() === Date.parse(at))?.id
+    const part = p => pre.rows.filter(x => x.part === p)
+    const listed = p => part(p).filter(x => !/^(discount requests|active templates)/.test(x.item))
+    const count = (p, item) => part(p).find(x => x.item === item)?.found
+    const h = listed('h. pending'), i = listed('i. rejected'), j = listed('j. day_number')
+    say(pre.ok && !!LAUNCH && h.length === 2 && count('h. pending', 'discount requests still pending') === '2'
+          && h[0].item === `made 2026-07-01 10:00 UTC: request ${idOf(G(2), 'pending', '2026-07-01T10:00:00Z')}, student ${G(2)}`
+          && h[1].item.includes(`request ${idOf(G(1), 'pending', '2026-10-12T10:00:00Z')}, student ${G(1)}`)
+          && h.every(x => x.found === 'pending' && /before v104/.test(x.expect)),
+        "the preflight's h. pending: every pending request, oldest first, with its id and student, and the count",
+        pre.ok ? asJson(h.map(x => x.item)) : said(pre))
+    say(pre.ok && i.length === 2 && count('i. rejected', 'discount requests rejected since the launch') === '2'
+          && i.some(x => x.item.includes(idOf(G(3), 'rejected', '2026-10-13T10:00:00Z')) && x.found === 'rejected: not every video')
+          && i.some(x => x.item.includes(idOf(G(4), 'rejected', LAUNCH)) && x.found === 'rejected: no reason given')
+          && !!idOf(G(4), 'rejected', justBefore) && !i.some(x => x.item.includes(idOf(G(4), 'rejected', justBefore))),
+        `the preflight's i. rejected: rejections from the launch instant on (${LAUNCH}, discount.ts), not one a millisecond before it, nor an approved request`,
+        pre.ok ? asJson(i.map(x => `${x.item} | ${x.found}`)) : said(pre))
+    say(pre.ok && j.length === 2 && count('j. day_number', 'active templates using day_number') === '2'
+          && j.find(x => x.item === 'custom.cut_day_lessons: Day and lessons')?.expect.startsWith('stays on')
+          && j.find(x => x.item === 'custom.cut_day_lessons: Day and lessons')?.found.includes('"total_lessons_watched"')
+          && j.find(x => x.item === 'custom.cut_day_region: Day and region')?.expect === 'turned off by the switch'
+          && !j.some(x => x.item.startsWith('custom.cut_day_off')),
+        "the preflight's j. day_number: every active template with a day_number condition, its conditions in full, and which the switch turns off",
+        pre.ok ? asJson(j.map(x => `${x.item} | ${x.expect}`)) : said(pre))
+    const k = part('k. triggers').filter(x => x.item !== 'triggers on the tables the switch writes')
+    const hook = k.find(x => x.item === 'student_lesson_completions.dashboard_webhook')
+    const known = k.filter(x => x.expect === 'expected').map(x => x.item).sort()
+    say(pre.ok && sameJson(known, KNOWN_TRIGGERS)
+          && hook?.expect.startsWith('NOT expected') && /AFTER DELETE ON public\.student_lesson_completions/.test(hook.found)
+          && k.length === 7 && !k.some(x => x.item.includes('elsewhere_hook'))
+          && count('k. triggers', 'triggers on the tables the switch writes') === '7, of them expected: 6',
+        "the preflight's k. triggers: the 6 the migrations make marked expected, a dashboard-made one on a wiped table NOT expected, one on a table the switch does not write left out",
+        pre.ok ? asJson(k.map(x => `${x.item} | ${x.expect}`)) : said(pre))
   }
 
   // ── the guards: one copy of the database per broken starting point ──
@@ -3143,6 +3231,81 @@ const cutover = async (d, where) => {
       await c.close()
     }
     say(!!idx, '(the unique index on lessons_next.whop_lesson_id was there to be dropped in the copy)', idx ?? 'missing')
+  }
+
+  // ── the lock: every table the file writes, locked before it reads one ──
+  // A row a student commits between the archive copy and the wipe would be
+  // lost without it. A second session cannot be staged here (PGlite is one
+  // session, and a wait on a prepared transaction hangs it), so this proves
+  // the list and the sentence, never a real wait. Three runs per file, each
+  // on a copy: as written, with probes after the lock and before the commit;
+  // with the lock taken out, to see which tables its own statements write;
+  // and with the lock replaced by the error a timeout raises.
+  {
+    const LOCK_HEAD = '-- ─────────────── The lock ───────────────'
+    const LOCK_SQL = `execute 'lock table ' || v_list || ' in access exclusive mode';`
+    const relsIn = modes => `(select coalesce(string_agg(distinct c.relname::text, ',' order by c.relname::text), '')
+        from pg_locks l join pg_class c on c.oid = l.relation
+       where l.pid = pg_backend_pid() and l.locktype = 'relation' and c.relnamespace = 'public'::regnamespace
+         and c.relkind in ('r', 'p') and ${modes})`
+    const WRITE_MODES = `l.mode not in ('AccessShareLock', 'RowShareLock')`
+    const probe = (sql, marker, name, what) => {
+      const i = sql.indexOf(marker)
+      return i < 0 ? sql : sql.slice(0, i) + `\nselect set_config('test.${name}', ${what}, false);\n` + sql.slice(i)
+    }
+    const unlocked = (sql, next) => { const a = sql.indexOf(LOCK_HEAD), b = sql.indexOf(next); return a < 0 || b < a ? sql : sql.slice(0, a) + sql.slice(b) }
+    const setting = async (c, n) => (await c.query(`select coalesce(current_setting('test.${n}', true), '') as v`)).rows[0].v
+    const list = s => s ? s.split(',').sort() : []
+    const lockCase = async (base, sql, first) => {
+      const out = {}
+      let c = await base.clone()
+      let rr = await runFile(c, probe(probe(probe(sql, first, 'locked_first', relsIn(`l.mode = 'AccessExclusiveLock'`)),
+                                            first, 'timeout_first', `current_setting('lock_timeout')`),
+                                      '\ncommit;\n', 'written', relsIn(WRITE_MODES)))
+      out.ran = rr.ok ? 'ok' : said(rr)
+      out.lockedFirst = list(await setting(c, 'locked_first'))
+      out.timeout = await setting(c, 'timeout_first')
+      out.writtenAsIs = list(await setting(c, 'written'))
+      out.after = (await c.query(`select current_setting('lock_timeout') as v`)).rows[0].v
+      await c.close()
+      c = await base.clone()
+      rr = await runFile(c, probe(unlocked(sql, first), '\ncommit;\n', 'written', relsIn(WRITE_MODES)))
+      out.ranBare = rr.ok ? 'ok' : said(rr)
+      out.writtenBare = list(await setting(c, 'written'))
+      await c.close()
+      c = await base.clone()
+      const was = await everything(c)
+      out.busy = await runFile(c, sql.replace(LOCK_SQL, `raise exception 'canceling statement due to lock timeout' using errcode = '55P03';`))
+      out.busyUnchanged = await everything(c) === was
+      await c.close()
+      return out
+    }
+    const report = x => `locked first ${x.lockedFirst.length} [${x.timeout}], written ${x.writtenBare.length}`
+                      + `${x.ran === 'ok' ? '' : ' / ' + x.ran}${x.ranBare === 'ok' ? '' : ' / bare: ' + x.ranBare}`
+                      + `, missing ${x.writtenBare.filter(t => !x.lockedFirst.includes(t)).join(',') || 'none'}`
+    const holds = x => x.ran === 'ok' && x.ranBare === 'ok' && x.writtenBare.length === 18 && sameJson(x.lockedFirst, x.writtenBare)
+                       && x.writtenAsIs.every(t => x.lockedFirst.includes(t)) && x.timeout === '5s' && x.after === '0'
+    const busySays = (x, who) => x.busy.code === '55P03' && x.busyUnchanged
+                       && x.busy.said.includes(`so the ${who} did not start. Nothing was changed. Paste it again in a minute.`)
+
+    const sw = await lockCase(d, v104, '-- ─────────────── 0. Already switched? ───────────────')
+    say(holds(sw),
+        'v104 locks, before its first read and with lock_timeout 5s, exactly the 18 tables its own statements write or alter (found by running it without the lock); nothing gets a write lock it did not take first',
+        report(sw))
+    say(busySays(sw, 'switch'),
+        'v104 with its lock timing out (55P03, raised in place of the lock): "Nothing was changed. Paste it again in a minute.", and every table, object and schema identical',
+        sw.busy.ok ? 'it ran' : `${sw.busy.code}: ${sw.busy.said.slice(0, 90)}`)
+
+    const switched = await d.clone()
+    const ran = await runFile(switched, v104)
+    const un = await lockCase(switched, undo104, '-- ─────────────── 1. It can be undone ───────────────')
+    await switched.close()
+    say(ran.ok && holds(un),
+        'the undo of v104 locks, before its first read and with lock_timeout 5s, exactly the 18 tables its own statements write or alter; nothing gets a write lock it did not take first',
+        ran.ok ? report(un) : said(ran))
+    say(ran.ok && busySays(un, 'undo'),
+        'the undo with its lock timing out (55P03): "Nothing was changed. Paste it again in a minute.", and every table, object and schema identical',
+        un.busy.ok ? 'it ran' : `${un.busy.code}: ${un.busy.said.slice(0, 90)}`)
   }
 
   // ── the switch ──
@@ -3201,8 +3364,10 @@ const cutover = async (d, where) => {
           && g[0]?.first_sprint_login_at?.toISOString() === '2026-06-01T12:00:00.000Z' && g[2]?.first_sprint_login_at?.toISOString() === '2026-06-01T12:00:00.000Z',
         labelOf("first logins filled in on exactly the students worked out here; the fourth gets the earliest of its times (a skip at 09:00 on 15 June); the two who had one keep theirs"),
         `${Object.keys(loginsGot).length} filled`)
-    const created = (await one(`select string_agg(student_id::text, ',') as s from archive_v1.stamps where not row_existed and student_id::text like 'c1%'`)).s
-    say(created === G(2), labelOf('of the fixtures, only the graduate with no milestone row had one created for it'), created ?? 'none')
+    const created = (await one(`select string_agg(student_id::text, ',' order by student_id::text) as s from archive_v1.stamps
+                                 where not row_existed and student_id::text like 'c1%'`)).s
+    say(created === (want.created.join(',') || null),
+        labelOf('of the fixtures, a milestone row is created only for a stamped student who had none, as worked out here'), created ?? 'none')
     // CSM
     const tasks = Object.fromEntries((await Q(`select scenario_id, status, notes, dismissed_at from tasks where student_id::text like 'c1%'`))
                                      .map(k => [k.scenario_id, k]))
@@ -3249,7 +3414,10 @@ const cutover = async (d, where) => {
   const wantFirst = await expectations()
   wantFirst.achievements = (await Q(`select id from achievements order by id`)).map(x => x.id)
   wantFirst.a1l01video = asJson(await Q(`select * from lesson_videos where lesson_id = 'a1l01'`))
-  const dataBefore104 = await dataDump(d, { daily_progress_snapshots: true, templates: ['updated_at'] })
+  // student_milestones is compared on its own after the undo: the first
+  // logins the switch fills in stay.
+  const dataBefore104 = await dataDump(d, { daily_progress_snapshots: true, templates: ['updated_at'], student_milestones: true })
+  const msBefore104 = Object.fromEntries((await Q(`select * from student_milestones`)).map(m => [m.student_id, m]))
   const objectsBefore104 = await objectDump()
 
   r = await runFile(d, v104)
@@ -3356,6 +3524,24 @@ const cutover = async (d, where) => {
     insert into student_lesson_completions (student_id, lesson_id, completed_at) values ('${G(1)}', 'a1l01', now());
     insert into lesson_notes (student_id, lesson_id, content) values ('${G(1)}', 'a1l02', 'a note on the new course');
     insert into student_achievements (student_id, achievement_id) values ('${G(1)}', 'first_lesson');`)
+
+  // A CSM note written after the switch survives the undo (on a copy).
+  {
+    const NOTE = "Dismissed by the course switch: the old course's progress was reset."
+    const c = await d.clone()
+    await c.exec(`update tasks set notes = notes || E'\\nCalled her again after the switch.'
+                   where student_id = '${G(1)}' and scenario_id = 'noship.r1.day7';`)
+    const rr = await runFile(c, undo104)
+    const t = Object.fromEntries((await c.query(`select scenario_id, status, notes from tasks where student_id::text like 'c1%'`)).rows
+                                   .map(k => [k.scenario_id, k]))
+    await c.close()
+    say(rr.ok && rr.rows[0]?.task_notes_kept === 1 && rr.rows[0]?.tasks_reopened === wantFirst.tasks.length
+          && t['noship.r1.day7']?.status === 'open' && t['noship.r1.day7'].notes === `Called once.\n${NOTE}\nCalled her again after the switch.`
+          && t['nolessons.day3']?.status === 'open' && t['nolessons.day3'].notes === null && t['pace.day7']?.notes === null,
+        "the undo reopens a task whose notes the team changed after the switch and keeps the team's notes word for word (task_notes_kept 1); the other reopened tasks get their notes back exactly",
+        rr.ok ? `kept ${rr.rows[0]?.task_notes_kept}: ${asJson(t['noship.r1.day7']?.notes)}` : said(rr))
+  }
+
   {
     const rr = await runFile(d, undo104)
     const row = rr.rows[0] ?? {}
@@ -3363,6 +3549,7 @@ const cutover = async (d, where) => {
           && row.moved_badges === 1 && row.moved_watch_rows === 1 && row.restored_completions === wantFirst.counts.student_lesson_completions
           && row.restored_notes === wantFirst.counts.lesson_notes && row.restored_badges === wantFirst.counts.student_achievements
           && row.not_restored_student_gone === 0 && row.not_restored_video_taken === 0 && row.tasks_left_dismissed === 0
+          && row.task_notes_kept === 0
           && row.tasks_reopened === wantFirst.tasks.length && row.alerts_reopened === wantFirst.alerts.length
           && row.templates_reactivated === wantFirst.offTemplates.length,
         'the undo runs: its row names the renamed archive, what moved to archive_v2 and what came back, with nothing left behind',
@@ -3374,15 +3561,38 @@ const cutover = async (d, where) => {
         (select count(*)::int from archive_v2.student_lesson_watch where lesson_id = 'a1l01') as watch`).catch(x => ({ error: x.message }))
     say(v2.completion === 1 && v2.note === 1 && v2.badge === 1 && v2.watch === 1,
         'the completion, the note, the badge and the watch row made after the switch are in archive_v2', asJson(v2))
-    const dataNow = await dataDump(d, { daily_progress_snapshots: true, templates: ['updated_at'] })
+    const dataNow = await dataDump(d, { daily_progress_snapshots: true, templates: ['updated_at'], student_milestones: true })
     let firstOff = ''
     if (dataNow !== dataBefore104) {
       const a = JSON.parse(dataBefore104), b = JSON.parse(dataNow)
       firstOff = Object.keys({ ...a, ...b }).find(t => asJson(a[t]) !== asJson(b[t])) ?? ''
     }
     say(dataNow === dataBefore104,
-        'after the undo every table in public equals the dump taken before v104 (snapshot rows aside, and templates.updated_at, which its trigger stamps)',
+        'after the undo every table in public equals the dump taken before v104 (snapshot rows aside, templates.updated_at, which its trigger stamps, and student_milestones, checked next)',
         firstOff ? `first difference in ${firstOff}` : '')
+    // student_milestones: as before v104, plus the first logins the switch
+    // filled in, on the rows that had none and on the rows it created.
+    {
+      const now = Object.fromEntries((await Q(`select * from student_milestones`)).map(m => [m.student_id, m]))
+      const logins = wantFirst.logins
+      const withoutLogin = m => { const o = { ...m }; delete o.first_sprint_login_at; return asJson(o) }
+      const off = []
+      for (const [s, b] of Object.entries(msBefore104)) {
+        const a = now[s]
+        if (!a) { off.push(`${s.slice(-2)} gone`); continue }
+        const want = b.first_sprint_login_at?.getTime() ?? logins[s] ?? null
+        if ((a.first_sprint_login_at?.getTime() ?? null) !== want) off.push(`${s.slice(-2)} login`)
+        if (withoutLogin(a) !== withoutLogin(b)) off.push(`${s.slice(-2)} other columns`)
+      }
+      const added = Object.keys(now).filter(s => !(s in msBefore104)).sort()
+      for (const s of added) {
+        if (now[s].first_sprint_login_at?.getTime() !== logins[s] || now[s].playbook_unlocked_at !== null) off.push(`${s.slice(-2)} added`)
+      }
+      say(off.length === 0 && sameJson(added, Object.keys(logins).filter(s => !(s in msBefore104)).sort()) && added.includes(G(2))
+            && now[G(4)]?.first_sprint_login_at?.toISOString() === '2026-06-15T09:00:00.000Z',
+          "the undo keeps every first login the switch filled in (the student's earliest completion) and the rows created to hold one; every other column of student_milestones is as before v104",
+          `${Object.keys(logins).length} logins, ${added.length} rows added${off.length ? ', off: ' + off.join(' ') : ''}`)
+    }
     say(await objectDump() === objectsBefore104,
         '...and every column with its not-null flag and default, every constraint definition (the six keys under their old names, the day and terrain checks), every index, view, function and trigger')
     const sch = await archives()
@@ -3404,8 +3614,9 @@ const cutover = async (d, where) => {
     wantAgain.achievements = (await Q(`select id from achievements order by id`)).map(x => x.id)
     wantAgain.a1l01video = asJson(await Q(`select * from lesson_videos where lesson_id = 'a1l01'`))
     const rr = await runFile(d, v104)
-    say(rr.ok && sameJson(wantAgain.grads, wantFirst.grads) && wantAgain.tasks.length === wantFirst.tasks.length,
-        'v104 runs again after the undo, on the same graduates and the same open tasks', said(rr))
+    say(rr.ok && sameJson(wantAgain.grads, wantFirst.grads) && wantAgain.tasks.length === wantFirst.tasks.length
+          && sameJson(wantFirst.created, [G(2)]) && sameJson(wantAgain.created, []),
+        'v104 runs again after the undo, on the same graduates and the same open tasks; the row the first switch created for the graduate on day 10 is still there, so none is created', said(rr))
     if (rr.ok) await switchHolds(rr, wantAgain, l => `switch again: ${l}`)
 
     let was = await everything()

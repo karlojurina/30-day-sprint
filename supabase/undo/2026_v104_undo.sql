@@ -7,6 +7,11 @@
 -- (the PRD's ship order, "Rollback").
 --
 -- WHAT IT DOES, in one transaction
+--   First it locks every table it writes or alters (the 18 in "The lock"
+--   below), so nothing a student does lands between a copy and its delete.
+--   Until the commit, every read and write of those tables by the app waits
+--   (a few seconds); a request that waits past its own statement timeout
+--   fails.
 --   1. Checks it can: the switch is in place (admin_config holds
 --      curriculum_reset_at), archive_v1 holds the switch's record and agrees
 --      with that row, archive_v2 does not exist yet, and the keys into lessons
@@ -26,14 +31,16 @@
 --      rows of old lessons, parents before children.
 --   5. Re-adds the six keys under the names and with the definitions the
 --      switch recorded from production's own catalogue. Nothing is retyped.
---   6. Takes back what the switch stamped: a Playbook stamp or a first login
---      it set (only while it still holds the value the switch wrote), and a
---      student_milestones row it created (only while nothing else on it has
---      been filled in since).
+--   6. Takes back a Playbook stamp the switch set (only while it still holds
+--      the value the switch wrote).
 --   7. Takes back the CSM changes, from the copy of each row kept in
 --      archive_v1.csm_changes: templates active again (those still off),
 --      alerts open again, tasks open again where no open task exists now for
---      the same student and scenario.
+--      the same student and scenario. A reopened task's notes go back to the
+--      copy only while they are still exactly what the switch wrote (the
+--      copy's notes and the switch's line). When someone changed them since,
+--      they stay as the team left them and are counted (task_notes_kept);
+--      the copy stays in the renamed archive's csm_changes.
 --   8. Deletes admin_config['curriculum_reset_at'] and renames archive_v1
 --      to archive_v1_undone_<yyyymmdd_hh24mi>, in UTC.
 --   9. Checks its own result, commits, and shows one row.
@@ -47,6 +54,14 @@
 --     (not_restored_video_taken).
 --   * templates.updated_at: the trigger on templates stamps every update, so
 --     a template switched back on shows the time of this undo.
+--   * student_milestones.first_sprint_login_at where the switch filled it in
+--     (archive_v1.stamps.set_first_login), and the student_milestones row
+--     the switch created to hold it. That stamp is the student's earliest
+--     completion, a true date on which they used the app, and the app never
+--     rewrites it once set (the Whop login stamps it only while empty). It
+--     stays after the undo.
+--   * The notes of a reopened task that someone changed after the switch:
+--     they stay as written, the switch's line included (see 7).
 --   * Anything done on the new course: it is in archive_v2, not in the live
 --     tables. Tasks the CSM created after the switch, discount requests,
 --     streaks and snapshot rows are left as they are.
@@ -61,6 +76,15 @@
 --     progress. Check it, rename or drop it, then run this again.
 --   * The keys into lessons or regions are not the six the switch made.
 --
+-- WHEN THE TABLES ARE BUSY
+--   * Another session holds one of the 18 tables for more than 5 seconds,
+--     or the wait for it ends in a deadlock: "Another session held a table
+--     the undo changes for more than 5 seconds (...). Nothing was changed.
+--     Paste it again in a minute."
+--   * The same wait later in the file shows Postgres's own words, "canceling
+--     statement due to lock timeout" (SQLSTATE 55P03). Nothing was changed.
+--     Paste it again in a minute.
+--
 -- After it, the switch can run again (it archives afresh into a new
 -- archive_v1). v103's undo can run once this has.
 --
@@ -71,6 +95,43 @@ begin;
 
 -- The switch recorded its key definitions under this search path.
 set local search_path = public;
+
+-- ─────────────── The lock ───────────────
+--
+-- Under READ COMMITTED every statement below sees what other sessions have
+-- committed by then. A completion committed after step 2 copies a table
+-- into archive_v2 and before it deletes from it would be deleted and kept
+-- nowhere. So, before anything is read, every table this file writes or
+-- alters is locked in the strongest mode until the commit, the same 18 the
+-- switch locks, parents first. A table that does not exist is left alone.
+--
+-- Each lock waits at most 5 seconds. When one is held longer, or the wait
+-- ends in a deadlock, the file stops with the sentence below. A lock wait
+-- later in the file stops with Postgres's own words (SQLSTATE 55P03,
+-- "canceling statement due to lock timeout"). Either way nothing was
+-- changed: paste it again in a minute.
+
+set local lock_timeout = '5s';
+
+do $lock$
+declare
+  c_tables constant text[] := array['admin_config', 'regions', 'lessons', 'lesson_videos', 'achievements',
+    'quizzes', 'quiz_questions', 'templates', 'student_milestones', 'student_lesson_completions',
+    'student_lesson_watch', 'lesson_notes', 'student_lesson_ratings', 'student_quiz_attempts',
+    'student_region_quiz', 'student_achievements', 'tasks', 'disengagement_alerts'];
+  v_list text;
+begin
+  select string_agg(format('public.%I', t), ', ' order by o) into v_list
+    from unnest(c_tables) with ordinality as x(t, o)
+   where to_regclass('public.' || t) is not null;
+  if v_list is not null then
+    execute 'lock table ' || v_list || ' in access exclusive mode';
+  end if;
+exception when lock_not_available or deadlock_detected then
+  raise exception 'Another session held a table the undo changes for more than 5 seconds (%), so the undo did not start. Nothing was changed. Paste it again in a minute.', sqlerrm
+    using errcode = sqlstate;
+end
+$lock$;
 
 -- ─────────────── 1. It can be undone ───────────────
 
@@ -231,13 +292,14 @@ $restore$;
 
 do $revert$
 declare
+  -- The line v104 step 4 appends to each task it dismisses, word for word.
+  c_note     constant text := 'Dismissed by the course switch: the old course''s progress was reset.';
   v_reset    timestamptz;
   v_playbook bigint;
-  v_logins   bigint;
-  v_rows     bigint;
   v_tmpl     bigint;
   v_alerts   bigint;
   v_tasks    bigint;
+  v_notes    bigint;
   v_kept     bigint;
 begin
   select reset_at into v_reset from archive_v1.meta;
@@ -248,25 +310,8 @@ begin
    where s.student_id = m.student_id and s.set_playbook and m.playbook_unlocked_at = v_reset;
   get diagnostics v_playbook = row_count;
 
-  -- The first login the switch wrote is the earliest time on the student's
-  -- archived completions; counted again from the archive.
-  update public.student_milestones m
-     set first_sprint_login_at = null
-    from archive_v1.stamps s,
-         (select student_id, min(least(completed_at, skipped_at, action_completed_at)) as at
-            from archive_v1.student_lesson_completions group by student_id) f
-   where s.student_id = m.student_id and f.student_id = m.student_id
-     and s.set_first_login and m.first_sprint_login_at = f.at;
-  get diagnostics v_logins = row_count;
-
-  -- A row the switch created goes when nothing else on it was filled in
-  -- since: every column but student_id and updated_at is empty or false.
-  delete from public.student_milestones m
-   using archive_v1.stamps s
-   where s.student_id = m.student_id and not s.row_existed
-     and not exists (select 1 from jsonb_each(to_jsonb(m) - 'student_id' - 'updated_at') e
-                      where e.value not in ('null'::jsonb, 'false'::jsonb));
-  get diagnostics v_rows = row_count;
+  -- The first login the switch filled in stays, and with it any row the
+  -- switch created to hold it (every such row holds one). See the header.
 
   update public.templates t
      set is_active = true
@@ -281,21 +326,27 @@ begin
    where c.kind = 'alert' and c.id = a.id::text and a.is_dismissed and a.dismissed_at = v_reset;
   get diagnostics v_alerts = row_count;
 
+  -- The notes go back to the copy only while they are still exactly what the
+  -- switch wrote (its concat_ws, the same expression). Notes the team changed
+  -- since stay as they are: putting the copy back would erase their words,
+  -- and appending it would repeat the old text the edit usually kept.
   select count(*) into v_kept from archive_v1.csm_changes where kind = 'task';
-  update public.tasks k
-     set status = b.status, dismissed_at = b.dismissed_at, dismissed_by = b.dismissed_by, notes = b.notes
-    from archive_v1.csm_changes c
-    cross join lateral jsonb_populate_record(null::public.tasks, c.before) b
-   where c.kind = 'task' and c.id = k.id::text
-     and k.status = 'dismissed' and k.dismissed_at = v_reset
-     and not exists (select 1 from public.tasks o
-                      where o.status = 'open' and o.student_id = k.student_id and o.scenario_id = k.scenario_id);
-  get diagnostics v_tasks = row_count;
+  with reopened as (
+    update public.tasks k
+       set status = b.status, dismissed_at = b.dismissed_at, dismissed_by = b.dismissed_by,
+           notes = case when k.notes is not distinct from concat_ws(E'\n', b.notes, c_note) then b.notes else k.notes end
+      from archive_v1.csm_changes c
+      cross join lateral jsonb_populate_record(null::public.tasks, c.before) b
+     where c.kind = 'task' and c.id = k.id::text
+       and k.status = 'dismissed' and k.dismissed_at = v_reset
+       and not exists (select 1 from public.tasks o
+                        where o.status = 'open' and o.student_id = k.student_id and o.scenario_id = k.scenario_id)
+    returning k.notes is distinct from b.notes as notes_kept)
+  select count(*), count(*) filter (where notes_kept) into v_tasks, v_notes from reopened;
 
   perform set_config('cutover.undo_revert', jsonb_build_object(
-    'playbook_stamps_cleared', v_playbook, 'first_logins_cleared', v_logins, 'milestone_rows_removed', v_rows,
-    'templates_reactivated', v_tmpl, 'alerts_reopened', v_alerts, 'tasks_reopened', v_tasks,
-    'tasks_left_dismissed', v_kept - v_tasks)::text, false);
+    'playbook_stamps_cleared', v_playbook, 'templates_reactivated', v_tmpl, 'alerts_reopened', v_alerts,
+    'tasks_reopened', v_tasks, 'task_notes_kept', v_notes, 'tasks_left_dismissed', v_kept - v_tasks)::text, false);
 end
 $revert$;
 
@@ -383,6 +434,7 @@ select
   (select nullif(j, '')::jsonb ->> 'playbook_stamps_cleared' from revert)::int    as playbook_stamps_cleared,
   (select nullif(j, '')::jsonb ->> 'templates_reactivated' from revert)::int      as templates_reactivated,
   (select nullif(j, '')::jsonb ->> 'tasks_reopened' from revert)::int             as tasks_reopened,
+  (select nullif(j, '')::jsonb ->> 'task_notes_kept' from revert)::int            as task_notes_kept,
   (select nullif(j, '')::jsonb ->> 'tasks_left_dismissed' from revert)::int       as tasks_left_dismissed,
   (select nullif(j, '')::jsonb ->> 'alerts_reopened' from revert)::int            as alerts_reopened;
 -- EXPECT one row: "The switch is taken back.", the new name of the archive,
@@ -390,7 +442,11 @@ select
 -- not_restored counts should be 0; anything else is in the renamed archive.
 -- tasks_left_dismissed counts tasks the switch dismissed that stay dismissed
 -- because an open task now exists for the same student and scenario.
+-- task_notes_kept counts reopened tasks whose notes the team changed after
+-- the switch; they keep the team's notes.
 -- Then, in Vercel: take back NEXT_PUBLIC_STUDENT_HOME, NEXT_PUBLIC_WORLD_LIVE
 -- and CATALOG_SHAPE, put WHOP_COURSE_ID back, and redeploy.
--- If the file stopped with a message ending "Nothing was changed.", it is
--- true: the whole file is one transaction.
+-- If the file stopped with a message saying "Nothing was changed.", it is
+-- true: the whole file is one transaction. A stop on "canceling statement
+-- due to lock timeout" (SQLSTATE 55P03) or "deadlock detected" (40P01) is
+-- the same: nothing was changed. Paste it again in a minute.

@@ -13,9 +13,10 @@
 --      empty. regions_next has them (v94, v99); the switch copies them into
 --      the live table, which must have the columns first.
 --   3. The view student_last_counted_completion (student_id,
---      last_completed_at): the latest completed_at of each student's done
---      lessons that count toward progress. The admin pages' activity pills
---      and the CSM read it (call C4). Hardened like its sister view
+--      last_completed_at): the latest moment of activity on each student's
+--      done lessons that count toward progress, the later of completed_at
+--      and action_completed_at. The admin pages' activity pills and the CSM
+--      read it (call C4). Hardened like its sister view
 --      student_progress_counts (v78): security_invoker on, authenticated may
 --      read it, anon may not.
 --   4. A floor under daily_progress_snapshots: the trigger
@@ -42,6 +43,11 @@
 --   4. A curriculum_reset_at that is not a time Postgres can read makes every
 --      write to daily_progress_snapshots fail until the row is fixed. Only
 --      the switch writes that row, in the format 2026-10-20T18:25:00.000Z.
+--   5. It alters student_milestones and regions and puts a trigger on
+--      daily_progress_snapshots, each waiting at most 5 seconds for its lock.
+--      When another session holds one longer, the file stops with
+--      "canceling statement due to lock timeout" (SQLSTATE 55P03). Nothing
+--      was changed. Paste it again in a minute.
 --
 -- UNDO: supabase/undo/2026_v103_undo.sql. It refuses while the switch is in
 -- place (curriculum_reset_at exists): run the undo of v104 first.
@@ -52,6 +58,13 @@
 -- ============================================================
 
 begin;
+
+-- Each ALTER below waits for every query already running on its table, and
+-- every query that arrives after it waits behind it. On a live day a slow
+-- read would stall the app's pages for as long as it runs. 5 seconds at
+-- most per lock, then the file stops: nothing was changed, paste it again
+-- in a minute.
+set local lock_timeout = '5s';
 
 -- ─────────────── 1. The Playbook stamp ───────────────
 
@@ -75,10 +88,15 @@ alter table public.regions
 -- skipped is done, but it is not activity, and a compound lesson with its
 -- second half still open is not done. Either one gives a student no row
 -- here, as the PRD's tests expect.
+--
+-- The moment is the later of completed_at and action_completed_at
+-- (greatest() passes over a null). A student who watched a compound lesson
+-- on Monday and shipped its action on Friday was active on Friday; reading
+-- completed_at alone would call them slipping on Saturday.
 
 create or replace view public.student_last_counted_completion as
 select c.student_id,
-       max(c.completed_at) as last_completed_at
+       max(greatest(c.completed_at, c.action_completed_at)) as last_completed_at
   from public.student_lesson_completions c
   join public.lessons l on l.id = c.lesson_id
  where l.counts_toward_progress
@@ -189,4 +207,6 @@ select
 -- EXPECT one row: the first five columns true, and switch reading
 --   "not yet: the switch has not run" until v104 has run.
 -- If the file stopped with a message ending "Nothing was changed.", it is
--- true: the whole file is one transaction.
+-- true: the whole file is one transaction. A stop on "canceling statement
+-- due to lock timeout" (SQLSTATE 55P03) is the same: nothing was changed.
+-- Paste it again in a minute.

@@ -8,6 +8,11 @@
 -- values first, then this file, then the redeploy at once.
 --
 -- WHAT THIS FILE DOES, in one transaction
+--   First it locks every table it writes or alters (the 18 in "The lock"
+--   below), so no student's write can land between the archive copy and
+--   the wipe. Until the commit, every read and write of those tables by the
+--   app waits (a few seconds); a request that waits past its own statement
+--   timeout fails.
 --   0. Looks for admin_config['curriculum_reset_at']. When it is there the
 --      switch has already happened: every step below is skipped and the
 --      final table says "The switch is already in place since <time>."
@@ -71,6 +76,15 @@
 --     empty. (Added by the builder: without it such a column fails the copy
 --     with Postgres's own words. Same outcome, nothing changed.)
 --
+-- WHEN THE TABLES ARE BUSY
+--   * Another session holds one of the 18 tables for more than 5 seconds,
+--     or the wait for it ends in a deadlock: "Another session held a table
+--     the switch changes for more than 5 seconds (...). Nothing was
+--     changed. Paste it again in a minute."
+--   * The same wait later in the file shows Postgres's own words, "canceling
+--     statement due to lock timeout" (SQLSTATE 55P03). Nothing was changed.
+--     Paste it again in a minute.
+--
 -- OPERATIONAL CONSEQUENCES, stated plainly
 --   1. Every student starts the new course with nothing done. Lessons they
 --      watched on Whop's new course come back at their next visit (the Whop
@@ -111,6 +125,46 @@ begin;
 -- on the search path. The undo re-adds the keys from what is recorded here,
 -- so both run with the same path.
 set local search_path = public;
+
+-- ─────────────── The lock ───────────────
+--
+-- Under READ COMMITTED every statement below sees what other sessions have
+-- committed by then. A completion the Whop webhook commits after the archive
+-- copy (step 2) and before the wipe (step 5) would be deleted without ever
+-- being archived, and step 9 could not tell. So, before anything is read,
+-- every table this file writes or alters is locked in the strongest mode:
+-- no other session reads or writes them until the commit, and no statement
+-- below has to upgrade a weaker lock (the upgrade is where two sessions
+-- deadlock). Parents first, then the rows students write. A table that does
+-- not exist is left to step 1, which names it.
+--
+-- Each lock waits at most 5 seconds. When one is held longer, or the wait
+-- ends in a deadlock, the file stops with the sentence below. A lock wait
+-- later in the file stops with Postgres's own words (SQLSTATE 55P03,
+-- "canceling statement due to lock timeout"). Either way nothing was
+-- changed: paste it again in a minute.
+
+set local lock_timeout = '5s';
+
+do $lock$
+declare
+  c_tables constant text[] := array['admin_config', 'regions', 'lessons', 'lesson_videos', 'achievements',
+    'quizzes', 'quiz_questions', 'templates', 'student_milestones', 'student_lesson_completions',
+    'student_lesson_watch', 'lesson_notes', 'student_lesson_ratings', 'student_quiz_attempts',
+    'student_region_quiz', 'student_achievements', 'tasks', 'disengagement_alerts'];
+  v_list text;
+begin
+  select string_agg(format('public.%I', t), ', ' order by o) into v_list
+    from unnest(c_tables) with ordinality as x(t, o)
+   where to_regclass('public.' || t) is not null;
+  if v_list is not null then
+    execute 'lock table ' || v_list || ' in access exclusive mode';
+  end if;
+exception when lock_not_available or deadlock_detected then
+  raise exception 'Another session held a table the switch changes for more than 5 seconds (%), so the switch did not start. Nothing was changed. Paste it again in a minute.', sqlerrm
+    using errcode = sqlstate;
+end
+$lock$;
 
 -- ─────────────── 0. Already switched? ───────────────
 --
@@ -755,5 +809,7 @@ select line, name, lessons, counting, action_items, with_video, with_whop_id, va
 --   then reset_at and nine counts. graduates_stamped and logins_backfilled
 --   should match the preflight's (d) rows, tasks_dismissed and
 --   alerts_dismissed its (e) rows, templates_deactivated its (b) count.
--- If the file stopped with a message ending "Nothing was changed.", it is
--- true: the whole file is one transaction.
+-- If the file stopped with a message saying "Nothing was changed.", it is
+-- true: the whole file is one transaction. A stop on "canceling statement
+-- due to lock timeout" (SQLSTATE 55P03) or "deadlock detected" (40P01) is
+-- the same: nothing was changed. Paste it again in a minute.

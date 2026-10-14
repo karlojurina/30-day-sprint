@@ -59,3 +59,19 @@ gen('../src/lib/world/lesson-text.ts', './_gen/lesson-text.ts')
 
 // embed-cache.ts imports only TYPES from ./lesson-transport, which --experimental-strip-types erases.
 gen('../src/lib/world/embed-cache.ts', './_gen/embed-cache.ts')
+
+// action-items.ts has no imports at all, so it copies across untouched. So
+// has progress.ts, whose isLessonComplete() the action item test asks.
+gen('../src/lib/world/action-items.ts', './_gen/action-items.ts')
+gen('../src/lib/progress.ts', './_gen/progress.ts')
+
+// discount.ts takes the 14 days from constants.ts, which has no imports and
+// copies across untouched; discount-server.ts imports discount.ts and only a
+// TYPE from supabase-js, which --experimental-strip-types erases.
+gen('../src/lib/constants.ts', './_gen/constants.ts')
+gen('../src/lib/world/discount.ts', './_gen/discount.ts', [
+  ['from "@/lib/constants"', 'from "./constants.ts"'],
+])
+gen('../src/lib/world/discount-server.ts', './_gen/discount-server.ts', [
+  ['from "./discount"', 'from "./discount.ts"'],
+])

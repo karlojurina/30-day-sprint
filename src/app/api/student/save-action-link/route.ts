@@ -8,19 +8,26 @@
  *
  * Constraints:
  *   - Lesson must be an action-item (requires_action = true OR type = 'action').
- *   - A completion row must already exist for (student, lesson). The link
- *     is metadata on the shipped submission, not a way to mark complete.
- *   - link must match the Discord message URL format, else 400.
+ *     It is read from the active catalog (LESSONS_TABLE): `lessons` on the
+ *     live app, `lessons_next` on a deployment reading the new course.
+ *   - The link is metadata on the submission, not a way to mark complete.
+ *   - link must match the Discord message URL format, else 400. The pattern
+ *     and the message are src/lib/world/action-items.ts (checkDiscordLink),
+ *     which the old dashboard's form and the new lesson page use too.
  *   - Passing null/'' clears the link.
  *
  * The DB CHECK constraint (v28) double-validates as a defense in depth.
+ *
+ * A write that fails is answered as a failure, never as a success. Before the
+ * cutover the completions table references `lessons(id)` only, so a new-course
+ * lesson's insert fails its foreign key there: 409 with plain words
+ * (plainWriteError).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-
-const DISCORD_LINK_RE =
-  /^https:\/\/discord\.com\/channels\/[0-9]+\/[0-9]+\/[0-9]+\/?$/;
+import { LESSONS_TABLE } from "@/lib/catalog-tables";
+import { checkDiscordLink, plainWriteError, takesDiscordLink } from "@/lib/world/action-items";
 
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -31,21 +38,15 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => null);
   const lessonId =
     typeof body?.lessonId === "string" ? body.lessonId.trim() : "";
-  const linkRaw = typeof body?.link === "string" ? body.link.trim() : "";
-  const link = linkRaw.length === 0 ? null : linkRaw;
+  const checked = checkDiscordLink(body?.link);
 
   if (!lessonId) {
     return NextResponse.json({ error: "Missing lessonId" }, { status: 400 });
   }
-  if (link !== null && !DISCORD_LINK_RE.test(link)) {
-    return NextResponse.json(
-      {
-        error:
-          "That doesn't look like a Discord message link. Right-click the message in #ad-review and click \"Copy Message Link.\"",
-      },
-      { status: 400 },
-    );
+  if (!checked.ok) {
+    return NextResponse.json({ error: checked.error }, { status: 400 });
   }
+  const link = checked.link;
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -72,11 +73,11 @@ export async function POST(request: NextRequest) {
 
   // Lesson must be an action-item (compound or pure action).
   const { data: lesson } = await supabase
-    .from("lessons")
+    .from(LESSONS_TABLE)
     .select("id, requires_action, type")
     .eq("id", lessonId)
     .single();
-  if (!lesson || !(lesson.requires_action || lesson.type === "action")) {
+  if (!lesson || !takesDiscordLink(lesson)) {
     return NextResponse.json(
       { error: "Only action-item lessons can have a Discord link" },
       { status: 400 },
@@ -138,6 +139,12 @@ export async function POST(request: NextRequest) {
   }
 
   if (error) {
+    // The lesson is not in `lessons` (a new-course lesson before the
+    // cutover): nothing was written, and the student is told so plainly.
+    const plain = plainWriteError(error);
+    if (plain) {
+      return NextResponse.json({ error: plain }, { status: 409 });
+    }
     // CHECK constraint failure → friendly error
     return NextResponse.json(
       {

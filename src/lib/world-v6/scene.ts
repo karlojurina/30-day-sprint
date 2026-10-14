@@ -9,6 +9,7 @@ import { FramePacer, IdleLadder, burstProbe, createGpuLoad, quickProbe, measureO
 import { POSTER_RULES, recallPosterVerdict, rememberPoster, type PosterKind, type PosterPreference } from "./poster";
 import { addPathLine, footprintStats, resetFootprints } from "./footprints";
 import { NO_PROGRESS, sameProgress, type WorldProgress } from "./progress";
+import { CHECKPOINT, type CheckpointLook } from "./checkpoint";
 
 /**
  * The world-v6 scene: the grey version of the V4 map. V3's camera, park,
@@ -168,6 +169,8 @@ const DEFAULT_MODULES: ReadonlyArray<ModuleSpec> = [
   ["dress-lakeforest", () => import("./dress-lakeforest")],
   ["dress-sky", () => import("./dress-sky")],
   ["dress-gate", () => import("./dress-gate")],
+  // The discount checkpoint's trail cache on the saddle (checkpoint.ts).
+  ["dress-checkpoint", () => import("./dress-checkpoint")],
   // After the dressers (it switches their tagged lamps), before life (which finds its smoke).
   ["progress-world", () => import("./progress-world")],
   ["life", () => import("./life")],
@@ -1505,6 +1508,8 @@ export class WorldScene {
   private progress = 0;
   /** Per-lesson progress (progress.ts), passed to modules with setWorldProgress. */
   private worldProgress: WorldProgress = NO_PROGRESS;
+  /** The discount checkpoint's look (checkpoint.ts), passed to modules with setCheckpoint. */
+  private checkpointLook: CheckpointLook = "closed";
   private depthMax = 1;
   private spacerEl: HTMLElement | null = null;
 
@@ -1875,6 +1880,7 @@ export class WorldScene {
     this.setProgress(this.progress);
     this.forwardWorldProgress();
     this.forwardMist();
+    this.forwardCheckpoint();
     scene.updateMatrixWorld(true);
     this.indexLandmarks(scene);
     this.indexTrees(scene);
@@ -3128,6 +3134,32 @@ export class WorldScene {
     this.wake();
   }
 
+  /**
+   * The discount checkpoint's look (checkpoint.ts): the trail cache on the
+   * saddle closed, near, ready or claimed. The page sets it from the
+   * student's discount state; modules with setCheckpoint(look) draw it.
+   */
+  setCheckpoint(look: CheckpointLook): void {
+    if (look === this.checkpointLook) return;
+    this.checkpointLook = look;
+    this.forwardCheckpoint();
+  }
+
+  private forwardCheckpoint() {
+    for (const rec of this.modules) {
+      const m = rec.module as WorldModule & { setCheckpoint?: (look: CheckpointLook) => void };
+      if (typeof m.setCheckpoint === "function") {
+        try {
+          m.setCheckpoint(this.checkpointLook);
+        } catch (e) {
+          console.error(`[world-v6] module ${rec.name} setCheckpoint threw`, e);
+        }
+      }
+    }
+    this.dirty = true;
+    this.wake();
+  }
+
   private forwardWorldProgress() {
     for (const rec of this.modules) {
       const m = rec.module as WorldModule & { setWorldProgress?: (p: WorldProgress) => void };
@@ -3371,7 +3403,8 @@ export class WorldScene {
     }
     // Round 1: a hand placed click in view (layout PARK_VIEWS), where the
     // solver cannot frame what matters (a3: the lower falls and the pool).
-    const authored = Layout.PARK_VIEWS[PLACES[this.anchorPlace[pi] ?? -1]?.id as Layout.PlaceId];
+    // The discount checkpoint is no place and has its own (checkpoint.ts).
+    const authored = Layout.PARK_VIEWS[PLACES[this.anchorPlace[pi] ?? -1]?.id as Layout.PlaceId] ?? (anchorId === CHECKPOINT.id ? CHECKPOINT.park : undefined);
     if (authored) {
       const b = (authored.bearing * Math.PI) / 180;
       const p = (authored.pitch * Math.PI) / 180;

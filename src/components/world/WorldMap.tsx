@@ -4,10 +4,11 @@ import { useMemo, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { WorldV6 } from "@/components/world-v6/WorldV6";
-import { sourceData, type WorldSource } from "@/components/world-v6/source";
+import { sourceData, type WorldDiscount, type WorldSource } from "@/components/world-v6/source";
 import tokens from "@/components/world-v6/tokens.module.css";
 import { useWorldStage } from "@/components/world/WorldStage";
 import { useMapModel, type ReadyMapModel } from "@/components/world/useMapModel";
+import { useWorldDiscount } from "@/components/world/useWorldDiscount";
 import { useLessonAccess, useLessonTransport } from "@/lib/world/useLessonTransport";
 import { STUDENT_HOME, WORLD_LOCK_MODE } from "@/lib/world/access";
 import { posterSrc } from "@/lib/world-v6/poster";
@@ -24,6 +25,9 @@ import u from "@/components/world/world-ui.module.css";
  * lesson page's route and, for a lesson with a video, the video's address
  * before the click (embed-cache.ts), into the same cache the lesson page
  * reads (useLessonTransport.ts). Neither while the membership is not active.
+ * The student's early-finish discount goes in too (useWorldDiscount.ts), for
+ * the checkpoint between the Trail Hut and the Boathouse; its Apply is the
+ * one thing here that writes (POST /api/discounts/request).
  *
  * THE MAP IS NOT MOUNTED UNTIL THE CATALOG HAS LOADED AND IS THE EIGHT-AREA
  * ONE. Loading, a failed load, an empty catalog and a catalog of any other
@@ -103,6 +107,19 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
 
   const data = useMemo(() => sourceData(model, WORLD_LOCK_MODE), [model]);
 
+  // The discount, with the next video it asks for as a place and a row of the map.
+  const { state: discountNow, now: discountClock, apply: applyDiscount } = useWorldDiscount();
+  const discount = useMemo<WorldDiscount>(() => {
+    let next: WorldDiscount["next"] = null;
+    if (discountNow.kind === "locked" && discountNow.nextLessonId) {
+      for (let k = 0; k < data.lessonIds.length && !next; k++) {
+        const i = data.lessonIds[k].indexOf(discountNow.nextLessonId);
+        if (i >= 0) next = { k, i };
+      }
+    }
+    return { state: discountNow, now: discountClock, next, apply: applyDiscount };
+  }, [discountNow, discountClock, applyDiscount, data]);
+
   const source = useMemo<WorldSource>(() => {
     const ids = model.areas.map((a) => a.id);
     const at = openAreaId === null ? -1 : ids.indexOf(openAreaId);
@@ -136,8 +153,9 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
         }
         if (lesson?.hasVideo) transport.prefetch(lesson.id);
       },
+      discount,
     };
-  }, [model, data, openAreaId, lessonId, href, router, transport, active]);
+  }, [model, data, openAreaId, lessonId, href, router, transport, active, discount]);
 
   return <WorldV6 source={source} />;
 }

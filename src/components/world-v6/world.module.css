@@ -2498,3 +2498,320 @@
   opacity: 0;
   transition: none;
 }
+
+/* ══ The discount checkpoint (2026-10-14) ═══════════════════════
+   The 30% between Video Ads II and Static Ads: a chip in the header with the
+   days left, a notch on the course bar at the gate, a tag on the timeline
+   between the 4th and 5th diamonds, the cache's marker in the world, and its
+   panel (WorldV6 CheckpointBody). One shape throughout: a price tag on its
+   side (TagGlyph), sand. The deadline is mono text and never pulses
+   (.impeccable.md, "Calm confidence over urgency"). */
+
+.tagBody {
+  fill: currentColor;
+}
+
+.tagHole {
+  fill: var(--color-surface-0);
+}
+
+/* ── The header: the chip, then the course bar ── */
+
+.headerEnd {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.root .cpChip {
+  pointer-events: auto;
+  height: 28px;
+  padding: 0 11px 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(232, 168, 106, 0.42);
+  background: rgba(29, 24, 38, 0.66);
+  box-shadow: 0 6px 18px rgba(15, 10, 16, 0.3);
+  font: 600 10.5px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-2);
+  transition:
+    background-color 150ms var(--ease),
+    border-color 150ms var(--ease);
+}
+
+.cpChip b {
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.root .cpChip {
+  white-space: nowrap;
+}
+
+/* Phones: the header's row has no room beside the brand and the course bar,
+   so the chip sits right under it, over the place's picture. */
+.root[data-view="list"] .cpChip {
+  position: absolute;
+  top: 62px;
+  right: 22px;
+}
+
+/* Through the telescope (a7's click-in) the sky's caption takes the header's
+   row: the chip steps out of its way until the camera comes back. */
+.root:has(.panel[data-tel]) .cpChip {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cpChipGlyph {
+  flex: 0 0 auto;
+  color: var(--color-accent);
+}
+
+.cpChipTail {
+  padding-left: 8px;
+  border-left: 1px solid var(--color-line);
+  font-weight: 500;
+}
+
+.root .cpChip[data-ready] {
+  border-color: var(--color-accent);
+  background: rgba(58, 42, 34, 0.78);
+}
+
+.cpChip[data-ready] .cpChipTail {
+  color: var(--color-accent-strong);
+}
+
+.root .cpChip:hover {
+  border-color: var(--color-accent);
+  background: var(--color-surface-3);
+}
+
+/* The gate on the course bar: a sand tick across it between the place the
+   checkpoint follows and the next. The bar's 3px gap is taken back, so the
+   eight segments keep their widths. */
+.cpNotch {
+  position: relative;
+  flex: 0 0 0;
+  width: 0;
+  margin-left: -3px;
+}
+
+.cpNotch::before {
+  content: "";
+  position: absolute;
+  left: 0.75px;
+  top: -3px;
+  width: 1.5px;
+  height: 9px;
+  border-radius: 1px;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 1px rgba(29, 24, 38, 0.6);
+}
+
+.cpNotch[data-cp="locked"]::before {
+  background: rgba(232, 168, 106, 0.78);
+}
+
+.cpNotch[data-cp="closed"]::before {
+  background: var(--color-ink-3);
+}
+
+/* ── The timeline: the tag ── */
+
+.root .cpTag {
+  position: absolute;
+  top: 0;
+  width: 30px;
+  height: 30px;
+  margin-left: -15px;
+  padding: 0;
+  border: 0;
+  background: none;
+  display: grid;
+  place-items: center;
+}
+
+.cpTagGlyph {
+  display: block;
+  color: var(--color-surface-0);
+  overflow: visible;
+  transition: transform 150ms var(--ease);
+}
+
+.cpTagGlyph .tagBody {
+  stroke: var(--color-accent);
+  stroke-width: 1.3px;
+}
+
+.cpTagGlyph .tagHole {
+  fill: var(--color-accent);
+}
+
+.cpTag[data-cp="ready"] .cpTagGlyph,
+.cpTag[data-cp="pending"] .cpTagGlyph,
+.cpTag[data-cp="done"] .cpTagGlyph {
+  color: var(--color-accent);
+}
+
+.cpTag[data-cp="ready"] .cpTagGlyph .tagHole,
+.cpTag[data-cp="pending"] .cpTagGlyph .tagHole,
+.cpTag[data-cp="done"] .cpTagGlyph .tagHole {
+  fill: var(--color-surface-0);
+}
+
+.cpTag[data-cp="closed"] .cpTagGlyph .tagBody {
+  stroke: var(--color-ink-3);
+  stroke-dasharray: 2 1.6;
+}
+
+.cpTag[data-cp="closed"] .cpTagGlyph .tagHole {
+  fill: var(--color-ink-3);
+}
+
+.cpTag:hover .cpTagGlyph,
+.cpTag:focus-visible .cpTagGlyph {
+  transform: scale(1.18);
+}
+
+/* ── The marker in the world: the place's pin and plaque, in sand ── */
+
+.cpMarker .pin {
+  background: var(--color-accent);
+}
+
+.cpMarker .stem {
+  background: linear-gradient(var(--color-accent), rgba(232, 168, 106, 0.55));
+}
+
+.cpMarker .label {
+  border-color: rgba(232, 168, 106, 0.62);
+}
+
+.cpLabelGlyph {
+  flex: 0 0 auto;
+  margin-right: 8px;
+  color: var(--color-accent);
+}
+
+.cpMarker .labelCount {
+  color: var(--color-ink-2);
+}
+
+.cpMarker[data-cp="ready"] .label {
+  border-color: var(--color-accent);
+  background: #3a2a22;
+}
+
+.cpMarker[data-cp="ready"] .labelCount {
+  color: var(--color-accent-strong);
+}
+
+.cpMarker[data-cp="closed"] .pin {
+  background: var(--color-ink-3);
+}
+
+.cpMarker[data-cp="closed"] .label {
+  border-color: var(--plaque-line);
+}
+
+.cpMarker:hover .label,
+.cpMarker[data-hover] .label,
+.cpMarker:focus-visible .label {
+  border-color: var(--color-accent);
+}
+
+/* ── The panel ── */
+
+.cpEyebrowGlyph {
+  flex: 0 0 auto;
+  color: var(--color-accent);
+}
+
+.cpAfter {
+  white-space: nowrap;
+}
+
+.cpWhen {
+  margin: 10px 0 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font: 500 11px/1.3 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-2);
+}
+
+.cpWhen b {
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.cpLeft {
+  white-space: nowrap;
+  color: var(--color-accent);
+}
+
+/* The videos the offer asks for, watched: one continuous bar (41 ticks would be noise). */
+.cpBar {
+  margin-top: 14px;
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: rgba(246, 239, 230, 0.16);
+}
+
+.cpBar i {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+  transform-origin: left center;
+  transition: transform 400ms var(--ease);
+}
+
+.cpBar + .prog {
+  justify-content: space-between;
+}
+
+.cpToGo {
+  color: var(--color-ink-3);
+}
+
+.cpPanel .rows {
+  margin-top: 14px;
+}
+
+.root .cpApply {
+  margin-top: 16px;
+}
+
+.root .cpApply:disabled {
+  cursor: progress;
+  background: var(--color-accent-deep);
+}
+
+.cpError {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-danger);
+}
+
+.cpReason {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: var(--color-surface-2);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-ink);
+}

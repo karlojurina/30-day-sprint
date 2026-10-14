@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -14,7 +15,7 @@ import {
 import type { Rail } from "@/lib/world-v6/rail";
 import type { AreaAnchor, ProjectedMarker, WorldFrame, WorldScene } from "@/lib/world-v6/scene";
 import { STUDY_AREAS, isAction, lessonTitle, pad2, studyFor, type Study, type StudyArea } from "./study";
-import type { WorldSource } from "./source";
+import type { WorldDiscount, WorldSource } from "./source";
 import {
   WorldContentContext,
   contentOf,
@@ -27,6 +28,9 @@ import {
 } from "./content";
 import { areaShare, type WorldProgress } from "@/lib/world-v6/progress";
 import { SKY_MARKS } from "@/lib/world-v6/layout";
+import { CHECKPOINT, type CheckpointLook } from "@/lib/world-v6/checkpoint";
+import { DISCOUNT_PERCENT, DISCOUNT_WINDOW_DAYS, DISCOUNT_LAUNCH_DATE } from "@/lib/world/discount";
+import { checkpointView, shortDate, type CheckpointView } from "./checkpointView";
 import { CARD_HINTS, anchorCard, placeCard, placePanel, type Box, type Placement } from "./cardPlace";
 import { DEFAULT_TUNING, clearTuning, loadTuning, sameTuning, sanitize, saveTuning, type Tuning } from "./tuning";
 import { TuningPanel } from "./TuningPanel";
@@ -111,6 +115,19 @@ import s from "./world.module.css";
  * focus goes into the panel when a lesson page closes over an open place. The
  * TUNE panel, the footer links and the bench exist only without a source.
  * Geometry (N, ANCHORS, slotOf, the depths) reads STUDY_AREAS either way.
+ *
+ * THE DISCOUNT CHECKPOINT (2026-10-14, source.discount). Between the Trail
+ * Hut and the Boathouse the trail passes a cache on the saddle
+ * (src/lib/world-v6/checkpoint.ts): a ninth anchor in the scene, slot CP of
+ * the marker arrays, with its own marker ("30% off"), a tag on the timeline
+ * between the 4th and 5th diamonds, a chip in the header with the days left,
+ * and a notch on the header's course bar at the gate. Any of them opens its
+ * panel (CheckpointBody): the camera parks at the cache from wherever it is
+ * (its own park pose; no stop and no scroll budget on the rail), the scroll
+ * locks as for a place, Esc and Back come home. A place opening gives way to
+ * nothing: the checkpoint's panel closes into it. What shows comes from
+ * checkpointView.ts; the cache's look goes to the scene (setCheckpoint). With
+ * no discount on the source none of it shows and the cache stands closed.
  */
 
 const N = STUDY_AREAS.length;
@@ -159,7 +176,22 @@ const POSTER_TOP_BAND = 90;
 const POSTER_BOX_HALF = 24;
 const POSTER_BOX_DROP = 0.12;
 
-const ANCHORS: AreaAnchor[] = STUDY_AREAS.map((a) => ({ id: a.id, depth: a.depth, landmark: a.mesh }));
+/** The discount checkpoint's slot in the marker arrays: after the eight places. slotOf() never returns it. */
+const CP = N;
+/** Opened this close (depth) to the rail point that frames the cache, with its marker on screen, the camera parks from where it is. */
+const CP_NEAR = 0.02;
+
+const ANCHORS: AreaAnchor[] = [
+  ...STUDY_AREAS.map((a) => ({ id: a.id, depth: a.depth, landmark: a.mesh })),
+  // No place: the scene gives it no stop and no lock, and parks at CHECKPOINT.park.
+  { id: CHECKPOINT.id, depth: 0, landmark: CHECKPOINT.mesh },
+];
+
+/** A picked anchor's slot: a place's, CP for the checkpoint while it shows, else -1. */
+function pickSlot(id: string | null, cpShown: boolean): number {
+  if (id === CHECKPOINT.id) return cpShown ? CP : -1;
+  return id ? slotOf(id) : -1;
+}
 
 function slotOf(id: string): number {
   for (let k = 0; k < N; k++) if (STUDY_AREAS[k].id === id) return k;
@@ -272,6 +304,8 @@ interface Harness {
   __worldCelebrations?: number;
   /** ?bench=1: the results, once the bench has run. */
   __worldBench?: BenchResult | null;
+  /** The discount checkpoint: shown, its look, its marker and panel, and the rail depth that frames it (depth). */
+  __worldCheckpoint?: () => unknown;
 }
 /** Where the hooks go: the window, or in a production build an object nobody else holds. */
 const harness = () => (HOOKS ? window : {}) as unknown as Harness & Record<string, unknown>;
@@ -294,6 +328,7 @@ const PLAIN_HOOKS = [
   "__worldUi",
   "__worldProgress",
   "__worldCelebrations",
+  "__worldCheckpoint",
 ] as const;
 
 /** A transparent pixel: the landing poster's fallback below 760 px, where the page is a list and needs no poster. */
@@ -340,6 +375,11 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
   /** The place panel shows the watched lessons folded into one row until Show. */
   const [showWatched, setShowWatched] = useState(false);
   const [hint, setHint] = useState<{ k: number; seq: number } | null>(null);
+  /** The discount checkpoint's panel is open (the map's own: it has no address), and closing. */
+  const [cpOpen, setCpOpen] = useState(false);
+  const [cpClosing, setCpClosing] = useState(false);
+  /** The pointer or the keyboard is on the timeline's tag. */
+  const [cpTip, setCpTip] = useState(false);
   // The server render and the first client render use the defaults; the
   // stored tuning is read once mounted (localStorage is client only).
   const [devTuning, setTuning] = useState<Tuning>(DEFAULT_TUNING);
@@ -371,6 +411,14 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
   );
   const study = source ? source.study : fixtureStudy;
   const areas = content.areas;
+  /** The student's discount (with a source that knows it) and what the map shows of it. */
+  const discount = source?.discount ?? null;
+  const cpView = useMemo<CheckpointView | null>(
+    () => (discount ? checkpointView(discount.state, discount.now, study.place, CHECKPOINT.after) : null),
+    [discount, study.place],
+  );
+  const cpShown = cpView?.shown ?? false;
+  const cpLook: CheckpointLook = cpView?.look ?? "closed";
 
   const view: View = narrow === null ? "unknown" : narrow || phase === "failed" ? "list" : "world";
 
@@ -399,6 +447,11 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
   const footerRef = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLElement | null>(null);
   const panelInnerRef = useRef<HTMLDivElement | null>(null);
+  /** The checkpoint's panel, its heading, the timeline's tag; and whether it shows and how, for code outside React. */
+  const cpPanelRef = useRef<HTMLElement | null>(null);
+  const cpHeadingRef = useRef<HTMLHeadingElement | null>(null);
+  const cpTagRef = useRef<HTMLButtonElement | null>(null);
+  const cpRef = useRef<{ shown: boolean; look: CheckpointLook }>({ shown: false, look: "closed" });
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const lessonHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const readoutRef = useRef<HTMLSpanElement | null>(null);
@@ -489,6 +542,11 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
     seedK: source?.openK ?? -1,
     /** That place is waiting under a lesson page, and the page scroll is locked for it (reconcile). */
     seedHold: false,
+    /** The discount checkpoint's panel: open, flying home, what opened it, focus to go back once home. */
+    cp: false,
+    cpClosing: false,
+    cpTrigger: null as HTMLElement | null,
+    cpReturn: false,
   });
 
   useEffect(() => {
@@ -773,6 +831,13 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       if (u.open === idx && !u.closing) return;
       cancelTween();
       window.clearInterval(u.closeTimer);
+      // The checkpoint's panel gives way to the place; the scroll lock carries over.
+      if (u.cp) {
+        u.cp = false;
+        u.cpClosing = false;
+        setCpOpen(false);
+        setCpClosing(false);
+      }
       if (u.open === -1) {
         lock();
         u.trigger = trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
@@ -854,6 +919,112 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
   useEffect(() => {
     closeAreaRef.current = closeArea;
   }, [closeArea]);
+
+  /**
+   * The discount checkpoint's panel. It opens as a place does: the scroll
+   * locks and the camera parks at the cache (CHECKPOINT.park). An open
+   * place's panel gives way to it (the address goes back to the map). From
+   * far away (the cache's marker is not on screen: the header's chip on day
+   * one, the timeline's tag) the scroll first jumps to the rail point that
+   * frames the cache, as an address naming a place does (reconcile), so the
+   * cache opens in its own sunset light after a short flight, and Back leaves
+   * the student on the trail in front of it. The next video the offer asks
+   * for is asked for ahead.
+   */
+  const openCheckpoint = useCallback(
+    (trigger: HTMLElement | null) => {
+      const u = ui.current;
+      if (!cpRef.current.shown || (u.cp && !u.cpClosing)) return;
+      cancelTween();
+      window.clearInterval(u.closeTimer);
+      if (u.open >= 0) {
+        const src = sourceRef.current;
+        if (src && src.openK !== null) src.onCloseArea();
+        u.open = -1;
+        u.closing = false;
+        u.lesson = -1;
+        setOpenIdx(null);
+        setLesson(null);
+        setClosing(false);
+        setDir("none");
+        // The place's scroll lock ends here; the checkpoint takes its own below.
+        unlock();
+      }
+      const sc = sceneRef.current;
+      if (!u.cp && sc && u.live) {
+        const depth = sc.depthFor(CHECKPOINT.id);
+        const m = lastFrame.current?.markers.find((x) => x.id === CHECKPOINT.id);
+        const at = lastFrame.current?.depth ?? -1;
+        if (!m?.visible || Math.abs(depth - at) > CP_NEAR) {
+          window.scrollTo({ top: Math.round(sc.scrollYForDepth(depth)), left: 0, behavior: "instant" });
+          sc.seedDepth(depth);
+        }
+      }
+      if (!u.cp) {
+        lock();
+        const was = document.activeElement;
+        u.cpTrigger = trigger ?? (was instanceof HTMLElement && was !== document.body ? was : null);
+      }
+      u.cp = true;
+      u.cpClosing = false;
+      setCpOpen(true);
+      setCpClosing(false);
+      sceneRef.current?.park(CHECKPOINT.id);
+      const d = sourceRef.current?.discount;
+      if (d?.next) sourceRef.current?.onPrefetch?.(d.next.k, d.next.i);
+    },
+    [cancelTween, lock, unlock],
+  );
+
+  const finalizeCheckpoint = useCallback(() => {
+    const u = ui.current;
+    if (!u.cp) return;
+    window.clearInterval(u.closeTimer);
+    u.cp = false;
+    u.cpClosing = false;
+    u.cpReturn = true;
+    unlock();
+    setCpOpen(false);
+    setCpClosing(false);
+  }, [unlock]);
+
+  /** Back to the map: the camera flies home to the depth the page scroll says, as closeArea does. */
+  const closeCheckpoint = useCallback(() => {
+    const u = ui.current;
+    if (!u.cp || u.cpClosing) return;
+    u.cpClosing = true;
+    setCpClosing(true);
+    if (u.locked) restoreScroll();
+    const scene = sceneRef.current;
+    scene?.park(null);
+    const f = lastFrame.current;
+    if (!scene || !u.live || u.reduced || !f || f.parkProgress <= 0.001 || scene.isContextLost()) {
+      finalizeCheckpoint();
+      return;
+    }
+    // Watchdog for a lost WebGL context: 10 visible seconds without a frame.
+    let seen = u.frames;
+    let stalls = 0;
+    window.clearInterval(u.closeTimer);
+    u.closeTimer = window.setInterval(() => {
+      if (u.frames !== seen || document.hidden) {
+        seen = u.frames;
+        stalls = 0;
+      } else if (++stalls >= 10) {
+        finalizeCheckpoint();
+      }
+    }, 1000);
+  }, [finalizeCheckpoint, restoreScroll]);
+
+  // What shows and the cache's look, for the frame loop and the scene; an
+  // offer that stops showing (its window ran out) closes its panel.
+  useLayoutEffect(() => {
+    cpRef.current = { shown: cpShown, look: cpLook };
+    sceneRef.current?.setCheckpoint(cpLook);
+    if (!cpShown && ui.current.cp) closeCheckpoint();
+    const f = lastFrame.current;
+    if (f) applyRef.current?.(f);
+  }, [cpShown, cpLook, closeCheckpoint]);
 
   const openLesson = useCallback((i: number) => {
     const u = ui.current;
@@ -1123,15 +1294,16 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
     if (!stage) return;
     const u = ui.current;
     const w = harness();
-    const layout = layoutRef.current ?? (layoutRef.current = new LabelLayout(N));
+    // The eight places and the discount checkpoint (slot CP).
+    const layout = layoutRef.current ?? (layoutRef.current = new LabelLayout(N + 1));
     const depths = depthsRef.current;
     const sizes = sizesRef.current;
-    const bySlot: Array<ProjectedMarker | null> = new Array(N).fill(null);
-    const domMode = new Uint8Array(N).fill(255);
-    const domStem = new Float32Array(N).fill(-1);
-    const domShift = new Int32Array(N);
-    const domX = new Int32Array(N).fill(-99999);
-    const domY = new Int32Array(N).fill(-99999);
+    const bySlot: Array<ProjectedMarker | null> = new Array(N + 1).fill(null);
+    const domMode = new Uint8Array(N + 1).fill(255);
+    const domStem = new Float32Array(N + 1).fill(-1);
+    const domShift = new Int32Array(N + 1);
+    const domX = new Int32Array(N + 1).fill(-99999);
+    const domY = new Int32Array(N + 1).fill(-99999);
     // Round 1: the whole landmark is the button. The pointer's place (slot, or
     // -1), picked on pointer events only (at most once per animation frame),
     // never in the frame loop. The scene lifts the hovered landmark's light.
@@ -1143,8 +1315,8 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       hover.slot = k;
       const el = markerRefs.current[k];
       if (el) el.dataset.hover = "";
-      stage.style.cursor = k < 0 ? "" : studyRef.current.locked[k] ? "not-allowed" : "pointer";
-      sceneRef.current?.setHoverAnchor(k >= 0 ? STUDY_AREAS[k].id : null);
+      stage.style.cursor = k < 0 ? "" : k !== CP && studyRef.current.locked[k] ? "not-allowed" : "pointer";
+      sceneRef.current?.setHoverAnchor(k < 0 ? null : k === CP ? CHECKPOINT.id : STUDY_AREAS[k].id);
       // The scene may be asleep: lay the labels out now.
       const f = lastFrame.current;
       if (redraw && f) apply(f);
@@ -1181,9 +1353,16 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       totalVh: 1,
       /** Final pass C: how far into the telescope park (0 elsewhere). */
       tel: -1,
+      /** The checkpoint's panel, as the place panel's above. */
+      cpEl: null as HTMLElement | null,
+      cpP: -1,
+      cpVw: 0,
+      cpPinX: NaN,
+      cpPinY: NaN,
     };
     const cardPl: Placement = { x: 0, y: 0, side: "r", d: "", overlap: 0 };
     const panelPl: Placement = { x: 0, y: 0, side: "l", d: "", overlap: 0 };
+    const cpPl: Placement = { x: 0, y: 0, side: "l", d: "", overlap: 0 };
     const box: Box = { l: 0, t: 0, r: 0, b: 0 };
     /** Final pass: the other places' plaques on screen, which the card keeps off (cardPlace avoid). */
     const avoidBoxes: Box[] = [];
@@ -1341,12 +1520,13 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       u.frames++;
       if (u.snap) stepSnap();
       if (u.closing && f.parkedId === null && (u.reduced || f.parkProgress <= 1e-4)) finalizeClose();
+      if (u.cpClosing && f.parkedId === null && (u.reduced || f.parkProgress <= 1e-4)) finalizeCheckpoint();
       apply(f);
     };
 
     /** Every per-frame DOM write. Also run once after a measure, because the scene sleeps when idle. */
     const apply = (f: WorldFrame) => {
-      const p = u.reduced ? (u.open >= 0 && !u.closing ? 1 : 0) : clamp01(f.parkProgress);
+      const p = u.reduced ? ((u.open >= 0 && !u.closing) || (u.cp && !u.cpClosing) ? 1 : 0) : clamp01(f.parkProgress);
       const chrome = 1 - smooth(0, 0.5, p);
       const pf = u.poster ? posterFrame(f) : null;
       // Long travel: the labels wait under the frozen frame and fade in with the dissolve.
@@ -1395,7 +1575,7 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       bySlot.fill(null);
       if (frameMarkers) {
         for (let i = 0; i < frameMarkers.length; i++) {
-          const k = slotOf(frameMarkers[i].id);
+          const k = pickSlot(frameMarkers[i].id, cpRef.current.shown);
           if (k >= 0) bySlot[k] = frameMarkers[i];
         }
       }
@@ -1403,7 +1583,7 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       // Markers: skipped entirely while they are faded out.
       if (markersA > 0.001 && frameMarkers) {
         layout.run(bySlot, Math.min(st.place, N - 1), sizes.w, sizes.h, hover.slot);
-        for (let k = 0; k < N; k++) {
+        for (let k = 0; k <= CP; k++) {
           const el = markerRefs.current[k];
           if (!el) continue;
           const mode = layout.mode[k];
@@ -1454,7 +1634,7 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       }
       const nowMs = performance.now();
       const target = sizes.h > 0 ? Math.min(f.maxDepth, (window.scrollY * 100) / sizes.h / cache.totalVh) : f.depth;
-      const busy = u.open >= 0 || u.closing || !u.live;
+      const busy = u.open >= 0 || u.closing || u.cp || u.cpClosing || !u.live;
       const resting =
         !busy && !u.tween && p === 0 && f.flight >= 0.999 && Math.abs(f.depth - target) < SETTLE_EPS && nowMs - u.scrollAt > REST_MS;
       const win = ARRIVE_VH / cache.totalVh;
@@ -1584,6 +1764,47 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
         setLeader("");
       }
 
+      // The checkpoint's panel: the same place in the frame, joined to the cache's pin.
+      const cpPanel = cpPanelRef.current;
+      const panelLeft = sizes.w < 1100 ? 28 : sizes.w >= 2200 ? 56 : 40;
+      if (cpPanel && (cpPanel !== cache.cpEl || p !== cache.cpP || sizes.w !== cache.cpVw)) {
+        const fresh = cpPanel !== cache.cpEl || sizes.w !== cache.cpVw;
+        cache.cpEl = cpPanel;
+        cache.cpP = p;
+        if (fresh) {
+          cache.cpVw = sizes.w;
+          cache.cpPinX = NaN;
+          placePanel(cpPl, 0, 0, null, cpPanel.offsetWidth, cpPanel.offsetHeight, sizes.w, PANEL_TOP, panelLeft + 8);
+        }
+        // Not parked (the list's sheet, a scene that is not live): it shows at once.
+        const c = u.live && !u.reduced ? smooth(0.3, 1, p) : 1;
+        cpPanel.style.opacity = c.toFixed(3);
+        cpPanel.style.transform = `translate3d(${Math.round(cpPl.x)}px, ${(cpPl.y + (1 - c) * 14).toFixed(1)}px, 0)`;
+      } else if (!cpPanel) {
+        cache.cpEl = null;
+      }
+      if (cpPanel && u.cp && !u.cpClosing) {
+        const m = bySlot[CP];
+        if (p >= 0.999 && m && m.visible) {
+          if (!(Math.abs(m.x - cache.cpPinX) <= 0.75) || !(Math.abs(m.y - cache.cpPinY) <= 0.75)) {
+            cache.cpPinX = m.x;
+            cache.cpPinY = m.y;
+            placePanel(cpPl, m.x, m.y, boxOf(m) ? box : null, cpPanel.offsetWidth, cpPanel.offsetHeight, sizes.w, PANEL_TOP, panelLeft + 8);
+            cpPanel.dataset.overlap = String(cpPl.overlap);
+            cpPanel.style.transform = `translate3d(${Math.round(cpPl.x)}px, ${cpPl.y.toFixed(1)}px, 0)`;
+            setLeader(cpPl.d);
+            const pin = leaderPinRef.current;
+            if (pin) {
+              pin.setAttribute("transform", `translate(${m.x.toFixed(1)} ${m.y.toFixed(1)})`);
+              pin.setAttribute("visibility", "visible");
+            }
+          }
+        }
+      } else if (!cardEl && cache.leader && u.cpClosing) {
+        cache.cpPinX = NaN;
+        setLeader("");
+      }
+
       // Where on the rail we are: the timeline's caret.
       const caret = caretRef.current;
       if (caret) {
@@ -1693,6 +1914,7 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       sc.setProgress(progressRef.current);
       u.wp = progressOf(areasRef.current, studyRef.current);
       sc.setWorldProgress(u.wp);
+      sc.setCheckpoint(cpRef.current.look);
       offTier = sc.onQualityTier((tierNow) => {
         if (!disposed) setTier(tierNow);
       });
@@ -1774,8 +1996,27 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       w.__worldScrollFor = (d: number) => sc.scrollYForDepth(d);
       w.__worldDepthFor = (id: string) => sc.depthFor(id);
       w.__worldPark = (id: string | null) => {
-        if (id === null) closeArea();
+        if (id === null) {
+          if (u.cp) closeCheckpoint();
+          else closeArea();
+        } else if (id === CHECKPOINT.id) openCheckpoint(null);
         else openArea(slotOf(id), null);
+      };
+      w.__worldCheckpoint = () => {
+        const m = lastFrame.current?.markers.find((x) => x.id === CHECKPOINT.id) ?? null;
+        const el = markerRefs.current[CP];
+        const r = cpPanelRef.current?.getBoundingClientRect() ?? null;
+        return {
+          shown: cpRef.current.shown,
+          look: cpRef.current.look,
+          open: u.cp,
+          closing: u.cpClosing,
+          mode: el?.dataset.mode ?? null,
+          marker: m ? { x: Math.round(m.x), y: Math.round(m.y), visible: m.visible } : null,
+          panel: r ? { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom) } : null,
+          /** The rail depth that frames it (scene depthFor: 400 back along the view, rail.ts sNearest). */
+          depth: sc.depthFor(CHECKPOINT.id),
+        };
       };
       w.__worldCamera = () => sc.cameraPose();
       w.__worldParkInfo = () => sc.parkInfo();
@@ -1837,7 +2078,7 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
 
       // Round 1: hover and click the landmark itself. The label buttons stay
       // the keyboard and screen reader way in; this is the pointer's.
-      const canPick = () => u.live && !u.poster && u.open === -1 && cache.markersLive;
+      const canPick = () => u.live && !u.poster && u.open === -1 && !u.cp && cache.markersLive;
       const runPick = () => {
         hover.raf = 0;
         if (!hover.has || !canPick()) {
@@ -1845,7 +2086,7 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
           return;
         }
         const id = sc.pickAnchor(hover.x, hover.y);
-        setHover(id ? slotOf(id) : -1);
+        setHover(pickSlot(id, cpRef.current.shown));
       };
       const schedulePick = () => {
         if (!hover.raf) hover.raf = requestAnimationFrame(runPick);
@@ -1871,11 +2112,12 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       onStageClick = (e: MouseEvent) => {
         if (!canPick()) return;
         const id = sc.pickAnchor(e.clientX, e.clientY);
-        const k = id ? slotOf(id) : -1;
+        const k = pickSlot(id, cpRef.current.shown);
         if (k < 0) return;
         e.preventDefault();
         setHover(-1);
-        openArea(k, markerRefs.current[k] ?? null);
+        if (k === CP) openCheckpoint(markerRefs.current[CP] ?? null);
+        else openArea(k, markerRefs.current[k] ?? null);
       };
       stage.addEventListener("pointermove", onPointerMove);
       stage.addEventListener("pointerleave", onPointerLeave);
@@ -1966,7 +2208,7 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       lastFrame.current = null;
       applyRef.current = null;
     };
-  }, [view, tuningLoaded, openArea, closeArea, finalizeClose, applyTuning, writeRide, showPosterLayer, loadManifest, revealLive, travel, stepSnap, reconcile]);
+  }, [view, tuningLoaded, openArea, closeArea, finalizeClose, openCheckpoint, closeCheckpoint, finalizeCheckpoint, applyTuning, writeRide, showPosterLayer, loadManifest, revealLive, travel, stepSnap, reconcile]);
 
   // The tuning hooks work on the list view too, so they live outside the scene effect.
   useEffect(() => {
@@ -2001,7 +2243,7 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       if (!layout || !stage) return;
       sizes.w = stage.clientWidth;
       sizes.h = stage.clientHeight;
-      for (let k = 0; k < N; k++) {
+      for (let k = 0; k <= CP; k++) {
         const label = labelRefs.current[k];
         if (!label) continue;
         layout.width[k] = label.offsetWidth;
@@ -2032,18 +2274,22 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
     };
   }, [view, phase]);
 
-  // A locked marker's label is a few px wider (the lock glyph): measure again.
+  // A locked marker's label is a few px wider (the lock glyph), and the
+  // checkpoint's says something else in each state: measure again.
   useEffect(() => {
     if (view !== "world" || phase !== "ready") return;
     const layout = layoutRef.current;
     if (!layout) return;
-    for (let k = 0; k < N; k++) {
+    for (let k = 0; k <= CP; k++) {
       const label = labelRefs.current[k];
-      if (label) layout.width[k] = label.offsetWidth;
+      if (label) {
+        layout.width[k] = label.offsetWidth;
+        layout.height[k] = label.offsetHeight;
+      }
     }
     const f = lastFrame.current;
     if (f) applyRef.current?.(f);
-  }, [view, phase, study]);
+  }, [view, phase, study, cpView]);
 
   // ── Focus: into the panel on open, back to the trigger once the camera is home.
   // With a source a place can open under a lesson page, where the root is inert
@@ -2108,6 +2354,13 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       // A lesson page is open over the map: the key is its own.
       if (sourceRef.current?.paused) return;
       const u = ui.current;
+      if (u.cp) {
+        if (!u.cpClosing) {
+          e.preventDefault();
+          closeCheckpoint();
+        }
+        return;
+      }
       if (u.open === -1 || u.closing) return;
       e.preventDefault();
       if (u.lesson >= 0) backToArea();
@@ -2115,7 +2368,22 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [backToArea, closeArea]);
+  }, [backToArea, closeArea, closeCheckpoint]);
+
+  // ── The checkpoint's panel: focus to its heading on open, back to what opened it once home.
+  useEffect(() => {
+    const u = ui.current;
+    if (cpOpen) {
+      if (!paused) cpHeadingRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    if (!u.cpReturn) return;
+    u.cpReturn = false;
+    let target = u.cpTrigger;
+    u.cpTrigger = null;
+    if (target && (!target.isConnected || target.dataset.mode === "hidden" || target.closest("[inert]"))) target = null;
+    (target ?? cpTagRef.current)?.focus({ preventScroll: true });
+  }, [cpOpen, paused]);
 
   // ── Never leave the page scroll-locked or a timer running behind us.
   useEffect(() => {
@@ -2204,7 +2472,7 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
     <main
       className={`${tokens.tokens} ${s.root}`}
       data-view={view}
-      data-open={isOpen || undefined}
+      data-open={isOpen || cpOpen || undefined}
       data-lock={tuning.lock}
       data-loading={loading || undefined}
       data-poster={posterReady || undefined}
@@ -2357,7 +2625,7 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
             <i className={s.cueLine} />
           </div>
 
-          <div ref={markersRef} className={s.markers} inert={isOpen || loading}>
+          <div ref={markersRef} className={s.markers} inert={isOpen || cpOpen || loading}>
             {areas.map((a, k) => (
               <button
                 key={a.id}
@@ -2393,10 +2661,39 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
                 </span>
               </button>
             ))}
+            {/* The discount checkpoint (slot CP), after the places, so a place's index is still its own. */}
+            {cpView && (
+              <button
+                ref={(el) => {
+                  markerRefs.current[CP] = el;
+                }}
+                type="button"
+                className={`${s.marker} ${s.cpMarker}`}
+                data-mode="hidden"
+                data-cp={cpView.tag}
+                tabIndex={-1}
+                aria-label={cpAria(cpView)}
+                onClick={(e) => openCheckpoint(e.currentTarget)}
+              >
+                <span className={s.pin} aria-hidden="true" />
+                <span className={s.stem} aria-hidden="true" />
+                <span
+                  ref={(el) => {
+                    labelRefs.current[CP] = el;
+                  }}
+                  className={s.label}
+                  aria-hidden="true"
+                >
+                  <TagGlyph className={s.cpLabelGlyph} />
+                  {cpView.label.lead}
+                  {cpView.label.tail && <span className={s.labelCount}>{cpView.label.tail}</span>}
+                </span>
+              </button>
+            )}
           </div>
 
           {/* The timeline: the eight places, the student's highlighted, the camera's caret. */}
-          <nav ref={timelineRef} className={s.timeline} aria-label="Places" inert={isOpen || loading}>
+          <nav ref={timelineRef} className={s.timeline} aria-label="Places" inert={isOpen || cpOpen || loading}>
             <span className={s.tlCount} aria-label={`${study.doneTotal} of ${content.total} lessons done`}>
               <b>{study.doneTotal}</b>/{content.total}
             </span>
@@ -2437,6 +2734,30 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
                   )}
                 </button>
               ))}
+              {/* The discount checkpoint: a tag between the place it follows and the next, after the stops. */}
+              {cpView?.shown && (
+                <button
+                  ref={cpTagRef}
+                  type="button"
+                  className={s.cpTag}
+                  data-cp={cpView.tag}
+                  style={{ left: `${((CHECKPOINT.after + 1) / N) * 100}%` }}
+                  aria-label={cpAria(cpView)}
+                  onClick={(e) => openCheckpoint(e.currentTarget)}
+                  onPointerEnter={() => setCpTip(true)}
+                  onPointerLeave={() => setCpTip(false)}
+                  onFocus={() => setCpTip(true)}
+                  onBlur={() => setCpTip(false)}
+                >
+                  <TagGlyph className={s.cpTagGlyph} />
+                  {cpTip && hint === null && (
+                    <span className={s.stopTip} aria-hidden="true">
+                      {cpView.label.lead}
+                      {cpView.label.tail && <span className={s.labelCount}>{cpView.chip?.tail ?? cpView.label.tail}</span>}
+                    </span>
+                  )}
+                </button>
+              )}
             </div>
             {hint !== null && (
               <span className={s.hint} role="status">
@@ -2521,6 +2842,21 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
               </div>
             </section>
           )}
+
+          {cpOpen && discount && cpView && (
+            <section ref={cpPanelRef} className={`${s.panel} ${s.cpPanel}`} aria-labelledby="cp-panel-title" inert={cpClosing}>
+              <div className={s.panelInner}>
+                <CheckpointBody
+                  discount={discount}
+                  cv={cpView}
+                  backLabel="Back to map"
+                  onBack={closeCheckpoint}
+                  onWatch={(k, i, el) => watch(k, i, el)}
+                  headingRef={cpHeadingRef}
+                />
+              </div>
+            </section>
+          )}
         </>
       )}
 
@@ -2529,20 +2865,40 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
           <Mark />
           ecomtalent
         </span>
-        {/* Where the student is on the course: one segment per place, sized by its lessons. */}
-        <span
-          className={s.progress}
-          aria-label={placeArea ? `Place ${place + 1} of ${N}, ${placeArea.name}` : "Every place done"}
-        >
-          <span className={s.courseSegs} aria-hidden="true">
-            {areas.map((a, k) => (
-              <span key={a.id} className={s.courseSeg} data-state={study.state[k]} style={{ flexGrow: a.lessons }}>
-                <i style={{ transform: `scaleX(${study.done[k] / a.lessons})` }} />
-              </span>
-            ))}
-          </span>
-          <span aria-hidden="true">
-            <b>{pad2(Math.min(place + 1, N))}</b>/{pad2(N)}
+        <span className={s.headerEnd}>
+          {/* The discount, from day one: the offer and the days left, one click to its panel. */}
+          {cpView?.chip && (
+            <button
+              type="button"
+              className={s.cpChip}
+              data-ready={cpView.chip.ready || undefined}
+              aria-label={`${cpView.chip.lead}, ${cpView.chip.tail}. Open the discount checkpoint`}
+              onClick={(e) => openCheckpoint(e.currentTarget)}
+            >
+              <TagGlyph className={s.cpChipGlyph} />
+              <b>{cpView.chip.lead}</b>
+              <span className={s.cpChipTail}>{cpView.chip.tail}</span>
+            </button>
+          )}
+          {/* Where the student is on the course: one segment per place, sized by its lessons. */}
+          <span
+            className={s.progress}
+            aria-label={placeArea ? `Place ${place + 1} of ${N}, ${placeArea.name}` : "Every place done"}
+          >
+            <span className={s.courseSegs} aria-hidden="true">
+              {areas.map((a, k) => (
+                <Fragment key={a.id}>
+                  <span className={s.courseSeg} data-state={study.state[k]} style={{ flexGrow: a.lessons }}>
+                    <i style={{ transform: `scaleX(${study.done[k] / a.lessons})` }} />
+                  </span>
+                  {/* The discount's gate, on the line between the place it follows and the next. */}
+                  {cpView?.shown && k === CHECKPOINT.after && <span className={s.cpNotch} data-cp={cpView.tag} />}
+                </Fragment>
+              ))}
+            </span>
+            <span aria-hidden="true">
+              <b>{pad2(Math.min(place + 1, N))}</b>/{pad2(N)}
+            </span>
           </span>
         </span>
       </header>
@@ -2588,6 +2944,19 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       {view === "list" && isOpen && (
         <section className={s.sheet} role="dialog" aria-modal="true" aria-labelledby="v4-panel-title">
           {panelBody}
+        </section>
+      )}
+
+      {view === "list" && cpOpen && discount && cpView && (
+        <section className={s.sheet} role="dialog" aria-modal="true" aria-labelledby="cp-panel-title">
+          <CheckpointBody
+            discount={discount}
+            cv={cpView}
+            backLabel="All areas"
+            onBack={closeCheckpoint}
+            onWatch={(k, i, el) => watch(k, i, el)}
+            headingRef={cpHeadingRef}
+          />
         </section>
       )}
 
@@ -3151,6 +3520,251 @@ function PanelBody({
           </div>
         ))}
     </div>
+  );
+}
+
+/** What a screen reader hears for the checkpoint's marker and tag: "30% off, 11 days left". */
+function cpAria(cv: CheckpointView): string {
+  const tail = cv.chip?.tail ?? cv.label.tail;
+  return `Discount checkpoint, ${cv.label.lead}${tail ? `, ${tail}` : ""}`;
+}
+
+/** Whole hours (or minutes under one) of video still to watch: "21 hours", "40 min". */
+function videoTime(seconds: number): string {
+  if (!(seconds > 0)) return "";
+  if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))} min`;
+  const h = Math.round(seconds / 3600);
+  return `${h} hour${h === 1 ? "" : "s"}`;
+}
+
+const LAUNCH_DAY = new Date(DISCOUNT_LAUNCH_DATE).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+
+/**
+ * The discount checkpoint's panel (2026-10-14): the offer, where the student
+ * stands on it (src/lib/world/discount.ts discountState), and the one thing
+ * to do next: Watch the next video the offer asks for, or Apply. The copy
+ * reuses the old dashboard's (DiscountClaimCelebration, StatsWidget) where it
+ * still holds: "30% off your next month", "within 48 hours", "your Whop
+ * subscription". The code is never shown (the team attaches it on Whop).
+ */
+function CheckpointBody({
+  discount,
+  cv,
+  backLabel,
+  onBack,
+  onWatch,
+  headingRef,
+}: {
+  discount: WorldDiscount;
+  cv: CheckpointView;
+  backLabel: string;
+  onBack: () => void;
+  onWatch: (k: number, i: number, el: HTMLElement) => void;
+  headingRef: RefObject<HTMLHeadingElement | null>;
+}) {
+  const c = useContent();
+  const st = discount.state;
+  const after = c.areas[CHECKPOINT.after]?.name ?? "";
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  const apply = async () => {
+    if (sending) return;
+    setSending(true);
+    setError(null);
+    let said: string | null;
+    try {
+      said = await discount.apply();
+    } catch {
+      said = "That didn't go through. Try again in a moment.";
+    }
+    if (!alive.current) return;
+    setSending(false);
+    setError(said);
+  };
+
+  const status =
+    st.kind === "ready"
+      ? "Ready"
+      : st.kind === "pending"
+        ? "In review"
+        : st.kind === "approved"
+          ? "Approved"
+          : st.kind === "applied"
+            ? "Yours"
+            : st.kind === "rejected"
+              ? "Not approved"
+              : st.kind === "expired"
+                ? "Closed"
+                : null;
+
+  let body: React.ReactNode = null;
+  if (st.kind === "locked") {
+    const done = st.lessonsTotal - st.lessonsLeft;
+    const next = discount.next;
+    const na = next ? c.areas[next.k] : null;
+    const title = next && na ? lessonTitle(na, next.i) : null;
+    const length = next ? lessonLength(c, next.k, next.i) : null;
+    const time = videoTime(st.secondsLeft);
+    body = (
+      <>
+        <p className={s.cpWhen}>
+          <span>
+            Apply by <b>{cv.deadline}</b>
+          </span>
+          {cv.left && <span className={s.cpLeft}>{cv.left}</span>}
+        </p>
+        <p className={s.desc}>
+          Watch every video through {after} in your first {DISCOUNT_WINDOW_DAYS} days and your next month is {DISCOUNT_PERCENT}% off.
+        </p>
+        <div className={s.cpBar} aria-hidden="true">
+          <i style={{ transform: `scaleX(${st.lessonsTotal > 0 ? done / st.lessonsTotal : 0})` }} />
+        </div>
+        <p className={s.prog}>
+          <span>
+            <b>{done}</b> of {st.lessonsTotal} videos
+          </span>
+          <span className={s.cpToGo}>
+            {st.lessonsLeft} to go{time ? ` · about ${time}` : ""}
+          </span>
+        </p>
+        {next && na && title !== null && (
+          <ol className={s.rows}>
+            <li className={s.nextRow}>
+              <span className={s.mark} data-m="n" aria-hidden="true" />
+              <span className={s.rowN} aria-hidden="true">
+                {next.i + 1}
+              </span>
+              <span className={s.rowT}>
+                {title}
+                <span className={s.rowSub}>
+                  {na.name}
+                  {length !== null ? ` · ${length}` : ""}
+                </span>
+              </span>
+              <button
+                type="button"
+                className={`${s.primary} ${s.primarySm}`}
+                aria-label={`Watch ${title}, the next video for the discount`}
+                onClick={(e) => onWatch(next.k, next.i, e.currentTarget)}
+              >
+                <Play />
+                Watch
+              </button>
+            </li>
+          </ol>
+        )}
+      </>
+    );
+  } else if (st.kind === "ready") {
+    body = (
+      <>
+        <p className={s.cpWhen}>
+          <span>
+            Apply by <b>{cv.deadline}</b>
+          </span>
+          {cv.left && <span className={s.cpLeft}>{cv.left}</span>}
+        </p>
+        <p className={s.desc}>
+          Every video through {after} is watched. Apply now and the team confirms within 48 hours.
+        </p>
+        <button type="button" className={`${s.primary} ${s.cpApply}`} onClick={apply} disabled={sending} aria-busy={sending || undefined}>
+          {sending ? "Sending…" : `Apply for ${DISCOUNT_PERCENT}% off`}
+          {!sending && <Arrow />}
+        </button>
+        {error && (
+          <p className={s.cpError} role="alert">
+            {error}
+          </p>
+        )}
+      </>
+    );
+  } else if (st.kind === "pending") {
+    body = (
+      <>
+        <p className={s.cpWhen}>
+          <span>
+            Sent <b>{shortDate(st.at)}</b>
+          </span>
+        </p>
+        <p className={s.desc}>
+          Your application is in. The team checks it and confirms within 48 hours, then puts the {DISCOUNT_PERCENT}% on your Whop subscription.
+        </p>
+      </>
+    );
+  } else if (st.kind === "approved") {
+    body = (
+      <p className={s.desc}>
+        Approved. The team is putting it on your Whop subscription, and you&apos;ll see it on your next renewal. Nothing else to do.
+      </p>
+    );
+  } else if (st.kind === "applied") {
+    body = <p className={s.desc}>It&apos;s on your Whop subscription. You&apos;ll see {DISCOUNT_PERCENT}% off on your next renewal.</p>;
+  } else if (st.kind === "rejected") {
+    body = (
+      <>
+        <p className={s.desc}>The team didn&apos;t approve this one.</p>
+        {st.rejectionReason && <p className={s.cpReason}>{st.rejectionReason}</p>}
+        <p className={s.desc}>If you think that&apos;s wrong, ask in Discord and the team will sort it out.</p>
+      </>
+    );
+  } else if (st.kind === "expired") {
+    body = (
+      <p className={s.desc}>
+        This offer closed on {shortDate(st.endsAt)}. It runs for your first {DISCOUNT_WINDOW_DAYS} days.
+      </p>
+    );
+  } else if (st.kind === "not-eligible") {
+    body = (
+      <p className={s.desc}>
+        {st.reason === "before-launch"
+          ? `This offer is for students who joined from ${LAUNCH_DAY}, when the new course opened.`
+          : st.reason === "no-payment"
+            ? "We can't see your first payment yet. If you joined in the last two weeks, tell the team and they'll sort it out."
+            : "This offer isn't open yet."}
+      </p>
+    );
+  }
+
+  return (
+    <div className={s.view} data-cp-state={st.kind} key="cp">
+      <div className={s.panelTop}>
+        <button type="button" className={s.back} onClick={onBack}>
+          <Arrow back />
+          {backLabel}
+        </button>
+        <kbd className={s.esc}>Esc</kbd>
+      </div>
+      <p className={s.eyebrow}>
+        <TagGlyph className={s.cpEyebrowGlyph} />
+        <span className={s.accent}>Checkpoint</span>
+        {after && <span className={s.cpAfter}>after {after}</span>}
+        {status && <span className={s.eyebrowEnd}>{status}</span>}
+      </p>
+      <h2 ref={headingRef} id="cp-panel-title" className={s.panelTitle} tabIndex={-1}>
+        {DISCOUNT_PERCENT}% off your next month
+      </h2>
+      {body}
+    </div>
+  );
+}
+
+/** A price tag on its side, the point to the left with its hole: the discount's one shape. */
+function TagGlyph({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="16" height="11" viewBox="0 0 16 11" fill="none" aria-hidden="true">
+      <path
+        d="M1.2 5.5 4.9 1.3c.2-.2.5-.3.7-.3h8.3c.6 0 1 .4 1 1v7c0 .6-.4 1-1 1H5.6c-.3 0-.5-.1-.7-.3L1.2 5.5Z"
+        className={s.tagBody}
+      />
+      <circle cx="5.6" cy="5.5" r="1.15" className={s.tagHole} />
+    </svg>
   );
 }
 

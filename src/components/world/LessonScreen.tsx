@@ -8,6 +8,7 @@ import { useWorldStage } from "@/components/world/WorldStage";
 import { useStudent } from "@/contexts/StudentContext";
 import { LessonPlayer } from "@/components/world/LessonPlayer";
 import { LessonText } from "@/components/world/LessonText";
+import { ActionItemBlock } from "@/components/world/ActionItemBlock";
 import type { CachedLessonTransport } from "@/lib/world/embed-cache";
 import { useLessonTransport } from "@/lib/world/useLessonTransport";
 import { parseLessonText } from "@/lib/world/lesson-text";
@@ -50,6 +51,14 @@ import u from "@/components/world/world-ui.module.css";
  * of the student's data whose read of the videos failed answers "no video"
  * for every lesson, and that must not take a playing video off the page: the
  * player keeps it and handles `recorded` turning false itself.
+ *
+ * AN ACTION ITEM (requires_action) gets its hand-in last, under the text (or
+ * under the Milestone box when there is no text): the Discord link, Save, and
+ * the complete button (ActionItemBlock.tsx). On a lesson with no video the
+ * button completes the lesson; on a video lesson it completes the action
+ * half, and the lesson is done once the video is watched too. Either way
+ * "Next lesson" lights the moment the context says the lesson is done, as it
+ * does after a video.
  */
 export function LessonScreen({
   areaId,
@@ -81,7 +90,7 @@ export function LessonScreen({
   const { status } = useMapModel();
   // While the course is loading, or did not arrive, the host's card says so.
   const silent = mapIsSilent(status);
-  const { completedLessonIds, markWatched } = useStudent();
+  const { completedLessonIds, markWatched, completions, saveDiscordLink, toggleLessonAction } = useStudent();
   const [justCompleted, setJustCompleted] = useState<string[] | null>(null);
   // The lesson the player was put up for. It stays up for that lesson.
   const [playerFor, setPlayerFor] = useState<string | null>(null);
@@ -212,6 +221,16 @@ export function LessonScreen({
         <LessonText blocks={text} />
       ) : (
         !withPlayer && watch && <p className={u.muted}>Not recorded yet.</p>
+      )}
+
+      {lesson.requires_action && (
+        <ActionItemBlock
+          key={lesson.id}
+          separateWatchHalf={watch}
+          row={(completions ?? []).find((c) => c.lesson_id === lesson.id) ?? null}
+          onSave={(link) => saveDiscordLink(lesson.id, link)}
+          onComplete={() => toggleLessonAction(lesson.id)}
+        />
       )}
 
       {(done || devComplete || next) && (

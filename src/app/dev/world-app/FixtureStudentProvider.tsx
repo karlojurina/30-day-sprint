@@ -20,6 +20,8 @@ import {
   type FixtureCall,
   type FixtureWatchRow,
 } from "./fixtureTransport";
+import { useFixtureActionItems } from "./fixtureActionItems";
+import { FixtureDiscount, discountPresetIds } from "./fixtureDiscount";
 
 /**
  * The pretend student behind /dev/world-app (world_v6_wiring_prd.md, Work Item 4).
@@ -43,7 +45,9 @@ import {
  * WorldMap and LessonScreen read completedLessonIds; LessonScreen and
  * LessonPlayer call markWatched; LessonPlayer reads watchProgress and
  * patchWatchProgress (kept here the way StudentProvider keeps them, so a
- * lesson left halfway resumes). Anything else on StudentContextType is absent,
+ * lesson left halfway resumes). LessonScreen's action item block reads
+ * completions and calls saveDiscordLink and toggleLessonAction, kept in memory
+ * by fixtureActionItems.ts. Anything else on StudentContextType is absent,
  * which is what the cast below admits to.
  *
  * The query string is read once, when the layout mounts. The stage's links
@@ -65,6 +69,12 @@ import {
  *   ?latency=<ms>      the stand-in server gives a lesson's address that many
  *                      ms after it is asked (0 to 5000, default 0), as the
  *                      real route would. Any mode.
+ *
+ *   ?discount=<preset> the early-finish discount's states, in memory
+ *                      (fixtureDiscount.tsx: locked, ready, pending, approved,
+ *                      expired, before-launch); ready and after add the videos
+ *                      the offer asks for to the ?p= preset. Without it the
+ *                      pretend student has no first payment: no offer shows.
  *
  * THE REAL COURSE. ?catalog=course swaps the generated catalog for the rows of
  * courseCatalog.ts: the 8 areas and 141 lessons of
@@ -297,17 +307,22 @@ export function FixtureStudentProvider({
     if (search === null) return [];
     const name = new URLSearchParams(search).get("p");
     // The real course has its own presets: the others count placeholder lessons.
-    return modeOf(search) === "course" ? coursePresetIds(name) : presetIds(name);
+    const ids = modeOf(search) === "course" ? coursePresetIds(name) : presetIds(name);
+    // ?discount=ready and after: every video the offer asks for is watched too (fixtureDiscount.tsx).
+    return [...ids, ...discountPresetIds(search, modeOf(search) === "course" ? COURSE.lessons : FULL.lessons)];
   }, [search]);
   /** Lessons marked watched since the page loaded, on top of the preset. */
   const [watched, setWatched] = useState<ReadonlySet<string>>(() => new Set());
+  // Action items: the Discord link and the two halves, in memory (fixtureActionItems.ts).
+  const actionItems = useFixtureActionItems();
   // The preset and the catalog arrive in the same render, so the map first
   // mounts with the preset in place and a page load never plays the done moment.
   const completedLessonIds = useMemo(() => {
     const ids = new Set(preset);
     for (const id of watched) ids.add(id);
+    for (const id of actionItems.doneIds) ids.add(id);
     return ids;
-  }, [preset, watched]);
+  }, [preset, watched, actionItems.doneIds]);
 
   const markWatched = useCallback((id: string) => {
     setWatched((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
@@ -396,16 +411,20 @@ export function FixtureStudentProvider({
         loading: mode === null || mode === "loading",
         loadError: mode === "error" ? LOAD_ERROR : null,
         patchWatchProgress,
-        markWatched,
+        // markWatched (on an action item it records the watch half only),
+        // completions, saveDiscordLink and toggleLessonAction.
+        ...actionItems.contextFor(rows.lessons, completedLessonIds, markWatched),
         catalogSuffix: "_next",
       }) as unknown as StudentContextType,
-    [rows, mode, completedLessonIds, watchProgress, patchWatchProgress, markWatched],
+    [rows, mode, completedLessonIds, watchProgress, patchWatchProgress, markWatched, actionItems],
   );
 
   return (
     <StudentContext.Provider value={value}>
       <LessonAccessContext.Provider value={PRETEND_ACCESS}>
-        <LessonTransportContext.Provider value={transport}>{children}</LessonTransportContext.Provider>
+        <LessonTransportContext.Provider value={transport}>
+          <FixtureDiscount search={search}>{children}</FixtureDiscount>
+        </LessonTransportContext.Provider>
       </LessonAccessContext.Provider>
     </StudentContext.Provider>
   );

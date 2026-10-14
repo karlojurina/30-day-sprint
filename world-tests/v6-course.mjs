@@ -49,6 +49,21 @@
  * server), so rows 17 and 20 print it apart from the rest of the wait.
  * Rows 17, 18 and 20 need the test videos and are NOT COVERED without them.
  *
+ * ROWS 21 AND 22 ARE ACTION ITEMS (src/components/world/ActionItemBlock.tsx,
+ * the rules in src/lib/world/action-items.ts), done the way a student does
+ * them: typed into the field, Enter or a click. The pretend student keeps the
+ * link and the two halves in memory (fixtureActionItems.ts), so nothing is
+ * asked of /api. On a5l22 (a setup action item, no video) a thread's own
+ * link is refused with the old app's message, a message link is saved and
+ * shown, and the complete button finishes the lesson and lights "Next
+ * lesson" (21). On a5l08 (an action item with a video) the block sits under
+ * the text, the complete button is there once the link is saved, and the
+ * lesson is done only with both halves, in either order: the video alone is
+ * not enough, the button alone is not enough (22). Row 21 takes the three
+ * pictures a person looks at (G6): lesson-a5l22-action-empty.png,
+ * lesson-a5l22-action-saved.png, lesson-a5l22-action-done.png (and
+ * lesson-a5l22-action-error.png).
+ *
  * ROW 12 PLAYS A REAL VIDEO. In course mode every lesson that has a video
  * plays the harness's test video 1, and the stand-in server holds it to that
  * clip's length (fixtureTransport.ts, COURSE MODE). So the row presses play
@@ -119,6 +134,12 @@
  *              element holding the "Milestone" label, the innermost element
  *              saying "Not recorded yet.", and the text's ul, ol, li value,
  *              strong, br and a (href, target, rel)
+ *   the block  (rows 21, 22) outside `main`: section[data-action-item] (its
+ *              value is the state: empty, saved, completed), its input, its
+ *              p[role="alert"], its link, its buttons by their words ("Save",
+ *              "Complete lesson", "Complete the action", "Edit link"), the
+ *              foot's "Done." and the "Next lesson" link, the "Mark watched
+ *              (dev)" button, and window.__fixture.completed()
  *   the wait   (rows 17 to 20) window.__fixture.calls (getEmbed, by lesson),
  *              the placeholder [data-video-veil] outside `main` (data-gone,
  *              its computed opacity, visibility, pointer-events and its
@@ -592,6 +613,83 @@ const SAYS = (source) => {
   return new RegExp(source).test(text.replace(/\s+/g, ' '))
 }
 
+/**
+ * Rows 21 and 22: the action item's block and the page's foot, measured.
+ * `first` is the sample text's first line (the text is the element holding
+ * that paragraph); `id` the lesson.
+ */
+const ACTION = ({ first, id }) => {
+  const norm = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
+  const outside = (el) => !el.closest('main, nextjs-portal')
+  const box = (el) => {
+    if (!el) return null
+    const b = el.getBoundingClientRect()
+    return { top: Math.round(b.top * 10) / 10, bottom: Math.round(b.bottom * 10) / 10 }
+  }
+  const block = [...document.querySelectorAll('section[data-action-item]')].find(outside) ?? null
+  const firstP = [...document.querySelectorAll('p')].filter(outside).find((p) => norm(p.textContent) === first) ?? null
+  const label = [...document.querySelectorAll('p')].filter(outside).find((p) => norm(p.textContent) === 'Milestone') ?? null
+  const button = (re) => (block ? [...block.querySelectorAll('button')].find((b) => re.test(norm(b.textContent))) ?? null : null)
+  const input = block?.querySelector('input') ?? null
+  const alert = block?.querySelector('p[role="alert"]') ?? null
+  const link = block?.querySelector('a[href]') ?? null
+  const complete = button(/^Complete (lesson|the action)$/)
+  const next = [...document.querySelectorAll('a')].filter(outside).find((a) => /Next lesson/.test(a.textContent)) ?? null
+  let words = ''
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const p = n.parentElement
+    if (!p || p.closest('main, script, style, noscript, template, nextjs-portal, next-route-announcer')) continue
+    words += ` ${n.textContent}`
+  }
+  const at = document.activeElement
+  return {
+    state: block?.dataset.actionItem ?? null,
+    text: block ? norm(block.textContent) : null,
+    input: input ? { value: input.value, invalid: input.getAttribute('aria-invalid'), name: input.getAttribute('aria-labelledby') ? norm(document.getElementById(input.getAttribute('aria-labelledby'))?.textContent) : null } : null,
+    alert: alert ? norm(alert.textContent) : null,
+    link: link ? { href: link.getAttribute('href'), target: link.getAttribute('target'), rel: link.getAttribute('rel') } : null,
+    complete: complete ? norm(complete.textContent) : null,
+    edit: !!button(/^Edit link$/),
+    focus: at && block?.contains(at) ? norm(at.textContent) || at.tagName : at ? at.tagName : null,
+    saysDone: /(^| )Done\.( |$)/.test(norm(words)),
+    next: next ? { disabled: next.getAttribute('aria-disabled'), href: next.getAttribute('href') } : null,
+    done: window.__fixture ? window.__fixture.completed().includes(id) : null,
+    boxes: { milestone: box(label?.parentElement ?? null), text: box(firstP?.parentElement ?? null), block: box(block), player: box([...document.querySelectorAll('body *')].filter(outside).find((el) => [...el.classList].some((c) => /__player$/.test(c))) ?? null) },
+  }
+}
+
+/** Put `value` in the block's field the way a person does: click it, select what is there, type over it. */
+async function typeLink(page, value, what) {
+  const handle = await page.evaluateHandle(() => [...document.querySelectorAll('section[data-action-item] input')].find((x) => !x.closest('main')) ?? null)
+  const input = handle.asElement()
+  if (!input) {
+    await handle.dispose()
+    throw new Error(`${what}: the block has no field`)
+  }
+  await input.click()
+  await page.evaluate((el) => el.select(), input)
+  await input.dispose()
+  if (value === '') await page.keyboard.press('Backspace')
+  else await page.keyboard.type(value, { delay: 2 })
+}
+
+/** Click the block's button whose words match `source` (a pattern). */
+async function pressBlockButton(page, source, what) {
+  return click(page, (src) => {
+    const re = new RegExp(src)
+    const block = [...document.querySelectorAll('section[data-action-item]')].find((x) => !x.closest('main'))
+    return block ? ([...block.querySelectorAll('button')].find((b) => re.test(b.textContent.replace(/\s+/g, ' ').trim())) ?? null) : null
+  }, source, { what })
+}
+
+/** A Discord message link of the right shape: made-up ids. */
+const GOOD_LINK = 'https://discord.com/channels/1100000000000000001/1200000000000000002/1300000000000000003'
+/** A thread's own link: two ids. The old app refused it, and so does the database. */
+const THREAD_LINK = 'https://discord.com/channels/1100000000000000001/1200000000000000002'
+/** The old route's words for a wrong link, typed here from it. */
+const OLD_LINK_ERROR = 'That doesn\'t look like a Discord message link. Right-click the message in #ad-review and click "Copy Message Link."'
+
 /** What a row clicks. Each returns one element or null. */
 const FIND = {
   marker: (k) => {
@@ -1051,6 +1149,8 @@ const ROWS = [
   [18, 'The placeholder over the video until its player is ready'],
   [19, 'A lesson without a video is never asked for'],
   [20, 'With the server taking 1.5 s, a hovered row still opens at once'],
+  [21, 'A setup action item: paste the Discord link, save it, complete the lesson'],
+  [22, 'An action item with a video: the link under the text, and both halves to finish it'],
 ]
 const nameOf = (id) => ROWS.find((r) => r[0] === id)[1]
 
@@ -1068,6 +1168,11 @@ const GAPS = [
     'G5',
     "How a lesson's text looks",
     'not a script verdict. A person looks at the two pictures rows 13 and 14 take in shots/v6/course/ (lesson-a5l22-text-no-video.png, lesson-a5l08-video-milestone-text.png): the type, the lists, the bold, the link.',
+  ],
+  [
+    'G6',
+    "How an action item's Discord block looks",
+    'not a script verdict. A person looks at the pictures row 21 takes in shots/v6/course/: lesson-a5l22-action-empty.png, lesson-a5l22-action-error.png, lesson-a5l22-action-saved.png, lesson-a5l22-action-done.png.',
   ],
 ]
 
@@ -1682,6 +1787,171 @@ try {
       r.check('the stand-in really takes 1.5 s: row 5, clicked with no wait on it, has its frame 1400 ms or more after the click', coldMs >= 1400, `${coldMs} ms`)
       r.check('row 3, with the pointer on it 2.2 s first: its frame is in the page within 300 ms of the click', asked === 1 && ms <= 300, `${split(warm)}; asked ${asked} time before it`)
       r.check('and it was asked for once in all', all === 1, `${all} calls`)
+    })
+
+    // 21 ── A setup action item: paste the Discord link, save it, complete the lesson
+    await runRow(21, nameOf(21), async (r) => {
+      const id = 'a5l22'
+      const lesson = lessonOf(id)
+      const place = PLACES[4].counting
+      const nextId = place[place.findIndex((l) => l.id === id) + 1].id
+      const arg = { first: SAMPLE_FIRST, id }
+      const page = await r.open(url(`/a5/${id}`, { text: 'sample', arrive: 0, poster: 'off' }))
+      await waitLesson(page, lesson.title, 'row 21', LOAD_MS)
+      await waitFor(page, () => [...document.querySelectorAll('section[data-action-item]')].some((x) => !x.closest('main')), { timeout: 10000, what: 'row 21: the action item block' })
+      await sleep(500)
+      const empty = await page.evaluate(ACTION, arg)
+      r.check(`course_catalog.json: ${id} is a setup lesson with a brief and no length`, lesson.type === 'setup' && !!lesson.action_brief && LENGTHS[id] === undefined, { type: lesson.type, length: LENGTHS[id] ?? 'none' })
+      const b = empty.boxes
+      r.check(
+        'the block sits under the text, which sits under the Milestone box',
+        !!b.milestone && !!b.text && !!b.block && b.milestone.bottom <= b.text.top && b.text.bottom <= b.block.top,
+        b,
+      )
+      r.check(
+        'empty: a field named "Discord link" and Save, no complete button, the lesson not done, "Next lesson" off',
+        empty.state === 'empty' && empty.input?.name === 'Discord link' && empty.input?.value === '' && /\bSave\b/.test(empty.text) && empty.complete === null && !empty.saysDone && empty.next?.disabled === 'true' && empty.done === false,
+        { state: empty.state, input: empty.input, complete: empty.complete, next: empty.next, done: empty.done },
+      )
+      r.values.shots = [await r.shot('lesson-a5l22-action-empty')]
+
+      // A thread's own link, saved with Enter in the field.
+      await typeLink(page, THREAD_LINK, 'row 21')
+      await page.keyboard.press('Enter')
+      await waitFor(page, () => [...document.querySelectorAll('section[data-action-item] p[role="alert"]')].some((x) => !x.closest('main')), { timeout: 5000, what: 'row 21: the error line' })
+      await sleep(200)
+      const wrong = await page.evaluate(ACTION, arg)
+      r.check(
+        "a thread's own link (two ids), Enter: refused with the old app's words, the field marked invalid, nothing saved",
+        wrong.alert === OLD_LINK_ERROR && wrong.input?.invalid === 'true' && wrong.state === 'empty' && wrong.link === null && wrong.done === false,
+        { alert: wrong.alert, invalid: wrong.input?.invalid, state: wrong.state },
+      )
+      r.values.shots.push(await r.shot('lesson-a5l22-action-error'))
+
+      // A message link, saved with Enter.
+      await typeLink(page, GOOD_LINK, 'row 21')
+      await page.keyboard.press('Enter')
+      await waitFor(page, () => [...document.querySelectorAll('section[data-action-item]')].some((x) => !x.closest('main') && x.dataset.actionItem === 'saved'), { timeout: 5000, what: 'row 21: the saved state' })
+      await sleep(300)
+      const saved = await page.evaluate(ACTION, arg)
+      r.check(
+        'a message link, Enter: saved and shown, opening Discord in a new tab with no opener, the error gone',
+        saved.state === 'saved' && saved.link?.href === GOOD_LINK && saved.link?.target === '_blank' && /\bnoopener\b/.test(saved.link?.rel ?? '') && saved.alert === null && saved.input === null && saved.edit,
+        { state: saved.state, link: saved.link, alert: saved.alert, edit: saved.edit },
+      )
+      r.check(
+        'then "Complete lesson" is there and has the keyboard; the lesson is not done yet',
+        saved.complete === 'Complete lesson' && saved.focus === 'Complete lesson' && !saved.saysDone && saved.next?.disabled === 'true' && saved.done === false,
+        { complete: saved.complete, focus: saved.focus, next: saved.next, done: saved.done },
+      )
+      r.values.shots.push(await r.shot('lesson-a5l22-action-saved'))
+
+      // Complete, from the keyboard: the button has the focus.
+      await page.keyboard.press('Enter')
+      await waitFor(page, () => [...document.querySelectorAll('section[data-action-item]')].some((x) => !x.closest('main') && x.dataset.actionItem === 'completed'), { timeout: 5000, what: 'row 21: the completed state' })
+      await sleep(400)
+      const done = await page.evaluate(ACTION, arg)
+      const today = await page.evaluate(() => new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }))
+      r.check(
+        `completed: "Completed on ${today}.", the link still there and editable, no complete button`,
+        done.state === 'completed' && done.text.includes(`Completed on ${today}.`) && done.link?.href === GOOD_LINK && done.edit && done.complete === null,
+        done.text,
+      )
+      r.check('the lesson is done: in the done set, and "Done." in the foot', done.done === true && done.saysDone, { done: done.done, saysDone: done.saysDone })
+      r.check(`"Next lesson" is lit and leads to ${nextId}`, done.next?.disabled === 'false' && done.next?.href === `${APP}/a5/${nextId}`, done.next)
+      r.check('the keyboard is on the completed line (the button it was on is gone)', /^Completed on/.test(done.focus ?? ''), done.focus)
+      r.check('no request to /api in the whole row', r.api.length === 0, r.api.map((x) => `${x.method} ${x.path}`).slice(0, 3))
+      r.values.shots.push(await r.shot('lesson-a5l22-action-done'))
+    })
+
+    // 22 ── An action item with a video: the link under the text, and both halves to finish it
+    await runRow(22, nameOf(22), async (r) => {
+      const id = 'a5l08'
+      const lesson = lessonOf(id)
+      const place = PLACES[4].counting
+      const nextId = place[place.findIndex((l) => l.id === id) + 1].id
+      const arg = { first: SAMPLE_FIRST, id }
+      const at = url(`/a5/${id}`, { text: 'sample', arrive: 0, poster: 'off' })
+      const markWatched = () => [...document.querySelectorAll('button')].find((x) => !x.closest('main') && /Mark watched \(dev\)/.test(x.textContent)) ?? null
+      const inState = (state) => [...document.querySelectorAll('section[data-action-item]')].some((x) => !x.closest('main') && x.dataset.actionItem === state)
+      const openIt = async (what) => {
+        const p = await r.open(at)
+        await waitLesson(p, lesson.title, what, LOAD_MS)
+        await waitFor(p, () => [...document.querySelectorAll('section[data-action-item]')].some((x) => !x.closest('main')), { timeout: 10000, what: `${what}: the action item block` })
+        await sleep(500)
+        return p
+      }
+
+      // First order: the video, then the link and the button.
+      let page = await openIt('row 22')
+      const first = await page.evaluate(ACTION, arg)
+      r.check(`course_catalog.json: ${id} is a watch lesson with a brief and a length`, lesson.type === 'watch' && !!lesson.action_brief && LENGTHS[id] > 0, { type: lesson.type, length: LENGTHS[id] ?? 'none' })
+      const b = first.boxes
+      r.check(
+        'the block sits under the text, the text under the Milestone box, and the player (when it is up) above them',
+        !!b.milestone && !!b.text && !!b.block && b.milestone.bottom <= b.text.top && b.text.bottom <= b.block.top && (!b.player || b.player.bottom <= b.milestone.top),
+        b,
+      )
+      r.check('before a link is saved: the field and Save, and no complete button', first.state === 'empty' && !!first.input && first.complete === null, { state: first.state, complete: first.complete })
+      await click(page, markWatched, null, { what: 'row 22: "Mark watched (dev)"' })
+      await sleep(500)
+      const watchedOnly = await page.evaluate(ACTION, arg)
+      r.check(
+        'the video watched with no link: the lesson is not done, "Next lesson" stays off, still no complete button',
+        watchedOnly.done === false && !watchedOnly.saysDone && watchedOnly.next?.disabled === 'true' && watchedOnly.state === 'empty' && watchedOnly.complete === null,
+        { done: watchedOnly.done, saysDone: watchedOnly.saysDone, next: watchedOnly.next, state: watchedOnly.state },
+      )
+      await typeLink(page, GOOD_LINK, 'row 22')
+      await pressBlockButton(page, '^Save$', 'row 22: Save')
+      await waitFor(page, inState, { arg: 'saved', timeout: 5000, what: 'row 22: the saved state' })
+      await sleep(300)
+      const saved = await page.evaluate(ACTION, arg)
+      r.check(
+        'Save works: the link saved and shown, and the button reads "Complete lesson" (the video is watched)',
+        saved.state === 'saved' && saved.link?.href === GOOD_LINK && saved.complete === 'Complete lesson' && saved.done === false,
+        { state: saved.state, link: saved.link?.href, complete: saved.complete },
+      )
+      await pressBlockButton(page, '^Complete lesson$', 'row 22: Complete lesson')
+      await waitFor(page, inState, { arg: 'completed', timeout: 5000, what: 'row 22: the completed state' })
+      await sleep(400)
+      const both = await page.evaluate(ACTION, arg)
+      r.check(
+        `both halves: done, "Done.", "Next lesson" lit and leading to ${nextId}`,
+        both.done === true && both.saysDone && both.next?.disabled === 'false' && both.next?.href === `${APP}/a5/${nextId}` && /Completed on/.test(both.text) && !/Watch the video/.test(both.text),
+        { done: both.done, next: both.next, text: both.text },
+      )
+
+      // Second order, on a fresh page: the link and the button, then the video.
+      page = await openIt('row 22, the other order')
+      await typeLink(page, GOOD_LINK, 'row 22, the other order')
+      await pressBlockButton(page, '^Save$', 'row 22, the other order: Save')
+      await waitFor(page, inState, { arg: 'saved', timeout: 5000, what: 'row 22, the other order: the saved state' })
+      await sleep(300)
+      const before = await page.evaluate(ACTION, arg)
+      r.check(
+        'the complete button is there before the video is watched (the old app: the link first, the video not required), reading "Complete the action"',
+        before.complete === 'Complete the action',
+        before.complete,
+      )
+      await pressBlockButton(page, '^Complete the action$', 'row 22: Complete the action')
+      await waitFor(page, inState, { arg: 'completed', timeout: 5000, what: 'row 22, the other order: the completed state' })
+      await sleep(400)
+      const actionOnly = await page.evaluate(ACTION, arg)
+      r.check(
+        'the button alone: "Action completed on <date>. Watch the video to finish the lesson.", not done, "Next lesson" off',
+        /Action completed on [^.]+\. Watch the video to finish the lesson\./.test(actionOnly.text) && actionOnly.done === false && !actionOnly.saysDone && actionOnly.next?.disabled === 'true',
+        { text: actionOnly.text, done: actionOnly.done, next: actionOnly.next },
+      )
+      await click(page, markWatched, null, { what: 'row 22, the other order: "Mark watched (dev)"' })
+      await waitFor(page, (lessonId) => window.__fixture?.completed().includes(lessonId), { arg: id, timeout: 5000, soft: true, what: 'row 22: done' })
+      await sleep(400)
+      const finished = await page.evaluate(ACTION, arg)
+      r.check(
+        'then the video watched: done, "Done.", "Next lesson" lit, the waiting line gone',
+        finished.done === true && finished.saysDone && finished.next?.disabled === 'false' && /Completed on/.test(finished.text) && !/Watch the video/.test(finished.text),
+        { done: finished.done, next: finished.next, text: finished.text },
+      )
+      r.check('no request to /api in the whole row', r.api.length === 0, r.api.map((x) => `${x.method} ${x.path}`).slice(0, 3))
     })
   }
 } finally {

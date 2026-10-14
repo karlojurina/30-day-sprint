@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useStudent } from "@/contexts/StudentContext";
 import { LESSON_TYPE_LABELS, LESSON_GROUPS } from "@/lib/constants";
 import { useFocusTrap } from "@/lib/useFocusTrap";
+import { checkDiscordLink } from "@/lib/world/action-items";
 
 interface LessonSheetProps {
   lessonId: string | null;
@@ -961,9 +962,15 @@ function DiscordLinkBlock({
 
   async function handleSave() {
     setError(null);
+    // The shared rule (src/lib/world/action-items.ts): the pattern and the
+    // message the route answers with, said here before any request.
+    const checked = checkDiscordLink(draft);
+    if (!checked.ok) {
+      setError(checked.error);
+      return;
+    }
     setSaving(true);
-    const trimmed = draft.trim();
-    const result = await onSave(trimmed.length === 0 ? null : trimmed);
+    const result = await onSave(checked.link);
     setSaving(false);
     if (result) {
       setError(result);

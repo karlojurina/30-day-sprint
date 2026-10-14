@@ -106,8 +106,12 @@ export interface StudentContextType {
 
   // Actions
   toggleLesson: (lessonId: string) => Promise<void>;
-  /** For compound lessons: toggle the manual "shipped" half independent of watch state */
-  toggleLessonAction: (lessonId: string) => Promise<void>;
+  /**
+   * For compound lessons: toggle the manual "shipped" half independent of
+   * watch state. Resolves to null when the server recorded it, or to a
+   * message to show when it did not (the change is then rolled back).
+   */
+  toggleLessonAction: (lessonId: string) => Promise<string | null>;
   /**
    * Save the Discord message link the student pastes after shipping an
    * action-item ad to #ad-review. Pass `null` (or empty string) to clear.
@@ -1100,8 +1104,8 @@ export function StudentProvider({ children }: { children: ReactNode }) {
    * touching the watch state (which auto-syncs from Whop separately).
    */
   const toggleLessonAction = useCallback(
-    async (lessonId: string) => {
-      if (!student) return;
+    async (lessonId: string): Promise<string | null> => {
+      if (!student) return "Not signed in";
 
       // Run the optimistic update IMMEDIATELY before any awaits — the
       // earlier version awaited getAccessToken() first, which made the
@@ -1134,7 +1138,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       });
 
       const token = await getAccessToken();
-      if (!token) return;
+      if (!token) return "Not signed in";
 
       try {
         const res = await fetch("/api/student/mark-action-shipped", {
@@ -1147,6 +1151,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         });
 
         if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
           // Revert by refetching
           const dataRes = await fetch("/api/student/data", {
             headers: { Authorization: `Bearer ${token}` },
@@ -1155,6 +1160,9 @@ export function StudentProvider({ children }: { children: ReactNode }) {
             const data = await dataRes.json();
             setCompletions(data.completions);
           }
+          return typeof body.error === "string"
+            ? body.error
+            : `Save failed (${res.status})`;
         } else {
           const result = await res.json();
           if (result.completion) {
@@ -1175,6 +1183,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           // v53 (Phase 5) - signal AchievementsButton to re-poll.
           if (typeof window !== "undefined")
             window.dispatchEvent(new Event("et:achievements-changed"));
+          return null;
         }
       } catch {
         const token2 = await getAccessToken();
@@ -1187,6 +1196,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
             setCompletions(data.completions);
           }
         }
+        return "Couldn't reach the server. Nothing was recorded, so try again.";
       }
     },
     [student, actionShippedLessonIds, refreshFromServer]
@@ -1240,8 +1250,13 @@ export function StudentProvider({ children }: { children: ReactNode }) {
 
       const { completion } = await res.json();
       if (completion) {
+        // The route inserts a row when there was none (a link saved before
+        // the video was watched, or a setup lesson's first save): add it, or
+        // the saved link would not show until the next refresh.
         setCompletions((prev) =>
-          prev.map((c) => (c.lesson_id === lessonId ? completion : c)),
+          prev.some((c) => c.lesson_id === lessonId)
+            ? prev.map((c) => (c.lesson_id === lessonId ? completion : c))
+            : [...prev, completion],
         );
       }
       return null;

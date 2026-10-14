@@ -14,6 +14,7 @@
  * comes from the catalog through buildMapModel().
  */
 import type { MapModel } from "@/lib/world/map-model";
+import type { DiscountState } from "@/lib/world/discount";
 import { STUDY_AREAS, type AreaState, type LockMode, type Study, type StudyArea } from "./study";
 
 export interface WorldSource {
@@ -47,6 +48,24 @@ export interface WorldSource {
    * lesson has a video and asks no more than once (embed-cache.ts).
    */
   onPrefetch?(k: number, i: number): void;
+  /**
+   * The early-finish discount (2026-10-14): what the discount checkpoint
+   * between the Trail Hut and the Boathouse, its timeline tag, the header's
+   * chip and its panel show. Absent: none of them shows and the cache in
+   * the world stands closed.
+   */
+  discount?: WorldDiscount;
+}
+
+/** The student's discount, as the host worked it out (src/lib/world/discount.ts). */
+export interface WorldDiscount {
+  state: DiscountState;
+  /** The clock the state was worked out at (ms), for "11 days left". */
+  now: number;
+  /** The next video the offer asks for, as place k and lesson i (locked only), or null. */
+  next: { k: number; i: number } | null;
+  /** Apply for it: null once the application is in, else the words to show the student. */
+  apply(): Promise<string | null>;
 }
 
 /** Everything of a WorldSource that comes from the model: the host adds the route and the callbacks. */

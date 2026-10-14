@@ -560,6 +560,214 @@
   color: var(--color-ink);
 }
 
+/* ── An action item's hand-in (ActionItemBlock.tsx) ─────────── */
+
+/* Under the text, or under the Milestone box when there is none. The
+   Milestone box says what to do; this is where it is handed in. A solid
+   card surface, so the violet stays the Milestone's. */
+.submit {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+  background: var(--color-surface-2);
+}
+
+/* Secondary ink: the tertiary measures under 4:1 on this surface. */
+.submitLabel {
+  margin: 0;
+  font: 600 10.5px/1 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-2);
+}
+
+.submitHelp {
+  margin: 12px 0 0;
+  max-width: 68ch;
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--color-ink-2);
+}
+
+/* "How do I get the link?": a quiet control on its own line, 40px tall. */
+.stepsToggle {
+  min-height: 40px;
+  margin: 2px 0 0 -8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.stepsToggle:hover {
+  color: var(--color-accent-strong);
+}
+
+.steps {
+  margin: 0 0 4px;
+  padding-left: 22px;
+  max-width: 68ch;
+  list-style: decimal;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--color-ink-2);
+}
+
+.steps li + li {
+  margin-top: 6px;
+}
+
+.steps li::marker {
+  color: var(--color-ink-3);
+}
+
+.field {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.input {
+  flex: 1 1 280px;
+  min-width: 0;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 9px;
+  background: var(--color-surface-0);
+  color: var(--color-ink);
+  font: 400 13px/1 var(--mono);
+  /* The mono face draws "://" as one glyph; a link must read as typed. */
+  font-variant-ligatures: none;
+}
+
+.input::placeholder {
+  color: var(--color-ink-3);
+}
+
+/* A wrong link: the field's edge, beside the words that say what is wrong.
+   --color-danger is the app's (globals.css): the world's tokens have none. */
+.input[aria-invalid="true"] {
+  border-color: var(--color-danger);
+}
+
+/* The quiet button beside the accent one: Cancel, Edit link. */
+.secondary {
+  height: 40px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 9px;
+  background: none;
+  color: var(--color-ink);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.secondary:hover {
+  background: var(--color-surface-3);
+}
+
+.submit .primary:disabled,
+.submit .secondary:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+/* The saved link and the way to change it. */
+.saved {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.savedNote {
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--color-ink-2);
+}
+
+.savedLink {
+  flex: 1 1 200px;
+  min-width: 0;
+  font: 400 13px/1.55 var(--mono);
+  font-variant-ligatures: none;
+  color: var(--color-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+.savedLink:hover {
+  color: var(--color-accent-strong);
+}
+
+.card .savedLink:focus-visible {
+  border-radius: 5px;
+}
+
+.submitActions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* "Completed on Oct 14, 2026.": the done mark of the lesson page's foot. */
+.submitState {
+  margin: 12px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 500;
+}
+
+/* It takes the focus once the complete button is gone. Not a control: no ring. */
+.card .submitState:focus,
+.card .submitState:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.submitError {
+  margin: 12px 0 0;
+  max-width: 68ch;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--color-ink);
+}
+
+.errorMark {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-danger);
+  transform: translateY(-1px);
+}
+
 /* ── The phone view: solid surfaces, no blur ───────────────── */
 
 @media (width < 760px) {
@@ -591,6 +799,10 @@
   .eyebrow,
   .muted {
     color: var(--color-ink-2);
+  }
+
+  .submit {
+    padding: 12px;
   }
 }
 

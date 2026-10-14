@@ -48,7 +48,9 @@
 --
 -- WHAT IT LEAVES ALONE
 --   lessons and regions, the live catalog. On regions_next: landmark_label,
---   rail_at and terrain (v99). Every student's rows.
+--   rail_at and terrain (v99). On lessons_next: the whop_lesson_id column
+--   and its index, which v101 adds; the placeholder rows have none. Every
+--   student's rows.
 --
 -- Safe to run again: a second run ends in the same state. v101 can be run
 -- again after it.

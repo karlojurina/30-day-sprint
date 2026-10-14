@@ -24,7 +24,8 @@
 // title that is empty, untrimmed or over 120 characters; no gate or more
 // than one; two lessons of one area outside the lesson count; a feature key
 // on two lessons; a brief with a link in it (http, www., or a bare domain
-// such as discord.gg/x).
+// such as discord.gg/x); a lesson without its Whop lesson id, an id not shaped
+// like lesn_ and letters or digits, or one Whop lesson id on two lessons.
 //
 // The undo's seed statements are copied out of v94's own file. Nothing in
 // them is typed here, so the undo cannot drift from what v94 really seeds.
@@ -47,6 +48,11 @@ const LESSON_ID = /^a[1-8]l[0-9]{2}$/
 // The same pattern as text, for the SQL this script writes.
 const LESSON_ID_SQL = '^a[1-8]l[0-9]{2}$'
 const TITLE_MAX = 120
+// The id of the same lesson in the Whop course. The Whop sync and the webhook
+// find a lesson by it (lessons.whop_lesson_id), so it is catalog-owned, like
+// the title. A Whop lesson id is not a secret; a Whop course id never goes in
+// the data file.
+const WHOP_LESSON_ID = /^lesn_[A-Za-z0-9]+$/
 // A link in a brief: http, www., or a bare domain, which is a word, a dot and
 // one of these endings with nothing joined on after it (discord.gg/x).
 const LINK = /http|www\.|\w\.(?:com|gg|io|net|org|app|co|tv)\b/i
@@ -125,6 +131,10 @@ function problems(c) {
     if (l.feature_key !== undefined && (!isText(l.feature_key) || l.feature_key.trim() === '')) {
       out.push(`The feature key of lesson ${id} is empty. Leave it out when the lesson has none.`)
     }
+    if (l.whop_lesson_id === undefined) out.push(`Lesson ${id} has no whop_lesson_id. Every lesson carries the id of the same lesson in the Whop course.`)
+    else if (!isText(l.whop_lesson_id) || !WHOP_LESSON_ID.test(l.whop_lesson_id)) {
+      out.push(`Lesson ${id} has the whop_lesson_id ${JSON.stringify(l.whop_lesson_id)}. A Whop lesson id is lesn_ and then letters or digits.`)
+    }
   })
 
   for (const [id, n] of seen) {
@@ -170,6 +180,14 @@ function problems(c) {
     if (ids.length > 1) out.push(`The feature key ${JSON.stringify(key)} is on ${ids.length} lessons (${list(ids)}). A feature key belongs to one lesson.`)
   }
 
+  const byWhop = new Map()
+  for (const l of c.lessons) {
+    if (isText(l?.whop_lesson_id)) byWhop.set(l.whop_lesson_id, [...(byWhop.get(l.whop_lesson_id) ?? []), l.id])
+  }
+  for (const [whop, ids] of byWhop) {
+    if (ids.length > 1) out.push(`The whop_lesson_id ${whop} is on ${ids.length} lessons (${list(ids)}). A Whop lesson belongs to one lesson.`)
+  }
+
   return out
 }
 
@@ -204,6 +222,7 @@ const rows = catalog.lessons.map((l, i) => ({
   is_gate: l.gate === true,
   counts_toward_progress: l.counts !== false,
   feature_key: l.feature_key,
+  whop_lesson_id: l.whop_lesson_id,
 }))
 
 const total      = rows.length
@@ -302,8 +321,12 @@ const migration = `${RULE}
 --   2. Rewrites lessons_next. v94 seeded it with 145 placeholder lessons
 --      ("Fundamentals · lesson 3"). After this file it holds the ${total}
 --      lessons of the course: id, area, type, title, order, the ${actions} action
---      items with their briefs, the one gate (${gate}) and the special
---      rows (${specialsSaid}).
+--      items with their briefs, the one gate (${gate}), the special
+--      rows (${specialsSaid}),
+--      and every lesson's Whop lesson id (whop_lesson_id, a column this file
+--      adds to lessons_next when it is missing). The Whop sync and the Whop
+--      webhook find a lesson by that id, so once the cutover copies these
+--      rows into lessons, a lesson watched on Whop counts on the map.
 --      A lesson whose id is in the table already is updated in place and
 --      keeps its created_at. A row whose id is not in the course is deleted.
 --   3. Checks its own result before it commits, and ends with a table of
@@ -460,15 +483,24 @@ ${catalog.areas.map(a => `    (${sq(a.id)}, ${sq(a.name)})`).join(',\n')}
 
 ${head('4. Clear the way')}
 --
--- Three unique indexes stand in the way of rewriting the rows one by one: one
--- gate, one lesson per feature key, one lesson per sort_order. The gate and
--- the feature keys are taken off, and every sort_order is moved up by
--- ${PARKED}. Step 5 gives the lessons of the course their real values back. What
--- is still parked above ${PARKED} after step 5 is a row the course no longer has.
+-- First the column for the Whop lesson id, when it is missing, with its own
+-- unique index: one Whop lesson belongs to one lesson. v94 has no such column.
+--
+-- Four unique indexes stand in the way of rewriting the rows one by one: one
+-- gate, one lesson per feature key, one lesson per Whop lesson id, one lesson
+-- per sort_order. The gate, the feature keys and the Whop lesson ids are taken
+-- off, and every sort_order is moved up by ${PARKED}. Step 5 gives the lessons
+-- of the course their real values back. What is still parked above ${PARKED}
+-- after step 5 is a row the course no longer has.
+
+alter table public.lessons_next add column if not exists whop_lesson_id text;
+
+create unique index if not exists lessons_next_whop_lesson_id_key
+  on public.lessons_next (whop_lesson_id) where whop_lesson_id is not null;
 
 update public.lessons_next
-   set is_gate = false, feature_key = null
- where is_gate or feature_key is not null;
+   set is_gate = false, feature_key = null, whop_lesson_id = null
+ where is_gate or feature_key is not null or whop_lesson_id is not null;
 
 update public.lessons_next set sort_order = sort_order + ${PARKED};
 
@@ -482,11 +514,12 @@ ${head(`5. The ${total} lessons of the course`)}
 
 insert into public.lessons_next
   (id, region_id, type, title, description, sort_order, requires_action, action_brief,
-   is_optional, is_gate, lesson_group_id, discord_channel, counts_toward_progress, feature_key)
+   is_optional, is_gate, lesson_group_id, discord_channel, counts_toward_progress, feature_key,
+   whop_lesson_id)
 values
 ${rows.map(r => `  (${[sq(r.id), sq(r.region_id), sq(r.type), sq(r.title), 'null', r.sort_order, r.requires_action,
                        orNull(r.action_brief), 'false', r.is_gate, 'null', 'null', r.counts_toward_progress,
-                       orNull(r.feature_key)].join(', ')})`).join(',\n')}
+                       orNull(r.feature_key), sq(r.whop_lesson_id)].join(', ')})`).join(',\n')}
 on conflict (id) do update
   set region_id              = excluded.region_id,
       type                   = excluded.type,
@@ -499,7 +532,8 @@ on conflict (id) do update
       lesson_group_id        = excluded.lesson_group_id,
       discord_channel        = excluded.discord_channel,
       counts_toward_progress = excluded.counts_toward_progress,
-      feature_key            = excluded.feature_key;
+      feature_key            = excluded.feature_key,
+      whop_lesson_id         = excluded.whop_lesson_id;
 
 ${head('6. The rows the course no longer has')}
 
@@ -524,6 +558,7 @@ begin
          count(*) filter (where requires_action and action_brief is null)::int as no_brief,
          count(*) filter (where type = 'setup')::int                        as setups,
          count(*) filter (where title like '% · lesson %')::int             as placeholders,
+         count(distinct whop_lesson_id)::int                                as whop_ids,
          coalesce(string_agg(id, ', ' order by sort_order) filter (where is_gate), 'none') as gates,
          coalesce(string_agg(id || ':' || coalesce(feature_key, 'no key') || ':'
                              || case when counts_toward_progress then 'counting' else 'outside the count' end,
@@ -578,6 +613,9 @@ begin
   end if;
   if f.placeholders <> 0 then
     raise exception '% lessons would still carry a placeholder title from v94. Nothing was changed.', f.placeholders;
+  end if;
+  if f.whop_ids <> ${total} then
+    raise exception '% lessons would carry a Whop lesson id of their own, and all ${total} must. Nothing was changed.', f.whop_ids;
   end if;
 end
 ${CHECK};
@@ -670,7 +708,9 @@ const undo = `${RULE}
 --
 -- WHAT IT LEAVES ALONE
 --   lessons and regions, the live catalog. On regions_next: landmark_label,
---   rail_at and terrain (v99). Every student's rows.
+--   rail_at and terrain (v99). On lessons_next: the whop_lesson_id column
+--   and its index, which v101 adds; the placeholder rows have none. Every
+--   student's rows.
 --
 -- Safe to run again: a second run ends in the same state. v101 can be run
 -- again after it.

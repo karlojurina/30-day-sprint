@@ -1545,6 +1545,7 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
     id: l.id, region_id: l.area, type: l.type, title: l.title, sort_order: i + 1,
     requires_action: 'action_brief' in l, action_brief: l.action_brief ?? null,
     is_gate: l.gate === true, counts_toward_progress: l.counts !== false, feature_key: l.feature_key ?? null,
+    whop_lesson_id: l.whop_lesson_id,
   }))
   // The table v101's final select returns. `withLength` lists the lessons
   // that have a length at that moment.
@@ -1556,7 +1557,7 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
             line('total', 'the whole course', COURSE.lessons)]
   }
   // The post-conditions of the PRD (section 9.C, step 7), as its own numbers.
-  const THE_COURSE = { n: 141, counting: 140, lo: 1, hi: 141, orders: 141, sizes: '8,11,25,17,26,22,19,13', crossings: 0, gates: 'a5l26',
+  const THE_COURSE = { n: 141, counting: 140, lo: 1, hi: 141, orders: 141, sizes: '8,11,25,17,26,22,19,13', crossings: 0, gates: 'a4l17',
                        special: 'a7l19/bounty_access/false', actions: 9, no_brief: 0, setups: 5, placeholders: 0 }
   const facts = async d => (await rowsOn(d, `select
       count(*)::int as n,
@@ -1581,7 +1582,7 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
       count(*) filter (where type = 'setup')::int as setups,
       count(*) filter (where title like '% · lesson %')::int as placeholders
     from lessons_next`))[0]
-  const CATALOG_COLS = 'id, region_id, type, title, sort_order, requires_action, action_brief, is_gate, counts_toward_progress, feature_key'
+  const CATALOG_COLS = 'id, region_id, type, title, sort_order, requires_action, action_brief, is_gate, counts_toward_progress, feature_key, whop_lesson_id'
   const catalogRows = d => rowsOn(d, `select ${CATALOG_COLS} from lessons_next order by sort_order`)
   const TABLE_COLS = 'area,name,rows,counting,action_items,with_length'
   const isTheCourse = async (d, r, withLength = []) =>
@@ -1601,6 +1602,18 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
   })
   const everything = async () => await staging(db) + await live() + await dependents()
   const refusal = r => r.ok ? 'it ran' : `${r.code}: ${r.said.slice(0, 64)}`
+  // The Whop lesson id column on lessons_next (v101 adds it): is it there, is
+  // its unique index there, and what it holds, lesson id to Whop lesson id.
+  const whopIds = async d => {
+    const has = (await rowsOn(d, `select
+        exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'lessons_next'
+                   and column_name = 'whop_lesson_id' and data_type = 'text') as col,
+        exists (select 1 from pg_indexes where schemaname = 'public' and tablename = 'lessons_next'
+                   and indexname = 'lessons_next_whop_lesson_id_key' and indexdef ilike '%unique%where (whop_lesson_id is not null)%') as idx`))[0]
+    const held = has.col ? await rowsOn(d, `select id, whop_lesson_id from lessons_next order by id`) : []
+    return { ...has, held: Object.fromEntries(held.map(x => [x.id, x.whop_lesson_id])) }
+  }
+  const WHOP_WANT = Object.fromEntries(COURSE.lessons.map(l => [l.id, l.whop_lesson_id]).sort((a, b) => a[0] < b[0] ? -1 : 1))
   const unchanged = r => !r.ok && r.code === 'P0001' && /Nothing was changed\.$/.test(r.said) && !/vid_/.test(r.said)
 
   // ── the generator, run as a program ──
@@ -1646,6 +1659,14 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
     ['7 areas',                           c => { c.areas.pop() },                        'must list exactly 8 areas, a1 to a8, in that order. It lists 7'],
     ['the a8 block listed first',         c => { c.lessons = [...c.lessons.filter(l => l.area === 'a8'), ...c.lessons.filter(l => l.area !== 'a8')] },
                                                                                          'The blocks of the areas must come in the order a1 to a8. In the list they come as a8, a1, a2'],
+    ['a lesson without its Whop lesson id', c => { delete c.lessons.find(l => l.id === 'a3l07').whop_lesson_id },
+                                                                                         'Lesson a3l07 has no whop_lesson_id'],
+    ['a Whop lesson id of the wrong shape', c => { c.lessons.find(l => l.id === 'a3l07').whop_lesson_id = 'chap_abc123' },
+                                                                                         'Lesson a3l07 has the whop_lesson_id "chap_abc123". A Whop lesson id is lesn_'],
+    ["a Whop lesson id with a quote in it", c => { c.lessons.find(l => l.id === 'a3l07').whop_lesson_id = "lesn_a'b" },
+                                                                                         'Lesson a3l07 has the whop_lesson_id "lesn_a\'b"'],
+    ['one Whop lesson id on two lessons', c => { c.lessons.find(l => l.id === 'a3l08').whop_lesson_id = c.lessons.find(l => l.id === 'a3l07').whop_lesson_id },
+                                                                                         'is on 2 lessons (a3l07, a3l08). A Whop lesson belongs to one lesson'],
   ]) {
     g = generate('--catalog', copyOfTheData('refused', change))
     note(g.code === 2 && g.said.includes(sentence) && /Nothing was written/.test(g.said) && onDisk() === generated,
@@ -1691,13 +1712,21 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
          r.rows.map(x => `${x.area}:${x.rows}`).join(' '))
     const f = await facts(db)
     note(sameJson(f, THE_COURSE),
-         'the post-conditions hold: 141 rows, 140 counting, sort_order 1 to 141 and rising with the areas, 8/11/25/17/26/22/19/13, gate a5l26, a7l19 the one feature row, 9 action items with briefs, 5 setup, no placeholder title',
+         'the post-conditions hold: 141 rows, 140 counting, sort_order 1 to 141 and rising with the areas, 8/11/25/17/26/22/19/13, gate a4l17, a7l19 the one feature row, 9 action items with briefs, 5 setup, no placeholder title',
          JSON.stringify(f))
     const got = await catalogRows(db)
     const firstOff = got.findIndex((row, i) => !sameJson(row, wantRows[i]))
     note(sameJson(got, wantRows),
          'every row equals the data file: id, area, type, title, order, action flag, brief, gate, counting flag, feature key',
          firstOff < 0 ? `${got.length} rows` : `first difference at ${wantRows[firstOff]?.id}`)
+    {
+      const w = await whopIds(db)
+      const values = Object.values(w.held)
+      note(w.col && w.idx && values.length === 141 && new Set(values).size === 141 && values.every(v => /^lesn_[A-Za-z0-9]+$/.test(v))
+           && sameJson(w.held, WHOP_WANT),
+           'v101 adds whop_lesson_id to lessons_next with a unique index where not null, and writes 141 distinct Whop lesson ids, each the one the data file gives its lesson',
+           `column ${w.col}, index ${w.idx}, ${new Set(values).size} distinct`)
+    }
     const untouched = (await q(`select
          count(*) filter (where description is not null or lesson_group_id is not null or discord_channel is not null or is_optional)::int as filled,
          count(*) filter (where duration_seconds is not null or bunny_video_id is not null or video_ready_at is not null)::int as video_columns
@@ -1721,6 +1750,23 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
     r = await runFile(db, v101)
     note(await isTheCourse(db, r) && await staging(db, ['updated_at']) === before,
          'run again: every column except updated_at is identical, created_at included', refusal(r))
+    note(sameJson((await whopIds(db)).held, WHOP_WANT), '...the 141 Whop lesson ids among them')
+    {
+      // Two lessons trade Whop lesson ids in a copy. The unique index must not
+      // stop the rewrite (step 4 takes every id off first), and the copy's
+      // values are what the table then holds.
+      const [x, y] = ['a3l07', 'a3l08'].map(id => COURSE.lessons.find(l => l.id === id).whop_lesson_id)
+      const swapped = v101.replace(`'${x}'`, "'lesn_SWAPMARK'").replace(`'${y}'`, `'${x}'`).replace("'lesn_SWAPMARK'", `'${y}'`)
+      // The file opens and commits its own transaction, so the copy is run
+      // for real and the real file is run again after it to put them back.
+      const pre = await staging(db, ['updated_at'])
+      const rs = await runFile(db, swapped)
+      const tr = await rowsOn(db, `select whop_lesson_id w from lessons_next where id in ('a3l07', 'a3l08') order by id`)
+      const back = await runFile(db, v101)
+      note(countOf(v101, `'${x}'`) === 1 && countOf(v101, `'${y}'`) === 1 && rs.ok && sameJson(tr.map(t => t.w), [y, x]),
+           'a copy where two lessons trade Whop lesson ids runs past the unique index and writes the traded values', refusal(rs))
+      note(back.ok && await staging(db, ['updated_at']) === pre, '...and the real file run after it puts every value back', refusal(back))
+    }
 
     // ── run again after a load: one lesson has a video and a length ──
     // By hand here. Section 21 does the same with the load file itself.
@@ -1821,9 +1867,15 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
     const stampBefore = JSON.stringify(await q(`select * from public.lesson_videos`))
     r = await runFile(db, undo)
     note(r.ok, 'with nothing pointing at a course lesson, the undo executes', r.ok ? '' : r.said)
-    note(await staging(db, ['created_at', 'updated_at']) === stagingBefore,
-         'after the undo regions_next and lessons_next equal the dump taken before v101, on every column except created_at and updated_at',
+    note(await staging(db, ['created_at', 'updated_at', 'whop_lesson_id']) === stagingBefore,
+         'after the undo regions_next and lessons_next equal the dump taken before v101, on every column except created_at and updated_at (and the whop_lesson_id column v101 added)',
          `${(await q(`select count(*)::int n from lessons_next`))[0].n} lessons`)
+    {
+      const w = await whopIds(db)
+      note(w.col && w.idx && Object.keys(w.held).length === 145 && Object.values(w.held).every(v => v === null),
+           'the undo leaves the whop_lesson_id column and its index in place, empty on every one of the 145 placeholder rows',
+           `column ${w.col}, index ${w.idx}, ${Object.values(w.held).filter(v => v !== null).length} filled`)
+    }
     note(await live() === liveBefore && JSON.stringify(await q(`select * from public.lesson_videos`)) === stampBefore && JSON.parse(stampBefore).length === 1,
          'the undo leaves the LIVE catalog untouched, and a video row on a live lesson (l004) too')
     {
@@ -1851,14 +1903,15 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
            "the undo's own commented post-check runs and comes back all true", rows ? `${Object.keys(rows[0]).length} columns` : err)
     }
     r = await runFile(db, undo)
-    note(r.ok && await staging(db, ['created_at', 'updated_at']) === stagingBefore,
+    note(r.ok && await staging(db, ['created_at', 'updated_at', 'whop_lesson_id']) === stagingBefore
+         && Object.values((await whopIds(db)).held).every(v => v === null),
          'a second undo ends in the same state', refusal(r))
 
     // ── and forward again. Section 21 starts from this state. ──
     await db.exec(`delete from public.lesson_videos;`)
     r = await runFile(db, v101)
-    note(await isTheCourse(db, r) && await live() === liveBefore,
-         'v101 applies again after the undo: the same table, the same rows, the live catalog still untouched', refusal(r))
+    note(await isTheCourse(db, r) && await live() === liveBefore && sameJson((await whopIds(db)).held, WHOP_WANT),
+         'v101 applies again after the undo: the same table, the same rows and Whop lesson ids, the live catalog still untouched', refusal(r))
 
     // ── course-catalog-check.sql ──
     const CHECK_COLS = 'item,name,rows,counting,action_items,with_video,with_length,verdict'
@@ -1930,8 +1983,8 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
       note(has.no_videos && has.no_watch && await isTheCourse(d, r),
            'second database, without lesson_videos and without student_lesson_watch: v101 runs, with the same table, rows and post-conditions', refusal(r))
       r = await runFile(d, undo)
-      note(r.ok && await staging(d, ['created_at', 'updated_at']) === seeded,
-           '...and the undo runs there too, back to what v94 and v99 left', refusal(r))
+      note(r.ok && await staging(d, ['created_at', 'updated_at', 'whop_lesson_id']) === seeded,
+           '...and the undo runs there too, back to what v94 and v99 left (the whop_lesson_id column stays, empty)', refusal(r))
       await d.close()
     }
     {

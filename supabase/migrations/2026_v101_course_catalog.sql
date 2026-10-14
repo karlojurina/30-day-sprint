@@ -18,8 +18,12 @@
 --   2. Rewrites lessons_next. v94 seeded it with 145 placeholder lessons
 --      ("Fundamentals · lesson 3"). After this file it holds the 141
 --      lessons of the course: id, area, type, title, order, the 9 action
---      items with their briefs, the one gate (a5l26) and the special
---      rows (a7l19, feature key bounty_access, outside the lesson count).
+--      items with their briefs, the one gate (a4l17), the special
+--      rows (a7l19, feature key bounty_access, outside the lesson count),
+--      and every lesson's Whop lesson id (whop_lesson_id, a column this file
+--      adds to lessons_next when it is missing). The Whop sync and the Whop
+--      webhook find a lesson by that id, so once the cutover copies these
+--      rows into lessons, a lesson watched on Whop counts on the map.
 --      A lesson whose id is in the table already is updated in place and
 --      keeps its created_at. A row whose id is not in the course is deleted.
 --   3. Checks its own result before it commits, and ends with a table of
@@ -323,15 +327,24 @@ update public.regions_next as r
 
 -- ─────────────── 4. Clear the way ───────────────
 --
--- Three unique indexes stand in the way of rewriting the rows one by one: one
--- gate, one lesson per feature key, one lesson per sort_order. The gate and
--- the feature keys are taken off, and every sort_order is moved up by
--- 100000. Step 5 gives the lessons of the course their real values back. What
--- is still parked above 100000 after step 5 is a row the course no longer has.
+-- First the column for the Whop lesson id, when it is missing, with its own
+-- unique index: one Whop lesson belongs to one lesson. v94 has no such column.
+--
+-- Four unique indexes stand in the way of rewriting the rows one by one: one
+-- gate, one lesson per feature key, one lesson per Whop lesson id, one lesson
+-- per sort_order. The gate, the feature keys and the Whop lesson ids are taken
+-- off, and every sort_order is moved up by 100000. Step 5 gives the lessons
+-- of the course their real values back. What is still parked above 100000
+-- after step 5 is a row the course no longer has.
+
+alter table public.lessons_next add column if not exists whop_lesson_id text;
+
+create unique index if not exists lessons_next_whop_lesson_id_key
+  on public.lessons_next (whop_lesson_id) where whop_lesson_id is not null;
 
 update public.lessons_next
-   set is_gate = false, feature_key = null
- where is_gate or feature_key is not null;
+   set is_gate = false, feature_key = null, whop_lesson_id = null
+ where is_gate or feature_key is not null or whop_lesson_id is not null;
 
 update public.lessons_next set sort_order = sort_order + 100000;
 
@@ -345,149 +358,150 @@ update public.lessons_next set sort_order = sort_order + 100000;
 
 insert into public.lessons_next
   (id, region_id, type, title, description, sort_order, requires_action, action_brief,
-   is_optional, is_gate, lesson_group_id, discord_channel, counts_toward_progress, feature_key)
+   is_optional, is_gate, lesson_group_id, discord_channel, counts_toward_progress, feature_key,
+   whop_lesson_id)
 values
-  ('a1l01', 'a1', 'watch', 'Welcome to Ecom University', null, 1, false, null, false, false, null, null, true, null),
-  ('a1l02', 'a1', 'watch', 'Why Marketing + Ecom = Money Printer', null, 2, false, null, false, false, null, null, true, null),
-  ('a1l03', 'a1', 'watch', 'The Skill Stacking Effect', null, 3, false, null, false, false, null, null, true, null),
-  ('a1l04', 'a1', 'watch', 'How This Program Works', null, 4, false, null, false, false, null, null, true, null),
-  ('a1l05', 'a1', 'watch', 'How To Learn Like A Billionaire', null, 5, false, null, false, false, null, null, true, null),
-  ('a1l06', 'a1', 'watch', 'How To Lock In', null, 6, false, null, false, false, null, null, true, null),
-  ('a1l07', 'a1', 'watch', 'Why You''re Not Behind', null, 7, false, null, false, false, null, null, true, null),
-  ('a1l08', 'a1', 'watch', 'You Need Resistance To Grow', null, 8, false, null, false, false, null, null, true, null),
-  ('a2l01', 'a2', 'watch', 'How Marketing Works (And Why We''re Doing Ads)', null, 9, false, null, false, false, null, null, true, null),
-  ('a2l02', 'a2', 'watch', 'Direct Response Advertising Explained', null, 10, false, null, false, false, null, null, true, null),
-  ('a2l03', 'a2', 'watch', 'How Ads Are Made, Full Process', null, 11, false, null, false, false, null, null, true, null),
-  ('a2l04', 'a2', 'watch', 'How To Stay Ahead Of AI', null, 12, false, null, false, false, null, null, true, null),
-  ('a2l05', 'a2', 'watch', 'Why Are People On Social Media?', null, 13, false, null, false, false, null, null, true, null),
-  ('a2l06', 'a2', 'watch', 'Why Do People Buy Things?', null, 14, false, null, false, false, null, null, true, null),
-  ('a2l07', 'a2', 'watch', 'How To Make People Say "This Is Literally Me"', null, 15, false, null, false, false, null, null, true, null),
-  ('a2l08', 'a2', 'watch', 'You''re Not Selling Products', null, 16, false, null, false, false, null, null, true, null),
-  ('a2l09', 'a2', 'watch', 'The Advertising Dictionary', null, 17, false, null, false, false, null, null, true, null),
-  ('a2l10', 'a2', 'watch', 'Building Your Marketing Muscle', null, 18, false, null, false, false, null, null, true, null),
-  ('a2l11', 'a2', 'watch', 'Time To Lock In', null, 19, false, null, false, false, null, null, true, null),
-  ('a3l01', 'a3', 'watch', 'Start to Greatness', null, 20, false, null, false, false, null, null, true, null),
-  ('a3l02', 'a3', 'watch', 'What an Ads Editor Actually Does', null, 21, false, null, false, false, null, null, true, null),
-  ('a3l03', 'a3', 'watch', 'What an Ad Really Is', null, 22, false, null, false, false, null, null, true, null),
-  ('a3l04', 'a3', 'watch', 'Types of Ads', null, 23, false, null, false, false, null, null, true, null),
-  ('a3l05', 'a3', 'watch', 'What Makes an Ad Work', null, 24, false, null, false, false, null, null, true, null),
-  ('a3l06', 'a3', 'watch', 'The Art of ''Show, Don''t Tell''', null, 25, false, null, false, false, null, null, true, null),
-  ('a3l07', 'a3', 'watch', 'Avatar-based Editing', null, 26, false, null, false, false, null, null, true, null),
-  ('a3l08', 'a3', 'watch', 'Understanding The Hook Slap', null, 27, false, null, false, false, null, null, true, null),
-  ('a3l09', 'a3', 'watch', 'The Hook Teardown', null, 28, false, null, false, false, null, null, true, null),
-  ('a3l10', 'a3', 'watch', 'The Slippery Slope', null, 29, false, null, false, false, null, null, true, null),
-  ('a3l11', 'a3', 'watch', 'Your Editing Software', null, 30, false, null, false, false, null, null, true, null),
-  ('a3l12', 'a3', 'watch', 'Load Your Kit', null, 31, false, null, false, false, null, null, true, null),
-  ('a3l13', 'a3', 'watch', 'CapCut Starter Course', null, 32, false, null, false, false, null, null, true, null),
-  ('a3l14', 'a3', 'watch', 'Premiere Pro Starter Course', null, 33, false, null, false, false, null, null, true, null),
-  ('a3l15', 'a3', 'watch', 'Asset Management', null, 34, false, null, false, false, null, null, true, null),
-  ('a3l16', 'a3', 'watch', 'What a Brief Is & How to Work With It', null, 35, false, null, false, false, null, null, true, null),
-  ('a3l17', 'a3', 'watch', 'Your First Boss Battle', null, 36, false, null, false, false, null, null, true, null),
-  ('a3l18', 'a3', 'watch', 'A-Roll - Your First Boss Battle', null, 37, false, null, false, false, null, null, true, null),
-  ('a3l19', 'a3', 'watch', 'Music - Your First Boss Battle', null, 38, false, null, false, false, null, null, true, null),
-  ('a3l20', 'a3', 'watch', 'B-Roll - Your First Boss Battle', null, 39, false, null, false, false, null, null, true, null),
-  ('a3l21', 'a3', 'watch', 'Effects & Transitions - Your First Boss Battle', null, 40, false, null, false, false, null, null, true, null),
-  ('a3l22', 'a3', 'watch', 'Captions & Text - Your First Boss Battle', null, 41, false, null, false, false, null, null, true, null),
-  ('a3l23', 'a3', 'watch', 'SFX - Your First Boss Battle', null, 42, false, null, false, false, null, null, true, null),
-  ('a3l24', 'a3', 'watch', 'How to Submit an Action Item', null, 43, false, null, false, false, null, null, true, null),
-  ('a3l25', 'a3', 'watch', '[ACTION ITEM] Congrats! Here''s another one', null, 44, true, 'Edit the entire ad all by yourself, from the brief all the way to the submission.', false, false, null, null, true, null),
-  ('a4l01', 'a4', 'watch', 'How to Improve Fast: Your Daily Editing Routine', null, 45, false, null, false, false, null, null, true, null),
-  ('a4l02', 'a4', 'watch', 'Editing Breakdown - UGC', null, 46, false, null, false, false, null, null, true, null),
-  ('a4l03', 'a4', 'watch', 'Editing Breakdown - Text on Screen Ad', null, 47, false, null, false, false, null, null, true, null),
-  ('a4l04', 'a4', 'watch', 'Editing Breakdown - AI VO Ad', null, 48, false, null, false, false, null, null, true, null),
-  ('a4l05', 'a4', 'watch', 'Editing Breakdown - VSL Ad', null, 49, false, null, false, false, null, null, true, null),
-  ('a4l06', 'a4', 'watch', 'Understanding Leverage Moves', null, 50, false, null, false, false, null, null, true, null),
-  ('a4l07', 'a4', 'watch', 'The Emotion Map', null, 51, false, null, false, false, null, null, true, null),
-  ('a4l08', 'a4', 'watch', 'Reading Scripts Like the Top 1%', null, 52, false, null, false, false, null, null, true, null),
-  ('a4l09', 'a4', 'watch', 'ElevenLabs: Walkthrough', null, 53, false, null, false, false, null, null, true, null),
-  ('a4l10', 'a4', 'watch', 'ElevenLabs: Masterclass V1', null, 54, false, null, false, false, null, null, true, null),
-  ('a4l11', 'a4', 'watch', 'Music Leverage', null, 55, false, null, false, false, null, null, true, null),
-  ('a4l12', 'a4', 'watch', 'The Focal Point', null, 56, false, null, false, false, null, null, true, null),
-  ('a4l13', 'a4', 'watch', 'World Building', null, 57, false, null, false, false, null, null, true, null),
-  ('a4l14', 'a4', 'watch', 'Cinematography Basics', null, 58, false, null, false, false, null, null, true, null),
-  ('a4l15', 'a4', 'watch', 'Effects & Transitions', null, 59, false, null, false, false, null, null, true, null),
-  ('a4l16', 'a4', 'watch', 'Sound Design That Feels Real', null, 60, false, null, false, false, null, null, true, null),
-  ('a4l17', 'a4', 'watch', 'The Editor''s Teardown', null, 61, false, null, false, false, null, null, true, null),
-  ('a5l01', 'a5', 'watch', 'You should be a designer', null, 62, false, null, false, false, null, null, true, null),
-  ('a5l02', 'a5', 'watch', 'What are static ads?', null, 63, false, null, false, false, null, null, true, null),
-  ('a5l03', 'a5', 'watch', 'The Tools', null, 64, false, null, false, false, null, null, true, null),
-  ('a5l04', 'a5', 'watch', 'Figma - The Base', null, 65, false, null, false, false, null, null, true, null),
-  ('a5l05', 'a5', 'watch', 'Figma - Ad Design', null, 66, false, null, false, false, null, null, true, null),
-  ('a5l06', 'a5', 'watch', 'Figma - Ad Design 2', null, 67, false, null, false, false, null, null, true, null),
-  ('a5l07', 'a5', 'watch', 'Photoshop - Essentials', null, 68, false, null, false, false, null, null, true, null),
-  ('a5l08', 'a5', 'watch', 'Action item - The Backbone', null, 69, true, 'You''ll build a batch of 3 statics and grade it yourself with our Figma plugin.', false, false, null, null, true, null),
-  ('a5l09', 'a5', 'watch', 'Design Execution', null, 70, false, null, false, false, null, null, true, null),
-  ('a5l10', 'a5', 'watch', 'The anatomy of a static ad', null, 71, false, null, false, false, null, null, true, null),
-  ('a5l11', 'a5', 'watch', 'Design Fundamentals: Demo', null, 72, false, null, false, false, null, null, true, null),
-  ('a5l12', 'a5', 'watch', 'Action Item - Imitation', null, 73, true, 'Your first shot at making actual ads by imitating an existing batch. The goal is accurately recreating existing creatives, while still following the technicalities covered so far.', false, false, null, null, true, null),
-  ('a5l13', 'a5', 'watch', 'How Static Ads Work?', null, 74, false, null, false, false, null, null, true, null),
-  ('a5l14', 'a5', 'watch', 'Meta Andromeda', null, 75, false, null, false, false, null, null, true, null),
-  ('a5l15', 'a5', 'watch', 'The Scroll & The Single Frame', null, 76, false, null, false, false, null, null, true, null),
-  ('a5l16', 'a5', 'watch', 'Study the Greats', null, 77, false, null, false, false, null, null, true, null),
-  ('a5l17', 'a5', 'watch', 'Copywriting for Statics', null, 78, false, null, false, false, null, null, true, null),
-  ('a5l18', 'a5', 'watch', 'Visual Inspiration', null, 79, false, null, false, false, null, null, true, null),
-  ('a5l19', 'a5', 'watch', 'Interpretation', null, 80, false, null, false, false, null, null, true, null),
-  ('a5l20', 'a5', 'watch', 'How to break the pattern', null, 81, false, null, false, false, null, null, true, null),
-  ('a5l21', 'a5', 'watch', 'Brand Interpretation', null, 82, false, null, false, false, null, null, true, null),
-  ('a5l22', 'a5', 'setup', 'Action Item - Brand Deck', null, 83, true, 'A finished brand deck of a random brand of your choice, using the template provided, and an analysis of 5 of the brand''s ads, their favorite formats and layouts.', false, false, null, null, true, null),
-  ('a5l23', 'a5', 'watch', 'Action Item - Static Ad Brief', null, 84, true, 'Interpret a creative brief and design your own batch from scratch. It''s a review by Valter and George, not the plugin.', false, false, null, null, true, null),
-  ('a5l24', 'a5', 'watch', 'AI in Design', null, 85, false, null, false, false, null, null, true, null),
-  ('a5l25', 'a5', 'watch', 'AI isn''t replacing designers', null, 86, false, null, false, false, null, null, true, null),
-  ('a5l26', 'a5', 'watch', 'The Core Principle', null, 87, false, null, false, true, null, null, true, null),
-  ('a6l01', 'a6', 'watch', 'AI, the biggest opportunity today', null, 88, false, null, false, false, null, null, true, null),
-  ('a6l02', 'a6', 'watch', 'Limitless Creativity', null, 89, false, null, false, false, null, null, true, null),
-  ('a6l03', 'a6', 'setup', 'ACTION ITEM: Study winning AI Ads', null, 90, true, 'Take 10-15 minutes of your time and look through these AI ads and gather your first thoughts.', false, false, null, null, true, null),
-  ('a6l04', 'a6', 'watch', 'Prompting 101: Prompt like a Million $ Operator', null, 91, false, null, false, false, null, null, true, null),
-  ('a6l05', 'a6', 'watch', 'What Actually Makes AI Ads generate $$$: Basics', null, 92, false, null, false, false, null, null, true, null),
-  ('a6l06', 'a6', 'watch', 'The Science Behind AI Animation Ads: Deep Dive', null, 93, false, null, false, false, null, null, true, null),
-  ('a6l07', 'a6', 'watch', 'The Anatomy of a Winning Ad: Half a Million in Spend', null, 94, false, null, false, false, null, null, true, null),
-  ('a6l08', 'a6', 'watch', 'Formats & Avatars', null, 95, false, null, false, false, null, null, true, null),
-  ('a6l09', 'a6', 'watch', 'How to Develop Winning Ideas: Creative Inspiration', null, 96, false, null, false, false, null, null, true, null),
-  ('a6l10', 'a6', 'setup', 'ACTION ITEM: Choose Your Visual Style', null, 97, true, 'Find a visual style or ad that inspires you and save it as your reference.', false, false, null, null, true, null),
-  ('a6l11', 'a6', 'watch', 'Enough Theory, Let''s Get Shit Done', null, 98, false, null, false, false, null, null, true, null),
-  ('a6l12', 'a6', 'watch', 'Systems & Workflows: Basics', null, 99, false, null, false, false, null, null, true, null),
-  ('a6l13', 'a6', 'watch', 'TrenchOS: Your Private AI Ads Platform', null, 100, false, null, false, false, null, null, true, null),
-  ('a6l14', 'a6', 'watch', 'Our Private $$$ AI UGC Workflow', null, 101, false, null, false, false, null, null, true, null),
-  ('a6l15', 'a6', 'watch', 'Our Private $$$ AI Animation Workflow', null, 102, false, null, false, false, null, null, true, null),
-  ('a6l16', 'a6', 'watch', 'Our Private $$$ AI B-Roll Workflow', null, 103, false, null, false, false, null, null, true, null),
-  ('a6l17', 'a6', 'setup', 'ACTION ITEM: Stop', null, 104, true, 'Take 10 to 15 minutes away from the screen. Sit down, relax, and think back over what you''ve learned so far.', false, false, null, null, true, null),
-  ('a6l18', 'a6', 'watch', 'Intro + My Mental Model to Reverse-Engineer Any AI Ad', null, 105, false, null, false, false, null, null, true, null),
-  ('a6l19', 'a6', 'setup', 'ACTION ITEM: Reverse engineering', null, 106, true, 'Pick one piece of content you like, then break it down. Go shot by shot.', false, false, null, null, true, null),
-  ('a6l20', 'a6', 'watch', 'Advanced Technique: Transitions', null, 107, false, null, false, false, null, null, true, null),
-  ('a6l21', 'a6', 'watch', 'Mastering Creative Judgment in AI Ads', null, 108, false, null, false, false, null, null, true, null),
-  ('a6l22', 'a6', 'watch', 'The Start', null, 109, false, null, false, false, null, null, true, null),
-  ('a7l01', 'a7', 'watch', 'Welcome To Creative Strategy', null, 110, false, null, false, false, null, null, true, null),
-  ('a7l02', 'a7', 'watch', 'What Is Creative Strategy?', null, 111, false, null, false, false, null, null, true, null),
-  ('a7l03', 'a7', 'watch', 'How To Be Creative?', null, 112, false, null, false, false, null, null, true, null),
-  ('a7l04', 'a7', 'watch', 'How To Strategize?', null, 113, false, null, false, false, null, null, true, null),
-  ('a7l05', 'a7', 'watch', 'Market Awareness', null, 114, false, null, false, false, null, null, true, null),
-  ('a7l06', 'a7', 'watch', 'Market Sophistication', null, 115, false, null, false, false, null, null, true, null),
-  ('a7l07', 'a7', 'watch', 'How I Made A Winning Ad From Scratch (With Proof)', null, 116, false, null, false, false, null, null, true, null),
-  ('a7l08', 'a7', 'watch', 'Winning Ad Breakdown: Episode 1', null, 117, false, null, false, false, null, null, true, null),
-  ('a7l09', 'a7', 'watch', 'Winning Ad Breakdown: Episode 2', null, 118, false, null, false, false, null, null, true, null),
-  ('a7l10', 'a7', 'watch', 'Winning Ad Breakdown: Episode 3', null, 119, false, null, false, false, null, null, true, null),
-  ('a7l11', 'a7', 'watch', 'Winning Ad Breakdown: Episode 4', null, 120, false, null, false, false, null, null, true, null),
-  ('a7l12', 'a7', 'watch', 'Winning Ad Breakdown: Episode 5', null, 121, false, null, false, false, null, null, true, null),
-  ('a7l13', 'a7', 'watch', 'Winning Ad Breakdown: Episode 6', null, 122, false, null, false, false, null, null, true, null),
-  ('a7l14', 'a7', 'watch', 'How We Use AI For Creative Strategy', null, 123, false, null, false, false, null, null, true, null),
-  ('a7l15', 'a7', 'watch', 'Your Creative Strategy Workspace', null, 124, false, null, false, false, null, null, true, null),
-  ('a7l16', 'a7', 'watch', 'CS Workspace Onboarding Walkthrough', null, 125, false, null, false, false, null, null, true, null),
-  ('a7l17', 'a7', 'watch', 'Making Your First Ad', null, 126, false, null, false, false, null, null, true, null),
-  ('a7l18', 'a7', 'watch', 'Making The Workspace Your Own', null, 127, false, null, false, false, null, null, true, null),
-  ('a7l19', 'a7', 'watch', 'How To Win On The Ad Bounty Program', null, 128, false, null, false, false, null, null, false, 'bounty_access'),
-  ('a8l01', 'a8', 'watch', 'Intro', null, 129, false, null, false, false, null, null, true, null),
-  ('a8l02', 'a8', 'watch', 'Communication', null, 130, false, null, false, false, null, null, true, null),
-  ('a8l03', 'a8', 'watch', 'Experience Over Money', null, 131, false, null, false, false, null, null, true, null),
-  ('a8l04', 'a8', 'watch', 'Portfolio', null, 132, false, null, false, false, null, null, true, null),
-  ('a8l05', 'a8', 'watch', 'How To Win On The Job Board', null, 133, false, null, false, false, null, null, true, null),
-  ('a8l06', 'a8', 'watch', 'Build Your Name In Public', null, 134, false, null, false, false, null, null, true, null),
-  ('a8l07', 'a8', 'watch', 'After You Apply', null, 135, false, null, false, false, null, null, true, null),
-  ('a8l08', 'a8', 'watch', 'The Call', null, 136, false, null, false, false, null, null, true, null),
-  ('a8l09', 'a8', 'watch', 'What To Charge', null, 137, false, null, false, false, null, null, true, null),
-  ('a8l10', 'a8', 'watch', 'How To Vet Clients', null, 138, false, null, false, false, null, null, true, null),
-  ('a8l11', 'a8', 'watch', 'Become Unfireable', null, 139, false, null, false, false, null, null, true, null),
-  ('a8l12', 'a8', 'watch', 'Raise Your Prices', null, 140, false, null, false, false, null, null, true, null),
-  ('a8l13', 'a8', 'watch', 'What Now?', null, 141, false, null, false, false, null, null, true, null)
+  ('a1l01', 'a1', 'watch', 'Welcome to Ecom University', null, 1, false, null, false, false, null, null, true, null, 'lesn_cpJLgWKYeczP8'),
+  ('a1l02', 'a1', 'watch', 'Why Marketing + Ecom = Money Printer', null, 2, false, null, false, false, null, null, true, null, 'lesn_cgI3ZSzUQ0CNC'),
+  ('a1l03', 'a1', 'watch', 'The Skill Stacking Effect', null, 3, false, null, false, false, null, null, true, null, 'lesn_hJrXBoPiB7iN9'),
+  ('a1l04', 'a1', 'watch', 'How This Program Works', null, 4, false, null, false, false, null, null, true, null, 'lesn_9tZJBvqx0b1NI'),
+  ('a1l05', 'a1', 'watch', 'How To Learn Like A Billionaire', null, 5, false, null, false, false, null, null, true, null, 'lesn_T3xjECjrBrrr2'),
+  ('a1l06', 'a1', 'watch', 'How To Lock In', null, 6, false, null, false, false, null, null, true, null, 'lesn_5FVNyI5IlsJkD'),
+  ('a1l07', 'a1', 'watch', 'Why You''re Not Behind', null, 7, false, null, false, false, null, null, true, null, 'lesn_UDoNWaqWKAdeM'),
+  ('a1l08', 'a1', 'watch', 'You Need Resistance To Grow', null, 8, false, null, false, false, null, null, true, null, 'lesn_Tx08hjqPbO5rH'),
+  ('a2l01', 'a2', 'watch', 'How Marketing Works (And Why We''re Doing Ads)', null, 9, false, null, false, false, null, null, true, null, 'lesn_IV8st85TL9EzZ'),
+  ('a2l02', 'a2', 'watch', 'Direct Response Advertising Explained', null, 10, false, null, false, false, null, null, true, null, 'lesn_TMSDjHZV94kgv'),
+  ('a2l03', 'a2', 'watch', 'How Ads Are Made, Full Process', null, 11, false, null, false, false, null, null, true, null, 'lesn_Y22BG4q1RCcnq'),
+  ('a2l04', 'a2', 'watch', 'How To Stay Ahead Of AI', null, 12, false, null, false, false, null, null, true, null, 'lesn_6nyT8bfBK9K0j'),
+  ('a2l05', 'a2', 'watch', 'Why Are People On Social Media?', null, 13, false, null, false, false, null, null, true, null, 'lesn_t0u1NHGNE5u0J'),
+  ('a2l06', 'a2', 'watch', 'Why Do People Buy Things?', null, 14, false, null, false, false, null, null, true, null, 'lesn_YNa2lt7W4M5ge'),
+  ('a2l07', 'a2', 'watch', 'How To Make People Say "This Is Literally Me"', null, 15, false, null, false, false, null, null, true, null, 'lesn_13v224kX5OVxH'),
+  ('a2l08', 'a2', 'watch', 'You''re Not Selling Products', null, 16, false, null, false, false, null, null, true, null, 'lesn_HKiS5KpygYexl'),
+  ('a2l09', 'a2', 'watch', 'The Advertising Dictionary', null, 17, false, null, false, false, null, null, true, null, 'lesn_famuI1T6CSpwz'),
+  ('a2l10', 'a2', 'watch', 'Building Your Marketing Muscle', null, 18, false, null, false, false, null, null, true, null, 'lesn_yzr0mf5Jlqslr'),
+  ('a2l11', 'a2', 'watch', 'Time To Lock In', null, 19, false, null, false, false, null, null, true, null, 'lesn_lDCUjsItYSRVV'),
+  ('a3l01', 'a3', 'watch', 'Start to Greatness', null, 20, false, null, false, false, null, null, true, null, 'lesn_5I9lOoZsLRU5c'),
+  ('a3l02', 'a3', 'watch', 'What an Ads Editor Actually Does', null, 21, false, null, false, false, null, null, true, null, 'lesn_gWVR78ehigHAA'),
+  ('a3l03', 'a3', 'watch', 'What an Ad Really Is', null, 22, false, null, false, false, null, null, true, null, 'lesn_SEEHgNdF5PSpk'),
+  ('a3l04', 'a3', 'watch', 'Types of Ads', null, 23, false, null, false, false, null, null, true, null, 'lesn_21pQDOwhgeJWr'),
+  ('a3l05', 'a3', 'watch', 'What Makes an Ad Work', null, 24, false, null, false, false, null, null, true, null, 'lesn_Q366ST1SLZMrS'),
+  ('a3l06', 'a3', 'watch', 'The Art of ''Show, Don''t Tell''', null, 25, false, null, false, false, null, null, true, null, 'lesn_hnHrbscBN6MDv'),
+  ('a3l07', 'a3', 'watch', 'Avatar-based Editing', null, 26, false, null, false, false, null, null, true, null, 'lesn_fb7qM8fgfb9az'),
+  ('a3l08', 'a3', 'watch', 'Understanding The Hook Slap', null, 27, false, null, false, false, null, null, true, null, 'lesn_r582g3kmv9qVw'),
+  ('a3l09', 'a3', 'watch', 'The Hook Teardown', null, 28, false, null, false, false, null, null, true, null, 'lesn_5a4qol57uMGpc'),
+  ('a3l10', 'a3', 'watch', 'The Slippery Slope', null, 29, false, null, false, false, null, null, true, null, 'lesn_6ob6gb50zJFob'),
+  ('a3l11', 'a3', 'watch', 'Your Editing Software', null, 30, false, null, false, false, null, null, true, null, 'lesn_TfCehZMcwFFED'),
+  ('a3l12', 'a3', 'watch', 'Load Your Kit', null, 31, false, null, false, false, null, null, true, null, 'lesn_fQK4tPL1d8yiA'),
+  ('a3l13', 'a3', 'watch', 'CapCut Starter Course', null, 32, false, null, false, false, null, null, true, null, 'lesn_aTv5ztfDe5FQk'),
+  ('a3l14', 'a3', 'watch', 'Premiere Pro Starter Course', null, 33, false, null, false, false, null, null, true, null, 'lesn_GM5vHgPalb3XY'),
+  ('a3l15', 'a3', 'watch', 'Asset Management', null, 34, false, null, false, false, null, null, true, null, 'lesn_9oqTEV90xGiAD'),
+  ('a3l16', 'a3', 'watch', 'What a Brief Is & How to Work With It', null, 35, false, null, false, false, null, null, true, null, 'lesn_BZsTm3En9zj7k'),
+  ('a3l17', 'a3', 'watch', 'Your First Boss Battle', null, 36, false, null, false, false, null, null, true, null, 'lesn_tqVoEVlvmqcNg'),
+  ('a3l18', 'a3', 'watch', 'A-Roll - Your First Boss Battle', null, 37, false, null, false, false, null, null, true, null, 'lesn_K9rw8c7czrnxh'),
+  ('a3l19', 'a3', 'watch', 'Music - Your First Boss Battle', null, 38, false, null, false, false, null, null, true, null, 'lesn_PNwFBoNG6qUAi'),
+  ('a3l20', 'a3', 'watch', 'B-Roll - Your First Boss Battle', null, 39, false, null, false, false, null, null, true, null, 'lesn_n5tesFEBVoEDP'),
+  ('a3l21', 'a3', 'watch', 'Effects & Transitions - Your First Boss Battle', null, 40, false, null, false, false, null, null, true, null, 'lesn_TezU5obcbVhK4'),
+  ('a3l22', 'a3', 'watch', 'Captions & Text - Your First Boss Battle', null, 41, false, null, false, false, null, null, true, null, 'lesn_5rrfiw4rpjDKU'),
+  ('a3l23', 'a3', 'watch', 'SFX - Your First Boss Battle', null, 42, false, null, false, false, null, null, true, null, 'lesn_P0YLAiY8Don7n'),
+  ('a3l24', 'a3', 'watch', 'How to Submit an Action Item', null, 43, false, null, false, false, null, null, true, null, 'lesn_oBG9UqLxBA6yI'),
+  ('a3l25', 'a3', 'watch', '[ACTION ITEM] Congrats! Here''s another one', null, 44, true, 'Edit the entire ad all by yourself, from the brief all the way to the submission.', false, false, null, null, true, null, 'lesn_utZ7VahCXShWV'),
+  ('a4l01', 'a4', 'watch', 'How to Improve Fast: Your Daily Editing Routine', null, 45, false, null, false, false, null, null, true, null, 'lesn_lgkk7aRIPBwDf'),
+  ('a4l02', 'a4', 'watch', 'Editing Breakdown - UGC', null, 46, false, null, false, false, null, null, true, null, 'lesn_RZAleGyAu1pmm'),
+  ('a4l03', 'a4', 'watch', 'Editing Breakdown - Text on Screen Ad', null, 47, false, null, false, false, null, null, true, null, 'lesn_Op529V4SoObt2'),
+  ('a4l04', 'a4', 'watch', 'Editing Breakdown - AI VO Ad', null, 48, false, null, false, false, null, null, true, null, 'lesn_JZleFDdLUDGL0'),
+  ('a4l05', 'a4', 'watch', 'Editing Breakdown - VSL Ad', null, 49, false, null, false, false, null, null, true, null, 'lesn_26RJ8fja7HATk'),
+  ('a4l06', 'a4', 'watch', 'Understanding Leverage Moves', null, 50, false, null, false, false, null, null, true, null, 'lesn_hvfqbNtKKrYMq'),
+  ('a4l07', 'a4', 'watch', 'The Emotion Map', null, 51, false, null, false, false, null, null, true, null, 'lesn_L73QjVPOxinzc'),
+  ('a4l08', 'a4', 'watch', 'Reading Scripts Like the Top 1%', null, 52, false, null, false, false, null, null, true, null, 'lesn_18IWiJpLCWDj5'),
+  ('a4l09', 'a4', 'watch', 'ElevenLabs: Walkthrough', null, 53, false, null, false, false, null, null, true, null, 'lesn_ojBtxdb3cONKr'),
+  ('a4l10', 'a4', 'watch', 'ElevenLabs: Masterclass V1', null, 54, false, null, false, false, null, null, true, null, 'lesn_7IAajltBVDNZL'),
+  ('a4l11', 'a4', 'watch', 'Music Leverage', null, 55, false, null, false, false, null, null, true, null, 'lesn_j6s1pubEinnRv'),
+  ('a4l12', 'a4', 'watch', 'The Focal Point', null, 56, false, null, false, false, null, null, true, null, 'lesn_u3uVqYyHrU6me'),
+  ('a4l13', 'a4', 'watch', 'World Building', null, 57, false, null, false, false, null, null, true, null, 'lesn_UMmkFPoLQF4TP'),
+  ('a4l14', 'a4', 'watch', 'Cinematography Basics', null, 58, false, null, false, false, null, null, true, null, 'lesn_EtC6pacSfELda'),
+  ('a4l15', 'a4', 'watch', 'Effects & Transitions', null, 59, false, null, false, false, null, null, true, null, 'lesn_P5w5nAGWLguLR'),
+  ('a4l16', 'a4', 'watch', 'Sound Design That Feels Real', null, 60, false, null, false, false, null, null, true, null, 'lesn_iBl1YOaml1Ckl'),
+  ('a4l17', 'a4', 'watch', 'The Editor''s Teardown', null, 61, false, null, false, true, null, null, true, null, 'lesn_k7eJSJKR4nKFG'),
+  ('a5l01', 'a5', 'watch', 'You should be a designer', null, 62, false, null, false, false, null, null, true, null, 'lesn_P7CYyeRhoOjuV'),
+  ('a5l02', 'a5', 'watch', 'What are static ads?', null, 63, false, null, false, false, null, null, true, null, 'lesn_YoFOMOavZuF1n'),
+  ('a5l03', 'a5', 'watch', 'The Tools', null, 64, false, null, false, false, null, null, true, null, 'lesn_m1f3rkYYOdsrH'),
+  ('a5l04', 'a5', 'watch', 'Figma - The Base', null, 65, false, null, false, false, null, null, true, null, 'lesn_9o7w6zgr1f2dy'),
+  ('a5l05', 'a5', 'watch', 'Figma - Ad Design', null, 66, false, null, false, false, null, null, true, null, 'lesn_zbHDuWaFKI6gp'),
+  ('a5l06', 'a5', 'watch', 'Figma - Ad Design 2', null, 67, false, null, false, false, null, null, true, null, 'lesn_uIn3TI66tITL5'),
+  ('a5l07', 'a5', 'watch', 'Photoshop - Essentials', null, 68, false, null, false, false, null, null, true, null, 'lesn_GLqQFtMKJT6Lg'),
+  ('a5l08', 'a5', 'watch', 'Action item - The Backbone', null, 69, true, 'You''ll build a batch of 3 statics and grade it yourself with our Figma plugin.', false, false, null, null, true, null, 'lesn_fGZBBR3bdoswc'),
+  ('a5l09', 'a5', 'watch', 'Design Execution', null, 70, false, null, false, false, null, null, true, null, 'lesn_x5l1UuaOw3ZqI'),
+  ('a5l10', 'a5', 'watch', 'The anatomy of a static ad', null, 71, false, null, false, false, null, null, true, null, 'lesn_7EVYoU21lxJgL'),
+  ('a5l11', 'a5', 'watch', 'Design Fundamentals: Demo', null, 72, false, null, false, false, null, null, true, null, 'lesn_3bWOVXY2iPkJD'),
+  ('a5l12', 'a5', 'watch', 'Action Item - Imitation', null, 73, true, 'Your first shot at making actual ads by imitating an existing batch. The goal is accurately recreating existing creatives, while still following the technicalities covered so far.', false, false, null, null, true, null, 'lesn_1u1ml63Gd336B'),
+  ('a5l13', 'a5', 'watch', 'How Static Ads Work?', null, 74, false, null, false, false, null, null, true, null, 'lesn_3yQOkZwcFf6kS'),
+  ('a5l14', 'a5', 'watch', 'Meta Andromeda', null, 75, false, null, false, false, null, null, true, null, 'lesn_sjEdWhGcSUJmB'),
+  ('a5l15', 'a5', 'watch', 'The Scroll & The Single Frame', null, 76, false, null, false, false, null, null, true, null, 'lesn_kPllhhEb6XmSV'),
+  ('a5l16', 'a5', 'watch', 'Study the Greats', null, 77, false, null, false, false, null, null, true, null, 'lesn_eu82uZJ6fA3hb'),
+  ('a5l17', 'a5', 'watch', 'Copywriting for Statics', null, 78, false, null, false, false, null, null, true, null, 'lesn_ElHwr0bveS5jp'),
+  ('a5l18', 'a5', 'watch', 'Visual Inspiration', null, 79, false, null, false, false, null, null, true, null, 'lesn_3y5pGvbm8vGth'),
+  ('a5l19', 'a5', 'watch', 'Interpretation', null, 80, false, null, false, false, null, null, true, null, 'lesn_ho8b7Gku9OJV0'),
+  ('a5l20', 'a5', 'watch', 'How to break the pattern', null, 81, false, null, false, false, null, null, true, null, 'lesn_GTufpgEzZY6rE'),
+  ('a5l21', 'a5', 'watch', 'Brand Interpretation', null, 82, false, null, false, false, null, null, true, null, 'lesn_hpeHnPMvPbWyc'),
+  ('a5l22', 'a5', 'setup', 'Action Item - Brand Deck', null, 83, true, 'A finished brand deck of a random brand of your choice, using the template provided, and an analysis of 5 of the brand''s ads, their favorite formats and layouts.', false, false, null, null, true, null, 'lesn_Uod56bEnIDY1z'),
+  ('a5l23', 'a5', 'watch', 'Action Item - Static Ad Brief', null, 84, true, 'Interpret a creative brief and design your own batch from scratch. It''s a review by Valter and George, not the plugin.', false, false, null, null, true, null, 'lesn_FI2Y1i1cOBowL'),
+  ('a5l24', 'a5', 'watch', 'AI in Design', null, 85, false, null, false, false, null, null, true, null, 'lesn_OwbBYX22CWiuE'),
+  ('a5l25', 'a5', 'watch', 'AI isn''t replacing designers', null, 86, false, null, false, false, null, null, true, null, 'lesn_ckFV01ZeE8yct'),
+  ('a5l26', 'a5', 'watch', 'The Core Principle', null, 87, false, null, false, false, null, null, true, null, 'lesn_4IRDzy6voMXj1'),
+  ('a6l01', 'a6', 'watch', 'AI, the biggest opportunity today', null, 88, false, null, false, false, null, null, true, null, 'lesn_UfecktfFX67Cc'),
+  ('a6l02', 'a6', 'watch', 'Limitless Creativity', null, 89, false, null, false, false, null, null, true, null, 'lesn_clZRgxOiM83Fz'),
+  ('a6l03', 'a6', 'setup', 'ACTION ITEM: Study winning AI Ads', null, 90, true, 'Take 10-15 minutes of your time and look through these AI ads and gather your first thoughts.', false, false, null, null, true, null, 'lesn_2MoZmjbIULyOi'),
+  ('a6l04', 'a6', 'watch', 'Prompting 101: Prompt like a Million $ Operator', null, 91, false, null, false, false, null, null, true, null, 'lesn_LQ0edS1u6djPq'),
+  ('a6l05', 'a6', 'watch', 'What Actually Makes AI Ads generate $$$: Basics', null, 92, false, null, false, false, null, null, true, null, 'lesn_fID6MV68kNB2f'),
+  ('a6l06', 'a6', 'watch', 'The Science Behind AI Animation Ads: Deep Dive', null, 93, false, null, false, false, null, null, true, null, 'lesn_hfy4PCCBJM21S'),
+  ('a6l07', 'a6', 'watch', 'The Anatomy of a Winning Ad: Half a Million in Spend', null, 94, false, null, false, false, null, null, true, null, 'lesn_y7Kw170CzE1jw'),
+  ('a6l08', 'a6', 'watch', 'Formats & Avatars', null, 95, false, null, false, false, null, null, true, null, 'lesn_EBIdeIfkpyYwI'),
+  ('a6l09', 'a6', 'watch', 'How to Develop Winning Ideas: Creative Inspiration', null, 96, false, null, false, false, null, null, true, null, 'lesn_bkZnU3aVhVY9E'),
+  ('a6l10', 'a6', 'setup', 'ACTION ITEM: Choose Your Visual Style', null, 97, true, 'Find a visual style or ad that inspires you and save it as your reference.', false, false, null, null, true, null, 'lesn_OJextvPQ1ITwh'),
+  ('a6l11', 'a6', 'watch', 'Enough Theory, Let''s Get Shit Done', null, 98, false, null, false, false, null, null, true, null, 'lesn_0B9WoLcPfmuup'),
+  ('a6l12', 'a6', 'watch', 'Systems & Workflows: Basics', null, 99, false, null, false, false, null, null, true, null, 'lesn_9PV8DLbekxvyG'),
+  ('a6l13', 'a6', 'watch', 'TrenchOS: Your Private AI Ads Platform', null, 100, false, null, false, false, null, null, true, null, 'lesn_XR7ACR1vGtbnf'),
+  ('a6l14', 'a6', 'watch', 'Our Private $$$ AI UGC Workflow', null, 101, false, null, false, false, null, null, true, null, 'lesn_zVgJNRt31cclz'),
+  ('a6l15', 'a6', 'watch', 'Our Private $$$ AI Animation Workflow', null, 102, false, null, false, false, null, null, true, null, 'lesn_AJFo7Ka7FMBow'),
+  ('a6l16', 'a6', 'watch', 'Our Private $$$ AI B-Roll Workflow', null, 103, false, null, false, false, null, null, true, null, 'lesn_yx8hJNP7VUQFI'),
+  ('a6l17', 'a6', 'setup', 'ACTION ITEM: Stop', null, 104, true, 'Take 10 to 15 minutes away from the screen. Sit down, relax, and think back over what you''ve learned so far.', false, false, null, null, true, null, 'lesn_DahglS54yV55A'),
+  ('a6l18', 'a6', 'watch', 'Intro + My Mental Model to Reverse-Engineer Any AI Ad', null, 105, false, null, false, false, null, null, true, null, 'lesn_0EQQMfaMQAZxZ'),
+  ('a6l19', 'a6', 'setup', 'ACTION ITEM: Reverse engineering', null, 106, true, 'Pick one piece of content you like, then break it down. Go shot by shot.', false, false, null, null, true, null, 'lesn_tiyMQICEXQBx2'),
+  ('a6l20', 'a6', 'watch', 'Advanced Technique: Transitions', null, 107, false, null, false, false, null, null, true, null, 'lesn_BJ3Jtbi36B5ep'),
+  ('a6l21', 'a6', 'watch', 'Mastering Creative Judgment in AI Ads', null, 108, false, null, false, false, null, null, true, null, 'lesn_7o1vdESoROyhG'),
+  ('a6l22', 'a6', 'watch', 'The Start', null, 109, false, null, false, false, null, null, true, null, 'lesn_vnXkJ1SorbbVq'),
+  ('a7l01', 'a7', 'watch', 'Welcome To Creative Strategy', null, 110, false, null, false, false, null, null, true, null, 'lesn_3GSvk5xWJyims'),
+  ('a7l02', 'a7', 'watch', 'What Is Creative Strategy?', null, 111, false, null, false, false, null, null, true, null, 'lesn_Us9nE96lP3itG'),
+  ('a7l03', 'a7', 'watch', 'How To Be Creative?', null, 112, false, null, false, false, null, null, true, null, 'lesn_eBKBfva1LLl4r'),
+  ('a7l04', 'a7', 'watch', 'How To Strategize?', null, 113, false, null, false, false, null, null, true, null, 'lesn_FiQrpxXHhfAAW'),
+  ('a7l05', 'a7', 'watch', 'Market Awareness', null, 114, false, null, false, false, null, null, true, null, 'lesn_BiIvR51xCwJ4r'),
+  ('a7l06', 'a7', 'watch', 'Market Sophistication', null, 115, false, null, false, false, null, null, true, null, 'lesn_MstOaChCUFJHX'),
+  ('a7l07', 'a7', 'watch', 'How I Made A Winning Ad From Scratch (With Proof)', null, 116, false, null, false, false, null, null, true, null, 'lesn_wfe69IgVMGOdg'),
+  ('a7l08', 'a7', 'watch', 'Winning Ad Breakdown: Episode 1', null, 117, false, null, false, false, null, null, true, null, 'lesn_FNYVuTiBWdsp0'),
+  ('a7l09', 'a7', 'watch', 'Winning Ad Breakdown: Episode 2', null, 118, false, null, false, false, null, null, true, null, 'lesn_VYdyXfQ91r7S3'),
+  ('a7l10', 'a7', 'watch', 'Winning Ad Breakdown: Episode 3', null, 119, false, null, false, false, null, null, true, null, 'lesn_H18bK4SA6jshr'),
+  ('a7l11', 'a7', 'watch', 'Winning Ad Breakdown: Episode 4', null, 120, false, null, false, false, null, null, true, null, 'lesn_QmaZSEH8GvZdU'),
+  ('a7l12', 'a7', 'watch', 'Winning Ad Breakdown: Episode 5', null, 121, false, null, false, false, null, null, true, null, 'lesn_w5o84jabPcAHP'),
+  ('a7l13', 'a7', 'watch', 'Winning Ad Breakdown: Episode 6', null, 122, false, null, false, false, null, null, true, null, 'lesn_rdcDDOkeLRZpr'),
+  ('a7l14', 'a7', 'watch', 'How We Use AI For Creative Strategy', null, 123, false, null, false, false, null, null, true, null, 'lesn_Zo0MgXznAjwTQ'),
+  ('a7l15', 'a7', 'watch', 'Your Creative Strategy Workspace', null, 124, false, null, false, false, null, null, true, null, 'lesn_3T60HczIAmTe1'),
+  ('a7l16', 'a7', 'watch', 'CS Workspace Onboarding Walkthrough', null, 125, false, null, false, false, null, null, true, null, 'lesn_TlEOXVjBbmWoo'),
+  ('a7l17', 'a7', 'watch', 'Making Your First Ad', null, 126, false, null, false, false, null, null, true, null, 'lesn_0tPgz1h8mixNu'),
+  ('a7l18', 'a7', 'watch', 'Making The Workspace Your Own', null, 127, false, null, false, false, null, null, true, null, 'lesn_qREYYoc7gXFFA'),
+  ('a7l19', 'a7', 'watch', 'How To Win On The Ad Bounty Program', null, 128, false, null, false, false, null, null, false, 'bounty_access', 'lesn_ZrEgiuDjhXOY2'),
+  ('a8l01', 'a8', 'watch', 'Intro', null, 129, false, null, false, false, null, null, true, null, 'lesn_nDXLopje3ggoX'),
+  ('a8l02', 'a8', 'watch', 'Communication', null, 130, false, null, false, false, null, null, true, null, 'lesn_B0dFf7uCBPb2d'),
+  ('a8l03', 'a8', 'watch', 'Experience Over Money', null, 131, false, null, false, false, null, null, true, null, 'lesn_FpIfJIp9zQNip'),
+  ('a8l04', 'a8', 'watch', 'Portfolio', null, 132, false, null, false, false, null, null, true, null, 'lesn_O2zCOoEf2u31F'),
+  ('a8l05', 'a8', 'watch', 'How To Win On The Job Board', null, 133, false, null, false, false, null, null, true, null, 'lesn_wPiBe4VYi9C4A'),
+  ('a8l06', 'a8', 'watch', 'Build Your Name In Public', null, 134, false, null, false, false, null, null, true, null, 'lesn_OJJVAyc2X26Ng'),
+  ('a8l07', 'a8', 'watch', 'After You Apply', null, 135, false, null, false, false, null, null, true, null, 'lesn_FXZakY2eO91pH'),
+  ('a8l08', 'a8', 'watch', 'The Call', null, 136, false, null, false, false, null, null, true, null, 'lesn_cDk3zQ1MWEbc8'),
+  ('a8l09', 'a8', 'watch', 'What To Charge', null, 137, false, null, false, false, null, null, true, null, 'lesn_DBoFE4f5DS4yA'),
+  ('a8l10', 'a8', 'watch', 'How To Vet Clients', null, 138, false, null, false, false, null, null, true, null, 'lesn_LFmVqrBwvy83R'),
+  ('a8l11', 'a8', 'watch', 'Become Unfireable', null, 139, false, null, false, false, null, null, true, null, 'lesn_cRa08utk4iQpu'),
+  ('a8l12', 'a8', 'watch', 'Raise Your Prices', null, 140, false, null, false, false, null, null, true, null, 'lesn_5XKWUVpQxaE09'),
+  ('a8l13', 'a8', 'watch', 'What Now?', null, 141, false, null, false, false, null, null, true, null, 'lesn_ng7hOOi1pUxuv')
 on conflict (id) do update
   set region_id              = excluded.region_id,
       type                   = excluded.type,
@@ -500,7 +514,8 @@ on conflict (id) do update
       lesson_group_id        = excluded.lesson_group_id,
       discord_channel        = excluded.discord_channel,
       counts_toward_progress = excluded.counts_toward_progress,
-      feature_key            = excluded.feature_key;
+      feature_key            = excluded.feature_key,
+      whop_lesson_id         = excluded.whop_lesson_id;
 
 -- ─────────────── 6. The rows the course no longer has ───────────────
 
@@ -525,6 +540,7 @@ begin
          count(*) filter (where requires_action and action_brief is null)::int as no_brief,
          count(*) filter (where type = 'setup')::int                        as setups,
          count(*) filter (where title like '% · lesson %')::int             as placeholders,
+         count(distinct whop_lesson_id)::int                                as whop_ids,
          coalesce(string_agg(id, ', ' order by sort_order) filter (where is_gate), 'none') as gates,
          coalesce(string_agg(id || ':' || coalesce(feature_key, 'no key') || ':'
                              || case when counts_toward_progress then 'counting' else 'outside the count' end,
@@ -565,8 +581,8 @@ begin
   if v_crossed <> 0 then
     raise exception 'In % area(s) the first lesson would not come after the last lesson of the area before it. The order of the lessons must rise with the order of the areas and never cross between two of them. Nothing was changed.', v_crossed;
   end if;
-  if f.gates <> 'a5l26' then
-    raise exception 'The gate would be on: %. It must be on a5l26 and nowhere else. Nothing was changed.', f.gates;
+  if f.gates <> 'a4l17' then
+    raise exception 'The gate would be on: %. It must be on a4l17 and nowhere else. Nothing was changed.', f.gates;
   end if;
   if f.specials <> 'a7l19:bounty_access:outside the count' then
     raise exception 'The rows with a feature key or outside the lesson count would be: %. They must be: a7l19:bounty_access:outside the count. Nothing was changed.', f.specials;
@@ -579,6 +595,9 @@ begin
   end if;
   if f.placeholders <> 0 then
     raise exception '% lessons would still carry a placeholder title from v94. Nothing was changed.', f.placeholders;
+  end if;
+  if f.whop_ids <> 141 then
+    raise exception '% lessons would carry a Whop lesson id of their own, and all 141 must. Nothing was changed.', f.whop_ids;
   end if;
 end
 $check$;

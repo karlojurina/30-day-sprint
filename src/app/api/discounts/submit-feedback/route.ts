@@ -29,6 +29,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { onDiscountRequested } from "@/lib/csm-events";
+import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
+import { decideDiscountRequest, loadDiscountReads } from "@/lib/world/discount-server";
 
 interface IncomingAnswer {
   question_id?: unknown;
@@ -93,40 +95,55 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Re-validate the eligibility window (server-side defense — same
-  // rule as /api/discounts/request).
-  const { data: student } = await supabase
-    .from("students")
-    .select("joined_at, first_paid_at")
-    .eq("id", studentId)
-    .single();
-  if (!student) {
-    return NextResponse.json({ error: "Student not found" }, { status: 404 });
-  }
+  if (CATALOG_IS_V2) {
+    // The new course: the same rule and the same refusals as
+    // /api/discounts/request (src/lib/world/discount.ts), decided before
+    // anything is written. Any read that fails sends nothing.
+    const reads = await loadDiscountReads(supabase, studentId, LESSONS_TABLE);
+    const decision = decideDiscountRequest(reads, new Date());
+    if (!decision.grant) {
+      if (decision.log) console.error(`[discounts/submit-feedback] student ${studentId}: ${decision.log}`);
+      return NextResponse.json(
+        { error: decision.error, state: decision.state },
+        { status: decision.status },
+      );
+    }
+  } else {
+    // Re-validate the eligibility window (server-side defense — same
+    // rule as /api/discounts/request).
+    const { data: student } = await supabase
+      .from("students")
+      .select("joined_at, first_paid_at")
+      .eq("id", studentId)
+      .single();
+    if (!student) {
+      return NextResponse.json({ error: "Student not found" }, { status: 404 });
+    }
 
-  // v75.18: discount window anchored on first_paid_at (original
-  // signup), not joined_at (current cycle start).
-  // v75.26: NULL first_paid_at → ineligible (no joined_at fallback).
-  if (!student.first_paid_at) {
-    return NextResponse.json(
-      {
-        error:
-          "We can't verify your signup date right now — please contact support and we'll sort it out within 24h.",
-      },
-      { status: 400 },
+    // v75.18: discount window anchored on first_paid_at (original
+    // signup), not joined_at (current cycle start).
+    // v75.26: NULL first_paid_at → ineligible (no joined_at fallback).
+    if (!student.first_paid_at) {
+      return NextResponse.json(
+        {
+          error:
+            "We can't verify your signup date right now — please contact support and we'll sort it out within 24h.",
+        },
+        { status: 400 },
+      );
+    }
+    const joinedAt = new Date(student.first_paid_at);
+    const deadline = new Date(
+      joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000,
     );
-  }
-  const joinedAt = new Date(student.first_paid_at);
-  const deadline = new Date(
-    joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000,
-  );
-  if (new Date() > deadline) {
-    return NextResponse.json(
-      {
-        error: `The ${DISCOUNT_WINDOW_DAYS}-day discount window has closed.`,
-      },
-      { status: 400 },
-    );
+    if (new Date() > deadline) {
+      return NextResponse.json(
+        {
+          error: `The ${DISCOUNT_WINDOW_DAYS}-day discount window has closed.`,
+        },
+        { status: 400 },
+      );
+    }
   }
 
   // Atomic insert via the v29 RPC function.

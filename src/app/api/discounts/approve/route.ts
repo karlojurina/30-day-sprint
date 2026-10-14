@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { createWhopPromoCode } from "@/lib/whop";
+import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
+import { approvalVerdict, loadDiscountReads } from "@/lib/world/discount-server";
 
 /**
  * Approve a pending discount request.
@@ -85,91 +87,105 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // v75.20: anchor on first_paid_at (original signup), not joined_at
-  // (current cycle start). Returning customers can't get a fresh
-  // 14-day discount window from a renewal.
-  // v75.26: NULL first_paid_at → block at the FINAL approval gate.
-  // This is the last line of defense if the request/feedback gates
-  // were somehow bypassed. The admin must manually verify the
-  // student's signup history and backfill first_paid_at before
-  // approving.
-  if (!override && !studentRow.first_paid_at) {
-    return NextResponse.json(
-      {
-        error:
-          "Cannot approve: student has no first_paid_at on file. Run the Whop sync (Refresh on /admin) to backfill, then retry. If still NULL, this student's Whop membership history needs manual review.",
-      },
-      { status: 400 },
-    );
-  }
-  // `?? 0` only matters under override (first_paid_at can be null then);
-  // the resulting deadline is unused because the window check below is
-  // also override-gated.
-  const joinedAt = new Date(studentRow.first_paid_at ?? 0);
-  const deadline = new Date(
-    joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000
-  );
-
-  // Eligibility re-check (server-side, same rule as /api/discounts/request):
-  //   - Compound action items (requires_action=true): need BOTH
-  //     completed_at AND action_completed_at.
-  //   - Other lessons: completed_at OR skipped_at counts as done.
-  const [{ data: requiredLessons }, { data: completions }] = await Promise.all([
-    supabase
-      .from("lessons")
-      .select("id, requires_action")
-      .in("region_id", ["r1", "r2"]),
-    supabase
-      .from("student_lesson_completions")
-      .select("lesson_id, completed_at, action_completed_at, skipped_at")
-      .eq("student_id", discountReq.student_id),
-  ]);
-
-  const required = requiredLessons ?? [];
-  const completionMap = new Map<
-    string,
-    {
-      completed_at: string | null;
-      action_completed_at: string | null;
-      skipped_at: string | null;
+  if (CATALOG_IS_V2) {
+    // The new course: the request route's rule (src/lib/world/discount.ts),
+    // judged at the end of the 14 days. `override` skips it, as it skips
+    // every gate of the old rule below.
+    if (!override) {
+      const reads = await loadDiscountReads(supabase, discountReq.student_id, LESSONS_TABLE);
+      const verdict = approvalVerdict(reads, new Date());
+      if (!verdict.ok) {
+        if (verdict.log) console.error(`[discount approve] request ${requestId}: ${verdict.log}`);
+        return NextResponse.json({ error: verdict.error }, { status: verdict.status });
+      }
     }
-  >();
-  for (const c of completions ?? []) {
-    completionMap.set(c.lesson_id, {
-      completed_at: c.completed_at,
-      action_completed_at: c.action_completed_at,
-      skipped_at: c.skipped_at,
-    });
-  }
-
-  let latestCompletion = joinedAt;
-  for (const lesson of required) {
-    const c = completionMap.get(lesson.id);
-    const watchDone = c?.completed_at != null;
-    const actionDone = c?.action_completed_at != null;
-    const skipped = c?.skipped_at != null;
-    const fullyDone = lesson.requires_action
-      ? watchDone && actionDone
-      : watchDone || skipped;
-    if (!override && !fullyDone) {
+  } else {
+    // v75.20: anchor on first_paid_at (original signup), not joined_at
+    // (current cycle start). Returning customers can't get a fresh
+    // 14-day discount window from a renewal.
+    // v75.26: NULL first_paid_at → block at the FINAL approval gate.
+    // This is the last line of defense if the request/feedback gates
+    // were somehow bypassed. The admin must manually verify the
+    // student's signup history and backfill first_paid_at before
+    // approving.
+    if (!override && !studentRow.first_paid_at) {
       return NextResponse.json(
-        { error: "Student has not completed all required R1 + R2 lessons" },
+        {
+          error:
+            "Cannot approve: student has no first_paid_at on file. Run the Whop sync (Refresh on /admin) to backfill, then retry. If still NULL, this student's Whop membership history needs manual review.",
+        },
+        { status: 400 },
+      );
+    }
+    // `?? 0` only matters under override (first_paid_at can be null then);
+    // the resulting deadline is unused because the window check below is
+    // also override-gated.
+    const joinedAt = new Date(studentRow.first_paid_at ?? 0);
+    const deadline = new Date(
+      joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000
+    );
+
+    // Eligibility re-check (server-side, same rule as /api/discounts/request):
+    //   - Compound action items (requires_action=true): need BOTH
+    //     completed_at AND action_completed_at.
+    //   - Other lessons: completed_at OR skipped_at counts as done.
+    const [{ data: requiredLessons }, { data: completions }] = await Promise.all([
+      supabase
+        .from("lessons")
+        .select("id, requires_action")
+        .in("region_id", ["r1", "r2"]),
+      supabase
+        .from("student_lesson_completions")
+        .select("lesson_id, completed_at, action_completed_at, skipped_at")
+        .eq("student_id", discountReq.student_id),
+    ]);
+
+    const required = requiredLessons ?? [];
+    const completionMap = new Map<
+      string,
+      {
+        completed_at: string | null;
+        action_completed_at: string | null;
+        skipped_at: string | null;
+      }
+    >();
+    for (const c of completions ?? []) {
+      completionMap.set(c.lesson_id, {
+        completed_at: c.completed_at,
+        action_completed_at: c.action_completed_at,
+        skipped_at: c.skipped_at,
+      });
+    }
+
+    let latestCompletion = joinedAt;
+    for (const lesson of required) {
+      const c = completionMap.get(lesson.id);
+      const watchDone = c?.completed_at != null;
+      const actionDone = c?.action_completed_at != null;
+      const skipped = c?.skipped_at != null;
+      const fullyDone = lesson.requires_action
+        ? watchDone && actionDone
+        : watchDone || skipped;
+      if (!override && !fullyDone) {
+        return NextResponse.json(
+          { error: "Student has not completed all required R1 + R2 lessons" },
+          { status: 400 }
+        );
+      }
+      for (const ts of [c?.completed_at, c?.action_completed_at, c?.skipped_at]) {
+        if (ts) {
+          const d = new Date(ts);
+          if (d > latestCompletion) latestCompletion = d;
+        }
+      }
+    }
+
+    if (!override && latestCompletion > deadline) {
+      return NextResponse.json(
+        { error: "Student finished R1 + R2 after the discount window closed" },
         { status: 400 }
       );
     }
-    for (const ts of [c?.completed_at, c?.action_completed_at, c?.skipped_at]) {
-      if (ts) {
-        const d = new Date(ts);
-        if (d > latestCompletion) latestCompletion = d;
-      }
-    }
-  }
-
-  if (!override && latestCompletion > deadline) {
-    return NextResponse.json(
-      { error: "Student finished R1 + R2 after the discount window closed" },
-      { status: 400 }
-    );
   }
 
   if (override) {

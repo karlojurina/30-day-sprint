@@ -1,7 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { onDiscountRequested } from "@/lib/csm-events";
+import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
+import { decideDiscountRequest, loadDiscountReads } from "@/lib/world/discount-server";
+
+/**
+ * The new course (2026-10-14): on a deployment that reads the v2 catalog
+ * (CATALOG_IS_V2, true on staging and after cutover), the request is decided
+ * by src/lib/world/discount.ts, the same rule the map shows: every video up to
+ * the gate lesson, inside 14 days of a first payment made on or after
+ * 2026-10-09. It grants only on `ready` and fails closed on any read error.
+ * The old rule below runs everywhere else, unchanged, so the live app on the
+ * v1 catalog behaves exactly as before.
+ */
+async function requestUnderNewCourse(supabase: SupabaseClient, studentId: string) {
+  const reads = await loadDiscountReads(supabase, studentId, LESSONS_TABLE);
+  const decision = decideDiscountRequest(reads, new Date());
+  if (!decision.grant) {
+    if (decision.log) console.error(`[discounts/request] student ${studentId}: ${decision.log}`);
+    return NextResponse.json(
+      { error: decision.error, state: decision.state },
+      { status: decision.status },
+    );
+  }
+
+  const { data, error } = await supabase
+    .from("discount_requests")
+    .insert({ student_id: studentId })
+    .select()
+    .single();
+
+  if (error) {
+    return NextResponse.json({ error: "Failed to create request" }, { status: 500 });
+  }
+
+  // CSM W2.6 admin task (best-effort).
+  await onDiscountRequested(supabase, studentId);
+
+  return NextResponse.json(data);
+}
 
 /**
  * V4: Discount = complete ALL Region 1 + Region 2 lessons within
@@ -45,6 +83,8 @@ export async function POST(request: NextRequest) {
   }
   // Server-derived; body.studentId (if any) is ignored.
   const studentId = authedStudent.id;
+
+  if (CATALOG_IS_V2) return requestUnderNewCourse(supabase, studentId);
 
   // Duplicate check
   const { data: existing } = await supabase

@@ -318,6 +318,10 @@ const migration = `${RULE}
 --   lesson gets its length together with its video row, from
 --   supabase/diagnostics/load-lesson-videos.sql. Running this file again
 --   after the videos are loaded keeps every length and every video row.
+--   Nor does it write description on a lesson that exists: the written
+--   instructions under a lesson come from
+--   supabase/diagnostics/load-lesson-text.sql, and running this file again
+--   keeps every one of them. A new lesson starts with none.
 --
 -- WHEN IT REFUSES, changing nothing
 --   * regions_next or lessons_next is missing (v94 has not run).
@@ -470,8 +474,10 @@ update public.lessons_next set sort_order = sort_order + ${PARKED};
 
 ${head(`5. The ${total} lessons of the course`)}
 --
--- description, lesson_group_id and discord_channel are null and is_optional
--- is false on every row. duration_seconds, bunny_video_id, video_ready_at and
+-- lesson_group_id and discord_channel are null and is_optional is false on
+-- every row. A new row starts with no description, and a row that exists
+-- keeps its own: load-lesson-text.sql writes that column, so it is not in the
+-- update list below. duration_seconds, bunny_video_id, video_ready_at and
 -- created_at are not in the column list, so a row that exists keeps its own.
 
 insert into public.lessons_next
@@ -485,7 +491,6 @@ on conflict (id) do update
   set region_id              = excluded.region_id,
       type                   = excluded.type,
       title                  = excluded.title,
-      description            = excluded.description,
       sort_order             = excluded.sort_order,
       requires_action        = excluded.requires_action,
       action_brief           = excluded.action_brief,

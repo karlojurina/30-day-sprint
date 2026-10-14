@@ -250,15 +250,28 @@ When adding a new table, append it here. When deleting a field, scan
   - **Migration v101** (`2026_v101_course_catalog.sql`, generated from
     `supabase/catalog/course_catalog.json` by `npm run build:catalog`)
     rewrites the rows in place over v94's placeholder seed. It owns
-    `id`, `region_id`, `type`, `title`, `description`, `sort_order`,
+    `id`, `region_id`, `type`, `title`, `sort_order`,
     `requires_action`, `action_brief`, `is_optional`, `is_gate`,
     `lesson_group_id`, `discord_channel`, `counts_toward_progress` and
-    `feature_key`. It never writes `duration_seconds`,
-    `bunny_video_id`, `video_ready_at` or `created_at`, so a row that
-    exists keeps its own. A row whose id the course does not have is
+    `feature_key`. It never writes `duration_seconds`, `description`
+    (on a row that exists), `bunny_video_id`, `video_ready_at` or
+    `created_at`, so a row that exists keeps its own. A row whose id the course does not have is
     deleted. After it the table holds the data file's 141 rows, 140 of
     them counting toward progress, in 8 areas of 8, 11, 25, 17, 26, 22,
     19 and 13.
+  - **The text load** (`supabase/diagnostics/load-lesson-text.sql`,
+    added 2026-10-14) owns `description` for course-shaped ids, in
+    `lessons_next` and `lessons`. As tracked it is a template that
+    holds no text; a private filled copy, written by the tool in
+    `clients/ecom-university/tools/lesson-text/` from the lesson
+    pages on Whop, is pasted into the SQL editor. The list is the
+    whole truth: a listed lesson gets its text, every other course
+    lesson's `description` is emptied, rows on other ids are never
+    written. It refuses a title that differs from the catalog's. The
+    text is plain text in a small format (paragraphs, lists, bold,
+    https links) that `src/lib/world/lesson-text.ts` reads. The texts
+    stay out of the repository because they carry links to course
+    assets.
   - **The video load** (`supabase/diagnostics/load-lesson-videos.sql`,
     run as a filled private copy) owns `duration_seconds` on every
     lesson whose id is shaped like `a3l07`: it sets it on a listed

@@ -40,6 +40,7 @@ The interesting assertions are the ones about things **staying the same**:
   positions past the end, scrubbing backwards, calls with no session.
 - Section 20, the course catalog (v101): the generated migration and its undo match `supabase/catalog/course_catalog.json`, the 141 lessons replace the placeholder seed and can be put back, and the file refuses to retitle or remove a lesson that a video row or a watch row points at.
 - Section 21, the video load (`diagnostics/load-lesson-videos.sql`): filled with made-up ids, it makes `lesson_videos` and the lengths follow a list and refuses every bad list with nothing changed. `LESSON_VIDEOS_SQL=/path/to/the/filled/copy npm test` also runs the private file of real rows and prints counts only.
+- Section 22, the text load (`diagnostics/load-lesson-text.sql`): filled with made-up texts, it makes `description` on the course's lessons follow a list (a text round-trips byte for byte, a lesson dropped from the list gets null, a live lesson like l004 keeps its own) and refuses every bad list with nothing changed. `LESSON_TEXT_SQL=/path/to/the/filled/copy npm test` also runs the private file of real texts on a database of its own and prints counts only.
 
 ## How it stays honest
 

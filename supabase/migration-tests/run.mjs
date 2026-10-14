@@ -1738,6 +1738,24 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
          && (await q(`select duration_seconds d from lessons_next where id = '${KEEPS}'`))[0].d === 756,
          'run again after a load: the lesson keeps its video row and its length, and the total row counts 1 with a length', refusal(r))
 
+    // ── run again after the text load ──
+    // load-lesson-text.sql (section 22) owns lessons_next.description. Two
+    // texts set here by hand, the way that load sets them, must outlive v101.
+    {
+      const TEXTS = {
+        a3l25: '**Your brief** is ready.\n\n- Read [the brief](https://example.com/made-up/brief)',
+        a5l23: "It's yours: $$$ and $text$ stay.\nA backslash \\ and two quotes ''.",
+      }
+      for (const [id, text] of Object.entries(TEXTS)) await db.query(`update lessons_next set description = $1 where id = $2`, [text, id])
+      const keptBefore = await staging(db, ['updated_at'])
+      r = await runFile(db, v101)
+      const textsNow = Object.fromEntries(
+        (await q(`select id, description from lessons_next where description is not null order by id`)).map(x => [x.id, x.description]))
+      note(r.ok && sameJson(textsNow, TEXTS) && await staging(db, ['updated_at']) === keptBefore,
+           'run again after the text load: the descriptions load-lesson-text.sql wrote on two lessons survive byte for byte, and nothing else moves', refusal(r))
+      await db.exec(`update lessons_next set description = null where id in ('a3l25', 'a5l23');`)
+    }
+
     // ── it will not move a video onto another lesson ──
     let asItWas = await everything()
     const retitled = v101.replaceAll(keepsTitle, "'Another Title Entirely'")
@@ -2354,6 +2372,304 @@ console.log('\n=== 21. the video load: lesson_videos and the lengths follow a li
              && c.rows.slice(9).length === 4 && c.rows.slice(9).every(k => k.rows === 0 && k.verdict === 'PASS') && !/vid_/.test(JSON.stringify(c.rows)),
              'LESSON_VIDEOS_SQL: course-catalog-check.sql then reads the same count with a video and with a length, and PASS four times',
              c.ok ? `${c.rows[8]?.with_video} with a video, ${c.rows[8]?.with_length} with a length` : `it raised ${c.code}`)
+      }
+    }
+  }
+}
+
+
+console.log('\n=== 22. the text load: the description of the action items follows a list ===')
+// supabase/diagnostics/load-lesson-text.sql is a template. The lesson text
+// tool fills it outside the repository and the owner pastes the filled copy.
+// Here it is filled with made-up texts and run the way the SQL editor runs it.
+{
+  const template = diagnostic('load-lesson-text.sql')
+  const PLACEHOLDER = "  ('REPLACE_WITH_ROWS', 'REPLACE_WITH_ROWS', 'REPLACE_WITH_ROWS');"
+  const titleOf = lesson => COURSE.lessons.find(l => l.id === lesson)?.title ?? 'A Lesson The Course Does Not Have'
+  // A row of the list: lesson id, title, text. The title is the data file's
+  // for that lesson unless another one is given.
+  const row = (lesson, body, title = titleOf(lesson)) => [lesson, title, body]
+  // The one way a list gets into the file: the placeholder line is replaced
+  // by the rows, every single quote doubled, the last row closed with a
+  // semicolon. A text of null is written as null.
+  const sqlText = s => `'${s.replaceAll("'", "''")}'`
+  const fillText = rows => template.replace(PLACEHOLDER, () =>
+    rows.map(([lesson, title, body]) => `  (${sqlText(lesson)}, ${sqlText(title)}, ${body === null ? 'null' : sqlText(body)})`).join(',\n') + ';')
+  const COURSE_ID = /^a[1-8]l[0-9]{2}$/
+  const RESULT_COLS = 'line,name,listed,changed,emptied,lessons,with_text'
+  // Made-up texts only, in the format the lesson page reads. Their links go
+  // to example.com. NEVER a real text: those carry the course's links.
+  const T1 = '**Your brief** is ready.\n\n- Read [the brief](https://example.com/made-up/brief)\n- Write 3 hooks\n\n1. Export the batch\n2. Post it'
+  const T2 = 'Duplicate [the template](https://example.com/made-up/template) and fill in every page.'
+  const T3 = "It's yours: $$$ and $text$ stay as they are.\nA line break, a backslash \\ and two quotes ''."
+  const LIVE_TEXT = 'A live description, made up for this test.'
+
+  const texts = async (d = db) => Object.fromEntries(
+    (await rowsOn(d, `select id, description from lessons_next where description is not null order by id`)).map(x => [x.id, x.description]))
+  const world = async () => JSON.stringify({
+    staging: await q(`select * from lessons_next order by id`),
+    areas:   await q(`select * from regions_next order by id`),
+    live:    await q(`select * from lessons order by id`),
+    videos:  await q(`select * from lesson_videos order by lesson_id`),
+  })
+  const did = r => { const s = r.rows[0] ?? {}; return [s.listed, s.changed, s.emptied] }
+  // The result as it must read for a list: the run's three numbers, then per
+  // area how many lessons have a text. No text and no link in it.
+  const reads = (r, list, three) => {
+    const inStaging = list.filter(([lesson]) => COURSE.lessons.some(l => l.id === lesson))
+    const per = a => inStaging.filter(([lesson]) => lesson.startsWith(a + 'l')).length
+    return r.ok && r.cols.join(',') === RESULT_COLS && r.rows.length === 9 && !/http|example\.com/.test(JSON.stringify(r.rows))
+      && sameJson(r.rows[0], { line: 'this run', name: 'the whole course', listed: three[0], changed: three[1], emptied: three[2],
+                               lessons: COURSE.lessons.length, with_text: inStaging.length })
+      && sameJson(r.rows.slice(1), COURSE.areas.map(a => ({ line: a.id, name: a.name, listed: null, changed: null, emptied: null,
+                               lessons: COURSE.lessons.filter(l => l.area === a.id).length, with_text: per(a.id) })))
+  }
+  // The staging catalog's descriptions say exactly what the list says.
+  const follows = async (list, d = db) =>
+    sameJson(await texts(d), Object.fromEntries([...list].sort((a, b) => a[0] < b[0] ? -1 : 1).map(([lesson, , body]) => [lesson, body])))
+  const said = r => r.ok ? 'it ran' : `${r.code}: ${r.said.slice(0, 64)}`
+  const BODIES = [T1, T2, T3, LIVE_TEXT, 'example.com']
+  // A refusal: our own raise, its sentence, "Nothing was changed." at the
+  // end, no text and no link in the message, none of the given strings in
+  // it, and a database that is identical afterwards.
+  const refuses = async (label, sqls, sentence, never = []) => {
+    const was = await world()
+    const got = []
+    for (const sql of [].concat(sqls)) got.push(await runFile(db, sql))
+    note(got.every(r => !r.ok && r.code === 'P0001' && r.said.includes(sentence) && /Nothing was changed\.$/.test(r.said)
+                        && !/http/i.test(r.said) && ![...BODIES, ...never].some(x => r.said.includes(x)))
+         && await world() === was,
+         label, got.map(said).join(' | ').slice(0, 110))
+  }
+
+  // ── the template itself ──
+  note(countOf(template, PLACEHOLDER) === 1 && countOf(template, 'REPLACE_WITH_ROWS') === 3
+       && template.includes('insert into _text values\n' + PLACEHOLDER + '\n')
+       && template.includes('create temp table _text (lesson_id text, title text, body text) on commit drop;'),
+       'the template holds its placeholder line exactly once, three columns wide, straight after "insert into _text values"')
+  note(template.split('\n').filter(l => /http/i.test(l)).every(l => l.startsWith('--')),
+       'the template holds no address: "https" appears in its header, where it describes the format, and nowhere else',
+       `${template.split('\n').filter(l => /http/i.test(l)).length} header lines`)
+
+  const ready = (await q(`select
+       (select count(*)::int from lessons_next) as lessons,
+       (select count(*)::int from lessons_next where description is not null) as texts`))[0]
+  if (!(ready.lessons === 141 && ready.texts === 0)) {
+    note(false, 'section 22 needs the state v101 leaves: 141 lessons and no description', JSON.stringify(ready))
+  } else {
+    // A description on a live lesson. It stays for the whole section: no
+    // load may touch it.
+    await db.exec(`update lessons set description = '${LIVE_TEXT}' where id = 'l004';`)
+    const liveBefore = JSON.stringify(await q(`select * from lessons order by id`))
+    const videosBefore = JSON.stringify(await q(`select * from lesson_videos order by lesson_id`))
+    const otherColumns = async () => JSON.stringify(
+      (await q(`select * from lessons_next order by id`)).map(({ description, updated_at, ...rest }) => rest))
+    const otherBefore = await otherColumns()
+
+    // 3 lessons over 2 areas: a3l25 in a3, a5l22 (a setup lesson) and a5l23 in a5.
+    const LIST = [row('a3l25', T1), row('a5l22', T2), row('a5l23', T3)]
+
+    // ── a list that is wrong changes nothing ──
+    await refuses('the template as tracked, its placeholder line not replaced, is refused', template,
+                  'The placeholder line was not replaced with the rows')
+    await refuses("a lesson id that is not a course lesson id is refused, and never repeated: a live lesson's id, a ninth area, capitals, an empty id",
+                  ['l004', 'a9l01', 'A5L23', ''].map(bad => fillText([...LIST.slice(0, 2), row(bad, T3, titleOf('a5l23'))])),
+                  '1 row(s) of the list have a lesson id that is not a course lesson id', ['l004', 'a9l01', 'A5L23'])
+    await refuses('a lesson that is in the list twice is refused, and the message says which lesson',
+                  fillText([...LIST, row('a3l25', T2)]), '1 lesson(s) are in the list more than once: a3l25. A lesson has one text')
+    await refuses('an empty text, a text of blanks and line ends, and a null text are refused, and the message says which lesson',
+                  ['', '  \n \n', null].map(bad => fillText([...LIST.slice(0, 2), row('a5l23', bad)])),
+                  '1 lesson(s) of the list have an empty text: a5l23.')
+    await refuses('a text of 8001 characters is refused, and the message says which lesson',
+                  fillText([...LIST.slice(0, 2), row('a5l23', 'é'.repeat(8001))]),
+                  '1 lesson(s) of the list have a text longer than 8000 characters: a5l23.')
+    await refuses('a lesson that is in neither catalog is refused, and the message says which lesson',
+                  fillText([...LIST, row('a1l09', T2)]),
+                  '1 lesson(s) of the list are in neither public.lessons_next nor public.lessons: a1l09. The list was written')
+    await refuses('a message names 10 lessons at most, then says how many more: 12 unknown lessons read "... a1l18 and 2 more"',
+                  fillText([...LIST, ...Array.from({ length: 12 }, (_, i) => row(`a1l${String(9 + i).padStart(2, '0')}`, T2))]),
+                  '12 lesson(s) of the list are in neither public.lessons_next nor public.lessons: '
+                  + 'a1l09, a1l10, a1l11, a1l12, a1l13, a1l14, a1l15, a1l16, a1l17, a1l18 and 2 more. The list was written',
+                  ['a1l19', 'a1l20'])
+    // The right lesson id, the right text, and the title of another version
+    // of the course.
+    await refuses('a list with one wrong title is refused: the message names the lesson, says the list is for another version of the course, and repeats no title',
+                  fillText(LIST.map(x => x[0] === 'a5l22' ? row('a5l22', T2, 'Action Item - Brand Book') : x)),
+                  '1 lesson(s) of the list carry another title than the catalog has under that id: a5l22. This list was made for another version of the course. '
+                  + 'Run the read and the sql command of the lesson text tool again',
+                  ['Action Item - Brand Book', titleOf('a5l22')])
+
+    // ── first load ──
+    let r = await runFile(db, fillText(LIST))
+    note(r.ok && await follows(LIST),
+         'first load of 3 lessons over 2 areas, one of them a setup lesson: their descriptions are set, and no other lesson has one', said(r))
+    note(reads(r, LIST, [3, 3, 0]),
+         'its result says 3 listed, 3 changed, 0 emptied, then lessons and texts per area, and shows no text',
+         r.ok ? `${did(r).join('/')}; ${r.rows.slice(1).map(x => `${x.line}:${x.with_text}`).join(' ')}` : said(r))
+    {
+      const got = (await q(`select description, octet_length(description)::int as bytes from lessons_next where id = 'a5l23'`))[0] ?? {}
+      note(got.description === T3 && got.bytes === Buffer.byteLength(T3, 'utf8') && fillText(LIST).includes("It''s yours: $$$ and $text$")
+           && (await texts()).a3l25 === T1,
+           "a text with an apostrophe, $$$, the block's own $text$, a backslash, two quotes and a line break comes back byte for byte",
+           `${got.bytes} bytes`)
+    }
+    note(await otherColumns() === otherBefore && JSON.stringify(await q(`select * from lesson_videos order by lesson_id`)) === videosBefore
+         && JSON.stringify(await q(`select * from lessons order by id`)) === liveBefore,
+         'the load writes description on lessons_next and nothing else: not duration_seconds, not lesson_videos, not the live lessons')
+    note((await q(`select description from lessons where id = 'l004'`))[0]?.description === LIVE_TEXT,
+         'the live lesson l004 keeps its own description')
+
+    // ── what the app then sees ──
+    {
+      const sent = await q(`select * from lessons_next order by sort_order`)
+      note(sent.length === 141 && sameJson(sent.filter(l => l.description !== null).map(l => [l.id, l.description]),
+                                           [['a3l25', T1], ['a5l22', T2], ['a5l23', T3]]),
+           "the data route's catalog read (select * from lessons_next order by sort_order) carries each text on its lesson, and null on every other",
+           `${sent.filter(l => l.description !== null).length} of ${sent.length}`)
+    }
+
+    // ── the same list again ──
+    let before = await world()
+    r = await runFile(db, fillText(LIST))
+    note(reads(r, LIST, [3, 0, 0]) && await world() === before,
+         'the same list again changes nothing, updated_at included; its result says 0 changed, 0 emptied', said(r))
+
+    // ── one text changes ──
+    const stamps = async () => Object.fromEntries((await q(`select id, updated_at::text as at from lessons_next where id in ('a3l25', 'a5l22', 'a5l23')`)).map(x => [x.id, x.at]))
+    let at = await stamps()
+    let list = LIST.map(x => x[0] === 'a5l22' ? row('a5l22', T2 + '\n\nThen post it in the channel.') : x)
+    r = await runFile(db, fillText(list))
+    let now = await stamps()
+    note(reads(r, list, [3, 1, 0]) && await follows(list) && now.a5l22 !== at.a5l22 && now.a3l25 === at.a3l25 && now.a5l23 === at.a5l23,
+         'a text that changes replaces the old one, and only that lesson is written (its updated_at moves, the other two keep theirs)',
+         r.ok ? did(r).join('/') : said(r))
+
+    // ── a lesson drops out of the list ──
+    at = await stamps()
+    list = list.filter(x => x[0] !== 'a3l25')
+    r = await runFile(db, fillText(list))
+    now = await stamps()
+    note(reads(r, list, [2, 0, 1]) && await follows(list) && !('a3l25' in await texts()) && now.a5l22 === at.a5l22 && now.a5l23 === at.a5l23,
+         'a lesson dropped from the list gets null, and the lessons still listed are not touched', r.ok ? did(r).join('/') : said(r))
+
+    // ── the longest text there may be ──
+    // 8000 characters of a letter that takes 2 bytes: the limit is counted in
+    // characters, not bytes.
+    {
+      const longest = 'é'.repeat(8000)
+      const withLongest = [...list, row('a6l03', longest)]
+      r = await runFile(db, fillText(withLongest))
+      note(r.ok && (await texts()).a6l03 === longest,
+           'a text of exactly 8000 characters (16000 bytes) is taken', said(r))
+      r = await runFile(db, fillText(list))
+      note(reads(r, list, [2, 0, 1]) && await follows(list), '...and taken out again by the next list', said(r))
+    }
+
+    // ── course lessons in the LIVE table, as after a cutover ──
+    // The load writes the text into `lessons` as well as lessons_next. Before
+    // the cutover no course lesson is in `lessons`, so those statements match
+    // nothing and could be broken unseen. Two live lessons with course ids:
+    // a5l22 copied from the staging catalog, so it is in both tables, and
+    // a1l09, which is in `lessons` only.
+    {
+      const LIVE_ONLY = 'A Lesson Added After The Cutover'
+      await db.exec(`
+        insert into lessons (id, region_id, day, type, title, sort_order)
+        select id, 'r4', 30, type, title, 9000 + sort_order from lessons_next where id = 'a5l22';
+        insert into lessons (id, region_id, day, type, title, sort_order) values ('a1l09', 'r4', 30, 'watch', '${LIVE_ONLY}', 9999);`)
+      const liveTexts = async () => Object.fromEntries(
+        (await q(`select id, description from lessons where id in ('a1l09', 'a5l22', 'l004') order by id`)).map(x => [x.id, x.description]))
+      const withLive = [...list, row('a1l09', T1, LIVE_ONLY)]
+      const b22 = list.find(x => x[0] === 'a5l22')[2]
+      r = await runFile(db, fillText(withLive))
+      note(r.ok && sameJson(await liveTexts(), { a1l09: T1, a5l22: b22, l004: LIVE_TEXT }) && await follows(list),
+           'with course lessons in the live table: a listed lesson gets its text in lessons too (a5l22 in both tables, a1l09 in lessons only), and l004 keeps its own',
+           r.ok ? Object.entries(await liveTexts()).map(([k, v]) => `${k}:${v === null ? 'null' : v.length}`).join(' ') : said(r))
+      await refuses('a lesson that is only in the live table is held to the title it has there',
+                    fillText([...list, row('a1l09', T1, 'Some Other Title')]),
+                    '1 lesson(s) of the list carry another title than the catalog has under that id: a1l09.', ['Some Other Title', LIVE_ONLY])
+      r = await runFile(db, fillText(list.filter(x => x[0] !== 'a5l22')))
+      note(r.ok && sameJson(await liveTexts(), { a1l09: null, a5l22: null, l004: LIVE_TEXT }) && !('a5l22' in await texts()),
+           'dropped from the list, both lose their text in lessons, and a5l22 in lessons_next too; the live lesson l004 keeps its own',
+           r.ok ? did(r).join('/') : said(r))
+      await db.exec(`delete from lessons where id in ('a1l09', 'a5l22');`)
+      note(JSON.stringify(await q(`select * from lessons order by id`)) === liveBefore,
+           '...and with those two test lessons taken out again the live table is as it was before the section')
+    }
+
+    // ── a database where v101 has not run ──
+    // The staging catalog is still v94's placeholder seed. Every id of this
+    // list is in the seed too, so nothing but the title tells a placeholder
+    // from the real lesson. (The seed has 22 lessons in a3, so no a3l25.)
+    {
+      const d = await secondDatabase()
+      const seeded = [row('a1l01', T2), row('a5l22', T2), row('a5l23', T3)]
+      const inTheSeed = (await rowsOn(d, `select count(*)::int n from lessons_next where id in (${seeded.map(([lesson]) => `'${lesson}'`).join(', ')})`))[0].n
+      const was = JSON.stringify(await rowsOn(d, `select * from lessons_next order by id`))
+      const r2 = await runFile(d, fillText(seeded))
+      note(inTheSeed === seeded.length && !r2.ok && r2.code === 'P0001'
+           && r2.said.includes('The course catalog is still the placeholder one') && r2.said.includes('Run migration 2026_v101_course_catalog.sql first')
+           && /Nothing was changed\.$/.test(r2.said) && JSON.stringify(await rowsOn(d, `select * from lessons_next order by id`)) === was,
+           'second database, v101 not run: a list of ids the placeholder seed also has is refused, and no text lands on a placeholder', said(r2))
+      await d.close()
+    }
+
+    // ── the real rows, when the private file is given ──
+    // LESSON_TEXT_SQL=/path/to/the/filled/copy npm run test:migrations
+    // NOTHING from that file is ever printed: no row, no text, no link, and no
+    // error text that Postgres wrote, because an error can quote the value it
+    // tripped on. Counts only. It runs on a database of its own, in the state
+    // v101 leaves, so this harness's own database is not touched by it.
+    const realPath = process.env.LESSON_TEXT_SQL
+    if (!realPath) {
+      console.log('         (LESSON_TEXT_SQL is not set: the private file of real texts was not run)')
+    } else {
+      let text = null
+      try { text = fs.readFileSync(realPath, 'utf8') } catch { /* said below, without the path's content */ }
+      const [head, foot] = template.split(PLACEHOLDER)
+      const filled = text !== null && text.startsWith(head) && text.endsWith(foot) && !text.includes('REPLACE_WITH_ROWS')
+      const region = filled ? text.slice(head.length, text.length - foot.length) : ''
+      // One row: ('a5l22', 'A Title, Its Quotes Doubled', 'A text, its quotes doubled, over any number of lines')
+      const one = /  \('(a[1-8]l[0-9]{2})', '((?:[^']|'')*)', '((?:[^']|'')*)'\)(,\n|;)/y
+      const real = []
+      let rest = region.length > 0
+      for (let m; rest && (m = one.exec(region)) !== null;) {
+        real.push([m[1], m[2].replaceAll("''", "'"), m[3].replaceAll("''", "'")])
+        if (m[4] === ';') rest = false
+      }
+      const whole = filled && real.length > 0 && !rest && one.lastIndex === region.length
+      note(whole,
+           'LESSON_TEXT_SQL: the file is the template with its placeholder line replaced by well-formed rows of three columns',
+           text === null ? 'the file could not be read' : `${real.length} rows read`)
+      if (whole) {
+        // Our own raises never hold a text or a title (asserted above). A
+        // lesson id they may name is no secret, so they may be shown.
+        // Anything else is shown as its code alone.
+        const safe = x => x.ok ? 'it ran' : x.code === 'P0001' ? x.said.slice(0, 80) : `it raised ${x.code}`
+        note(real.every(([lesson, title]) => title === titleOf(lesson)),
+             'LESSON_TEXT_SQL: every row carries the title the data file has for its lesson',
+             `${real.filter(([lesson, title]) => title === titleOf(lesson)).length} of ${real.length} titles agree`)
+        // base.sql holds no live lesson, so l004 is put there with its own
+        // description, as in the harness's own database.
+        const d = await secondDatabase(read(V101F))
+        await d.exec(`insert into regions (id, order_num, name, terrain) values ('r1', 1, 'Foundation', 'shore');
+                      insert into lessons (id, region_id, day, type, title, description, sort_order) values ('l004', 'r1', 2, 'watch', 'Lesson 4', '${LIVE_TEXT}', 4);`)
+        let x = await runFile(d, text)
+        note(x.ok && await follows(real, d),
+             "LESSON_TEXT_SQL: on a database in the state v101 leaves, every listed lesson's description equals the text in the file, and no other lesson has one",
+             x.ok ? `${Object.keys(await texts(d)).length} descriptions for the ${real.length} rows in the file` : safe(x))
+        note(x.ok && x.rows[0]?.listed === real.length && x.rows[0]?.changed === real.length && x.rows[0]?.emptied === 0
+             && x.rows[0]?.with_text === real.length && !/http/i.test(JSON.stringify(x.rows)),
+             'LESSON_TEXT_SQL: its result counts every row as listed and changed, and shows no text',
+             x.ok ? `${x.rows[0]?.listed}/${x.rows[0]?.changed}/${x.rows[0]?.emptied}` : safe(x))
+        const settled = JSON.stringify(await rowsOn(d, `select * from lessons_next order by id`))
+        x = await runFile(d, text)
+        note(x.ok && x.rows[0]?.changed === 0 && x.rows[0]?.emptied === 0
+             && JSON.stringify(await rowsOn(d, `select * from lessons_next order by id`)) === settled
+             && (await rowsOn(d, `select description from lessons where id = 'l004'`))[0]?.description === LIVE_TEXT,
+             'LESSON_TEXT_SQL: a second run changes nothing, and the live lesson l004 keeps its own description',
+             x.ok ? `${x.rows[0]?.changed}/${x.rows[0]?.emptied}` : safe(x))
+        await d.close()
       }
     }
   }

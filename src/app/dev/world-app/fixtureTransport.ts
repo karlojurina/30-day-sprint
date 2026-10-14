@@ -1,7 +1,9 @@
 "use client";
 
-import { createContext, useContext } from "react";
+import { useContext } from "react";
 import { tellaEmbedUrl, WATCH_SPEED_CAP } from "@/lib/world/tella";
+import type { CachedLessonTransport } from "@/lib/world/embed-cache";
+import { LessonTransportContext } from "@/lib/world/useLessonTransport";
 import {
   judgeWatch,
   WATCH_PLAYED_FLOOR,
@@ -125,8 +127,14 @@ export function createFixtureServer(opts: {
    * the page has read its query string.
    */
   courseVideoLessons?: () => ReadonlySet<string> | null;
+  /**
+   * ?latency=<ms>: how long `getEmbed` takes to answer, as the real route
+   * would. 0 (at once) when the page has none. Asked on each call, for the
+   * same reason as the course's video lessons.
+   */
+  latencyMs?: () => number;
 }): FixtureServer {
-  const { videos, markWatched, courseVideoLessons } = opts;
+  const { videos, markWatched, courseVideoLessons, latencyMs } = opts;
   const watch: Record<string, FixtureWatchRow> = {};
   const calls: FixtureCall[] = [];
 
@@ -240,7 +248,10 @@ export function createFixtureServer(opts: {
   const transport: LessonTransport = {
     async getEmbed(lessonId) {
       const videoId = videoIdOf(lessonId);
+      // Logged when asked; answered `latency` ms later.
       calls.push({ at: Date.now(), call: "getEmbed", lessonId, ok: videoId !== undefined });
+      const latency = latencyMs?.() ?? 0;
+      if (latency > 0) await new Promise((resolve) => setTimeout(resolve, latency));
       if (videoId === undefined) return { ok: false, kind: "not-recorded" };
       return { ok: true, embedUrl: tellaEmbedUrl(videoId) };
     },
@@ -299,10 +310,12 @@ export function createFixtureServer(opts: {
   return { transport, watch, calls };
 }
 
-/** The harness's transport, handed down by FixtureStudentProvider. */
-export const FixtureTransportContext = createContext<LessonTransport | null>(null);
-
-/** undefined outside the harness provider, where the player would use the real calls. */
-export function useFixtureTransport(): LessonTransport | undefined {
-  return useContext(FixtureTransportContext) ?? undefined;
+/**
+ * The harness's transport, behind the embed cache, as FixtureStudentProvider
+ * hands it down through the shared LessonTransportContext (the map's host
+ * reads the same one). undefined outside the harness provider, where the
+ * player would use the real calls.
+ */
+export function useFixtureTransport(): CachedLessonTransport | undefined {
+  return useContext(LessonTransportContext) ?? undefined;
 }

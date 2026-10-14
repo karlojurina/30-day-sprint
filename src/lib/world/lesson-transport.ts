@@ -12,7 +12,8 @@ import type { WatchHeartbeatOptions } from "@/lib/world/watch-heartbeat";
  * gathered here, the login-free harness hands the player a stand-in for the
  * server and the same component runs with a real video and no account.
  *
- * `/world` passes nothing and gets `realLessonTransport`.
+ * `/world` gets `realLessonTransport`, behind the page's embed cache
+ * (embed-cache.ts, useLessonTransport.ts).
  */
 
 export type EmbedAnswer =

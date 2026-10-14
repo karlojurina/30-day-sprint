@@ -3,11 +3,17 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useMemo,
   type ReactNode,
 } from "react";
+import { preconnect } from "react-dom";
 import { useSelectedLayoutSegments } from "next/navigation";
 import { WorldMap } from "@/components/world/WorldMap";
+import { TELLA_ORIGIN } from "@/lib/world/tella";
+
+/** Where Tella's player streams the video from, from inside its frame. */
+const TELLA_STREAM_ORIGIN = "https://prod-stream.tella.tv";
 
 /**
  * Owns the map, and lives in the LAYOUT rather than a page.
@@ -69,6 +75,15 @@ export function WorldStage({
   base?: string;
 }) {
   const segments = useSelectedLayoutSegments();
+
+  // Warm the connections a lesson video needs, once, when the world first
+  // mounts in the browser: a preconnect to Tella saved about 0.5 s on a cold
+  // first load (measured 2026-10-14). React keeps one hint per address.
+  useEffect(() => {
+    preconnect(TELLA_ORIGIN);
+    preconnect(TELLA_STREAM_ORIGIN);
+  }, []);
+
   const openAreaId = segments[0] ?? null;
   const lessonId = segments[1] ?? null;
   const href = useMemo(() => hrefFor(base), [base]);

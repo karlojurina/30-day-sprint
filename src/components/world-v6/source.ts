@@ -39,6 +39,14 @@ export interface WorldSource {
   onWatch(k: number, i: number): void;
   /** Open the page of place k's feature row. */
   onFeature(k: number): void;
+  /**
+   * Lesson i of place k may be opened soon: ask for its page and its video's address now.
+   * Called when a place's panel opens (its first lesson not done), when the
+   * card shows the student's next lesson, and when the pointer or the
+   * keyboard reaches a lesson row of the panel. The host decides whether the
+   * lesson has a video and asks no more than once (embed-cache.ts).
+   */
+  onPrefetch?(k: number, i: number): void;
 }
 
 /** Everything of a WorldSource that comes from the model: the host adds the route and the callbacks. */

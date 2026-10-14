@@ -136,8 +136,13 @@ export interface LessonPlayerProps {
    */
   onCompleted?: (lessonId: string, newAchievements: string[]) => void;
   /**
-   * What the player talks to. Left out everywhere but the development
-   * harness, which passes a stand-in for the server.
+   * Fires once the video's own player has said "ready". The lesson page asks
+   * for the next lesson's address then.
+   */
+  onReady?: () => void;
+  /**
+   * What the player talks to. The lesson page passes the page's one, behind
+   * the embed cache (useLessonTransport.ts); left out, the real calls.
    */
   transport?: LessonTransport;
   className?: string;
@@ -197,6 +202,7 @@ function LessonVideo({
   durationSeconds = null,
   recorded = true,
   onCompleted,
+  onReady,
   transport = realLessonTransport,
   className,
 }: LessonPlayerProps) {
@@ -206,6 +212,11 @@ function LessonVideo({
   // Beside "ready", never in place of it: the frame loaded and the player has
   // said nothing for 12 seconds. The frame stays mounted.
   const [noLoad, setNoLoad] = useState(false);
+  // The player in the frame has said something (the real one says "idle",
+  // then "ready" in the same millisecond). Until then, or until the 12 second
+  // line, the app's own placeholder covers the frame: Tella's page is a grey
+  // box until its player draws.
+  const [playerUp, setPlayerUp] = useState(false);
   // The video played to its end and the server's answer to the heartbeat for
   // that end still says the 95% point is not reached.
   const [endedShort, setEndedShort] = useState(false);
@@ -388,6 +399,8 @@ function LessonVideo({
     },
   );
 
+  const sayReady = useEffectEvent(() => onReady?.());
+
   const claimStoredCrossing = useEffectEvent(() => {
     if (!recorded) return;
     // React's development double mount runs this twice. The second run must
@@ -461,7 +474,8 @@ function LessonVideo({
     }, NO_LOAD_MS);
 
     // The player said something. Whatever it was, the video is there: the
-    // 12 second timer is off, and the line it may already have put up goes.
+    // 12 second timer is off, the line it may already have put up goes, and
+    // so does the placeholder over the frame.
     const heard = () => {
       if (spoke) return;
       spoke = true;
@@ -470,11 +484,17 @@ function LessonVideo({
         noLoadTimer = null;
       }
       setNoLoad(false);
+      setPlayerUp(true);
     };
 
+    let saidReady = false;
     const player: TellaPlayerHandle = attachTellaPlayer(iframe, {
       onReady: () => {
         heard();
+        if (!saidReady) {
+          saidReady = true;
+          sayReady();
+        }
         // Measured on the real player: the seek does not start playback by
         // itself. When the student presses play, it starts there.
         if (!resumedRef.current && resumeAt > 0) {
@@ -585,14 +605,6 @@ function LessonVideo({
     );
   }
 
-  if (state.kind === "loading") {
-    return (
-      <div className={frame}>
-        <Centered>Loading…</Centered>
-      </div>
-    );
-  }
-
   if (state.kind === "blocked") {
     return (
       <div className={frame}>
@@ -609,6 +621,30 @@ function LessonVideo({
     );
   }
 
+  // Loading and ready share this box, so the placeholder is one element from
+  // the click to the player's first word (its key keeps it when the frame goes
+  // in before it): it never blinks or restarts its pulse.
+  const veilGone = playerUp || noLoad;
+  const veil = (
+    <div
+      key="veil"
+      className={u.veil}
+      data-video-veil=""
+      data-gone={veilGone || undefined}
+      aria-hidden={veilGone || undefined}
+    >
+      <span className={u.veilText}>Loading video…</span>
+    </div>
+  );
+
+  if (state.kind === "loading") {
+    return (
+      <div className={className}>
+        <div className={u.frame}>{veil}</div>
+      </div>
+    );
+  }
+
   return (
     <div className={className}>
       <div className={u.frame}>
@@ -621,6 +657,9 @@ function LessonVideo({
           allowFullScreen
           className={u.frameVideo}
         />
+        {/* Over the frame, which loads underneath: gone at the player's first
+            word, or when the 12 second line goes up. */}
+        {veil}
       </div>
       {/* The app's own progress line. Tella's scrub bar is inside the iframe
           and says nothing about how much of the LESSON is done. */}

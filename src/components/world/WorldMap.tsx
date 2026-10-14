@@ -8,6 +8,7 @@ import { sourceData, type WorldSource } from "@/components/world-v6/source";
 import tokens from "@/components/world-v6/tokens.module.css";
 import { useWorldStage } from "@/components/world/WorldStage";
 import { useMapModel, type ReadyMapModel } from "@/components/world/useMapModel";
+import { useLessonAccess, useLessonTransport } from "@/lib/world/useLessonTransport";
 import { STUDENT_HOME, WORLD_LOCK_MODE } from "@/lib/world/access";
 import { posterSrc } from "@/lib/world-v6/poster";
 import u from "@/components/world/world-ui.module.css";
@@ -19,7 +20,10 @@ import u from "@/components/world/world-ui.module.css";
  * the map shows (buildMapModel, then sourceData). The address, read by the
  * stage, says which place is open and whether a lesson page is open over the
  * map. What the student does inside the map comes back as four callbacks, and
- * each one only changes the address.
+ * each one only changes the address. A fifth, onPrefetch, asks Next for the
+ * lesson page's route and, for a lesson with a video, the video's address
+ * before the click (embed-cache.ts), into the same cache the lesson page
+ * reads (useLessonTransport.ts). Neither while the membership is not active.
  *
  * THE MAP IS NOT MOUNTED UNTIL THE CATALOG HAS LOADED AND IS THE EIGHT-AREA
  * ONE. Loading, a failed load, an empty catalog and a catalog of any other
@@ -85,10 +89,17 @@ function RetryButton() {
   );
 }
 
+/** Lesson routes already handed to router.prefetch on this page. */
+const routesAsked = new Set<string>();
+
 /** The map with a real student in it. Mounted once the model is the eight-area one. */
 function SourcedMap({ model }: { model: ReadyMapModel }) {
   const router = useRouter();
   const { openAreaId, lessonId, href } = useWorldStage();
+  // The lesson page's own transport, so what is asked for here is what its player finds.
+  const transport = useLessonTransport();
+  // Nothing is asked for ahead while the membership is not active.
+  const { active } = useLessonAccess();
 
   const data = useMemo(() => sourceData(model, WORLD_LOCK_MODE), [model]);
 
@@ -112,8 +123,21 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
       onCloseArea: () => go(href()),
       onWatch: (k, i) => go(href(ids[k], data.lessonIds[k]?.[i])),
       onFeature: (k) => go(href(ids[k], data.featureIds[k])),
+      // The lesson page's route (the address onWatch pushes), once per lesson
+      // per page, so the click does not wait on it; and, for a lesson with a
+      // video, its address.
+      onPrefetch: (k, i) => {
+        if (!active) return;
+        const lesson = model.areas[k]?.lessons[i];
+        const to = lesson ? href(ids[k], data.lessonIds[k]?.[i]) : null;
+        if (to !== null && !routesAsked.has(to)) {
+          routesAsked.add(to);
+          router.prefetch(to);
+        }
+        if (lesson?.hasVideo) transport.prefetch(lesson.id);
+      },
     };
-  }, [model, data, openAreaId, lessonId, href, router]);
+  }, [model, data, openAreaId, lessonId, href, router, transport, active]);
 
   return <WorldV6 source={source} />;
 }

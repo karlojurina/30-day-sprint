@@ -56,3 +56,6 @@ gen('../src/lib/world/tella-player.ts', './_gen/tella-player.ts', [
 
 // lesson-text.ts has no imports at all, so it copies across untouched.
 gen('../src/lib/world/lesson-text.ts', './_gen/lesson-text.ts')
+
+// embed-cache.ts imports only TYPES from ./lesson-transport, which --experimental-strip-types erases.
+gen('../src/lib/world/embed-cache.ts', './_gen/embed-cache.ts')

@@ -1358,11 +1358,20 @@ watch heartbeat, and the messages it trades with Tella's frame.
   address, the heartbeat, the completion), behind one interface, so a
   test or the development harness can stand in for the server.
 - **Written by:** `realLessonTransport`, in the same file, and nothing
-  else in the app. `/world` passes no transport and gets it by default.
-  The development harness under `/dev/world-app` passes a stand-in of
-  its own (`fixtureTransport.ts`), which no student route can reach.
-- **Read by:** `LessonPlayer`, which receives it through the
-  `transport` prop of `LessonScreen`
+  else in the app. `/world` gets it behind the page's embed cache
+  (`withEmbedCache` in `src/lib/world/embed-cache.ts`, handed out by
+  `useLessonTransport()` in `src/lib/world/useLessonTransport.ts`).
+  The development harness under `/dev/world-app` provides a stand-in
+  of its own (`fixtureTransport.ts`) behind the same cache, which no
+  student route can reach.
+- **Read by:** `LessonPlayer`, which receives it through
+  `LessonScreen`, and the map's host `WorldMap`, which asks for a
+  lesson's address before the click (`prefetch`) into the same cache.
+  A `ready` address is kept, so the lesson page's own ask is answered
+  without a request, but never past the right to it: the cache empties
+  itself when the signed-in student changes or signs out, when
+  `students.membership_status` (AuthContext's `student`) is anything
+  but `"active"`, and when its oldest address is 30 minutes old.
 - **Shape:**
   ```ts
   export type EmbedAnswer =

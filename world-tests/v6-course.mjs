@@ -12,7 +12,7 @@
  * generated one: src/app/dev/world-app/courseCatalog.ts builds the rows from
  * supabase/catalog/course_catalog.json and course-lengths.fixture.json.
  * Headless Chrome on the real GPU, autoplay allowed, muted, 1691x1278. Takes
- * about 6 minutes (27 page loads, 28 when row 2 fails, and row 12 watches a
+ * about 7 minutes (31 page loads, 32 when row 2 fails, and row 12 watches a
  * 67 second clip in real time): run it in the background.
  *
  * One PASS or FAIL line per row of the table, with what was measured after it.
@@ -30,6 +30,24 @@
  * no opener and the javascript: one is no link (15); a watch lesson with no
  * video and no text says "Not recorded yet." on one short line (16). Row 13
  * also opens a5l22 without ?text=sample and finds no sample there.
+ *
+ * ROWS 17 TO 20 ARE THE VIDEO ASKED FOR BEFORE THE CLICK (embed-cache.ts).
+ * The pointer on a panel row asks the stand-in server for that lesson's
+ * address once, before any click, and the click then has the frame in the
+ * page within 300 ms with no second ask (17). The app's placeholder covers
+ * the 16:9 box from the click until the player's first word (the real player
+ * says playbackState "idle", then "ready" in the same millisecond), over the
+ * frame once it is in, then fades out; it pulses except under reduced motion
+ * (18).
+ * A lesson with no video is never asked for, and the map's first load asks
+ * for no place's lessons (19). With ?latency=1500 (the stand-in takes 1.5 s,
+ * as the real route can) a row clicked at once waits for it, and a row the
+ * pointer rested on first still opens within 300 ms (20). Times are from the
+ * click to the frame going into the page, on the page's own clock (FAST).
+ * The 300 ms includes the route change to the lesson page, which on the dev
+ * server is a request of its own (measured 107 to 299 ms, more on a busy
+ * server), so rows 17 and 20 print it apart from the rest of the wait.
+ * Rows 17, 18 and 20 need the test videos and are NOT COVERED without them.
  *
  * ROW 12 PLAYS A REAL VIDEO. In course mode every lesson that has a video
  * plays the harness's test video 1, and the stand-in server holds it to that
@@ -67,7 +85,8 @@
  * (the camera at the place's stop, the student's card up) and
  * place-N-name-panel.png for places 3 and 5 (the place open). And two more
  * for the lessons' text (G5): lesson-a5l22-text-no-video.png and
- * lesson-a5l08-video-milestone-text.png.
+ * lesson-a5l08-video-milestone-text.png. And one of the video's placeholder
+ * while the address is on its way (row 18): lesson-video-placeholder.png.
  *
  * What a row reads, so a change in the markup is found fast:
  *   hooks      window.__worldReady, __worldError, __worldDepth, __worldDepthFor(id),
@@ -100,6 +119,12 @@
  *              element holding the "Milestone" label, the innermost element
  *              saying "Not recorded yet.", and the text's ul, ol, li value,
  *              strong, br and a (href, target, rel)
+ *   the wait   (rows 17 to 20) window.__fixture.calls (getEmbed, by lesson),
+ *              the placeholder [data-video-veil] outside `main` (data-gone,
+ *              its computed opacity, visibility, pointer-events and its
+ *              ::before animation-name, its box against the 16:9 box), the
+ *              panel's rows by their aria-label number, and the frame's
+ *              "ready" message (FAST)
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
@@ -345,6 +370,85 @@ const PROBE = (tellaOrigin) => {
   }).observe(document, { childList: true, subtree: true })
 }
 
+/**
+ * Rows 17 to 20, installed before the page's own scripts: when a panel row was
+ * clicked, when the lesson's frame went into the page, when its player first
+ * said anything and when it said "ready", and what the app's placeholder over
+ * the frame looked like at each of those moments. All on the page's own clock
+ * (performance.now). The frame's address is never read. reset() forgets one
+ * click so the page can time a second.
+ *
+ * "First said anything" because the real player says playbackState "idle" in
+ * the same millisecond just before "ready" (measured 2026-10-14, 3 loads of
+ * 3), and the placeholder goes at the player's first word.
+ */
+const FAST = (tellaOrigin) => {
+  if (window !== window.top) return
+  const veil = () => {
+    const v = [...document.querySelectorAll('[data-video-veil]')].find((x) => !x.closest('main'))
+    if (!v) return null
+    const cs = getComputedStyle(v)
+    const box = v.parentElement
+    const frame = box.querySelector('iframe[title="Lesson video"]')
+    return {
+      gone: v.dataset.gone !== undefined,
+      opacity: Number(cs.opacity),
+      visibility: cs.visibility,
+      text: (v.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      // The 16:9 box, edge to edge (inside its 1 px border).
+      covers: v.offsetWidth > 0 && Math.abs(v.offsetWidth - box.clientWidth) <= 1 && Math.abs(v.offsetHeight - box.clientHeight) <= 1,
+      // After the frame in the same box, both absolutely placed: drawn over it.
+      overFrame: !!frame && frame.parentElement === box && (frame.compareDocumentPosition(v) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+      takesClicks: cs.pointerEvents !== 'none',
+      pulse: getComputedStyle(v, '::before').animationName,
+    }
+  }
+  const fresh = () => ({ click: null, heading: null, frame: null, first: null, firstSaid: null, ready: null, veilAtFrame: null, veilAtFirst: null, veilAtReady: null })
+  window.__fast = { ...fresh(), veil, reset: () => Object.assign(window.__fast, fresh()) }
+  document.addEventListener(
+    'click',
+    (e) => {
+      if (window.__fast.click === null && e.target instanceof Element && e.target.closest('main section[aria-labelledby="v4-panel-title"] ol')) window.__fast.click = performance.now()
+    },
+    true,
+  )
+  window.addEventListener('message', (e) => {
+    if (e.origin !== tellaOrigin || window.__fast.click === null || window.__fast.ready !== null) return
+    let d = e.data
+    if (typeof d === 'string') {
+      try {
+        d = JSON.parse(d)
+      } catch {
+        return
+      }
+    }
+    if (!d || typeof d !== 'object') return
+    // Registered before the page's own listener, so this sees the placeholder as it was when each word arrived.
+    if (window.__fast.first === null && ['ready', 'playbackState', 'timeUpdate'].includes(d.type)) {
+      window.__fast.first = performance.now()
+      window.__fast.firstSaid = typeof d.state === 'string' ? `${d.type} ${d.state}` : String(d.type)
+      window.__fast.veilAtFirst = veil()
+    }
+    if (d.type === 'ready') {
+      window.__fast.ready = performance.now()
+      window.__fast.veilAtReady = veil()
+    }
+  })
+  new MutationObserver(() => {
+    if (window.__fast.click === null) return
+    // The lesson page's heading: the route change is done (its request to the dev server included).
+    if (window.__fast.heading === null && [...document.querySelectorAll('h1')].some((h) => !h.closest('main'))) window.__fast.heading = performance.now()
+    if (window.__fast.frame !== null) return
+    if ([...document.querySelectorAll('iframe[title="Lesson video"]')].some((x) => !x.closest('main'))) {
+      window.__fast.frame = performance.now()
+      window.__fast.veilAtFrame = veil()
+    }
+  }).observe(document, { childList: true, subtree: true })
+}
+
+/** The stand-in server's getEmbed calls for one lesson, or for every lesson. */
+const ASKED = (lessonId) => (window.__fixture?.calls ?? []).filter((c) => c.call === 'getEmbed' && (lessonId === null || c.lessonId === lessonId)).map((c) => c.lessonId)
+
 /** Post one command to the lesson's frame, the way the measured player takes them. */
 const SEND = ({ message, tellaOrigin }) => {
   const frame = [...document.querySelectorAll('iframe[title="Lesson video"]')].find((x) => !x.closest('main'))
@@ -521,12 +625,13 @@ async function waitFor(page, fn, { arg, timeout = 10000, poll = 120, what, soft 
   }
 }
 
-async function openPage(ctx, row, urlPath, { probe = false } = {}) {
+async function openPage(ctx, row, urlPath, { probe = false, fast = false } = {}) {
   const page = await ctx.newPage()
   tally.pages++
   page.setDefaultTimeout(60000)
   await page.setViewport({ ...DESKTOP, deviceScaleFactor: 1 })
   if (probe) await page.evaluateOnNewDocument(PROBE, TELLA)
+  if (fast) await page.evaluateOnNewDocument(FAST, TELLA)
   page.on('pageerror', (e) => {
     const rec = { row: row.id, message: scrub(`${String(e.message).slice(0, 240)} :: ${(e.stack || '').split('\n').slice(1, 4).join(' <- ').slice(0, 400)}`) }
     row.pageErrors.push(rec)
@@ -704,6 +809,75 @@ async function openPlace(page, k, what) {
   return via
 }
 
+/**
+ * Rows 17 to 20: openPlace without the mouse. The label is clicked through
+ * the DOM and the pointer is parked in the header's corner first, so it rests
+ * on no row of the panel that opens; a row is reached only when a row says so.
+ */
+async function openPlaceQuietly(page, k, what) {
+  await scrollToPlace(page, k, what)
+  await sleep(450) // the labels are laid out once the scroll rests
+  await page.mouse.move(4, 4)
+  const clicked = await page.evaluate((kk) => {
+    const b = document.querySelectorAll('main button[data-mode]')[kk]
+    const el = b ? (b.dataset.mode === 'text' ? b.lastElementChild : b) : null
+    if (!el) return false
+    el.click()
+    return true
+  }, k)
+  if (!clicked) throw new Error(`${what}: the label of place ${k + 1} is not on the page`)
+  await waitPath(page, `${APP}/a${k + 1}`, what)
+  await waitPanel(page, k, what)
+}
+
+/** The middle of lesson row n (1-based) of the open panel, brought into view inside the panel's list first. Never scrolls the page. */
+async function rowPoint(page, n, what) {
+  const at = await page.evaluate((i) => {
+    const ol = document.querySelector('main section[aria-labelledby="v4-panel-title"] ol')
+    const li = ol
+      ? ([...ol.children].find((x) => Number(/^(?:Watch lesson|Lesson) (\d+),/.exec(x.querySelector('button[aria-label]')?.getAttribute('aria-label') ?? '')?.[1]) === i) ?? null)
+      : null
+    if (!li) return null
+    for (let box = li.parentElement; box && box !== document.body; box = box.parentElement) {
+      const overflowY = getComputedStyle(box).overflowY
+      if ((overflowY === 'auto' || overflowY === 'scroll') && box.scrollHeight > box.clientHeight + 1) {
+        const a = li.getBoundingClientRect()
+        const f = box.getBoundingClientRect()
+        box.scrollTop += a.top + a.height / 2 - (f.top + f.height / 2)
+        break
+      }
+    }
+    const b = li.querySelector('button').getBoundingClientRect()
+    return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }
+  }, n)
+  if (!at) throw new Error(`${what}: no lesson row ${n} in the open panel`)
+  return at
+}
+
+/** Give lesson row n (1-based) of the open panel the keyboard focus. */
+const FOCUS_ROW = (i) => {
+  const ol = document.querySelector('main section[aria-labelledby="v4-panel-title"] ol')
+  const li = ol ? [...ol.children].find((x) => Number(/^(?:Watch lesson|Lesson) (\d+),/.exec(x.querySelector('button[aria-label]')?.getAttribute('aria-label') ?? '')?.[1]) === i) : null
+  const b = li?.querySelector('button')
+  if (!b) return false
+  b.focus()
+  return document.activeElement === b
+}
+
+/** Does the harness have its two test videos (layout.tsx: how many, never which)? */
+const hasTestVideos = (page) => page.evaluate(() => document.querySelector('[data-dev-videos]')?.getAttribute('data-dev-videos') === '2')
+const NO_TEST_VIDEOS = 'the harness has no test video ([data-dev-videos] is not "2": DEV_TELLA_VIDEO_ID and DEV_TELLA_VIDEO_ID_2 are not both set), so no lesson frame can mount here.'
+
+/** A lesson that has a video in course mode (courseCatalog.ts: a watch lesson with a length). */
+const hasVideoInJson = (id) => lessonOf(id)?.type === 'watch' && LENGTHS[id] > 0
+
+/** The frame went into the page after the click: both stamps, page clock. */
+const FRAME_UP = () => window.__fast.click !== null && window.__fast.frame !== null && { click: window.__fast.click, heading: window.__fast.heading, frame: window.__fast.frame }
+
+/** "312 ms from the click (the route change to the lesson page 260 ms, then 52 ms to the frame)". */
+const split = (t) =>
+  `${Math.round(t.frame - t.click)} ms from the click (the route change to the lesson page ${t.heading === null ? '?' : Math.round(t.heading - t.click)} ms, then ${t.heading === null ? '?' : Math.round(t.frame - t.heading)} ms to the frame)`
+
 async function closePlace(page, what) {
   await page.keyboard.press('Escape')
   await waitPath(page, APP, what)
@@ -873,6 +1047,10 @@ const ROWS = [
   [14, 'A lesson with a video and a text: the player, the Milestone box, the text'],
   [15, "The links in a lesson's text"],
   [16, 'A watch lesson with no video and no text'],
+  [17, "A row's video is asked for when the pointer reaches it, once, and the click puts the frame up at once"],
+  [18, 'The placeholder over the video until its player is ready'],
+  [19, 'A lesson without a video is never asked for'],
+  [20, 'With the server taking 1.5 s, a hovered row still opens at once'],
 ]
 const nameOf = (id) => ROWS.find((r) => r[0] === id)[1]
 
@@ -1341,6 +1519,169 @@ try {
       )
       r.check('no text', m.text === null, m.text)
       r.check('the stand-in server was asked for nothing', m.asked === 0, `${m.asked} calls`)
+    })
+
+    // 17 ── A row's video is asked for when the pointer reaches it, once, and the click puts the frame up at once
+    await runRow(17, nameOf(17), async (r) => {
+      const id = 'a1l03'
+      const page = await r.open(url('', { arrive: 0, poster: 'off' }), { fast: true })
+      await ready(page, 'row 17')
+      if (!(await hasTestVideos(page))) return r.notCovered(NO_TEST_VIDEOS)
+      await openPlaceQuietly(page, 0, 'row 17')
+      const before = (await page.evaluate(ASKED, id)).length
+      const at = await rowPoint(page, 3, 'row 17')
+      await page.mouse.move(at.x, at.y)
+      await sleep(900)
+      // Out and back in: the second visit finds the address kept.
+      await page.mouse.move(4, 4)
+      await sleep(200)
+      await page.mouse.move(at.x, at.y)
+      await sleep(600)
+      const hovered = (await page.evaluate(ASKED, id)).length
+      r.check(
+        `hovering row 3 (${id}) asks the stand-in server for its video exactly once, before any click`,
+        before === 0 && hovered === 1,
+        `${before} calls before the pointer reached the row, ${hovered} after it (the pointer left and came back once)`,
+      )
+      await page.mouse.click(at.x, at.y)
+      const t = await waitFor(page, FRAME_UP, { timeout: 20000, what: 'row 17: the frame after the click' })
+      const ms = Math.round(t.frame - t.click)
+      r.check('the click then puts the lesson frame in the page within 300 ms', ms <= 300, split(t))
+      const heard = await waitFor(page, () => window.__fast.ready, { timeout: PLAYER_READY_MS, soft: true, what: 'row 17: "ready"' })
+      await sleep(500)
+      const all = (await page.evaluate(ASKED, id)).length
+      r.check('with no second ask: still one call for it once the lesson page is up and its player has said "ready"', all === 1 && !!heard, `${all} calls; "ready" ${heard ? `${Math.round(heard - t.click)} ms after the click` : 'never heard'}`)
+    })
+
+    // 18 ── The placeholder over the video until its player is ready
+    await runRow(18, nameOf(18), async (r) => {
+      const id = 'a1l04'
+      // 1.5 s for the address, and no wait on the row before the click: the placeholder's whole life, slowed down enough to look at.
+      const page = await r.open(url('', { arrive: 0, poster: 'off', latency: 1500 }), { fast: true })
+      await ready(page, 'row 18')
+      if (!(await hasTestVideos(page))) return r.notCovered(NO_TEST_VIDEOS)
+      await openPlaceQuietly(page, 0, 'row 18')
+      const at = await rowPoint(page, 4, 'row 18')
+      await page.mouse.click(at.x, at.y)
+      await waitLesson(page, lessonOf(id).title, 'row 18')
+      await sleep(450)
+      const early = await page.evaluate(() => ({ veil: window.__fast.veil(), frame: window.__fast.frame !== null, sinceClick: Math.round(performance.now() - window.__fast.click) }))
+      r.values.shot = await r.shot('lesson-video-placeholder')
+      r.check(
+        'while the address is on its way: the placeholder fills the 16:9 box, shown, saying "Loading video…", and no frame yet',
+        !!early.veil && !early.veil.gone && early.veil.opacity === 1 && early.veil.visibility === 'visible' && early.veil.covers && early.veil.text === 'Loading video…' && !early.frame,
+        early,
+      )
+      r.check('it never takes a click (pointer-events: none)', !!early.veil && !early.veil.takesClicks, early.veil?.takesClicks ?? null)
+      const pulse = early.veil?.pulse ?? null
+      await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }])
+      const still = await page.evaluate(() => window.__fast.veil()?.pulse ?? null)
+      await page.emulateMediaFeatures([])
+      r.check('it pulses, and not under prefers-reduced-motion', !!pulse && pulse !== 'none' && still === 'none', { pulse, reducedMotion: still })
+      const t = await waitFor(
+        page,
+        () =>
+          window.__fast.frame !== null &&
+          window.__fast.ready !== null && {
+            click: window.__fast.click,
+            frame: window.__fast.frame,
+            first: window.__fast.first,
+            firstSaid: window.__fast.firstSaid,
+            ready: window.__fast.ready,
+            atFrame: window.__fast.veilAtFrame,
+            atFirst: window.__fast.veilAtFirst,
+          },
+        { timeout: PLAYER_READY_MS, what: 'row 18: the frame and its "ready"' },
+      )
+      const shown = (v) => !!v && !v.gone && v.opacity === 1 && v.visibility === 'visible' && v.covers
+      r.check(
+        "the frame goes in under it, and it stays shown over the frame until the player's first word (\"ready\", or the \"idle\" the real player says in the same millisecond before it)",
+        t.frame < t.first && shown(t.atFrame) && t.atFrame.overFrame && shown(t.atFirst) && t.atFirst.overFrame && t.ready - t.first < 50,
+        {
+          frameAfterClick: Math.round(t.frame - t.click),
+          firstWord: `${t.firstSaid}, ${Math.round(t.first - t.click)} ms after the click`,
+          readyAfterIt: `${Math.round(t.ready - t.first)} ms`,
+          atFrame: { shown: shown(t.atFrame), overFrame: t.atFrame?.overFrame },
+          atFirstWord: { shown: shown(t.atFirst), overFrame: t.atFirst?.overFrame },
+        },
+      )
+      await sleep(800) // its 300 ms fade, and room
+      const late = await page.evaluate(() => window.__fast.veil())
+      r.check('after "ready" it is gone: faded to opacity 0, then hidden', !!late && late.gone && late.opacity === 0 && late.visibility === 'hidden', late)
+    })
+
+    // 19 ── A lesson without a video is never asked for
+    await runRow(19, nameOf(19), async (r) => {
+      const page = await r.open(url('', { arrive: 0, poster: 'off' }))
+      await ready(page, 'row 19')
+      await sleep(1500) // a card or a place that would ask on its own has asked by now
+      const onLoad = await page.evaluate(ASKED, null)
+      r.check(
+        "the map's first load asks for no place's lessons: at most the card's next lesson (a1l01)",
+        onLoad.length <= 1 && onLoad.every((x) => x === 'a1l01'),
+        onLoad,
+      )
+      const noVideo = 'a3l11'
+      const withVideo = 'a3l10'
+      await openPlaceQuietly(page, 2, 'row 19, place 3')
+      const p11 = await rowPoint(page, 11, 'row 19')
+      await page.mouse.move(p11.x, p11.y)
+      await sleep(600)
+      const focused = await page.evaluate(FOCUS_ROW, 11)
+      await sleep(600)
+      const none = (await page.evaluate(ASKED, noVideo)).length
+      const p10 = await rowPoint(page, 10, 'row 19')
+      await page.mouse.move(p10.x, p10.y)
+      await sleep(600)
+      const one = (await page.evaluate(ASKED, withVideo)).length
+      r.check(`course_catalog.json: ${noVideo} is a watch lesson with no video, ${withVideo} has one`, !hasVideoInJson(noVideo) && hasVideoInJson(withVideo), { [noVideo]: hasVideoInJson(noVideo), [withVideo]: hasVideoInJson(withVideo) })
+      r.check(`row 11 (${noVideo}, no video): reached by the pointer and by the keyboard, never asked for`, none === 0 && focused, `${none} calls; focused ${focused}`)
+      r.check(`row 10 beside it (${withVideo}, a video): reached by the pointer, asked for once`, one === 1, `${one} calls`)
+      await closePlace(page, 'row 19')
+      await openPlaceQuietly(page, 6, 'row 19, place 7')
+      for (const n of [1, 2, 3]) {
+        const p = await rowPoint(page, n, 'row 19, place 7')
+        await page.mouse.move(p.x, p.y)
+        await sleep(300)
+      }
+      await page.evaluate(FOCUS_ROW, 1)
+      await sleep(500)
+      const all = await page.evaluate(ASKED, null)
+      const a7 = all.filter((x) => x.startsWith('a7'))
+      r.check('place 7, where no lesson has a video: opening it and reaching rows 1 to 3 asks for nothing', a7.length === 0, a7)
+      r.check('every lesson the stand-in server was asked about in this run has a video', all.length > 0 && all.every(hasVideoInJson), all)
+    })
+
+    // 20 ── With the server taking 1.5 s, a hovered row still opens at once
+    await runRow(20, nameOf(20), async (r) => {
+      const page = await r.open(url('', { arrive: 0, poster: 'off', latency: 1500 }), { fast: true })
+      await ready(page, 'row 20')
+      if (!(await hasTestVideos(page))) return r.notCovered(NO_TEST_VIDEOS)
+      await openPlaceQuietly(page, 0, 'row 20')
+      // The control: row 5 clicked with no wait on it waits out the stand-in's 1.5 s.
+      const c = await rowPoint(page, 5, 'row 20')
+      await page.mouse.click(c.x, c.y)
+      const cold = await waitFor(page, FRAME_UP, { timeout: 20000, what: 'row 20: the frame of row 5' })
+      const coldMs = Math.round(cold.frame - cold.click)
+      await page.keyboard.press('Escape')
+      await waitPath(page, `${APP}/a1`, 'row 20')
+      await waitPanel(page, 0, 'row 20')
+      await waitFor(page, () => ![...document.querySelectorAll('iframe[title="Lesson video"]')].some((x) => !x.closest('main')), { timeout: 10000, what: 'row 20: the lesson page closed' })
+      await page.mouse.move(4, 4)
+      await page.evaluate(() => window.__fast.reset())
+      const id = 'a1l03'
+      const at = await rowPoint(page, 3, 'row 20')
+      await page.mouse.move(at.x, at.y)
+      await sleep(2200)
+      const asked = (await page.evaluate(ASKED, id)).length
+      await page.mouse.click(at.x, at.y)
+      const warm = await waitFor(page, FRAME_UP, { timeout: 20000, what: 'row 20: the frame of row 3' })
+      const ms = Math.round(warm.frame - warm.click)
+      await sleep(400)
+      const all = (await page.evaluate(ASKED, id)).length
+      r.check('the stand-in really takes 1.5 s: row 5, clicked with no wait on it, has its frame 1400 ms or more after the click', coldMs >= 1400, `${coldMs} ms`)
+      r.check('row 3, with the pointer on it 2.2 s first: its frame is in the page within 300 ms of the click', asked === 1 && ms <= 300, `${split(warm)}; asked ${asked} time before it`)
+      r.check('and it was asked for once in all', all === 1, `${all} calls`)
     })
   }
 } finally {

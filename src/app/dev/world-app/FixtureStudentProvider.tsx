@@ -11,9 +11,10 @@ import {
   coursePresetIds,
   withCourseTexts,
 } from "./courseCatalog";
+import { withEmbedCache } from "@/lib/world/embed-cache";
+import { LessonAccessContext, LessonTransportContext, type LessonAccess } from "@/lib/world/useLessonTransport";
 import {
   createFixtureServer,
-  FixtureTransportContext,
   VIDEO_LESSON_IDS,
   type DevVideos,
   type FixtureCall,
@@ -60,6 +61,10 @@ import {
  *   ?catalog=empty     no rows, no error
  *   ?catalog=shape     only the first four areas and their lessons
  *   ?catalog=course    the real course (course_catalog_prd.md, Work Item 3)
+ *
+ *   ?latency=<ms>      the stand-in server gives a lesson's address that many
+ *                      ms after it is asked (0 to 5000, default 0), as the
+ *                      real route would. Any mode.
  *
  * THE REAL COURSE. ?catalog=course swaps the generated catalog for the rows of
  * courseCatalog.ts: the 8 areas and 141 lessons of
@@ -233,6 +238,19 @@ function sampleTextOf(search: string | null): boolean {
   return search !== null && new URLSearchParams(search).get("text") === "sample";
 }
 
+/**
+ * The pretend student, as the lesson cache sees it (useLessonTransport.ts):
+ * one student, always active. It stands in for AuthContext's signed-in one,
+ * which this page does not have.
+ */
+const PRETEND_ACCESS: LessonAccess = { studentId: "fixture-student", active: true };
+
+/** ?latency=<ms>: how long the stand-in server takes to give a lesson's address. 0 to 5000, default 0. */
+function latencyOf(search: string | null): number {
+  const ms = search === null ? 0 : Number(new URLSearchParams(search).get("latency") ?? 0);
+  return Number.isFinite(ms) ? Math.min(5000, Math.max(0, Math.round(ms))) : 0;
+}
+
 interface FixtureHook {
   complete(id: string): void;
   completed(): string[];
@@ -337,8 +355,13 @@ export function FixtureStudentProvider({
       videos: devVideos,
       markWatched,
       courseVideoLessons: () => (modeOf(boot.search) === "course" ? COURSE_VIDEO_LESSON_IDS : null),
+      latencyMs: () => latencyOf(boot.search),
     }),
   );
+  // What the map's host and the lesson page both read: the stand-in server
+  // behind the page's one embed cache, made once like the server.
+  // `server.calls` still logs every request that reaches the server.
+  const [transport] = useState(() => withEmbedCache(server.transport));
 
   useEffect(() => {
     const w = window as FixtureWindow;
@@ -381,7 +404,9 @@ export function FixtureStudentProvider({
 
   return (
     <StudentContext.Provider value={value}>
-      <FixtureTransportContext.Provider value={server.transport}>{children}</FixtureTransportContext.Provider>
+      <LessonAccessContext.Provider value={PRETEND_ACCESS}>
+        <LessonTransportContext.Provider value={transport}>{children}</LessonTransportContext.Provider>
+      </LessonAccessContext.Provider>
     </StudentContext.Provider>
   );
 }

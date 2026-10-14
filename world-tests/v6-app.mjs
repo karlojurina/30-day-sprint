@@ -1068,7 +1068,7 @@ try {
       r.check('the panel has the Ad Bounty row', /Ad Bounty/.test(panel?.feature ?? ''), panel?.feature ?? null)
       r.check('the address ends /a7/a7l22', s.path === `${APP}/a7/a7l22`, s.path)
       r.check('the page shows the setup text', s.outside.includes(FEATURE_TEXT), s.outside.slice(0, 200))
-      r.check('no player', s.iframes === 0 && !/Not recorded yet\.|Loading…/.test(s.outside), { iframes: s.iframes })
+      r.check('no player', s.iframes === 0 && !/Not recorded yet\.|Loading video…/.test(s.outside), { iframes: s.iframes })
       r.check('no request to /api', r.api.length === 0, r.api.map((x) => `${x.method} ${x.url}`).slice(0, 3))
       r.values.scrollY = `${yBefore} before the click, ${s.y} on the page`
       r.values.shot = await r.shot('feature-page')

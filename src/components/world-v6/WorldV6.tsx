@@ -100,7 +100,10 @@ import s from "./world.module.css";
  * localStorage. It changes no progress and opens no lesson itself: opening and
  * closing a place, Watch, a panel row and the feature row call the source,
  * whose host changes the address, and one effect brings the component to
- * source.openK. While source.paused (a lesson page is open over the map) the
+ * source.openK. A place opening, the card showing the next lesson and the
+ * pointer or the keyboard on a panel row tell the source which lesson may be
+ * opened next (source.onPrefetch), so its video can be asked for before the
+ * click. While source.paused (a lesson page is open over the map) the
  * scene draws nothing, the root is inert, and new progress waits until it
  * closes; the stylesheet hides every layer of the interface under an inert
  * root, so only the picture is left behind the lesson. A place the address
@@ -789,6 +792,14 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       // With a source the address follows, unless it is the address that opened this place.
       const src = sourceRef.current;
       if (src && src.openK !== idx) src.onOpenArea(idx);
+      // Its first lesson not done is the likeliest click: ask for its video while the camera flies in.
+      if (src?.onPrefetch) {
+        for (let i = 0; i < src.areas[idx].lessons; i++) {
+          if (src.isDone(idx, i)) continue;
+          src.onPrefetch(idx, i);
+          break;
+        }
+      }
     },
     [cancelTween, lock, showHint],
   );
@@ -1476,6 +1487,8 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
         if (cardEl && cardK >= 0) {
           const m = markerRefs.current[cardK];
           if (m) m.dataset.card = "";
+          // The card puts the student's next lesson and its Watch button up: ask for that video now.
+          if (!cardDone && cardK === place && st.placeNext >= 0) sourceRef.current?.onPrefetch?.(cardK, st.placeNext);
           // Resting at the next place ends the done moment for the last one.
           if (!cardDone && u.doneK >= 0 && cardK !== u.doneK) {
             u.doneK = -1;
@@ -2174,6 +2187,7 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
         onShowWatched={() => setShowWatched(true)}
         onBack={closeArea}
         onOpenLesson={openLesson}
+        onPrefetch={(i) => source?.onPrefetch?.(openIdx, i)}
         onBackToArea={backToArea}
         headingRef={headingRef}
         lessonHeadingRef={lessonHeadingRef}
@@ -2955,6 +2969,7 @@ function PanelBody({
   onShowWatched,
   onBack,
   onOpenLesson,
+  onPrefetch,
   onBackToArea,
   headingRef,
   lessonHeadingRef,
@@ -2969,6 +2984,8 @@ function PanelBody({
   onShowWatched: () => void;
   onBack: () => void;
   onOpenLesson: (i: number) => void;
+  /** The pointer entered lesson row i, or the keyboard reached it. */
+  onPrefetch: (i: number) => void;
   onBackToArea: () => void;
   headingRef: RefObject<HTMLHeadingElement | null>;
   lessonHeadingRef: RefObject<HTMLHeadingElement | null>;
@@ -3040,9 +3057,11 @@ function PanelBody({
     const action = isAction(a, i);
     const length = lessonLength(c, idx, i);
     const state = lessonDone(c, idx, i, done) ? "done" : i === nextIdx ? "next" : action ? "action" : "todo";
+    // A lesson row the pointer enters or the keyboard reaches is the likeliest next click.
+    const soon = { onPointerEnter: () => onPrefetch(i), onFocus: () => onPrefetch(i) };
     if (state === "next") {
       rows.push(
-        <li key={i} className={s.nextRow}>
+        <li key={i} className={s.nextRow} {...soon}>
           <span className={s.mark} data-m="n" aria-hidden="true" />
           <span className={s.rowN} aria-hidden="true">
             {i + 1}
@@ -3070,7 +3089,7 @@ function PanelBody({
       continue;
     }
     rows.push(
-      <li key={i}>
+      <li key={i} {...soon}>
         <button
           ref={setRow(i)}
           type="button"

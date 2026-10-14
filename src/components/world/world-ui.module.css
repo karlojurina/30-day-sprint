@@ -279,6 +279,56 @@
   color: var(--color-ink-2);
 }
 
+/* The app's own placeholder, from the click until the player in the frame
+   says it is ready (or the 12 second line goes up). It lies over the frame,
+   which loads underneath: Tella's page is a grey box until its player draws.
+   It never takes a click. It fades out on opacity alone, then is hidden. */
+.veil {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--color-surface-0);
+  color: var(--color-ink-2);
+  font-size: 15px;
+  line-height: 1.55;
+  text-align: center;
+  pointer-events: none;
+}
+
+/* The soft pulse: a lighter surface breathing in and out under the words. */
+.veil::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--color-surface-2);
+  opacity: 0;
+  animation: veilPulse 1600ms ease-in-out infinite alternate;
+}
+
+.veilText {
+  position: relative;
+}
+
+.veil[data-gone] {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 300ms var(--ease),
+    visibility 0s linear 300ms;
+}
+
+.veil[data-gone]::before {
+  animation-play-state: paused;
+}
+
+@keyframes veilPulse {
+  to {
+    opacity: 0.7;
+  }
+}
+
 /* How much of the lesson has played. */
 .bar {
   height: 3px;
@@ -551,5 +601,9 @@
 
   .barFill {
     transition: none;
+  }
+
+  .veil::before {
+    animation: none;
   }
 }

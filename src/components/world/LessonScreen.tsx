@@ -8,7 +8,8 @@ import { useWorldStage } from "@/components/world/WorldStage";
 import { useStudent } from "@/contexts/StudentContext";
 import { LessonPlayer } from "@/components/world/LessonPlayer";
 import { LessonText } from "@/components/world/LessonText";
-import type { LessonTransport } from "@/lib/world/lesson-transport";
+import type { CachedLessonTransport } from "@/lib/world/embed-cache";
+import { useLessonTransport } from "@/lib/world/useLessonTransport";
 import { parseLessonText } from "@/lib/world/lesson-text";
 import { Panel } from "@/components/world/AreaScreen";
 import { mapIsSilent, useMapModel } from "@/components/world/useMapModel";
@@ -66,12 +67,16 @@ export function LessonScreen({
   /**
    * Development harness only: what the player talks to in place of the
    * server. The real routes never pass it, and the player then uses the real
-   * calls.
+   * calls, through the page's embed cache (useLessonTransport.ts).
    */
-  transport?: LessonTransport;
+  transport?: CachedLessonTransport;
 }) {
   const router = useRouter();
   const stage = useWorldStage();
+  // The same cache the map asked into before the click, so a lesson asked for
+  // there opens with its frame at once.
+  const shared = useLessonTransport();
+  const lessonTransport = transport ?? shared;
   const { areas, lessonsByArea, lessonById, hasVideo } = useWorldCatalog();
   const { status } = useMapModel();
   // While the course is loading, or did not arrive, the host's card says so.
@@ -184,7 +189,11 @@ export function LessonScreen({
           durationSeconds={lesson.duration_seconds}
           recorded={recorded}
           onCompleted={onCompleted}
-          transport={transport}
+          transport={lessonTransport}
+          // This video is up: ask for the next lesson's address while it plays.
+          onReady={() => {
+            if (next && next.type === "watch" && hasVideo(next.id)) lessonTransport.prefetch(next.id);
+          }}
           className={u.player}
         />
       )}

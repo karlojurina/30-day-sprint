@@ -1,7 +1,9 @@
+import fs from "node:fs";
 import { notFound } from "next/navigation";
 import { Bricolage_Grotesque } from "next/font/google";
 import { WorldStage } from "@/components/world/WorldStage";
 import { isTellaVideoId } from "@/lib/world/tella";
+import { matchCourseTexts } from "./courseCatalog";
 import { FixtureStudentProvider } from "./FixtureStudentProvider";
 import type { DevVideos } from "./fixtureTransport";
 
@@ -30,6 +32,16 @@ import type { DevVideos } from "./fixtureTransport";
  * what it was: no lesson has a video. `data-dev-videos` says how many ids
  * arrived and never which, and `data-dev-video-seconds` the length the three
  * video lessons were given; the proof script reads both.
+ *
+ * THE LESSONS' TEXT (courseCatalog.ts, THE LESSONS' TEXT). When
+ * DEV_COURSE_TEXT_FILE names a readable JSON file of the shape
+ * {"lessons": {"<lesson id>": {"title": "...", "text": "..."}}}, it is read
+ * here, on the server, on every request, and the texts whose title matches
+ * the course's go to the provider, which puts them on the course under
+ * ?catalog=course. Each entry left out is logged here with why, by id and
+ * title; a file that cannot be read is logged with the reason's code. The
+ * text itself is never logged. The file is private and lives outside the
+ * repository.
  */
 
 /** Used when DEV_TELLA_VIDEO_SECONDS is not set: both test videos are 67 s long. */
@@ -41,6 +53,23 @@ function readDevVideos(): DevVideos | null {
   if (!isTellaVideoId(a) || !isTellaVideoId(b)) return null;
   const seconds = Number(process.env.DEV_TELLA_VIDEO_SECONDS);
   return { a, b, seconds: isFinite(seconds) && seconds > 0 ? seconds : DEFAULT_VIDEO_SECONDS };
+}
+
+function readCourseTexts(): Record<string, string> | null {
+  const file = process.env.DEV_COURSE_TEXT_FILE;
+  if (!file) return null;
+  let json: unknown;
+  try {
+    json = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (e) {
+    // The code alone (ENOENT, EACCES): a JSON error's message quotes the file.
+    const code = (e as NodeJS.ErrnoException).code;
+    console.warn(`[dev/world-app] DEV_COURSE_TEXT_FILE was not read: ${code ?? "not valid JSON"}`);
+    return null;
+  }
+  const { texts, skipped } = matchCourseTexts(json);
+  for (const line of skipped) console.warn(`[dev/world-app] DEV_COURSE_TEXT_FILE: ${line}`);
+  return texts;
 }
 
 const display = Bricolage_Grotesque({
@@ -58,13 +87,14 @@ export const metadata = {
 export default function WorldAppLayout({ children }: { children: React.ReactNode }) {
   if (process.env.NODE_ENV !== "development") notFound();
   const devVideos = readDevVideos();
+  const courseTexts = readCourseTexts();
   return (
     <div
       className={display.variable}
       data-dev-videos={devVideos ? 2 : undefined}
       data-dev-video-seconds={devVideos?.seconds}
     >
-      <FixtureStudentProvider devVideos={devVideos}>
+      <FixtureStudentProvider devVideos={devVideos} courseTexts={courseTexts}>
         <WorldStage base="/dev/world-app">{children}</WorldStage>
       </FixtureStudentProvider>
     </div>

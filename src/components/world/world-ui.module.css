@@ -306,14 +306,77 @@
   color: var(--color-ink-2);
 }
 
-/* ── A setup step's text, and the milestone ────────────────── */
+/* ── A lesson's written text, and the milestone ────────────── */
 
-.body {
-  margin: 16px 0 0;
+/* The row's description (LessonText.tsx): under the video, or in its place
+   when the lesson has none. Tailwind's reset (imported by globals.css) takes
+   the bullets, numbers, indents and link colour off, so each is set here. */
+.text {
+  margin-top: 16px;
   max-width: 68ch;
   font-size: 15px;
   line-height: 1.55;
   color: var(--color-ink-2);
+  overflow-wrap: break-word;
+}
+
+/* One weight for both rules, so the gap between blocks is not overruled. */
+.text > * {
+  margin: 0;
+}
+
+.text > * + * {
+  margin-top: 12px;
+}
+
+.text ul,
+.text ol {
+  padding-left: 22px;
+}
+
+.text ul {
+  list-style: disc;
+}
+
+.text ol {
+  list-style: decimal;
+}
+
+.text li + li {
+  margin-top: 6px;
+}
+
+.text li::marker {
+  color: var(--color-ink-3);
+}
+
+.text strong {
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.text a {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.text a:hover {
+  color: var(--color-accent-strong);
+}
+
+/* A link inside a sentence takes the small radius for its focus ring. */
+.card .text a:focus-visible {
+  border-radius: 5px;
+}
+
+/* The one short line when a watch lesson has neither a video nor a text:
+   "Not recorded yet." No box. */
+.muted {
+  margin: 16px 0 0;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--color-ink-3);
 }
 
 .milestone {
@@ -475,7 +538,8 @@
 
   /* On the solid phone card the tertiary ink measures about 4.3:1; the
      secondary ink clears the 4.5:1 floor. */
-  .eyebrow {
+  .eyebrow,
+  .muted {
     color: var(--color-ink-2);
   }
 }

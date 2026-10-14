@@ -1,0 +1,12 @@
+{
+  "lessons": {
+    "a5l22": {
+      "title": "Action Item - Brand Deck",
+      "text": "This is sample text for the development page. None of it is the course's own wording.\n\nBefore you start, have **the brand's last 20 ads** open in one tab.\nKeep every note in one document.\n\n- Pick a brand you have never bought from\n- Save **5 of its ads** that ran for over a month\n- Write one line on why each of them works\n\n3. Fill in the template, one slide per ad\n4. Mark the format and the layout of each ad\n5. Send the finished deck to your coach\n\nThe template is here: [the sample deck template](https://example.com/sample-deck-template). This one must stay plain text: [run the sample script](javascript:alert(1))."
+    },
+    "a5l08": {
+      "title": "Action item - The Backbone",
+      "text": "This is sample text for the development page. None of it is the course's own wording.\n\nBefore you start, have **the brand's last 20 ads** open in one tab.\nKeep every note in one document.\n\n- Pick a brand you have never bought from\n- Save **5 of its ads** that ran for over a month\n- Write one line on why each of them works\n\n3. Fill in the template, one slide per ad\n4. Mark the format and the layout of each ad\n5. Send the finished deck to your coach\n\nThe template is here: [the sample deck template](https://example.com/sample-deck-template). This one must stay plain text: [run the sample script](javascript:alert(1))."
+    }
+  }
+}

@@ -12,14 +12,24 @@
  * generated one: src/app/dev/world-app/courseCatalog.ts builds the rows from
  * supabase/catalog/course_catalog.json and course-lengths.fixture.json.
  * Headless Chrome on the real GPU, autoplay allowed, muted, 1691x1278. Takes
- * about 5 minutes (22 page loads, 23 when row 2 fails, and row 12 watches a
+ * about 6 minutes (27 page loads, 28 when row 2 fails, and row 12 watches a
  * 67 second clip in real time): run it in the background.
  *
  * One PASS or FAIL line per row of the table, with what was measured after it.
- * Every row loads its own fresh page in its own browser context. The four
- * rows a script cannot judge (G1 to G4) are printed as NOT COVERED with their
+ * Every row loads its own fresh page in its own browser context. The five
+ * rows a script cannot judge (G1 to G5) are printed as NOT COVERED with their
  * reason and are never a pass. After the rows, one MEASURED line: page errors
  * and requests to /api over every page the run opened. Exit code 1 on any FAIL.
+ *
+ * ROWS 13 TO 16 ARE THE LESSONS' TEXT, on ?catalog=course&text=sample: the
+ * made-up text of course-sample-text.fixture.json on a5l22 (a setup action
+ * item, no video) and a5l08 (a watch action item with one). A lesson with no
+ * video has no player and no 16:9 box, and its text sits right under the
+ * Milestone box (13); a lesson with a video has the player, then the
+ * Milestone box, then the text (14); the https link opens in a new tab with
+ * no opener and the javascript: one is no link (15); a watch lesson with no
+ * video and no text says "Not recorded yet." on one short line (16). Row 13
+ * also opens a5l22 without ?text=sample and finds no sample there.
  *
  * ROW 12 PLAYS A REAL VIDEO. In course mode every lesson that has a video
  * plays the harness's test video 1, and the stand-in server holds it to that
@@ -55,7 +65,9 @@
  * Screenshots and results.json: world-tests/shots/v6/course/ (git-ignored).
  * The ten a person looks at: place-N-name-parked.png for the eight places
  * (the camera at the place's stop, the student's card up) and
- * place-N-name-panel.png for places 3 and 5 (the place open).
+ * place-N-name-panel.png for places 3 and 5 (the place open). And two more
+ * for the lessons' text (G5): lesson-a5l22-text-no-video.png and
+ * lesson-a5l08-video-milestone-text.png.
  *
  * What a row reads, so a change in the markup is found fast:
  *   hooks      window.__worldReady, __worldError, __worldDepth, __worldDepthFor(id),
@@ -81,6 +93,13 @@
  *              outside `main`), window.__fixture.watch[lessonId]
  *   the player (row 12) the frame's messages: "ready", "timeUpdate" with
  *              currentTime and duration, "playbackState" with state
+ *   the text   (rows 13 to 16) outside `main`: elements whose class ends
+ *              "__player" or "__frame" (the CSS module's names for .player and
+ *              .frame), any element with a 16:9 aspect-ratio, the element
+ *              holding the paragraph that is the sample's first line, the
+ *              element holding the "Milestone" label, the innermost element
+ *              saying "Not recorded yet.", and the text's ul, ol, li value,
+ *              strong, br and a (href, target, rel)
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
@@ -128,6 +147,16 @@ const POND = { place: 6, id: 'a7l19', title: 'How To Win On The Ad Bounty Progra
 // ── The course, as the data files hold it ───────────────────────────────────
 const CATALOG = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'supabase', 'catalog', 'course_catalog.json'), 'utf8'))
 const LENGTHS = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'src', 'app', 'dev', 'world-app', 'course-lengths.fixture.json'), 'utf8'))
+/**
+ * Rows 13 to 16: the made-up text ?text=sample puts on a5l22 and a5l08
+ * (courseCatalog.ts, THE LESSONS' TEXT). Its first paragraph, its https link
+ * and its javascript: link are read from it here.
+ */
+const SAMPLE = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'src', 'app', 'dev', 'world-app', 'course-sample-text.fixture.json'), 'utf8'))
+const SAMPLE_TEXT = SAMPLE.lessons.a5l22.text
+const SAMPLE_FIRST = SAMPLE_TEXT.split('\n')[0]
+const [, SAMPLE_LINK, SAMPLE_HREF] = /\[([^\]]+)\]\((https:[^)\s]+)\)/.exec(SAMPLE_TEXT)
+const [, SAMPLE_SCRIPT] = /\[([^\]]+)\]\(javascript:/.exec(SAMPLE_TEXT)
 /** Per place, in route order: the lessons that count and the rows that do not, in the JSON's order. */
 const PLACES = CATALOG.areas.map((a) => {
   const rows = CATALOG.lessons.filter((l) => l.area === a.id)
@@ -141,6 +170,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const f = (n, d = 4) => (typeof n === 'number' ? n.toFixed(d) : String(n))
 const same = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i])
 const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim()
+/** A string as a pattern that matches it and nothing else (for SAYS). */
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 /** Nothing shaped like a video id or a Tella address leaves this script. */
 const scrub = (s) =>
@@ -363,6 +394,85 @@ const WATCHED = ({ lessonId, from }) => {
     reports: reports.length,
     first: reports[0] ?? null,
     last: reports.at(-1) ?? null,
+  }
+}
+
+/**
+ * Rows 13 to 16: the lesson page under the title, measured. The player is any
+ * element whose class is the player's or its frame's (world-ui.module.css
+ * .player and .frame, as the CSS module names them: "…__player", "…__frame"),
+ * the lesson's text is the element holding the paragraph that is `first`, and
+ * the Milestone box is the element holding the "Milestone" label. Every box is
+ * in page pixels.
+ */
+const LAYOUT = (first) => {
+  const norm = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
+  const outside = (el) => !el.closest('main, nextjs-portal')
+  const box = (el) => {
+    if (!el) return null
+    const b = el.getBoundingClientRect()
+    return { top: Math.round(b.top * 10) / 10, bottom: Math.round(b.bottom * 10) / 10, h: Math.round(b.height * 10) / 10 }
+  }
+  const all = [...document.querySelectorAll('body *')].filter(outside)
+  const ofClass = (re) => all.filter((el) => [...el.classList].some((c) => re.test(c)))
+  const h1 = all.find((el) => el.tagName === 'H1') ?? null
+  const firstP = all.find((el) => el.tagName === 'P' && norm(el.textContent) === first) ?? null
+  const text = firstP?.parentElement ?? null
+  const label = all.find((el) => el.tagName === 'P' && norm(el.textContent) === 'Milestone') ?? null
+  const milestone = label?.parentElement ?? null
+  const player = ofClass(/__player$/)
+  // The innermost elements that say it, so a wrapper is not counted twice.
+  const said = all.filter((el) => norm(el.textContent) === 'Not recorded yet.' && ![...el.children].some((c) => norm(c.textContent) === 'Not recorded yet.'))
+  let words = ''
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const p = n.parentElement
+    if (!p || p.closest('main, script, style, noscript, template, nextjs-portal, next-route-announcer')) continue
+    words += ` ${n.textContent}`
+  }
+  return {
+    heading: h1 ? norm(h1.textContent) : null,
+    player: player.length,
+    playerBox: box(player[0]),
+    frames: ofClass(/__frame$/).length,
+    iframes: all.filter((el) => el.tagName === 'IFRAME').length,
+    sixteenByNine: all.filter((el) => getComputedStyle(el).aspectRatio.replace(/\s/g, '') === '16/9').length,
+    bar: !!document.querySelector('[role="progressbar"][aria-label="Lesson progress"]'),
+    milestone: box(milestone),
+    text: box(text),
+    shape: text
+      ? {
+          bullets: [...text.querySelectorAll('ul > li')].length,
+          numbers: [...text.querySelectorAll('ol > li')].map((li) => li.value),
+          olStart: text.querySelector('ol')?.start ?? null,
+          bold: text.querySelectorAll('strong').length,
+          breaks: text.querySelectorAll('p br').length,
+          // The space between each block and the one before it, in px.
+          gaps: [...text.children].slice(1).map((el) => Math.round(el.getBoundingClientRect().top - el.previousElementSibling.getBoundingClientRect().bottom)),
+        }
+      : null,
+    notRecorded: said.map((el) => ({ tag: el.tagName, ...box(el) })),
+    words: norm(words),
+    asked: (window.__fixture?.calls ?? []).length,
+  }
+}
+
+/** Row 15: the links inside the lesson's text, and whether `script` (the javascript: link's label) is inside any link. */
+const LINKS = ({ first, script }) => {
+  const norm = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
+  const outside = (el) => !el.closest('main, nextjs-portal')
+  const firstP = [...document.querySelectorAll('p')].filter(outside).find((p) => norm(p.textContent) === first)
+  const text = firstP?.parentElement ?? null
+  const holders = []
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    if (n.parentElement && outside(n.parentElement) && n.textContent.includes(script)) holders.push(n.parentElement)
+  }
+  return {
+    links: text ? [...text.querySelectorAll('a')].map((a) => ({ text: norm(a.textContent), href: a.getAttribute('href'), target: a.getAttribute('target'), rel: a.getAttribute('rel') })) : null,
+    scriptShown: holders.length > 0,
+    scriptInALink: holders.some((el) => el.closest('a') !== null),
+    scriptHrefs: [...document.querySelectorAll('a[href]')].filter(outside).filter((a) => /^\s*javascript:/i.test(a.getAttribute('href'))).length,
   }
 }
 
@@ -759,6 +869,10 @@ const ROWS = [
   [10, 'A lesson page without a video'],
   [11, "An action item's page"],
   [12, 'A course lesson watched to its end'],
+  [13, "A lesson with no video: its text in the video's place"],
+  [14, 'A lesson with a video and a text: the player, the Milestone box, the text'],
+  [15, "The links in a lesson's text"],
+  [16, 'A watch lesson with no video and no text'],
 ]
 const nameOf = (id) => ROWS.find((r) => r[0] === id)[1]
 
@@ -772,6 +886,11 @@ const GAPS = [
   ['G2', 'The default page is unchanged', 'another script proves it: `node world-tests/v6-app.mjs` must still end PASS 20  FAIL 0  NOT COVERED 3.'],
   ['G3', 'Lanterns in uncleared ground cover (C12)', 'a residual for the eye, on the same ten pictures. Not a failure.'],
   ['G4', 'The real login, the real server', 'gap by design: /ship.'],
+  [
+    'G5',
+    "How a lesson's text looks",
+    'not a script verdict. A person looks at the two pictures rows 13 and 14 take in shots/v6/course/ (lesson-a5l22-text-no-video.png, lesson-a5l08-video-milestone-text.png): the type, the lists, the bold, the link.',
+  ],
 ]
 
 browser = await puppeteer.launch({
@@ -1107,6 +1226,121 @@ try {
       // The page's own progress line divides by the catalog's length, so it ends far from full here.
       r.values.progressLine = `aria-valuenow ${s.bar}`
       r.values.heartbeats = beats.map((c) => `${f(c.position, 1)} s +${f(c.credited, 1)}${c.force ? ' forced' : ''}${c.accepted ? '' : ' REFUSED'}${c.met ? ' met' : ''}`)
+    })
+
+    // 13 ── A lesson with no video: its text in the video's place
+    await runRow(13, nameOf(13), async (r) => {
+      const id = 'a5l22'
+      const lesson = lessonOf(id)
+      const page = await r.open(url(`/a5/${id}`, { text: 'sample', arrive: 0, poster: 'off' }))
+      await waitLesson(page, lesson.title, 'row 13', LOAD_MS)
+      await waitFor(page, SAYS, { arg: escapeRe(SAMPLE_FIRST), timeout: 10000, soft: true, what: 'row 13: the text' })
+      await sleep(1500) // long enough for a player to have mounted, had the page put one up
+      const m = await page.evaluate(LAYOUT, SAMPLE_FIRST)
+      r.check(`course_catalog.json: ${id} is a setup lesson with a brief and no length`, lesson.type === 'setup' && !!lesson.action_brief && LENGTHS[id] === undefined, { type: lesson.type, length: LENGTHS[id] ?? 'none' })
+      r.check(`the heading is "${lesson.title}"`, m.heading === lesson.title, m.heading)
+      r.check(
+        "no player: no element of the player's or the frame's class, no iframe, no 16:9 box, no progress line",
+        m.player === 0 && m.frames === 0 && m.iframes === 0 && m.sixteenByNine === 0 && !m.bar,
+        { player: m.player, frames: m.frames, iframes: m.iframes, sixteenByNine: m.sixteenByNine, progressLine: m.bar },
+      )
+      const gap = m.milestone && m.text ? Math.round((m.text.top - m.milestone.bottom) * 10) / 10 : null
+      r.check(
+        "the Milestone box, then the text, its top within 80 px of the box's bottom",
+        gap !== null && gap >= 0 && gap <= 80,
+        m.milestone && m.text ? `Milestone ${m.milestone.top} to ${m.milestone.bottom}, text from ${m.text.top} (${m.text.h} px tall): ${gap} px apart` : { milestone: m.milestone, text: m.text },
+      )
+      r.check(
+        'the text is drawn as written: 3 bullets, a numbered list 3, 4, 5, bold, one line break',
+        !!m.shape && m.shape.bullets === 3 && same(m.shape.numbers, [3, 4, 5]) && m.shape.olStart === 3 && m.shape.bold >= 2 && m.shape.breaks === 1,
+        m.shape,
+      )
+      r.check('its blocks are apart: at least 8 px between each block and the next', !!m.shape && m.shape.gaps.length === 4 && m.shape.gaps.every((g) => g >= 8), m.shape?.gaps ?? null)
+      r.check('no filler line and no "Not recorded yet."', !/Nothing to watch here/.test(m.words) && m.notRecorded.length === 0, m.words.slice(0, 160))
+      r.check('the stand-in server was asked for nothing', m.asked === 0, `${m.asked} calls`)
+      r.values.shot = await r.shot('lesson-a5l22-text-no-video')
+      // The same lesson without ?text=sample: the sample is nowhere.
+      const plain = await r.open(url(`/a5/${id}`, { arrive: 0, poster: 'off' }))
+      await waitLesson(plain, lesson.title, 'row 13, without ?text=sample', LOAD_MS)
+      await sleep(800)
+      const p = await plain.evaluate(LAYOUT, SAMPLE_FIRST)
+      r.check('without ?text=sample the sample text is not on the page', p.text === null && !p.words.includes(SAMPLE_FIRST), p.words.slice(0, 160))
+    })
+
+    // 14 ── A lesson with a video and a text: the player, the Milestone box, the text
+    await runRow(14, nameOf(14), async (r) => {
+      const id = 'a5l08'
+      const lesson = lessonOf(id)
+      const page = await r.open(url(`/a5/${id}`, { text: 'sample', arrive: 0, poster: 'off' }))
+      await waitLesson(page, lesson.title, 'row 14', LOAD_MS)
+      // Whether the frame is there, and nothing about it: its address holds the video's id.
+      const frame = await waitFor(page, () => [...document.querySelectorAll('iframe[title="Lesson video"]')].some((x) => !x.closest('main')), {
+        timeout: 20000,
+        soft: true,
+        what: 'row 14: the frame',
+      })
+      await sleep(500)
+      const m = await page.evaluate(LAYOUT, SAMPLE_FIRST)
+      r.check(`course_catalog.json: ${id} is a watch lesson with a brief and a length`, lesson.type === 'watch' && !!lesson.action_brief && LENGTHS[id] > 0, { type: lesson.type, length: LENGTHS[id] ?? 'none' })
+      r.check(`the heading is "${lesson.title}"`, m.heading === lesson.title, m.heading)
+      r.check('the player is on the page: one player, its 16:9 frame, the video frame, the progress line', m.player === 1 && m.sixteenByNine === 1 && !!frame && m.iframes === 1 && m.bar, {
+        player: m.player,
+        sixteenByNine: m.sixteenByNine,
+        iframe: !!frame,
+        progressLine: m.bar,
+      })
+      const inOrder = !!m.playerBox && !!m.milestone && !!m.text && m.playerBox.bottom <= m.milestone.top && m.milestone.bottom <= m.text.top
+      r.check(
+        'in this order, top to bottom: the player, the Milestone box, the text',
+        inOrder,
+        m.playerBox && m.milestone && m.text
+          ? `player ${m.playerBox.top} to ${m.playerBox.bottom}, Milestone ${m.milestone.top} to ${m.milestone.bottom}, text ${m.text.top} to ${m.text.bottom}`
+          : { player: m.playerBox, milestone: m.milestone, text: m.text },
+      )
+      r.check('no "Not recorded yet." under it', m.notRecorded.length === 0, m.notRecorded)
+      await sleep(2500) // for the picture: the player's own first frame
+      r.values.shot = await r.shot('lesson-a5l08-video-milestone-text')
+    })
+
+    // 15 ── The links in a lesson's text
+    await runRow(15, nameOf(15), async (r) => {
+      const id = 'a5l22'
+      const page = await r.open(url(`/a5/${id}`, { text: 'sample', arrive: 0, poster: 'off' }))
+      await waitLesson(page, lessonOf(id).title, 'row 15', LOAD_MS)
+      await waitFor(page, SAYS, { arg: escapeRe(SAMPLE_FIRST), timeout: 10000, soft: true, what: 'row 15: the text' })
+      await sleep(500)
+      const l = await page.evaluate(LINKS, { first: SAMPLE_FIRST, script: SAMPLE_SCRIPT })
+      const link = l.links?.find((a) => a.text === SAMPLE_LINK) ?? null
+      r.check(`the https link "${SAMPLE_LINK}" is a link to its address`, !!link && link.href === SAMPLE_HREF, l.links)
+      r.check('it opens in a new tab with no opener: target _blank, rel holds noopener', !!link && link.target === '_blank' && /\bnoopener\b/.test(link.rel ?? ''), link ? { target: link.target, rel: link.rel } : null)
+      r.check('it is the only link in the text', l.links?.length === 1, l.links?.length ?? null)
+      r.check(
+        `the javascript: link "${SAMPLE_SCRIPT}" is shown as its label and is not a link`,
+        l.scriptShown && !l.scriptInALink && l.scriptHrefs === 0,
+        { shown: l.scriptShown, insideALink: l.scriptInALink, javascriptHrefsOnThePage: l.scriptHrefs },
+      )
+    })
+
+    // 16 ── A watch lesson with no video and no text
+    await runRow(16, nameOf(16), async (r) => {
+      const id = 'a7l01'
+      const lesson = lessonOf(id)
+      const page = await r.open(url(`/a7/${id}`, { text: 'sample', arrive: 0, poster: 'off' }))
+      await waitLesson(page, lesson.title, 'row 16', LOAD_MS)
+      await waitFor(page, SAYS, { arg: 'Not recorded yet\\.', timeout: 10000, soft: true, what: 'row 16: the line' })
+      await sleep(1500) // long enough for a player to have mounted, had the page put one up
+      const m = await page.evaluate(LAYOUT, SAMPLE_FIRST)
+      r.check(`course_catalog.json: ${id} is a watch lesson with no length, and the sample has no text for it`, lesson.type === 'watch' && LENGTHS[id] === undefined && SAMPLE.lessons[id] === undefined, { type: lesson.type, length: LENGTHS[id] ?? 'none' })
+      r.check(`the heading is "${lesson.title}"`, m.heading === lesson.title, m.heading)
+      const line = m.notRecorded.length === 1 ? m.notRecorded[0] : null
+      r.check('"Not recorded yet." once, on one short line (a paragraph under 30 px tall)', !!line && line.tag === 'P' && line.h > 0 && line.h < 30, m.notRecorded)
+      r.check(
+        "no box: no element of the player's or the frame's class, no iframe, no 16:9 box",
+        m.player === 0 && m.frames === 0 && m.iframes === 0 && m.sixteenByNine === 0 && !m.bar,
+        { player: m.player, frames: m.frames, iframes: m.iframes, sixteenByNine: m.sixteenByNine },
+      )
+      r.check('no text', m.text === null, m.text)
+      r.check('the stand-in server was asked for nothing', m.asked === 0, `${m.asked} calls`)
     })
   }
 } finally {

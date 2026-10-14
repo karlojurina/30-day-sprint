@@ -124,6 +124,9 @@ export interface LessonPlayerProps {
    * False when the catalog already knows there is no video behind this lesson.
    * The player then shows "Not recorded yet." and asks the server for nothing.
    * Once a video is on the page, a false here is ignored: see the render.
+   * The lesson page never mounts the player for a lesson the catalog already
+   * says has no video (LessonScreen), so there a false is one that arrived
+   * after the player was put up.
    */
   recorded?: boolean;
   /**

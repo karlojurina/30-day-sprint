@@ -4,7 +4,13 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type R
 import { StudentContext, type StudentContextType } from "@/contexts/StudentContext";
 import type { CatalogLessonLike, CatalogRegionLike } from "@/lib/world/catalog";
 import type { StudentLessonWatch } from "@/types/database";
-import { COURSE, COURSE_VIDEO_LESSON_IDS, coursePresetIds } from "./courseCatalog";
+import {
+  COURSE,
+  COURSE_VIDEO_LESSON_IDS,
+  COURSE_WITH_SAMPLE_TEXT,
+  coursePresetIds,
+  withCourseTexts,
+} from "./courseCatalog";
 import {
   createFixtureServer,
   FixtureTransportContext,
@@ -63,6 +69,12 @@ import {
  * video 1 (fixtureTransport.ts). Its presets are p0, mid (areas 1 to 3 done,
  * lessons 1 to 9 of area 4) and all; any other name is p0.
  * world-tests/v6-course.mjs walks it.
+ *
+ * THE LESSONS' TEXT, course mode only (courseCatalog.ts, THE LESSONS' TEXT).
+ * With ?text=sample the made-up sample text is on a5l22 and a5l08, and
+ * nothing else is. Without it, the texts of the private file the layout read
+ * from DEV_COURSE_TEXT_FILE (`courseTexts`), when there is one. With neither,
+ * no lesson has a text, as before. Every other mode ignores both.
  *
  * For the browser run: window.__fixture.complete(id) marks a lesson watched,
  * window.__fixture.completed() lists what is watched, window.__fixture.watch
@@ -216,6 +228,11 @@ function modeOf(search: string | null): CatalogMode | null {
   return search === null ? null : catalogMode(new URLSearchParams(search).get("catalog"));
 }
 
+/** ?text=sample: the course's sample text in place of any other. */
+function sampleTextOf(search: string | null): boolean {
+  return search !== null && new URLSearchParams(search).get("text") === "sample";
+}
+
 interface FixtureHook {
   complete(id: string): void;
   completed(): string[];
@@ -231,10 +248,17 @@ const noServerQuery = () => null;
 export function FixtureStudentProvider({
   children,
   devVideos = null,
+  courseTexts = null,
 }: {
   children: ReactNode;
   /** The two test videos from .env.local, or null when they are not set. */
   devVideos?: DevVideos | null;
+  /**
+   * Lesson id to text, from the private file DEV_COURSE_TEXT_FILE names, as
+   * the layout matched it against the course's titles. null when the
+   * variable is not set or the file could not be read.
+   */
+  courseTexts?: Readonly<Record<string, string>> | null;
 }) {
   // The query string as it was when this provider mounted. null on the server
   // and while hydrating (the server render has no query), so the first paint
@@ -246,6 +270,11 @@ export function FixtureStudentProvider({
     noServerQuery,
   );
   const mode = useMemo(() => modeOf(search), [search]);
+  const sampleText = sampleTextOf(search);
+  // The course with the private file's texts, made once: the layout hands
+  // down a new object on every server render, and the map must not be handed
+  // a new list of lessons for that.
+  const [courseWithFileTexts] = useState(() => (courseTexts ? withCourseTexts(courseTexts) : COURSE));
   const preset = useMemo(() => {
     if (search === null) return [];
     const name = new URLSearchParams(search).get("p");
@@ -329,10 +358,10 @@ export function FixtureStudentProvider({
   const videoSeconds = devVideos?.seconds ?? null;
   const rows = useMemo(() => {
     // The real course brings its own lengths and videos: the three video lessons are not part of it.
-    if (mode === "course") return COURSE;
+    if (mode === "course") return sampleText ? COURSE_WITH_SAMPLE_TEXT : courseWithFileTexts;
     const base = mode === "ready" ? FULL : mode === "shape" ? FIRST_FOUR : NONE;
     return videoSeconds === null ? base : withVideos(base, videoSeconds);
-  }, [mode, videoSeconds]);
+  }, [mode, sampleText, courseWithFileTexts, videoSeconds]);
 
   const value = useMemo(
     () =>

@@ -7,7 +7,9 @@ import { useWorldCatalog } from "@/lib/world/useWorldCatalog";
 import { useWorldStage } from "@/components/world/WorldStage";
 import { useStudent } from "@/contexts/StudentContext";
 import { LessonPlayer } from "@/components/world/LessonPlayer";
+import { LessonText } from "@/components/world/LessonText";
 import type { LessonTransport } from "@/lib/world/lesson-transport";
+import { parseLessonText } from "@/lib/world/lesson-text";
 import { Panel } from "@/components/world/AreaScreen";
 import { mapIsSilent, useMapModel } from "@/components/world/useMapModel";
 import { pad2 } from "@/components/world-v6/study";
@@ -33,6 +35,20 @@ import u from "@/components/world/world-ui.module.css";
  * minutes when the catalog has a length, and the action mark on an action
  * item. A lesson that does not count (the Ad Bounty row) gets the place's
  * number and name only.
+ *
+ * UNDER THE TITLE. A watch lesson with a video: the player, the Milestone box
+ * when the lesson is an action item, then the lesson's text when it has one.
+ * A lesson with no video (a setup step, or a watch lesson not filmed yet) has
+ * no video-sized box at all: the Milestone box, then the text in the video's
+ * place. With no text either, a watch lesson says "Not recorded yet." on one
+ * short line and a setup step says nothing. Which of the two layouts it is,
+ * is read from the catalog (`hasVideo` and the type) before anything is asked
+ * of the server; the player is not mounted for a lesson with no video.
+ *
+ * Once the player is up for a lesson it stays up for that lesson. A refresh
+ * of the student's data whose read of the videos failed answers "no video"
+ * for every lesson, and that must not take a playing video off the page: the
+ * player keeps it and handles `recorded` turning false itself.
  */
 export function LessonScreen({
   areaId,
@@ -62,6 +78,8 @@ export function LessonScreen({
   const silent = mapIsSilent(status);
   const { completedLessonIds, markWatched } = useStudent();
   const [justCompleted, setJustCompleted] = useState<string[] | null>(null);
+  // The lesson the player was put up for. It stays up for that lesson.
+  const [playerFor, setPlayerFor] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
 
   const placeHref = stage.href(areaId);
@@ -81,6 +99,13 @@ export function LessonScreen({
   const area = areas.find((a) => a.id === areaId);
   const lesson = lessonById(lessonId);
   const shown = !silent && !!area && !!lesson;
+
+  // Whether this lesson gets the player, from the catalog alone, before any
+  // request. Once it has, `hasVideo` turning false under it changes nothing.
+  const recorded = !!lesson && hasVideo(lesson.id);
+  const watch = lesson?.type === "watch";
+  if (watch && recorded && playerFor !== lessonId) setPlayerFor(lessonId);
+  const withPlayer = watch && (recorded || playerFor === lessonId);
 
   // The map behind this page is inert while it is open, so the keyboard starts
   // here. preventScroll: a focus must never move the page, and so the camera.
@@ -113,6 +138,7 @@ export function LessonScreen({
   const counting = siblings.filter((l) => l.counts_toward_progress);
   const position = counting.findIndex((l) => l.id === lessonId) + 1;
   const minutes = position > 0 ? minutesOf(lesson.duration_seconds) : null;
+  const text = parseLessonText(lesson.description);
 
   return (
     <Panel>
@@ -152,19 +178,15 @@ export function LessonScreen({
         {lesson.title}
       </h1>
 
-      {lesson.type === "watch" ? (
+      {withPlayer && (
         <LessonPlayer
           lessonId={lesson.id}
           durationSeconds={lesson.duration_seconds}
-          recorded={hasVideo(lesson.id)}
+          recorded={recorded}
           onCompleted={onCompleted}
           transport={transport}
           className={u.player}
         />
-      ) : (
-        <p className={u.body}>
-          {lesson.description ?? "Nothing to watch here — this one is a setup step."}
-        </p>
       )}
 
       {lesson.requires_action && (
@@ -175,6 +197,12 @@ export function LessonScreen({
           </p>
           <p className={u.milestoneBrief}>{lesson.action_brief}</p>
         </div>
+      )}
+
+      {text.length > 0 ? (
+        <LessonText blocks={text} />
+      ) : (
+        !withPlayer && watch && <p className={u.muted}>Not recorded yet.</p>
       )}
 
       {(done || devComplete || next) && (

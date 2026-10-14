@@ -53,3 +53,6 @@ gen('../src/lib/world/tella-lock.ts', './_gen/tella-lock.ts')
 gen('../src/lib/world/tella-player.ts', './_gen/tella-player.ts', [
   ['from "./tella"', 'from "./tella.ts"'],
 ])
+
+// lesson-text.ts has no imports at all, so it copies across untouched.
+gen('../src/lib/world/lesson-text.ts', './_gen/lesson-text.ts')

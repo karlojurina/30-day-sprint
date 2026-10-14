@@ -75,3 +75,6 @@ gen('../src/lib/world/discount.ts', './_gen/discount.ts', [
 gen('../src/lib/world/discount-server.ts', './_gen/discount-server.ts', [
   ['from "./discount"', 'from "./discount.ts"'],
 ])
+
+// curriculum-reset.ts imports only a TYPE from supabase-js, which --experimental-strip-types erases.
+gen('../src/lib/curriculum-reset.ts', './_gen/curriculum-reset.ts')

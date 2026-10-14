@@ -5,6 +5,11 @@ import { isDmEnabled } from "@/lib/dm-toggles";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import { csmSprintWindowCutoffIso } from "@/lib/constants";
 import {
+  courseAnchorIso,
+  daysOnCourse,
+  getCurriculumResetAt,
+} from "@/lib/curriculum-reset";
+import {
   verifyCronAuth,
   cronUnauthorizedResponse,
   logCronStart,
@@ -37,6 +42,20 @@ export async function GET(request: NextRequest) {
   const supabase = createServiceClient();
   const now = new Date();
   const alerts: { student_id: string; alert_type: string; message: string }[] = [];
+
+  // Cutover WI-3: the course switch's moment, null while the old course
+  // is live. A failed read stops the run and shows in cron_runs:
+  // guessing "no switch" would alert every student who paid before the
+  // switch as "never completed" on the old clock.
+  let resetAt: string | null;
+  try {
+    resetAt = await getCurriculumResetAt(supabase);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error("[check-engagement] reset read failed:", message);
+    await logCronFinish(runId, "failed", { error: message });
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 
   const { data: students, error: studentsErr } = await supabase
     .from("students")
@@ -140,11 +159,14 @@ export async function GET(request: NextRequest) {
   );
 
   for (const student of students) {
-    const dayNumber = Math.max(
-      1,
-      Math.ceil(
-        (now.getTime() - new Date(student.first_paid_at ?? student.joined_at).getTime()) / 86400000
-      )
+    // Cutover WI-3: Day N on the course, counted from the later of first
+    // payment and the switch. With no switch this is the old formula
+    // (first_paid_at ?? joined_at, max(1, ceil(days))). After it, the
+    // "never completed" branches below start again from the switch for
+    // a student who paid before it.
+    const dayNumber = daysOnCourse(
+      courseAnchorIso(student.first_paid_at ?? null, student.joined_at, resetAt),
+      now.getTime(),
     );
     const studentData = completionsByStudent[student.id];
     const completedLessonIds = studentData?.lessonIds || new Set();

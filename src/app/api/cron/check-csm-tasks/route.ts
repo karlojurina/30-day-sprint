@@ -47,6 +47,7 @@ import {
   triggers,
   evaluateCustomTrigger,
   snapshotIsCanceling,
+  alertTask,
   SCENARIO_BUCKET,
 } from "@/lib/csm-triggers";
 import {
@@ -54,6 +55,7 @@ import {
   csmSprintWindowCutoffIso,
   sprintDayNumber,
 } from "@/lib/constants";
+import { getCurriculumResetAt } from "@/lib/curriculum-reset";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import type { Student, TriggerConfig } from "@/types/database";
 
@@ -90,37 +92,9 @@ function priorityFor(bucket: string): number {
   return 99;
 }
 
-/**
- * v58 - map disengagement_alerts rows (created by check-engagement)
- * to the closest brief-v3 scenario.
- *
- *   no_lessons_3d  → `nolessons.day{N}` based on the day tier
- *   no_login_5d    → `pace.day{N}` (student hasn't been around)
- *   no_tasks_7d    → `pace.day{N}` (student isn't completing
- *                    things)
- *
- * Day-tier matching is loose: the trigger functions themselves
- * also gate by day, so this just picks the right scenario when
- * the engagement cron noticed a problem on a day-N tier.
- */
-function pickExistingAlertScenario(
-  alertType: string,
-  day: number,
-): string | null {
-  if (alertType === "no_lessons_3d") {
-    if (day <= 5)  return "nolessons.day3";
-    if (day <= 10) return "nolessons.day7";
-    if (day <= 17) return "nolessons.day14";
-    return null;
-  }
-  if (alertType === "no_tasks_7d" || alertType === "no_login_5d") {
-    if (day <= 9)  return "pace.day7";
-    if (day <= 17) return "pace.day14";
-    if (day <= 24) return "pace.day21";
-    return null;
-  }
-  return null;
-}
+// The alert → scenario mapping (pickExistingAlertScenario) and the
+// progress gate live in src/lib/csm-triggers.ts as alertTask, since
+// cutover WI-3, so the client test can run them on both courses.
 
 const ROUTE_NAME = "check-csm-tasks";
 
@@ -135,6 +109,19 @@ export async function GET(request: NextRequest) {
 
   const supabase = createServiceClient();
 
+  // Cutover WI-3: the course switch's moment, null while the old course
+  // is live. A failed read stops the run here and shows in cron_runs:
+  // guessing "no switch" would judge every student on the old 30-day
+  // clock again and flood the queue.
+  let resetAt: string | null;
+  try {
+    resetAt = await getCurriculumResetAt(supabase);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    await logCronFinish(runId, "failed", { error: message });
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+
   // ─── Bulk pulls ─────────────────────────────────────────────
 
   const [
@@ -144,6 +131,7 @@ export async function GET(request: NextRequest) {
     templatesRes,
     alertsRes,
     milestonesRes,
+    regionsRes,
   ] = await Promise.all([
     // Limit to actual paying students who joined on/after the
     // tasks cutoff. csm_exempt = test accounts we never DM.
@@ -173,7 +161,9 @@ export async function GET(request: NextRequest) {
     // could only see ~1000, so students whose completions fell
     // outside that slice appeared as "0 lessons watched" and got
     // bogus nolessons.day3 tasks they couldn't escape.
-    supabase.from("lessons").select("id, region_id, requires_action"),
+    supabase
+      .from("lessons")
+      .select("id, region_id, requires_action, counts_toward_progress"),
     // v75.56: tasks + milestones are UNBOUNDED tables (one row per
     // task / per student forever) and a raw .limit(50000) does NOT
     // bypass PostgREST's server-side ~1000-row cap — the limit only
@@ -226,6 +216,10 @@ export async function GET(request: NextRequest) {
         // and 3c would wrongly dismiss their valid tasks.
         .order("student_id"),
     ),
+    // Cutover WI-3: the live course's regions, in order (r1..r4 before
+    // the switch, a1..a8 after it). The snapshot's region map is built
+    // from these rows instead of a literal r1..r4.
+    supabase.from("regions").select("id, order_num").order("order_num"),
   ]);
 
   // v75.56: tasks + milestones errors now short-circuit too. The
@@ -238,11 +232,24 @@ export async function GET(request: NextRequest) {
     lessonsRes.error ??
     templatesRes.error ??
     tasksRes.error ??
-    milestonesRes.error;
+    milestonesRes.error ??
+    regionsRes.error;
   if (studentsErr) {
     await logCronFinish(runId, "failed", { error: studentsErr.message });
     return NextResponse.json({ error: studentsErr.message }, { status: 500 });
   }
+
+  // An empty region list would count 0 lessons for every student and
+  // fire nolessons.* on all of them. Stop instead, visibly.
+  const regionOrder = ((regionsRes.data ?? []) as Array<{ id: string }>).map(
+    (r) => r.id,
+  );
+  if (regionOrder.length === 0) {
+    const message = "regions returned no rows; no student was judged";
+    await logCronFinish(runId, "failed", { error: message });
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+  const course = { regionOrder, resetAt };
 
   const students = (studentsRes.data ?? []) as Student[];
   const lessons = lessonsRes.data ?? [];
@@ -298,7 +305,9 @@ export async function GET(request: NextRequest) {
 
   // ─── Pre-compute lookups ───────────────────────────────────
 
-  const regionTotals: Record<string, number> = { r1: 0, r2: 0, r3: 0, r4: 0 };
+  // Cutover WI-3: starts empty; the snapshot reads a region with no
+  // lessons as 0, as the old literal { r1: 0, ... } gave.
+  const regionTotals: Record<string, number> = {};
   for (const l of lessons) {
     regionTotals[l.region_id] = (regionTotals[l.region_id] ?? 0) + 1;
   }
@@ -381,6 +390,7 @@ export async function GET(request: NextRequest) {
         regionTotals,
         existingByStudent.get(student.id) ?? [],
         milestonesByStudent.get(student.id) ?? null,
+        course,
       ),
     );
   }
@@ -405,43 +415,41 @@ export async function GET(request: NextRequest) {
     behavior_summary: string;
   }> = [];
 
-  /** Cancel-path alerts only fire if the student is genuinely
-   *  behind. Skips when progressRatio >= 0.6 — a Day-7 student who
-   *  watched 8 lessons in one weekend is fine even if they haven't
-   *  logged in for five days. */
-  const CANCEL_PATH_PROGRESS_GATE = 0.6;
-
   for (const alert of alerts) {
     const student = students.find((s) => s.id === alert.student_id);
     if (!student) continue;
+    // Every student in `students` has a snapshot (built just above).
     const snap = snapByStudent.get(student.id);
+    if (!snap) continue;
     // v85.4 — the alert path bypasses the trigger registry, so the
     // canceling suppression must be enforced here too. Without this,
     // check-engagement (which has no cancel filtering) turns a quiet
     // canceling student into no_login_5d → pace.dayN every run, and
     // the wrong task re-appears each cycle after 3c dismisses it.
-    if (snap && snapshotIsCanceling(snap)) continue;
+    if (snapshotIsCanceling(snap)) continue;
     // Same login gate the built-in triggers use. A student with an
     // alert but no first_sprint_login_at hasn't opened the app yet -
     // they belong to the NA (stalled.*) pipeline, not nolessons/pace.
-    if (snap && !snap.student.first_sprint_login_at) continue;
+    if (!snap.student.first_sprint_login_at) continue;
     // v75.18: day count from first_paid_at (true Day 1), fallback to
-    // joined_at for safety during the backfill window.
-    const day = sprintDayNumber(student.first_paid_at ?? student.joined_at);
-    const scenarioId = pickExistingAlertScenario(alert.alert_type, day);
-    if (!scenarioId) continue;
-    const templateId = templateBy.get(scenarioId);
+    // joined_at for safety during the backfill window. Cutover WI-3:
+    // the day is snap.dayOnCourse (the same value before the switch,
+    // course days after it), and alertTask holds the mapping, the
+    // progress gate and the summary.
+    const task = alertTask(
+      alert.alert_type,
+      ALERT_LABEL[alert.alert_type] ?? alert.message,
+      snap,
+    );
+    if (!task) continue;
+    const templateId = templateBy.get(task.scenarioId);
     if (!templateId) continue;
 
-    // Progress gate — all four mapped scenarios are cancel_path.
-    if (snap && snap.progressRatio >= CANCEL_PATH_PROGRESS_GATE) continue;
-
-    const label = ALERT_LABEL[alert.alert_type] ?? alert.message;
     toInsert.push({
       student_id: student.id,
-      scenario_id: scenarioId,
+      scenario_id: task.scenarioId,
       template_id: templateId,
-      behavior_summary: `Day ${day} · ${label} · pace ${snap?.progressRatio.toFixed(2) ?? "?"}.`,
+      behavior_summary: task.summary,
     });
   }
 

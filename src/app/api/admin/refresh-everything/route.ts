@@ -36,6 +36,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
+import {
+  clampStartToReset,
+  getCurriculumResetAt,
+} from "@/lib/curriculum-reset";
 
 // Full pipeline can take 100-130s. 300s is Vercel Pro's max.
 export const maxDuration = 300;
@@ -98,14 +102,28 @@ export async function POST(request: NextRequest) {
   // call has not succeeded since 2026-07-13. Never widen this range
   // without passing an explicit p_end_date that stops short of collected
   // history. Repairing the old range is a deliberate, backed-up one-off.
-  const rebuildFrom = new Date(Date.now() - 2 * 86_400_000)
-    .toISOString()
-    .slice(0, 10);
+  //
+  // Cutover: never from before the course switch. Those rows were
+  // computed from progress that is now archived and would come back near
+  // 0%; the database's floor trigger refuses them too. A failed read of
+  // the switch lands in the catch: no rebuild, the error in the summary.
   try {
-    const { error } = await auth.supabase.rpc("rebuild_daily_snapshots", {
-      p_start_date: rebuildFrom,
-    });
-    summary.rebuild = error ? { error: error.message } : { ok: true };
+    const resetAt = await getCurriculumResetAt(auth.supabase);
+    const rebuildFrom = clampStartToReset(
+      new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10),
+      resetAt,
+    );
+    // The RPC's own end: current_date (UTC).
+    if (rebuildFrom > new Date().toISOString().slice(0, 10)) {
+      summary.rebuild = {
+        skipped: "nothing to rebuild before the course switch",
+      };
+    } else {
+      const { error } = await auth.supabase.rpc("rebuild_daily_snapshots", {
+        p_start_date: rebuildFrom,
+      });
+      summary.rebuild = error ? { error: error.message } : { ok: true };
+    }
   } catch (e) {
     summary.rebuild = {
       error: e instanceof Error ? e.message : String(e),

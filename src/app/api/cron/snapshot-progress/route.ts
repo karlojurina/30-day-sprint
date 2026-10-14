@@ -50,6 +50,10 @@ import { createServiceClient } from "@/lib/supabase-server";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 import {
+  clampStartToReset,
+  getCurriculumResetAt,
+} from "@/lib/curriculum-reset";
+import {
   verifyCronAuth,
   cronUnauthorizedResponse,
   logCronStart,
@@ -119,10 +123,12 @@ export async function GET(request: NextRequest) {
 
   // Lessons count — denominator for avg_progress. v75.1 excludes
   // l057 (bounty onboarding) to match the 64-lesson sprint count.
+  // Cutover: by the v92 flag, false on l057 alone on the old course
+  // (so still 64) and on the pond row a7l19 on the new one (140).
   const { count: lessonCount } = await supabase
     .from("lessons")
     .select("id", { count: "exact", head: true })
-    .neq("id", "l057");
+    .eq("counts_toward_progress", true);
   const totalLessons = lessonCount ?? 0;
 
   // Pull every currently-active PAYING student.
@@ -295,12 +301,24 @@ export async function GET(request: NextRequest) {
   // disagree and the numbers would flip every time someone pressed
   // Refresh. One definition, one writer: the RPC owns this table and the
   // cron owns canceling_snapshots (which genuinely cannot be recomputed).
-  const rebuildFrom = new Date(Date.now() - 86_400_000)
-    .toISOString()
-    .slice(0, 10);
-  const { error: rebuildErr } = await supabase.rpc("rebuild_daily_snapshots", {
-    p_start_date: rebuildFrom,
-  });
+  //
+  // Cutover: never from before the course switch. Those rows were
+  // computed from progress that is now archived and would come back
+  // near 0%; the database's floor trigger refuses them too. A failed
+  // read of the switch throws into the catch below: the run is logged
+  // failed instead of guessing.
+  const resetAt = await getCurriculumResetAt(supabase);
+  const rebuildFrom = clampStartToReset(
+    new Date(Date.now() - 86_400_000).toISOString().slice(0, 10),
+    resetAt,
+  );
+  // The RPC's own end: current_date (UTC).
+  const rebuildSkipped = rebuildFrom > new Date().toISOString().slice(0, 10);
+  const { error: rebuildErr } = rebuildSkipped
+    ? { error: null }
+    : await supabase.rpc("rebuild_daily_snapshots", {
+        p_start_date: rebuildFrom,
+      });
 
   const upsertErr =
     upsertBoth.find((r) => r.error)?.error ?? rebuildErr ?? undefined;
@@ -315,6 +333,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       yesterday: yesterday.date,
       today: today.date,
+      ...(rebuildSkipped
+        ? { rebuild: "nothing to rebuild before the course switch" }
+        : {}),
       all: {
         active_count: activeAll.length,
         joined_count_today: todayCounts.joined_all,

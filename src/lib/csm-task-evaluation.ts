@@ -27,6 +27,7 @@ import {
   evaluateCustomTrigger,
   triggers,
 } from "@/lib/csm-triggers";
+import { getCurriculumResetAt } from "@/lib/curriculum-reset";
 import type { Student, TriggerConfig } from "@/types/database";
 
 /**
@@ -52,12 +53,17 @@ export async function reEvaluateStudentOpenTasks(
     }
 
     // 2. Pull just the data we need to build a snapshot for THIS student.
+    // Cutover WI-3: also the live course's regions and the switch's
+    // moment. getCurriculumResetAt throws on a read error; the catch
+    // below then returns { error } and dismisses nothing.
     const [
       studentRes,
       completionsRes,
       lessonsRes,
       milestonesRes,
       templatesRes,
+      regionsRes,
+      resetAt,
     ] = await Promise.all([
       supabase
         .from("students")
@@ -70,7 +76,9 @@ export async function reEvaluateStudentOpenTasks(
         .from("student_lesson_completions")
         .select("student_id, lesson_id, completed_at, action_completed_at, skipped_at")
         .eq("student_id", studentId),
-      supabase.from("lessons").select("id, region_id, requires_action"),
+      supabase
+        .from("lessons")
+        .select("id, region_id, requires_action, counts_toward_progress"),
       supabase
         .from("student_milestones")
         .select("first_sprint_login_at")
@@ -80,10 +88,23 @@ export async function reEvaluateStudentOpenTasks(
         .from("templates")
         .select("id, scenario_id, trigger_config")
         .eq("is_active", true),
+      supabase.from("regions").select("id, order_num").order("order_num"),
+      getCurriculumResetAt(supabase),
     ]);
 
     if (!studentRes.data) {
       return { checked: openTasks.length, dismissed: 0 };
+    }
+
+    // No regions = 0 lessons counted for this student, which would
+    // keep nolessons.* open and dismiss everything else. Dismiss nothing.
+    const regionOrder = ((regionsRes.data ?? []) as Array<{ id: string }>).map(
+      (r) => r.id,
+    );
+    if (regionsRes.error || regionOrder.length === 0) {
+      const msg = `regions could not be read: ${regionsRes.error?.message ?? "no rows"}`;
+      console.error("[reEvaluateStudentOpenTasks] failed:", msg);
+      return { error: msg };
     }
 
     const student = studentRes.data as unknown as Pick<
@@ -101,6 +122,7 @@ export async function reEvaluateStudentOpenTasks(
       id: string;
       region_id: string;
       requires_action: boolean;
+      counts_toward_progress: boolean;
     }>;
     const milestones = milestonesRes.data as
       | { first_sprint_login_at: string | null }
@@ -129,6 +151,7 @@ export async function reEvaluateStudentOpenTasks(
       regionTotals,
       [], // existing — leave empty for fresh re-eval
       milestones,
+      { regionOrder, resetAt },
     );
 
     // Build a scenario → template lookup for trigger_config evaluation.

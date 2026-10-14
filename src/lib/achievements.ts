@@ -18,10 +18,22 @@
  *
  * v53 - 17 achievements seeded (4 common, 4 uncommon, 5 rare,
  * 4 legendary). See the catalog migration for the list.
+ *
+ * Cutover (PRD cutover, WI-4): the course is read from the `lessons`
+ * rows, so the same rules run on the old course (r1..r4) and the new
+ * one (a1..a8). `unbroken` and `perfect_run` want every area that has
+ * a counting lesson done; `dayNumber` counts from the course switch
+ * for a student who paid before it. The four `r*_clear` rules,
+ * `early_finisher` and `speedrun` name r1..r4, so on the new course
+ * they never fire; the switch deletes their catalog rows (C3).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { SPRINT_EXCLUDED_LESSON_IDS } from "./constants";
+import {
+  courseAnchorIso,
+  daysOnCourse,
+  getCurriculumResetAt,
+} from "./curriculum-reset";
 
 export interface AchievementSnapshot {
   /** Lesson IDs the student has completed (skipped or watched OR
@@ -32,14 +44,16 @@ export interface AchievementSnapshot {
   shippedActionLessonIds: Set<string>;
   /** Lesson IDs where skipped_at is set. Used by perfect_run. */
   skippedLessonIds: Set<string>;
-  /** Region → ordered lesson IDs. Region complete = every lesson
-   *  in this list is in completedLessonIds. */
+  /** Region → ordered lesson IDs, one key per region (area) that
+   *  holds a counting lesson (`counts_toward_progress`). Region
+   *  complete = every lesson in this list is in completedLessonIds. */
   lessonsByRegion: Record<string, string[]>;
   currentStreak: number;
   longestStreak: number;
   bountyAccessClaimedAt: string | null;
   discountEarnedAt: string | null;
-  /** Day number computed from students.joined_at, 1-indexed. */
+  /** Day N on the course, 1-indexed, from first_paid_at (joined_at
+   *  when null), or from the course switch when that is later. */
   dayNumber: number;
   /** Number of distinct calendar days (in UTC) the student
    *  completed at least one lesson on. Used for streak-since-day-1
@@ -57,15 +71,20 @@ interface AchievementRule {
   evaluate: (snap: AchievementSnapshot) => boolean;
 }
 
-const REGION_IDS = ["r1", "r2", "r3", "r4"] as const;
-
-function regionComplete(
-  snap: AchievementSnapshot,
-  regionId: (typeof REGION_IDS)[number],
-): boolean {
+function regionComplete(snap: AchievementSnapshot, regionId: string): boolean {
   const lessons = snap.lessonsByRegion[regionId] ?? [];
   if (lessons.length === 0) return false;
   return lessons.every((id) => snap.completedLessonIds.has(id));
+}
+
+/** Every region (area) of the live course done: r1..r4 before the
+ *  switch, a1..a8 after it. No regions at all (a failed lessons read)
+ *  is not done. */
+function courseComplete(snap: AchievementSnapshot): boolean {
+  const regionIds = Object.keys(snap.lessonsByRegion);
+  return (
+    regionIds.length > 0 && regionIds.every((r) => regionComplete(snap, r))
+  );
 }
 
 export const ACHIEVEMENT_RULES: AchievementRule[] = [
@@ -162,16 +181,16 @@ export const ACHIEVEMENT_RULES: AchievementRule[] = [
     // collapsing many days of real work into one active day. They will not
     // earn this. Under-awarding a prestige badge is the right way to be
     // wrong.
-    evaluate: (s) =>
-      REGION_IDS.every((r) => regionComplete(s, r)) &&
-      s.currentStreak >= s.dayNumber,
+    //
+    // Cutover: every live area, and dayNumber counts from the switch for a
+    // student who paid before it, so the streak has to be unbroken since
+    // the switch (streaks are kept across it, C2).
+    evaluate: (s) => courseComplete(s) && s.currentStreak >= s.dayNumber,
   },
   {
     id: "perfect_run",
-    // Sprint complete (all 4 regions) with zero skipped lessons.
-    evaluate: (s) =>
-      REGION_IDS.every((r) => regionComplete(s, r)) &&
-      s.skippedLessonIds.size === 0,
+    // Course complete (every live region or area) with zero skipped lessons.
+    evaluate: (s) => courseComplete(s) && s.skippedLessonIds.size === 0,
   },
 ];
 
@@ -184,7 +203,7 @@ export async function buildAchievementSnapshot(
   supabase: SupabaseClient,
   studentId: string,
 ): Promise<AchievementSnapshot | null> {
-  const [studentRes, completionsRes, lessonsRes, streaksRes, milestonesRes, discountRes] =
+  const [studentRes, completionsRes, lessonsRes, streaksRes, milestonesRes, discountRes, resetRes] =
     await Promise.all([
       supabase
         .from("students")
@@ -199,7 +218,9 @@ export async function buildAchievementSnapshot(
         .eq("student_id", studentId),
       supabase
         .from("lessons")
-        .select("id, region_id, day, sort_order, requires_action"),
+        .select(
+          "id, region_id, day, sort_order, requires_action, counts_toward_progress",
+        ),
       supabase
         .from("student_streaks")
         .select("current_streak, longest_streak")
@@ -218,6 +239,15 @@ export async function buildAchievementSnapshot(
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle(),
+      // getCurriculumResetAt throws on a failed read; caught here so the
+      // other reads still settle, and handled below.
+      getCurriculumResetAt(supabase).then(
+        (resetAt) => ({ resetAt, error: null }),
+        (err: unknown) => ({
+          resetAt: null,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      ),
     ]);
 
   const student = studentRes.data as {
@@ -225,6 +255,19 @@ export async function buildAchievementSnapshot(
     first_paid_at: string | null;
   } | null;
   if (!student?.joined_at) return null;
+
+  // Without the switch's moment there is no telling which course the
+  // student's days count on, and guessing "no switch" after it would put
+  // them back on the 30-day clock. Evaluate nothing this time: every
+  // caller treats achievements as best-effort, they are sticky, and the
+  // next lesson write evaluates again. Same direction as the reads below:
+  // a bad read under-awards, never over-awards.
+  if (resetRes.error) {
+    console.error(
+      `[achievements] course switch read failed for student=${studentId}, nothing evaluated: ${resetRes.error}`,
+    );
+    return null;
+  }
 
   const completions =
     (completionsRes.data as Array<{
@@ -240,6 +283,7 @@ export async function buildAchievementSnapshot(
       day: number;
       sort_order: number;
       requires_action: boolean;
+      counts_toward_progress: boolean;
     }> | null) ?? [];
   const streaks =
     (streaksRes.data as {
@@ -281,19 +325,19 @@ export async function buildAchievementSnapshot(
       requires_action: l.requires_action,
     });
   }
-  const lessonsByRegion: Record<string, string[]> = {
-    r1: [],
-    r2: [],
-    r3: [],
-    r4: [],
-  };
+  // Cutover: one key per region (area) found in the lessons rows, so
+  // r1..r4 on the old course and a1..a8 on the new one.
+  const lessonsByRegion: Record<string, string[]> = {};
   for (const l of lessons) {
-    // v74.3 - exclude SPRINT_EXCLUDED_LESSON_IDS (currently l057
-    // bounty onboarding) so achievements like early_finisher /
-    // speedrun / region_4 fire on the curriculum being done, not
-    // gated on the student also having applied to Bounty Access.
-    if (SPRINT_EXCLUDED_LESSON_IDS.has(l.id)) continue;
-    if (lessonsByRegion[l.region_id]) lessonsByRegion[l.region_id].push(l.id);
+    // v74.3 - leave out the lessons that do not count toward progress
+    // (l057 bounty onboarding on the old course, the a7l19 pond row on
+    // the new one) so achievements like early_finisher / speedrun /
+    // region_4 fire on the curriculum being done, not gated on the
+    // student also having applied to Bounty Access. On the old course
+    // v92 sets the flag false on l057 alone, the one id
+    // SPRINT_EXCLUDED_LESSON_IDS held.
+    if (l.counts_toward_progress === false) continue;
+    (lessonsByRegion[l.region_id] ??= []).push(l.id);
   }
 
   // Canonical "complete" predicate - matches src/lib/progress.ts:
@@ -353,14 +397,10 @@ export async function buildAchievementSnapshot(
 
   // v75.20: anchor day on first_paid_at (original signup), not
   // joined_at (current cycle start). Affects achievement evaluation
-  // for any "by Day N" criteria.
-  const dayNumber = Math.max(
-    1,
-    Math.ceil(
-      (Date.now() -
-        new Date(student.first_paid_at ?? student.joined_at).getTime()) /
-        86_400_000,
-    ),
+  // for any "by Day N" criteria. Cutover: or on the course switch,
+  // when that is later. With no switch this is the old formula.
+  const dayNumber = daysOnCourse(
+    courseAnchorIso(student.first_paid_at, student.joined_at, resetRes.resetAt),
   );
 
   return {

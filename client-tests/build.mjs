@@ -78,3 +78,26 @@ gen('../src/lib/world/discount-server.ts', './_gen/discount-server.ts', [
 
 // curriculum-reset.ts imports only a TYPE from supabase-js, which --experimental-strip-types erases.
 gen('../src/lib/curriculum-reset.ts', './_gen/curriculum-reset.ts')
+
+// achievements.ts imports curriculum-reset.ts (above) and only a TYPE from
+// supabase-js. titles.ts imports only a TYPE, but from an @/ path, which this
+// file refuses: the line goes and the type (a union of strings) reads as string.
+// achievements-cutover.test.mjs takes the old copies of both from git itself.
+gen('../src/lib/achievements.ts', './_gen/achievements.ts', [
+  ['from "./curriculum-reset"', 'from "./curriculum-reset.ts"'],
+])
+gen('../src/lib/titles.ts', './_gen/titles.ts', [
+  ['import type { StudentTitle } from "@/types/database";\n', ''],
+  ['StudentTitle', 'string'],
+])
+
+// csm-triggers.ts imports constants.ts and curriculum-reset.ts (above) and
+// only TYPES from @/types/database, in import type lines and inline
+// import("...") types, all of which --experimental-strip-types erases; the
+// path is pointed at a file that does not exist, so one that survived would
+// fail loudly. csm-cutover.test.mjs takes the old copy from git itself.
+gen('../src/lib/csm-triggers.ts', './_gen/csm-triggers.ts', [
+  ['"@/types/database"', '"./types-erased.ts"'],
+  ['from "@/lib/constants"', 'from "./constants.ts"'],
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+])

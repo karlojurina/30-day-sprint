@@ -11,12 +11,29 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
+import {
+  clampStartToReset,
+  getCurriculumResetAt,
+} from "@/lib/curriculum-reset";
 
 export async function POST(request: NextRequest) {
   const auth = await requireTeam(request, ["founder", "admin"]);
   if (isAuthFailure(auth)) return auth.error;
 
   const t0 = Date.now();
+  // Cutover: never from before the course switch. Those rows were
+  // computed from progress that is now archived and would come back near
+  // 0%; the database's floor trigger refuses them too. A failed read of
+  // the switch answers 500 instead of guessing.
+  let resetAt: string | null;
+  try {
+    resetAt = await getCurriculumResetAt(auth.supabase);
+  } catch (e) {
+    return NextResponse.json(
+      { error: e instanceof Error ? e.message : String(e) },
+      { status: 500 },
+    );
+  }
   // Run the rebuild as one Postgres call so it's atomic + fast.
   // v89: BOUNDED to the last 2 days. This used to pass '2026-01-01',
   // which made rebuild_daily_snapshots() delete and re-derive the entire
@@ -28,14 +45,19 @@ export async function POST(request: NextRequest) {
   // call has not succeeded since 2026-07-13. Never widen this range
   // without passing an explicit p_end_date that stops short of collected
   // history. Repairing the old range is a deliberate, backed-up one-off.
-  const rebuildFrom = new Date(Date.now() - 2 * 86_400_000)
-    .toISOString()
-    .slice(0, 10);
-  const { error } = await auth.supabase.rpc("rebuild_daily_snapshots", {
-    p_start_date: rebuildFrom,
-  });
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  const rebuildFrom = clampStartToReset(
+    new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10),
+    resetAt,
+  );
+  // The RPC's own end: current_date (UTC).
+  const rebuildSkipped = rebuildFrom > new Date().toISOString().slice(0, 10);
+  if (!rebuildSkipped) {
+    const { error } = await auth.supabase.rpc("rebuild_daily_snapshots", {
+      p_start_date: rebuildFrom,
+    });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
   }
   // Count what we ended up with so the UI can report it.
   const { count } = await auth.supabase
@@ -45,5 +67,8 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     rows: count ?? 0,
     duration_ms: Date.now() - t0,
+    ...(rebuildSkipped
+      ? { rebuild: "nothing to rebuild before the course switch" }
+      : {}),
   });
 }

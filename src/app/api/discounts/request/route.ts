@@ -173,6 +173,16 @@ export async function POST(request: NextRequest) {
   );
 
   const required = requiredLessons ?? [];
+  // Fails closed (cutover PRD, C22, WI-9). On the old course r1 + r2 always
+  // hold lessons, so an empty list means the new course's data met a build
+  // without CATALOG_SHAPE=v2, or the read failed. Every lesson in an empty
+  // list is "done", so carrying on would grant the request to anyone.
+  if (required.length === 0) {
+    return NextResponse.json(
+      { error: "The course changed and this check cannot run. Nothing was requested." },
+      { status: 409 },
+    );
+  }
   const completionMap = new Map<
     string,
     {

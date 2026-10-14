@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createServiceClient } from "@/lib/supabase-server";
+import { STUDENT_HOME } from "@/lib/world/access";
 import { JournalView } from "./JournalView";
 
 interface JournalPageProps {
@@ -82,7 +83,7 @@ export default async function JournalPage(props: JournalPageProps) {
 
   if (!isTeam && !isStudentSelf) {
     // Logged in but not authorized for this journal.
-    redirect("/dashboard");
+    redirect(STUDENT_HOME);
   }
 
   const [

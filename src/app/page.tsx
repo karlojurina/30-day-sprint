@@ -3,6 +3,7 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { STUDENT_HOME } from "@/lib/world/access";
 
 export default function HomePage() {
   const { isStudent, isTeam, loading } = useAuth();
@@ -14,7 +15,7 @@ export default function HomePage() {
     if (isTeam) {
       router.replace("/admin");
     } else if (isStudent) {
-      router.replace("/dashboard");
+      router.replace(STUDENT_HOME);
     } else {
       router.replace("/login");
     }

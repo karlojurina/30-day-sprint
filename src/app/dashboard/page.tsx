@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { HOME_IS_DASHBOARD, STUDENT_HOME } from "@/lib/world/access";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import { LessonSheet } from "@/components/map/LessonSheet";
@@ -35,7 +36,28 @@ const DISCOUNT_APPROVED_LAST_SEEN_KEY = "et.discountApproved.lastSeen";
 const streakLastSeenKey = (studentId: string) =>
   `et.streak.lastSeen.${studentId}`;
 
-export default function DashboardPage() {
+/**
+ * Once the home moves (NEXT_PUBLIC_STUDENT_HOME=/world at cutover), this page
+ * forwards there before rendering anything, so the old map, its first-login
+ * stamps and its celebrations never mount on the new course (cutover PRD, C12,
+ * WI-7). /dashboard/playbook is its own route and is not forwarded. The home
+ * is fixed at build time, so the branch never flips under a mounted page. A
+ * week after the switch this becomes a server redirect (WI-12).
+ */
+export default function DashboardRoute() {
+  if (!HOME_IS_DASHBOARD) return <ForwardHome />;
+  return <DashboardPage />;
+}
+
+function ForwardHome() {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace(STUDENT_HOME);
+  }, [router]);
+  return null;
+}
+
+function DashboardPage() {
   const { student } = useAuth();
   const {
     loading,

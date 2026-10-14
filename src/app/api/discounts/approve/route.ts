@@ -141,6 +141,16 @@ export async function POST(request: NextRequest) {
     ]);
 
     const required = requiredLessons ?? [];
+    // Fails closed (cutover PRD, C22, WI-9), as the request route does: an
+    // empty r1 + r2 list means the new course's data met a build without
+    // CATALOG_SHAPE=v2, or the read failed, and every check below would pass.
+    // "Generate anyway" skips the checks, as it does today.
+    if (!override && required.length === 0) {
+      return NextResponse.json(
+        { error: "The course changed and this check cannot run. Nothing was approved." },
+        { status: 409 },
+      );
+    }
     const completionMap = new Map<
       string,
       {

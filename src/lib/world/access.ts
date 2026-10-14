@@ -22,8 +22,8 @@
  * Its job is to stop 845 students stumbling into a half-built UI, nothing more.
  *
  * CLOSED BY DEFAULT. An unset or empty variable admits nobody, so forgetting to
- * configure it hides the world rather than exposing it. At cutover the gate is
- * deleted outright, not opened.
+ * configure it hides the world rather than exposing it. At cutover the gate
+ * opens (WORLD_IS_LIVE below); a week later it is deleted (cutover PRD, WI-12).
  *
  * Student UUIDs in a NEXT_PUBLIC bundle are deliberate and safe: every student
  * already holds their own id client-side, and holding someone else's grants
@@ -42,8 +42,38 @@ export const WORLD_PREVIEW_IDS = parseIds(
   process.env.NEXT_PUBLIC_WORLD_PREVIEW_IDS,
 );
 
-/** True when /world is open to everyone — set only at cutover. */
-export const WORLD_IS_LIVE = process.env.NEXT_PUBLIC_WORLD_LIVE === "true";
+/** The old course's page, and every student's home until the switch. */
+const DASHBOARD = "/dashboard";
+
+/**
+ * The home from its raw variable. A trailing slash is dropped because the
+ * pages compare the home by string: "/world/" would otherwise leave /world
+ * closed and send /world to /world/ and back, and "/dashboard/" would make
+ * /dashboard forward to itself.
+ */
+export function resolveHome(raw: string | undefined): string {
+  return raw?.trim().replace(/\/+$/, "") || DASHBOARD;
+}
+
+/** Where every student lands. Becomes '/world' at cutover. */
+export const STUDENT_HOME = resolveHome(process.env.NEXT_PUBLIC_STUDENT_HOME);
+
+/** False once the home moves; /dashboard then forwards to it (app/dashboard/page.tsx). */
+export const HOME_IS_DASHBOARD = STUDENT_HOME === DASHBOARD;
+
+/**
+ * Whether /world is open to everyone, with its inputs passed in so the test
+ * can ask it. A home of /world opens the world on its own (cutover PRD, C14):
+ * with the home moved and the live flag forgotten, WorldAccessGate would send
+ * every student from /world to /world and render nothing, a blank loop on the
+ * evening. One variable can then never produce it.
+ */
+export function worldIsLive(liveRaw: string | undefined, home: string): boolean {
+  return liveRaw === "true" || home === "/world";
+}
+
+/** True when /world is open to everyone: set at cutover, or implied by the home. */
+export const WORLD_IS_LIVE = worldIsLive(process.env.NEXT_PUBLIC_WORLD_LIVE, STUDENT_HOME);
 
 /**
  * The rule itself, with its inputs passed in so it can be tested without
@@ -63,10 +93,6 @@ export function isAllowed(
 export function canSeeWorld(studentId: string | null | undefined): boolean {
   return isAllowed(studentId, WORLD_PREVIEW_IDS, WORLD_IS_LIVE);
 }
-
-/** Where to send everyone else. Becomes '/world' at cutover. */
-export const STUDENT_HOME =
-  process.env.NEXT_PUBLIC_STUDENT_HOME?.trim() || "/dashboard";
 
 /**
  * How the map treats the places past the student's own. "open" lets every

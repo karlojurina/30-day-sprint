@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { createClient, isLockContention } from "@/lib/supabase-browser";
+import { STUDENT_HOME } from "@/lib/world/access";
 
 /** Overall budget for the handoff. setSession does NOT reject when the auth
  *  host is unreachable — it never settles — so without this the page span
@@ -128,7 +129,7 @@ export default function AuthCompletePage() {
       if (failure) {
         failToLogin("session_failed", `client: ${failure}`);
       } else {
-        window.location.href = "/dashboard";
+        window.location.href = STUDENT_HOME;
       }
     })();
 

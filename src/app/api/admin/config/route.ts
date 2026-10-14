@@ -7,6 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
+import { CURRICULUM_RESET_KEY } from "@/lib/curriculum-reset";
 
 export async function GET(request: NextRequest) {
   const auth = await requireTeam(request);
@@ -34,6 +35,14 @@ export async function PUT(request: NextRequest) {
 
   if (!key) {
     return NextResponse.json({ error: "Missing key" }, { status: 400 });
+  }
+  // The course switch writes this once (cutover PRD, C6). Moving it would
+  // move every course day, CSM window and snapshot floor counted from it.
+  if (key === CURRICULUM_RESET_KEY) {
+    return NextResponse.json(
+      { error: "The course switch date is set by the switch and cannot be changed here." },
+      { status: 400 },
+    );
   }
 
   const { data, error } = await auth.supabase

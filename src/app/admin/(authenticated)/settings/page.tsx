@@ -18,6 +18,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase-browser";
 import type { AdminConfigRow } from "@/types/database";
 import { RestrictedPage } from "@/components/admin/ui";
+import { CURRICULUM_RESET_KEY } from "@/lib/curriculum-reset";
 
 const FRIENDLY_LABELS: Record<string, string> = {
   program_login_link: "Program login link",
@@ -162,6 +163,9 @@ function AdminSettingsBody() {
           const draft = drafts[row.key] ?? "";
           const dirty = draft !== row.value;
           const empty = draft.trim() === "";
+          // Written once by the course switch (cutover PRD, C6); every
+          // course day, CSM window and snapshot floor counts from it.
+          const locked = row.key === CURRICULUM_RESET_KEY;
 
           return (
             <div
@@ -192,6 +196,18 @@ function AdminSettingsBody() {
               >
                 {row.key}
               </div>
+              {locked && (
+                <p
+                  style={{
+                    fontSize: 12,
+                    color: "var(--color-text-secondary)",
+                    marginBottom: 8,
+                  }}
+                >
+                  Set by the course switch. Every course day, CSM window and
+                  progress snapshot counts from it, so it cannot be changed here.
+                </p>
+              )}
               {row.description && (
                 <p
                   style={{
@@ -207,7 +223,7 @@ function AdminSettingsBody() {
                 <input
                   type="text"
                   value={draft}
-                  disabled={!canEdit}
+                  disabled={!canEdit || locked}
                   onChange={(e) =>
                     setDrafts((prev) => ({
                       ...prev,
@@ -229,7 +245,7 @@ function AdminSettingsBody() {
                 <button
                   type="button"
                   onClick={() => void save(row.key)}
-                  disabled={!canEdit || !dirty || saving === row.key}
+                  disabled={!canEdit || locked || !dirty || saving === row.key}
                   style={{
                     padding: "8px 14px",
                     fontSize: 12,

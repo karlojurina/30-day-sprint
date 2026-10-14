@@ -1,15 +1,33 @@
 "use client";
 
-import type { Student, RegionId } from "@/types/database";
+import type { Student } from "@/types/database";
 import { getDayNumber } from "@/types/database";
 import { Avatar, PacePill, Pill } from "@/components/admin/ui";
 import { isCanceling } from "@/lib/admin/metrics-definitions";
+import type { ActivityLabel } from "@/lib/curriculum-reset";
+import { ACTIVITY_TEXT, ACTIVITY_TONE } from "@/lib/useJourneyPaceCounts";
+
+/** The student's area, as `regions` names and orders it. */
+export interface CardArea {
+  order: number;
+  name: string;
+}
+
+/**
+ * Before the course switch: the pace pill. After it: the activity pill.
+ * Null when it cannot be known (a read failed): the card shows neither.
+ */
+export type CardPace =
+  | { course: "old"; label: "behind" | "on_pace" | "ahead" }
+  | { course: "new"; label: ActivityLabel };
 
 interface StudentCardProps {
   student: Student;
-  progressPercent: number;
-  currentRegion: RegionId;
-  paceLabel: "behind" | "on_pace" | "ahead";
+  /** Null when the lessons could not be counted: the card shows "—". */
+  progressPercent: number | null;
+  /** Null when the areas could not be read: no chip. */
+  area: CardArea | null;
+  pace: CardPace | null;
   onClick: () => void;
 }
 
@@ -23,25 +41,18 @@ interface StudentCardProps {
  *
  * Clicking opens the right-side drawer with the full detail.
  */
-const REGION_NUMERAL: Record<RegionId, string> = {
-  r1: "I",
-  r2: "II",
-  r3: "III",
-  r4: "IV",
-};
+const NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 
-const REGION_NAME: Record<RegionId, string> = {
-  r1: "Foundation",
-  r2: "Production",
-  r3: "Strategy",
-  r4: "Gate",
-};
+/** The area's numeral from its order_num: I..IV on the old course, I..VIII on the new. */
+function numeral(order: number): string {
+  return NUMERALS[order - 1] ?? String(order);
+}
 
 export function StudentCard({
   student,
   progressPercent,
-  currentRegion,
-  paceLabel,
+  area,
+  pace,
   onClick,
 }: StudentCardProps) {
   // v75.18: day from first_paid_at (original signup).
@@ -100,8 +111,11 @@ export function StudentCard({
         className="flex items-center"
         style={{ gap: 6, marginBottom: 10, flexWrap: "wrap" }}
       >
-        <RegionChip region={currentRegion} />
-        <PacePill label={paceLabel} compact />
+        {area && <RegionChip area={area} />}
+        {pace?.course === "old" && <PacePill label={pace.label} compact />}
+        {pace?.course === "new" && (
+          <Pill tone={ACTIVITY_TONE[pace.label]}>{ACTIVITY_TEXT[pace.label]}</Pill>
+        )}
         {isCanceling(student) && (
           <Pill tone="warning">
             <span aria-hidden="true">⏳</span>
@@ -123,7 +137,7 @@ export function StudentCard({
         <div
           style={{
             height: "100%",
-            width: `${Math.min(100, progressPercent)}%`,
+            width: `${Math.min(100, progressPercent ?? 0)}%`,
             background: "var(--color-accent)",
             transition: "width 250ms var(--ease-default)",
           }}
@@ -138,16 +152,18 @@ export function StudentCard({
           fontVariantNumeric: "tabular-nums",
         }}
       >
-        <span>{progressPercent}% complete</span>
+        <span>
+          {progressPercent == null ? "—" : `${progressPercent}% complete`}
+        </span>
         <span>{lastActiveLabel}</span>
       </div>
     </button>
   );
 }
 
-/** Compact region chip: Roman numeral + short name. Mirrors the
- *  region numerals used on the map for at-a-glance recognition. */
-function RegionChip({ region }: { region: RegionId }) {
+/** Compact region chip: Roman numeral + the area's name from `regions`.
+ *  Mirrors the region numerals used on the map for at-a-glance recognition. */
+function RegionChip({ area }: { area: CardArea }) {
   return (
     <span
       className="inline-flex items-center"
@@ -170,9 +186,9 @@ function RegionChip({ region }: { region: RegionId }) {
           fontSize: 10,
         }}
       >
-        {REGION_NUMERAL[region]}
+        {numeral(area.order)}
       </span>
-      <span>{REGION_NAME[region]}</span>
+      <span>{area.name}</span>
     </span>
   );
 }

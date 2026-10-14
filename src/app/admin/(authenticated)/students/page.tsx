@@ -7,7 +7,6 @@ import type { Student } from "@/types/database";
 import { getDayNumber } from "@/types/database";
 import {
   progressPercent,
-  TOTAL_LESSONS,
   ADMIN_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
 // v75.51: useAdminScope removed. Cohort-only.
@@ -25,6 +24,13 @@ import {
   type PillTone,
 } from "@/components/admin/ui";
 import { buildPaceSummary } from "@/lib/csm-triggers";
+import { activityLabel, type ActivityLabel } from "@/lib/curriculum-reset";
+import {
+  ACTIVITY_TEXT,
+  ACTIVITY_TONE,
+  loadCourseActivity,
+  type CourseActivity,
+} from "@/lib/useJourneyPaceCounts";
 
 type SortKey = "name" | "joined_at" | "day" | "progress" | "last_active_at";
 type SortDir = "asc" | "desc";
@@ -32,7 +38,10 @@ type SortDir = "asc" | "desc";
 export default function StudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
   const [completionCounts, setCompletionCounts] = useState<Record<string, number>>({});
-  const [totalLessons, setTotalLessons] = useState<number>(TOTAL_LESSONS);
+  // Null until counted, and after a failed count: the column shows "—".
+  const [totalLessons, setTotalLessons] = useState<number | null>(null);
+  // Which course is live; after the switch the Pace column shows activity.
+  const [course, setCourse] = useState<CourseActivity | null>(null);
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("joined_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -58,7 +67,7 @@ export default function StudentsPage() {
           .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
           .order("joined_at", { ascending: false });
 
-      const [studentsRes, completionsRes, lessonsRes] = await Promise.all([
+      const [studentsRes, completionsRes, lessonsRes, courseRes] = await Promise.all([
         fetchAllRowsPaginated<Student>(buildStudentsQuery),
         // Pre-aggregated per-student counts via a view. Querying
         // student_lesson_completions directly returns one row per
@@ -78,12 +87,13 @@ export default function StudentsPage() {
               // skipped across page boundaries.
               .order("student_id"),
         ),
-        // v75.1 - exclude l057 (bounty onboarding) so the list's
-        // per-student % matches the 64-lesson sprint denominator.
+        // Only the lessons that count toward progress: the old course's
+        // 64 (l057, the bounty onboarding, does not), the new course's 140.
         supabase
           .from("lessons")
           .select("id", { count: "exact", head: true })
-          .neq("id", "l057"),
+          .eq("counts_toward_progress", true),
+        loadCourseActivity(supabase),
       ]);
 
       // v75.32: surface paginated fetch errors. Helper returns empty
@@ -103,9 +113,16 @@ export default function StudentsPage() {
       }
       setCompletionCounts(counts);
 
-      if (typeof lessonsRes.count === "number" && lessonsRes.count > 0) {
+      if (
+        !lessonsRes.error &&
+        typeof lessonsRes.count === "number" &&
+        lessonsRes.count > 0
+      ) {
         setTotalLessons(lessonsRes.count);
+      } else {
+        console.error("[admin/students] lessons count failed:", lessonsRes.error);
       }
+      setCourse(courseRes);
 
       setLoading(false);
     }
@@ -291,7 +308,9 @@ export default function StudentsPage() {
             <SortHeader label="Day" sortKeyName="day" />
           </div>
           <div style={{ width: 100, flexShrink: 0 }}>
-            <span style={T.eyebrow}>Pace</span>
+            <span style={T.eyebrow}>
+              {course?.ok && course.resetAt != null ? "Activity" : "Pace"}
+            </span>
           </div>
           <div style={{ width: 160, flexShrink: 0 }}>
             <SortHeader label="Progress" sortKeyName="progress" />
@@ -317,7 +336,10 @@ export default function StudentsPage() {
             // v75.18: day from first_paid_at (original signup).
             const day = getDayNumber(student.first_paid_at ?? student.joined_at);
             const completed = completionCounts[student.id] || 0;
-            const percent = progressPercent(completed, totalLessons);
+            const percent =
+              totalLessons == null
+                ? null
+                : progressPercent(completed, totalLessons);
             const dayColor =
               day > 25
                 ? "var(--color-danger)"
@@ -384,16 +406,26 @@ export default function StudentsPage() {
                   </span>
                 </div>
                 <div style={{ width: 100, flexShrink: 0 }}>
-                  <PacePill
-                    label={
-                      buildPaceSummary(
-                        student.joined_at,
-                        completed,
-                        totalLessons,
-                        "r1",
-                      ).progressLabel
-                    }
-                  />
+                  {course?.ok && course.resetAt != null ? (
+                    <ActivityPill
+                      label={activityLabel(
+                        course.lastByStudent.get(student.id) ?? null,
+                      )}
+                    />
+                  ) : course?.ok && totalLessons != null ? (
+                    <PacePill
+                      label={
+                        buildPaceSummary(
+                          student.joined_at,
+                          completed,
+                          totalLessons,
+                          "r1",
+                        ).progressLabel
+                      }
+                    />
+                  ) : (
+                    <span style={T.meta}>—</span>
+                  )}
                 </div>
                 <div
                   style={{ width: 160, flexShrink: 0, paddingRight: 12 }}
@@ -412,7 +444,7 @@ export default function StudentsPage() {
                       <div
                         style={{
                           height: "100%",
-                          width: `${percent}%`,
+                          width: `${percent ?? 0}%`,
                           background: "var(--color-accent-dark)",
                           transition:
                             "width 250ms var(--ease-default)",
@@ -427,7 +459,7 @@ export default function StudentsPage() {
                         textAlign: "right",
                       }}
                     >
-                      {percent}%
+                      {percent == null ? "—" : `${percent}%`}
                     </span>
                   </div>
                 </div>
@@ -456,6 +488,11 @@ function STATUS_TONE(status: Student["membership_status"]): PillTone {
   if (status === "canceled") return "danger";
   if (status === "past_due") return "warning";
   return "neutral";
+}
+
+/** The new course's pill: how long ago the student last finished a counted lesson. */
+function ActivityPill({ label }: { label: ActivityLabel }) {
+  return <Pill tone={ACTIVITY_TONE[label]}>{ACTIVITY_TEXT[label]}</Pill>;
 }
 
 function StatusPill({ status }: { status: Student["membership_status"] }) {

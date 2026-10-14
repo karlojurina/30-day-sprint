@@ -15,7 +15,6 @@ import type {
 import { getDayNumber } from "@/types/database";
 import {
   LESSON_TYPE_LABELS,
-  SPRINT_EXCLUDED_LESSON_IDS,
   progressPercent,
 } from "@/lib/constants";
 import { completedLessonIdsFor } from "@/lib/progress";
@@ -32,6 +31,13 @@ import {
 } from "@/components/admin/ui";
 import { buildPaceSummary } from "@/lib/csm-triggers";
 import type { RegionId } from "@/types/database";
+import { activityLabel } from "@/lib/curriculum-reset";
+import {
+  ACTIVITY_TEXT,
+  ACTIVITY_TONE,
+  loadCourseActivity,
+  type CourseActivity,
+} from "@/lib/useJourneyPaceCounts";
 
 export default function StudentDetailPage() {
   const params = useParams();
@@ -47,6 +53,8 @@ export default function StudentDetailPage() {
   // v46 — per-function sibling tables joined into the admin detail view.
   const [streaks, setStreaks] = useState<StudentStreaks | null>(null);
   const [whopSync, setWhopSync] = useState<StudentWhopSync | null>(null);
+  // Which course is live; after the switch the pace pill shows activity.
+  const [course, setCourse] = useState<CourseActivity | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -59,6 +67,7 @@ export default function StudentDetailPage() {
         discountRes,
         streaksRes,
         whopSyncRes,
+        courseRes,
       ] = await Promise.all([
         supabase.from("students").select("*").eq("id", studentId).single(),
         supabase.from("regions").select("*").order("order_num"),
@@ -90,6 +99,7 @@ export default function StudentDetailPage() {
           )
           .eq("student_id", studentId)
           .maybeSingle(),
+        loadCourseActivity(supabase, studentId),
       ]);
 
       if (studentRes.data) setStudent(studentRes.data);
@@ -99,6 +109,7 @@ export default function StudentDetailPage() {
       if (discountRes.data) setDiscountRequest(discountRes.data);
       if (streaksRes.data) setStreaks(streaksRes.data as StudentStreaks);
       if (whopSyncRes.data) setWhopSync(whopSyncRes.data as StudentWhopSync);
+      setCourse(courseRes);
       setLoading(false);
     }
 
@@ -120,38 +131,56 @@ export default function StudentDetailPage() {
   const completedIds = completedLessonIdsFor(completions, lessons);
   // v75.18: day from first_paid_at (original signup).
   const dayNumber = getDayNumber(student.first_paid_at ?? student.joined_at);
-  // v75.1 - lessons.length includes l057 (bounty onboarding). Filter
-  // it out so the % displayed matches the 64-lesson sprint baseline
-  // every other surface uses.
-  const sprintLessons = lessons.filter(
-    (l) => !SPRINT_EXCLUDED_LESSON_IDS.has(l.id),
+  // Lessons that do not count toward progress (the old course's l057,
+  // the bounty onboarding; the new course's pond row) stay out of the %,
+  // so it matches the denominator every other surface uses.
+  const excludedIds = new Set(
+    lessons.filter((l) => l.counts_toward_progress === false).map((l) => l.id),
   );
+  const sprintLessons = lessons.filter((l) => !excludedIds.has(l.id));
   const sprintCompletedIds = new Set(
-    Array.from(completedIds).filter(
-      (id) => !SPRINT_EXCLUDED_LESSON_IDS.has(id),
-    ),
+    Array.from(completedIds).filter((id) => !excludedIds.has(id)),
   );
-  const overallPercent = progressPercent(
-    sprintCompletedIds.size,
-    sprintLessons.length,
-  );
+  // Null when the lessons could not be read: the stat shows "—".
+  const overallPercent =
+    sprintLessons.length > 0
+      ? progressPercent(sprintCompletedIds.size, sprintLessons.length)
+      : null;
 
-  // Highest region with any completion — drives the region-pace pill.
-  const lessonRegion = new Map(lessons.map((l) => [l.id, l.region_id]));
-  const REGION_ORDER: RegionId[] = ["r1", "r2", "r3", "r4"];
-  let currentRegion: RegionId = "r1";
+  // Highest area with any completion, in the order `regions` comes in
+  // (order_num): r1..r4 on the old course, a1..a8 on the new one. Drives
+  // the region-pace pill before the switch and the area pill after it.
+  const lessonRegion = new Map(lessons.map((l) => [l.id, l.region_id as string]));
+  const regionOrder = regions.map((r) => r.id as string);
+  let currentRegion: string | null = regionOrder[0] ?? null;
   for (const lessonId of completedIds) {
-    const rid = lessonRegion.get(lessonId) as RegionId | undefined;
-    if (rid && REGION_ORDER.indexOf(rid) > REGION_ORDER.indexOf(currentRegion)) {
+    const rid = lessonRegion.get(lessonId);
+    if (
+      rid &&
+      currentRegion &&
+      regionOrder.indexOf(rid) > regionOrder.indexOf(currentRegion)
+    ) {
       currentRegion = rid;
     }
   }
-  const pace = buildPaceSummary(
-    student.joined_at,
-    sprintCompletedIds.size,
-    sprintLessons.length,
-    currentRegion,
-  );
+  const currentRegionName =
+    regions.find((r) => r.id === currentRegion)?.name ?? null;
+  const courseIsNew = course?.ok === true && course.resetAt != null;
+  // Old course only, and only with a real denominator: a pace against an
+  // empty catalog would be invented.
+  const pace =
+    course?.ok && !courseIsNew && sprintLessons.length > 0
+      ? buildPaceSummary(
+          student.joined_at,
+          sprintCompletedIds.size,
+          sprintLessons.length,
+          (currentRegion ?? "") as RegionId,
+        )
+      : null;
+  const activity =
+    course?.ok && courseIsNew
+      ? activityLabel(course.lastByStudent.get(student.id) ?? null)
+      : null;
 
   // Group lessons by region
   const lessonsByRegion: Record<string, Lesson[]> = {};
@@ -160,8 +189,9 @@ export default function StudentDetailPage() {
     lessonsByRegion[lesson.region_id].push(lesson);
   }
 
-  // Discount status
-  const gateCompleted = completedIds.has("l18");
+  // Discount status: the lesson the catalog marks as the gate.
+  const gateLesson = lessons.find((l) => l.is_gate) ?? null;
+  const gateCompleted = gateLesson != null && completedIds.has(gateLesson.id);
 
   // DM templates
   const dmTemplates = [
@@ -175,7 +205,7 @@ export default function StudentDetailPage() {
     },
     {
       label: "Encouragement",
-      text: `Hey ${student.name || "there"}! You're making great progress — ${overallPercent}% through your expedition. Keep going! The next region is where things really click.`,
+      text: `Hey ${student.name || "there"}! You're making great progress — ${overallPercent == null ? "—" : `${overallPercent}%`} through your expedition. Keep going! The next region is where things really click.`,
     },
   ];
 
@@ -238,8 +268,8 @@ export default function StudentDetailPage() {
               {student.membership_status.replace("_", " ")}
             </span>
           </Pill>
-          <PacePill label={pace.progressLabel} />
-          {pace.regionPace !== "on_pace" && (
+          {pace && <PacePill label={pace.progressLabel} />}
+          {pace && currentRegion && pace.regionPace !== "on_pace" && (
             <Pill tone={pace.regionPace === "behind" ? "warning" : "accent"}>
               <span>
                 Region{" "}
@@ -249,6 +279,15 @@ export default function StudentDetailPage() {
               </span>
             </Pill>
           )}
+          {/* After the course switch: activity, and the area the student
+              is in, by the area's own name. No clock to be behind. */}
+          {activity && (
+            <Pill tone={ACTIVITY_TONE[activity]}>{ACTIVITY_TEXT[activity]}</Pill>
+          )}
+          {activity && currentRegionName && (
+            <Pill tone="neutral">In {currentRegionName}</Pill>
+          )}
+          {!pace && !activity && <Pill tone="neutral">Pace —</Pill>}
         </div>
       </div>
 
@@ -257,7 +296,11 @@ export default function StudentDetailPage() {
         className="grid grid-cols-2 lg:grid-cols-4"
         style={{ gap: 12, marginBottom: 16 }}
       >
-        <Stat label="Progress" value={`${overallPercent}%`} tone="accent" />
+        <Stat
+          label="Progress"
+          value={overallPercent == null ? "—" : `${overallPercent}%`}
+          tone="accent"
+        />
         <Stat label="Streak" value={`${streaks?.current_streak ?? 0}d`} />
         <Stat
           label="Joined"
@@ -406,7 +449,11 @@ export default function StudentDetailPage() {
             {regions.map((region) => (
               <div key={region.id}>
                 <p style={{ ...T.bodyDim, fontSize: 12, marginBottom: 8 }}>
-                  {region.name} — {region.subtitle} ({region.days_label})
+                  {/* The new course's areas have no day range and may have
+                      no subtitle; print only what the row holds. */}
+                  {region.name}
+                  {region.subtitle ? ` — ${region.subtitle}` : ""}
+                  {region.days_label ? ` (${region.days_label})` : ""}
                 </p>
                 <div
                   style={{
@@ -462,7 +509,8 @@ export default function StudentDetailPage() {
                             letterSpacing: "-0.005em",
                           }}
                         >
-                          Day {lesson.day}: {lesson.title}
+                          {lesson.day != null ? `Day ${lesson.day}: ` : ""}
+                          {lesson.title}
                         </span>
                         <span style={T.meta}>
                           ({LESSON_TYPE_LABELS[lesson.type]})
@@ -480,7 +528,9 @@ export default function StudentDetailPage() {
       <Section eyebrow="Discount">
         <Card padding={20}>
           <p style={{ ...T.bodyDim, fontSize: 12, marginBottom: 12 }}>
-            Gate lesson (l18): {gateCompleted ? "completed" : "not yet"}
+            {gateLesson
+              ? `Gate lesson (${gateLesson.title}): ${gateCompleted ? "completed" : "not yet"}`
+              : "No lesson is marked as the gate."}
           </p>
           {discountRequest ? (
             <DiscountStatusPill

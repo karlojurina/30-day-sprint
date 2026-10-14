@@ -15,10 +15,19 @@
  *
  * The component is fully controlled: parent owns the TriggerConfig
  * state and passes it down. The builder only emits onChange events.
+ *
+ * The areas and the action lessons it offers come from the live catalog
+ * (`regions`, `lessons where requires_action`), so the editor offers r1..r4
+ * before the course switch and a1..a8 after it. Once the switch has run
+ * (admin_config.curriculum_reset_at), the three metrics that measure pace
+ * against the old 30-day clock are not offered: on the new course they
+ * never match (cutover PRD, C5).
  */
 
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase-browser";
+import { getCurriculumResetAt } from "@/lib/curriculum-reset";
 import {
-  ACTION_LESSONS,
   METRICS,
   REGION_LABEL,
 } from "@/lib/csm-triggers";
@@ -44,7 +53,121 @@ const BINARY_OPS: Array<{ value: ConditionOp; label: string }> = [
   { value: "is_not", label: "is not" },
 ];
 
-const REGIONS: RegionId[] = ["r1", "r2", "r3", "r4"];
+/** The metrics that measure pace against the old course's 30-day clock. */
+const CLOCK_METRICS = new Set<ConditionMetric>([
+  "progress_ratio",
+  "progress_label",
+  "region_pace",
+]);
+
+interface Option {
+  id: string;
+  label: string;
+}
+
+/** What the dropdowns offer, read from the live catalog. */
+interface Catalog {
+  /** Areas in order_num order. */
+  regions: Option[];
+  /** Lessons with an action item, in course order. */
+  actionLessons: Option[];
+  /** True once the course switch has run. */
+  courseIsNew: boolean;
+}
+
+/**
+ * Reads the areas, the action lessons and the reset key. `catalog` stays
+ * null while loading and after a failed read, and `error` says why; the
+ * dropdowns that need the catalog are disabled until it arrives, so a
+ * condition is never given a default that was guessed.
+ */
+function useTriggerCatalog(): { catalog: Catalog | null; error: string | null } {
+  const [state, setState] = useState<{
+    catalog: Catalog | null;
+    error: string | null;
+  }>({ catalog: null, error: null });
+
+  useEffect(() => {
+    let cancelled = false;
+    const supabase = createClient();
+    (async () => {
+      try {
+        const [resetAt, regionsRes, lessonsRes] = await Promise.all([
+          getCurriculumResetAt(supabase),
+          supabase.from("regions").select("id, name, order_num").order("order_num"),
+          supabase
+            .from("lessons")
+            .select("id, title, region_id, day, sort_order")
+            .eq("requires_action", true),
+        ]);
+        if (regionsRes.error) throw new Error(`areas: ${regionsRes.error.message}`);
+        if (lessonsRes.error) throw new Error(`lessons: ${lessonsRes.error.message}`);
+        const regions = (regionsRes.data ?? []) as Array<{
+          id: string;
+          name: string;
+          order_num: number;
+        }>;
+        const order = new Map(regions.map((r) => [r.id, r.order_num]));
+        const lessons = [
+          ...((lessonsRes.data ?? []) as Array<{
+            id: string;
+            title: string;
+            region_id: string;
+            day: number | null;
+            sort_order: number;
+          }>),
+        ].sort(
+          (a, b) =>
+            (order.get(a.region_id) ?? 0) - (order.get(b.region_id) ?? 0) ||
+            (a.day ?? 0) - (b.day ?? 0) ||
+            a.sort_order - b.sort_order,
+        );
+        if (cancelled) return;
+        setState({
+          catalog: {
+            regions: regions.map((r) => ({
+              id: r.id,
+              label: REGION_LABEL[r.id] ?? `Area ${r.order_num} (${r.name})`,
+            })),
+            actionLessons: lessons.map((l) => ({
+              id: l.id,
+              label: `${l.title} (${l.id})`,
+            })),
+            courseIsNew: resetAt != null,
+          },
+          error: null,
+        });
+      } catch (e) {
+        if (cancelled) return;
+        setState({
+          catalog: null,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return state;
+}
+
+/**
+ * The options for one dropdown, with the condition's current value kept
+ * in the list even when the catalog no longer has it (a template written
+ * for the old course), so the select never shows a different value from
+ * the one saved.
+ */
+function withCurrent(options: Option[], current: string, loaded: boolean): Option[] {
+  if (options.some((o) => o.id === current)) return options;
+  // An old area keeps its old label; a lesson id stands for itself.
+  const label = REGION_LABEL[current] ?? current;
+  return [
+    { id: current, label: loaded ? `${label} (not in the course)` : label },
+    ...options,
+  ];
+}
 
 interface Props {
   value: TriggerConfig;
@@ -54,6 +177,7 @@ interface Props {
 
 export function TriggerBuilder({ value, onChange, disabled }: Props) {
   const conds = value.all ?? [];
+  const { catalog, error } = useTriggerCatalog();
 
   const updateRow = (idx: number, next: Condition) => {
     onChange({ all: conds.map((c, i) => (i === idx ? next : c)) });
@@ -98,6 +222,19 @@ export function TriggerBuilder({ value, onChange, disabled }: Props) {
         cover multiple OR cases, make separate templates.
       </p>
 
+      {error && (
+        <p
+          style={{
+            fontSize: 12,
+            color: "var(--color-danger)",
+            marginBottom: 10,
+          }}
+        >
+          The areas and lessons could not be loaded, so their dropdowns are
+          off: {error}
+        </p>
+      )}
+
       {conds.length === 0 && (
         <p
           style={{
@@ -116,6 +253,7 @@ export function TriggerBuilder({ value, onChange, disabled }: Props) {
           <ConditionRow
             key={i}
             cond={cond}
+            catalog={catalog}
             disabled={disabled}
             onChange={(c) => updateRow(i, c)}
             onRemove={() => removeRow(i)}
@@ -202,28 +340,42 @@ export function TriggerBuilder({ value, onChange, disabled }: Props) {
 
 function ConditionRow({
   cond,
+  catalog,
   disabled,
   onChange,
   onRemove,
 }: {
   cond: Condition;
+  /** Null while loading or after a failed read. */
+  catalog: Catalog | null;
   disabled?: boolean;
   onChange: (c: Condition) => void;
   onRemove: () => void;
 }) {
   const def = METRICS[cond.metric];
   const inputType = def.input;
+  // The first area and the first action lesson of the live catalog are the
+  // defaults; without the catalog, metrics that need one cannot be picked.
+  const firstRegion = catalog?.regions[0]?.id ?? null;
+  const firstLesson = catalog?.actionLessons[0]?.id ?? null;
+  const metricOptions = (Object.keys(METRICS) as ConditionMetric[]).filter(
+    (m) =>
+      m === cond.metric ||
+      (!(catalog?.courseIsNew && CLOCK_METRICS.has(m)) &&
+        !(METRICS[m].param === "region" && !firstRegion) &&
+        !(METRICS[m].param === "lesson" && !firstLesson)),
+  );
 
   // Change metric → reset to a sensible default for the new shape.
   const handleMetricChange = (newId: ConditionMetric) => {
     const newDef = METRICS[newId];
     if (newDef.input === "boolean") {
       if (newDef.param === "region") {
-        onChange({ metric: newId, region: "r1", op: "is" } as Condition);
+        onChange({ metric: newId, region: firstRegion, op: "is" } as Condition);
       } else if (newDef.param === "lesson") {
         onChange({
           metric: newId,
-          lesson_id: "l018",
+          lesson_id: firstLesson,
           op: "is",
         } as Condition);
       } else {
@@ -241,7 +393,7 @@ function ConditionRow({
       if (newDef.param === "region") {
         onChange({
           metric: newId,
-          region: "r1",
+          region: firstRegion,
           op: "at_least",
           value: 0,
         } as Condition);
@@ -268,9 +420,11 @@ function ConditionRow({
         onChange={(e) => handleMetricChange(e.target.value as ConditionMetric)}
         style={selectStyle()}
       >
-        {(Object.keys(METRICS) as ConditionMetric[]).map((m) => (
+        {metricOptions.map((m) => (
           <option key={m} value={m}>
-            {METRICS[m].label}
+            {catalog?.courseIsNew && CLOCK_METRICS.has(m)
+              ? `${METRICS[m].label} (never matches on the new course)`
+              : METRICS[m].label}
           </option>
         ))}
       </select>
@@ -278,32 +432,38 @@ function ConditionRow({
       {/* Sub-param: region */}
       {def.param === "region" && "region" in cond && (
         <select
-          disabled={disabled}
+          disabled={disabled || !catalog}
           value={cond.region}
           onChange={(e) =>
             onChange({ ...cond, region: e.target.value as RegionId } as Condition)
           }
           style={selectStyle()}
         >
-          {REGIONS.map((r) => (
-            <option key={r} value={r}>
-              {REGION_LABEL[r]}
-            </option>
-          ))}
+          {withCurrent(catalog?.regions ?? [], cond.region, catalog != null).map(
+            (r) => (
+              <option key={r.id} value={r.id}>
+                {r.label}
+              </option>
+            ),
+          )}
         </select>
       )}
 
       {/* Sub-param: lesson */}
       {def.param === "lesson" && "lesson_id" in cond && (
         <select
-          disabled={disabled}
+          disabled={disabled || !catalog}
           value={cond.lesson_id}
           onChange={(e) =>
             onChange({ ...cond, lesson_id: e.target.value } as Condition)
           }
           style={selectStyle()}
         >
-          {ACTION_LESSONS.map((l) => (
+          {withCurrent(
+            catalog?.actionLessons ?? [],
+            cond.lesson_id,
+            catalog != null,
+          ).map((l) => (
             <option key={l.id} value={l.id}>
               {l.label}
             </option>

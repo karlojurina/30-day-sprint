@@ -11,7 +11,9 @@
  *
  * Plus a pace breakdown card (behind / on pace / ahead counts) for
  * students currently on the 30-day journey, sourced from the same
- * useJourneyPaceCounts hook the sidebar badge uses.
+ * useJourneyPaceCounts hook the sidebar badge uses. After the course
+ * switch the card counts activity instead (not started / moving /
+ * slipping / stalled), over every active member.
  *
  * UX:
  *   - Range presets (7/30/90/all) AND custom from/to date pickers
@@ -33,7 +35,12 @@ import {
   EmptyState,
   T,
 } from "@/components/admin/ui";
-import { useJourneyPaceCounts } from "@/lib/useJourneyPaceCounts";
+import {
+  ACTIVITY_ORDER,
+  ACTIVITY_TEXT,
+  useJourneyPaceCounts,
+} from "@/lib/useJourneyPaceCounts";
+import type { ActivityLabel } from "@/lib/curriculum-reset";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
@@ -424,7 +431,7 @@ export default function ProgressInsightsPage() {
         </div>
       )}
 
-      <CalcTransparency />
+      <CalcTransparency courseIsNew={paceCounts.courseIsNew} />
     </AdminPage>
   );
 }
@@ -482,13 +489,93 @@ function DateInput({
   );
 }
 
+/** What each activity cell says after the course switch (cutover PRD, C4). */
+const ACTIVITY_CELL: Record<
+  ActivityLabel,
+  { color: string; description: string }
+> = {
+  not_started: {
+    color: "var(--color-text-primary)",
+    description: "No counted lesson finished on the new course yet.",
+  },
+  moving: {
+    color: "var(--color-success)",
+    description: "Last counted lesson under 3 days ago.",
+  },
+  slipping: {
+    color: "var(--color-warning)",
+    description: "Last counted lesson 3 to 7 days ago.",
+  },
+  stalled: {
+    color: "var(--color-danger)",
+    description: "Last counted lesson over 7 days ago. Worth a check-in.",
+  },
+};
+
 /** Three-way pace stat card — same data as the sidebar badge but in
- *  big detailed numbers with descriptions. */
+ *  big detailed numbers with descriptions. After the course switch it
+ *  counts the four activity labels instead. */
 function PaceBreakdownCard({
   counts,
 }: {
   counts: ReturnType<typeof useJourneyPaceCounts>;
 }) {
+  if (counts.courseIsNew || counts.error) {
+    return (
+      <div
+        style={{
+          background: "var(--color-bg-card)",
+          border: "1px solid var(--color-border)",
+          borderRadius: 12,
+          padding: "14px 16px",
+          marginBottom: 12,
+        }}
+      >
+        <div className="flex items-baseline" style={{ marginBottom: 10, gap: 8 }}>
+          <h3
+            style={{
+              fontSize: 14,
+              fontWeight: 600,
+              color: "var(--color-text-primary)",
+              letterSpacing: "-0.012em",
+            }}
+          >
+            {counts.error ? "Pace right now" : "Activity right now"}
+          </h3>
+          <span
+            style={{
+              fontSize: 11,
+              color: counts.error
+                ? "var(--color-danger)"
+                : "var(--color-text-tertiary)",
+            }}
+          >
+            {counts.error
+              ? `Could not be counted: ${counts.error}`
+              : `Active members on the course · ${counts.total} total`}
+          </span>
+        </div>
+        {!counts.error && (
+          <div
+            className="grid grid-cols-2 lg:grid-cols-4"
+            style={{ gap: 12 }}
+          >
+            {ACTIVITY_ORDER.map((label) => (
+              <PaceCell
+                key={label}
+                label={ACTIVITY_TEXT[label]}
+                value={counts.activity[label]}
+                total={counts.total}
+                color={ACTIVITY_CELL[label].color}
+                description={ACTIVITY_CELL[label].description}
+                loading={counts.loading}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
     <div
       style={{
@@ -1016,7 +1103,7 @@ function ChartTooltip({
  * `<details>` so the page footer stays light unless someone needs
  * the reference.
  */
-function CalcTransparency() {
+function CalcTransparency({ courseIsNew }: { courseIsNew: boolean }) {
   const entries: Array<{ label: string; body: React.ReactNode }> = [
     {
       label: "Avg progress",
@@ -1030,10 +1117,15 @@ function CalcTransparency() {
       label: "Joined / Churned",
       body: "New / canceled memberships per day. The chart shows daily counts; the summary number is the window sum.",
     },
-    {
-      label: "Pace right now",
-      body: "Live count of students currently on the 30-day journey, grouped by completedLessons / expectedLessons. Behind < 0.5×, Ahead > 1.5×.",
-    },
+    courseIsNew
+      ? {
+          label: "Activity right now",
+          body: "Live count of active members, grouped by how long ago they last finished a counted lesson on the new course: Moving under 3 days, Slipping 3 to 7, Stalled over 7, Not started when none yet.",
+        }
+      : {
+          label: "Pace right now",
+          body: "Live count of students currently on the 30-day journey, grouped by completedLessons / expectedLessons. Behind < 0.5×, Ahead > 1.5×.",
+        },
     {
       label: "Bounty Program · joined",
       body: "Live count of students onboarded to the Bounty Program. Stamped exclusively by Zak's adbounty webhook.",
@@ -1442,7 +1534,8 @@ function BountyCell({
   suffix = "",
 }: {
   label: string;
-  value: number;
+  /** Null renders "—": a number that could not be computed. */
+  value: number | null;
   sublabel: string;
   color: string;
   loading: boolean;
@@ -1480,7 +1573,7 @@ function BountyCell({
             lineHeight: 1,
           }}
         >
-          {loading ? "—" : `${value}${suffix}`}
+          {loading || value == null ? "—" : `${value}${suffix}`}
         </span>
       </div>
       <p
@@ -1502,11 +1595,12 @@ interface SprinterProgress {
   loading: boolean;
   /** Students still within 30 days of joining + membership active. */
   count: number;
-  /** Mean completion % across that pool. */
-  avgProgress: number;
+  /** Mean completion % across that pool. Null when the lessons could
+   *  not be counted. */
+  avgProgress: number | null;
   /** Median completion % across that pool. Catches the case where a few
-   *  high performers pull the mean up. */
-  medianProgress: number;
+   *  high performers pull the mean up. Null like avgProgress. */
+  medianProgress: number | null;
 }
 
 function useCurrentSprinterProgress(): SprinterProgress {
@@ -1528,8 +1622,9 @@ function useCurrentSprinterProgress(): SprinterProgress {
       // tenure) instead of joined_at (current cycle, breaks for
       // returners). Adds paying-plan filter (free users no longer
       // inflate denominator) and ACTIVE_STATUSES (past_due included).
-      // Lessons count excludes l057 (sprint denominator = 64, not 65).
-      // Paginates student_progress_counts so the view's ~1000-row cap
+      // Lessons count takes only the lessons that count toward progress
+      // (the old course's 64, the new course's 140); a failed count shows
+      // "—". Paginates student_progress_counts so the view's ~1000-row cap
       // doesn't silently truncate.
       const [studentsRes, lessonsRes, completionsRes] = await Promise.all([
         supabase
@@ -1542,7 +1637,7 @@ function useCurrentSprinterProgress(): SprinterProgress {
         supabase
           .from("lessons")
           .select("id", { count: "exact", head: true })
-          .neq("id", "l057"),
+          .eq("counts_toward_progress", true),
         fetchAllRowsPaginated<{
           student_id: string;
           completed_count: number;
@@ -1558,9 +1653,21 @@ function useCurrentSprinterProgress(): SprinterProgress {
         joined_at: string;
       }>;
       const totalLessons =
-        typeof lessonsRes.count === "number" && lessonsRes.count > 0
+        !lessonsRes.error &&
+        typeof lessonsRes.count === "number" &&
+        lessonsRes.count > 0
           ? lessonsRes.count
-          : 64;
+          : null;
+      if (totalLessons == null) {
+        if (cancelled) return;
+        setData({
+          loading: false,
+          count: students.length,
+          avgProgress: null,
+          medianProgress: null,
+        });
+        return;
+      }
       const completionMap = new Map<string, number>();
       for (const r of (completionsRes.data ?? []) as Array<{
         student_id: string;

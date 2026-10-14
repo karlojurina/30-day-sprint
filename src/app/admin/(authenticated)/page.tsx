@@ -20,7 +20,6 @@ import { createClient } from "@/lib/supabase-browser";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import type { Student } from "@/types/database";
 import {
-  TOTAL_LESSONS,
   progressPercent,
   ADMIN_STUDENT_JOIN_CUTOFF,
   TASKS_STUDENT_JOIN_CUTOFF,
@@ -57,7 +56,8 @@ interface DashboardData {
   totalStudents: number;
   activeStudents: number;
   joinedThisWeek: number;
-  avgProgress: number;
+  /** Null when the lessons could not be counted: the tile shows "—". */
+  avgProgress: number | null;
   canceledThisMonth: number;
   pendingDiscounts: number;
   openTasks: number;
@@ -147,12 +147,12 @@ export default function AdminDashboard() {
               .from("student_progress_counts")
               .select("student_id, completed_count"),
         ),
-        // v75.1 - excludes l057 (bounty onboarding) so the avg-progress
-        // denominator matches the 64-lesson sprint.
+        // Only the lessons that count toward progress: the old course's
+        // 64 (l057, the bounty onboarding, does not), the new course's 140.
         supabase
           .from("lessons")
           .select("id", { count: "exact", head: true })
-          .neq("id", "l057"),
+          .eq("counts_toward_progress", true),
         supabase.from("discount_requests").select("id").eq("status", "pending"),
         // Mirror /api/admin/tasks filtering exactly so the dashboard
         // count and the Tasks page count agree. !inner forces the
@@ -219,10 +219,17 @@ export default function AdminDashboard() {
 
       const students = (studentsRes.data || []) as Student[];
       const completions = completionsRes.data || [];
+      // A failed count shows "—" on the tile, never an average over a
+      // remembered number of lessons.
       const totalLessons =
-        typeof lessonsRes.count === "number" && lessonsRes.count > 0
+        !lessonsRes.error &&
+        typeof lessonsRes.count === "number" &&
+        lessonsRes.count > 0
           ? lessonsRes.count
-          : TOTAL_LESSONS;
+          : null;
+      if (totalLessons == null) {
+        console.error("[admin/dashboard] lessons count failed:", lessonsRes.error);
+      }
 
       const completionMap: Record<string, number> = {};
       for (const r of completions) {
@@ -261,12 +268,14 @@ export default function AdminDashboard() {
         0,
       );
       const avgProgress =
-        activeStudents.length > 0 && totalLessons > 0
-          ? Math.round(
-              (totalCompletions / (activeStudents.length * totalLessons)) *
-                100,
-            )
-          : 0;
+        totalLessons == null
+          ? null
+          : activeStudents.length > 0
+            ? Math.round(
+                (totalCompletions / (activeStudents.length * totalLessons)) *
+                  100,
+              )
+            : 0;
 
       // v75.38: Month-2 conversion now flows through ONE canonical
       // helper (isMonth2Converted + isInMonth2Cohort) in metrics-
@@ -887,7 +896,8 @@ function SparklineTile({
   deltaSuffix = "",
 }: {
   label: string;
-  current: number;
+  /** Null renders "—": a number that could not be computed. */
+  current: number | null;
   currentSuffix?: string;
   points: number[];
   mode: "running" | "flow";
@@ -933,8 +943,8 @@ function SparklineTile({
             lineHeight: 1.05,
           }}
         >
-          {current}
-          {currentSuffix ?? ""}
+          {current == null ? "—" : current}
+          {current == null ? "" : (currentSuffix ?? "")}
         </p>
         <SparklineSVG points={points} mode={mode} color={sparkColor} />
       </div>

@@ -1,18 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase-browser";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import type { Student, RegionId } from "@/types/database";
 import { getDayNumber } from "@/types/database";
 import {
-  TOTAL_LESSONS,
   progressPercent,
   ADMIN_STUDENT_JOIN_CUTOFF,
 } from "@/lib/constants";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import { buildPaceSummary } from "@/lib/csm-triggers";
-import { StudentCard } from "./StudentCard";
+import { activityLabel, type ActivityLabel } from "@/lib/curriculum-reset";
+import {
+  ACTIVITY_ORDER,
+  ACTIVITY_TEXT,
+  loadCourseActivity,
+} from "@/lib/useJourneyPaceCounts";
+import { StudentCard, type CardArea, type CardPace } from "./StudentCard";
 import { StudentDrawer } from "./StudentDrawer";
 
 /**
@@ -64,17 +69,28 @@ function columnFor(student: Student): ColumnId {
 
 interface StudentWithProgress extends Student {
   completedCount: number;
-  /** Highest region the student has any complete lesson in. r1 default. */
-  currentRegion: RegionId;
-  /** Pace label vs the linear 30-day glide path. */
-  paceLabel: "behind" | "on_pace" | "ahead";
+  /** Highest area the student has any complete lesson in, by `regions`'
+   *  order; the first area by default. Null when the areas could not be read. */
+  area: CardArea | null;
+  /** Before the switch: pace vs the linear 30-day glide path. After it:
+   *  activity. Null when it cannot be known. */
+  pace: CardPace | null;
 }
 
+const EMPTY_ACTIVITY: Record<ActivityLabel, number> = {
+  not_started: 0,
+  moving: 0,
+  slipping: 0,
+  stalled: 0,
+};
 
 export default function KanbanPage() {
   const supabase = createClient();
   const [students, setStudents] = useState<StudentWithProgress[]>([]);
-  const [totalLessons, setTotalLessons] = useState<number>(TOTAL_LESSONS);
+  // Null until counted, and after a failed count: the cards show "—".
+  const [totalLessons, setTotalLessons] = useState<number | null>(null);
+  // "old" / "new" once known; null when the reset key could not be read.
+  const [courseKind, setCourseKind] = useState<"old" | "new" | null>(null);
   const [loading, setLoading] = useState(true);
   const [drawerStudentId, setDrawerStudentId] = useState<string | null>(null);
 
@@ -88,7 +104,14 @@ export default function KanbanPage() {
       // the journey wasn't).
       // v75.27: paginated student + view fetches. Bypasses the
       // PostgREST ~1000-row server-side cap.
-      const [studentsRes, countsRes, regionsRes, totalLessonsRes] =
+      const [
+        studentsRes,
+        countsRes,
+        regionsRes,
+        totalLessonsRes,
+        areasRes,
+        course,
+      ] =
         await Promise.all([
           fetchAllRowsPaginated<Student>(() =>
             supabase
@@ -125,19 +148,44 @@ export default function KanbanPage() {
                 .from("student_current_region")
                 .select("student_id, current_region"),
           ),
-          // v75.1 - exclude l057 (bounty onboarding) so per-student
-          // % matches the 64-lesson sprint denominator.
+          // Only the lessons that count toward progress: the old course's
+          // 64 (l057, the bounty onboarding, does not), the new course's 140.
           supabase
             .from("lessons")
             .select("id", { count: "exact", head: true })
-            .neq("id", "l057"),
+            .eq("counts_toward_progress", true),
+          // The areas' names and order, for the chips: r1..r4 before the
+          // switch, a1..a8 after it.
+          supabase.from("regions").select("id, name, order_num").order("order_num"),
+          loadCourseActivity(supabase),
         ]);
 
+      // A failed count shows "—" on every card, never a % of a remembered number.
       const totalLessonsCount =
-        typeof totalLessonsRes.count === "number" && totalLessonsRes.count > 0
+        !totalLessonsRes.error &&
+        typeof totalLessonsRes.count === "number" &&
+        totalLessonsRes.count > 0
           ? totalLessonsRes.count
-          : TOTAL_LESSONS;
+          : null;
+      if (totalLessonsCount == null) {
+        console.error("[admin/journey] lessons count failed:", totalLessonsRes.error);
+      }
       setTotalLessons(totalLessonsCount);
+      const courseIsNew = course.ok && course.resetAt != null;
+      setCourseKind(course.ok ? (courseIsNew ? "new" : "old") : null);
+
+      const areas = (areasRes.data ?? []) as Array<{
+        id: string;
+        name: string;
+        order_num: number;
+      }>;
+      if (areasRes.error) {
+        console.error("[admin/journey] regions read failed:", areasRes.error);
+      }
+      const areaById = new Map(
+        areas.map((a) => [a.id, { order: a.order_num, name: a.name }]),
+      );
+      const firstAreaId = areas[0]?.id ?? null;
 
       // student_id → count
       const counts = new Map<string, number>();
@@ -162,22 +210,33 @@ export default function KanbanPage() {
 
       const out: StudentWithProgress[] = (studentsRes.data ?? []).map((s) => {
         const completedCount = counts.get(s.id) ?? 0;
-        const currentRegion = currentRegionByStudent.get(s.id) ?? "r1";
+        const currentRegion = currentRegionByStudent.get(s.id) ?? firstAreaId;
         // v75.36: pace anchor on first_paid_at (real platform tenure)
         // not joined_at (current cycle start, breaks for returners).
         // Matches every other surface's day-N anchor since v75.20.
         const paceAnchor = s.first_paid_at ?? s.joined_at;
-        const pace = buildPaceSummary(
-          paceAnchor,
-          completedCount,
-          totalLessonsCount,
-          currentRegion,
-        );
+        let pace: CardPace | null = null;
+        if (course.ok && courseIsNew) {
+          pace = {
+            course: "new",
+            label: activityLabel(course.lastByStudent.get(s.id) ?? null),
+          };
+        } else if (course.ok && totalLessonsCount != null) {
+          pace = {
+            course: "old",
+            label: buildPaceSummary(
+              paceAnchor,
+              completedCount,
+              totalLessonsCount,
+              (currentRegion ?? "") as RegionId,
+            ).progressLabel,
+          };
+        }
         return {
           ...s,
           completedCount,
-          currentRegion,
-          paceLabel: pace.progressLabel,
+          area: currentRegion ? (areaById.get(currentRegion) ?? null) : null,
+          pace,
         };
       });
       setStudents(out);
@@ -204,10 +263,24 @@ export default function KanbanPage() {
     for (const s of students) {
       const col = columnFor(s);
       if (col === "churned" || col === "month-2") continue;
-      counts[s.paceLabel]++;
+      if (s.pace?.course === "old") counts[s.pace.label]++;
     }
     return counts;
   }, [students]);
+
+  // After the course switch: activity over every member who has not
+  // churned. The new course has no 30 days, so Month 2+ is on it too.
+  const activityCounts = useMemo(() => {
+    const counts = { ...EMPTY_ACTIVITY };
+    for (const s of students) {
+      if (s.membership_status === "canceled") continue;
+      if (s.pace?.course === "new") counts[s.pace.label]++;
+    }
+    return counts;
+  }, [students]);
+
+  // The old pace needs both the course and a real lesson count.
+  const pacePossible = courseKind === "old" && totalLessons != null;
 
   if (loading) {
     return (
@@ -269,23 +342,39 @@ export default function KanbanPage() {
             padding: "10px 14px",
           }}
         >
-          <PaceStat
-            label="Behind"
-            value={paceCounts.behind}
-            color="var(--color-danger)"
-          />
-          <Divider />
-          <PaceStat
-            label="On pace"
-            value={paceCounts.on_pace}
-            color="var(--color-text-primary)"
-          />
-          <Divider />
-          <PaceStat
-            label="Ahead"
-            value={paceCounts.ahead}
-            color="var(--color-success)"
-          />
+          {courseKind === "new" ? (
+            ACTIVITY_ORDER.map((label, i) => (
+              <Fragment key={label}>
+                {i > 0 && <Divider />}
+                <PaceStat
+                  label={ACTIVITY_TEXT[label]}
+                  value={activityCounts[label]}
+                  color={ACTIVITY_COLOR[label]}
+                />
+              </Fragment>
+            ))
+          ) : (
+            <>
+              {/* "—" when the lessons or the reset key could not be read. */}
+              <PaceStat
+                label="Behind"
+                value={pacePossible ? paceCounts.behind : "—"}
+                color="var(--color-danger)"
+              />
+              <Divider />
+              <PaceStat
+                label="On pace"
+                value={pacePossible ? paceCounts.on_pace : "—"}
+                color="var(--color-text-primary)"
+              />
+              <Divider />
+              <PaceStat
+                label="Ahead"
+                value={pacePossible ? paceCounts.ahead : "—"}
+                color="var(--color-success)"
+              />
+            </>
+          )}
         </div>
       </header>
 
@@ -382,12 +471,13 @@ export default function KanbanPage() {
                       <StudentCard
                         key={s.id}
                         student={s}
-                        progressPercent={progressPercent(
-                          s.completedCount,
-                          totalLessons
-                        )}
-                        currentRegion={s.currentRegion}
-                        paceLabel={s.paceLabel}
+                        progressPercent={
+                          totalLessons == null
+                            ? null
+                            : progressPercent(s.completedCount, totalLessons)
+                        }
+                        area={s.area}
+                        pace={s.pace}
                         onClick={() => setDrawerStudentId(s.id)}
                       />
                     ))
@@ -408,6 +498,14 @@ export default function KanbanPage() {
   );
 }
 
+/** The activity stats' colours, after the course switch. */
+const ACTIVITY_COLOR: Record<ActivityLabel, string> = {
+  not_started: "var(--color-text-primary)",
+  moving: "var(--color-success)",
+  slipping: "var(--color-warning)",
+  stalled: "var(--color-danger)",
+};
+
 /** Small stat cell for the pace overview row. Value above label,
  *  numeric tabular alignment so the trio line up cleanly. */
 function PaceStat({
@@ -416,7 +514,8 @@ function PaceStat({
   color,
 }: {
   label: string;
-  value: number;
+  /** A count, or "—" when it cannot be known. */
+  value: number | string;
   color: string;
 }) {
   return (

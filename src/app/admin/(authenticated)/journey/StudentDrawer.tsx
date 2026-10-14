@@ -12,7 +12,7 @@ import type {
   StudentStreaks,
 } from "@/types/database";
 import { getDayNumber } from "@/types/database";
-import { TOTAL_LESSONS, progressPercent } from "@/lib/constants";
+import { progressPercent } from "@/lib/constants";
 import { completedLessonIdsFor } from "@/lib/progress";
 
 interface StudentDrawerProps {
@@ -105,12 +105,20 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
     [completions, lessons]
   );
 
-  // Use the live lessons array length when available so the math
-  // tracks actual content (defends against TOTAL_LESSONS drift after
-  // content migrations).
-  const overallPercent = student
-    ? progressPercent(completedIds.size, lessons.length || TOTAL_LESSONS)
-    : 0;
+  // Over the lessons that count toward progress, as every other admin
+  // surface counts them (the old course's 64, the new course's 140); a
+  // lesson that does not count (l057, the pond row) is left out of both
+  // sides. Null when the lessons could not be read: the stat shows "—".
+  const countingLessons = lessons.filter(
+    (l) => l.counts_toward_progress !== false,
+  );
+  const countingDone = countingLessons.filter((l) =>
+    completedIds.has(l.id),
+  ).length;
+  const overallPercent =
+    countingLessons.length > 0
+      ? progressPercent(countingDone, countingLessons.length)
+      : null;
 
   // v75.18: anchor day on first_paid_at (original signup).
   const dayNumber = student
@@ -250,7 +258,11 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
               className="grid grid-cols-2"
               style={{ gap: 8, marginBottom: 24 }}
             >
-              <Stat label="Progress" value={`${overallPercent}%`} accent />
+              <Stat
+                label="Progress"
+                value={overallPercent == null ? "—" : `${overallPercent}%`}
+                accent
+              />
               <Stat label="Streak" value={`${streaks?.current_streak ?? 0}d`} />
               <Stat
                 label="Joined"
@@ -272,7 +284,11 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {regions.map((r) => {
-                  const regionLessons = lessons.filter((l) => l.region_id === r.id);
+                  // Counting lessons only, like the total above: a lesson
+                  // outside progress would leave the area at 14/15 forever.
+                  const regionLessons = countingLessons.filter(
+                    (l) => l.region_id === r.id,
+                  );
                   const total = regionLessons.length;
                   const done = regionLessons.filter((l) =>
                     completedIds.has(l.id)

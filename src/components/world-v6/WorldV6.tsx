@@ -3556,7 +3556,8 @@ function videoTime(seconds: number): string {
   return `${h} hour${h === 1 ? "" : "s"}`;
 }
 
-const LAUNCH_DAY = new Date(DISCOUNT_LAUNCH_DATE).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
+// The cutoff is midnight in Croatia (discount.ts), so the day is read there: in UTC it would print 8 October.
+const LAUNCH_DAY = new Date(DISCOUNT_LAUNCH_DATE).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Zagreb" });
 
 /**
  * The discount checkpoint's panel (2026-10-14): the offer, where the student

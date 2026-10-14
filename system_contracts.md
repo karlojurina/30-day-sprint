@@ -87,7 +87,29 @@ When adding a new table, append it here. When deleting a field, scan
 - **Stable contract:** `student_id`, `onboarding_completed_at`,
   `first_sprint_login_at`, `first_dashboard_login_at`,
   `intro_video_threshold_met`, `why_youre_here_panel_dismissed`,
-  `bounty_access_claimed_at`, `playbook_welcome_seen_at`
+  `bounty_access_claimed_at`, `playbook_welcome_seen_at`, and from v103
+  `playbook_unlocked_at`
+- **`playbook_unlocked_at` (v103, timestamptz, branch `world-engine`,
+  not on production).** Written only by SQL run by hand: v104 sets it
+  to the switch's moment for every graduate of the old course (a done
+  l078, or done lessons numbering at least `ceil(0.8 x` the counting
+  lessons`)`, every done lesson counted as the Playbook page counts
+  them, no 30-day wait), inserting a milestone row where none existed;
+  the undo of v104 clears only the stamps it made (`archive_v1.stamps`)
+  and deletes a row it created when nothing else on it was filled in
+  since; the commented statement at the foot of
+  `supabase/diagnostics/cutover-postcheck.sql` stamps one named student
+  by hand. The app never writes it. As committed, nothing in `src/`
+  reads it: `GET /api/student/data` selects `*` from this table, so it
+  reaches the browser, and the Playbook gate that honours it is cutover
+  WI-8, not merged at the time of writing. Until then the switch would
+  lock every graduate out. The undo of v103 drops the column.
+- **`first_sprint_login_at` and the switch:** v104 fills it from the
+  earliest of `completed_at`, `skipped_at` and `action_completed_at`
+  for every student who has a completion and no stamp, so the team's
+  "never opened the app" lists do not count those students; recorded in
+  `archive_v1.stamps` and taken back by the undo while it still holds
+  that value.
 - **Dormant column (do not extend):** `first_client_landed_at` — the
   API route, celebration component, and Map 2 milestone node were
   all removed in v72.4. Column persists for back-compat; safe to
@@ -145,10 +167,29 @@ When adding a new table, append it here. When deleting a field, scan
 - **Depended on by:** `lessons.region_id`, `MapMockup`, `StudentContext`,
   any region-aware UI, the `student_current_region` view (since v92 it
   joins `regions` and picks a student's furthest region by `order_num`),
-  `src/lib/world/catalog.ts` (sorts areas by `order_num`)
-- **Stable contract:** `id` (r1–r4), `name`, `order_num`
-- **Note:** this table has no `landmark_label` or `rail_at` column.
-  Only `regions_next` has them.
+  `src/lib/world/catalog.ts` (sorts areas by `order_num`). Added by the
+  cutover work (branch `world-engine`): `quizzes.region_id` and
+  `student_region_quiz.region_id` by key; `/api/cron/check-csm-tasks`
+  and `src/lib/csm-task-evaluation.ts` (`id, order_num`, ordered: the
+  CSM's areas; an empty table fails the cron); the admin pages
+  `/admin/journey` (chips, default area, the drawer),
+  `/admin/students/[id]` (the current area) and the trigger editor
+  (`id, name, order_num`); `/journal/[studentId]`;
+  `GET /api/admin/cutover-status` (the ids)
+- **Stable contract:** `id` (r1–r4; `a1`–`a8` after v104), `name`,
+  `order_num`
+- **Note:** before v103 this table has no `landmark_label` or `rail_at`
+  column. v103 adds both, empty, so v104 can copy them from
+  `regions_next`.
+- **After v104** (2026-10-14 code, not on production): the eight rows
+  of `regions_next` (`id, order_num, name, subtitle, tagline, terrain,
+  landmark_label, rail_at, quiz_format, is_discount_gate, created_at`).
+  The not-nulls on `subtitle`, `tagline`, `terrain`, `days_label`,
+  `day_start` and `day_end` and the check on `terrain` are dropped,
+  each recorded in `archive_v1` as Postgres stated it, for the undo.
+  Three keys point here, all `ON DELETE RESTRICT`: an area with
+  lessons, quizzes or quiz results cannot be deleted
+  ([The course switch](#the-course-switch-v103-v104)).
 
 ### `lessons`
 - **Depends on:** `regions`
@@ -167,20 +208,62 @@ When adding a new table, append it here. When deleting a field, scan
   lesson), `GET /api/cron/check-lesson-videos` (reads `id`, `type` and
   `duration_seconds`, by name), and, while the catalog switch names
   this table, `GET /api/student/data`,
-  `POST /api/student/lesson-video` and
-  `POST /api/student/lesson-watched`
+  `POST /api/student/lesson-video`,
+  `POST /api/student/lesson-watched`, `save-action-link`,
+  `mark-action-shipped` and, on the v2 shape, the discount routes.
+  Added by the cutover work, all by name: the view
+  `student_last_counted_completion` (v103); the CSM cron and
+  `csm-task-evaluation.ts` (`id, region_id, requires_action,
+  counts_toward_progress`); `src/lib/achievements.ts` (`region_id`,
+  `counts_toward_progress`: the areas it counts); the snapshot cron and
+  every admin page that divides by a lesson count (`.eq("counts_toward_progress",
+  true)`, never the constant 64); `/admin/students/[id]` (the `is_gate`
+  lesson's title); the trigger editor (lessons with `requires_action`);
+  `GET /api/admin/cutover-status` (three counts); the Whop webhook and
+  `src/app/api/student/_lib/watch-sync.ts` (`whop_lesson_id`, below)
 - **Stable contract:** `id`, `region_id`, `day`, `sort_order`, `type`
   (`watch` / `action` / `setup`, the CHECK constraint from v3),
   `requires_action`, `whop_lesson_id`, `title`, `is_gate`,
   `is_optional`, and from v92: `counts_toward_progress` (boolean,
   default true), `feature_key` (text, unique where set),
   `duration_seconds` (int, null or above 0), `updated_at`
+- **After v104** (2026-10-14 code, not on production): the 141 rows of
+  `lessons_next`, copied column for column (`id, region_id, type,
+  title, description, sort_order, requires_action, action_brief,
+  is_optional, is_gate, lesson_group_id, discord_channel,
+  counts_toward_progress, feature_key, bunny_video_id,
+  duration_seconds, video_ready_at, whop_lesson_id, created_at,
+  updated_at`). `day` is null on every row: its not-null and its check
+  (1 to 30) are dropped and recorded in `archive_v1` for the undo, so
+  every `.order("day")` falls through to `.order("sort_order")`, which
+  the readers that order by day now add. `type` is `watch` or `setup`.
+  The three keys that point here are `ON DELETE RESTRICT`: a lesson
+  with a completion, a note or a rating cannot be deleted at all
+  ([The course switch](#the-course-switch-v103-v104)).
+- **`whop_lesson_id` and the Whop sync** (kept by Lovro's word,
+  2026-10-14). The webhook (`POST /api/webhooks/whop`, a lesson
+  completed on Whop) looks the lesson up by `whop_lesson_id` with
+  `.maybeSingle()` and upserts a completion; no row means the Whop
+  lesson is not in the course and the event is ignored with a 200.
+  `syncWatchProgress` (`watch-sync.ts`, run at login, by
+  `refresh-watch-sync` and on tab focus) reads the student's
+  `course_lesson_interactions` for `WHOP_COURSE_ID` and matches the
+  completed ones the same way; the ones it cannot match go to
+  `student_whop_sync.last_sync_unmatched`. Before the switch the column
+  has only a non-unique index, so a doubled id would make the
+  webhook's `.maybeSingle()` error. v104 adds the unique index
+  `lessons_whop_lesson_id_key` (where not null), and every new-course
+  row carries its own id (v101 refuses otherwise). After the switch
+  `WHOP_COURSE_ID` has to name the new course on Whop, or the backfill
+  fetches the old course's lessons and matches nothing.
 - **Dormant columns (do not extend):** `bunny_video_id` (text, unique
   where set) and `video_ready_at`, both from v92. They still exist and
   the app has not read them since 2026-10-12, when lesson video moved
   to Tella. `GET /api/student/data` selects every column, so their
   values still travel in the lessons payload with no reader. They are
-  dropped with the cutover's cleanup.
+  kept: the cutover drops no column, now or in its week-later
+  deletion (call C19), because a dropped column that one forgotten
+  select still names returns an empty course with no error.
 - **No video id lives here, on purpose.** Every account that is signed
   in can read every column of this table (its select policy is
   `auth.uid() is not null`), and a Tella id is the video's address. The
@@ -204,10 +287,14 @@ When adding a new table, append it here. When deleting a field, scan
   `counts_toward_progress` false and `feature_key` `bounty_access` on
   `l057`, and `feature_key` `playbook_unlock` on `l078`. The SQL views
   and the snapshot function read `counts_toward_progress`; the world's
-  catalog and map model read both columns. The dashboard code still
-  uses the lesson ids in `src/lib/constants.ts`
-  (`SPRINT_EXCLUDED_LESSON_IDS`, `PLAYBOOK_UNLOCK_LESSON_ID`), so a
-  change to one must be made in the other.
+  catalog and map model read both columns; since the cutover work the
+  admin pages, the snapshot cron, the CSM and the achievements read
+  `counts_toward_progress` too. The dashboard code still uses the
+  lesson ids in `src/lib/constants.ts` (`SPRINT_EXCLUDED_LESSON_IDS`,
+  `PLAYBOOK_UNLOCK_LESSON_ID`), so a change to one must be made in the
+  other, until the week-later deletion removes those constants. On the
+  new course `a7l19` (the pond) is the one row outside the count and no
+  row holds `playbook_unlock`.
 
 ### `regions_next` (v94)
 - **Owner:** the course rebuild (branch `world-engine`). The staging
@@ -227,7 +314,10 @@ When adding a new table, append it here. When deleting a field, scan
   `CATALOG_TABLE_SUFFIX` is `_next`: `GET /api/student/data` returns
   these rows as `regions`, and through it `StudentContext` (so
   `/dashboard` as well as `/world`), `src/lib/world/catalog.ts` and the
-  world map.
+  world map. Whatever the switch says: v104 copies every row into
+  `regions` and refuses unless this table is exactly `a1` to `a8` with
+  `order_num` 1 to 8. It is kept after the switch and still read by
+  v101's guards.
 - **Stable contract:** `id` (`a1` to `a8`), `order_num` (unique; it is
   what orders the areas, the id text never is), `name`. Also present:
   `subtitle`, `tagline`, `terrain`, `landmark_label`, `rail_at`,
@@ -252,8 +342,12 @@ When adding a new table, append it here. When deleting a field, scan
     rewrites the rows in place over v94's placeholder seed. It owns
     `id`, `region_id`, `type`, `title`, `sort_order`,
     `requires_action`, `action_brief`, `is_optional`, `is_gate`,
-    `lesson_group_id`, `discord_channel`, `counts_toward_progress` and
-    `feature_key`. It never writes `duration_seconds`, `description`
+    `lesson_group_id`, `discord_channel`, `counts_toward_progress`,
+    `feature_key` and, since 2026-10-14, `whop_lesson_id` (it adds the
+    column and the unique index `lessons_next_whop_lesson_id_key`, and
+    refuses unless all 141 rows carry an id of their own). Since the
+    same day it refuses to run at all once `curriculum_reset_at`
+    exists: after the switch it would change only this table. It never writes `duration_seconds`, `description`
     (on a row that exists), `bunny_video_id`, `video_ready_at` or
     `created_at`, so a row that exists keeps its own. A row whose id the course does not have is
     deleted. After it the table holds the data file's 141 rows, 140 of
@@ -290,7 +384,13 @@ When adding a new table, append it here. When deleting a field, scan
   `StudentContext`, `src/lib/world/catalog.ts`,
   `src/lib/world/map-model.ts` and the world map. Whatever the switch
   says, `GET /api/cron/check-lesson-videos` reads `id`, `type` and
-  `duration_seconds` here by name.
+  `duration_seconds` here by name. v104 copies every row into
+  `lessons` and refuses unless this table holds 100 to 200 rows, every
+  id shaped like `a3l07` in an area of `regions_next`, no placeholder
+  title, exactly one `is_gate`, and a distinct `whop_lesson_id` on
+  every row; it archives and deletes the `lesson_videos` and
+  `student_lesson_watch` rows whose id is not here. The table is kept
+  after the switch, and the two private loads still write it.
 - **Stable contract:** `id`, `region_id`, `type` (`watch` / `setup`
   only; `action` is not allowed here), `title`, `description`,
   `sort_order` (unique, 1 to N across the whole course),
@@ -298,8 +398,9 @@ When adding a new table, append it here. When deleting a field, scan
   is true), `is_optional`, `is_gate` (at most one row may be true),
   `lesson_group_id`, `discord_channel`, `counts_toward_progress`,
   `feature_key` (unique where set), `duration_seconds` (null or above
-  0), `created_at`, `updated_at`. It has no `day`, `duration_label`,
-  `whop_lesson_id` or `is_boss`.
+  0), `whop_lesson_id` (since 2026-10-14, unique where set, all 141
+  set), `created_at`, `updated_at`. It has no `day`, `duration_label`
+  or `is_boss`.
 - **Dormant columns (do not extend):** `bunny_video_id` (unique where
   set) and `video_ready_at`. Still columns here, and unread by the app
   since 2026-10-12, as on `lessons`.
@@ -330,8 +431,12 @@ When adding a new table, append it here. When deleting a field, scan
   production.
 - **Depends on:** nothing by constraint. `lesson_id` has no foreign
   key, on purpose: until the cutover the table may hold ids from both
-  `lessons` and `lessons_next`. The foreign key to `lessons` is handed
-  forward to the cutover.
+  `lessons` and `lessons_next`. The cutover did not add one (its PRD:
+  "no key, by design"): v104 copies the rows on ids the new course
+  does not have into `archive_v1` and deletes them (call C11), and
+  leaves the course's own rows alone, so after the switch every row
+  names a lesson in `lessons`, with nothing in the database holding it
+  there.
 - **Written by:** three writers. No route a student can reach writes
   it.
   - **The video load** (`supabase/diagnostics/load-lesson-videos.sql`)
@@ -444,10 +549,15 @@ When adding a new table, append it here. When deleting a field, scan
   grant that fixes it.
 
 ### `quizzes` + `quiz_questions`
-- **Depends on:** `regions`
+- **Depends on:** `regions` (after v104 the key is
+  `fk_quizzes_region_id`, `ON DELETE RESTRICT`)
 - **Depended on by:** `student_quiz_attempts`, quiz UI
 - **Stable contract:** quiz schema is mostly internal — only quiz IDs
   travel outside
+- **Note:** v104 archives and empties both tables, with
+  `student_quiz_attempts` and `student_region_quiz`: the new course has
+  no region quizzes. Only `/dashboard` reads them, and it forwards
+  after the switch.
 
 ### `playbook_nodes` (Map 2)
 - **Depends on:** —
@@ -471,6 +581,17 @@ When adding a new table, append it here. When deleting a field, scan
   `stalled.whop.day{3|5|7|10}`, `nolessons.day{3|7|14}`,
   `noship.r1.day7`, `noship.r2.day14`, `pace.day{7|14|21}`,
   `month2.entry`. Legacy W-series + X.1 deleted in v57.
+- **At the course switch (v104):** every active template whose
+  `trigger_config -> 'all'` has an element naming `lesson_id` or
+  `region`, or the metric `progress_ratio`, `progress_label` or
+  `region_pace`, is set `is_active = false`, with a copy of the row in
+  `archive_v1.csm_changes`; the undo turns back on the ones still off.
+  `cutover-preflight.sql` part b lists them beforehand. Turning a
+  template off does not stop a built-in: the built-ins fire whenever a
+  template row exists for their scenario (`check-csm-tasks`), which is
+  why the clock built-ins are stopped in code (`courseIsNew`) and not
+  here. After the switch the trigger editor offers areas from
+  `regions` and no clock metric.
 
 ### `admin_config`
 - **Depends on:** —
@@ -484,6 +605,58 @@ When adding a new table, append it here. When deleting a field, scan
   `src/lib/constants.ts`. `/admin/settings` lists every row of this
   table as an editable field and saves through `PUT /api/admin/config`,
   so the key can be edited there and the edit changes nothing.
+- **`curriculum_reset_at` (cutover, branch `world-engine`, not on
+  production).** The moment of the course switch, a string in UTC
+  like `2026-10-20T18:25:00.000Z`. No row means the old course is
+  live; a row means the new one is.
+  - **Written by** v104 only, in the same transaction as the archive,
+    the wipe and the copy, and equal to `archive_v1.meta.reset_at`.
+    **Deleted by** the undo of v104, in its transaction. Nothing in
+    `src/` writes it: `/admin/settings` shows it read-only and
+    `PUT /api/admin/config` refuses its key with a 400. A founder can
+    still change it in the Supabase editor, which would move every
+    course day, CSM window and snapshot floor counted from it.
+  - **Read in the app** through `getCurriculumResetAt()`
+    (`src/lib/curriculum-reset.ts`), which throws on a read error or a
+    value that is not a date and time with its zone. Each reader, and
+    what it does when the read fails:
+    - `/api/cron/check-csm-tasks`: course days, the live areas, the
+      clock built-ins off; the run fails in `cron_runs`.
+    - `src/lib/csm-task-evaluation.ts` (`reEvaluateStudentOpenTasks`,
+      after a lesson write): the same; it returns an error and
+      dismisses nothing.
+    - `/api/cron/check-engagement`: course days in its "Day N" texts;
+      the run fails in `cron_runs`.
+    - `src/lib/achievements.ts` (`buildAchievementSnapshot`): the day
+      number from the later of first payment and the switch; the check
+      is skipped that once.
+    - `/api/cron/snapshot-progress`, `/api/admin/rebuild-snapshots`,
+      `/api/admin/refresh-everything`: the rebuild's start clamped to
+      the switch's date; the cron fails in `cron_runs`,
+      `rebuild-snapshots` answers 500, `refresh-everything` reports it
+      under `rebuild` and still runs the three crons.
+    - `src/lib/useJourneyPaceCounts.ts` (`useJourneyPaceCounts`,
+      `loadCourseActivity`), and through it `/admin/journey`,
+      `/admin/students`, `/admin/students/[id]` and
+      `/admin/insights/progress`: activity in place of pace; "—".
+    - `src/components/admin/TriggerBuilder.tsx`: no clock metric
+      offered after the switch.
+    - `GET /api/admin/cutover-status`: the phase and the problem list;
+      500.
+    - `/admin/settings` and `PUT /api/admin/config` compare the key
+      (`CURRICULUM_RESET_KEY`) to lock it, and read nothing.
+  - **Read in SQL:** the trigger function `daily_snapshots_reset_floor()`
+    (v103, the snapshot floor); v104 (it skips everything when the row
+    exists, and checks the row against `archive_v1.meta`); the undo of
+    v104 (refuses without it); the undo of v103 (refuses with it); v101
+    (refuses with it); `cutover-preflight.sql` (expects it absent) and
+    `cutover-postcheck.sql` (expects it to agree with
+    `archive_v1.meta`).
+  - Readable by any team member and writable by founders and admins
+    (v27's policies); the crons read it with the service role. A
+    student's client reads no row and gets null, so no student-side
+    code reads it: the world tells the courses apart by
+    `CATALOG_IS_V2`.
 
 ## Student state
 
@@ -503,7 +676,18 @@ When adding a new table, append it here. When deleting a field, scan
 - **Stable contract:** `student_id`, `lesson_id`, `completed_at`,
   `action_completed_at`, `discord_message_link`, `skipped_at`
 - **Note:** `lesson_id` references `lessons(id)` (v3). A lesson that
-  exists only in `lessons_next` cannot have a row here.
+  exists only in `lessons_next` cannot have a row here. After v104 the
+  key is `fk_student_lesson_completions_lesson_id`, `ON DELETE
+  RESTRICT` (it was `CASCADE` under Postgres's default name).
+- **Added by the cutover work:** the view
+  `student_last_counted_completion` (v103) reads `completed_at` of
+  complete rows on counting lessons; `src/lib/world/discount-server.ts`
+  reads `lesson_id, completed_at` (a video is done when `completed_at`
+  is set). Writers it already had and keeps: the Whop webhook and
+  `watch-sync.ts` upsert a row for a lesson matched by
+  `whop_lesson_id`. v104 archives every row into `archive_v1` and
+  empties the table; its undo moves the rows made since into
+  `archive_v2` and puts the archived ones back.
 
 ### `student_lesson_watch` (v93)
 - **Owner:** the lesson video player under `/world` (branch
@@ -544,9 +728,13 @@ When adding a new table, append it here. When deleting a field, scan
 - **Stable contract:** `student_id`, `note_date`, `body`
 
 ### `lesson_notes`
-- **Depends on:** `students`, `lessons`
+- **Depends on:** `students`, `lessons` (after v104 the key is
+  `fk_lesson_notes_lesson_id`, `ON DELETE RESTRICT`)
 - **Depended on by:** `LessonSheet` (per-lesson note), journal
 - **Stable contract:** `student_id`, `lesson_id`, `body`
+- **Note:** v104 archives and empties it, as it does
+  `student_lesson_ratings` (key `fk_student_lesson_ratings_lesson_id`,
+  RESTRICT): both name old-course lessons.
 
 ### `student_quiz_attempts`
 - **Depends on:** `students`, `quizzes`
@@ -563,6 +751,14 @@ When adding a new table, append it here. When deleting a field, scan
 - **Added in v95, unused:** `gate_lesson_id` (text, nullable, no
   foreign key on purpose): the lesson that was the discount gate when
   the request was decided. Nothing in `src/` reads or writes it.
+- **The new course's rule (branch `world-engine`):**
+  `src/lib/world/discount-server.ts` reads the student's requests
+  (status, `created_at`, `promo_code`, `rejection_reason`) and the map
+  reads them through `StudentContext`; `discountState()` ignores a
+  request made before 2026-10-08 22:00 UTC (the new course's launch)
+  and lets the latest later one decide what the student sees. The
+  course switch leaves the table untouched (call C10), so a request
+  still pending at the switch has to be decided before it.
 
 ### `discount_feedback_questions` + `discount_feedback_responses`
 - **Depends on:** `discount_requests`
@@ -576,6 +772,13 @@ When adding a new table, append it here. When deleting a field, scan
   `/api/cron/check-csm-tasks/route.ts`)
 - **Stable contract:** `student_id`, `alert_type`, `created_at`,
   `dismissed_at`
+- **At the course switch (v104):** open `no_tasks_7d` and
+  `no_lessons_3d` alerts are set `is_dismissed = true` with
+  `dismissed_at` = the moment (each in `archive_v1.csm_changes`; the
+  undo opens them again); `no_login_5d` stays open. After the switch
+  `pickExistingAlertScenario` maps `no_tasks_7d` and `no_login_5d` to
+  no task, and `no_lessons_3d` to `nolessons.day{N}` by course day only
+  for a student with 0 lessons.
 
 ### `tasks` (CSM task queue)
 - **Depends on:** `students`, `templates`
@@ -597,6 +800,13 @@ When adding a new table, append it here. When deleting a field, scan
 - **Note:** Not to be confused with the legacy curriculum `tasks`
   table (`student_task_completions`'s parent, predates `lessons`).
   The CSM `tasks` table is a *queue*.
+- **At the course switch (v104):** every open task whose `scenario_id`
+  starts `nolessons.`, `noship.` or `pace.`, or whose template the
+  switch turned off, is set `status = 'dismissed'`, `dismissed_at` =
+  the moment, with "Dismissed by the course switch: the old course's
+  progress was reset." appended to `notes`, and a copy of the row in
+  `archive_v1.csm_changes`. The undo reopens a task only where no open
+  task now exists for the same student and scenario.
 
 ### `daily_progress_snapshots`
 - **Depends on:** `students`, `lessons`
@@ -618,7 +828,22 @@ When adding a new table, append it here. When deleting a field, scan
   execute it, and it raises when `p_start_date` is more than 30 days
   back. Its three callers use the service-role key: the
   `snapshot-progress` cron, `/api/admin/rebuild-snapshots` and
-  `/api/admin/refresh-everything`.
+  `/api/admin/refresh-everything`. Since the cutover work each reads
+  `curriculum_reset_at` and moves its start up to the switch's UTC
+  date (`clampStartToReset`); when nothing is left it does not call
+  the function and says "nothing to rebuild before the course switch".
+  The snapshot cron counts lessons by `counts_toward_progress`.
+- **The floor (v103):** the trigger `trg_daily_snapshots_reset_floor`
+  (`before insert or update or delete`, for each row, function
+  `daily_snapshots_reset_floor()`, security definer) raises `22023`
+  for any row dated before the UTC date of
+  `admin_config.curriculum_reset_at`, so no writer, the function
+  included, can recompute a day from archived progress or fill in a
+  day missing from before the switch. Without the key it lets every
+  write through; the switch's own day stays writable. A
+  `curriculum_reset_at` Postgres cannot read as a time makes every
+  write to the table fail until the row is fixed. The undo of v103
+  drops it.
 - **Filter rules** applied by `snapshot-progress` cron + the
   `rebuild_daily_snapshots()` RPC:
   - "active" = `membership_status IN ('active', 'past_due')`
@@ -829,10 +1054,12 @@ intermittently, a non-JSON HTML 500 page.
 
 ## SQL functions and views (progress and watching)
 
-Defined by migrations v92 to v98 and v100, whose files exist only on
-branch `world-engine`. Whether v98 is applied to production is
+Defined by migrations v92 to v98, v100 and v103, whose files exist
+only on branch `world-engine`. Whether v98 is applied to production is
 unconfirmed; `supabase/diagnostics/v6-wiring-preflight.sql` is the
-read-only query that settles it. v100 has not been run on production.
+read-only query that settles it. v100 has not been run on production
+by this document's record (the course-catalog state file says it
+has). v103 has not.
 
 ### `lesson_is_complete` (function, v92)
 - **What it is:** the one SQL rule for "is this lesson done", the twin
@@ -974,6 +1201,128 @@ read-only query that settles it. v100 has not been run on production.
   revoked from `anon`.
 - **Unconfirmed:** until v98 is applied, the live view is v92's, which
   has no `counts_toward_progress` filter and so also counts `l057`.
+
+### `student_last_counted_completion` (view, v103)
+- **What it is:** one row per student who has finished at least one
+  lesson that counts toward progress: `student_id`,
+  `last_completed_at` (timestamptz), the latest `completed_at` among
+  them. The same lessons and the same "done" as
+  `student_progress_counts` (`counts_toward_progress`,
+  `lesson_is_complete`), plus one condition the PRD did not write:
+  `completed_at` is set. A lesson that was only skipped is done but is
+  not activity, and gives no row (morning review B2).
+- **Depends on:** `student_lesson_completions`, `lessons`
+  (`counts_toward_progress`, `requires_action`), `lesson_is_complete`
+- **Written by:** nobody; it is a view. Not on production.
+- **Depended on by:** `loadCourseActivity` in
+  `src/lib/useJourneyPaceCounts.ts`, and through it the activity pills
+  and counts of `/admin/journey`, `/admin/students`,
+  `/admin/students/[id]` and `/admin/insights/progress`. It is read
+  only when `curriculum_reset_at` exists, so before v103 runs nothing
+  asks for it. The CSM works out the same date from its own snapshot
+  (`lastCountedCompletionAt` in `csm-triggers.ts`), by the same rule.
+- **Stable contract:** `student_id`, `last_completed_at`.
+  `security_invoker = on` (a team member's policies decide what it
+  shows); select is granted to `authenticated` and revoked from `anon`,
+  as for `student_progress_counts`.
+- **Undo:** the undo of v103 drops it.
+
+### `daily_snapshots_reset_floor` (trigger function, v103)
+- The floor under `daily_progress_snapshots`; its entry above says what
+  it refuses. Trigger `trg_daily_snapshots_reset_floor`. Reads only
+  `admin_config` key `curriculum_reset_at`. Security definer,
+  `search_path = public`.
+
+---
+
+## The course switch (v103, v104)
+
+Two migrations on branch `world-engine` (2026-10-14), neither on
+production. v103 (`2026_v103_cutover_expand.sql`) is additive and can
+run any day: `student_milestones.playbook_unlocked_at`,
+`regions.landmark_label` and `rail_at`, the view
+`student_last_counted_completion`, the snapshot floor. v104
+(`2026_v104_course_switch.sql`) is the switch, in one transaction.
+Their undos are `supabase/undo/2026_v103_undo.sql` and
+`2026_v104_undo.sql`. CONTEXT.md, "The course switch", says what each
+part of the app does after it; this section is what the database
+holds.
+
+### The six keys into the catalog
+Before the switch they are `ON DELETE CASCADE` under Postgres's
+default names, so one `delete from regions` would erase every
+student's progress. v104 looks them up in `pg_constraint` (never by
+name), refuses unless they are exactly these six, records each
+definition in `archive_v1.constraints`, drops them, and after the copy
+adds them back as RESTRICT under names of its own:
+
+| Key | Column | Points at |
+|-----|--------|-----------|
+| `fk_lessons_region_id` | `lessons.region_id` | `regions` |
+| `fk_student_lesson_completions_lesson_id` | `student_lesson_completions.lesson_id` | `lessons` |
+| `fk_lesson_notes_lesson_id` | `lesson_notes.lesson_id` | `lessons` |
+| `fk_student_lesson_ratings_lesson_id` | `student_lesson_ratings.lesson_id` | `lessons` |
+| `fk_quizzes_region_id` | `quizzes.region_id` | `regions` |
+| `fk_student_region_quiz_region_id` | `student_region_quiz.region_id` | `regions` |
+
+All six `ON DELETE RESTRICT`: deleting a lesson or an area that
+anything points at is refused. No other key may point at `lessons` or
+`regions` (the post-checks of v104 and `cutover-postcheck.sql` check
+it). The chained keys (`quiz_questions.quiz_id`,
+`student_quiz_attempts.quiz_id`) are untouched. `lesson_videos`,
+`student_lesson_watch` and `discount_requests.gate_lesson_id` have no
+key, by design. With the keys, v104 adds the unique partial index
+`lessons_whop_lesson_id_key` on `lessons (whop_lesson_id) where
+whop_lesson_id is not null`. The undo drops the six and the index and
+re-adds the old keys from the recorded definitions, under their old
+names.
+
+### The schema `archive_v1`
+- **Written by** v104 only, before any delete. One table per archived
+  table, made with `create table ... as table` (same columns, no
+  constraints): `regions`, `lessons`, `student_lesson_completions`,
+  `lesson_notes`, `student_lesson_ratings`, `quizzes`,
+  `quiz_questions`, `student_quiz_attempts`, `student_region_quiz`,
+  `student_achievements`, `achievements`, `student_milestones`, and
+  only the `student_lesson_watch` and `lesson_videos` rows whose
+  `lesson_id` is not in `lessons_next`. Then the switch's record:
+  - `meta (reset_at, ran_by, counts jsonb)`: one row; `reset_at`
+    equals `admin_config.curriculum_reset_at`, `ran_by` is
+    `current_user`, `counts` the row count of every archived table.
+  - `stamps (student_id, row_existed, set_playbook, set_first_login)`:
+    every student whose Playbook stamp or first login the switch set.
+  - `csm_changes (kind, id, before jsonb)`: every template, task and
+    alert it changed, `kind` one of `template`, `task`, `alert`, with
+    the whole row as it was (`before` is the builder's addition to
+    the PRD, so the undo puts back exactly that).
+  - `constraints (table_name, conname, definition)` and
+    `not_nulls (table_name, column_name)`: the keys, checks and
+    not-nulls it dropped, as `pg_get_constraintdef` stated them.
+- **Access:** every privilege on the schema and its tables is revoked
+  from `public`, `anon`, `authenticated` and `service_role` (the PRD
+  named the first three), so no API key reaches it. Only the owner,
+  in the SQL editor, reads it.
+- **Read by** the undo of v104, `cutover-postcheck.sql` (in a block
+  before its select, only when the schema exists) and v104's own
+  post-checks and final table.
+- **Lifecycle:** absent, written by v104, renamed
+  `archive_v1_undone_<yyyymmdd_hh24mi>` (UTC) by the undo, dropped by
+  hand after at least 90 days (call C18; tasks.md). v104 refuses while
+  a schema `archive_v1` exists. The undo also makes `archive_v2`, the
+  rows done on the new course before the undo, and refuses while one
+  exists.
+
+### What v104 relaxes, and what it leaves
+- Dropped, recorded, put back by the undo: `lessons.day` not-null and
+  its check; `regions.subtitle`, `tagline`, `terrain`, `days_label`,
+  `day_start`, `day_end` not-nulls and the `terrain` check.
+- No column is dropped (call C19).
+- `lessons_next` and `regions_next` stay, and the two private loads
+  still write both catalogs.
+- Not touched: `discount_requests`, `student_streaks`,
+  `student_celebrations`, `daily_progress_snapshots` rows,
+  `daily_notes`, the DM logs, `student_whop_sync`, `lesson_videos`
+  rows on new-course ids.
 
 ---
 

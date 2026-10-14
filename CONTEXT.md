@@ -16,10 +16,15 @@ structure changes.
 > world-v6-wiring PRDs record `main` as the production branch.
 >
 > On `world-engine` the app has a second student home, `/world`: a 3D
-> map of the rebuilt eight-area course. It sits behind a closed
-> allowlist (`src/lib/world/access.ts`). A student who is not on the
-> list is sent to `/dashboard`, and an unset list admits nobody.
-> `/dashboard` stays the default student home.
+> map of the rebuilt eight-area course. Where every student lands is
+> one build-time value, `NEXT_PUBLIC_STUDENT_HOME` (default
+> `/dashboard`). `/world` is open to every student when that home is
+> `/world` or `NEXT_PUBLIC_WORLD_LIVE` is `true`, and otherwise only to
+> the allowlist, where an unset list admits nobody
+> (`src/lib/world/access.ts`). Until the course switch the home stays
+> `/dashboard` and the old course stays in `lessons` and `regions`;
+> how the switch moves both is under
+> [The course switch](#the-course-switch-cutover).
 >
 > - **Why the rebuild exists, and how it was designed:**
 >   `../_admin/memos/sprint_rebuild.md` (the memo),
@@ -51,6 +56,15 @@ structure changes.
 >   21 of the course's 115 lesson videos on Tella were set to "Embed
 >   only". The staging catalog and `lesson_videos` entries under
 >   Database have the rest.
+> - **Nothing from the cutover has run on production either
+>   (2026-10-14).** Migrations v103 and v104 are not applied, no Vercel
+>   value has changed, and the code is on `world-engine` only
+>   (`410e011` to `3678190`). Production has the old course in `lessons`
+>   and no `curriculum_reset_at`. The plan is
+>   `../_admin/prds/cutover/cutover_prd.md` (its calls C1 to C22 in
+>   section 3, the evening's ship order at the end of section 12), the
+>   record is `project_log.md` beside it, and the calls made while it
+>   was built are in `../_admin/prds/night-2026-10-14/morning_review.md`.
 > - **The map's own records:** `world_overnight_log.md` (every decision
 >   taken while the map was built, numbered), `world_art_bible_v6.md`
 >   (how each place is built, and the frame budgets) and `.impeccable.md`
@@ -77,7 +91,8 @@ live invariants over its views, and a service for tests on every
 change, a live probe of the deployed service and its noticer firing on
 a forced failure (`../documentation_standard.md`, section 4). What
 exists here, checked on 2026-10-07, for the lesson video on
-2026-10-12, and for the course catalog on 2026-10-13:
+2026-10-12, for the course catalog on 2026-10-13, and for the cutover
+on 2026-10-14:
 
 - **Application.** No browser smoke goes through the real login, and no
   disposable identity exists. No invariant runs against live data.
@@ -100,10 +115,27 @@ exists here, checked on 2026-10-07, for the lesson video on
   video load, in the `lesson_videos` entry under Database; as tracked
   it is a template and refuses to run), and `stamp-test-lesson.sql`,
   which belongs to the Bunny player and is superseded.
-- **Service.** `npm run test:migrations` runs migrations v92 to v101 on
-  a local Postgres, among them the heartbeat function, the snapshot
+- **The cutover (2026-10-14).** The code that judges a student's
+  history was proved on the old course by running the old and the new
+  modules side by side in `npm run test:client`: `csm-cutover` (14
+  students over days 1 to 30, 0 differences), `achievements-cutover`
+  (12 students, every title count) and `curriculum-reset`, plus
+  `access` for every home and live setting. `npm run test:migrations`
+  runs v103, v104 and both undos (sections 23 and 24) twice, on the
+  harness and on a database built from `base.sql` and v92 to v101.
+  `node world-tests/v6-discount.mjs` and `node world-tests/v6-hud.mjs`
+  walk the checkpoint and the corner on the login-free harness. What
+  still needs a login, and so waits for the switch evening (the PRD's
+  ship order, steps 10 to 12): every admin page after the switch,
+  `/admin/cutover`'s real values and its 401 and 403, the admin pages'
+  read of `student_last_counted_completion`, a student landing on
+  `/world`, the real Playbook page, and the CSM and engagement crons
+  against the switched data (their first tick).
+- **Service.** `npm run test:migrations` runs migrations v92 to v101,
+  v103 and v104 (no v102 exists) on a local Postgres, among them the heartbeat function, the snapshot
   rebuild, v100's undo, the morning kit, the course catalog (v101) with
-  its generator and its undo, and the video load. No test covers a
+  its generator and its undo, the video load, and the cutover's two
+  migrations with their undos and its two checks. No test covers a
   webhook handler, and one cron route has a test:
   `node world-tests/lock-check-sim.mjs` runs the lock check's real
   route file against stand-ins for the database, Tella, Discord and the
@@ -144,7 +176,8 @@ Two surfaces in one Next.js app:
   to-dos) and `/dashboard/playbook` (Map 2: post-sprint hub with 3
   always-on cards, each opening a full HTML article in an iframe —
   v72). On branch `world-engine` there is also `/world`, the map of the
-  rebuilt course, for allowlisted students only.
+  rebuilt course: for allowlisted students until the course switch,
+  and every student's home after it.
 - **Team-facing** — `/admin` (Karlo + CSM team): kanban, students,
   templates, discounts, alerts, insights, discord settings.
 
@@ -170,9 +203,9 @@ Two surfaces in one Next.js app:
 |------|------------|
 | `/login` | Whop OAuth entry |
 | `/auth/callback` + `/auth/complete` | OAuth callback + post-auth landing |
-| `/dashboard` | The map (overview + 4 regions). Auto-redirects to `/dashboard/playbook` once the student has completed `PLAYBOOK_UNLOCK_LESSON_ID` (l078, the last R4 watch lesson) unless `?map=1` is passed. |
-| `/dashboard/playbook` | Map 2 hub. Two unlock paths (v75.16, see `isPlaybookUnlocked` in `src/lib/progress.ts`): standard sprint completion of l078 ("How I Approach Research / Coming Up With Ad Ideas"), OR legacy auto-unlock (`joined_at >= 30 days ago` AND completion ratio >= 0.80) — for older customers who passed the action-item phase before our platform existed. Bounty Access (`bounty_access_claimed_at`) is a SEPARATE milestone and does NOT unlock the Playbook. |
-| `/world` | Branch `world-engine`, allowlisted students only. The world map. The layout (`src/app/world/layout.tsx`) wraps the same `StudentGuard`, `StudentProvider` and `MembershipBlockOverlay` as the dashboard, plus `WorldAccessGate` (the allowlist) and `WorldStage`. `WorldStage` mounts the map host `WorldMap` once, so the map stays mounted while the address moves between the three routes. The page itself renders nothing. `WorldMap` shows the v6 map (`WorldV6`) with the student's own areas, lesson titles and finished lessons once the catalog has loaded and has exactly eight areas. In every other state it shows one plain card and loads no 3D: loading, "Your course didn't load.", "There are no lessons here yet.", or "The new course isn't switched on here yet." Under 760 px wide, or when the 3D fails to start, the same component shows a list view; on a machine that cannot draw the 3D it shows still posters from `public/world-v6/posters/`. |
+| `/dashboard` | The map (overview + 4 regions). Auto-redirects to `/dashboard/playbook` once the student has completed `PLAYBOOK_UNLOCK_LESSON_ID` (l078, the last R4 watch lesson) unless `?map=1` is passed. On branch `world-engine`, once `NEXT_PUBLIC_STUDENT_HOME` is anything but `/dashboard`, the page renders nothing and forwards to the home (`router.replace`, query string or not), so none of its extras mount: the intro video gate, "Why you're here", the streak and discount celebrations, the discount feedback modal, `?devtest=1` (cutover WI-7, morning review L3). |
+| `/dashboard/playbook` | Map 2 hub. Two unlock paths (v75.16, see `isPlaybookUnlocked` in `src/lib/progress.ts`): standard sprint completion of l078 ("How I Approach Research / Coming Up With Ad Ideas"), OR legacy auto-unlock (`joined_at >= 30 days ago` AND completion ratio >= 0.80) — for older customers who passed the action-item phase before our platform existed. Bounty Access (`bounty_access_claimed_at`) is a SEPARATE milestone and does NOT unlock the Playbook. It is not forwarded when the home moves. As committed on `world-engine` (2026-10-14) the gate is still those two paths and does not read `student_milestones.playbook_unlocked_at`, the stamp the switch gives every graduate; the switch wipes every completion and l078 leaves the catalog, so every graduate would be locked out at the switch until cutover WI-8 (the gate on the new course, and a link on `/world`) is merged. The PRD's ship order makes WI-8 a condition of the switch (step 5c). A locked student is sent to `/dashboard?map=1`, which forwards to the home. |
+| `/world` | Branch `world-engine`. Open to every student when the home is `/world` or `NEXT_PUBLIC_WORLD_LIVE` is `true`, else to allowlisted students only. The world map. The layout (`src/app/world/layout.tsx`) wraps the same `StudentGuard`, `StudentProvider` and `MembershipBlockOverlay` as the dashboard, plus `WorldAccessGate` (the allowlist) and `WorldStage`. `WorldStage` mounts the map host `WorldMap` once, so the map stays mounted while the address moves between the three routes. The page itself renders nothing. `WorldMap` shows the v6 map (`WorldV6`) with the student's own areas, lesson titles and finished lessons once the catalog has loaded and has exactly eight areas. In every other state it shows one plain card and loads no 3D: loading, "Your course didn't load.", "There are no lessons here yet.", or "The new course isn't switched on here yet." Under 760 px wide, or when the 3D fails to start, the same component shows a list view; on a machine that cannot draw the 3D it shows still posters from `public/world-v6/posters/`. **The corner (2026-10-14, `WorldCorner`):** one pill in the header's row right after the wordmark, the twin of the discount chip at the other end: the streak (a flame, "4 days"), the achievements held ("4/10", a hexagon) as one button that opens the list in the place panel's slot (streak and best, every achievement by tier with the share of students who hold it, "Unbroken" and "Perfectionist" hidden until earned), and Sign out. A new unlock toasts out of the pill for 6.5 s, one at a time, and waits while a lesson page is open. It stays while a place or the checkpoint is open and hides under a lesson page and through the telescope. It replaces the old dashboard's top-left card; the database's emoji icons are not shown. The streak number does not move when a video finishes on the map until the app's next data refresh (morning review H14). It has a `playbook` slot for the Playbook link, empty as committed. **The discount checkpoint (2026-10-14):** a trail cache between Video Ads II (the Trail Hut) and Static Ads (the Boathouse), whose look follows the student (closed, near, ready, claimed), plus a header chip from day one ("30% off · 11 days left"), a notch on the course bar where Video Ads II ends and a tag on the timeline. Each opens one panel driven by `discountState()` (`src/lib/world/discount.ts`): the deadline, the videos watched and left, the next one with Watch, then Apply, which posts to `POST /api/discounts/request` in one click; then in review, approved, applied or the reason it was not. For a student the offer is closed to (joined before 9 October 2026, no first payment on record, or 14 days passed with no request) there is no chip, tag or marker and the cache is scenery. The rule itself is under API Routes, Discounts. |
 | `/world/[areaId]` | A place's own address. The route (`PlaceRoute`) renders nothing for an area the catalog has: `WorldStage` reads the same address and the map opens that place's panel. For an unknown area it shows "That place isn't on the map." with a link back. Opening or closing a place inside the map changes the address without moving the page scroll, because the page scroll is the map's camera. |
 | `/world/[areaId]/[lessonId]` | The lesson page (`LessonScreen`), drawn over the paused map: a back link to the place, an eyebrow (the area's number, the lesson's position in the area, the minutes when the catalog has them), the lesson title, then for a `watch` lesson with a video the player (`LessonPlayer`: Tella's frame, the app's own progress line under it, and under that up to three lines of text: when the video has not loaded, when the video played to its end and the server still does not see the lesson's 95% point, and when the lesson was not counted because too little of it was played), the Milestone box when the lesson has an action item, the lesson's text (its `description`, drawn by `LessonText` from `src/lib/world/lesson-text.ts`: paragraphs, bullet and numbered lists, bold and https links, no HTML) when it has one, and a Next lesson link that is enabled once the lesson is in `completedLessonIds`. A lesson with no video (a `setup` lesson, or a `watch` lesson whose `has_video` is false) gets no player and no video-sized box: the Milestone box, then the text in the video's place; with no text either, a `watch` lesson says "Not recorded yet." on one short line and a `setup` lesson says nothing (2026-10-14). That is decided from the catalog before any request, and once the player is up for a lesson it stays up for it. Escape returns to the place. An unknown area or lesson shows "That lesson isn't here." An action item (`requires_action`) ends with its hand-in (`ActionItemBlock`, 2026-10-14): a field for the Discord message link, Save, then a complete button, the link shown and editable once saved, "Completed on <date>." once done. The link rules, and which halves the button writes, are `src/lib/world/action-items.ts`, shared with the old dashboard's form and both routes. A setup action item is finished by the button alone; one with a video needs the button and the video, in either order. |
 
@@ -353,12 +386,15 @@ singletons in the browser — `createBrowserClient.js:8-14`).
 | `/admin/alerts` | Auto-generated churn alerts |
 | `/admin/insights` | Progress + retention insights |
 | `/admin/discord` | Day-28 DM toggles, preview |
-| `/admin/settings` | Admin config (booking link, program link, etc.) |
+| `/admin/settings` | Admin config (booking link, program link, etc.). Every `admin_config` row is an editable field except `curriculum_reset_at`, which is shown read-only with a line saying why; `PUT /api/admin/config` refuses that key too (cutover, morning review N4). It can still be changed in the Supabase editor. |
+| `/admin/cutover` | **The course switch's status page (cutover WI-10), founder and admin only; a CSM gets the restricted page.** Not in the sidebar: it is opened by its address. It fetches `GET /api/admin/cutover-status` and shows "All good" or one line per problem, then the running build's values (student home, whether the world is open to everyone, catalog shape, catalog table, whether `WHOP_COURSE_ID` is set and its last 4 characters, Vercel's deployment id and commit, "Not reported" where Vercel gives none) and the database's (the switch's moment, the area ids, lessons, counting lessons, lessons with a Whop id). It is the only place a build-time value can be seen after a redeploy, so it is looked at again after every redeploy on the evening. The problem lines come from `cutoverProblems()` in `src/lib/curriculum-reset.ts`. |
 | `/admin/stats` | **Whop revenue, FOUNDER-ONLY (v86).** The per-product money tracking Whop removed from their own dashboard UI. Catalog-driven: any of Whop's 64 Stats metrics as a tile, 23 of them filterable by product, 20 months of history (from 2025-02), date-range presets + previous-period delta + daily/weekly/monthly, saved layouts. **The only dynamic (`ƒ`) page under `(authenticated)`** — it awaits `cookies()` and checks `isStatsOwner(user.id)`, so it is not prerendered and not client-gated like the other 17. Nothing is stored; every figure is read live. See `system-docs/plan_2026-09-03_revenue-stats-page.md`. |
 | `/admin/etfb` | **Brand Owners (v87).** Every ETfB brand owner, their subscription state and cycle-end date, the free team link minted for them, and who redeemed it. When an owner stops paying their seats surface in a review list. Mints links via `POST /api/v2/plans`, so `owner ↔ link` is a real column, not a parsed label. TEAM-WIDE (`requireTeam`, no role list) — Astrid is `csm` and the founder/admin pattern would lock her out. Everything is read LIVE from Whop; nothing about owners or seats is cached. No revoke button in v1 by design — Lovro confirmed 2026-09-14 that removal stays in Whop permanently, so the page's product is a *confirmed list*, not an action queue. Redesigned 2026-09-14 against `system-docs/design_brief_2026-09-14_etfb-page.md` (read it before changing this page): trust banner gates every action, no accordion, attribution evidence is the content. |
 | `/journal/[studentId]` | Student daily-notes journal (read-only for team) |
 
 **Launch cohort only (v75.51):** every admin metric surface (dashboard, /admin/students, /admin/journey, /admin/not-activated, /admin/insights, /admin/discounts) filters to the LAUNCH COHORT — students whose `first_paid_at >= ADMIN_STUDENT_JOIN_CUTOFF` (2026-05-25). Pre-launch / legacy customers are excluded from operational surfaces. The previous "All members | New students" scope toggle (v75.13–v75.50) was removed because it produced inconsistent reads across surfaces and obscured the actual launch-retention signal. CSM crons and the day-28 DM also filter via their own (independent) day-30 sprint-window filter (`csmSprintWindowCutoffIso()`).
+
+**The admin numbers on both courses (cutover WI-5, 2026-10-14, branch `world-engine`).** Every lesson count divides by the lessons with `counts_toward_progress` (64 on the old course, 140 on the new), read from `lessons`; a count that fails shows "—", never a fallback number. Area names, their order and the Journey chips' numerals come from `regions` (so before the switch the 4th chip reads "Gate of Possibilities" where it read "Gate"). A student's page names the gate lesson (`is_gate`) by its title; the old check of an id `l18` that does not exist is gone. The Journey drawer leaves out lessons that do not count, as the student page already did. Each page that shows pace reads `admin_config.curriculum_reset_at` (`loadCourseActivity` and `useJourneyPaceCounts` in `src/lib/useJourneyPaceCounts.ts`): with no row the pace pill is as before; with it the pill is activity (Not started, Moving, Slipping, Stalled, defined under [The course switch](#the-course-switch-cutover)), read from the view `student_last_counted_completion`, the "Region behind" pill on a student's page is gone and the page shows "In <area name>", and the activity counts on `/admin/journey` and the Insights card cover every active and past-due paying member of the launch cohort, Month 2+ included, with no day-30 cut. When the key cannot be read, pace and activity show "—". The trigger editor offers the areas from `regions` and every lesson with an action item by title, and after the switch it stops offering the three clock metrics. The "Day N" on the students list, a student's page, the Journey cards, the DM templates and the Journey's week columns still count from first payment after the switch (morning review P9), while a CSM task's "Day N" counts course days. Every page after the switch is unproved: it needs a team login (the PRD's ship order, step 12).
 
 **Canceling state (v75.46–v75.47):** Whop emits a "Canceling" status when a student clicks cancel but still has access through the end of their billing cycle. The sync runner stamps `students.cancel_scheduled_at` for these students. The dashboard surfaces a "Canceling" early-warning tile; the journey kanban shows an amber pill on the student card. The M2 conversion helper (`isMonth2Converted`) counts Canceling students as NOT converted if the cancel was scheduled on/before the end of the first cycle.
 
@@ -460,6 +496,17 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
   `/api/admin/backfill-discord-ids`, `/api/admin/backfill-first-paid-at` v75.34,
   `/api/admin/refresh-everything` v75.22)
 - Day-28 DM preview (`/api/admin/preview-day28-dm`)
+- `GET /api/admin/cutover-status` (cutover WI-10): founder and admin
+  only (`requireTeam`, bearer token, so it is read through
+  `/admin/cutover`). Answers `{ ok, phase: "before" | "after",
+  problems, build, db }`, `Cache-Control: no-store`. `build` is the
+  answering deployment's own values (`STUDENT_HOME`, `WORLD_IS_LIVE`,
+  `CATALOG_IS_V2`, `LESSONS_TABLE`, the suffix, whether
+  `WHOP_COURSE_ID` is set and its last 4 characters when it is longer
+  than 8, `VERCEL_DEPLOYMENT_ID`, the commit); `db` is the switch's
+  moment, the ids in `regions` and three counts of `lessons`. A read
+  that fails answers 500 with the reason, never a guessed number.
+  `PUT /api/admin/config` refuses the key `curriculum_reset_at` (400).
 - Ad-submissions verification gate
   (`/api/admin/verify-ad-submissions`)
 - `GET /api/admin/stats` (v86) — **founder-only** revenue proxy for
@@ -495,6 +542,27 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
 - `POST /api/discounts/reject` — team auth
 - `POST /api/discounts/mark-applied` — team auth
 - All four gates (`request`, `submit-feedback`, `approve`, UI) treat NULL `first_paid_at` as ineligible (v75.26 closed a discount-leak that let returning customers get a fresh 14-day window via the `joined_at` fallback).
+- **The new course's rule (branch `world-engine`, 2026-10-14).** Where
+  the catalog has the v2 shape (`CATALOG_IS_V2`: the staging catalog,
+  and the live one after the switch), `request`, `submit-feedback`
+  and `approve` use one rule shared with the map,
+  `discountState()` in `src/lib/world/discount.ts`, fed from the
+  database by `src/lib/world/discount-server.ts`: 30% off once every
+  counting `watch` lesson up to and including the `is_gate` lesson
+  (`a4l17`, the end of Video Ads II) that has a video has its video
+  done, within 14 days of the first payment, for a first payment on or
+  after 9 October 2026 (midnight in Croatia). A request decides what
+  the student sees from then on, so a rejected student cannot apply
+  again, and a request made before 9 October plays no part. `approve`
+  checks the rule again as of the day the 14 days ended; "generate
+  anyway" still skips every check. Every read that fails, or no video
+  up to the gate, means no request and no approval. On the old shape
+  the routes behave as before, except that an empty or failed read of
+  the R1 + R2 lessons answers 409 ("The course changed and this check
+  cannot run. Nothing was requested." / "...Nothing was approved.")
+  instead of letting the request through (cutover WI-9): that is what
+  the new data would look like under a build that still has the old
+  shape. The calls are D1 to D14 and L1, L4 in the morning review.
 
 **Webhooks**
 - `POST /api/webhooks/whop` — HMAC-verified Whop events
@@ -529,10 +597,17 @@ as applied to production on 2026-09-23, and the post-checks
 as passing against production on 2026-09-24. Whether v98 and v99 are
 applied is unconfirmed; `supabase/diagnostics/v6-wiring-preflight.sql`
 is the read-only query that settles it. v100 (2026-10-12, the Tella
-player) is on the same branch and has not been run on production. v101
-(2026-10-13, the real course in the staging catalog) is on the same
-branch and has not been run on production either. The files that take
-the two back are described at the end of this section. The header of
+player) and v101 (2026-10-13, the real course in the staging catalog)
+ran on production on 2026-10-14, with the private video and text
+loads: Lovro pasted them and their results during the course catalog's
+ship round (`../_admin/prds/course-catalog/state.md`). But v101
+as it now stands on the branch (2026-10-14) carries every lesson's
+Whop lesson id and moves the gate to `a4l17`, so it differs from any
+copy pasted before and has to run on production again before the
+switch (the cutover's ship order, step 3). v103 and v104 (2026-10-14,
+the cutover) are on the same branch and have not been run on
+production; there is no v102. The files that take them back are
+described at the end of this section. The header of
 `prd1-postchecks.sql` says its rows 40 to 48 describe v94's placeholder
 seed and report differences once v101 has run; the check for v101 is
 `supabase/diagnostics/course-catalog-check.sql`. What this section says
@@ -565,9 +640,24 @@ about those migrations comes from their text.
     Whop's cancellation date and must never be read as one.
 
 **Curriculum (read-mostly)**
-- `regions` — R1–R4 metadata
+- `regions` — R1–R4 metadata. v103 adds `landmark_label` and `rail_at`,
+  empty, so the switch can copy them from `regions_next`. After v104
+  it holds the eight areas `a1` to `a8`, copied from `regions_next`,
+  and its not-nulls on `subtitle`, `tagline`, `terrain`, `days_label`,
+  `day_start`, `day_end` and the `terrain` check are dropped (recorded
+  in the archive for the undo).
 - `lessons` — canonical lesson list (id, region, day, sort_order,
-  watch vs action, `whop_lesson_id`, etc.)
+  watch vs action, `whop_lesson_id`, etc.). After v104 it holds the 141
+  lessons of the new course, copied from `lessons_next` with their
+  Whop lesson ids, lengths, texts, gate and feature keys; `day` is
+  null on every row, its not-null and its check are dropped, and a
+  unique index (`lessons_whop_lesson_id_key`, where not null) holds
+  one lesson per Whop lesson. The six keys that point at `lessons` and
+  `regions` become `ON DELETE RESTRICT` under names of their own, so
+  no delete of a lesson or an area can erase progress again;
+  system_contracts.md lists them. No column is dropped, now or a week
+  later (call C19): a dropped column that one forgotten select still
+  names turns into an empty course with no error.
   - v92 added six columns. `counts_toward_progress` (boolean, default
     true; false on `l057`): the SQL progress views and the snapshot
     function count only lessons where it is true. `feature_key` (text,
@@ -598,8 +688,13 @@ about those migrations comes from their text.
   action items (`requires_action` with a brief): `a3l25`, `a5l08`,
   `a5l12`, `a5l22`, `a5l23`, `a6l03`, `a6l10`, `a6l17` and `a6l19`.
   Five of them have no video and are `type` `setup`: `a5l22`, `a6l03`,
-  `a6l10`, `a6l17` and `a6l19`. Nothing under `/world` can complete an
-  action item or a `setup` lesson yet (Student Surfaces).
+  `a6l10`, `a6l17` and `a6l19`. Since 2026-10-14 the lesson page can
+  complete them (`ActionItemBlock`, Student Surfaces). Since the same
+  day every row carries `whop_lesson_id`, the id of the same lesson in
+  Whop's course: v101 adds the column with a unique index
+  (`lessons_next_whop_lesson_id_key`) and refuses unless all 141 are
+  there and distinct. The switch copies it into `lessons`, which is how
+  the Whop sync and webhook find a lesson after the switch.
 
   **How the course gets into the tables.** `npm run build:catalog`
   (`supabase/catalog/build-course-sql.mjs`) writes
@@ -618,14 +713,11 @@ about those migrations comes from their text.
   run again. The generator refuses a data file with a link in a brief:
   an `http` address, a `www.` address or a bare domain.
 
-  **v101 has not been run on production (2026-10-13), and neither has
-  v100.** Until it is, production's `lessons_next` holds v94's
-  placeholder seed: the same 8 area ids under the names Introduction,
-  Fundamentals, Video Ads I, Video Ads II, Static Ads, AI Ads &
-  Content, Creative Strategy and Job Board, and 145 placeholder lessons
-  (`a1l01` to `a8l14`), 144 of which count toward progress, with
-  `a7l22` as the Ad Bounty row, `a5l25` as the discount gate and nine
-  placeholder action items. Production rows were not read for this
+  **v100 and v101 ran on production on 2026-10-14** (course catalog
+  ship round). Before that, production's `lessons_next` held v94's
+  placeholder seed (145 placeholder lessons, `a5l25` as the gate); the
+  copy of v101 pasted then predates tonight's gate move to `a4l17` and
+  the Whop ids, so v101 runs again before the switch. Production rows were not read for this
   document: the numbers are the data file's and the two migrations',
   and that v94 is applied there is the rebuild-engine project log's
   record.
@@ -641,12 +733,14 @@ about those migrations comes from their text.
   **Which catalog the app reads is one server-side switch.**
   `src/lib/catalog-tables.ts` turns the env var `CATALOG_TABLE_SUFFIX`
   (empty or `_next`; any other value throws when the module loads)
-  into `REGIONS_TABLE` and `LESSONS_TABLE`. Three routes read the
+  into `REGIONS_TABLE` and `LESSONS_TABLE`. These routes read the
   catalog through those names: `GET /api/student/data`,
-  `POST /api/student/lesson-video` and `POST /api/student/lesson-watched`.
-  Everything else (the crons, the admin pages, the achievements code,
-  the discount routes, `toggle-lesson`) reads `lessons` and `regions`
-  by name. The lock check reads `type` and `duration_seconds` from both
+  `POST /api/student/lesson-video`, `POST /api/student/lesson-watched`,
+  `save-action-link`, `mark-action-shipped`, and on the v2 shape the
+  discount routes. Everything else (the crons, the admin pages, the
+  achievements code, the discount routes' old branch, the Whop sync
+  and webhook, `toggle-lesson`, `/admin/cutover`) reads `lessons` and
+  `regions` by name. The lock check reads `type` and `duration_seconds` from both
   `lessons` and `lessons_next`, each by name. `StudentContext` gets its
   catalog only from `/api/student/data`, so a deployment with the
   suffix set serves the
@@ -654,7 +748,11 @@ about those migrations comes from their text.
   var, `CATALOG_SHAPE` (empty, `v1` or `v2`), says whether the catalog
   has the v2 shape (no `day`, one `sort_order` for the whole course).
   The staging tables always count as v2, and the data route picks its
-  ordering from that.
+  ordering from that. After the switch the suffix is empty (the new
+  course is in `lessons`) and `CATALOG_SHAPE` is `v2`; both are server
+  values, so a client component always sees `CATALOG_IS_V2` false, and
+  admin pages tell the courses apart by `curriculum_reset_at` instead
+  ([The course switch](#the-course-switch-cutover)).
 
   **A staging lesson cannot be completed.**
   `student_lesson_completions.lesson_id` references `lessons(id)`, and
@@ -663,7 +761,8 @@ about those migrations comes from their text.
   exists only in `lessons_next` can be listed and opened, and nothing
   can mark it done. A `lesson_videos` row for such a lesson changes
   none of that: with the switch on `_next` the video would play, every
-  heartbeat would be refused, and nothing would be recorded.
+  heartbeat would be refused, and nothing would be recorded. That
+  holds until v104 copies the course into `lessons`.
 - `lesson_videos` (v100): which Tella video plays for which lesson, and
   what the last lock check found. One row per lesson that has a video;
   no row means "not recorded yet". Columns: `lesson_id` (primary key),
@@ -757,7 +856,12 @@ about those migrations comes from their text.
     is `auth.uid() is not null`), so an id stored there would reach
     every account, lapsed members included.
   - `lesson_id` has no foreign key, on purpose: until the cutover the
-    table may hold ids from both `lessons` and `lessons_next`.
+    table may hold ids from both `lessons` and `lessons_next`. The
+    cutover adds none either: v104 copies the rows on ids the new
+    course does not have (test stamps on old lessons) into
+    `archive_v1` and deletes them, and leaves the course's own rows as
+    they are (call C11). `student_lesson_watch` is treated the same
+    way.
   - Unproven: whether production grants a new table to `service_role`
     by default, which the two routes and the lock check need. v100's
     commented post-check has a column for it
@@ -775,6 +879,14 @@ about those migrations comes from their text.
     reads it: the discount routes use `DISCOUNT_WINDOW_DAYS` in
     `src/lib/constants.ts`. It still appears as an editable row on
     `/admin/settings`, where changing it changes nothing.
+  - `curriculum_reset_at` (written by v104, 2026-10-14 code, not on
+    production): the moment of the course switch, in UTC, like
+    `2026-10-20T18:25:00.000Z`. v104 writes it in the same transaction
+    as the wipe and the copy, and its undo deletes it, so it cannot
+    disagree with the data: no row means the old course is live. The
+    CSM, achievements, the snapshot callers and floor, and the admin
+    pages count from it. Read-only on `/admin/settings`. Every reader is
+    listed in system_contracts.md (`admin_config`).
 
 **Student state (per-student rows — one table per function, v46)**
 - `student_milestones` — onboarding + sprint progression
@@ -785,6 +897,15 @@ about those migrations comes from their text.
   Note: `first_client_landed_at` is dormant - the column persists but
   the API route, celebration component, and milestone node were all
   removed in v72.4. Safe to drop in a future migration if reclaimed.
+  v103 adds `playbook_unlocked_at` (timestamptz, empty). v104 stamps it
+  with the switch's moment for every graduate of the old course (a done
+  l078, or done lessons numbering at least 80% of the old course's
+  counting lessons, with no 30-day wait), and fills
+  `first_sprint_login_at` from the earliest completion for students
+  who have completions and no login stamp. The app never writes it. As
+  committed, nothing in `src/` reads it either; the data route's
+  `select("*")` already sends it to the browser, and cutover WI-8 is
+  the work that makes the Playbook gate honour it.
 - `student_streaks` — current_streak, longest_streak, last_streak_date
 - `student_whop_sync` — Whop OAuth tokens + watch-history sync diagnostics
 - `student_celebrations` — last_streak_milestone_shown,
@@ -845,7 +966,7 @@ about those migrations comes from their text.
   `templates`). v85 added `outcome` (replied/no_reply/NULL, manual CSM
   tap on the Sent tab) + `outcome_at` + `outcome_by` — Phase 0 of the
   retention overhaul's feedback loop.
-- `daily_progress_snapshots` — one aggregate row per DAY (PK `snapshot_date`), not per student. Written solely by the `rebuild_daily_snapshots` RPC since v89; values are point-in-time, derived from `first_paid_at` / `canceled_at`. v77 added cohort columns (`active_count_cohort`, `joined_count_cohort`, `churned_count_cohort`, `avg_progress_cohort`). After v75.51 (scope toggle removed), only the `_cohort` columns are read by the UI; the legacy non-cohort columns are still written for historical continuity. v89 made every past day point-in-time (was: recomputed from each student's CURRENT membership_status, which made the active line monotone and unable to show churn), bounded the rebuild with `p_end_date`, and made the RPC the SOLE writer — the snapshot cron now calls it instead of upserting its own values, so there is one definition of 'active'. `canceling_snapshots` remains the cron's, and the RPC cannot see it. v81 aligned the cron + RPC + dashboard avg_progress formula on the canonical isLessonComplete + l057 exclusion (single source of truth). v92 added the column `total_lessons`: the number of lessons with `counts_toward_progress` that `avg_progress` was divided by on that date (null on rows written before v92), and the RPC now decides "done" through the shared SQL function `lesson_is_complete`. v96 made the RPC executable by `service_role` only and made it raise when asked to start more than 30 days back.
+- `daily_progress_snapshots` — one aggregate row per DAY (PK `snapshot_date`), not per student. Written solely by the `rebuild_daily_snapshots` RPC since v89; values are point-in-time, derived from `first_paid_at` / `canceled_at`. v77 added cohort columns (`active_count_cohort`, `joined_count_cohort`, `churned_count_cohort`, `avg_progress_cohort`). After v75.51 (scope toggle removed), only the `_cohort` columns are read by the UI; the legacy non-cohort columns are still written for historical continuity. v89 made every past day point-in-time (was: recomputed from each student's CURRENT membership_status, which made the active line monotone and unable to show churn), bounded the rebuild with `p_end_date`, and made the RPC the SOLE writer — the snapshot cron now calls it instead of upserting its own values, so there is one definition of 'active'. `canceling_snapshots` remains the cron's, and the RPC cannot see it. v81 aligned the cron + RPC + dashboard avg_progress formula on the canonical isLessonComplete + l057 exclusion (single source of truth). v92 added the column `total_lessons`: the number of lessons with `counts_toward_progress` that `avg_progress` was divided by on that date (null on rows written before v92), and the RPC now decides "done" through the shared SQL function `lesson_is_complete`. v96 made the RPC executable by `service_role` only and made it raise when asked to start more than 30 days back. v103 puts a floor under the table: the trigger `trg_daily_snapshots_reset_floor` refuses (22023, "Nothing was changed.") any insert, update or delete of a row dated before the UTC date of `admin_config.curriculum_reset_at`, because such a row would be recomputed from archived progress as near 0%; with no such key it lets everything through. The switch day itself stays writable, so its row shows the drop, which is real. The three callers (the snapshot cron, `/api/admin/rebuild-snapshots`, `/api/admin/refresh-everything`) clamp their start to that date with `clampStartToReset()` and say "nothing to rebuild before the course switch" when nothing is left. A day missing before the switch stays missing.
 - `sync_runs` — audit log for the Whop community sync (v77). One row per attempt with source (cron / admin-button), status (success/failed), counts (fetched/inserted/updated/skipped/errors), duration_ms, error_message. Team-read RLS. Use to answer "did sync run last night?" without digging Vercel logs.
 - `canceling_snapshots` (v84) — one row per day: how many launch-cohort
   paying students were in Whop's "Canceling" state at snapshot time.
@@ -909,6 +1030,25 @@ about those migrations comes from their text.
 - `student_task_completions` — predates `lessons`; new code uses
   `student_lesson_completions`
 - `checkpoints` — older waypoint model; superseded by `regions`/`lessons`
+- The schema `archive_v1` (written by v104, not on production): the
+  old course and every progress row the switch removed, one table per
+  archived table (same columns, no constraints): `regions`, `lessons`,
+  `student_lesson_completions`, `lesson_notes`,
+  `student_lesson_ratings`, `quizzes`, `quiz_questions`,
+  `student_quiz_attempts`, `student_region_quiz`,
+  `student_achievements`, `achievements`, `student_milestones`, and
+  the `student_lesson_watch` and `lesson_videos` rows on lessons the
+  new course does not have. Plus the switch's own record: `meta` (the
+  moment, who ran it, each table's row count), `stamps` (each student
+  whose Playbook or first login it set), `csm_changes` (each template,
+  task and alert it changed, with a copy of the row as it was),
+  `constraints` and `not_nulls` (the keys and constraints it dropped,
+  as Postgres stated them). Every privilege is revoked from `public`,
+  `anon`, `authenticated` and `service_role`, so no API key reads it;
+  only the SQL editor's owner does. The undo of v104 restores from it
+  and renames it `archive_v1_undone_<yyyymmdd_hh24mi>`; it moves
+  anything done on the new course into `archive_v2`. It is kept at
+  least 90 days (call C18), then dropped by hand.
 
 **Undo files (`supabase/undo/`)**
 
@@ -941,7 +1081,40 @@ the Supabase SQL editor by hand, and only to undo.
   started, gives the two counts and no video id, and changes nothing.
   It leaves `lessons` and `regions` alone, and on `regions_next` the
   three columns v99 filled. A second run ends in the same state, and
-  v101 can be run again after it.
+  v101 can be run again after it. Since 2026-10-14 v101 itself refuses
+  once `curriculum_reset_at` exists ("The course is live in
+  public.lessons since the switch of ...; this file changes only the
+  staging tables. Nothing was changed."), because after the switch it
+  would change only the staging tables and look like it worked (call
+  C20). A course change after the switch has no generated path into
+  `lessons` yet (tasks.md).
+- `2026_v103_undo.sql`: drops the snapshot floor (trigger and
+  function), the view `student_last_counted_completion` and the three
+  columns v103 added. It refuses while `curriculum_reset_at` exists:
+  the live course needs them, so the undo of v104 goes first. Run it
+  only together with putting the app back on a build from before the
+  cutover code, which reads the view and the column.
+- `2026_v104_undo.sql`: takes the switch back in one transaction. It
+  moves every row made on the new course (completions, notes, ratings,
+  quiz rows, badges, watch rows) into a new schema `archive_v2`, drops
+  the six RESTRICT keys and the Whop index, puts the old catalog,
+  every relaxed constraint, the six retired badges, every progress row
+  and the old watch and video rows back from `archive_v1`, re-adds the
+  keys under the names and definitions the switch recorded from
+  production, takes back its Playbook and login stamps (only while
+  they still hold its value) and its CSM changes (a task reopens only
+  where no open task now exists for the same student and scenario),
+  deletes `curriculum_reset_at` and renames `archive_v1`. It refuses
+  with no `curriculum_reset_at`, with `archive_v1.meta` missing or
+  disagreeing, with `archive_v2` already there, or when the keys are
+  not the six it made. It leaves in the archive, and counts, rows of
+  students deleted since the switch and old video rows whose id another
+  lesson now holds (expect 0 and 0); a re-enabled template shows the
+  undo's time as its `updated_at`; snapshot rows written after the
+  switch stay. Then the Vercel values go back and the app is
+  redeployed (the PRD's ship order, "Rollback"). The switch can run
+  again after it. Once the week-later deletion (cutover WI-12) has
+  merged, an undo needs that commit reverted first.
 
 **The morning kit (`supabase/diagnostics/`)**
 
@@ -982,6 +1155,49 @@ only on the local test database, with fake ids (section 19 of the
 migration tests). The SQL editor has not run it, and which two lessons
 production picks is not known.
 
+**The cutover's checks (`supabase/diagnostics/`, 2026-10-14)**
+
+Both are read-only selects, pasted into the SQL editor, and both run
+before and after the switch. Sections 23 and 24 of the migration tests
+run them and check that every table count is unchanged afterwards.
+
+- `cutover-preflight.sql`: what v104 will find and do, read from
+  production, run after v101 and v103 and before the switch (ship
+  order step 5). Its header lists its parts; as committed (`e07c0fd`)
+  they are a. the keys into `lessons` and `regions` with their names
+  (expect exactly six), what the switch relaxes, and any not-null
+  column the copy would leave empty; b. every active template the
+  switch turns off, with the conditions that make it (the list to read
+  with Astrid and Karlo); c. the row counts the archive will hold;
+  d. the graduates it stamps (by l078, by 80%) and the logins it fills
+  in; e. the open tasks and alerts it dismisses; f. `lessons_next`
+  (141 rows, 140 counting, gate `a4l17`, 141 distinct Whop ids, no
+  placeholder title); g. whether v103 and v100 ran and whether
+  `archive_v1` or the switch's row already exist. Since `9ffdec0` (review R4, R7):
+  h. discount requests still pending (each decided before v104); i.
+  requests rejected since the launch cutoff; j. active templates using
+  `day_number`; k. the database triggers on every table v104 writes,
+  against the six expected. v104's final table
+  repeats b, d and e, to be compared.
+- `cutover-postcheck.sql`: run right after the switch, the next
+  morning and through the first week (steps 13 and 15). One row per
+  check with a verdict (PASS, LOOK, INFO, NOT SWITCHED, NOT CHECKED):
+  the switch's row and `archive_v1.meta` agree, the catalog equals
+  staging, the six keys are RESTRICT and no other key points at the
+  catalog, the Whop index, every archive count, no graduate without
+  the Playbook, no retired badge back, no course task or alert from
+  before the switch open again, the floor in place. Then INFO: open
+  tasks created since the switch by scenario (no `nolessons`, `noship`
+  or `pace` before course day 3), heartbeats, completions, and Whop
+  syncs since the switch with what they fetched, matched and could not
+  match. It reads `archive_v1` in a block before the select, so it is
+  pasted and run in one go. At its foot, commented out, is the one
+  statement that stamps the Playbook for a named student by hand.
+- `admin-health.sql` INVARIANT 6 counts the lessons with
+  `counts_toward_progress` (every lesson but `l057` on the old course,
+  every lesson but `a7l19` on the new) where it excluded the id `l057`,
+  so it holds on both courses.
+
 ## Cron Jobs (Vercel)
 
 | Job | Cadence | What it does |
@@ -1001,6 +1217,18 @@ cancel flags and engagement's alerts from the SAME cycle.
 
 Schedules live in `vercel.json`. All seven routes use the shared `verifyCronAuth` helper from `src/lib/cron-auth.ts` (v75.37) which trims whitespace from CRON_SECRET (defense against env-var-drift silent 401s) and writes audit rows to the `cron_runs` table on every invocation. Use `cron_runs` to answer "did Vercel fire this cron in the last N hours?" — separable from "did the work succeed?".
 
+**On both courses (cutover, branch `world-engine`).** `check-csm-tasks`,
+`check-engagement` and `snapshot-progress` read
+`admin_config.curriculum_reset_at` on every run; with no row each
+behaves as before (proved side by side for the CSM). A failed read of
+it fails the run in `cron_runs` rather than guess which course is live,
+and so does an empty `regions` table for `check-csm-tasks` ("regions
+returned no rows; no student was judged"). What changes after the
+switch is under [The course switch](#the-course-switch-cutover). The
+runs to watch on the evening: the first `check-engagement`,
+`check-csm-tasks` and `check-na-tasks` after the switch, and the next
+00:30 snapshot (ship order steps 14 and 15).
+
 **Manual triggers** (Karlo/team):
 - "↻ Refresh everything" button (dashboard + `/admin/tasks`) → `/api/admin/refresh-everything` runs sync-whop, rebuild_daily_snapshots RPC, then 3 CSM crons in parallel (v75.22)
 - One-time first_paid_at backfill: `/api/admin/backfill-first-paid-at` (v75.34) — accepts CRON_SECRET fallback auth for terminal use.
@@ -1013,7 +1241,7 @@ Schedules live in `vercel.json`. All seven routes use the shared `verifyCronAuth
 | `admin-auth.ts` | Team auth gate for API routes. v86: also `STATS_ALLOWED_USER_IDS` / `isStatsOwner()` / `requireStatsOwner()` — the revenue-visibility allowlist, keyed on the **immutable** `auth.users` id, never on `team_members.role` (role is mutable: any founder can grant `founder` via `PATCH /api/admin/team-members/[id]`). One definition, consumed by both the page gate and the API gate. |
 | `whop.ts` / `whop-members.ts` / `whop-sync-runner.ts` | Whop HTTP + sync. v75.53: the sync self-heals NULL `first_paid_at` via a bounded cross-product lookup (shared with the backfill). **v75.59 LOAD-BEARING: every upsert row carries the IDENTICAL full column set, preserving by VALUE — never reintroduce a conditional row key.** postgrest-js unions batch keys and PostgREST NULLs omitted columns on conflict-update (the 2026-06-11 wipe: 638 `first_paid_at` + 67 `whop_plan_id` + ~48 `cancel_scheduled_at` erased); a tripwire aborts the sync on any non-uniform key set. v75.60/61: `canceled_at` backfill tries past cycle-end, then past `expires_at` (refund revocations), then stamps the observation moment — a churned student can never stay invisible to the churn trend. |
 | `pkce.ts` | OAuth PKCE helpers |
-| `csm-triggers.ts` | Trigger metric registry + evaluator. v76: `is_canceling` condition (cancel_scheduled_at + still active) available in the /admin/templates TriggerBuilder — powers the save-the-sale "Canceling" task template. v85.1: CANCELING SUPPRESSION — for canceling students every built-in trigger returns null (`snapshotIsCanceling` wrap on the registry) and `evaluateCustomTrigger` only matches configs referencing `is_canceling`; check-csm-tasks 3c + check-na-tasks reinforce it, so canceling students hold exactly one task: the save-the-sale one. |
+| `csm-triggers.ts` | Trigger metric registry + evaluator. v76: `is_canceling` condition (cancel_scheduled_at + still active) available in the /admin/templates TriggerBuilder — powers the save-the-sale "Canceling" task template. v85.1: CANCELING SUPPRESSION — for canceling students every built-in trigger returns null (`snapshotIsCanceling` wrap on the registry) and `evaluateCustomTrigger` only matches configs referencing `is_canceling`; check-csm-tasks 3c + check-na-tasks reinforce it, so canceling students hold exactly one task: the save-the-sale one. Cutover WI-3 (branch `world-engine`): `buildStudentSnapshot` takes the live course (`regionOrder` from `regions`, `resetAt` from the switch; a caller that passes none gets r1..r4 and no switch) and adds `courseIsNew`, `dayOnCourse`, `daysSinceCourseStart`, `lastCountedCompletionAt` and `activity`. See [The course switch](#the-course-switch-cutover) for what changes after it. |
 | `csm-events.ts` | CSM event hooks (called from mark-* routes). v85.4: W2.2 + X.1 skip canceling students at creation; W2.6 (discount review) deliberately unguarded AND exempt from the 3c canceling sweep — a canceling student applying for the discount is a save signal. |
 | `templates.ts` | DM template renderer (variable substitution) |
 | `dm-toggles.ts` | Day-28 DM enable/disable |
@@ -1029,20 +1257,23 @@ Schedules live in `vercel.json`. All seven routes use the shared `verifyCronAuth
 | `cron-auth.ts` (v75.37) | `verifyCronAuth(request)` + `logCronStart`/`logCronFinish` — shared auth check (whitespace-trimmed against drift) + audit-log writes to `cron_runs`. All 7 cron handlers use this; replaces the per-route inline `Bearer ${process.env.CRON_SECRET}` check. |
 | `csm-task-evaluation.ts` (v75.21) | `reEvaluateStudentOpenTasks(supabase, studentId)` — real-time auto-dismiss helper called from toggle-lesson / mark-action-shipped / skip-lesson API routes. Re-evaluates each open task's trigger against the student's CURRENT state and dismisses any that no longer apply. Same evaluation logic as check-csm-tasks section 3c but scoped to one student. |
 | `outreach-insights.ts` (v85.3) | `computeOutreachInsights(supabase, {sinceIso})` — single source of truth for outreach effectiveness. `familyOf(template)` maps scenario prefix / is_canceling trigger / bucket → family; each family graded on what its message asks (see /admin/tasks/insights row above). Evidence: lesson+note events (activity families), student_milestones.first_sprint_login_at (stalled), current students state (canceling saves). Also: replied/no_reply/unmarked, median time-to-send, students_reached (unique). Excludes admin-only + untemplated tasks. Per-metric range filtering. Used by /api/admin/tasks/insights + /api/admin/templates/stats (strip shows "% success"). |
-| `achievements.ts` | Achievement catalog + unlock evaluation (v53) |
+| `achievements.ts` | Achievement catalog + unlock evaluation (v53). Cutover WI-4: the areas come from every lesson's `region_id` (lessons outside the count left out by `counts_toward_progress`), so `unbroken`, `perfect_run` and `region_sweep` count whichever course is live, and the day number counts from the later of first payment and the switch. A failed read of the switch skips the check that once (it under-awards, never over-awards; morning review T1). The six rules tied to r1..r4 or the 30-day clock stay in the file and cannot fire on the new course, whose `achievements` rows the switch deletes. |
 | `discord.ts` | Discord HTTP helpers |
 | `day28-embed.ts` | Day-28 DM embed builder |
-| `titles.ts` | Student title progression |
+| `titles.ts` | Student title progression. `getTitleForRegions(count, totalRegions = 4)` and `getNextTitle`: a rung needs `minRegions × totalRegions / 4` areas, so on eight areas the ladder is 0, 2, 4, 6, 8. An area count that is not a positive number (areas not loaded yet) gives Recruit, next Explorer (morning review T3). |
 | `constants.ts` | Lesson groups, discount window, `DISCOUNT_GATE_LESSON_ID`, `PLAYBOOK_UNLOCK_LESSON_ID` (l078), launch date, `PAYING_WHOP_PLAN_IDS` allowlist (v79), `csmSprintWindowCutoffIso()` (v75.15 — `now - 30d` for CSM cron filters), etc. |
 | `motion.ts` | GSAP / Framer easing constants |
 | `useMediaQuery.ts` | SSR-safe phone-detection hook |
 | `useFocusTrap.ts` | Modal a11y |
-| `useJourneyPaceCounts.ts` | Admin Journey pace tile data |
+| `useJourneyPaceCounts.ts` | Admin Journey pace tile data. Since the cutover work it also holds what the admin pages share about activity: `loadCourseActivity(supabase, studentId?)` (the switch's moment and, only when it exists, each student's row of `student_last_counted_completion`; never throws, a failed read comes back as `{ ok: false }` and the pages show "—"), and the pill's words, tones and order. After the switch the hook counts the four activity labels instead of behind / on pace / ahead. |
 | `map/` | Map geometry (path math, region bounds) |
-| `sop-templates.ts` | SOP scaffolding |
+| `sop-templates.ts` | SOP scaffolding: four Day 1/7/14/21 messages about regions, the 30 days and "R1 + R2". Nothing in `src/` imports it (git grep, 2026-10-14). |
 | `catalog-tables.ts` | Which catalog the app reads. `CATALOG_TABLE_SUFFIX` becomes `REGIONS_TABLE` and `LESSONS_TABLE`; `CATALOG_SHAPE` becomes `CATALOG_IS_V2`. It throws when the module loads on any value outside the allowed ones, because a wrong table name would return an empty catalog with no error anywhere. |
+| `curriculum-reset.ts` | The course switch as the code that judges a student's history sees it (cutover WI-1). No React, no Next, no environment. `CURRICULUM_RESET_KEY`; `getCurriculumResetAt(supabase)` reads `admin_config.curriculum_reset_at`, returns null with no row and **throws** on a read error or a value that is not a date and time with its zone, because a null on a failed read would judge everyone on the old 30-day clock again. It needs a service-role or team client: a student's client reads no row and gets null whatever the database holds. `courseAnchorIso` (the later of first payment, or `joined_at` with none, and the switch), `daysOnCourse` (`sprintDayNumber`'s rounding, held equal by the test), `activityLabel`, `resetDateUtc` and `clampStartToReset` (the snapshot floor's date), `cutoverProblems` (the lines `/admin/cutover` shows). Code that reads the active catalog branches on `CATALOG_IS_V2`, never on this. |
 | `complete-lesson.ts` | `stampWatchCompletion()` stamps the watch half of a completion and is safe to call twice. `afterCompletionWrite()` runs what follows a completion, in order: streak, CSM reactivation, achievements, open-task re-evaluation, each best-effort. Only `POST /api/student/lesson-watched` calls them; `toggle-lesson` still carries its own copy of the same four calls. |
-| `world/access.ts` | Who may see `/world`. `canSeeWorld(studentId)` is true when `NEXT_PUBLIC_WORLD_LIVE` is `true` or the id is in `NEXT_PUBLIC_WORLD_PREVIEW_IDS`; an unset list admits nobody. Also `STUDENT_HOME` (`NEXT_PUBLIC_STUDENT_HOME`, default `/dashboard`) and `WORLD_LOCK_MODE` (`"open"`). It is a convenience gate in the browser; video addresses and completions are guarded on the server. |
+| `world/access.ts` | Who may see `/world`, and where a student lands. `STUDENT_HOME` is `resolveHome(NEXT_PUBLIC_STUDENT_HOME)`: default `/dashboard`, a trailing slash dropped (`/world/` is `/world`). `/`, `/auth/complete`, the journal's redirect and `WorldAccessGate` all send to it, and `/dashboard` forwards to it when `HOME_IS_DASHBOARD` is false. `WORLD_IS_LIVE` is true when `NEXT_PUBLIC_WORLD_LIVE` is `true` or the home is `/world` (cutover call C14: with the home moved and the live flag forgotten, the gate would send `/world` to `/world` and render nothing). `canSeeWorld(studentId)` is true when the world is live or the id is in `NEXT_PUBLIC_WORLD_PREVIEW_IDS`; an unset list admits nobody. Also `WORLD_LOCK_MODE` (`"open"`). It is a convenience gate in the browser; video addresses and completions are guarded on the server. `client-tests/access.test.mjs` runs all 40 home and live settings: no loop. |
+| `world/discount.ts` | Pure. The early-finish discount on the new course: `discountState()` (not eligible, expired, locked with the lessons and seconds left, ready, or the latest request's status), `requiredLessons()` and `gateLessonId()`, `DISCOUNT_PERCENT` (30), `DISCOUNT_LAUNCH_DATE` (9 October 2026, 00:00 in Croatia). Shared by the map and the routes, so they cannot disagree about who is ready. The rule is under API Routes, Discounts. |
+| `world/discount-server.ts` | The server half: `loadDiscountReads` (the five reads, the catalog through `LESSONS_TABLE`, never throwing), `factsFromReads`, `decideDiscountRequest` and `approvalVerdict` (every video done inside the 14 days). Everything fails closed: a read that errors, or comes back empty where a row must exist, means no request and no approval. |
 | `world/tella.ts` | The small facts about Tella that both sides share, with no imports. `TELLA_ORIGIN` (`https://www.tella.tv`, the only origin the player listens to and posts to), `WATCH_SPEED_CAP` (2.5, the same number as `v_speed_cap` in the SQL function), `isTellaVideoId()` (the pattern of the table's check constraint) and `tellaEmbedUrl(id)`, which builds `https://www.tella.tv/video/{id}/embed?title=0&b=0&wt=0&a=0&o=1` and throws on a malformed id without repeating it. The five switches hide the creator's name and Tella's own links; the reactions row stays. |
 | `world/tella-lock.ts` | Pure. `judgeLock(facts, expectedDomains, catalogDurationSeconds, catalogLesson)` decides whether a video is still locked and says why in plain sentences. `missing` when Tella has no such video. `open` when access is anything but "Embed only", when there is no domain list, when a site on the list is not an expected one (`localhost` included), or when downloads are on. `locked` otherwise. Four findings add a sentence and leave the status alone. Two are about the video: an expected site missing from the list, and a length more than 2 s away from the catalog's. Two are about the catalog, added on 2026-10-12 because either makes a lesson impossible to finish: a `watch` lesson with no length ("The catalog has no length for this lesson, so it can never be counted.") and a row whose id no `watch` lesson has ("No watch lesson has this id."). The catalog rules run whatever Tella answered, a 404 included. The fourth argument says what the catalog knows about the lesson: `"watch"` (the default), `"none"`, or `"unread"` when a catalog table could not be read, and then nothing is said about the catalog. `watchLessonSeconds(tables)` builds the length of every `watch` lesson by id from the catalog rows it is handed; a later table wins an id two tables share, so the caller passes the live table last. |
 | `world/tella-api.ts` | Server only. `fetchTellaVideoFacts(videoId, apiKey)` makes the one read the lock check needs, `GET https://api.tella.com/v1/videos/{id}`. One request, reading the answer included, is given up after 10 s. It returns null on a 404, throws on any other answer that is not a 200, and throws on a 200 that has no settings or no download switches, so an answer nobody could read never comes out as "locked". A missing access level or domain list is handed on, and `judgeLock` reports it as `open`. A timeout, a failure to reach Tella and an answer that is not JSON each throw a sentence written in this file; an error from the network layer is never passed on in its own words. Nothing it throws names the video or the key. The key can read every video in the workspace and change the ones uploaded from its own login (measured 2026-10-13: a change to another member's video answers 404). Its only caller in the app is the lock check. |
@@ -1064,7 +1295,10 @@ Schedules live in `vercel.json`. All seven routes use the shared `verifyCronAuth
 | File | Owns |
 |------|------|
 | `world/WorldStage.tsx` | Mounted by the `/world` layout. Reads the route segments below it: the first names the open place, the second the open lesson. Provides that as `useWorldStage()` (`base`, `openAreaId`, `lessonId`, `href()`), and renders `WorldMap` and then the route's children. The address is the only source of truth for what is open. |
-| `world/WorldMap.tsx` | The map's host. Joins the catalog, the student's finished lessons and the address into the one input `WorldV6` takes (`WorldSource`), and turns the map's four callbacks into address changes. Shows one of four plain cards when the catalog is not ready. It writes nothing. |
+| `world/WorldMap.tsx` | The map's host. Joins the catalog, the student's finished lessons, the discount (`useWorldDiscount`) and the address into the one input `WorldV6` takes (`WorldSource`), turns the map's four callbacks into address changes, and hands `WorldV6` the corner (`WorldCorner`). Shows one of four plain cards when the catalog is not ready. It writes nothing. |
+| `world/WorldCorner.tsx` + `world/corner.module.css` | The header's corner pill, its achievements list and its toast (Student Surfaces, `/world`). `CornerLink` is a link already styled for the pill's `playbook` slot. |
+| `world/useWorldBadges.ts` | The corner's data: the achievement catalog, the student's unlocks and the share of students holding each, read from Supabase in the browser as the old dashboard's `AchievementsButton` reads them, again on the window event `et:achievements-changed`; an unlock that arrives while the page is open is queued for the toast. Also the sign-out. The development page provides `HudStandInContext` and then nothing is read. |
+| `world/useWorldDiscount.ts` | The student's discount for the map: `discountState()` over what the app already holds, worked out again every minute, and Apply, which posts to `POST /api/discounts/request` with the session's token, as the old dashboard does, without going through `StudentContext.requestDiscount` (that one returns at once unless the old course's R1 + R2 are done). The development page provides `DiscountStandInContext`. |
 | `world/useMapModel.ts` | `useMapModel()` names the five states the world can be in (`loading`, `error`, `empty`, `shape`, `ready`) for the host and for the routes drawn over it. |
 | `world/PlaceRoute.tsx` | What `/world/[areaId]` renders: nothing for a known area, a card for an unknown one. |
 | `world/LessonScreen.tsx` | The lesson page (see Student Surfaces). It reflects the server's answer about completion and has no way to decide it. It takes an optional `transport` and hands it to the player; `/world` passes none. |
@@ -1109,10 +1343,11 @@ Schedules live in `vercel.json`. All seven routes use the shared `verifyCronAuth
 | Env var | Read by | What it sets |
 |---------|---------|--------------|
 | `CATALOG_TABLE_SUFFIX` | `src/lib/catalog-tables.ts` | Which catalog the app reads: empty for `lessons` and `regions`, `_next` for the staging pair. Server side. |
-| `CATALOG_SHAPE` | `src/lib/catalog-tables.ts` | Empty, `v1` or `v2`: whether the catalog has the v2 shape. Server side. |
-| `NEXT_PUBLIC_WORLD_PREVIEW_IDS` | `src/lib/world/access.ts` | The allowlist: student ids, comma separated. Unset admits nobody. |
-| `NEXT_PUBLIC_WORLD_LIVE` | `src/lib/world/access.ts` | `true` opens `/world` to every student. |
-| `NEXT_PUBLIC_STUDENT_HOME` | `src/lib/world/access.ts` | Where a student who may not see the world is sent. Default `/dashboard`. |
+| `CATALOG_SHAPE` | `src/lib/catalog-tables.ts` | Empty, `v1` or `v2`: whether the catalog has the v2 shape. Server side. `v2` on Production from the switch evening, with the suffix empty: without it the discount's old rule would run on the new data (it then refuses, cutover WI-9) and `/admin/cutover` names it first. |
+| `NEXT_PUBLIC_WORLD_PREVIEW_IDS` | `src/lib/world/access.ts` | The allowlist: student ids, comma separated. Unset admits nobody. Ignored once the world is live. |
+| `NEXT_PUBLIC_WORLD_LIVE` | `src/lib/world/access.ts` | `true` opens `/world` to every student. A home of `/world` opens it too, whatever this says. |
+| `NEXT_PUBLIC_STUDENT_HOME` | `src/lib/world/access.ts` | Where every student lands: `/`, `/auth/complete`, the journal's redirect and the world's gate send there, and `/dashboard` forwards there when it is anything else. Default `/dashboard`; `/world` from the switch evening. A trailing slash is dropped. |
+| `WHOP_COURSE_ID` | `src/lib/whop.ts` (the backfill of a student's Whop lesson history, `course_lesson_interactions`), `GET /api/student/data` (masked, for the sync debug panel), `GET /api/admin/cutover-status` (set or not, and its last 4 characters) | The Whop course whose lessons the sync reads. On the switch evening it becomes the id of the new course on Whop (the PRD's ship order, step 7); the old value is written down first, for an undo. The webhook has no course filter: it matches any Whop lesson id against `lessons.whop_lesson_id`. Server side. |
 | `WATCH_PLAYED_FLOOR` | `src/lib/world/watch-rules.ts` | The share of a lesson that must have been played for it to count as watched. Default 0.8. Server side. |
 | `TELLA_API_KEY` | `src/app/api/cron/check-lesson-videos/route.ts`, which hands it to `src/lib/world/tella-api.ts` | Tella's API key. It can read every video in the workspace and change only the ones uploaded from its own login. Server only: the lock check uses it and nothing a student touches does. `world-tests/tella-lock-live.mjs` reads it from `.env.local`, and so does the Tella tool outside this repository (with `TELLA_API_KEYS_MORE`, comma separated, when that line is there). The PRD records it as set on Vercel for Preview only (2026-10-12); that was not checked for this document. |
 | `TELLA_EMBED_DOMAINS` | `src/app/api/cron/check-lesson-videos/route.ts` | The hosts a real lesson may be embedded on, comma separated. The lock check judges every video's domain list against it and refuses to run without it. Server only, and used by nothing a student touches. `localhost` never goes in it. The PRD's ship order has it still to be added on Vercel. |
@@ -1197,6 +1432,133 @@ to host on Tella (row 14, with rows 12 and 13 beside it). The private
 table, the membership check on the address and the lock check are what
 the build puts around it.
 
+## The course switch (cutover)
+
+The rebuilt course reaches every student on one evening: one SQL file
+switches the data, four Vercel values and a redeploy switch the build.
+Built on branch `world-engine` on 2026-10-14 from
+`../_admin/prds/cutover/cutover_prd.md`; none of it has run on
+production, and the plan waits for Lovro's read and `/ship`. The
+plan's ship order (end of its section 12) is the evening's full list
+with every check. This section says how the app behaves.
+
+**The evening, in short.** Any day before: v101 as it stands now, then
+v103 (additive: the Playbook column, the two area columns, the view
+`student_last_counted_completion`, the snapshot floor; nothing a
+student sees changes), the merge of `world-engine` into `main`, and
+`cutover-preflight.sql`, read with Astrid and Karlo. On the evening, at
+an even UTC hour at :25 (the crons run at :00 to :20 every two hours,
+the snapshot at 00:30): the Vercel Production values
+`NEXT_PUBLIC_STUDENT_HOME=/world`, `NEXT_PUBLIC_WORLD_LIVE=true`,
+`CATALOG_SHAPE=v2`, `CATALOG_TABLE_SUFFIX` empty or absent and
+`WHOP_COURSE_ID` set to the new course on Whop, which act only on the
+next build; then v104 in the SQL editor; then a redeploy at once; then
+`/admin/cutover`, a student login on `/world` and
+`cutover-postcheck.sql`. Between v104 and the new build being Ready
+the old build meets the new data: no cron runs in that window if the
+time is kept, and the discount's old rule refuses (cutover WI-9).
+
+**What v104 does**, in one transaction that refuses with a sentence
+ending "Nothing was changed." whenever it does not find the state it
+was written for (its header lists every guard): copies the old catalog
+and every progress table into `archive_v1`; stamps the Playbook for
+the old course's graduates and fills missing first logins; turns off
+the templates whose trigger names a lesson, an area, `progress_ratio`,
+`progress_label` or `region_pace`, dismisses open `nolessons.*`,
+`noship.*` and `pace.*` tasks and those templates' tasks with a note,
+and dismisses open `no_tasks_7d` and `no_lessons_3d` alerts
+(`no_login_5d` stays); empties completions, notes, ratings, the quiz
+tables and every student's badges, and deletes six badges (`r1_clear`
+to `r4_clear`, `early_finisher`, `speedrun`); replaces `regions` and
+`lessons` with a copy of the staging catalog; puts the six keys back
+as RESTRICT; writes `curriculum_reset_at`. Discount requests, streaks,
+celebrations, daily notes, DM logs, the Whop sync's rows and the
+snapshot history are left as they are. Every student starts the new
+course with nothing done; lessons watched on Whop's new course come
+back at the student's next visit (the sync) and new ones at once (the
+webhook). Run again, v104 changes nothing and says since when the
+switch is in place.
+
+**Two signals, never mixed.** Code that reads the active catalog (the
+world, the data and video routes, the action-item and discount routes)
+branches on `CATALOG_IS_V2`. Code that reads `lessons` and `regions`
+by name or judges a student's history branches on
+`admin_config.curriculum_reset_at`: no row means the old course is
+live. The row is written in the same transaction as the wipe, so it
+cannot be forgotten, and admin client pages can read it, where they
+cannot read a server value (call C6).
+
+**After the switch, part by part.** Before it, each part behaves as it
+did; the CSM and the achievements were proved side by side with their
+old code on old-course fixtures.
+
+- **Course days.** A student's day counts from the later of their first
+  payment and the switch (`courseAnchorIso`, `daysOnCourse`), so
+  everyone already enrolled is on Day 1 on the evening.
+- **The CSM queue.** Lessons are counted per area of `regions`.
+  `nolessons.day3/7/14` run on course days, so none fires in the first
+  two course days. `noship.r1.day7`, `noship.r2.day14` and
+  `pace.day7/14/21` return nothing (call C5). In team templates
+  `progress_ratio`, `progress_label` and `region_pace` never match,
+  and "days since last lesson" counts from the course start when
+  nothing is done since. `no_tasks_7d` and `no_login_5d` alerts no
+  longer become tasks, and `no_lessons_3d` becomes `nolessons.dayN`
+  only for a student with 0 lessons. As committed, `day_number` in a
+  team template still counts from first payment (morning review Q1),
+  after the switch it counts course days, like `nolessons.*` (morning
+  review R3, commit `9ffdec0`), so such a template does not fire for
+  every student in the pool on the evening.
+  The pool itself is unchanged, the crons' 30-day window, so a student
+  who paid more than 30 days before the switch gets no CSM task on the
+  new course (Q3). `check-engagement` writes its three "Day N" texts in
+  course days (Q2).
+- **Achievements and titles.** Every badge is archived and can be
+  earned again, except the six deleted. `unbroken`, `perfect_run` and
+  `region_sweep` count the eight areas, and titles scale to 0, 2, 4, 6
+  and 8 areas. Streaks are kept (call C2), so a student holding a 7 or
+  14 day streak gets that badge back at their next lesson.
+- **Snapshots.** Rows before the switch day are frozen by the floor
+  (`daily_progress_snapshots` under Database), and the three callers
+  never ask for them.
+- **Admin pages.** Activity in place of pace, 140 as the denominator,
+  area names from `regions` (Admin Surfaces).
+- **Students.** They land on `/world`; `/dashboard` forwards. The
+  Playbook needs cutover WI-8 merged first (Student Surfaces,
+  `/dashboard/playbook`).
+- **The Whop sync** stays. The webhook and the backfill match
+  `lessons.whop_lesson_id`, which then holds the new course's ids, one
+  lesson per id; `WHOP_COURSE_ID` must name the new course or the
+  backfill matches nothing. An old-course webhook event finds no lesson
+  and is ignored.
+- **The discount.** The new rule (API Routes, Discounts). A request
+  still pending at the switch cannot be judged by the old rule after
+  it, so the team decides every pending request before v104 (ship
+  order step 5b).
+
+**Activity, in place of pace** (call C4). There is no 30-day plan to
+be ahead of or behind, so the pill says how long ago the student last
+finished a lesson that counts: no such lesson, "Not started"; under 3
+whole days, "Moving"; 3 to 7, "Slipping"; over 7, "Stalled"
+(`activityLabel`). The admin pages read the date from the view
+`student_last_counted_completion`, the CSM from its own snapshot by the
+same rule. A lesson that was only skipped is not activity (morning
+review B2). After the switch the view only holds lessons finished
+since.
+
+**Rollback**, the evening or the days after: `2026_v104_undo.sql`
+(Undo files, under Database), then in Vercel remove
+`NEXT_PUBLIC_STUDENT_HOME`, `NEXT_PUBLIC_WORLD_LIVE` and
+`CATALOG_SHAPE`, set `WHOP_COURSE_ID` back, redeploy, and
+`/admin/cutover` says "before". Progress made on the new course in
+between waits in `archive_v2`. The undo of v103 runs only after it.
+
+**A week later** (cutover WI-12, its own build, on Lovro's word once a
+week of numbers has moved and no undo is in view): the old course's
+branches, screens and constants, the day-28 DM, the preview gate and
+`CATALOG_SHAPE` are deleted. The Whop sync, every column,
+`lessons_next` and `regions_next`, and `archive_v1` stay. `tasks.md`
+holds it.
+
 ## Testing
 
 No test runner is installed and nothing runs on a push. Each harness
@@ -1206,8 +1568,8 @@ the row says otherwise. Node 22 runs the TypeScript directly
 
 | Harness | Command | Needs the dev server | What it covers |
 |---------|---------|----------------------|----------------|
-| Client tests | `npm run test:client` | No | Eight suites, run from the real source files in `client-tests/`. On 2026-10-12, after decisions D14 to D19: 312 checks, 0 failed: `watch-heartbeat` 91, `watch-rules` 16, `catalog` 22, `access` 12, `map-model` 34, `tella` 75, `tella-player` 62. On 2026-10-14 the `lesson-text` suite was added (62 checks, every rule of a lesson's text format, `javascript:`, `data:` and `http:` refused, broken links and an unclosed `**` shown as written, the 8000-character cut, Windows line ends): 374 checks, 0 failed. The `tella` suite proves the id pattern, the exact embed address, that `WATCH_SPEED_CAP` and the SQL file's `v_speed_cap` are the same number, every rule of `judgeLock` with its two catalog sentences, and `watchLessonSeconds`. The `tella-player` suite proves the message parser, and who `attachTellaPlayer` listens to and posts to. The heartbeat suite proves that reports 250 ms apart count at 1x, 2x and 2.5x and that a skip does not, that reports handled back to back after a 1 s stall lose nothing, that the allowance never holds more than 5.35 s, that a forced beat that fails or is held back by the gate is sent again after 2, 5 and 10 s and then given up, that a failing database call is tried every 15 s, and that each answer comes with the beat it answers. It proves nothing in a browser, nothing about what Tella's real player sends, and no route or database. |
-| Migration tests | `npm run test:migrations` (once before the first run: `npm install` in `supabase/migration-tests/`) | No | Migrations v92 to v101 on a local Postgres (PGlite), with the generator of v101, the two undo files, the morning kit, the video load and the course check. On 2026-10-13: 276 assertions, 0 failed (the run ends `PASS 276   FAIL 0`). It was 188 on 2026-10-12, before sections 20 and 21 were added. With `LESSON_VIDEOS_SQL` set to the path of a filled copy of the video load, seven more assertions run that file, 283 in all. The SQL runs, a second run changes nothing, column types and progress numbers stay put, and the heartbeat function holds against a hostile caller. For v100 (section 18): `lesson_videos` is private and its three constraints hold, a lesson with no `lesson_videos` row is refused, a 2.5x beat is credited in full, the 60 s cap and the first beat's 20 s hold, a forced replay with no time passed gains under half a second, and the function is v97's with exactly five changes. For the lock: the function takes it once, after the student lookup and before the watch row is read; a call holds one exclusive lock, keyed on its own student and lesson, until its transaction ends; and calls served one at a time are credited as one (four calls of 60 s get 60 s between them, and three first calls at the end of a 67 s lesson bank 20 s). The race the lock closes is NOT reproduced: the harness has one connection and cannot fire two calls at the same instant. For the undo: with rows in the table it refuses, says how many and changes nothing; with the table emptied it restores v97's function character for character, drops the table, runs twice, and v100 applies again after it. For the morning kit (section 19): stamp, proof and unstamp run in order with fake ids, the stamp and the unstamp refuse a placeholder left in, the stamp refuses when a lesson it picked holds a video that is not one of the two test ids, no result shows a video id, and the unstamp leaves `lesson_videos` empty. For the course catalog (section 20, 52 assertions): `build:catalog -- --check` exits 0, and exits 1 on a copy of the data file with one title edited; the generator refuses eight bad data files and writes nothing, three of them a brief with a link (an `http` address, a bare domain, a `www.` address); v101 turns v94's 145 placeholders into the 141 lessons, row for row as the data file has them, writes no length, leaves the live catalog untouched and on a second run changes no column but `updated_at`; a copy that would retitle or drop a lesson with a video row is refused, so is a copy that would turn such a lesson into a `setup` lesson, so is a run while a video row waits on a course id that has no lesson yet, and so is a first run while a watch row sits on a placeholder lesson; it runs on a database v100 has not been applied to; the undo refuses while a video row or a watch row points at a course lesson, and otherwise puts back what v94 and v99 left; `course-catalog-check.sql` returns the expected table and each of its four checks moves when a bad row is planted. For the video load (section 21, 36 assertions), with made-up ids: the template is refused as tracked; every kind of bad list is refused with nothing changed, a list with one wrong title among them; a first load of 5 lessons, the same list again, a lesson given another video, a lesson dropped from the list and a video moved to another lesson each end as the list says; a course lesson that is not in the list loses its length whatever its type; a test stamp on the live lesson `l004` is untouched through every load, and a list holding that video is refused; the data route's and the video route's reads find exactly the loaded lessons; a heartbeat for a loaded staging lesson is still refused before the cutover; a course lesson placed in the live table gets and loses its length there with the list, and is held to the title it has there; and the load is refused where v100 or v101 has not run. v99 runs as a step of section 20, and nothing checks what it wrote. It proves nothing about production: how Supabase grants a new table to `service_role`, or the SQL editor running a block and a select on one connection. |
+| Client tests | `npm run test:client` | No | Fourteen suites, run from the real source files in `client-tests/` (copied into `client-tests/_gen/` by `build.mjs`). At `3678190` (2026-10-14, run on a copy of that commit): 893 checks, 0 failed: `watch-heartbeat` 91, `watch-rules` 16, `catalog` 22, `access` 35, `map-model` 34, `tella` 75, `tella-player` 62, `lesson-text` 62, `embed-cache` 56, `action-items` 77, `discount` 133, `curriculum-reset` 75, `achievements-cutover` 114, `csm-cutover` 41. The two cutover suites take the module as it stood before the cutover from git (`git show <base>:<path>`, the base written in the test) and assert the old and the new give the same results on old-course fixtures with no switch: `csm-cutover` compares every trigger, every condition over every metric and every old snapshot field for 14 students over days 1 to 30 (700,140 comparisons, 0 differences), then the new course; `achievements-cutover` every rule and every title count for 12 students. Both need the repository's git history to run. On 2026-10-12, after decisions D14 to D19: 312 checks, 0 failed: `watch-heartbeat` 91, `watch-rules` 16, `catalog` 22, `access` 12, `map-model` 34, `tella` 75, `tella-player` 62. On 2026-10-14 the `lesson-text` suite was added (62 checks, every rule of a lesson's text format, `javascript:`, `data:` and `http:` refused, broken links and an unclosed `**` shown as written, the 8000-character cut, Windows line ends): 374 checks, 0 failed. The `tella` suite proves the id pattern, the exact embed address, that `WATCH_SPEED_CAP` and the SQL file's `v_speed_cap` are the same number, every rule of `judgeLock` with its two catalog sentences, and `watchLessonSeconds`. The `tella-player` suite proves the message parser, and who `attachTellaPlayer` listens to and posts to. The heartbeat suite proves that reports 250 ms apart count at 1x, 2x and 2.5x and that a skip does not, that reports handled back to back after a 1 s stall lose nothing, that the allowance never holds more than 5.35 s, that a forced beat that fails or is held back by the gate is sent again after 2, 5 and 10 s and then given up, that a failing database call is tried every 15 s, and that each answer comes with the beat it answers. It proves nothing in a browser, nothing about what Tella's real player sends, and no route or database. |
+| Migration tests | `npm run test:migrations` (once before the first run: `npm install` in `supabase/migration-tests/`) | No | Migrations v92 to v101, v103 and v104 on a local Postgres (PGlite), with the generator of v101, the undo files, the morning kit, the video load, the text load, the course check and the cutover's two checks. At `3678190` (run 2026-10-14): `PASS 492   FAIL 0`, 312 before the cutover's sections 23 and 24. Section 23 (v103 and its undo): the four objects, the progress views and the snapshot numbers unchanged, a second run changes nothing, the view's value (no row for a skip only or a half-done action item), the floor inert without the key and refusing a rebuild, update, delete or insert before the switch day with it, the undo. Section 24 (v104 and its undo): one copy of the database per broken starting point, each refused with nothing changed; the first run's archive, stamps, CSM changes, wipe, copy, RESTRICT keys and Whop index against counts worked out before it; the app's own SQL afterwards (the views, the snapshot function, the heartbeat on a new-course lesson); a second run and v101 both change nothing; the undo puts every table, constraint, not-null and index back as the dump before the switch had it and moves new-course progress into `archive_v2`; the switch runs again after it; the undo's refusals; both checks change nothing and their expected rows hold; `admin-health.sql` INVARIANT 6 after the switch. Both sections run twice: on the harness's database and on one built from `base.sql` and the real files v92 to v101. Production's key names, team templates, counts and grants are not in it: the preflight reads those. On 2026-10-13: 276 assertions, 0 failed (the run ends `PASS 276   FAIL 0`). It was 188 on 2026-10-12, before sections 20 and 21 were added. With `LESSON_VIDEOS_SQL` set to the path of a filled copy of the video load, seven more assertions run that file, 283 in all. The SQL runs, a second run changes nothing, column types and progress numbers stay put, and the heartbeat function holds against a hostile caller. For v100 (section 18): `lesson_videos` is private and its three constraints hold, a lesson with no `lesson_videos` row is refused, a 2.5x beat is credited in full, the 60 s cap and the first beat's 20 s hold, a forced replay with no time passed gains under half a second, and the function is v97's with exactly five changes. For the lock: the function takes it once, after the student lookup and before the watch row is read; a call holds one exclusive lock, keyed on its own student and lesson, until its transaction ends; and calls served one at a time are credited as one (four calls of 60 s get 60 s between them, and three first calls at the end of a 67 s lesson bank 20 s). The race the lock closes is NOT reproduced: the harness has one connection and cannot fire two calls at the same instant. For the undo: with rows in the table it refuses, says how many and changes nothing; with the table emptied it restores v97's function character for character, drops the table, runs twice, and v100 applies again after it. For the morning kit (section 19): stamp, proof and unstamp run in order with fake ids, the stamp and the unstamp refuse a placeholder left in, the stamp refuses when a lesson it picked holds a video that is not one of the two test ids, no result shows a video id, and the unstamp leaves `lesson_videos` empty. For the course catalog (section 20, 52 assertions): `build:catalog -- --check` exits 0, and exits 1 on a copy of the data file with one title edited; the generator refuses eight bad data files and writes nothing, three of them a brief with a link (an `http` address, a bare domain, a `www.` address); v101 turns v94's 145 placeholders into the 141 lessons, row for row as the data file has them, writes no length, leaves the live catalog untouched and on a second run changes no column but `updated_at`; a copy that would retitle or drop a lesson with a video row is refused, so is a copy that would turn such a lesson into a `setup` lesson, so is a run while a video row waits on a course id that has no lesson yet, and so is a first run while a watch row sits on a placeholder lesson; it runs on a database v100 has not been applied to; the undo refuses while a video row or a watch row points at a course lesson, and otherwise puts back what v94 and v99 left; `course-catalog-check.sql` returns the expected table and each of its four checks moves when a bad row is planted. For the video load (section 21, 36 assertions), with made-up ids: the template is refused as tracked; every kind of bad list is refused with nothing changed, a list with one wrong title among them; a first load of 5 lessons, the same list again, a lesson given another video, a lesson dropped from the list and a video moved to another lesson each end as the list says; a course lesson that is not in the list loses its length whatever its type; a test stamp on the live lesson `l004` is untouched through every load, and a list holding that video is refused; the data route's and the video route's reads find exactly the loaded lessons; a heartbeat for a loaded staging lesson is still refused before the cutover; a course lesson placed in the live table gets and loses its length there with the list, and is held to the title it has there; and the load is refused where v100 or v101 has not run. v99 runs as a step of section 20, and nothing checks what it wrote. It proves nothing about production: how Supabase grants a new table to `service_role`, or the SQL editor running a block and a select on one connection. |
 | Lesson player simulation | `node world-tests/lesson-player-sim.mjs` (`S3 S5` for some sections) | No. No database, no login and no network either | The real `LessonPlayer.tsx`, `tella-player.ts`, `watch-heartbeat.ts`, `tella.ts`, `lesson-transport.ts` and `call-gate.ts`, loaded into headless Chrome and driven through whole visits to a lesson: watched through, skipped then watched at 2.5x, a claim that is refused, held back, failed or slow, a resumed lesson, a video that says nothing or whose frame never loads, a change of lesson, the real transport's two requests, a lesson that ends without reaching its 95% point, an end heartbeat that fails, a lesson the catalog disowns for a moment while it plays, and a page whose main thread is held up while the video plays on. 138 checks on the code as it stands after decisions D14 to D19 (run 2026-10-12). About 5 minutes. It proves nothing about what Tella really sends or obeys: the frame is a stand-in written from the PRD's contract, and the server is a stand-in too. |
 | Lock check, live | `node world-tests/tella-lock-live.mjs` | No. It needs the network and `TELLA_API_KEY`, `DEV_TELLA_VIDEO_ID` and `DEV_TELLA_VIDEO_ID_2` in `.env.local` | `fetchTellaVideoFacts` and `judgeLock` from the real source against the two real test videos: two `GET` requests to Tella's API that change nothing, each given up after 10 s, and nothing written anywhere. It has no catalog to read, so it judges both videos as a `watch` lesson 67 s long, the length the stamp file gives the two test lessons; it fails on the length rule if a test video is recorded again at another length. It expects both videos `open` with one problem naming `localhost`, and both `locked` once `localhost` is expected. It prints how long Tella took to answer, and neither the key nor an id. It proves nothing about the cron route around that logic (the table read, the writes, the alert), and the `missing` verdict has only run against a stubbed answer. Its last recorded run (project log, 22:19) was before it judged against a catalog length. **Run again on 2026-10-13 it fails: `PASS 0   FAIL 2`, both videos judged "Tella no longer has this video."** The key in `.env.local` was changed that day to the workspace that holds the course, and Tella answers 404 to it for the two test videos, which were made under the earlier key. The two test videos still play on the development page (`tella-watch.mjs` passed the same evening). The locks of the course's own videos are proved by the Tella tool's `check`, outside this repository. |
 | Lock check simulation | `node world-tests/lock-check-sim.mjs` | No. No database, no network and no `.env.local` either | The lock check's real route file (`src/app/api/cron/check-lesson-videos/route.ts`) with the real `tella-lock.ts`, `tella-api.ts`, `cron-auth.ts` and `discord.ts`, loaded as they are and run against stand-ins for `fetch`, the Supabase client, `NextResponse` and the clock. On 2026-10-12: 89 checks, 0 failed, in under a second. It proves the route's own logic: the refusals (401 without the secret, 500 without the key or the domain list, 500 when the table of videos cannot be read); one row of every kind with its verdict, its sentences and what is written; the write filtered on the lesson and the video; a row swapped or deleted while the run is on; the 270 s budget, with no request started after it, `notReached` saying how many were left and the next run starting with them; the pace of one request per 700 ms, 86 a minute at most; when the alert is sent, what it says and its cut at whole lines under Discord's limit; a catalog table that cannot be read, a write that fails and an alert that does not go out, with what `cron_runs` says after each; and that no video id and no key is in any answer, alert, `cron_runs` row or log line. It proves nothing about real Supabase (how supabase-js and PostgREST treat the order and the two filters, row level security, how long a write takes), real Tella, real Discord or Vercel's clock. Every timing in it is an input on a pretend clock, so it confirms the arithmetic of how many videos fit and measures nothing. |
@@ -1215,14 +1577,17 @@ the row says otherwise. Node 22 runs the TypeScript directly
 | Offline v6 map tests | `node --import ./world-tests/v6-ts-resolve.mjs --experimental-strip-types --no-warnings world-tests/<file>` for `v6-route.mjs`, `v6-gate.mjs`, `v6-locked.mjs` and `v6-a2-foundations.test.mjs`. `v6-rail.test.mjs` takes the same flags plus `--expose-gc`. | No | The map's route, camera rail, cave, gate, locked stretches and quality logic, measured from `src/lib/world-v6/` with no browser. Each exits 1 on a failed check. |
 | Dev map page checks | `node world-tests/v6-ui.mjs checks` | Yes, on port 3111 | The interface of `/dev/world-v6`. The script launches Chrome with a software renderer (SwiftShader), so the page runs in poster mode: it covers the interface and leaves the live 3D path uncovered. |
 | World browser proof | `node world-tests/v6-app.mjs` (`--only 3,5,18` for some rows) | Yes, on port 3111 | 20 rows on `/dev/world-app`, on the real GPU: arrival, Watch, finishing a lesson and a place, deep links, unknown addresses, the phone view, poster mode, reduced motion, the four not-ready cards. It takes about 3 minutes, and three gaps print as NOT COVERED (a real login with a real video, other browsers and devices, the `look` and `locked` modes with a real student). The default catalog it walks is unchanged by the course mode: `PASS 20  FAIL 0  NOT COVERED 3` on 2026-10-13 (course-catalog project log). |
-| Course browser proof | `node world-tests/v6-course.mjs` (`--only 2,4` for some rows) | Yes, on port 3111. Rows 9 and 12 also need `DEV_TELLA_VIDEO_ID` and `DEV_TELLA_VIDEO_ID_2` in `.env.local`, and the network | 20 rows on `/dev/world-app?catalog=course`, on the real GPU: the map takes the real counts, every lesson has a lantern, each place's card, each place's panel, the action items, the pond, the total, 26 ticks fitting the card, a lesson page with a video, a lesson page without one, an action item's page, a course lesson watched to the end of the test clip, and since 2026-10-14 four rows on `?text=sample` for the lessons' text (a5l22 with no video: no player and no 16:9 box, the text right under the Milestone box; a5l08: the player, the Milestone box, then the text; the https link opens in a new tab with `noopener` and the `javascript:` one is no link; a7l01 with no video and no text: "Not recorded yet." on one short line). Five gaps print as NOT COVERED (how the eight stops look with the real names, which a person judges from the screenshots; the default page, which `v6-app.mjs` proves; lanterns in uncleared ground cover; the real login and the real server; how a lesson's text looks, from two screenshots). On 2026-10-13: `PASS 11  FAIL 1  NOT COVERED 4` (course-catalog project log). On 2026-10-14: `PASS 15  FAIL 1  NOT COVERED 5`; with rows 17 to 20 added the same day (the video asked for before the click: a hovered row is asked for once and its frame is in the page within 300 ms of the click, also with `?latency=1500`; the "Loading video…" placeholder until the player's first word, with a screenshot, `lesson-video-placeholder.png`; a lesson with no video is never asked for), `PASS 19  FAIL 1  NOT COVERED 5`. The 300 ms includes the dev server's route change to the lesson page, so rows 17 and 20 can miss it on a busy server (one run of two, 482 and 376 ms); they print the two parts. The failing row is known and left failed: place 3 puts down 19 lanterns for 25 lessons. With the placeholder course the same place puts down 17 for 22. The counts, the place names, the action items and the pond row it expects are typed into the script, and the titles and briefs are read from the data file. About 7 minutes. |
+| Course browser proof | `node world-tests/v6-course.mjs` (`--only 2,4` for some rows) | Yes, on port 3111. Rows 9 and 12 also need `DEV_TELLA_VIDEO_ID` and `DEV_TELLA_VIDEO_ID_2` in `.env.local`, and the network | 20 rows on `/dev/world-app?catalog=course`, on the real GPU: the map takes the real counts, every lesson has a lantern, each place's card, each place's panel, the action items, the pond, the total, 26 ticks fitting the card, a lesson page with a video, a lesson page without one, an action item's page, a course lesson watched to the end of the test clip, and since 2026-10-14 four rows on `?text=sample` for the lessons' text (a5l22 with no video: no player and no 16:9 box, the text right under the Milestone box; a5l08: the player, the Milestone box, then the text; the https link opens in a new tab with `noopener` and the `javascript:` one is no link; a7l01 with no video and no text: "Not recorded yet." on one short line). Five gaps print as NOT COVERED (how the eight stops look with the real names, which a person judges from the screenshots; the default page, which `v6-app.mjs` proves; lanterns in uncleared ground cover; the real login and the real server; how a lesson's text looks, from two screenshots). On 2026-10-13: `PASS 11  FAIL 1  NOT COVERED 4` (course-catalog project log). On 2026-10-14: `PASS 15  FAIL 1  NOT COVERED 5`; with rows 17 to 20 added the same day (the video asked for before the click: a hovered row is asked for once and its frame is in the page within 300 ms of the click, also with `?latency=1500`; the "Loading video…" placeholder until the player's first word, with a screenshot, `lesson-video-placeholder.png`; a lesson with no video is never asked for), `PASS 19  FAIL 1  NOT COVERED 5`. The 300 ms includes the dev server's route change to the lesson page, so rows 17 and 20 can miss it on a busy server (one run of two, 482 and 376 ms); they print the two parts. The failing row is known and left failed: place 3 puts down 19 lanterns for 25 lessons. With the placeholder course the same place puts down 17 for 22. The counts, the place names, the action items and the pond row it expects are typed into the script, and the titles and briefs are read from the data file. About 7 minutes. At `3678190` (2026-10-14, that commit's message): `PASS 21  FAIL 1`, the same lantern row. |
+| Discount checkpoint proof | `node world-tests/v6-discount.mjs` (`--only 1,3` for some rows) | Yes, on port 3111 | 10 rows on `/dev/world-app?catalog=course&discount=<state>`, on the real GPU: the header chip, the course bar's notch and the timeline's tag when locked; the cache and its marker in the world; the marker, the tag and the chip each opening the panel (the chip from the opening frame, jumping the scroll to the cache); Esc back to where the camera was; Watch opening the next video; ready, Apply (in memory) and in review; pending and approved; the lantern lit in Video Ads II; nothing shown for a student the offer is closed to. Then 0 requests to `/api` and 0 page errors. `PASS 10` in the two commits that touched it (`d11d215`, `3678190`). It proves nothing about the request route, the database or a real student's first payment. About 3 minutes. Pictures in `world-tests/shots/v6/discount/`. |
+| Corner proof | `node world-tests/v6-hud.mjs` (`--only 1,3` for some rows) | Yes, on port 3111 | 10 rows on `/dev/world-app?catalog=course&hud=<state>` (`cold`, `some`, `long`, `all`, `fresh`): the pill per state, the list (tiers, shares, the two hidden ones), a fresh unlock's toast, the corner over an open place and the checkpoint, the keyboard, Sign out (counted by the stand-in), hidden under a lesson page with the toast waiting, through the telescope, a wide screen and a phone. Then 0 requests to `/api`, 0 to Supabase and 0 page errors. `PASS 10` (`3678190`'s message). It proves nothing about the real achievement reads or a real sign-out. About 4 minutes. Pictures in `world-tests/shots/v6/hud/`. |
 
-The five browser scripts (`v6-ui.mjs`, `v6-app.mjs`, `v6-course.mjs`,
-`lesson-player-sim.mjs`, `tella-watch.mjs`) need `npm install` once in
-`world-tests/` (`puppeteer-core`) and Google Chrome installed at its
-default macOS path. For the four that need the dev server, start it
-with `PORT=3111 npm run dev`; `BASE_URL` overrides the address the
-three map scripts open. Screenshots land in `world-tests/shots/`, which
+The seven browser scripts (`v6-ui.mjs`, `v6-app.mjs`, `v6-course.mjs`,
+`v6-discount.mjs`, `v6-hud.mjs`, `lesson-player-sim.mjs`,
+`tella-watch.mjs`) need `npm install` once in `world-tests/`
+(`puppeteer-core`) and Google Chrome installed at its default macOS
+path. For the six that need the dev server, start it with
+`PORT=3111 npm run dev`; `BASE_URL` overrides the address the map
+scripts open. Screenshots land in `world-tests/shots/`, which
 git ignores (the Tella proof's under `world-tests/shots/tella/`, the
 course proof's under `world-tests/shots/v6/course/`).
 
@@ -1265,6 +1630,10 @@ explains the folder and its two traps.
 | Replace a lesson video whose id leaked | Rule 3 of "Lesson videos on Tella: the rules" |
 | Take migration v100 back | `supabase/undo/2026_v100_undo.sql`, and its entry under Database first |
 | Take migration v101 back | `supabase/undo/2026_v101_undo.sql`, and its entry under Database first |
+| Switch every student to the new course | [The course switch](#the-course-switch-cutover), then the ship order at the end of section 12 of `../_admin/prds/cutover/cutover_prd.md`, step by step. Never v104 without the preflight read and WI-8 merged |
+| Take the course switch back | `supabase/undo/2026_v104_undo.sql` (its entry under Database), then the Vercel values back and a redeploy ("Rollback" in The course switch) |
+| See what the running build and the database hold for the switch | `/admin/cutover` (founder or admin) |
+| Tell in code which course is live | `getCurriculumResetAt()` in `src/lib/curriculum-reset.ts` for code that judges history or reads `lessons` by name; `CATALOG_IS_V2` for code that reads the active catalog. Never mix the two |
 | Add a new DM template | `/admin/templates` (UI, not migration) |
 | Run a one-off DB change | New migration in `supabase/migrations/`, idempotent |
 | Update CONTEXT.md | When you add/rename/delete a route, table, context, or lib module |

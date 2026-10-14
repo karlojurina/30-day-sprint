@@ -9,6 +9,7 @@ import tokens from "@/components/world-v6/tokens.module.css";
 import { useWorldStage } from "@/components/world/WorldStage";
 import { useMapModel, type ReadyMapModel } from "@/components/world/useMapModel";
 import { useWorldDiscount } from "@/components/world/useWorldDiscount";
+import { WorldCorner } from "@/components/world/WorldCorner";
 import { useLessonAccess, useLessonTransport } from "@/lib/world/useLessonTransport";
 import { STUDENT_HOME, WORLD_LOCK_MODE } from "@/lib/world/access";
 import { posterSrc } from "@/lib/world-v6/poster";
@@ -28,6 +29,9 @@ import u from "@/components/world/world-ui.module.css";
  * The student's early-finish discount goes in too (useWorldDiscount.ts), for
  * the checkpoint between the Trail Hut and the Boathouse; its Apply is the
  * one thing here that writes (POST /api/discounts/request).
+ * The header's top-left corner (WorldCorner.tsx) shows the student's streak
+ * and achievements and holds Sign out; it reads its own data
+ * (useWorldBadges.ts).
  *
  * THE MAP IS NOT MOUNTED UNTIL THE CATALOG HAS LOADED AND IS THE EIGHT-AREA
  * ONE. Loading, a failed load, an empty catalog and a catalog of any other
@@ -157,7 +161,12 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
     };
   }, [model, data, openAreaId, lessonId, href, router, transport, active, discount]);
 
-  return <WorldV6 source={source} />;
+  // The header's top-left corner: streak, achievements, Sign out (WorldCorner.tsx).
+  // THE PLAYBOOK LINK goes in as its `playbook` prop, e.g.
+  // playbook={<CornerLink href="/dashboard/playbook">Playbook</CornerLink>}.
+  const corner = <WorldCorner paused={lessonId !== null} placeOpen={openAreaId !== null} />;
+
+  return <WorldV6 source={source} corner={corner} />;
 }
 
 /** One of the four cards shown in the map's place. The routes over it still paint above. */

@@ -22,6 +22,7 @@ import {
 } from "./fixtureTransport";
 import { useFixtureActionItems } from "./fixtureActionItems";
 import { FixtureDiscount, discountPresetIds } from "./fixtureDiscount";
+import { FixtureHud, hudStreak } from "./fixtureHud";
 
 /**
  * The pretend student behind /dev/world-app (world_v6_wiring_prd.md, Work Item 4).
@@ -75,6 +76,11 @@ import { FixtureDiscount, discountPresetIds } from "./fixtureDiscount";
  *                      expired, before-launch); ready and after add the videos
  *                      the offer asks for to the ?p= preset. Without it the
  *                      pretend student has no first payment: no offer shows.
+ *
+ *   ?hud=<preset>      the map's top-left corner: the streak (on this context,
+ *                      as StudentProvider carries it) and the achievements and
+ *                      Sign out (fixtureHud.tsx: cold, some, long, all,
+ *                      fresh). Without it: no streak, no achievements.
  *
  * THE REAL COURSE. ?catalog=course swaps the generated catalog for the rows of
  * courseCatalog.ts: the 8 areas and 141 lessons of
@@ -298,6 +304,7 @@ export function FixtureStudentProvider({
     noServerQuery,
   );
   const mode = useMemo(() => modeOf(search), [search]);
+  const streak = useMemo(() => hudStreak(search), [search]);
   const sampleText = sampleTextOf(search);
   // The course with the private file's texts, made once: the layout hands
   // down a new object on every server render, and the map must not be handed
@@ -415,15 +422,19 @@ export function FixtureStudentProvider({
         // completions, saveDiscordLink and toggleLessonAction.
         ...actionItems.contextFor(rows.lessons, completedLessonIds, markWatched),
         catalogSuffix: "_next",
+        // The corner's streak (?hud=, fixtureHud.tsx).
+        streak,
       }) as unknown as StudentContextType,
-    [rows, mode, completedLessonIds, watchProgress, patchWatchProgress, markWatched, actionItems],
+    [rows, mode, completedLessonIds, watchProgress, patchWatchProgress, markWatched, actionItems, streak],
   );
 
   return (
     <StudentContext.Provider value={value}>
       <LessonAccessContext.Provider value={PRETEND_ACCESS}>
         <LessonTransportContext.Provider value={transport}>
-          <FixtureDiscount search={search}>{children}</FixtureDiscount>
+          <FixtureDiscount search={search}>
+            <FixtureHud search={search}>{children}</FixtureHud>
+          </FixtureDiscount>
         </LessonTransportContext.Provider>
       </LessonAccessContext.Provider>
     </StudentContext.Provider>

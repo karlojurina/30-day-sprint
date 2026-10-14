@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactNode,
   type RefObject,
 } from "react";
 import type { Rail } from "@/lib/world-v6/rail";
@@ -346,17 +347,31 @@ type View = "unknown" | "world" | "list";
 type Phase = "loading" | "ready" | "failed";
 type Dir = "none" | "fwd" | "back";
 
-export function WorldV6({ source }: { source?: WorldSource } = {}) {
+/**
+ * `corner`: what the host puts in the header's left end, after the brand (the
+ * student's streak, achievements and Sign out: src/components/world/WorldCorner.tsx).
+ * It is laid out by its own stylesheet, which reads this root's data-view,
+ * data-open and data-solid. The dev page has none.
+ */
+export function WorldV6({ source, corner }: { source?: WorldSource; corner?: ReactNode } = {}) {
   // The course's words and counts, for the map and every component under it (content.ts).
   const content = useMemo(() => contentOf(source), [source]);
   return (
     <WorldContentContext.Provider value={content}>
-      <WorldV6View source={source} content={content} />
+      <WorldV6View source={source} content={content} corner={corner} />
     </WorldContentContext.Provider>
   );
 }
 
-function WorldV6View({ source, content }: { source: WorldSource | undefined; content: WorldContent }) {
+function WorldV6View({
+  source,
+  content,
+  corner,
+}: {
+  source: WorldSource | undefined;
+  content: WorldContent;
+  corner?: ReactNode;
+}) {
   const hasSource = source !== undefined;
   /** A lesson page is open over the map (always false on the dev page). */
   const paused = source?.paused ?? false;
@@ -2861,9 +2876,13 @@ function WorldV6View({ source, content }: { source: WorldSource | undefined; con
       )}
 
       <header ref={headerRef} className={s.header} inert={view === "list" && isOpen}>
-        <span className={s.brand}>
-          <Mark />
-          ecomtalent
+        <span className={s.headerStart}>
+          <span className={s.brand}>
+            <Mark />
+            ecomtalent
+          </span>
+          {/* The host's corner: the student's streak, achievements and Sign out. */}
+          {corner}
         </span>
         <span className={s.headerEnd}>
           {/* The discount, from day one: the offer and the days left, one click to its panel. */}

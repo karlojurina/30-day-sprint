@@ -2518,9 +2518,24 @@
 /* ── The header: the chip, then the course bar ── */
 
 .headerEnd {
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: 18px;
+}
+
+/* The brand, then the host's corner (src/components/world/corner.module.css),
+   which takes what the row has left and gives it back first when it is short. */
+.headerStart {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.headerStart .brand {
+  flex: none;
 }
 
 .root .cpChip {

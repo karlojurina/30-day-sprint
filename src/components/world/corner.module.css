@@ -1,0 +1,779 @@
+/*
+ * The map's top-left corner (WorldCorner.tsx): the pill, the toast, the list.
+ *
+ * It lives inside the map's header (WorldV6, after the brand), so the map's
+ * tokens resolve here and its focus ring applies. The map's state comes from
+ * its root's attributes, read with plain attribute selectors on `main`:
+ *   [data-view="list"]  phones and no WebGL: the pill drops under the header's
+ *                       row, the list is a full sheet, Sign out moves into it
+ *   [data-open]         a place or the checkpoint is open: the list goes solid
+ *   [data-solid]        tiers 2 and 3 and poster mode: no backdrop filter
+ *   :has([data-tel])    through the telescope the sky's caption takes the
+ *                       header's row: the corner steps out, as the chip does
+ * Under a lesson page the map's root is inert and its stylesheet hides the
+ * whole header, the corner with it.
+ *
+ * .impeccable.md: radius 14 / 9 / 5 / 999, spacing 6 / 8 / 12 / 16 / 22,
+ * transform and opacity only, no glow, nothing pulses.
+ */
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── The corner and its pill ─────────────────────────────── */
+
+.corner {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The discount chip's twin: the same height, ground, line and type. */
+.pill {
+  pointer-events: auto;
+  flex: none;
+  height: 28px;
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 999px;
+  border: 1px solid var(--color-line);
+  background: rgba(29, 24, 38, 0.66);
+  box-shadow: 0 6px 18px rgba(15, 10, 16, 0.3);
+  font: 600 10.5px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-2);
+  white-space: nowrap;
+  transition: border-color 150ms var(--ease);
+}
+
+.pill:hover,
+.corner[data-open] .pill {
+  border-color: var(--color-line-strong);
+}
+
+.pill b {
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+/* A segment of the pill: the stats, the Playbook link, Sign out. Its hover is
+   a capsule inside the pill, so the ends never need their own radius; its
+   touch target reaches 40px over the 28px it draws. */
+.corner .seg,
+.corner .link {
+  position: relative;
+  isolation: isolate;
+  height: 100%;
+  margin: 0;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: inherit;
+  /* Buttons reset both; the pill's mono caps are the chip's. */
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-decoration: none;
+}
+
+.seg::before,
+.link::before {
+  content: "";
+  position: absolute;
+  inset: -6px 0;
+}
+
+.seg::after,
+.link::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: -1;
+  border-radius: 999px;
+  background: transparent;
+  transition: background-color 150ms var(--ease);
+}
+
+.seg:hover::after,
+.link:hover::after,
+.corner[data-open] .seg[aria-expanded="true"]::after {
+  background: var(--color-surface-3);
+}
+
+.corner .link:hover {
+  color: var(--color-ink);
+}
+
+.streak,
+.count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.unit {
+  margin-left: -1px;
+}
+
+.rule {
+  width: 1px;
+  height: 12px;
+  align-self: center;
+  background: var(--color-line);
+}
+
+/* While the toast says what was unlocked, the count it went into is sand. */
+.count[data-fresh] b {
+  color: var(--color-accent-strong);
+}
+
+.flame,
+.eyebrowFlame {
+  flex: 0 0 auto;
+  display: block;
+  overflow: visible;
+}
+
+.flame path,
+.eyebrowFlame path {
+  fill: transparent;
+  stroke: var(--color-ink-3);
+  stroke-width: 1.2px;
+}
+
+.flame[data-lit] path,
+.eyebrowFlame[data-lit] path {
+  fill: var(--color-accent);
+  stroke: var(--color-accent);
+}
+
+/* The flame's pale core, only while it burns. */
+.flame .core,
+.eyebrowFlame .core {
+  display: none;
+}
+
+.flame[data-lit] .core,
+.eyebrowFlame[data-lit] .core {
+  display: block;
+  fill: #f7d9b0;
+  stroke: none;
+}
+
+.hex,
+.eyebrowHex,
+.rowHex,
+.toastHex {
+  flex: 0 0 auto;
+  display: block;
+  overflow: visible;
+}
+
+.hex path,
+.eyebrowHex path,
+.rowHex path {
+  fill: transparent;
+  stroke: var(--color-ink-3);
+  stroke-width: 1.2px;
+}
+
+.hex[data-lit] path,
+.eyebrowHex[data-lit] path,
+.rowHex[data-lit] path,
+.toastHex path {
+  fill: var(--color-accent);
+  stroke: var(--color-accent);
+}
+
+.slot {
+  display: inline-flex;
+  align-items: stretch;
+  border-left: 1px solid var(--color-line);
+}
+
+/* Sign out: the glyph alone, its word on hover and focus. */
+.corner .out {
+  padding: 0 11px 0 10px;
+  border-left: 1px solid var(--color-line);
+  border-radius: 0 999px 999px 0;
+}
+
+.corner .out:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.exit {
+  flex: 0 0 auto;
+  display: block;
+}
+
+.tip {
+  position: absolute;
+  top: calc(100% + 9px);
+  left: 50%;
+  padding: 6px 8px;
+  border: 1px solid var(--plaque-line);
+  border-radius: 5px;
+  background: var(--plaque);
+  font: 500 10px/1 var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--color-ink);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, -3px);
+  transition:
+    opacity 150ms var(--ease),
+    transform 150ms var(--ease);
+}
+
+.out:hover .tip,
+.out:focus-visible .tip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+/* ── The toast: out of the pill, along the header's row ───── */
+
+.corner .toast {
+  pointer-events: auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 380px;
+  height: 28px;
+  margin: 0;
+  padding: 0 14px 0 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid var(--color-accent);
+  border-radius: 999px;
+  background: rgba(58, 42, 34, 0.9);
+  box-shadow: 0 6px 18px rgba(15, 10, 16, 0.3);
+  color: var(--color-ink);
+  text-align: left;
+  animation: toastIn 420ms var(--ease) both;
+}
+
+.toastEyebrow {
+  flex: 0 0 auto;
+  font: 600 10.5px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-accent-strong);
+}
+
+.toastName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 9px;
+  border-left: 1px solid rgba(232, 168, 106, 0.42);
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translate3d(-12px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── The list: in the place panel's slot, on its surface ─── */
+
+.panel {
+  pointer-events: auto;
+  position: fixed;
+  /* Over the header's other parts (on phones the discount chip and the
+     course bar sit where the sheet is). */
+  z-index: 2;
+  top: 92px;
+  left: calc(var(--gutter) + 8px);
+  width: 404px;
+  max-width: calc(100vw - 48px);
+  max-height: min(760px, calc(100svh - 92px - 88px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  background: var(--panel-bg);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: var(--panel-shadow);
+  color: var(--color-ink);
+  font-size: 14px;
+  line-height: 1.4;
+  text-shadow: none;
+  animation: panelIn 240ms var(--ease) both;
+}
+
+/* Over an open place or the checkpoint (whose text would show through the
+   blur), and wherever the map's own panels are solid. */
+main[data-open] .panel,
+main[data-solid] .panel {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: #1b151b;
+}
+
+/* ...and the line from that panel to its landmark goes while the list covers
+   it, or it would seem to come out of the list. (The map's leader is the
+   only svg directly under its root.) */
+main[data-open]:has(.corner[data-open]) > svg {
+  opacity: 0;
+}
+
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.panelInner {
+  position: relative;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 16px 16px 18px;
+  mask-image: linear-gradient(180deg, #000 calc(100% - 28px), transparent);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+.top {
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.corner .back,
+.corner .signOut {
+  height: 36px;
+  padding: 0 12px 0 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-2);
+  transition:
+    background-color 150ms var(--ease),
+    color 150ms var(--ease);
+}
+
+.corner .back {
+  margin-left: -10px;
+}
+
+.corner .back:hover,
+.corner .signOut:hover:not(:disabled) {
+  color: var(--color-ink);
+  background: var(--color-surface-2);
+}
+
+.backArrow {
+  flex: 0 0 auto;
+  transition: transform 180ms var(--ease);
+}
+
+.back:hover .backArrow {
+  transform: translateX(-2px);
+}
+
+.esc {
+  padding: 4px 6px;
+  border: 1px solid var(--color-line);
+  border-radius: 5px;
+  font: 500 10px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+/* The heading takes focus when the list opens (screen readers start there). */
+.corner h2:focus,
+.corner h2:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* The streak and the count, side by side. */
+.hero {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.stat {
+  min-width: 0;
+}
+
+.stat + .stat {
+  padding-left: 18px;
+  border-left: 1px solid var(--color-line);
+}
+
+.eyebrow {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 10.5px/1 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+.big {
+  margin: 12px 0 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 31px;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.018em;
+  font-variant-numeric: tabular-nums;
+}
+
+.big span {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--color-ink-2);
+}
+
+.sub {
+  margin: 10px 0 0;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-2);
+}
+
+.sub b {
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.ticks {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ticks i {
+  display: block;
+  width: 3px;
+  height: 10px;
+  border-radius: 1px;
+  background: rgba(246, 239, 230, 0.18);
+}
+
+.ticks i[data-t="d"] {
+  background: var(--color-accent);
+}
+
+.hint {
+  margin: 16px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-ink-2);
+}
+
+.note {
+  margin: 16px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+  color: var(--color-ink-2);
+}
+
+.note p {
+  margin: 0;
+}
+
+.list {
+  margin-top: 16px;
+  border-top: 1px solid var(--color-line);
+}
+
+.group {
+  margin-top: 16px;
+}
+
+.groupHead {
+  margin: 0;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font: 600 10.5px/1 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+.groupCount {
+  letter-spacing: 0.04em;
+  color: var(--color-ink-2);
+}
+
+.groupEnd {
+  margin-left: auto;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+}
+
+.rows {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 14px 1fr auto;
+  column-gap: 12px;
+  align-items: start;
+  padding: 8px 10px;
+  border-radius: 9px;
+}
+
+.row[data-new] {
+  background: var(--color-accent-soft);
+}
+
+.rowHex {
+  margin-top: 2px;
+}
+
+.rowText {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.rowName {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--color-ink-2);
+}
+
+.row[data-held] .rowName {
+  color: var(--color-ink);
+}
+
+.rowDesc {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--color-ink-3);
+}
+
+.row[data-held] .rowDesc {
+  color: var(--color-ink-2);
+}
+
+.newTag {
+  padding: 3px 5px;
+  border-radius: 5px;
+  background: var(--color-accent);
+  font: 600 10px/1 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-on-accent);
+}
+
+.rowPct {
+  padding-top: 3px;
+  font: 500 11px/1.3 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-3);
+}
+
+.row[data-held] .rowPct {
+  color: var(--color-ink-2);
+}
+
+.foot {
+  margin-top: 18px;
+  padding-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--color-line);
+}
+
+.who {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--color-ink-3);
+}
+
+.corner .signOut {
+  flex: none;
+  margin-left: auto;
+  margin-right: -6px;
+  padding: 0 12px 0 10px;
+  border: 1px solid var(--color-line);
+}
+
+.corner .signOut:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* ── Sizes ───────────────────────────────────────────────── */
+
+/* Under 1280 px the header's row has less room: the streak keeps its number. */
+@media (width < 1280px) {
+  .unit {
+    display: none;
+  }
+}
+
+@media (width < 1100px) {
+  .panel {
+    width: 360px;
+  }
+}
+
+@media (min-width: 2200px) {
+  .panel {
+    width: 432px;
+  }
+}
+
+/* A touch screen has no Esc key. */
+@media (hover: none) {
+  .esc {
+    display: none;
+  }
+}
+
+/* Through the telescope (a7's click-in) the sky's caption takes the header's
+   row: the corner steps out until the camera comes back. */
+main[data-view]:has([data-tel]) .corner {
+  visibility: hidden;
+}
+
+/* ── Phones (the list view) ──────────────────────────────── */
+
+/* Under the header's row on the left, the discount chip's place on the right. */
+main[data-view="list"] .corner {
+  position: absolute;
+  top: 62px;
+  left: 22px;
+}
+
+main[data-view="list"] .unit,
+main[data-view="list"] .out {
+  display: none;
+}
+
+main[data-view="list"] .corner .seg {
+  padding: 0 9px;
+}
+
+/* Under 380 px the row has no room for the pill and the discount chip side
+   by side: the pill takes the row under them. */
+@media (width < 380px) {
+  main[data-view="list"] .corner {
+    top: 98px;
+  }
+}
+
+main[data-view="list"] .panel {
+  inset: 0;
+  width: auto;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: var(--color-surface-0);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: none;
+  animation: sheetIn 320ms var(--ease) both;
+}
+
+main[data-view="list"] .panelInner {
+  padding: 24px 22px 48px;
+  mask-image: none;
+}
+
+main[data-view="list"] .toast {
+  position: fixed;
+  z-index: 2;
+  left: 16px;
+  right: 16px;
+  bottom: 20px;
+  max-width: none;
+  height: 44px;
+  border-radius: 14px;
+}
+
+@keyframes sheetIn {
+  from {
+    opacity: 0;
+    transform: translate3d(24px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .corner *,
+  .corner *::before,
+  .corner *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

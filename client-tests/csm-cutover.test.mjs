@@ -535,6 +535,12 @@ console.log('\n=== Activity ===')
      'the view\'s rule: a half-done action lesson (1 day), the pond row and a skip without completed_at (today) do not count; the plain lesson 9 days ago is the last: stalled',
      `last counted ${s1.lastCountedCompletionAt}`)
   ok(snapWith([c('a1l05', { done: agoD(1), action: agoD(1) })]).activity === 'moving', 'an action lesson counts once shipped')
+  {
+    const shippedLater = snapWith([c('a1l05', { done: agoD(9), action: agoD(1) })])
+    ok(shippedLater.lastCountedCompletionAt === agoD(1) && shippedLater.activity === 'moving',
+       'watched 9 days ago, shipped yesterday: the shipping is the last activity (the view takes the later of the two, F5)',
+       `last counted ${shippedLater.lastCountedCompletionAt}`)
+  }
   ok(snapWith([c('a2l04', { done: agoD(1), skip: agoD(1) })]).activity === 'moving', 'a skipped row that also has completed_at counts (lesson_is_complete)')
   ok(snapWith([c('a7l19', { done: agoD(0) })]).activity === 'not_started', 'only the pond row: not started')
   at(now)

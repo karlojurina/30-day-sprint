@@ -302,12 +302,19 @@ export function buildStudentSnapshot(
     if (fullyDone) region.fullyComplete += 1;
 
     // Cutover WI-3: the view student_last_counted_completion's rule —
-    // complete, on a counting lesson, latest completed_at.
+    // complete, on a counting lesson with completed_at, at the later of
+    // completed_at and action_completed_at (v103 after the database review,
+    // F5: shipping an action item days after the video is activity too).
     if (fullyDone && c.completed_at && lesson.counts_toward_progress !== false) {
-      const t = new Date(c.completed_at).getTime();
+      const moment =
+        c.action_completed_at &&
+        new Date(c.action_completed_at).getTime() > new Date(c.completed_at).getTime()
+          ? c.action_completed_at
+          : c.completed_at;
+      const t = new Date(moment).getTime();
       if (latestCountedAt === null || t > latestCountedAt) {
         latestCountedAt = t;
-        lastCountedCompletionAt = c.completed_at;
+        lastCountedCompletionAt = moment;
       }
     }
 

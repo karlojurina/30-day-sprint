@@ -10,6 +10,9 @@ import { useWorldStage } from "@/components/world/WorldStage";
 import { useMapModel, type ReadyMapModel } from "@/components/world/useMapModel";
 import { useWorldDiscount } from "@/components/world/useWorldDiscount";
 import { WorldCorner } from "@/components/world/WorldCorner";
+import { PlaybookLink } from "@/components/world/PlaybookLink";
+import { WorldDiscountForm } from "@/components/world/WorldDiscountForm";
+import { WorldCelebrations } from "@/components/world/WorldCelebrations";
 import { useLessonAccess, useLessonTransport } from "@/lib/world/useLessonTransport";
 import { STUDENT_HOME, WORLD_LOCK_MODE } from "@/lib/world/access";
 import { posterSrc } from "@/lib/world-v6/poster";
@@ -27,11 +30,16 @@ import u from "@/components/world/world-ui.module.css";
  * before the click (embed-cache.ts), into the same cache the lesson page
  * reads (useLessonTransport.ts). Neither while the membership is not active.
  * The student's early-finish discount goes in too (useWorldDiscount.ts), for
- * the checkpoint between the Trail Hut and the Boathouse; its Apply is the
- * one thing here that writes (POST /api/discounts/request).
+ * the checkpoint between the Trail Hut and the Boathouse; its Apply opens the
+ * application's questions (WorldDiscountForm.tsx, mounted beside the map),
+ * and sending them is the one thing here that writes
+ * (POST /api/discounts/submit-feedback; /api/discounts/request when there
+ * are no active questions).
  * The header's top-left corner (WorldCorner.tsx) shows the student's streak
  * and achievements and holds Sign out; it reads its own data
- * (useWorldBadges.ts).
+ * (useWorldBadges.ts). A graduate gets the Playbook link in it
+ * (PlaybookLink.tsx). The old dashboard's streak and discount-approved
+ * celebrations are mounted beside the map (WorldCelebrations.tsx).
  *
  * THE MAP IS NOT MOUNTED UNTIL THE CATALOG HAS LOADED AND IS THE EIGHT-AREA
  * ONE. Loading, a failed load, an empty catalog and a catalog of any other
@@ -112,7 +120,7 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
   const data = useMemo(() => sourceData(model, WORLD_LOCK_MODE), [model]);
 
   // The discount, with the next video it asks for as a place and a row of the map.
-  const { state: discountNow, now: discountClock, apply: applyDiscount } = useWorldDiscount();
+  const { state: discountNow, now: discountClock, apply: applyDiscount, form: discountForm } = useWorldDiscount();
   const discount = useMemo<WorldDiscount>(() => {
     let next: WorldDiscount["next"] = null;
     if (discountNow.kind === "locked" && discountNow.nextLessonId) {
@@ -161,12 +169,18 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
     };
   }, [model, data, openAreaId, lessonId, href, router, transport, active, discount]);
 
-  // The header's top-left corner: streak, achievements, Sign out (WorldCorner.tsx).
-  // THE PLAYBOOK LINK goes in as its `playbook` prop, e.g.
-  // playbook={<CornerLink href="/dashboard/playbook">Playbook</CornerLink>}.
-  const corner = <WorldCorner paused={lessonId !== null} placeOpen={openAreaId !== null} />;
+  // The header's top-left corner: streak, achievements, Sign out (WorldCorner.tsx),
+  // and the Playbook link for a student who has it (PlaybookLink.tsx).
+  const corner = <WorldCorner paused={lessonId !== null} placeOpen={openAreaId !== null} playbook={<PlaybookLink />} />;
 
-  return <WorldV6 source={source} corner={corner} />;
+  return (
+    <>
+      <WorldV6 source={source} corner={corner} />
+      {/* Over the map, outside it: the discount's questions and the two celebrations. */}
+      <WorldDiscountForm form={discountForm} paused={lessonId !== null} />
+      <WorldCelebrations approvedRequestId={discountNow.kind === "approved" ? discountNow.requestId : null} />
+    </>
+  );
 }
 
 /** One of the four cards shown in the map's place. The routes over it still paint above. */

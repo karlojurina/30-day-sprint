@@ -23,6 +23,7 @@ import {
 import { useFixtureActionItems } from "./fixtureActionItems";
 import { FixtureDiscount, discountPresetIds } from "./fixtureDiscount";
 import { FixtureHud, hudStreak } from "./fixtureHud";
+import { CelebrationStandInContext } from "@/components/world/WorldCelebrations";
 
 /**
  * The pretend student behind /dev/world-app (world_v6_wiring_prd.md, Work Item 4).
@@ -82,6 +83,19 @@ import { FixtureHud, hudStreak } from "./fixtureHud";
  *                      Sign out (fixtureHud.tsx: cold, some, long, all,
  *                      fresh). Without it: no streak, no achievements.
  *
+ *   ?playbook=1        the pretend student has the Playbook (playbookUnlocked,
+ *                      as StudentProvider works it out): the corner shows
+ *                      the link (PlaybookLink.tsx). Without it: not.
+ *
+ *   ?celebrate=1       the map's celebrations may fire (WorldCelebrations.tsx):
+ *                      the pretend student stands in for the signed-in one
+ *                      their triggers need, under the id "fixture-student".
+ *                      Without it they never fire on their own, so a ?hud=
+ *                      streak does not put one over every other test.
+ *
+ *   ?questions=<preset> the discount application's questions
+ *                      (fixtureDiscount.tsx: none, fail; default the six).
+ *
  * THE REAL COURSE. ?catalog=course swaps the generated catalog for the rows of
  * courseCatalog.ts: the 8 areas and 141 lessons of
  * supabase/catalog/course_catalog.json, with a length and a video on the
@@ -99,8 +113,10 @@ import { FixtureHud, hudStreak } from "./fixtureHud";
  *
  * For the browser run: window.__fixture.complete(id) marks a lesson watched,
  * window.__fixture.completed() lists what is watched, window.__fixture.watch
- * holds the stand-in server's watch rows by lesson id, and
- * window.__fixture.calls every call the player made to it.
+ * holds the stand-in server's watch rows by lesson id,
+ * window.__fixture.calls every call the player made to it, and
+ * window.__fixture.setStreak(n) sets the streak, as a refresh after a
+ * finished lesson would.
  */
 
 const AREAS = [
@@ -272,7 +288,16 @@ interface FixtureHook {
   completed(): string[];
   watch: Record<string, FixtureWatchRow>;
   calls: FixtureCall[];
+  setStreak(n: number): void;
 }
+
+/** ?<name>=1 in the query string. */
+function flagOf(search: string | null, name: string): boolean {
+  return search !== null && new URLSearchParams(search).get(name) === "1";
+}
+
+/** ?celebrate=1: the pretend student behind the map's celebrations. */
+const PRETEND_CELEBRANT = { studentId: "fixture-student" };
 type FixtureWindow = Window & { __fixture?: FixtureHook };
 
 /** The query string never changes under the provider: it is read once and kept. */
@@ -304,7 +329,14 @@ export function FixtureStudentProvider({
     noServerQuery,
   );
   const mode = useMemo(() => modeOf(search), [search]);
-  const streak = useMemo(() => hudStreak(search), [search]);
+  /** Set by window.__fixture.setStreak, over the ?hud= preset's. */
+  const [streakNow, setStreakNow] = useState<number | null>(null);
+  const streak = useMemo(() => {
+    const base = hudStreak(search);
+    return streakNow === null ? base : { current: streakNow, longest: Math.max(base.longest, streakNow) };
+  }, [search, streakNow]);
+  const playbookUnlocked = flagOf(search, "playbook");
+  const celebrate = flagOf(search, "celebrate");
   const sampleText = sampleTextOf(search);
   // The course with the private file's texts, made once: the layout hands
   // down a new object on every server render, and the map must not be handed
@@ -392,6 +424,7 @@ export function FixtureStudentProvider({
       completed: () => [...completedLessonIds].sort(),
       watch: server.watch,
       calls: server.calls,
+      setStreak: (n: number) => setStreakNow(n),
     };
     return () => {
       delete w.__fixture;
@@ -424,17 +457,21 @@ export function FixtureStudentProvider({
         catalogSuffix: "_next",
         // The corner's streak (?hud=, fixtureHud.tsx).
         streak,
+        // The corner's Playbook link (?playbook=1).
+        playbookUnlocked,
       }) as unknown as StudentContextType,
-    [rows, mode, completedLessonIds, watchProgress, patchWatchProgress, markWatched, actionItems, streak],
+    [rows, mode, completedLessonIds, watchProgress, patchWatchProgress, markWatched, actionItems, streak, playbookUnlocked],
   );
 
   return (
     <StudentContext.Provider value={value}>
       <LessonAccessContext.Provider value={PRETEND_ACCESS}>
         <LessonTransportContext.Provider value={transport}>
-          <FixtureDiscount search={search}>
-            <FixtureHud search={search}>{children}</FixtureHud>
-          </FixtureDiscount>
+          <CelebrationStandInContext.Provider value={celebrate ? PRETEND_CELEBRANT : null}>
+            <FixtureDiscount search={search}>
+              <FixtureHud search={search}>{children}</FixtureHud>
+            </FixtureDiscount>
+          </CelebrationStandInContext.Provider>
         </LessonTransportContext.Provider>
       </LessonAccessContext.Provider>
     </StudentContext.Provider>

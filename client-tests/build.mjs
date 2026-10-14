@@ -61,9 +61,19 @@ gen('../src/lib/world/lesson-text.ts', './_gen/lesson-text.ts')
 gen('../src/lib/world/embed-cache.ts', './_gen/embed-cache.ts')
 
 // action-items.ts has no imports at all, so it copies across untouched. So
-// has progress.ts, whose isLessonComplete() the action item test asks.
+// has progress.ts, whose isLessonComplete() the action item test asks and
+// whose isPlaybookUnlocked() playbook.test.mjs runs beside the old one from git.
 gen('../src/lib/world/action-items.ts', './_gen/action-items.ts')
 gen('../src/lib/progress.ts', './_gen/progress.ts')
+
+// celebrations.ts has no imports at all, so it copies across untouched.
+gen('../src/lib/world/celebrations.ts', './_gen/celebrations.ts')
+
+// discount-feedback.ts imports only TYPES, from an @/ path, which this file
+// refuses: the line goes, and --experimental-strip-types erases the names.
+gen('../src/lib/discount-feedback.ts', './_gen/discount-feedback.ts', [
+  ['import type { DiscountFeedbackAnswer, DiscountFeedbackQuestion } from "@/types/database";\n', ''],
+])
 
 // discount.ts takes the 14 days from constants.ts, which has no imports and
 // copies across untouched; discount-server.ts imports discount.ts and only a

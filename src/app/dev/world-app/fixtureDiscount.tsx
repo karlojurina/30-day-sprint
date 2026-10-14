@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DiscountStandInContext, type DiscountStandIn } from "@/components/world/useWorldDiscount";
 import { requiredLessons, type DiscountLesson, type DiscountRequestRow } from "@/lib/world/discount";
 import type { CatalogLessonLike } from "@/lib/world/catalog";
+import type { DiscountFeedbackAnswer, DiscountFeedbackQuestion } from "@/types/database";
+
+const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
 
 /**
  * The pretend student's early-finish discount on /dev/world-app
@@ -20,11 +23,24 @@ import type { CatalogLessonLike } from "@/lib/world/catalog";
  *   ?discount=before-launch  first payment on 2026-09-20, before the new course
  *   no ?discount             no first payment on record: the offer is not shown
  *
- * Apply resolves in memory after 600 ms: the application turns pending, as
- * the route's row would. No request leaves the page. The clock is the page's
- * load time, so the days left do not drift while a test runs.
+ * THE QUESTIONS. Apply opens the application's questions
+ * (src/components/world/WorldDiscountForm.tsx), as on /world. They are the
+ * six the database was seeded with (supabase/migrations/2026_v29, a scale, two
+ * choices, three optional texts), unless:
  *
- * window.__fixtureDiscount: the preset and the requests, for the browser run.
+ *   ?questions=none          no active questions: Apply sends the plain
+ *                            request, as /world does then
+ *   ?questions=fail          the six, and sending them is refused with the
+ *                            words a failed request shows
+ *
+ * Sending resolves in memory after 600 ms: the application turns pending, as
+ * the route's row would, and the answers are kept. So does the plain Apply. No
+ * request leaves the page. The clock is the page's load time, so the days
+ * left do not drift while a test runs.
+ *
+ * window.__fixtureDiscount, for the browser run: the preset, the requests,
+ * the answers sent (one array per application) and how many plain requests
+ * went in.
  */
 
 export type DiscountPreset = "locked" | "ready" | "pending" | "approved" | "expired" | "before-launch";
@@ -33,6 +49,51 @@ const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 /** The pretend Apply's wait, so the button's sending state can be seen. */
 const APPLY_MS = 600;
+/** ?questions=fail: what the form shows (the words useWorldDiscount gives a request that never arrived). */
+const SEND_REFUSED = "Couldn't reach the server. Try again in a moment.";
+
+/** The six questions v29 seeded, as discount_feedback_questions rows. */
+const QUESTIONS: readonly DiscountFeedbackQuestion[] = [
+  question(1, "On a scale of 1-10, how likely are you to recommend EcomTalent to a friend?", "scale", { min: 1, max: 10, required: true }),
+  question(2, "Has the pace of the program felt right?", "multi_choice", {
+    options: ["Way too fast", "A bit too fast", "Just right", "A bit too slow", "Way too slow"],
+    required: true,
+  }),
+  question(3, "How would you rate the feedback you've gotten from the coaches on your ads?", "multi_choice", {
+    options: ["Haven't gotten feedback yet", "Not helpful", "Somewhat helpful", "Very helpful", "Game-changing"],
+    required: true,
+  }),
+  question(4, "What's been your biggest win in the program so far?", "open_text"),
+  question(5, "What's been the most frustrating or confusing part?", "open_text"),
+  question(6, "If you could change ONE thing about the program, what would it be?", "open_text"),
+];
+
+function question(
+  n: number,
+  text: string,
+  type: DiscountFeedbackQuestion["question_type"],
+  o: { options?: string[]; min?: number; max?: number; required?: boolean } = {},
+): DiscountFeedbackQuestion {
+  return {
+    id: `fixture-q${n}`,
+    order_num: n,
+    question_text: text,
+    question_type: type,
+    options: o.options ?? null,
+    scale_min: o.min ?? null,
+    scale_max: o.max ?? null,
+    is_required: o.required ?? false,
+    is_active: true,
+    created_at: "2026-05-01T00:00:00.000Z",
+  };
+}
+
+type QuestionsPreset = "six" | "none" | "fail";
+
+function questionsPresetOf(search: string | null): QuestionsPreset {
+  const v = search === null ? null : new URLSearchParams(search).get("questions");
+  return v === "none" || v === "fail" ? v : "six";
+}
 
 export function discountPresetOf(search: string | null): DiscountPreset | null {
   if (search === null) return null;
@@ -61,13 +122,24 @@ export function discountPresetIds(search: string | null, lessons: readonly Catal
   return requiredLessons(course).map((l) => l.id);
 }
 
-type FixtureDiscountWindow = Window & { __fixtureDiscount?: { preset: DiscountPreset | null; requests: () => DiscountRequestRow[] } };
+type FixtureDiscountWindow = Window & {
+  __fixtureDiscount?: {
+    preset: DiscountPreset | null;
+    requests: () => DiscountRequestRow[];
+    answers: () => DiscountFeedbackAnswer[][];
+    plain: () => number;
+  };
+};
 
 export function FixtureDiscount({ search, children }: { search: string | null; children: ReactNode }) {
   const preset = discountPresetOf(search);
+  const questionsPreset = questionsPresetOf(search);
   // The page's load time: the presets count from it.
   const [boot] = useState(() => Date.now());
   const [sent, setSent] = useState<DiscountRequestRow[]>([]);
+  /** What each application carried, and how many went in with no questions. */
+  const answersRef = useRef<DiscountFeedbackAnswer[][]>([]);
+  const plainRef = useRef(0);
 
   const firstPaidAt = useMemo(() => {
     switch (preset) {
@@ -100,15 +172,36 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
 
   const apply = useCallback(async (): Promise<string | null> => {
     await new Promise((r) => setTimeout(r, APPLY_MS));
+    plainRef.current += 1;
     setSent((prev) => (prev.length ? prev : [{ id: "fixture-sent", status: "pending", created_at: new Date().toISOString() }]));
     return null;
   }, []);
 
-  const value = useMemo<DiscountStandIn>(() => ({ firstPaidAt, requests, apply }), [firstPaidAt, requests, apply]);
+  const questions = questionsPreset === "none" ? NO_QUESTIONS : QUESTIONS;
+  const submit = useCallback(
+    async (answers: DiscountFeedbackAnswer[]): Promise<string | null> => {
+      await new Promise((r) => setTimeout(r, APPLY_MS));
+      if (questionsPreset === "fail") return SEND_REFUSED;
+      answersRef.current.push(answers);
+      setSent((prev) => (prev.length ? prev : [{ id: "fixture-sent", status: "pending", created_at: new Date().toISOString() }]));
+      return null;
+    },
+    [questionsPreset],
+  );
+
+  const value = useMemo<DiscountStandIn>(
+    () => ({ firstPaidAt, requests, apply, questions, submit }),
+    [firstPaidAt, requests, apply, questions, submit],
+  );
 
   useEffect(() => {
     const w = window as FixtureDiscountWindow;
-    w.__fixtureDiscount = { preset, requests: () => value.requests.slice() };
+    w.__fixtureDiscount = {
+      preset,
+      requests: () => value.requests.slice(),
+      answers: () => answersRef.current.map((a) => a.slice()),
+      plain: () => plainRef.current,
+    };
     return () => {
       delete w.__fixtureDiscount;
     };

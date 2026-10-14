@@ -87,13 +87,6 @@ export function countCompletedLessons(
 }
 
 /**
- * Days since this student joined the platform.
- */
-function daysSinceJoined(joinedAtIso: string): number {
-  return (Date.now() - new Date(joinedAtIso).getTime()) / 86_400_000;
-}
-
-/**
  * Thresholds for the legacy auto-unlock branch of the Playbook gate.
  * A student qualifies for auto-unlock if they've been on the platform
  * at least PLAYBOOK_AUTO_UNLOCK_DAYS days AND completed at least
@@ -109,37 +102,66 @@ function daysSinceJoined(joinedAtIso: string): number {
 export const PLAYBOOK_AUTO_UNLOCK_DAYS = 30;
 export const PLAYBOOK_AUTO_UNLOCK_RATIO = 0.8;
 
+/** What the Playbook gate reads of a lesson: a lesson row of either course. */
+export interface PlaybookLesson {
+  id: string;
+  sort_order: number;
+  /** False: outside the progress count (l057 on the old course, a7l19 on the new). Missing counts. */
+  counts_toward_progress?: boolean;
+  feature_key?: string | null;
+}
+
 /**
- * The Playbook unlock gate.
+ * The Playbook unlock gate (cutover PRD, call C8 and Work Item 8). The
+ * course comes from the lessons handed in, so the same rule reads the old
+ * course and the new one. Three ways in, OR'd together:
  *
- * Two paths to unlocked, OR'd together:
- *   1. Standard sprint path — student completed PLAYBOOK_UNLOCK_LESSON_ID
- *      (l078, "How I Approach Research / Coming Up With Ad Ideas"). This
- *      is the canonical "you finished the watch curriculum" milestone.
- *   2. Legacy auto-unlock — joined_at >= PLAYBOOK_AUTO_UNLOCK_DAYS ago
- *      AND completed >= PLAYBOOK_AUTO_UNLOCK_RATIO of all lessons. For
- *      students who've been around long enough and done most of the
- *      course but skipped the action-item gate.
+ *   1. The stamp: `unlockedAt` (student_milestones.playbook_unlocked_at).
+ *      The course switch (v104) sets it for every graduate of the old course,
+ *      whose done lessons it then archives. The app never writes it.
+ *   2. The unlock lesson is done: the lesson holding feature_key
+ *      "playbook_unlock" (l078 on the old course, set by v92), or, on a
+ *      course where none holds it, the last counting lesson by sort_order.
+ *      The old course's canonical "you finished the watch curriculum"
+ *      milestone (v72.7), unchanged there.
+ *   3. Legacy auto-unlock: PLAYBOOK_AUTO_UNLOCK_DAYS since the first payment
+ *      (else joined_at; v75.18: a renewal does not reset the count), and
+ *      done lessons numbering at least PLAYBOOK_AUTO_UNLOCK_RATIO of the
+ *      counting lessons. Every done lesson is counted, a non-counting one
+ *      too, as the page always did (v104's stamp counts the same way).
  *
- * The new-student path (path 1) is unchanged from v72.7. Karlo's
- * explicit ask: "don't make any mistakes in terms of changing how the
- * new students part works."
+ * The old course's verdicts are the old gate's (client-tests/playbook.test.mjs
+ * runs both). Karlo's explicit ask stands: "don't make any mistakes in terms
+ * of changing how the new students part works."
+ *
+ * `now` is the clock (ms), so a render can pass a ticking state and stay pure.
  */
 export function isPlaybookUnlocked(args: {
-  student: { joined_at: string };
-  completedLessonIds: Set<string>;
-  playbookUnlockLessonId: string;
-  totalLessons: number;
+  student: { joined_at: string; first_paid_at?: string | null };
+  completedLessonIds: ReadonlySet<string>;
+  lessons: readonly PlaybookLesson[];
+  unlockedAt: string | null | undefined;
+  now?: number;
 }): boolean {
-  // Path 1: standard sprint completion.
-  if (args.completedLessonIds.has(args.playbookUnlockLessonId)) return true;
+  const { student, completedLessonIds, lessons, unlockedAt } = args;
 
-  // Path 2: legacy auto-unlock.
-  if (args.totalLessons <= 0) return false;
-  const days = daysSinceJoined(args.student.joined_at);
-  const ratio = args.completedLessonIds.size / args.totalLessons;
-  return (
-    days >= PLAYBOOK_AUTO_UNLOCK_DAYS &&
-    ratio >= PLAYBOOK_AUTO_UNLOCK_RATIO
-  );
+  // 1. The stamp.
+  if (unlockedAt) return true;
+
+  // 2. The unlock lesson.
+  const counting = lessons.filter((l) => l.counts_toward_progress !== false);
+  const unlockLesson =
+    lessons.find((l) => l.feature_key === "playbook_unlock") ??
+    counting.reduce<PlaybookLesson | null>(
+      (last, l) => (last === null || l.sort_order > last.sort_order ? l : last),
+      null,
+    );
+  if (unlockLesson && completedLessonIds.has(unlockLesson.id)) return true;
+
+  // 3. Legacy auto-unlock. No lessons yet (still loading): closed.
+  if (counting.length === 0) return false;
+  const since = student.first_paid_at ?? student.joined_at;
+  const days = ((args.now ?? Date.now()) - new Date(since).getTime()) / 86_400_000;
+  const ratio = completedLessonIds.size / counting.length;
+  return days >= PLAYBOOK_AUTO_UNLOCK_DAYS && ratio >= PLAYBOOK_AUTO_UNLOCK_RATIO;
 }

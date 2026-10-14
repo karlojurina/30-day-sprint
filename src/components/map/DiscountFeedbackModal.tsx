@@ -17,28 +17,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useStudent } from "@/contexts/StudentContext";
-import type {
-  DiscountFeedbackAnswer,
-  DiscountFeedbackQuestion,
-} from "@/types/database";
-
-type AnswerValue =
-  | { kind: "scale"; value: number | null }
-  | { kind: "choice"; value: string | null }
-  | { kind: "text"; value: string };
-
-function defaultValue(q: DiscountFeedbackQuestion): AnswerValue {
-  if (q.question_type === "scale") return { kind: "scale", value: null };
-  if (q.question_type === "multi_choice") return { kind: "choice", value: null };
-  return { kind: "text", value: "" };
-}
-
-function isAnswered(q: DiscountFeedbackQuestion, a: AnswerValue): boolean {
-  if (!q.is_required) return true;
-  if (a.kind === "scale") return a.value != null;
-  if (a.kind === "choice") return a.value != null && a.value.length > 0;
-  return a.value.trim().length > 0;
-}
+import type { DiscountFeedbackQuestion } from "@/types/database";
+// The rules both forms share (the map's is src/components/world/WorldDiscountForm.tsx).
+import {
+  defaultValue,
+  isAnswered,
+  sortQuestions,
+  toAnswers,
+  type AnswerValue,
+} from "@/lib/discount-feedback";
 
 export function DiscountFeedbackModal() {
   const {
@@ -49,10 +36,7 @@ export function DiscountFeedbackModal() {
   } = useStudent();
 
   const sortedQuestions = useMemo(
-    () =>
-      [...discountFeedbackQuestions].sort(
-        (a, b) => a.order_num - b.order_num,
-      ),
+    () => sortQuestions(discountFeedbackQuestions),
     [discountFeedbackQuestions],
   );
 
@@ -103,15 +87,7 @@ export function DiscountFeedbackModal() {
   async function handleSubmit() {
     setError(null);
     setSubmitting(true);
-    const payload: DiscountFeedbackAnswer[] = sortedQuestions.map((q) => {
-      const v = answers[q.id] ?? defaultValue(q);
-      return {
-        question_id: q.id,
-        answer_scale: v.kind === "scale" ? v.value : null,
-        answer_choice: v.kind === "choice" ? v.value : null,
-        answer_text: v.kind === "text" ? v.value : null,
-      };
-    });
+    const payload = toAnswers(sortedQuestions, answers);
     const errMsg = await submitDiscountFeedback(payload);
     setSubmitting(false);
     if (errMsg) {

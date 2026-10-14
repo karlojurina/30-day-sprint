@@ -16,10 +16,8 @@ import {
   LESSON_GROUPS,
   PLAYBOOK_UNLOCK_LESSON_ID,
   SPRINT_EXCLUDED_LESSON_IDS,
-  TOTAL_LESSONS,
   DISCOUNT_WINDOW_DAYS,
 } from "@/lib/constants";
-import { isPlaybookUnlocked } from "@/lib/progress";
 import { useIsPhone } from "@/lib/useMediaQuery";
 import type { Lesson } from "@/types/database";
 
@@ -535,6 +533,7 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
     // submit mutator replaces the v54 mark + increment split.
     regionQuiz,
     submitRegionQuiz,
+    playbookUnlocked,
   } = useStudent();
 
   // v50.3 — testOverrides escape hatch. /dashboard-mockup wires this
@@ -554,17 +553,9 @@ export function MapMockup({ onOpenLesson, testOverrides }: MapMockupProps) {
   // v75.16 - second auto-unlock path: legacy students 30+ days in AND
   // 80%+ complete. New-student behavior unchanged (still needs l078).
   // The helper handles both branches with an OR — see isPlaybookUnlocked
-  // in src/lib/progress.ts.
-  const playbookUnlocked = student
-    ? isPlaybookUnlocked({
-        // v75.18: anchor on first_paid_at (original signup), not
-        // joined_at (current cycle start).
-        student: { joined_at: student.first_paid_at ?? student.joined_at },
-        completedLessonIds,
-        playbookUnlockLessonId: PLAYBOOK_UNLOCK_LESSON_ID,
-        totalLessons: TOTAL_LESSONS,
-      })
-    : false;
+  // in src/lib/progress.ts. StudentContext works it out once
+  // (`playbookUnlocked`), so this map, the Playbook page and the new map's
+  // link agree (cutover WI-8); on this course its verdicts are the old ones.
 
   // v54 (brief-region-quiz) - quiz modal state. quizRegionId is the
   // region whose quiz is currently open (null = closed). quizProgress

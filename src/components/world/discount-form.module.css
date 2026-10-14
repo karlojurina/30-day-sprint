@@ -1,0 +1,490 @@
+/*
+ * The discount application's questions on the map (WorldDiscountForm.tsx).
+ *
+ * It opens from the checkpoint's panel and takes that panel's slot under the
+ * header on the left, as the corner's list does, a little wider so ten
+ * numbers fit in a row at 40px. The world stays in view to the right under a
+ * light scrim, the cache in it. It is solid, not glass: it always sits over
+ * the checkpoint's panel, whose text would show through a blur. On phones
+ * (the map's list view) it is a full sheet on the ground colour.
+ *
+ * .impeccable.md: radius 14 / 9 / 5 / 999, spacing 6 / 8 / 12 / 16 / 22,
+ * Bricolage for words, JetBrains Mono for counts and eyebrows, sand for state
+ * and the one action, transform and opacity only, nothing bounces.
+ * The tokens come from the root's .tokens class (tokens.module.css).
+ */
+
+.root {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  color: var(--color-ink);
+  font-family: var(--display);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* At no weight, so each control's own size and colour below win. */
+:where(.root) button,
+:where(.root) textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:where(.root) button {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The checkpoint's panel it opens from is under it in the same slot; on a
+   short question its foot (and its Apply) showed below the form. It is
+   hidden while the form is up and back as it was when the form closes. The
+   form is mounted right after the map's root (WorldMap.tsx). */
+main:has(~ .root) section[aria-labelledby="cp-panel-title"] {
+  visibility: hidden;
+}
+
+.root :focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: var(--focus-halo);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 15, 18, 0.42);
+  animation: fadeIn 240ms var(--ease) both;
+}
+
+.panel {
+  position: absolute;
+  top: 92px;
+  left: calc(var(--gutter) + 8px);
+  width: 480px;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100svh - 92px - 48px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+  background: #1b151b;
+  box-shadow: var(--panel-shadow);
+  animation: panelIn 260ms var(--ease) both;
+}
+
+.inner {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 18px 16px 16px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+/* ── The top: what this is, how far in ───────────────────── */
+
+.top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 600 10.5px/1 var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+.eyebrow {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-accent);
+}
+
+.tag {
+  flex: none;
+}
+
+.count {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.count b {
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.bar {
+  margin-top: 12px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--color-line);
+  overflow: hidden;
+}
+
+.bar i {
+  display: block;
+  height: 100%;
+  background: var(--color-accent);
+  transform-origin: left center;
+  transition: transform 300ms var(--ease);
+}
+
+/* ── One question ───────────────────────────────────────── */
+
+.step {
+  animation: stepIn 300ms var(--ease) both;
+}
+
+.question {
+  margin: 22px 0 0;
+  font-size: 20px;
+  line-height: 1.25;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  outline: none;
+}
+
+.root .question:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.optional {
+  margin-left: 8px;
+  padding: 3px 5px;
+  display: inline-block;
+  vertical-align: 3px;
+  border: 1px solid var(--color-line);
+  border-radius: 5px;
+  font: 600 10px/1 var(--mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
+}
+
+.answer {
+  margin-top: 16px;
+}
+
+/* The native radio stays, out of sight: arrows, Space and a reader work as they always do. */
+.radio {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  pointer-events: none;
+}
+
+/* A number scale: one row of squares, two rows of five on a phone. */
+.scale {
+  display: grid;
+  grid-template-columns: repeat(var(--n, 10), minmax(0, 1fr));
+  gap: 4px;
+}
+
+.scaleItem {
+  position: relative;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+  background: var(--color-surface-2);
+  font: 600 13px/1 var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease),
+    border-color 150ms var(--ease),
+    color 150ms var(--ease);
+}
+
+.scaleItem:hover {
+  background: var(--color-surface-3);
+  color: var(--color-ink);
+}
+
+.scaleItem:has(:checked) {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-accent-strong);
+}
+
+.scaleItem:has(:focus-visible),
+.choice:has(:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: var(--focus-halo);
+}
+
+/* A choice: a row with the lesson's dot, filled once chosen. */
+.choices {
+  display: grid;
+  gap: 6px;
+}
+
+.choice {
+  position: relative;
+  min-height: 43px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: var(--color-surface-2);
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--color-ink-2);
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease),
+    border-color 150ms var(--ease),
+    color 150ms var(--ease);
+}
+
+.choice:hover {
+  background: var(--color-surface-3);
+  color: var(--color-ink);
+}
+
+.dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-ink-3);
+  transition:
+    background-color 150ms var(--ease),
+    border-color 150ms var(--ease);
+}
+
+.choice:has(:checked) {
+  border-color: var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-ink);
+}
+
+.choice:has(:checked) .dot {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.text {
+  width: 100%;
+  min-height: 112px;
+  padding: 12px 14px;
+  display: block;
+  resize: vertical;
+  border: 1px solid var(--color-line);
+  border-radius: 9px;
+  background: var(--color-surface-2);
+  font-size: 15px;
+  line-height: 1.55;
+  transition: border-color 150ms var(--ease);
+}
+
+.text::placeholder {
+  color: var(--color-ink-3);
+}
+
+.text:hover {
+  border-color: var(--color-line-strong);
+}
+
+.error {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-danger);
+}
+
+/* ── The way on ─────────────────────────────────────────── */
+
+.foot {
+  margin-top: 22px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cancel,
+.back {
+  height: 40px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  transition:
+    background-color 150ms var(--ease),
+    color 150ms var(--ease),
+    border-color 150ms var(--ease);
+}
+
+.cancel {
+  margin-left: -6px;
+  margin-right: auto;
+  border: 0;
+  background: none;
+  color: var(--color-ink-3);
+}
+
+.cancel:hover {
+  color: var(--color-ink);
+  background: var(--color-surface-2);
+}
+
+.back {
+  border: 1px solid var(--color-line);
+  background: none;
+  color: var(--color-ink-2);
+}
+
+.back:hover {
+  color: var(--color-ink);
+  border-color: var(--color-line-strong);
+}
+
+.back svg {
+  transform: scaleX(-1);
+}
+
+.primary {
+  height: 40px;
+  min-width: 112px;
+  padding: 0 14px 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--color-accent);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  transition:
+    background-color 180ms var(--ease),
+    opacity 180ms var(--ease),
+    transform 180ms var(--ease);
+}
+
+.root .primary {
+  color: var(--color-on-accent);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--color-accent-strong);
+}
+
+.primary:active:not(:disabled) {
+  background: var(--color-accent-deep);
+  transform: translateY(1px);
+}
+
+.primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.primary[aria-busy="true"] {
+  cursor: progress;
+  opacity: 1;
+  background: var(--color-accent-deep);
+}
+
+.arrow {
+  flex: none;
+  transition: transform 180ms var(--ease);
+}
+
+.primary:hover:not(:disabled) .arrow {
+  transform: translateX(2px);
+}
+
+/* ── Phones: the map's list view ────────────────────────── */
+
+.root[data-sheet] .scrim {
+  display: none;
+}
+
+.root[data-sheet] .panel {
+  inset: 0;
+  width: auto;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: var(--color-surface-0);
+  box-shadow: none;
+  animation: sheetIn 320ms var(--ease) both;
+}
+
+.root[data-sheet] .inner {
+  padding: 24px 22px 40px;
+}
+
+.root[data-sheet] .scale {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.root[data-sheet] .scaleItem {
+  height: 48px;
+}
+
+/* ── Motion ─────────────────────────────────────────────── */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes panelIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0);
+  }
+}
+
+@keyframes stepIn {
+  from {
+    opacity: 0;
+    transform: translate3d(16px, 0, 0);
+  }
+}
+
+@keyframes sheetIn {
+  from {
+    opacity: 0;
+    transform: translate3d(24px, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root *,
+  .root *::before,
+  .root *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

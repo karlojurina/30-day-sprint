@@ -36,10 +36,9 @@ import type {
 import { getTitleForRegions } from "@/lib/titles";
 import {
   DISCOUNT_WINDOW_DAYS,
-  SPRINT_EXCLUDED_LESSON_IDS,
   progressPercent,
 } from "@/lib/constants";
-import { isLessonComplete } from "@/lib/progress";
+import { isLessonComplete, isPlaybookUnlocked } from "@/lib/progress";
 
 export interface RegionProgress {
   completed: number;
@@ -147,6 +146,14 @@ export interface StudentContextType {
   // sets the stamp so it doesn't re-fire on the next load.
   playbookWelcomeSeenAt: string | null;
   dismissPlaybookWelcome: () => Promise<void>;
+  /**
+   * The Playbook is open to this student (isPlaybookUnlocked in
+   * src/lib/progress.ts: the switch's stamp, the unlock lesson done, or 30
+   * days and 80% of the counting lessons). Worked out here once, so the
+   * Playbook page, the old map and the new map's link agree (cutover WI-8).
+   * False while loading.
+   */
+  playbookUnlocked: boolean;
 
   // v46 — onboarding milestone + celebration state, sourced from
   // student_milestones / student_celebrations respectively.
@@ -457,53 +464,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  /**
-   * v93 — a watch lesson just completed itself.
-   *
-   * Called after /api/student/lesson-watched confirms the crossing, never
-   * from the player's own reckoning: the route re-reads student_lesson_watch
-   * server-side and applies the played-seconds floor, so the client is
-   * reflecting a decision, not making one.
-   *
-   * Reuses the v74 recently-toggled guard for exactly the same reason it
-   * exists: the completion is written server-side microseconds earlier, and
-   * the refresh that follows can be served by a replica that hasn't caught
-   * up, which would tick the lesson back to incomplete in front of the
-   * student.
-   *
-   * A compound lesson (requires_action) may ALREADY have a row whose action
-   * half shipped first. Stamping completed_at on the existing row is what
-   * makes isLessonComplete() true for it; inserting a second row would
-   * violate the (student_id, lesson_id) unique constraint.
-   */
-  const markWatched = useCallback(
-    (lessonId: string) => {
-      if (!student) return;
-      markRecentlyToggled(lessonId);
-      setCompletions((prev) => {
-        const existing = prev.find((c) => c.lesson_id === lessonId);
-        if (existing) {
-          if (existing.completed_at) return prev;
-          const stamped = new Date().toISOString();
-          return prev.map((c) =>
-            c.lesson_id === lessonId ? { ...c, completed_at: stamped } : c,
-          );
-        }
-        const optimistic: StudentLessonCompletion = {
-          id: crypto.randomUUID(),
-          student_id: student.id,
-          lesson_id: lessonId,
-          completed_at: new Date().toISOString(),
-          action_completed_at: null,
-          skipped_at: null,
-          discord_message_link: null,
-        };
-        return [...prev, optimistic];
-      });
-    },
-    [student],
-  );
-
   const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnostics>({
     lastSyncAt: null,
     fetchedCount: null,
@@ -748,6 +708,68 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     });
   }, [setStudent]);
 
+  /**
+   * v93 — a watch lesson just completed itself.
+   *
+   * Called after /api/student/lesson-watched confirms the crossing, never
+   * from the player's own reckoning: the route re-reads student_lesson_watch
+   * server-side and applies the played-seconds floor, so the client is
+   * reflecting a decision, not making one.
+   *
+   * Reuses the v74 recently-toggled guard for exactly the same reason it
+   * exists: the completion is written server-side microseconds earlier, and
+   * the refresh that follows can be served by a replica that hasn't caught
+   * up, which would tick the lesson back to incomplete in front of the
+   * student.
+   *
+   * A compound lesson (requires_action) may ALREADY have a row whose action
+   * half shipped first. Stamping completed_at on the existing row is what
+   * makes isLessonComplete() true for it; inserting a second row would
+   * violate the (student_id, lesson_id) unique constraint.
+   *
+   * Then the student's data is fetched again, unthrottled, as the old
+   * toggles do after their routes (toggleLesson, v50.4): the route ticked the
+   * streak (afterCompletionWrite) before it answered, and without the refetch
+   * the new map's corner and its streak celebration only saw it at the next
+   * tab focus (2026-10-14). The new map's lesson player is the only caller
+   * besides a development button; the old dashboard never calls this. The
+   * player already fires et:achievements-changed after it, so it is not
+   * fired twice here.
+   */
+  const markWatched = useCallback(
+    (lessonId: string) => {
+      if (!student) return;
+      markRecentlyToggled(lessonId);
+      setCompletions((prev) => {
+        const existing = prev.find((c) => c.lesson_id === lessonId);
+        if (existing) {
+          if (existing.completed_at) return prev;
+          const stamped = new Date().toISOString();
+          return prev.map((c) =>
+            c.lesson_id === lessonId ? { ...c, completed_at: stamped } : c,
+          );
+        }
+        const optimistic: StudentLessonCompletion = {
+          id: crypto.randomUUID(),
+          student_id: student.id,
+          lesson_id: lessonId,
+          completed_at: new Date().toISOString(),
+          action_completed_at: null,
+          skipped_at: null,
+          discord_message_link: null,
+        };
+        return [...prev, optimistic];
+      });
+      // Best-effort, as the toggles' refetch is: a failure leaves the
+      // streak to the next focus and changes nothing else.
+      void (async () => {
+        const token = await getAccessToken();
+        if (token) await refreshFromServer(token, "lesson-watched", { throttled: false });
+      })().catch(() => {});
+    },
+    [student, refreshFromServer],
+  );
+
   // Auto-sync Whop progress. Silent — no button, no flash.
   //   - Once on mount (first load after login)
   //   - Every time the tab regains visibility (student alt-tabs back from
@@ -896,11 +918,12 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     for (const r of regions) {
       progress[r.id] = { completed: 0, total: 0, isComplete: false, isUnlocked: false };
     }
-    // count - exclude SPRINT_EXCLUDED_LESSON_IDS (currently just
-    // l057 bounty onboarding). See src/lib/constants.ts.
+    // count - exclude the lessons outside the progress count
+    // (counts_toward_progress false: l057 bounty onboarding on the old
+    // course, set by v92; a7l19 on the new one).
     for (const lesson of lessons) {
       if (!progress[lesson.region_id]) continue;
-      if (SPRINT_EXCLUDED_LESSON_IDS.has(lesson.id)) continue;
+      if (lesson.counts_toward_progress === false) continue;
       progress[lesson.region_id].total++;
       if (completedLessonIds.has(lesson.id)) {
         progress[lesson.region_id].completed++;
@@ -933,12 +956,13 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     return progress;
   }, [regions, lessons, completedLessonIds, regionQuizMap]);
 
-  // v75.1 - "sprint" view of lessons excludes SPRINT_EXCLUDED_LESSON_IDS
-  // (currently just l057 bounty onboarding). Every X/Y display the
+  // v75.1 - "sprint" view of lessons excludes the lessons outside the
+  // progress count (counts_toward_progress false since v92; on the old
+  // course just l057 bounty onboarding). Every X/Y display the
   // student sees should use these instead of the raw lessons array
   // so the denominator matches the 64-lesson sprint definition.
   const sprintLessons = useMemo(
-    () => lessons.filter((l) => !SPRINT_EXCLUDED_LESSON_IDS.has(l.id)),
+    () => lessons.filter((l) => l.counts_toward_progress !== false),
     [lessons],
   );
   const sprintCompletedCount = useMemo(
@@ -968,9 +992,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     return Object.values(regionProgress).filter((p) => p.isComplete).length;
   }, [regionProgress]);
 
+  // The ladder scales to the course's areas: 4 on the old course, 8 on the
+  // new (cutover WI-4, C3).
   const currentTitle = useMemo(() => {
-    return getTitleForRegions(completedRegionCount).key;
-  }, [completedRegionCount]);
+    return getTitleForRegions(completedRegionCount, regions.length).key;
+  }, [completedRegionCount, regions.length]);
 
   // Discount window: R1 + R2 all complete AND finished within
   // DISCOUNT_WINDOW_DAYS of the student's Whop join date.
@@ -1008,6 +1034,24 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       : 0;
 
   const discountEligible = discountAllLessonsDone && discountMsLeft > 0;
+
+  // The Playbook gate, once for every surface (src/lib/progress.ts). The
+  // clock is the minute tick above, so a student crossing day 30 opens
+  // without a reload.
+  const playbookUnlockedAt = milestones?.playbook_unlocked_at ?? null;
+  const playbookUnlocked = useMemo(
+    () =>
+      student
+        ? isPlaybookUnlocked({
+            student,
+            completedLessonIds,
+            lessons,
+            unlockedAt: playbookUnlockedAt,
+            now: nowMs,
+          })
+        : false,
+    [student, completedLessonIds, lessons, playbookUnlockedAt, nowMs],
+  );
 
   // Actions
 
@@ -1461,6 +1505,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       bounty_access_claimed_at: prev?.bounty_access_claimed_at ?? null,
       first_client_landed_at: prev?.first_client_landed_at ?? null,
       playbook_welcome_seen_at: data.playbook_welcome_seen_at,
+      playbook_unlocked_at: prev?.playbook_unlocked_at ?? null,
       updated_at: data.playbook_welcome_seen_at,
     }));
   }, [student, milestones]);
@@ -1499,6 +1544,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         bounty_access_claimed_at: prev?.bounty_access_claimed_at ?? null,
         first_client_landed_at: prev?.first_client_landed_at ?? null,
         playbook_welcome_seen_at: prev?.playbook_welcome_seen_at ?? null,
+        playbook_unlocked_at: prev?.playbook_unlocked_at ?? null,
         updated_at: new Date().toISOString(),
       }));
     },
@@ -1812,6 +1858,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         bountyAccessClaimedAt: milestones?.bounty_access_claimed_at ?? null,
         playbookWelcomeSeenAt: milestones?.playbook_welcome_seen_at ?? null,
         dismissPlaybookWelcome,
+        playbookUnlocked,
         onboardingCompletedAt: milestones?.onboarding_completed_at ?? null,
         celebrations,
         firstDashboardLoginAt: milestones?.first_dashboard_login_at ?? null,

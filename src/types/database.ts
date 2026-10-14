@@ -111,6 +111,10 @@ export interface Student {
  *                                      Playbook.
  *   first_client_landed_at          — self-reported on Map 2 (v2)
  *   playbook_welcome_seen_at        — saw the Map 2 intro once (v2)
+ *   playbook_unlocked_at            — v103: the course switch (v104)
+ *                                      stamps every graduate of the old
+ *                                      course, so the reset keeps their
+ *                                      Playbook. Never written by the app.
  */
 export interface StudentMilestones {
   student_id: string;
@@ -122,6 +126,7 @@ export interface StudentMilestones {
   bounty_access_claimed_at: string | null;
   first_client_landed_at: string | null;
   playbook_welcome_seen_at: string | null;
+  playbook_unlocked_at: string | null;
   updated_at: string;
 }
 

@@ -3,8 +3,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
+import { sortQuestions } from "@/lib/discount-feedback";
 import { createClient, getSharedSession } from "@/lib/supabase-browser";
 import { discountState, type DiscountLesson, type DiscountRequestRow, type DiscountState } from "@/lib/world/discount";
+import type { DiscountFeedbackAnswer, DiscountFeedbackQuestion } from "@/types/database";
 
 /**
  * The student's early-finish discount, for the map (WorldMap.tsx passes it on
@@ -18,34 +20,71 @@ import { discountState, type DiscountLesson, type DiscountRequestRow, type Disco
  * not). It is worked out again every minute, so "11 days left" and the
  * window's end keep up with the clock.
  *
- * APPLY posts to /api/discounts/request exactly as the old dashboard's
+ * APPLY OPENS THE QUESTIONS (2026-10-14). The old dashboard sent every
+ * application through its 6-question form (DiscountFeedbackModal), and the
+ * team reads the answers. So does the map: Apply opens the form
+ * (WorldDiscountForm.tsx, mounted by WorldMap.tsx, its open state here as
+ * `form`) with the active questions StudentContext already loads
+ * (discountFeedbackQuestions), and the form sends them with the application
+ * through StudentContext.submitDiscountFeedback (/api/discounts/submit-feedback,
+ * which on the new course checks the same rule as a plain request). On
+ * success the form closes and the state turns to "in review".
+ *
+ * WITH NO ACTIVE QUESTIONS Apply sends the plain request: it posts to
+ * /api/discounts/request exactly as the old dashboard's
  * StudentContext.requestDiscount does (the session's Bearer token, the
  * student's id in the body; the route derives the student from the token).
  * It does not call requestDiscount itself: that one returns at once unless the
  * old course's R1 + R2 are done (StudentContext discountEligible), so on the
  * new course it would never send anything, and it reports failures with
- * window.alert. The row the route returns is kept here until StudentContext's
- * own refresh brings the same row, so the panel turns to "in review" at once.
+ * window.alert.
+ *
+ * EITHER WAY, what went in is kept here (`sent`) until StudentContext brings
+ * a request it did not have before, so the panel turns to "in review" at once
+ * and a later approval read from StudentContext is never hidden behind it.
  *
  * THE DEVELOPMENT PAGE provides DiscountStandInContext (its first payment,
- * its requests, an Apply that resolves in memory) and this hook then reads no
- * student and calls no route.
+ * its requests, its questions, an Apply and a submit that resolve in memory)
+ * and this hook then reads no student and calls no route.
  */
 
 export interface DiscountStandIn {
   firstPaidAt: string | null;
   requests: readonly DiscountRequestRow[];
-  /** Resolves null when the application went in, else the words to show. */
+  /** The plain request. Resolves null when the application went in, else the words to show. */
   apply(): Promise<string | null>;
+  /** The active questions, any order. None: Apply sends the plain request. */
+  questions: readonly DiscountFeedbackQuestion[];
+  /** The application with the answers. Resolves null when it went in, else the words to show. */
+  submit(answers: DiscountFeedbackAnswer[]): Promise<string | null>;
 }
 
 /** The development page's pretend student's discount. /world provides nothing. */
 export const DiscountStandInContext = createContext<DiscountStandIn | null>(null);
 
+/** The questions' form, as WorldDiscountForm.tsx reads it. */
+export interface DiscountFormState {
+  open: boolean;
+  /** The active questions in the team's order. */
+  questions: readonly DiscountFeedbackQuestion[];
+  close(): void;
+  /** Sends the application with the answers. Null when it went in (the form then closes), else the words to show. */
+  submit(answers: DiscountFeedbackAnswer[]): Promise<string | null>;
+}
+
 export interface WorldDiscountHook {
   state: DiscountState;
   now: number;
+  /** Opens the questions, or with none sends the plain request. Null unless there are words to show. */
   apply(): Promise<string | null>;
+  form: DiscountFormState;
+}
+
+/** What went in from this page, and the request StudentContext had at that moment. */
+interface Sent {
+  row: DiscountRequestRow;
+  /** StudentContext's request id when it was sent (null: none). Once it holds another, it has caught up. */
+  over: string | null;
 }
 
 const MINUTE_MS = 60_000;
@@ -91,8 +130,9 @@ export function useWorldDiscount(): WorldDiscountHook {
     return () => window.clearInterval(id);
   }, []);
 
-  /** The row this page's own Apply got back, until StudentContext has it too. */
-  const [sent, setSent] = useState<DiscountRequestRow | null>(null);
+  /** What this page sent, until StudentContext has a request it did not have then. */
+  const [sent, setSent] = useState<Sent | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
 
   const courseLessons = useMemo<DiscountLesson[]>(
     () =>
@@ -110,21 +150,33 @@ export function useWorldDiscount(): WorldDiscountHook {
   );
 
   const firstPaidAt = stand ? stand.firstPaidAt : (student?.first_paid_at ?? null);
+  const requestId = discountRequest?.id ?? null;
   const requests = useMemo<readonly DiscountRequestRow[]>(() => {
     if (stand) return stand.requests;
     const out: DiscountRequestRow[] = [];
     if (discountRequest) out.push(discountRequest);
-    if (sent && sent.id !== discountRequest?.id) out.push(sent);
+    // Until StudentContext holds a request it did not hold when this was sent.
+    if (sent && requestId === sent.over && sent.row.id !== requestId) out.push(sent.row);
     return out;
-  }, [stand, discountRequest, sent]);
+  }, [stand, discountRequest, requestId, sent]);
 
   const state = useMemo(
     () => discountState({ now: new Date(now), firstPaidAt, lessons: courseLessons, videoDoneIds: videoDone, requests }),
     [now, firstPaidAt, courseLessons, videoDone, requests],
   );
 
+  // The questions: the stand-in's, or the active ones StudentContext loaded
+  // (the development page's context has none of its own).
+  const { discountFeedbackQuestions, submitDiscountFeedback } = ctx;
+  const questions = useMemo(
+    () => sortQuestions(stand ? stand.questions : (discountFeedbackQuestions ?? [])),
+    [stand, discountFeedbackQuestions],
+  );
+
   const studentId = student?.id ?? null;
-  const apply = useCallback(async (): Promise<string | null> => {
+
+  /** The plain request, for a course with no active questions. */
+  const sendPlain = useCallback(async (): Promise<string | null> => {
     if (stand) return stand.apply();
     if (!studentId) return SIGNED_OUT;
     let token: string | null = null;
@@ -147,12 +199,54 @@ export function useWorldDiscount(): WorldDiscountHook {
       }
       const row = rowOf(data);
       // A success with no row: show it as sent; StudentContext's next refresh brings the real one.
-      setSent(row ?? { id: "sent", status: "pending", created_at: new Date().toISOString() });
+      setSent({ row: row ?? pendingNow(), over: requestId });
       return null;
     } catch {
       return NO_REACH;
     }
-  }, [stand, studentId]);
+  }, [stand, studentId, requestId]);
 
-  return { state, now, apply };
+  const apply = useCallback(async (): Promise<string | null> => {
+    if (questions.length === 0) return sendPlain();
+    setFormOpen(true);
+    return null;
+  }, [questions.length, sendPlain]);
+
+  const close = useCallback(() => setFormOpen(false), []);
+
+  const submit = useCallback(
+    async (answers: DiscountFeedbackAnswer[]): Promise<string | null> => {
+      let said: string | null;
+      if (stand) {
+        said = await stand.submit(answers);
+      } else if (!studentId || !submitDiscountFeedback) {
+        said = SIGNED_OUT;
+      } else {
+        // StudentContext's submit reads the new request back before it
+        // resolves; when that read fails, `sent` shows it until it arrives.
+        const over = requestId;
+        try {
+          said = await submitDiscountFeedback(answers);
+        } catch {
+          said = NO_REACH;
+        }
+        if (said === null) setSent({ row: pendingNow(), over });
+      }
+      if (said === null) setFormOpen(false);
+      return said;
+    },
+    [stand, studentId, submitDiscountFeedback, requestId],
+  );
+
+  const form = useMemo<DiscountFormState>(
+    () => ({ open: formOpen, questions, close, submit }),
+    [formOpen, questions, close, submit],
+  );
+
+  return { state, now, apply, form };
+}
+
+/** An application sent just now, before its row is known. */
+function pendingNow(): DiscountRequestRow {
+  return { id: "sent", status: "pending", created_at: new Date().toISOString() };
 }

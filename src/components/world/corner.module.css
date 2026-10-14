@@ -205,6 +205,11 @@
   border-left: 1px solid var(--color-line);
 }
 
+/* The Playbook link renders nothing for a student without it: no line then. */
+.slot:empty {
+  display: none;
+}
+
 /* Sign out: the glyph alone, its word on hover and focus. */
 .corner .out {
   padding: 0 11px 0 10px;
@@ -726,6 +731,14 @@ main[data-view="list"] .corner .seg {
   main[data-view="list"] .corner {
     top: 98px;
   }
+}
+
+/* With the Playbook link in it the pill is about 80 px longer, and at 390 px
+   it ran into the discount chip (measured 2026-10-14): while the chip is up
+   (a button in the header's right end), the pill takes the row under them.
+   Without the chip (most graduates are past the offer) it stays beside it. */
+main[data-view="list"] header:has(> :last-child > button) .corner:has(.slot:not(:empty)) {
+  top: 98px;
 }
 
 main[data-view="list"] .panel {

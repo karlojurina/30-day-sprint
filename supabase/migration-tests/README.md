@@ -41,6 +41,11 @@ The interesting assertions are the ones about things **staying the same**:
 - Section 20, the course catalog (v101): the generated migration and its undo match `supabase/catalog/course_catalog.json`, the 141 lessons replace the placeholder seed and can be put back, and the file refuses to retitle or remove a lesson that a video row or a watch row points at.
 - Section 21, the video load (`diagnostics/load-lesson-videos.sql`): filled with made-up ids, it makes `lesson_videos` and the lengths follow a list and refuses every bad list with nothing changed. `LESSON_VIDEOS_SQL=/path/to/the/filled/copy npm test` also runs the private file of real rows and prints counts only.
 - Section 22, the text load (`diagnostics/load-lesson-text.sql`): filled with made-up texts, it makes `description` on the course's lessons follow a list (a text round-trips byte for byte, a lesson dropped from the list gets null, a live lesson like l004 keeps its own) and refuses every bad list with nothing changed. `LESSON_TEXT_SQL=/path/to/the/filled/copy npm test` also runs the private file of real texts on a database of its own and prints counts only.
+- Section 23, the cutover's expand (v103 and its undo): the four objects are there, the progress views and the snapshot numbers do not move, a second run changes nothing, the new view gives the latest counted lesson (no row for a skip only or a half-done compound lesson), and the undo puts every object and row back and refuses while the switch is in place. The snapshot floor: with no `curriculum_reset_at` every write goes through as before; with it, a rebuild, update, delete or insert of a day before the switch raises 22023 and changes nothing, and the switch day itself is still written.
+- Section 24, the switch (v104 and its undo, `diagnostics/cutover-preflight.sql`, `cutover-postcheck.sql`, `admin-health.sql` INVARIANT 6): one copy of the database per broken starting point, each refused with its sentence and nothing changed; the first run's archive, stamps, CSM changes, wipe, copy, RESTRICT keys and Whop index, each against counts worked out separately before the run; the app's own SQL afterwards (views, snapshot RPC, heartbeat); a second run and v101 both change nothing; the undo moves new-course progress into `archive_v2` and puts every table, constraint, not-null and index back as the dump before the switch had it; the switch runs again after it; the undo's three refusals.
+- Sections 23 and 24 run twice: on this harness's database as section 22 leaves it, then on a second database built from `base.sql` and the real migration files v92 to v101 in order. `base.sql` carries the tables the switch touches for that (lesson_notes, ratings, the quiz tables, templates, tasks, alerts, `student_whop_sync`), shaped from the migrations named beside each, with Postgres's default key names as in production.
+
+The run ends with `PASS 492   FAIL 0` (312 before the cutover sections).
 
 ## How it stays honest
 
@@ -51,7 +56,8 @@ fiction. Extracting the real text means the "before" state is the real one.
 
 `base.sql` is the exception: it is a hand-written minimum of the table shapes
 the migrations touch, assembled from v3 + v6 + v15 + v19 + v22 + v27 + v31 +
-v32 + v77. It is **not** a full copy of production and is not meant to be —
+v32 + v77, and for the cutover v2 + v10 + v34 + v46 + v51 + v54 + v57 + v65 +
+v75 + v85. It is **not** a full copy of production and is not meant to be —
 the live preconditions are verified separately by
 `../diagnostics/prd1-preconditions.sql`, which Lovro runs against the real
 database. This harness proves the new SQL is correct *given* those

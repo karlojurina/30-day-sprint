@@ -55,8 +55,9 @@ const v89fn   = lift('2026_v89_point_in_time_snapshots.sql', 'create or replace 
 for (const [sql, l] of [[v81view,'v81 student_progress_counts'],[v49view,'v49 student_current_region'],[v90view,'v90 achievement_unlock_stats'],[v89fn,'v89 rebuild_daily_snapshots']]) {
   if (await exec(sql, `lift+run ${l}`)) console.log(`         (${sql.split('\n').length} lines)`)
 }
-// v78 hardening, as it stands in production today
-await exec(`
+// v78 hardening, as it stands in production today. Kept in a constant:
+// sections 23 and 24 build a second database with it.
+const V78_HARDENING = `
 alter view public.student_progress_counts set (security_invoker = on);
 revoke select on public.student_progress_counts from anon;
 grant select on public.student_progress_counts to authenticated;
@@ -65,7 +66,8 @@ revoke select on public.student_current_region from anon;
 grant select on public.student_current_region to authenticated;
 revoke select on public.achievement_unlock_stats from anon;
 grant select on public.achievement_unlock_stats to authenticated;
-grant execute on function public.rebuild_daily_snapshots(date, date) to authenticated;`, 'v78 hardening')
+grant execute on function public.rebuild_daily_snapshots(date, date) to authenticated;`
+await exec(V78_HARDENING, 'v78 hardening')
 
 console.log('\n=== 3. seed (65 lessons incl. l057 + l078, 8 students) ===')
 let seed = `
@@ -2726,6 +2728,705 @@ console.log('\n=== 22. the text load: the description of the action items follow
       }
     }
   }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 23 and 24: the cutover. v103 (expand), v104 (the switch), their undos,
+// and the two diagnostics (_admin/prds/cutover/cutover_prd.md, WI-2).
+// ════════════════════════════════════════════════════════════════════
+// Both sections are one function run twice: on this harness's own database,
+// in the state section 22 left it, then on a second database built from
+// base.sql and the chain of real migration files, with none of the leftovers
+// of sections 10 to 22. Every fixture below is added on top of what is there,
+// and every assertion is about the fixtures or about a count taken first.
+
+const V103F = '2026_v103_cutover_expand.sql'
+const V104F = '2026_v104_course_switch.sql'
+const undoText = f => fs.readFileSync(fileURLToPath(new URL('../undo/' + f, import.meta.url)), 'utf8')
+const RETIRED = ['r1_clear', 'r2_clear', 'r3_clear', 'r4_clear', 'early_finisher', 'speedrun']
+const ARCHIVED_WHOLE = ['regions', 'lessons', 'student_lesson_completions', 'lesson_notes', 'student_lesson_ratings', 'quizzes',
+                        'quiz_questions', 'student_quiz_attempts', 'student_region_quiz', 'student_achievements', 'achievements',
+                        'student_milestones']
+const WIPED = ['student_quiz_attempts', 'quiz_questions', 'quizzes', 'student_region_quiz', 'student_lesson_ratings', 'lesson_notes',
+               'student_lesson_completions', 'student_achievements']
+const LESSON_COPY = 'id, region_id, type, title, description, sort_order, requires_action, action_brief, is_optional, is_gate, '
+                  + 'lesson_group_id, discord_channel, counts_toward_progress, feature_key, bunny_video_id, duration_seconds, '
+                  + 'video_ready_at, whop_lesson_id, created_at, updated_at'
+const REGION_COPY = 'id, order_num, name, subtitle, tagline, terrain, landmark_label, rail_at, quiz_format, is_discount_gate, created_at'
+const SIX = ['fk_lesson_notes_lesson_id', 'fk_lessons_region_id', 'fk_quizzes_region_id', 'fk_student_lesson_completions_lesson_id',
+             'fk_student_lesson_ratings_lesson_id', 'fk_student_region_quiz_region_id']
+const SWITCH_COLS = 'line,name,lessons,counting,action_items,with_video,with_whop_id,value'
+const ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+// Well-formed FAKE video ids, as in sections 18 to 21. Never a real one.
+const CUTFAKE = n => `vid_cutoverfake${'a'.repeat(6)}${String(n).padStart(2, '0')}`
+// lesson_is_complete() (v92), written a second time in JavaScript.
+const doneJs = r => r.skipped_at !== null || (!r.requires_action && r.completed_at !== null)
+                 || (r.requires_action && r.completed_at !== null && r.action_completed_at !== null)
+const asJson = v => JSON.stringify(v, (k, x) => typeof x === 'bigint' ? x.toString() : x)
+
+// A second database: base.sql, the lifted pre-v92 objects and v78's hardening
+// (section 2), the old-course seed (section 3), then every migration file from
+// v92 to v101 in order, with section 18's seam before v100.
+const chainDatabase = async () => {
+  const d = new PGlite()
+  await d.exec(fs.readFileSync(new URL('base.sql', import.meta.url), 'utf8'))
+  for (const sql of [v81view, v49view, v90view, v89fn, V78_HARDENING, seed]) await d.exec(sql)
+  for (const f of ['2026_v92_progress_predicate_and_lessons_v2_columns.sql', '2026_v93_lesson_watch_telemetry.sql',
+                   '2026_v94_catalog_next_staging.sql', '2026_v95_discount_window_config.sql',
+                   '2026_v96_lock_down_rebuild_snapshots.sql', '2026_v97_heartbeat_trust_nothing.sql',
+                   '2026_v98_current_region_counts_toward_progress.sql', V99F]) await d.exec(read(f))
+  await d.exec(`alter default privileges in schema public grant all on tables to anon, authenticated, service_role;`)
+  await d.exec(read('2026_v100_lesson_videos_and_speed.sql'))
+  await d.exec(read(V101F))
+  return d
+}
+
+const cutover = async (d, where) => {
+  const tag = where ? ` [${where}]` : ''
+  const say = (pass, label, detail = '') => note(pass, label + tag, detail)
+  const Q = async (sql, params) => (await d.query(sql, params)).rows
+  const one = async (sql, params) => (await Q(sql, params))[0]
+  const said = r => r.ok ? 'it ran' : `${r.code}: ${r.said.slice(0, 90)}`
+  const refused = (r, sentence) => !r.ok && r.code === 'P0001' && r.said.includes(sentence) && /Nothing was changed\.$/.test(r.said)
+  const raisesOn = async (dd, sql) => { try { await dd.query(sql); return null } catch (e) { return e } }
+
+  // Every row of every table in public, as sorted JSON. `skip` drops a table
+  // (true) or some of its columns (a list).
+  const dataDump = async (dd = d, skip = {}) => {
+    const out = {}
+    for (const { tablename: t } of (await dd.query(`select tablename from pg_tables where schemaname = 'public' order by 1`)).rows) {
+      if (skip[t] === true) continue
+      out[t] = (await dd.query(`select * from public."${t}"`)).rows
+        .map(r => { const o = { ...r }; for (const c of skip[t] ?? []) delete o[c]; return asJson(o) }).sort()
+    }
+    return asJson(out)
+  }
+  // Every column with its type, not-null flag and default, every constraint as
+  // Postgres states it, every index, view, function and trigger in public.
+  const objectDump = async (dd = d) => asJson({
+    columns:     (await dd.query(`select table_name, column_name, data_type, is_nullable, column_default
+                                    from information_schema.columns where table_schema = 'public' order by 1, 2`)).rows,
+    constraints: (await dd.query(`select conrelid::regclass::text as t, conname, pg_get_constraintdef(oid) as d
+                                    from pg_constraint where connamespace = 'public'::regnamespace order by 1, 2`)).rows,
+    indexes:     (await dd.query(`select tablename, indexname, indexdef from pg_indexes where schemaname = 'public' order by 1, 2`)).rows,
+    views:       (await dd.query(`select viewname, definition from pg_views where schemaname = 'public' order by 1`)).rows,
+    functions:   (await dd.query(`select proname, pg_get_function_identity_arguments(oid) as a from pg_proc
+                                   where pronamespace = 'public'::regnamespace order by 1, 2`)).rows,
+    triggers:    (await dd.query(`select tgrelid::regclass::text as t, tgname from pg_trigger where not tgisinternal order by 1, 2`)).rows,
+  })
+  const archives = async (dd = d) => (await dd.query(`select nspname from pg_namespace where nspname like 'archive%' order by 1`)).rows.map(r => r.nspname)
+  const everything = async (dd = d) => await dataDump(dd) + await objectDump(dd) + asJson(await archives(dd))
+  const theKey = async (dd = d) => (await dd.query(`select value from admin_config where key = 'curriculum_reset_at'`)).rows[0]?.value ?? null
+
+  // ════════════════════════════ 23 ════════════════════════════
+  console.log(`\n=== 23. v103: what the switch needs, added beside what exists${tag} ===`)
+  const v103 = read(V103F)
+  const undo103 = undoText('2026_v103_undo.sql')
+  const SNAPSKIP = { daily_progress_snapshots: ['created_at'] }
+  const viewRows = async () => asJson({
+    counts: await Q(`select student_id::text, completed_count from student_progress_counts order by 1`),
+    region: await Q(`select student_id::text, current_region from student_current_region order by 1`) })
+  const snapNumbers = async () => {
+    await d.query(`select public.rebuild_daily_snapshots(current_date - 1, current_date)`)
+    return asJson(await Q(`select snapshot_date::text, active_students, total_completions, avg_progress::text,
+                                  avg_progress_cohort::text, active_count, joined_count, churned_count, total_lessons
+                             from daily_progress_snapshots where snapshot_date >= current_date - 1 order by 1`))
+  }
+  const facts103 = async () => one(`select
+      exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'student_milestones'
+                and column_name = 'playbook_unlocked_at' and data_type = 'timestamp with time zone') as playbook,
+      (select string_agg(column_name || ':' || data_type, ',' order by column_name) from information_schema.columns
+        where table_schema = 'public' and table_name = 'regions' and column_name in ('landmark_label', 'rail_at')) as area_cols,
+      (select data_type from information_schema.columns where table_schema = 'public'
+          and table_name = 'student_last_counted_completion' and column_name = 'last_completed_at') as view_type,
+      (select reloptions::text from pg_class where oid = to_regclass('public.student_last_counted_completion')) as view_opts,
+      has_table_privilege('anon', 'public.student_last_counted_completion', 'select') as anon_reads,
+      has_table_privilege('authenticated', 'public.student_last_counted_completion', 'select') as students_read,
+      (select tgtype from pg_trigger where tgname = 'trg_daily_snapshots_reset_floor' and not tgisinternal) as tgtype,
+      (select prosecdef from pg_proc where proname = 'daily_snapshots_reset_floor') as definer`)
+
+  const start = await one(`select (select count(*)::int from lessons_next) as staged,
+                                  exists (select 1 from lessons where id = 'l078') as old_live,
+                                  (select count(*)::int from admin_config where key = 'curriculum_reset_at') as keys`)
+  if (!(start.staged === 141 && start.old_live && start.keys === 0)) {
+    say(false, 'section 23 needs v101 applied, the old course live and no switch', asJson(start))
+    return
+  }
+
+  const numbersBefore = await snapNumbers()
+  const viewsBefore = await viewRows()
+  const objectsBefore103 = await objectDump()
+  const dataBefore103 = await dataDump(d, SNAPSKIP)
+
+  let r = await runFile(d, v103)
+  say(r.ok && r.rows.length === 1 && ['playbook_column', 'area_columns', 'last_counted_view', 'view_security_invoker', 'snapshot_floor']
+        .every(c => r.rows[0][c] === true) && r.rows[0].switch === 'not yet: the switch has not run',
+      'v103 first run: its result row says the four are there and the switch has not run', r.ok ? asJson(r.rows[0]) : said(r))
+  let f = await facts103()
+  // tgtype bits: 1 row, 2 before, 4 insert, 8 delete, 16 update.
+  say(f.playbook && f.area_cols === 'landmark_label:text,rail_at:numeric' && f.view_type === 'timestamp with time zone'
+        && f.tgtype === (1 | 2 | 4 | 8 | 16) && f.definer === true,
+      'the four objects: playbook_unlocked_at timestamptz, regions.landmark_label text and rail_at numeric, the view, the floor (before insert, update or delete, for each row, security definer)',
+      asJson(f))
+  say(f.view_opts === '{security_invoker=on}' && f.anon_reads === false && f.students_read === true,
+      'the view is hardened like student_progress_counts: security_invoker on, authenticated reads it, anon does not', asJson(f))
+  say(await viewRows() === viewsBefore, 'every row of student_progress_counts and student_current_region is identical after v103')
+  say(await snapNumbers() === numbersBefore, 'the snapshot RPC returns the same numbers after v103')
+
+  {
+    const objects = await objectDump(), data = await dataDump(d, SNAPSKIP)
+    r = await runFile(d, v103)
+    say(r.ok && await objectDump() === objects && await dataDump(d, SNAPSKIP) === data,
+        'v103 run again: every object and every row unchanged', said(r))
+  }
+
+  // The view's value, on fixtures inside a transaction that is rolled back.
+  {
+    const V = n => `c2000000-0000-0000-0000-00000000000${n}`
+    const got = await d.transaction(async tx => {
+      await tx.exec(`
+        insert into students (id, supabase_user_id, first_paid_at, whop_plan_id, membership_status)
+        select ('c2000000-0000-0000-0000-00000000000' || n)::uuid, ('c2000000-0000-0000-0000-00000000000' || n)::uuid,
+               '2026-06-01 10:00:00+00', 'plan_4ZrwR4PmBsVsx', 'active' from generate_series(1, 4) n;
+        insert into student_lesson_completions (student_id, lesson_id, completed_at, action_completed_at, skipped_at) values
+          ('${V(1)}', 'l001', '2026-07-01 10:00:00+00', null, null),
+          ('${V(1)}', 'l002', '2026-07-03 10:00:00+00', null, null),
+          ('${V(1)}', 'l057', '2026-07-09 10:00:00+00', null, null),
+          ('${V(2)}', 'l004', null, null, '2026-07-05 10:00:00+00'),
+          ('${V(3)}', 'l008', '2026-07-06 10:00:00+00', null, null),
+          ('${V(4)}', 'l008', '2026-07-06 10:00:00+00', '2026-07-08 10:00:00+00', null);`)
+      const rows = (await tx.query(`select student_id::text as s, last_completed_at from student_last_counted_completion
+                                     where student_id::text like 'c2000000%' order by 1`)).rows
+      await tx.rollback()
+      return rows
+    }).catch(e => [{ s: e.message }])
+    say(got.length === 2 && got[0].s === V(1) && got[0].last_completed_at?.toISOString() === '2026-07-03T10:00:00.000Z'
+          && got[1].s === V(4) && got[1].last_completed_at?.toISOString() === '2026-07-06T10:00:00.000Z',
+        "the view: the latest completed_at of counting done lessons (a later l057 does not count); a skipped-only student and a compound lesson half done give no row; both halves done gives its completed_at",
+        got.map(x => `${x.s.slice(-1)}:${x.last_completed_at?.toISOString?.() ?? x.s}`).join(' '))
+  }
+
+  // The undo of v103: refuses while the switch is in place, else takes it all back.
+  {
+    await d.exec(`insert into admin_config (key, value) values ('curriculum_reset_at', '2026-10-20T18:25:00.000Z');`)
+    const was = await everything()
+    r = await runFile(d, undo103)
+    say(refused(r, 'Run the undo of v104 first') && await everything() === was,
+        'the undo of v103 refuses while curriculum_reset_at exists, and changes nothing', said(r))
+    await d.exec(`delete from admin_config where key = 'curriculum_reset_at';`)
+    r = await runFile(d, undo103)
+    say(r.ok && r.rows.length === 1 && Object.values(r.rows[0]).every(v => v === true)
+          && await objectDump() === objectsBefore103 && await dataDump(d, SNAPSKIP) === dataBefore103,
+        'the undo of v103: every object and every row equals the dump taken before v103, and its result row is all true', said(r))
+    r = await runFile(d, undo103)
+    say(r.ok && await objectDump() === objectsBefore103, 'a second undo changes nothing', said(r))
+    r = await runFile(d, v103)
+    say(r.ok, 'v103 applies again after its undo', said(r))
+  }
+
+  // ── the floor (the backstop of cutover WI-6) ──
+  {
+    const D = (await one(`select (now() at time zone 'UTC')::date::text as d`)).d
+    const snaps = async () => asJson(await Q(`select * from daily_progress_snapshots order by snapshot_date`))
+    const rpc = (from, to) => raisesOn(d, `select public.rebuild_daily_snapshots(${from}, ${to})`)
+    // Without the key: every write as before, today and earlier.
+    let e = await rpc('current_date - 2', 'current_date')
+    say(e === null && (await one(`select count(*)::int as n from daily_progress_snapshots where snapshot_date >= current_date - 2`)).n === 3,
+        'without the key the floor does nothing: a rebuild over the last 3 days runs and writes its 3 rows', e?.message ?? '')
+    e = await raisesOn(d, `update daily_progress_snapshots set active_students = active_students where snapshot_date = current_date - 1`)
+    const e2 = await raisesOn(d, `delete from daily_progress_snapshots where snapshot_date = current_date - 30`)
+    say(e === null && e2 === null, '...and an update of yesterday\'s row and a delete of an older one go through', (e ?? e2)?.message ?? '')
+
+    // The key at day D (today, UTC).
+    await d.exec(`insert into admin_config (key, value) values ('curriculum_reset_at', '${D}T00:00:01.000Z');`)
+    let before = await snaps()
+    e = await rpc('current_date - 2', 'current_date')
+    say(e?.code === '22023' && /from before the course switch of/.test(e.message) && /Nothing was changed\.$/.test(e.message)
+          && await snaps() === before,
+        'with the key at day D: a rebuild from D-2 raises 22023 and leaves every row as it was', e ? `${e.code}: ${e.message.slice(0, 80)}` : 'it ran')
+    e = await rpc('current_date', 'current_date')
+    const today = await one(`select count(*)::int as n, max(created_at) > now() - interval '1 minute' as fresh
+                               from daily_progress_snapshots where snapshot_date = current_date`)
+    say(e === null && today.n === 1 && today.fresh === true,
+        '...a rebuild from D runs and writes the row for D', e?.message ?? asJson(today))
+    before = await snaps()
+    const upd = await raisesOn(d, `update daily_progress_snapshots set active_students = active_students where snapshot_date = current_date - 1`)
+    const del = await raisesOn(d, `delete from daily_progress_snapshots where snapshot_date = current_date - 1`)
+    const gap = (await one(`select min(g)::date::text as g from generate_series(current_date - 29, current_date - 3, interval '1 day') g
+                             where not exists (select 1 from daily_progress_snapshots s where s.snapshot_date = g::date)`)).g
+    const ins = gap ? await raisesOn(d, `insert into daily_progress_snapshots (snapshot_date, active_students, total_completions, avg_progress)
+                                          values ('${gap}', 0, 0, 0)`) : { code: 'no day free' }
+    const moveIn = await raisesOn(d, `update daily_progress_snapshots set snapshot_date = current_date - 5 where snapshot_date = current_date`)
+    say([upd, del, ins, moveIn].every(x => x?.code === '22023') && await snaps() === before,
+        '...an update and a delete of the row for D-1, an insert for a missing earlier day, and moving the row of D back in time each raise 22023, and change nothing',
+        [upd, del, ins, moveIn].map(x => x?.code ?? 'went through').join(' '))
+    e = await raisesOn(d, `update daily_progress_snapshots set active_students = active_students where snapshot_date = current_date`)
+    say(e === null, '...and the row for D itself can still be changed', e?.message ?? '')
+    await d.exec(`delete from admin_config where key = 'curriculum_reset_at';`)
+    e = await rpc('current_date - 2', 'current_date')
+    say(e === null, 'with the key gone the floor is inert again: the rebuild from D-2 runs', e?.message ?? '')
+  }
+
+  // ════════════════════════════ 24 ════════════════════════════
+  console.log(`\n=== 24. v104: the switch, its guards, its undo, and the two diagnostics${tag} ===`)
+  const v104 = read(V104F)
+  const undo104 = undoText('2026_v104_undo.sql')
+  const preflight = diagnostic('cutover-preflight.sql')
+  const postcheck = diagnostic('cutover-postcheck.sql')
+
+  // The seam, widened: on Supabase a new table is born readable by the API
+  // roles. Here every new table and schema is, wherever it is made, so the
+  // assertions on archive_v1 measure v104's REVOKE and nothing else.
+  await d.exec(`alter default privileges grant all on tables to anon, authenticated, service_role;
+                alter default privileges grant usage on schemas to anon, authenticated, service_role;
+                create schema _born_open; create table _born_open.t (id int);`)
+  {
+    const b = await one(`select has_schema_privilege('anon', '_born_open', 'usage') as s, has_table_privilege('anon', '_born_open.t', 'select') as t`)
+    await d.exec(`drop schema _born_open cascade;`)
+    say(b.s === true && b.t === true, 'harness seam: a new schema and a new table outside public are born open to anon', asJson(b))
+  }
+
+  // ── fixtures ──
+  const G = n => `c1000000-0000-0000-0000-00000000000${n}`
+  const counting = (await one(`select count(*)::int as n from lessons where counts_toward_progress`)).n
+  const need = Math.ceil(0.8 * counting)
+  const pool = (await Q(`select id from lessons where id <> 'l078' order by id`)).map(x => x.id)
+  const TEMPLATE = { region: 'c3000000-0000-0000-0000-000000000001', days: 'c3000000-0000-0000-0000-000000000002',
+                     override: 'c3000000-0000-0000-0000-000000000003', plain: 'c3000000-0000-0000-0000-000000000004' }
+  const doneRows = (st, ids) => ids.map(id => `('${st}', '${id}', '2026-07-01 10:00:00+00', '2026-07-01 11:00:00+00', null)`).join(',\n')
+  await d.exec(`
+    insert into students (id, supabase_user_id, first_paid_at, whop_plan_id, membership_status)
+    select ('c1000000-0000-0000-0000-00000000000' || n)::uuid, ('c1000000-0000-0000-0000-00000000000' || n)::uuid,
+           case when n = 2 then now() - interval '10 days' else '2026-06-01 10:00:00+00' end,
+           'plan_4ZrwR4PmBsVsx', 'active' from generate_series(1, 4) n;
+    -- G1 graduates by l078; G2 at 80% on day 10; G3 one lesson short; G4 is in
+    -- none of that and has no first login.
+    insert into student_lesson_completions (student_id, lesson_id, completed_at, action_completed_at, skipped_at) values
+      ('${G(1)}', 'l078', '2026-07-02 10:00:00+00', null, null),
+      ('${G(1)}', 'l001', '2026-07-01 10:00:00+00', null, null),
+      ${doneRows(G(2), pool.slice(0, need))},
+      ${doneRows(G(3), pool.slice(0, need - 1))},
+      ('${G(4)}', 'l002', '2026-06-20 10:00:00+00', null, null),
+      ('${G(4)}', 'l003', null, null, '2026-06-15 09:00:00+00');
+    insert into student_milestones (student_id, first_sprint_login_at, first_dashboard_login_at) values
+      ('${G(1)}', '2026-06-01 12:00:00+00', null),
+      ('${G(3)}', '2026-06-01 12:00:00+00', null),
+      ('${G(4)}', null, '2026-06-14 08:00:00+00');
+    insert into lesson_notes (student_id, lesson_id, content) values ('${G(1)}', 'l001', 'a note on the old course');
+    insert into student_lesson_ratings (student_id, lesson_id, stars, comment) values ('${G(3)}', 'l002', 4, 'good');
+    insert into quizzes (id, region_id, title) values ('cut_quiz_r1', 'r1', 'Foundation quiz');
+    insert into quiz_questions (quiz_id, sort_order, question, options, correct_index) values
+      ('cut_quiz_r1', 1, 'Which?', '["a","b"]', 0);
+    insert into student_quiz_attempts (student_id, quiz_id, score, total, passed, answers) values
+      ('${G(1)}', 'cut_quiz_r1', 1, 1, true, '[]');
+    insert into student_region_quiz (student_id, region_id, quiz_passed_at, quiz_attempts) values ('${G(1)}', 'r1', now(), 1);
+    insert into templates (id, scenario_id, bucket, title, trigger_description, is_custom, trigger_config) values
+      ('${TEMPLATE.region}',   'custom.cut_region', 'at_risk',  'Region custom',   'x', true,
+         '{"all":[{"metric":"region_lessons_watched","region":"r1","op":"at_least","value":3}]}'),
+      ('${TEMPLATE.days}',     'custom.cut_days',   'at_risk',  'Days custom',     'x', true,
+         '{"all":[{"metric":"days_since_last_completion","op":"at_least","value":5}]}'),
+      ('${TEMPLATE.override}', 'stalled.cut_mid',   'at_risk',  'Built-in, tuned', 'x', false,
+         '{"all":[{"metric":"progress_ratio","op":"at_most","value":0.2}]}'),
+      ('${TEMPLATE.plain}',    'nolessons.cut3',    'at_risk',  'Built-in',        'x', false, null);
+    insert into tasks (student_id, scenario_id, template_id, status, notes) values
+      ('${G(1)}', 'nolessons.day3',    null, 'open', null),
+      ('${G(1)}', 'noship.r1.day7',    null, 'open', 'Called once.'),
+      ('${G(2)}', 'pace.day7',         null, 'open', null),
+      ('${G(3)}', 'welcome.day1',      null, 'open', null),
+      ('${G(4)}', 'custom.cut_region', '${TEMPLATE.region}', 'open', null),
+      ('${G(3)}', 'custom.cut_days',   '${TEMPLATE.days}',   'open', null);
+    insert into disengagement_alerts (student_id, alert_type, message) values
+      ('${G(1)}', 'no_tasks_7d', 'x'), ('${G(2)}', 'no_lessons_3d', 'x'), ('${G(3)}', 'no_login_5d', 'x');
+    insert into student_lesson_watch (student_id, lesson_id) values ('${G(1)}', 'l004');
+    insert into lesson_videos (lesson_id, tella_video_id) values ('l004', '${CUTFAKE(1)}'), ('a1l01', '${CUTFAKE(2)}')
+      on conflict (lesson_id) do nothing;
+    update lessons_next set duration_seconds = coalesce(duration_seconds, 756) where id = 'a1l01';
+    insert into achievements (id, name) values ('first_lesson', 'First Lesson'), ('r1_clear', 'R1 Clear') on conflict (id) do nothing;
+    insert into student_achievements (student_id, achievement_id) values ('${G(1)}', 'first_lesson'), ('${G(1)}', 'r1_clear');`)
+
+  // What the switch should do, worked out here from the rows and not from its SQL.
+  const countsNow = async () => {
+    const out = {}
+    for (const t of ARCHIVED_WHOLE) out[t] = (await one(`select count(*)::int as n from public."${t}"`)).n
+    out.student_lesson_watch = (await one(`select count(*)::int as n from student_lesson_watch where lesson_id not in (select id from lessons_next)`)).n
+    out.lesson_videos = (await one(`select count(*)::int as n from lesson_videos where lesson_id not in (select id from lessons_next)`)).n
+    return out
+  }
+  const expectations = async () => {
+    const rows = await Q(`select c.student_id::text as s, c.completed_at, c.action_completed_at, c.skipped_at, l.requires_action, l.feature_key
+                            from student_lesson_completions c join lessons l on l.id = c.lesson_id`)
+    const n = (await one(`select count(*)::int as n from lessons where counts_toward_progress`)).n
+    const per = {}, first = {}
+    for (const x of rows) {
+      const p = per[x.s] ??= { done: 0, l078: false }
+      if (doneJs(x)) { p.done++; if (x.feature_key === 'playbook_unlock') p.l078 = true }
+      const ts = [x.completed_at, x.skipped_at, x.action_completed_at].filter(Boolean).map(t => t.getTime())
+      if (ts.length) first[x.s] = Math.min(first[x.s] ?? Infinity, ...ts)
+    }
+    const ms = Object.fromEntries((await Q(`select student_id::text as s, first_sprint_login_at as f from student_milestones`)).map(m => [m.s, m.f]))
+    const grads = Object.keys(per).filter(s => per[s].l078 || per[s].done >= Math.ceil(0.8 * n)).sort()
+    const logins = Object.fromEntries(Object.keys(first).filter(s => !ms[s]).sort().map(s => [s, first[s]]))
+    const offTemplates = (await Q(`select id::text from templates where is_active and exists (
+        select 1 from jsonb_array_elements(case when jsonb_typeof(trigger_config -> 'all') = 'array' then trigger_config -> 'all' else '[]' end) e
+         where e ? 'lesson_id' or e ? 'region' or e ->> 'metric' in ('progress_ratio', 'progress_label', 'region_pace')) order by 1`)).map(x => x.id)
+    const tasks = (await Q(`select id::text, scenario_id, template_id::text as t from tasks where status = 'open'`))
+      .filter(k => /^(nolessons|noship|pace)\./.test(k.scenario_id) || offTemplates.includes(k.t)).map(k => k.id).sort()
+    const alerts = (await Q(`select id::text from disengagement_alerts
+                              where not is_dismissed and alert_type in ('no_tasks_7d', 'no_lessons_3d')`)).map(a => a.id).sort()
+    const videosByArea = Object.fromEntries((await Q(`select n.region_id as a, count(v.lesson_id)::int as k from lessons_next n
+        left join lesson_videos v on v.lesson_id = n.id group by 1`)).map(x => [x.a, x.k]))
+    return { grads, logins, offTemplates, tasks, alerts, videosByArea, counts: await countsNow() }
+  }
+  const milestoneOf = async s => await one(`select playbook_unlocked_at, first_sprint_login_at from student_milestones where student_id = $1`, [s])
+
+  // ── the two diagnostics, before the switch ──
+  {
+    const was = await everything()
+    const pre = await runFile(d, preflight)
+    const post = await runFile(d, postcheck)
+    const want = await expectations()
+    const row = item => pre.rows.find(x => x.item === item)?.found
+    say(pre.ok && post.ok && await everything() === was,
+        'before the switch: the preflight and the postcheck both run, and change nothing (every table, object and schema identical)',
+        pre.ok ? (post.ok ? '' : said(post)) : said(pre))
+    say(pre.ok && pre.rows.filter(x => x.part === 'a. keys' && x.expect === 'one of the six').length === 6
+          && row('keys into lessons and regions') === '6, of them the six: 6'
+          && row('not-null columns the copy leaves empty') === 'none'
+          && row('graduates the switch stamps') === String(want.grads.length)
+          && row('first logins the switch fills in') === String(Object.keys(want.logins).length)
+          && row('open tasks the switch dismisses') === String(want.tasks.length)
+          && row('open alerts the switch dismisses') === String(want.alerts.length)
+          && row('templates the switch turns off') === String(want.offTemplates.length)
+          && row('student_lesson_completions') === String(want.counts.student_lesson_completions)
+          && row('lesson_videos (old lessons)') === String(want.counts.lesson_videos)
+          && row('the gate') === 'a4l17' && row('with a Whop lesson id / distinct') === '141 / 141'
+          && row('v103 ran (the column, the two area columns, the view, the floor)') === 'yes'
+          && row('schema archive_v1') === 'absent' && row('admin_config curriculum_reset_at') === 'absent',
+        "the preflight's rows: the six keys, nothing left empty, and graduates, logins, tasks, alerts, templates and archive counts as worked out here",
+        pre.ok ? `grads ${row('graduates the switch stamps')}/${want.grads.length}, tasks ${row('open tasks the switch dismisses')}/${want.tasks.length}` : said(pre))
+    say(post.ok && post.rows.length > 0 && post.rows.every(x => x.verdict === 'NOT SWITCHED'),
+        'the postcheck before the switch says NOT SWITCHED on every row', post.ok ? [...new Set(post.rows.map(x => x.verdict))].join(',') : said(post))
+  }
+
+  // ── the guards: one copy of the database per broken starting point ──
+  {
+    const idx = (await one(`select indexdef from pg_indexes where indexname = 'lessons_next_whop_lesson_id_key'`))?.indexdef
+    const cases = [
+      ['v103 absent',                    undo103, 'Migration 2026_v103_cutover_expand.sql has not run here'],
+      ['lesson_videos absent (v100)',    `alter table lesson_videos rename to lesson_videos_aside;`, 'public.lesson_videos does not exist'],
+      ['a placeholder title in lessons_next', `update lessons_next set title = 'Introduction · lesson 1' where id = 'a1l01';`,
+                                         'placeholder lessons'],
+      ['a lesson without its Whop id',   `update lessons_next set whop_lesson_id = null where id = 'a3l07';`,
+                                         'have no Whop lesson id: a3l07.'],
+      ['one Whop id on two lessons',     `drop index lessons_next_whop_lesson_id_key;
+                                          update lessons_next set whop_lesson_id = (select whop_lesson_id from lessons_next where id = 'a3l07') where id = 'a3l08';`,
+                                         'are on more than one lesson of public.lessons_next'],
+      ['7 areas',                        `delete from regions_next where id = 'a8';`,
+                                         'it holds: a1:1, a2:2, a3:3, a4:4, a5:5, a6:6, a7:7.'],
+      ['lessons already holding a1l01',  `insert into lessons (id, region_id, day, type, title, sort_order) values ('a1l01', 'r1', 1, 'watch', 'Early copy', 500);`,
+                                         'already holds lessons of the new course (a1l01)'],
+      ['a seventh key into lessons',     `create table public.lesson_bookmarks (student_id uuid, lesson_id text references lessons (id));`,
+                                         'Found: lesson_bookmarks.lesson_id, lesson_notes.lesson_id, lessons.region_id'],
+      ['archive_v1 present',             `create schema archive_v1;`, 'An archive from an earlier switch is still here'],
+      ['a not-null column the copy leaves empty', `alter table lessons add column must_say text not null default 'x';
+                                                   alter table lessons alter column must_say drop default;`, 'the copy does not fill them: lessons.must_say.'],
+    ]
+    for (const [what, breakIt, sentence] of cases) {
+      const c = await d.clone()
+      const broke = await runFile(c, breakIt)
+      const was = await everything(c)
+      const rr = await runFile(c, v104)
+      say(broke.ok && refused(rr, sentence) && await everything(c) === was
+            && sameJson(await archives(c), what === 'archive_v1 present' ? ['archive_v1'] : []),
+          `v104 refuses with ${what}: it says so, and every table, object and schema is identical afterwards`,
+          broke.ok ? said(rr) : `the break failed: ${said(broke)}`)
+      await c.close()
+    }
+    say(!!idx, '(the unique index on lessons_next.whop_lesson_id was there to be dropped in the copy)', idx ?? 'missing')
+  }
+
+  // ── the switch ──
+  // Checked after the first run and again after the switch that follows the
+  // undo. `want` is worked out before each run.
+  const switchHolds = async (r, want, labelOf) => {
+    const reset = await theKey()
+    const meta = await one(`select to_char(reset_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as at, ran_by, counts from archive_v1.meta`)
+    say(r.ok && r.cols.join(',') === SWITCH_COLS && r.rows.length === 20 && r.rows[0].value === `The switch ran now, at ${reset}.`,
+        labelOf('its result table: 20 rows, the first saying the switch ran now'), r.ok ? r.rows[0].value : said(r))
+    const areaWant = COURSE.areas.map(a => {
+      const ls = COURSE.lessons.filter(l => l.area === a.id)
+      return [a.id, a.name, ls.length, ls.filter(l => l.counts !== false).length, ls.filter(l => 'action_brief' in l).length,
+              want.videosByArea[a.id] ?? 0, ls.length]
+    })
+    const areaGot = r.ok ? r.rows.slice(1, 9).map(x => [x.line, x.name, x.lessons, x.counting, x.action_items, x.with_video, x.with_whop_id]) : []
+    const tot = r.rows[9] ?? {}
+    say(sameJson(areaGot, areaWant) && tot.line === 'total' && tot.lessons === 141 && tot.counting === 140 && tot.action_items === 9 && tot.with_whop_id === 141,
+        labelOf("...one row per area as the data file has it, with a Whop id on every lesson, and a total of 141, 140 counting, 9 action items"),
+        areaGot.map(x => `${x[0]}:${x[2]}/${x[5]}v`).join(' '))
+    const sum = Object.fromEntries((r.rows ?? []).slice(10).map(x => [x.line, x.value]))
+    say(sum.reset_at === reset && sum.archived_completions === String(want.counts.student_lesson_completions)
+          && sum.archived_notes === String(want.counts.lesson_notes) && sum.archived_ratings === String(want.counts.student_lesson_ratings)
+          && sum.archived_badges === String(want.counts.student_achievements) && sum.graduates_stamped === String(want.grads.length)
+          && sum.logins_backfilled === String(Object.keys(want.logins).length) && sum.tasks_dismissed === String(want.tasks.length)
+          && sum.alerts_dismissed === String(want.alerts.length) && sum.templates_deactivated === String(want.offTemplates.length),
+        labelOf('...and its summary rows are the counts worked out here before the run'), asJson(sum))
+    say(ISO_Z.test(reset ?? '') && meta?.at === reset && Math.abs(Date.parse(reset) - Date.now()) < 120000 && !!meta.ran_by,
+        labelOf('admin_config curriculum_reset_at holds the moment in UTC (like 2026-10-20T18:25:00.000Z), the same as archive_v1.meta'), `${reset} ran_by=${meta?.ran_by}`)
+    const metaCounts = meta?.counts ?? {}
+    const archived = {}
+    for (const t of Object.keys(want.counts)) archived[t] = (await one(`select count(*)::int as n from archive_v1."${t}"`)).n
+    say(sameJson(archived, want.counts) && Object.keys(want.counts).every(t => Number(metaCounts[t]) === want.counts[t]),
+        labelOf('every archive copy holds what the live table held before the run, and meta says the same'), asJson(archived))
+    say(asJson(await Q(`select ${LESSON_COPY} from lessons order by id`)) === asJson(await Q(`select ${LESSON_COPY} from lessons_next order by id`))
+          && asJson(await Q(`select ${REGION_COPY} from regions order by id`)) === asJson(await Q(`select ${REGION_COPY} from regions_next order by id`)),
+        labelOf('lessons and regions equal lessons_next and regions_next on every copied column: Whop ids, lengths, texts, gate and feature keys'))
+    const left = {}
+    for (const t of WIPED) left[t] = (await one(`select count(*)::int as n from public."${t}"`)).n
+    say(Object.values(left).every(n => n === 0), labelOf('every progress table is empty'), asJson(left))
+    const ach = (await Q(`select id from achievements order by id`)).map(x => x.id)
+    say(!ach.some(a => RETIRED.includes(a)) && sameJson(ach, want.achievements.filter(a => !RETIRED.includes(a))),
+        labelOf('achievements lacks the six retired badges and keeps every other'), ach.join(','))
+    // stamps
+    const stamped = (await Q(`select student_id::text as s from student_milestones where playbook_unlocked_at is not null order by 1`)).map(x => x.s)
+    const stampAt = (await Q(`select distinct playbook_unlocked_at from student_milestones where playbook_unlocked_at is not null`))
+    const g = await Promise.all([1, 2, 3, 4].map(n => milestoneOf(G(n))))
+    say(sameJson(stamped, want.grads) && stamped.includes(G(1)) && stamped.includes(G(2)) && !stamped.includes(G(3)) && !stamped.includes(G(4))
+          && stampAt.length === 1 && stampAt[0].playbook_unlocked_at.toISOString() === reset,
+        labelOf('the Playbook is stamped at the moment on exactly the graduates worked out here: the one by l078 and the one at 80% on day 10, not the one at 79%'),
+        `${stamped.length} stamped`)
+    const loginsGot = Object.fromEntries((await Q(`select m.student_id::text as s, m.first_sprint_login_at as f from student_milestones m
+                                                    join archive_v1.stamps s on s.student_id = m.student_id where s.set_first_login order by 1`))
+                                          .map(x => [x.s, x.f.getTime()]))
+    say(sameJson(loginsGot, want.logins) && g[3]?.first_sprint_login_at?.toISOString() === '2026-06-15T09:00:00.000Z'
+          && g[0]?.first_sprint_login_at?.toISOString() === '2026-06-01T12:00:00.000Z' && g[2]?.first_sprint_login_at?.toISOString() === '2026-06-01T12:00:00.000Z',
+        labelOf("first logins filled in on exactly the students worked out here; the fourth gets the earliest of its times (a skip at 09:00 on 15 June); the two who had one keep theirs"),
+        `${Object.keys(loginsGot).length} filled`)
+    const created = (await one(`select string_agg(student_id::text, ',') as s from archive_v1.stamps where not row_existed and student_id::text like 'c1%'`)).s
+    say(created === G(2), labelOf('of the fixtures, only the graduate with no milestone row had one created for it'), created ?? 'none')
+    // CSM
+    const tasks = Object.fromEntries((await Q(`select scenario_id, status, notes, dismissed_at from tasks where student_id::text like 'c1%'`))
+                                     .map(k => [k.scenario_id, k]))
+    const NOTE = "Dismissed by the course switch: the old course's progress was reset."
+    const gone = ['nolessons.day3', 'noship.r1.day7', 'pace.day7', 'custom.cut_region']
+    say(gone.every(s => tasks[s]?.status === 'dismissed' && tasks[s].dismissed_at?.toISOString() === reset && tasks[s].notes?.endsWith(NOTE))
+          && tasks['noship.r1.day7']?.notes === `Called once.\n${NOTE}` && tasks['nolessons.day3']?.notes === NOTE
+          && tasks['welcome.day1']?.status === 'open' && tasks['custom.cut_days']?.status === 'open',
+        labelOf('tasks: nolessons, noship, pace and the one of the region template dismissed at the moment with the note (after a note that was there); welcome.day1 and the days-only template\'s task open'),
+        Object.entries(tasks).map(([s, k]) => `${s}:${k.status}`).join(' '))
+    const tmpl = Object.fromEntries((await Q(`select id::text, is_active from templates where id::text like 'c3%'`)).map(t => [t.id, t.is_active]))
+    say(tmpl[TEMPLATE.region] === false && tmpl[TEMPLATE.override] === false && tmpl[TEMPLATE.days] === true && tmpl[TEMPLATE.plain] === true,
+        labelOf('templates: the region one and the built-in with a progress_ratio override off; the days-only one and a built-in with no trigger on'), asJson(tmpl))
+    const alerts = Object.fromEntries((await Q(`select alert_type, is_dismissed, dismissed_at from disengagement_alerts where student_id::text like 'c1%'`))
+                                      .map(a => [a.alert_type, a]))
+    say(alerts.no_tasks_7d?.is_dismissed && alerts.no_lessons_3d?.is_dismissed && alerts.no_tasks_7d.dismissed_at?.toISOString() === reset
+          && alerts.no_login_5d?.is_dismissed === false,
+        labelOf('alerts: no_tasks_7d and no_lessons_3d dismissed, no_login_5d open'))
+    const l004 = await one(`select (select count(*)::int from student_lesson_watch where lesson_id = 'l004') as watch,
+                                   (select count(*)::int from lesson_videos where lesson_id = 'l004') as video,
+                                   (select count(*)::int from archive_v1.student_lesson_watch where lesson_id = 'l004') as watch_kept,
+                                   (select count(*)::int from archive_v1.lesson_videos where lesson_id = 'l004') as video_kept`)
+    say(l004.watch === 0 && l004.video === 0 && l004.watch_kept === 1 && l004.video_kept === 1
+          && asJson(await Q(`select * from lesson_videos where lesson_id = 'a1l01'`)) === want.a1l01video,
+        labelOf('the watch row and the video row on l004 are archived and gone; the video row on a1l01 is untouched'), asJson(l004))
+    // keys
+    const keys = await Q(`select conname, confdeltype, conrelid::regclass::text as t from pg_constraint
+                           where contype = 'f' and confrelid in ('public.lessons'::regclass, 'public.regions'::regclass) order by conname collate "C"`)
+    say(sameJson(keys.map(k => k.conname), SIX) && keys.every(k => k.confdeltype === 'r'),
+        labelOf('the keys: exactly the six names, all ON DELETE RESTRICT, and nothing else points at lessons or regions'), keys.map(k => k.conname).join(','))
+    const priv = await one(`select
+        bool_or(has_schema_privilege(r, 'archive_v1', 'usage')) as usage,
+        (select count(*)::int from pg_class c, aclexplode(c.relacl) a
+          where c.relnamespace = 'archive_v1'::regnamespace and a.grantee in ('anon'::regrole, 'authenticated'::regrole, 'service_role'::regrole)) as grants,
+        (select count(*)::int from pg_class where relnamespace = 'archive_v1'::regnamespace and relkind = 'r') as tables
+      from unnest(array['anon', 'authenticated', 'service_role']) r`)
+    // 14 copies, then meta, stamps, csm_changes, constraints, not_nulls.
+    say(priv.usage === false && priv.grants === 0 && priv.tables === 19,
+        labelOf('archive_v1: 19 tables, and anon, authenticated and service_role hold no usage on the schema and no grant on any table'), asJson(priv))
+    // no other archive got made
+    say(sameJson((await archives()).filter(n => n === 'archive_v1'), ['archive_v1']), labelOf('the schema archive_v1 exists'))
+  }
+
+  const wantFirst = await expectations()
+  wantFirst.achievements = (await Q(`select id from achievements order by id`)).map(x => x.id)
+  wantFirst.a1l01video = asJson(await Q(`select * from lesson_videos where lesson_id = 'a1l01'`))
+  const dataBefore104 = await dataDump(d, { daily_progress_snapshots: true, templates: ['updated_at'] })
+  const objectsBefore104 = await objectDump()
+
+  r = await runFile(d, v104)
+  say(r.ok, 'v104 first run executes', said(r))
+  if (!r.ok) return
+  await switchHolds(r, wantFirst, l => l)
+
+  // The keys and the index at work.
+  {
+    const e = await d.transaction(async tx => {
+      await tx.exec(`insert into student_lesson_completions (student_id, lesson_id, completed_at) values ('${G(1)}', 'a1l02', now());`)
+      const err = await tx.query(`delete from lessons where id = 'a1l02'`).then(() => null, x => x)
+      await tx.rollback()
+      return err
+    }).catch(x => x)
+    say(e?.code === '23503' && /fk_student_lesson_completions_lesson_id/.test(e.message ?? ''),
+        'deleting a lesson that has a completion is refused by fk_student_lesson_completions_lesson_id (RESTRICT)', e ? `${e.code}: ${e.message?.slice(0, 70)}` : 'it went through')
+    const w = await raisesOn(d, `update lessons set whop_lesson_id = (select whop_lesson_id from lessons where id = 'a3l07') where id = 'a3l08'`)
+    say(w?.code === '23505' && /lessons_whop_lesson_id_key/.test(w.message), 'an update giving two lessons one Whop id is refused by lessons_whop_lesson_id_key',
+        w ? `${w.code}` : 'it went through')
+  }
+
+  // The app's SQL after the switch.
+  {
+    const views = await one(`select (select count(*)::int from student_progress_counts) as counts,
+                                    (select count(*)::int from student_current_region) as regions`)
+    const e = await raisesOn(d, `select public.rebuild_daily_snapshots(current_date, current_date)`)
+    const snap = await one(`select total_lessons, total_completions, avg_progress::text as avg from daily_progress_snapshots where snapshot_date = current_date`)
+    await d.exec(`select set_config('test.uid', '${G(1)}', false);`)
+    const beat = await d.query(`select public.record_lesson_heartbeat('a1l01', 0, 756, 0, false) as j`).then(x => x.rows[0].j, x => ({ raised: x.message }))
+    const lesson = await one(`select type, duration_seconds from lessons where id = 'a1l01'`)
+    say(views.counts === 0 && views.regions === 0, 'after the switch student_progress_counts and student_current_region are empty', asJson(views))
+    say(e === null && snap?.total_lessons === 140 && snap.total_completions === 0,
+        'the snapshot RPC for today runs on the new catalog: 140 lessons count, 0 completions', e?.message ?? asJson(snap))
+    say(beat.accepted === true && lesson.type === 'watch' && lesson.duration_seconds > 0,
+        'the heartbeat RPC accepts a beat on a new watch lesson with a video row and a length (a1l01)', beat.raised ?? `accepted=${beat.accepted}`)
+  }
+
+  // admin-health.sql, INVARIANT 6, after the switch.
+  {
+    const health = diagnostic('admin-health.sql')
+    const at = health.indexOf('WITH total_lessons AS (', health.indexOf('-- INVARIANT 6'))
+    const END = 'FROM live_avg la CROSS JOIN snap;'
+    const inv6 = health.slice(at, health.indexOf(END, at) + END.length)
+    const total = inv6.slice(0, inv6.indexOf('),\ncohort AS')) + ')\nSELECT n::int AS n FROM total_lessons'
+    const v = await Q(inv6).catch(x => [{ verdict: x.message }])
+    const n = await Q(total).catch(() => [{ n: null }])
+    say(at > 0 && !inv6.includes("'l057'") && n[0]?.n === 140 && v[0]?.verdict === 'OK',
+        'admin-health.sql INVARIANT 6 after the switch: its denominator reads counts_toward_progress (140), and live and snapshot agree (OK)',
+        `${n[0]?.n} lessons, ${v[0]?.verdict}`)
+  }
+
+  // Run again.
+  {
+    const was = await everything()
+    const key = await theKey()
+    const rr = await runFile(d, v104)
+    say(rr.ok && rr.rows[0]?.value === `The switch is already in place since ${key}. This run changed nothing.` && rr.rows.length === 20
+          && await everything() === was,
+        'v104 run again: "The switch is already in place since <time>", the same table, and every table, object and schema identical', rr.ok ? rr.rows[0].value : said(rr))
+  }
+
+  // v101 after the switch (C20).
+  {
+    const was = await everything()
+    const rr = await runFile(d, read(V101F))
+    say(refused(rr, `The course is live in public.lessons since the switch of ${await theKey()}; this file changes only the staging tables.`)
+          && await everything() === was,
+        'v101 after the switch refuses: the course is live in public.lessons, and it changes nothing', said(rr))
+  }
+
+  // The two diagnostics after the switch, and the hand stamp.
+  {
+    const was = await everything()
+    const pre = await runFile(d, preflight)
+    const post = await runFile(d, postcheck)
+    say(pre.ok && post.ok && await everything() === was,
+        'after the switch: the preflight and the postcheck both run, and change nothing', pre.ok ? said(post) : said(pre))
+    const checks = post.rows.filter(x => x.verdict !== 'INFO')
+    say(post.ok && checks.length === 12 && checks.every(x => x.verdict === 'PASS') && post.rows.some(x => x.verdict === 'INFO')
+          && post.rows.find(x => x.item === 'watch rows with a heartbeat since / of them past 95%')?.found === '1 / 0',
+        "the postcheck's 12 checks all PASS, and its INFO rows count since the switch (the one heartbeat above)",
+        post.ok ? checks.filter(x => x.verdict !== 'PASS').map(x => `${x.item}: ${x.found}`).join(' | ') : said(post))
+    const optional = postcheck.slice(postcheck.indexOf('\n-- OPTIONAL')).split('\n').filter(l => /^--    /.test(l)).map(l => l.slice(2)).join('\n')
+    const c = await d.clone()
+    const blank = await runFile(c, optional)
+    const stampsOf = async () => asJson(await c.query(`select student_id::text, playbook_unlocked_at from student_milestones order by 1`).then(x => x.rows))
+    const before = await stampsOf()
+    const filled = await runFile(c, optional.replace('REPLACE_WITH_STUDENT_ID', G(3)))
+    const g3 = (await c.query(`select playbook_unlocked_at from student_milestones where student_id = '${G(3)}'`)).rows[0]?.playbook_unlocked_at
+    const g1Before = (await c.query(`select playbook_unlocked_at from student_milestones where student_id = '${G(1)}'`)).rows[0]?.playbook_unlocked_at
+    const again = await runFile(c, optional.replace('REPLACE_WITH_STUDENT_ID', G(1)))
+    const g1After = (await c.query(`select playbook_unlocked_at from student_milestones where student_id = '${G(1)}'`)).rows[0]?.playbook_unlocked_at
+    const others = asJson(JSON.parse(await stampsOf()).filter(x => x.student_id !== G(3)))
+    say(!blank.ok && filled.ok && again.ok && g3 instanceof Date && g1After?.getTime() === g1Before?.getTime()
+          && others === asJson(JSON.parse(before).filter(x => x.student_id !== G(3))),
+        "the postcheck's hand stamp: with its placeholder it fails; filled, it stamps that one student, keeps a stamp already there, and touches no other",
+        `blank ${said(blank)}`)
+    await c.close()
+  }
+
+  // Progress made after the switch, then the undo.
+  await d.exec(`
+    insert into student_lesson_completions (student_id, lesson_id, completed_at) values ('${G(1)}', 'a1l01', now());
+    insert into lesson_notes (student_id, lesson_id, content) values ('${G(1)}', 'a1l02', 'a note on the new course');
+    insert into student_achievements (student_id, achievement_id) values ('${G(1)}', 'first_lesson');`)
+  {
+    const rr = await runFile(d, undo104)
+    const row = rr.rows[0] ?? {}
+    say(rr.ok && /^archive_v1_undone_\d{8}_\d{4}$/.test(row.archive_renamed_to ?? '') && row.moved_completions === 1 && row.moved_notes === 1
+          && row.moved_badges === 1 && row.moved_watch_rows === 1 && row.restored_completions === wantFirst.counts.student_lesson_completions
+          && row.restored_notes === wantFirst.counts.lesson_notes && row.restored_badges === wantFirst.counts.student_achievements
+          && row.not_restored_student_gone === 0 && row.not_restored_video_taken === 0 && row.tasks_left_dismissed === 0
+          && row.tasks_reopened === wantFirst.tasks.length && row.alerts_reopened === wantFirst.alerts.length
+          && row.templates_reactivated === wantFirst.offTemplates.length,
+        'the undo runs: its row names the renamed archive, what moved to archive_v2 and what came back, with nothing left behind',
+        rr.ok ? asJson(row) : said(rr))
+    const v2 = await one(`select
+        (select count(*)::int from archive_v2.student_lesson_completions where lesson_id = 'a1l01' and student_id = '${G(1)}') as completion,
+        (select count(*)::int from archive_v2.lesson_notes where lesson_id = 'a1l02') as note,
+        (select count(*)::int from archive_v2.student_achievements where achievement_id = 'first_lesson' and student_id = '${G(1)}') as badge,
+        (select count(*)::int from archive_v2.student_lesson_watch where lesson_id = 'a1l01') as watch`).catch(x => ({ error: x.message }))
+    say(v2.completion === 1 && v2.note === 1 && v2.badge === 1 && v2.watch === 1,
+        'the completion, the note, the badge and the watch row made after the switch are in archive_v2', asJson(v2))
+    const dataNow = await dataDump(d, { daily_progress_snapshots: true, templates: ['updated_at'] })
+    let firstOff = ''
+    if (dataNow !== dataBefore104) {
+      const a = JSON.parse(dataBefore104), b = JSON.parse(dataNow)
+      firstOff = Object.keys({ ...a, ...b }).find(t => asJson(a[t]) !== asJson(b[t])) ?? ''
+    }
+    say(dataNow === dataBefore104,
+        'after the undo every table in public equals the dump taken before v104 (snapshot rows aside, and templates.updated_at, which its trigger stamps)',
+        firstOff ? `first difference in ${firstOff}` : '')
+    say(await objectDump() === objectsBefore104,
+        '...and every column with its not-null flag and default, every constraint definition (the six keys under their old names, the day and terrain checks), every index, view, function and trigger')
+    const sch = await archives()
+    say(!sch.includes('archive_v1') && sch.includes('archive_v2') && sch.some(n => /^archive_v1_undone_\d{8}_\d{4}$/.test(n)) && await theKey() === null,
+        'archive_v1 is renamed, archive_v2 holds the new-course rows, and curriculum_reset_at is gone', sch.join(','))
+  }
+
+  // The undo refuses.
+  {
+    let was = await everything()
+    let rr = await runFile(d, undo104)
+    say(refused(rr, 'admin_config holds no curriculum_reset_at') && await everything() === was,
+        'the undo refuses with no curriculum_reset_at, and changes nothing', said(rr))
+  }
+
+  // Switch again after the undo.
+  {
+    const wantAgain = await expectations()
+    wantAgain.achievements = (await Q(`select id from achievements order by id`)).map(x => x.id)
+    wantAgain.a1l01video = asJson(await Q(`select * from lesson_videos where lesson_id = 'a1l01'`))
+    const rr = await runFile(d, v104)
+    say(rr.ok && sameJson(wantAgain.grads, wantFirst.grads) && wantAgain.tasks.length === wantFirst.tasks.length,
+        'v104 runs again after the undo, on the same graduates and the same open tasks', said(rr))
+    if (rr.ok) await switchHolds(rr, wantAgain, l => `switch again: ${l}`)
+
+    let was = await everything()
+    let ur = await runFile(d, undo104)
+    say(refused(ur, 'The schema archive_v2 exists') && await everything() === was,
+        'the undo refuses while archive_v2 is present, and changes nothing', said(ur))
+    const c = await d.clone()
+    await c.exec(`alter schema archive_v1 rename to archive_v1_set_aside;`)
+    was = await everything(c)
+    ur = await runFile(c, undo104)
+    say(refused(ur, 'archive_v1.meta is missing') && await everything(c) === was,
+        'the undo refuses with archive_v1 missing, and changes nothing', said(ur))
+    await c.close()
+  }
+}
+
+await cutover(db, '')
+{
+  const d2 = await chainDatabase()
+  await cutover(d2, 'second database')
+  await d2.close()
 }
 
 console.log(`\n${'='.repeat(60)}\n  PASS ${ok.length}   FAIL ${fail.length}`)

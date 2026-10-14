@@ -189,11 +189,11 @@ FROM live CROSS JOIN snap;
 
 -- ==========================================================================
 -- avg_progress_live_vs_snapshot
--- INVARIANT 6: live cohort avg progress (canonical isLessonComplete via student_progress_counts view, l057 excluded) vs latest daily_progress_snapshots.avg_progress_cohort. Formula: Sum(completed_count over cohort) / (cohort_active_count * total_lessons) * 100. The view (supabase/migrations/2026_v81_canonical_progress_alignment.sql:39-59), the snapshot cron (snapshot-progress/route.ts:169-185,329-338), the RPC, and the dashboard (page.tsx:246-256) must all agree. If hitting Refresh changes the number, these formulas diverged.
+-- INVARIANT 6: live cohort avg progress (canonical isLessonComplete via student_progress_counts view, lessons outside the count excluded: counts_toward_progress, which on the old course is every lesson but l057 and on the new one every lesson but a7l19) vs latest daily_progress_snapshots.avg_progress_cohort. Formula: Sum(completed_count over cohort) / (cohort_active_count * total_lessons) * 100. The view (supabase/migrations/2026_v81_canonical_progress_alignment.sql:39-59), the snapshot cron (snapshot-progress/route.ts:169-185,329-338), the RPC, and the dashboard (page.tsx:246-256) must all agree. If hitting Refresh changes the number, these formulas diverged.
 -- EXPECTED: diff within ~1 point (rounding/timing), verdict OK. A larger gap means the canonical formula diverged across surfaces (the exact 'how is hitting Refresh changing the number' bug v81 fixed). Note: snapshot rounds to 2dp, dashboard rounds to integer — small diff is normal.
 -- ==========================================================================
 WITH total_lessons AS (
-  SELECT COUNT(*)::numeric AS n FROM lessons WHERE id <> 'l057'
+  SELECT COUNT(*)::numeric AS n FROM lessons WHERE counts_toward_progress
 ),
 cohort AS (
   SELECT id

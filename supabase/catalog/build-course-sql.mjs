@@ -347,6 +347,11 @@ const migration = `${RULE}
 --   keeps every one of them. A new lesson starts with none.
 --
 -- WHEN IT REFUSES, changing nothing
+--   * The course switch has happened (admin_config holds
+--     curriculum_reset_at, written by 2026_v104_course_switch.sql). The
+--     course is then live in lessons, and this file changes only the
+--     staging tables: run after the switch, it would look like it worked
+--     while nothing a student sees changed.
 --   * regions_next or lessons_next is missing (v94 has not run).
 --   * regions_next holds anything other than the 8 areas a1 to a8.
 --   * A row of lesson_videos or of student_lesson_watch points at a lesson
@@ -390,12 +395,22 @@ ${RULE}
 
 begin;
 
-${head('1. The two tables are there, and the areas are the eight')}
+${head('1. The switch has not happened, the two tables are there, and the areas are the eight')}
 
 do ${GUARD}
 declare
-  v_areas text;
+  v_switched text;
+  v_areas    text;
 begin
+  -- Read through to_regclass and execute, so the file runs the same way on a
+  -- database without admin_config.
+  if to_regclass('public.admin_config') is not null then
+    execute 'select value from public.admin_config where key = $1' into v_switched using 'curriculum_reset_at';
+    if v_switched is not null then
+      raise exception 'The course is live in public.lessons since the switch of %; this file changes only the staging tables. Nothing was changed.', v_switched;
+    end if;
+  end if;
+
   if to_regclass('public.regions_next') is null or to_regclass('public.lessons_next') is null then
     raise exception 'public.regions_next or public.lessons_next does not exist. Run migration 2026_v94_catalog_next_staging.sql first. Nothing was changed.';
   end if;

@@ -419,6 +419,33 @@ console.log('\n=== nolessons on course days: paid 20 days before the reset, logg
   ok(NEW.triggers['nolessons.day3'](snap) === null, 'course day 3 with 1 lesson since the switch: none')
 }
 
+console.log('\n=== day_number on course days after the reset ===')
+{
+  const firstPaidMs = RESET_MS - 20 * DAY
+  const dn = (s, op, value) => NEW.evaluateCustomTrigger(s, { all: [{ metric: 'day_number', op, value }] })
+  // The template the morning review's Q1 names: day at least 5 and 0 lessons.
+  const q1 = { all: [{ metric: 'day_number', op: 'at_least', value: 5 }, { metric: 'total_lessons_watched', op: 'is', value: 0 }] }
+  {
+    const now = RESET_MS + 0.5 * DAY; at(now)
+    const s = buildNew(fixture({ id: 'paid-20-before', rows: [] }, 1, now, { firstPaidMs }))
+    ok(s.day === 21 && dn(s, 'is', 1).match && !dn(s, 'at_least', 2).match && dn(s, 'is', 1).summary === 'Day in the program is 1',
+       'paid 20 days before the switch, on its evening: day_number is 1 (tenure day 21)', `day ${s.day}, course day ${s.dayOnCourse}`)
+    ok(!NEW.evaluateCustomTrigger(s, q1).match, 'day at least 5 with 0 lessons does not fire for that student on the evening')
+  }
+  {
+    const now = RESET_MS + 4.5 * DAY; at(now)
+    const s = buildNew(fixture({ id: 'paid-20-before', rows: [] }, 1, now, { firstPaidMs }))
+    ok(s.dayOnCourse === 5 && dn(s, 'is', 5).match && NEW.evaluateCustomTrigger(s, q1).match,
+       '...and fires on course day 5 with no lesson since the switch', NEW.evaluateCustomTrigger(s, q1).summary)
+  }
+  {
+    const paidAfter = RESET_MS + 2 * DAY + 3 * HOUR
+    const now = paidAfter + 6.5 * DAY; at(now)
+    const s = buildNew(fixture({ id: 'paid-after', rows: [] }, 7, now, { firstPaidMs: paidAfter }))
+    ok(s.day === 7 && dn(s, 'is', 7).match, 'paid after the switch: day_number is the day since payment, as before', `day ${s.day}`)
+  }
+}
+
 console.log('\n=== A student who paid after the reset: the old rule ===')
 {
   const p = { id: 'paid-after', rows: [] }

@@ -5,7 +5,7 @@
  * video up to the discount checkpoint, which sits between Video Ads II (the
  * Trail Hut) and Static Ads (the Boathouse), within 14 days of their first
  * payment. Only students whose first payment is on or after the day the new
- * course launched (2026-10-09) can earn it.
+ * course launched (9 October 2026, from midnight in Croatia) can earn it.
  *
  * "The videos up to the checkpoint" are the counting watch lessons, in course
  * order, up to and including the gate lesson (`is_gate`), that have a video.
@@ -22,8 +22,13 @@ import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 export const DISCOUNT_PERCENT = 30;
 /** The 14 days. One source: constants.ts, re-exported here for the map. */
 export { DISCOUNT_WINDOW_DAYS };
-/** The new course launched on Whop on this day; earlier buyers bought the old course. */
-export const DISCOUNT_LAUNCH_DATE = "2026-10-09T00:00:00.000Z";
+/**
+ * The new course launched on Whop on 9 October 2026; earlier buyers bought the
+ * old course. The cutoff is midnight that day in Croatia: 9 October 00:00 CEST
+ * (UTC+2) is 8 October 22:00 UTC. Shown to students as a date in
+ * Europe/Zagreb, never UTC, or it would read "October 8".
+ */
+export const DISCOUNT_LAUNCH_DATE = "2026-10-08T22:00:00.000Z";
 
 const DAY_MS = 86_400_000;
 

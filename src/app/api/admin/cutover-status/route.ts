@@ -10,7 +10,9 @@
  * redeploy is not in any of them.
  *
  * The database half reads the LIVE tables (`regions`, `lessons`), which the
- * switch fills, and the reset key the switch writes.
+ * switch fills, the lesson ids in `lesson_videos` (for the discount gate's two
+ * checks; the service-role client of requireTeam sees its rows), and the reset
+ * key the switch writes.
  *
  * WHOP_COURSE_ID is never sent whole: whether it is set, and its last 4
  * characters when it is long enough for 4 to give nothing away.
@@ -27,6 +29,9 @@ import {
   LESSONS_TABLE,
 } from "@/lib/catalog-tables";
 import { STUDENT_HOME, WORLD_IS_LIVE } from "@/lib/world/access";
+import { gateLessonId, requiredLessons } from "@/lib/world/discount";
+import { LESSON_COLUMNS, toDiscountLessons } from "@/lib/world/discount-server";
+import type { CatalogLessonRow } from "@/lib/world/discount-server";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +52,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const [regionsRes, allRes, countingRes, whopRes] = await Promise.all([
+  // The discount's two facts are worked out as discount.ts does: the catalog
+  // in course order, and which lessons have a row in lesson_videos (only the
+  // lesson id; the row's Tella id never leaves the server).
+  const [regionsRes, allRes, countingRes, whopRes, catalogRes, videosRes] = await Promise.all([
     supabase.from("regions").select("id").order("order_num"),
     supabase.from("lessons").select("id", { count: "exact", head: true }),
     supabase
@@ -58,6 +66,8 @@ export async function GET(request: NextRequest) {
       .from("lessons")
       .select("id", { count: "exact", head: true })
       .not("whop_lesson_id", "is", null),
+    supabase.from("lessons").select(LESSON_COLUMNS).order("sort_order"),
+    supabase.from("lesson_videos").select("lesson_id"),
   ]);
   if (regionsRes.error) {
     return NextResponse.json(
@@ -65,6 +75,18 @@ export async function GET(request: NextRequest) {
       { status: 500 },
     );
   }
+  for (const [name, res] of Object.entries({ lessons: catalogRes, lesson_videos: videosRes })) {
+    if (res.error || !res.data) {
+      return NextResponse.json(
+        { error: `${name} could not be read${res.error ? `: ${res.error.message}` : ""}` },
+        { status: 500 },
+      );
+    }
+  }
+  const discountLessons = toDiscountLessons(
+    catalogRes.data as CatalogLessonRow[],
+    new Set((videosRes.data as { lesson_id: string }[]).map((v) => v.lesson_id)),
+  );
   const counts = { all: allRes, counting: countingRes, whop: whopRes };
   for (const [name, res] of Object.entries(counts)) {
     if (res.error || typeof res.count !== "number") {
@@ -112,6 +134,8 @@ export async function GET(request: NextRequest) {
     lessons: db.lessons,
     countingLessons: db.countingLessons,
     lessonsWithWhopId: db.lessonsWithWhopId,
+    discountGateId: gateLessonId(discountLessons),
+    discountLessons: requiredLessons(discountLessons).length,
   });
 
   return NextResponse.json(

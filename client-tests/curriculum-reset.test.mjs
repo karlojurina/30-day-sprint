@@ -163,11 +163,13 @@ console.log('\n=== cutoverProblems ===')
   const AREAS = ['a3', 'a1', 'a2', 'a8', 'a4', 'a6', 'a5', 'a7']
   const after = (o = {}) => ({
     resetAt: RESET, catalogTable: 'lessons', catalogIsV2: true, studentHome: '/world', worldLive: true,
-    whopCourseIdSet: true, regionIds: AREAS, lessons: 141, countingLessons: 140, lessonsWithWhopId: 141, ...o,
+    whopCourseIdSet: true, regionIds: AREAS, lessons: 141, countingLessons: 140, lessonsWithWhopId: 141,
+    discountGateId: 'a4l17', discountLessons: 59, ...o,
   })
   const before = (o = {}) => ({
     resetAt: null, catalogTable: 'lessons', catalogIsV2: false, studentHome: '/dashboard', worldLive: false,
-    whopCourseIdSet: true, regionIds: ['r1', 'r2', 'r3', 'r4'], lessons: 65, countingLessons: 64, lessonsWithWhopId: 0, ...o,
+    whopCourseIdSet: true, regionIds: ['r1', 'r2', 'r3', 'r4'], lessons: 65, countingLessons: 64, lessonsWithWhopId: 0,
+    discountGateId: 'l049', discountLessons: 0, ...o,
   })
   const one = (facts, want, label) => {
     const got = cutoverProblems(facts)
@@ -186,8 +188,13 @@ console.log('\n=== cutoverProblems ===')
   one(after({ regionIds: [] }), 'the live areas are not a1..a8', 'no areas at all, alone')
   one(after({ lessonsWithWhopId: 138 }), '3 lessons have no Whop id', 'three lessons without a Whop id, alone')
   one(after({ lessonsWithWhopId: 140 }), '1 lesson has no Whop id', 'one lesson without a Whop id, in the singular')
-  ok(same(cutoverProblems(after({ lessons: 0, lessonsWithWhopId: 0, countingLessons: 0, regionIds: [] })), ['the live areas are not a1..a8']),
-     'an empty catalog is caught by its areas')
+  ok(same(cutoverProblems(after({ lessons: 0, lessonsWithWhopId: 0, countingLessons: 0, regionIds: [], discountGateId: null, discountLessons: 0 })),
+          ['the live areas are not a1..a8', 'No lesson is the discount gate']),
+     'an empty catalog is caught by its areas, and has no gate')
+  one(after({ discountGateId: null, discountLessons: 0 }), 'No lesson is the discount gate', 'no lesson marked is_gate, alone')
+  one(after({ discountLessons: 0 }), 'No lesson up to the discount gate has a video, so the offer is closed for everyone',
+      'a gate with not one video up to it, alone')
+  ok(same(cutoverProblems(after({ discountLessons: 1 })), []), 'one video up to the gate is enough to keep the offer open')
   {
     const got = cutoverProblems(after({
       catalogIsV2: false, catalogTable: 'lessons', studentHome: '/dashboard', worldLive: false,
@@ -200,8 +207,8 @@ console.log('\n=== cutoverProblems ===')
   }
 
   ok(same(cutoverProblems(before()), []), 'before the switch, production as it is today: no problems')
-  ok(same(cutoverProblems(before({ whopCourseIdSet: false, regionIds: [], lessonsWithWhopId: 0 })), []),
-     'before the switch, the after-switch checks stay quiet')
+  ok(same(cutoverProblems(before({ whopCourseIdSet: false, regionIds: [], lessonsWithWhopId: 0, discountGateId: null, discountLessons: 0 })), []),
+     'before the switch, the after-switch checks stay quiet (the discount gate\'s two among them)')
   ok(same(cutoverProblems(before({ catalogTable: 'lessons_next', catalogIsV2: true, regionIds: AREAS })), []),
      'before the switch, the staging catalog on a preview: no problems')
   one(before({ studentHome: '/world' }), 'NEXT_PUBLIC_STUDENT_HOME is /world, but the course switch has not run',

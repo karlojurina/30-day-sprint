@@ -3,7 +3,12 @@ import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { createWhopPromoCode } from "@/lib/whop";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
-import { approvalVerdict, loadDiscountReads } from "@/lib/world/discount-server";
+import { getCurriculumResetAt } from "@/lib/curriculum-reset";
+import {
+  approvalVerdict,
+  explainOldCourseRequest,
+  loadDiscountReads,
+} from "@/lib/world/discount-server";
 
 /**
  * Approve a pending discount request.
@@ -93,7 +98,20 @@ export async function POST(request: NextRequest) {
     // every gate of the old rule below.
     if (!override) {
       const reads = await loadDiscountReads(supabase, discountReq.student_id, LESSONS_TABLE);
-      const verdict = approvalVerdict(reads, new Date());
+      let verdict = approvalVerdict(reads, new Date(), discountReq.created_at);
+      if (!verdict.ok && verdict.status === 400) {
+        // A request made before the course switch gets a refusal that says
+        // so. The switch date only changes the words, so a failed read of it
+        // keeps the refusal as it is.
+        try {
+          const resetAt = await getCurriculumResetAt(supabase);
+          verdict = explainOldCourseRequest(verdict, discountReq.created_at, resetAt);
+        } catch (e) {
+          console.error(
+            `[discount approve] request ${requestId}: the course switch could not be read, the refusal keeps its words: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+      }
       if (!verdict.ok) {
         if (verdict.log) console.error(`[discount approve] request ${requestId}: ${verdict.log}`);
         return NextResponse.json({ error: verdict.error }, { status: verdict.status });

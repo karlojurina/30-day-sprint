@@ -26,6 +26,25 @@
 --                 Whop lesson ids present and distinct, placeholder titles.
 --   g. ready      Whether v103 ran, whether archive_v1 or the switch's row
 --                 already exist.
+--   h. pending    Discount requests still pending, one row each. Approve or
+--                 reject every one before v104: after it the old rule cannot
+--                 judge them.
+--   i. rejected   Discount requests rejected and made on or after the launch
+--                 (9 October 2026, midnight in Croatia). After the switch
+--                 these students cannot apply again (D7), so the team decides
+--                 each one.
+--   j. day_number Every active template whose conditions use day_number.
+--                 After the switch day_number counts course days; read each
+--                 with Astrid and Karlo.
+--   k. triggers   Every trigger on a table the switch writes, and whether
+--                 the repo made it (expect: the 6 the migrations create). A
+--                 trigger or database webhook made in the Supabase dashboard
+--                 is not in the repo: it would fire once per row the switch
+--                 wipes, or abort the switch. Read any NOT expected row
+--                 before running v104.
+--
+-- These lists sit in this one result, the part column saying which list a
+-- row belongs to: the SQL editor shows only the last statement's rows.
 --
 -- The switch's final table repeats the counts of b, d and e. They should
 -- match what this said, give or take what happened in between.
@@ -82,6 +101,47 @@ with
       from public.templates t
      where t.is_active),
   off as (select * from tmpl where why is not null),
+  -- every active template with a day_number condition, turned off or not
+  dayn as (
+    select t.scenario_id, t.title, (t.trigger_config -> 'all')::text as conds, t.id
+      from public.templates t
+     where t.is_active
+       and exists (select 1
+                     from jsonb_array_elements(case when jsonb_typeof(t.trigger_config -> 'all') = 'array'
+                                                    then t.trigger_config -> 'all' else '[]'::jsonb end) e
+                    where e ->> 'metric' = 'day_number')),
+  -- DISCOUNT_LAUNCH_DATE in src/lib/world/discount.ts: 9 October 2026 at
+  -- midnight in Croatia (CEST, UTC+2), which is 22:00 UTC on the 8th
+  launch (at) as (select timestamptz '2026-10-08 22:00:00+00'),
+  dreq as (
+    select r.status, r.id, r.student_id, r.rejection_reason,
+           'made ' || to_char(r.created_at at time zone 'UTC', 'YYYY-MM-DD HH24:MI') || ' UTC: request '
+             || r.id || ', student ' || r.student_id as said
+      from public.discount_requests r
+     where r.status = 'pending'
+        or (r.status = 'rejected' and r.created_at >= (select at from launch))),
+  -- every table v104 writes, and the triggers the migrations put on them
+  -- (v2 lesson_notes, v75 ratings, v27 templates, v92 lessons, v100
+  -- lesson_videos, v103 the snapshot floor)
+  written (t) as (values ('lessons'), ('regions'), ('student_lesson_completions'), ('lesson_notes'),
+                         ('student_lesson_ratings'), ('quizzes'), ('quiz_questions'), ('student_quiz_attempts'),
+                         ('student_region_quiz'), ('student_achievements'), ('achievements'), ('student_milestones'),
+                         ('student_lesson_watch'), ('lesson_videos'), ('templates'), ('tasks'),
+                         ('disengagement_alerts'), ('admin_config'), ('daily_progress_snapshots')),
+  known (t, name) as (values ('lesson_notes', 'lesson_notes_updated_at'),
+                             ('student_lesson_ratings', 'trg_bump_student_lesson_ratings_updated_at'),
+                             ('templates', 'trg_templates_updated_at'),
+                             ('lessons', 'trg_lessons_updated_at'),
+                             ('lesson_videos', 'trg_lesson_videos_updated_at'),
+                             ('daily_progress_snapshots', 'trg_daily_snapshots_reset_floor')),
+  trig as (
+    select c.relname as tbl, g.tgname as name,
+           pg_get_triggerdef(g.oid) || case when g.tgenabled = 'D' then ' (disabled)' else '' end as def,
+           exists (select 1 from known k where k.t = c.relname and k.name = g.tgname) as expected
+      from pg_trigger g
+      join pg_class c on c.oid = g.tgrelid
+     where not g.tgisinternal
+       and g.tgrelid in (select to_regclass('public.' || t) from written)),
   -- step 3's graduates and first logins, the same rule
   done as (
     select c.student_id, l.feature_key
@@ -236,5 +296,38 @@ select part, item, found, expect
     select 63, 'g. ready', 'admin_config curriculum_reset_at',
            coalesce((select value from public.admin_config where key = 'curriculum_reset_at'), 'absent'),
            'absent before the switch'
+    -- h. pending
+    union all
+    select 70, 'h. pending', said, 'pending', 'approve or reject it before v104: after it the old rule cannot judge it'
+      from dreq where status = 'pending'
+    union all
+    select 71, 'h. pending', 'discount requests still pending',
+           (select count(*)::text from dreq where status = 'pending'), '0 before v104'
+    -- i. rejected
+    union all
+    select 72, 'i. rejected', said, 'rejected: ' || coalesce(nullif(rejection_reason, ''), 'no reason given'),
+           'the team decides: after the switch this student cannot apply again'
+      from dreq where status = 'rejected'
+    union all
+    select 73, 'i. rejected', 'discount requests rejected since the launch',
+           (select count(*)::text from dreq where status = 'rejected'), 'info'
+    -- j. day_number
+    union all
+    select 80, 'j. day_number', scenario_id || ': ' || title, conds,
+           case when id in (select id from off) then 'turned off by the switch'
+                else 'stays on, counting course days after the switch: read it with the team' end
+      from dayn
+    union all
+    select 81, 'j. day_number', 'active templates using day_number', (select count(*)::text from dayn), 'info'
+    -- k. triggers
+    union all
+    select 90, 'k. triggers', tbl || '.' || name, def,
+           case when expected then 'expected'
+                else 'NOT expected: not made by the repo, it fires on the switch''s writes' end
+      from trig
+    union all
+    select 91, 'k. triggers', 'triggers on the tables the switch writes',
+           (select count(*)::text from trig) || ', of them expected: ' || (select count(*) from trig where expected),
+           '6, of them expected: 6'
   ) t
  order by o, part, item;

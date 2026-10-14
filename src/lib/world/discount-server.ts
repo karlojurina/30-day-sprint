@@ -50,10 +50,17 @@ export interface Read<T> {
   error: { message: string } | null;
 }
 
+/** One `lesson_videos` row as the loader selects it: never the Tella id. */
+export interface VideoRow {
+  lesson_id: string;
+  /** When the video was loaded. The approval leaves out a video loaded after the request. */
+  created_at?: string | null;
+}
+
 export interface DiscountReads {
   student: Read<{ first_paid_at: string | null }>;
   lessons: Read<CatalogLessonRow[]>;
-  videos: Read<{ lesson_id: string }[]>;
+  videos: Read<VideoRow[]>;
   completions: Read<CompletionRow[]>;
   requests: Read<DiscountRequestRow[]>;
 }
@@ -67,6 +74,7 @@ export interface DiscountFacts {
 
 export const LESSON_COLUMNS = "id, type, counts_toward_progress, is_gate, duration_seconds";
 export const REQUEST_COLUMNS = "id, status, created_at, promo_code, rejection_reason";
+export const VIDEO_COLUMNS = "lesson_id, created_at";
 
 /**
  * The five reads the discount needs. `lessonsTable` is LESSONS_TABLE from
@@ -74,8 +82,9 @@ export const REQUEST_COLUMNS = "id, status, created_at, promo_code, rejection_re
  *
  * `lesson_videos` has row level security and no policy: only a service-role
  * client sees its rows. Any other client gets an empty list and no error, so
- * a route must hand this a service-role client. Only `lesson_id` is selected:
- * the row also carries the Tella id, which never leaves the server.
+ * a route must hand this a service-role client. Only `lesson_id` and
+ * `created_at` are selected: the row also carries the Tella id, which never
+ * leaves the server.
  */
 export async function loadDiscountReads(
   db: SupabaseClient,
@@ -95,7 +104,7 @@ export async function loadDiscountReads(
       db.from("students").select("first_paid_at").eq("id", studentId).single(),
     ),
     guard<CatalogLessonRow[]>(db.from(lessonsTable).select(LESSON_COLUMNS).order("sort_order")),
-    guard<{ lesson_id: string }[]>(db.from("lesson_videos").select("lesson_id")),
+    guard<VideoRow[]>(db.from("lesson_videos").select(VIDEO_COLUMNS)),
     guard<CompletionRow[]>(
       db.from("student_lesson_completions").select("lesson_id, completed_at").eq("student_id", studentId),
     ),
@@ -170,11 +179,13 @@ export function factsFromReads(
   };
 }
 
+// The launch is midnight in Croatia (discount.ts), so the day is read there:
+// in UTC it falls on the evening before.
 const LAUNCH_DAY = new Date(DISCOUNT_LAUNCH_DATE).toLocaleDateString("en-US", {
   month: "long",
   day: "numeric",
   year: "numeric",
-  timeZone: "UTC",
+  timeZone: "Europe/Zagreb",
 });
 
 /** "about 3.5 hours of video", "about 40 minutes of video", or "" for nothing known. */
@@ -274,8 +285,19 @@ export type ApprovalVerdict =
  * done by the day the 14 days ran out, so a request may be approved late and a
  * video watched after the window does not count. The student's own requests
  * are left out (the one being approved would otherwise decide the answer).
+ *
+ * `requestCreatedAt` is the `created_at` of the request being approved. A
+ * video loaded after it is not asked for: the student applied with every
+ * video that existed then done, and could not have watched one that did not.
+ * What the student sees is unchanged. A request date that does not parse, or a
+ * video with no date, asks for the video (the side that approves nothing by
+ * mistake).
  */
-export function approvalVerdict(reads: DiscountReads, now: Date): ApprovalVerdict {
+export function approvalVerdict(
+  reads: DiscountReads,
+  now: Date,
+  requestCreatedAt: string | null,
+): ApprovalVerdict {
   const f = factsFromReads(reads);
   if (!f.ok) {
     return {
@@ -285,7 +307,16 @@ export function approvalVerdict(reads: DiscountReads, now: Date): ApprovalVerdic
       log: `nothing approved, a read failed: ${f.failed.join("; ")}`,
     };
   }
-  const { firstPaidAt, lessons, completions } = f.facts;
+  const { firstPaidAt, completions } = f.facts;
+  const asked = requestCreatedAt == null ? NaN : Date.parse(requestCreatedAt);
+  const loadedLater = new Set(
+    Number.isFinite(asked)
+      ? reads.videos.data!
+          .filter((v) => v.created_at != null && Date.parse(v.created_at) > asked)
+          .map((v) => v.lesson_id)
+      : [],
+  );
+  const lessons = f.facts.lessons.map((l) => (loadedLater.has(l.id) ? { ...l, has_video: false } : l));
   const endsAt = discountEndsAt(firstPaidAt);
   const at = endsAt && now.getTime() > endsAt.getTime() ? endsAt : now;
   const state = discountState({
@@ -334,4 +365,26 @@ export function approvalVerdict(reads: DiscountReads, now: Date): ApprovalVerdic
       // Unreachable with no requests and the clock held inside the window.
       return { ok: false, status: 400, error: `Cannot approve: the discount state is ${state.kind}.` };
   }
+}
+
+export const OLD_COURSE_REQUEST_REFUSAL =
+  "This request was made on the old course, before the switch. Judge it by hand; Generate anyway skips the check.";
+
+/**
+ * POST /api/discounts/approve on the new course: a refusal of a request made
+ * before the course switch (`curriculum_reset_at`), in words that say so. The
+ * old course's progress was archived at the switch, so the new rule's reason
+ * says nothing about that student. A verdict that approves, a failed read
+ * (500), no switch, or a date that does not parse comes back as it went in.
+ */
+export function explainOldCourseRequest(
+  verdict: ApprovalVerdict,
+  requestCreatedAt: string,
+  resetAt: string | null,
+): ApprovalVerdict {
+  if (verdict.ok || verdict.status !== 400 || resetAt == null) return verdict;
+  const asked = Date.parse(requestCreatedAt);
+  const reset = Date.parse(resetAt);
+  if (!Number.isFinite(asked) || !Number.isFinite(reset) || asked >= reset) return verdict;
+  return { ok: false, status: 400, error: OLD_COURSE_REQUEST_REFUSAL };
 }

@@ -181,6 +181,10 @@ export interface CutoverFacts {
   lessons: number;
   countingLessons: number;
   lessonsWithWhopId: number;
+  /** The `lessons` row marked `is_gate`, or null when none is (gateLessonId in discount.ts). */
+  discountGateId: string | null;
+  /** The lessons the discount asks for: counting watch lessons up to the gate with a row in `lesson_videos` (requiredLessons in discount.ts). */
+  discountLessons: number;
 }
 
 const NEW_AREAS = ["a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"];
@@ -212,6 +216,12 @@ export function cutoverProblems(f: CutoverFacts): string[] {
   const noWhop = f.lessons - f.lessonsWithWhopId;
   if (noWhop > 0) {
     problems.push(noWhop === 1 ? "1 lesson has no Whop id" : `${noWhop} lessons have no Whop id`);
+  }
+  // Either one closes the discount for every student (discount.ts, "no-gate").
+  if (f.discountGateId == null) {
+    problems.push("No lesson is the discount gate");
+  } else if (f.discountLessons === 0) {
+    problems.push("No lesson up to the discount gate has a video, so the offer is closed for everyone");
   }
   return problems;
 }

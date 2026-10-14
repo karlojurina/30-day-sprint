@@ -11,8 +11,8 @@ import {
 } from './_gen/discount.ts'
 import { DISCOUNT_WINDOW_DAYS as CONSTANTS_WINDOW_DAYS } from './_gen/constants.ts'
 import {
-  LESSON_COLUMNS, REQUEST_COLUMNS,
-  approvalVerdict, decideDiscountRequest, discountRefusalMessage, factsFromReads,
+  LESSON_COLUMNS, OLD_COURSE_REQUEST_REFUSAL, REQUEST_COLUMNS, VIDEO_COLUMNS,
+  approvalVerdict, decideDiscountRequest, discountRefusalMessage, explainOldCourseRequest, factsFromReads,
   loadDiscountReads, toDiscountLessons, videoDoneIds,
 } from './_gen/discount-server.ts'
 
@@ -47,7 +47,10 @@ const R = (id, status, created_at, o = {}) => ({ id, status, created_at, ...o })
 
 console.log('\n=== One source for the 14 days ===')
 ok(DISCOUNT_WINDOW_DAYS === 14 && DISCOUNT_WINDOW_DAYS === CONSTANTS_WINDOW_DAYS, 'DISCOUNT_WINDOW_DAYS is constants.ts\'s, re-exported', `${DISCOUNT_WINDOW_DAYS}`)
-ok(DISCOUNT_PERCENT === 30 && DISCOUNT_LAUNCH_DATE === '2026-10-09T00:00:00.000Z', 'the offer is 30% for payments from 2026-10-09')
+ok(DISCOUNT_PERCENT === 30 && DISCOUNT_LAUNCH_DATE === '2026-10-08T22:00:00.000Z',
+   'the offer is 30% for payments from 9 October 2026 at midnight in Croatia (22:00 UTC on the 8th, CEST is UTC+2)')
+ok(new Date(DISCOUNT_LAUNCH_DATE).toLocaleString('en-GB', { timeZone: 'Europe/Zagreb' }) === '09/10/2026, 00:00:00',
+   'the cutoff is 00:00 on 9 October in Zagreb', new Date(DISCOUNT_LAUNCH_DATE).toLocaleString('en-GB', { timeZone: 'Europe/Zagreb' }))
 
 console.log('\n=== discountEndsAt ===')
 ok(discountEndsAt(PAID)?.toISOString() === ENDS, '14 days after the first payment, to the millisecond', discountEndsAt(PAID)?.toISOString())
@@ -77,11 +80,13 @@ ok(requiredLessons([L('g', { is_gate: true, has_video: false })]).length === 0, 
 console.log('\n=== discountState: who cannot earn it ===')
 ok(same(state({ firstPaidAt: null }), { kind: 'not-eligible', reason: 'no-payment' }), 'no first payment', show(state({ firstPaidAt: null })))
 ok(same(state({ firstPaidAt: 'garbage' }), { kind: 'not-eligible', reason: 'no-payment' }), 'a first payment that does not parse counts as none')
-ok(same(state({ firstPaidAt: '2026-10-08T23:59:59.999Z', now: new Date('2026-10-10T00:00:00Z') }), { kind: 'not-eligible', reason: 'before-launch' }),
-   'a first payment the millisecond before 2026-10-09 (the old course)')
+ok(same(state({ firstPaidAt: '2026-10-08T21:59:59.999Z', now: new Date('2026-10-10T00:00:00Z') }), { kind: 'not-eligible', reason: 'before-launch' }),
+   'a first payment the millisecond before midnight on 9 October in Croatia (the old course)')
+ok(state({ firstPaidAt: '2026-10-08T23:30:00.000Z', now: new Date('2026-10-10T00:00:00Z') }).kind === 'locked',
+   'a first payment at 01:30 on 9 October in Croatia (23:30 UTC on the 8th) is in')
 ok(same(state({ firstPaidAt: '2026-09-01T00:00:00Z', now: new Date('2026-09-05T00:00:00Z') }), { kind: 'not-eligible', reason: 'before-launch' }),
    'before launch wins even inside that payment\'s own 14 days')
-ok(state({ firstPaidAt: '2026-10-09T00:00:00.000Z', now: new Date('2026-10-10T00:00:00Z') }).kind === 'locked', 'a first payment at the launch instant is in')
+ok(state({ firstPaidAt: '2026-10-08T22:00:00.000Z', now: new Date('2026-10-10T00:00:00Z') }).kind === 'locked', 'a first payment at the launch instant is in')
 ok(same(state({ lessons: COURSE.map((l) => ({ ...l, is_gate: false })) }), { kind: 'not-eligible', reason: 'no-gate' }), 'a catalog with no gate closes the offer')
 ok(same(state({ lessons: [] }), { kind: 'not-eligible', reason: 'no-gate' }), 'an empty catalog closes the offer')
 ok(same(state({ lessons: COURSE.map((l) => ({ ...l, has_video: false })) }), { kind: 'not-eligible', reason: 'no-gate' }),
@@ -143,8 +148,8 @@ console.log('\n=== discountState: a request from the old course is ignored ===')
   const june = R('june', 'approved', '2026-06-12T10:00:00.000Z', { promo_code: 'ECOM30-OLD' })
   const s = state({ firstPaidAt: '2026-06-01T00:00:00Z', now: new Date('2026-10-15T00:00:00Z'), requests: [june] })
   ok(same(s, { kind: 'not-eligible', reason: 'before-launch' }), 'a June student with an approved June request sees "not eligible", never "approved"', show(s))
-  ok(state({ requests: [R('eve', 'pending', '2026-10-08T23:59:59.999Z')] }).kind === 'locked', 'a request the millisecond before the launch is ignored')
-  ok(state({ requests: [R('at', 'pending', '2026-10-09T00:00:00.000Z')] }).kind === 'pending', 'a request at the launch instant counts')
+  ok(state({ requests: [R('eve', 'pending', '2026-10-08T21:59:59.999Z')] }).kind === 'locked', 'a request the millisecond before the launch is ignored')
+  ok(state({ requests: [R('at', 'pending', '2026-10-08T22:00:00.000Z')] }).kind === 'pending', 'a request at the launch instant counts')
   ok(state({ requests: [R('new', 'pending', '2026-10-12T00:00:00Z'), R('old', 'approved', '2026-07-01T00:00:00Z')] }).requestId === 'new',
      'next to a new request, an old one plays no part')
   ok(state({ requests: [R('old', 'rejected', '2026-09-30T00:00:00Z')], videoDoneIds: new Set(['x01', 'x05', 'x06']) }).kind === 'ready',
@@ -314,6 +319,76 @@ ok(/no discount gate lesson/.test(approvalVerdict(reads({ lessons: okRead(catalo
   ok(!v.ok && v.status === 500 && v.log.includes('lesson_videos: denied'), 'a failed read: 500, nothing approved', show(v))
 }
 
+console.log('\n=== approvalVerdict: a video loaded after the request is not asked for ===')
+{
+  // The reviewer's case: x05 had no video when the student applied, its video
+  // was loaded since, and the team approves days later.
+  const ASKED = '2026-10-15T08:00:00.000Z'
+  const LATER = '2026-10-16T00:00:00.000Z'
+  const APPROVE_AT = new Date('2026-10-18T00:00:00Z')
+  const videos = (x05At) => okRead(COURSE.filter((l) => l.has_video).map((l) =>
+    ({ lesson_id: l.id, created_at: l.id === 'x05' ? x05At : '2026-10-01T00:00:00.000Z' })))
+  const doneButX05 = done(['x01', 'x06'])
+  const pending = okRead([R('q', 'pending', ASKED)])
+  const withoutX05 = okRead(COURSE.filter((l) => l.has_video && l.id !== 'x05').map((l) => ({ lesson_id: l.id, created_at: '2026-10-01T00:00:00.000Z' })))
+  ok(decideDiscountRequest(reads({ videos: withoutX05, completions: doneButX05 }), new Date(ASKED)).grant === true,
+     'the request: granted while x05 had no video')
+  {
+    const v = approvalVerdict(reads({ videos: videos(LATER), completions: doneButX05, requests: pending }), APPROVE_AT, ASKED)
+    ok(same(v, { ok: true }), 'the approval: x05\'s video was loaded after the request, so it is not asked for', show(v))
+  }
+  {
+    const v = approvalVerdict(reads({ videos: videos(LATER), completions: doneButX05, requests: pending }), APPROVE_AT, null)
+    ok(!v.ok && v.error.includes('1 of 3 still missing'), 'with no request date every video is asked for, as before', v.error)
+  }
+  {
+    const v = approvalVerdict(reads({ videos: videos('2026-10-14T00:00:00.000Z'), completions: doneButX05, requests: pending }), APPROVE_AT, ASKED)
+    ok(!v.ok && v.status === 400 && v.error.includes('1 of 3 still missing'), 'a video loaded before the request is still asked for', v.error)
+  }
+  ok(!approvalVerdict(reads({ videos: videos(ASKED), completions: doneButX05 }), APPROVE_AT, ASKED).ok,
+     'a video loaded at the request\'s own instant is still asked for (only later ones are left out)')
+  ok(!approvalVerdict(reads({ videos: videos(null), completions: doneButX05 }), APPROVE_AT, ASKED).ok
+       && !approvalVerdict(reads({ videos: videos('not a date'), completions: doneButX05 }), APPROVE_AT, ASKED).ok,
+     'a video with no date, or one that does not parse, is still asked for')
+  ok(!approvalVerdict(reads({ videos: videos(LATER), completions: doneButX05 }), APPROVE_AT, 'not a date').ok,
+     'a request date that does not parse: every video is asked for')
+  {
+    // A video loaded after the request, watched late, still cannot make up for one that existed.
+    const v = approvalVerdict(reads({ videos: videos(LATER), completions: done(['x01']) }), APPROVE_AT, ASKED)
+    ok(!v.ok && v.error.includes('1 of 2 still missing'), 'the videos that existed when the student applied are all still asked for', v.error)
+  }
+  {
+    // What the student sees is unchanged: the map and the request route still ask for x05.
+    const d = decideDiscountRequest(reads({ videos: videos(LATER), completions: doneButX05 }), APPROVE_AT)
+    ok(!d.grant && d.state === 'locked', 'the student-facing state still asks for the new video', d.error)
+  }
+}
+
+console.log('\n=== explainOldCourseRequest: a request made before the course switch ===')
+{
+  const RESET = '2026-10-16T18:30:00.000Z'
+  const AT = new Date('2026-10-17T10:00:00Z')
+  ok(OLD_COURSE_REQUEST_REFUSAL === 'This request was made on the old course, before the switch. Judge it by hand; Generate anyway skips the check.',
+     'the words', OLD_COURSE_REQUEST_REFUSAL)
+  // The reviewer's case 2: paid 10 October, applied 13 October under the old
+  // rule, the completions archived at the switch.
+  const locked = approvalVerdict(reads({ student: okRead({ first_paid_at: '2026-10-10T10:00:00Z' }), completions: okRead([]) }), AT, '2026-10-13T10:00:00Z')
+  ok(!locked.ok && locked.status === 400 && locked.error.includes('3 of 3 still missing'), 'the new rule alone refuses it as unwatched', locked.error)
+  const said = explainOldCourseRequest(locked, '2026-10-13T10:00:00Z', RESET)
+  ok(same(said, { ok: false, status: 400, error: OLD_COURSE_REQUEST_REFUSAL }), 'made before the switch: the refusal says so, still a 400', show(said))
+  // The reviewer's case 1: paid 1 October, refused as before the launch.
+  const early = approvalVerdict(reads({ student: okRead({ first_paid_at: '2026-10-01T10:00:00Z' }) }), AT, '2026-10-12T10:00:00Z')
+  ok(early.error.includes('before October 9, 2026') && explainOldCourseRequest(early, '2026-10-12T10:00:00Z', RESET).error === OLD_COURSE_REQUEST_REFUSAL,
+     'paid 1 October, refused as before the launch: the same words')
+  ok(explainOldCourseRequest(locked, '2026-10-17T09:00:00Z', RESET) === locked, 'made after the switch: the new rule\'s own words')
+  ok(explainOldCourseRequest(locked, RESET, RESET) === locked, 'made at the switch\'s instant: the new rule\'s own words')
+  ok(explainOldCourseRequest(locked, '2026-10-13T10:00:00Z', null) === locked, 'no switch: unchanged')
+  ok(explainOldCourseRequest(locked, 'not a date', RESET) === locked, 'a request date that does not parse: unchanged')
+  ok(same(explainOldCourseRequest({ ok: true }, '2026-10-13T10:00:00Z', RESET), { ok: true }), 'an approval stays an approval')
+  const failed = approvalVerdict(reads({ videos: badRead('denied') }), AT, '2026-10-13T10:00:00Z')
+  ok(explainOldCourseRequest(failed, '2026-10-13T10:00:00Z', RESET) === failed, 'a failed read keeps its 500 and its words')
+}
+
 console.log('\n=== loadDiscountReads, against a stand-in client ===')
 {
   const calls = []
@@ -339,7 +414,8 @@ console.log('\n=== loadDiscountReads, against a stand-in client ===')
   const by = Object.fromEntries(calls.map((c) => [c.table, c.steps]))
   ok(same(Object.keys(by).sort(), ['discount_requests', 'lesson_videos', 'lessons_next', 'student_lesson_completions', 'students']), 'five reads, the catalog from the table it is handed', show(Object.keys(by)))
   ok(same(by.lessons_next, [['select', LESSON_COLUMNS], ['order', 'sort_order']]), 'lessons: the five columns, in course order', show(by.lessons_next))
-  ok(same(by.lesson_videos, [['select', 'lesson_id']]), 'lesson_videos: the lesson id and nothing else (never the Tella id)', show(by.lesson_videos))
+  ok(same(by.lesson_videos, [['select', 'lesson_id, created_at']]) && VIDEO_COLUMNS === 'lesson_id, created_at',
+     'lesson_videos: the lesson id and when it was loaded, nothing else (never the Tella id)', show(by.lesson_videos))
   ok(same(by.students, [['select', 'first_paid_at'], ['eq', 'id', 'stu-1'], ['single']]), 'students: the one row\'s first payment', show(by.students))
   ok(same(by.student_lesson_completions, [['select', 'lesson_id, completed_at'], ['eq', 'student_id', 'stu-1']]), 'completions: this student\'s only', show(by.student_lesson_completions))
   ok(same(by.discount_requests, [['select', REQUEST_COLUMNS], ['eq', 'student_id', 'stu-1']]), 'requests: this student\'s only, every status', show(by.discount_requests))

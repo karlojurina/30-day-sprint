@@ -971,7 +971,11 @@ function compareNumber(actual: number, op: ConditionOp, target: number): boolean
 function getNumericValue(snap: StudentSnapshot, c: Condition): number | null {
   switch (c.metric) {
     case "day_number":
-      return snap.day;
+      // After the switch: course days, as nolessons.* count them. On
+      // payment days a template pairing this with a lesson count would
+      // fire on the evening for every student, whose counts all start
+      // again at 0. Before the switch dayOnCourse is not read.
+      return snap.courseIsNew ? snap.dayOnCourse : snap.day;
     case "total_lessons_watched":
       return Object.values(snap.regions).reduce(
         (sum, r) => sum + r.watchedComplete,

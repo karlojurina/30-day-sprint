@@ -1,15 +1,19 @@
 /*
- * The map's top-left corner (WorldCorner.tsx): the pill, the toast, the list.
+ * The student's group at the right of the map's header (WorldCorner.tsx):
+ * the pill, the toast, the list. Called the corner since it began top left.
  *
- * It lives inside the map's header (WorldV6, after the brand), so the map's
- * tokens resolve here and its focus ring applies. The map's state comes from
- * its root's attributes, read with plain attribute selectors on `main`:
- *   [data-view="list"]  phones and no WebGL: the pill drops under the header's
- *                       row, the list is a full sheet, Sign out moves into it
+ * It lives inside the map's header (WorldV6, the brand alone at the left),
+ * so the map's tokens resolve here and its focus ring applies. The map's
+ * state comes from its root's attributes, read with plain attribute
+ * selectors on `main`:
+ *   [data-view="list"]  phones and no WebGL: the stats stay in the header's
+ *                       row, the discount and the Playbook drop to the row
+ *                       under it, the list is a full sheet, Sign out moves
+ *                       into it
  *   [data-open]         a place or the checkpoint is open: the list goes solid
  *   [data-solid]        tiers 2 and 3 and poster mode: no backdrop filter
  *   :has([data-tel])    through the telescope the sky's caption takes the
- *                       header's row: the corner steps out, as the chip does
+ *                       header's row: the group steps out
  * Under a lesson page the map's root is inert and its stylesheet hides the
  * whole header, the corner with it.
  *
@@ -34,12 +38,14 @@
   min-width: 0;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
 }
 
-/* The discount chip's twin: the same height, ground, line and type. */
+/* One pill: the stats, the map's discount, the Playbook, Sign out. */
 .pill {
   pointer-events: auto;
+  position: relative;
   flex: none;
   height: 28px;
   display: inline-flex;
@@ -199,6 +205,12 @@
   stroke: var(--color-accent);
 }
 
+/* The discount and the Playbook: segments of the pill on a computer (their
+   wrapper leaves no box), the row under it on a phone (below). */
+.more {
+  display: contents;
+}
+
 .slot {
   display: inline-flex;
   align-items: stretch;
@@ -227,10 +239,11 @@
   display: block;
 }
 
+/* Its word, under it, kept inside the screen's right edge. */
 .tip {
   position: absolute;
   top: calc(100% + 9px);
-  left: 50%;
+  right: 0;
   padding: 6px 8px;
   border: 1px solid var(--plaque-line);
   border-radius: 5px;
@@ -241,7 +254,7 @@
   white-space: nowrap;
   pointer-events: none;
   opacity: 0;
-  transform: translate(-50%, -3px);
+  transform: translate(0, -3px);
   transition:
     opacity 150ms var(--ease),
     transform 150ms var(--ease);
@@ -250,13 +263,14 @@
 .out:hover .tip,
 .out:focus-visible .tip {
   opacity: 1;
-  transform: translate(-50%, 0);
+  transform: none;
 }
 
-/* ── The toast: out of the pill, along the header's row ───── */
+/* ── The toast: out of the pill, leftward along the header's row ───── */
 
 .corner .toast {
   pointer-events: auto;
+  order: -1;
   flex: 0 1 auto;
   min-width: 0;
   max-width: 380px;
@@ -298,7 +312,7 @@
 @keyframes toastIn {
   from {
     opacity: 0;
-    transform: translate3d(-12px, 0, 0);
+    transform: translate3d(12px, 0, 0);
   }
   to {
     opacity: 1;
@@ -306,16 +320,48 @@
   }
 }
 
-/* ── The list: in the place panel's slot, on its surface ─── */
+/* Under 1280 px the row between the logo and the group can be too short for
+   it (the widest group leaves a toast nothing at 800 px): it drops under the
+   pill instead, right-aligned with it, as wide as its words, over the world.
+   The list, when open, starts lower (92 px), so the two never meet. */
+@media (width < 1280px) {
+  main:not([data-view="list"]) .corner {
+    position: relative;
+  }
 
+  main:not([data-view="list"]) .corner .toast {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    max-width: min(380px, calc(100vw - 2 * var(--gutter)));
+    animation-name: toastDrop;
+  }
+}
+
+@keyframes toastDrop {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ── The list: under the pill on the right, the place panel's size and surface ─── */
+
+/* The right of the screen, mirroring the place panel's slot on the left:
+   next to the pill that opens it, and never over a place's or the
+   checkpoint's panel, which open on the left (2026-10-15). */
 .panel {
   pointer-events: auto;
   position: fixed;
-  /* Over the header's other parts (on phones the discount chip and the
-     course bar sit where the sheet is). */
+  /* Over the header's other parts (on phones the discount and the Playbook
+     sit where the sheet is). */
   z-index: 2;
   top: 92px;
-  left: calc(var(--gutter) + 8px);
+  right: calc(var(--gutter) + 8px);
   width: 404px;
   max-width: calc(100vw - 48px);
   max-height: min(760px, calc(100svh - 92px - 88px));
@@ -334,8 +380,9 @@
   animation: panelIn 240ms var(--ease) both;
 }
 
-/* Over an open place or the checkpoint (whose text would show through the
-   blur), and wherever the map's own panels are solid. */
+/* While a place or the checkpoint is open (on a narrow screen the two can
+   meet, and neither should show through the other), and wherever the map's
+   own panels are solid. */
 main[data-open] .panel,
 main[data-solid] .panel {
   -webkit-backdrop-filter: none;
@@ -343,9 +390,10 @@ main[data-solid] .panel {
   background: #1b151b;
 }
 
-/* ...and the line from that panel to its landmark goes while the list covers
-   it, or it would seem to come out of the list. (The map's leader is the
-   only svg directly under its root.) */
+/* ...and the line from that panel to its landmark goes while the list is up:
+   the landmark sits right of the frame's middle, where the list is, and the
+   line would seem to run into the list. (The map's leader is the only svg
+   directly under its root.) */
 main[data-open]:has(.corner[data-open]) > svg {
   opacity: 0;
 }
@@ -709,13 +757,8 @@ main[data-view]:has([data-tel]) .corner {
 
 /* ── Phones (the list view) ──────────────────────────────── */
 
-/* Under the header's row on the left, the discount chip's place on the right. */
-main[data-view="list"] .corner {
-  position: absolute;
-  top: 62px;
-  left: 22px;
-}
-
+/* The stats stay in the header's row, at its right end across from the
+   brand; the streak keeps its number and Sign out moves into the sheet. */
 main[data-view="list"] .unit,
 main[data-view="list"] .out {
   display: none;
@@ -725,20 +768,40 @@ main[data-view="list"] .corner .seg {
   padding: 0 9px;
 }
 
-/* Under 380 px the row has no room for the pill and the discount chip side
-   by side: the pill takes the row under them. */
-@media (width < 380px) {
-  main[data-view="list"] .corner {
-    top: 98px;
-  }
+/* The discount and the Playbook drop to a pill of their own in the row
+   under it, right-aligned with it. If both cannot fit on a narrow phone,
+   the discount's last words give way (an ellipsis); the Playbook keeps its. */
+main[data-view="list"] .more {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: -1px;
+  height: 28px;
+  max-width: calc(100vw - 44px);
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: rgba(29, 24, 38, 0.66);
+  box-shadow: 0 6px 18px rgba(15, 10, 16, 0.3);
 }
 
-/* With the Playbook link in it the pill is about 80 px longer, and at 390 px
-   it ran into the discount chip (measured 2026-10-14): while the chip is up
-   (a button in the header's right end), the pill takes the row under them.
-   Without the chip (most graduates are past the offer) it stays beside it. */
-main[data-view="list"] header:has(> :last-child > button) .corner:has(.slot:not(:empty)) {
-  top: 98px;
+/* Nothing to drop (no offer showing, no Playbook): no empty pill. */
+main[data-view="list"] .more:not(:has(> .slot:not(:empty))) {
+  display: none;
+}
+
+main[data-view="list"] .more > .slot {
+  flex: none;
+  border-left: 0;
+}
+
+main[data-view="list"] .more > .slot[data-slot="discount"] {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+main[data-view="list"] .more > .slot + .slot:not(:empty) {
+  border-left: 1px solid var(--color-line);
 }
 
 main[data-view="list"] .panel {

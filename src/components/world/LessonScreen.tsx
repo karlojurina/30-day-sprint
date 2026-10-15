@@ -31,8 +31,9 @@ import u from "@/components/world/world-ui.module.css";
  * same address and pauses it. Every link here is built by the stage and leaves
  * the page scroll alone, because the page scroll is the map's camera.
  *
- * It wears the map's own panel, type and shapes (world-ui.module.css). The
- * eyebrow says where the lesson sits: the place's number in route order, then
+ * It wears the map's own panel, type and shapes (world-ui.module.css), in the
+ * middle of the screen (Panel centred). The eyebrow says where the lesson
+ * sits: the place's number in route order, then
  * "Lesson i of n" among the place's lessons that count toward progress, the
  * minutes when the catalog has a length, and the action mark on an action
  * item. A lesson that does not count (the Ad Bounty row) gets the place's
@@ -155,7 +156,7 @@ export function LessonScreen({
   const text = parseLessonText(lesson.description);
 
   return (
-    <Panel>
+    <Panel centred>
       <div className={u.top}>
         <Link href={placeHref} scroll={false} className={u.back}>
           <span aria-hidden="true">←</span>

@@ -17,22 +17,33 @@
  * run opened (all three must be 0). Exit code 1 on any FAIL.
  *
  *   1  locked: the header's chip says 30% off and the days left (11: the
- *      preset's first payment is 3 days old), the course bar has its notch,
- *      the timeline has its tag between the 4th and 5th places' diamonds
+ *      preset's first payment is 3 days old) and carries the offer's state
+ *      (2026-10-15: it is a segment of the header's group, and the course bar
+ *      with its notch is gone); the timeline has its tag between the 4th and
+ *      5th places' diamonds, saying "30% off" and outlined (locked)
  *   2  the checkpoint in the world: from the rail point that frames it the
  *      cache's marker is up as a plaque ("30% off", the days), on screen; the
  *      cache is closed (no video watched, not at Video Ads II)
  *   3  the marker opens the panel (a real mouse click on the plaque): the
- *      camera parks at the cache, the panel says the deadline, the videos
- *      watched and left, and offers the next one with Watch
+ *      camera parks at the cache, the panel says the deadline, how many
+ *      videos to watch, the videos watched and left (no time estimate and no
+ *      Watch row since Lovro's review of 2026-10-15), and shows Apply greyed
+ *      out: aria-disabled, still in the keyboard's path, no fill, its reason
+ *      ("Watch all 59 videos to apply") its title and its description in the
+ *      accessibility tree
  *   4  Esc comes home: the panel goes, the camera is back on the rail where it
  *      was, the page scrolls again
- *   5  the timeline's tag opens the panel (and names the offer on hover)
+ *   5  the timeline's tag opens the panel (and names the offer and its days
+ *      left on hover, the tip clear above the tag)
  *   6  the header's chip opens the panel from the opening frame, far from the
  *      cache: the scroll jumps to the rail point that frames it, the camera
  *      parks; Esc leaves it on the trail in front of the cache
- *   7  Watch in the panel opens the next video's lesson page
- *   8  ready: the chip says to apply, the cache is ready, Apply opens the
+ *   7  locked, Apply takes nothing: a real mouse click, Tab to it then
+ *      Enter, and Space open no questions, send nothing (no application, no
+ *      plain request) and leave the panel open and the camera parked;
+ *      hovered, it stays unfilled
+ *   8  ready: the chip says to apply, the cache is ready, Apply is on (no
+ *      aria-disabled, no reason, filled) and opens the
  *      application's questions (2026-10-14: WorldDiscountForm.tsx, the six
  *      the stand-in serves); answered and sent (in memory), the form closes,
  *      the panel turns to "in review", the chip too, the cache is claimed
@@ -59,7 +70,7 @@
  *   marker-label.png      the marker's plaque, cropped (row 2)
  *   panel-locked.png      the panel, locked, parked at the cache (row 3)
  *   timeline-tag.png      the timeline round the tag, its tip up (row 5)
- *   header-chip.png       the header's right end: the chip and the course bar (row 1)
+ *   header-chip.png       the header's right end: the group with the chip in it (row 1)
  *   panel-ready.png       the panel, ready, before Apply (row 8)
  *   form-map.png          the questions on the map, 1691x1278, a number picked (row 8)
  *   panel-pending.png     the panel after the questions went in (row 8)
@@ -76,8 +87,8 @@
  *              __worldCheckpoint() (shown, look, open, mode, marker, panel,
  *              depth: the rail depth that frames the cache), __worldPark,
  *              window.__fixtureDiscount.requests()
- *   the chip   main header button[aria-label*="discount checkpoint"]
- *   the notch  main header [data-cp]
+ *   the chip   main header button[aria-label*="discount checkpoint"]; its
+ *              state: main header [data-cp] (the chip's data-cp)
  *   the tag    main nav[aria-label="Places"] button[data-cp]; the places'
  *              diamonds: nav[aria-label="Places"] > div > button:not([data-cp])
  *   the marker main button[data-mode][data-cp], its plaque = last child
@@ -120,12 +131,52 @@ const results = []
 
 const FIND = {
   chip: () => document.querySelector('main header button[aria-label*="discount checkpoint"]'),
-  notch: () => document.querySelector('main header [data-cp]'),
+  chipState: () => document.querySelector('main header [data-cp]'),
   tag: () => document.querySelector('main nav[aria-label="Places"] button[data-cp]'),
   marker: () => document.querySelector('main button[data-mode][data-cp]'),
   panel: () => document.querySelector('main section[aria-labelledby="cp-panel-title"]'),
   apply: () => [...(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.querySelectorAll('button') ?? [])].find((b) => /^(Apply for|Sending)/.test(b.textContent.trim())) ?? null,
   watch: () => document.querySelector('main section[aria-labelledby="cp-panel-title"] button[aria-label^="Watch "]'),
+}
+
+/** The panel's Apply as a person meets it: greyed out or on, its reason, where the focus is (rows 3, 7, 8). */
+const APPLY = () => {
+  const b = [...(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.querySelectorAll('button') ?? [])].find((x) => /^(Apply for|Sending)/.test(x.textContent.trim()))
+  if (!b) return null
+  const cs = getComputedStyle(b)
+  return {
+    text: b.textContent.replace(/\s+/g, ' ').trim(),
+    ariaDisabled: b.getAttribute('aria-disabled'),
+    disabled: b.disabled,
+    tabIndex: b.tabIndex,
+    title: b.getAttribute('title'),
+    filled: cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent',
+    cursor: cs.cursor,
+    focused: document.activeElement === b,
+  }
+}
+
+/** What a press on the locked Apply could have set off (row 7). */
+const UNMOVED = () => ({
+  form: !!document.querySelector('[data-discount-form]'),
+  requests: window.__fixtureDiscount?.requests().length ?? null,
+  plain: window.__fixtureDiscount?.plain() ?? null,
+  answers: window.__fixtureDiscount?.answers().length ?? null,
+  panel: !!document.querySelector('main section[aria-labelledby="cp-panel-title"]'),
+  parked: window.__worldFrame?.parkedId === 'checkpoint' && window.__worldFrame.parkProgress >= 0.999,
+  sending: /Sending/.test(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.textContent ?? ''),
+  path: location.pathname,
+})
+/** Nothing came of it: no questions, no application, no plain request, the panel open and parked, the page where it was. */
+const unmoved = (u, at) => !!u && !u.form && u.requests === 0 && u.plain === 0 && u.answers === 0 && u.panel && u.parked && !u.sending && u.path === at
+
+/** The Apply's node in the accessibility tree: what a screen reader is told (row 3). */
+async function applyAx(page) {
+  const h = await page.evaluateHandle(FIND.apply)
+  const el = h.asElement()
+  const ax = el ? await page.accessibility.snapshot({ root: el, interestingOnly: false }) : null
+  await h.dispose()
+  return ax ? { role: ax.role, name: ax.name, disabled: ax.disabled === true, description: ax.description ?? null } : null
 }
 
 /** What the map shows of the discount right now. */
@@ -148,8 +199,8 @@ const SNAP = () => {
     y: Math.round(scrollY),
     locked: document.body.style.overflow === 'hidden',
     chip: chip ? { text: norm(chip.textContent), box: box(chip) } : null,
-    notch: document.querySelector('main header [data-cp]')?.getAttribute('data-cp') ?? null,
-    tag: tag ? { state: tag.dataset.cp, box: box(tag), label: tag.getAttribute('aria-label') } : null,
+    chipState: document.querySelector('main header [data-cp]')?.getAttribute('data-cp') ?? null,
+    tag: tag ? { state: tag.dataset.cp, box: box(tag), label: tag.getAttribute('aria-label'), text: norm(tag.textContent) } : null,
     stops: stops.map((b) => box(b)),
     marker: marker ? { mode: marker.dataset.mode, state: marker.dataset.cp, label: norm(marker.lastElementChild?.textContent), box: box(marker.lastElementChild) } : null,
     panel: panel ? { title: norm(panel.querySelector('#cp-panel-title')?.textContent), text: norm(panel.textContent), box: box(panel), opacity: Number(getComputedStyle(panel).opacity) } : null,
@@ -422,20 +473,22 @@ browser = await puppeteer.launch({
 })
 
 try {
-  await runRow(1, 'locked: the chip counts the days, the course bar has its notch, the timeline its tag between places 4 and 5', async (r) => {
+  await runRow(1, 'locked: the chip counts the days and carries the state, the timeline its tag between places 4 and 5', async (r) => {
     const page = await r.open({ discount: 'locked' })
     const s = await page.evaluate(SNAP)
     r.check('the chip says 30% off and 11 days left', s.chip && /30% off/i.test(s.chip.text) && /11 days left/i.test(s.chip.text), s.chip)
-    r.check('the course bar has the notch at the gate (locked)', s.notch === 'locked', s.notch)
+    // 2026-10-15: the course bar and its notch at the gate are gone; the chip carries the state the notch showed.
+    r.check("the header's chip carries the offer's state (locked)", s.chipState === 'locked', s.chipState)
     const [a4, a5] = [s.stops[3], s.stops[4]]
     const mid = s.tag ? (s.tag.box.l + s.tag.box.r) / 2 : NaN
     r.check('the timeline has the tag, between the 4th and 5th diamonds', s.tag && a4 && a5 && mid > (a4.l + a4.r) / 2 + 8 && mid < (a5.l + a5.r) / 2 - 8, { tag: s.tag, a4, a5 })
+    r.check('the tag says 30% off (never 30% alone) and is locked', s.tag?.state === 'locked' && /^30% off$/i.test(s.tag.text), s.tag)
+    r.check('the tag stands above the bar, clear of the diamonds', s.tag && a4 && a5 && s.tag.box.b <= Math.min(a4.t, a5.t), { tag: s.tag?.box, a4, a5 })
     r.check('the tag is no ninth diamond: the places still have 8', s.stops.length === 8, s.stops.length)
     r.check('the cache is closed (no video watched yet, far from Video Ads II)', s.cp?.shown === true && s.cp?.look === 'closed', s.cp)
     const head = await page.evaluate(() => {
-      const a = document.querySelector('main header button[aria-label*="discount checkpoint"]').getBoundingClientRect()
-      const b = document.querySelector('main header [aria-label^="Place "]').getBoundingClientRect()
-      return { l: Math.round(Math.min(a.left, b.left)), t: Math.round(Math.min(a.top, b.top)), r: Math.round(Math.max(a.right, b.right)), b: Math.round(Math.max(a.bottom, b.bottom)) }
+      const r = document.querySelector('main header > :last-child').getBoundingClientRect()
+      return { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom) }
     })
     await crop(page, 'header-chip.png', { ...head, w: head.r - head.l, h: head.b - head.t }, 20)
   })
@@ -454,7 +507,7 @@ try {
     await crop(page, 'marker-label.png', s.marker?.box ? { ...s.marker.box, b: s.marker.box.b + 60, h: s.marker.box.h + 60 } : null, 40)
   })
 
-  await runRow(3, 'the marker opens the panel and parks the camera at the cache (a real click)', async (r) => {
+  await runRow(3, 'the marker opens the panel and parks the camera at the cache (a real click); locked, Apply is there and greyed out', async (r) => {
     const page = await r.open({ discount: 'locked' })
     const depth = await page.evaluate(() => window.__worldCheckpoint().depth)
     await railTo(page, depth, 'row 3')
@@ -467,7 +520,15 @@ try {
     r.check('the panel is up, titled 30% off your next month', s.panel?.title === '30% off your next month' && s.panel.opacity > 0.99, s.panel?.title)
     r.check('it says the deadline and the days left', /Apply by \w{3} \d{1,2} \w{3}/i.test(s.panel?.text ?? '') && /11 days left/i.test(s.panel?.text ?? ''), s.panel?.text)
     r.check('it counts the videos watched and to go (0 of N, N to go)', /0 of (\d+) videos/.test(s.panel?.text ?? '') && /(\d+) to go/.test(s.panel?.text ?? ''), s.panel?.text)
-    r.check('it offers the next video with Watch', /Watch/.test(s.panel?.text ?? '') && (await page.evaluate(FIND.watch)) !== null, s.panel?.text)
+    const total = Number(/0 of (\d+) videos/.exec(s.panel?.text ?? '')?.[1])
+    r.check('it says how many videos to watch, the same N as the count', total > 0 && new RegExp(`Watch all ${total} videos through Video Ads II`).test(s.panel?.text ?? ''), s.panel?.text)
+    const watchButtons = await page.evaluate(() => [...document.querySelectorAll('main section[aria-labelledby="cp-panel-title"] button')].filter((b) => /^Watch\b/.test(b.textContent.trim()) || /^Watch /.test(b.getAttribute('aria-label') ?? '')).length)
+    r.check('no time estimate and no Watch row (Lovro, 2026-10-15)', !/about \d+ (hours?|min)/i.test(s.panel?.text ?? '') && (await page.evaluate(FIND.watch)) === null && watchButtons === 0, { text: s.panel?.text, watchButtons })
+    const a = await page.evaluate(APPLY)
+    r.check('Apply is there and greyed out: aria-disabled, still in the keyboard path, no fill, not-allowed', a?.text === 'Apply for 30% off' && a.ariaDisabled === 'true' && a.disabled === false && a.tabIndex >= 0 && !a.filled && a.cursor === 'not-allowed', a)
+    const why = `Watch all ${total} videos to apply`
+    const ax = await applyAx(page)
+    r.check(`its reason "${why}" is its title (the hover's tip) and, with it disabled, what a screen reader is told`, a?.title === why && ax?.role === 'button' && ax.name === 'Apply for 30% off' && ax.disabled === true && ax.description === why, { title: a?.title, ax })
     r.check('the page scroll is locked while parked', s.locked === true, s.locked)
     r.check('the cache is in the frame, right of the panel', s.cp?.marker?.visible && s.cp.marker.x > (s.panel?.box.r ?? 0), { marker: s.cp?.marker, panel: s.panel?.box })
     await page.screenshot({ path: path.join(OUT, 'panel-locked.png') })
@@ -496,11 +557,16 @@ try {
     await sleep(350)
     const tip = await page.evaluate(() => document.querySelector('main nav[aria-label="Places"] button[data-cp]')?.textContent ?? '')
     r.check('hovered, the tag says 30% off and the days left', /30% off/i.test(tip) && /11 days left/i.test(tip), tip)
+    const tipBox = await page.evaluate(() => {
+      const t = document.querySelector('main nav[aria-label="Places"] button[data-cp]')?.children[1]?.getBoundingClientRect()
+      return t ? { t: Math.round(t.top), b: Math.round(t.bottom) } : null
+    })
+    r.check('the tip stands clear above the tag', !!tipBox && tipBox.b <= box.t, { tip: tipBox, tag: box })
     const nav = await page.evaluate(() => {
       const b = document.querySelector('main nav[aria-label="Places"]').getBoundingClientRect()
       return { l: Math.round(b.left), t: Math.round(b.top), r: Math.round(b.right), b: Math.round(b.bottom), w: Math.round(b.width), h: Math.round(b.height) }
     })
-    await crop(page, 'timeline-tag.png', { ...nav, t: nav.t - 40, h: nav.h + 40 }, 24)
+    await crop(page, 'timeline-tag.png', { ...nav, t: nav.t - 70, h: nav.h + 70 }, 24)
     await page.mouse.click((box.l + box.r) / 2, (box.t + box.b) / 2)
     await parked(page, 'row 5')
     const s = await page.evaluate(SNAP)
@@ -523,17 +589,42 @@ try {
     r.check('opened from far, Esc leaves the camera on the trail in front of the cache (its marker up)', Math.abs(back.d - back.want) < 2e-3 && back.marker?.visible === true, back)
   })
 
-  await runRow(7, 'Watch in the panel opens the next video’s lesson page', async (r) => {
+  await runRow(7, 'locked: Apply takes no click, no Enter, no Space; nothing opens, nothing is sent, the panel stays', async (r) => {
     const page = await r.open({ discount: 'locked' })
     await page.evaluate(() => window.__worldPark('checkpoint'))
     await parked(page, 'row 7')
-    const label = await page.evaluate(() => document.querySelector('main section[aria-labelledby="cp-panel-title"] button[aria-label^="Watch "]')?.getAttribute('aria-label') ?? null)
-    await click(page, FIND.watch, 'row 7: Watch')
-    await waitFor(page, () => /^\/dev\/world-app\/a\d\/a\dl\d\d$/.test(location.pathname), { timeout: 40000, what: 'row 7: no lesson page' })
     const at = await page.evaluate(() => location.pathname)
-    r.check('the next video is the first of the course (nothing watched): a1l01', at === `${APP}/a1/a1l01`, { at, label })
-    await waitFor(page, () => [...document.querySelectorAll('h1')].some((h) => !h.closest('main')), { timeout: 40000, what: 'row 7: the lesson page has no heading' })
-    r.check("the checkpoint's panel gave way", !(await page.evaluate(FIND.panel)), 'closed')
+    // Longer than the stand-in's Apply (600 ms) and the questions' opening: whatever a press set off shows by then.
+    const settle = () => sleep(1200)
+    const via = await click(page, FIND.apply, 'row 7: Apply')
+    await settle()
+    let u = await page.evaluate(UNMOVED)
+    r.check('a mouse click: no questions, nothing sent, the panel open and parked', via === 'mouse' && unmoved(u, at), { via, ...u })
+    // The keyboard's way in: one Tab from the panel's heading (aria-disabled keeps Apply in the path).
+    await page.evaluate(() => document.getElementById('cp-panel-title')?.focus())
+    await page.keyboard.press('Tab')
+    let a = await page.evaluate(APPLY)
+    r.check('Tab from the heading reaches Apply', a?.focused === true, a)
+    await page.keyboard.press('Enter')
+    await settle()
+    u = await page.evaluate(UNMOVED)
+    a = await page.evaluate(APPLY)
+    r.check('Enter on it: nothing opens or is sent, the focus stays on it', unmoved(u, at) && a?.focused === true, { ...u, focused: a?.focused })
+    await page.keyboard.press('Space')
+    await settle()
+    u = await page.evaluate(UNMOVED)
+    r.check('Space on it: the same', unmoved(u, at), u)
+    // Hovered, it stays greyed out: the accent button it shares fills on hover.
+    const c = await page.evaluate((src) => {
+      const r = new Function(`return (${src})()`)()?.getBoundingClientRect()
+      return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null
+    }, FIND.apply.toString())
+    if (c) await page.mouse.move(c.x, c.y)
+    await sleep(300)
+    a = await page.evaluate(APPLY)
+    r.check('hovered, it stays unfilled and not-allowed', !!c && !!a && !a.filled && a.cursor === 'not-allowed', a)
+    const chip = (await page.evaluate(SNAP)).chip
+    r.check('the chip still counts the days (nothing went in for review)', /11 days left/i.test(chip?.text ?? ''), chip)
   })
 
   await runRow(8, 'ready: Apply opens the questions; sent, the panel and the chip turn to in review, the cache is claimed', async (r) => {
@@ -549,6 +640,8 @@ try {
     await parked(page, 'row 8')
     s = await page.evaluate(SNAP)
     r.check('the panel says every video is watched, and offers Apply', /Every video through Video Ads II is watched/.test(s.panel?.text ?? '') && (await page.evaluate(FIND.apply)) !== null, s.panel?.text)
+    const on = await page.evaluate(APPLY)
+    r.check('ready, Apply is on: not aria-disabled, no reason, filled, a pointer', on?.ariaDisabled === null && on.disabled === false && on.title === null && on.filled && on.cursor === 'pointer', on)
     await page.screenshot({ path: path.join(OUT, 'panel-ready.png') })
     await click(page, FIND.apply, 'row 8: Apply')
     await waitFor(page, () => !!document.querySelector('[data-discount-form] [role="dialog"]'), { timeout: 3000, what: 'row 8: Apply did not open the questions' })
@@ -610,7 +703,7 @@ try {
       const page = await r.open(params)
       const s = await page.evaluate(SNAP)
       const name = params.discount ?? 'no ?discount'
-      r.check(`${name}: no chip, no notch, no tag`, s.chip === null && s.notch === null && s.tag === null, { chip: s.chip, notch: s.notch, tag: s.tag })
+      r.check(`${name}: no chip, nothing of the offer in the header, no tag`, s.chip === null && s.chipState === null && s.tag === null, { chip: s.chip, chipState: s.chipState, tag: s.tag })
       r.check(`${name}: the checkpoint does not show and the cache stands closed`, s.cp?.shown === false && s.cp?.look === 'closed' && (s.marker === null || s.marker.mode === 'hidden'), s.cp)
       await page.close()
     }

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Bricolage_Grotesque } from "next/font/google";
 import { StudentGuard } from "@/components/auth/StudentGuard";
 import { StudentProvider } from "@/contexts/StudentContext";
@@ -30,6 +31,11 @@ const display = Bricolage_Grotesque({
   variable: "--font-v2-display",
   axes: ["opsz"],
 });
+
+/** The tab's title on the map and every page over it (Lovro's review, 2026-10-15: "everything is going to be Ecom University"). */
+export const metadata: Metadata = {
+  title: "Ecom University",
+};
 
 export default function WorldLayout({
   children,

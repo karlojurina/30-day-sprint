@@ -20,10 +20,13 @@
  *   1  without ?playbook: no link, and the pill is what it was (the stats and
  *      Sign out, no empty slot, no extra line)
  *   2  with ?playbook=1: a link labelled Playbook to /dashboard/playbook, in
- *      the pill between the stats and Sign out, clear of the brand and of the
- *      header's right end; it takes the keyboard's focus ring
- *   3  phone (390x844): the link fits, the pill clear of the discount chip
- *      and inside the screen, with the longest streak and the chip up
+ *      the pill between the stats and Sign out (after the discount's segment:
+ *      since 2026-10-15 the pill is the header's group at the right end), the
+ *      pill clear of the brand; Tab reaches it after the discount, and it
+ *      takes the keyboard's focus ring
+ *   3  phone (390x844): the stats stay in the header's row and the link drops
+ *      to the row under them with the discount, both inside the screen and
+ *      apart, with the longest streak and the chip up; alone without the chip
  *   4  wide (3428x1230): the link in the pill, clear of everything
  *
  * Pictures for a person, in world-tests/shots/v6/playbook/ (git-ignored):
@@ -86,9 +89,13 @@ const SNAP = () => {
   const link = document.querySelector('main header a[href="/dashboard/playbook"]')
   const out = document.querySelector('main header button[aria-label="Sign out"]')
   const chip = document.querySelector('main header button[aria-label*="discount checkpoint"]')
-  const brand = header?.querySelector('span > span')
+  // Since 2026-10-15 the header holds two things: the brand, then the group at the right end.
+  const brand = header?.firstElementChild
   const end = header?.lastElementChild
-  const kids = pill ? [...pill.children].map((el) => ({ tag: el.tagName, seen: seen(el), empty: el.childElementCount === 0 && !el.textContent.trim(), w: Math.round(el.getBoundingClientRect().width) })) : []
+  // The pill's parts, through any wrapper that draws no box of its own (the slots sit in
+  // `.more`, display: contents, which is always 0 wide): so row 1 measures the empty slot itself.
+  const flat = (els) => els.flatMap((el) => (getComputedStyle(el).display === 'contents' ? flat([...el.children]) : [el]))
+  const kids = pill ? flat([...pill.children]).map((el) => ({ tag: el.tagName, slot: el.dataset.slot ?? null, seen: seen(el), empty: el.childElementCount === 0 && !el.textContent.trim(), w: Math.round(el.getBoundingClientRect().width) })) : []
   return {
     view: document.querySelector('main')?.dataset.view ?? null,
     pill: box(pill),
@@ -111,6 +118,8 @@ const SNAP = () => {
 }
 
 const apart = (a, b) => !a || !b || a.r <= b.l || b.r <= a.l || a.b <= b.t || b.b <= a.t
+/** a's box within b's (a pixel of rounding either way). */
+const inside = (a, b) => !!a && !!b && a.l >= b.l - 1 && a.r <= b.r + 1 && a.t >= b.t - 1 && a.b <= b.b + 1
 
 async function waitFor(page, fn, { arg, timeout = 10000, poll = 120, what }) {
   const t0 = Date.now()
@@ -198,14 +207,8 @@ async function runRow(id, name, body) {
   if (row.error) console.log(`        error: ${row.error}`)
 }
 
-/** The header's left end: the brand and the pill, padded. */
-const leftEnd = (s) => {
-  const l = Math.min(s.brand?.l ?? 0, s.pill?.l ?? 0)
-  const t = Math.min(s.brand?.t ?? 0, s.pill?.t ?? 0)
-  const rr = Math.max(s.brand?.r ?? 0, s.pill?.r ?? 0)
-  const b = Math.max(s.brand?.b ?? 0, s.pill?.b ?? 0)
-  return { l, t, r: rr, b, w: rr - l, h: b - t }
-}
+/** The header's right end (since 2026-10-15): the pill, padded. */
+const groupEnd = (s) => s.pill
 
 browser = await puppeteer.launch({
   executablePath: CHROME,
@@ -222,7 +225,7 @@ try {
     const shown = s.kids.filter((k) => k.seen)
     r.check('the pill shows two parts, the stats and Sign out', shown.length === 2 && shown[0].tag === 'BUTTON' && shown[1].tag === 'BUTTON', s.kids)
     r.check('the empty slot takes no room', s.kids.every((k) => k.seen || k.w === 0), s.kids)
-    await crop(page, 'corner-none.png', leftEnd(s), DESKTOP, 20)
+    await crop(page, 'corner-none.png', groupEnd(s), DESKTOP, 20)
   })
 
   await runRow(2, 'with ?playbook=1: a link to /dashboard/playbook in the pill, clear of the rest, with a focus ring', async (r) => {
@@ -230,17 +233,21 @@ try {
     const s = await page.evaluate(SNAP)
     r.check('the link is there, says Playbook, goes to /dashboard/playbook', s.link?.text === 'Playbook' && s.link.href === '/dashboard/playbook' && s.link.seen, s.link)
     r.check('it is in the pill, after the stats and before Sign out', s.link?.inPill && s.stats && s.out && s.link.box.l >= s.stats.r - 1 && s.link.box.r <= s.out.box.l + 1, { stats: s.stats, link: s.link?.box, out: s.out?.box })
-    r.check('the pill is clear of the brand and of the header\'s right end', apart(s.pill, s.brand) && apart(s.pill, s.end) && apart(s.pill, s.chip), { pill: s.pill, brand: s.brand, end: s.end, chip: s.chip })
+    r.check('the pill is the group at the header\'s right end, clear of the brand; the discount and the link are parts of it, apart', apart(s.pill, s.brand) && s.pill.r === s.end.r && inside(s.chip, s.pill) && apart(s.link?.box, s.chip) && s.link.box.l >= s.chip.r - 1, { pill: s.pill, brand: s.brand, end: s.end, chip: s.chip, link: s.link?.box })
     r.check('the link is as tall as the pill (one row)', s.link && s.pill && s.link.box.h <= s.pill.h, { link: s.link?.box, pill: s.pill })
-    await crop(page, 'corner-playbook.png', leftEnd(s), DESKTOP, 20)
+    await crop(page, 'corner-playbook.png', groupEnd(s), DESKTOP, 20)
     await page.screenshot({ path: path.join(OUT, 'map-playbook.png') })
-    // The keyboard: Tab from the stats lands on the link.
+    // The keyboard follows the pill's order: the stats, the discount (this row has one up), the link, Sign out.
     await page.evaluate(() => document.querySelector('main header button[aria-expanded]').focus())
+    await page.keyboard.press('Tab')
+    await sleep(150)
+    const between = await page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? null)
+    r.check('Tab from the stats reaches the discount first', /discount checkpoint/.test(between ?? ''), between)
     await page.keyboard.press('Tab')
     await sleep(250)
     const f = await page.evaluate(SNAP)
-    r.check('Tab from the stats reaches the link, with the focus ring', f.focus === '/dashboard/playbook' && f.ring?.outline === 'solid', { focus: f.focus, ring: f.ring })
-    await crop(page, 'corner-focus.png', leftEnd(f), DESKTOP, 20)
+    r.check('the next Tab reaches the link, with the focus ring', f.focus === '/dashboard/playbook' && f.ring?.outline === 'solid', { focus: f.focus, ring: f.ring })
+    await crop(page, 'corner-focus.png', groupEnd(f), DESKTOP, 20)
   })
 
   await runRow(3, 'phone (390x844): the link fits, clear of the chip, inside the screen', async (r) => {
@@ -250,11 +257,12 @@ try {
       const name = `${hud}, ${discount ? 'chip up' : 'no chip'}`
       r.check(`${name}: the list view`, s.view === 'list', s.view)
       r.check(`${name}: the link is there and seen, in the pill`, s.link?.seen && s.link.inPill && s.link.href === '/dashboard/playbook', s.link)
-      r.check(`${name}: the pill is inside the screen (16 px gutter at least)`, s.pill && s.pill.l >= 16 && s.pill.r <= PHONE.width - 16, s.pill)
+      r.check(`${name}: the pill and the link are inside the screen (16 px gutter at least)`, s.pill && s.pill.l >= 16 && s.pill.r <= PHONE.width - 16 && s.link && s.link.box.l >= 16 && s.link.box.r <= PHONE.width - 16, { pill: s.pill, link: s.link?.box })
+      // Since 2026-10-15 the stats keep the header's row (its right end) and the discount and the link drop to the row under them.
       if (discount) {
-        r.check(`${name}: the pill and the discount chip do not touch (the pill takes the row under it)`, s.chip && apart(s.pill, s.chip) && s.pill.t >= s.chip.b, { pill: s.pill, chip: s.chip })
+        r.check(`${name}: the discount and the link drop to the row under the stats, the discount first, apart`, s.chip && s.chip.t >= s.pill.b + 4 && s.link.box.t >= s.pill.b + 4 && apart(s.chip, s.link.box) && s.chip.r <= s.link.box.l + 1, { pill: s.pill, chip: s.chip, link: s.link?.box })
       } else {
-        r.check(`${name}: with no chip the pill keeps its row under the header (top 62)`, s.chip === null && s.pill?.t === 62, s.pill)
+        r.check(`${name}: with no chip the link alone drops to the row under the stats, right-aligned with them`, s.chip === null && s.link.box.t >= s.pill.b + 4 && Math.abs(s.link.box.r - s.pill.r) <= 2, { pill: s.pill, link: s.link?.box })
       }
       // The pill's segments reach past the 28 px they draw (corner.module.css .link::before):
       // the link's target is the same as the stats segment beside it.
@@ -273,8 +281,8 @@ try {
     const page = await r.open({ hud: 'long', playbook: '1', discount: 'locked' }, WIDE)
     const s = await page.evaluate(SNAP)
     r.check('the link is there and seen, in the pill', s.link?.seen && s.link.inPill, s.link)
-    r.check('the pill is clear of the brand, the chip and the right end', apart(s.pill, s.brand) && apart(s.pill, s.chip) && apart(s.pill, s.end), { pill: s.pill, chip: s.chip })
-    await crop(page, 'wide-playbook.png', leftEnd(s), WIDE, 20)
+    r.check('the pill is the group at the right end, clear of the brand; the chip and the link are parts of it, apart', apart(s.pill, s.brand) && s.pill.r === s.end.r && inside(s.chip, s.pill) && apart(s.link?.box, s.chip), { pill: s.pill, brand: s.brand, chip: s.chip, link: s.link?.box })
+    await crop(page, 'wide-playbook.png', s.end, WIDE, 20)
   })
 } finally {
   await browser.close()

@@ -79,8 +79,9 @@ const display = Bricolage_Grotesque({
   axes: ["opsz"],
 });
 
+/** The tab's title, as on /world (src/app/world/layout.tsx). */
 export const metadata = {
-  title: "EcomTalent World (dev harness)",
+  title: "Ecom University",
   robots: { index: false, follow: false },
 };
 

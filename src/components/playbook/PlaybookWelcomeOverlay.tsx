@@ -69,7 +69,7 @@ export function PlaybookWelcomeOverlay({ open, onDismiss }: Props) {
                   fontSize: 11,
                 }}
               >
-                EcomTalent · The Playbook
+                Ecom University · The Playbook
               </span>
               <h2
                 id="pb-welcome-title"

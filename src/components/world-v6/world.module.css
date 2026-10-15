@@ -193,18 +193,64 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   pointer-events: none;
 }
 
+/* The brand, alone at the left (WorldV6 BrandMark): the logo, or with
+   BRAND_LOGO null the name beside the Mark. */
 .brand {
+  flex: none;
   display: inline-flex;
   align-items: center;
   gap: 10px;
   font-size: 18px;
   font-weight: 650;
   letter-spacing: -0.02em;
+  white-space: nowrap;
   color: var(--color-ink);
   text-shadow: 0 1px 14px var(--shadow-ink);
+}
+
+/* The logo (Karlo's lockup, as it came): 20 px tall on a computer
+   (brand_fit.md), its width from its own proportions, never stretched, no
+   shadow or filter on it (the brand's rules). Its size never follows the
+   group, so it holds still while a new badge's toast shows (the toast finds
+   its own room: corner.module.css). */
+.brandLogo {
+  flex: none;
+  display: block;
+  width: auto;
+  height: 20px;
+}
+
+/* Under 844 px the widest group (a 3 digit streak, Apply with its days, the
+   Playbook, Sign out: 500 px) and the 20 px logo (270 px) no longer share the
+   row: the logo narrows with the window, 14 px tall at 760 px. 574 px is the
+   two 28 px gutters, the 16 px gap, that group and 2 px to spare. */
+@media (width < 844px) {
+  .brandLogo {
+    width: max(160px, calc(100vw - 574px));
+    height: auto;
+  }
+}
+
+/* Phones: 16 px tall where the row has the room (216 px wide, a 390 px
+   phone), smaller where it has not. The box takes what the stats pill
+   leaves, and the file is drawn whole inside it. No toast shares this row
+   (it sits at the bottom), so the stats pill keeps its size and the logo
+   gives way. */
+.root[data-view="list"] .brandLogo {
+  flex: 0 1 auto;
+  min-width: 0;
+  width: auto;
+  height: 16px;
+  object-fit: contain;
+  object-position: left center;
+}
+
+.root[data-view="list"] .headerEnd {
+  flex-shrink: 0;
 }
 
 .mark {
@@ -214,25 +260,6 @@
 
 .markSun {
   fill: var(--color-accent);
-}
-
-.progress {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-ink-2);
-  /* The tight halo holds the 11px counter on the bright morning sky at a8. */
-  text-shadow: 0 0 3px var(--shadow-ink), 0 1px 12px var(--shadow-ink);
-}
-
-.progress b {
-  color: var(--color-ink);
-  font-weight: 600;
 }
 
 /* ── Next ──────────────────────────────────────────────────── */
@@ -998,6 +1025,17 @@
   border-top: 1px solid var(--color-line);
 }
 
+/* The course's count heads the list of places (WorldV6, phones): nearer the
+   list than the Watch button, so it reads as the list's. (.list first: it
+   is also a .prog, which comes later in this file.) */
+.list .listCourse {
+  margin: 32px 0 0;
+}
+
+.list .listCourse + .areaList {
+  margin-top: 14px;
+}
+
 .areaList li {
   border-bottom: 1px solid var(--color-line);
 }
@@ -1708,7 +1746,8 @@
    Positions come from the frame loop through the `translate` property, so
    the show and hide can animate `scale` about the side facing the landmark. */
 
-/* ── Header: where the student is, one segment per place ── */
+/* ── The course bar: one segment per place, sized by its lessons. The
+   finished card's (FinishedCount); the header's went on 2026-10-15. ── */
 
 .courseSegs {
   display: flex;
@@ -2286,30 +2325,46 @@
   margin-top: 14px;
 }
 
-/* ── The timeline ── */
+/* ── The timeline ──
+   2026-10-15, Lovro's review ("the actual timeline looks pretty ugly", the
+   30% "a bit more visual"): the course in one bar on the header pill's
+   ground and line. The count, then a cell per place filled by its lessons
+   with the place's diamond on it, the camera's tick sliding along, and each
+   checkpoint's tag standing on a post between the places it sits between.
+   Its top stays 52 px up, under the chip's row at the bottom left. */
 
 .timeline {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 22px;
+  bottom: 16px;
   z-index: 4;
   margin: 0 auto;
-  width: clamp(340px, calc(100vw - 2 * (var(--gutter) + 392px)), 600px);
-  height: 30px;
+  width: clamp(340px, calc(100vw - 2 * (var(--gutter) + 392px)), 680px);
+  height: 36px;
+  padding: 0 16px 0 18px;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: rgba(29, 24, 38, 0.66);
+  box-shadow: 0 6px 18px rgba(15, 10, 16, 0.3);
+  container-type: inline-size;
   will-change: transform, opacity;
+  --cell-gap: 14px;
 }
 
 .tlCount {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
   font: 500 11px/1 var(--mono);
   letter-spacing: 0.02em;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   color: var(--color-ink-2);
-  text-shadow: 0 0 3px var(--shadow-ink), 0 1px 12px var(--shadow-ink);
 }
 
 .tlCount b {
@@ -2317,45 +2372,66 @@
   font-weight: 600;
 }
 
+/* The header pill's unit ("DAYS"): 10.5 px in the second ink, which reads
+   on the capsule over the brightest sky. */
+.tlUnit {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-ink-2);
+}
+
 .track {
   position: relative;
   flex: 1 1 auto;
-  height: 30px;
+  align-self: stretch;
 }
 
-.trackLine,
-.trackDone {
+/* A place's lessons: its slot of the bar, a gap either side, filled from
+   the left as they are watched. */
+.cell {
   position: absolute;
-  left: 0;
-  right: 0;
   top: 50%;
-  border-radius: 1px;
+  height: 4px;
+  margin-top: -2px;
+  padding: 0 calc(var(--cell-gap) / 2);
+  pointer-events: none;
 }
 
-.trackLine {
-  height: 1px;
-  margin-top: -0.5px;
-  background: rgba(246, 239, 230, 0.34);
-  box-shadow: 0 1px 6px rgba(15, 10, 16, 0.4);
+.cell::before {
+  content: "";
+  position: absolute;
+  inset: 0 calc(var(--cell-gap) / 2);
+  border-radius: 2px;
+  background: rgba(246, 239, 230, 0.2);
 }
 
-.trackDone {
-  height: 2px;
-  margin-top: -1px;
+.cell i {
+  position: relative;
+  display: block;
+  height: 100%;
+  border-radius: 2px;
   background: var(--color-accent);
-  transform-origin: left center;
 }
 
-/* The camera: a thin upright tick that slides along the line. */
+.cell[data-locked]::before {
+  background: rgba(246, 239, 230, 0.09);
+}
+
+/* The camera: a thin upright tick that slides along the bar. Taller than a
+   diamond with its dark ring (18 px), so where it passes a stop it still
+   shows above and below it. */
 .caret {
   position: absolute;
-  left: -0.75px;
-  top: 6px;
-  width: 1.5px;
-  height: 18px;
+  left: -1px;
+  top: 50%;
+  width: 2px;
+  height: 26px;
+  margin-top: -13px;
   border-radius: 1px;
   background: var(--color-ink);
-  box-shadow: 0 0 0 1px rgba(29, 24, 38, 0.55);
+  box-shadow: 0 0 0 1px rgba(29, 24, 38, 0.6);
   pointer-events: none;
   will-change: transform;
 }
@@ -2363,8 +2439,8 @@
 .stop {
   position: absolute;
   top: 0;
+  bottom: 0;
   width: 30px;
-  height: 30px;
   margin-left: -15px;
   padding: 0;
   border: 0;
@@ -2373,12 +2449,14 @@
   place-items: center;
 }
 
+/* The diamond sits on its cell; the dark ring cuts the bar round it. */
 .stopDot {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 1.5px;
-  border: 1.25px solid rgba(246, 239, 230, 0.7);
+  border: 1.25px solid rgba(246, 239, 230, 0.72);
   background: var(--color-surface-0);
+  box-shadow: 0 0 0 2px rgba(29, 24, 38, 0.9);
   transform: rotate(45deg);
   transition: transform 150ms var(--ease);
 }
@@ -2389,11 +2467,13 @@
 }
 
 .stop[data-state="current"] .stopDot {
-  width: 10px;
-  height: 10px;
-  border-color: var(--color-accent);
+  width: 11px;
+  height: 11px;
+  border-color: var(--color-accent-strong);
   background: var(--color-accent-strong);
-  box-shadow: 0 0 0 3px rgba(232, 168, 106, 0.28);
+  box-shadow:
+    0 0 0 2px rgba(29, 24, 38, 0.9),
+    0 0 0 5px rgba(232, 168, 106, 0.3);
 }
 
 .stop:hover .stopDot,
@@ -2404,17 +2484,36 @@
 .stop[data-locked] .stopDot {
   border-style: dashed;
   border-color: var(--color-ink-3);
-  background: transparent;
+  background: var(--color-surface-0);
 }
 
 .stop[data-locked][aria-disabled] {
   cursor: not-allowed;
 }
 
+/* Very wide screens: a longer bar, the cells with it. */
+@media (min-width: 2200px) {
+  .timeline {
+    width: clamp(340px, calc(100vw - 2 * (var(--gutter) + 392px)), 800px);
+  }
+}
+
+/* A narrow bar: the count drops its word, the cells narrow their gaps. */
+@container (width < 440px) {
+  .timeline .tlUnit {
+    display: none;
+  }
+
+  .track {
+    --cell-gap: 8px;
+  }
+}
+
+/* A stop's and a tag's tip stand clear of the checkpoints' tags over the bar. */
 .stopTip,
 .hint {
   position: absolute;
-  bottom: calc(100% + 6px);
+  bottom: calc(100% + 30px);
   height: 26px;
   padding: 0 10px;
   display: flex;
@@ -2500,11 +2599,11 @@
 }
 
 /* ══ The discount checkpoint (2026-10-14) ═══════════════════════
-   The 30% between Video Ads II and Static Ads: a chip in the header with the
-   days left, a notch on the course bar at the gate, a tag on the timeline
-   between the 4th and 5th diamonds, the cache's marker in the world, and its
-   panel (WorldV6 CheckpointBody). One shape throughout: a price tag on its
-   side (TagGlyph), sand. The deadline is mono text and never pulses
+   The 30% between Video Ads II and Static Ads: a segment in the header's
+   group with the days left, a tag on the timeline between the 4th and 5th
+   places, the cache's marker in the world, and its panel (WorldV6
+   CheckpointBody). One shape throughout: a price tag on its side
+   (TagGlyph), sand. The deadline is mono text and never pulses
    (.impeccable.md, "Calm confidence over urgency"). */
 
 .tagBody {
@@ -2515,72 +2614,80 @@
   fill: var(--color-surface-0);
 }
 
-/* ── The header: the chip, then the course bar ── */
+/* ── The header's group ──
+   2026-10-15, Lovro's review: the brand alone at the left; at the right one
+   group, the host's corner (src/components/world/corner.module.css): the
+   streak and the achievements, this segment, the Playbook, Sign out last. */
 
 .headerEnd {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 18px;
-}
-
-/* The brand, then the host's corner (src/components/world/corner.module.css),
-   which takes what the row has left and gives it back first when it is short. */
-.headerStart {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   display: inline-flex;
   align-items: center;
-  gap: 20px;
-}
-
-.headerStart .brand {
-  flex: none;
-}
-
-.root .cpChip {
-  pointer-events: auto;
-  height: 28px;
-  padding: 0 11px 0 9px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 999px;
-  border: 1px solid rgba(232, 168, 106, 0.42);
-  background: rgba(29, 24, 38, 0.66);
-  box-shadow: 0 6px 18px rgba(15, 10, 16, 0.3);
-  font: 600 10.5px/1 var(--mono);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  font-variant-numeric: tabular-nums;
-  color: var(--color-ink-2);
-  transition:
-    background-color 150ms var(--ease),
-    border-color 150ms var(--ease);
-}
-
-.cpChip b {
-  font-weight: 600;
-  color: var(--color-ink);
-}
-
-.root .cpChip {
-  white-space: nowrap;
-}
-
-/* Phones: the header's row has no room beside the brand and the course bar,
-   so the chip sits right under it, over the place's picture. */
-.root[data-view="list"] .cpChip {
-  position: absolute;
-  top: 62px;
-  right: 22px;
+  justify-content: flex-end;
 }
 
 /* Through the telescope (a7's click-in) the sky's caption takes the header's
-   row: the chip steps out of its way until the camera comes back. */
-.root:has(.panel[data-tel]) .cpChip {
-  opacity: 0;
-  pointer-events: none;
+   row: the group steps out of its way until the camera comes back. */
+.root:has(.panel[data-tel]) .headerEnd {
+  visibility: hidden;
+}
+
+/* The discount's segment of the group: the pill's type and height, the
+   corner's segments' hover capsule, and sand where it stands. */
+.root .cpChip {
+  pointer-events: auto;
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  white-space: nowrap;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+
+/* Its touch target reaches 40 px over the 28 it draws. */
+.cpChip::before {
+  content: "";
+  position: absolute;
+  inset: -6px 0;
+}
+
+.cpChip::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: -1;
+  border-radius: 999px;
+  background: transparent;
+  transition: background-color 150ms var(--ease);
+}
+
+.cpChip:hover::after {
+  background: var(--color-surface-3);
+}
+
+/* Ready to apply: a sand ground inside the pill and the word in sand. */
+.cpChip[data-ready]::after {
+  background: rgba(232, 168, 106, 0.16);
+}
+
+.cpChip[data-ready]:hover::after {
+  background: rgba(232, 168, 106, 0.26);
+}
+
+.cpChip b {
+  flex: none;
+  font-weight: 600;
+  color: var(--color-ink);
 }
 
 .cpChipGlyph {
@@ -2589,110 +2696,194 @@
 }
 
 .cpChipTail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   padding-left: 8px;
   border-left: 1px solid var(--color-line);
   font-weight: 500;
-}
-
-.root .cpChip[data-ready] {
-  border-color: var(--color-accent);
-  background: rgba(58, 42, 34, 0.78);
 }
 
 .cpChip[data-ready] .cpChipTail {
   color: var(--color-accent-strong);
 }
 
-.root .cpChip:hover {
-  border-color: var(--color-accent);
-  background: var(--color-surface-3);
+/* With no host's corner (no page mounts the map that way today) the segment
+   is a pill of its own, the corner's pill's look. */
+.soloPill {
+  pointer-events: auto;
+  height: 28px;
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: rgba(29, 24, 38, 0.66);
+  box-shadow: 0 6px 18px rgba(15, 10, 16, 0.3);
+  font: 600 10.5px/1 var(--mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-2);
 }
 
-/* The gate on the course bar: a sand tick across it between the place the
-   checkpoint follows and the next. The bar's 3px gap is taken back, so the
-   eight segments keep their widths. */
-.cpNotch {
-  position: relative;
-  flex: 0 0 0;
-  width: 0;
-  margin-left: -3px;
-}
+/* ── The timeline: the checkpoints' tags ──
+   2026-10-15 (Lovro: the 30% "a bit more visual"): a tag standing on a post
+   over the bar between the place it follows and the next, "30% off" on it
+   (never "30%" alone, which on a progress bar reads as how far along).
+   Locked it is outlined; ready, filled with a ring, the bar's one call to
+   act; claimed (in review, approved, applied), filled on a warm ground;
+   refused, dashed and grey. Its tip says the days left or where it stands. */
 
-.cpNotch::before {
-  content: "";
+.root .gate {
   position: absolute;
-  left: 0.75px;
-  top: -3px;
-  width: 1.5px;
-  height: 9px;
-  border-radius: 1px;
-  background: var(--color-accent);
-  box-shadow: 0 0 0 1px rgba(29, 24, 38, 0.6);
-}
-
-.cpNotch[data-cp="locked"]::before {
-  background: rgba(232, 168, 106, 0.78);
-}
-
-.cpNotch[data-cp="closed"]::before {
-  background: var(--color-ink-3);
-}
-
-/* ── The timeline: the tag ── */
-
-.root .cpTag {
-  position: absolute;
-  top: 0;
-  width: 30px;
-  height: 30px;
-  margin-left: -15px;
+  bottom: calc(100% + 4px);
+  margin: 0;
   padding: 0;
   border: 0;
   background: none;
-  display: grid;
-  place-items: center;
+  transform: translateX(-50%);
 }
 
-.cpTagGlyph {
+.gateTag {
+  height: 18px;
+  padding: 0 6px 0 5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(232, 168, 106, 0.62);
+  border-radius: 5px;
+  background: var(--plaque);
+  box-shadow: 0 4px 12px rgba(15, 10, 16, 0.4);
+  font: 600 10px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--color-ink);
+  transition:
+    border-color 150ms var(--ease),
+    background-color 150ms var(--ease);
+}
+
+.gateGlyph {
+  flex: 0 0 auto;
   display: block;
-  color: var(--color-surface-0);
+  width: 13px;
+  height: 9px;
+  color: var(--color-accent);
   overflow: visible;
-  transition: transform 150ms var(--ease);
 }
 
-.cpTagGlyph .tagBody {
+/* The post down to the bar, and its foot between the two places' cells. */
+.gate::after,
+.gate::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  pointer-events: none;
+}
+
+.gate::after {
+  top: 100%;
+  width: 1.5px;
+  height: 21px;
+  margin-left: -0.75px;
+  background: rgba(232, 168, 106, 0.75);
+}
+
+.gate::before {
+  top: calc(100% + 18px);
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 2px rgba(29, 24, 38, 0.9);
+}
+
+.gate[data-cp="locked"] .gateGlyph .tagBody {
+  fill: none;
   stroke: var(--color-accent);
-  stroke-width: 1.3px;
+  stroke-width: 1.4px;
 }
 
-.cpTagGlyph .tagHole {
+.gate[data-cp="locked"] .gateGlyph .tagHole {
   fill: var(--color-accent);
 }
 
-.cpTag[data-cp="ready"] .cpTagGlyph,
-.cpTag[data-cp="pending"] .cpTagGlyph,
-.cpTag[data-cp="done"] .cpTagGlyph {
-  color: var(--color-accent);
+.gate[data-cp="ready"] .gateTag {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  box-shadow:
+    0 0 0 3px rgba(232, 168, 106, 0.3),
+    0 4px 12px rgba(15, 10, 16, 0.4);
 }
 
-.cpTag[data-cp="ready"] .cpTagGlyph .tagHole,
-.cpTag[data-cp="pending"] .cpTagGlyph .tagHole,
-.cpTag[data-cp="done"] .cpTagGlyph .tagHole {
-  fill: var(--color-surface-0);
+.gate[data-cp="ready"] .gateGlyph {
+  color: var(--color-on-accent);
 }
 
-.cpTag[data-cp="closed"] .cpTagGlyph .tagBody {
+.gate[data-cp="ready"] .gateGlyph .tagHole {
+  fill: var(--color-accent);
+}
+
+.gate[data-cp="pending"] .gateTag,
+.gate[data-cp="done"] .gateTag {
+  border-color: var(--color-accent);
+  background: #3a2a22;
+  color: var(--color-accent-strong);
+}
+
+/* Refused or closed: the words in the second ink (about 9:1 on the plaque; the
+   third ink read 4.3:1, under the 4.5 floor for words that must be read, and it
+   is still a button), the rest grey so it still reads as closed. */
+.gate[data-cp="closed"] .gateTag {
+  border-style: dashed;
+  border-color: var(--color-ink-3);
+  color: var(--color-ink-2);
+}
+
+.gate[data-cp="closed"] .gateGlyph {
+  color: var(--color-ink-3);
+}
+
+.gate[data-cp="closed"] .gateGlyph .tagBody {
+  fill: none;
   stroke: var(--color-ink-3);
+  stroke-width: 1.4px;
   stroke-dasharray: 2 1.6;
 }
 
-.cpTag[data-cp="closed"] .cpTagGlyph .tagHole {
+.gate[data-cp="closed"] .gateGlyph .tagHole,
+.gate[data-cp="closed"]::after,
+.gate[data-cp="closed"]::before {
+  background: var(--color-ink-3);
   fill: var(--color-ink-3);
 }
 
-.cpTag:hover .cpTagGlyph,
-.cpTag:focus-visible .cpTagGlyph {
-  transform: scale(1.18);
+.gate:hover .gateTag {
+  border-color: var(--color-accent-strong);
+}
+
+.gate[data-cp="ready"]:hover .gateTag {
+  background: var(--color-accent-strong);
+}
+
+/* The keyboard's ring goes round the tag, not round its post. */
+.root .gate:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.gate:focus-visible .gateTag {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Its tip, right over it. */
+.gate .stopTip {
+  bottom: calc(100% + 6px);
 }
 
 /* ── The marker in the world: the place's pin and plaque, in sand ── */
@@ -2801,10 +2992,6 @@
   color: var(--color-ink-3);
 }
 
-.cpPanel .rows {
-  margin-top: 14px;
-}
-
 .root .cpApply {
   margin-top: 16px;
 }
@@ -2812,6 +2999,23 @@
 .root .cpApply:disabled {
   cursor: progress;
   background: var(--color-accent-deep);
+}
+
+/* Locked (aria-disabled): there, outlined and plainly off, as the lesson
+   page's Next lesson waits (world-ui.module.css). No fill, no hover, no
+   press; the padlock sits where the arrow does. */
+.root .cpApply[aria-disabled="true"],
+.root .cpApply[aria-disabled="true"]:hover,
+.root .cpApply[aria-disabled="true"]:active {
+  border: 1px solid var(--color-line);
+  background: none;
+  color: var(--color-ink-3);
+  transform: none;
+  cursor: not-allowed;
+}
+
+.cpApply .lock {
+  margin-right: 3px;
 }
 
 .cpError {

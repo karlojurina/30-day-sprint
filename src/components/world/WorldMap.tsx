@@ -35,9 +35,9 @@ import u from "@/components/world/world-ui.module.css";
  * and sending them is the one thing here that writes
  * (POST /api/discounts/submit-feedback; /api/discounts/request when there
  * are no active questions).
- * The header's top-left corner (WorldCorner.tsx) shows the student's streak
- * and achievements and holds Sign out; it reads its own data
- * (useWorldBadges.ts). A graduate gets the Playbook link in it
+ * The header's group at the right (WorldCorner.tsx) shows the student's
+ * streak and achievements, holds the map's discount segment and Sign out,
+ * and reads its own data (useWorldBadges.ts). A graduate gets the Playbook link in it
  * (PlaybookLink.tsx). The old dashboard's streak and discount-approved
  * celebrations are mounted beside the map (WorldCelebrations.tsx).
  *
@@ -169,9 +169,19 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
     };
   }, [model, data, openAreaId, lessonId, href, router, transport, active, discount]);
 
-  // The header's top-left corner: streak, achievements, Sign out (WorldCorner.tsx),
-  // and the Playbook link for a student who has it (PlaybookLink.tsx).
-  const corner = <WorldCorner paused={lessonId !== null} placeOpen={openAreaId !== null} playbook={<PlaybookLink />} />;
+  // The header's group at the right: streak, achievements, the map's discount
+  // segment, the Playbook link for a student who has it (PlaybookLink.tsx) and
+  // Sign out (WorldCorner.tsx). WorldV6 calls it with the discount segment and
+  // whether the checkpoint's panel is up, which closes the list as a place does.
+  const corner = (discount: ReactNode, checkpointOpen: boolean) => (
+    <WorldCorner
+      paused={lessonId !== null}
+      placeOpen={openAreaId !== null}
+      checkpointOpen={checkpointOpen}
+      discount={discount}
+      playbook={<PlaybookLink />}
+    />
+  );
 
   return (
     <>

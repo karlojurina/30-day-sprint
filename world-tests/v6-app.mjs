@@ -33,8 +33,9 @@
  *              and "Watch lesson N, title"), button[data-state="fold"], the count
  *              line (the element before the ol), a button whose text has "Ad Bounty"
  *   markers    main button[data-mode] (index = place), label = its last child
- *   header     main header [aria-label^="Place "] (last child's text, "04/08")
- *   timeline   main nav[aria-label="Places"] [aria-label$="lessons done"]
+ *   timeline   main nav[aria-label="Places"] [aria-label$="lessons done"]; the
+ *              student's place: its > div > button[aria-current="step"] (the
+ *              header's "04/08" until 2026-10-15, when Lovro's review took it out)
  *   phone      main[data-view="list"], main ol > li > button (the eight rows),
  *              main section[aria-label="Next lesson"], main section[role="dialog"]
  *   lesson     the h1 outside `main`, a button "Mark watched (dev)", an `a` whose
@@ -85,13 +86,13 @@ const area1Minutes = (n) => Math.max(1, Math.round((300 + 61 * n) / 60))
 const FEATURE_TEXT = 'Fixture setup step'
 const briefStart = (id) => `Fixture milestone brief for ${id}`
 /**
- * The header for the mid student. The PRD's row 2 says "03/08"; the header
- * shows the student's place number, so three places done and the fourth under
- * way reads "04/08" (WorldV6.tsx, the header's pad2(place + 1); .impeccable.md
- * "The chrome" says the same). Asserted as built; change this one line if the
- * header's meaning is ever changed.
+ * The mid student's place. The PRD's row 2 says "03/08"; the header showed the
+ * student's place number, so three places done and the fourth under way read
+ * "04/08". Lovro's review of 2026-10-15 took that counter out of the header,
+ * and the same fact is now the timeline's: the 4th of its 8 diamonds is the
+ * student's (aria-current="step"), Video Ads II.
  */
-const HEADER_MID = '04/08'
+const CURRENT_MID = { place: 4, of: 8, label: 'Travel to Video Ads II' }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const f = (n, d = 4) => (typeof n === 'number' ? n.toFixed(d) : String(n))
@@ -120,7 +121,8 @@ const SNAP = () => {
   const done = shown(document.querySelector('main section[aria-label="Place done"]'))
   const chip = shown(document.querySelector('main section[data-dir]'))
   const panel = document.querySelector('main section[aria-labelledby="v4-panel-title"]')
-  const prog = document.querySelector('main header [aria-label^="Place "], main header [aria-label="Every place done"]')
+  const stops = [...document.querySelectorAll('main nav[aria-label="Places"] > div > button:not([data-cp])')]
+  const here = stops.findIndex((b) => b.getAttribute('aria-current') === 'step')
   const tl = document.querySelector('main nav[aria-label="Places"] [aria-label$="lessons done"]')
   const h1 = [...document.querySelectorAll('h1')].find((h) => !h.closest('main')) ?? null
   const rect = h1 ? h1.getBoundingClientRect() : null
@@ -143,7 +145,7 @@ const SNAP = () => {
     done: done ? { title: norm(done.querySelector('h2')?.textContent), button: norm(done.querySelector('button')?.textContent) } : null,
     chip: chip ? norm(chip.textContent) : null,
     panel: panel ? { title: norm(panel.querySelector('#v4-panel-title')?.textContent), role: panel.getAttribute('role') } : null,
-    header: prog ? { label: prog.getAttribute('aria-label'), text: norm(prog.lastElementChild?.textContent) } : null,
+    current: here >= 0 ? { place: here + 1, of: stops.length, label: stops[here].getAttribute('aria-label') } : null,
     count: tl?.getAttribute('aria-label') ?? null,
     lesson: h1
       ? {
@@ -702,7 +704,7 @@ try {
       r.check('the camera rests at place 4', true, `depth ${f(rest.d)}, the stop is at ${f(rest.t)}, ${rest.ms} ms after ready`)
       r.check('the card says Video Ads II', card?.title === 'Video Ads II', card?.title ?? null)
       r.check('the card says 18 of 22', !!card && /(^|\D)18 of 22/.test(card.text), card?.text ?? null)
-      r.check(`the header reads ${HEADER_MID} (the PRD's row says 03/08, see HEADER_MID)`, s.header?.text === HEADER_MID, s.header)
+      r.check(`the timeline marks place ${CURRENT_MID.place} of ${CURRENT_MID.of} as the student's, Video Ads II (the header's old 04/08, see CURRENT_MID)`, s.current?.place === CURRENT_MID.place && s.current.of === CURRENT_MID.of && s.current.label === CURRENT_MID.label, s.current)
       r.values.timeline = s.count
       r.values.shot = await r.shot('arrive-mid')
     })
@@ -1048,7 +1050,7 @@ try {
       r.check('the card reads "Every place done."', card?.title === 'Every place done.', card?.title ?? null)
       r.check(`the card reads "${TOTAL} of ${TOTAL} lessons"`, !!card && card.text.includes(`${TOTAL} of ${TOTAL} lessons`), card?.text ?? null)
       r.check('no chip', s.chip === null, s.chip)
-      r.values.header = s.header
+      r.values.current = s.current
       r.values.shot = await r.shot('everything-done')
     })
 

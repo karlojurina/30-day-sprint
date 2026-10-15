@@ -1,6 +1,7 @@
 /**
- * The map's top-left corner (2026-10-14): the streak, the achievements and
- * Sign out, walked in a real browser.
+ * The student's group in the map's header (2026-10-14; at its right end since
+ * 2026-10-15): the streak, the achievements and Sign out, walked in a real
+ * browser.
  *
  *   node world-tests/v6-hud.mjs [--only 1,3]
  *
@@ -18,20 +19,28 @@
  * requests to /api, requests to Supabase and page errors over every page the
  * run opened (all three must be 0). Exit code 1 on any FAIL.
  *
- *   1  each ?hud= state in the header: the pill beside the wordmark says the
- *      streak and the count (none, cold, some, long, all), the flame is lit
- *      only while a streak runs, nothing overlaps the brand or the right end
- *   2  the list: the pill opens it in the place panel's slot; it says the
- *      streak, the best and the count, lists every achievement by tier with
- *      the share of students, hides the two secret ones until earned; Back to
- *      map closes it; a click outside closes it
- *   3  a fresh unlock (?hud=fresh): the toast slides out of the pill with the
- *      name, the count turns sand, a status line reads it out; after 6.5 s it
- *      goes; the list marks it New
+ *   1  each ?hud= state in the header: the pill says the streak and the count
+ *      (none, cold, some, long, all), the flame is lit only while a streak
+ *      runs. Since 2026-10-15 (Lovro's review) the pill is the group at the
+ *      header's right end, Sign out its last part, and the brand stands
+ *      alone at the left
+ *   2  the list: the pill opens it under itself on the right, the place
+ *      panel's size; it says the streak, the best and the count, lists every
+ *      achievement by tier with the share of students, hides the two secret
+ *      ones until earned; Back to map closes it; a click outside closes it
+ *   3  a fresh unlock (?hud=fresh): the toast slides out of the pill to its
+ *      left with the name, the count turns sand, a status line reads it out;
+ *      after 6.5 s it goes; the list marks it New. At 1024 and 800 px wide,
+ *      with the widest group, it sits under the pill, whole, and the logo
+ *      holds still
  *   4  with a place open the corner stays above its panel without touching
- *      it; the list opens over the panel, solid; Esc closes the list and
- *      leaves the place open; a second Esc closes the place; opening a place
- *      closes the list; the checkpoint's panel too
+ *      it; the list opens on the right, clear of the panel, solid; Esc closes
+ *      the list and leaves the place open; a second Esc closes the place;
+ *      opening a place closes the list; the checkpoint's panel too, with the
+ *      discount's segment inside the pill. With the list open, the discount's
+ *      segment (a click at 1691 px, Shift+Tab back to it and Enter at 800 px,
+ *      a click at 800 px from an open place) parks the camera at the cache
+ *      and closes the list: one panel, focus in it, nothing over the cache
  *   5  the keyboard: Tab reaches the pill (focus ring), Enter opens the list
  *      with focus inside, Esc closes it and focus is back on the pill, Tab
  *      reaches Sign out and its word shows
@@ -41,13 +50,16 @@
  *      there toasts once the student is back on the map
  *   8  through the telescope (Creative Strategy's click-in) the corner steps
  *      out of the sky caption's row
- *   9  wide (3428x1230): the pill, the list, the toast
- *  10  phone (390x844): the pill under the header on the left, the discount
- *      chip on the right, apart; the list is a full sheet with Sign out; the
- *      toast sits at the bottom
+ *   9  wide (3428x1230): the pill at the right end, the list under it, the
+ *      toast
+ *  10  phone (390x844): the stats in the header's row at its right end,
+ *      across from the brand, and the discount in the row under them,
+ *      right-aligned; the list is a full sheet with Sign out; the toast sits
+ *      at the bottom; the course's count (the header's 01/08 went) heads
+ *      the list of places and adds up the places' counts
  *
  * Pictures for a person, in world-tests/shots/v6/hud/ (git-ignored):
- *   state-<preset>.png      the header's left end per state (row 1)
+ *   state-<preset>.png      the header's right end per state (row 1)
  *   map-some.png            the whole frame, some (row 1)
  *   list-<preset>.png       the list open, cold / some / all (row 2)
  *   fresh-toast.png         the toast up, the count sand (row 3)
@@ -55,6 +67,7 @@
  *   place-corner.png        a place open, the corner above it (row 4)
  *   place-list.png          the list over the place's panel (row 4)
  *   checkpoint-corner.png   the checkpoint's panel open, the corner above it (row 4)
+ *   checkpoint-from-list-*.png  the checkpoint opened from the segment with the list up: the list gone (row 4)
  *   focus-pill.png          the pill with the keyboard's ring (row 5)
  *   focus-list.png          the list from the keyboard, Back focused (row 5)
  *   focus-signout.png       Sign out focused, its word showing (row 5)
@@ -136,8 +149,10 @@ const SNAP = () => {
   const header = document.querySelector('main header')
   const pill = document.querySelector('main header button[aria-expanded]')
   const out = document.querySelector('main header button[aria-label="Sign out"]')
-  const brand = header?.querySelector('span > span')
+  // Since 2026-10-15 the header holds two things: the brand, then the group at the right end.
+  const brand = header?.firstElementChild
   const end = header?.lastElementChild
+  const chip = document.querySelector('main header button[aria-label*="discount checkpoint"]')
   const list = document.querySelector('main header [role="dialog"]')
   const toast = document.querySelector('main header button[aria-hidden="true"]')
   const status = document.querySelector('main header [role="status"]')
@@ -160,6 +175,9 @@ const SNAP = () => {
     out: out ? { box: box(out), seen: seen(out) } : null,
     brand: box(brand),
     end: box(end),
+    headerKids: header?.childElementCount ?? 0,
+    chip: box(chip),
+    vw: innerWidth,
     list: list
       ? {
           box: box(list),
@@ -179,6 +197,7 @@ const SNAP = () => {
     status: status ? norm(status.textContent) : null,
     place: place ? { box: box(place), opacity: Number(getComputedStyle(place).opacity) } : null,
     cp: cp ? { box: box(cp), opacity: Number(getComputedStyle(cp).opacity) } : null,
+    park: window.__worldFrame ? { id: window.__worldFrame.parkedId, p: window.__worldFrame.parkProgress, flight: window.__worldFrame.flight } : null,
     headerSeen: seen(header),
     focus: at ? { tag: at.tagName, label: at.getAttribute('aria-label'), text: norm(at.textContent).slice(0, 40), inList: !!list && list.contains(at) } : null,
     hud: window.__fixtureHud ? { preset: window.__fixtureHud.preset, held: window.__fixtureHud.held(), signOuts: window.__fixtureHud.signOuts() } : null,
@@ -272,8 +291,8 @@ async function crop(page, file, b, pad = 16, viewport = DESKTOP) {
   await page.screenshot({ path: path.join(OUT, file), clip: { x, y, width: Math.min(viewport.width - x, b.r - b.l + 2 * pad), height: Math.min(viewport.height - y, b.b - b.t + 2 * pad) } })
 }
 
-/** The header's left end: from the page's edge to past the pill (and the toast). */
-const leftEnd = (s, wide = 0) => ({ l: 0, t: 0, r: Math.max(s.pillBox?.r ?? 0, s.toast?.box.r ?? 0) + 40 + wide, b: 72 })
+/** The header's right end: from before the pill (and the toast left of it) to the page's edge. */
+const groupEnd = (s) => ({ l: Math.max(0, Math.min(s.pillBox?.l ?? s.vw, s.toast?.box.l ?? s.vw) - 40), t: 0, r: s.vw, b: 72 })
 
 async function openList(page, what) {
   const via = await click(page, FIND.pill, `${what}: the pill`)
@@ -287,6 +306,16 @@ async function parked(page, find, what) {
     const el = new Function(`return (${src})()`)()
     return !!el && (window.__worldFrame?.parkProgress ?? 0) >= 0.999 && Number(getComputedStyle(el).opacity) > 0.99
   }, { arg: find.toString(), timeout: PARK_MS, what: `${what}: the panel did not open with the camera parked` })
+  await sleep(600)
+}
+
+/** The camera parked at one place (its id), the flight over (a switch from a place starts at flight 0, progress 1), its panel up. */
+async function parkedAt(page, id, find, what) {
+  await waitFor(page, ([src, want]) => {
+    const el = new Function(`return (${src})()`)()
+    const f = window.__worldFrame
+    return !!el && f?.parkedId === want && f.parkProgress >= 0.999 && f.flight >= 0.999 && Number(getComputedStyle(el).opacity) > 0.99
+  }, { arg: [find.toString(), id], timeout: PARK_MS, what: `${what}: the camera did not park at ${id} with its panel up` })
   await sleep(600)
 }
 
@@ -342,30 +371,31 @@ const STATES = [
 ]
 
 try {
-  await runRow(1, 'each ?hud= state: the pill beside the wordmark says the streak and the count', async (r) => {
+  await runRow(1, 'each ?hud= state: the pill at the header\'s right end says the streak and the count; the brand alone at the left', async (r) => {
     for (const st of STATES) {
       const page = await r.open(st.preset ? { hud: st.preset } : {})
       const s = await page.evaluate(SNAP)
       const name = st.preset ?? 'no ?hud'
       r.check(`${name}: the pill says ${st.text.source}`, s.pill && st.text.test(s.pill.text), s.pill?.text)
       r.check(`${name}: the flame is ${st.lit ? 'lit' : 'an outline'}`, s.flameLit === st.lit, s.flameLit)
-      r.check(`${name}: the pill sits right of the wordmark, on its line, apart from the right end`, s.pillBox && s.brand && s.end && s.pillBox.l >= s.brand.r + 12 && Math.abs((s.pillBox.t + s.pillBox.b) / 2 - (s.brand.t + s.brand.b) / 2) <= 2 && s.pillBox.r < s.end.l - 40, { pill: s.pillBox, brand: s.brand, end: s.end })
-      r.check(`${name}: Sign out is in the pill`, s.out?.seen && s.out.box.l >= s.pill.box.r - 1 && s.out.box.r <= s.pillBox.r + 1, s.out)
+      r.check(`${name}: the pill ends at the header's right edge (the 40 px gutter), on the brand's line`, s.pillBox && s.brand && s.pillBox.r === s.vw - 40 && Math.abs((s.pillBox.t + s.pillBox.b) / 2 - (s.brand.t + s.brand.b) / 2) <= 2, { pill: s.pillBox, brand: s.brand })
+      r.check(`${name}: the brand stands alone at the left (the header holds it and the group), far from the pill`, s.brand && s.brand.l === 40 && s.headerKids === 2 && s.end && s.end.l > s.brand.r + 200 && s.pillBox.l >= s.end.l, { brand: s.brand, group: s.end, pill: s.pillBox, kids: s.headerKids })
+      r.check(`${name}: Sign out is the pill's last part`, s.out?.seen && s.out.box.l >= s.pill.box.r - 1 && Math.abs(s.out.box.r - s.pillBox.r) <= 1, s.out)
       r.check(`${name}: the label reads it out`, /^Streak \d+ days?(, best \d+)?\. \d+ of 10 achievements\. Show them$/.test(s.pill?.label ?? ''), s.pill?.label)
-      await crop(page, `state-${st.file}.png`, leftEnd(s), 0)
+      await crop(page, `state-${st.file}.png`, groupEnd(s), 0)
       if (st.preset === 'some') await shot(page, 'map-some.png')
       await page.close()
     }
   })
 
-  await runRow(2, 'the list: in the panel slot, the streak and the count, every achievement by tier; Back and a click outside close it', async (r) => {
+  await runRow(2, 'the list: under the pill on the right, the streak and the count, every achievement by tier; Back and a click outside close it', async (r) => {
     for (const preset of ['cold', 'some', 'all']) {
       const page = await r.open({ hud: preset })
       const via = await openList(page, `row 2 (${preset})`)
       const s = await page.evaluate(SNAP)
       r.check(`${preset}: opened with the mouse`, via === 'mouse', via)
       r.check(`${preset}: the pill says it is open`, s.pill?.expanded === 'true', s.pill?.expanded)
-      r.check(`${preset}: in the place panel's slot (left 48, top 92, 404 wide)`, s.list && s.list.box.l === 48 && s.list.box.t === 92 && s.list.box.w === 404, s.list?.box)
+      r.check(`${preset}: under the pill on the right, the place panel's size (right edge 48 in, top 92, 404 wide)`, s.list && s.list.box.r === s.vw - 48 && s.list.box.t === 92 && s.list.box.w === 404 && s.list.box.t > s.pillBox.b, s.list?.box)
       r.check(`${preset}: translucent over the open map (backdrop blur)`, /blur/.test(s.list?.backdrop ?? ''), s.list?.backdrop)
       r.check(`${preset}: ten rows in four tiers`, s.list?.rows.length === 10 && s.list.groups.length === 4, { rows: s.list?.rows.length, groups: s.list?.groups })
       if (preset === 'cold') {
@@ -404,10 +434,10 @@ try {
     await sleep(600)
     const s = await page.evaluate(SNAP)
     r.check('the toast names it: Achievement unlocked, Habit Builder', /Achievement unlocked Habit Builder/i.test(s.toast?.text ?? ''), s.toast?.text)
-    r.check('it sits in the header row, right of the pill', s.toast && s.toast.box.l >= s.pillBox.r && s.toast.box.b <= 72 && s.toast.box.r < s.end.l, { toast: s.toast?.box, pill: s.pillBox, end: s.end })
+    r.check('it sits in the header row, left of the pill, clear of the brand', s.toast && s.toast.box.r <= s.pillBox.l && s.toast.box.b <= 72 && s.toast.box.l > s.brand.r, { toast: s.toast?.box, pill: s.pillBox, brand: s.brand })
     r.check('the count says 3/10, in sand', /3\/10$/.test(s.pill?.text ?? '') && s.countFresh === true && /rgb\(240, 183, 126\)/.test(s.countColor ?? ''), { text: s.pill?.text, fresh: s.countFresh, color: s.countColor })
     r.check('the status line reads it out', s.status === 'Achievement unlocked: Habit Builder.', s.status)
-    await crop(page, 'fresh-toast.png', leftEnd(s), 0)
+    await crop(page, 'fresh-toast.png', groupEnd(s), 0)
     await waitFor(page, () => !document.querySelector('main header button[aria-hidden="true"]'), { timeout: TOAST_MS + 2000, what: 'row 3: the toast did not go' })
     const after = await page.evaluate(SNAP)
     r.check('it goes on its own; the count stays 3/10 in ink', after.toast === null && /3\/10$/.test(after.pill?.text ?? '') && after.countFresh === false && after.status === '', { toast: after.toast, text: after.pill?.text, status: after.status })
@@ -416,9 +446,27 @@ try {
     const fresh = l.list?.rows.filter((x) => x.fresh) ?? []
     r.check('the list marks Habit Builder New, and only it', fresh.length === 1 && /^Habit Builder New/i.test(fresh[0].text) && fresh[0].held, fresh)
     await shot(page, 'fresh-list.png')
+    // Under 1280 px the row between the logo and the group can be too short for it (the widest
+    // group leaves it nothing at 800 px): it drops under the pill, right-aligned with it, its
+    // words whole, and the logo does not move.
+    for (const width of [1024, 800]) {
+      const vp = { width, height: 900 }
+      const narrow = await r.open({ hud: 'fresh', discount: 'ready', playbook: '1' }, '', vp)
+      const b0 = await narrow.evaluate(SNAP)
+      await present(narrow, FIND.toast, { timeout: 8000, what: `row 3 (${width}): no toast` })
+      await sleep(600)
+      const n = await narrow.evaluate(SNAP)
+      const whole = await narrow.evaluate(() => {
+        const t = document.querySelector('main header button[aria-hidden="true"]')
+        return !!t && t.scrollWidth <= t.clientWidth + 1 && [...t.children].every((c) => c.scrollWidth <= c.clientWidth + 1)
+      })
+      r.check(`${width} px wide: the toast under the pill, right-aligned with it, its words whole; the logo holds still`, n.toast?.seen && n.toast.box.t >= n.pillBox.b + 4 && Math.abs(n.toast.box.r - n.pillBox.r) <= 1 && n.toast.box.l > n.brand.r && whole && /Habit Builder/.test(n.toast.text) && JSON.stringify(n.brand) === JSON.stringify(b0.brand), { toast: n.toast?.box, pill: n.pillBox, brand: [b0.brand, n.brand], whole })
+      await crop(narrow, `fresh-toast-${width}.png`, { l: 0, t: 0, r: width, b: 100 }, 0, vp)
+      await narrow.close()
+    }
   })
 
-  await runRow(4, 'a place open: the corner stays above its panel; the list over it, solid; Esc one level at a time', async (r) => {
+  await runRow(4, 'a place open: the corner stays above its panel; the list on the right, clear of it, solid; Esc one level at a time', async (r) => {
     const page = await r.open({ hud: 'some' }, '/a5')
     await parked(page, FIND.place, 'row 4')
     let s = await page.evaluate(SNAP)
@@ -427,17 +475,21 @@ try {
     await shot(page, 'place-corner.png')
     await openList(page, 'row 4')
     s = await page.evaluate(SNAP)
-    r.check('the list opens over the place, in the same slot', s.list && s.list.box.l === s.place?.box.l && s.list.box.t === s.place?.box.t, { list: s.list?.box, place: s.place?.box })
-    r.check('solid over the panel (no blur, an opaque ground)', s.list?.backdrop === 'none' && /^rgb\(/.test(s.list?.bg ?? ''), { backdrop: s.list?.backdrop, bg: s.list?.bg })
+    r.check("the list opens on the right under the pill, clear of the place's panel on the left", s.list && s.place && s.list.box.t === 92 && s.list.box.r === s.vw - 48 && s.list.box.l >= s.place.box.r + 16, { list: s.list?.box, place: s.place?.box })
+    r.check('solid while a place is open (no blur, an opaque ground)', s.list?.backdrop === 'none' && /^rgb\(/.test(s.list?.bg ?? ''), { backdrop: s.list?.backdrop, bg: s.list?.bg })
     const top = await page.evaluate(() => {
       const list = document.querySelector('main header [role="dialog"]')
+      const place = document.querySelector('main section[aria-labelledby="v4-panel-title"]')
       const r = list.getBoundingClientRect()
-      const el = document.elementFromPoint(r.left + 40, r.top + 200)
-      return list.contains(el)
+      const p = place.getBoundingClientRect()
+      return {
+        list: list.contains(document.elementFromPoint(r.left + 40, r.top + 200)),
+        place: place.contains(document.elementFromPoint(p.left + p.width / 2, p.top + Math.min(200, p.height / 2))),
+      }
     })
-    r.check('it is on top of the place panel', top === true, top)
+    r.check("it is on top where it is, and the place's panel stays in view beside it", top.list === true && top.place === true, top)
     const leader = await page.evaluate(() => getComputedStyle(document.querySelector('main > svg')).opacity)
-    r.check("the place's line to its landmark goes while the list covers the panel", leader === '0', leader)
+    r.check("the place's line to its landmark (under the list, right of the frame's middle) goes while the list is up", leader === '0', leader)
     await shot(page, 'place-list.png')
     await page.keyboard.press('Escape')
     await sleep(500)
@@ -461,8 +513,57 @@ try {
     await cpPage.evaluate(() => window.__worldPark('checkpoint'))
     await parked(cpPage, FIND.cpPanel, 'row 4 (checkpoint)')
     s = await cpPage.evaluate(SNAP)
-    r.check("the checkpoint's panel is up, the corner above it and the chip at the right end", s.cp && s.pill?.seen && s.pillBox.b + 12 <= s.cp.box.t && s.pillBox.r < s.end.l, { pill: s.pillBox, cp: s.cp?.box, end: s.end })
+    r.check("the checkpoint's panel is up, the corner above it, the discount's segment inside the pill", s.cp && s.pill?.seen && s.pillBox.b + 12 <= s.cp.box.t && s.chip && s.chip.l >= s.pillBox.l && s.chip.r <= s.pillBox.r && s.chip.l >= s.pill.box.r - 1 && s.chip.r <= s.out.box.l + 1, { pill: s.pillBox, cp: s.cp?.box, chip: s.chip })
     await shot(cpPage, 'checkpoint-corner.png')
+    await cpPage.close()
+
+    // The list open, then the discount's segment in the same pill: the checkpoint opens, the
+    // camera parks at the cache and the list gives way to it, as it does to a place. Inside the
+    // pill a click on the segment is not a click outside the list (at HEAD the chip stood
+    // outside the corner, and that click closed it). By the mouse and by the keyboard, at 800 px
+    // too, where the list would cover the cache; and from an open place, whose address goes
+    // only after the checkpoint has opened.
+    const NARROW = { width: 800, height: 900 }
+    const SEG = [
+      { how: 'mouse', vp: DESKTOP, sub: '' },
+      { how: 'keyboard', vp: NARROW, sub: '' },
+      { how: 'mouse', vp: NARROW, sub: '/a5' },
+    ]
+    for (const t of SEG) {
+      const name = `${t.vp.width} px, ${t.how === 'mouse' ? 'a click' : 'Shift+Tab back to it and Enter'}${t.sub ? ', from an open place' : ''}`
+      const pg = await r.open({ hud: 'some', discount: 'locked' }, t.sub, t.vp)
+      if (t.sub) await parked(pg, FIND.place, `row 4 (${name})`)
+      await openList(pg, `row 4 (${name})`)
+      let via = null
+      if (t.how === 'keyboard') {
+        // The list opens with focus on its heading; back through Sign out to the segment.
+        for (let i = 0; i < 6 && via === null; i++) {
+          await pg.keyboard.down('Shift')
+          await pg.keyboard.press('Tab')
+          await pg.keyboard.up('Shift')
+          if (await pg.evaluate(() => /discount checkpoint/.test(document.activeElement?.getAttribute('aria-label') ?? ''))) via = `Enter, after ${i + 1} Shift+Tab`
+        }
+        if (via === null) throw new Error(`row 4 (${name}): Shift+Tab never reached the discount segment`)
+        await pg.keyboard.press('Enter')
+      } else {
+        via = await click(pg, FIND.cpChip, `row 4 (${name}): the discount segment`)
+      }
+      await parkedAt(pg, 'checkpoint', FIND.cpPanel, `row 4 (${name})`)
+      s = await pg.evaluate(SNAP)
+      // The cache the camera parked on: the checkpoint's point on the screen, as the scene
+      // projects it (its plaque fades out with the other markers while parked).
+      const cache = await pg.evaluate(() => {
+        const m = window.__worldFrame?.markers.find((x) => x.id === 'checkpoint')
+        if (!m) return null
+        const hit = document.elementFromPoint(m.x, m.y)
+        return { x: Math.round(m.x), y: Math.round(m.y), onScreen: m.visible && m.x >= 0 && m.x <= innerWidth && m.y >= 0 && m.y <= innerHeight, underADialog: !!hit?.closest('[role="dialog"]') }
+      })
+      const focusIn = await pg.evaluate(() => !!document.activeElement?.closest('section[aria-labelledby="cp-panel-title"]'))
+      r.check(`${name}: with the list open, the discount segment opens the checkpoint, the camera parks at the cache, and the list closes`, (t.how === 'keyboard' || via === 'mouse') && s.list === null && s.cp !== null && s.park?.id === 'checkpoint' && s.pill?.expanded === 'false', { via, list: s.list?.box ?? null, cp: s.cp?.box, park: s.park, expanded: s.pill?.expanded })
+      r.check(`${name}: one panel on the screen, the checkpoint's, with the focus in it; the cache is in view and nothing of the list lies over it`, focusIn && cache?.onScreen && !cache.underADialog && (!t.sub || (s.place === null && s.path === APP)), { focusIn, cache, place: s.place?.box ?? null, path: s.path })
+      await shot(pg, `checkpoint-from-list-${t.vp.width}-${t.how}${t.sub ? '-place' : ''}.png`)
+      await pg.close()
+    }
   })
 
   await runRow(5, 'the keyboard: Tab to the pill, Enter opens the list, Esc back to the pill, Tab to Sign out', async (r) => {
@@ -484,7 +585,7 @@ try {
     })
     r.check('with the focus ring (2px, focus-visible)', ring.visible && ring.outline === 'solid' && ring.width === '2px', ring)
     let s = await page.evaluate(SNAP)
-    await crop(page, 'focus-pill.png', leftEnd(s), 0)
+    await crop(page, 'focus-pill.png', groupEnd(s), 0)
     await page.keyboard.press('Enter')
     await present(page, FIND.list, { timeout: 3000, what: 'row 5: Enter did not open the list' })
     await sleep(400)
@@ -507,7 +608,12 @@ try {
       return t ? { text: t.textContent, opacity: Number(getComputedStyle(t).opacity) } : null
     })
     r.check('the next Tab is Sign out, and its word shows', s.focus?.label === 'Sign out' && tip?.text === 'Sign out' && tip.opacity > 0.9, { focus: s.focus, tip })
-    await crop(page, 'focus-signout.png', { ...leftEnd(s), b: 110 }, 0)
+    const word = await page.evaluate(() => {
+      const r = document.activeElement?.querySelector('[aria-hidden="true"]:not(svg)')?.getBoundingClientRect()
+      return r ? { l: Math.round(r.left), r: Math.round(r.right) } : null
+    })
+    r.check('its word stays inside the screen at the right end', !!word && word.l >= 0 && word.r <= s.vw, word)
+    await crop(page, 'focus-signout.png', { ...groupEnd(s), b: 110 }, 0)
   })
 
   await runRow(6, 'Sign out: the pill and the list both reach the app’s sign-out (counted by the stand-in)', async (r) => {
@@ -551,25 +657,25 @@ try {
     r.check('the corner is not visible', s.pill?.seen === false, s.pill)
   })
 
-  await runRow(9, 'wide (3428x1230): the pill, the list, the toast', async (r) => {
+  await runRow(9, 'wide (3428x1230): the pill at the right end, the list under it, the toast', async (r) => {
     let page = await r.open({ hud: 'long' }, '', WIDE)
     let s = await page.evaluate(SNAP)
-    r.check('the pill beside the wordmark, apart from the right end', s.pillBox && s.pillBox.l >= s.brand.r + 12 && s.pillBox.r < s.end.l - 200, { pill: s.pillBox, brand: s.brand, end: s.end })
+    r.check('the pill ends at the right edge (the 56 px gutter), the brand alone at the left', s.pillBox && s.pillBox.r === WIDE.width - 56 && s.brand && s.brand.l === 56 && s.pillBox.l > s.brand.r + 200, { pill: s.pillBox, brand: s.brand })
     await page.screenshot({ path: path.join(OUT, 'wide-long.png') })
     await openList(page, 'row 9')
     s = await page.evaluate(SNAP)
-    r.check('the list in the panel slot at this size (left 64, 432 wide)', s.list?.box.l === 64 && s.list.box.w === 432, s.list?.box)
+    r.check('the list under the pill at this size (right edge 64 in, 432 wide)', s.list?.box.r === WIDE.width - 64 && s.list.box.w === 432, s.list?.box)
     await page.screenshot({ path: path.join(OUT, 'wide-list.png') })
     await page.close()
     page = await r.open({ hud: 'fresh' }, '', WIDE)
     await present(page, FIND.toast, { timeout: 8000, what: 'row 9: no toast' })
     await sleep(600)
     s = await page.evaluate(SNAP)
-    r.check('the toast in the header row', s.toast?.seen && s.toast.box.b <= 72, s.toast)
-    await crop(page, 'wide-toast.png', leftEnd(s), 0, WIDE)
+    r.check('the toast in the header row, left of the pill', s.toast?.seen && s.toast.box.b <= 72 && s.toast.box.r <= s.pillBox.l, s.toast)
+    await crop(page, 'wide-toast.png', groupEnd(s), 0, WIDE)
   })
 
-  await runRow(10, 'phone (390x844): the pill under the header, the chip apart, the list a full sheet with Sign out, the toast at the bottom', async (r) => {
+  await runRow(10, 'phone (390x844): the stats at the header row\'s right end, the discount in the row under them, the list a full sheet with Sign out, the toast at the bottom', async (r) => {
     for (const st of STATES) {
       const page = await r.open({ ...(st.preset ? { hud: st.preset } : {}), discount: 'locked' }, '', PHONE)
       const s = await page.evaluate(SNAP)
@@ -579,9 +685,9 @@ try {
       })
       const name = st.preset ?? 'no ?hud'
       const numbers = st.text.source.replace(/ days/, '').replace(/\\\//, '/').replace(/[\^$]/g, '').replace(/\/i$/, '')
-      r.check(`${name}: the list view, the pill under the header's row on the left`, s.view === 'list' && s.pillBox && s.pillBox.l === 22 && s.pillBox.t >= 60, s.pillBox)
+      r.check(`${name}: the list view, the stats in the header's row at its right end (22 px gutter), across from the brand`, s.view === 'list' && s.pillBox && s.pillBox.r === PHONE.width - 22 && s.pillBox.t < 36 && s.pillBox.b > 36 && s.brand && s.brand.l === 22 && s.brand.r + 8 <= s.pillBox.l, { pill: s.pillBox, brand: s.brand })
       r.check(`${name}: numbers only, no Sign out in the pill`, s.pill?.text.toLowerCase() === numbers && s.out?.seen === false, { text: s.pill?.text, want: numbers, out: s.out?.seen })
-      r.check(`${name}: clear of the discount chip`, chip && s.pillBox.r + 8 <= chip.l, { pill: s.pillBox, chip })
+      r.check(`${name}: the discount in the row under the stats, right-aligned with them, inside the screen`, chip && chip.t >= s.pillBox.b + 4 && Math.abs(chip.r - s.pillBox.r) <= 2 && chip.l >= 22, { pill: s.pillBox, chip })
       if (st.preset === 'some') {
         await shot(page, 'phone-some.png')
         await openList(page, 'row 10')
@@ -612,6 +718,33 @@ try {
     const s = await page.evaluate(SNAP)
     r.check('the toast at the bottom, full width', s.toast?.seen && s.toast.box.l === 16 && s.toast.box.r === PHONE.width - 16 && s.toast.box.b === PHONE.height - 20, s.toast?.box)
     await shot(page, 'phone-toast.png')
+    // The header's 01/08 went (2026-10-15) and a phone has no timeline: the course's count heads
+    // the list of places, and it is the places' own counts added up. With every place done the
+    // Next block carries it instead.
+    for (const p of ['mid', 'all']) {
+      const pg = await r.open({ p, discount: 'locked' }, '', PHONE)
+      const c = await pg.evaluate(() => {
+        const norm = (t) => (t ?? '').replace(/\s+/g, ' ').trim()
+        const next = document.querySelector('main section[aria-label="Next lesson"]')
+        const line = next?.nextElementSibling?.tagName === 'P' ? next.nextElementSibling : null
+        const ol = document.querySelector('main ol')
+        const rows = [...(ol?.querySelectorAll(':scope > li > button') ?? [])].map((b) => /, (\d+) of (\d+) lessons done$/.exec(b.getAttribute('aria-label') ?? ''))
+        const watch = next?.querySelector('button')?.getBoundingClientRect()
+        const lr = line?.getBoundingClientRect()
+        return {
+          line: line ? norm(line.innerText) : null,
+          done: rows.reduce((n, m) => n + Number(m?.[1] ?? 0), 0),
+          total: rows.reduce((n, m) => n + Number(m?.[2] ?? 0), 0),
+          rows: rows.filter(Boolean).length,
+          between: !!(lr && watch && ol && lr.top >= watch.bottom && lr.bottom <= ol.getBoundingClientRect().top),
+          inNext: [...(next?.querySelectorAll('p') ?? [])].map((x) => norm(x.innerText)).filter((t) => / of \d+ lessons$/.test(t)),
+        }
+      })
+      if (p === 'mid') r.check('?p=mid: the course\'s count heads the list, under Watch, and adds up the 8 places\' counts', c.rows === 8 && c.done > 0 && c.line === `${c.done} of ${c.total} lessons` && c.between && c.inNext.length === 0, c)
+      else r.check('?p=all: nothing over the list, the Next block says every lesson is done', c.rows === 8 && c.line === null && c.inNext.length === 1 && c.inNext[0] === `${c.total} of ${c.total} lessons`, c)
+      if (p === 'mid') await shot(pg, 'phone-course-count.png')
+      await pg.close()
+    }
   })
 } finally {
   await browser.close()

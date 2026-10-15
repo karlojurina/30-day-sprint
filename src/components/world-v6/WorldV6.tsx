@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import {
-  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -121,8 +120,9 @@ import s from "./world.module.css";
  * Hut and the Boathouse the trail passes a cache on the saddle
  * (src/lib/world-v6/checkpoint.ts): a ninth anchor in the scene, slot CP of
  * the marker arrays, with its own marker ("30% off"), a tag on the timeline
- * between the 4th and 5th diamonds, a chip in the header with the days left,
- * and a notch on the header's course bar at the gate. Any of them opens its
+ * between the 4th and 5th places, and a segment with the days left in the
+ * header's group (2026-10-15: the header's course bar and its notch are
+ * gone). Any of them opens its
  * panel (CheckpointBody): the camera parks at the cache from wherever it is
  * (its own park pose; no stop and no scroll budget on the rail), the scroll
  * locks as for a place, Esc and Back come home. A place opening gives way to
@@ -348,12 +348,36 @@ type Phase = "loading" | "ready" | "failed";
 type Dir = "none" | "fwd" | "back";
 
 /**
- * `corner`: what the host puts in the header's left end, after the brand (the
- * student's streak, achievements and Sign out: src/components/world/WorldCorner.tsx).
- * It is laid out by its own stylesheet, which reads this root's data-view,
- * data-open and data-solid. The dev page has none.
+ * `corner`: the host's group at the header's right end, the brand alone at the
+ * left (2026-10-15, Lovro's review): the student's streak, achievements, the
+ * Playbook and Sign out (src/components/world/WorldCorner.tsx). The map calls
+ * it with its discount segment (null when the offer shows nothing), which the
+ * group puts after the achievements, and with whether the checkpoint's panel
+ * is up (open and not closing), which closes the achievements list as a place
+ * opening does. It is laid out by its own stylesheet, which reads this root's
+ * data-view, data-open and data-solid. The dev page
+ * has none, and shows the segment in a pill of its own.
  */
-export function WorldV6({ source, corner }: { source?: WorldSource; corner?: ReactNode } = {}) {
+type Corner = (discount: ReactNode, checkpointOpen: boolean) => ReactNode;
+
+/** A checkpoint's tag on the timeline, between the place it follows and the next (`gates` in WorldV6View). */
+interface Gate {
+  key: string;
+  /** The place it follows (0-based). */
+  after: number;
+  /** Its look: locked, ready, pending, done or closed (checkpointView.ts). */
+  state: CheckpointView["tag"];
+  /** The words on the tag: "30% off". */
+  text: string;
+  /** The tip on hover and focus: what it is, then where it stands. */
+  tip: { lead: string; tail: string };
+  /** What a screen reader hears. */
+  label: string;
+  ref?: RefObject<HTMLButtonElement | null>;
+  open: (trigger: HTMLElement | null) => void;
+}
+
+export function WorldV6({ source, corner }: { source?: WorldSource; corner?: Corner } = {}) {
   // The course's words and counts, for the map and every component under it (content.ts).
   const content = useMemo(() => contentOf(source), [source]);
   return (
@@ -370,7 +394,7 @@ function WorldV6View({
 }: {
   source: WorldSource | undefined;
   content: WorldContent;
-  corner?: ReactNode;
+  corner?: Corner;
 }) {
   const hasSource = source !== undefined;
   /** A lesson page is open over the map (always false on the dev page). */
@@ -393,8 +417,8 @@ function WorldV6View({
   /** The discount checkpoint's panel is open (the map's own: it has no address), and closing. */
   const [cpOpen, setCpOpen] = useState(false);
   const [cpClosing, setCpClosing] = useState(false);
-  /** The pointer or the keyboard is on the timeline's tag. */
-  const [cpTip, setCpTip] = useState(false);
+  /** The timeline's checkpoint tag the pointer or the keyboard is on (its key). */
+  const [gateTip, setGateTip] = useState<string | null>(null);
   // The server render and the first client render use the defaults; the
   // stored tuning is read once mounted (localStorage is client only).
   const [devTuning, setTuning] = useState<Tuning>(DEFAULT_TUNING);
@@ -2483,6 +2507,43 @@ function WorldV6View({
       ? `${areas[k].name}, locked`
       : `${areas[k].name}, ${study.done[k]} of ${areas[k].lessons} lessons done`;
 
+  /**
+   * The checkpoints on the timeline, each a tag between the place it follows
+   * and the next. The discount's for now; the Ad Bounty's (after Creative
+   * Strategy, plan item 18) is one more entry in this list.
+   */
+  const gates: Gate[] = cpView?.shown
+    ? [
+        {
+          key: "discount",
+          after: CHECKPOINT.after,
+          state: cpView.tag,
+          // "30% off", never "30%" alone: on a progress bar that reads as how far along.
+          text: cpView.label.lead,
+          tip: { lead: cpView.label.lead, tail: cpView.chip?.tail ?? cpView.label.tail },
+          label: cpAria(cpView),
+          ref: cpTagRef,
+          open: openCheckpoint,
+        },
+      ]
+    : [];
+
+  /** The discount in the header's group: the offer and where it stands, one click to its panel. Null when the header shows nothing of it. */
+  const discountSeg = cpView?.chip ? (
+    <button
+      type="button"
+      className={s.cpChip}
+      data-cp={cpView.tag}
+      data-ready={cpView.chip.ready || undefined}
+      aria-label={`${cpView.chip.lead}, ${cpView.chip.tail}. Open the discount checkpoint`}
+      onClick={(e) => openCheckpoint(e.currentTarget)}
+    >
+      <TagGlyph className={s.cpChipGlyph} />
+      <b>{cpView.chip.lead}</b>
+      <span className={s.cpChipTail}>{cpView.chip.tail}</span>
+    </button>
+  ) : null;
+
   return (
     <main
       className={`${tokens.tokens} ${s.root}`}
@@ -2707,18 +2768,31 @@ function WorldV6View({
             )}
           </div>
 
-          {/* The timeline: the eight places, the student's highlighted, the camera's caret. */}
+          {/* The timeline: the course in one bar. A cell per place, filled by its
+              lessons, under the place's diamond (the student's highlighted);
+              the checkpoints' tags between places; the camera's caret. */}
           <nav ref={timelineRef} className={s.timeline} aria-label="Places" inert={isOpen || cpOpen || loading}>
             <span className={s.tlCount} aria-label={`${study.doneTotal} of ${content.total} lessons done`}>
-              <b>{study.doneTotal}</b>/{content.total}
+              <span aria-hidden="true">
+                <b>{study.doneTotal}</b>/{content.total}
+              </span>
+              <span className={s.tlUnit} aria-hidden="true">
+                lessons
+              </span>
             </span>
             <div ref={trackRef} className={s.track}>
-              <span className={s.trackLine} aria-hidden="true" />
-              <span
-                className={s.trackDone}
-                aria-hidden="true"
-                style={{ transform: `scaleX(${place >= N ? 1 : (place + 0.5) / N})` }}
-              />
+              {areas.map((a, k) => (
+                <span
+                  key={a.id}
+                  className={s.cell}
+                  data-state={study.state[k]}
+                  data-locked={study.locked[k] || undefined}
+                  style={{ left: `${(k / N) * 100}%`, width: `${100 / N}%` }}
+                  aria-hidden="true"
+                >
+                  <i style={{ width: `${(Math.min(study.done[k], a.lessons) / Math.max(1, a.lessons)) * 100}%` }} />
+                </span>
+              ))}
               <span ref={caretRef} className={s.caret} aria-hidden="true" />
               {areas.map((a, k) => (
                 <button
@@ -2745,34 +2819,44 @@ function WorldV6View({
                     <span className={s.stopTip} data-align={alignOf(k)} aria-hidden="true">
                       {study.locked[k] && <Lock />}
                       {a.name}
+                      {!study.locked[k] && (
+                        <span className={s.labelCount}>
+                          {study.done[k]}/{a.lessons}
+                        </span>
+                      )}
                     </span>
                   )}
                 </button>
               ))}
-              {/* The discount checkpoint: a tag between the place it follows and the next, after the stops. */}
-              {cpView?.shown && (
+              {/* The checkpoints: a tag on a post over the bar between the place each follows and the next, after the stops. */}
+              {gates.map((g) => (
                 <button
-                  ref={cpTagRef}
+                  key={g.key}
+                  ref={g.ref}
                   type="button"
-                  className={s.cpTag}
-                  data-cp={cpView.tag}
-                  style={{ left: `${((CHECKPOINT.after + 1) / N) * 100}%` }}
-                  aria-label={cpAria(cpView)}
-                  onClick={(e) => openCheckpoint(e.currentTarget)}
-                  onPointerEnter={() => setCpTip(true)}
-                  onPointerLeave={() => setCpTip(false)}
-                  onFocus={() => setCpTip(true)}
-                  onBlur={() => setCpTip(false)}
+                  className={s.gate}
+                  data-gate={g.key}
+                  data-cp={g.state}
+                  style={{ left: `${((g.after + 1) / N) * 100}%` }}
+                  aria-label={g.label}
+                  onClick={(e) => g.open(e.currentTarget)}
+                  onPointerEnter={() => setGateTip(g.key)}
+                  onPointerLeave={() => setGateTip(null)}
+                  onFocus={() => setGateTip(g.key)}
+                  onBlur={() => setGateTip(null)}
                 >
-                  <TagGlyph className={s.cpTagGlyph} />
-                  {cpTip && hint === null && (
+                  <span className={s.gateTag} aria-hidden="true">
+                    <TagGlyph className={s.gateGlyph} />
+                    {g.text}
+                  </span>
+                  {gateTip === g.key && hint === null && (
                     <span className={s.stopTip} aria-hidden="true">
-                      {cpView.label.lead}
-                      {cpView.label.tail && <span className={s.labelCount}>{cpView.chip?.tail ?? cpView.label.tail}</span>}
+                      {g.tip.lead}
+                      {g.tip.tail && <span className={s.labelCount}>{g.tip.tail}</span>}
                     </span>
                   )}
                 </button>
-              )}
+              ))}
             </div>
             {hint !== null && (
               <span className={s.hint} role="status">
@@ -2866,7 +2950,6 @@ function WorldV6View({
                   cv={cpView}
                   backLabel="Back to map"
                   onBack={closeCheckpoint}
-                  onWatch={(k, i, el) => watch(k, i, el)}
                   headingRef={cpHeadingRef}
                 />
               </div>
@@ -2875,50 +2958,12 @@ function WorldV6View({
         </>
       )}
 
+      {/* The brand alone at the left; the student's group at the right
+          (Lovro's review, 2026-10-15). The course's progress is the timeline's. */}
       <header ref={headerRef} className={s.header} inert={view === "list" && isOpen}>
-        <span className={s.headerStart}>
-          <span className={s.brand}>
-            <Mark />
-            ecomtalent
-          </span>
-          {/* The host's corner: the student's streak, achievements and Sign out. */}
-          {corner}
-        </span>
+        <BrandMark />
         <span className={s.headerEnd}>
-          {/* The discount, from day one: the offer and the days left, one click to its panel. */}
-          {cpView?.chip && (
-            <button
-              type="button"
-              className={s.cpChip}
-              data-ready={cpView.chip.ready || undefined}
-              aria-label={`${cpView.chip.lead}, ${cpView.chip.tail}. Open the discount checkpoint`}
-              onClick={(e) => openCheckpoint(e.currentTarget)}
-            >
-              <TagGlyph className={s.cpChipGlyph} />
-              <b>{cpView.chip.lead}</b>
-              <span className={s.cpChipTail}>{cpView.chip.tail}</span>
-            </button>
-          )}
-          {/* Where the student is on the course: one segment per place, sized by its lessons. */}
-          <span
-            className={s.progress}
-            aria-label={placeArea ? `Place ${place + 1} of ${N}, ${placeArea.name}` : "Every place done"}
-          >
-            <span className={s.courseSegs} aria-hidden="true">
-              {areas.map((a, k) => (
-                <Fragment key={a.id}>
-                  <span className={s.courseSeg} data-state={study.state[k]} style={{ flexGrow: a.lessons }}>
-                    <i style={{ transform: `scaleX(${study.done[k] / a.lessons})` }} />
-                  </span>
-                  {/* The discount's gate, on the line between the place it follows and the next. */}
-                  {cpView?.shown && k === CHECKPOINT.after && <span className={s.cpNotch} data-cp={cpView.tag} />}
-                </Fragment>
-              ))}
-            </span>
-            <span aria-hidden="true">
-              <b>{pad2(Math.min(place + 1, N))}</b>/{pad2(N)}
-            </span>
-          </span>
+          {corner ? corner(discountSeg, cpOpen && !cpClosing) : discountSeg && <span className={s.soloPill}>{discountSeg}</span>}
         </span>
       </header>
 
@@ -2929,6 +2974,9 @@ function WorldV6View({
           <section className={s.listNext} aria-label="Next lesson">
             <NextBlock study={study} onWatch={(el) => watch(place, study.placeNext, el)} />
           </section>
+          {/* The course's count over its places: a phone has no timeline, and the header's
+              01/08 went (2026-10-15). Once every place is done, the Next block says it. */}
+          {study.place < N && <FinishedCount study={study} className={s.listCourse} />}
           <ol className={s.areaList}>
             {areas.map((a, k) => (
               <li key={a.id}>
@@ -2973,7 +3021,6 @@ function WorldV6View({
             cv={cpView}
             backLabel="All areas"
             onBack={closeCheckpoint}
-            onWatch={(k, i, el) => watch(k, i, el)}
             headingRef={cpHeadingRef}
           />
         </section>
@@ -3275,7 +3322,7 @@ function FinishedBody({ study }: { study: Study }) {
   );
 }
 
-/** The course's count, one bar segment per place (the header's), for the finished card and the phone. */
+/** The course's count, one bar segment per place sized by its lessons, for the finished card and the phone. */
 function FinishedCount({ study, className }: { study: Study; className?: string }) {
   const { areas, total } = useContent();
   return (
@@ -3548,38 +3595,33 @@ function cpAria(cv: CheckpointView): string {
   return `Discount checkpoint, ${cv.label.lead}${tail ? `, ${tail}` : ""}`;
 }
 
-/** Whole hours (or minutes under one) of video still to watch: "21 hours", "40 min". */
-function videoTime(seconds: number): string {
-  if (!(seconds > 0)) return "";
-  if (seconds < 3600) return `${Math.max(1, Math.round(seconds / 60))} min`;
-  const h = Math.round(seconds / 3600);
-  return `${h} hour${h === 1 ? "" : "s"}`;
-}
-
 // The cutoff is midnight in Croatia (discount.ts), so the day is read there: in UTC it would print 8 October.
 const LAUNCH_DAY = new Date(DISCOUNT_LAUNCH_DATE).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Zagreb" });
 
 /**
  * The discount checkpoint's panel (2026-10-14): the offer, where the student
- * stands on it (src/lib/world/discount.ts discountState), and the one thing
- * to do next: Watch the next video the offer asks for, or Apply. The copy
- * reuses the old dashboard's (DiscountClaimCelebration, StatsWidget) where it
- * still holds: "30% off your next month", "within 48 hours", "your Whop
- * subscription". The code is never shown (the team attaches it on Whop).
+ * stands on it (src/lib/world/discount.ts discountState), and Apply. No video
+ * plays here (Lovro's review, 2026-10-15), so a locked student sees the
+ * videos watched and to go, and Apply greyed out until every one is watched.
+ * It is aria-disabled, not disabled, so the keyboard and a screen reader
+ * still reach it and hear why: its title, "Watch all 59 videos to apply", is
+ * both the hover's tip and its description. apply() takes no click, Enter or
+ * Space before the state is ready. The copy reuses the old dashboard's
+ * (DiscountClaimCelebration, StatsWidget) where it still holds: "30% off your
+ * next month", "within 48 hours", "your Whop subscription". The code is never
+ * shown (the team attaches it on Whop).
  */
 function CheckpointBody({
   discount,
   cv,
   backLabel,
   onBack,
-  onWatch,
   headingRef,
 }: {
   discount: WorldDiscount;
   cv: CheckpointView;
   backLabel: string;
   onBack: () => void;
-  onWatch: (k: number, i: number, el: HTMLElement) => void;
   headingRef: RefObject<HTMLHeadingElement | null>;
 }) {
   const c = useContent();
@@ -3595,7 +3637,8 @@ function CheckpointBody({
     };
   }, []);
   const apply = async () => {
-    if (sending) return;
+    // Locked, Apply is on the panel but off: a click, Enter or Space asks nothing of the host.
+    if (sending || st.kind !== "ready") return;
     setSending(true);
     setError(null);
     let said: string | null;
@@ -3624,14 +3667,27 @@ function CheckpointBody({
                 ? "Closed"
                 : null;
 
+  // The one Apply, locked and ready. Locked it is greyed out with its reason
+  // and a padlock; ready it opens the questions (useWorldDiscount.ts).
+  const why = st.kind === "locked" ? `Watch all ${st.lessonsTotal} videos to apply` : null;
+  const applyButton = (
+    <button
+      type="button"
+      className={`${s.primary} ${s.cpApply}`}
+      onClick={apply}
+      disabled={sending}
+      aria-disabled={why ? true : undefined}
+      title={why ?? undefined}
+      aria-busy={sending || undefined}
+    >
+      {sending ? "Sending…" : `Apply for ${DISCOUNT_PERCENT}% off`}
+      {!sending && (why ? <Lock /> : <Arrow />)}
+    </button>
+  );
+
   let body: React.ReactNode = null;
   if (st.kind === "locked") {
     const done = st.lessonsTotal - st.lessonsLeft;
-    const next = discount.next;
-    const na = next ? c.areas[next.k] : null;
-    const title = next && na ? lessonTitle(na, next.i) : null;
-    const length = next ? lessonLength(c, next.k, next.i) : null;
-    const time = videoTime(st.secondsLeft);
     body = (
       <>
         <p className={s.cpWhen}>
@@ -3641,7 +3697,7 @@ function CheckpointBody({
           {cv.left && <span className={s.cpLeft}>{cv.left}</span>}
         </p>
         <p className={s.desc}>
-          Watch every video through {after} in your first {DISCOUNT_WINDOW_DAYS} days and your next month is {DISCOUNT_PERCENT}% off.
+          Watch all {st.lessonsTotal} videos through {after}, then apply here.
         </p>
         <div className={s.cpBar} aria-hidden="true">
           <i style={{ transform: `scaleX(${st.lessonsTotal > 0 ? done / st.lessonsTotal : 0})` }} />
@@ -3650,36 +3706,9 @@ function CheckpointBody({
           <span>
             <b>{done}</b> of {st.lessonsTotal} videos
           </span>
-          <span className={s.cpToGo}>
-            {st.lessonsLeft} to go{time ? ` · about ${time}` : ""}
-          </span>
+          <span className={s.cpToGo}>{st.lessonsLeft} to go</span>
         </p>
-        {next && na && title !== null && (
-          <ol className={s.rows}>
-            <li className={s.nextRow}>
-              <span className={s.mark} data-m="n" aria-hidden="true" />
-              <span className={s.rowN} aria-hidden="true">
-                {next.i + 1}
-              </span>
-              <span className={s.rowT}>
-                {title}
-                <span className={s.rowSub}>
-                  {na.name}
-                  {length !== null ? ` · ${length}` : ""}
-                </span>
-              </span>
-              <button
-                type="button"
-                className={`${s.primary} ${s.primarySm}`}
-                aria-label={`Watch ${title}, the next video for the discount`}
-                onClick={(e) => onWatch(next.k, next.i, e.currentTarget)}
-              >
-                <Play />
-                Watch
-              </button>
-            </li>
-          </ol>
-        )}
+        {applyButton}
       </>
     );
   } else if (st.kind === "ready") {
@@ -3694,10 +3723,7 @@ function CheckpointBody({
         <p className={s.desc}>
           Every video through {after} is watched. Apply now and the team confirms within 48 hours.
         </p>
-        <button type="button" className={`${s.primary} ${s.cpApply}`} onClick={apply} disabled={sending} aria-busy={sending || undefined}>
-          {sending ? "Sending…" : `Apply for ${DISCOUNT_PERCENT}% off`}
-          {!sending && <Arrow />}
-        </button>
+        {applyButton}
         {error && (
           <p className={s.cpError} role="alert">
             {error}
@@ -3818,6 +3844,47 @@ function Lock() {
       <rect x="1" y="4.75" width="8" height="5.5" rx="1.2" fill="currentColor" />
       <path d="M3 4.75V3.4a2 2 0 0 1 4 0v1.35" stroke="currentColor" strokeWidth="1.3" />
     </svg>
+  );
+}
+
+/**
+ * The brand, alone at the header's left (Lovro's review, 2026-10-15:
+ * "everything is going to be Ecom University"). The logo is the Ecom
+ * University lockup with "| Ad Creative", Lovro's pick, in Karlo's white
+ * file exactly as it came from his brand pack (public/brand/). It replaces
+ * the name and the half-sun Mark, since a logo carries its own mark.
+ * Another file: put it in public/brand/ and change BRAND_LOGO (its path, its
+ * own width and height, which hold its proportions before it loads so
+ * nothing moves, and what it says). BRAND_LOGO null shows the name in the
+ * map's type beside the Mark instead.
+ */
+const BRAND_LOGO: { src: string; width: number; height: number; alt: string } | null = {
+  src: "/brand/ecomu-ad-creative-white.svg",
+  width: 3142,
+  height: 233,
+  alt: "Ecom University, Ad Creative",
+};
+const BRAND_NAME = "Ecom University";
+
+function BrandMark() {
+  if (BRAND_LOGO !== null) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        className={s.brandLogo}
+        src={BRAND_LOGO.src}
+        width={BRAND_LOGO.width}
+        height={BRAND_LOGO.height}
+        alt={BRAND_LOGO.alt}
+        draggable={false}
+      />
+    );
+  }
+  return (
+    <span className={s.brand}>
+      <Mark />
+      {BRAND_NAME}
+    </span>
   );
 }
 

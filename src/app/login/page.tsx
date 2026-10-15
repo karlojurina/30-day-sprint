@@ -14,7 +14,7 @@ function LoginContent() {
   // `?error=` redirects in api/auth/whop/callback and auth/complete —
   // an unmapped code renders the useless generic fallback below.
   const errorMessages: Record<string, string> = {
-    no_membership: "Active EcomTalent membership required.",
+    no_membership: "Active Ecom University membership required.",
     session_expired: "That sign-in attempt expired. Start again below.",
     session_timeout:
       "Couldn't reach our servers. Check your connection, then try again.",
@@ -62,7 +62,7 @@ function LoginContent() {
             transition={{ duration: 0.5, ease: SPEC_EASE }}
             className="mono-label-accent mb-3"
           >
-            EcomTalent · 30-Day Sprint
+            Ecom University · 30-Day Sprint
           </motion.div>
 
           <motion.h1

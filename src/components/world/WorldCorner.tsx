@@ -9,38 +9,44 @@ import { useWorldBadges, useWorldSignOut, type WorldBadges } from "./useWorldBad
 import c from "./corner.module.css";
 
 /**
- * The map's top-left corner (2026-10-14): the student's streak, their
- * achievements and Sign out, in the header's row beside the wordmark
- * (WorldMap.tsx hands it to WorldV6 as `corner`; WorldV6 puts it after the
- * brand). It replaces the old dashboard's top-left card
- * (src/components/map/StatsWidget.tsx), whose other parts the map already
- * shows in its own places: progress in the header's course bar and the
+ * The student's group in the map's header (2026-10-14; moved to the right
+ * end on 2026-10-15, Lovro's review: the brand alone at the left, and "the
+ * streak, the achievements, the 30 percent off and how many days are left"
+ * together at the right, Sign out last). WorldMap.tsx hands it to WorldV6 as
+ * `corner`, and WorldV6 calls it with its discount segment. It replaces the
+ * old dashboard's top-left card (src/components/map/StatsWidget.tsx), whose
+ * other parts the map already shows in its own places: progress on the
  * timeline, the next lesson on the card, the discount at its checkpoint.
  *
- * ONE PILL, THE CHIP'S SHAPE. The discount chip sits at the header's right
- * end; the corner is its twin at the left: the streak (a flame, lit from day
- * 1 of a streak) and the achievements held (a hexagon, "4/10") in one button
- * that opens the list, then Sign out. Mono numbers, no glow, nothing pulses.
+ * ONE PILL. The streak (a flame, lit from day 1 of a streak) and the
+ * achievements held (a hexagon, "4/10") in one button that opens the list,
+ * then the map's discount segment (the offer and its days left, opening the
+ * checkpoint), then the Playbook, then Sign out, each behind a hairline.
+ * Mono numbers, no glow, nothing pulses. On phones the pill keeps the
+ * stats in the header's row, the discount and the Playbook drop to the row
+ * under it, and Sign out moves into the list.
  *
- * THE LIST opens in the place panel's slot, under the header on the left,
- * on the panel's surface: the streak and the best, then every achievement by
- * tier, with the share of students who hold it. A place or the checkpoint can
- * be open under it: it is then solid, so their text does not show through.
- * Esc, Back to map or a click outside close it and leave the place open;
- * opening a place closes it. On phones it is a full sheet, and Sign out
- * moves into it.
+ * THE LIST opens under the pill on the right, the place panel's size and
+ * surface, so it never covers a place's or the checkpoint's panel (they open
+ * on the left): the streak and the best, then every achievement by tier,
+ * with the share of students who hold it. While a place or the checkpoint is
+ * open it is solid, so where the two meet on a narrow screen neither shows
+ * through the other. Esc, Back to map or a click outside close it and leave
+ * the place open; opening a place or the checkpoint closes it (the discount's
+ * segment in the pill included). On phones it is a full sheet, with Sign out.
  *
  * THE TOAST. An achievement unlocked while the map is open slides out of the
- * pill along the header's row, says its name for 6.5 s and goes, and the
- * count in the pill turns sand while it shows. One at a time, oldest first.
- * Under a lesson page (`paused`) the whole header is hidden, so it waits and
- * plays when the student is back on the map; the lesson page itself already
- * says "You unlocked 1 achievement." Clicking it opens the list, where the
- * new one is marked New.
+ * pill to the left along the header's row (under 1280 px wide it drops under
+ * the pill, where the row may have no room for it), says its name for 6.5 s
+ * and goes, and the count in the pill turns sand while it shows. One at a time,
+ * oldest first. Under a lesson page (`paused`) the whole header is hidden,
+ * so it waits and plays when the student is back on the map; the lesson page
+ * itself already says "You unlocked 1 achievement." Clicking it opens the
+ * list, where the new one is marked New.
  *
- * THE PLAYBOOK SLOT. `playbook` (a small link, CornerLink below fits it)
- * goes inside the pill between the achievements and Sign out, behind a
- * hairline. WorldMap.tsx is where it is passed.
+ * THE SLOTS. `discount` (WorldV6's segment) and `playbook` (a small link,
+ * CornerLink below fits it) go inside the pill between the achievements and
+ * Sign out. WorldMap.tsx is where they are passed.
  */
 
 /** How long the toast stays up, ms. */
@@ -68,12 +74,18 @@ function share(pct: number | undefined): string | null {
 export function WorldCorner({
   paused,
   placeOpen,
+  checkpointOpen = false,
+  discount,
   playbook,
 }: {
   /** A lesson page is open over the map: the list closes and the toast waits. */
   paused: boolean;
   /** A place is open (its address): the list gives way to it. */
   placeOpen: boolean;
+  /** The checkpoint's panel is up (WorldV6: open, not closing): the list gives way to it too. */
+  checkpointOpen?: boolean;
+  /** The map's discount segment (WorldV6), after the achievements; null when the offer shows nothing. */
+  discount?: ReactNode;
   /** The Playbook link's slot, inside the pill before Sign out. */
   playbook?: ReactNode;
 }) {
@@ -98,11 +110,16 @@ export function WorldCorner({
   const panelId = useId();
   const titleId = useId();
 
-  // A place opening, or a lesson page, closes the list.
-  const [wasPlace, setWasPlace] = useState(placeOpen);
-  if (wasPlace !== placeOpen) {
-    setWasPlace(placeOpen);
-    if (placeOpen && open) setOpen(false);
+  // A place or the checkpoint opening on the left, or a lesson page, closes the
+  // list. Read as which one is up, so a switch from a place to the checkpoint
+  // counts: the place's address goes only after the checkpoint has opened, and
+  // the discount's segment sits inside this group, so its click is no click
+  // outside the list.
+  const left = checkpointOpen ? "checkpoint" : placeOpen ? "place" : null;
+  const [wasLeft, setWasLeft] = useState(left);
+  if (wasLeft !== left) {
+    setWasLeft(left);
+    if (left !== null && open) setOpen(false);
   }
   if (paused && open) setOpen(false);
 
@@ -195,7 +212,19 @@ export function WorldCorner({
             )}
           </span>
         </button>
-        {playbook && <span className={c.slot}>{playbook}</span>}
+        {/* In the pill on a computer; on a phone the row under it. */}
+        <span className={c.more}>
+          {discount && (
+            <span className={c.slot} data-slot="discount">
+              {discount}
+            </span>
+          )}
+          {playbook && (
+            <span className={c.slot} data-slot="playbook">
+              {playbook}
+            </span>
+          )}
+        </span>
         <button type="button" className={`${c.seg} ${c.out}`} aria-label="Sign out" disabled={leaving} onClick={doSignOut}>
           <ExitGlyph />
           <span className={c.tip} aria-hidden="true">

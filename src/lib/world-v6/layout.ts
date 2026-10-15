@@ -135,8 +135,8 @@ export const TRAIL_HUT = { x: 548, y: 300, z: 1234, facing: 234 } as const;
  * floor. So: three ladders of 80, each one `step` further east along the
  * face than the one below, with a plank landing where they meet, the way a
  * trail crew would hang them. The first stands on the floor at `foot`; the
- * last comes over the bench's lip 13 from the lesson lantern at its west end,
- * where the painted trail runs on.
+ * last comes over the bench's lip by its west end, where the painted trail
+ * runs on.
  * `bearing` is the way up the face (compass, into the wall); `levels` the
  * ground heights where the sections start and end. dress-gorge.ts builds it
  * from ladderSections below and v6-route.mjs holds the camera to its line.
@@ -673,6 +673,12 @@ export const TELESCOPE = { pivot: [OBSERVATORY.x, OBSERVATORY.y + 58, OBSERVATOR
  * landmark; the centre of each on the sky (az compass, el degrees up) and its
  * angular size (degrees across). Spread so 4 show in the a7 frame (az ~276 to
  * 324, el ~0 to 36) and all 8 over the island's sky. Index = place index.
+ * Since round 1 they show only through the telescope, where nightsky.ts
+ * places the other seven on its chart (CHART) round a7's centre, so only
+ * a7's az and el are read here; `shape` names each in the sky caption
+ * (WorldV6.tsx). Map review 2026-10-15: a7 (Creative Strategy) has no shape
+ * any more, one star per lesson at random round its centre (nightsky.ts
+ * heroLayout); "telescope" stays as its name.
  */
 export const SKY_MARKS: ReadonlyArray<{ id: PlaceId; shape: string; az: number; el: number; size: number }> = [
   // Fix round 3: the first three sit in the a7 frame (bearing 46, 8 up),
@@ -1004,14 +1010,17 @@ const M = (name: string, k: Key): Key => {
  * onward to a6, the rise, the bridge and the flight.
  */
 const KEYS: readonly Key[] = [
-  // THE OPENING (bible 1.1): low over the bay's east side, the islet's boulders
-  // reaching into the lower right, looking up the valley at the plume and the
-  // Upper Falls with 40-55% sky. Wide lens (KEY_FOV). B9: 9.5 up keeps the sea
-  // under a fifth of the frame (measured 44% sky, 17% sea at 1691x1278).
+  // THE OPENING (bible 1.1): low over the bay's east side, looking up the
+  // valley at the plume and the Upper Falls with 40-55% sky. Wide lens
+  // (KEY_FOV). B9: 9.5 up keeps the sea under a fifth of the frame (measured
+  // 44% sky, 17% sea at 1691x1278).
   // Fix round 1 (judge 1): a tighter lens (40 -> 34) so the plume, the
   // Landing and the valley grow; the camera backs off ~80 south east so the
-  // islet's boulders sit inside the lower right as the dark near shape instead
+  // islet's boulders sat inside the lower right as the dark near shape instead
   // of one face filling the edge (measured 45.6% sky, 13% sea, plume x ~0.62).
+  // Map review 2026-10-15, item 7 (Lovro's Loom, 0:24): the islet and its
+  // boulders are gone, so open water fills the lower right; the camera did
+  // not move.
   K(1692, 30, 5030, 328, -9, "walk", undefined, 34),
   K(1420, 28, 4700, 330, -9, "walk", undefined, 39),
   // a1 (bible 1.2): low by the dock's head, ~260 from the signpost, the
@@ -1070,7 +1079,7 @@ const KEYS: readonly Key[] = [
   // but we don't take it and go in the air"). From the a3 view the camera
   // comes down over the pool to its east shore, where the trail starts among
   // Video Ads I's lanterns, crosses the river on the fallen log, walks the
-  // talus fan beside Video Ads II's lanterns and the handrail, goes up the
+  // talus fan beside Video Ads I's lanterns and the handrail, goes up the
   // north wall and along the bench past the Trail Hut's door, and at the
   // bench's east end turns round to the hut and the falls: the a4 view. One
   // move, no stop. FACING FORWARD: the view looks where the camera goes, and

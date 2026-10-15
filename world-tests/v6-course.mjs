@@ -80,10 +80,38 @@
  * here. The lesson titles and the briefs are read from the JSON. So a change
  * to the data file that the plan does not know about fails row 1 by name.
  *
- * ROW 2 CAN FAIL AND STAY FAILED. The map lays out one lantern per lesson and
- * can put down fewer than it was asked for without saying so. When a place is
- * short this row fails, names the place with both numbers and takes a picture
- * of it with every lantern lit. Nothing in the map is changed to make it pass.
+ * ROW 2 IS THE LESSON LANTERNS (progress-world.ts; the map review of
+ * 2026-10-15, item 12: one lantern per lesson along the trail from each
+ * place's landmark toward the next place's, evenly spaced, the first by the
+ * landmark). Every place puts down as many lanterns as it has lessons (a
+ * place that is short is named with both numbers and pictured with every
+ * lantern lit). Every lantern stands on dry ground, judged against the water
+ * as it is drawn: no triangle of the water meshes (the sea, the Mirror Lake's
+ * mirror, the pool, the river, the stream, the brook, the glowing stream, the
+ * tarn) within WATER_GAP of its foot with its surface above the ground the
+ * lantern stands on. Each place's lanterns are evenly spaced over the ground
+ * beside its walk where a lantern may stand (lanternLayout()'s u: every step
+ * within SPACING_TOL of the place's spacing, the first at its walk's first
+ * room, the last one spacing short of the walk's end, or at it for the last
+ * place and for Video Ads II, round 3), and no two of a place closer than 0.6
+ * of its spacing in 3D. The
+ * first stands within FIRST_NEAR of the landmark's trail point (typed below,
+ * WALK_START). Video Ads I's last ones hang on the rock beside the ladder
+ * (round 2): each one's post is in the rock to its top and its glass clear
+ * of it, read off the terrain meshes as drawn. The bench at the ladder's top
+ * is Video Ads II's: all of its lanterns stand from there on, none of Video
+ * Ads I's, and its run ends toward the 30% cache (Lovro's Loom, 6:02 to 6:39),
+ * where the trail comes into the cache's park view: none of them in that
+ * view, the last within CACHE_NEAR of the cache (round 3). None of its glass
+ * hides behind the Trail Hut from the hut's stop or parked view (round 3).
+ * Every lantern on land stands on ground no steeper than STEEP, the terrain
+ * as drawn (round 3: none on a face).
+ * Lovro's own test (3 of Video Ads I, 7 of Video Ads II watched) lights 7 of
+ * Video Ads II's on the bench round the hut. And watching k lessons of a place
+ * lights its first k from its landmark on, with the next one pulsing in the
+ * student's current place: four progress states set through
+ * __worldV6Debug.setWorldProgress, the glass's aState read back for every
+ * lantern.
  *
  * A place's card only shows at the student's own place. So for the card of
  * place k the pretend student is put there first: every lesson of the places
@@ -108,6 +136,10 @@
  *              __worldScrollFor(depth), __worldFrame, __worldProgress(),
  *              __worldCelebrations, __worldV6Debug.moduleStats()["progress-world"]
  *              (perArea, wanted), and the harness's window.__fixture
+ *   lanterns   (row 2) the progress-world module's lanternLayout() (through
+ *              __worldV6Debug.modules), __worldV6Debug.setWorldProgress, and in
+ *              debugScene() the "ProgressLanternGlass" mesh (aState per
+ *              instance) and the water meshes by name
  *              (complete(id), completed(), calls)
  *   harness    [data-dev-videos], [data-dev-video-seconds] (layout.tsx: how many
  *              test videos and how long, never which)
@@ -189,6 +221,61 @@ const TOTAL = 140
 const ACTION_ROWS = [[], [], [25], [], [8, 12, 22, 23], [3, 10, 17, 19], [], []]
 /** The Ad Bounty lesson: the pond's button in place 7, outside the lesson count. */
 const POND = { place: 6, id: 'a7l19', title: 'How To Win On The Ad Bounty Program' }
+
+// ── The lesson lanterns, as the plan states them (row 2) ────────────────────
+/**
+ * Where each place's walk starts: the trail point by its landmark, the plan's
+ * numbers typed here (progress-world.ts walks() has them too). The last place's
+ * lanterns run up the causeway from the dock to the arch, so its walk starts
+ * at the dock.
+ */
+const WALK_START = [
+  [1300, 4170], // the signpost
+  [440, 2720], // Base Camp, below the lookout's knoll
+  [6, 1640], // the pool's east shore, where the ride down the falls sets you down
+  [404.75, 1235.36], // the bench by the Trail Hut, where the ladder comes over its lip (round 2)
+  [1350, -440], // the jetty's foot
+  [-700, -1110], // in front of the Great Tree
+  [-1980, -1508], // the terrace by the observatory
+  [-2043, -4044], // the dock's head, where the airship sets you down
+]
+/**
+ * A place's first lantern stands within FIRST_NEAR of its walk's start. Static
+ * Ads within FIRST_NEAR_STATIC: the path's first 120 or so units from the
+ * jetty's foot run under the lake's visible water until item 15c moves the
+ * shore, and no lantern stands in water.
+ */
+const FIRST_NEAR = 35
+const FIRST_NEAR_STATIC = 150
+/** Every step between a place's lanterns, along the room its walk has, is within this of the place's spacing. */
+const SPACING_TOL = 0.5
+/** A lantern stands this far from the trail's centre line (its piece's offset) give or take this. */
+const OFFSET_TOL = 1
+/** No water drawn within this of a lantern's foot. */
+const WATER_GAP = 1.5
+/** The water meshes WATER_NEAR reads (water.ts, and light.ts's MirrorLake). */
+const WATER_MESHES = ['Sea', 'MirrorLake', 'Pool', 'River', 'Stream', 'Brook', 'GlowStream', 'UpperTarn']
+/** The Trail Hut (layout TRAIL_HUT, its bench at 300) and the ladder's top on the bench: Video Ads II's lanterns stand from there on, on the bench or higher. */
+const HUT = { x: 548, y: 300, z: 1234 }
+const LADDER_TOP_X = 404
+/** Lovro's test at 6:16 in the Loom lights Video Ads II's 7 on the bench within this of the hut. */
+const HUT_NEAR = 220
+/**
+ * The 30% cache (checkpoint.ts CHECKPOINT) and its park camera (CHECKPOINT.park:
+ * position, compass bearing, pitch below the horizon, vertical lens), the view
+ * the discount panel opens on. Video Ads II's walk ends where the trail comes
+ * into that view (round 3), its last lantern just under the frame's bottom
+ * edge: within CACHE_NEAR of the cache, none past it, none in the frame at
+ * PARK_ASPECT (3428x1230, the widest screen the review pictures take).
+ */
+const CACHE = { x: 1472, z: 692 }
+const PARK = { x: 1436, y: 690, z: 862, bearing: 4, pitch: 4, fov: 40 }
+const PARK_ASPECT = 3428 / 1230
+const CACHE_NEAR = 120
+/** No lantern on land stands on ground steeper than this (rise over run over STEEP_E, the terrain as drawn; progress-world.ts STEEP 1.5). */
+const STEEP = 1.5
+const STEEP_E = 2
+const STEEP_TOL = 0.1
 
 // ── The course, as the data files hold it ───────────────────────────────────
 const CATALOG = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'supabase', 'catalog', 'course_catalog.json'), 'utf8'))
@@ -346,6 +433,233 @@ const LANTERNS = () => {
   const st = sc && typeof sc.moduleStats === 'function' ? sc.moduleStats()['progress-world'] : null
   if (!st || typeof st !== 'object') return null
   return { perArea: st.perArea ?? null, wanted: st.wanted ?? null, lessonLanterns: st.lessonLanterns ?? null, placeLamps: st.placeLamps ?? null, instances: st.instances ?? null }
+}
+
+/**
+ * Row 2: where the lesson lanterns stand, as progress-world.ts reports it
+ * (lanternLayout(): each place's walk, and every lesson lantern with its
+ * instance index and how far along its walk's room it stands).
+ */
+const LANTERN_LAYOUT = () => {
+  const sc = window.__worldV6Debug
+  const mod = sc?.modules?.find((m) => m.name === 'progress-world')?.module
+  return mod && typeof mod.lanternLayout === 'function' ? mod.lanternLayout() : null
+}
+
+/**
+ * Row 2: set the student's progress on the scene and read back how lit every
+ * lantern is (the glass's aState per instance: 0 dark, 1 lit, 2 the next one).
+ */
+const SET_AND_READ = (p) => {
+  const sc = window.__worldV6Debug
+  sc.setWorldProgress(p)
+  const scene = sc.debugScene ? sc.debugScene() : sc.scene
+  let glass = null
+  scene.traverse((o) => {
+    if (o.name === 'ProgressLanternGlass') glass = o
+  })
+  return glass ? Array.from(glass.geometry.getAttribute('aState').array.slice(0, glass.count)) : null
+}
+
+/**
+ * Row 2: water drawn at or near each point, read off the water meshes
+ * themselves (in world space, every triangle): for each point, the first
+ * water triangle within `margin` of it (in plan) whose surface at its nearest
+ * point stands above `ground`, the height the lantern stands on. A lantern
+ * on a bank above a river is dry; one at the lake's edge with the mirror
+ * over the ground beside it is not. Returns the hits and the meshes it found.
+ */
+const WATER_NEAR = ({ pts, margin, names }) => {
+  const sc = window.__worldV6Debug
+  const scene = sc.debugScene ? sc.debugScene() : sc.scene
+  const meshes = []
+  scene.traverse((o) => {
+    if (o.isMesh && names.includes(o.name)) meshes.push(o)
+  })
+  const sets = meshes.map((m) => {
+    m.updateMatrixWorld(true)
+    const pos = m.geometry.getAttribute('position')
+    const idx = m.geometry.getIndex()
+    const n = idx ? idx.count : pos.count
+    const e = m.matrixWorld.elements
+    const arr = new Float64Array(n * 3)
+    let minX = Infinity
+    let maxX = -Infinity
+    let minZ = Infinity
+    let maxZ = -Infinity
+    for (let k = 0; k < n; k++) {
+      const i = idx ? idx.getX(k) : k
+      const x = pos.getX(i)
+      const y = pos.getY(i)
+      const z = pos.getZ(i)
+      const wx = e[0] * x + e[4] * y + e[8] * z + e[12]
+      const wz = e[2] * x + e[6] * y + e[10] * z + e[14]
+      arr[k * 3] = wx
+      arr[k * 3 + 1] = e[1] * x + e[5] * y + e[9] * z + e[13]
+      arr[k * 3 + 2] = wz
+      minX = Math.min(minX, wx)
+      maxX = Math.max(maxX, wx)
+      minZ = Math.min(minZ, wz)
+      maxZ = Math.max(maxZ, wz)
+    }
+    return { name: m.name, arr, tris: Math.floor(n / 3), minX, maxX, minZ, maxZ }
+  })
+  /** The nearest point of triangle abc to p, in plan, as barycentric weights and its distance. */
+  const nearest = (px, pz, ax, az, bx, bz, cx, cz) => {
+    const abx = bx - ax, abz = bz - az, acx = cx - ax, acz = cz - az
+    const apx = px - ax, apz = pz - az
+    const d1 = abx * apx + abz * apz, d2 = acx * apx + acz * apz
+    if (d1 <= 0 && d2 <= 0) return [1, 0, 0]
+    const bpx = px - bx, bpz = pz - bz
+    const d3 = abx * bpx + abz * bpz, d4 = acx * bpx + acz * bpz
+    if (d3 >= 0 && d4 <= d3) return [0, 1, 0]
+    const vc = d1 * d4 - d3 * d2
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+      const v = d1 / (d1 - d3)
+      return [1 - v, v, 0]
+    }
+    const cpx = px - cx, cpz = pz - cz
+    const d5 = abx * cpx + abz * cpz, d6 = acx * cpx + acz * cpz
+    if (d6 >= 0 && d5 <= d6) return [0, 0, 1]
+    const vb = d5 * d2 - d1 * d6
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+      const w = d2 / (d2 - d6)
+      return [1 - w, 0, w]
+    }
+    const va = d3 * d6 - d5 * d4
+    if (va <= 0 && d4 - d3 >= 0 && d5 - d6 >= 0) {
+      const w = (d4 - d3) / (d4 - d3 + (d5 - d6))
+      return [0, 1 - w, w]
+    }
+    const den = 1 / (va + vb + vc)
+    const v = vb * den
+    const w = vc * den
+    return [1 - v - w, v, w]
+  }
+  const hits = pts.map((p) => {
+    for (const t of sets) {
+      if (p.x < t.minX - margin || p.x > t.maxX + margin || p.z < t.minZ - margin || p.z > t.maxZ + margin) continue
+      const a = t.arr
+      for (let k = 0; k < t.tris; k++) {
+        const o = k * 9
+        const ax = a[o], ay = a[o + 1], az = a[o + 2]
+        const bx = a[o + 3], by = a[o + 4], bz = a[o + 5]
+        const cx = a[o + 6], cy = a[o + 7], cz = a[o + 8]
+        if (p.x < Math.min(ax, bx, cx) - margin || p.x > Math.max(ax, bx, cx) + margin || p.z < Math.min(az, bz, cz) - margin || p.z > Math.max(az, bz, cz) + margin) continue
+        // A triangle seen edge on from above (a waterfall's sheet) covers no ground.
+        if (Math.abs((bx - ax) * (cz - az) - (bz - az) * (cx - ax)) < 1e-6) continue
+        const [wa, wb, wc] = nearest(p.x, p.z, ax, az, bx, bz, cx, cz)
+        const d = Math.hypot(ax * wa + bx * wb + cx * wc - p.x, az * wa + bz * wb + cz * wc - p.z)
+        if (d > margin) continue
+        const y = ay * wa + by * wb + cy * wc
+        if (y > p.ground) return { name: t.name, d, water: y, ground: p.ground }
+      }
+    }
+    return null
+  })
+  return { hits, meshes: sets.map((t) => `${t.name} ${t.tris}`) }
+}
+
+/**
+ * Row 2: for each point, whether the object named `name` (every mesh under it,
+ * as drawn) stands between the camera `cam` and the point. Null when there is
+ * no such object.
+ */
+const HIDDEN_BY = ({ name, cam, pts }) => {
+  const sc = window.__worldV6Debug
+  const scene = sc.debugScene ? sc.debugScene() : sc.scene
+  const obj = scene.getObjectByName(name)
+  if (!obj) return null
+  obj.updateMatrixWorld(true)
+  const tris = []
+  obj.traverse((o) => {
+    if (!o.isMesh || !o.visible) return
+    const pos = o.geometry.getAttribute('position')
+    const idx = o.geometry.getIndex()
+    const n = idx ? idx.count : pos.count
+    const e = o.matrixWorld.elements
+    const w = (i) => {
+      const x = pos.getX(i)
+      const y = pos.getY(i)
+      const z = pos.getZ(i)
+      return [e[0] * x + e[4] * y + e[8] * z + e[12], e[1] * x + e[5] * y + e[9] * z + e[13], e[2] * x + e[6] * y + e[10] * z + e[14]]
+    }
+    for (let k = 0; k + 2 < n; k += 3) tris.push([w(idx ? idx.getX(k) : k), w(idx ? idx.getX(k + 1) : k + 1), w(idx ? idx.getX(k + 2) : k + 2)])
+  })
+  // Moller-Trumbore on the segment from the camera to the point.
+  const hit = (p) => {
+    const d = [p[0] - cam[0], p[1] - cam[1], p[2] - cam[2]]
+    for (const [a, b, c] of tris) {
+      const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]]
+      const e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]]
+      const h = [d[1] * e2[2] - d[2] * e2[1], d[2] * e2[0] - d[0] * e2[2], d[0] * e2[1] - d[1] * e2[0]]
+      const det = e1[0] * h[0] + e1[1] * h[1] + e1[2] * h[2]
+      if (Math.abs(det) < 1e-9) continue
+      const s = [cam[0] - a[0], cam[1] - a[1], cam[2] - a[2]]
+      const u = (s[0] * h[0] + s[1] * h[1] + s[2] * h[2]) / det
+      if (u < 0 || u > 1) continue
+      const q = [s[1] * e1[2] - s[2] * e1[1], s[2] * e1[0] - s[0] * e1[2], s[0] * e1[1] - s[1] * e1[0]]
+      const v = (d[0] * q[0] + d[1] * q[1] + d[2] * q[2]) / det
+      if (v < 0 || u + v > 1) continue
+      const t = (e2[0] * q[0] + e2[1] * q[1] + e2[2] * q[2]) / det
+      if (t > 1e-4 && t < 0.999) return true
+    }
+    return false
+  }
+  return pts.map(hit)
+}
+
+/**
+ * Row 2: the ground as drawn at each point (x, z): the highest terrain
+ * triangle over it, in world space, of the terrain meshes the camera draws
+ * ("Terrain", "Terrain:falls", "Terrain:patchN"; not surfaces.ts's coarse
+ * "Terrain:mirror", which only the Mirror Lake's reflection draws), or null
+ * where none is. For the lanterns on the rock beside the ladder: the rock over
+ * a post's top, and under its glass. Returns the heights and the meshes read.
+ */
+const TERRAIN_AT = (pts) => {
+  const sc = window.__worldV6Debug
+  const scene = sc.debugScene ? sc.debugScene() : sc.scene
+  const meshes = []
+  scene.traverse((o) => {
+    if (o.isMesh && /^Terrain(:falls|:patch\d+)?$/.test(o.name)) meshes.push(o)
+  })
+  const top = pts.map(() => null)
+  for (const m of meshes) {
+    m.updateMatrixWorld(true)
+    const pos = m.geometry.getAttribute('position')
+    const idx = m.geometry.getIndex()
+    const n = idx ? idx.count : pos.count
+    const e = m.matrixWorld.elements
+    const w = (i) => {
+      const x = pos.getX(i)
+      const y = pos.getY(i)
+      const z = pos.getZ(i)
+      return [e[0] * x + e[4] * y + e[8] * z + e[12], e[1] * x + e[5] * y + e[9] * z + e[13], e[2] * x + e[6] * y + e[10] * z + e[14]]
+    }
+    for (let k = 0; k + 2 < n; k += 3) {
+      const A = w(idx ? idx.getX(k) : k)
+      const B = w(idx ? idx.getX(k + 1) : k + 1)
+      const C = w(idx ? idx.getX(k + 2) : k + 2)
+      const minX = Math.min(A[0], B[0], C[0])
+      const maxX = Math.max(A[0], B[0], C[0])
+      const minZ = Math.min(A[2], B[2], C[2])
+      const maxZ = Math.max(A[2], B[2], C[2])
+      for (let p = 0; p < pts.length; p++) {
+        const { x, z } = pts[p]
+        if (x < minX || x > maxX || z < minZ || z > maxZ) continue
+        const den = (B[2] - C[2]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[2] - C[2])
+        if (Math.abs(den) < 1e-9) continue
+        const a = ((B[2] - C[2]) * (x - C[0]) + (C[0] - B[0]) * (z - C[2])) / den
+        const b = ((C[2] - A[2]) * (x - C[0]) + (A[0] - C[0]) * (z - C[2])) / den
+        const c = 1 - a - b
+        if (a < -1e-6 || b < -1e-6 || c < -1e-6) continue
+        const y = a * A[1] + b * B[1] + c * C[1]
+        if (top[p] === null || y > top[p]) top[p] = y
+      }
+    }
+  }
+  return { heights: top, meshes: meshes.map((m) => m.name) }
 }
 
 /**
@@ -1222,6 +1536,209 @@ try {
       r.check('the map was asked for one lantern per lesson (wanted)', st?.wanted === want, st?.wanted ?? null)
       const all = r.check('every place put down as many (perArea equals wanted)', !!st && st.perArea === st.wanted, st ? `perArea ${st.perArea}; wanted ${st.wanted}` : null)
       r.values.lanterns = st
+      const lay = await page.evaluate(LANTERN_LAYOUT)
+      const reported = r.check(
+        'the map says where its lesson lanterns stand (lanternLayout(), 8 places)',
+        !!lay && Array.isArray(lay.lanterns) && Array.isArray(lay.places) && lay.places.length === NAMES.length,
+        lay ? `${lay.lanterns?.length} lanterns, ${lay.places?.length} places` : null,
+      )
+      if (reported) {
+        const at = (l) => `place ${l.area + 1} lesson ${l.lesson + 1} at (${f(l.x, 0)}, ${f(l.z, 0)})`
+        const byPlace = NAMES.map((_, k) => lay.lanterns.filter((l) => l.area === k).sort((a, b) => a.u - b.u))
+        r.values.places = lay.places.map((p, k) => ({
+          place: `${k + 1} ${NAMES[k]}`,
+          lanterns: byPlace[k].length,
+          spacing: p.spacing,
+          room: p.room,
+          sides: p.sides,
+          firstFromStart: byPlace[k].length ? Math.round(Math.hypot(byPlace[k][0].x - WALK_START[k][0], byPlace[k][0].z - WALK_START[k][1])) : null,
+        }))
+        r.check(
+          `one lantern per lesson in every place (${want}), numbered from its landmark on`,
+          byPlace.every((ls, k) => ls.length === COUNTING[k] && ls.every((l, j) => l.lesson === j)),
+          byPlace.map((ls) => ls.length).join(','),
+        )
+
+        // Dry ground, judged against the water as it is drawn.
+        const water = await page.evaluate(WATER_NEAR, { pts: lay.lanterns.map((l) => ({ x: l.x, z: l.z, ground: l.y + 0.3 })), margin: WATER_GAP, names: WATER_MESHES })
+        const wet = water.hits.map((h, i) => (h ? `${at(lay.lanterns[i])}: ${h.name} ${f(h.d, 1)} away, its surface ${f(h.water, 1)} over the ground at ${f(h.ground, 1)}` : null)).filter(Boolean)
+        r.values.waterMeshes = water.meshes
+        r.check(`every water mesh is there to judge by (${WATER_MESHES.length})`, WATER_MESHES.every((n) => water.meshes.some((m) => m.startsWith(`${n} `))), water.meshes)
+        r.check(`every lantern on dry ground: no water drawn within ${WATER_GAP} of its foot`, wet.length === 0, wet.length ? wet.slice(0, 6) : 'none')
+
+        // Evenly spaced along the walk, the first by the landmark, a constant way from the trail.
+        const uneven = []
+        const packed = []
+        const offTrail = []
+        byPlace.forEach((ls, k) => {
+          const p = lay.places[k]
+          if (!ls.length) return
+          if (Math.abs(ls[0].u - p.first) > SPACING_TOL) uneven.push(`place ${k + 1}: the first stands ${f(ls[0].u, 1)} into its walk's room, not at its first room ${f(p.first, 1)}`)
+          for (let j = 1; j < ls.length; j++) {
+            const du = ls[j].u - ls[j - 1].u
+            if (Math.abs(du - p.spacing) > SPACING_TOL) uneven.push(`place ${k + 1}: lessons ${j} to ${j + 1} are ${f(du, 1)} apart along the walk, its spacing ${f(p.spacing, 1)}`)
+            const d3 = Math.hypot(ls[j].x - ls[j - 1].x, ls[j].y - ls[j - 1].y, ls[j].z - ls[j - 1].z)
+            if (d3 < 0.6 * p.spacing) packed.push(`place ${k + 1}: lessons ${j} and ${j + 1} stand ${f(d3, 1)} apart, its spacing ${f(p.spacing, 1)}`)
+          }
+          const tail = p.room - ls[ls.length - 1].u
+          const wantTail = p.toEnd ? 0 : p.spacing
+          if (Math.abs(tail - wantTail) > SPACING_TOL) uneven.push(`place ${k + 1}: the last stands ${f(tail, 1)} short of its walk's end, not ${f(wantTail, 1)}`)
+          for (const l of ls) {
+            const want = p.offsets[l.piece]
+            if (Math.abs(l.trail - want) > OFFSET_TOL) offTrail.push(`${at(l)}: ${f(l.trail, 1)} from the trail's middle, not ${want}`)
+          }
+        })
+        r.check(`each place's lanterns evenly spaced along its walk (every step within ${SPACING_TOL} of its spacing; the last one spacing short of the next place, at its walk's end for Video Ads II and at the arch for the last)`, uneven.length === 0, uneven.length ? uneven.slice(0, 6) : lay.places.map((p, k) => `${k + 1}: ${f(p.spacing, 1)}`).join(', '))
+        r.check('no two lanterns of a place closer than 0.6 of its spacing', packed.length === 0, packed.length ? packed.slice(0, 6) : 'none')
+        r.check(`every lantern its piece's offset from the trail's middle (within ${OFFSET_TOL})`, offTrail.length === 0, offTrail.length ? offTrail.slice(0, 6) : 'none')
+
+        const starts = lay.places.map((p, k) => (p.start ? Math.hypot(p.start[0] - WALK_START[k][0], p.start[1] - WALK_START[k][1]) : Infinity))
+        r.check('each walk starts at its landmark\'s trail point (WALK_START)', starts.every((d) => d < 1), starts.map((d) => f(d, 1)).join(', '))
+        const far = byPlace
+          .map((ls, k) => {
+            const limit = k === 4 ? FIRST_NEAR_STATIC : FIRST_NEAR
+            const d = ls.length ? Math.hypot(ls[0].x - WALK_START[k][0], ls[0].z - WALK_START[k][1]) : Infinity
+            const nearest = ls.every((l) => Math.hypot(l.x - WALK_START[k][0], l.z - WALK_START[k][1]) >= d - 1e-6)
+            return d <= limit && nearest ? null : `place ${k + 1} ${NAMES[k]}: the first stands ${f(d, 1)} from its walk's start (at most ${limit})${nearest ? '' : ', and another stands nearer'}`
+          })
+          .filter(Boolean)
+        r.check(`each place's first lantern is the nearest to its landmark's trail point, within ${FIRST_NEAR} (Static Ads ${FIRST_NEAR_STATIC})`, far.length === 0, far.length ? far : r.values.places.map((p) => p.firstFromStart).join(', '))
+        // Video Ads I's last ones hang on the rock beside the ladder: the rock over each post's top, under its glass's back.
+        const onRock = byPlace[2].filter((l) => l.wall)
+        const rock = onRock.length ? await page.evaluate(TERRAIN_AT, onRock.flatMap((l) => [{ x: l.wall.post[0], z: l.wall.post[2] }, { x: l.wall.back[0], z: l.wall.back[2] }])) : null
+        const showing = []
+        onRock.forEach((l, i) => {
+          const over = rock?.heights?.[i * 2]
+          const under = rock?.heights?.[i * 2 + 1]
+          if (!(typeof over === 'number' && over >= l.wall.post[1])) showing.push(`${at(l)}: its post's top at ${f(l.wall.post[1], 1)} stands out of the rock (the rock there at ${f(over, 1)})`)
+          if (!(typeof under === 'number' && under <= l.wall.back[1])) showing.push(`${at(l)}: its glass's foot at ${f(l.wall.back[1], 1)} is in the rock (the rock there at ${f(under, 1)})`)
+        })
+        r.check(
+          'Video Ads I\'s lanterns on the ladder hang from the rock beside it: each post in the rock to its top, each glass clear of it (the terrain as drawn)',
+          onRock.length > 0 && showing.length === 0,
+          showing.length ? showing.slice(0, 6) : `${onRock.length} on the rock, beside the ladder by ${onRock.map((l) => f(l.trail, 1)).join(', ')}; meshes ${rock?.meshes?.join(', ')}`,
+        )
+        const va2 = byPlace[3]
+        const behind = va2.filter((l) => !(l.x > LADDER_TOP_X && l.y >= HUT.y - 5)).map(at)
+        const onBench = byPlace[2].filter((l) => l.y >= HUT.y - 5).map(at)
+        r.check(
+          `all ${COUNTING[3]} of Video Ads II's lanterns stand from the ladder's top on (on the bench by the hut or higher), and none of Video Ads I's on that bench`,
+          va2.length === COUNTING[3] && behind.length === 0 && onBench.length === 0,
+          behind.length || onBench.length ? [...behind, ...onBench.map((s) => `Video Ads I's on the bench: ${s}`)] : `${va2.length} from the ladder's top on`,
+        )
+        const lastVa2 = va2[va2.length - 1]
+        const pastCache = va2.filter((l) => l.z < CACHE.z).map(at)
+        const toCache = lastVa2 ? Math.hypot(lastVa2.x - CACHE.x, lastVa2.z - CACHE.z) : Infinity
+        // Round 3: none of its lanterns shows in the cache's park view (the post, foot to top, projected into
+        // that camera's frame at the widest screen the review takes), and the run still reaches the cache.
+        const b = (PARK.bearing * Math.PI) / 180
+        const pt = (PARK.pitch * Math.PI) / 180
+        const fwd = [Math.sin(b) * Math.cos(pt), -Math.sin(pt), -Math.cos(b) * Math.cos(pt)]
+        const right = [Math.cos(b), 0, Math.sin(b)]
+        const up = [right[1] * fwd[2] - right[2] * fwd[1], right[2] * fwd[0] - right[0] * fwd[2], right[0] * fwd[1] - right[1] * fwd[0]]
+        const tanV = Math.tan(((PARK.fov / 2) * Math.PI) / 180)
+        /** Where (x, y, z) lands in the park frame: [-1, 1] across and up is inside it; null behind the camera. */
+        const inFrame = (x, y, z) => {
+          const v = [x - PARK.x, y - PARK.y, z - PARK.z]
+          const d = v[0] * fwd[0] + v[1] * fwd[1] + v[2] * fwd[2]
+          if (d <= 0.1) return null
+          return [(v[0] * right[0] + v[1] * right[1] + v[2] * right[2]) / (d * tanV * PARK_ASPECT), (v[0] * up[0] + v[1] * up[1] + v[2] * up[2]) / (d * tanV)]
+        }
+        const showing2 = []
+        let nearestEdge = -Infinity
+        for (const l of va2) {
+          for (const dy of [0, 4, 8, 10]) {
+            const q = inFrame(l.x, l.y + dy, l.z)
+            if (!q) continue
+            if (Math.abs(q[0]) <= 1) nearestEdge = Math.max(nearestEdge, q[1])
+            if (Math.abs(q[0]) <= 1 && Math.abs(q[1]) <= 1) {
+              showing2.push(`${at(l)}: ${dy ? `${dy} over its foot` : 'its foot'} at (${f(q[0], 2)}, ${f(q[1], 2)}) in the frame`)
+              break
+            }
+          }
+        }
+        r.check(
+          `none of Video Ads II's lanterns shows in the 30% cache's park view (the discount panel's view, ${PARK_ASPECT.toFixed(2)} wide); its last within ${CACHE_NEAR} of the cache, none past it`,
+          va2.length > 0 && showing2.length === 0 && toCache <= CACHE_NEAR && pastCache.length === 0,
+          showing2.length || pastCache.length || !lastVa2 ? [...showing2, ...pastCache.map((s) => `past the cache: ${s}`)] : `the nearest comes to ${f(nearestEdge, 2)} of the frame's height (its bottom edge is -1); the last ${f(toCache, 0)} from the cache`,
+        )
+        // Round 3: none on a face. The ground under every lantern on land, as drawn, no steeper than STEEP.
+        const onLand = lay.lanterns.filter((l) => !l.wall && lay.places[l.area]?.pieces?.[l.piece]?.ground === 'land')
+        const slopes = onLand.length ? await page.evaluate(TERRAIN_AT, onLand.flatMap((l) => [{ x: l.x, z: l.z }, { x: l.x + STEEP_E, z: l.z }, { x: l.x, z: l.z + STEEP_E }])) : null
+        const steep = []
+        let steepest = 0
+        onLand.forEach((l, i) => {
+          const [h, hx, hz] = [0, 1, 2].map((d) => slopes?.heights?.[i * 3 + d])
+          if (![h, hx, hz].every((v) => typeof v === 'number')) return steep.push(`${at(l)}: no drawn ground under it`)
+          const s = Math.hypot(hx - h, hz - h) / STEEP_E
+          steepest = Math.max(steepest, s)
+          if (s > STEEP + STEEP_TOL) steep.push(`${at(l)}: its ground rises ${f(s, 2)} per unit`)
+        })
+        r.check(
+          `every lantern on land stands on ground no steeper than ${STEEP} (the terrain as drawn, over ${STEEP_E})`,
+          onLand.length > 0 && steep.length === 0,
+          steep.length ? steep.slice(0, 6) : `${onLand.length} on land, the steepest ${f(steepest, 2)}`,
+        )
+
+        // Watching k lessons lights the first k from the landmark on; the next one pulses in the current place.
+        const lighting = (label, p) => {
+          return page.evaluate(SET_AND_READ, p).then((states) => {
+            const wrong = []
+            byPlace.forEach((ls, k) => {
+              ls.forEach((l, rank) => {
+                const want = rank < p.done[k] ? 1 : k === p.current && rank === p.done[k] ? 2 : 0
+                const got = states ? states[l.i] : null
+                if (got !== want) wrong.push(`${at(l)}: state ${got}, wants ${want}`)
+              })
+            })
+            r.check(`${label}: every place's first k lit from its landmark on, the next one pulsing in the current place`, !!states && wrong.length === 0, wrong.length ? wrong.slice(0, 6) : `done ${p.done.join(',')}`)
+            return states
+          })
+        }
+        const someDone = [3, 5, 7, 7, 9, 4, 6, 2]
+        await lighting('some of every place watched, the student in Video Ads II with 7', { lessons: COUNTING, done: someDone, current: 3, next: someDone[3] + 1 })
+        // Lovro's own test at 6:16 in the Loom: 3 of Video Ads I and 7 of Video Ads II watched, nothing else.
+        const loomDone = [0, 0, 3, 7, 0, 0, 0, 0]
+        const states = await lighting('Lovro\'s test in the Loom (3 of Video Ads I, 7 of Video Ads II)', { lessons: COUNTING, done: loomDone, current: 3, next: loomDone[3] + 1 })
+        const litVa2 = states ? va2.filter((l) => states[l.i] === 1) : []
+        const litVa1 = states ? byPlace[2].filter((l) => states[l.i] === 1) : []
+        const hutD = (l) => Math.hypot(l.x - HUT.x, l.z - HUT.z)
+        r.check(
+          `Lovro's test lights Video Ads II's 7 on the bench within ${HUT_NEAR} of the hut, and Video Ads I's 3 down by the river, none of them on the bench`,
+          litVa2.length === 7 && litVa2.every((l) => l.y >= HUT.y - 5 && hutD(l) <= HUT_NEAR) && litVa1.length === 3 && litVa1.every((l) => l.y < HUT.y - 100),
+          `Video Ads II: ${litVa2.map((l) => `${at(l)} ${f(hutD(l), 0)} from the hut`).join('; ')}. Video Ads I: ${litVa1.map(at).join('; ')}`,
+        )
+        await lighting('nothing watched', { lessons: COUNTING, done: COUNTING.map(() => 0), current: 0, next: 1 })
+        await lighting('everything watched', { lessons: COUNTING, done: COUNTING.slice(), current: 8, next: 0 })
+
+        // Round 3: from the hut's stop and from its parked view (Lovro's at 6:02 and 6:17), no Video Ads II
+        // lantern's glass hides behind the hut (from the parked view the hut's eave hides 18 units of the bench
+        // west of it, and at 39 apart one lantern stood there).
+        const glassPts = (l) => (Array.isArray(l.glass) ? [[0, 0, 0], [-0.6, -0.75, 0], [0.6, -0.75, 0], [-0.6, 0.75, 0], [0.6, 0.75, 0], [0, -0.75, -0.6], [0, 0.75, 0.6]].map(([dx, dy, dz]) => [l.glass[0] + dx, l.glass[1] + dy, l.glass[2] + dz]) : [])
+        const near = va2.filter((l) => Array.isArray(l.glass) && Math.hypot(l.x - HUT.x, l.z - HUT.z) < 300)
+        const hutViews = []
+        await scrollToPlace(page, 3, 'row 2, the hut\'s stop')
+        hutViews.push({ view: 'the stop', cam: await page.evaluate(() => { const c = window.__worldV6Debug.cameraPose(); return [c.x, c.y, c.z] }) })
+        await openPlaceQuietly(page, 3, 'row 2, the hut parked')
+        hutViews.push({ view: 'parked', cam: await page.evaluate(() => { const c = window.__worldV6Debug.cameraPose(); return [c.x, c.y, c.z] }) })
+        const behindHut = []
+        for (const hv of hutViews) {
+          const hits = await page.evaluate(HIDDEN_BY, { name: 'LM_TrailHut', cam: hv.cam, pts: near.flatMap(glassPts) })
+          if (!hits) {
+            behindHut.push(`${hv.view}: no LM_TrailHut in the scene`)
+            continue
+          }
+          near.forEach((l, i) => {
+            const n = hits.slice(i * 7, i * 7 + 7).filter(Boolean).length
+            if (n) behindHut.push(`${hv.view}: ${at(l)}, ${n} of 7 points of its glass behind the hut`)
+          })
+        }
+        r.check(
+          'no Video Ads II lantern\'s glass is hidden behind the Trail Hut from its stop or its parked view',
+          near.length > 0 && behindHut.length === 0,
+          behindHut.length ? behindHut.slice(0, 6) : `${near.length} lanterns within 300 of the hut, clear from ${hutViews.map((h) => `${h.view} (${h.cam.map((v) => f(v, 0)).join(', ')})`).join(' and ')}`,
+        )
+      }
       if (!st || all) return
       // A place is short. Say which, and take its picture with every lantern lit.
       const got = String(st.perArea).split(',').map(Number)

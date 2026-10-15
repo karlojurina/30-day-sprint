@@ -496,8 +496,9 @@ export const LOOKS: Record<LightWaypointKey, LookKey> = {
     // Fix round 1 (judge 1): the opening read hazy and flat, every ridge in
     // one grey band. Less additive fog and a longer ramp, so the col, the
     // massif and the east peaks step back in value; a darker near shade so
-    // the islet reads as the dark near shape. It eases into afternoon-gold
-    // by a1 (a hold waypoint at key 0).
+    // the islet read as the dark near shape (the islet and its boulders went
+    // in the map review of 2026-10-15, item 7; the value stays). It eases
+    // into afternoon-gold by a1 (a hold waypoint at key 0).
     // rampEnd stays 4400: it is also the cull, and at 6200 the far north wall
     // rose behind the plume and took the sky from 45% to 36% (fix-1-frame/k0-after).
     // Fix round 2 (judge 2): the west massif still read hazy. fogCap 0.9 -> 0.84

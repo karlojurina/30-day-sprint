@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { LADDER, PATH, PLACES, TRAIL_HUT, WORLD, ladderSections } from "./layout";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
-import { addFootprint, addPathLine } from "./footprints";
+import { addFootprint, addPathLine, blocked } from "./footprints";
 import { terrainHeight } from "./terrain";
 import { trailDist } from "./rocks";
 
@@ -22,9 +22,10 @@ import { trailDist } from "./rocks";
  *                bracket at the porch's south corner, where the a4 camera sees it.
  *   Gorge:set    the bench facing the falls at the ledge's edge; the rope
  *                handrail on old posts wherever the trail runs on the ground
- *                from the log to the gully (the thread from the Landing); a
- *                cairn at each bend; the gully's stone steps and fixed rope;
- *                the cairn at the gully's top; the fallen spruce over the
+ *                from the log to the gully, on one side of the trail along a
+ *                run; the gully's stone steps and fixed rope (the cairns at
+ *                the bends and at the gully's top went on 2026-10-15, Lovro's
+ *                Loom); the fallen spruce over the
  *                river below the pool (lit worn top, broken stubs, root
  *                plate); a blazed post at the lip; a rockfall at the cliff's
  *                foot east of the falls and ferns on the bank below it; the
@@ -138,6 +139,10 @@ class Kit {
   ) {}
   get tris(): number {
     return this.p.length / 9;
+  }
+  /** Restart the running count that seeds each piece's value jitter (add), so pieces taken out before this point deal none after it again. */
+  setCount(n: number): void {
+    this.n = n;
   }
   private push(x: number, y: number, z: number, col: RGB, k: number): void {
     this.p.push(x - this.o.x, y - this.o.y, z - this.o.z);
@@ -423,20 +428,6 @@ function bench(k: Kit, x: number, z: number, facing: number): void {
   k.beam([x - S[0] * 7.5, g + 5.6, z - S[1] * 7.5], [x + S[0] * 7.5, g + 5.6, z + S[1] * 7.5], 3.4, 1.4, P.barkLit, "box", 0.06);
   for (const s of [-5, 5]) k.beam([x + S[0] * s - F[0] * 1.6, g + 5, z + S[1] * s - F[1] * 1.6], [x + S[0] * s - F[0] * 2.4, g + 11.5, z + S[1] * s - F[1] * 2.4], 0.8, 0.8, P.post);
   k.beam([x - S[0] * 7 - F[0] * 2.3, g + 10, z - S[1] * 7 - F[1] * 2.3], [x + S[0] * 7 - F[0] * 2.3, g + 10, z + S[1] * 7 - F[1] * 2.3], 2.0, 0.7, P.plank, "box", 0.06);
-}
-
-/** A trail cairn, stones of falling size. */
-function cairn(k: Kit, x: number, z: number, h: number, seed: number): void {
-  const g = G(x, z);
-  let y = g - 0.5;
-  let s = h * 0.36;
-  for (let i = 0; i < 6 && y < g + h; i++) {
-    const ox = (rnd(seed, i) - 0.5) * s * 0.25;
-    const oz = (rnd(seed, i + 9) - 0.5) * s * 0.25;
-    k.add("dode", T(x + ox, y + s * 0.42, z + oz, s, s * 0.62, s * 0.9, rnd(seed, i + 3) * 3, (rnd(seed, i + 5) - 0.5) * 0.3), i % 2 ? P.stone : P.stoneWarm, 0.14);
-    y += s * 0.74;
-    s *= 0.8;
-  }
 }
 
 /** An old post, weathered, a little out of true. */
@@ -742,9 +733,24 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   // the ground (the heightfield has no switchback benches; posts on a cliff
   // read as floating). Plus along the ledge's outer edge from the a4 camera
   // to the hut, the leading line in the a4 frame.
+  // The fence keeps to its side of the trail (Lovro's Loom, 2026-10-15: by the
+  // hut a rope "just goes across"). Each post took its own downhill side, and
+  // on the ledge's flat bench that flipped from post to post, so a rope joined
+  // posts on opposite sides. Now a post changes side only where the ground
+  // there clearly falls the other way (SIDE_DROP over 16 across the trail),
+  // and the change ends the run: a gap, no rope. The posts stand POST_OFF from
+  // the trail's middle line, off the painted path (half width 6.5 to 8.5,
+  // surfaces.ts) and outside the lamps' line (progress-world.ts OFFSET, 10),
+  // so a lamp on this side stands between the path and the rope, never on a
+  // post. A post nearer the line than ROPE_CLEAR (at a tight bend it lands by
+  // the trail's other leg) or on a footprint (a rock) is left out, a gap; so
+  // is a rope that would come within ROPE_CLEAR of the line.
   let posts = 0;
   let ropes = 0;
   {
+    const SIDE_DROP = 1;
+    const POST_OFF = 12;
+    const ROPE_CLEAR = 8.5;
     const iLog = PATH.findIndex((p) => Math.abs(p.x - 62) < 1 && Math.abs(p.z - 1608) < 1);
     const iEnd = PATH.findIndex((p) => Math.abs(p.x - 1436) < 1 && Math.abs(p.z - 1146) < 1);
     const run: V3[] = [];
@@ -755,8 +761,14 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       }
       run.length = 0;
     };
+    const clearOfTrail = (p: V3, q: V3) => {
+      for (let k = 0; k <= 8; k++) if (trailDist(p[0] + ((q[0] - p[0]) * k) / 8, p[2] + ((q[2] - p[2]) * k) / 8) < ROPE_CLEAR) return false;
+      return true;
+    };
     let acc = 11;
     let seed = 0;
+    /** The fence's side (1 = the trail's left, -1 its right), 0 before the first post. */
+    let fenceSide = 0;
     for (let i = Math.max(0, iLog + 2); i < iEnd && i + 1 < PATH.length; i++) {
       const a = PATH[i];
       const b = PATH[i + 1];
@@ -772,17 +784,23 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
         // Downhill side: the side where the ground falls away (the gorge).
         const gl = G(x - uz * 8, z + ux * 8);
         const gr = G(x + uz * 8, z - ux * 8);
-        const side = gl < gr ? 1 : -1;
-        const px = x - uz * 6 * side;
-        const pz = z + ux * 6 * side;
+        const downhill = gl < gr ? 1 : -1;
+        const clear = Math.abs(gl - gr) >= SIDE_DROP;
+        if (fenceSide && clear && downhill !== fenceSide) flush();
+        const side = fenceSide && !clear ? fenceSide : downhill;
+        const px = x - uz * POST_OFF * side;
+        const pz = z + ux * POST_OFF * side;
         const gp = G(px, pz);
         const slope = Math.abs(gl - gr) / 16;
         const nearHut = Math.hypot(px - hx, pz - hz) < 26;
-        if (Math.abs(g - py) > 14 || Math.abs(gp - g) > 4 || slope > 1.1 || nearHut) {
+        if (Math.abs(g - py) > 14 || Math.abs(gp - g) > 4 || slope > 1.1 || nearHut || trailDist(px, pz) < ROPE_CLEAR || blocked(px, pz)) {
           flush();
           continue;
         }
-        run.push(post(kSet, px, pz, 10.5, seed++));
+        const top = post(kSet, px, pz, 10.5, seed++);
+        if (run.length && !clearOfTrail(run[run.length - 1], top)) flush();
+        run.push(top);
+        fenceSide = side;
         posts++;
       }
       acc -= len;
@@ -794,33 +812,12 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   stats.handrailPosts = posts;
   stats.handrailRopes = ropes;
 
-  // Cairns at the bends that stand on real ground. Each is seeded by its
-  // bend's number counted from the log's south end, which was the trail's
-  // point 23 when they were built: a point added to or taken from the trail
-  // before the log must not rebuild them.
-  let cairns = 0;
-  const seedOf = (i: number) => i - PATH.findIndex((p) => Math.abs(p.x - 62) < 1 && Math.abs(p.z - 1608) < 1) + 23;
-  for (let i = 1; i + 1 < PATH.length; i++) {
-    const p = PATH[i];
-    if (p.x < 100 || p.x > 1500 || p.z < 1000 || p.z > 1700 || p.y < 60) continue;
-    if (Math.abs(G(p.x, p.z) - p.y) > 14) continue;
-    const a = PATH[i - 1];
-    const b = PATH[i + 1];
-    let turn = Math.abs(Math.atan2(b.x - p.x, b.z - p.z) - Math.atan2(p.x - a.x, p.z - a.z)) % (Math.PI * 2);
-    if (turn > Math.PI) turn = Math.PI * 2 - turn;
-    if (turn < 0.35) continue;
-    const cx = p.x + 9;
-    const cz = p.z - 7;
-    if (Math.hypot(cx - hx, cz - hz) < 30) continue;
-    cairn(kSet, cx, cz, 7 + rnd(seedOf(i), 7) * 3, seedOf(i));
-    addFootprint({ x: cx, z: cz, r: 4, kind: "rock" });
-    cairns++;
-  }
-  // The cairn at the gully's top (the goal seen from inside the gully).
-  cairn(kSet, 1424, 1060, 12, 77);
-  addFootprint({ x: 1424, z: 1060, r: 5, kind: "rock" });
-  cairns++;
-  stats.cairns = cairns;
+  // The trail cairns (one at each bend between the log and the gully, one at
+  // the gully's top) went on 2026-10-15 (Lovro's Loom: "these weird stone
+  // structures which are so random and so unnecessary"). The set's pieces from
+  // here on keep the value jitter they had with them and the old handrail: 189
+  // pieces came before them.
+  kSet.setCount(189);
 
   // The gully: stone steps up its floor and a fixed rope on iron pins along its west side.
   {

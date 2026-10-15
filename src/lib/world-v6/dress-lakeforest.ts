@@ -18,8 +18,8 @@
  *       jetty's foot, and lamp halos for the windows and lanterns.
  *     - LakeFrame (pass 3, NO_REFLECT_LAYER): a rock islet with reeds and a
  *       leaning spruce, the dark framing shape on the stop's lower left.
- *   The walk from the collar (Set_meadow): cairns about every 110 along the
- *     trail, a fallen log over the brook with a root plate.
+ *   The walk from the collar (Set_meadow): a fallen log over the brook with a
+ *     root plate (its cairns along the trail went on 2026-10-15).
  *   a6 The Glowing Forest
  *     - M1 giant elders (4.2) in two species, instanced, 3 LODs with per
  *       frame compaction (bible 5.3): the TIERED elder (twisted column trunk,
@@ -385,14 +385,12 @@ const P = {
   fungus: C(0x7c8a94),
   capStem: C(0x8a8a90),
   capTop: C(0x3a2f4a),
-  // Stone (steps, cairns, chimney)
+  // Stone (steps, chimney)
   stoneTop: C(0x8a869c),
   stoneSide: C(0x747086),
   stoneKeel: C(0x4a4656),
   stoneMoss: C(0x3e5a3a),
   root: C(0x3a2e28),
-  cairn: C(0x8a857e),
-  cairnTop: C(0x9e988e),
   // Wood (bible 1.8: brown #6b4e3a, grey brown #7d6b5a, cream #e3d6ba, canvas, rope, iron)
   wall: C(0x5a4032),
   wall2: C(0x523a2e),
@@ -1761,55 +1759,15 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     }
   }
 
-  // ── The walk from the collar: cairns and a log over the brook ──
+  // ── The walk from the collar: a log over the brook ──
+  // (Its cairns, a stack of 5 stones every 110 from the gully's top to the
+  // jetty, went on 2026-10-15: Lovro's Loom, "these weird stone structures
+  // which are so random and so unnecessary".)
   const meadowSet = scene.getObjectByName("Set_meadow");
   if (meadowSet) {
     const s = new Soup();
     const o = meadowSet.position;
     const toL = (x: number, y: number, z: number) => V3(x - o.x, y - o.y, z - o.z);
-    const brookDist = (x: number, z: number) => {
-      let best = Infinity;
-      for (let i = 0; i < BROOK.length - 1; i++) {
-        const [ax, , az] = BROOK[i];
-        const [bx, , bz] = BROOK[i + 1];
-        const dx = bx - ax;
-        const dz = bz - az;
-        const t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
-        best = Math.min(best, Math.hypot(x - ax - dx * t, z - az - dz * t));
-      }
-      return best;
-    };
-    const walk = PATH.filter((p) => p.x > 1300 && p.z <= 950 && p.z >= -430 && p.y > 500);
-    let acc = 60;
-    let cairns = 0;
-    for (let i = 0; i < walk.length - 1; i++) {
-      const a = walk[i];
-      const b = walk[i + 1];
-      const seg = Math.hypot(b.x - a.x, b.z - a.z);
-      while (acc < seg) {
-        const t = acc / seg;
-        const dx = (b.x - a.x) / seg;
-        const dz = (b.z - a.z) / seg;
-        const side = cairns % 2 ? -1 : 1;
-        const x = a.x + (b.x - a.x) * t - dz * 12 * side;
-        const z = a.z + (b.z - a.z) * t + dx * 12 * side;
-        if (brookDist(x, z) > 22) {
-          const g = H(x, z);
-          let y = g - 0.6;
-          for (let k = 0; k < 5; k++) {
-            const r = 3.4 - k * 0.55;
-            const hh = 1.5 - k * 0.12;
-            const c = toL(x + (rnd(cairns + k, 61) - 0.5) * 0.8, y + hh, z + (rnd(cairns + k, 62) - 0.5) * 0.8);
-            octa(s, c, r, hh, r * 0.85, k === 4 ? P.cairnTop : P.cairn);
-            y += hh * 1.7;
-          }
-          cairns++;
-        }
-        acc += 110;
-      }
-      acc -= seg;
-    }
-    stats.cairns = cairns;
     // The fallen log over the brook, a root plate at one end.
     {
       const [ax, ay, az] = BROOK[1];

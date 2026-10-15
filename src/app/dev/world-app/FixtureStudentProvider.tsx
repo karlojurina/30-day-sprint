@@ -102,7 +102,9 @@ import { CelebrationStandInContext } from "@/components/world/WorldCelebrations"
  * lessons course-lengths.fixture.json lists. The three video lessons are not
  * part of it: with the two ids, every lesson that has a video plays test
  * video 1 (fixtureTransport.ts). Its presets are p0, mid (areas 1 to 3 done,
- * lessons 1 to 9 of area 4) and all; any other name is p0.
+ * lessons 1 to 9 of area 4), partial (the first 6 lessons of every area), loom
+ * (Lovro's test in the map review Loom: 3 of area 3, 7 of area 4) and all; any
+ * other name is p0.
  * world-tests/v6-course.mjs walks it.
  *
  * THE LESSONS' TEXT, course mode only (courseCatalog.ts, THE LESSONS' TEXT).

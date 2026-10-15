@@ -1189,6 +1189,154 @@ function buildRibbon(spec: RibbonSpec, drawnGround: (x: number, z: number) => nu
   return g;
 }
 
+// ── Where water is drawn (shared) ─────────────────────────────────────────────
+
+/**
+ * Is water drawn at (x, z), or anywhere within `margin` of it (up to 16)? The one test for
+ * keeping a thing out of the water, read off what this module and light.ts
+ * draw (map review 2026-10-15: the lesson lanterns use it; the Mirror Lake's
+ * new shore, item 15c, should use it and change it with the lake). `ground` is
+ * the ground's height as the terrain mesh draws it (rocks.ts groundY).
+ *
+ *   the sea      the "Sea" plane at WORLD.seaLevel, wherever the ground is under it;
+ *   the lake     light.ts's mirror: a disc of WORLD.lake.r + 20 at WORLD.lake.y
+ *                + 0.5 (its LAKE_LIFT), wherever the ground is under it. That is
+ *                20 past WORLD.lake.r, where scene.ts's surfaceHeight stops, and
+ *                the ground just outside r is under the mirror;
+ *   the pool     the "Pool" disc, WORLD.pool.r + 3 at WORLD.pool.y + 0.15 (its
+ *                swell is under half a unit at the rim), wherever the ground is under it;
+ *   the tarn     the "UpperTarn" disc, r + 14 at its y;
+ *   the ribbons  as the install's addRibbon calls lay them: the river, the brook
+ *                and the glowing stream over the drawn ground across their
+ *                whole width; the stream at its own level, cut off where the
+ *                banks rise over it, and on to the lip (the curtain's approach
+ *                takes its last APPROACH_LEN at the same level).
+ * The island's rills are dress-sky.ts's and register "water" footprints, which
+ * footprints.ts's blocked() finds. Change this with any of the above.
+ * Pure (no scene): the first call builds the ribbons' lines, later calls allocate nothing.
+ */
+export function waterAt(x: number, z: number, ground: (x: number, z: number) => number, margin = 0): boolean {
+  const W = waterLines();
+  const m = Math.max(0, margin);
+  // Nothing drawn anywhere near: the common case, answered with one read of the ground.
+  const lk = WORLD.lake;
+  const pl = WORLD.pool;
+  const tn = WORLD.upperFalls.tarn;
+  const nearDisc = (cx: number, cz: number, r: number) => (x - cx) * (x - cx) + (z - cz) * (z - cz) < (r + m) * (r + m);
+  const g0 = ground(x, z);
+  if (g0 > WORLD.seaLevel + 40 && !nearDisc(lk.x, lk.z, lk.r + 20) && !nearDisc(pl.x, pl.z, pl.r + 3) && !nearDisc(tn.x, tn.z, tn.r + 14) && !W.near(x, z, m)) return false;
+  if (wetPoint(W, x, z, g0)) return true;
+  if (m <= 0) return false;
+  // Eight points round it at `margin`, each with its own ground.
+  for (let k = 0; k < 8; k++) {
+    const a = (k * Math.PI) / 4;
+    const qx = x + Math.cos(a) * m;
+    const qz = z + Math.sin(a) * m;
+    if (wetPoint(W, qx, qz, ground(qx, qz))) return true;
+  }
+  return false;
+}
+
+/** Water drawn exactly at (x, z), with the ground g there. */
+function wetPoint(W: WaterLines, x: number, z: number, g: number): boolean {
+  if (g < WORLD.seaLevel) return true;
+  const lk = WORLD.lake;
+  if (g < lk.y + 0.5 && (x - lk.x) * (x - lk.x) + (z - lk.z) * (z - lk.z) < (lk.r + 20) * (lk.r + 20)) return true;
+  const pl = WORLD.pool;
+  if (g < pl.y + 0.6 && (x - pl.x) * (x - pl.x) + (z - pl.z) * (z - pl.z) < (pl.r + 3) * (pl.r + 3)) return true;
+  const tn = WORLD.upperFalls.tarn;
+  if (g < tn.y && (x - tn.x) * (x - tn.x) + (z - tn.z) * (z - tn.z) < (tn.r + 14) * (tn.r + 14)) return true;
+  return W.wet(x, z, g);
+}
+
+interface WaterLines {
+  /** Is (x, z) within `pad` of a ribbon's edge? */
+  near(x: number, z: number, pad: number): boolean;
+  /** Is a ribbon drawn at (x, z), the ground there at g? */
+  wet(x: number, z: number, g: number): boolean;
+}
+let waterLinesCache: WaterLines | null = null;
+/** The ribbons' centre lines, sampled as buildRibbon samples them, in a grid of 48 unit cells. */
+function waterLines(): WaterLines {
+  if (waterLinesCache) return waterLinesCache;
+  const U = WORLD.upperFalls;
+  const lk = WORLD.lake;
+  const pl = WORLD.pool;
+  // Segments: ax, az, bx, bz, half width at a and b, level at a and b (1e9: drawn over the ground).
+  const seg: number[] = [];
+  const line = (pts: ReadonlyArray<readonly [number, number, number]>, halfW: (a: number) => number, skip: (x: number, z: number) => boolean, level: boolean) => {
+    const curve = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(p[0], p[1], p[2])), false, "centripetal");
+    const n = Math.max(4, Math.round(curve.getLength() / RIBBON_STEP));
+    const P = curve.getSpacedPoints(n);
+    for (let i = 0; i < n; i++) {
+      const a = P[i];
+      const b = P[i + 1];
+      if (skip(a.x, a.z) || skip(b.x, b.z)) continue;
+      seg.push(a.x, a.z, b.x, b.z, halfW(i / n), halfW((i + 1) / n), level ? a.y : 1e9, level ? b.y : 1e9);
+    }
+  };
+  line(RIVER, () => RIVER_HW, (x, z) => Math.hypot(x - pl.x, z - pl.z) < pl.r - 6, false);
+  line(STREAM, (a) => streamHalfW(a) + APPROACH_BANK, (x, z) => Math.hypot(x - U.tarn.x, z - U.tarn.z) < U.tarn.r - 8, true);
+  line(BROOK, (a) => brookHalfW(a) + 1.5, (x, z) => Math.hypot(x - lk.x, z - lk.z) < lk.r - 4, false);
+  line(meander(GLOW_STREAM), (a) => (4 + 3.5 * a) * (1 - 0.25 * smooth(0.2, 0.45, a)), (x, z) => Math.hypot(x - lk.x, z - lk.z) < lk.r - 4, false);
+  const S = 8;
+  const N = seg.length / S;
+  const CELL = 48;
+  /** Room in the grid for a query's margin. */
+  const PAD = 16;
+  const cells = new Map<number, number[]>();
+  const key = (i: number, j: number) => (i + 4096) * 8192 + (j + 4096);
+  for (let s = 0; s < N; s++) {
+    const o = s * S;
+    const r = Math.max(seg[o + 4], seg[o + 5]) + PAD;
+    const i0 = Math.floor((Math.min(seg[o], seg[o + 2]) - r) / CELL);
+    const i1 = Math.floor((Math.max(seg[o], seg[o + 2]) + r) / CELL);
+    const j0 = Math.floor((Math.min(seg[o + 1], seg[o + 3]) - r) / CELL);
+    const j1 = Math.floor((Math.max(seg[o + 1], seg[o + 3]) + r) / CELL);
+    for (let j = j0; j <= j1; j++)
+      for (let i = i0; i <= i1; i++) {
+        const k = key(i, j);
+        const b = cells.get(k);
+        if (b) b.push(s);
+        else cells.set(k, [s]);
+      }
+  }
+  /** The segments near (x, z) for which `test` holds, given the point's place across each: t along it and its distance d. */
+  const visit = (x: number, z: number, test: (o: number, t: number, d: number) => boolean): boolean => {
+    const b = cells.get(key(Math.floor(x / CELL), Math.floor(z / CELL)));
+    if (!b) return false;
+    for (let k = 0; k < b.length; k++) {
+      const o = b[k] * S;
+      const ax = seg[o];
+      const az = seg[o + 1];
+      const dx = seg[o + 2] - ax;
+      const dz = seg[o + 3] - az;
+      const l2 = dx * dx + dz * dz;
+      let t = l2 > 0 ? ((x - ax) * dx + (z - az) * dz) / l2 : 0;
+      t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const d = Math.hypot(x - ax - dx * t, z - az - dz * t);
+      if (test(o, t, d)) return true;
+    }
+    return false;
+  };
+  let qPad = 0;
+  let qG = 0;
+  const nearTest = (o: number, t: number, d: number) => d < seg[o + 4] + (seg[o + 5] - seg[o + 4]) * t + qPad;
+  const wetTest = (o: number, t: number, d: number) =>
+    d < seg[o + 4] + (seg[o + 5] - seg[o + 4]) * t && qG < seg[o + 6] + (seg[o + 7] - seg[o + 6]) * t;
+  waterLinesCache = {
+    near(x, z, pad) {
+      qPad = Math.min(pad, PAD);
+      return visit(x, z, nearTest);
+    },
+    wet(x, z, g) {
+      qG = g;
+      return visit(x, z, wetTest);
+    },
+  };
+  return waterLinesCache;
+}
+
 // ── The falls: how water falls, and its sheets ─────────────────────────────
 
 /** v6: the falls' flow direction in plan (x, z) and the sheet's across

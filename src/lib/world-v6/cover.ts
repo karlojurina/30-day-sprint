@@ -846,13 +846,16 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
     }
   }
   // ── The opening's islet (bible 1.1 layer 1): big dry grass clumps along its
-  // near flank, at the foot of the boulder family, on the ground as drawn (the
-  // islet is a coarse mound; the heightfield under it is higher and rounder).
+  // near flank, at the foot of the boulder family, on the ground as drawn.
+  // IT PLANTS NOTHING since the map review of 2026-10-15 (item 7): the islet's
+  // mound and boulders are gone, the ground as drawn at every spot below is
+  // the sea floor (-60), and each clump fails the 0.5 test. Left in place for
+  // the next change to cover.ts to delete.
   if (surf) {
     numbersFrom("islet");
     const islet: Kit = { ...KITS.coastTall, hMin: 13, hMax: 18 };
     const onIslet = (x: number, z: number) => surf.drawnHeight(x, z);
-    // Between and in front of the boulders' footprints (rocks.ts), where the mound is above the sea.
+    // Between and in front of the boulders' footprints (rocks.ts), where the mound was above the sea.
     for (const [x, z] of [
       [1625, 4887],
       [1636, 4886],

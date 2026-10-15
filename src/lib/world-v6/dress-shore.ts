@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { addFootprint, addPathLine } from "./footprints";
 import { PATH, PLACES } from "./layout";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
-import { groundY, rnd, trailDist } from "./rocks";
+import { groundY, rnd } from "./rocks";
 
 /**
  * v6 dressing module: dress-shore (world_art_bible_v6.md 1.1 to 1.4, 2.8;
@@ -15,7 +15,7 @@ import { groundY, rnd, trailDist } from "./rocks";
  * the ground shades under it and no cover grows through it.
  *
  * Every material is stock Lambert or Basic with fog on (light.ts hooks the
- * ramp and the grade in), except the wire and the halos (their own programs).
+ * ramp and the grade in), except the halos (their own program).
  *
  * REPLACES (blocks.ts's grey stand-ins, hidden at install, restored on dispose):
  *   Landmark_a1, Set_a1_Block, Landmark_a2, Set_a2_Block
@@ -39,12 +39,6 @@ import { groundY, rnd, trailDist } from "./rocks";
  *                   with an axe in the stump; at the knoll's west foot by the
  *                   woods, 3 tents in a loose row round a fire ring, a
  *                   lantern and a washing line.
- *   Shore:thread    the human thread (2.8): old wooden posts with a crossarm
- *                   every ~85 along the trail from the Landing to the stream,
- *                   leaning a little, on the trail's west side.
- *   Shore:wire      the one sagging wire between the posts: a screen space
- *                   ribbon at least ~1.3 CSS px wide, fading when thinner, so
- *                   it reads as a thin dark line against the sky at any range.
  *   Shore:glow      lantern glass and lit windows (lamp glow, light.ts levels it).
  *   Shore:signLamp  the signpost's lantern under its first arm: lit once
  *                   Introduction is done (setProgress >= 1).
@@ -63,8 +57,13 @@ import { groundY, rnd, trailDist } from "./rocks";
  * (userData.smoke = "chimney") on the cabin's chimney top; userData.smokeSpec
  * { place, rate, rise, width, lit }. The same list is exported as SHORE_SMOKE.
  *
- * Draw calls: at a1 about 7 (signpost, a1 set, thread, wire, glow, halos,
- * boat), at a2 about 8 (+ lookout, flag, wash). stats() reports triangles.
+ * Draw calls: at a1 about 5 (signpost, a1 set, glow, halos, boat), at a2
+ * about 6 (+ lookout, flag, wash). stats() reports triangles.
+ *
+ * The thread (bible 2.8, decision 30: old posts with one sagging wire along
+ * the trail from the Landing to the stream) was taken out on 2026-10-15
+ * (Lovro's Loom: "it doesn't make sense for these to be in like a random
+ * forest").
  */
 
 // ── Palette (bible 1.8), display sRGB hex, converted to linear once ──────────
@@ -127,10 +126,6 @@ const P = {
   driftDark: lin(0x8a8276),
   bell: lin(0x8a6a3a),
   kettle: lin(0x3c3a38),
-  /** The thread: weathered pole, darker arm, the wire near black. */
-  pole: lin(0x6a5a4a),
-  poleArm: lin(0x4e4238),
-  wire: lin(0x26221f),
 };
 /** Unlit glow colours, above 1 so they read as light after tone mapping (blocks.ts G). */
 const GL = {
@@ -1085,175 +1080,6 @@ function buildCamp(k: Kit, glow: Kit, lm: { x: number; z: number }): CampOut {
   return { lamps, chimney, wash: { a: [w0[0], gw0 + 12.1, w0[1]], b: [w1[0], gw1 + 12.1, w1[1]] } };
 }
 
-// ── The thread: old posts and one sagging wire (bible 2.8) ──────────────────
-
-/**
- * Posts every ~85 along the trail from the Landing (past the signpost) to
- * where it meets the stream (PATH[1] to PATH[10]), 21 to the trail's left
- * going up (west), leaning a little, each with a short crossarm; the wire
- * hangs from the arm's outer end on a cream insulator. Returns the attach
- * points in order, for the wire.
- */
-function buildThread(k: Kit): V3[] {
-  const attach: V3[] = [];
-  const first = 1;
-  const last = 10;
-  const sign = PLACES[0].pos;
-  const look = PLACES[1].pos;
-  let carry = 48;
-  let n = 0;
-  for (let i = first; i < last; i++) {
-    const a = PATH[i];
-    const b = PATH[i + 1];
-    const len = Math.hypot(b.x - a.x, b.z - a.z);
-    const dx = (b.x - a.x) / len;
-    const dz = (b.z - a.z) / len;
-    const lx = dz;
-    const lz = -dx;
-    let s = carry;
-    while (s < len) {
-      let x = a.x + dx * s + lx * 21;
-      let z = a.z + dz * s + lz * 21;
-      // Push out where a bend brings the other leg closer than 16.
-      for (let t = 0; t < 4 && trailDist(x, z) < 16; t++) {
-        x += lx * 4;
-        z += lz * 4;
-      }
-      // Final pass B (judge: a black pole stood in the middle third of a1):
-      // no post within 230 of the a1 stop camera (1400, 4420); the wire's
-      // first span starts further up the trail.
-      const far = Math.hypot(x - sign.x, z - sign.z) > 40 && Math.hypot(x - look.x, z - look.z) > 60 && Math.hypot(x - 1400, z - 4420) > 230;
-      if (far) {
-        const g = G(x, z) - 1.5;
-        const h = 25 + rnd(n, 31) * 3;
-        const la = (rnd(n, 32) - 0.5) * 5 * DEG;
-        const lb = (rnd(n, 33) - 0.5) * 5 * DEG;
-        const topX = x + Math.sin(la) * h;
-        const topZ = z + Math.sin(lb) * h;
-        k.beam([x, g, z], [topX, g + h, topZ], 1.25, 1.25, P.pole, "cyl6", g + 1);
-        // The crossarm across the line, and a brace.
-        const armY = g + h - 2.2;
-        const ax = topX - (topX - x) * (2.2 / h);
-        const az = topZ - (topZ - z) * (2.2 / h);
-        const half = 4.2;
-        const e0: V3 = [ax - dz * half, armY, az + dx * half];
-        const e1: V3 = [ax + dz * half, armY, az - dx * half];
-        k.beam(e0, e1, 0.7, 0.8, P.poleArm);
-        // The outer end (away from the trail) carries the wire.
-        const out = lx * (e1[0] - ax) + lz * (e1[2] - az) > 0 ? e1 : e0;
-        k.beam([ax, armY - 4.2, az], [(out[0] + ax) / 2, armY - 0.3, (out[2] + az) / 2], 0.4, 0.4, P.poleArm);
-        k.add("cyl6", T(out[0], armY + 0.9, out[2], 0.45, 1.2, 0.45), P.cream, null, 0);
-        attach.push([out[0], armY + 1.4, out[2]]);
-        addFootprint({ x, z, r: 2.2, kind: "prop" });
-        n++;
-      }
-      s += 82 + rnd(i, s) * 10;
-    }
-    carry = s - len;
-  }
-  return attach;
-}
-
-/**
- * The wire's program: each segment is a quad widened in screen space to at
- * least uMinPx (device pixels), its alpha falling with its true width under
- * that, so a far wire thins out instead of breaking into dashes. Fog chunks
- * as life.ts's birds, so light.ts's ramp and grade reach it.
- */
-function wireMaterial(): THREE.ShaderMaterial {
-  return new THREE.ShaderMaterial({
-    name: "V6ShoreWire",
-    transparent: true,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-    fog: true,
-    uniforms: {
-      ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog),
-      uColor: { value: new THREE.Color().setRGB(P.wire[0], P.wire[1], P.wire[2]) },
-      uRes: { value: new THREE.Vector2(1600, 1200) },
-      uWidth: { value: 0.32 },
-      uMinPx: { value: 1.6 },
-    },
-    vertexShader: /* glsl */ `
-      attribute vec3 aOther;
-      attribute float aSide;
-      uniform vec2 uRes;
-      uniform float uWidth;
-      uniform float uMinPx;
-      varying float vA;
-      #include <fog_pars_vertex>
-      void main() {
-        vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-        vec4 mvO = modelViewMatrix * vec4(aOther, 1.0);
-        // Keep the other end in front of the camera for the direction.
-        if (mvO.z > -1.0) mvO.xyz = mvPosition.xyz + normalize(mvO.xyz - mvPosition.xyz) * 0.5;
-        vec4 c = projectionMatrix * mvPosition;
-        vec4 o = projectionMatrix * mvO;
-        vec2 sc = c.xy / c.w * uRes * 0.5;
-        vec2 so = o.xy / max(o.w, 1e-3) * uRes * 0.5;
-        vec2 d = so - sc;
-        vec2 n = length(d) > 1e-4 ? normalize(vec2(-d.y, d.x)) : vec2(0.0, 1.0);
-        float px = uWidth * projectionMatrix[1][1] * uRes.y * 0.5 / max(-mvPosition.z, 1.0);
-        float w = max(px, uMinPx);
-        vA = clamp(px / uMinPx, 0.2, 1.0);
-        c.xy += n * aSide * 0.5 * w / (uRes * 0.5) * c.w;
-        gl_Position = c;
-        #include <fog_vertex>
-      }`,
-    fragmentShader: /* glsl */ `
-      uniform vec3 uColor;
-      varying float vA;
-      #include <fog_pars_fragment>
-      void main() {
-        gl_FragColor = vec4(uColor, vA);
-        #include <tonemapping_fragment>
-        #include <colorspace_fragment>
-        #include <fog_fragment>
-      }`,
-  });
-}
-
-/** The wire through the attach points, sagging ~3.5% of each span, 8 segments a span. */
-function wireGeometry(pts: V3[]): THREE.BufferGeometry {
-  const line: V3[] = [];
-  for (let i = 0; i + 1 < pts.length; i++) {
-    const a = pts[i];
-    const b = pts[i + 1];
-    const span = Math.hypot(b[0] - a[0], b[2] - a[2]);
-    const sag = span * 0.035;
-    const segs = 8;
-    for (let j = i === 0 ? 0 : 1; j <= segs; j++) {
-      const f = j / segs;
-      line.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f - sag * 4 * f * (1 - f), a[2] + (b[2] - a[2]) * f]);
-    }
-  }
-  const pos: number[] = [];
-  const oth: number[] = [];
-  const side: number[] = [];
-  const v = (p: V3, o: V3, s: number) => {
-    pos.push(p[0], p[1], p[2]);
-    oth.push(o[0], o[1], o[2]);
-    side.push(s);
-  };
-  for (let i = 0; i + 1 < line.length; i++) {
-    const a = line[i];
-    const b = line[i + 1];
-    // Seen from b, the direction to a is reversed, so its side flips.
-    v(a, b, -1);
-    v(b, a, 1);
-    v(b, a, -1);
-    v(a, b, -1);
-    v(b, a, -1);
-    v(a, b, 1);
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-  g.setAttribute("aOther", new THREE.Float32BufferAttribute(oth, 3));
-  g.setAttribute("aSide", new THREE.Float32BufferAttribute(side, 1));
-  g.computeBoundingSphere();
-  return g;
-}
-
 // ── Moving cloth (flag, washing) ─────────────────────────────────────────────
 
 /**
@@ -1393,7 +1219,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   const find = (name: string) => scene.getObjectByName(name) ?? null;
 
   // Materials: the timber family (Lambert, flat), lamp glow (Basic, levelled
-  // by light.ts), cloth (double sided), the wire, halos.
+  // by light.ts), cloth (double sided), halos.
   const timber = track(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
   timber.name = "V5Timber";
   const cloth = track(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide }));
@@ -1402,7 +1228,6 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   glowMat.name = "V5ShoreGlow";
   glowMat.userData.lightGlow = "lamp";
   const haloMat = track(haloMaterial());
-  const wireMat = track(wireMaterial());
 
   const tris: Record<string, number> = {};
   const meshes: THREE.Mesh[] = [];
@@ -1460,24 +1285,6 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   const kA2 = new Kit(U, a2);
   const camp = buildCamp(kA2, glow, a2);
   addMesh(root, kA2, timber, "Shore:a2", a2).renderOrder = -7;
-
-  // ── The thread: posts, then the wire ──
-  const threadO = { x: 600, y: 150, z: 3100 };
-  const kThread = new Kit(U, threadO);
-  const attach = buildThread(kThread);
-  addMesh(root, kThread, timber, "Shore:thread", threadO);
-  const wireGeo = track(wireGeometry(attach));
-  const wire = new THREE.Mesh(wireGeo, wireMat);
-  wire.name = "Shore:wire";
-  wire.renderOrder = 2;
-  const vpW = new THREE.Vector2();
-  wire.onBeforeRender = (renderer) => {
-    renderer.getDrawingBufferSize(vpW);
-    wireMat.uniforms.uRes.value.copy(vpW);
-    wireMat.uniforms.uMinPx.value = 1.3 * renderer.getPixelRatio();
-  };
-  root.add(wire);
-  tris["Shore:wire"] = wireGeo.getAttribute("position").count / 3;
 
   addMesh(root, glow, glowMat, "Shore:glow", { x: 0, y: 0, z: 0 });
 
@@ -1637,7 +1444,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   let animating = false;
   const wind: [number, number] = [wx, wz];
   const buildMs = Math.round(performance.now() - t0);
-  const calls = meshes.length + 4;
+  // The added meshes, plus the flag, the washing and the halos.
+  const calls = meshes.length + 3;
 
   return {
     name: "dress-shore",
@@ -1691,9 +1499,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
         triangles: total,
         ...Object.fromEntries(Object.entries(tris).map(([k, v]) => [`tris_${k}`, v])),
         calls,
-        meshes: meshes.length + 4,
+        meshes: meshes.length + 3,
         lamps: haloPts.length,
-        posts: attach.length,
         hidden: hidden.map((o) => o.name).join(","),
         swapped: swapped.map((s) => s.mesh.name).join(","),
         buildMs,

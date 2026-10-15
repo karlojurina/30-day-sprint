@@ -142,19 +142,33 @@ const MID_LESSONS: ReadonlySet<string> = new Set(
   Array.from({ length: 9 }, (_, n) => `a4l0${n + 1}`),
 );
 
+/** In the partial preset: this many lessons of every place. */
+const PARTIAL_EACH = 6;
+
+/** In the loom preset: Lovro's own test in the map review Loom (6:16), lessons watched per area. */
+const LOOM_EACH: Readonly<Record<string, number>> = { a3: 3, a4: 7 };
+
 /**
  * What ?p= means in course mode. The other presets of the harness count
- * lessons of the placeholder course, so here any name but these two is a
+ * lessons of the placeholder course, so here any name but these four is a
  * student who has watched nothing.
  *
- *   ?p=mid   every counting lesson of areas 1 to 3, and a4l01 to a4l09
- *   ?p=all   every lesson that counts toward progress
+ *   ?p=mid      every counting lesson of areas 1 to 3, and a4l01 to a4l09
+ *   ?p=partial  the first 6 counting lessons of every area, so every place
+ *               has lit and dark lanterns (world-tests/v6-review-shots.mjs)
+ *   ?p=loom     Lovro's test at 6:16 in the map review Loom: lessons 1 to 3
+ *               of Video Ads I and 1 to 7 of Video Ads II, nothing else
+ *   ?p=all      every lesson that counts toward progress
  */
 export function coursePresetIds(name: string | null): string[] {
   const counting = COURSE.lessons.filter((l) => l.counts_toward_progress);
   switch (name) {
     case "mid":
       return counting.filter((l) => MID_AREAS.has(l.region_id) || MID_LESSONS.has(l.id)).map((l) => l.id);
+    case "partial":
+      return COURSE.regions.flatMap((r) => counting.filter((l) => l.region_id === r.id).slice(0, PARTIAL_EACH).map((l) => l.id));
+    case "loom":
+      return COURSE.regions.flatMap((r) => counting.filter((l) => l.region_id === r.id).slice(0, LOOM_EACH[r.id] ?? 0).map((l) => l.id));
     case "all":
       return counting.map((l) => l.id);
     default:

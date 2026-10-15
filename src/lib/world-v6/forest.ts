@@ -1177,7 +1177,12 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   await yieldTask();
 
   // Sample: scale so the kept count lands on TARGET_WILD (shrubs included).
-  const K = (TARGET_WILD * 0.8) / Math.max(1, wSum);
+  // ISLET_W: the weight of the opening's islet's 2 candidates, the last 2 in
+  // the list, which went with the islet on 2026-10-15 (Lovro's Loom). Kept in
+  // the sum so K stays what it was and no tree is dealt again (without it, 366
+  // trees changed, nearly all in a band at z 1,635 to 1,749 across the world).
+  const ISLET_W = 0.90429701446;
+  const K = (TARGET_WILD * 0.8) / Math.max(1, wSum + ISLET_W);
   const rand = mulberry32(7);
   const REC = 11;
   const recs: number[] = []; // species, x, y, z, h, w, yaw, leanAx, lean, tint, cell

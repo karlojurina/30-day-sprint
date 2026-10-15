@@ -24,9 +24,10 @@ import { BROOK, GORGE, PATH, PLACES, RIVER, STREAM, WORLD } from "./layout";
  * its lip; the Upper Falls' three steps and tarn on the west massif's east
  * shoulder (upperFalls); the north wall between x 0 and 1,150 is a talus foot
  * and stacked cliff bands (northBands) with the rock spur of the a4 ledge
- * (hikeLedge); the gully notch in the Climb's rim (gully); the opening's
- * islet in the bay (ISLET); the a2 lookout's knoll (KNOLL). Nothing north of
- * the ridge changed except the brook's new course.
+ * (hikeLedge); the gully notch in the Climb's rim (gully); the a2 lookout's
+ * knoll (KNOLL). Nothing north of the ridge changed except the brook's new
+ * course. The opening's islet in the bay went on 2026-10-15 with its boulders
+ * (Lovro's Loom).
  *
  * terrainHeight allocates nothing and runs in ~2 microseconds in node
  * (measured: 200k random calls). buildTerrainGeometry(320) takes ~180 ms.
@@ -121,9 +122,6 @@ const STREAM_BANK = 3;
 const STREAM_W0 = 14;
 const STREAM_W1 = 58;
 
-/** v6, the opening's islet in the bay (bible 1.1): a rock off the key-0
- *  camera's right, its top `h` over the sea; B2's boulders stand on it. */
-const ISLET = { x: 1633, z: 4868, r: 36, h: 18 } as const;
 /** v6, the a2 lookout's knoll (bible 1.3): a dome `h` tall and `r` round
  *  under the lookout (PLACES a2), ~100 west of the trail. */
 const KNOLL = { r: 95, h: 26 } as const;
@@ -544,15 +542,6 @@ function padsAndWater(x: number, z: number, h: number): number {
   }
   h = hikeLedge(x, z, h);
   h = upperFalls(x, z, h);
-  // v6: the opening's islet.
-  {
-    const di = Math.hypot(x - ISLET.x, z - ISLET.z);
-    if (di < ISLET.r * 1.6) {
-      const k = di / ISLET.r;
-      const top = ISLET.h * (1 - 0.35 * k * k) + 4 * (noise(x / 14, z / 14) - 0.5) - Math.max(0, k - 0.8) * 90;
-      if (top > h) h = top;
-    }
-  }
   for (let i = 0; i < PADS.length; i++) {
     const p = PADS[i];
     const d = Math.hypot(x - p[0], z - p[2]);

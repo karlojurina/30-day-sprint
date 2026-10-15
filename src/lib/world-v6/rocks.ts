@@ -251,11 +251,6 @@ interface PalDef {
 const PAL_DEFS: Record<string, PalDef> = {
   // Opening, a1: from the left, side lit.
   gold: { az: 250, el: 16, top: 0xc4ae8c, lit: 0xb09070, shade: 0x5a667c, floor: 0.08 },
-  // The opening's islet boulders (bible 1.1 layer 1): warm lit tops, sky blue shade sides.
-  // Final pass B: darker and less blue (pale beige over royal blue read as
-  // crystals and pulled the eye from the plume); the lower right is the
-  // opening's darkest large shape, the plume its brightest.
-  islet: { az: 250, el: 16, top: 0xd8b88e, lit: 0xbc9c78, shade: 0x5c5a6c, floor: 0.28 },
   // a2 and the valley: clear afternoon.
   day: { az: 245, el: 14, top: 0xc8b898, lit: 0xb49c7e, shade: 0x627088, floor: 0.16 },
   // The stream, the lip, the ride, the pool, the falls wall.
@@ -609,12 +604,17 @@ class Soup {
   col: number[] = [];
   kind: number[] = [];
   tris = 0;
+  /**
+   * The running count that seeds each face's value jitter in put(): every
+   * triangle put or laid flat counts, as `tris` does. place() may pin it where
+   * a place's rocks start, so rocks taken out before them deal none of their
+   * faces again (2026-10-15).
+   */
+  seq = 0;
   rocks = 0;
   heroes = 0;
   /** Final pass B: skip ground rocks on faces steeper than 0.8 (the gorge's walls, where they hung mid air). */
   wallGuard = false;
-  /** Final pass B: no painted crack decals (the islet's cracks read as lightning bolts). */
-  noCrack = false;
   private a = new THREE.Vector3();
   private b = new THREE.Vector3();
   private c = new THREE.Vector3();
@@ -646,9 +646,8 @@ class Soup {
       const lit = hard ? (sd > 0.02 ? 1 : 0) : smooth(-0.2, 0.5, sd);
       this.col3.copy(pal.shade).lerp(pal.lit, lit).lerp(pal.top, up * 0.85);
       const lc = (t[o + 1] + t[o + 4] + t[o + 7]) / 3 / Math.max(1e-3, p.h);
-      let k = v * (0.7 + 0.3 * smooth(0.02, 0.36, lc)) * (0.96 + 0.08 * rnd(i, this.tris));
+      let k = v * (0.7 + 0.3 * smooth(0.02, 0.36, lc)) * (0.96 + 0.08 * rnd(i, this.seq));
       const f = p.flag[i];
-      if (f === 2 && this.noCrack) continue;
       if (f === 1) k *= 1.22;
       else if (f === 2) k *= 0.55;
       const kd = f === 1 ? 3 : up > 0.5 ? 0 : sd > 0.1 ? 1 : 2;
@@ -666,6 +665,7 @@ class Soup {
         this.kind.push(kd);
       }
       this.tris++;
+      this.seq++;
     }
   }
   /** v5's sheet painting (the Sky Island's underside, as it was: the rise is locked). */
@@ -688,6 +688,7 @@ class Soup {
           this.kind.push(2);
         }
         this.tris++;
+        this.seq++;
       }
     }
   }
@@ -878,7 +879,7 @@ function rndDG(i: number, s = 0): number {
  * One step of a rock stair (the gully, fix round 2): a chamfered hull stone
  * on a `w` by `d` footprint turned `yaw`, seated on the downhill ground and
  * standing 2 to 3.5 proud of the ground at its centre, in three flat values
- * (the islet's `hard` mode: lit top about 1.8x the shade side); a wide step
+ * (the `hard` mode: lit top about 1.8x the shade side); a wide step
  * gets a small second stone beside it. No footprint: the stones are the path.
  */
 export function addStepStones(soup: Soup, x: number, z: number, w: number, d: number, yaw: number, seed = 1): void {
@@ -946,18 +947,14 @@ function gorgeAt(x: number): { z: number; y: number; hw: number } {
 }
 
 interface Built {
-  soups: Record<"south" | "islet" | "gorge" | "high" | "sky" | "gate", Soup>;
+  soups: Record<"south" | "gorge" | "high" | "sky" | "gate", Soup>;
   families: number;
   modules: number;
 }
 
-/** The opening's islet (terrain.ts ISLET, not exported): a rock in the bay off key 0's right. */
-const ISLET = { x: 1633, z: 4868, r: 36 } as const;
-
 function place(): Built {
-  const soups = { south: new Soup(), islet: new Soup(), gorge: new Soup(), high: new Soup(), sky: new Soup(), gate: new Soup() };
+  const soups = { south: new Soup(), gorge: new Soup(), high: new Soup(), sky: new Soup(), gate: new Soup() };
   soups.gorge.wallGuard = true;
-  soups.islet.noCrack = true;
   let families = 0;
   let modules = 0;
   rockAnchors.length = 0;
@@ -967,41 +964,13 @@ function place(): Built {
   };
   const stop = (id: string) => PLACES.find((p) => p.id === id)!;
 
-  ringsFrom("opening");
-  // ── The opening (bible 1.1): the islet's boulder family, the near layer of the most important frame ──
-  // Three hull boulders on the islet's east half (the glide from key 0 passes
-  // ~30 west of its centre), tops 20 to 35 over the sea so they reach up into
-  // the lower right; chamfered (within 150 of an eye level camera).
-  {
-    const pal = PAL.islet;
-    const strata: [number, number] = [250, 10];
-    const rand = mulberry(4401);
-    // The drawn islet is the coarse terrain grid: a mound about 40 by 50,
-    // top ~16 at (1620, 4870). The rocks stand from just above the sea and
-    // are the islet's top themselves. Fix round 1: three distinct chunky
-    // boulders (h/w about 1), not one spire: the big one centre right, a
-    // medium one in front on the left, a small one on the right, each with
-    // flat lit planes against a blue shade side.
-    const put = (key: KitKey, x: number, z: number, hw: number, baseY: number, maxTop: number, tall: number, dir: number) =>
-      rock(soups.islet, key, x, z, hw, pal, rand, { dir, lean: strata[1], hero: true, maxTop, baseY, sink: 0.2, tall, hard: true });
-    // Each stands on the mound as drawn (its base is the drawn height there,
-    // sunk a fifth), so the whole boulder shows, not the cap of a rock buried
-    // in the mound. Tops stay under the far shore's line (y ~25 here) where
-    // they stand in front of the Landing (frame x 0.6 to 0.75); only the big
-    // one on the right rises over it.
-    put("K3", ISLET.x + 15, ISLET.z - 2, 14, 12, 36, 1.1, 250);
-    put("K1", ISLET.x - 1, ISLET.z + 6, 9, 14, 26, 1.05, 230);
-    put("K3", ISLET.x - 14, ISLET.z + 13, 6, 7, 17, 1.0, 270);
-    for (let i = 0; i < 9; i++) {
-      const a = (-40 + i * 22 + rand() * 12) * DEG;
-      const r = ISLET.r * (0.95 + rand() * 0.25);
-      rock(soups.south, i % 3 ? "K6" : "K5", ISLET.x + Math.sin(a) * r, ISLET.z - Math.cos(a) * r, 2 + rand() * 3, pal, rand, { dir: strata[0], lean: strata[1], baseY: -1.5, sink: 0.35, foot: false });
-    }
-    rockAnchors.push({ x: ISLET.x + 10, z: ISLET.z, r: 40 });
-    families++;
-  }
-
+  // The opening (bible 1.1) has no rocks: the islet's three boulders and the
+  // 9 rocks round its rim went with the islet on 2026-10-15 (Lovro's Loom:
+  // "this boulder which is kind of annoying ... let's remove that"). They were
+  // the south soup's first 104 triangles; the Landing starts its value jitter
+  // count there still, so its faces and the valley's keep their colours.
   ringsFrom("landing");
+  soups.south.seq = 104;
   // ── a1, the Landing (bible 1.2): the tide line: pebbles and a few warm families, no black rocks ──
   {
     const a1 = stop("a1");
@@ -1060,8 +1029,15 @@ function place(): Built {
       if (Math.hypot(hit.x - L2.x, hit.z - L2.z) < 110) continue;
       F(soups.south, hit.x, hit.z, s, 200 + k, { lead: "K3" });
     }
-    // Trail bends from the signpost to the stream (PATH 1..9), 30-50 off on the outside.
-    for (let i = 1; i < 10; i++) {
+    // Trail bends from the signpost to the stream (PATH 2..9), 30-50 off on the outside.
+    // The bend at the signpost (PATH 1) had a family 44 east of the post until
+    // 2026-10-15 (Lovro's Loom: "the stone over here is kind of annoying"). The
+    // bends after it keep the ring numbers and the value jitter count they had
+    // with it (its 4 footprints were the valley's rings 23 to 26, its faces the
+    // south soup's triangles 2,194 to 2,329), so no rock or ring of theirs moves.
+    ringNo = RING_START.valley + 7;
+    soups.south.seq = 2330;
+    for (let i = 2; i < 10; i++) {
       const a = PATH[i - 1];
       const b = PATH[i];
       const c = PATH[i + 1];
@@ -1758,7 +1734,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   const kitMs = performance.now() - tk;
   const built = place();
   // The sky soup holds v5's underside sheets (the rise is locked): no floor there, as v5.
-  const FLOOR: Record<string, number> = { south: PAL.gold.floor, islet: PAL.islet.floor, gorge: PAL.gorge.floor, high: PAL.sunset.floor, sky: 0, gate: PAL.sunrise.floor };
+  const FLOOR: Record<string, number> = { south: PAL.gold.floor, gorge: PAL.gorge.floor, high: PAL.sunset.floor, sky: 0, gate: PAL.sunrise.floor };
   const mats: THREE.MeshLambertMaterial[] = [];
   const meshes: THREE.Mesh[] = [];
   const tris: Record<string, number> = {};

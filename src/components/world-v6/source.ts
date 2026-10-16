@@ -55,6 +55,36 @@ export interface WorldSource {
    * the world stands closed.
    */
   discount?: WorldDiscount;
+  /**
+   * The Ad Bounty's lesson (map review 2026-10-15, plan item 18): a place's
+   * feature row, which the map shows as the one lesson of its own checkpoint
+   * on the notice-board isle after Creative Strategy, not as a row of that
+   * place's panel. onFeature(bounty.k) opens its page. Absent: no bounty
+   * checkpoint shows.
+   */
+  bounty?: WorldBounty;
+  /**
+   * The address names the Ad Bounty's lesson page (it is open over the map).
+   * Opened by its address (a refresh, a link from outside the map) it has no
+   * checkpoint panel under it, so the checkpoint opens once the page closes:
+   * the page's back link and Esc come home to the panel, as they do when the
+   * page was opened from it.
+   */
+  bountyOpen?: boolean;
+}
+
+/** The Ad Bounty's lesson, as the catalog has it (sourceData). */
+export interface WorldBounty {
+  /** The place whose feature row it is (Creative Strategy, 6, on the real course). */
+  k: number;
+  /** Its lesson id ("" on the dev page's fixture, which opens no page). */
+  id: string;
+  title: string;
+  /** A watch lesson (the generated dev course has a setup step there). */
+  watch: boolean;
+  /** A watch lesson with a video behind it: the panel shows Watch. */
+  hasVideo: boolean;
+  done: boolean;
 }
 
 /** The student's discount, as the host worked it out (src/lib/world/discount.ts). */
@@ -79,9 +109,17 @@ export interface SourceData {
   featureIds: (string | null)[];
   minutes: (number | null)[][];
   done: boolean[][];
+  /** The Ad Bounty's lesson: the first place whose feature row has the bounty key, or null. */
+  bounty: WorldBounty | null;
 }
 
 type ReadyModel = Extract<MapModel, { ok: true }>;
+
+/** The catalog's feature key of the Ad Bounty's lesson (lessons.feature_key). */
+export const BOUNTY_KEY = "bounty_access";
+
+/** The Ad Bounty checkpoint's name: its marker, tag, phone row and panel, and its lesson's page (LessonScreen). */
+export const BOUNTY_NAME = "Ad Bounty";
 
 export function sourceData(model: ReadyModel, lock: LockMode): SourceData {
   const n = STUDY_AREAS.length;
@@ -91,6 +129,7 @@ export function sourceData(model: ReadyModel, lock: LockMode): SourceData {
   const minutes: (number | null)[][] = [];
   const done: boolean[][] = [];
   const doneCount: number[] = [];
+  let bounty: WorldBounty | null = null;
 
   for (let k = 0; k < n; k++) {
     const m = model.areas[k];
@@ -98,9 +137,13 @@ export function sourceData(model: ReadyModel, lock: LockMode): SourceData {
     m.lessons.forEach((l, i) => {
       if (l.action) actions.push(i);
     });
-    const feature = m.features[0];
+    // The Ad Bounty's row when the place has one (plan item 18: its own checkpoint's lesson), else the first.
+    const feature = m.features.find((f) => f.key === BOUNTY_KEY) ?? m.features[0];
     if (m.features.length > 1 && process.env.NODE_ENV !== "production") {
-      console.warn(`[world-v6] ${m.id} has ${m.features.length} rows outside the count; only the first is shown`, m.features.map((f) => f.id));
+      console.warn(`[world-v6] ${m.id} has ${m.features.length} rows outside the count; only one is shown`, m.features.map((f) => f.id));
+    }
+    if (!bounty && feature?.key === BOUNTY_KEY) {
+      bounty = { k, id: feature.id, title: feature.title, watch: feature.watch, hasVideo: feature.hasVideo, done: feature.done };
     }
     areas.push({
       ...STUDY_AREAS[k],
@@ -143,5 +186,5 @@ export function sourceData(model: ReadyModel, lock: LockMode): SourceData {
     unreachable,
   };
 
-  return { areas, study, total: model.total, lessonIds, featureIds, minutes, done };
+  return { areas, study, total: model.total, lessonIds, featureIds, minutes, done, bounty };
 }

@@ -15,7 +15,7 @@ import {
 import type { Rail } from "@/lib/world-v6/rail";
 import type { AreaAnchor, ProjectedMarker, WorldFrame, WorldScene } from "@/lib/world-v6/scene";
 import { STUDY_AREAS, isAction, lessonTitle, pad2, studyFor, type Study, type StudyArea } from "./study";
-import type { WorldDiscount, WorldSource } from "./source";
+import { BOUNTY_NAME, type WorldBounty, type WorldDiscount, type WorldSource } from "./source";
 import {
   WorldContentContext,
   contentOf,
@@ -29,6 +29,7 @@ import {
 import { areaShare, type WorldProgress } from "@/lib/world-v6/progress";
 import { SKY_MARKS } from "@/lib/world-v6/layout";
 import { CHECKPOINT, type CheckpointLook } from "@/lib/world-v6/checkpoint";
+import { BOUNTY } from "@/lib/world-v6/bounty";
 import { DISCOUNT_PERCENT, DISCOUNT_WINDOW_DAYS, DISCOUNT_LAUNCH_DATE } from "@/lib/world/discount";
 import { checkpointView, shortDate, type CheckpointView } from "./checkpointView";
 import { CARD_HINTS, anchorCard, placeCard, placePanel, type Box, type Placement } from "./cardPlace";
@@ -129,6 +130,22 @@ import s from "./world.module.css";
  * nothing: the checkpoint's panel closes into it. What shows comes from
  * checkpointView.ts; the cache's look goes to the scene (setCheckpoint). With
  * no discount on the source none of it shows and the cache stands closed.
+ *
+ * THE AD BOUNTY CHECKPOINT (map review 2026-10-15, plan item 18). "How To Win
+ * On The Ad Bounty Program" is a lesson outside the count (the feature row of
+ * Creative Strategy in the catalog), and it is no longer a row of that place's
+ * panel: it is the one lesson of a checkpoint of its own, the bounty board on
+ * the isle past the rope bridge (src/lib/world-v6/bounty.ts; dress-sky.ts
+ * builds the board, LM_Bounty). A tenth anchor, slot BT, with its own marker
+ * ("Ad Bounty"), a tag on the timeline between the 7th and 8th places, and on
+ * phones a row under Creative Strategy's. Any of them opens its panel
+ * (BountyBody) the way the discount's opens (openCheckpoint(el, "bounty")):
+ * the camera parks at the board (BOUNTY.park), the scroll locks, Esc and Back
+ * come home. The two checkpoints share the panel's slot and state; `cpKind`
+ * says which one is up. The panel's row opens the lesson's page
+ * (source.onFeature), which the host opens over the checkpoint. Always open:
+ * it never locks and shows whenever the course has the lesson
+ * (source.bounty; the dev page's fixture row without a source).
  */
 
 const N = STUDY_AREAS.length;
@@ -179,18 +196,28 @@ const POSTER_BOX_DROP = 0.12;
 
 /** The discount checkpoint's slot in the marker arrays: after the eight places. slotOf() never returns it. */
 const CP = N;
+/** The Ad Bounty checkpoint's slot (plan item 18), after the discount's. */
+const BT = N + 1;
+/** Every marker slot: the eight places and the two checkpoints. */
+const SLOTS = N + 2;
 /** Opened this close (depth) to the rail point that frames the cache, with its marker on screen, the camera parks from where it is. */
 const CP_NEAR = 0.02;
 
+/** Which checkpoint's panel is up: the discount's cache, or the Ad Bounty's board. */
+type Cp = "discount" | "bounty";
+const cpAnchor = (kind: Cp) => (kind === "bounty" ? BOUNTY.id : CHECKPOINT.id);
+
 const ANCHORS: AreaAnchor[] = [
   ...STUDY_AREAS.map((a) => ({ id: a.id, depth: a.depth, landmark: a.mesh })),
-  // No place: the scene gives it no stop and no lock, and parks at CHECKPOINT.park.
+  // No places: the scene gives them no stop and no lock, and parks at CHECKPOINT.park and BOUNTY.park.
   { id: CHECKPOINT.id, depth: 0, landmark: CHECKPOINT.mesh },
+  { id: BOUNTY.id, depth: 0, landmark: BOUNTY.mesh },
 ];
 
-/** A picked anchor's slot: a place's, CP for the checkpoint while it shows, else -1. */
-function pickSlot(id: string | null, cpShown: boolean): number {
+/** A picked anchor's slot: a place's, CP or BT for a checkpoint while it shows, else -1. */
+function pickSlot(id: string | null, cpShown: boolean, btShown: boolean): number {
   if (id === CHECKPOINT.id) return cpShown ? CP : -1;
+  if (id === BOUNTY.id) return btShown ? BT : -1;
   return id ? slotOf(id) : -1;
 }
 
@@ -305,8 +332,8 @@ interface Harness {
   __worldCelebrations?: number;
   /** ?bench=1: the results, once the bench has run. */
   __worldBench?: BenchResult | null;
-  /** The discount checkpoint: shown, its look, its marker and panel, and the rail depth that frames it (depth). */
-  __worldCheckpoint?: () => unknown;
+  /** A checkpoint ("discount", the default, or "bounty"): shown, its look, its marker and panel, and the rail depth that frames it (depth). */
+  __worldCheckpoint?: (which?: Cp) => unknown;
 }
 /** Where the hooks go: the window, or in a production build an object nobody else holds. */
 const harness = () => (HOOKS ? window : {}) as unknown as Harness & Record<string, unknown>;
@@ -365,9 +392,11 @@ interface Gate {
   key: string;
   /** The place it follows (0-based). */
   after: number;
-  /** Its look: locked, ready, pending, done or closed (checkpointView.ts). */
-  state: CheckpointView["tag"];
-  /** The words on the tag: "30% off". */
+  /** Its look: the discount's locked, ready, pending, done or closed (checkpointView.ts); the Ad Bounty's open, or done once watched. */
+  state: CheckpointView["tag"] | "open";
+  /** Its shape: the discount's price tag, the Ad Bounty's pinned notice. */
+  glyph: "tag" | "notice";
+  /** The words on the tag: "30% off", "Ad Bounty". */
   text: string;
   /** The tip on hover and focus: what it is, then where it stands. */
   tip: { lead: string; tail: string };
@@ -414,9 +443,10 @@ function WorldV6View({
   /** The place panel shows the watched lessons folded into one row until Show. */
   const [showWatched, setShowWatched] = useState(false);
   const [hint, setHint] = useState<{ k: number; seq: number } | null>(null);
-  /** The discount checkpoint's panel is open (the map's own: it has no address), and closing. */
+  /** A checkpoint's panel is open (the map's own: it has no address), and closing; cpKind says which. */
   const [cpOpen, setCpOpen] = useState(false);
   const [cpClosing, setCpClosing] = useState(false);
+  const [cpKind, setCpKind] = useState<Cp>("discount");
   /** The timeline's checkpoint tag the pointer or the keyboard is on (its key). */
   const [gateTip, setGateTip] = useState<string | null>(null);
   // The server render and the first client render use the defaults; the
@@ -458,6 +488,9 @@ function WorldV6View({
   );
   const cpShown = cpView?.shown ?? false;
   const cpLook: CheckpointLook = cpView?.look ?? "closed";
+  /** The Ad Bounty's one lesson (plan item 18): its checkpoint shows whenever the course has it. */
+  const bounty = useMemo(() => bountyOf(source, areas), [source, areas]);
+  const btShown = bounty !== null;
 
   const view: View = narrow === null ? "unknown" : narrow || phase === "failed" ? "list" : "world";
 
@@ -491,6 +524,9 @@ function WorldV6View({
   const cpHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const cpTagRef = useRef<HTMLButtonElement | null>(null);
   const cpRef = useRef<{ shown: boolean; look: CheckpointLook }>({ shown: false, look: "closed" });
+  /** The Ad Bounty's timeline tag, and whether its checkpoint shows, for code outside React. */
+  const btTagRef = useRef<HTMLButtonElement | null>(null);
+  const btRef = useRef(btShown);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const lessonHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const readoutRef = useRef<HTMLSpanElement | null>(null);
@@ -581,11 +617,14 @@ function WorldV6View({
     seedK: source?.openK ?? -1,
     /** That place is waiting under a lesson page, and the page scroll is locked for it (reconcile). */
     seedHold: false,
-    /** The discount checkpoint's panel: open, flying home, what opened it, focus to go back once home. */
+    /** A checkpoint's panel: open, flying home, what opened it, focus to go back once home, and which checkpoint. */
     cp: false,
     cpClosing: false,
     cpTrigger: null as HTMLElement | null,
     cpReturn: false,
+    cpKind: "discount" as Cp,
+    /** The Ad Bounty's page was opened by its address with no checkpoint panel under it: the checkpoint opens once the page closes (reconcile). */
+    bountySeed: false,
   });
 
   useEffect(() => {
@@ -969,13 +1008,24 @@ function WorldV6View({
    * cache opens in its own sunset light after a short flight, and Back leaves
    * the student on the trail in front of it. The next video the offer asks
    * for is asked for ahead.
+   *
+   * `kind` "bounty" opens the Ad Bounty's checkpoint the same way (plan item
+   * 18), parked at the board. One checkpoint's panel up gives way to the
+   * other's (the header's discount from the bounty's panel): its scroll lock
+   * ends and the other's jump and lock follow, as from a place.
    */
   const openCheckpoint = useCallback(
-    (trigger: HTMLElement | null) => {
+    (trigger: HTMLElement | null, kind: Cp = "discount") => {
       const u = ui.current;
-      if (!cpRef.current.shown || (u.cp && !u.cpClosing)) return;
+      const shown = kind === "bounty" ? btRef.current : cpRef.current.shown;
+      if (!shown || (u.cp && !u.cpClosing && u.cpKind === kind)) return;
       cancelTween();
       window.clearInterval(u.closeTimer);
+      if (u.cp && u.cpKind !== kind) {
+        u.cp = false;
+        u.cpClosing = false;
+        unlock();
+      }
       if (u.open >= 0) {
         const src = sourceRef.current;
         if (src && src.openK !== null) src.onCloseArea();
@@ -990,9 +1040,10 @@ function WorldV6View({
         unlock();
       }
       const sc = sceneRef.current;
+      const id = cpAnchor(kind);
       if (!u.cp && sc && u.live) {
-        const depth = sc.depthFor(CHECKPOINT.id);
-        const m = lastFrame.current?.markers.find((x) => x.id === CHECKPOINT.id);
+        const depth = sc.depthFor(id);
+        const m = lastFrame.current?.markers.find((x) => x.id === id);
         const at = lastFrame.current?.depth ?? -1;
         if (!m?.visible || Math.abs(depth - at) > CP_NEAR) {
           window.scrollTo({ top: Math.round(sc.scrollYForDepth(depth)), left: 0, behavior: "instant" });
@@ -1006,11 +1057,13 @@ function WorldV6View({
       }
       u.cp = true;
       u.cpClosing = false;
+      u.cpKind = kind;
+      setCpKind(kind);
       setCpOpen(true);
       setCpClosing(false);
-      sceneRef.current?.park(CHECKPOINT.id);
+      sceneRef.current?.park(id);
       const d = sourceRef.current?.discount;
-      if (d?.next) sourceRef.current?.onPrefetch?.(d.next.k, d.next.i);
+      if (kind === "discount" && d?.next) sourceRef.current?.onPrefetch?.(d.next.k, d.next.i);
     },
     [cancelTween, lock, unlock],
   );
@@ -1056,14 +1109,17 @@ function WorldV6View({
   }, [finalizeCheckpoint, restoreScroll]);
 
   // What shows and the cache's look, for the frame loop and the scene; an
-  // offer that stops showing (its window ran out) closes its panel.
+  // offer that stops showing (its window ran out) closes its panel. The same
+  // for the Ad Bounty's checkpoint, which shows while the course has its lesson.
   useLayoutEffect(() => {
     cpRef.current = { shown: cpShown, look: cpLook };
+    btRef.current = btShown;
     sceneRef.current?.setCheckpoint(cpLook);
-    if (!cpShown && ui.current.cp) closeCheckpoint();
+    const u = ui.current;
+    if (u.cp && ((u.cpKind === "discount" && !cpShown) || (u.cpKind === "bounty" && !btShown))) closeCheckpoint();
     const f = lastFrame.current;
     if (f) applyRef.current?.(f);
-  }, [cpShown, cpLook, closeCheckpoint]);
+  }, [cpShown, cpLook, btShown, closeCheckpoint]);
 
   const openLesson = useCallback((i: number) => {
     const u = ui.current;
@@ -1187,6 +1243,20 @@ function WorldV6View({
         u.seedHold = false;
         unlock();
       }
+      // The Ad Bounty's page opened by its address (a refresh, a link from
+      // outside the map) has no checkpoint panel under it: the checkpoint
+      // opens once the page closes, so the page's back link and Esc come home
+      // to the panel (plan item 18), as a place named by a lesson's address
+      // opens once its page closes (below). Nothing moves behind the page.
+      if (src.bountyOpen && !u.cp) u.bountySeed = true;
+      if (u.bountySeed && !src.paused) {
+        if (want >= 0) u.bountySeed = false;
+        else if (!inWorld || u.live) {
+          u.bountySeed = false;
+          openCheckpoint(null, "bounty");
+          return;
+        }
+      }
       // Already there, or already closing toward it.
       if (want === (u.closing ? -1 : u.open)) return;
       if (inWorld && !u.live) return;
@@ -1209,7 +1279,7 @@ function WorldV6View({
       // Once it is open the scroll lock is the open place's.
       if (u.open === want) u.seedHold = false;
     },
-    [openArea, closeArea, travel, lock, unlock],
+    [openArea, closeArea, travel, lock, unlock, openCheckpoint],
   );
   const openK = source ? source.openK : null;
   useEffect(() => {
@@ -1333,16 +1403,16 @@ function WorldV6View({
     if (!stage) return;
     const u = ui.current;
     const w = harness();
-    // The eight places and the discount checkpoint (slot CP).
-    const layout = layoutRef.current ?? (layoutRef.current = new LabelLayout(N + 1));
+    // The eight places and the two checkpoints (slots CP and BT).
+    const layout = layoutRef.current ?? (layoutRef.current = new LabelLayout(SLOTS));
     const depths = depthsRef.current;
     const sizes = sizesRef.current;
-    const bySlot: Array<ProjectedMarker | null> = new Array(N + 1).fill(null);
-    const domMode = new Uint8Array(N + 1).fill(255);
-    const domStem = new Float32Array(N + 1).fill(-1);
-    const domShift = new Int32Array(N + 1);
-    const domX = new Int32Array(N + 1).fill(-99999);
-    const domY = new Int32Array(N + 1).fill(-99999);
+    const bySlot: Array<ProjectedMarker | null> = new Array(SLOTS).fill(null);
+    const domMode = new Uint8Array(SLOTS).fill(255);
+    const domStem = new Float32Array(SLOTS).fill(-1);
+    const domShift = new Int32Array(SLOTS);
+    const domX = new Int32Array(SLOTS).fill(-99999);
+    const domY = new Int32Array(SLOTS).fill(-99999);
     // Round 1: the whole landmark is the button. The pointer's place (slot, or
     // -1), picked on pointer events only (at most once per animation frame),
     // never in the frame loop. The scene lifts the hovered landmark's light.
@@ -1354,8 +1424,8 @@ function WorldV6View({
       hover.slot = k;
       const el = markerRefs.current[k];
       if (el) el.dataset.hover = "";
-      stage.style.cursor = k < 0 ? "" : k !== CP && studyRef.current.locked[k] ? "not-allowed" : "pointer";
-      sceneRef.current?.setHoverAnchor(k < 0 ? null : k === CP ? CHECKPOINT.id : STUDY_AREAS[k].id);
+      stage.style.cursor = k < 0 ? "" : k < N && studyRef.current.locked[k] ? "not-allowed" : "pointer";
+      sceneRef.current?.setHoverAnchor(k < 0 ? null : k === CP ? CHECKPOINT.id : k === BT ? BOUNTY.id : STUDY_AREAS[k].id);
       // The scene may be asleep: lay the labels out now.
       const f = lastFrame.current;
       if (redraw && f) apply(f);
@@ -1403,12 +1473,13 @@ function WorldV6View({
     const panelPl: Placement = { x: 0, y: 0, side: "l", d: "", overlap: 0 };
     const cpPl: Placement = { x: 0, y: 0, side: "l", d: "", overlap: 0 };
     const box: Box = { l: 0, t: 0, r: 0, b: 0 };
-    /** Final pass: the other places' plaques on screen, which the card keeps off (cardPlace avoid). */
+    /** Final pass: the other places' plaques on screen, which the card keeps off (cardPlace avoid);
+     *  and the Ad Bounty's, which shows across the island from Creative Strategy's stop. */
     const avoidBoxes: Box[] = [];
     const plaquesBesides = (k: number): Box[] => {
       avoidBoxes.length = 0;
-      for (let j = 0; j < N; j++) {
-        if (j === k) continue;
+      for (let j = 0; j <= BT; j++) {
+        if (j === k || j === CP) continue;
         const el = markerRefs.current[j];
         const label = labelRefs.current[j];
         if (!el || !label || el.dataset.mode !== "text") continue;
@@ -1614,7 +1685,7 @@ function WorldV6View({
       bySlot.fill(null);
       if (frameMarkers) {
         for (let i = 0; i < frameMarkers.length; i++) {
-          const k = pickSlot(frameMarkers[i].id, cpRef.current.shown);
+          const k = pickSlot(frameMarkers[i].id, cpRef.current.shown, btRef.current);
           if (k >= 0) bySlot[k] = frameMarkers[i];
         }
       }
@@ -1622,7 +1693,7 @@ function WorldV6View({
       // Markers: skipped entirely while they are faded out.
       if (markersA > 0.001 && frameMarkers) {
         layout.run(bySlot, Math.min(st.place, N - 1), sizes.w, sizes.h, hover.slot);
-        for (let k = 0; k <= CP; k++) {
+        for (let k = 0; k < SLOTS; k++) {
           const el = markerRefs.current[k];
           if (!el) continue;
           const mode = layout.mode[k];
@@ -1823,7 +1894,7 @@ function WorldV6View({
         cache.cpEl = null;
       }
       if (cpPanel && u.cp && !u.cpClosing) {
-        const m = bySlot[CP];
+        const m = bySlot[u.cpKind === "bounty" ? BT : CP];
         if (p >= 0.999 && m && m.visible) {
           if (!(Math.abs(m.x - cache.cpPinX) <= 0.75) || !(Math.abs(m.y - cache.cpPinY) <= 0.75)) {
             cache.cpPinX = m.x;
@@ -2039,22 +2110,25 @@ function WorldV6View({
           if (u.cp) closeCheckpoint();
           else closeArea();
         } else if (id === CHECKPOINT.id) openCheckpoint(null);
+        else if (id === BOUNTY.id) openCheckpoint(null, "bounty");
         else openArea(slotOf(id), null);
       };
-      w.__worldCheckpoint = () => {
-        const m = lastFrame.current?.markers.find((x) => x.id === CHECKPOINT.id) ?? null;
-        const el = markerRefs.current[CP];
-        const r = cpPanelRef.current?.getBoundingClientRect() ?? null;
+      w.__worldCheckpoint = (which: Cp = "discount") => {
+        const id = cpAnchor(which);
+        const m = lastFrame.current?.markers.find((x) => x.id === id) ?? null;
+        const el = markerRefs.current[which === "bounty" ? BT : CP];
+        const up = u.cp && u.cpKind === which;
+        const r = up ? (cpPanelRef.current?.getBoundingClientRect() ?? null) : null;
         return {
-          shown: cpRef.current.shown,
-          look: cpRef.current.look,
-          open: u.cp,
-          closing: u.cpClosing,
+          shown: which === "bounty" ? btRef.current : cpRef.current.shown,
+          look: which === "bounty" ? null : cpRef.current.look,
+          open: up,
+          closing: up && u.cpClosing,
           mode: el?.dataset.mode ?? null,
           marker: m ? { x: Math.round(m.x), y: Math.round(m.y), visible: m.visible } : null,
           panel: r ? { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom) } : null,
           /** The rail depth that frames it (scene depthFor: 400 back along the view, rail.ts sNearest). */
-          depth: sc.depthFor(CHECKPOINT.id),
+          depth: sc.depthFor(id),
         };
       };
       w.__worldCamera = () => sc.cameraPose();
@@ -2125,7 +2199,7 @@ function WorldV6View({
           return;
         }
         const id = sc.pickAnchor(hover.x, hover.y);
-        setHover(pickSlot(id, cpRef.current.shown));
+        setHover(pickSlot(id, cpRef.current.shown, btRef.current));
       };
       const schedulePick = () => {
         if (!hover.raf) hover.raf = requestAnimationFrame(runPick);
@@ -2151,11 +2225,12 @@ function WorldV6View({
       onStageClick = (e: MouseEvent) => {
         if (!canPick()) return;
         const id = sc.pickAnchor(e.clientX, e.clientY);
-        const k = pickSlot(id, cpRef.current.shown);
+        const k = pickSlot(id, cpRef.current.shown, btRef.current);
         if (k < 0) return;
         e.preventDefault();
         setHover(-1);
         if (k === CP) openCheckpoint(markerRefs.current[CP] ?? null);
+        else if (k === BT) openCheckpoint(markerRefs.current[BT] ?? null, "bounty");
         else openArea(k, markerRefs.current[k] ?? null);
       };
       stage.addEventListener("pointermove", onPointerMove);
@@ -2282,7 +2357,7 @@ function WorldV6View({
       if (!layout || !stage) return;
       sizes.w = stage.clientWidth;
       sizes.h = stage.clientHeight;
-      for (let k = 0; k <= CP; k++) {
+      for (let k = 0; k < SLOTS; k++) {
         const label = labelRefs.current[k];
         if (!label) continue;
         layout.width[k] = label.offsetWidth;
@@ -2314,12 +2389,12 @@ function WorldV6View({
   }, [view, phase]);
 
   // A locked marker's label is a few px wider (the lock glyph), and the
-  // checkpoint's says something else in each state: measure again.
+  // checkpoints' say something else in each state: measure again.
   useEffect(() => {
     if (view !== "world" || phase !== "ready") return;
     const layout = layoutRef.current;
     if (!layout) return;
-    for (let k = 0; k <= CP; k++) {
+    for (let k = 0; k < SLOTS; k++) {
       const label = labelRefs.current[k];
       if (label) {
         layout.width[k] = label.offsetWidth;
@@ -2328,7 +2403,7 @@ function WorldV6View({
     }
     const f = lastFrame.current;
     if (f) applyRef.current?.(f);
-  }, [view, phase, study, cpView]);
+  }, [view, phase, study, cpView, bounty]);
 
   // ── Focus: into the panel on open, back to the trigger once the camera is home.
   // With a source a place can open under a lesson page, where the root is inert
@@ -2410,6 +2485,9 @@ function WorldV6View({
   }, [backToArea, closeArea, closeCheckpoint]);
 
   // ── The checkpoint's panel: focus to its heading on open, back to what opened it once home.
+  // cpKind is in the deps because one checkpoint's panel can give way to the
+  // other's (the header's discount from the bounty's panel) with cpOpen true
+  // throughout: the new panel's heading takes focus then too.
   useEffect(() => {
     const u = ui.current;
     if (cpOpen) {
@@ -2421,8 +2499,8 @@ function WorldV6View({
     let target = u.cpTrigger;
     u.cpTrigger = null;
     if (target && (!target.isConnected || target.dataset.mode === "hidden" || target.closest("[inert]"))) target = null;
-    (target ?? cpTagRef.current)?.focus({ preventScroll: true });
-  }, [cpOpen, paused]);
+    (target ?? (u.cpKind === "bounty" ? btTagRef.current : cpTagRef.current))?.focus({ preventScroll: true });
+  }, [cpOpen, cpKind, paused]);
 
   // ── Never leave the page scroll-locked or a timer running behind us.
   useEffect(() => {
@@ -2509,24 +2587,37 @@ function WorldV6View({
 
   /**
    * The checkpoints on the timeline, each a tag between the place it follows
-   * and the next. The discount's for now; the Ad Bounty's (after Creative
-   * Strategy, plan item 18) is one more entry in this list.
+   * and the next: the discount's while it shows, and the Ad Bounty's after
+   * Creative Strategy (plan item 18), always.
    */
-  const gates: Gate[] = cpView?.shown
-    ? [
-        {
-          key: "discount",
-          after: CHECKPOINT.after,
-          state: cpView.tag,
-          // "30% off", never "30%" alone: on a progress bar that reads as how far along.
-          text: cpView.label.lead,
-          tip: { lead: cpView.label.lead, tail: cpView.chip?.tail ?? cpView.label.tail },
-          label: cpAria(cpView),
-          ref: cpTagRef,
-          open: openCheckpoint,
-        },
-      ]
-    : [];
+  const gates: Gate[] = [];
+  if (cpView?.shown) {
+    gates.push({
+      key: "discount",
+      after: CHECKPOINT.after,
+      state: cpView.tag,
+      glyph: "tag",
+      // "30% off", never "30%" alone: on a progress bar that reads as how far along.
+      text: cpView.label.lead,
+      tip: { lead: cpView.label.lead, tail: cpView.chip?.tail ?? cpView.label.tail },
+      label: cpAria(cpView),
+      ref: cpTagRef,
+      open: openCheckpoint,
+    });
+  }
+  if (bounty) {
+    gates.push({
+      key: "bounty",
+      after: BOUNTY.after,
+      state: bounty.done ? "done" : "open",
+      glyph: "notice",
+      text: BOUNTY_NAME,
+      tip: { lead: BOUNTY_NAME, tail: bounty.done ? "Watched" : "1 lesson" },
+      label: bountyAria(bounty),
+      ref: btTagRef,
+      open: (el) => openCheckpoint(el, "bounty"),
+    });
+  }
 
   /** The discount in the header's group: the offer and where it stands, one click to its panel. Null when the header shows nothing of it. */
   const discountSeg = cpView?.chip ? (
@@ -2766,6 +2857,35 @@ function WorldV6View({
                 </span>
               </button>
             )}
+            {/* The Ad Bounty checkpoint (slot BT, plan item 18): the board on the isle past the rope bridge. */}
+            {bounty && (
+              <button
+                ref={(el) => {
+                  markerRefs.current[BT] = el;
+                }}
+                type="button"
+                className={`${s.marker} ${s.cpMarker}`}
+                data-mode="hidden"
+                data-bounty={bounty.done ? "done" : "open"}
+                tabIndex={-1}
+                aria-label={bountyAria(bounty)}
+                onClick={(e) => openCheckpoint(e.currentTarget, "bounty")}
+              >
+                <span className={s.pin} aria-hidden="true" />
+                <span className={s.stem} aria-hidden="true" />
+                <span
+                  ref={(el) => {
+                    labelRefs.current[BT] = el;
+                  }}
+                  className={s.label}
+                  aria-hidden="true"
+                >
+                  <NoticeGlyph className={s.cpLabelGlyph} />
+                  {BOUNTY_NAME}
+                  {bounty.done && <span className={s.labelCount}>Watched</span>}
+                </span>
+              </button>
+            )}
           </div>
 
           {/* The timeline: the course in one bar. A cell per place, filled by its
@@ -2846,7 +2966,7 @@ function WorldV6View({
                   onBlur={() => setGateTip(null)}
                 >
                   <span className={s.gateTag} aria-hidden="true">
-                    <TagGlyph className={s.gateGlyph} />
+                    {g.glyph === "notice" ? <NoticeGlyph className={s.gateGlyph} /> : <TagGlyph className={s.gateGlyph} />}
                     {g.text}
                   </span>
                   {gateTip === g.key && hint === null && (
@@ -2942,7 +3062,7 @@ function WorldV6View({
             </section>
           )}
 
-          {cpOpen && discount && cpView && (
+          {cpOpen && cpKind === "discount" && discount && cpView && (
             <section ref={cpPanelRef} className={`${s.panel} ${s.cpPanel}`} aria-labelledby="cp-panel-title" inert={cpClosing}>
               <div className={s.panelInner}>
                 <CheckpointBody
@@ -2952,6 +3072,14 @@ function WorldV6View({
                   onBack={closeCheckpoint}
                   headingRef={cpHeadingRef}
                 />
+              </div>
+            </section>
+          )}
+
+          {cpOpen && cpKind === "bounty" && bounty && (
+            <section ref={cpPanelRef} className={`${s.panel} ${s.cpPanel}`} aria-labelledby="bounty-panel-title" inert={cpClosing}>
+              <div className={s.panelInner}>
+                <BountyBody bounty={bounty} backLabel="Back to map" onBack={closeCheckpoint} headingRef={cpHeadingRef} />
               </div>
             </section>
           )}
@@ -3002,6 +3130,24 @@ function WorldV6View({
                   </span>
                   <span className={s.rowDot} aria-hidden="true" />
                 </button>
+                {/* The Ad Bounty's checkpoint follows Creative Strategy (plan item 18): a slimmer row under its place's, in the same item, so the eight places keep their rows. */}
+                {k === BOUNTY.after && bounty && (
+                  <button
+                    type="button"
+                    className={`${s.areaRow} ${s.cpRow}`}
+                    data-cp={bounty.done ? "done" : "open"}
+                    aria-label={bountyAria(bounty)}
+                    onClick={(e) => openCheckpoint(e.currentTarget, "bounty")}
+                  >
+                    <span className={s.rowNum} aria-hidden="true">
+                      <NoticeGlyph className={s.cpRowGlyph} />
+                    </span>
+                    <span className={s.rowText}>
+                      <span className={s.rowName}>{BOUNTY_NAME}</span>
+                      <span className={s.rowMeta}>Checkpoint</span>
+                    </span>
+                  </button>
+                )}
               </li>
             ))}
           </ol>
@@ -3014,7 +3160,7 @@ function WorldV6View({
         </section>
       )}
 
-      {view === "list" && cpOpen && discount && cpView && (
+      {view === "list" && cpOpen && cpKind === "discount" && discount && cpView && (
         <section className={s.sheet} role="dialog" aria-modal="true" aria-labelledby="cp-panel-title">
           <CheckpointBody
             discount={discount}
@@ -3023,6 +3169,12 @@ function WorldV6View({
             onBack={closeCheckpoint}
             headingRef={cpHeadingRef}
           />
+        </section>
+      )}
+
+      {view === "list" && cpOpen && cpKind === "bounty" && bounty && (
+        <section className={s.sheet} role="dialog" aria-modal="true" aria-labelledby="bounty-panel-title">
+          <BountyBody bounty={bounty} backLabel="All areas" onBack={closeCheckpoint} headingRef={cpHeadingRef} />
         </section>
       )}
 
@@ -3210,9 +3362,9 @@ function SkyCaption({ study }: { study: Study }) {
   return (
     <>
       <span className={s.lensEyebrow}>
-        Your sky · {names.length} of {N}
+        Your sky · {names.length} of {N} places
       </span>
-      <span className={s.lensLine}>{names.length ? names.join(", ") : "Finish a place and its stars go up here."}</span>
+      <span className={s.lensLine}>{names.length ? names.join(", ") : "Each lesson here lights a star."}</span>
     </>
   );
 }
@@ -3572,19 +3724,7 @@ function PanelBody({
         <PlaceCount k={idx} done={done} />
       </p>
       <ol className={s.rows}>{rows}</ol>
-      {/* With a source the feature row opens its own page; on the dev page it is a plain line. */}
-      {a.feature &&
-        (c.onFeature ? (
-          <button type="button" className={s.feature} onClick={() => c.onFeature?.(idx)}>
-            <span className={s.diamond} aria-hidden="true" />
-            {a.feature.title}
-          </button>
-        ) : (
-          <div className={s.feature}>
-            <span className={s.diamond} aria-hidden="true" />
-            {a.feature.title}
-          </div>
-        ))}
+      {/* The feature row (the Ad Bounty's lesson) is no longer here: it is the one lesson of its own checkpoint (BountyBody, plan item 18). */}
     </div>
   );
 }
@@ -3593,6 +3733,122 @@ function PanelBody({
 function cpAria(cv: CheckpointView): string {
   const tail = cv.chip?.tail ?? cv.label.tail;
   return `Discount checkpoint, ${cv.label.lead}${tail ? `, ${tail}` : ""}`;
+}
+
+/**
+ * The Ad Bounty's one lesson (plan item 18): the source's (the catalog's
+ * feature row with the bounty key, source.ts), or on the dev page without a
+ * source the fixture's feature row (study.ts), with no video and no page.
+ */
+function bountyOf(source: WorldSource | undefined, areas: readonly StudyArea[]): WorldBounty | null {
+  if (source) return source.bounty ?? null;
+  const k = areas.findIndex((a) => a.feature?.key === "bounty_access");
+  const f = k >= 0 ? areas[k].feature : undefined;
+  return f ? { k, id: "", title: f.title, watch: true, hasVideo: false, done: false } : null;
+}
+
+/** What a screen reader hears for the Ad Bounty's marker, tag and phone row: "Ad Bounty checkpoint, 1 lesson". */
+function bountyAria(b: WorldBounty): string {
+  return `${BOUNTY_NAME} checkpoint, ${b.done ? "watched" : "1 lesson"}`;
+}
+
+/**
+ * The Ad Bounty checkpoint's panel (map review 2026-10-15, plan item 18): what
+ * the program is in one plain line, in the course's own words for it (a
+ * brand tests your ad with its own money and you get a percent of the ad
+ * spend for as long as it keeps running), and its one lesson. With a video
+ * the lesson gets Watch. A watch lesson without one says it is not recorded
+ * yet, once, here where Watch would be. Either way the row opens the
+ * lesson's own page (content.onFeature, the address of the old feature row).
+ * On the dev page without a source the row is a plain line, as the feature
+ * row was. Always open: nothing here is locked or counted.
+ */
+function BountyBody({
+  bounty,
+  backLabel,
+  onBack,
+  headingRef,
+}: {
+  bounty: WorldBounty;
+  backLabel: string;
+  onBack: () => void;
+  headingRef: RefObject<HTMLHeadingElement | null>;
+}) {
+  const c = useContent();
+  const after = c.areas[BOUNTY.after]?.name ?? "";
+  const open = c.onFeature ? () => c.onFeature?.(bounty.k) : null;
+  const ready = bounty.watch && bounty.hasVideo && !bounty.done;
+  const unrecorded = bounty.watch && !bounty.hasVideo && !bounty.done;
+  const state = bounty.done ? "done" : ready ? "ready" : unrecorded ? "unrecorded" : "open";
+  let row: ReactNode;
+  if (ready && open) {
+    row = (
+      <li className={s.nextRow}>
+        <span className={s.mark} data-m="n" aria-hidden="true" />
+        <span className={s.rowN} aria-hidden="true" />
+        <span className={s.rowT}>{bounty.title}</span>
+        <button type="button" className={`${s.primary} ${s.primarySm}`} aria-label={`Watch ${bounty.title}`} onClick={open}>
+          <Play />
+          Watch
+        </button>
+      </li>
+    );
+  } else {
+    const inner = (
+      <>
+        <span className={s.mark} data-m={bounty.done ? "d" : undefined} aria-hidden="true" />
+        <span className={s.rowN} aria-hidden="true" />
+        <span className={s.rowT}>
+          {bounty.title}
+          {unrecorded && <span className={s.rowSub}>Not recorded yet</span>}
+        </span>
+        <span className={s.rowEnd} aria-hidden="true">
+          {open && <Arrow />}
+        </span>
+      </>
+    );
+    row = (
+      <li>
+        {open ? (
+          <button
+            type="button"
+            className={s.row}
+            data-state={bounty.done ? "done" : "todo"}
+            aria-label={`${bounty.title}${bounty.done ? ", watched" : unrecorded ? ", not recorded yet" : ""}`}
+            onClick={open}
+          >
+            {inner}
+          </button>
+        ) : (
+          <div className={s.row} data-state={bounty.done ? "done" : "todo"}>
+            {inner}
+          </div>
+        )}
+      </li>
+    );
+  }
+  return (
+    <div className={s.view} data-bounty={state} key="bounty">
+      <div className={s.panelTop}>
+        <button type="button" className={s.back} onClick={onBack}>
+          <Arrow back />
+          {backLabel}
+        </button>
+        <kbd className={s.esc}>Esc</kbd>
+      </div>
+      <p className={s.eyebrow}>
+        <NoticeGlyph className={s.cpEyebrowGlyph} />
+        <span className={s.accent}>Checkpoint</span>
+        {after && <span className={s.cpAfter}>after {after}</span>}
+        {bounty.done && <span className={s.eyebrowEnd}>Watched</span>}
+      </p>
+      <h2 ref={headingRef} id="bounty-panel-title" className={s.panelTitle} tabIndex={-1}>
+        {BOUNTY_NAME}
+      </h2>
+      <p className={s.desc}>Make ads for real brands and earn a share of the ad spend while they run.</p>
+      <ol className={s.rows}>{row}</ol>
+    </div>
+  );
 }
 
 // The cutoff is midnight in Croatia (discount.ts), so the day is read there: in UTC it would print 8 October.
@@ -3810,6 +4066,22 @@ function TagGlyph({ className }: { className?: string }) {
         className={s.tagBody}
       />
       <circle cx="5.6" cy="5.5" r="1.15" className={s.tagHole} />
+    </svg>
+  );
+}
+
+/**
+ * A notice pinned up, two lines on it: the Ad Bounty's one shape (plan item
+ * 18), the board's bounty notices in the world. Drawn in the price tag's box
+ * and classes, so it takes the tag's colours wherever the tag does.
+ */
+function NoticeGlyph({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="16" height="11" viewBox="0 0 16 11" fill="none" aria-hidden="true">
+      <rect x="4" y="1.2" width="8" height="9.4" rx="1" className={s.tagBody} />
+      <circle cx="8" cy="2.9" r="1.05" className={s.tagHole} />
+      <rect x="5.7" y="5.3" width="4.6" height="1.1" rx="0.4" className={s.tagHole} />
+      <rect x="5.7" y="7.6" width="3.2" height="1.1" rx="0.4" className={s.tagHole} />
     </svg>
   );
 }

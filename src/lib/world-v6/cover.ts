@@ -8,6 +8,7 @@ import { all as allFootprints, blocked } from "./footprints";
 import { gateIsleTop } from "./dress-gate";
 import { GRASS_ATLAS_SIZE, getGrassAtlas, grassAtlasStats, grassCell, type GrassCell, type GrassKind } from "./grass-atlas";
 import { chainCompile, sandLineAt, type SurfacesApi } from "./surfaces";
+import { lakeShoreAt, lakeShoreR } from "./terrain";
 
 /**
  * v6 ground cover (world_art_bible_v6.md 2.3; Lovro: the tufts were "ugly, no
@@ -697,7 +698,9 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
     for (let i = 0; i < n; i++) {
       const a = (i / n) * Math.PI * 2 + rnd(i, 71) * 0.03;
       const reed = rnd(i, 72) < 0.55;
-      const d = reed ? L.r - 6 + rnd(i, 73) * 12 : L.r + 14 + rnd(i, 74) * 110;
+      // From the shore as drawn (terrain.ts lakeShoreR, map review item 15c), not WORLD.lake's circle.
+      const sr = lakeShoreR(a);
+      const d = reed ? sr - 6 + rnd(i, 73) * 12 : sr + 14 + rnd(i, 74) * 110;
       const x = L.x + Math.cos(a) * d;
       const z = L.z + Math.sin(a) * d;
       if (railKeep(x, z, 450, 1100) <= 0) continue;
@@ -707,7 +710,7 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
           maxSlope: 0.6,
           shade: 0,
           yAt: (px, pz) => Math.max(gY(px, pz), L.y - 3.5),
-          accept: (px, pz, gy) => gy >= L.y - 3.6 && Math.hypot(px - L.x, pz - L.z) < L.r + 10,
+          accept: (px, pz, gy) => gy >= L.y - 3.6 && Math.hypot(px - L.x, pz - L.z) < lakeShoreAt(px, pz) + 10,
         });
       } else drift(x, z, 10 + 12 * rnd(i, 78), 9 + Math.floor(12 * rnd(i, 79)), KITS.lakeTall, { maxSlope: 0.6 });
     }
@@ -739,7 +742,11 @@ function scatter(ctx: WorldCtx, surf: SurfacesApi | undefined): ScatterOut {
         if (dT > 110 || nearPath >= 240) continue;
         nearPath++;
       }
-      const m = magicAt(cx, cz);
+      // The field's core (wave 3, 2026-10-15): this glowing floor stays inside
+      // the forest's circle as it was; out in the field's halo the forest's own
+      // glow ferns and glowcaps carry it (forest.ts), in patches, so the floor
+      // fades out with the trees instead of stopping at this circle.
+      const m = magicAt(cx, cz, true);
       const hue = rnd(i, 233) < 0.68 ? 0 : 1;
       const glowA = hue ? GLOW[3] : GLOW[rnd(i, 234) < 0.3 ? 1 : 0];
       const R = 6 + rnd(i, 235) * 10;

@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
 import { BROOK, GLOW_STREAM, ISLAND_RILLS, PLACES, RIVER, STREAM, WORLD, fallsCurtainAt, magicAt } from "./layout";
-import { terrainHeight } from "./terrain";
+import { LAKE_OUTER, LAKE_PAD, LAKE_SURFACE, POOL_PAD, POOL_SURFACE, lakeShoreAt, poolShoreAt, poolShoreR, terrainHeight } from "./terrain";
 import { NOISE_TEX_FRAG_GLSL, NOISE_TEX_GLSL, getNoiseTexture } from "./noise";
 import { addPathLine } from "./footprints";
 import type { QualityTier } from "./quality";
@@ -12,17 +12,25 @@ import { NOISE_GLSL, RIVER_HW, brookHalfW, clamp01, lightStateOf, lin, smooth, s
  * world, in one module.
  *
  *   Sea        one quad over the world: posterised ripple cells from the noise
- *              texture's cellular channel (two layers stretched 3:1 along the
- *              shore, scrolling 70 degrees apart), shallow / mid / deep bands
- *              from the height texture, foam bands that march up the beach and
- *              break into lumps as they die, glints as bright cells in the sun's
- *              lobe, a smooth sky mirror past ~1,500. The long swell stays at
- *              20 percent, as a drift in the ripple thresholds.
+ *              texture's cellular channel (two layers scrolling apart: round
+ *              inside 420 of the camera, where the light shapes are the cells'
+ *              borders; stretched 3:1 along the shore past 180 to 420),
+ *              shallow / mid / deep bands from the height texture, foam bands
+ *              that march up the beach and break into lumps as they die, glints
+ *              where the two layers' borders cross in the sun's lobe (bright
+ *              cells on the far mirror), a smooth sky mirror past ~1,500. The
+ *              long swell stays at 20 percent, as a drift in the ripple
+ *              thresholds. 3 texture reads on open water past 420, 5 inside it,
+ *              3 more where the water is under 12 deep (map review 2026-10-15,
+ *              item 15a; 9 everywhere before).
  *   Tarn       the Upper Falls' tarn: the sea's program on a small disc.
  *   Ribbons    "River", "Stream", "Brook", "GlowStream": posterised flow streaks
  *              lighter than the grass (they take the sky), white water where the
  *              water level drops fast (rapids, cascades: aRough per vertex), dark
- *              wet banks; the glowing stream teal by magicAt (aMagic).
+ *              wet banks; the glowing stream teal by magicAt (aMagic). The river
+ *              is the pool's water running out of it (POOL_LOOK, its own
+ *              program; item 15b): the pool's colours and sky, starting inside
+ *              the pool and fading in there (RIVER_JOIN).
  *   Lake       the Mirror Lake keeps light.ts's reflector; this patches its
  *              shader with a dark shallow band and a pale line at the shore.
  *   Falls      "Landmark_a3_Water": the curtain on WORLD.falls, falling the way
@@ -37,7 +45,10 @@ import { NOISE_GLSL, RIVER_HW, brookHalfW, clamp01, lightStateOf, lin, smooth, s
  *   Pool       "Pool": a displaced polar disc, white water boiling at the impact
  *              (faceted mounds lit by the sun), foam lace carried out and
  *              thinning into drift lines, dark teal water with ripple cells, a
- *              shallow band and a shore line from the height texture.
+ *              shallow band and a shore line from the height texture, their
+ *              outline wobbling round the pool (item 15b). Its rim lies under
+ *              the shore terrain.ts draws (poolShoreR: points of land on the
+ *              west and north, review round 1), at POOL_SURFACE.
  *   Puffs      one program (SurfPuff), three instanced meshes: "FallsSpray"
  *              (rising and fading over 2-4 s at the foot, invisible inside 30 of
  *              the camera, full from 80), "FallsPlume" (the opening's focal point:
@@ -232,34 +243,60 @@ void main() {
   vec2 p = vW.xz;
   float t = uTime;
 
-  // Ripple cells: the cellular channel (0 at a cell's point, ~1 at its edge),
-  // two layers stretched 3:1 along the shore (x), scrolling 70 degrees apart.
+  // Ripple cells: the cellular channel (0 at a cell's point, 0.44 its median,
+  // 0.68 at the 90th percentile), two layers scrolling apart.
+  // The far pair: stretched 3:1 along the shore (x), past 180 to 420 out, so the
+  // ripples still read from 250 to 900 (a low camera squeezes the near cells to
+  // under 2 pixels there). Read in every pixel, as before: the far look is unchanged.
   vec2 s3 = vec2( p.x * 0.3333, p.y );
-  vec2 qa = s3 / 150.0 + vec2( 0.0045, 0.0085 ) * t;
-  vec2 qb = s3 / 96.0 + vec2( -0.0082, 0.0046 ) * t + 0.37;
-  float ca = texture2D( uNoise, qa ).g;
-  float cb = texture2D( uNoise, qb ).g;
-  // Past ~250 a second, 2.8x bigger pair of layers takes over, so the ripple
-  // crescents still read from 250 to 900 out (a low camera squeezes the near
-  // cells to under 2 pixels there).
   float farK = smoothstep( 180.0, 420.0, dist );
   vec2 qc = s3 / 420.0 + vec2( 0.0021, 0.0042 ) * t + 0.61;
   vec2 qd = s3 / 270.0 + vec2( -0.0039, 0.0022 ) * t + 0.13;
-  ca = mix( ca, texture2D( uNoise, qc ).g, farK );
-  cb = mix( cb, texture2D( uNoise, qd ).g, farK );
+  float ca = texture2D( uNoise, qc ).g;
+  float cb = texture2D( uNoise, qd ).g;
+  // Map review 2026-10-15, item 15a (Lovro: "weird streaks over here at the
+  // start"): the near pair is round, not 3:1, at the same speeds as before.
+  // Stretched, its cells lay 3 times longer across the opening's view, and the
+  // low camera's foreshortening drew them out into long streaks; round, they read
+  // as ripples. Read only where it shows (inside 420): the gradients are taken
+  // first, so the samples stay filtered right at the edge of the branch.
+  vec2 qa = ( p + vec2( 2.025, 1.275 ) * t ) / 220.0;
+  vec2 qb = ( p + vec2( -2.362, 0.442 ) * t ) / 140.0 + 0.37;
+  vec2 qaX = dFdx( qa ), qaY = dFdy( qa );
+  vec2 qbX = dFdx( qb ), qbY = dFdy( qb );
+  if ( farK < 1.0 ) {
+    ca = mix( textureGrad( uNoise, qa, qaX, qaY ).g, ca, farK );
+    cb = mix( textureGrad( uNoise, qb, qbX, qbY ).g, cb, farK );
+  }
   // Cells smaller than ~2 pixels fade to the body (no shimmer), and far water is a mirror.
-  float cellPx = mix( max( fwidth( qa.y ), fwidth( qa.x ) ), max( fwidth( qc.y ), fwidth( qc.x ) ), farK ) * 16.0;
+  float cellPx = mix( max( abs( qaX.y ) + abs( qaY.y ), abs( qaX.x ) + abs( qaY.x ) ), max( fwidth( qc.y ), fwidth( qc.x ) ), farK ) * 16.0;
   float detail = ( 1.0 - smoothstep( 0.3, 0.7, cellPx ) ) * ( 1.0 - smoothstep( 900.0, 1500.0, dist ) );
   // The long swell, at 20 percent: it drifts the thresholds, never draws crests.
   float swell = 0.2 * sin( dot( p, vec2( -0.2425, -0.9701 ) ) * 0.0331 - t * 0.75 );
   float darkS = pStep( 0.6 + swell * 0.2, 1.0 - ca );
-  float lightS = pStep( 0.7 - swell * 0.2, 1.0 - cb ) * ( 1.0 - darkS );
+  // 15a: near the camera the light shapes are the second layer's cell borders
+  // (about a fifth of the water), so the light falls between the dark scallops
+  // as wavelets; round light cells read as polka dots there. The far pair keeps
+  // its light cells.
+  float lightS = mix( pStep( 0.6 + swell * 0.1, cb ), pStep( 0.7 - swell * 0.2, 1.0 - cb ), farK ) * ( 1.0 - darkS );
 
   // Shallow, mid, deep: posterised from the height texture.
   vec2 huv = ( p - uHB.xy ) * uHB.zw;
   float ground = ( huv.x > 0.0 && huv.x < 1.0 && huv.y > 0.0 && huv.y < 1.0 ) ? texture2D( uHeight, huv ).r : -200.0;
   float depth = uLevel - ground;
-  float fr = texture2D( uNoise, p / 61.0 ).r;
+  // 15a: the shore's three noises (the bands' jitter, the foam's lumps, the rim)
+  // only where the shore is: from 12 deep on the bands are all deep and both
+  // foams are off whatever the noise says, so open water skips the three reads.
+  vec2 frUv = p / 61.0;
+  vec2 frX = dFdx( frUv ), frY = dFdy( frUv );
+  float fr = 0.5;
+  float lumps = 0.0;
+  float rimN = 0.0;
+  if ( depth < 12.0 ) {
+    fr = textureGrad( uNoise, frUv, frX, frY ).r;
+    lumps = textureGrad( uNoise, p / 23.0 + vec2( t * 0.006, 0.0 ), frX * 2.652, frY * 2.652 ).r;
+    rimN = textureGrad( uNoise, p / 26.0 + t * 0.015, frX * 2.346, frY * 2.346 ).g;
+  }
   float band = pBands3( depth + ( fr - 0.5 ) * 2.0, 2.5, 9.0 );
   vec3 body = mix( uShallow, mix( uShallow, uDeep, 0.55 ), clamp( band * 2.0, 0.0, 1.0 ) );
   body = mix( body, uDeep, clamp( band * 2.0 - 1.0, 0.0, 1.0 ) );
@@ -275,36 +312,33 @@ void main() {
   vec3 col = mix( base, darkC, darkS * detail );
   col = mix( col, lightC, lightS * detail );
 
-  // Glints: the brightest cells inside the sun's lobe, near white, broken dashes.
+  // Glints: bright, near white, inside the sun's lobe.
   vec2 dirH = normalize( -V.xz + 1e-5 );
   vec2 sunH = normalize( uSunDir.xz + 1e-5 );
   // A low sun spreads its path wide across rippled water: a broad lobe, so the
-  // broken glint path reaches in from the sun's side of the frame.
+  // glint path reaches in from the sun's side of the frame (the far mirror's: the brightest cells).
   float lobe = pow( max( dot( dirH, sunH ), 0.0 ), 1.6 ) * smoothstep( 0.0, 0.2, 1.0 - V.y ) * smoothstep( -0.05, 0.1, uSunDir.y );
   float glint = pStep( 0.9 - 0.42 * lobe, 1.0 - min( ca, cb * 1.15 ) ) * pStep( 0.12, lobe ) * max( detail, 0.5 );
-  // Final pass C: on the near and middle water (detail) the round cells read
-  // as leopard spots all over the bay. There the glints are broken dashes
-  // lying across the sun's line (the way a glitter path breaks up), in a
-  // narrower path toward the sun, and the rest of the water stays calm. The
-  // far mirror keeps the old glints (the a8 frame is locked).
-  // (No branch: the texture read and pStep need their derivatives in every pixel of a quad.)
+  // On the near and middle water (detail) the glints are where both layers'
+  // cell borders cross: small and many toward the sun, fewer and smaller out of
+  // its path, twinkling as the layers slide past each other. (Final pass C drew
+  // broken dashes stretched 520 by 55 across the sun's line here, cut at a hard
+  // edge of the path; Lovro's "weird streaks", map review 2026-10-15, item 15a.)
+  // The far mirror keeps the old glints.
   float lobeN = pow( max( dot( dirH, sunH ), 0.0 ), 3.0 ) * smoothstep( 0.0, 0.2, 1.0 - V.y ) * smoothstep( -0.05, 0.1, uSunDir.y );
-  vec2 sPerp = vec2( -sunH.y, sunH.x );
-  vec2 gq = vec2( dot( p, sPerp ) / 520.0, dot( p, sunH ) / 55.0 ) + vec2( 0.004, -0.009 ) * t;
-  float dash = pStep( 0.95 - 0.33 * lobeN, 1.0 - texture2D( uNoise, gq ).g ) * pStep( 0.1, lobeN );
-  glint = mix( glint, dash, detail );
+  float spark = pStep( 0.66 - 0.04 * lobeN, min( ca, cb ) ) * smoothstep( 0.02, 0.3, lobeN );
+  glint = mix( glint, spark, detail );
   col = mix( col, uSunCol * 1.25 + vec3( 0.25 ), glint );
 
   // Foam bands marching up the beach (every ~7.7 s) and breaking into lumps as they die.
   float d = depth + ( fr - 0.5 ) * 1.5;
   float wave = fract( d * 0.25 + t * 0.13 );
   float life = 1.0 - smoothstep( 0.8, 6.5, d );
-  float lumps = texture2D( uNoise, p / 23.0 + vec2( t * 0.006, 0.0 ) ).r;
   float line = pStep( 0.9, wave ) * life * step( 0.3, d ) * pStep( 0.28 + 0.4 * ( 1.0 - smoothstep( 0.5, 4.0, d ) ), lumps );
   // The white rim at the water's edge, washing in and out on the swash.
   float sw = 0.5 + 0.5 * sin( uSwash + p.x * 0.006 + p.y * 0.004 );
   float reach = 0.5 + 1.3 * sw;
-  float rimF = ( 1.0 - pStep( reach, d ) ) * pStep( 0.35, texture2D( uNoise, p / 26.0 + t * 0.015 ).g );
+  float rimF = ( 1.0 - pStep( reach, d ) ) * pStep( 0.35, rimN );
   col = mix( col, uFoam, clamp( max( line * 0.85, rimF * 0.9 ), 0.0, 1.0 ) * step( -2.0, depth ) );
 
   gl_FragColor = vec4( col, 1.0 );
@@ -321,6 +355,10 @@ uniform float uTime, uSpeed, uWhite, uLook, uRoughK, uSheen, uWild, uDim;
 uniform vec2 uEndFade;
 uniform vec3 uSunDir, uSunCol, uSkyLo, uSkyHi, uBody, uFoam, uGlow, uTeal, uJadeC;
 uniform sampler2D uNoise;
+#ifdef POOL_LOOK
+uniform float uDay;
+uniform vec4 uJoin;
+#endif
 varying vec3 vW;
 varying vec4 vFlow;
 ${NOISE_TEX_GLSL}
@@ -333,9 +371,45 @@ void main() {
   float magic = vFlow.w;
   float t = uTime * uSpeed * ( 1.0 + rough );
   float fine = 1.0 - smoothstep( 1.5, 5.0, fwidth( s ) );
+#ifndef POOL_LOOK
   float fres = pow( 1.0 - clamp( V.y, 0.0, 1.0 ), 3.0 );
+#endif
   float st1, st2, streak, tone;
   vec3 col;
+#ifdef POOL_LOOK
+  // Map review 2026-10-15, item 15b: the river is the pool's water running out
+  // of it (the "River" ribbon only; the other ribbons compile without this).
+  // uJoin: its water fades in over the pool from s = x to y, and its running
+  // water (streaks, banks, white water) grows in from z to w.
+  float join = smoothstep( uJoin.x, uJoin.y, s );
+  float run = smoothstep( uJoin.z, uJoin.w, s );
+  vec3 R;
+  {
+    // The look 1 streaks (as the stream's, below).
+    st1 = texture2D( uNoise, vec2( u * 0.9 + 0.03 * sin( s * 0.02 ), ( s - t ) / 260.0 ) ).r;
+    st2 = texture2D( uNoise, vec2( u * 2.1 + 0.4, ( s - t * 1.4 ) / 110.0 ) ).r;
+    float st3 = texture2D( uNoise, vec2( u * 5.0 + 0.7, ( s - t * 1.9 ) / 40.0 ) ).r;
+    streak = st1 * 0.5 + mix( 0.5, st2, fine ) * 0.3 + mix( 0.5, st3, fine ) * 0.2;
+    float cen = 1.0 - smoothstep( 0.15, 0.8, abs( u ) );
+    vec3 bodyF = mix( uJadeC, uTeal, cen );
+    tone = pBands3( streak, 0.42, 0.64 );
+    // The pool's shallow water, running: the pool's deep teal and jade (uTeal
+    // and uJadeC carry the pool's colours here), the sky by the pool's Fresnel,
+    // capped at 0.55 and tinted jade, on a surface tilted by the streaks (flat
+    // while it is still the pool), then the pool's turquoise shallows over it
+    // at 0.4, as POOL_FRAG mixes them. The streaks are lighter and darker water
+    // (the pool's slivers), not the pale sky runs that made it grey white.
+    vec3 N = normalize( vec3( ( st1 - 0.5 ) * 0.3 * run, 1.0, ( st2 - 0.5 ) * 0.3 * run ) );
+    R = reflect( -V, N );
+    vec3 skyP = mix( uSkyLo, uSkyHi, smoothstep( 0.0, 0.6, max( R.y, 0.0 ) ) );
+    float fx = 1.0 - clamp( dot( N, V ), 0.0, 1.0 );
+    fx *= fx;
+    vec3 base = mix( mix( uTeal, bodyF, run ), mix( skyP, uJadeC, 0.3 ) * 0.8, min( ( 0.04 + 0.96 * fx * fx ) * 0.55, 0.55 ) );
+    base = base * 0.6 + vec3( 0.04, 0.144, 0.132 );
+    col = base * mix( 1.0, mix( 0.86, 1.12, tone ), run );
+    col = mix( col, col * 1.08 + skyP * 0.05, step( 0.99, tone ) * run );
+  }
+#else
   if ( uLook > 0.5 ) {
     // The stream and the river (uLook 1): streaks at three scales, about 5:1
     // along the flow, over a deep teal middle that lightens to jade toward the
@@ -363,6 +437,7 @@ void main() {
     tone = pBands3( streak, 0.4, 0.68 );
     col = base * mix( 0.72, 1.12, tone );
   }
+#endif
   // (fix-3) A wild stream (uWild, the glowing stream): its water edge wanders
   // along the flow (ragged banks, never one clean ribbon), its water sits dark
   // in the ground (uDim), and wet stones break it.
@@ -374,6 +449,10 @@ void main() {
   }
   // Dark wet banks: the ribbon's edges.
   float bank = smoothstep( edgeW - 0.14, edgeW + 0.12, abs( u ) );
+#ifdef POOL_LOOK
+  // 15b: the river's banks, and its white water at them, grow in as it leaves the pool.
+  bank *= run;
+#endif
   col = mix( col, uBody * 0.45 * mix( 1.0, uDim, uWild ), bank * 0.65 );
   // White water: at stones along the edges, in broken patches, and wherever the
   // level drops fast (rapids and cascades).
@@ -381,6 +460,9 @@ void main() {
   // so the edge foam breaks into patches instead of running as a border.
   float bankN = texture2D( uNoise, vec2( 0.31 + step( 0.0, u ) * 0.37, s / 520.0 ) ).r;
   float edge = smoothstep( 0.66, 0.9, abs( u ) ) * ( 1.0 - bank ) * smoothstep( 0.45, 0.62, bankN );
+#ifdef POOL_LOOK
+  edge *= run;
+#endif
   float wantW = clamp( edge * 0.3 + uWhite + rough * 0.95 * uRoughK, 0.0, 1.0 );
   float white = pStep( 1.02 - wantW * 0.62, mix( 0.5, st2, fine ) * 0.55 + st1 * 0.45 + rough * 0.15 );
   // (fix-3) the wild stream: a fleck of white only, at its own water value.
@@ -389,10 +471,20 @@ void main() {
   // (fix-3) soft low down, brightening only toward the forest.
   vec3 glowC = uGlow * mix( 0.55, 1.1, tone ) * mix( 1.0, 0.2 + 0.7 * magic * magic, uWild );
   col = mix( col, glowC, magic * ( 1.0 - bank * 0.6 ) );
+#ifndef POOL_LOOK
   vec3 N = normalize( vec3( ( st1 - 0.5 ) * 0.3, 1.0, ( st2 - 0.5 ) * 0.3 ) );
   vec3 R = reflect( -V, N );
+#endif
   col += uSunCol * pStep( 0.975, max( dot( R, uSunDir ), 0.0 ) ) * 0.35 * ( 1.0 - magic ) * mix( 1.0, uDim, uWild );
+#ifdef POOL_LOOK
+  // 15b: over the pool the river's sides are soft (a current in the pool's
+  // water, not a ribbon), back to the usual edge by the time it is opaque; it
+  // fades in out of the pool, and takes the day's light as the pool does.
+  float a = ( 1.0 - smoothstep( edgeW - 0.5 * ( 1.0 - join ), edgeW + 0.14, abs( u ) ) ) * join;
+  col *= uDay;
+#else
   float a = 1.0 - smoothstep( edgeW, edgeW + 0.14, abs( u ) );
+#endif
   // (fix-3) the stream fades out over the curtain's approach (no seam across it).
   a *= 1.0 - smoothstep( uEndFade.x, uEndFade.y, s );
   if ( uWild > 0.5 ) {
@@ -421,11 +513,15 @@ const POOL_VERT = /* glsl */ `
 #include <common>
 #include <fog_pars_vertex>
 uniform float uTime;
-uniform vec2 uImpact;
+uniform vec2 uImpact, uOutlet;
 uniform vec3 uPool;
+// (15b, review round 1) How far inside the shore (terrain.ts poolShoreR) the vertex lies.
+attribute float aShore;
 varying vec3 vW;
 varying vec3 vN;
 varying float vEl;
+varying float vWob;
+varying float vShore;
 ${NOISE_GLSL}
 float poolH( vec2 p, float amp ) {
   return amp * ( sNoise( p * 0.075 + vec2( uTime * 0.31, -uTime * 0.47 ) ) + sNoise( p * 0.17 - vec2( 0.0, uTime * 0.83 ) ) * 0.6 - 0.8 );
@@ -434,14 +530,29 @@ void main() {
   vec4 wp = modelMatrix * vec4( position, 1.0 );
   vec2 d = wp.xz - uImpact;
   float el = length( vec2( d.x / 60.0, d.y / 26.0 ) );
-  // Mounds of white water boiling up at the impact, settling as it spreads.
-  float rim = 1.0 - smoothstep( uPool.z - 26.0, uPool.z - 2.0, length( wp.xz - uPool.xy ) );
+  // Mounds of white water boiling up at the impact, settling as it spreads,
+  // and still from 1 past the shore out (rising over 24 into the water).
+  float rim = 1.0 - smoothstep( -23.0, 1.0, -aShore );
   float amp = ( 4.2 * ( 1.0 - smoothstep( 0.4, 3.2, el ) ) + 0.45 ) * rim;
   float h0 = poolH( wp.xz, amp );
   // A smooth normal from the same field, so the mounds shade as rolling volumes.
   float hx = poolH( wp.xz + vec2( 2.0, 0.0 ), amp );
   float hz = poolH( wp.xz + vec2( 0.0, 2.0 ), amp );
   vN = normalize( vec3( h0 - hx, 2.0, h0 - hz ) );
+  // Map review 2026-10-15, item 15b: the shallows do not follow the bowl's
+  // round contours. A slow wobble round the pool (3 and 7 lobes) moves the
+  // shallow band, the bed and the shore line in and out by up to about 7 units
+  // (POOL_FRAG adds it to the water's depth), so the edge reads uneven instead
+  // of as a drawn circle; not where the river leaves (uOutlet, its first
+  // reach's direction), where the pool's water runs on into it. Per vertex:
+  // 56 around the disc hold 7 lobes, and the pixels pay nothing.
+  vec2 dc = wp.xz - uPool.xy;
+  float ang = atan( dc.y, dc.x );
+  float outlet = smoothstep( 0.82, 0.95, dot( dc, uOutlet ) / max( length( dc ), 1e-3 ) );
+  vWob = ( 1.3 * sin( 3.0 * ang + 1.3 ) + 0.7 * sin( 7.0 * ang + 0.4 ) ) * ( 1.0 - outlet );
+  // Review round 1: the shallows hug the shore, points of land included (the
+  // height texture's 33 unit cells cannot draw them); none across the outlet.
+  vShore = aShore + 99.0 * outlet;
   wp.y += h0;
   vW = wp.xyz;
   vEl = el;
@@ -462,6 +573,8 @@ uniform vec4 uHB;
 varying vec3 vW;
 varying vec3 vN;
 varying float vEl;
+varying float vWob;
+varying float vShore;
 ${NOISE_TEX_GLSL}
 ${NOISE_TEX_FRAG_GLSL}
 void main() {
@@ -490,6 +603,11 @@ void main() {
   water = mix( water, water * 1.12 + sky * 0.04, pStep( 0.66, sl ) );
   vec2 huv = ( vW.xz - uHB.xy ) * uHB.zw;
   float depth = uLevel - texture2D( uHeight, huv ).r;
+  // Review round 1: never deeper than the shore's own slope allows (vShore),
+  // so the shallows, the bed and the shore line follow the shore round its points.
+  depth = min( depth, 0.3 + 0.3 * vShore );
+  // 15b: the shore's wobble (POOL_VERT): the shallows' outline is uneven.
+  depth += vWob;
   // Round F: lighter turquoise where it shallows, the bed showing only at the very edge.
   vec3 turq = vec3( 0.1, 0.36, 0.33 );
   water = mix( water, mix( water, turq, 0.4 ), 1.0 - pStep( 3.2 + fr * 2.0, depth ) );
@@ -1063,6 +1181,53 @@ const APPROACH_LEN = 42;
 const APPROACH_BANK = 4;
 /** (fix-3) The glowing stream's water value (1 = the other ribbons'). */
 const GLOW_DIM = 0.42;
+/**
+ * (15b, map review 2026-10-15) Where the river leaves the pool. Its ribbon
+ * starts `inside` units inside the pool's rim, `lift` over the pool's water
+ * (clear of the pool's swell there), fades in until `full` inside the rim, and
+ * eases down to its own line over `ramp` past the rim; its running water
+ * (streaks, banks, white water) grows in until `run` past the rim.
+ */
+const RIVER_JOIN = { inside: 16, full: 5, lift: 0.55, ramp: 26, run: 40 } as const;
+/**
+ * (15b, review round 1) Where the river meets the sea. RIVER runs on out to
+ * (4100, -1) over open sea, so its ribbon floated up to 2.6 over the sea for
+ * about 390 units past the coast, in the pool's teal over the sea's sky, and
+ * ended in a straight cut (a second water at the mouth). Now it fades out from
+ * `fadeIn` before the coast to `fadeOut` past it, so the sea's own water shows
+ * through, and nothing is laid past `skip` (waterAt's line stops there too).
+ * skip is at least fadeOut + RIBBON_STEP, so the ribbon's last section is clear.
+ */
+const RIVER_SEA = { fadeIn: 12, fadeOut: 24, skip: 32 } as const;
+let riverCoastS: number | null = null;
+/**
+ * The distance along RIVER's curve (centripetal, sampled every RIBBON_STEP as
+ * buildRibbon lays it) of its first point over drawn ground under the sea's
+ * level, counted back from the river's end; Infinity if its end is on land.
+ * `ground` is the ground as the terrain mesh draws it (the install's drawn
+ * height, or waterAt's caller's rocks.ts groundY: the same grid), worked out
+ * once, so the ribbon and waterAt read the same number.
+ */
+function riverCoast(ground: (x: number, z: number) => number): number {
+  if (riverCoastS !== null) return riverCoastS;
+  const curve = new THREE.CatmullRomCurve3(RIVER.map((p) => new THREE.Vector3(p[0], p[1], p[2])), false, "centripetal");
+  const len = curve.getLength();
+  const n = Math.max(4, Math.round(len / RIBBON_STEP));
+  const v = new THREE.Vector3();
+  const under = (i: number) => {
+    curve.getPointAt(i / n, v);
+    return ground(v.x, v.z) < WORLD.seaLevel;
+  };
+  let i = n;
+  if (!under(i)) i = Infinity;
+  else while (i > 0 && under(i - 1)) i--;
+  riverCoastS = (i / n) * len;
+  return riverCoastS;
+}
+/** Past where the river's ribbon (and waterAt's line along it) stops, out in the sea: `s` is the distance along RIVER's curve. */
+function riverPastSea(s: number, ground: (x: number, z: number) => number): boolean {
+  return s > riverCoast(ground) + RIVER_SEA.skip;
+}
 /** (fix-3) Bends laid over the glowing stream's layout line: [amplitude, wavelength] pairs, units. */
 const GLOW_MEANDER: ReadonlyArray<readonly [number, number]> = [
   [16, 170],
@@ -1093,6 +1258,58 @@ function meander(pts: ReadonlyArray<readonly [number, number, number]>): Array<[
     out.push([p.x - (t.z / L) * off, p.y, p.z + (t.x / L) * off]);
   }
   return out;
+}
+
+/**
+ * Map review 2026-10-15, item 15c: where the brook and the glowing stream meet
+ * the Mirror Lake. A stream's line is carried on the way it last ran until
+ * MOUTH_IN inside the lake's shore (terrain.ts lakeShoreR), so its ribbon
+ * reaches the water wherever the shore lies; the ribbon fades out across the
+ * shore (mouthFade, into the lake's own colour) and is skipped past MOUTH_SKIP
+ * inside it, where only the mirror shows.
+ */
+const MOUTH_IN = 20;
+const MOUTH_SKIP = 18;
+function toLake(pts: ReadonlyArray<readonly [number, number, number]>): Array<[number, number, number]> {
+  const out = pts.map((p) => [p[0], p[1], p[2]] as [number, number, number]);
+  const a = out[out.length - 2];
+  const b = out[out.length - 1];
+  const dx = b[0] - a[0];
+  const dz = b[2] - a[2];
+  const L = Math.hypot(dx, dz) || 1;
+  const lk = WORLD.lake;
+  for (let t = 0; t <= 240; t += 4) {
+    const x = b[0] + (dx / L) * t;
+    const z = b[2] + (dz / L) * t;
+    if (Math.hypot(x - lk.x, z - lk.z) < lakeShoreAt(x, z) - MOUTH_IN) {
+      if (t > 0) out.push([x, b[1], z]);
+      break;
+    }
+  }
+  return out;
+}
+/** More than MOUTH_SKIP inside the lake's shore: a ribbon there would only lie under the mirror. */
+function pastMouth(x: number, z: number): boolean {
+  return Math.hypot(x - WORLD.lake.x, z - WORLD.lake.z) < lakeShoreAt(x, z) - MOUTH_SKIP;
+}
+/** Where a ribbon along `pts` fades into the lake, as distances along it (FLOW_FRAG's uEndFade): from 3 outside the shore to 16 inside. */
+function mouthFade(pts: ReadonlyArray<readonly [number, number, number]>): [number, number] {
+  const curve = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(p[0], p[1], p[2])), false, "centripetal");
+  const len = curve.getLength();
+  const lk = WORLD.lake;
+  const v = new THREE.Vector3();
+  let s0 = 1e9;
+  let s1 = 2e9;
+  for (let i = 0; i <= 400; i++) {
+    curve.getPointAt(i / 400, v);
+    const e = Math.hypot(v.x - lk.x, v.z - lk.z) - lakeShoreAt(v.x, v.z);
+    if (s0 > 1e8 && e < 3) s0 = (i / 400) * len;
+    if (e < -16) {
+      s1 = (i / 400) * len;
+      break;
+    }
+  }
+  return [s0, Math.max(s1, s0 + 1)];
 }
 
 interface RibbonSpec {
@@ -1199,16 +1416,19 @@ function buildRibbon(spec: RibbonSpec, drawnGround: (x: number, z: number) => nu
  * the ground's height as the terrain mesh draws it (rocks.ts groundY).
  *
  *   the sea      the "Sea" plane at WORLD.seaLevel, wherever the ground is under it;
- *   the lake     light.ts's mirror: a disc of WORLD.lake.r + 20 at WORLD.lake.y
- *                + 0.5 (its LAKE_LIFT), wherever the ground is under it. That is
- *                20 past WORLD.lake.r, where scene.ts's surfaceHeight stops, and
- *                the ground just outside r is under the mirror;
- *   the pool     the "Pool" disc, WORLD.pool.r + 3 at WORLD.pool.y + 0.15 (its
- *                swell is under half a unit at the rim), wherever the ground is under it;
+ *   the lake     light.ts's mirror: the shore terrain.ts draws (lakeShoreR) plus
+ *                LAKE_PAD, at LAKE_SURFACE (WORLD.lake.y + its LAKE_LIFT),
+ *                wherever the ground is under it (item 15c: the same function
+ *                shapes the ground, the mirror and this test);
+ *   the pool     the "Pool" disc at POOL_SURFACE, to the shore terrain.ts draws
+ *                (poolShoreR, with its points of land) plus POOL_PAD, wherever the
+ *                ground is under it (its swell, up to half a unit, rises from
+ *                nothing at the shore over the 24 inside it);
  *   the tarn     the "UpperTarn" disc, r + 14 at its y;
  *   the ribbons  as the install's addRibbon calls lay them: the river, the brook
  *                and the glowing stream over the drawn ground across their
- *                whole width; the stream at its own level, cut off where the
+ *                whole width (the river only to RIVER_SEA.skip past its mouth,
+ *                riverCoast; the last two carried on into the lake, toLake); the stream at its own level, cut off where the
  *                banks rise over it, and on to the lip (the curtain's approach
  *                takes its last APPROACH_LEN at the same level).
  * The island's rills are dress-sky.ts's and register "water" footprints, which
@@ -1216,7 +1436,7 @@ function buildRibbon(spec: RibbonSpec, drawnGround: (x: number, z: number) => nu
  * Pure (no scene): the first call builds the ribbons' lines, later calls allocate nothing.
  */
 export function waterAt(x: number, z: number, ground: (x: number, z: number) => number, margin = 0): boolean {
-  const W = waterLines();
+  const W = waterLines(ground);
   const m = Math.max(0, margin);
   // Nothing drawn anywhere near: the common case, answered with one read of the ground.
   const lk = WORLD.lake;
@@ -1224,7 +1444,7 @@ export function waterAt(x: number, z: number, ground: (x: number, z: number) => 
   const tn = WORLD.upperFalls.tarn;
   const nearDisc = (cx: number, cz: number, r: number) => (x - cx) * (x - cx) + (z - cz) * (z - cz) < (r + m) * (r + m);
   const g0 = ground(x, z);
-  if (g0 > WORLD.seaLevel + 40 && !nearDisc(lk.x, lk.z, lk.r + 20) && !nearDisc(pl.x, pl.z, pl.r + 3) && !nearDisc(tn.x, tn.z, tn.r + 14) && !W.near(x, z, m)) return false;
+  if (g0 > WORLD.seaLevel + 40 && !nearDisc(lk.x, lk.z, LAKE_OUTER + LAKE_PAD) && !nearDisc(pl.x, pl.z, pl.r + POOL_PAD) && !nearDisc(tn.x, tn.z, tn.r + 14) && !W.near(x, z, m)) return false;
   if (wetPoint(W, x, z, g0)) return true;
   if (m <= 0) return false;
   // Eight points round it at `margin`, each with its own ground.
@@ -1241,9 +1461,18 @@ export function waterAt(x: number, z: number, ground: (x: number, z: number) => 
 function wetPoint(W: WaterLines, x: number, z: number, g: number): boolean {
   if (g < WORLD.seaLevel) return true;
   const lk = WORLD.lake;
-  if (g < lk.y + 0.5 && (x - lk.x) * (x - lk.x) + (z - lk.z) * (z - lk.z) < (lk.r + 20) * (lk.r + 20)) return true;
+  if (g < LAKE_SURFACE) {
+    const d = Math.hypot(x - lk.x, z - lk.z);
+    if (d < LAKE_OUTER + LAKE_PAD && d < lakeShoreAt(x, z) + LAKE_PAD) return true;
+  }
   const pl = WORLD.pool;
-  if (g < pl.y + 0.6 && (x - pl.x) * (x - pl.x) + (z - pl.z) * (z - pl.z) < (pl.r + 3) * (pl.r + 3)) return true;
+  if (g < POOL_SURFACE + 0.5) {
+    const d = Math.hypot(x - pl.x, z - pl.z);
+    if (d < pl.r + POOL_PAD) {
+      const R = poolShoreAt(x, z);
+      if (d < R + POOL_PAD && g < POOL_SURFACE + 0.5 * smooth(-1, 23, R - d)) return true;
+    }
+  }
   const tn = WORLD.upperFalls.tarn;
   if (g < tn.y && (x - tn.x) * (x - tn.x) + (z - tn.z) * (z - tn.z) < (tn.r + 14) * (tn.r + 14)) return true;
   return W.wet(x, z, g);
@@ -1256,29 +1485,30 @@ interface WaterLines {
   wet(x: number, z: number, g: number): boolean;
 }
 let waterLinesCache: WaterLines | null = null;
-/** The ribbons' centre lines, sampled as buildRibbon samples them, in a grid of 48 unit cells. */
-function waterLines(): WaterLines {
+/** The ribbons' centre lines, sampled as buildRibbon samples them, in a grid of 48 unit cells (`ground`: the drawn ground, for the river's mouth). */
+function waterLines(ground: (x: number, z: number) => number): WaterLines {
   if (waterLinesCache) return waterLinesCache;
   const U = WORLD.upperFalls;
-  const lk = WORLD.lake;
   const pl = WORLD.pool;
   // Segments: ax, az, bx, bz, half width at a and b, level at a and b (1e9: drawn over the ground).
   const seg: number[] = [];
-  const line = (pts: ReadonlyArray<readonly [number, number, number]>, halfW: (a: number) => number, skip: (x: number, z: number) => boolean, level: boolean) => {
+  // `skip` gets a point and its distance along the line.
+  const line = (pts: ReadonlyArray<readonly [number, number, number]>, halfW: (a: number) => number, skip: (x: number, z: number, s: number) => boolean, level: boolean) => {
     const curve = new THREE.CatmullRomCurve3(pts.map((p) => new THREE.Vector3(p[0], p[1], p[2])), false, "centripetal");
-    const n = Math.max(4, Math.round(curve.getLength() / RIBBON_STEP));
+    const len = curve.getLength();
+    const n = Math.max(4, Math.round(len / RIBBON_STEP));
     const P = curve.getSpacedPoints(n);
     for (let i = 0; i < n; i++) {
       const a = P[i];
       const b = P[i + 1];
-      if (skip(a.x, a.z) || skip(b.x, b.z)) continue;
+      if (skip(a.x, a.z, (i / n) * len) || skip(b.x, b.z, ((i + 1) / n) * len)) continue;
       seg.push(a.x, a.z, b.x, b.z, halfW(i / n), halfW((i + 1) / n), level ? a.y : 1e9, level ? b.y : 1e9);
     }
   };
-  line(RIVER, () => RIVER_HW, (x, z) => Math.hypot(x - pl.x, z - pl.z) < pl.r - 6, false);
+  line(RIVER, () => RIVER_HW, (x, z, s) => Math.hypot(x - pl.x, z - pl.z) < pl.r - RIVER_JOIN.inside || riverPastSea(s, ground), false);
   line(STREAM, (a) => streamHalfW(a) + APPROACH_BANK, (x, z) => Math.hypot(x - U.tarn.x, z - U.tarn.z) < U.tarn.r - 8, true);
-  line(BROOK, (a) => brookHalfW(a) + 1.5, (x, z) => Math.hypot(x - lk.x, z - lk.z) < lk.r - 4, false);
-  line(meander(GLOW_STREAM), (a) => (4 + 3.5 * a) * (1 - 0.25 * smooth(0.2, 0.45, a)), (x, z) => Math.hypot(x - lk.x, z - lk.z) < lk.r - 4, false);
+  line(toLake(BROOK), (a) => brookHalfW(a) + 1.5, pastMouth, false);
+  line(toLake(meander(GLOW_STREAM)), (a) => (4 + 3.5 * a) * (1 - 0.25 * smooth(0.2, 0.45, a)), pastMouth, false);
   const S = 8;
   const N = seg.length / S;
   const CELL = 48;
@@ -1631,16 +1861,48 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
     stats[`${name}Tris`] = (g.index ? g.index.count : 0) / 3;
   };
   const r0 = performance.now();
-  // One program for every ribbon (same defines): their looks differ by uniforms.
+  // One program for the stream, the brook and the glowing stream (same defines):
+  // their looks differ by uniforms. The river compiles its own (POOL_LOOK).
+  // (15b) The river is the pool's water running out of it: the pool's colours
+  // and sky (POOL_LOOK), starting inside the pool, just over its water, and fading
+  // in there (uJoin), so the pool turns into the river with no edge between them.
+  const riverMat = flowMat("SurfRiver", 26, 0.1, 1);
+  riverMat.defines.POOL_LOOK = "";
+  riverMat.uniforms.uTeal.value = lin(WATER_C.pool);
+  riverMat.uniforms.uJadeC.value = lin(WATER_C.poolJade);
+  // The river's length along its curve, as buildRibbon measures it (its skip gets a share of it).
+  let riverLen = 0;
+  {
+    // Where the join's distances from the pool's middle fall along the curve.
+    const c = new THREE.CatmullRomCurve3(RIVER.map((p) => new THREE.Vector3(p[0], p[1], p[2])), false, "centripetal");
+    const L = c.getLength();
+    riverLen = L;
+    const v = new THREE.Vector3();
+    const sAt = (dist: number) => {
+      for (let i = 0; i <= 400; i++) {
+        c.getPointAt(i / 400, v);
+        if (Math.hypot(v.x - pool.x, v.z - pool.z) >= dist) return (i / 400) * L;
+      }
+      return L;
+    };
+    const J = RIVER_JOIN;
+    riverMat.uniforms.uJoin = { value: new THREE.Vector4(sAt(pool.r - J.inside), sAt(pool.r - J.full), sAt(pool.r - J.inside), sAt(pool.r + J.run)) };
+    // (review round 1) Out into the sea's own water at its mouth (RIVER_SEA).
+    const sSea = riverCoast(drawn);
+    if (Number.isFinite(sSea)) riverMat.uniforms.uEndFade.value.set(sSea - RIVER_SEA.fadeIn, sSea + RIVER_SEA.fadeOut);
+  }
   addRibbon(
     "River",
     {
       pts: RIVER,
       halfW: () => RIVER_HW,
       lift: 0.5,
-      skip: (x, z) => Math.hypot(x - pool.x, z - pool.z) < pool.r - 6,
+      // Flat over the pool, J.lift over its water, easing down to the river's own line past the rim.
+      level: (x, y, z) => y + Math.max(0, POOL_SURFACE + RIVER_JOIN.lift - y) * (1 - smooth(pool.r, pool.r + RIVER_JOIN.ramp, Math.hypot(x - pool.x, z - pool.z))),
+      // Not inside the pool, and not out at sea past its mouth (RIVER_SEA).
+      skip: (x, z, along) => Math.hypot(x - pool.x, z - pool.z) < pool.r - RIVER_JOIN.inside || riverPastSea(along * riverLen, drawn),
     },
-    flowMat("SurfRiver", 26, 0.1, 1),
+    riverMat,
   );
   const streamMat = flowMat("SurfStream", 34, 0.16, 1);
   {
@@ -1673,18 +1935,23 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
     },
     streamMat,
   );
+  // Item 15c: carried on into the lake and faded out across the shore, so it
+  // meets the lake in the lake's colour (Lovro: "It should mesh together").
+  const brookPts = toLake(BROOK);
+  const brookMat = flowMat("SurfBrook", 18, 0.08);
+  brookMat.uniforms.uEndFade.value.set(...mouthFade(brookPts));
   addRibbon(
     "Brook",
     {
-      pts: BROOK,
+      pts: brookPts,
       // Laid over the brook's carved bed (bilinear grid + 1.2), a little above and wider.
       halfW: (a) => brookHalfW(a) + 1.5,
       lift: 1.4,
       ground: coarseH,
       level: (x, y, z) => Math.max(y + 0.6, coarseH(x, z) + 1.4),
-      skip: (x, z) => Math.hypot(x - WORLD.lake.x, z - WORLD.lake.z) < WORLD.lake.r - 4,
+      skip: pastMouth,
     },
-    flowMat("SurfBrook", 18, 0.08),
+    brookMat,
   );
   // The glowing stream: the stream's three-scale look (plain water by the lake,
   // glowing teal only where magicAt rises), little white water on the hill, and
@@ -1700,16 +1967,19 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   glowMat.uniforms.uSheen.value = 0.12;
   glowMat.uniforms.uWild.value = 1;
   glowMat.uniforms.uDim.value = GLOW_DIM;
+  // Item 15c: down to the lake's water wherever the shore lies, faded into it.
+  const glowPts = toLake(meander(GLOW_STREAM));
+  glowMat.uniforms.uEndFade.value.set(...mouthFade(glowPts));
   addRibbon(
     "GlowStream",
     {
-      pts: meander(GLOW_STREAM),
+      pts: glowPts,
       halfW: (a) => (4 + 3.5 * a) * (1 - 0.25 * smooth(0.2, 0.45, a)),
       lift: 1.2,
       // Following the ground (the meander leaves the layout's line, and the
       // line's y would float it over the low side of the slope).
       level: (x, _y, z) => drawn(x, z) + 1.2,
-      skip: (x, z) => Math.hypot(x - WORLD.lake.x, z - WORLD.lake.z) < WORLD.lake.r - 4,
+      skip: pastMouth,
       magic: (x, z) => smooth(0.2, 0.7, magicAt(x, z)),
     },
     glowMat,
@@ -1782,6 +2052,8 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
     uTeal: { value: lin(WATER_C.teal) },
     uJadeC: { value: lin(WATER_C.jade) },
   };
+  // (15b) The river takes the day's light from the same live value as the pool.
+  riverMat.uniforms.uDay = curtainU.uDay;
   /** Final pass C: the camera's distance in front of the sheet when it is low and close (1e4 elsewhere), for the close threads' scale. */
   const camDU = { value: 1e4 };
   /** Final pass D: the pass through the falls (x 0-1) and the camera's distance to the sheet (y), for the spray (CURTAIN_FRAG). */
@@ -1878,20 +2150,44 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
   meshes.push(curtain);
 
   // The pool: a polar disc a little wider than the pool (the bank clips it),
-  // displaced near the impact.
+  // displaced near the impact. (15b, review round 1) Its rim lies POOL_PAD past
+  // the shore terrain.ts draws (poolShoreR, with its points of land), each
+  // vertex moved along its radius, at POOL_SURFACE; aShore is how far inside
+  // the shore a vertex lies (the swell and the shallows read it).
   const impact = new THREE.Vector2(F.bottom[0] + FLOW_DIR[0] * 4, F.bottom[2] + FLOW_DIR[1] * 4);
-  const poolGeo = new THREE.RingGeometry(0.5, pool.r + 3, 56, 18);
+  const poolGeo = new THREE.RingGeometry(0.5, pool.r + POOL_PAD, 56, 18);
   poolGeo.rotateX(-Math.PI / 2);
+  {
+    const pos = poolGeo.getAttribute("position") as THREE.BufferAttribute;
+    const shore = new Float32Array(pos.count);
+    // RingGeometry lays its vertices ring by ring, 57 round each: the shore once per angle.
+    const round = 56 + 1;
+    const shoreAt = new Float32Array(round).fill(NaN);
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const z = pos.getZ(i);
+      const j = i % round;
+      if (shoreAt[j] !== shoreAt[j]) shoreAt[j] = poolShoreR(Math.atan2(z, x));
+      const R = shoreAt[j];
+      const k = (R + POOL_PAD) / (pool.r + POOL_PAD);
+      pos.setXYZ(i, x * k, 0, z * k);
+      shore[i] = R - Math.hypot(x, z) * k;
+    }
+    poolGeo.setAttribute("aShore", new THREE.BufferAttribute(shore, 1));
+    poolGeo.computeBoundingSphere();
+  }
   geos.push(poolGeo);
   const poolU = {
     uImpact: { value: impact },
-    uPool: { value: new THREE.Vector3(pool.x, pool.z, pool.r + 3) },
+    uPool: { value: new THREE.Vector3(pool.x, pool.z, pool.r + POOL_PAD) },
     uLevel: { value: pool.y },
     uDeep: { value: lin(WATER_C.pool) },
     uJade: { value: lin(WATER_C.poolJade) },
     uBed: { value: lin(WATER_C.poolBed) },
     uFoam: { value: lin(WATER_C.foam) },
     uShade: { value: lin(WATER_C.curtainShade).multiplyScalar(0.7) },
+    // (15b) the river's first reach, out of the pool: the shore's wobble stays off it.
+    uOutlet: { value: new THREE.Vector2(RIVER[1][0] - RIVER[0][0], RIVER[1][2] - RIVER[0][2]).normalize() },
   };
   const poolMat = new THREE.ShaderMaterial({
     name: "SurfPool",
@@ -1914,7 +2210,7 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
   mats.push(poolMat);
   const poolMesh = new THREE.Mesh(poolGeo, poolMat);
   poolMesh.name = "Pool";
-  poolMesh.position.set(pool.x, pool.y + 0.15, pool.z);
+  poolMesh.position.set(pool.x, POOL_SURFACE, pool.z);
 
   // Puffs: one program, three meshes.
   const puffU = { uLitC: { value: new THREE.Color(0.85, 0.83, 0.78) }, uShadeC: { value: new THREE.Color(0.5, 0.55, 0.6) } };
@@ -2281,7 +2577,7 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
   stats.upperFallsTris = (upperGeo.index ? upperGeo.index.count : 0) / 3;
   // sea, ribbons, curtain (front or back), pool, spray, plume, upper falls, tarn, island falls, island mist
   stats.drawCallsAdded = 1 + ribbons.length + 9;
-  stats.programs = "sea, flow, curtain, island falls, pool, puff, upper";
+  stats.programs = "sea, flow, river (flow with POOL_LOOK), curtain, island falls, pool, puff, upper";
   stats.installMs = Math.round(performance.now() - t0);
 
   let restored = 0;

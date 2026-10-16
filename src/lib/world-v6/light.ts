@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { Reflector } from "three/examples/jsm/objects/Reflector.js";
 import { FLIGHT_KEYS, PLACES, ROUTE_MARKS, TAIL_KEYS, TRAIL, WORLD, type LightKey } from "./layout";
-import { terrainHeight } from "./terrain";
+import { LAKE_PAD, lakeShoreR, terrainHeight } from "./terrain";
 
 /**
  * V4 light: the time of day along the route, the sky, the clouds and the
@@ -1719,27 +1719,42 @@ export function install(ctx: LightCtx): LightModule {
         vec3 c = lightSky(d);
         // v6 (bible 1.17): the Milky Way, once the sky is dark: a band of teal,
         // violet and rose dust with a bright core and dark rifts along it.
+        // Map review wave 3 (real_time_light.md "Cheap now"): its noise runs
+        // only where the band can change the screen. most: the most the band
+        // can add here (every factor below at its largest, each colour channel
+        // at 1). Times the slope of the screen's sRGB curve at this sky's
+        // darkest channel, that is the most it can move the pixel; under half
+        // an 8-bit step (0.5 / 255) it cannot show, so the noise is skipped
+        // and the sky's pixel comes out the same or 1 level off. The slope is
+        // 0.4396 at 1.0 and 12.92 at most (the curve's dark end): what shows
+        // at 0.4396 shows on any sky up to 1.0, what does not at 12.92 shows
+        // on none, and only between them is the slope worked out. Where the
+        // noise runs, the sum is the one it always was.
         if (uBand > 0.0) {
           float bd = dot(d, uBandN);
           float bm = exp(-bd * bd / 0.03);
           float core = exp(-bd * bd / 0.005);
-          // Position along the band, for the dust's colour and clumps.
-          vec3 bx = normalize(cross(uBandN, vec3(0.0, 1.0, 0.0)) + vec3(1e-5, 0.0, 0.0));
-          vec3 by = cross(uBandN, bx);
-          float along = atan(dot(d, by), dot(d, bx));
-          vec2 bq = vec2(along * 3.2, bd * 14.0);
-          float dust = lfbm(bq * 1.6 + 5.3);
-          float clump = smoothstep(0.35, 0.8, lfbm(bq * 3.1 + 1.7));
-          vec3 teal = vec3(0.16, 0.5, 0.56);
-          vec3 violet = vec3(0.42, 0.26, 0.66);
-          vec3 rose = vec3(0.72, 0.34, 0.5);
-          float hueT = lfbm(vec2(along * 1.3, 0.7) + 9.1);
-          vec3 bc = mix(mix(teal, violet, smoothstep(0.3, 0.55, hueT)), rose, smoothstep(0.55, 0.8, hueT));
-          bc = mix(bc, vec3(0.95, 0.86, 0.92), core * 0.55);
-          // Rifts: dark lanes off the band's centre, broken by the dust.
-          float rift = 1.0 - 0.8 * exp(-(bd - 0.025) * (bd - 0.025) / 0.00045) * smoothstep(0.3, 0.62, dust)
-                           - 0.4 * exp(-(bd + 0.05) * (bd + 0.05) / 0.0003) * smoothstep(0.45, 0.7, dust);
-          c += bc * uBand * (bm * (0.3 + 0.7 * dust) + core * 0.7 + clump * bm * 0.5) * max(rift, 0.0) * smoothstep(0.0, 0.2, d.y);
+          float fade = smoothstep(0.0, 0.2, d.y);
+          float most = uBand * (1.5 * bm + 0.7 * core) * fade;
+          if (most * 0.4396 > 0.5 / 255.0 || (most * 12.92 > 0.5 / 255.0 && most * 0.4396 * pow(max(min(c.r, min(c.g, c.b)), 1e-4), -0.5833) > 0.5 / 255.0)) {
+            // Position along the band, for the dust's colour and clumps.
+            vec3 bx = normalize(cross(uBandN, vec3(0.0, 1.0, 0.0)) + vec3(1e-5, 0.0, 0.0));
+            vec3 by = cross(uBandN, bx);
+            float along = atan(dot(d, by), dot(d, bx));
+            vec2 bq = vec2(along * 3.2, bd * 14.0);
+            float dust = lfbm(bq * 1.6 + 5.3);
+            float clump = smoothstep(0.35, 0.8, lfbm(bq * 3.1 + 1.7));
+            vec3 teal = vec3(0.16, 0.5, 0.56);
+            vec3 violet = vec3(0.42, 0.26, 0.66);
+            vec3 rose = vec3(0.72, 0.34, 0.5);
+            float hueT = lfbm(vec2(along * 1.3, 0.7) + 9.1);
+            vec3 bc = mix(mix(teal, violet, smoothstep(0.3, 0.55, hueT)), rose, smoothstep(0.55, 0.8, hueT));
+            bc = mix(bc, vec3(0.95, 0.86, 0.92), core * 0.55);
+            // Rifts: dark lanes off the band's centre, broken by the dust.
+            float rift = 1.0 - 0.8 * exp(-(bd - 0.025) * (bd - 0.025) / 0.00045) * smoothstep(0.3, 0.62, dust)
+                             - 0.4 * exp(-(bd + 0.05) * (bd + 0.05) / 0.0003) * smoothstep(0.45, 0.7, dust);
+            c += bc * uBand * (bm * (0.3 + 0.7 * dust) + core * 0.7 + clump * bm * 0.5) * max(rift, 0.0) * fade;
+          }
         }
         float horizon = smoothstep(-0.004, 0.004, d.y);
         float sa = acos(clamp(dot(d, uSunDir), -1.0, 1.0));
@@ -1965,7 +1980,20 @@ export function install(ctx: LightCtx): LightModule {
   let cloudsFromBelow = false;
 
   // ── Mirror Lake ──
-  const lakeGeo = new THREE.CircleGeometry(WORLD.lake.r + 20, 96);
+  // Map review 2026-10-15, item 15c: the mirror follows the shore terrain.ts
+  // draws (lakeShoreR), not a circle, and reaches LAKE_PAD past it under the
+  // bank, so the edge you see is the ground's own waterline and no water lies
+  // past it. The same fan as before (a centre and a rim), 180 rim points.
+  const lakeGeo = new THREE.CircleGeometry(1, 180);
+  {
+    const p = lakeGeo.getAttribute("position") as THREE.BufferAttribute;
+    for (let i = 1; i < p.count; i++) {
+      // Local (x, y) is world (x, -z) once the mesh lies flat (rotation.x below).
+      const R = lakeShoreR(Math.atan2(-p.getY(i), p.getX(i))) + LAKE_PAD;
+      p.setXY(i, p.getX(i) * R, p.getY(i) * R);
+    }
+    lakeGeo.computeBoundingSphere();
+  }
   const reflector = new Reflector(lakeGeo, {
     textureWidth: 512,
     textureHeight: 320,

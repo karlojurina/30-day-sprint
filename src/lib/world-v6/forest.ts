@@ -12,7 +12,15 @@
  *     normal forest into teal tipped spruces (0.25 to 0.5), then lantern
  *     willows (M2), glowcaps (M3) and glow ferns (M4) where the field rises;
  *     past 0.8 the giant elders (dress-lakeforest.ts) own the ground. The edge
- *     follows the field's lobes, never a circle.
+ *     follows the field's lobes, never a circle. Wave 3 (2026-10-15): the
+ *     field has a wide, soft halo round its core, so the giants reach further
+ *     and come down in size toward its edge and the change to normal forest
+ *     runs over about 500 units (giantSpots, the halo's understory).
+ *   - wave 3's rules (2026-10-15, Lovro's Loom), after the deal: no crown
+ *     grows into another or into a giant (SPACE_K), aspen groves of aspens
+ *     alone, fewer lodgepole pines, no trunk in the water as drawn (water.ts
+ *     waterAt). Each takes its chances from the tree's spot, so a tree no
+ *     rule touches stands where it always stood.
  *
  * LEVELS (2.1). Near, inside NEAR_D x tier.treeDistance: the hybrid, a 12
  * triangle dark faceted core in the tree's body colour (it fills the gaps when
@@ -42,7 +50,8 @@
  * mask clumped by low frequency noise, densest on mid slopes, none on water,
  * cliffs, above the treeline, on the path, in the landmark clearings; pockets
  * of taller trees round the open stops; zone mixes (ZONES); aspens only where
- * the grove field says so; about 17,000 wild trees.
+ * the grove field says so; about 16,500 wild trees dealt (shrubs included),
+ * about 14,700 left once crowded crowns are left out (wave 3).
  *
  * TUNING: the constants block below.
  */
@@ -51,7 +60,8 @@ import type { InstallFn, WorldCtx, WorldModule } from "./modules";
 import type { SurfacesApi } from "./surfaces";
 import type { QualityTier } from "./quality";
 import { foliageAtlasStats, foliageCellKeep, foliageCellRects, getFoliageAtlas } from "./foliage-atlas";
-import { BROOK, FOREST_KEEP_CLEAR, PATH, PLACES, RIVER, STREAM, TRAIL, TRAIL_KIND, WORLD, magicAt, type TrailKind } from "./layout";
+import { BROOK, FOREST_KEEP_CLEAR, GLOW_STREAM, GREAT_TREE, PATH, PLACES, RIVER, STEPS_FOOT, STEPS_TOP, STREAM, TRAIL, TRAIL_KIND, WORLD, magicAt, type TrailKind } from "./layout";
+import { waterAt } from "./water";
 
 // ── Tunables ────────────────────────────────────────────────────────────────
 
@@ -106,6 +116,101 @@ const A6_CAM = TRAIL[PLACES.find((p) => p.id === "a6")?.trail ?? 55];
 const A6_FERN_THIN = 230;
 /** magicAt above this: the giant elders' ground (dress-lakeforest.ts), no wild tree. */
 const MAGIC_GIANTS = 0.8;
+/**
+ * 1dc7e10's deal, held (map review, wave 3, review round 2). The trees are
+ * dealt from one random stream in row order (z, then x), each kept at its
+ * weight times K, so a change to the ground, the trail or the rail used to
+ * deal every tree after it again, and the grass with them: cover.ts picks
+ * each drift's kit from the forest's density, and one kit that changes
+ * renumbers the rest of its part. Item 15c's lake bank did that to half the
+ * world's grass, Base Camp's meadow in Lovro's approved stop view included.
+ * Two pins keep 1dc7e10's deal outside the rows the bank crosses:
+ * - K_SUM, the sum of every candidate's weight on 1dc7e10 (the opening
+ *   islet's two, which went in wave 2, included), so K no longer moves with
+ *   a change, and every row before the first changed one is dealt as it was;
+ * - DEAL_SYNC, the stream's place (draws taken) at row 218 (z 488), the first
+ *   row past the bank: the bank changes the ground out to WORLD.lake's
+ *   r + 160, read off the drawn grid, so it changes candidates in rows 118 to
+ *   217 (z -1,112 to 488), and from row 218 on the stream is where 1dc7e10's
+ *   stood, so every later row is dealt as it was.
+ * A change from row 218 on still deals the rows after it again. When the
+ * forest is dealt again on purpose (a draw of its own for each candidate,
+ * Lovro's call), both go; moduleStats' wSum gives the sum to scale by.
+ */
+const K_SUM = 35104.52767941057;
+const DEAL_SYNC = { row: 218, draws: 93328 } as const;
+
+// ── Wave 3 (Lovro's Loom, 2026-10-15: 2:54 to 3:35, the trees; 10:09 to 11:00, the forest) ──
+//
+// The forest is still dealt from one random stream, as before. Every rule
+// below changes a tree only AFTER its draws are taken, and takes its own
+// chances from a hash of the tree's spot (spotHash), so a tree that no rule
+// touches stands exactly where it stood, the same species, size, turn and
+// tint. Only the trees the rules are about change.
+
+/**
+ * Spacing ("they kind of sometimes intertwine with other trees. So they
+ * basically grow on top of each other"): two crowns stand at least SPACE_K of
+ * their summed widths apart at the height where the pair is widest together
+ * (PROFILE), so crowns may touch but no crown grows through another. The tree
+ * dealt first keeps its spot and a later one that would crowd it is left
+ * out, with its shrubs. The giant elders are spaced against the same way (their
+ * trunk to the canopy's foot, then the canopy). Shrubs and the ground glow
+ * (glowcaps, ferns) are not spaced.
+ */
+const SPACE_K = 0.85;
+/** Crown half width per atlas cell (FOLIAGE_CELLS order), a share of the card's height: the atlas's painted crop times its keep, read off the live atlas on 2026-10-15. */
+const CELL_HALF: readonly number[] = [0.248, 0.218, 0.26, 0.179, 0.214, 0.135, 0.266, 0.255, 0.274, 0.504, 0.452, 0.174, 0.099, 0.207];
+/** The lantern willow's crown half width, a share of its height (willow(): the dome's radius). */
+const WILLOW_HALF = 0.36;
+/**
+ * Crown profile per species: [height share, radius share] pairs from the
+ * crown's foot to its top, from the painted silhouettes (foliage-atlas.ts) and
+ * the willow's geometry. null: not spaced.
+ */
+const PROFILE: ReadonlyArray<readonly number[] | null> = [
+  [0.04, 1, 1, 0.04], // S1 spruce: widest at the lowest whorl
+  [0.5, 0.5, 0.58, 1, 0.97, 0.3], // S2 lodgepole: bare to about half way, then the crown
+  [0.04, 1, 0.52, 1, 1, 0.04], // S3 fir: a column, tapering from half way
+  [0.36, 0.35, 0.66, 1, 0.97, 0.3], // S4 aspen: an oval round 0.66
+  [0.5, 1, 0.8, 0.6], // S5 snag: the stubs
+  [0.04, 1, 1, 0.04], // dying spruce
+  [0, 1, 1, 0.04], // S6 young spruce: to the ground
+  null, // S7 shrub
+  [0.04, 1, 1, 0.04], // teal tipped spruce
+  [0.3, 0.75, 0.74, 1, 0.94, 0.3], // M2 lantern willow: the dome, its strands below
+  null, // M3 glowcaps
+  null, // M4 glow ferns
+];
+/** The spacing grid's cell. */
+const SPACE_CELL = 36;
+
+/**
+ * Aspens (Lovro: "I'm not sure which one that is supposed to be", on a grove
+ * with spruces and pines standing in it): a grove is aspens alone, no conifer
+ * threaded through it, and groves are fewer and smaller (the grove noise over
+ * ASPEN_GROVE, was 0.69). No aspen where the magic starts (magicAt over 0.25).
+ */
+const ASPEN_GROVE = 0.715;
+/**
+ * Lodgepole pines (Lovro, 2:54 to 3:17: "these trees that have this kind of
+ * thing on top ... I'm not a fan of them and how they look", his cursor on
+ * them): none near the walk (railD under LODGE_NEAR), and the share that
+ * stays rises to LODGE_KEEP_FAR far off (railD over LODGE_FAR), where they
+ * are yellow green flecks in a far stand. The rest become spruces painted as
+ * the warmest of the three (spruce-b, cell 1), so the near forest keeps some
+ * of their warmth, and one in four a fir.
+ */
+const LODGE_KEEP_NEAR = 0;
+const LODGE_KEEP_FAR = 0.5;
+const LODGE_NEAR = 500;
+const LODGE_FAR = 1500;
+/**
+ * The magic halo (magicAt's wider, softer field round its core, layout.ts):
+ * extra glow ferns, glowcaps and willows where it adds to the core's, at
+ * this share of the core's density, from their own random stream.
+ */
+const HALO_UNDERSTORY = 0.55;
 
 // Species ids.
 const SPR = 0; // S1 spruce
@@ -187,6 +292,10 @@ function mulberry32(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+/** mulberry32(seed) as it stands after n draws: its state steps by 0x6d2b79f5 a draw. */
+function mulberry32After(seed: number, n: number) {
+  return mulberry32((seed + Math.imul(n, 0x6d2b79f5)) >>> 0);
+}
 function hash2(ix: number, iz: number, seed: number): number {
   let h = (Math.imul(ix, 374761393) + Math.imul(iz, 668265263) + Math.imul(seed, 144665)) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
@@ -216,6 +325,194 @@ const smooth = (e0: number, e1: number, x: number) => {
 const yieldTask = () => new Promise<void>((r) => setTimeout(r, 0));
 /** Math.hypot is slow in V8's hot loops. */
 const hyp = (a: number, b: number, c = 0) => Math.sqrt(a * a + b * b + c * c);
+
+// ── The giant elders' spots (built by dress-lakeforest.ts) ─────────────────
+
+/**
+ * Where a giant elder stands. dress-lakeforest.ts builds them; the wild trees
+ * keep clear of them (wave 3: SPACE_K). A pure function of layout.ts and the
+ * ground, so both modules read the same list (giantSpots).
+ */
+export interface GiantSpot {
+  /** Trunk foot. */
+  x: number;
+  z: number;
+  /** Ground under it (terrainHeight). */
+  g: number;
+  /** Height before the stretch over the camera's line (sy), and the stretch. */
+  h: number;
+  sy: number;
+  /** Crown width (the instance's x and z scale). */
+  w: number;
+  /** 0 tiered, 1 weeping. */
+  sp: 0 | 1;
+  /** The grid key its other chances hash from (dress-lakeforest's rnd(k, s)). */
+  k: number;
+}
+/** The grid the giants are placed on (dress-lakeforest's v5 grey forest grid, kept so the corridors and views hold). */
+const GIANT_GRID = 62;
+/** Share of giants that are the tiered species (the rest weep). */
+const TIERED_SHARE = 0.62;
+/** How far past the forest's circle the grid reaches (the field's lobes reach past it). */
+const GIANT_EXT = 520;
+/**
+ * Wave 3: a giant the halo adds (magicAt with its halo over the core) comes
+ * down toward the halo's edge, to about a big willow's height where the field
+ * is 0.48, so the giants thin and shrink into the willows and the teal tipped
+ * spruces. The core's giants are as before.
+ */
+const GIANT_EDGE = 0.5;
+/**
+ * Review round 2: the halo's giants stood one to nearly every cell of the
+ * grid, in near equal sizes (the rows of pale diamonds seen from the lake were
+ * mostly the halo's willows, a willow's far level of detail; see the magic
+ * understory). A halo giant now stands anywhere in its cell, is taken at the
+ * square of the field's chance (so they thin toward the edge as well as
+ * shrink), varies more in size, and is more often the weeping kind toward the
+ * edge: the tiered share falls from TIERED_SHARE at the field's 0.72 to
+ * GIANT_HALO_TIERED at 0.48.
+ */
+const GIANT_HALO_TIERED = 0.25;
+/**
+ * Review round 3: a giant the halo adds keeps its trunk this far from the
+ * glowing stream's line (GLOW_STREAM; the drawn stream meanders up to 22 off
+ * it and is at most about 8 wide each side). The halo now reaches down the
+ * stream's valley (magicAt), and two of its giants stood in the water there.
+ * The core's giants are as before (none stands this close to the line).
+ */
+const GIANT_STREAM = 60;
+/** dress-lakeforest.ts's hash, as it places the giants. */
+function giantRnd(i: number, s = 0): number {
+  const x = Math.sin(i * 127.1 + s * 311.7 + 74.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+let giantMemo: { H: (x: number, z: number) => number; spots: GiantSpot[] } | null = null;
+/**
+ * The giants (bible 1.15): they follow the magic field, never a circle. They
+ * begin where magicAt passes 0.48 and own the ground past 0.8 (forest.ts's
+ * teal spruces and willows fill below that); size grows toward the tree.
+ * Out of the clearing, the lake and the corridors; clear of the camera's line
+ * from the lake stop into the forest (a crown over the line is raised to start
+ * 14 above it, or the tree is left out) and of the floating steps.
+ */
+export function giantSpots(H: (x: number, z: number) => number): readonly GiantSpot[] {
+  if (giantMemo && giantMemo.H === H) return giantMemo.spots;
+  const Fo = WORLD.forest;
+  const L = WORLD.lake;
+  const A6 = PLACES[5].pos;
+  const GH = GREAT_TREE.height;
+  const curve = new THREE.CatmullRomCurve3(TRAIL.map((q) => new THREE.Vector3(q[0], q[1], q[2])), false, "centripetal");
+  const n1 = TRAIL.length - 1;
+  const cam: THREE.Vector3[] = [];
+  const tA = (PLACES[4].trail + 1) / n1;
+  const tB = (PLACES[5].trail + 4) / n1;
+  for (let i = 0; i <= 500; i++) cam.push(curve.getPoint(tA + ((tB - tA) * i) / 500));
+  // The camera's points in runs of 25, each with its box, so a spot far from a
+  // run skips it (the same nearest distance and the same height over the line).
+  const RUN = 25;
+  const runBox: number[] = [];
+  for (let i = 0; i < cam.length; i += RUN) {
+    let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+    for (let j = i; j < Math.min(cam.length, i + RUN); j++) {
+      a0 = Math.min(a0, cam[j].x);
+      a1 = Math.max(a1, cam[j].x);
+      b0 = Math.min(b0, cam[j].z);
+      b1 = Math.max(b1, cam[j].z);
+    }
+    runBox.push(a0, a1, b0, b1);
+  }
+  const keepClear = (px: number, pz: number, r: number) => {
+    for (const [ax, az, bx, bz, hw] of FOREST_KEEP_CLEAR) {
+      const dx = bx - ax;
+      const dz = bz - az;
+      const t = Math.min(1, Math.max(0, ((px - ax) * dx + (pz - az) * dz) / (dx * dx + dz * dz)));
+      if (Math.hypot(px - ax - dx * t, pz - az - dz * t) < hw + r) return false;
+    }
+    return true;
+  };
+  const sdx = STEPS_TOP[0] - STEPS_FOOT[0];
+  const sdz = STEPS_TOP[2] - STEPS_FOOT[2];
+  const sL = Math.hypot(sdx, sdz);
+  const underSteps = (px: number, pz: number) => {
+    const t = Math.min(1, Math.max(0, ((px - STEPS_FOOT[0]) * sdx + (pz - STEPS_FOOT[2]) * sdz) / (sL * sL)));
+    return { d: Math.hypot(px - STEPS_FOOT[0] - sdx * t, pz - STEPS_FOOT[2] - sdz * t), y: STEPS_FOOT[1] + (STEPS_TOP[1] - STEPS_FOOT[1]) * t };
+  };
+  /** Distance to the glowing stream's line (GIANT_STREAM). */
+  const streamD = (px: number, pz: number) => {
+    let best = Infinity;
+    for (let i = 0; i + 1 < GLOW_STREAM.length; i++) {
+      const qx = GLOW_STREAM[i][0];
+      const qz = GLOW_STREAM[i][2];
+      const sx = GLOW_STREAM[i + 1][0] - qx;
+      const sz = GLOW_STREAM[i + 1][2] - qz;
+      const t = Math.min(1, Math.max(0, ((px - qx) * sx + (pz - qz) * sz) / (sx * sx + sz * sz)));
+      best = Math.min(best, Math.hypot(px - qx - sx * t, pz - qz - sz * t));
+    }
+    return best;
+  };
+  const S = GIANT_GRID;
+  const spots: GiantSpot[] = [];
+  for (let gz = Fo.z - Fo.r - GIANT_EXT; gz <= Fo.z + Fo.r + GIANT_EXT; gz += S) {
+    for (let gx = Fo.x - Fo.r - GIANT_EXT; gx <= Fo.x + Fo.r + GIANT_EXT; gx += S) {
+      const k = gx * 3.1 + gz * 7.7;
+      let tx = gx + (giantRnd(k, 101) - 0.5) * S * 0.8;
+      let tz = gz + (giantRnd(k, 102) - 0.5) * S * 0.8;
+      // A cell the field's core takes keeps its giant where it stood; one it
+      // does not take may be the halo's (GIANT_HALO_TIERED).
+      const halo = giantRnd(k, 103) > smooth(0.48, 0.8, magicAt(tx, tz, true));
+      let mg: number;
+      if (halo) {
+        tx = gx + (giantRnd(k, 121) - 0.5) * S;
+        tz = gz + (giantRnd(k, 122) - 0.5) * S;
+        mg = magicAt(tx, tz);
+        const take = smooth(0.48, 0.8, mg);
+        if (giantRnd(k, 103) > take * take || mg <= magicAt(tx, tz, true) + 1e-6) continue;
+        if (streamD(tx, tz) < GIANT_STREAM) continue;
+      } else mg = magicAt(tx, tz);
+      const rr = 1 - smooth(0.5, 1.0, mg);
+      if (Math.hypot(tx - Fo.clearing.x, tz - Fo.clearing.z) < Fo.clearing.r + 10) continue;
+      if (Math.hypot(tx - L.x, tz - L.z) < L.r + 40) continue;
+      let h = (185 - 90 * rr) * (halo ? 0.68 + 0.56 * giantRnd(k, 104) : 0.82 + 0.3 * giantRnd(k, 104));
+      if (mg > magicAt(tx, tz, true) + 1e-6) h *= 1 - GIANT_EDGE * (1 - smooth(0.48, 0.7, mg));
+      if (tx > -220) h = Math.min(h, 125 - Math.max(0, tx + 220) * 0.12);
+      const dG = Math.hypot(tx - A6.x, tz - A6.z);
+      h = Math.min(h, GH / 2 - 2 + Math.max(0, dG - 260) * 0.45);
+      const tiered = halo ? GIANT_HALO_TIERED + (TIERED_SHARE - GIANT_HALO_TIERED) * smooth(0.48, 0.72, mg) : TIERED_SHARE;
+      const sp: 0 | 1 = giantRnd(k, 110) < tiered ? 0 : 1;
+      const tr = h * 0.075;
+      if (!keepClear(tx, tz, tr + 6)) continue;
+      const g = H(tx, tz);
+      let near = Infinity;
+      let camY = -Infinity;
+      const w = h * (0.92 + giantRnd(k, 111) * 0.18);
+      // How far the crown reaches from the axis: the tiered discs (and the side pad), the weeping lobes.
+      const cr = w * (sp === 0 ? 0.37 : 0.46);
+      const reach = Math.max(tr + 30, cr + 16) + 1;
+      for (let i = 0, b = 0; i < cam.length; i += RUN, b += 4) {
+        const ex = Math.max(runBox[b] - tx, 0, tx - runBox[b + 1]);
+        const ez = Math.max(runBox[b + 2] - tz, 0, tz - runBox[b + 3]);
+        if (ex * ex + ez * ez > reach * reach) continue;
+        for (let j = i; j < Math.min(cam.length, i + RUN); j++) {
+          const c = cam[j];
+          const d = Math.hypot(c.x - tx, c.z - tz);
+          if (d < near) near = d;
+          if (d < cr + 16) camY = Math.max(camY, c.y);
+        }
+      }
+      if (near < tr + 30) continue;
+      // Crowns over the camera's line start 14 above it (the weeping strands hang to 0.3 of the height).
+      const low = sp === 0 ? 0.5 : 0.3;
+      let sy = 1;
+      if (camY > -Infinity) sy = Math.max(1, (camY + 14 - g) / (h * low));
+      if (sy > 1.45) continue;
+      const us = underSteps(tx, tz);
+      if (us.d < cr + 30 && g + h * sy > us.y - 40) continue;
+      spots.push({ x: tx, z: tz, g, h, sy, w, sp, k });
+    }
+  }
+  giantMemo = { H, spots };
+  return spots;
+}
 
 // ── Geometry kit ────────────────────────────────────────────────────────────
 
@@ -404,11 +701,15 @@ function willow(lod: 0 | 1 | 2): Soup {
   const domeR = V(0.36, 0.2, 0.36);
   const leaf = (v: THREE.Vector3, d: THREE.Vector3) => MAGIC_LEAF_LOW.clone().lerp(MAGIC_LEAF_TOP, smooth(-0.6, 0.9, d.y));
   if (lod === 2) {
+    // Review round 3: a low cap, the near dome's shape. The lower point hung
+    // 0.32 under the rim and carried the teal underside, so far willows read
+    // as pale diamonds from the lake; now it is 0.06 under (the same 8
+    // triangles, colours and normals).
     const oct = new THREE.OctahedronGeometry(1, 0);
     const p = oct.getAttribute("position");
     for (let i = 0; i < p.count; i++) {
       const d = V(p.getX(i), p.getY(i), p.getZ(i));
-      s.vert(V(domeC.x + d.x * domeR.x, domeC.y + d.y * domeR.y * 1.6 - 0.1, domeC.z + d.z * domeR.z), d.clone().normalize(), leaf(d, d), d.y < -0.3 ? TEAL.clone().multiplyScalar(0.5) : null);
+      s.vert(V(domeC.x + d.x * domeR.x, domeC.y + (d.y < 0 ? d.y * 0.06 : d.y * domeR.y * 1.6) - 0.1, domeC.z + d.z * domeR.z), d.clone().normalize(), leaf(d, d), d.y < -0.3 ? TEAL.clone().multiplyScalar(0.5) : null);
     }
     oct.dispose();
     return s;
@@ -999,6 +1300,25 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   brookD.polyline(STREAM, 60);
   const riverD = new Grid(999);
   riverD.polyline(RIVER, 120);
+  // Wave 3: where water is drawn near enough to ask water.ts's waterAt, which
+  // is exact but not cheap: round the streams' and the river's lines out past
+  // their widest ribbons (the stream is about 64 wide each side at the lip, the
+  // glowing stream meanders up to 22 off its line), the lake's shore, the pool
+  // and the tarn. Anywhere else no water is drawn.
+  const wetNear = new Grid(999);
+  wetNear.polyline(STREAM, 100);
+  wetNear.polyline(GLOW_STREAM, 60);
+  wetNear.polyline(BROOK, 50);
+  wetNear.polyline(RIVER, 60);
+  const tarn = WORLD.upperFalls.tarn;
+  const inWater = (x: number, z: number, margin: number): boolean => {
+    const near =
+      wetNear.get(x, z, 999) < 999 ||
+      hyp(x - WORLD.lake.x, z - WORLD.lake.z) < WORLD.lake.r + 60 ||
+      hyp(x - WORLD.pool.x, z - WORLD.pool.z) < WORLD.pool.r + 40 ||
+      hyp(x - tarn.x, z - tarn.z) < tarn.r + 40;
+    return near && waterAt(x, z, hAt, margin);
+  };
 
   // The rail: the camera's lowest height near each cell, and the distance to it.
   const camMinY = new Grid(1e9);
@@ -1048,6 +1368,9 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   const pool = WORLD.pool;
   const jettyFoot = PATH.find((q) => Math.abs(q.x - 1350) < 1 && Math.abs(q.z + 440) < 1) ?? { x: 1350, z: -440 };
   const pockets = [PLACES[0].pos, PLACES[1].pos, PLACES[4].pos];
+  /** The pockets' x and z as plain numbers, for the candidates' loops (load, review round 2). */
+  const PKX = pockets.map((p) => p.x);
+  const PKZ = pockets.map((p) => p.z);
   const keepClear = (px: number, pz: number, r: number) => {
     for (const [ax, az, bx, bz, hw] of FOREST_KEEP_CLEAR) {
       const dx = bx - ax;
@@ -1084,13 +1407,106 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
     return Math.abs(a) < 22;
   };
 
+  // The magic field, sampled (wave 3). It matters only over 0.25 (teal tips,
+  // willows, the thinning into the giants' ground), so the deal reads its
+  // core only inside the box where the core passes 0.2 (cx0..cz1, padded by
+  // 80) and the halo is read only inside its own box (mx0..mz1), for the trees
+  // that stand; elsewhere both are 0. The core is sampled on the lattice and in
+  // the window it was always sampled in (every 40), which holds all of it, and
+  // gives the understory's box as before (over 0.28). The halo is sampled every
+  // 80 over a wider window: how much understory it adds (haloShare) and where
+  // (haloPick: each lattice point weighted by what it adds, the willows by
+  // their ring, 0.48 to 0.88).
+  let fx0 = Infinity, fx1 = -Infinity, fz0 = Infinity, fz1 = -Infinity;
+  let cx0 = Infinity, cx1 = -Infinity, cz0 = Infinity, cz1 = -Infinity;
+  let mx0 = Infinity, mx1 = -Infinity, mz0 = Infinity, mz1 = -Infinity;
+  const coreSum = [0, 0, 0];
+  const haloSum = [0, 0, 0];
+  const pickPts: number[][] = [[], [], [], []]; // x, z, running weight
+  const pickSum = [0, 0, 0, 0];
+  const addPick = (u: number, x: number, z: number, wgt: number) => {
+    if (wgt <= 0) return;
+    pickSum[u] += wgt;
+    pickPts[u].push(x, z, pickSum[u]);
+  };
+  for (let z = Fo.z - 1400; z <= Fo.z + 1400; z += 40) {
+    for (let x = Fo.x - 1400; x <= Fo.x + 1600; x += 40) {
+      const mc = magicAt(x, z, true);
+      if (mc > 0.28) {
+        fx0 = Math.min(fx0, x);
+        fx1 = Math.max(fx1, x);
+        fz0 = Math.min(fz0, z);
+        fz1 = Math.max(fz1, z);
+      }
+      if (mc > 0.2) {
+        cx0 = Math.min(cx0, x - 80);
+        cx1 = Math.max(cx1, x + 80);
+        cz0 = Math.min(cz0, z - 80);
+        cz1 = Math.max(cz1, z + 80);
+      }
+      // The core's understory weight, every other point (the halo's 80 spacing), for haloShare.
+      if ((x - Fo.x) % 80 === 0 && (z - Fo.z) % 80 === 0) {
+        coreSum[0] += smooth(0.5, 0.8, mc);
+        coreSum[1] += smooth(0.45, 0.85, mc);
+        coreSum[2] += smooth(0.28, 0.7, mc);
+      }
+      // Review round 2: the core's willows, planted again (pick list 3).
+      addPick(3, x, z, smooth(0.5, 0.8, mc));
+    }
+  }
+  for (let z = Fo.z - 2000; z <= Fo.z + 2000; z += 80) {
+    for (let x = Fo.x - 2200; x <= Fo.x + 2200; x += 80) {
+      const mn = magicAt(x, z);
+      if (mn <= 0.2) continue;
+      mx0 = Math.min(mx0, x - 160);
+      mx1 = Math.max(mx1, x + 160);
+      mz0 = Math.min(mz0, z - 160);
+      mz1 = Math.max(mz1, z + 160);
+      const mc = magicAt(x, z, true);
+      if (mn <= mc) continue;
+      const e1 = smooth(0.45, 0.85, mn) - smooth(0.45, 0.85, mc);
+      const e2 = smooth(0.28, 0.7, mn) - smooth(0.28, 0.7, mc);
+      haloSum[0] += smooth(0.5, 0.8, mn) - smooth(0.5, 0.8, mc);
+      haloSum[1] += e1;
+      haloSum[2] += e2;
+      // Review round 2: the willows thin toward the halo's outer edge.
+      addPick(0, x, z, smooth(0.48, 0.62, mn) * (1 - smooth(0.75, 0.88, mn)) * smooth(0.48, 0.88, mn));
+      addPick(1, x, z, e1);
+      addPick(2, x, z, e2);
+    }
+  }
+  const haloShare = (u: number) => (coreSum[u] > 0 ? (haloSum[u] / coreSum[u]) * HALO_UNDERSTORY : 0);
+  /**
+   * A spot for the halo's understory u: a lattice point by its weight,
+   * anywhere in its 80 square (u 3, the core's willows again: its 40 square).
+   * pickW is the picked point's weight.
+   */
+  let pickW = 0;
+  const haloPick = (u: number, R: () => number): [number, number] => {
+    const P = pickPts[u];
+    const r = R() * pickSum[u];
+    let lo = 0;
+    let hi = P.length / 3 - 1;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (P[mid * 3 + 2] < r) lo = mid + 1;
+      else hi = mid;
+    }
+    pickW = P[lo * 3 + 2] - (lo > 0 ? P[lo * 3 - 1] : 0);
+    const step = u === 3 ? 40 : 80;
+    return [P[lo * 3] + (R() - 0.5) * step, P[lo * 3 + 1] + (R() - 0.5) * step];
+  };
+
   // Candidates.
   const nxC = Math.floor((ROI.maxX - ROI.minX) / CELL);
   const nzC = Math.floor((ROI.maxZ - ROI.minZ) / CELL);
-  const cand: number[] = []; // x, z, g, weight, clump, zone, capH, ledge, magic
+  const cand: number[] = []; // x, z, g, weight, clump, zone, capH, ledge, magic (the field's core: the deal)
   const CS = 9;
   let wSum = 0;
+  /** Where DEAL_SYNC's row starts in the candidates. */
+  let syncAt = -1;
   for (let j = 0; j < nzC; j++) {
+    if (j === DEAL_SYNC.row) syncAt = cand.length;
     for (let i = 0; i < nxC; i++) {
       const x = ROI.minX + (i + 0.5 + (hash2(i, j, 1) - 0.5) * 0.9) * CELL;
       const z = ROI.minZ + (j + 0.5 + (hash2(i, j, 2) - 0.5) * 0.9) * CELL;
@@ -1101,7 +1517,8 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
       const dl = hyp(x - lake.x, z - lake.z);
       if (dl < lake.r + 22) continue;
       // The Glowing Forest: the giants own the field's heart; the corridors stay clear.
-      const mg = magicAt(x, z);
+      // The deal reads the field's core, as it always did (wave 3: the halo's changes come after it).
+      const mg = x >= cx0 && x <= cx1 && z >= cz0 && z <= cz1 ? magicAt(x, z, true) : 0;
       if (mg > MAGIC_GIANTS) continue;
       const dF = hyp(x - Fo.x, z - Fo.z);
       if (dF < Fo.r + 400 && !keepClear(x, z, 10)) continue;
@@ -1114,8 +1531,13 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
       if (inA5View(x, z)) continue;
       const clump = fbm(x / 300, z / 300, 11);
       let pkRing = 0;
-      for (const pk of pockets) {
-        const d = hyp(x - pk.x, z - pk.z);
+      for (let q = 0; q < PKX.length; q++) {
+        // Wave 3 (load, the same values): the ring is 0 inside 130 and past 520.
+        const ex = x - PKX[q];
+        const ez = z - PKZ[q];
+        const d2 = ex * ex + ez * ez;
+        if (d2 <= 16900 || d2 >= 270400) continue;
+        const d = hyp(ex, ez);
         pkRing = Math.max(pkRing, smooth(130, 190, d) * (1 - smooth(420, 520, d)));
       }
       const clumpCut = 0.38 - 0.1 * pkRing;
@@ -1142,8 +1564,13 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
       const dTents = hyp(x - 250, z - 2750);
       if (dTents < 55) continue;
       m *= smooth(55, 95, dTents);
-      for (const pk of pockets) {
-        const d = hyp(x - pk.x, z - pk.z);
+      for (let q = 0; q < PKX.length; q++) {
+        // The factor is 1 inside 120 and past 480.
+        const ex = x - PKX[q];
+        const ez = z - PKZ[q];
+        const d2 = ex * ex + ez * ez;
+        if (d2 <= 14400 || d2 >= 230400) continue;
+        const d = hyp(ex, ez);
         m *= 1 + 0.6 * smooth(120, 200, d) * (1 - smooth(380, 480, d));
       }
       if (m <= 0.01) continue;
@@ -1151,7 +1578,11 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
       let best = 1;
       for (let q = 0; q < ZONES.length; q++) {
         const Z = ZONES[q];
-        const dd = hyp(x - Z.x, z - Z.z) / Z.r;
+        // Past its radius a zone can never be the nearest (best starts at 1).
+        const ex = x - Z.x;
+        const ez = z - Z.z;
+        if (ex * ex + ez * ez >= Z.r * Z.r) continue;
+        const dd = hyp(ex, ez) / Z.r;
         if (dd < best) {
           best = dd;
           zi = q;
@@ -1176,16 +1607,15 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   lap("candidates");
   await yieldTask();
 
-  // Sample: scale so the kept count lands on TARGET_WILD (shrubs included).
-  // ISLET_W: the weight of the opening's islet's 2 candidates, the last 2 in
-  // the list, which went with the islet on 2026-10-15 (Lovro's Loom). Kept in
-  // the sum so K stays what it was and no tree is dealt again (without it, 366
-  // trees changed, nearly all in a band at z 1,635 to 1,749 across the world).
-  const ISLET_W = 0.90429701446;
-  const K = (TARGET_WILD * 0.8) / Math.max(1, wSum + ISLET_W);
-  const rand = mulberry32(7);
+  // Sample: scale so the kept count lands on TARGET_WILD (shrubs included), by
+  // 1dc7e10's weight sum (K_SUM; it holds the weight of the opening islet's 2
+  // candidates, the ISLET_W of 2026-10-15). wSum is today's, for moduleStats.
+  const K = (TARGET_WILD * 0.8) / K_SUM;
+  let rand = mulberry32(7);
   const REC = 11;
   const recs: number[] = []; // species, x, y, z, h, w, yaw, leanAx, lean, tint, cell
+  /** Wave 3: every tree as dealt (x, z, h, w), standing or not, for the density map (bakeMaps). */
+  const dealt: number[] = [];
   const TINTS = [
     [1, 1, 1],
     [0.92, 0.97, 0.99],
@@ -1199,12 +1629,191 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
     const cs = CELLS[sp];
     return cs.length ? cs[Math.floor(rand() * cs.length) % cs.length] : 0;
   };
-  const push = (sp: number, x: number, y: number, z: number, h: number, w: number, zn: string) => {
-    recs.push(sp, x, y, z, h, w, rand() * Math.PI * 2, rand() * Math.PI * 2, sp === SHR ? 0 : rand() * 0.06, Math.floor(rand() * TINTS.length), pickCell(sp));
+  const record = (sp: number, x: number, y: number, z: number, h: number, w: number, yaw: number, leanAx: number, lean: number, tint: number, cell: number, zn: string) => {
+    recs.push(sp, x, y, z, h, w, yaw, leanAx, lean, tint, cell);
     counts[sp]++;
     zoneCounts[zn] = (zoneCounts[zn] ?? 0) + 1;
   };
+
+  // ── Wave 3: crowns keep apart (SPACE_K) ──
+  // The trees kept so far, on a grid of SPACE_CELL, each with its crown as
+  // [y, radius] pairs in world units (PROFILE), and the giants on their own.
+  const SNX = Math.ceil((ROI.maxX - ROI.minX) / SPACE_CELL);
+  const SNZ = Math.ceil((ROI.maxZ - ROI.minZ) / SPACE_CELL);
+  const sHead = new Int32Array(SNX * SNZ).fill(-1);
+  let sCap = 1 << 15;
+  let sNext = new Int32Array(sCap);
+  let sXZ = new Float64Array(sCap * 2);
+  let sProf = new Float64Array(sCap * 6);
+  let sN = new Uint8Array(sCap);
+  let sR = new Float64Array(sCap);
+  let sCount = 0;
+  const cProf = new Float64Array(6);
+  /** The crown of a tree as [y, r] pairs into out at o; returns the pair count (0: a species not spaced). */
+  const crownOf = (out: Float64Array, o: number, sp: number, y: number, h: number, wd: number, cell: number): number => {
+    const pr = PROFILE[sp];
+    if (!pr) return 0;
+    const R = (sp === M2 ? WILLOW_HALF : CELL_HALF[cell] ?? 0.25) * h * wd;
+    const n = pr.length >> 1;
+    for (let i = 0; i < n; i++) {
+      out[o + 2 * i] = y + pr[2 * i] * h;
+      out[o + 2 * i + 1] = pr[2 * i + 1] * R;
+    }
+    return n;
+  };
+  /** A crown's radius at height y (0 outside it). */
+  const rAt = (P: Float64Array, o: number, n: number, y: number): number => {
+    if (y < P[o] || y > P[o + 2 * (n - 1)]) return 0;
+    for (let i = 0; i < n - 1; i++) {
+      const y0 = P[o + 2 * i];
+      const y1 = P[o + 2 * i + 2];
+      if (y <= y1) {
+        const r0 = P[o + 2 * i + 1];
+        const r1 = P[o + 2 * i + 3];
+        return y1 > y0 ? r0 + ((r1 - r0) * (y - y0)) / (y1 - y0) : Math.max(r0, r1);
+      }
+    }
+    return P[o + 2 * (n - 1) + 1];
+  };
+  /** The two crowns' summed radius at the height where it is greatest (profiles are piecewise linear, so at a break). */
+  const pairWidth = (A: Float64Array, ao: number, an: number, B: Float64Array, bo: number, bn: number): number => {
+    const lo = Math.max(A[ao], B[bo]);
+    const hi = Math.min(A[ao + 2 * (an - 1)], B[bo + 2 * (bn - 1)]);
+    if (hi < lo) return 0;
+    let m = rAt(A, ao, an, lo) + rAt(B, bo, bn, lo);
+    const t = rAt(A, ao, an, hi) + rAt(B, bo, bn, hi);
+    if (t > m) m = t;
+    for (let i = 0; i < an; i++) {
+      const y = A[ao + 2 * i];
+      if (y > lo && y < hi) {
+        const s = A[ao + 2 * i + 1] + rAt(B, bo, bn, y);
+        if (s > m) m = s;
+      }
+    }
+    for (let i = 0; i < bn; i++) {
+      const y = B[bo + 2 * i];
+      if (y > lo && y < hi) {
+        const s = rAt(A, ao, an, y) + B[bo + 2 * i + 1];
+        if (s > m) m = s;
+      }
+    }
+    return m;
+  };
+  // The giants: trunk and root fins to the canopy's foot, then the canopy.
+  const giants = giantSpots(ctx.terrainHeight);
+  const GCELL = 128;
+  const GNX = Math.ceil((ROI.maxX - ROI.minX) / GCELL);
+  const GNZ = Math.ceil((ROI.maxZ - ROI.minZ) / GCELL);
+  const gHead = new Int32Array(GNX * GNZ).fill(-1);
+  const gNext = new Int32Array(Math.max(1, giants.length));
+  const gProf = new Float64Array(Math.max(1, giants.length) * 10);
+  const gR = new Float64Array(Math.max(1, giants.length));
+  giants.forEach((G, i) => {
+    const hs = G.h * G.sy;
+    const low = (G.sp === 0 ? 0.48 : 0.3) * hs;
+    const cr = G.w * (G.sp === 0 ? 0.37 : 0.46);
+    gProf.set([G.g, 0.12 * G.w, G.g + 0.1 * hs, 0.06 * G.w, G.g + low, 0.045 * G.w, G.g + low + 0.5, cr, G.g + hs, 0.6 * cr], i * 10);
+    gR[i] = Math.max(cr, 0.12 * G.w);
+    const ci = Math.min(GNX - 1, Math.max(0, Math.floor((G.x - ROI.minX) / GCELL)));
+    const cj = Math.min(GNZ - 1, Math.max(0, Math.floor((G.z - ROI.minZ) / GCELL)));
+    gNext[i] = gHead[cj * GNX + ci];
+    gHead[cj * GNX + ci] = i;
+  });
+  /** The widest crown kept so far (how far a search must reach). */
+  let sRmax = 0;
+  /** Would a crown (cProf, n pairs, widest R) at (x, z) grow into a kept tree's or a giant's? */
+  const crowded = (x: number, z: number, n: number, R: number): boolean => {
+    const ci = Math.floor((x - ROI.minX) / SPACE_CELL);
+    const cj = Math.floor((z - ROI.minZ) / SPACE_CELL);
+    const k = Math.ceil((SPACE_K * (R + sRmax)) / SPACE_CELL);
+    for (let j = Math.max(0, cj - k); j <= Math.min(SNZ - 1, cj + k); j++) {
+      for (let i = Math.max(0, ci - k); i <= Math.min(SNX - 1, ci + k); i++) {
+        for (let t = sHead[j * SNX + i]; t >= 0; t = sNext[t]) {
+          const dx = sXZ[2 * t] - x;
+          const dz = sXZ[2 * t + 1] - z;
+          const d2 = dx * dx + dz * dz;
+          const far = SPACE_K * (R + sR[t]);
+          if (d2 >= far * far) continue;
+          const need = SPACE_K * pairWidth(cProf, 0, n, sProf, 6 * t, sN[t]);
+          if (d2 < need * need) return true;
+        }
+      }
+    }
+    const gi = Math.floor((x - ROI.minX) / GCELL);
+    const gj = Math.floor((z - ROI.minZ) / GCELL);
+    for (let j = Math.max(0, gj - 1); j <= Math.min(GNZ - 1, gj + 1); j++) {
+      for (let i = Math.max(0, gi - 1); i <= Math.min(GNX - 1, gi + 1); i++) {
+        for (let t = gHead[j * GNX + i]; t >= 0; t = gNext[t]) {
+          const G = giants[t];
+          const dx = G.x - x;
+          const dz = G.z - z;
+          const d2 = dx * dx + dz * dz;
+          const far = SPACE_K * (R + gR[t]);
+          if (d2 >= far * far) continue;
+          const need = SPACE_K * pairWidth(cProf, 0, n, gProf, 10 * t, 5);
+          if (d2 < need * need) return true;
+        }
+      }
+    }
+    return false;
+  };
+  /** Keep a spaced tree's crown (cProf, n pairs) at (x, z). */
+  const keepCrown = (x: number, z: number, n: number, R: number) => {
+    if (sCount >= sCap) {
+      sCap *= 2;
+      const nx = new Int32Array(sCap);
+      nx.set(sNext);
+      sNext = nx;
+      const xz = new Float64Array(sCap * 2);
+      xz.set(sXZ);
+      sXZ = xz;
+      const pf = new Float64Array(sCap * 6);
+      pf.set(sProf);
+      sProf = pf;
+      const nn = new Uint8Array(sCap);
+      nn.set(sN);
+      sN = nn;
+      const rr = new Float64Array(sCap);
+      rr.set(sR);
+      sR = rr;
+    }
+    const ci = Math.min(SNX - 1, Math.max(0, Math.floor((x - ROI.minX) / SPACE_CELL)));
+    const cj = Math.min(SNZ - 1, Math.max(0, Math.floor((z - ROI.minZ) / SPACE_CELL)));
+    const t = sCount++;
+    sXZ[2 * t] = x;
+    sXZ[2 * t + 1] = z;
+    for (let i = 0; i < 2 * n; i++) sProf[6 * t + i] = cProf[i];
+    sN[t] = n;
+    sR[t] = R;
+    if (R > sRmax) sRmax = R;
+    sNext[t] = sHead[cj * SNX + ci];
+    sHead[cj * SNX + ci] = t;
+  };
+  /** Spaced: true when the tree may stand (and its crown is kept); species not spaced always may. */
+  const spaced = (sp: number, x: number, y: number, z: number, h: number, wd: number, cell: number): boolean => {
+    const n = crownOf(cProf, 0, sp, y, h, wd, cell);
+    if (n === 0) return true;
+    let R = 0;
+    for (let i = 0; i < n; i++) R = Math.max(R, cProf[2 * i + 1]);
+    if (crowded(x, z, n, R)) return false;
+    keepCrown(x, z, n, R);
+    return true;
+  };
+  /** A tree spot's own chances for the wave 3 rules (never the deal's stream). */
+  const spotHash = (x: number, z: number, s: number) => hash2(Math.floor(x * 4), Math.floor(z * 4), 900 + s);
+  const cellFor = (sp: number, u: number) => {
+    const cs = CELLS[sp];
+    return cs.length ? cs[Math.floor(u * cs.length) % cs.length] : 0;
+  };
+  let nCrowded = 0;
+  let nWet = 0;
+  let nLodgeSwap = 0;
+  let nGroveSwap = 0;
+  let nHaloSwap = 0;
+
   for (let c = 0; c < cand.length; c += CS) {
+    // DEAL_SYNC: from this row on, the stream is where 1dc7e10's stood.
+    if (c === syncAt) rand = mulberry32After(7, DEAL_SYNC.draws);
     const x = cand[c];
     const z = cand[c + 1];
     const g = cand[c + 2];
@@ -1216,7 +1825,12 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
     const mg = cand[c + 8];
     const Z = zi >= 0 ? ZONES[zi] : BACKDROP;
     if (rand() > Math.min(1, w * K)) continue;
+    // The field with its halo (wave 3), for the trees dealt.
+    const mgN = x >= mx0 && x <= mx1 && z >= mz0 && z <= mz1 ? magicAt(x, z) : mg;
     let sp: number;
+    // Wave 3 reads these: the species before the grove made it an aspen, and the grove.
+    let spPre = -1;
+    let grove = -1;
     if (isLedge) sp = FIR;
     else {
       const edge = 1 - smooth(0.45, 0.62, clump);
@@ -1231,7 +1845,8 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
       else sp = SPR;
       // Aspens stand in groves of 15 to 40, never one by one (2.1).
       if (Z.aspen && g < 760 && sp !== SNAG) {
-        const grove = fbm(x / 170 + 31.7, z / 170 - 12.3, 41);
+        grove = fbm(x / 170 + 31.7, z / 170 - 12.3, 41);
+        spPre = sp;
         if (grove > 0.69) sp = rand() < 0.88 ? ASP : sp;
       }
       // About 1 spruce in 12 is dying (rust brown, never the landmark's red).
@@ -1244,12 +1859,21 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
     }
     const core = 0.6 + 0.4 * smooth(0.42, 0.72, clump);
     const [h0, h1] = H_RANGE[sp];
-    let h = (h0 + (h1 - h0) * rand()) * core * (0.9 + 0.2 * rand());
+    const hr0 = rand();
+    const hr1 = rand();
+    let h = (h0 + (h1 - h0) * hr0) * core * (0.9 + 0.2 * hr1);
+    let pocketMul = 1;
     for (const pk of pockets) {
       const d = hyp(x - pk.x, z - pk.z);
-      if (d > 150 && d < 420) h *= 1.1;
+      if (d > 150 && d < 420) {
+        h *= 1.1;
+        pocketMul *= 1.1;
+      }
     }
-    if (zi === 4 && hyp(x - a5cam[0], z - a5cam[2]) > 950) h *= 0.75;
+    if (zi === 4 && hyp(x - a5cam[0], z - a5cam[2]) > 950) {
+      h *= 0.75;
+      pocketMul *= 0.75;
+    }
     if (h > capH) {
       if (capH < h0 * 0.7) {
         if (capH < H_RANGE[SHR][0]) continue;
@@ -1258,9 +1882,71 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
       } else h = Math.max(4, capH);
     }
     const width = 0.88 + 0.24 * rand();
-    push(sp, x, g - 0.03 * h, z, h, width, Z.name);
-    // Understory (v5 3.1.5): 2 to 4 shrubs round trees at a clump's edge.
+    const yaw = rand() * Math.PI * 2;
+    const leanAx = rand() * Math.PI * 2;
+    const lean = sp === SHR ? 0 : rand() * 0.06;
+    const tint = Math.floor(rand() * TINTS.length);
+    const cell = pickCell(sp);
+    if (sp !== SHR) dealt.push(x, z, h, width);
+
+    // ── Wave 3: the rules, after the deal ──
+    let spF = sp;
+    if (sp !== SHR && !isLedge) {
+      // Aspen groves of aspens alone, fewer and smaller; none in the magic.
+      const inGrove = grove > ASPEN_GROVE && mgN <= 0.25;
+      if (sp === ASP && !inGrove) spF = spPre;
+      else if (inGrove && sp !== SNAG && sp !== ASP && sp !== M2 && sp !== TEALS) spF = ASP;
+      // Fewer lodgepole pines, none near the walk.
+      if (spF === LDG) {
+        const keepShare = LODGE_KEEP_NEAR + (LODGE_KEEP_FAR - LODGE_KEEP_NEAR) * smooth(LODGE_NEAR, LODGE_FAR, railD.get(x, z, 3500));
+        if (spotHash(x, z, 1) >= keepShare) spF = spotHash(x, z, 2) < 0.75 ? SPR : FIR;
+      }
+      // The halo (and an aspen the grove gave back inside the magic): the
+      // magic's own rules at the field with its halo, on the spot's chances.
+      if ((mgN > mg + 1e-6 || (sp === ASP && spF !== ASP)) && mgN > 0.25 && spF !== M2 && spF !== TEALS && spF !== ASP) {
+        if (mgN > 0.5 && spotHash(x, z, 3) < 0.45 * smooth(0.5, 0.75, mgN)) spF = M2;
+        else if (spotHash(x, z, 4) < smooth(0.22, 0.5, mgN)) spF = spF === SNAG ? SNAG : TEALS;
+      }
+    }
+    let hF = h;
+    let cellF = cell;
+    if (spF !== sp) {
+      // The new species' size from the same draws; where the camera's clearance
+      // would make it a shrub, the tree stays as dealt.
+      const [a0, a1] = H_RANGE[spF];
+      let hn = (a0 + (a1 - a0) * hr0) * core * (0.9 + 0.2 * hr1) * pocketMul;
+      if (hn > capH) hn = capH < a0 * 0.7 ? -1 : Math.max(4, capH);
+      if (hn < 0) spF = sp;
+      else {
+        hF = hn;
+        cellF = sp === LDG && spF === SPR ? 1 : cellFor(spF, spotHash(x, z, 5));
+        if (spF === ASP || sp === ASP) nGroveSwap++;
+        else if (sp === LDG) nLodgeSwap++;
+        else nHaloSwap++;
+      }
+    }
+    // The halo thins the wild trees toward the giants' ground as the core does.
+    let keepTree = true;
+    if (mgN > mg + 1e-6 && mgN > 0.55) {
+      const f = (1 - 0.7 * smooth(0.55, MAGIC_GIANTS, mgN)) / (1 - 0.7 * smooth(0.55, MAGIC_GIANTS, mg));
+      if (spotHash(x, z, 6) > f) keepTree = false;
+    }
+    // No trunk in the water as drawn (the glowing stream and its meander are not in brookD).
+    if (keepTree && inWater(x, z, 2)) {
+      keepTree = false;
+      nWet++;
+    }
+    if (keepTree && !spaced(spF, x, g - 0.03 * hF, z, hF, width, cellF)) {
+      keepTree = false;
+      nCrowded++;
+    }
+    // A lodgepole made a spruce keeps a warm, light tint (TINTS 2 or 4), so the near forest keeps some of their light.
+    const tintF = sp === LDG && spF === SPR ? (spotHash(x, z, 7) < 0.5 ? 2 : 4) : tint;
+    if (keepTree) record(spF, x, g - 0.03 * hF, z, hF, width, yaw, leanAx, lean, tintF, cellF, Z.name);
+    // Understory (v5 3.1.5): 2 to 4 shrubs round trees at a clump's edge
+    // (dealt as before; kept round a tree that stands, and not round a willow or a snag).
     if (sp !== SNAG && sp !== M2 && clump < 0.56 && rand() < Z.shrub) {
+      const shrubs = keepTree && spF !== M2 && spF !== SNAG;
       const n = 2 + Math.floor(rand() * 3);
       const cr = h * 0.2;
       for (let k = 0; k < n; k++) {
@@ -1272,7 +1958,12 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
         const sg = hAt(sx, sz);
         const sh = H_RANGE[SHR][0] + (H_RANGE[SHR][1] - H_RANGE[SHR][0]) * rand();
         if (sh > capH + g - sg) continue;
-        push(SHR, sx, sg - 0.08 * sh, sz, sh, 0.85 + 0.3 * rand(), Z.name);
+        const sw = 0.85 + 0.3 * rand();
+        const syaw = rand() * Math.PI * 2;
+        const sAx = rand() * Math.PI * 2;
+        const sTint = Math.floor(rand() * TINTS.length);
+        const sCell = pickCell(SHR);
+        if (shrubs && !inWater(sx, sz, 1)) record(SHR, sx, sg - 0.08 * sh, sz, sh, sw, syaw, sAx, 0, sTint, sCell, Z.name);
       }
     }
   }
@@ -1299,7 +1990,7 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
         if (hyp(jx - lake.x, jz - lake.z) < lake.r + 80) continue;
         const g = hAt(jx, jz);
         if (g < 120 || g > 780) continue;
-        if (magicAt(jx, jz) > 0.2 || inA5View(jx, jz)) continue;
+        if (magicAt(jx, jz, true) > 0.2 || inA5View(jx, jz)) continue;
         const ny = normalY(jx, jz);
         if (ny < 0.46 || ny >= 0.72) continue;
         const cl = fbm(jx / 260, jz / 260, 41);
@@ -1307,12 +1998,33 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
         if (pick > m * 0.85) continue;
         const capH = maxTreeH(jx, jz, g);
         const r = mr();
-        const sp = r < 0.58 ? SPR : r < 0.9 ? FIR : YNG;
+        let sp = r < 0.58 ? SPR : r < 0.9 ? FIR : YNG;
         const [h0, h1] = H_RANGE[sp];
         const h = Math.min(capH, h0 + (h1 - h0) * mr());
         if (h < h0 * 0.7) continue;
         const cs = CELLS[sp];
-        recs.push(sp, jx, g - 0.03 * h, jz, h, 0.88 + 0.24 * mr(), mr() * Math.PI * 2, mr() * Math.PI * 2, mr() * 0.06, Math.floor(mr() * TINTS.length), cs[Math.floor(mr() * cs.length) % cs.length]);
+        const wd = 0.88 + 0.24 * mr();
+        const yaw = mr() * Math.PI * 2;
+        const leanAx = mr() * Math.PI * 2;
+        const lean = mr() * 0.06;
+        const tint = Math.floor(mr() * TINTS.length);
+        let cell = cs[Math.floor(mr() * cs.length) % cs.length];
+        dealt.push(jx, jz, h, wd);
+        // Wave 3: teal tips where the halo reaches these slopes; spaced.
+        const mgN = jx >= mx0 && jx <= mx1 && jz >= mz0 && jz <= mz1 ? magicAt(jx, jz) : 0;
+        if (mgN > 0.25 && spotHash(jx, jz, 4) < smooth(0.22, 0.5, mgN)) {
+          sp = TEALS;
+          cell = cellFor(TEALS, 0);
+        }
+        if (inWater(jx, jz, 2)) {
+          nWet++;
+          continue;
+        }
+        if (!spaced(sp, jx, g - 0.03 * h, jz, h, wd, cell)) {
+          nCrowded++;
+          continue;
+        }
+        recs.push(sp, jx, g - 0.03 * h, jz, h, wd, yaw, leanAx, lean, tint, cell);
         counts[sp]++;
         nMassif++;
       }
@@ -1324,26 +2036,61 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   await yieldTask();
 
   // The magic understory, by the field: glow ferns from 0.3, glowcaps from 0.5, willows 0.5 to 0.9.
+  // Dealt as before over the field's core (fx0..fz1, from the samples above).
+  // Wave 3: a willow that would grow into a tree or a giant, or stand in the
+  // water, is left out; it still counts as placed, so the glowcaps and ferns
+  // after it stay where they were (a glowcap or a fern in the water is left
+  // out the same way). Then, from streams of their own: those willows again,
+  // in the core where they were dealt, as many as find room (review round 2:
+  // planted in the halo's ring, they made its outer edge the brightest teal
+  // in the lake's views), and the halo's own willows, glowcaps and ferns,
+  // where it outruns the core, at HALO_UNDERSTORY of the core's density.
   const mrand = mulberry32(31);
-  let fx0 = Infinity, fx1 = -Infinity, fz0 = Infinity, fz1 = -Infinity;
-  for (let z = Fo.z - 1400; z <= Fo.z + 1400; z += 40) {
-    for (let x = Fo.x - 1400; x <= Fo.x + 1600; x += 40) {
-      if (magicAt(x, z) > 0.28) {
-        fx0 = Math.min(fx0, x);
-        fx1 = Math.max(fx1, x);
-        fz0 = Math.min(fz0, z);
-        fz1 = Math.max(fz1, z);
-      }
-    }
-  }
   const cl = Fo.clearing;
-  const placeMagic = (sp: number, n: number, lo: number, hi: number, tries: number) => {
+  let nWillowCrowded = 0;
+  /**
+   * u: the halo's pick list (0 willows, 1 glowcaps, 2 ferns), -1 for the
+   * core as dealt before, or -2 for the core again (only what stands counts
+   * toward n). The halo's glowcaps and ferns grow in patches of 3 to 6 round
+   * a picked spot (scattered one by one at its lower density they read as
+   * dots on bare ground).
+   */
+  const placeMagic = (sp: number, n: number, lo: number, hi: number, tries: number, R: () => number, u: number) => {
     let made = 0;
+    let left = 0;
+    let px = 0;
+    let pz = 0;
     for (let t = 0; t < tries && made < n; t++) {
-      const x = fx0 + (fx1 - fx0) * mrand();
-      const z = fz0 + (fz1 - fz0) * mrand();
-      const mg = magicAt(x, z);
-      if (mrand() > smooth(lo, hi, mg)) continue;
+      let x: number;
+      let z: number;
+      let mg: number;
+      if (u < 0) {
+        // Again (-2): from the core's lattice by its willow weight, kept at
+        // the field's share of that weight, so the willows spread as the first
+        // pass's do and few tries go where none may stand.
+        if (u === -1) {
+          x = fx0 + (fx1 - fx0) * R();
+          z = fz0 + (fz1 - fz0) * R();
+        } else [x, z] = haloPick(3, R);
+        mg = magicAt(x, z, true);
+        if (R() * (u === -1 ? 1 : pickW) > smooth(lo, hi, mg)) continue;
+      } else {
+        if (u === 0) [x, z] = haloPick(u, R);
+        else {
+          if (left <= 0) {
+            [px, pz] = haloPick(u, R);
+            left = 3 + Math.floor(R() * 4);
+          }
+          left--;
+          const a = R() * Math.PI * 2;
+          const d = (sp === M3 ? 7 : 12) * Math.sqrt(R());
+          x = px + Math.cos(a) * d;
+          z = pz + Math.sin(a) * d;
+        }
+        mg = magicAt(x, z);
+        // Still what the halo adds here (the spot moved off its lattice point).
+        if (u === 0 ? mg < 0.48 || mg > 0.88 : smooth(lo, hi, mg) <= smooth(lo, hi, magicAt(x, z, true))) continue;
+      }
       if (sp === M2 && mg > 0.93) continue;
       if (hyp(x - cl.x, z - cl.z) < cl.r * 0.55) continue;
       if (hyp(x - lake.x, z - lake.z) < lake.r + 10) continue;
@@ -1351,20 +2098,48 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
       if (pathD.get(x, z, 999) < (sp === M2 ? 20 : 5)) continue;
       const g = hAt(x, z);
       const [h0, h1] = H_RANGE[sp];
-      const h = h0 + (h1 - h0) * mrand();
+      const h = h0 + (h1 - h0) * R();
       if (camMinY.get(x, z, 1e9) - CAM_GAP - g < h) continue;
       // C3 round 2 (judge 2, fix 6): half the ferns in the a6 frame's lower 40%.
       if (sp === M4 && hyp(x - A6_CAM[0], z - A6_CAM[2]) < A6_FERN_THIN && hash2(Math.floor(x * 4), Math.floor(z * 4), 97) < 0.5) continue;
-      recs.push(sp, x, g - 0.03 * h, z, h, 0.85 + 0.3 * mrand(), mrand() * Math.PI * 2, mrand() * Math.PI * 2, mrand() * 0.05, Math.floor(mrand() * 3), 0);
+      const wd = 0.85 + 0.3 * R();
+      const yaw = R() * Math.PI * 2;
+      const leanAx = R() * Math.PI * 2;
+      const lean = R() * 0.05;
+      const tint = Math.floor(R() * 3);
+      if (u === -1) made++;
+      if (u === -1 && sp === M2) dealt.push(x, z, h, wd);
+      if (inWater(x, z, sp === M2 ? 2 : 1)) {
+        if (u === -1 && sp === M2) nWillowCrowded++;
+        nWet++;
+        continue;
+      }
+      if (!spaced(sp, x, g - 0.03 * h, z, h, wd, 0)) {
+        if (u === -1) nWillowCrowded++;
+        continue;
+      }
+      if (u !== -1) made++;
+      recs.push(sp, x, g - 0.03 * h, z, h, wd, yaw, leanAx, lean, tint, 0);
       counts[sp]++;
-      made++;
     }
   };
   if (fx1 > fx0) {
-    placeMagic(M2, WILLOWS, 0.5, 0.8, WILLOWS * 30);
-    placeMagic(M3, GLOWCAPS, 0.45, 0.85, GLOWCAPS * 12);
-    placeMagic(M4, GLOWFERNS, 0.28, 0.7, GLOWFERNS * 10);
+    placeMagic(M2, WILLOWS, 0.5, 0.8, WILLOWS * 30, mrand, -1);
+    placeMagic(M3, GLOWCAPS, 0.45, 0.85, GLOWCAPS * 12, mrand, -1);
+    placeMagic(M4, GLOWFERNS, 0.28, 0.7, GLOWFERNS * 10, mrand, -1);
   }
+  const coreMade = counts[M2];
+  if (pickSum[3] > 0 && nWillowCrowded > 0) placeMagic(M2, nWillowCrowded, 0.5, 0.8, nWillowCrowded * 60, mulberry32(97), -2);
+  const willowsAgain = counts[M2] - coreMade;
+  const haloMade = [counts[M2], counts[M3], counts[M4]];
+  const nW = Math.round(WILLOWS * haloShare(0));
+  const nC = Math.round(GLOWCAPS * haloShare(1));
+  const nF = Math.round(GLOWFERNS * haloShare(2));
+  if (pickSum[0] > 0) placeMagic(M2, nW, 0.5, 0.8, nW * 30, mulberry32(89), 0);
+  const hrand = mulberry32(83);
+  if (pickSum[1] > 0) placeMagic(M3, nC, 0.45, 0.85, nC * 6, hrand, 1);
+  if (pickSum[2] > 0) placeMagic(M4, nF, 0.28, 0.7, nF * 6, hrand, 2);
+  const haloAdded = [counts[M2] - haloMade[0], counts[M3] - haloMade[1], counts[M4] - haloMade[2]];
   lap("magic");
   await yieldTask();
 
@@ -1471,7 +2246,13 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
     const cj = Math.min(cnz - 1, Math.max(0, Math.floor((z - ROI.minZ) / CULL_CELL)));
     cellOfTree[i] = cj * cnx + ci;
   }
-  const order = Array.from({ length: N }, (_, i) => i).sort((a, b) => cellOfTree[a] - cellOfTree[b]);
+  // By cell, each cell's trees in their dealt order: the order a stable sort
+  // gives, as a counting sort (load, review round 2: 4 ms to 0.3).
+  const byCell = new Int32Array(cnx * cnz + 1);
+  for (let i = 0; i < N; i++) byCell[cellOfTree[i] + 1]++;
+  for (let c = 1; c <= cnx * cnz; c++) byCell[c] += byCell[c - 1];
+  const order = new Int32Array(N);
+  for (let i = 0; i < N; i++) order[byCell[cellOfTree[i]]++] = i;
   const MAT = new Float32Array(N * 16);
   const CMAT = new Float32Array(N * 16);
   const COL = new Float32Array(N * 3);
@@ -1586,7 +2367,8 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   setTimeout(() => {
     if (disposed) return;
     const t0 = performance.now();
-    maps = bakeMaps(recs, REC, (x, z) => railD.get(x, z, 9999) < 2600);
+    maps = bakeMaps(recs, REC, (x, z) => railD.get(x, z, 9999) < 2600, dealt);
+    dealt.length = 0;
     ctx.scene.userData.forestMaps = maps;
     const surf = ctx.scene.userData.surfaces as SurfacesApi | undefined;
     if (surf) {
@@ -1861,6 +2643,18 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
       const out: Record<string, number | string> = {
         trees: N,
         wild: nWild,
+        // Wave 3: trees left out for crowding (willows apart), species swapped, the halo's understory.
+        crowded: nCrowded,
+        willowsCrowded: nWillowCrowded,
+        inWater: nWet,
+        lodgeSwap: nLodgeSwap,
+        groveSwap: nGroveSwap,
+        haloSwap: nHaloSwap,
+        haloUnderstory: JSON.stringify(haloAdded),
+        willowsAgain,
+        // Today's weight sum (K_SUM holds 1dc7e10's).
+        wSum,
+        giantSpots: giants.length,
         buildMs: times.total,
         build: JSON.stringify(times),
         mapsMs,
@@ -1913,7 +2707,7 @@ const ZONE_SUN: Record<string, readonly [number, number]> = {
   Z5: [262, 1.6],
 };
 
-function bakeMaps(recs: number[], REC: number, casts: (x: number, z: number) => boolean): ForestMaps {
+function bakeMaps(recs: number[], REC: number, casts: (x: number, z: number) => boolean, dealt: number[]): ForestMaps {
   const size = Math.max(ROI.maxX - ROI.minX, ROI.maxZ - ROI.minZ);
   const ox = ROI.minX;
   const oz = ROI.minZ;
@@ -1923,6 +2717,24 @@ function bakeMaps(recs: number[], REC: number, casts: (x: number, z: number) => 
   const dens = new Float32Array(DN * DN);
   const sT = size / SN;
   const dT = size / DN;
+  // Density: a soft disc per tree as dealt (wave 3: [x, z, h, w], in the deal's
+  // order, the trees its rules left out or changed as they were dealt), so the
+  // forest floor's paint and the grass that reads it stay as they were.
+  for (let r = 0; r < dealt.length; r += 4) {
+    const x = dealt[r];
+    const z = dealt[r + 1];
+    const cr = Math.max(4, dealt[r + 2] * 0.2 * dealt[r + 3]);
+    const R = (cr + 14) / dT;
+    const ci = (x - ox) / dT;
+    const cj = (z - oz) / dT;
+    for (let j = Math.max(0, Math.floor(cj - R)); j <= Math.min(DN - 1, Math.ceil(cj + R)); j++) {
+      for (let i = Math.max(0, Math.floor(ci - R)); i <= Math.min(DN - 1, Math.ceil(ci + R)); i++) {
+        const d = hyp(i + 0.5 - ci, j + 0.5 - cj) / R;
+        if (d < 1) dens[j * DN + i] += 0.45 * (1 - d * d);
+      }
+    }
+  }
+  // Shade: the trees that stand.
   for (let r = 0; r < recs.length; r += REC) {
     const sp = recs[r];
     if (sp === SHR || sp === M3 || sp === M4) continue;
@@ -1930,18 +2742,6 @@ function bakeMaps(recs: number[], REC: number, casts: (x: number, z: number) => 
     const z = recs[r + 3];
     const h = recs[r + 4];
     const cr = Math.max(4, h * 0.2 * recs[r + 5]);
-    // Density: a soft disc.
-    {
-      const R = (cr + 14) / dT;
-      const ci = (x - ox) / dT;
-      const cj = (z - oz) / dT;
-      for (let j = Math.max(0, Math.floor(cj - R)); j <= Math.min(DN - 1, Math.ceil(cj + R)); j++) {
-        for (let i = Math.max(0, Math.floor(ci - R)); i <= Math.min(DN - 1, Math.ceil(ci + R)); i++) {
-          const d = hyp(i + 0.5 - ci, j + 0.5 - cj) / R;
-          if (d < 1) dens[j * DN + i] += 0.45 * (1 - d * d);
-        }
-      }
-    }
     if (sp >= M2 || !casts(x, z)) continue;
     // Shade: a stripe away from the owning zone's sun.
     let best = "";

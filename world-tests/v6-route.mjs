@@ -23,7 +23,9 @@
  *     hidden (< 1% of the frame) before the flight begins;
  *   - the Sky Island: hidden from stops 1-4 by terrain alone, never seen
  *     directly before stop 5, and at stop 5 its reflection is in the lake;
- *   - spacing between stops, the ravine floor below camp, the lake level,
+ *   - spacing between stops, the ravine floor below camp, the lake's shore
+ *     (map review item 15c: no circle, its level, the mirror's edge under the
+ *     bank, the trail and the jetty's foot out of its water),
  *     the falls lip, the Climb's face, the steps, the pads.
  *   - 2026-10-13, a3 TO a4 IN THE OPEN (Lovro: "the camera between Video Ads 1
  *     and Video Ads 2 goes into the cave for no reason. Just going straight
@@ -36,12 +38,17 @@
  *     from the world, and the mine's checks of grey pass 3 with it): no key
  *     of a kind the layout does not pace, the old marks retired, no sample of
  *     the route under the terrain's surface, the camera never through the
- *     falling water; the trail on the ground starts again on the pool's shore
- *     and reaches the log over the gorge's floor, never at a rock wall;
+ *     falling water; the trail on the ground starts again at the falls' foot
+ *     and runs round the pool's east side to the log over the gorge's floor,
+ *     never at a rock wall, and from there to the traverse touches water only
+ *     on the log (map review item 15d);
  *   - the scenery is pinned to places (decision 66): see the last section;
  *   - grey pass 3 leftovers: the flight takes 200-300 vh; the star look has
  *     the observatory in the lower part of the frame; the Great Tree is whole
  *     in frame at a6.
+ *   - map review 2026-10-15, item 14: the stretches from a1 to a7 at most 260
+ *     vh, and no turn on the route faster than 3.4 degrees per vh (the
+ *     gully's) at the default pacing.
  * Writes, to world-tests/shots/v6/route/: map.svg/png (top down),
  * profile.svg/png (height along the route), views.png (ray-marched grey
  * previews of the stops and the key moments) and report.json.
@@ -52,7 +59,7 @@ import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 import * as THREE from "three";
 import * as L from "../src/lib/world-v6/layout.ts";
-import { terrainHeight } from "../src/lib/world-v6/terrain.ts";
+import { LAKE_PAD, LAKE_SURFACE, lakeShoreAt, lakeShoreR, terrainHeight } from "../src/lib/world-v6/terrain.ts";
 import { createRail } from "../src/lib/world-v6/rail.ts";
 import { railGround } from "../src/lib/world-v6/scene.ts";
 
@@ -469,7 +476,7 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
   const hikeVh = vhAt(rail, burstS) - vhAt(rail, a4S);
   report.hikeVh = r1(hikeVh);
   report.upVh = r1(upVh);
-  // Decision 67: a3 to a4 is the walk along the trail, 1,546 units with 400 degrees of turning: 280 vh (Version W, 120 degrees: 200).
+  // Decision 67: a3 to a4 is the walk along the trail, 1,546 units with 400 degrees of turning: 280 vh (Version W, 120 degrees: 200). Map review 2026-10-15 (item 14): 255.
   check("the way up: a3 to a4 <= 300 vh, a4 to the burst <= 200 vh at the default pacing", upVh <= 300 && hikeVh <= 200, `${r1(upVh)} vh / ${r1(hikeVh)} vh`);
   // Facing where it goes after a4: from just past a4 to the burst, the view
   // stays within 60 of the travel heading.
@@ -483,6 +490,30 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
   };
   const w2 = offTravel(sAtKey(L.ROUTE_MARKS.traverse + 0.5), burstS);
   check("the traverse faces where it goes (view within 60 of the travel heading, a4 to the burst)", w2.v <= 60, `traverse to burst ${JSON.stringify(w2)}`);
+  // Map review 2026-10-15, item 14 (Lovro's Loom, 5:09 to 6:02: "some
+  // distances are bigger"; that evening: "if we can somehow shrink the long
+  // distances ... then great"): the stretches from a1 to a7 run 160 to 260 vh
+  // (they were 160 to 300). A shorter budget turns every view in its stretch
+  // faster per vh, so no turn on the route may be faster than the gully's,
+  // 3.4 degrees per vh 60 clear of the stops (the route's fastest since final
+  // pass D brought it down from 3.84). a7 to a8 (420 vh) is left out: 220 of
+  // it is the locked flight and most of the rest the rope bridge.
+  {
+    const st = rail.stopS;
+    const stretches = st.slice(1, 7).map((s, i) => r1(vhAt(rail, s) - vhAt(rail, st[i])));
+    let fastest = { v: 0 };
+    let prev = rail.bearingAtS(0);
+    for (let s = 2; s <= rail.length; s += 2) {
+      const b = rail.bearingAtS(s);
+      const d = Math.abs(b - prev);
+      prev = b;
+      if (st.some((q) => Math.abs(s - q) <= 60)) continue;
+      const dv = vhAt(rail, s) - vhAt(rail, s - 2);
+      if (dv > 1e-6 && d / dv > fastest.v) fastest = { v: +(d / dv).toFixed(2), s: Math.round(s), kind: rail.kindAtS(s) };
+    }
+    report.pacing = { stretches, fastest };
+    check("pacing (map review item 14): the stretches from a1 to a7 at most 260 vh each, and no turn on the route faster than 3.4 degrees per vh (60 clear of the stops) at the default pacing", stretches.every((v) => v <= 260) && fastest.v <= 3.4, `a1 to a7: ${stretches.join(", ")} vh; fastest turn ${JSON.stringify(fastest)}`);
+  }
   // Decision 67, 2026-10-13 (Lovro: "we have the path but we don't take it
   // and go in the air"): a3 to a4 TAKES THE TRAIL on the ground, facing
   // forward: down from the stop to the pool's east shore, over the log, the
@@ -529,8 +560,8 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
     );
     // 3. On the trail, then on the ladder (decision 68). The visible trail is
     //    PATH where surfaces.ts paints it (both ends of a segment within 25 of
-    //    the ground), from the pool's shore to the traverse's first leg past
-    //    the bench. The camera comes down onto it at the shore and stays
+    //    the ground), from the falls' foot to the traverse's first leg past
+    //    the bench. The camera comes down onto it by the pool's east shore and stays
     //    within 12 of it past the fan's top (x 200), 36 to 65 over the ground
     //    as far as the fan (x 150). The strip turns in to the wall's foot
     //    there and stops; the wall behind it is stepped and tops out 150 short
@@ -796,10 +827,17 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
       //     settling). No step of 2 units turns more than 2.4
       //     degrees (the reveal is nearly a turn on the spot, walked at a
       //     crawl), and 60 clear of the stops the view never turns faster than
-      //     2.7 degrees per vh at the default pacing (it measures 2.6 in the
-      //     reveal and 2.5 at the log and on the fan: the three turns are paced
-      //     alike, which is what Q's paces on the rows are for).
-      check("a3 to a4 (F, facing forward): the turns are few and slow (under 420 degrees in all, no step of 2 units over 2.4 degrees, <= 2.7 degrees per vh 60 clear of the stops)", total < 420 && step.v <= 2.4 && fastest.v <= 2.7, `${r1(total)} degrees in all; largest step ${JSON.stringify(step)}; fastest ${JSON.stringify(fastest)}`);
+      //     3.0 degrees per vh at the default pacing (it measures 2.9 at the
+      //     log, on the fan, off the ladder and in the reveal: the turns are
+      //     paced alike, which is what Q's paces on the rows are for).
+      //     Map review 2026-10-15, item 14 (Lovro: the longer stretches are
+      //     "definitely noticeably longer"): the limit was 2.7, and at 280 vh
+      //     the stretch measured 2.68, with no scroll left to give back. Its
+      //     budget went to 255 with every row's pace kept, which turns each
+      //     view 10% faster per vh; retuning the rows' paces held 2.7 only
+      //     down to 265. 3.0 stays under the gully's turn, the route's fastest
+      //     (the pacing row after "the traverse faces where it goes").
+      check("a3 to a4 (F, facing forward): the turns are few and slow (under 420 degrees in all, no step of 2 units over 2.4 degrees, <= 3.0 degrees per vh 60 clear of the stops)", total < 420 && step.v <= 2.4 && fastest.v <= 3.0, `${r1(total)} degrees in all; largest step ${JSON.stringify(step)}; fastest ${JSON.stringify(fastest)}`);
       // 6F. Facing forward, then the reveal. From the pool's shore to the Trail
       //     Hut the view stays within 50 degrees of the way the camera travels
       //     (it leads into each corner). On the ladder (decision 68) the camera
@@ -903,7 +941,8 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
 // Its checks (the route in or out of its void, the rock cover over the hall,
 // the mouth behind the curtain) went with it. What holds now: the camera is
 // above ground everywhere and never passes through the falling water, and the
-// trail on the ground starts again on the pool's shore.
+// trail on the ground starts again at the falls' foot, out of the water
+// (since map review item 15d: it started on the pool's rim).
 {
   const F = WORLD.falls;
   // 1. No sample of the route is under the terrain's surface.
@@ -911,16 +950,30 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
   for (const d of dense) if (d.p.y < terrainHeight(d.p.x, d.p.z)) underground++;
   check("the camera is above ground everywhere (no sample of the route under the terrain's surface)", underground === 0, `${underground} of ${dense.length} samples under the surface`);
   // 2. The trail at the pool. The ride down the falls has no trail (the lip is
-  //    the only point flagged `under`); the next point is on the pool's shore,
-  //    just outside the water; from there to the log's south end the trail
-  //    lies on the gorge's floor, and nowhere does it start from or run into
-  //    a rock wall (the ground within 25 of it never rises 8 over it).
+  //    the only point flagged `under`). Map review 2026-10-15, item 15d
+  //    (Lovro: "It goes into the water in a weird way and not around it"):
+  //    the next point stood on the pool's rim, its last leg aimed at the
+  //    water, which it stopped 5 short of. Now the trail starts at the falls'
+  //    foot, 25 to 45 from the pool's water, its last leg turned 60 degrees
+  //    or more away from the pool's middle, and runs round the pool's east
+  //    side to the log's south end on the gorge's floor, nowhere starting from
+  //    or running into a rock wall (the ground within 25 of it never rises 8
+  //    over it). On the old points: 16.9 from the water, 21 degrees.
   {
     const iLip = PATH.findIndex((q) => q.under);
     const iLog = PATH.findIndex((q) => Math.abs(q.x - 62) < 1 && Math.abs(q.z - 1608) < 1);
     const unders = PATH.filter((q) => q.under).length;
     const P0 = PATH[iLip + 1];
+    const P1 = PATH[iLip + 2];
     const shore = Math.hypot(P0.x - WORLD.pool.x, P0.z - WORLD.pool.z) - WORLD.pool.r;
+    // The angle between the way the trail runs at its start (from its second point to its first) and the way to the pool's middle.
+    const away = (() => {
+      const ex = P0.x - P1.x;
+      const ez = P0.z - P1.z;
+      const px = WORLD.pool.x - P0.x;
+      const pz = WORLD.pool.z - P0.z;
+      return (Math.acos((ex * px + ez * pz) / (Math.hypot(ex, ez) * Math.hypot(px, pz))) * 180) / Math.PI;
+    })();
     let offGround = { v: 0 };
     let wall = { v: -Infinity };
     for (let i = iLip + 1; i < iLog; i++) {
@@ -941,9 +994,50 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
       }
     }
     check(
-      "the trail at the pool: no trail down the ride, then from the pool's shore to the log on the gorge's floor, never at a rock wall",
-      iLip >= 0 && unders === 1 && iLog > iLip + 1 && shore >= 0 && shore <= 30 && offGround.v <= 3 && wall.v < 8,
-      `points flagged under: ${unders}; the first point after the ride is ${r1(shore)} outside the pool's water; ${iLog - iLip} points to the log; furthest from the ground ${JSON.stringify(offGround)}; highest ground within 25 of it ${JSON.stringify(wall)}`,
+      "the trail at the pool (map review item 15d): no trail down the ride, then from the falls' foot (25 to 45 from the pool's water, its start turned 60 degrees or more away from the pool) round the pool's east side to the log on the gorge's floor, never at a rock wall",
+      iLip >= 0 && unders === 1 && iLog > iLip + 1 && shore >= 25 && shore <= 45 && away >= 60 && offGround.v <= 3 && wall.v < 8,
+      `points flagged under: ${unders}; the first point after the ride is ${r1(shore)} outside the pool's water, its start ${r1(away)} degrees off the way to the pool's middle; ${iLog - iLip} points to the log; furthest from the ground ${JSON.stringify(offGround)}; highest ground within 25 of it ${JSON.stringify(wall)}`,
+    );
+  }
+  // 3. Map review item 15d: the trail from Video Ads I to Video Ads II keeps
+  //    out of the water. Every 2 units from its first point after the ride to
+  //    the traverse's first leg, read with water.ts's waterAt (the one test
+  //    for water as drawn, which progress-world.ts keeps the lanterns dry
+  //    with) on the drawn ground (rocks.ts groundY): no sample under water
+  //    but on the log's span over the river, the one place it crosses water,
+  //    and off the log no water within 16 (the test's widest margin: the
+  //    paint's widest half width, 8.5, and most of its verge). On the old
+  //    points: water within 16 at the pool's rim (6, 1640).
+  {
+    const { waterAt } = await import("../src/lib/world-v6/water.ts");
+    const { groundY } = await import("../src/lib/world-v6/rocks.ts");
+    const iLip = PATH.findIndex((q) => q.under);
+    const iLog = PATH.findIndex((q) => Math.abs(q.x - 62) < 1 && Math.abs(q.z - 1608) < 1);
+    const iEnd = PATH.findIndex((q) => Math.abs(q.x - 900) < 1 && Math.abs(q.z - 1090) < 1);
+    let samples = 0;
+    let onLog = 0;
+    const under = [];
+    const near = [];
+    for (let i = iLip + 1; i < iEnd; i++) {
+      const a = PATH[i];
+      const b = PATH[i + 1];
+      const n = Math.ceil(Math.hypot(b.x - a.x, b.z - a.z) / 2);
+      for (let k = 0; k <= n; k++) {
+        const x = a.x + ((b.x - a.x) * k) / n;
+        const z = a.z + ((b.z - a.z) * k) / n;
+        samples++;
+        if (i === iLog) {
+          if (waterAt(x, z, groundY, 0)) onLog++;
+          continue;
+        }
+        if (waterAt(x, z, groundY, 0)) under.push([Math.round(x), Math.round(z)]);
+        else if (waterAt(x, z, groundY, 16)) near.push([Math.round(x), Math.round(z)]);
+      }
+    }
+    check(
+      "the trail from Video Ads I to Video Ads II out of the water (map review item 15d): no sample of it under water (water.ts waterAt) but on the log's span over the river, and off the log no water within 16",
+      iLip >= 0 && iLog > iLip && iEnd > iLog && under.length === 0 && near.length === 0 && onLog > 0,
+      `${samples} samples from the falls' foot to the traverse; ${onLog} under water on the log's span (the crossing); ${under.length} under water elsewhere${under.length ? ` (first ${under[0]})` : ""}; ${near.length} with water within 16 off the log${near.length ? ` (first ${near[0]})` : ""}`,
     );
   }
   // 2026-10-13: the camera used to go through the curtain and the arch with
@@ -1102,7 +1196,8 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
       const u = (o.y - Lk.y) / (o.y - my);
       const hx = o.x + (p[0] - o.x) * u;
       const hz = o.z + (p[2] - o.z) * u;
-      if (Math.hypot(hx - Lk.x, hz - Lk.z) >= Lk.r) continue;
+      // On the water: inside the shore (item 15c, terrain.ts lakeShoreR) and not on dry ground.
+      if (Math.hypot(hx - Lk.x, hz - Lk.z) >= lakeShoreAt(hx, hz) || terrainHeight(hx, hz) >= LAKE_SURFACE) continue;
       const hit = new THREE.Vector3(hx, Lk.y + 0.5, hz);
       if (rayBlock(o, [hx, Lk.y + 0.5, hz]) === 0 && rayBlock(hit, p) !== 1) clearPath++;
     }
@@ -1199,16 +1294,118 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
   const F = WORLD.falls;
   check("ravine floor (pool area) below Base Camp", floorMax < camp - 60, `floor max ${floorMax.toFixed(0)} vs camp ${camp}; pool water ${Pl.y}; lip ${F.top[1]}; drop ${Math.round(F.top[1] - F.bottom[1])}`);
 
+  // Map review 2026-10-15, item 15c: the lake's shore is terrain.ts's
+  // lakeShoreR, no longer WORLD.lake's circle (light.ts's mirror reaches
+  // LAKE_PAD past it). On the shore the ground is the water's surface; inside
+  // it the bed is under the water everywhere (the islet is boulders in open
+  // water on no mound, review round 1: a mound drew the a5 stop's ray-placed
+  // rocks and reeds onto it, into the locked reveal); at the mirror's edge the
+  // drawn ground (rocks.ts groundY, the terrain mesh) is over it, so no water
+  // shows past the shore (where the brook cuts in, its ribbon covers it); and
+  // the drawn ground first rises out of the water within 10 of the shore.
   const Lk = WORLD.lake;
+  const { groundY } = await import("../src/lib/world-v6/rocks.ts");
+  const brookD = (x, z) => {
+    let best = Infinity;
+    for (let i = 0; i < L.BROOK.length - 1; i++) {
+      const [ax, , az] = L.BROOK[i];
+      const [bx, , bz] = L.BROOK[i + 1];
+      const dx = bx - ax;
+      const dz = bz - az;
+      const u = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz)));
+      best = Math.min(best, Math.hypot(x - ax - dx * u, z - az - dz * u));
+    }
+    return best;
+  };
   let ringDev = 0;
   let innerMax = -Infinity;
-  for (let a = 0; a < 180; a++) {
-    const th = (a / 180) * Math.PI * 2;
-    ringDev = Math.max(ringDev, Math.abs(terrainHeight(Lk.x + Math.cos(th) * Lk.r, Lk.z + Math.sin(th) * Lk.r) - Lk.y));
-    for (const k of [0, 0.3, 0.6, 0.9, 0.97]) innerMax = Math.max(innerMax, terrainHeight(Lk.x + Math.cos(th) * Lk.r * k, Lk.z + Math.sin(th) * Lk.r * k));
+  let edgeMin = Infinity;
+  let edgeAt = null;
+  let crossDev = 0;
+  let crossAt = null;
+  const radii = [];
+  for (let a = 0; a < 360; a++) {
+    const th = (a / 360) * Math.PI * 2;
+    const R = lakeShoreR(th);
+    radii.push(R);
+    const at = (d) => [Lk.x + Math.cos(th) * d, Lk.z + Math.sin(th) * d];
+    ringDev = Math.max(ringDev, Math.abs(terrainHeight(...at(R)) - LAKE_SURFACE));
+    for (const k of [0, 0.3, 0.6, 0.9, 0.97]) {
+      const [x, z] = at(R * k);
+      innerMax = Math.max(innerMax, terrainHeight(x, z));
+    }
+    const [ex, ez] = at(R + LAKE_PAD);
+    if (brookD(ex, ez) > 16 && groundY(ex, ez) - LAKE_SURFACE < edgeMin) {
+      edgeMin = groundY(ex, ez) - LAKE_SURFACE;
+      edgeAt = a;
+    }
+    let cross = null;
+    for (let d = R - 30; d <= R + LAKE_PAD; d += 0.5) {
+      if (groundY(...at(d)) >= LAKE_SURFACE) {
+        cross = d - R;
+        break;
+      }
+    }
+    if (cross === null || Math.abs(cross) > crossDev) {
+      crossDev = cross === null ? Infinity : Math.abs(cross);
+      crossAt = a;
+    }
   }
-  check("lake shoreline level within +/-2 on its radius", ringDev <= 2, `max deviation ${ringDev.toFixed(2)}`);
-  check("lake bed below the water everywhere inside 0.97r", innerMax < Lk.y, `max bed ${innerMax.toFixed(1)} vs water ${Lk.y}`);
+  // The bed between the rays too, every 8 units: a mound the size of the
+  // islet's boulders (about 40 across) falls between the rays' samples.
+  let innerN = 0;
+  let innerAt = null;
+  for (let x = Lk.x - Lk.r - 15; x <= Lk.x + Lk.r + 15; x += 8) {
+    for (let z = Lk.z - Lk.r - 15; z <= Lk.z + Lk.r + 15; z += 8) {
+      if (Math.hypot(x - Lk.x, z - Lk.z) >= 0.97 * lakeShoreAt(x, z)) continue;
+      innerN++;
+      const h = terrainHeight(x, z);
+      if (h > innerMax) {
+        innerMax = h;
+        innerAt = [Math.round(x), Math.round(z)];
+      }
+    }
+  }
+  const rMin = Math.min(...radii);
+  const rMax = Math.max(...radii);
+  check("lake shore (item 15c): the ground on the shore is the water's surface (+/-0.05) on 360 rays", ringDev <= 0.05, `max deviation ${ringDev.toFixed(3)}`);
+  check("lake bed below the water everywhere inside 0.97 of the shore, islet included (360 rays and a grid every 8 units)", innerMax < Lk.y, `max bed ${innerMax.toFixed(1)}${innerAt ? ` at (${innerAt})` : ""} vs water ${Lk.y}; ${innerN} grid points`);
+  check("the mirror's edge, LAKE_PAD past the shore, lies under the drawn bank on every ray (the brook's mouth aside)", edgeMin > 0, `least ground over the surface ${edgeMin.toFixed(2)} at ${edgeAt} deg`);
+  check("the drawn ground rises out of the water within 10 of the shore on every ray", crossDev <= 10, `worst ${crossDev.toFixed(1)} at ${crossAt} deg`);
+  check("the shore is no circle: its radius spans 100 or more, and never past r + 15 (forest.ts plants no tree within r + 22)", rMax - rMin >= 100 && rMax <= Lk.r + 15, `radius ${rMin.toFixed(0)} to ${rMax.toFixed(0)} (r ${Lk.r})`);
+  // The trail beside the lake keeps out of its water (it ran into it at the
+  // jetty's foot): 14 from the lake's water as drawn (the mirror where the
+  // ground is under it), the paint's half width plus room. The brook it
+  // crosses on its footbridge is not the lake's.
+  {
+    const lakeWet = (x, z) => groundY(x, z) < LAKE_SURFACE && Math.hypot(x - Lk.x, z - Lk.z) < lakeShoreAt(x, z) + LAKE_PAD;
+    const waterAt = (x, z, _g, m) => {
+      if (lakeWet(x, z)) return true;
+      for (let k = 0; k < 8; k++) if (lakeWet(x + Math.cos((k * Math.PI) / 4) * m, z + Math.sin((k * Math.PI) / 4) * m)) return true;
+      return false;
+    };
+    let wet = 0;
+    let first = null;
+    let gap = Infinity;
+    for (let i = 0; i < L.PATH.length - 1; i++) {
+      const A = L.PATH[i];
+      const B = L.PATH[i + 1];
+      const n = Math.ceil(Math.hypot(B.x - A.x, B.z - A.z) / 4);
+      for (let k = 0; k <= n; k++) {
+        const x = A.x + ((B.x - A.x) * k) / n;
+        const z = A.z + ((B.z - A.z) * k) / n;
+        if (Math.hypot(x - Lk.x, z - Lk.z) > Lk.r + 200) continue;
+        gap = Math.min(gap, Math.hypot(x - Lk.x, z - Lk.z) - lakeShoreAt(x, z));
+        if (waterAt(x, z, groundY, 14)) {
+          wet++;
+          if (!first) first = [Math.round(x), Math.round(z)];
+        }
+      }
+    }
+    const jf = L.PATH.find((q) => Math.abs(q.x - 1350) < 1 && Math.abs(q.z + 440) < 1);
+    const jfIn = jf ? Math.hypot(jf.x - Lk.x, jf.z - Lk.z) - lakeShoreAt(jf.x, jf.z) : -1;
+    check("the trail beside the lake keeps 14 from its water and 22 from its shore, the jetty's foot 20 inside the bank (item 15c)", wet === 0 && gap >= 22 && jfIn >= 20, `${wet} trail points within 14 of water${first ? `, first at ${first}` : ""}; least gap to the shore ${gap.toFixed(1)}; the jetty's foot ${jfIn.toFixed(1)} inside the bank`);
+  }
 
   // The lip: 6 upstream of the falls' top (against the flow).
   const fb = (F.flow * Math.PI) / 180;
@@ -1323,7 +1520,7 @@ function topDown() {
       let c = shadeAt(x, z);
       if (y < 0) c = [70, 96, 122];
       const Lk = WORLD.lake;
-      if (Math.hypot(x - Lk.x, z - Lk.z) < Lk.r) c = [96, 128, 158];
+      if (y < LAKE_SURFACE && Math.hypot(x - Lk.x, z - Lk.z) < lakeShoreAt(x, z) + LAKE_PAD) c = [96, 128, 158];
       // contour every 200
       const band = Math.floor(y / 200);
       const band2 = Math.floor(gh(x + S, z) / 200);

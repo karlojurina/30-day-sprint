@@ -50,6 +50,14 @@ import { areaShare, type WorldProgress } from "./progress";
  * part of the 18 degree frame the lesson panel leaves free. The aurora is not
  * gated: it stays at a7 and on the rail.
  *
+ * Map review wave 3: the lens is vertical, so a window narrower than about
+ * 0.95 of its height left Creative Strategy's rightmost stars past the right
+ * edge, and under about 1,040 px wide the panel stops narrowing at 300 px and
+ * reaches toward its leftmost. On such a window the whole chart is moved and,
+ * when it has to be, drawn smaller about its middle, as one figure, so every
+ * one of its stars stands between the panel and the window's right edge
+ * (fitFor). Wider windows draw it exactly as laid out.
+ *
  * Everything fades with the light's star level (state.stars), so it is gone by
  * day and full at night.
  */
@@ -156,6 +164,37 @@ const CHART_DONE = 1.7;
 /** Lines: the quad's half width on the sky (radians), room for the soft profile at any lens the park passes; the profile's sigma (CSS px). */
 const LINE_QUAD = 0.06 * D2R;
 const LINE_SIGMA = 0.6;
+
+/**
+ * Map review wave 3, narrow and portrait windows. The telescope's rest view
+ * as scene.ts parks it (TEL_PARK_LOOK_OFF, TEL_PARK_FOV): 3.5 degrees left of
+ * and 1 below where the telescope points (SKY_MARKS a7), through an 18 degree
+ * lens, vertical, so every window sees the same height of sky and a narrow
+ * one less of its width.
+ */
+const REST_OFF: readonly [number, number] = [3.5, 1];
+const REST_FOV = 18;
+/** How far (CSS px) a fitted chart keeps Creative Strategy's stars from the panel and from the window's right edge. */
+const FIT_PAD = 32;
+
+/**
+ * Where the telescope's panel ends (CSS px from the left) at a window w x h:
+ * its width is world.module.css .panel[data-tel], its left edge WorldV6.tsx's
+ * placePanel (the gutter plus 8: 36 under 1100 px wide, 48 up to 2200, 64 from
+ * there).
+ */
+function telPanelRight(w: number, h: number): number {
+  if (w >= 2200) return 64 + Math.min(432, w / 2 - 0.107 * h - 112);
+  return (w < 1100 ? 36 : 48) + Math.min(404, Math.max(300, w / 2 - 0.107 * h - 84));
+}
+
+/** The chart fitted to a narrow window, on the rest view's screen (vh from its centre, x right, y up): x' = x0 + s (x - xa), y' = ym + s (y - ym). */
+interface ChartFit {
+  s: number;
+  xa: number;
+  x0: number;
+  ym: number;
+}
 
 /** A hash in 0..1 (light.ts's hash1). */
 function hash01(i: number, seed: number): number {
@@ -433,6 +472,52 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   /** A point of CHART's plane (degrees right of and above the hero's centre) as a direction. */
   const planeDir = (x: number, y: number) =>
     fwd.clone().addScaledVector(right, Math.tan(x * D2R)).addScaledVector(upv, Math.tan(y * D2R)).normalize();
+  // Wave 3: the telescope's rest view (REST_OFF, REST_FOV), to fit the chart to narrow windows.
+  const restF = dirOf(hero.az - REST_OFF[0], hero.el - REST_OFF[1]);
+  const restR = new THREE.Vector3().crossVectors(restF, new THREE.Vector3(0, 1, 0)).normalize();
+  const restU = new THREE.Vector3().crossVectors(restR, restF);
+  const restTan = Math.tan((REST_FOV / 2) * D2R);
+  /** Where direction d shows in the rest view: vh from the screen's centre, x right, y up. */
+  const restVh = (d: THREE.Vector3): [number, number] => {
+    const z = d.dot(restF);
+    return [(d.dot(restR) / z / restTan) * 50, (d.dot(restU) / z / restTan) * 50];
+  };
+  /** Direction d where the fit puts it (null: as laid out). */
+  const fitDir = (d: THREE.Vector3, f: ChartFit | null, out: THREE.Vector3): THREE.Vector3 => {
+    if (!f) return out.copy(d);
+    const [x, y] = restVh(d);
+    const nx = f.x0 + f.s * (x - f.xa);
+    const ny = f.ym + f.s * (y - f.ym);
+    return out.copy(restF).addScaledVector(restR, (nx / 50) * restTan).addScaledVector(restU, (ny / 50) * restTan).normalize();
+  };
+  /**
+   * The fit that puts every one of Creative Strategy's stars (dirs) between
+   * the panel and the window's right edge, FIT_PAD clear of both: moved across
+   * when they fit, drawn smaller when they do not (filling the room, about
+   * their vertical middle). null where they stand there already, as on every
+   * window wider than about 0.95 of its height.
+   */
+  const fitFor = (dirs: readonly THREE.Vector3[], w: number, h: number): ChartFit | null => {
+    if (!dirs.length || !(w > 0) || !(h > 0)) return null;
+    const lo = ((telPanelRight(w, h) + FIT_PAD - w / 2) / h) * 100;
+    const hi = ((w / 2 - FIT_PAD) / h) * 100;
+    let xa = Infinity;
+    let xb = -Infinity;
+    let ya = Infinity;
+    let yb = -Infinity;
+    for (const d of dirs) {
+      const [x, y] = restVh(d);
+      xa = Math.min(xa, x);
+      xb = Math.max(xb, x);
+      ya = Math.min(ya, y);
+      yb = Math.max(yb, y);
+    }
+    if (xa >= lo && xb <= hi) return null;
+    const s = Math.max(0.2, Math.min(1, (hi - lo) / Math.max(1e-6, xb - xa)));
+    return { s, xa, x0: s < 1 || xb <= hi ? lo : hi - (xb - xa), ym: (ya + yb) / 2 };
+  };
+  const sameFit = (a: ChartFit | null, b: ChartFit | null) =>
+    a === b || (!!a && !!b && Math.abs(a.s - b.s) < 1e-6 && Math.abs(a.xa - b.xa) < 1e-6 && Math.abs(a.x0 - b.x0) < 1e-6 && Math.abs(a.ym - b.ym) < 1e-6);
   const marks = SKY_MARKS.flatMap((m, i) => {
     const c = CHART[m.id];
     if (!c || i === heroIdx) return [];
@@ -461,17 +546,16 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     return new Set(pick);
   };
 
-  // The chart's stars, built once: direction and sprite half size,
-  // brightness and warmth, area, one of the FEW. The hero's go after them.
-  const chartDirs: number[] = [];
+  // The chart's stars, laid out once: direction (build draws it through the
+  // fit), brightness and warmth, area, one of the FEW. The hero's go after them.
+  const chartNat: THREE.Vector3[] = [];
   const chartLook: number[] = [];
   const chartArea: number[] = [];
   const chartFew: boolean[] = [];
   for (const { i, m, shape } of marks) {
     const few = fewOf(shape.p);
     shape.p.forEach(([x, y], k) => {
-      const d = markDir(m, x, y);
-      chartDirs.push(d.x, d.y, d.z, CHART_HALF);
+      chartNat.push(markDir(m, x, y));
       chartLook.push(1, 1);
       chartArea.push(i);
       chartFew.push(few.has(k));
@@ -481,9 +565,6 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
 
   // Lines as thin quads on the sky: per vertex a point, the side vector and
   // [area, across (-1 or 1), along (0 at the start, 1 at the end), 0].
-  const chartLinePos: number[] = [];
-  const chartLineSide: number[] = [];
-  const chartLineData: number[] = [];
   const A = new THREE.Vector3();
   const B = new THREE.Vector3();
   const AB = new THREE.Vector3();
@@ -507,15 +588,12 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       data.push(area, across, along, 0);
     }
   };
+  /** The chart's lines: the area and both ends as laid out (build draws them through the fit). */
+  const chartLines: { area: number; a: THREE.Vector3; b: THREE.Vector3 }[] = [];
   for (const { i, m, shape } of marks) {
-    for (const [a, b] of shape.l) {
-      A.copy(markDir(m, shape.p[a][0], shape.p[a][1]));
-      B.copy(markDir(m, shape.p[b][0], shape.p[b][1]));
-      // Shortened at both ends so it stops short of the stars.
-      pushLine(chartLinePos, chartLineSide, chartLineData, i, 0.12, 0.12);
-    }
+    for (const [a, b] of shape.l) chartLines.push({ area: i, a: markDir(m, shape.p[a][0], shape.p[a][1]), b: markDir(m, shape.p[b][0], shape.p[b][1]) });
   }
-  const chartLineN = chartLineData.length / 16;
+  const chartLineN = chartLines.length;
 
   // ── Constellations: stars ──
   const quad = new THREE.PlaneGeometry(2, 2);
@@ -671,13 +749,27 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   let nLines = 0;
   let stateAttr = new THREE.InstancedBufferAttribute(new Float32Array(0), 1);
   let lineLitAttr = new THREE.Float32BufferAttribute(new Float32Array(0), 1);
+  /** Wave 3: the hero's layout for its count (a refit does not lay it out again), its stars as laid out, the window the chart is fitted to (CSS px) and the fit. */
+  let laid: { n: number; stars: HeroStar[]; gap: number } | null = null;
+  let heroNat: THREE.Vector3[] = [];
+  let fitW = 0;
+  let fitH = 0;
+  let fit: ChartFit | null = null;
+  const P = new THREE.Vector3();
   const build = (n: number) => {
     const b0 = performance.now();
-    const { stars, gap } = heroLayout(n);
+    if (!laid || laid.n !== n) laid = { n, ...heroLayout(n) };
+    const { stars, gap } = laid;
     heroN = stars.length;
     heroGap = gap;
-    const heroDirs = stars.map((s) => planeDir(s.x, s.y));
-    const dirs = chartDirs.slice();
+    heroNat = stars.map((s) => planeDir(s.x, s.y));
+    fit = fitFor(heroNat, fitW, fitH);
+    const heroDirs = heroNat.map((d) => fitDir(d, fit, new THREE.Vector3()));
+    const dirs: number[] = [];
+    for (const d of chartNat) {
+      fitDir(d, fit, P);
+      dirs.push(P.x, P.y, P.z, CHART_HALF);
+    }
     const look = chartLook.slice();
     stars.forEach((s, k) => {
       const d = heroDirs[k];
@@ -685,17 +777,26 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       look.push(s.bright, s.warm);
     });
     nStars = chartN + heroN;
+    // The chart's lines, shortened at both ends so they stop short of the
+    // stars. A fitted chart keeps the stars' size, so the cuts grow as it
+    // shrinks and the gaps stay as wide.
+    const sc = fit ? fit.s : 1;
+    const pos: number[] = [];
+    const sides: number[] = [];
+    const data: number[] = [];
+    for (const l of chartLines) {
+      fitDir(l.a, fit, A);
+      fitDir(l.b, fit, B);
+      pushLine(pos, sides, data, l.area, Math.min(0.3, 0.12 / sc), Math.min(0.3, 0.12 / sc));
+    }
     // One line per star after the first, to the lit star it grew from (in
     // star order, so line k - 1 belongs to star k), stopping short of both.
-    const pos = chartLinePos.slice();
-    const sides = chartLineSide.slice();
-    const data = chartLineData.slice();
     stars.forEach((s, k) => {
       if (s.parent < 0) return;
       const p = stars[s.parent];
       A.copy(heroDirs[s.parent]);
       B.copy(heroDirs[k]);
-      const len = Math.max(1e-3, Math.hypot(s.x - p.x, s.y - p.y));
+      const len = Math.max(1e-3, sc * Math.hypot(s.x - p.x, s.y - p.y));
       pushLine(pos, sides, data, heroIdx, Math.min(0.3, (HERO_LINE_GAP * p.size) / len), Math.min(0.3, (HERO_LINE_GAP * s.size) / len));
     });
     nLines = data.length / 16;
@@ -786,6 +887,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
 
   let lastNight = -1;
   let lastAim = 0;
+  const viewSize = new THREE.Vector2();
   const update = (time: number) => {
     const s = light?.state;
     const night = s ? Math.min(1, Math.max(0, s.stars)) * (1 - s.under) : 0;
@@ -807,7 +909,21 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     group.visible = night > 0.1;
     starMesh.visible = uTel.value > 0.002;
     lines.visible = starMesh.visible;
-    return changed || (night > 0.05 && !ctx.reducedMotion);
+    // Wave 3: a window of another size may need the chart fitted again (fitFor).
+    let refit = false;
+    if (ctx.renderer) {
+      ctx.renderer.getSize(viewSize);
+      if (viewSize.x !== fitW || viewSize.y !== fitH) {
+        fitW = viewSize.x;
+        fitH = viewSize.y;
+        if (!sameFit(fitFor(heroNat, fitW, fitH), fit)) {
+          build(heroLessons);
+          apply();
+          refit = true;
+        }
+      }
+    }
+    return changed || refit || (night > 0.05 && !ctx.reducedMotion);
   };
   update(0);
 
@@ -836,6 +952,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       heroLines: Math.max(0, heroLit - 1),
       heroFirst: chartN,
       heroGapDeg: Math.round(heroGap * 100) / 100,
+      // Wave 3: 0 when the chart is drawn as laid out; on a narrow window the scale it is fitted at (1: moved only).
+      heroFit: fit ? Math.round(fit.s * 1000) / 1000 : 0,
       heroBuildMs: Math.round(heroMs * 100) / 100,
       progress: Math.round(progress * 100) / 100,
       buildMs: Math.round(buildMs * 10) / 10,

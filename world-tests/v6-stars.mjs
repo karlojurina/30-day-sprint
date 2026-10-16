@@ -35,7 +35,12 @@
  *      there and the last (a7l22) is its Ad Bounty feature row, so 21
  *      lessons count and 21 stars show; 6 watched light 6.
  *   5  1366x768 and 1024x700 (the panel narrows there): every star still
- *      inside the lens, right of the panel, under the caption.
+ *      inside the lens, right of the panel, under the caption. Then the
+ *      windows narrower than about 0.95 of their height, where the chart is
+ *      fitted (map review wave 3): half a 1920x1080 monitor (960x1080),
+ *      portrait tablets (768x1024, 820x1180, 800x1280) and the narrowest
+ *      window that draws the world (760x1000): the same, 5 lines drawn, and
+ *      every star at least 8 px inside the window (every row checks that).
  * Then 0 requests to /api, 0 to Supabase and 0 page errors over every page.
  *
  * Pictures (git-ignored): world-tests/shots/v6/stars/<row>.png.
@@ -281,9 +286,11 @@ const dimOf = (m) => m.stars.filter((s) => s.peak >= DIM && s.peak < LIT)
 const missingOf = (m) => m.stars.filter((s) => s.peak < DIM)
 const linesOn = (m) => m.lines.filter((l) => l.mid >= LINE)
 
-/** Every star inside the lens's clear circle, right of the panel, under the caption, and apart. */
+/** Every star on the screen, inside the lens's clear circle, right of the panel, under the caption, and apart. */
 function placement(row, m, label) {
   const vh = m.H / 100
+  const off = m.stars.filter((s) => s.x < 8 || s.y < 8 || s.x > m.W - 8 || s.y > m.H - 8)
+  check(row, `${label}: every star at least 8px inside the window`, off.length === 0, off.length ? off.map((s) => `star ${s.k + 1} at ${Math.round(s.x)},${Math.round(s.y)}`).join('; ') : `x ${Math.round(Math.min(...m.stars.map((s) => s.x)))} to ${Math.round(Math.max(...m.stars.map((s) => s.x)))} of ${m.W}`)
   const cx = m.W / 2 + 17 * vh
   const cy = m.H * 0.48
   const out = m.stars.filter((s) => Math.hypot(s.x - cx, s.y - cy) > (LENS_VH - LENS_MARGIN_VH) * vh)
@@ -360,12 +367,13 @@ try {
     }
   }
 
-  // ── Row 5: smaller screens, where the panel narrows ──
-  for (const vp of [{ width: 1366, height: 768 }, { width: 1024, height: 700 }]) {
+  // ── Row 5: smaller screens, where the panel narrows; then narrow and portrait windows, where the chart is fitted ──
+  for (const vp of [{ width: 1366, height: 768 }, { width: 1024, height: 700 }, { width: 960, height: 1080 }, { width: 768, height: 1024 }, { width: 820, height: 1180 }, { width: 800, height: 1280 }, { width: 760, height: 1000 }]) {
     const { ctx, page } = await openParked({ catalog: 'course', p: 'partial' }, vp)
     try {
       const m = await measure(page, `5-${vp.width}x${vp.height}.png`)
-      check(5, `${vp.width}x${vp.height}: 18 stars, 6 lit`, m.stars.length === 18 && litOf(m).length === 6, { stars: m.stars.length, lit: litOf(m).length })
+      const narrow = vp.width < 0.95 * vp.height
+      check(5, `${vp.width}x${vp.height}: 18 stars, 6 lit${narrow ? ', 5 lines (the chart fitted at ' + m.stats.heroFit + ')' : ''}`, m.stars.length === 18 && litOf(m).length === 6 && (!narrow || (linesOn(m).length === 5 && m.stats.heroFit > 0)), { stars: m.stars.length, lit: litOf(m).length, lines: linesOn(m).length, fit: m.stats.heroFit })
       placement(5, m, `${vp.width}x${vp.height}`)
     } finally {
       await ctx.close().catch(() => {})

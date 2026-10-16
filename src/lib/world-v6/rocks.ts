@@ -21,7 +21,7 @@ import { addFootprint } from "./footprints";
 import { NO_REFLECT_LAYER } from "./light";
 import { gateIsleTop } from "./dress-gate";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
-import { terrainHeight } from "./terrain";
+import { LAKE_OUTER, LAKE_PAD, LAKE_SURFACE, lakePoints, lakeShoreAt, lakeShoreR, terrainHeight } from "./terrain";
 
 /**
  * v6 rocks (world_art_bible_v6.md 2.2, brief 4.6).
@@ -194,14 +194,20 @@ export function railDist(x: number, y: number, z: number): number {
 }
 export const nearRail = (x: number, y: number, z: number, r: number) => railDist(x, y, z) < r;
 
-/** Water covers (x, z): the sea below 0, the Mirror Lake, the plunge pool. */
+/** Water covers (x, z): the sea below 0, the Mirror Lake (its mirror, inside the shore terrain.ts draws), the plunge pool. */
 export function isWater(x: number, z: number, g = groundY(x, z)): boolean {
   if (g < WORLD.seaLevel - 0.5) return true;
-  const L = WORLD.lake;
-  if (Math.hypot(x - L.x, z - L.z) < L.r && g < L.y) return true;
+  if (g < LAKE_SURFACE && inLakeMirror(x, z)) return true;
   const P = WORLD.pool;
   if (Math.hypot(x - P.x, z - P.z) < P.r && g < P.y) return true;
   return false;
+}
+
+/** Inside the Mirror Lake's mirror (light.ts): the shore (terrain.ts lakeShoreR) plus LAKE_PAD. */
+function inLakeMirror(x: number, z: number): boolean {
+  const L = WORLD.lake;
+  const d = Math.hypot(x - L.x, z - L.z);
+  return d < LAKE_OUTER + LAKE_PAD && d < lakeShoreAt(x, z) + LAKE_PAD;
 }
 
 /**
@@ -223,7 +229,7 @@ export function stopRay(trailIndex: number, ndcX: number, ndcY: number, aspect =
     const z = p[2] + dir.z * t;
     const g = groundY(x, z);
     const L = WORLD.lake;
-    const inLake = Math.hypot(x - L.x, z - L.z) < L.r && g < L.y;
+    const inLake = g < LAKE_SURFACE && inLakeMirror(x, z);
     const wy = g < WORLD.seaLevel ? WORLD.seaLevel : inLake ? L.y : -Infinity;
     if (y < Math.max(g, wy)) return { x, y: Math.max(g, wy), z, water: wy > g, dist: t };
   }
@@ -1401,10 +1407,11 @@ function place(): Built {
   }
 
   ringsFrom("lake");
-  // ── The Mirror Lake (locked composition): framing lower left at a5, the shore, the rock islet with a bush (still 2) ──
+  // ── The Mirror Lake (locked composition): framing lower left at a5, the rock islet with a bush, rocks on the points ──
   {
     const a5 = stop("a5");
     const L = WORLD.lake;
+    const placed: Array<[number, number]> = [];
     for (const [nx, ny, s, k] of [
       [-0.8, -0.8, 18, 1],
       [-0.6, -0.9, 14, 2],
@@ -1417,25 +1424,52 @@ function place(): Built {
         const dx = x - L.x;
         const dz = z - L.z;
         const r = Math.hypot(dx, dz) || 1;
+        const shore = lakeShoreR(Math.atan2(dz, dx));
         let rr = r;
-        while (rr < L.r + 10 && L.y - groundY(L.x + (dx / r) * rr, L.z + (dz / r) * rr) > s * 0.25) rr += 4;
+        while (rr < shore + 10 && L.y - groundY(L.x + (dx / r) * rr, L.z + (dz / r) * rr) > s * 0.25) rr += 4;
         x = L.x + (dx / r) * rr;
         z = L.z + (dz / r) * rr;
       }
       F(soups.high, x, z, s, 700 + k, { pebbles: 5 });
+      placed.push([x, z]);
     }
-    // The rock islet in the water, left of the a5 frame, clear of the island's reflection.
+    // The rock islet in the water, left of the a5 frame, clear of the island's
+    // reflection. Its boulders stand in open water on no mound (map review item
+    // 15c, review round 1): a mound in the locked reveal grew grass and reeds,
+    // and the stop's rays above (and dress-lakeforest's reed beds) stopped on it.
     F(soups.high, 1030, -262, 17, 777, { lead: "K3", mediums: 3, pebbles: 4, baseY: L.y - 4 });
-    for (let b = 0; b < 360; b += 13) {
-      if (rnd(b, 31) < 0.4) continue;
-      const r = L.r + 4 + rnd(b, 32) * 22;
-      const x = L.x + Math.sin(b * DEG) * r;
-      const z = L.z - Math.cos(b * DEG) * r;
-      if (nearTrail(x, z, 22)) continue;
-      const B = a5.pos;
-      if (Math.hypot(x - B.x, z - B.z) < 90) continue; // the jetty and boathouse
-      F(soups.high, x, z, 8 + rnd(b, 33) * 10, 740 + b, { pebbles: 4 });
-    }
+    // Map review 2026-10-15, item 15c (Lovro: "these rocks over here are also
+    // random"): the ring of rocks round the shore is gone. A lake's rocks are on
+    // its points: one at the tip, half in the water, one at the water's edge on
+    // each flank, and up the bigger points one more on the spine. None on the
+    // trail, by the jetty and the boathouse, or on the a5 framing rocks.
+    const B = a5.pos;
+    const at = (a: number, e: number): [number, number] => {
+      const R = lakeShoreR(a) + e;
+      return [L.x + Math.cos(a) * R, L.z + Math.sin(a) * R];
+    };
+    lakePoints().forEach((p, n) => {
+      // Where the flank has climbed half the point's depth, either side of the tip.
+      const flank = (dir: number) => {
+        let a = p.angle;
+        for (let k = 0; k < 120 && lakeShoreR(a) < p.r + p.depth * 0.45; k++) a += dir * 0.0025;
+        return a;
+      };
+      const spots: Array<[number, number, number, number]> = [
+        [p.angle, -2, 11 + rnd(n, 34) * 5, 0],
+        [flank(-1), -1.5, 7 + rnd(n, 35) * 4, 1],
+        [flank(1), -1.5, 7 + rnd(n, 36) * 4, 2],
+      ];
+      if (p.depth >= 100) spots.push([p.angle, Math.min(60, p.depth * 0.3), 9 + rnd(n, 37) * 5, 3]);
+      for (const [a, e, size, k] of spots) {
+        const [x, z] = at(a, e);
+        if (nearTrail(x, z, 30)) continue;
+        if (Math.hypot(x - B.x, z - B.z) < 90) continue; // the jetty and boathouse
+        if (placed.some(([px, pz]) => Math.hypot(x - px, z - pz) < 45)) continue;
+        F(soups.high, x, z, size, 740 + n * 7 + k, { pebbles: 4 });
+        placed.push([x, z]);
+      }
+    });
   }
 
   ringsFrom("island");

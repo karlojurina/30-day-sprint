@@ -25,9 +25,13 @@ import type { QualityTier } from "./quality";
  *                    last ones hang on the rock beside the ladder, and Video
  *                    Ads II's run from the ladder's top past the hut toward
  *                    the 30% cache, ending where the trail comes into the
- *                    cache's park view, round 3). None stands in or over
- *                    water drawn anywhere (water.ts waterAt), on a cliff or
- *                    ground steeper than STEEP (round 3), or on another
+ *                    cache's park view, round 3; round 4: a place whose single
+ *                    lanterns would stand closer than PAIR_BELOW hangs them
+ *                    two to a double post, AI Ads & Content today). None
+ *                    stands in or over water drawn anywhere (water.ts
+ *                    waterAt), on a cliff or ground steeper than STEEP (round
+ *                    3), nearer its trail than its offset on the inside of a
+ *                    bend (FOLD, round 4), or on another
  *                    thing's footprint; they lay none of their own (round 2: moving
  *                    them never deals the grass again). Watched: lit (warm glass, a small halo
  *                    that grows at dusk and night). The next one: a gentle
@@ -80,6 +84,23 @@ const PLACE_H = 11;
 const BIG_H = 14;
 /** Distance from the trail's centre line to a lantern (the trail's footprint is its line plus 4). */
 const OFFSET = 10;
+/**
+ * A lantern stands no nearer any part of its piece's trail than its offset
+ * less this (round 4). On the inside of a sharp bend both legs pull the spots
+ * in, so two lanterns evenly spaced along the trail stood close: the trail's
+ * new start below the falls (item 15d) turns 68 degrees round the pool's east
+ * side and put Video Ads I's first two 12 apart, with 29 along the trail.
+ */
+const FOLD = 1;
+/**
+ * A place whose single lanterns would stand closer than this along its walk
+ * hangs them in pairs on double posts instead, the posts evenly spaced, each
+ * lantern still one lesson (round 4). Lovro called Fundamentals' lanterns
+ * "basically next to each other" at 23 apart (Loom, 2:22). Today only AI Ads
+ * & Content: 22 lessons on 372 of ground (the floating steps between its two
+ * pieces are LOCKED and carry none), 16.9 apart singly, 33.8 in pairs.
+ */
+const PAIR_BELOW = 24;
 /** A walk is checked every this many units for where a lantern may stand. */
 const WALK_STEP = 2;
 /** No water drawn within this of a lantern (water.ts waterAt: what is drawn, the lake's mirror to its edge, the river, the pool). */
@@ -171,6 +192,19 @@ interface Walk {
   toEnd?: boolean;
 }
 
+/** Plan distance from (x, z) to the nearest point of a polyline. */
+function trailGap(pts: V3[], x: number, z: number): number {
+  let best = Infinity;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, , az] = pts[i];
+    const dx = pts[i + 1][0] - ax;
+    const dz = pts[i + 1][2] - az;
+    const t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
+    best = Math.min(best, Math.hypot(ax + dx * t - x, az + dz * t - z));
+  }
+  return best;
+}
+
 /** A polyline with `cut` units of plan length taken off its end. */
 function shorten(pts: V3[], cut: number): V3[] {
   const out = pts.slice();
@@ -256,7 +290,7 @@ function walks(ground: (x: number, z: number) => number): Walk[] {
   const iSign = pathIdx(1300, 4170);
   const iCamp = pathIdx(440, 2720);
   const iLip = pathIdx(-112, 1782);
-  const iShore = pathIdx(6, 1640);
+  const iFallsFoot = pathIdx(18, 1662);
   const iLogN = pathIdx(52, 1538);
   const iWallFoot = pathIdx(236, 1290);
   const iBenchW = pathIdx(400, 1236);
@@ -291,15 +325,16 @@ function walks(ground: (x: number, z: number) => number): Walk[] {
     { pieces: [{ pts: pathPts(iSign, iCamp), ground: "land", side: -1 }] },
     // Fundamentals: from Base Camp up the hillside and along the stream's bank to the lip.
     { pieces: [{ pts: pathPts(iCamp, iLip), ground: "land" }] },
-    // Video Ads I: from the pool's east shore along the river and over the log
-    // (on the side away from the river), up the talus (on the uphill side: the
+    // Video Ads I: from the falls' foot, where the trail starts (item 15d), round
+    // the pool's east side, along the river and over the log (on the side away
+    // from the pool and the river), up the talus (on the uphill side: the
     // handrail runs on the gorge's side from there), along the floor to the
     // ladder, and up the ladder, its lanterns on the rock at its west side
     // (round 2: the bench at its top is Video Ads II's, so a student in Video
     // Ads II sees their own lanterns round the hut; Lovro's Loom, 6:27 to 6:39).
     {
       pieces: [
-        { pts: pathPts(iShore, iLogN), ground: "land", side: 1 },
+        { pts: pathPts(iFallsFoot, iLogN), ground: "land", side: 1 },
         { pts: pathPts(iLogN, iWallFoot), ground: "land", side: -1 },
         { pts: [at(iWallFoot), [foot[0], foot[1], foot[2]]], ground: "land" },
         { pts: climb, ground: "land", wall: secs, side: -1, offset: LADDER_SIDE },
@@ -324,7 +359,8 @@ function walks(ground: (x: number, z: number) => number): Walk[] {
     // Static Ads: from the jetty's foot along the lake's shore and into the forest to the Great Tree.
     { pieces: [{ pts: pathPts(iJetty, iTree), ground: "land" }] },
     // AI Ads & Content: from the Great Tree to the floating steps' foot; the
-    // steps carry none; from the island's cove up the path to the terrace.
+    // steps carry none (LOCKED); from the island's cove up the path to the
+    // terrace. 372 of ground for 22 lessons: two to a post (PAIR_BELOW).
     {
       pieces: [
         { pts: pathPts(iTree, iTree + 1), ground: "land" },
@@ -434,8 +470,9 @@ const WAKE: ReadonlyArray<ReadonlyArray<WakeItem>> = [
     { at: 0.5, kind: "lamp", slot: 0 },
     { at: 0.75, kind: "lamp", slot: 1 },
   ],
-  // a3: lamps on the pool's east shore, the big lamp at 100% (map review
-  // 2026-10-15: at 2, 1575 it stood in the river where it leaves the pool).
+  // a3: lamps at the falls' foot by the pool's east side, beside where the
+  // trail starts (item 15d), the big lamp at 100% (map review 2026-10-15: at
+  // 2, 1575 it stood in the river where it leaves the pool).
   [
     { at: 0.25, kind: "lamp", slot: 0 },
     { at: 0.5, kind: "lamp", slot: 1 },
@@ -484,9 +521,11 @@ const LAMP_SLOTS = [-8, 30, -46];
  * knoll, so its lamps stand by the tents' fire ring and at the camp's back,
  * west of the keeper's cabin, both in the a2 frame (final pass: the second
  * stood 105 from the stop camera and filled the foreground). a3 (map review
- * 2026-10-15): on the pool's east shore by the falls, where Video Ads I's
- * lanterns start; its old stretch, the stream's bank to the lip, is
- * Fundamentals' walk now, and its last stretch is under the stream's water.
+ * 2026-10-15): at the falls' foot by the pool's east side, where the trail
+ * and Video Ads I's lanterns start (item 15d: lamp 0 stands 10 west of the
+ * trail's first point, across it from the lanterns); its old stretch, the
+ * stream's bank to the lip, is Fundamentals' walk now, and its last stretch
+ * is under the stream's water.
  */
 const LAMP_AT: Partial<Record<number, ReadonlyArray<readonly [number, number]>>> = {
   1: [
@@ -963,6 +1002,8 @@ interface Lantern {
   face?: [number, number, number, number, number, number];
   /** A lamp set by hand (LAMP_AT, WAKE's big lamps): the spot as written. */
   set?: [number, number];
+  /** A lesson lantern on a double post (PAIR_BELOW): the post's number in its place; both its lanterns stand true on it. */
+  post?: number;
 }
 
 export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
@@ -1189,7 +1230,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
           const side = k === 0 ? 1 : -1;
           const x = f.x - f.tz * off * side;
           const z = f.z + f.tx * off * side;
-          const ok = relaxed ? spotOk(ground, x, z, ref, LEVEL * 2.5, 0, 0.4) : spotOk(ground, x, z, ref);
+          // Round 4: and no nearer the piece's trail than its offset (none pulled in on the inside of a bend).
+          const ok = (relaxed ? spotOk(ground, x, z, ref, LEVEL * 2.5, 0, 0.4) : spotOk(ground, x, z, ref)) && trailGap(p.pts, x, z) >= off - FOLD;
           if (ok) {
             if (open[k] === null) open[k] = sc;
             last[k] = sc;
@@ -1216,7 +1258,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   });
 
   /** What each place's layout came to (lanternLayout() reports it). */
-  const placed: { room: number; spacing: number; first: number; sides: number[] }[] = [];
+  const placed: { room: number; spacing: number; first: number; sides: number[]; per: number }[] = [];
   /** Per lesson lantern: how far along its walk's room (u) and its ground (s) it stands, and on which piece. */
   const along = new Map<Lantern, { u: number; s: number; piece: number }>();
 
@@ -1248,17 +1290,24 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       const s1 = pcs[r.pc].base + r.b;
       first += Math.max(0, Math.min(s1, FIRST) - s0);
     }
-    const spacing = n > 0 ? (room - first) / (w.toEnd ? Math.max(1, n - 1) : n) : 0;
-    placed[k] = { room, spacing, first, sides: pcs.map((pc) => pc.side) };
+    const evenly = (m: number) => (m > 0 ? (room - first) / (w.toEnd ? Math.max(1, m - 1) : m) : 0);
+    // Round 4: closer than PAIR_BELOW one by one, two to a post (never beside the ladder, whose
+    // brackets hold one lantern on the rock). The posts are evenly spaced; lesson 2p hangs toward
+    // the trail on post p, lesson 2p + 1 away from it.
+    const per = n >= 2 && evenly(n) < PAIR_BELOW && !pcs.some((pc) => pc.wall) ? 2 : 1;
+    const spacing = evenly(Math.ceil(n / per));
+    placed[k] = { room, spacing, first, sides: pcs.map((pc) => pc.side), per };
     const out: Lantern[] = [];
     for (let j = 0; j < n; j++) {
-      const u = Math.min(room, first + j * spacing);
+      // The post it hangs on: its own lesson's number when one lantern stands to a post.
+      const p = Math.floor(j / per);
+      const u = Math.min(room, first + p * spacing);
       let r = runs.length - 1;
       while (r > 0 && runs[r].u > u) r--;
       const run = runs[r];
       const pc = pcs[run.pc];
       const s = Math.min(run.b, run.a + (u - run.u));
-      const hj = LESSON_H * (0.92 + 0.16 * rnd(j, k * 7 + 3));
+      const hj = LESSON_H * (0.92 + 0.16 * rnd(p, k * 7 + 3));
       // Beside the ladder: one size, as fittings are (the rock was checked for it every half unit).
       const br = pc.wall ? bracketAt(pc, s, pc.side, pc.offset, LESSON_H) : null;
       if (br) {
@@ -1268,9 +1317,9 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
         continue;
       }
       const q = spotAt(pc, s, pc.side, pc.offset);
-      // The lantern hangs toward the trail.
-      const yaw = Math.atan2(-q.tz, q.tx) + (pc.side > 0 ? Math.PI / 2 : -Math.PI / 2) + (rnd(j, k * 7 + 2) - 0.5) * 0.12;
-      const l: Lantern = { x: q.x, y: groundAt(pc.ground, q.x, q.z) - 0.3, z: q.z, h: hj, yaw, area: k, lesson: j, at: 0, order: 0 };
+      // The lantern hangs toward the trail; on a double post the second hangs away from it (one height and one turn to a post).
+      const yaw = Math.atan2(-q.tz, q.tx) + (pc.side > 0 ? Math.PI / 2 : -Math.PI / 2) + (rnd(p, k * 7 + 2) - 0.5) * 0.12 + (j % per) * Math.PI;
+      const l: Lantern = { x: q.x, y: groundAt(pc.ground, q.x, q.z) - 0.3, z: q.z, h: hj, yaw, area: k, lesson: j, at: 0, order: 0, ...(per > 1 ? { post: p } : {}) };
       along.set(l, { u, s: pc.base + s, piece: run.pc });
       out.push(l);
     }
@@ -1532,8 +1581,9 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     for (let i = 0; i < n; i++) {
       const l = lanterns[i];
       o.position.set(l.x, l.y, l.z);
-      // A slight lean, as old posts have (one set in the rock beside the ladder hangs true).
-      const lean = l.face ? 0 : 0.07;
+      // A slight lean, as old posts have (one set in the rock beside the ladder hangs true, and so
+      // does a double post, round 4: its two lanterns share one post, which two leans would split).
+      const lean = l.face || l.post !== undefined ? 0 : 0.07;
       o.rotation.set((rnd(i, 81) - 0.5) * lean, l.yaw, (rnd(i, 82) - 0.5) * lean, "YXZ");
       o.scale.setScalar(l.h);
       o.updateMatrix();
@@ -1929,23 +1979,14 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
         const sec = secs.find((sc) => gy <= sc.b[1] + 1) ?? secs[secs.length - 1];
         return Math.abs((l.x - sec.a[0]) * sec.east[0] + (l.z - sec.a[2]) * sec.east[1]);
       };
-      const gap = (pts: V3[], x: number, z: number) => {
-        let best = Infinity;
-        for (let i = 0; i < pts.length - 1; i++) {
-          const [ax, , az] = pts[i];
-          const dx = pts[i + 1][0] - ax;
-          const dz = pts[i + 1][2] - az;
-          const t = Math.min(1, Math.max(0, ((x - ax) * dx + (z - az) * dz) / (dx * dx + dz * dz || 1)));
-          best = Math.min(best, Math.hypot(ax + dx * t - x, az + dz * t - z));
-        }
-        return best;
-      };
       const r2 = (v: number) => Math.round(v * 100) / 100;
       return {
         places: placed.map((p, k) => ({
           room: r2(p.room),
           spacing: r2(p.spacing),
           first: r2(p.first),
+          // Lanterns to a post (round 4: 2 where single ones would stand closer than PAIR_BELOW); spacing is between posts.
+          per: p.per,
           sides: p.sides,
           offsets: CHECKED[k].map((pc) => pc.offset),
           toEnd: !!WALKS[k].toEnd,
@@ -1961,11 +2002,11 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
             const c = Math.cos(l.yaw);
             const sn = -Math.sin(l.yaw);
             const wall = { post: [r2(l.x), r2(l.y + 0.84 * l.h), r2(l.z)], glass: [r2(l.x + c * GLASS.x * l.h), r2(l.y + GLASS.y * l.h), r2(l.z + sn * GLASS.x * l.h)], back: [r2(l.x + c * (GLASS.x - GLASS.w * 0.55) * l.h), r2(l.y + (GLASS.y - GLASS.h / 2) * l.h), r2(l.z + sn * (GLASS.x - GLASS.w * 0.55) * l.h)] };
-            return [{ i, area: l.area, lesson: l.lesson, x: r2(l.x), y: r2(l.y), z: r2(l.z), u: r2(a.u), s: r2(a.s), piece: a.piece, trail: r2(beside(pc.wall, l)), glass: wall.glass, wall }];
+            return [{ i, area: l.area, lesson: l.lesson, x: r2(l.x), y: r2(l.y), z: r2(l.z), u: r2(a.u), s: r2(a.s), piece: a.piece, trail: r2(beside(pc.wall, l)), glass: wall.glass, wall, post: l.post ?? null }];
           }
           // Round 3: where its glass hangs (the tests look for it from the place's views).
           const glass = [r2(l.x + Math.cos(l.yaw) * GLASS.x * l.h), r2(l.y + GLASS.y * l.h), r2(l.z - Math.sin(l.yaw) * GLASS.x * l.h)];
-          return [{ i, area: l.area, lesson: l.lesson, x: r2(l.x), y: r2(l.y), z: r2(l.z), u: r2(a.u), s: r2(a.s), piece: a.piece, trail: r2(gap(pc.pts, l.x, l.z)), glass }];
+          return [{ i, area: l.area, lesson: l.lesson, x: r2(l.x), y: r2(l.y), z: r2(l.z), u: r2(a.u), s: r2(a.s), piece: a.piece, trail: r2(trailGap(pc.pts, l.x, l.z)), glass, post: l.post ?? null }];
         }),
         lamps: lanterns.flatMap((l, i) => (l.lesson >= 0 ? [] : [{ i, area: l.area, at: l.at, x: r2(l.x), z: r2(l.z), set: l.set ?? null }])),
       };

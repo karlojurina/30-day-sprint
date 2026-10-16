@@ -134,7 +134,13 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
 
   const source = useMemo<WorldSource>(() => {
     const ids = model.areas.map((a) => a.id);
-    const at = openAreaId === null ? -1 : ids.indexOf(openAreaId);
+    // The Ad Bounty's lesson is its own checkpoint's (plan item 18): its page
+    // opens over the checkpoint's panel, so the place it is filed under in the
+    // catalog does not open under it. Browser back, the page's back link and
+    // Esc all come home to the panel (LessonScreen sends the last two to the
+    // map's address).
+    const bountyPage = lessonId !== null && lessonId === data.bounty?.id;
+    const at = openAreaId === null || bountyPage ? -1 : ids.indexOf(openAreaId);
     // scroll: false on every one. The page scroll is the camera, and an
     // address change must never move it.
     const go = (to: string) => router.push(to, { scroll: false });
@@ -151,6 +157,7 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
       onOpenArea: (k) => go(href(ids[k])),
       onCloseArea: () => go(href()),
       onWatch: (k, i) => go(href(ids[k], data.lessonIds[k]?.[i])),
+      // The feature row's page: the Ad Bounty's lesson, from its checkpoint's panel.
       onFeature: (k) => go(href(ids[k], data.featureIds[k])),
       // The lesson page's route (the address onWatch pushes), once per lesson
       // per page, so the click does not wait on it; and, for a lesson with a
@@ -166,6 +173,8 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
         if (lesson?.hasVideo) transport.prefetch(lesson.id);
       },
       discount,
+      bounty: data.bounty ?? undefined,
+      bountyOpen: bountyPage,
     };
   }, [model, data, openAreaId, lessonId, href, router, transport, active, discount]);
 

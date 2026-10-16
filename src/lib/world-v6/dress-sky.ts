@@ -14,10 +14,12 @@
  *       lower right of the a7 frame, nothing on the path or near the rail)
  *     - a flagstone path from the cove to the observatory and on to the bridge,
  *       small lanterns along it (lamp glow + halos)
- *     - the bounty isle: its body, the quest board with pinned notices and a
- *       roof, a lantern on a crook post, a crate stack, a barrel, a bench, two
- *       spires, the berth's bollards and gangway, the mooring ropes (shown only
- *       while your ship is moored)
+ *     - the bounty isle: its body, two spires, the berth's bollards and
+ *       gangway, the mooring ropes (shown only while your ship is moored), and
+ *       (map review item 18) the Ad Bounty's board in its own LM_Bounty group
+ *       (bounty.ts, buildBountyBoard): a stone footing, a gabled board of
+ *       bounty notices with a brass seal, a lantern off each post, a writing
+ *       stand, a bench; the crates and barrels behind it, off the walk
  *     - the bridge's end posts, gate beams and lantern posts (static; the deck
  *       and ropes sway with blocks' group)
  *     - cloud: a ring round the island's waist and the bounty isle's, so their
@@ -78,6 +80,7 @@ import { BOUNTY_DEPTH, BRIDGE, ISLAND_DEPTH, ISLAND_LOOKOUT, ISLAND_PATH, ISLAND
 import { addFootprint, addPathLine } from "./footprints";
 import { railDist, trailDistFast } from "./rocks";
 import { NO_REFLECT_LAYER } from "./light";
+import { BOUNTY } from "./bounty";
 
 // ── Tunables ────────────────────────────────────────────────────────────────
 
@@ -1059,23 +1062,23 @@ function ropeCoil(g: Geo, x: number, y: number, z: number, r: number): void {
   g.shape(prismShape(8, 1, 1, true, false), T(x, y + 1.66, z, r * 0.36, 0.05, r * 0.36), P.brownDark);
 }
 
-/** The ship's wheel on its pedestal, facing local +x (the helmsman stands aft of it). */
-function shipWheel(g: Geo, x: number, y: number, z: number): void {
-  g.shape(BOX, T(x - 0.8, y + 3.2, z, 2.2, 6.4, 2.6), P.brown);
-  g.shape(BOX, T(x - 0.8, y + 6.6, z, 2.8, 0.5, 3.2), P.brownDark);
-  const cy = y + 9.2;
-  const R = 3.6;
+/** The ship's wheel on its pedestal, facing local +x (the helmsman stands aft of it), `s` times its full size about its foot. */
+function shipWheel(g: Geo, x: number, y: number, z: number, s = 1): void {
+  g.shape(BOX, T(x - 0.8 * s, y + 3.2 * s, z, 2.2 * s, 6.4 * s, 2.6 * s), P.brown);
+  g.shape(BOX, T(x - 0.8 * s, y + 6.6 * s, z, 2.8 * s, 0.5 * s, 3.2 * s), P.brownDark);
+  const cy = y + 9.2 * s;
+  const R = 3.6 * s;
   const N = 12;
   for (let i = 0; i < N; i++) {
     const a0 = (i / N) * Math.PI * 2;
     const a1 = ((i + 1) / N) * Math.PI * 2;
-    g.beam([x + 0.6, cy + Math.cos(a0) * R, z + Math.sin(a0) * R], [x + 0.6, cy + Math.cos(a1) * R, z + Math.sin(a1) * R], 0.38, P.varnish2, 4);
+    g.beam([x + 0.6 * s, cy + Math.cos(a0) * R, z + Math.sin(a0) * R], [x + 0.6 * s, cy + Math.cos(a1) * R, z + Math.sin(a1) * R], 0.38 * s, P.varnish2, 4);
   }
   for (let i = 0; i < 8; i++) {
     const a = (i / 8) * Math.PI * 2 + 0.2;
-    g.beam([x + 0.6, cy, z], [x + 0.6, cy + Math.cos(a) * (R + 1.3), z + Math.sin(a) * (R + 1.3)], 0.22, P.varnish, 4, 0.3);
+    g.beam([x + 0.6 * s, cy, z], [x + 0.6 * s, cy + Math.cos(a) * (R + 1.3 * s), z + Math.sin(a) * (R + 1.3 * s)], 0.22 * s, P.varnish, 4, 0.3 * s);
   }
-  g.shape(prismShape(8, 1, 1, true, true), T(x + 1.4, cy, z, 0.9, 1.6, 0.9, 0, 0, Math.PI / 2), P.brass);
+  g.shape(prismShape(8, 1, 1, true, true), T(x + 1.4 * s, cy, z, 0.9 * s, 1.6 * s, 0.9 * s, 0, 0, Math.PI / 2), P.brass);
 }
 
 /** A chart table: planked top, four legs, a pale chart askew, a brass sextant, a book. */
@@ -1088,6 +1091,131 @@ function chartTable(g: Geo, x: number, y: number, z: number, ry: number): void {
   g.shape(BOX, T(x + ax * 1.4 + bx * 0.6, y + 5.58, z + az * 1.4 + bz * 0.6, 2.6, 0.08, 2, ry - 0.3), P.paper2);
   g.shape(prismShape(3, 1, 0, true, true), T(x - ax * 2.2, y + 5.6, z - az * 2.2, 0.9, 1.2, 0.9), P.brass);
   g.shape(BOX, T(x + ax * 2.6 - bx * 1.2, y + 5.75, z + az * 2.6 - bz * 1.2, 1.6, 0.5, 1.2, ry + 0.4), P.slate);
+}
+
+/** The bounty notices' wax seals, and the seal at the heart of the gable's brass. */
+const SEAL = lin(0x8e3b2f);
+
+/**
+ * The Ad Bounty's board (plan item 18, bounty.ts): the landmark of the
+ * bounty checkpoint, at BOUNTY on the isle's top, its face toward the
+ * bridge's end. A two-step stone footing; two posts carrying a framed board
+ * under a gable roof whose triangle faces the bridge, with a brass seal on it
+ * (a ring, a darker disc, red wax in the middle); bounty notices pinned in
+ * rows round a bigger one in the middle, some sealed in red wax, some with a
+ * brass reward band, one hanging by a corner; a caged lantern on an iron arm
+ * off each post (their glass in `glow`, the lamp tagged one); a writing stand
+ * with the sign-up ledger, an inkwell and a quill; a bench facing the board.
+ * About 30 units tall to the ridge (a person is 14).
+ */
+function buildBountyBoard(g: Geo, glow: Geo, flames: number[], halos: number[]): void {
+  const [fx, fz] = dirOf(BOUNTY.facing);
+  const [rx, rz] = dirOf(BOUNTY.facing - 90);
+  const y0 = BOUNTY.y;
+  /** World point at f out of the face, s to the right seen from the front, h over the isle. */
+  const at = (f: number, s: number, h: number): V3 => [BOUNTY.x + fx * f + rx * s, y0 + h, BOUNTY.z + fz * f + rz * s];
+  /** A box's local x along s, its local z along f. */
+  const ry = yawTo(BOUNTY.facing - 90);
+  const box = (f: number, s: number, h: number, ws: number, hy: number, df: number, col: RGB | ((cy: number) => RGB), tilt = 0, lean = 0) => {
+    const p = at(f, s, h);
+    g.shape(BOX, T(p[0], p[1], p[2], ws, hy, df, ry, lean, tilt), col);
+  };
+  // The stone footing: two steps.
+  box(3.5, 0, 0.55, 34, 1.1, 15, (cy) => (cy > 0.45 ? P.stoneLight : P.stoneDark));
+  box(1.2, 0, 1.55, 30.5, 0.9, 9, (cy) => (cy > 0.45 ? P.stone : P.stoneDark));
+  const base = 2;
+  // The posts, up under the eaves.
+  const POST_S = 14.2;
+  const eave = 24.6;
+  const ridge = 33;
+  for (const s of [-POST_S, POST_S]) {
+    box(0, s, base + (eave + 0.6 - base) / 2, 2.4, eave + 0.6 - base, 2.4, P.brown);
+    box(0, s, base + 0.6, 3.1, 1.2, 3.1, P.brownDark);
+  }
+  // The board and its frame.
+  box(-0.3, 0, 16.1, 26.2, 15, 0.9, P.greyBrown);
+  box(0.1, 0, 23.9, 28.6, 1.1, 1.7, P.brownDark);
+  box(0.1, 0, 8.2, 28.6, 1.1, 1.7, P.brownDark);
+  // The roof: a gable whose triangle faces the bridge, slate shingles in rows.
+  const span = POST_S + 1.6;
+  const slope = Math.atan2(ridge - eave, span);
+  const len = Math.hypot(span, ridge - eave);
+  const rows = 4;
+  for (const side of [-1, 1]) {
+    for (let r = 0; r < rows; r++) {
+      const u = (r + 0.5) / rows;
+      const s = side * span * (1 - u);
+      const h = eave + (ridge - eave) * u + 0.45;
+      box(0.4, s, h, len / rows + 0.5, 0.8, 9.2, r % 2 ? P.slate : scale(P.slate, 0.86), side * -slope);
+    }
+  }
+  g.beam(at(-4.4, 0, ridge + 0.9), at(5.2, 0, ridge + 0.9), 0.75, P.brownDark, 4);
+  // The gable's boards, and the brass seal on them.
+  const boards = 9;
+  for (let i = 0; i < boards; i++) {
+    const s0 = -span + (2 * span * i) / boards;
+    const s1 = -span + (2 * span * (i + 1)) / boards;
+    const mid = (s0 + s1) / 2;
+    const h = (ridge - eave) * (1 - Math.abs(mid) / (span + 0.5));
+    box(3.7, mid, eave + h / 2, s1 - s0 - 0.12, h, 0.5, i % 2 ? P.brown : P.brownDark);
+  }
+  {
+    const disc = (r: number, t: number, col: RGB, ahead: number) => {
+      const q = at(4.05 + ahead, 0, 28.6);
+      g.shape(prismShape(12, 1, 1, true, true, Math.PI / 12), T(q[0], q[1], q[2], r, t, r, ry, Math.PI / 2), col);
+    };
+    disc(3.1, 0.5, P.brass, 0);
+    disc(2.25, 0.7, P.copperDark, 0.15);
+    disc(1.05, 0.9, SEAL, 0.3);
+  }
+  // Lanterns on iron arms off the posts, hanging in front of the board.
+  for (const s of [-POST_S, POST_S]) {
+    g.beam(at(1.2, s, 21.6), at(4.6, s, 21.6), 0.38, P.iron, 4);
+    g.beam(at(4.4, s, 21.6), at(4.4, s, 20.6), 0.12, P.iron, 3);
+    const l = at(4.4, s, 18.4);
+    cagedLantern(g, glow, flames, halos, l[0], l[1], l[2], 1.05, 12);
+  }
+  // The notices: rows round a bigger one in the middle (the lesson's brief).
+  box(0.3, 0, 16.6, 6.6, 7.8, 0.22, P.paper);
+  box(0.42, 0, 19.7, 6.6, 1.1, 0.12, P.brass);
+  box(0.5, 0, 14.0, 1.3, 1.3, 0.3, SEAL);
+  const cols = [-10.4, -5.9, 5.9, 10.4];
+  const rowY = [20.4, 16.0, 11.6];
+  let n = 0;
+  for (const yy of rowY) {
+    for (const s of cols) {
+      const k = n++;
+      const w = 3.5 + rnd(k, 701) * 0.9;
+      const h = 3.7 + rnd(k, 702) * 0.9;
+      const tilt = k === 9 ? 0.55 : (rnd(k, 703) - 0.5) * 0.2;
+      const ss = s + (rnd(k, 704) - 0.5) * 0.8;
+      const hh = yy + (rnd(k, 705) - 0.5) * 0.6;
+      box(0.3, ss, hh, w, h, 0.2, k % 3 === 0 ? P.paper2 : P.paper, tilt);
+      if (k % 2 === 0) box(0.45, ss, hh + h / 2 - 0.7, 0.8, 0.8, 0.3, SEAL, tilt);
+      else if (k % 3 === 1) box(0.4, ss, hh + h / 2 - 0.5, w * 0.9, 0.55, 0.12, P.brass, tilt);
+    }
+  }
+  for (const s of [-2.3, 2.3]) box(0.3, s, 10.5, 2.8, 2.6, 0.2, s < 0 ? P.paper2 : P.paper, s * 0.03);
+  // The writing stand: the sign-up ledger open on its slope, an inkwell, a quill.
+  {
+    const f = 8.6;
+    const s = 7.4;
+    box(f, s, 1.1 + 4.1, 1.3, 8.2, 1.3, P.brownDark);
+    box(f, s, 1.1 + 0.3, 3.4, 0.6, 3.0, P.brownDark);
+    box(f, s, 1.1 + 8.6, 5.8, 0.5, 4.2, P.brown, 0, 0.36);
+    box(f + 0.05, s - 1.35, 1.1 + 8.95, 2.5, 0.12, 3.4, P.paper, 0.08, 0.36);
+    box(f + 0.05, s + 1.35, 1.1 + 8.95, 2.5, 0.12, 3.4, P.paper2, -0.08, 0.36);
+    const ink = at(f - 1.5, s + 2.4, 1.1 + 9.45);
+    g.shape(BOX, T(ink[0], ink[1], ink[2], 0.8, 0.8, 0.8, ry), P.iron);
+    g.beam(at(f - 1.5, s + 2.4, 1.1 + 9.6), at(f - 2.3, s + 3.1, 1.1 + 12.6), 0.12, P.cream, 3, 0.02);
+  }
+  // A bench facing the board.
+  {
+    const f = 12.5;
+    const s = -6.5;
+    box(f, s, 4.9, 13, 1.1, 3.8, P.brown);
+    for (const d of [-4.8, 4.8]) box(f, s + d, 2.2, 1.1, 4.4, 3.2, P.brownDark);
+  }
 }
 
 // ── The one airship kit (local: origin at the deck's centre, nose +x, as layout SHIP) ──
@@ -1245,7 +1373,14 @@ function buildAirship(g: Geo, glow: Geo, lamps: number[], opts: KitOpts = {}): v
     barrel(g, 30.6, 0.2, 9.2, 0.92, 2, P.brass);
     barrel(g, 28.2, 0.2, 5.6, 0.85, 3, P.brass);
     // The helm stands aft, behind the riding camera (seen from the gangway and from outside).
-    shipWheel(g, -46, 0.2, 0);
+    // Map review, item 18: the camera boards along the centreline, 12.5 to 12.8
+    // over the deck where the wheel stands, and at full size its spokes reached
+    // 14.3, so the boarding drove through it. At 0.7 it stays where it stood and
+    // its top is 10.0, 2.7 under the camera. Lovro picks (fix round 1,
+    // bounty-w3/fix-r1/boarding-wheel-ABC.jpg): full size here is the ride as
+    // it was, through the wheel; (-44.5, 0.2, 8) at full size is the starboard
+    // side of round 1.
+    shipWheel(g, -46, 0.2, 0, 0.7);
     // The lantern on a hook: a post by the port bulwark, an arm inboard, a
     // short chain; it hangs left of the view, clear of the harbour on the right third.
     // Fix pass 3: 16.4 -> 11.6 tall, so the post stays under the horizon at
@@ -2062,62 +2197,38 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   void bridges;
   a7Ground(rillPts);
 
-  // The bounty isle's set (blocks' board spot: 60 along the walk, 24 left).
+  // The bounty isle's set (plan item 18). The Ad Bounty's board (bounty.ts) is
+  // a landmark of its own, LM_Bounty, built here into boardG and parented
+  // below; its lanterns' glass, flames and halos join the island's. Behind it
+  // the supplies, which stood on the walk at the board's end until the camera
+  // went through them (Lovro, 13:44: "we definitely don't want to go through
+  // the crates"). Nothing stands within 30 of the walk from the bridge to the
+  // gangway but the berth's posts, as before.
   const mooringRopes = new Geo();
+  const boardG = new Geo();
   {
-    const wb = (Math.atan2(SHIP_MOORED.x - BRIDGE.b[0], -(SHIP_MOORED.z - BRIDGE.b[2])) * 180) / Math.PI;
-    const [wx, wz] = dirOf(wb);
-    const [lx, lz] = dirOf(wb - 90);
-    const qx = BRIDGE.b[0] + wx * 60 + lx * 24;
-    const qz = BRIDGE.b[2] + wz * 60 + lz * 24;
-    const face = (Math.atan2(BRIDGE.b[0] - qx, -(BRIDGE.b[2] - qz)) * 180) / Math.PI;
-    const ry = yawTo(face + 90);
-    const [ax, az] = dirOf(face + 90);
-    const [fx, fz] = dirOf(face);
+    const [wx, wz] = dirOf(BOUNTY.walk);
+    const [fx, fz] = dirOf(BOUNTY.facing);
+    const [rx, rz] = dirOf(BOUNTY.facing - 90);
+    const ry = yawTo(BOUNTY.facing - 90);
     const y = B.y;
-    // Posts, the backing board, a little roof.
-    for (const s of [-1, 1]) land.shape(BOX, T(qx + ax * s * 10, y + 10.5, qz + az * s * 10, 1.9, 21, 1.9, ry), P.brown);
-    land.shape(BOX, T(qx, y + 12.2, qz, 19, 12, 0.9, ry), P.greyBrown);
-    land.shape(BOX, T(qx, y + 18.6, qz, 20.5, 0.9, 1.4, ry), P.brownDark);
-    land.shape(BOX, T(qx, y + 5.8, qz, 20.5, 0.9, 1.4, ry), P.brownDark);
+    buildBountyBoard(boardG, glow, flames, halos);
+    /** A point of the board's frame (f out of its face, s to the right seen from the front), in plan. */
+    const at = (f: number, s: number): [number, number] => [BOUNTY.x + fx * f + rx * s, BOUNTY.z + fz * f + rz * s];
+    // The crate stack and the barrels, behind the board.
     {
-      const e0: V3 = [qx - ax * 12, y + 22.4, qz - az * 12];
-      const e1: V3 = [qx + ax * 12, y + 22.4, qz + az * 12];
-      for (const s of [-1, 1]) {
-        const a: V3 = [e0[0] + fx * 3.6 * s, y + 19.6, e0[2] + fz * 3.6 * s];
-        const b: V3 = [e1[0] + fx * 3.6 * s, y + 19.6, e1[2] + fz * 3.6 * s];
-        land.quad(a, b, e1, e0, P.slate);
-      }
+      const [c1x, c1z] = at(-11.5, -8.5);
+      const [c2x, c2z] = at(-12.5, -17);
+      const [c3x, c3z] = at(-11.8, -12.2);
+      const [b1x, b1z] = at(-9.5, 1.5);
+      const [b2x, b2z] = at(-13.5, 4.8);
+      crate(land, c1x, y, c1z, 8.4, ry + 0.2, 21);
+      crate(land, c2x, y, c2z, 7.6, ry - 0.15, 22);
+      crate(land, c3x, y + 8.4, c3z, 6.8, ry + 0.5, 23);
+      barrel(land, b1x, y, b1z, 1.4, 24);
+      barrel(land, b2x, y, b2z, 1.25, 25);
     }
-    // Pinned notices: rows of pale sheets, a few askew, one hanging by a corner.
-    for (let i = 0; i < 11; i++) {
-      const col = i % 4;
-      const row = Math.floor(i / 4);
-      const u = -6.9 + col * 4.6 + (rnd(i, 161) - 0.5) * 1.2;
-      const v = y + 16 - row * 3.9 + (rnd(i, 162) - 0.5) * 0.8;
-      const tilt = i === 6 ? 0.55 : (rnd(i, 163) - 0.5) * 0.22;
-      land.shape(BOX, T(qx + ax * u + fx * 0.6, v, qz + az * u + fz * 0.6, 3.6, 3, 0.2, ry, 0, tilt), i % 3 === 0 ? P.paper2 : P.paper);
-    }
-    // The lantern on a crook post at the board's right end.
-    const px = qx + ax * 16;
-    const pz = qz + az * 16;
-    land.shape(BOX, T(px, y + 10, pz, 1.3, 20, 1.3), P.brown);
-    land.beam([px, y + 19.5, pz], [px + fx * 5.5, y + 19.5, pz + fz * 5.5], 0.6, P.brown, 4);
-    land.beam([px + fx * 5.5, y + 19.5, pz + fz * 5.5], [px + fx * 5.5, y + 18.2, pz + fz * 5.5], 0.12, P.iron, 3);
-    cagedLantern(land, glow, flames, halos, px + fx * 5.5, y + 15.6, pz + fz * 5.5, 1, 12);
-    // A crate stack, a barrel and a bench at the board's left end.
-    const cx = qx - ax * 17 + fx * 3;
-    const cz = qz - az * 17 + fz * 3;
-    crate(land, cx, y, cz, 9, ry + 0.2, 21);
-    crate(land, cx - ax * 9.5, y, cz - az * 9.5, 8, ry - 0.15, 22);
-    crate(land, cx - ax * 4, y + 9, cz - az * 4, 7.4, ry + 0.5, 23);
-    barrel(land, cx + fx * 9, y, cz + fz * 9, 1.45, 24);
-    barrel(land, cx + fx * 13 - ax * 3, y, cz + fz * 13 - az * 3, 1.3, 25);
-    const bx = qx + fx * 14;
-    const bz = qz + fz * 14;
-    land.shape(BOX, T(bx, y + 5.4, bz, 16, 1.2, 4, ry), P.brown);
-    for (const s of [-6, 6]) land.shape(BOX, T(bx + ax * s, y + 2.6, bz + az * s, 1.2, 5.2, 3.4, ry), P.brownDark);
-    // Pale grass tufts over the top, off the walk and the props (cover.ts grows only the Sky Island's).
+    // Pale grass tufts over the top, off the walk and the board's set (cover.ts grows only the Sky Island's).
     for (let k = 0; k < 340; k++) {
       const a = rnd(k, 171) * Math.PI * 2;
       const rr = Math.sqrt(rnd(k, 172)) * (bountyRim(a) - 6);
@@ -2126,7 +2237,10 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       const along = (x - BRIDGE.b[0]) * wx + (z - BRIDGE.b[2]) * wz;
       const off = Math.abs((x - BRIDGE.b[0]) * -wz + (z - BRIDGE.b[2]) * wx);
       if (off < 30 && along > -10 && along < 250) continue;
-      if (Math.hypot(x - qx, z - qz) < 16 || Math.hypot(x - cx, z - cz) < 13 || Math.hypot(x - bx, z - bz) < 10) continue;
+      // The footing, the stand, the bench and the supplies.
+      const lf = (x - BOUNTY.x) * fx + (z - BOUNTY.z) * fz;
+      const ls = (x - BOUNTY.x) * rx + (z - BOUNTY.z) * rz;
+      if (lf > -18 && lf < 16 && ls > -22 && ls < 20) continue;
       const hgt = 2.2 + rnd(k, 173) * 2.2;
       for (let b = 0; b < 3; b++) {
         const ba = (b / 3) * Math.PI + a;
@@ -2331,6 +2445,18 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   const ropesMesh = addMesh(root, mooringRopes, solid, "Sky_MooringRopes");
   addHalos(root, halos, "Sky_Halos");
   addFlames(root, flames, "Sky_Flames");
+
+  // ── The Ad Bounty's board, in LM_Bounty (bounty.ts) ──
+  // Its own group, so the scene makes it a landmark: the bounty checkpoint's
+  // marker pins over it, a click on it opens the checkpoint, the pointer
+  // lights it. One more call while the isle is in the frame. It stays out of
+  // the Mirror Lake's reflection, where the isle is a few pixels.
+  {
+    const lmBounty = new THREE.Group();
+    lmBounty.name = BOUNTY.mesh;
+    root.add(lmBounty);
+    addMesh(lmBounty, boardG, solid, "Bounty_Board").layers.set(NO_REFLECT_LAYER);
+  }
 
   // ── The observatory, in LM_Observatory ──
   const lm = ctx.root.getObjectByName(a7.mesh) ?? ctx.scene.getObjectByName(a7.mesh);

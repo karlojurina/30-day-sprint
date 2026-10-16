@@ -10,6 +10,7 @@ import { POSTER_RULES, recallPosterVerdict, rememberPoster, type PosterKind, typ
 import { addPathLine, footprintStats, resetFootprints } from "./footprints";
 import { NO_PROGRESS, sameProgress, type WorldProgress } from "./progress";
 import { CHECKPOINT, type CheckpointLook } from "./checkpoint";
+import { BOUNTY } from "./bounty";
 
 /**
  * The world-v6 scene: the grey version of the V4 map. V3's camera, park,
@@ -3403,8 +3404,12 @@ export class WorldScene {
     }
     // Round 1: a hand placed click in view (layout PARK_VIEWS), where the
     // solver cannot frame what matters (a3: the lower falls and the pool).
-    // The discount checkpoint is no place and has its own (checkpoint.ts).
-    const authored = Layout.PARK_VIEWS[PLACES[this.anchorPlace[pi] ?? -1]?.id as Layout.PlaceId] ?? (anchorId === CHECKPOINT.id ? CHECKPOINT.park : undefined);
+    // The two checkpoints are no places and have their own: the discount's
+    // cache (checkpoint.ts) and the Ad Bounty's board (bounty.ts, its board is
+    // built by dress-sky.ts).
+    const authored =
+      Layout.PARK_VIEWS[PLACES[this.anchorPlace[pi] ?? -1]?.id as Layout.PlaceId] ??
+      (anchorId === CHECKPOINT.id ? CHECKPOINT.park : anchorId === BOUNTY.id ? BOUNTY.park : undefined);
     if (authored) {
       const b = (authored.bearing * Math.PI) / 180;
       const p = (authored.pitch * Math.PI) / 180;

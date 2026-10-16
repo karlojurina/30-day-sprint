@@ -94,7 +94,11 @@
  * within SPACING_TOL of the place's spacing, the first at its walk's first
  * room, the last one spacing short of the walk's end, or at it for the last
  * place and for Video Ads II, round 3), and no two of a place closer than 0.6
- * of its spacing in 3D. The
+ * of its spacing in 3D. Round 4: a place whose single lanterns would stand
+ * closer than PAIR_BELOW hangs them two to a post (AI Ads & Content), its
+ * posts then evenly spaced and the two of a post sharing it, arms opposite;
+ * and no lantern stands nearer its piece's trail than its offset less
+ * OFFSET_TOL, so none is pulled in on the inside of a sharp bend. The
  * first stands within FIRST_NEAR of the landmark's trail point (typed below,
  * WALK_START). Video Ads I's last ones hang on the rock beside the ladder
  * (round 2): each one's post is in the rock to its top and its glass clear
@@ -149,7 +153,11 @@
  *   the panel  main section[aria-labelledby="v4-panel-title"], its #v4-panel-title,
  *              its ol > li rows (button aria-label "Lesson N, title[, action item]"
  *              and "Watch lesson N, title"), the count line (the element before
- *              the ol), and the pond: a button outside the ol
+ *              the ol), and the buttons outside the ol (row 6: none is the
+ *              Ad Bounty's lesson since the map review's item 18)
+ *   bounty     (row 6) main section[aria-labelledby="bounty-panel-title"], its
+ *              ol's button whose aria-label starts with the lesson's title;
+ *              window.__worldPark('bounty')
  *   markers    main button[data-mode] (index = place), label = its last child
  *   timeline   main nav[aria-label="Places"] [aria-label$="lessons done"]
  *   lesson     the h1 outside `main`, iframe[title="Lesson video"],
@@ -219,7 +227,12 @@ const COUNTING = [8, 11, 25, 17, 26, 22, 18, 13]
 const TOTAL = 140
 /** The action items: the 1-based row numbers in each place's panel. */
 const ACTION_ROWS = [[], [], [25], [], [8, 12, 22, 23], [3, 10, 17, 19], [], []]
-/** The Ad Bounty lesson: the pond's button in place 7, outside the lesson count. */
+/**
+ * The Ad Bounty lesson: filed under place 7 in the catalog, outside the lesson
+ * count. Since the map review's item 18 (2026-10-15) it is the one lesson of
+ * its own checkpoint, the bounty board (row 6), and no longer a button in
+ * place 7's panel.
+ */
 const POND = { place: 6, id: 'a7l19', title: 'How To Win On The Ad Bounty Program' }
 
 // ── The lesson lanterns, as the plan states them (row 2) ────────────────────
@@ -232,7 +245,7 @@ const POND = { place: 6, id: 'a7l19', title: 'How To Win On The Ad Bounty Progra
 const WALK_START = [
   [1300, 4170], // the signpost
   [440, 2720], // Base Camp, below the lookout's knoll
-  [6, 1640], // the pool's east shore, where the ride down the falls sets you down
+  [18, 1662], // the falls' foot, where the ride down the falls sets you down and the trail starts (item 15d)
   [404.75, 1235.36], // the bench by the Trail Hut, where the ladder comes over its lip (round 2)
   [1350, -440], // the jetty's foot
   [-700, -1110], // in front of the Great Tree
@@ -240,17 +253,21 @@ const WALK_START = [
   [-2043, -4044], // the dock's head, where the airship sets you down
 ]
 /**
- * A place's first lantern stands within FIRST_NEAR of its walk's start. Static
- * Ads within FIRST_NEAR_STATIC: the path's first 120 or so units from the
- * jetty's foot run under the lake's visible water until item 15c moves the
- * shore, and no lantern stands in water.
+ * A place's first lantern stands within FIRST_NEAR of its walk's start, Static
+ * Ads' too since item 15c put the jetty's foot on dry land (until then it was
+ * allowed 150: the path's first 120 or so units ran under the lake's water).
  */
 const FIRST_NEAR = 35
-const FIRST_NEAR_STATIC = 150
 /** Every step between a place's lanterns, along the room its walk has, is within this of the place's spacing. */
 const SPACING_TOL = 0.5
 /** A lantern stands this far from the trail's centre line (its piece's offset) give or take this. */
 const OFFSET_TOL = 1
+/**
+ * Round 4: single lanterns that would stand closer than this along their walk hang two to a post instead
+ * (progress-world.ts PAIR_BELOW; Lovro called 23 apart "basically next to each other", Loom 2:22). Today
+ * only AI Ads & Content: 22 on 11 posts, the floating steps between its two pieces of ground carrying none.
+ */
+const PAIR_BELOW = 24
 /** No water drawn within this of a lantern's foot. */
 const WATER_GAP = 1.5
 /** The water meshes WATER_NEAR reads (water.ts, and light.ts's MirrorLake). */
@@ -1015,6 +1032,11 @@ const FIND = {
     [...document.querySelectorAll('main section[aria-labelledby="v4-panel-title"] button')].find(
       (b) => !b.closest('ol') && (b.textContent ?? '').replace(/\s+/g, ' ').trim() === title,
     ) ?? null,
+  /** The lesson's row in the Ad Bounty checkpoint's panel (item 18): a button whose label starts with its title. */
+  bountyRow: (title) =>
+    [...document.querySelectorAll('main section[aria-labelledby="bounty-panel-title"] ol button')].find((b) =>
+      (b.getAttribute('aria-label') ?? '').startsWith(title),
+    ) ?? null,
 }
 
 // ── Driving the page (v6-app.mjs's way) ─────────────────────────────────────
@@ -1448,7 +1470,7 @@ const ROWS = [
   [3, "Each place's card"],
   [4, "Each place's panel"],
   [5, 'Action items'],
-  [6, 'The pond'],
+  [6, 'The Ad Bounty lesson: not in place 7\'s panel, on its own checkpoint'],
   [7, 'The total'],
   [8, '26 ticks fit'],
   [9, 'A lesson page with a video'],
@@ -1544,7 +1566,7 @@ try {
       )
       if (reported) {
         const at = (l) => `place ${l.area + 1} lesson ${l.lesson + 1} at (${f(l.x, 0)}, ${f(l.z, 0)})`
-        const byPlace = NAMES.map((_, k) => lay.lanterns.filter((l) => l.area === k).sort((a, b) => a.u - b.u))
+        const byPlace = NAMES.map((_, k) => lay.lanterns.filter((l) => l.area === k).sort((a, b) => a.u - b.u || a.lesson - b.lesson))
         r.values.places = lay.places.map((p, k) => ({
           place: `${k + 1} ${NAMES[k]}`,
           lanterns: byPlace[k].length,
@@ -1566,21 +1588,48 @@ try {
         r.check(`every water mesh is there to judge by (${WATER_MESHES.length})`, WATER_MESHES.every((n) => water.meshes.some((m) => m.startsWith(`${n} `))), water.meshes)
         r.check(`every lantern on dry ground: no water drawn within ${WATER_GAP} of its foot`, wet.length === 0, wet.length ? wet.slice(0, 6) : 'none')
 
-        // Evenly spaced along the walk, the first by the landmark, a constant way from the trail.
+        // Evenly spaced along the walk, the first by the landmark, a constant way from the trail. Round 4: a place
+        // whose single lanterns would stand closer than PAIR_BELOW hangs them two to a post, and then its posts are
+        // what stands evenly spaced; the two lanterns of a post share its spot, their arms opposite.
         const uneven = []
         const packed = []
         const offTrail = []
+        const pairs = []
         byPlace.forEach((ls, k) => {
           const p = lay.places[k]
           if (!ls.length) return
-          if (Math.abs(ls[0].u - p.first) > SPACING_TOL) uneven.push(`place ${k + 1}: the first stands ${f(ls[0].u, 1)} into its walk's room, not at its first room ${f(p.first, 1)}`)
-          for (let j = 1; j < ls.length; j++) {
-            const du = ls[j].u - ls[j - 1].u
-            if (Math.abs(du - p.spacing) > SPACING_TOL) uneven.push(`place ${k + 1}: lessons ${j} to ${j + 1} are ${f(du, 1)} apart along the walk, its spacing ${f(p.spacing, 1)}`)
-            const d3 = Math.hypot(ls[j].x - ls[j - 1].x, ls[j].y - ls[j - 1].y, ls[j].z - ls[j - 1].z)
-            if (d3 < 0.6 * p.spacing) packed.push(`place ${k + 1}: lessons ${j} and ${j + 1} stand ${f(d3, 1)} apart, its spacing ${f(p.spacing, 1)}`)
+          const per = p.per ?? 1
+          // The posts in walking order, each with its lantern or its two.
+          const posts = []
+          for (const l of ls) {
+            const last = posts[posts.length - 1]
+            if (per > 1 && last && last.length < per && l.post !== null && l.post === last[0].post) last.push(l)
+            else posts.push([l])
           }
-          const tail = p.room - ls[ls.length - 1].u
+          const single = (p.room - p.first) / (p.toEnd ? Math.max(1, ls.length - 1) : ls.length)
+          const wantPer = ls.length >= 2 && single < PAIR_BELOW && !p.pieces.some((pc) => pc.wall) ? 2 : 1
+          if (per !== wantPer) pairs.push(`place ${k + 1}: ${per} to a post, wants ${wantPer} (one by one they would stand ${f(single, 1)} apart, the line ${PAIR_BELOW})`)
+          if (per > 1) {
+            posts.forEach((ps, n) => {
+              if (ps.length !== per && n < posts.length - 1) pairs.push(`place ${k + 1}: post ${n + 1} holds ${ps.length} lanterns, not ${per}`)
+              if (ps.length < 2) return
+              const [a, b] = ps
+              const one = Math.abs(a.u - b.u) <= 0.01 && Math.hypot(a.x - b.x, a.z - b.z) <= 0.01
+              const opposite = Math.hypot((a.glass[0] + b.glass[0]) / 2 - a.x, (a.glass[2] + b.glass[2]) / 2 - a.z) <= 0.05
+              if (!one || !opposite) pairs.push(`${at(a)} and lesson ${b.lesson + 1}: ${one ? '' : 'not on one post'}${!one && !opposite ? ', ' : ''}${opposite ? '' : 'their arms not opposite'}`)
+            })
+          }
+          if (p.spacing < PAIR_BELOW) pairs.push(`place ${k + 1}: its ${per > 1 ? 'posts' : 'lanterns'} stand ${f(p.spacing, 1)} apart, under ${PAIR_BELOW}`)
+          const heads = posts.map((ps) => ps[0])
+          if (Math.abs(heads[0].u - p.first) > SPACING_TOL) uneven.push(`place ${k + 1}: the first stands ${f(heads[0].u, 1)} into its walk's room, not at its first room ${f(p.first, 1)}`)
+          for (let j = 1; j < heads.length; j++) {
+            const what = per > 1 ? `posts ${j} to ${j + 1}` : `lessons ${j} to ${j + 1}`
+            const du = heads[j].u - heads[j - 1].u
+            if (Math.abs(du - p.spacing) > SPACING_TOL) uneven.push(`place ${k + 1}: ${what} are ${f(du, 1)} apart along the walk, its spacing ${f(p.spacing, 1)}`)
+            const d3 = Math.hypot(heads[j].x - heads[j - 1].x, heads[j].y - heads[j - 1].y, heads[j].z - heads[j - 1].z)
+            if (d3 < 0.6 * p.spacing) packed.push(`place ${k + 1}: ${what} stand ${f(d3, 1)} apart, its spacing ${f(p.spacing, 1)}`)
+          }
+          const tail = p.room - heads[heads.length - 1].u
           const wantTail = p.toEnd ? 0 : p.spacing
           if (Math.abs(tail - wantTail) > SPACING_TOL) uneven.push(`place ${k + 1}: the last stands ${f(tail, 1)} short of its walk's end, not ${f(wantTail, 1)}`)
           for (const l of ls) {
@@ -1589,20 +1638,24 @@ try {
           }
         })
         r.check(`each place's lanterns evenly spaced along its walk (every step within ${SPACING_TOL} of its spacing; the last one spacing short of the next place, at its walk's end for Video Ads II and at the arch for the last)`, uneven.length === 0, uneven.length ? uneven.slice(0, 6) : lay.places.map((p, k) => `${k + 1}: ${f(p.spacing, 1)}`).join(', '))
-        r.check('no two lanterns of a place closer than 0.6 of its spacing', packed.length === 0, packed.length ? packed.slice(0, 6) : 'none')
+        r.check('no two lanterns (or posts) of a place closer than 0.6 of its spacing', packed.length === 0, packed.length ? packed.slice(0, 6) : 'none')
+        r.check(
+          `no place's lanterns stand closer than ${PAIR_BELOW} along its walk: two to a post exactly where single ones would (round 4), the two on one post with their arms opposite`,
+          pairs.length === 0,
+          pairs.length ? pairs.slice(0, 6) : lay.places.map((p, k) => (p.per > 1 ? `${NAMES[k]}: ${byPlace[k].length} on ${Math.ceil(byPlace[k].length / p.per)} posts, ${f(p.spacing, 1)} apart` : null)).filter(Boolean).join('; ') || 'every place one to a post',
+        )
         r.check(`every lantern its piece's offset from the trail's middle (within ${OFFSET_TOL})`, offTrail.length === 0, offTrail.length ? offTrail.slice(0, 6) : 'none')
 
         const starts = lay.places.map((p, k) => (p.start ? Math.hypot(p.start[0] - WALK_START[k][0], p.start[1] - WALK_START[k][1]) : Infinity))
         r.check('each walk starts at its landmark\'s trail point (WALK_START)', starts.every((d) => d < 1), starts.map((d) => f(d, 1)).join(', '))
         const far = byPlace
           .map((ls, k) => {
-            const limit = k === 4 ? FIRST_NEAR_STATIC : FIRST_NEAR
             const d = ls.length ? Math.hypot(ls[0].x - WALK_START[k][0], ls[0].z - WALK_START[k][1]) : Infinity
             const nearest = ls.every((l) => Math.hypot(l.x - WALK_START[k][0], l.z - WALK_START[k][1]) >= d - 1e-6)
-            return d <= limit && nearest ? null : `place ${k + 1} ${NAMES[k]}: the first stands ${f(d, 1)} from its walk's start (at most ${limit})${nearest ? '' : ', and another stands nearer'}`
+            return d <= FIRST_NEAR && nearest ? null : `place ${k + 1} ${NAMES[k]}: the first stands ${f(d, 1)} from its walk's start (at most ${FIRST_NEAR})${nearest ? '' : ', and another stands nearer'}`
           })
           .filter(Boolean)
-        r.check(`each place's first lantern is the nearest to its landmark's trail point, within ${FIRST_NEAR} (Static Ads ${FIRST_NEAR_STATIC})`, far.length === 0, far.length ? far : r.values.places.map((p) => p.firstFromStart).join(', '))
+        r.check(`each place's first lantern is the nearest to its landmark's trail point, within ${FIRST_NEAR}`, far.length === 0, far.length ? far : r.values.places.map((p) => p.firstFromStart).join(', '))
         // Video Ads I's last ones hang on the rock beside the ladder: the rock over each post's top, under its glass's back.
         const onRock = byPlace[2].filter((l) => l.wall)
         const rock = onRock.length ? await page.evaluate(TERRAIN_AT, onRock.flatMap((l) => [{ x: l.wall.post[0], z: l.wall.post[2] }, { x: l.wall.back[0], z: l.wall.back[2] }])) : null
@@ -1855,14 +1908,31 @@ try {
         !!inFile && inFile.title === POND.title && inFile.counts === false && inFile.area === PLACES[k].id,
         inFile ? { title: inFile.title, counts: inFile.counts ?? true, area: inFile.area } : null,
       )
-      r.check(`place ${k + 1}: a button after the list holds "${POND.title}"`, p.after.includes(POND.title), p.after)
+      // Map review item 18 (2026-10-15): the lesson left place 7's panel for its own checkpoint.
+      r.check(`place ${k + 1}: no button after the list holds "${POND.title}" any more`, !p.after.includes(POND.title) && !p.after.some((t) => /Ad Bounty/.test(t)), p.after)
       r.check(`it is not one of the ${COUNTING[k]} rows`, p.rows.length === COUNTING[k] && !p.rows.some((x) => x.title === POND.title), `${p.rows.length} rows`)
-      r.values.click = await click(page, FIND.pond, POND.title, { what: 'row 6: the pond button', scroll: 'box' })
+      // The Ad Bounty checkpoint's panel holds it (the place gives way to it, as to the discount's).
+      await page.evaluate(() => window.__worldPark('bounty'))
+      await waitFor(page, () => window.__worldFrame?.parkedId === 'bounty' && window.__worldFrame.parkProgress >= 0.999 && !!document.querySelector('main section[aria-labelledby="bounty-panel-title"]'), {
+        timeout: 30000,
+        what: 'row 6: the Ad Bounty checkpoint did not open',
+      })
+      await sleep(700)
+      r.values.click = await click(page, FIND.bountyRow, POND.title, { what: 'row 6: the lesson\'s row in the Ad Bounty checkpoint\'s panel', scroll: 'box' })
       await waitPath(page, `${APP}/${PLACES[k].id}/${POND.id}`, 'row 6')
       await waitLesson(page, POND.title, 'row 6')
       await sleep(600)
       const s = await page.evaluate(SNAP)
-      r.check(`it opens ${APP}/${PLACES[k].id}/${POND.id}`, s.path === `${APP}/${PLACES[k].id}/${POND.id}` && s.lesson === POND.title, { path: s.path, heading: s.lesson })
+      r.check(`the Ad Bounty checkpoint's row opens ${APP}/${PLACES[k].id}/${POND.id}`, s.path === `${APP}/${PLACES[k].id}/${POND.id}` && s.lesson === POND.title, { path: s.path, heading: s.lesson })
+      // Its page names the checkpoint, not place 7 (item 18's fix round; LessonScreen.tsx): the eyebrow, and a back link to the map, where the checkpoint's panel is.
+      const named = await page.evaluate(() => {
+        const norm = (t) => (t ?? '').replace(/\s+/g, ' ').trim()
+        const h1 = [...document.querySelectorAll('h1')].find((h) => !h.closest('main'))
+        const eyebrow = h1?.previousElementSibling
+        const back = eyebrow?.previousElementSibling?.querySelector('a') ?? null
+        return { eyebrow: [...(eyebrow?.children ?? [])].map((c) => norm(c.textContent)).filter(Boolean).join(' '), back: back ? norm(back.textContent.replace('←', '')) : null, href: back?.getAttribute('href') ?? null }
+      })
+      r.check(`its page says "Checkpoint · Ad Bounty", not ${NAMES[k]}, and its back link "Ad Bounty" goes to the map`, named.eyebrow === 'Checkpoint · Ad Bounty' && named.back === 'Ad Bounty' && named.href === APP, named)
       r.values.page = s.outside.slice(0, 160)
     })
 

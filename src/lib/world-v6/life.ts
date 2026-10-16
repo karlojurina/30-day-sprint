@@ -1262,7 +1262,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     glowGroups.push({ name, sphere: s, maxDist, onScreen: false });
   };
   {
-    const rand = mulberry32(606);
+    let rand = mulberry32(606);
     const tmp = new THREE.Vector3();
     // The Glowing Forest (bible 1.15): fireflies and spores follow magicAt,
     // the field that runs from the lake's west shore (0) to the Great Tree's
@@ -1334,6 +1334,12 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       i++;
     }
     addGroup("seeds", seedPts, 30, 1500);
+    // The fireflies and seeds above take as many draws as magicAt makes them
+    // try, so a change to the field moved everything dealt after them (map
+    // review 2026-10-15, items 16 and 17). From here the stream stands where
+    // 1dc7e10's stood after them (3,585 draws; mulberry32's state steps by
+    // 0x6d2b79f5 a draw), so the motes and the fish rings stay where they were.
+    rand = mulberry32((606 + Math.imul(3585, 0x6d2b79f5)) >>> 0);
     // a2 (bible 1.3 Life): dust motes turning in a ray of light through the
     // trees on the left of the frame, 50 to 130 out, low over the meadow.
     const v2 = views[1];

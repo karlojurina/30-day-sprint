@@ -790,27 +790,6 @@
   color: var(--color-ink-2);
 }
 
-.feature {
-  margin-top: 22px;
-  min-height: 43px;
-  padding: 0 14px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  border-radius: 9px;
-  background: var(--color-milestone-soft);
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.diamond {
-  flex: 0 0 auto;
-  width: 8px;
-  height: 8px;
-  transform: rotate(45deg);
-  background: var(--color-milestone);
-}
-
 .video {
   margin-top: 24px;
   aspect-ratio: 16 / 9;
@@ -2302,25 +2281,6 @@
   color: var(--color-milestone);
 }
 
-.panel .feature {
-  margin-top: 12px;
-}
-
-/* With a source the feature row is a button to its own page (WorldV6
-   PanelBody): the same plaque, with .root button's font reset put back. */
-.root button.feature {
-  width: 100%;
-  border: 0;
-  font-size: 14px;
-  font-weight: 500;
-  text-align: left;
-  transition: background-color 150ms var(--ease);
-}
-
-.root button.feature:hover {
-  background: rgba(146, 151, 208, 0.24);
-}
-
 .panel .video {
   margin-top: 14px;
 }
@@ -2835,6 +2795,20 @@
   color: var(--color-accent-strong);
 }
 
+/* The Ad Bounty's tag (plan item 18) is open from day one, so it never wears
+   the locked outline. Open: the full sand border on the warm ground, the
+   words in ink and the notice in sand. Watched: the same tag with the words
+   and the notice in the second ink, quieter, as a lesson done is. */
+.gate[data-cp="open"] .gateTag {
+  border-color: var(--color-accent);
+  background: #3a2a22;
+}
+
+.gate[data-gate="bounty"][data-cp="done"] .gateTag,
+.gate[data-gate="bounty"][data-cp="done"] .gateGlyph {
+  color: var(--color-ink-2);
+}
+
 /* Refused or closed: the words in the second ink (about 9:1 on the plaque; the
    third ink read 4.3:1, under the 4.5 floor for words that must be read, and it
    is still a button), the rest grey so it still reads as closed. */
@@ -3033,4 +3007,26 @@
   font-size: 14px;
   line-height: 1.5;
   color: var(--color-ink);
+}
+
+/* ══ The Ad Bounty checkpoint (map review 2026-10-15, plan item 18) ══════
+   The board on the isle past the rope bridge. Its shape is a pinned notice
+   (WorldV6 NoticeGlyph) drawn with the price tag's classes, so its marker,
+   its timeline tag (the gate rules above: "open" is the plain tag, "done"
+   once its lesson is watched) and its panel's eyebrow take the discount's
+   colours. On a phone it is a slimmer row under Creative Strategy's, in the
+   same list item. */
+
+.areaList .cpRow {
+  min-height: 52px;
+  padding-top: 0;
+}
+
+.cpRow .rowName {
+  font-size: 16px;
+}
+
+.cpRowGlyph {
+  display: block;
+  color: var(--color-accent);
 }

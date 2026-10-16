@@ -271,6 +271,21 @@ export const OBSERVATORY = { x: -2052, y: 1650, z: -1560, facing: 125 } as const
  * 30.2. The ladder itself, from its first landing to the bench, takes 18 vh.
  * The view's fastest turn is 2.7 degrees per vh, which is the limit: there is
  * no scroll left in 280 to climb slower.
+ * Map review 2026-10-15, item 14 (Lovro's Loom, 5:09 to 6:02: "some distances
+ * are bigger"; that evening: "if we can somehow shrink the long distances ...
+ * then great", numbers only): the three longest stretches come down, every
+ * camera row where it was. a3 300 -> 260: everything in it 13% quicker, the
+ * ride 111 vh from the lip to level (was 128), the walk up to it 17.6 units
+ * per vh (was 15.2, now the route's quickest walk). a4 280 -> 255, the rows'
+ * paces kept: its turns reach 2.9 degrees per vh (v6-route.mjs's limit for
+ * this stretch went 2.7 -> 3.0; retuning the paces held 2.7 only down to 265).
+ * a5 280 -> 255: the traverse's middle row is walked at 0.5 instead of a
+ * hike's 2.6 (KEYS), so the straight there takes 33 vh where it took 56, and
+ * its turns stay under the gully's 3.4 degrees per vh, the route's fastest
+ * (v6-route.mjs). Stop to stop from a1 to a7: 160, 260, 255, 255, 200, 250
+ * vh (were 160, 300, 280, 280, 200, 250); 1,980 vh in all. a8's stretch stays
+ * 420 with the flight: 220 of it is the locked flight and most of the rest
+ * the rope bridge.
  */
 const PLACE_DEFS: ReadonlyArray<Omit<Place, "trail">> = [
   { id: "a1", module: "Introduction", place: "The Landing", landmark: "Signpost", mesh: "LM_Signpost",
@@ -281,13 +296,13 @@ const PLACE_DEFS: ReadonlyArray<Omit<Place, "trail">> = [
   // The waterfall's base: where the falling water meets the pool (WORLD.falls.bottom).
   // The stop stands at the pool's west end (A3_VIEW).
   { id: "a3", module: "Video Ads I", place: "The Falls", landmark: "Waterfall", mesh: "LM_Waterfall",
-    pos: { x: -100, y: 61.5, z: 1689 }, light: "late-afternoon", scrollVh: 300, height: 344 },
+    pos: { x: -100, y: 61.5, z: 1689 }, light: "late-afternoon", scrollVh: 260, height: 344 },
   // v6: the Trail Hut on the rock spur halfway up the gorge's north wall.
   { id: "a4", module: "Video Ads II", place: "The Gorge Trail", landmark: "Trail Hut", mesh: "LM_TrailHut",
-    pos: { x: TRAIL_HUT.x, y: TRAIL_HUT.y, z: TRAIL_HUT.z }, light: "gorge-sunset", scrollVh: 280, height: 30 },
+    pos: { x: TRAIL_HUT.x, y: TRAIL_HUT.y, z: TRAIL_HUT.z }, light: "gorge-sunset", scrollVh: 255, height: 30 },
   // The boathouse stands at the end of a jetty, on the water.
   { id: "a5", module: "Static Ads", place: "The Mirror Lake", landmark: "Boathouse", mesh: "LM_Boathouse",
-    pos: { x: 1150, y: 564, z: -420 }, light: "sunset", scrollVh: 280, height: 40 },
+    pos: { x: 1150, y: 564, z: -420 }, light: "sunset", scrollVh: 255, height: 40 },
   // The heart of the forest (WORLD.forest.clearing); the floating steps start beside it.
   { id: "a6", module: "AI Ads & Content", place: "The Glowing Forest", landmark: "Great Tree", mesh: "LM_GreatTree",
     pos: { x: -760, y: 791, z: -1190 }, light: "dusk", scrollVh: 200, height: 200 },
@@ -539,8 +554,21 @@ export const GLOW_STREAM: ReadonlyArray<readonly [number, number, number]> = [
  * lobed edge that follows the valley up the slope (never a circle).
  * Everything magical reads it: tree species, glow, ground, fireflies, mist.
  * Allocates nothing.
+ *
+ * Wave 3 (Lovro's Loom, 2026-10-15, 10:09 to 11:00: "I want it to be a bit
+ * bigger and more gradual of a change"): the field is its core (the field as
+ * it was, which `core` returns alone, for forest.ts's deal) or a halo round it,
+ * whichever is higher. The halo keeps the core's lobes and width, peaks at
+ * 0.72 at the core's edge and falls to nothing over about twice the core's
+ * width, so the giants reach about 200 further, thinning and smaller toward
+ * the edge, then willows, then teal tips, over about 500 units. Toward the
+ * lake, on the open slope (the camera's way up between the lobes), it stays
+ * under the giants' 0.48 until about half way up, so the slope keeps its trail
+ * and stays free of giants; either side of it, round the glowing stream's
+ * lower bends and in the forest under the lobes, it reaches the willows' ring
+ * (review round 3). It is 0 again at the shore.
  */
-export function magicAt(x: number, z: number): number {
+export function magicAt(x: number, z: number, core = false): number {
   const C = WORLD.forest.clearing;
   // The axis: from where the glowing stream enters the lake up to the clearing.
   const ax = 72;
@@ -565,7 +593,42 @@ export function magicAt(x: number, z: number): number {
   let m = up * lat;
   const dc = Math.hypot(x - C.x, z - C.z);
   if (dc < C.r * 1.4) m = Math.max(m, 1 - smooth01((dc - C.r) / (C.r * 0.4)));
-  return m < 0 ? 0 : m > 1 ? 1 : m;
+  m = m < 0 ? 0 : m > 1 ? 1 : m;
+  if (core) return m;
+  // The halo: full out to 0.55 of the width, gone by 2.15.
+  const lat2 = 1 - smooth01((side - width * 0.55) / (width * 1.6));
+  // Along the valley: from 0 at the stream's mouth to 0.55 of its height by a
+  // third of the way up, all of it from about two thirds; past the tree it
+  // fades out further than the core does.
+  let cap = 0.55 + 0.45 * smooth01((u - 0.45) / 0.35);
+  // Review round 3 (Lovro's cursor at 10:14 to 10:21 loops the forest under
+  // the left lobe and the stream's lower bends: "this whole area should be
+  // like the magical forest as well"): away from the open slope the lower
+  // valley's halo rises to 0.88 of its height (0.63, the willows' ring) where
+  // it stopped at 0.55 (0.4, teal tips that do not read from the rail). The
+  // open slope is the ground round FOREST_KEEP_CLEAR, the camera's way up
+  // between the lobes: within 110 of it the halo stays as it was, and it
+  // rises over the next 180, so the slope stays open and free of giants.
+  const VALLEY_CAP = 0.88;
+  if (cap < VALLEY_CAP) {
+    let d2 = Infinity;
+    for (let i = 0; i < FOREST_KEEP_CLEAR.length; i++) {
+      const c = FOREST_KEEP_CLEAR[i];
+      const sx = c[2] - c[0];
+      const sz = c[3] - c[1];
+      const t = Math.min(1, Math.max(0, ((x - c[0]) * sx + (z - c[1]) * sz) / (sx * sx + sz * sz)));
+      const ex = x - c[0] - sx * t;
+      const ez = z - c[1] - sz * t;
+      if (ex * ex + ez * ez < d2) d2 = ex * ex + ez * ez;
+    }
+    const lift = 0.55 + (VALLEY_CAP - 0.55) * smooth01((Math.sqrt(d2) - 110) / 180);
+    if (lift > cap) cap = lift;
+  }
+  const up2 = u < 1 ? smooth01((u + 0.05) / 0.35) * cap : 1 - smooth01((u - 1.3) / 0.75);
+  const lk = WORLD.lake;
+  const shore = smooth01((Math.hypot(x - lk.x, z - lk.z) - lk.r - 10) / 260);
+  const halo = 0.72 * up2 * lat2 * shore;
+  return halo > m ? halo : m;
 }
 function smooth01(t: number): number {
   const c = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -696,8 +759,9 @@ export const SKY_MARKS: ReadonlyArray<{ id: PlaceId; shape: string; az: number; 
 
 /**
  * The trail, shore to the gangway. The middle is v6's: the camp, the
- * stream's bank to the lip; the ride (no trail); from the pool's east shore
- * along the river's bank to the log; the log over the river; the talus;
+ * stream's bank to the lip; the ride (no trail); from the falls' foot round
+ * the pool's east side and along the river's bank to the log; the log over
+ * the river; the talus;
  * switchbacks up the north wall to the spur and the hut; the traverse east;
  * the gully; then v5's from the rim shelf on.
  */
@@ -718,11 +782,18 @@ export const PATH: readonly PathPoint[] = [
   P(-112, 410, 1782, false, true), // the lip; the ride down has no trail
   // 2026-10-13: the trail went from the pool's shore to the cliff's foot, in
   // through the cave's mouth and out by its side passage to the bank. With no
-  // cave it starts again where the ride sets you down: on the pool's east
-  // shore among Video Ads I's lanterns (clear of every one of them and of the
-  // boulders either side), and curves along the river's south bank to the log.
-  P(6, 63, 1640, false), // the pool's east shore
-  P(34, 63, 1636, false), // along the river's south bank
+  // cave it started again where the ride sets you down, on the pool's east
+  // rim, its end aimed at the water and 5 short of it. Map review 2026-10-15,
+  // item 15d (Lovro: "It goes into the water in a weird way and not around
+  // it"): it starts at the falls' foot instead, on the dry ground between the
+  // boulders by the falls and the rockfall, runs north round the pool's east
+  // side (22 or more from its water, so the paint and its verge stay on the
+  // grass) and bends east along the river's south bank to the log, the one
+  // place it crosses water. Each point keeps every rock's clearance, so
+  // rocks.ts places the same rocks.
+  P(18, 63, 1662, false), // the falls' foot, between the boulders and the rockfall
+  P(14, 63, 1640, false), // round the pool's east side
+  P(30, 63, 1630, false), // along the river's south bank
   P(54, 63, 1626, false),
   P(62, 64, 1608, false), // the log's south end
   P(52, 64, 1538, false), // the log's north end
@@ -1185,8 +1256,24 @@ const KEYS: readonly Key[] = [
   // 4 down through a 40 lens, so the lit shelf takes more of the frame than
   // the massif. The fastest turn on the route drops from 38.4 to ~33 degrees
   // per 10 vh (shots/v6/finalD/route/sheet-gully-*).
+  // Map review 2026-10-15, item 14: Lovro (Loom, 6:39 to 7:22) asked for this
+  // turn to go clockwise, to show the path and not the world. It stays as it
+  // is. The bench's own wall stands 42 to 64 from the a4 stop on every bearing
+  // from 300 round to 60, and 100 to 185 from the traverse keys, and the trail
+  // across the Climb's face has no ledge drawn to look at. These rows turned
+  // clockwise (bearings only, measured on the rail): about 60 vh of bare rock,
+  // 68 to 99% of the frame nearer than 150 and no sky, the view up to 176
+  // degrees off the way the camera travels (97 where v6-route.mjs allows 60),
+  // and the a4 stop aimed 10 degrees further right. It needs a new way up
+  // (shots/v6/review-2026-10-15/route-w3/clockwise-why-not.jpg).
+  // What changed here is the pace: the middle row is walked at 0.5, not a
+  // hike's 2.6, so the traverse's straight takes 33 vh where it took 56, and
+  // from a4 to the gully's top the view faces the valley and its haze
+  // (bearings 100 to 175) for 65 vh where it did for 92 (a5's budget 280 ->
+  // 255). The turns either side stay under the gully's 3.4 degrees per vh
+  // (3.22 off a4, was 3.09; the gully 3.36, was 3.40).
   M("traverse", K(935, 385, 1182, 155, 0, "hike", undefined, 46)),
-  K(1080, 470, 1196, 148, 2, "hike", undefined, 42),
+  Q(0.5, K(1080, 470, 1196, 148, 2, "hike", undefined, 42)),
   K(1262, 575, 1222, 132, 2, "hike", undefined, 40),
   // THE GULLY: over the notch heading north, the view swinging left onto
   // the lit shelf and the ridges ahead.

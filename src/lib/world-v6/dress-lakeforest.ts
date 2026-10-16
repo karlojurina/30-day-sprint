@@ -72,20 +72,17 @@
  */
 import * as THREE from "three";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
-import { BROOK, FOREST_KEEP_CLEAR, GREAT_TREE, PATH, PLACES, STEPS, STEPS_FOOT, STEPS_TOP, TRAIL, WORLD, magicAt } from "./layout";
+import { BROOK, GREAT_TREE, PATH, PLACES, STEPS, STEPS_TOP, TRAIL, WORLD } from "./layout";
 import { NO_REFLECT_LAYER } from "./light";
 import { stopRay } from "./rocks";
 import { foliageCell, foliageCellKeep, foliageCellRects, getFoliageAtlas } from "./foliage-atlas";
+import { giantSpots } from "./forest";
 
 // ── Tunables ────────────────────────────────────────────────────────────────
 
 /** Giant LOD switch distances (world units, camera to the tree's centre). */
 const GIANT_L1 = 1250;
 const GIANT_L2 = 2900;
-/** The grey forest's candidate grid (kept, so the corridors and views hold). */
-const GIANT_GRID = 62;
-/** Share of giants that are the tiered species (the rest weep). */
-const TIERED_SHARE = 0.62;
 /** Spores round the Great Tree. */
 const SPORES = 170;
 /** Rowboat bob. */
@@ -1886,83 +1883,20 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     removeByName("Set_a6_Block");
     removeByName("ForestMagic");
     const Fo = WORLD.forest;
-    const GH = GREAT_TREE.height;
-    const curve = new THREE.CatmullRomCurve3(TRAIL.map((q) => new THREE.Vector3(q[0], q[1], q[2])), false, "centripetal");
-    const n1 = TRAIL.length - 1;
-    const cam: THREE.Vector3[] = [];
-    const tA = (PLACES[4].trail + 1) / n1;
-    const tB = (PLACES[5].trail + 4) / n1;
-    for (let i = 0; i <= 500; i++) cam.push(curve.getPoint(tA + ((tB - tA) * i) / 500));
-    const keepClear = (px: number, pz: number, r: number) => {
-      for (const [ax, az, bx, bz, hw] of FOREST_KEEP_CLEAR) {
-        const dx = bx - ax;
-        const dz = bz - az;
-        const t = Math.min(1, Math.max(0, ((px - ax) * dx + (pz - az) * dz) / (dx * dx + dz * dz)));
-        if (Math.hypot(px - ax - dx * t, pz - az - dz * t) < hw + r) return false;
-      }
-      return true;
-    };
-    const sdx = STEPS_TOP[0] - STEPS_FOOT[0];
-    const sdz = STEPS_TOP[2] - STEPS_FOOT[2];
-    const sL = Math.hypot(sdx, sdz);
-    const underSteps = (px: number, pz: number) => {
-      const t = Math.min(1, Math.max(0, ((px - STEPS_FOOT[0]) * sdx + (pz - STEPS_FOOT[2]) * sdz) / (sL * sL)));
-      return { d: Math.hypot(px - STEPS_FOOT[0] - sdx * t, pz - STEPS_FOOT[2] - sdz * t), y: STEPS_FOOT[1] + (STEPS_TOP[1] - STEPS_FOOT[1]) * t };
-    };
-    const S = GIANT_GRID;
     const mtx = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const e = new THREE.Euler();
     const so = setA6.position;
-    // v6 (bible 1.15): the giants follow the magic field, never a circle. They
-    // begin where magicAt passes 0.5 and own the ground past 0.8 (forest.ts's
-    // teal spruces and willows fill below that); size grows toward the tree.
-    const sm = (e0: number, e1: number, v: number) => {
-      const t = Math.min(1, Math.max(0, (v - e0) / (e1 - e0)));
-      return t * t * (3 - 2 * t);
-    };
-    const EXT = 520;
-    for (let gz = Fo.z - Fo.r - EXT; gz <= Fo.z + Fo.r + EXT; gz += S) {
-      for (let gx = Fo.x - Fo.r - EXT; gx <= Fo.x + Fo.r + EXT; gx += S) {
-        const k = gx * 3.1 + gz * 7.7;
-        const tx = gx + (rnd(k, 101) - 0.5) * S * 0.8;
-        const tz = gz + (rnd(k, 102) - 0.5) * S * 0.8;
-        const mg = magicAt(tx, tz);
-        if (rnd(k, 103) > sm(0.48, 0.8, mg)) continue;
-        const rr = 1 - sm(0.5, 1.0, mg);
-        if (Math.hypot(tx - Fo.clearing.x, tz - Fo.clearing.z) < Fo.clearing.r + 10) continue;
-        if (Math.hypot(tx - L.x, tz - L.z) < L.r + 40) continue;
-        let h = (185 - 90 * rr) * (0.82 + 0.3 * rnd(k, 104));
-        if (tx > -220) h = Math.min(h, 125 - Math.max(0, tx + 220) * 0.12);
-        const dG = Math.hypot(tx - A6.x, tz - A6.z);
-        h = Math.min(h, GH / 2 - 2 + Math.max(0, dG - 260) * 0.45);
-        const sp: 0 | 1 = rnd(k, 110) < TIERED_SHARE ? 0 : 1;
-        const tr = h * 0.075;
-        if (!keepClear(tx, tz, tr + 6)) continue;
-        const g = H(tx, tz);
-        let near = Infinity;
-        let camY = -Infinity;
-        const w = h * (0.92 + rnd(k, 111) * 0.18);
-        // How far the crown reaches from the axis: the tiered discs (and the side pad), the weeping lobes.
-        const cr = w * (sp === 0 ? 0.37 : 0.46);
-        for (const c of cam) {
-          const d = Math.hypot(c.x - tx, c.z - tz);
-          if (d < near) near = d;
-          if (d < cr + 16) camY = Math.max(camY, c.y);
-        }
-        if (near < tr + 30) continue;
-        // Crowns over the camera's line start 14 above it (the weeping strands hang to 0.3 of the height).
-        const low = sp === 0 ? 0.5 : 0.3;
-        let sy = 1;
-        if (camY > -Infinity) sy = Math.max(1, (camY + 14 - g) / (h * low));
-        if (sy > 1.45) continue;
-        const us = underSteps(tx, tz);
-        if (us.d < cr + 30 && g + h * sy > us.y - 40) continue;
-        e.set((rnd(k, 112) - 0.5) * 3 * DEG, rnd(k, 113) * Math.PI * 2, (rnd(k, 114) - 0.5) * 3 * DEG);
-        q.setFromEuler(e);
-        mtx.compose(V3(tx - so.x, g - 1 - so.y, tz - so.z), q, V3(w, h * sy, w));
-        giants.push({ cx: tx, cy: g + h * sy * 0.55, cz: tz, r: Math.max(h * sy * 0.55, w * 0.34), sp, m: Float32Array.from(mtx.elements) });
-      }
+    // v6 (bible 1.15): the giants follow the magic field, never a circle. Where
+    // they stand is forest.ts's giantSpots (wave 3: the wild trees keep clear
+    // of them, and the field's halo adds smaller ones round the core); here
+    // each gets its lean, its turn and its matrix, as before.
+    for (const G of giantSpots(ctx.terrainHeight)) {
+      const k = G.k;
+      e.set((rnd(k, 112) - 0.5) * 3 * DEG, rnd(k, 113) * Math.PI * 2, (rnd(k, 114) - 0.5) * 3 * DEG);
+      q.setFromEuler(e);
+      mtx.compose(V3(G.x - so.x, G.g - 1 - so.y, G.z - so.z), q, V3(G.w, G.h * G.sy, G.w));
+      giants.push({ cx: G.x, cy: G.g + G.h * G.sy * 0.55, cz: G.z, r: Math.max(G.h * G.sy * 0.55, G.w * 0.34), sp: G.sp, m: Float32Array.from(mtx.elements) });
     }
     stats.giants = giants.length;
     const counts = [0, 0];

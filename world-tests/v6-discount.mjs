@@ -89,7 +89,8 @@
  *              window.__fixtureDiscount.requests()
  *   the chip   main header button[aria-label*="discount checkpoint"]; its
  *              state: main header [data-cp] (the chip's data-cp)
- *   the tag    main nav[aria-label="Places"] button[data-cp]; the places'
+ *   the tag    main nav[aria-label="Places"] button[data-gate="discount"] (its own:
+ *              the Ad Bounty's tag is a checkpoint's too since item 18); the places'
  *              diamonds: nav[aria-label="Places"] > div > button:not([data-cp])
  *   the marker main button[data-mode][data-cp], its plaque = last child
  *   the panel  main section[aria-labelledby="cp-panel-title"], #cp-panel-title
@@ -132,7 +133,7 @@ const results = []
 const FIND = {
   chip: () => document.querySelector('main header button[aria-label*="discount checkpoint"]'),
   chipState: () => document.querySelector('main header [data-cp]'),
-  tag: () => document.querySelector('main nav[aria-label="Places"] button[data-cp]'),
+  tag: () => document.querySelector('main nav[aria-label="Places"] button[data-gate="discount"]'),
   marker: () => document.querySelector('main button[data-mode][data-cp]'),
   panel: () => document.querySelector('main section[aria-labelledby="cp-panel-title"]'),
   apply: () => [...(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.querySelectorAll('button') ?? [])].find((b) => /^(Apply for|Sending)/.test(b.textContent.trim())) ?? null,
@@ -188,7 +189,7 @@ const SNAP = () => {
     return { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) }
   }
   const chip = document.querySelector('main header button[aria-label*="discount checkpoint"]')
-  const tag = document.querySelector('main nav[aria-label="Places"] button[data-cp]')
+  const tag = document.querySelector('main nav[aria-label="Places"] button[data-gate="discount"]')
   const stops = [...document.querySelectorAll('main nav[aria-label="Places"] > div > button:not([data-cp])')]
   const marker = document.querySelector('main button[data-mode][data-cp]')
   const panel = document.querySelector('main section[aria-labelledby="cp-panel-title"]')
@@ -555,10 +556,10 @@ try {
     if (!box) throw new Error('row 5: no tag')
     await page.mouse.move((box.l + box.r) / 2, (box.t + box.b) / 2)
     await sleep(350)
-    const tip = await page.evaluate(() => document.querySelector('main nav[aria-label="Places"] button[data-cp]')?.textContent ?? '')
+    const tip = await page.evaluate(() => document.querySelector('main nav[aria-label="Places"] button[data-gate="discount"]')?.textContent ?? '')
     r.check('hovered, the tag says 30% off and the days left', /30% off/i.test(tip) && /11 days left/i.test(tip), tip)
     const tipBox = await page.evaluate(() => {
-      const t = document.querySelector('main nav[aria-label="Places"] button[data-cp]')?.children[1]?.getBoundingClientRect()
+      const t = document.querySelector('main nav[aria-label="Places"] button[data-gate="discount"]')?.children[1]?.getBoundingClientRect()
       return t ? { t: Math.round(t.top), b: Math.round(t.bottom) } : null
     })
     r.check('the tip stands clear above the tag', !!tipBox && tipBox.b <= box.t, { tip: tipBox, tag: box })

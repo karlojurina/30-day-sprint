@@ -175,6 +175,210 @@ const PADS: ReadonlyArray<readonly [number, number, number, number, number]> = (
   return out;
 })();
 
+/**
+ * The Mirror Lake's shore (map review 2026-10-15, item 15c; Lovro, 8:58 to
+ * 9:16: "it's basically a perfect circle ... It should be more of like a real
+ * actual structure of water"). The water's edge is a radius from WORLD.lake's
+ * centre at each angle; the locked circle (v6-locked.mjs pins WORLD.lake) is
+ * only its reference now. Angles are atan2(z - lake.z, x - lake.x) in
+ * degrees: 0 east, 90 south, 180 west, 270 north.
+ *
+ * A slow wander (LAKE_WANDER: longer east to west than north to south), then
+ * the rows: [angle, change in radius, half-width before it, half-width after
+ * it, in degrees], negative for land reaching into the water. rocks.ts puts
+ * the lake's rocks on the points (lakePoints), cover.ts its reeds and shore
+ * grass along the shore. Bounds: never past r + 15 (forest.ts plants no tree
+ * within r + 22 of the centre), the trail along the east shore 22 to 37 from
+ * the water (TRAIL_GAP), life.ts's fish rings on water. light.ts's mirror,
+ * water.ts's waterAt and rocks.ts's isWater read this same shore.
+ * world-tests/v6-route.mjs checks it; v6-course row 2 the lanterns by it.
+ */
+const LAKE_SHORE: ReadonlyArray<readonly [number, number, number, number]> = [
+  [10, 25, 7, 3], // the brook's inlet
+  [22, -30, 3.5, 5], // the rocky point south of the brook (a5's lower left)
+  [95, -120, 16, 12], // the south spur, under the ridge
+  [150, -30, 12, 12],
+  [180, -60, 7, 8], // the west point
+  [204, 40, 6, 7], // the glowing stream's bay
+  [232, -90, 12, 16], // the north-west point
+  [262, 40, 7, 6], // the north bay
+  [286, -150, 6, 9], // the north point
+  [308, 20, 6, 6],
+  [330, -45, 5, 7], // the north-east point
+];
+/** The wander under the rows: [amplitude, waves round the lake, phase]. */
+const LAKE_WANDER: ReadonlyArray<readonly [number, number, number]> = [
+  [22, 2, 1.5708],
+  [9, 1, 0.9],
+  [6, 3, 0.4],
+  [3, 5, 1.7],
+];
+/** Mean shore radius past WORLD.lake.r, and the most it may reach past it. */
+const LAKE_SHORE_MEAN = -8;
+const LAKE_SHORE_MAX = 15;
+/** The water's surface: light.ts's mirror, WORLD.lake.y plus its LAKE_LIFT. */
+export const LAKE_SURFACE = WORLD.lake.y + 0.5;
+/** How far light.ts's mirror reaches past the shore, under the bank (never seen). */
+export const LAKE_PAD = 14;
+/** The farthest the shore reaches from WORLD.lake's centre (with LAKE_PAD, the mirror's bound). */
+export const LAKE_OUTER = WORLD.lake.r + LAKE_SHORE_MAX;
+/** The bank: the land blends down to the water's edge from LAKE_REACH past r (v5's bowl did from r). */
+const LAKE_REACH = 160;
+/** The bed's slope from the water's edge, and the bank's least slope beside it. */
+const SHORE_SHELF = 0.15;
+const SHORE_BANK = 0.12;
+
+/** The least gap from the water to the trail's middle line (its paint is 8.5 across each side). */
+const TRAIL_GAP = 22;
+/** How far from the lake's centre the ray at angle t first meets the trail (PATH as drawn), or Infinity. */
+function trailRay(t: number): number {
+  const L = WORLD.lake;
+  const dx = Math.cos(t);
+  const dz = Math.sin(t);
+  let best = Infinity;
+  for (let i = 0; i < PATH.length - 1; i++) {
+    const ax = PATH[i].x - L.x;
+    const az = PATH[i].z - L.z;
+    const ex = PATH[i + 1].x - PATH[i].x;
+    const ez = PATH[i + 1].z - PATH[i].z;
+    const den = dx * ez - dz * ex;
+    if (Math.abs(den) < 1e-9) continue;
+    const s = (ax * ez - az * ex) / den;
+    const u = (ax * dz - az * dx) / den;
+    if (s > 0 && u >= 0 && u <= 1 && s < best) best = s;
+  }
+  return best;
+}
+
+/** The shore's radius every half degree (filled on first use). */
+const SHORE_STEPS = 720;
+let shoreTab: Float32Array | null = null;
+function shoreTable(): Float32Array {
+  const tab = new Float32Array(SHORE_STEPS + 1);
+  const top = WORLD.lake.r + LAKE_SHORE_MAX;
+  for (let i = 0; i <= SHORE_STEPS; i++) {
+    const deg = (i / SHORE_STEPS) * 360;
+    const t = (deg * Math.PI) / 180;
+    let R = WORLD.lake.r + LAKE_SHORE_MEAN;
+    for (const [a, n, ph] of LAKE_WANDER) R += a * Math.sin(n * t + ph);
+    for (const [at, dr, w0, w1] of LAKE_SHORE) {
+      let d = deg - at;
+      d -= 360 * Math.round(d / 360);
+      const u = d / (d < 0 ? w0 : w1);
+      R += dr * Math.exp(-u * u);
+    }
+    // Coves stop short of LAKE_SHORE_MAX softly (no flat ledge in the outline).
+    if (R > top - 6) R = top - 6 * Math.exp(-(R - (top - 6)) / 6);
+    // Clear of the trail where it runs along the shore, by a gap that wanders.
+    const tr = trailRay(t);
+    if (tr < Infinity) R = smin(R, tr - (TRAIL_GAP + 9 * (0.5 + 0.5 * Math.sin(7 * t + 1.3)) + 6 * (0.5 + 0.5 * Math.sin(13 * t + 0.2))), 8);
+    tab[i] = R;
+  }
+  return tab;
+}
+
+/** The Mirror Lake's shore radius at `angle` (radians, atan2(z - lake.z, x - lake.x)). */
+export function lakeShoreR(angle: number): number {
+  let f = (angle / (2 * Math.PI)) * SHORE_STEPS;
+  f -= SHORE_STEPS * Math.floor(f / SHORE_STEPS);
+  const i = Math.floor(f);
+  const u = f - i;
+  const tab = shoreTab ?? (shoreTab = shoreTable());
+  return tab[i] + (tab[i + 1] - tab[i]) * u;
+}
+/** The shore's radius on the line from the lake's centre through (x, z). */
+export function lakeShoreAt(x: number, z: number): number {
+  return lakeShoreR(Math.atan2(z - WORLD.lake.z, x - WORLD.lake.x));
+}
+
+/**
+ * The shore's points, where land reaches into the water (rocks.ts stands its
+ * lake rocks on them): each least radius that lies at least POINT_MIN under
+ * the shore either side of it (the greatest radius within POINT_SPAN degrees
+ * on that side). Angle in radians, the radius there, and that depth.
+ */
+const POINT_MIN = 25;
+const POINT_SPAN = 30;
+export function lakePoints(): Array<{ angle: number; r: number; depth: number }> {
+  const tab = shoreTab ?? (shoreTab = shoreTable());
+  const N = SHORE_STEPS;
+  const at = (i: number) => tab[((i % N) + N) % N];
+  const span = Math.round((POINT_SPAN / 360) * N);
+  const out: Array<{ angle: number; r: number; depth: number }> = [];
+  for (let i = 0; i < N; i++) {
+    const v = at(i);
+    if (!(v < at(i - 1) && v <= at(i + 1))) continue;
+    let left = -Infinity;
+    let right = -Infinity;
+    for (let k = 1; k <= span; k++) {
+      left = Math.max(left, at(i - k));
+      right = Math.max(right, at(i + k));
+    }
+    const depth = Math.min(left, right) - v;
+    if (depth >= POINT_MIN) out.push({ angle: (i / N) * Math.PI * 2, r: v, depth });
+  }
+  return out;
+}
+
+// ── The plunge pool's shore ──────────────────────────────────────────────────
+
+/**
+ * Map review 2026-10-15, item 15b, review round 1 (Lovro, 4:53 to 5:04: "we
+ * have this circle and then we have running water. So it should all kind of
+ * intertwine and be one"): the plunge pool's shore, the waterline as drawn, is
+ * WORLD.pool's circle drawn in POOL_INSET, with points of land reaching into
+ * it on the west and the north, the side the rail looks across from Video Ads
+ * I to the log. The east (the trail and the falls' boulders), the falls' cliff
+ * and the river's mouth keep the circle. Rows: [math angle in degrees,
+ * atan2(z - pool.z, x - pool.x); how far in; width in degrees]. All of it
+ * inside WORLD.pool.r and under WORLD.pool.y, so whatever keeps out of the
+ * pool by its circle and its level (rocks.ts isWater, cover.ts, scene.ts
+ * surfaceHeight) keeps out of it as before; the water is drawn lower
+ * (POOL_SURFACE), and the ground rises out of it to POOL_LAND.
+ */
+const POOL_POINTS: ReadonlyArray<readonly [number, number, number]> = [
+  [190, 11, 15], // the west point, under the pool ring's west boulders
+  [240, 6, 11],
+  [262, 4, 30], // the north-west shore, drawn in a little all along
+  [284, 13, 13], // the north point, across the pool from the rail
+  [318, 6, 8],
+];
+/** The points stay between these angles (degrees), fading in and out over the last 12 to 25. */
+const POOL_POINTS_ARC = [150, 330] as const;
+/**
+ * The shore lies this far inside the circle everywhere, so the drawn grid
+ * crosses the water's level in the middle of the ground's rise out of it (16
+ * across, its middle on the shore): a smooth waterline, not the stair a step
+ * draws. The bowl still ends at WORLD.pool.r; where the shore is the circle's,
+ * the rise is cut there, 0.15 over the water.
+ */
+const POOL_INSET = 2;
+/** The pool's water as water.ts draws it (the "Pool" disc): under WORLD.pool.y, half way up the rise. */
+export const POOL_SURFACE = WORLD.pool.y - 0.5;
+/** How far the Pool disc reaches past the shore, under the bank (never seen). */
+export const POOL_PAD = 5;
+/** The ground the rise reaches (the points' top): over the water as drawn, under WORLD.pool.y. */
+const POOL_LAND = WORLD.pool.y - 0.04;
+
+/** The plunge pool's shore radius (the waterline) at `angle` (radians, atan2(z - pool.z, x - pool.x)): under WORLD.pool.r. */
+export function poolShoreR(angle: number): number {
+  let deg = (angle * 180) / Math.PI;
+  deg -= 360 * Math.floor(deg / 360);
+  const [a0, a1] = POOL_POINTS_ARC;
+  const m = smooth(a0 - 10, a0 + 15, deg) * (1 - smooth(a1 - 12, a1, deg));
+  if (m <= 0) return WORLD.pool.r - POOL_INSET;
+  let d = 0;
+  for (const [at, depth, w] of POOL_POINTS) {
+    const u = (deg - at) / w;
+    d += depth * Math.exp(-u * u);
+  }
+  return WORLD.pool.r - POOL_INSET - d * m;
+}
+/** The shore's radius on the line from the pool's centre through (x, z). */
+export function poolShoreAt(x: number, z: number): number {
+  return poolShoreR(Math.atan2(z - WORLD.pool.z, x - WORLD.pool.x));
+}
+
 /** Recommended grid resolution (cells along the long side): ~29 units a cell,
  *  ~190k triangles. */
 export const TERRAIN_RES = 320;
@@ -547,19 +751,40 @@ function padsAndWater(x: number, z: number, h: number): number {
     const d = Math.hypot(x - p[0], z - p[2]);
     if (d < p[3] + p[4]) h += (p[1] - h) * (1 - smooth(p[3], p[3] + p[4], d));
   }
+  // The Mirror Lake (item 15c): the bed inside the shore, the bank outside it.
   const L = WORLD.lake;
-  const dl = Math.hypot(x - L.x, z - L.z);
-  if (dl < L.r) {
-    const k = dl / L.r;
-    h = L.y - 1 - 40 * (1 - k * k);
-  } else if (dl < L.r + 160) {
-    h = L.y - 1 + (h - (L.y - 1)) * smooth(L.r, L.r + 160, dl);
+  const dxl = x - L.x;
+  const dzl = z - L.z;
+  const dl = Math.hypot(dxl, dzl);
+  if (dl < L.r + LAKE_REACH) {
+    const R = lakeShoreR(Math.atan2(dzl, dxl));
+    if (dl < R) {
+      // v5's bowl scaled to this shore, on a shelf that rises to the water's edge.
+      const k = dl / R;
+      const bed = L.y - 1 - 40 * (1 - k * k);
+      const shelf = LAKE_SURFACE + SHORE_SHELF * (dl - R);
+      h = bed > shelf ? bed : shelf;
+    } else {
+      // The land blended down to the water's edge (as v5's bowl did from r),
+      // and never flatter than SHORE_BANK beside it, so no ground under the
+      // water's level lies past the shore. A channel cut lower (the brook's
+      // mouth) is left low: the lake runs into it.
+      const hb = LAKE_SURFACE + (h - LAKE_SURFACE) * smooth(R, L.r + LAKE_REACH, dl);
+      const lift = Math.min(h, LAKE_SURFACE + SHORE_BANK * (dl - R));
+      h = hb > lift ? hb : lift;
+    }
   }
   const Pl = WORLD.pool;
   const dp = Math.hypot(x - Pl.x, z - Pl.z);
   if (dp < Pl.r) {
-    const k = dp / Pl.r;
-    const c = Pl.y - 1 - 14 * (1 - k * k);
+    // The bowl, scaled to the shore (poolShoreR), and the ground's rise out of
+    // it to POOL_LAND over the 16 across the shore, which crosses the water
+    // as drawn (POOL_SURFACE) on the shore itself; the points' ground runs on
+    // out to the circle.
+    const R = poolShoreR(Math.atan2(z - Pl.z, x - Pl.x));
+    const k = Math.min(1, dp / R);
+    const bed = Pl.y - 1 - 14 * (1 - k * k);
+    const c = bed + (POOL_LAND - bed) * smooth(R - 8, R + 8, dp);
     if (c < h) h = c;
   }
   return h;

@@ -32,6 +32,9 @@
  *              its ol > li rows (button aria-label "Lesson N, title[, watched|, action item]"
  *              and "Watch lesson N, title"), button[data-state="fold"], the count
  *              line (the element before the ol), a button whose text has "Ad Bounty"
+ *              (row 12: none since the map review's item 18)
+ *   bounty     (row 12) main section[aria-labelledby="bounty-panel-title"] ol button,
+ *              window.__worldPark('bounty')
  *   markers    main button[data-mode] (index = place), label = its last child
  *   timeline   main nav[aria-label="Places"] [aria-label$="lessons done"]; the
  *              student's place: its > div > button[aria-current="step"] (the
@@ -269,6 +272,8 @@ const FIND = {
   panelWatch: () => document.querySelector('main section[aria-labelledby="v4-panel-title"] button[aria-label^="Watch lesson "]'),
   fold: () => document.querySelector('main section[aria-labelledby="v4-panel-title"] button[data-state="fold"]'),
   feature: () => [...document.querySelectorAll('main section[aria-labelledby="v4-panel-title"] button')].find((b) => /Ad Bounty/.test(b.textContent)) ?? null,
+  /** Map review item 18: the feature row's lesson is the Ad Bounty checkpoint's one row. */
+  bountyRow: () => document.querySelector('main section[aria-labelledby="bounty-panel-title"] ol button'),
   listRow: (k) => document.querySelector('main ol')?.children[k]?.querySelector('button') ?? null,
   markWatched: () => [...document.querySelectorAll('button')].find((b) => !b.closest('main') && /Mark watched \(dev\)/.test(b.textContent)) ?? null,
   backLink: (pathname) => {
@@ -1054,23 +1059,41 @@ try {
       r.values.shot = await r.shot('everything-done')
     })
 
-    // 12 ── The feature row
+    // 12 ── The feature row: since the map review's item 18 (2026-10-15) it is
+    // the one lesson of the Ad Bounty's own checkpoint, not a row of place 7.
     await runRow(12, nameOf(12), async (r) => {
       const page = await r.open(url('', { p: 'mid', arrive: 0, poster: 'off' }))
       await ready(page, 'row 12')
       r.values.open = await openPlace(page, 6, 'row 12')
       const panel = await page.evaluate(READ_PANEL)
       r.values.shotPanel = await r.shot('place-7-panel')
+      r.check('place 7\'s panel has no Ad Bounty row any more', panel !== null && panel.feature === null && !/Ad Bounty/.test(panel.text), panel?.feature ?? null)
+      await page.evaluate(() => window.__worldPark('bounty'))
+      await waitFor(page, () => window.__worldFrame?.parkedId === 'bounty' && window.__worldFrame.parkProgress >= 0.999 && !!document.querySelector('main section[aria-labelledby="bounty-panel-title"]'), {
+        timeout: 30000,
+        what: 'row 12: the Ad Bounty checkpoint did not open',
+      })
+      await sleep(700)
+      const row = await page.evaluate(() => document.querySelector('main section[aria-labelledby="bounty-panel-title"] ol button')?.getAttribute('aria-label') ?? null)
       const yBefore = await page.evaluate(() => Math.round(window.scrollY))
-      r.values.click = await click(page, FIND.feature, null, { what: 'row 12: the "Ad Bounty" row as a button', scroll: 'box' })
+      r.values.click = await click(page, FIND.bountyRow, null, { what: 'row 12: the Ad Bounty checkpoint\'s row as a button', scroll: 'box' })
       await waitPath(page, `${APP}/a7/a7l22`, 'row 12')
       await waitFor(page, SAYS, { arg: FEATURE_TEXT, timeout: NAV_MS, soft: true, what: 'row 12: the setup text' })
       await sleep(1200)
       const s = await page.evaluate(SNAP)
-      r.check('the panel has the Ad Bounty row', /Ad Bounty/.test(panel?.feature ?? ''), panel?.feature ?? null)
+      r.check('the Ad Bounty checkpoint\'s panel holds the feature row\'s lesson', /Ad Bounty/.test(row ?? ''), row)
       r.check('the address ends /a7/a7l22', s.path === `${APP}/a7/a7l22`, s.path)
       r.check('the page shows the setup text', s.outside.includes(FEATURE_TEXT), s.outside.slice(0, 200))
       r.check('no player', s.iframes === 0 && !/Not recorded yet\.|Loading video…/.test(s.outside), { iframes: s.iframes })
+      // Its page names the checkpoint, not place 7 (item 18's fix round; LessonScreen.tsx): the eyebrow, and a back link to the map, where the checkpoint's panel is.
+      const named = await page.evaluate(() => {
+        const norm = (t) => (t ?? '').replace(/\s+/g, ' ').trim()
+        const h1 = [...document.querySelectorAll('h1')].find((h) => !h.closest('main'))
+        const eyebrow = h1?.previousElementSibling
+        const back = eyebrow?.previousElementSibling?.querySelector('a') ?? null
+        return { eyebrow: [...(eyebrow?.children ?? [])].map((c) => norm(c.textContent)).filter(Boolean).join(' '), back: back ? norm(back.textContent.replace('←', '')) : null, href: back?.getAttribute('href') ?? null }
+      })
+      r.check('its page says "Checkpoint · Ad Bounty" and its back link "Ad Bounty" goes to the map', named.eyebrow === 'Checkpoint · Ad Bounty' && named.back === 'Ad Bounty' && named.href === APP, named)
       r.check('no request to /api', r.api.length === 0, r.api.map((x) => `${x.method} ${x.url}`).slice(0, 3))
       r.values.scrollY = `${yBefore} before the click, ${s.y} on the page`
       r.values.shot = await r.shot('feature-page')

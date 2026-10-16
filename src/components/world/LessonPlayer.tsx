@@ -96,6 +96,14 @@ const ENDED_SHORT_TEXT =
   "This lesson finished but didn't register. Tell the team so we can fix it.";
 
 /**
+ * Shown while the heartbeat's last 3 reports in a row have failed
+ * (watch-heartbeat.ts, onSaveTrouble), and gone when one gets through. What
+ * was watched meanwhile is kept and sent with that one.
+ */
+const NOT_SAVING_TEXT =
+  "Your progress isn't being saved. Check your connection.";
+
+/**
  * How close to the player's own length a "paused" or "stopped" has to be to
  * count as the end of the video.
  *
@@ -223,6 +231,9 @@ function LessonVideo({
   // The last answer to a claim, kept only while it is a refusal for too
   // little played. It is what the note under the progress line reads.
   const [refusal, setRefusal] = useState<Refusal | null>(null);
+  // The heartbeat's reports keep failing: what is watched is not reaching the
+  // server. Off again when one gets through.
+  const [notSaving, setNotSaving] = useState(false);
   // Read once at mount so a refresh mid-lesson cannot move the resume point
   // under the student's feet.
   const [resumeAt] = useState(() => resumePoint(watchProgress.get(lessonId)));
@@ -389,6 +400,7 @@ function LessonVideo({
       durationSeconds,
       rpc: transport.heartbeat,
       onResult: (r, beat) => onBeatResult(r, beat),
+      onSaveTrouble: (failing) => setNotSaving(failing),
     }),
   );
 
@@ -677,6 +689,12 @@ function LessonVideo({
       {noLoad && (
         <p role="status" className={u.barNote}>
           {NO_LOAD_TEXT}
+        </p>
+      )}
+      {/* The last 3 reports of what was watched failed. Gone when one gets through. */}
+      {notSaving && (
+        <p role="status" className={u.barNote}>
+          {NOT_SAVING_TEXT}
         </p>
       )}
       {/* The video ended and the server still does not see its 95% point. */}

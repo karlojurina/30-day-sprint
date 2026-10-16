@@ -7,12 +7,15 @@
  *   - /api/cron/check-na-tasks   (stalled.discord.* / stalled.whop.*)
  *
  * Returns the JSON each cron returned so the UI can show "N tasks
- * created" inline. Used by the "Generate tasks now" button in
- * /admin/tasks - lets Astrid/Karlo refresh the queue without
- * waiting for the next scheduled run or hitting the cron URL with
- * the secret manually.
+ * created" inline. Used by the Refresh button on /admin/tasks when a
+ * CSM presses it - lets the team refresh the queue without waiting
+ * for the next scheduled run or hitting the cron URL with the secret
+ * manually. Founders and admins get /api/admin/refresh-everything
+ * from the same button, which also syncs Whop and rebuilds snapshots.
  *
- * Admin/founder only (CSM has read-only access).
+ * Any team role. Karlo's role table (v75.3) gave CSMs this button and
+ * kept the Whop sync and the snapshot rebuild founder/admin only; the
+ * founder/admin check that used to sit here refused every CSM press.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -21,18 +24,6 @@ import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
 export async function POST(request: NextRequest) {
   const auth = await requireTeam(request);
   if (isAuthFailure(auth)) return auth.error;
-
-  // Founder + admin only - CSM shouldn't be able to trigger
-  // production crons.
-  if (
-    auth.teamMember.role !== "founder" &&
-    auth.teamMember.role !== "admin"
-  ) {
-    return NextResponse.json(
-      { error: "Founder or admin role required" },
-      { status: 403 },
-    );
-  }
 
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) {

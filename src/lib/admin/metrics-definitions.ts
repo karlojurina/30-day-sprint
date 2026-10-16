@@ -111,6 +111,26 @@ export function isInLaunchCohort(s: StudentLike): boolean {
 }
 
 /**
+ * Whether /admin/discounts lists a request: the launch cohort's, plus
+ * every request the team still has to act on, whoever made it. Pending
+ * waits for a decision (the dashboard's tile and the course switch's
+ * preflight count every pending request), approved for its code to be
+ * attached in Whop and marked applied. So the cohort only trims the
+ * history tabs (applied, rejected) and those rows in All.
+ *
+ * The page used to put .gte() on the embedded student, which in
+ * PostgREST blanks the embed and keeps the row: older requests showed
+ * as "Unknown" and nothing was dropped.
+ */
+export function isListedDiscountRequest(
+  status: string,
+  student: StudentLike | null | undefined,
+): boolean {
+  if (status === "pending" || status === "approved") return true;
+  return !!student && isInLaunchCohort(student);
+}
+
+/**
  * v75.47: Whop "Canceling" predicate — student clicked cancel but
  * still has access through end of billing cycle. The earliest churn
  * signal Whop emits.

@@ -21,7 +21,7 @@ import {
   Tabs,
 } from "@/components/admin/ui";
 import { DiscountFeedbackResponses } from "@/components/admin/DiscountFeedbackResponses";
-import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
+import { isListedDiscountRequest } from "@/lib/admin/metrics-definitions";
 
 type RequestWithStudent = DiscountRequest & { student: Student };
 type FilterValue = "pending" | "approved" | "applied" | "rejected" | "all";
@@ -68,10 +68,6 @@ export default function DiscountsPage() {
     let query = supabase
       .from("discount_requests")
       .select("*, student:students(*)")
-      // v75.18: filter on first_paid_at (original signup), not joined_at
-      // (current cycle start). Returning customers who renewed post-launch
-      // shouldn't appear here — they're not first-time joiners.
-      .gte("student.first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
       .order("created_at", { ascending: false });
 
     if (filter !== "all") {
@@ -79,7 +75,14 @@ export default function DiscountsPage() {
     }
 
     const { data } = await query;
-    const rows = (data as RequestWithStudent[]) || [];
+    // v75.18: returning customers (first paid before the launch) stay
+    // off this page. That was a .gte() on the embedded student, which
+    // only blanked the embed ("Unknown") and dropped no row. The cohort
+    // is applied here, and a request still waiting on the team shows
+    // whoever made it (isListedDiscountRequest).
+    const rows = ((data as RequestWithStudent[]) || []).filter((r) =>
+      isListedDiscountRequest(r.status, r.student),
+    );
     setRequests(rows);
     setLoading(false);
 

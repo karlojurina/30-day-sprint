@@ -26,6 +26,18 @@ The other modules under test are copied the same way (`build.mjs` lists them,
 with what each one needed rewritten). A copy that still holds an `@/` import
 stops the build.
 
+Server code is copied too (since 2026-10-16): the Whop backfill and the visit
+route that runs it, the Whop webhook, `mark-action-shipped`, `skip-lesson` and
+the CSM's event hooks. Their imports go to `_gen/stub-server.ts`, a
+hand-written stand-in for Next's response, the service-role Supabase client
+(rows in plain arrays, answered the way PostgREST answers where a route depends
+on it: `.single()` on no row is an error, a select returns only the columns it
+names, `ON CONFLICT DO NOTHING` returns only the rows it added), Whop's
+completions read, the steps after a lesson (recorded in order) and the catalog
+flags. Each test calls the route's own `POST` with a real `Request`. The login
+callback is too big to run this way, so `whop-backfill.test.mjs` checks its one
+streak line in the source and says so.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 import { createClient } from "@/lib/supabase-browser";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import type { Student } from "@/types/database";
@@ -89,6 +90,11 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
   const supabase = createClient();
+  // The roles /api/admin/refresh-everything accepts. A CSM was shown the
+  // button and got "Founder or admin role required" back.
+  const { teamMember } = useAuth();
+  const canRefresh =
+    teamMember?.role === "founder" || teamMember?.role === "admin";
 
   const fetchDashboard = useCallback(
     async (silent = false) => {
@@ -480,7 +486,9 @@ export default function AdminDashboard() {
             : undefined
         }
         actions={
-          <RefreshEverything onDone={() => void fetchDashboard(true)} />
+          canRefresh ? (
+            <RefreshEverything onDone={() => void fetchDashboard(true)} />
+          ) : undefined
         }
       />
 

@@ -45,7 +45,10 @@ The interesting assertions are the ones about things **staying the same**:
 - Section 24, the switch (v104 and its undo, `diagnostics/cutover-preflight.sql`, `cutover-postcheck.sql`, `admin-health.sql` INVARIANT 6): one copy of the database per broken starting point, each refused with its sentence and nothing changed; the first run's archive, stamps, CSM changes, wipe, copy, RESTRICT keys and Whop index, each against counts worked out separately before the run; the app's own SQL afterwards (views, snapshot RPC, heartbeat); a second run and v101 both change nothing; the undo moves new-course progress into `archive_v2` and puts every table, constraint, not-null and index back as the dump before the switch had it (except the first logins the switch filled in, which stay, and a task note the team changed after the switch, which is kept); the switch runs again after it; the undo's three refusals. The lock: v104 and its undo each lock, before their first read and with `lock_timeout` 5s, exactly the 18 tables their own statements write or alter (read from `pg_locks` on a run with the lock taken out), and a timeout in place of the lock stops with "Nothing was changed. Paste it again in a minute." v103 runs with `lock_timeout` 5s.
 - Sections 23 and 24 run twice: on this harness's database as section 22 leaves it, then on a second database built from `base.sql` and the real migration files v92 to v101 in order. `base.sql` carries the tables the switch touches for that (lesson_notes, ratings, the quiz tables, templates, tasks, alerts, `student_whop_sync`), shaped from the migrations named beside each, with Postgres's default key names as in production.
 
-The run ends with `PASS 514   FAIL 0` (312 before the cutover sections).
+- Section 25, v105 and its undo, and `diagnostics/backend-readiness-read.sql`: on a database of its own (base.sql and the chain v92 to v101) with the policies production has on `student_lesson_completions`, `discount_requests` and `student_achievements`, lifted verbatim from v3, schema.sql, the team_members recursion fix, v53 and v55, and the feedback form's tables and function from v29. What a student's session could send is run for real under `SET ROLE authenticated`: before v105 a student writes their own completions, an "approved" discount request and a badge; after it every such write is refused (42501) while their reads, the service role, the team's policies and the feedback form's function work as before. The record v105 keeps, the undo putting back every policy exactly (command, roles, using, check, comment) with nothing else in the database different, a second run of each, the lock and its timeout, five refusals, and base.sql's spelling of the student policy. The read runs, changes nothing, and its part a shows the back doors before v105 and none after.
+- Section 26, v106 and its undo (T-057): with two students holding two pending requests it adds nothing, lists them and does not fail; once they are decided it adds the unique index, and a second pending request is refused (23505) whether inserted or set back to pending; other states are not limited; a second run, a wrong index of the same name, the hold on the table and its timeout, the undo. Then v103 and the switch (v104) still run after v105 and v106.
+
+The run ends with `PASS 565   FAIL 0` (312 before the cutover sections, 514 before sections 25 and 26).
 
 ## How it stays honest
 
@@ -74,7 +77,11 @@ built for; test them here before they are ever pasted anywhere.
 
 - PGlite runs as a single superuser, so **RLS row filtering is not exercised**
   — the harness asserts that the right policies exist and that no write policy
-  does, not that they filter correctly at runtime.
+  does, not that they filter correctly at runtime. Sections 25 and 26 are the
+  exception: they switch to the API roles with `SET ROLE` (authenticated,
+  service_role with BYPASSRLS, as on Supabase), so the policies filter for
+  real there. The feedback form's function is owned by PGlite's superuser
+  there; on production its owner is checked by v105 itself.
 - Supabase-specific pieces (`auth.uid()`, `current_user_is_team()`) are test
   seams backed by `set_config`, not the real implementations.
 - It does not prove anything about the *data* in production, only about the

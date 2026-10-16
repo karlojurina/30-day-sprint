@@ -36,6 +36,10 @@ export interface MapFeature {
   title: string;
   key: string | null;
   done: boolean;
+  /** A watch lesson (not a setup step). */
+  watch: boolean;
+  /** A watch lesson with a video behind it (the Ad Bounty checkpoint's panel shows Watch). */
+  hasVideo: boolean;
 }
 
 export interface MapArea {
@@ -104,7 +108,14 @@ export function buildMapModel(input: MapModelInput): MapModel {
         });
         if (isDone) done++;
       } else {
-        features.push({ id: l.id, title: l.title, key: l.feature_key, done: isDone });
+        features.push({
+          id: l.id,
+          title: l.title,
+          key: l.feature_key,
+          done: isDone,
+          watch: l.type === "watch",
+          hasVideo: l.type === "watch" && Boolean(l.has_video),
+        });
       }
     }
     total += lessons.length;

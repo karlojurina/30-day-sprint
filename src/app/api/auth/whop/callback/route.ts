@@ -419,7 +419,11 @@ export async function GET(request: NextRequest) {
           // refresh-watch-sync:54). Without it the streak is whatever it was
           // before this sync, so streak_7 / streak_14 / unbroken get judged
           // against a stale value and silently under-award.
-          await updateStudentStreak(supabase, upsertedStudent.id);
+          // Only when the sync added something, as refresh-watch-sync does: a
+          // login alone is no lesson work (backend_readiness.md, item 3).
+          if (syncResult.syncedCount > 0) {
+            await updateStudentStreak(supabase, upsertedStudent.id);
+          }
           await evaluateAchievements(supabase, upsertedStudent.id);
         } catch (err) {
           // Never let an achievement failure break a login.

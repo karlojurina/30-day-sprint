@@ -269,6 +269,24 @@ export default function OutreachInsightsPage() {
             />
           </div>
 
+          {/* The course switch archived the progress older sends were
+              graded on (src/lib/outreach-insights.ts). Nothing shows
+              before the switch. */}
+          {totals.graded_on_old_course > 0 && (
+            <p style={{ ...T.meta, marginBottom: 12 }}>
+              {totals.graded_on_old_course === 1
+                ? "1 DM sent before the course switch"
+                : `${totals.graded_on_old_course} DMs sent before the course switch`}
+              {data?.reset_at
+                ? ` (${new Date(data.reset_at).toLocaleDateString(undefined, { day: "numeric", month: "short" })})`
+                : ""}{" "}
+              {totals.graded_on_old_course === 1
+                ? "was graded on the old course, so Success leaves it out. It still counts as sent."
+                : "were graded on the old course, so Success leaves them out. They still count as sent."}{" "}
+              Save DMs are graded as before.
+            </p>
+          )}
+
           {/* Data-hygiene nudge — replied numbers are only as good as
               the team's tapping discipline. */}
           {totals.unmarked > 0 && (
@@ -393,6 +411,8 @@ export default function OutreachInsightsPage() {
                                 }}
                               >
                                 success = {r.success_label}
+                                {r.graded_on_old_course > 0 &&
+                                  ` · ${r.graded_on_old_course} graded on the old course`}
                               </span>
                             </td>
                             <td style={cellRight}>{r.sent}</td>
@@ -491,6 +511,17 @@ export default function OutreachInsightsPage() {
                   reviews) and tasks whose template was deleted are
                   excluded from every number.
                 </li>
+                {data?.reset_at && (
+                  <li>
+                    <strong>The course switch</strong> archived the old
+                    course&apos;s progress. From then on, a stalled,
+                    zero-lessons, no-ship, behind-pace or custom DM sent
+                    before the switch is left out of Success, because what
+                    it was graded on is gone. It still counts as sent.
+                    Save DMs read the membership, which the switch left
+                    alone, so they are graded as before.
+                  </li>
+                )}
                 <li>
                   Canceling templates carry their saves in their own
                   Success column, while the Success-rate KPI pools only

@@ -17,6 +17,27 @@
  * WHOP_COURSE_ID is never sent whole: whether it is set, and its last 4
  * characters when it is long enough for 4 to give nothing away.
  *
+ * NOT CHECKED: which course WHOP_COURSE_ID names. This route makes no
+ * Whop call, and the page says so. The check, when it is built, needs:
+ *   1. One server-side GET of `${WHOP_API_BASE}/courses/{WHOP_COURSE_ID}`
+ *      with WHOP_API_KEY, the read the course catalog was built from
+ *      (clients/ecom-university/tools/lesson-text/, outside this
+ *      repository). Its chapters[].lessons[] carry each lesson's id; a
+ *      lesson also holds video_asset, which must never leave the server.
+ *      Send counts only, never an id.
+ *   2. Those ids counted against lessons.whop_lesson_id (the live table)
+ *      and, before the switch, lessons_next.whop_lesson_id.
+ *   3. The verdict. Before the switch: every id in the live table is the
+ *      old course (right on production, whose old dashboard's backfill
+ *      reads it); ids that match lessons_next are the new course (right
+ *      only on a preview set up to try it). After it: as many ids as
+ *      lessons, every one in the live table, else a problem line.
+ *   4. A refused or failed read shown as "could not check", never as
+ *      "All good". The catalog tool read /courses/{id} with the
+ *      WHOP_API_KEY in this app's .env.local, which needs the
+ *      courses:read scope; whether the key Vercel holds for production
+ *      is that key, or has that scope, was not checked.
+ *
  * Auth: founder + admin only. UI: /admin/cutover.
  */
 

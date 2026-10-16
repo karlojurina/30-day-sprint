@@ -34,6 +34,7 @@ import {
   daysOnCourse,
   getCurriculumResetAt,
 } from "./curriculum-reset.ts";
+import { DISCOUNT_LAUNCH_DATE } from "./discount.ts";
 
 export interface AchievementSnapshot {
   /** Lesson IDs the student has completed (skipped or watched OR
@@ -231,14 +232,14 @@ export async function buildAchievementSnapshot(
         .select("bounty_access_claimed_at")
         .eq("student_id", studentId)
         .maybeSingle(),
+      // Every approval, oldest first: which ones count depends on the switch,
+      // read beside this (below, at discountEarnedAt).
       supabase
         .from("discount_requests")
         .select("id, status, created_at")
         .eq("student_id", studentId)
         .in("status", ["approved", "applied"])
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle(),
+        .order("created_at", { ascending: true }),
       // getCurriculumResetAt throws on a failed read; caught here so the
       // other reads still settle, and handled below.
       getCurriculumResetAt(supabase).then(
@@ -294,7 +295,19 @@ export async function buildAchievementSnapshot(
     (milestonesRes.data as {
       bounty_access_claimed_at: string | null;
     } | null) ?? { bounty_access_claimed_at: null };
-  const discount = discountRes.data as { created_at: string } | null;
+  // Discount Earned, as the map shows the offer (discount.ts, discountState):
+  // once the new course is live, only a request made on or after the day it
+  // launched counts. A June student's June approval was re-awarded after the
+  // switch while the map told them the offer was not for them
+  // (backend_readiness.md, section 5, item 21). Before the switch any
+  // approval counts, as it always did.
+  const launchMs = Date.parse(DISCOUNT_LAUNCH_DATE);
+  const approvals =
+    (discountRes.data as Array<{ created_at: string }> | null) ?? [];
+  const discount =
+    approvals.find(
+      (r) => resetRes.resetAt === null || Date.parse(r.created_at) >= launchMs,
+    ) ?? null;
 
   // v90: these reads had no error check at all, so a failed query was
   // indistinguishable from a student with no data. Behaviour is deliberately

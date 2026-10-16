@@ -8,8 +8,12 @@
  *
  * Response shape (v85.3 — success replaced re_engaged_72h):
  *   { stats: { [templateId]: { created, open, sent, dismissed,
- *     replied, no_reply, success, success_eligible, success_label } },
+ *     replied, no_reply, success, success_eligible, success_label,
+ *     graded_on_old_course } },
  *     computed_at }
+ *
+ * graded_on_old_course: sends from before the course switch that are
+ * left out of success (src/lib/outreach-insights.ts). 0 before it.
  *
  * Correlation, not causation — see the methodology box on
  * /admin/tasks/insights for the full definitions.
@@ -37,6 +41,7 @@ export async function GET(request: NextRequest) {
         success: number;
         success_eligible: number;
         success_label: string;
+        graded_on_old_course: number;
       }
     > = {};
     for (const row of insights.templates) {
@@ -50,6 +55,7 @@ export async function GET(request: NextRequest) {
         success: row.success,
         success_eligible: row.success_eligible,
         success_label: row.success_label,
+        graded_on_old_course: row.graded_on_old_course,
       };
     }
     return NextResponse.json({

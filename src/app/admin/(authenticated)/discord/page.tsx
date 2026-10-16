@@ -225,17 +225,19 @@ interface ToggleRowSpec {
 }
 
 const TOGGLE_ROWS: ToggleRowSpec[] = [
+  // vercel.json schedules no day-28 cron (CONTEXT.md, "Cron Jobs (Vercel)"),
+  // so this switch sends nothing. The alerts' cron is "10 */2 * * *".
   {
     key: "day28_dm_enabled",
-    title: "Day-28 summary DM",
+    title: "Day-28 summary DM (not scheduled)",
     description:
-      "Per-student DM (or team-channel fallback) sent 28 days after join. Cron runs 09:30 UTC.",
+      "Per-student DM (or team-channel fallback) 28 days after join. No cron sends it, so this switch does nothing. The test below still sends one to your test Discord ID.",
   },
   {
     key: "engagement_alerts_enabled",
     title: "Disengagement alerts",
     description:
-      "Team-channel embed listing flagged students. Cron runs 09:00 UTC.",
+      "Team-channel embed listing newly flagged students. The check runs every 2 hours at 10 past the hour (UTC) and posts only when it flags someone new.",
   },
   {
     key: "csm_task_summary_enabled",

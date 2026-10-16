@@ -19,11 +19,19 @@ import { createClient } from "@/lib/supabase-browser";
 import type { AdminConfigRow } from "@/types/database";
 import { RestrictedPage } from "@/components/admin/ui";
 import { CURRICULUM_RESET_KEY } from "@/lib/curriculum-reset";
+import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 
 const FRIENDLY_LABELS: Record<string, string> = {
   program_login_link: "Program login link",
   discord_invite_link: "Discord invite link",
+  discount_window_days: "Discount window (days)",
 };
+
+// Rows nothing in the app reads. v95 added discount_window_days and its
+// description says the discount routes read it; none ever did. The window
+// is DISCOUNT_WINDOW_DAYS in constants.ts. Shown read only with that said,
+// so a value someone already changed here is seen to change nothing.
+const UNUSED_KEYS = new Set(["discount_window_days"]);
 
 export default function AdminSettingsPage() {
   const { teamMember } = useAuth();
@@ -166,6 +174,7 @@ function AdminSettingsBody() {
           // Written once by the course switch (cutover PRD, C6); every
           // course day, CSM window and snapshot floor counts from it.
           const locked = row.key === CURRICULUM_RESET_KEY;
+          const unused = UNUSED_KEYS.has(row.key);
 
           return (
             <div
@@ -208,7 +217,7 @@ function AdminSettingsBody() {
                   progress snapshot counts from it, so it cannot be changed here.
                 </p>
               )}
-              {row.description && (
+              {unused ? (
                 <p
                   style={{
                     fontSize: 12,
@@ -216,14 +225,28 @@ function AdminSettingsBody() {
                     marginBottom: 8,
                   }}
                 >
-                  {row.description}
+                  Not used by the app. The discount window is{" "}
+                  {DISCOUNT_WINDOW_DAYS} days, set in the code, so changing
+                  this value changes nothing.
                 </p>
+              ) : (
+                row.description && (
+                  <p
+                    style={{
+                      fontSize: 12,
+                      color: "var(--color-text-secondary)",
+                      marginBottom: 8,
+                    }}
+                  >
+                    {row.description}
+                  </p>
+                )
               )}
               <div className="flex gap-2 items-center">
                 <input
                   type="text"
                   value={draft}
-                  disabled={!canEdit || locked}
+                  disabled={!canEdit || locked || unused}
                   onChange={(e) =>
                     setDrafts((prev) => ({
                       ...prev,
@@ -245,7 +268,7 @@ function AdminSettingsBody() {
                 <button
                   type="button"
                   onClick={() => void save(row.key)}
-                  disabled={!canEdit || locked || !dirty || saving === row.key}
+                  disabled={!canEdit || locked || unused || !dirty || saving === row.key}
                   style={{
                     padding: "8px 14px",
                     fontSize: 12,
@@ -271,7 +294,7 @@ function AdminSettingsBody() {
                       : "Save"}
                 </button>
               </div>
-              {empty && (
+              {empty && !unused && (
                 <p
                   style={{
                     fontSize: 11,

@@ -10,6 +10,7 @@ import type {
   WhopLessonInteractionWebhookData,
 } from "@/types/whop";
 import { createHmac } from "crypto";
+import { afterCompletionWrite } from "@/lib/complete-lesson";
 
 /**
  * Verify a Whop webhook using the Standard Webhooks / Svix signature
@@ -405,7 +406,9 @@ export async function POST(request: NextRequest) {
       }
       const lesson = lessonResult.data;
 
-      const { error } = await supabase
+      // Writes the row when there is none; the database stamps completed_at
+      // with the moment it arrives. `.select` returns only a row it added.
+      const { data: inserted, error } = await supabase
         .from("student_lesson_completions")
         .upsert(
           { student_id: student.id, lesson_id: lesson.id },
@@ -413,7 +416,8 @@ export async function POST(request: NextRequest) {
             onConflict: "student_id,lesson_id",
             ignoreDuplicates: true,
           }
-        );
+        )
+        .select("id");
 
       if (error) {
         // v75.30: return 500 so Whop retries. Was returning 200
@@ -427,9 +431,43 @@ export async function POST(request: NextRequest) {
           { status: 500 },
         );
       }
+
+      // A row was there already (a skip, a saved Discord link, an action done
+      // before its video): finish its watch half the way the backfill does
+      // (watch-sync.ts, 3b). It used to be dropped. A row already watched
+      // keeps its time.
+      let finished = (inserted?.length ?? 0) > 0;
+      if (!finished) {
+        const { data: promoted, error: promoteError } = await supabase
+          .from("student_lesson_completions")
+          .update({ completed_at: new Date().toISOString(), skipped_at: null })
+          .eq("student_id", student.id)
+          .eq("lesson_id", lesson.id)
+          .is("completed_at", null)
+          .select("id");
+        if (promoteError) {
+          // 500 so Whop retries, as for the insert above.
+          console.error(
+            `[whop-webhook] finishing the existing row failed for student=${student.id} lesson=${lesson.id}: ${promoteError.message}`
+          );
+          return NextResponse.json(
+            { error: "Database error" },
+            { status: 500 },
+          );
+        }
+        finished = (promoted?.length ?? 0) > 0;
+      }
       console.info(
-        `[whop-webhook] completion upserted: student=${student.id} lesson=${lesson.id} (whop_user=${whopUserId}, whop_lesson=${whopLessonId})`
+        `[whop-webhook] completion upserted: student=${student.id} lesson=${lesson.id} (whop_user=${whopUserId}, whop_lesson=${whopLessonId}) finished_now=${finished}`
       );
+
+      // The steps the app runs after a lesson (lesson-watched): the streak,
+      // the "came back" check, the badges, the CSM tasks. Once, on the
+      // delivery that finished the lesson, never on a retry. Each step is
+      // best-effort and none can throw past it.
+      if (finished) {
+        await afterCompletionWrite(supabase, student.id);
+      }
       break;
     }
 

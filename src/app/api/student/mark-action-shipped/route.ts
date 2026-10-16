@@ -7,6 +7,9 @@ import { reEvaluateStudentOpenTasks } from "@/lib/csm-task-evaluation";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
 import { actionWrite, hasActionHalf, plainWriteError, watchHalfIsSeparate } from "@/lib/world/action-items";
 
+/** The lesson page's own words for "no link yet" (ActionItemBlock.tsx, PASTE_FIRST). */
+const PASTE_LINK_FIRST = "Paste the link to your Discord message first.";
+
 /**
  * POST /api/student/mark-action-shipped
  *
@@ -84,12 +87,27 @@ export async function POST(request: NextRequest) {
   }
 
   // Check existing row
-  const { data: existing } = await supabase
+  const { data: existing, error: existingError } = await supabase
     .from("student_lesson_completions")
-    .select("id, completed_at, action_completed_at")
+    .select("id, completed_at, action_completed_at, discord_message_link")
     .eq("student_id", student.id)
     .eq("lesson_id", lessonId)
     .single();
+
+  // On the new course an action item is completed only once its Discord link
+  // is saved (backend_readiness.md item 15, morning review A3). The page asks
+  // for the link first; this holds the same rule here, so a request made
+  // without the page cannot complete one. Undoing needs no link. The old
+  // course is left exactly as it was.
+  if (shipped && CATALOG_IS_V2) {
+    // .single() answers "no row" with PGRST116, which is not a failure.
+    if (existingError && existingError.code !== "PGRST116") {
+      return NextResponse.json({ error: existingError.message }, { status: 500 });
+    }
+    if (!existing?.discord_message_link) {
+      return NextResponse.json({ error: PASTE_LINK_FIRST }, { status: 400 });
+    }
+  }
 
   // Watch lessons: the action half alone, and unshipping a row whose video
   // was never watched drops the row (as before). A v2 setup action item:

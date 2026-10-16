@@ -693,12 +693,16 @@ function DiscountStatusPill({
   status: string;
   promoCode?: string;
 }) {
+  // "applied" is the end of a granted discount: neutral, as the discount
+  // queue shows it. Only "rejected" is red.
   const tone: PillTone =
     status === "approved"
       ? "success"
       : status === "pending"
         ? "warning"
-        : "danger";
+        : status === "applied"
+          ? "neutral"
+          : "danger";
   return (
     <Pill tone={tone}>
       <span style={{ textTransform: "capitalize" }}>

@@ -13,33 +13,53 @@
  *
  * All handlers are best-effort: they swallow errors and log them.
  * A failure here never blocks the underlying student action.
+ *
+ * Migration v57 deleted all three templates (W2.2, W2.6, X.1). Each hook
+ * reads its template first, and when it is missing does nothing at all (no
+ * task, and no task dismissed in its name) and says so once per server
+ * instance, not on every lesson. Re-creating a template in /admin/templates
+ * turns its hook back on (backend_readiness.md, section 5, item 9).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+/** Missing templates already logged by this server instance. */
+const missingLogged = new Set<string>();
+
+/** The template's id, or null when there is none or it cannot be read. */
 async function getTemplateId(
   supabase: SupabaseClient,
   scenarioId: string,
 ): Promise<string | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("templates")
     .select("id")
     .eq("scenario_id", scenarioId)
-    .single();
-  return (data as { id: string } | null)?.id ?? null;
+    .maybeSingle();
+  if (error) {
+    console.error(
+      `[csm-events] template ${scenarioId} could not be read, nothing done:`,
+      error.message,
+    );
+    return null;
+  }
+  const id = (data as { id: string } | null)?.id ?? null;
+  if (!id && !missingLogged.has(scenarioId)) {
+    missingLogged.add(scenarioId);
+    console.warn(
+      `[csm-events] no template ${scenarioId}, so its event does nothing (said once per server instance)`,
+    );
+  }
+  return id;
 }
 
 async function insertTask(
   supabase: SupabaseClient,
   studentId: string,
   scenarioId: string,
+  templateId: string,
   behaviorSummary: string,
 ): Promise<void> {
-  const templateId = await getTemplateId(supabase, scenarioId);
-  if (!templateId) {
-    console.warn(`[csm-events] template ${scenarioId} not found — skipping task`);
-    return;
-  }
   const { error } = await supabase.from("tasks").insert({
     student_id: studentId,
     scenario_id: scenarioId,
@@ -94,6 +114,8 @@ export async function checkR2CompoundsShipped(
 ): Promise<void> {
   if (!R2_COMPOUND_LESSONS.includes(lessonId)) return;
   try {
+    const templateId = await getTemplateId(supabase, "W2.2");
+    if (!templateId) return;
     const { data } = await supabase
       .from("student_lesson_completions")
       .select("lesson_id, action_completed_at")
@@ -111,6 +133,7 @@ export async function checkR2CompoundsShipped(
       supabase,
       studentId,
       "W2.2",
+      templateId,
       `Both R2 compounds shipped (l022 VSL + l024 High-Production). 4 ad formats now in portfolio.`,
     );
   } catch (e) {
@@ -129,6 +152,8 @@ export async function onDiscountRequested(
   studentId: string,
 ): Promise<void> {
   try {
+    const templateId = await getTemplateId(supabase, "W2.6");
+    if (!templateId) return;
     const { data: s } = await supabase
       .from("students")
       .select("name")
@@ -139,7 +164,8 @@ export async function onDiscountRequested(
       supabase,
       studentId,
       "W2.6",
-      `${firstName} just applied for the 30% off. Verify R1+R2 lesson completion + ad submissions, then approve in the discount queue.`,
+      templateId,
+      `${firstName} just applied for the 30% off. Check the request in the discount queue, then approve or reject it.`,
     );
   } catch (e) {
     console.error("[csm-events.onDiscountRequested] failed:", e);
@@ -151,7 +177,7 @@ const REACTIVATION_TRIGGERED_SCENARIOS = ["W1.4", "W2.7", "W3.3", "W4.3"];
 /**
  * X.1 — fires when a student completes a lesson AFTER they had an
  * open cancel-path task (W1.4 / W2.7 / W3.3 / W4.3) OR an active
- * disengagement_alerts row (no_lessons_7d / no_login_5d).
+ * disengagement_alerts row (no_login_5d).
  *
  * Side effect: dismisses the prior cancel-path tasks with a note so
  * Astrid sees the trail.
@@ -164,6 +190,11 @@ export async function onLessonCompleted(
   studentId: string,
 ): Promise<void> {
   try {
+    // 0. No X.1 template (v57 deleted it): nothing to make, and so nothing
+    //    to dismiss in its name.
+    const templateId = await getTemplateId(supabase, "X.1");
+    if (!templateId) return;
+
     // 1. Find open cancel-path tasks for this student.
     const { data: openCancel } = await supabase
       .from("tasks")
@@ -172,7 +203,8 @@ export async function onLessonCompleted(
       .eq("status", "open")
       .in("scenario_id", REACTIVATION_TRIGGERED_SCENARIOS);
 
-    // 2. Or active disengagement_alerts (no_lessons_7d / no_login_5d).
+    // 2. Or an active disengagement_alerts row (no_login_5d, the one type
+    //    of the two it used to ask for that the table allows, v10).
     let hasActiveAlert = false;
     if (!openCancel || openCancel.length === 0) {
       const { data: alerts } = await supabase
@@ -180,7 +212,7 @@ export async function onLessonCompleted(
         .select("id")
         .eq("student_id", studentId)
         .eq("is_dismissed", false)
-        .in("alert_type", ["no_lessons_7d", "no_login_5d"])
+        .eq("alert_type", "no_login_5d")
         .limit(1);
       hasActiveAlert = (alerts?.length ?? 0) > 0;
     }
@@ -208,6 +240,7 @@ export async function onLessonCompleted(
       supabase,
       studentId,
       "X.1",
+      templateId,
       `Came back after an inactive stretch. Prior cancel-path tasks: ${
         openCancel?.map((t) => t.scenario_id).join(", ") || "(alert-only)"
       }.`,

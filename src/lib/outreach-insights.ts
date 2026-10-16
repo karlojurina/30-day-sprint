@@ -44,10 +44,22 @@
  *
  * Correlation, not causation — students also come back on their own.
  * Rank templates against each other; don't read any cell as proof.
+ *
+ * The course switch (v104, admin_config.curriculum_reset_at). It empties
+ * student_lesson_completions into an archive the app cannot read, and
+ * gives students who had completions but no first-login stamp the time
+ * of their first completion as one. A send from before the switch in a
+ * family graded on either would read as a failure (or, for stalled, a
+ * success) it never was. So once the switch exists those sends are not
+ * graded here: they still count as sent, and graded_on_old_course says
+ * how many were left out. Canceling reads the membership, which the
+ * switch leaves alone, and stays graded. Before the switch nothing
+ * changes.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
+import { getCurriculumResetAt } from "@/lib/curriculum-reset";
 import type { TriggerConfig } from "@/types/database";
 
 export const OUTREACH_WINDOW_MS = 72 * 3_600_000;
@@ -72,6 +84,15 @@ export const FAMILY_SUCCESS_LABEL: Record<OutreachFamily, string> = {
   custom: "came back within 72h (dormant sends only)",
   event: "not graded",
 };
+
+/** The families whose evidence the course switch archives or rewrites. */
+const REGRADED_BY_SWITCH: ReadonlySet<OutreachFamily> = new Set<OutreachFamily>([
+  "stalled",
+  "nolessons",
+  "noship",
+  "pace",
+  "custom",
+]);
 
 interface TaskLite {
   id: string;
@@ -114,6 +135,8 @@ export interface TemplateInsightRow {
   /** Of the eligible sends, how many did what the message asked. */
   success: number;
   median_time_to_send_ms: number | null;
+  /** Sends from before the course switch left out of grading. 0 before it. */
+  graded_on_old_course: number;
 }
 
 export interface OutreachInsights {
@@ -135,6 +158,8 @@ export interface OutreachInsights {
     success: number;
     success_eligible: number;
     median_time_to_send_ms: number | null;
+    /** Sends from before the course switch left out of grading. 0 before it. */
+    graded_on_old_course: number;
   };
   templates: TemplateInsightRow[];
   info: {
@@ -142,6 +167,8 @@ export interface OutreachInsights {
     untemplated_tasks: number;
   };
   since: string | null;
+  /** The course switch, or null while the old course is live. */
+  reset_at: string | null;
   computed_at: string;
 }
 
@@ -194,6 +221,7 @@ interface Acc {
   success_eligible: number;
   success: number;
   time_to_send_samples: number[];
+  graded_on_old_course: number;
 }
 
 function blankAcc(): Acc {
@@ -209,6 +237,7 @@ function blankAcc(): Acc {
     success_eligible: 0,
     success: 0,
     time_to_send_samples: [],
+    graded_on_old_course: 0,
   };
 }
 
@@ -225,7 +254,9 @@ export async function computeOutreachInsights(
   // Stable .order() on every paginated scan — .range() paging without
   // ORDER BY can skip/duplicate rows across page boundaries under
   // concurrent writes (the repo's own v75.56 lesson).
-  const [tasksRes, templatesRes] = await Promise.all([
+  // getCurriculumResetAt throws on a failed read: grading every old send
+  // against the emptied table would be a believable wrong answer.
+  const [tasksRes, templatesRes, resetAt] = await Promise.all([
     fetchAllRowsPaginated<TaskLite>(() =>
       supabase.from("tasks").select("*").order("id"),
     ),
@@ -235,9 +266,11 @@ export async function computeOutreachInsights(
         .select("id, scenario_id, title, bucket, is_admin_only, trigger_config")
         .order("id"),
     ),
+    getCurriculumResetAt(supabase),
   ]);
   if (tasksRes.error) throw tasksRes.error;
   if (templatesRes.error) throw templatesRes.error;
+  const resetMs = resetAt === null ? null : new Date(resetAt).getTime();
 
   const templateById = new Map(templatesRes.data.map((t) => [t.id, t]));
   const familyByTemplate = new Map(
@@ -268,8 +301,21 @@ export async function computeOutreachInsights(
     (t) => t.status === "completed" && inRange(t.completed_at),
   );
 
+  // A sent DM graded on the old course: after the switch, sent before it,
+  // in a family whose evidence the switch archived or rewrote. Never true
+  // before the switch.
+  const onOldCourse = (t: TaskLite, fam: OutreachFamily) =>
+    resetMs !== null &&
+    REGRADED_BY_SWITCH.has(fam) &&
+    new Date(t.completed_at as string).getTime() < resetMs;
+  const gradedSends = sentTasks.filter(
+    (t) =>
+      !onOldCourse(t, familyByTemplate.get(t.template_id as string) ?? "custom"),
+  );
+
   // ── Per-family evidence fetches ─────────────────────────────────
-  // All minimal-column, batched, paginated (v75.27 discipline).
+  // All minimal-column, batched, paginated (v75.27 discipline). Only
+  // for the sends graded here.
 
   const lessonEvents = new Map<string, number[]>(); // watch + ship
   const actionEvents = new Map<string, number[]>(); // ship only
@@ -277,9 +323,9 @@ export async function computeOutreachInsights(
   const firstLoginMs = new Map<string, number>(); // milestones
   const savedNow = new Map<string, boolean>(); // canceling students
 
-  if (sentTasks.length > 0) {
-    let minSendMs = new Date(sentTasks[0].completed_at as string).getTime();
-    for (const t of sentTasks) {
+  if (gradedSends.length > 0) {
+    let minSendMs = new Date(gradedSends[0].completed_at as string).getTime();
+    for (const t of gradedSends) {
       const ms = new Date(t.completed_at as string).getTime();
       if (ms < minSendMs) minSendMs = ms;
     }
@@ -300,7 +346,7 @@ export async function computeOutreachInsights(
     const activityStudents = new Set<string>();
     const stalledStudents = new Set<string>();
     const cancelingStudents = new Set<string>();
-    for (const t of sentTasks) {
+    for (const t of gradedSends) {
       const fam = familyOfTask(t);
       if (fam === "stalled") stalledStudents.add(t.student_id);
       else if (fam === "canceling") cancelingStudents.add(t.student_id);
@@ -465,7 +511,9 @@ export async function computeOutreachInsights(
 
     let eligible = false;
     let succeeded = false;
-    switch (fam) {
+    // Graded on the old course: counted as sent, graded by no case below.
+    const oldCourse = onOldCourse(t, fam);
+    switch (oldCourse ? null : fam) {
       case "stalled": {
         eligible = true;
         const login = firstLoginMs.get(t.student_id);
@@ -530,6 +578,7 @@ export async function computeOutreachInsights(
       if (outcome === "replied") s.replied++;
       else if (outcome === "no_reply") s.no_reply++;
       else s.unmarked++;
+      if (oldCourse) s.graded_on_old_course++;
       if (eligible) {
         s.success_eligible++;
         if (succeeded) s.success++;
@@ -542,6 +591,7 @@ export async function computeOutreachInsights(
     if (outcome === "replied") totals.replied++;
     else if (outcome === "no_reply") totals.no_reply++;
     else totals.unmarked++;
+    if (oldCourse) totals.graded_on_old_course++;
     if (fam === "canceling") {
       if (eligible) {
         savesEligible++;
@@ -588,6 +638,7 @@ export async function computeOutreachInsights(
       untemplated_tasks: untemplatedTasks,
     },
     since,
+    reset_at: resetAt,
     computed_at: new Date().toISOString(),
   };
 }

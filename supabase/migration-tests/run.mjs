@@ -3640,5 +3640,572 @@ await cutover(db, '')
   await d2.close()
 }
 
+// ════════════════════════════════════════════════════════════════════
+// 25 and 26: the database fixes of the backend audit of 15 October
+// (_admin/prds/map-review-2026-10-15/backend_readiness.md, section 5 items
+// 1, 2 and 27, section 6 steps 2 and 3) and T-057: v105, v106, their undos,
+// and diagnostics/backend-readiness-read.sql.
+// ════════════════════════════════════════════════════════════════════
+// A database of their own: base.sql and the chain v92 to v101
+// (chainDatabase), then the policies production has on the three tables,
+// lifted verbatim from v3, schema.sql, the team_members recursion fix, v53
+// and v55, and the feedback form's two tables and function from v29.
+// The seam, widened as on Supabase: the API roles hold the table
+// privileges, row level security does the filtering, service_role bypasses
+// it, and a new schema or table anywhere is born open to the API roles.
+// What a student's session could send is run for real, under SET ROLE
+// authenticated with auth.uid() set, inside a transaction that is rolled
+// back. These sections test what the policies do, not only that they exist.
+
+const V105F = '2026_v105_close_student_write_policies.sql'
+const V106F = '2026_v106_one_pending_discount_request.sql'
+const READ_OWN = 'Students can read own lesson completions'
+const DOORS = [['student_lesson_completions', 'Students can manage own lesson completions'],
+               ['discount_requests', 'Students can create discount requests'],
+               ['student_achievements', 'student_achievements: student writes own']]
+const UID = n => `00000000-0000-0000-0000-00000000000${n}`
+const TEAM_ID = 'c5000000-0000-0000-0000-000000000001'
+const ONE_PENDING = `CREATE UNIQUE INDEX discount_requests_one_pending_per_student ON public.discount_requests USING btree (student_id) WHERE (status = 'pending'::text)`
+const LOCK105 = `execute 'lock table ' || v_list || ' in access exclusive mode';`
+const LOCK106 = 'lock table public.discount_requests in share mode;'
+const TIMED_OUT = `raise exception 'canceling statement due to lock timeout' using errcode = '55P03';`
+
+// Statements sent as an API role, inside a transaction that is rolled back:
+// what they would do, never kept. uid is auth.uid(), team is
+// current_user_is_team(). `check` runs after them as the owner, still inside.
+const asRole = async (d, role, statements, { uid = '', team = false, check = null } = {}) => {
+  await d.exec('begin;')
+  try {
+    await d.exec(`set local role ${role};
+                  select set_config('test.uid', '${uid}', true), set_config('test.is_team', '${team}', true);`)
+    let last = null
+    for (const s of [].concat(statements)) last = await d.query(s)
+    let checked = null
+    if (check) { await d.exec('reset role;'); checked = (await d.query(check)).rows }
+    return { ok: true, rows: last?.rows ?? [], n: last?.affectedRows ?? 0, checked }
+  } catch (e) {
+    return { ok: false, code: e.code, said: e.message }
+  } finally {
+    await d.exec('rollback;')
+  }
+}
+const asStudent = (d, n, statements, opts = {}) => asRole(d, 'authenticated', statements, { uid: UID(n), ...opts })
+const rlsRefused = r => !r.ok && r.code === '42501' && /row-level security/.test(r.said)
+const stopped = (r, sentence) => !r.ok && r.code === 'P0001' && r.said.includes(sentence) && /Nothing was changed\.$/.test(r.said)
+const told = r => r.ok ? asJson(r.rows?.[0] ?? {}).slice(0, 110) : `${r.code}: ${(r.said ?? '').slice(0, 110)}`
+// The policies on the three tables, with their comments.
+const policiesOn = async d => asJson((await d.query(`
+  select p.tablename::text as t, p.policyname::text as n, p.permissive, p.roles::text as roles, p.cmd, p.qual, p.with_check,
+         obj_description(pol.oid, 'pg_policy') as comment
+    from pg_policies p
+    join pg_policy pol on pol.polrelid = format('%I.%I', p.schemaname, p.tablename)::regclass and pol.polname = p.policyname
+   where p.schemaname = 'public' and p.tablename in ('student_lesson_completions', 'discount_requests', 'student_achievements')
+   order by 1, 2`)).rows)
+// Every policy, row level security flag, schema, table, index, grant and
+// public function, outside the system schemas.
+const catalogOf = async d => asJson({
+  policies:  (await d.query(`select p.schemaname::text as s, p.tablename::text as t, p.policyname::text as n, p.permissive, p.roles::text as roles,
+                                    p.cmd, p.qual, p.with_check, obj_description(pol.oid, 'pg_policy') as comment
+                               from pg_policies p
+                               join pg_policy pol on pol.polrelid = format('%I.%I', p.schemaname, p.tablename)::regclass and pol.polname = p.policyname
+                              order by 1, 2, 3`)).rows,
+  rls:       (await d.query(`select oid::regclass::text as t, relrowsecurity as rls_on, relforcerowsecurity as rls_forced from pg_class
+                              where relnamespace = 'public'::regnamespace and relkind = 'r' order by 1`)).rows,
+  schemas:   (await d.query(`select nspname::text as n from pg_namespace where nspname !~ '^pg_' and nspname <> 'information_schema' order by 1`)).rows,
+  tables:    (await d.query(`select schemaname::text as s, tablename::text as t from pg_tables
+                              where schemaname !~ '^pg_' and schemaname <> 'information_schema' order by 1, 2`)).rows,
+  indexes:   (await d.query(`select schemaname::text as s, indexname::text as n, indexdef from pg_indexes
+                              where schemaname !~ '^pg_' and schemaname <> 'information_schema' order by 1, 2`)).rows,
+  grants:    (await d.query(`select table_schema::text as s, table_name::text as t, grantee::text as g, privilege_type::text as p
+                               from information_schema.role_table_grants
+                              where table_schema !~ '^pg_' and table_schema <> 'information_schema' order by 1, 2, 3, 4`)).rows,
+  functions: (await d.query(`select oid::regprocedure::text as f, prosecdef, pg_get_userbyid(proowner)::text as owner from pg_proc
+                              where pronamespace = 'public'::regnamespace order by 1`)).rows,
+})
+// Every row of every table in public, as sorted JSON.
+const rowsOf = async d => {
+  const out = {}
+  for (const { t } of (await d.query(`select tablename::text as t from pg_tables where schemaname = 'public' order by 1`)).rows)
+    out[t] = (await d.query(`select * from public."${t}"`)).rows.map(x => asJson(x)).sort()
+  return asJson(out)
+}
+const stateOf = async d => await catalogOf(d) + await rowsOf(d)
+// A statement put into a file just before `marker`, keeping a value in a
+// session setting; and what is in it afterwards, with lock_timeout as it is
+// after the file.
+const probeAt = (sql, marker, name, what) => {
+  const i = sql.indexOf(marker)
+  return i < 0 ? sql : sql.slice(0, i) + `select set_config('test.${name}', ${what}, false);\n` + sql.slice(i)
+}
+const probed = async (d, name) => (await d.query(`select coalesce(current_setting('test.${name}', true), '') as v,
+                                                         current_setting('lock_timeout') as after`)).rows[0]
+const lockedIn = mode => `(select coalesce(string_agg(distinct c.relname::text, ',' order by c.relname::text), '')
+    from pg_locks l join pg_class c on c.oid = l.relation
+   where l.pid = pg_backend_pid() and l.locktype = 'relation' and c.relnamespace = 'public'::regnamespace
+     and c.relkind = 'r' and l.mode = '${mode}')`
+
+console.log('\n=== 25. v105: students only read their completions, discount requests and badges; its undo; the backend read ===')
+const policyDb = await chainDatabase()
+{
+  const d = policyDb
+  const v105 = read(V105F)
+  const undo105 = undoText('2026_v105_undo.sql')
+  const readSql = diagnostic('backend-readiness-read.sql')
+  const V29F = '2026_v29_discount_feedback.sql'
+
+  // The seam, as on Supabase.
+  await d.exec(`
+    grant usage on schema public, auth to anon, authenticated, service_role;
+    grant all on all tables in schema public to authenticated, service_role;
+    alter role service_role bypassrls;
+    alter default privileges grant all on tables to anon, authenticated, service_role;
+    alter default privileges grant usage on schemas to anon, authenticated, service_role;`)
+  // The feedback form (v29): its two tables, its function and its grant.
+  for (const sql of [lift(V29F, 'create table if not exists discount_feedback_questions ('),
+                     lift(V29F, 'create table if not exists discount_feedback_responses ('),
+                     lift(V29F, 'create or replace function public.submit_discount_with_feedback(', '$func$;'),
+                     lift(V29F, 'grant execute on function public.submit_discount_with_feedback(uuid, jsonb) to authenticated;')]) {
+    await d.exec(sql)
+  }
+  // discount_requests and student_achievements as production has them.
+  for (const sql of [lift('../schema.sql', 'alter table discount_requests enable row level security;'),
+                     lift('../schema.sql', 'create policy "Students can read own discount requests"'),
+                     lift('../schema.sql', 'create policy "Students can create discount requests"'),
+                     lift('2026_fix_team_members_recursion.sql', 'create policy "Team can manage all discount requests"'),
+                     lift('2026_v53_phase5_achievements.sql', 'alter table student_achievements enable row level security;'),
+                     lift('2026_v53_phase5_achievements.sql', 'create policy "student_achievements: student reads own"'),
+                     lift('2026_v53_phase5_achievements.sql', 'create policy "student_achievements: team reads all"'),
+                     lift('2026_v55_audit_security_cleanup.sql', 'create policy "student_achievements: student writes own"')]) {
+    await d.exec(sql)
+  }
+  // A comment on one policy, to see the undo put comments back too.
+  await d.exec(`comment on policy "Students can create discount requests" on discount_requests is 'A comment, to see the undo put it back.';
+    insert into team_members (id, email) values ('${TEAM_ID}', 'team@example.test');
+    insert into discount_requests (student_id, status, created_at) values
+      ('${UID(1)}', 'pending',  '2026-10-12 10:00:00+00'),
+      ('${UID(2)}', 'rejected', '2026-10-12 11:00:00+00');`)
+  const questionId = (await d.query(`insert into discount_feedback_questions (order_num, question_text, question_type, scale_min, scale_max, is_required)
+                                      values (1, 'How likely are you to recommend us?', 'scale', 1, 10, true) returning id::text as id`)).rows[0].id
+  // base.sql's spelling of the student policy, set aside for the last check.
+  const harnessSpelling = await d.clone()
+  // student_lesson_completions as production has it: v3's spelling.
+  await d.exec(`drop policy "Students manage own lesson completions" on student_lesson_completions;`)
+  await d.exec(lift('2026_v3_expedition_restructure.sql', 'create policy "Students can manage own lesson completions"'))
+
+  {
+    const s = (await d.query(`select
+        has_table_privilege('authenticated', 'public.student_lesson_completions', 'insert')
+          and has_table_privilege('authenticated', 'public.discount_requests', 'insert')
+          and has_table_privilege('authenticated', 'public.student_achievements', 'insert') as granted,
+        (select rolbypassrls from pg_roles where rolname = 'service_role') as service_bypasses,
+        (select rolbypassrls or rolsuper from pg_roles where rolname = 'authenticated') as students_bypass,
+        (select count(*)::int from pg_class where relrowsecurity and oid in ('public.student_lesson_completions'::regclass,
+           'public.discount_requests'::regclass, 'public.student_achievements'::regclass)) as rls_on`)).rows[0]
+    await d.exec(`create schema _born_open; create table _born_open.t (id int);`)
+    const open = (await d.query(`select has_schema_privilege('anon', '_born_open', 'usage') and has_table_privilege('anon', '_born_open.t', 'select') as o`)).rows[0].o
+    await d.exec(`drop schema _born_open cascade;`)
+    note(s.granted && s.service_bypasses && !s.students_bypass && s.rls_on === 3 && open,
+         'harness seam: students hold the table privileges and row level security is on for the three tables, service_role bypasses it, and a new schema and table are born open to anon',
+         asJson({ ...s, open }))
+  }
+
+  const policiesBefore = await policiesOn(d)
+  const catalogBefore = await catalogOf(d)
+  const rowsBefore = await rowsOf(d)
+  const ownRows = `select lesson_id from student_lesson_completions order by lesson_id`
+  const s1Rows = (await d.query(`select lesson_id from student_lesson_completions where student_id = '${UID(1)}' order by lesson_id`)).rows
+  const readBefore = await asStudent(d, 1, ownRows)
+
+  // ── the hole, before v105 ──
+  {
+    const ins = await asStudent(d, 1, `insert into student_lesson_completions (student_id, lesson_id, completed_at)
+                                       values ('${UID(1)}', 'l003', '2026-01-01 00:00:00+00')`)
+    const upd = await asStudent(d, 1, `update student_lesson_completions set completed_at = '2026-01-01 00:00:00+00' where lesson_id = 'l001'`)
+    const del = await asStudent(d, 1, `delete from student_lesson_completions where lesson_id = 'l002'`)
+    note(ins.ok && ins.n === 1 && upd.ok && upd.n === 1 && del.ok && del.n === 1,
+         'before v105 (the hole): a student, with their own session, inserts a completion at any date, moves the date of another and deletes a third',
+         `insert ${told(ins)}, update ${upd.n}, delete ${del.n}`)
+    const req = await asStudent(d, 3, `insert into discount_requests (student_id, status) values ('${UID(3)}', 'approved')`)
+    const badge = await asStudent(d, 1, `insert into student_achievements (student_id, achievement_id) values ('${UID(1)}', 'r4_clear')`)
+    note(req.ok && req.n === 1 && badge.ok && badge.n === 1,
+         'before v105: a student creates their own discount request already "approved", and gives themselves a badge',
+         `${told(req)} / ${told(badge)}`)
+    const other = await asStudent(d, 1, `insert into student_lesson_completions (student_id, lesson_id) values ('${UID(2)}', 'l003')`)
+    note(rlsRefused(other) && readBefore.ok && sameJson(readBefore.rows, s1Rows) && s1Rows.length === 5,
+         "...but never for another student, and reads only their own rows: the policies are applied, as the student",
+         `${told(other)}; reads ${readBefore.rows?.length} of their ${s1Rows.length}`)
+    note(await rowsOf(d) === rowsBefore, '...and every attempt above was rolled back: no row changed')
+  }
+
+  // ── the read, before v105 ──
+  const partsOf = x => [...new Set(x.rows.map(y => y.part))]
+  const itemsOf = (x, p) => x.rows.filter(y => y.part === p).map(y => y.item)
+  const foundIn = (x, p) => x.rows.filter(y => y.part === p).map(y => `${y.item}=${y.detail}`)
+  {
+    const was = await stateOf(d)
+    const rd = await runFile(d, readSql)
+    note(rd.ok && sameJson(partsOf(rd), ['a. policy', 'b. template', 'f. watch rows recorded by the app', 'g. course videos with no length',
+                                         'h. setting', 'i. students who paid since 9 Oct'])
+         && await stateOf(d) === was,
+         'the read (diagnostics/backend-readiness-read.sql) runs here and changes nothing; it shows parts a, b, f, g, h and i (c, d and e have nothing to count on this database)',
+         rd.ok ? partsOf(rd).map(p => p.slice(0, 2)).join('') : told(rd))
+    const a = itemsOf(rd, 'a. policy')
+    note(rd.ok && a.length === 8 && a.includes('student_lesson_completions · Students can manage own lesson completions · ALL')
+         && a.includes('discount_requests · Students can create discount requests · INSERT')
+         && a.includes('student_achievements · student_achievements: student writes own · INSERT'),
+         "the read's part a before v105: every policy on the three tables, the three back doors among them (ALL, INSERT, INSERT)", `${a.length} rows`)
+    note(rd.ok && sameJson(foundIn(rd, 'b. template'), ['W2.2=MISSING', 'W2.6=MISSING', 'X.1=MISSING'])
+         && sameJson(foundIn(rd, 'h. setting'), ['discount_window_days=14'])
+         && sameJson(foundIn(rd, 'f. watch rows recorded by the app'), ['student_lesson_watch=0'])
+         && sameJson(foundIn(rd, 'g. course videos with no length'), ['lesson_videos on a lessons_next row with no duration=0'])
+         && foundIn(rd, 'i. students who paid since 9 Oct')[0]?.endsWith('=0 / 0 / 0 / 0 / 0'),
+         "the read's other parts on this database: b all MISSING, h discount_window_days and no curriculum_reset_at, f and g 0, i five zeros",
+         rd.ok ? [...foundIn(rd, 'b. template'), ...foundIn(rd, 'h. setting')].join(' ') : told(rd))
+  }
+
+  // ── its lock, its guards ──
+  {
+    const MARK = '-- ─────────────── 1. It can ───────────────'
+    const c = await d.clone()
+    const rr = await runFile(c, probeAt(probeAt(v105, MARK, 'v105_locked', lockedIn('AccessExclusiveLock')),
+                                        MARK, 'v105_timeout', `current_setting('lock_timeout')`))
+    const locked = await probed(c, 'v105_locked'), timeout = await probed(c, 'v105_timeout')
+    await c.close()
+    note(v105.includes(MARK) && rr.ok && locked.v === 'discount_requests,student_achievements,student_lesson_completions'
+         && timeout.v === '5s' && timeout.after === '0',
+         'v105 holds its three tables in ACCESS EXCLUSIVE before step 1 reads anything, with lock_timeout 5s, and the setting ends with its commit',
+         `${locked.v} [${timeout.v}, after ${timeout.after}] ${rr.ok ? '' : told(rr)}`)
+    const c2 = await d.clone()
+    const was = await stateOf(c2)
+    const busy = await runFile(c2, v105.replace(LOCK105, TIMED_OUT))
+    note(v105.includes(LOCK105) && busy.code === '55P03'
+         && busy.said.includes('so v105 did not start. Nothing was changed. Paste it again in a minute.') && await stateOf(c2) === was,
+         'v105 with its lock timing out (55P03, raised in place of the lock): "Nothing was changed. Paste it again in a minute.", and nothing changed', told(busy))
+    await c2.close()
+  }
+  for (const [what, breakIt, sentence] of [
+    ['row level security off on discount_requests', `alter table discount_requests disable row level security;`,
+     'Row level security is off on discount_requests'],
+    [`a policy already named "${READ_OWN}"`, `create policy "${READ_OWN}" on student_lesson_completions for select using (true);`,
+     'and v105 did not make it'],
+    ['the feedback form\'s function made security invoker', `alter function public.submit_discount_with_feedback(uuid, jsonb) security invoker;`,
+     'is not security definer'],
+    ['the feedback form\'s function owned by a role that row level security applies to',
+     `create role feedback_owner; alter function public.submit_discount_with_feedback(uuid, jsonb) owner to feedback_owner;`,
+     'runs as feedback_owner'],
+    ['student_achievements missing', `alter table student_achievements rename to student_achievements_aside;`,
+     'they are missing: student_achievements.'],
+  ]) {
+    const c = await d.clone()
+    const broke = await runFile(c, breakIt)
+    const was = await stateOf(c)
+    const rr = await runFile(c, v105)
+    note(broke.ok && stopped(rr, sentence) && await stateOf(c) === was,
+         `v105 refuses with ${what}: it says so, and nothing changed`, broke.ok ? told(rr) : `the break failed: ${told(broke)}`)
+    await c.close()
+  }
+
+  // ── v105 ──
+  let r = await runFile(d, v105)
+  note(r.ok && r.rows[0]?.v105 === 'v105 ran now: 3 dropped (kept in v105_record.policies), 1 added.' && r.rows.length === 10
+       && r.rows.filter(x => x.v105 === 'dropped by v105').length === 3 && r.rows.filter(x => x.v105 === 'added by v105').length === 1,
+       'v105 first run: "3 dropped, 1 added", then one row per policy: 5 kept, 1 added, 3 dropped', told(r))
+  const policiesAfter = await policiesOn(d)
+  const before = JSON.parse(policiesBefore), after = JSON.parse(policiesAfter)
+  const isDoor = p => DOORS.some(([t, n]) => p.t === t && p.n === n)
+  const added = after.find(p => p.t === 'student_lesson_completions' && p.n === READ_OWN)
+  const forAll = before.find(p => p.n === 'Students can manage own lesson completions')
+  note(sameJson(after.filter(p => p.n !== READ_OWN), before.filter(p => !isDoor(p))) && before.filter(isDoor).length === 3,
+       'v105: the three back doors are gone, and every other policy on the three tables is as it was, character for character',
+       after.map(p => `${p.t.slice(0, 8)}:${p.cmd}`).join(' '))
+  note(added?.cmd === 'SELECT' && added.roles === '{public}' && added.permissive === 'PERMISSIVE' && added.with_check === null
+       && !!forAll && added.qual === forAll.qual,
+       `v105: "${READ_OWN}" is FOR SELECT, for every role, with the using of the policy it replaces and no check`, added?.qual ?? 'missing')
+  const recordOf = async dd => asJson((await dd.query(`select tablename::text as t, policyname::text as n, permissive, roles::text as roles, cmd, qual,
+                                                              with_check, description as comment from v105_record.policies order by 1, 2`)).rows)
+  const recordAfter = await recordOf(d)
+  note(recordAfter === asJson(before.filter(isDoor)),
+       'v105_record.policies holds the three, as the catalogue stated them before v105, the comment included',
+       JSON.parse(recordAfter).map(p => p.n).join(', '))
+  {
+    const acc = (await d.query(`select bool_or(has_schema_privilege(r, 'v105_record', 'usage')) as usage,
+        (select count(*)::int from pg_class c, aclexplode(c.relacl) a
+          where c.relnamespace = 'v105_record'::regnamespace
+            and a.grantee in ('anon'::regrole, 'authenticated'::regrole, 'service_role'::regrole)) as grants
+      from unnest(array['anon', 'authenticated', 'service_role']) r`)).rows[0]
+    note(acc.usage === false && acc.grants === 0,
+         'v105_record: anon, authenticated and service_role hold no usage on the schema and no grant on its table', asJson(acc))
+  }
+
+  // ── after v105, as a student, the server, the team and the feedback form ──
+  {
+    const readAfter = await asStudent(d, 1, ownRows)
+    note(readAfter.ok && sameJson(readAfter.rows, s1Rows) && sameJson(readAfter.rows, readBefore.rows),
+         'after v105: a student reads exactly their own completions, the same rows as before', `${readAfter.rows?.length} rows`)
+    const ins = await asStudent(d, 1, `insert into student_lesson_completions (student_id, lesson_id, completed_at)
+                                       values ('${UID(1)}', 'l003', '2026-01-01 00:00:00+00')`)
+    const ups = await asStudent(d, 1, `insert into student_lesson_completions (student_id, lesson_id, completed_at)
+                                       values ('${UID(1)}', 'l001', '2026-01-01 00:00:00+00')
+                                       on conflict (student_id, lesson_id) do update set completed_at = excluded.completed_at`)
+    const upd = await asStudent(d, 1, `update student_lesson_completions set completed_at = '2026-01-01 00:00:00+00' where lesson_id = 'l001'`)
+    const del = await asStudent(d, 1, `delete from student_lesson_completions where lesson_id = 'l002'`)
+    note(rlsRefused(ins) && rlsRefused(ups) && upd.ok && upd.n === 0 && del.ok && del.n === 0,
+         'after v105: a student cannot insert or upsert a completion (row level security, 42501), and their update and delete touch no row',
+         `${told(ins)}; upsert ${ups.code}; update ${upd.n}, delete ${del.n}`)
+    const pending = await asStudent(d, 3, `insert into discount_requests (student_id) values ('${UID(3)}')`)
+    const approved = await asStudent(d, 3, `insert into discount_requests (student_id, status) values ('${UID(3)}', 'approved')`)
+    const approve = await asStudent(d, 1, `update discount_requests set status = 'approved'`)
+    const own = await asStudent(d, 1, `select student_id::text as s, status from discount_requests`)
+    note(rlsRefused(pending) && rlsRefused(approved) && approve.ok && approve.n === 0 && sameJson(own.rows, [{ s: UID(1), status: 'pending' }]),
+         'after v105: a student cannot create a discount request, pending or approved (42501), nor approve their own; they still read their own request and no one else\'s',
+         `${pending.code}/${approved.code}; approve ${approve.n}; reads ${asJson(own.rows)}`)
+    const badge = await asStudent(d, 1, `insert into student_achievements (student_id, achievement_id) values ('${UID(1)}', 'r4_clear')`)
+    const badges = await asStudent(d, 1, `select achievement_id from student_achievements order by 1`)
+    note(rlsRefused(badge) && sameJson(badges.rows.map(x => x.achievement_id), ['first_steps']),
+         'after v105: a student cannot give themselves a badge (42501), and still reads their own', `${badge.code}; ${asJson(badges.rows)}`)
+    const svc = await asRole(d, 'service_role', [
+        `insert into student_lesson_completions (student_id, lesson_id, completed_at) values ('${UID(1)}', 'l003', now())`,
+        `update student_lesson_completions set completed_at = now() where student_id = '${UID(1)}' and lesson_id = 'l001'`,
+        `delete from student_lesson_completions where student_id = '${UID(1)}' and lesson_id = 'l002'`,
+        `insert into discount_requests (student_id, status) values ('${UID(3)}', 'pending')`,
+        `update discount_requests set status = 'approved' where student_id = '${UID(3)}'`,
+        `insert into student_achievements (student_id, achievement_id) values ('${UID(1)}', 'r4_clear')`],
+      { check: `select (select count(*)::int from student_lesson_completions where student_id = '${UID(1)}') as c,
+                       (select string_agg(status, ',') from discount_requests where student_id = '${UID(3)}') as s,
+                       (select count(*)::int from student_achievements where student_id = '${UID(1)}') as a` })
+    note(svc.ok && svc.checked?.[0]?.c === s1Rows.length && svc.checked[0].s === 'approved' && svc.checked[0].a === 2,
+         'after v105: the service role (every route and cron) still inserts, updates and deletes on all three', svc.ok ? asJson(svc.checked) : told(svc))
+    const totals = (await d.query(`select (select count(*)::int from student_lesson_completions) as c, (select count(*)::int from student_achievements) as a,
+                                          (select count(*)::int from discount_requests) as r`)).rows[0]
+    const teamC = await asRole(d, 'authenticated', `select count(*)::int as n from student_lesson_completions`, { uid: TEAM_ID, team: true })
+    const teamA = await asRole(d, 'authenticated', `select count(*)::int as n from student_achievements`, { uid: TEAM_ID, team: true })
+    const teamD = await asRole(d, 'authenticated', `update discount_requests set rejection_reason = 'seen'`, { uid: TEAM_ID, team: true })
+    note(teamC.rows[0]?.n === totals.c && teamA.rows[0]?.n === totals.a && teamD.ok && teamD.n === totals.r,
+         'after v105: the team still reads every completion and badge and still changes every discount request, through its own policies',
+         `${teamC.rows[0]?.n}/${totals.c} ${teamA.rows[0]?.n}/${totals.a} ${teamD.n}/${totals.r}`)
+    const form = await asStudent(d, 3, `select public.submit_discount_with_feedback('${UID(3)}', '[{"question_id": "${questionId}", "answer_scale": 8}]'::jsonb)::text as id`,
+      { check: `select r.status, (select count(*)::int from discount_feedback_responses f where f.discount_request_id = r.id) as answers
+                  from discount_requests r where r.student_id = '${UID(3)}'` })
+    const forOther = await asStudent(d, 3, `select public.submit_discount_with_feedback('${UID(4)}', '[]'::jsonb)`)
+    note(form.ok && /^[0-9a-f-]{36}$/.test(form.rows[0]?.id ?? '') && sameJson(form.checked, [{ status: 'pending', answers: 1 }])
+         && !forOther.ok && /Not authorized/.test(forOther.said),
+         "after v105: the feedback form's function, called with a student's own session, still creates their request and its answer (it runs as its owner), and still refuses a request for another student",
+         form.ok ? asJson(form.checked) : told(form))
+    note(await rowsOf(d) === rowsBefore, '...and every one of those statements was rolled back: no row changed')
+  }
+
+  // ── the read, after v105 ──
+  {
+    const rd = await runFile(d, readSql)
+    const a = itemsOf(rd, 'a. policy')
+    const writes = a.filter(i => !i.endsWith(' · SELECT'))
+    note(rd.ok && !DOORS.some(([t, n]) => a.some(i => i.startsWith(`${t} · ${n} · `)))
+         && a.includes(`student_lesson_completions · ${READ_OWN} · SELECT`)
+         && sameJson(writes, ['discount_requests · Team can manage all discount requests · ALL']),
+         "the read after v105: part a has no student write row left; the one policy that is not SELECT is the team's ALL on discount_requests",
+         rd.ok ? asJson(writes) : told(rd))
+  }
+
+  // ── run again ──
+  {
+    const was = await stateOf(d)
+    const rr = await runFile(d, v105)
+    note(rr.ok && rr.rows[0]?.v105 === 'v105 was already in place. This run changed nothing.' && rr.rows.length === 10
+         && await stateOf(d) === was && await recordOf(d) === recordAfter,
+         'v105 run again: "already in place", and every policy, schema, grant, row and the record unchanged', told(rr))
+  }
+
+  // ── the undo ──
+  {
+    const c = await d.clone()
+    const broke = await runFile(c, `create policy "Students can create discount requests" on discount_requests for insert with check (false);`)
+    const was = await stateOf(c)
+    const rr = await runFile(c, undo105)
+    note(broke.ok && stopped(rr, 'with a definition other than the one v105 recorded: "Students can create discount requests" on discount_requests')
+         && await stateOf(c) === was,
+         'the undo refuses when a policy it would put back is there already with another definition, names it, and changes nothing',
+         broke.ok ? told(rr) : `the break failed: ${told(broke)}`)
+    await c.close()
+  }
+  {
+    const MARK = '-- ─────────────── 1. It can ───────────────'
+    const c = await d.clone()
+    const rr = await runFile(c, probeAt(probeAt(undo105, MARK, 'u105_locked', lockedIn('AccessExclusiveLock')),
+                                        MARK, 'u105_timeout', `current_setting('lock_timeout')`))
+    const locked = await probed(c, 'u105_locked'), timeout = await probed(c, 'u105_timeout')
+    await c.close()
+    const c2 = await d.clone()
+    const was = await stateOf(c2)
+    const busy = await runFile(c2, undo105.replace(LOCK105, TIMED_OUT))
+    const same = await stateOf(c2) === was
+    await c2.close()
+    note(undo105.includes(MARK) && rr.ok && locked.v === 'discount_requests,student_achievements,student_lesson_completions'
+         && timeout.v === '5s' && timeout.after === '0' && undo105.includes(LOCK105) && busy.code === '55P03'
+         && busy.said.includes('so the undo did not start. Nothing was changed. Paste it again in a minute.') && same,
+         'the undo of v105 holds the three tables before it reads anything, with lock_timeout 5s; with its lock timing out it says "Nothing was changed. Paste it again in a minute." and nothing changed',
+         `${locked.v} [${timeout.v}] / ${told(busy)}`)
+  }
+  r = await runFile(d, undo105)
+  note(r.ok && r.rows[0]?.undo?.startsWith('The undo of v105 ran now: 3 put back') && r.rows.filter(x => x.undo === 'put back').length === 3,
+       'the undo of v105 runs: "3 put back", and marks the three it put back', told(r))
+  note(await policiesOn(d) === policiesBefore,
+       'after the undo every policy on the three tables is back exactly as before v105: command, roles, using, check and comment')
+  note(await catalogOf(d) === catalogBefore && await rowsOf(d) === rowsBefore,
+       '...and nothing else differs from before v105: every policy, table, index, grant, function and schema (v105_record is gone), and every row')
+  {
+    const back = await asStudent(d, 1, `insert into student_lesson_completions (student_id, lesson_id) values ('${UID(1)}', 'l003')`)
+    note(back.ok && back.n === 1,
+         'after the undo a student can insert their own completion again: the undo puts back what the policies do, not only their names', told(back))
+    const was = await stateOf(d)
+    const rr = await runFile(d, undo105)
+    note(stopped(rr, 'v105_record.policies is missing') && await stateOf(d) === was,
+         'a second undo refuses (v105_record.policies is missing) and changes nothing', told(rr))
+  }
+  r = await runFile(d, v105)
+  note(r.ok && r.rows[0]?.v105 === 'v105 ran now: 3 dropped (kept in v105_record.policies), 1 added.'
+       && await policiesOn(d) === policiesAfter && await recordOf(d) === recordAfter,
+       'v105 applies again after its undo, with the same policies and the same record as its first run', told(r))
+
+  // ── base.sql's spelling ──
+  {
+    const c = harnessSpelling
+    const was = await policiesOn(c)
+    const rr = await runFile(c, v105)
+    const pol = JSON.parse(await policiesOn(c))
+    const rec = rr.ok ? (await c.query(`select policyname::text as n from v105_record.policies`)).rows.map(x => x.n).sort() : []
+    const un = await runFile(c, undo105)
+    note(rr.ok && rr.rows[0]?.v105 === 'v105 ran now: 3 dropped (kept in v105_record.policies), 1 added.'
+         && sameJson(rec, ['Students can create discount requests', 'Students manage own lesson completions', 'student_achievements: student writes own'])
+         && !pol.some(p => p.n === 'Students manage own lesson completions') && pol.some(p => p.n === READ_OWN)
+         && un.ok && await policiesOn(c) === was,
+         'with base.sql\'s spelling, "Students manage own lesson completions": v105 drops and records it too, adds the read policy, and its undo puts it back exactly',
+         rr.ok ? asJson(rec) : told(rr))
+    await c.close()
+  }
+}
+
+console.log('\n=== 26. v106: one pending discount request per student (T-057), and its undo ===')
+{
+  const v106 = read(V106F)
+  const undo106 = undoText('2026_v106_undo.sql')
+  // After v105, as production will be. S1 has one pending request, S2 a
+  // rejected one (section 25); S3 and S5 get two pending, S4 an approved and
+  // a pending.
+  const d = await policyDb.clone()
+  await policyDb.close()
+  await d.exec(`
+    insert into discount_requests (student_id, status, created_at) values
+      ('${UID(3)}', 'pending',  '2026-10-12 10:00:00+00'),
+      ('${UID(3)}', 'pending',  '2026-10-13 10:00:00+00'),
+      ('${UID(4)}', 'approved', '2026-10-11 10:00:00+00'),
+      ('${UID(4)}', 'pending',  '2026-10-14 10:00:00+00'),
+      ('${UID(5)}', 'rejected', '2026-10-10 10:00:00+00'),
+      ('${UID(5)}', 'pending',  '2026-10-11 10:00:00+00'),
+      ('${UID(5)}', 'pending',  '2026-10-14 10:00:00+00');`)
+  const indexDef = async (dd = d) => (await dd.query(`select pg_get_indexdef(to_regclass('public.discount_requests_one_pending_per_student')) as def`)).rows[0].def
+
+  {
+    const was = await stateOf(d)
+    const r = await runFile(d, v106)
+    const listed = r.ok ? r.rows.slice(1).map(x => `${x.student_id.slice(-1)}:${x.created_at.toISOString().slice(0, 10)}:${x.do.split(' ')[0]}`) : []
+    note(r.ok && r.rows[0]?.v106?.startsWith('Not added: 2 students have more than one pending request, listed below. Nothing was changed.')
+         && sameJson(listed, ['3:2026-10-13:keep', '3:2026-10-12:reject', '5:2026-10-14:keep', '5:2026-10-11:reject'])
+         && await indexDef() === null && await stateOf(d) === was,
+         'v106 with two students holding two pending requests each: it does not fail, adds nothing, and lists their pending requests, the newest of each to keep',
+         r.ok ? asJson(listed) : told(r))
+  }
+  {
+    const MARK = '-- ─────────────── 1 to 3.'
+    const c = await d.clone()
+    const rr = await runFile(c, probeAt(probeAt(v106, MARK, 'v106_locked', lockedIn('ShareLock')), MARK, 'v106_timeout', `current_setting('lock_timeout')`))
+    const locked = await probed(c, 'v106_locked'), timeout = await probed(c, 'v106_timeout')
+    await c.close()
+    const c2 = await d.clone()
+    const was = await stateOf(c2)
+    const busy = await runFile(c2, v106.replace(LOCK106, TIMED_OUT))
+    const same = await stateOf(c2) === was
+    await c2.close()
+    note(v106.includes(MARK) && rr.ok && locked.v === 'discount_requests' && timeout.v === '5s' && timeout.after === '0',
+         'v106 holds discount_requests in SHARE mode (reads go on, writes wait) before it looks, with lock_timeout 5s, and the setting ends with its commit',
+         `${locked.v} [${timeout.v}, after ${timeout.after}]`)
+    note(v106.includes(LOCK106) && busy.code === '55P03'
+         && busy.said.includes('so v106 did not start. Nothing was changed. Paste it again in a minute.') && same,
+         'v106 with its lock timing out (55P03): "Nothing was changed. Paste it again in a minute.", and nothing changed', told(busy))
+  }
+
+  // The team keeps the newest of each and rejects the other.
+  await d.exec(`update discount_requests set status = 'rejected', rejection_reason = 'a second request'
+                 where (student_id, created_at) in (('${UID(3)}', '2026-10-12 10:00:00+00'), ('${UID(5)}', '2026-10-11 10:00:00+00'));`)
+  const catalogBefore106 = await catalogOf(d)
+  let r = await runFile(d, v106)
+  note(r.ok && r.rows.length === 1 && r.rows[0].v106.startsWith('v106 added the index discount_requests_one_pending_per_student now.')
+       && await indexDef() === ONE_PENDING,
+       'with no student holding two, v106 adds the unique index on discount_requests (student_id) where status is pending', told(r))
+  {
+    const dup = await asRole(d, 'service_role', `insert into discount_requests (student_id) values ('${UID(1)}')`)
+    const reopen = await asRole(d, 'service_role', `update discount_requests set status = 'pending' where student_id = '${UID(3)}' and status = 'rejected'`)
+    const first = (await d.query(`select count(*)::int as n from discount_requests where student_id = '${UID(1)}' and status = 'pending'`)).rows[0].n
+    note(dup.code === '23505' && /discount_requests_one_pending_per_student/.test(dup.said) && reopen.code === '23505' && first === 1,
+         'from v106 on, a second pending request for a student is refused (23505), inserted (the request route\'s path) or set back to pending from rejected; the first one stands',
+         `${told(dup)} / ${reopen.code}`)
+    const others = await asRole(d, 'service_role', [
+        `insert into discount_requests (student_id, status) values ('${UID(1)}', 'approved'), ('${UID(1)}', 'rejected')`,
+        `update discount_requests set status = 'rejected' where student_id = '${UID(1)}' and status = 'pending'`,
+        `insert into discount_requests (student_id) values ('${UID(1)}')`],
+      { check: `select status, count(*)::int as n from discount_requests where student_id = '${UID(1)}' group by status order by status` })
+    note(others.ok && sameJson(others.checked, [{ status: 'approved', n: 1 }, { status: 'pending', n: 1 }, { status: 'rejected', n: 2 }]),
+         'requests in other states are not limited, and once the pending one is decided the student can apply again',
+         others.ok ? asJson(others.checked) : told(others))
+  }
+  {
+    const was = await stateOf(d)
+    const rr = await runFile(d, v106)
+    note(rr.ok && rr.rows.length === 1 && rr.rows[0].v106 === 'The index discount_requests_one_pending_per_student was already there. This run changed nothing.'
+         && await stateOf(d) === was,
+         'v106 run again: "already there", and nothing changed', told(rr))
+  }
+  {
+    const c = await d.clone()
+    const broke = await runFile(c, `drop index if exists discount_requests_one_pending_per_student;
+                                    create index discount_requests_one_pending_per_student on discount_requests (student_id);`)
+    const was = await stateOf(c)
+    const rr = await runFile(c, v106)
+    note(broke.ok && stopped(rr, 'exists and is not the one this file makes') && await stateOf(c) === was,
+         'v106 refuses an index of that name that is not its own (here not unique), shows it, and changes nothing',
+         broke.ok ? told(rr) : `the break failed: ${told(broke)}`)
+    await c.close()
+  }
+  {
+    const MARK = 'drop index if exists public.discount_requests_one_pending_per_student;'
+    const c = await d.clone()
+    const rr = await runFile(c, probeAt(undo106, MARK, 'u106_timeout', `current_setting('lock_timeout')`))
+    const timeout = await probed(c, 'u106_timeout')
+    await c.close()
+    r = await runFile(d, undo106)
+    note(undo106.includes(MARK) && rr.ok && timeout.v === '5s' && timeout.after === '0'
+         && r.ok && r.rows[0]?.index_gone === true && await indexDef() === null && await catalogOf(d) === catalogBefore106,
+         'the undo of v106 drops the index with lock_timeout 5s, and everything is as before v106', told(r))
+    const was = await stateOf(d)
+    r = await runFile(d, undo106)
+    note(r.ok && r.rows[0]?.index_gone === true && await stateOf(d) === was, 'a second undo of v106 changes nothing', told(r))
+    r = await runFile(d, v106)
+    note(r.ok && r.rows[0]?.v106?.startsWith('v106 added the index') && await indexDef() === ONE_PENDING,
+         'v106 applies again after its undo', told(r))
+  }
+
+  // Production gets v105 and v106 before the switch: the switch still runs.
+  {
+    const c = await d.clone()
+    const pol = await policiesOn(c)
+    const r3 = await runFile(c, read(V103F))
+    const r4 = await runFile(c, read(V104F))
+    note(r3.ok && r4.ok && r4.rows[0]?.value?.startsWith('The switch ran now') && await policiesOn(c) === pol && await indexDef(c) === ONE_PENDING,
+         'v103 and the switch (v104) still run after v105 and v106, and leave the policies and the index as they were',
+         r3.ok ? (r4.ok ? r4.rows[0]?.value : told(r4)) : told(r3))
+    await c.close()
+  }
+  await d.close()
+}
+
 console.log(`\n${'='.repeat(60)}\n  PASS ${ok.length}   FAIL ${fail.length}`)
 if (fail.length) { console.log('\nFAILURES:'); fail.forEach(f => console.log('  - ' + f)); process.exit(1) }

@@ -201,9 +201,13 @@ export default function AdminTasksKanban() {
   const [config, setConfig] = useState<AdminConfig>(undefined);
 
   // v75.3 - "Generate now" is now visible to every team role
-  // (was founder/admin only). The run-task-crons API already lets
-  // any team member trigger it; the button just gates the UI.
-  // Karlo's call: CSMs need it as much as Astrid does.
+  // (was founder/admin only). Karlo's call: CSMs need it as much as
+  // Astrid does. Founders and admins get the full refresh below; a
+  // CSM gets the two task crons through run-task-crons, which takes
+  // any team role. refresh-everything refuses a CSM, and Karlo's role
+  // table keeps the Whop sync and the snapshot rebuild from them.
+  const fullRefresh =
+    teamMember?.role === "founder" || teamMember?.role === "admin";
 
   const fetchTasks = useCallback(
     async (silent = false) => {
@@ -243,7 +247,7 @@ export default function AdminTasksKanban() {
   // v75.22 - one-button full refresh. Hits /api/admin/refresh-everything
   // which syncs Whop, rebuilds snapshots, and re-runs all three CSM
   // crons (auto-dismiss orphans + create new). Takes ~2 minutes.
-  // Replaces the v59-era run-task-crons trigger.
+  // A CSM's press runs the two task crons only (run-task-crons).
   const generateTasksNow = useCallback(async () => {
     setGenerating(true);
     setError(null);
@@ -252,34 +256,58 @@ export default function AdminTasksKanban() {
         data: { session },
       } = await supabase.auth.getSession();
       const token = session?.access_token;
-      const res = await fetch("/api/admin/refresh-everything", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(
+        fullRefresh
+          ? "/api/admin/refresh-everything"
+          : "/api/admin/run-task-crons",
+        {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        },
+      );
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error ?? `HTTP ${res.status}`);
       }
-      const payload = (await res.json()) as {
-        sync?: { fetched?: number; updated?: number; inserted?: number };
-        csm_tasks?: { tasks_created?: number };
-        na_tasks?: { created?: number };
-        engagement?: { alerts?: number };
-      };
-      const csmN = payload.csm_tasks?.tasks_created ?? 0;
-      const naN = payload.na_tasks?.created ?? 0;
-      const alerts = payload.engagement?.alerts ?? 0;
-      const fetched = payload.sync?.fetched ?? 0;
-      setToast(
-        `Refreshed everything · Whop ${fetched} members · +${csmN + naN} tasks · ${alerts} alerts.`,
-      );
-      // Refresh the queue so any dismissed/new rows show up.
-      await fetchTasks(true);
+      if (fullRefresh) {
+        const payload = (await res.json()) as {
+          sync?: { fetched?: number; updated?: number; inserted?: number };
+          csm_tasks?: { tasks_created?: number };
+          na_tasks?: { created?: number };
+          engagement?: { alerts?: number };
+        };
+        const csmN = payload.csm_tasks?.tasks_created ?? 0;
+        const naN = payload.na_tasks?.created ?? 0;
+        const alerts = payload.engagement?.alerts ?? 0;
+        const fetched = payload.sync?.fetched ?? 0;
+        setToast(
+          `Refreshed everything · Whop ${fetched} members · +${csmN + naN} tasks · ${alerts} alerts.`,
+        );
+        // Refresh the queue so any dismissed/new rows show up.
+        await fetchTasks(true);
+      } else {
+        // run-task-crons answers 200 with each cron's own answer, and
+        // { error } (or null) in place of one that failed.
+        const { csm, na } = (await res.json()) as {
+          csm: { tasks_created?: number; error?: string } | null;
+          na: { created?: number; error?: string } | null;
+        };
+        const csmN = csm?.tasks_created ?? 0;
+        const naN = na?.created ?? 0;
+        const allRan = !!csm && !csm.error && !!na && !na.error;
+        await fetchTasks(true);
+        if (!allRan) {
+          throw new Error(
+            "Some tasks could not be refreshed. Try again in a minute.",
+          );
+        }
+        setToast(`Tasks refreshed · +${csmN + naN} tasks.`);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
     setGenerating(false);
-  }, [supabase, fetchTasks]);
+  }, [supabase, fetchTasks, fullRefresh]);
 
   useEffect(() => {
     void fetchTasks(false);
@@ -535,7 +563,11 @@ export default function AdminTasksKanban() {
             size="md"
             busy={generating || refreshing}
             onClick={() => void generateTasksNow()}
-            title="Sync Whop, rebuild snapshots, re-evaluate all tasks (auto-dismiss stale + create new). ~2 min."
+            title={
+              fullRefresh
+                ? "Sync Whop, rebuild snapshots, re-evaluate all tasks (auto-dismiss stale + create new). ~2 min."
+                : "Re-evaluate all tasks now (auto-dismiss stale + create new)."
+            }
           >
             {generating || refreshing ? "Refreshing…" : "↻ Refresh"}
           </Button>

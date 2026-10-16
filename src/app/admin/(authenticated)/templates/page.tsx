@@ -94,6 +94,8 @@ interface TemplateStatLite {
   success: number;
   success_eligible: number;
   success_label: string;
+  /** Sends from before the course switch, left out of success. 0 before it. */
+  graded_on_old_course: number;
 }
 
 
@@ -535,9 +537,15 @@ export default function AdminTemplatesPage() {
                             : "";
                         const replied =
                           s.replied > 0 ? ` · ${s.replied} replied` : "";
+                        // Sends before the course switch are left out of
+                        // success; 0 (and nothing shown) before it.
+                        const oldCourse =
+                          s.graded_on_old_course > 0
+                            ? ` · ${s.graded_on_old_course} graded on the old course`
+                            : "";
                         return (
                           <span
-                            title={`sent = DMs marked sent · success = ${s.success_label} (${s.success}/${s.success_eligible}) · replied = manual tap on the Sent tab · full breakdown on the tasks Insights tab`}
+                            title={`sent = DMs marked sent · success = ${s.success_label} (${s.success}/${s.success_eligible})${oldCourse ? " · graded on the old course = sent before the course switch, left out of success" : ""} · replied = manual tap on the Sent tab · full breakdown on the tasks Insights tab`}
                             style={{
                               fontSize: 11,
                               color: "var(--color-text-tertiary)",
@@ -546,6 +554,7 @@ export default function AdminTemplatesPage() {
                             }}
                           >
                             {s.sent} sent{success}
+                            {oldCourse}
                             {replied}
                           </span>
                         );

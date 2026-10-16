@@ -77,6 +77,16 @@ const BUDGET_EPSILON_S = 1e-9;
  */
 const RETRY_AFTER_MS = [2_000, 5_000, 10_000];
 
+/**
+ * How many reports in a row may fail before the caller is told the watching
+ * isn't being saved (onSaveTrouble). One or two are a blip the next beat
+ * covers, since nothing banked is dropped. Three in a row is a connection or
+ * a database call that stays down: 30 seconds of routine beats, or a pause
+ * and its first two retries. It used to be silent forever, so a student could
+ * watch a whole lesson that never counted and see nothing.
+ */
+const FAILS_BEFORE_TROUBLE = 3;
+
 /** ~50 writes per full lesson. See the table in the research doc. */
 const THROTTLE_MS = 15_000;
 
@@ -128,6 +138,14 @@ export interface WatchHeartbeatOptions {
   onResult?: (result: HeartbeatResult, beat: HeartbeatBeat) => void;
   /** Fired once, on the beat the server says crossed the threshold. */
   onThresholdCrossed?: () => void;
+  /**
+   * Fired with true once FAILS_BEFORE_TROUBLE reports in a row have failed
+   * (the call answered an error or threw), and with false on the next report
+   * that gets through after that. Any answer gets through, a refusal
+   * included: the server heard it. A beat the gate held back, or one with
+   * nothing to say, is no report.
+   */
+  onSaveTrouble?: (failing: boolean) => void;
   /**
    * Stands in for the database call. Default: the real
    * `supabase.rpc("record_lesson_heartbeat", args)`. When this is given, no
@@ -210,6 +228,19 @@ export function createWatchHeartbeat(
   /** The one timer for a failed forced beat, and how many retries that beat has had. */
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let retriesUsed = 0;
+
+  /** Reports in a row that failed. Back to 0 on any answer. */
+  let failedInARow = 0;
+
+  /** Tells the caller. The caller's trouble never stops the heartbeat. */
+  function sayTrouble(failing: boolean) {
+    if (destroyed) return;
+    try {
+      opts.onSaveTrouble?.(failing);
+    } catch {
+      // As for the other callbacks below: the caller's to handle.
+    }
+  }
 
   function stopRetrying() {
     if (retryTimer !== null) clearTimeout(retryTimer);
@@ -315,17 +346,22 @@ export function createWatchHeartbeat(
 
       if (result === null) {
         // Losing a beat is survivable by design — the next one carries the
-        // same position and the accumulated delta. Deliberately silent: a
+        // same position and the accumulated delta. Silent for a blip: a
         // toast on every transient network blip would be worse than the blip.
+        // Only FAILS_BEFORE_TROUBLE in a row tell the caller, once.
         // An ordinary beat is tried again by the throttle, 15s on. A forced
         // one has nothing coming after it, so it gets its own retries.
         if (force) retryLater(reason, retry);
+        failedInARow += 1;
+        if (failedInARow === FAILS_BEFORE_TROUBLE) sayTrouble(true);
         return;
       }
 
       // The call got through, so whatever a failed forced beat still had to
       // say has now been said, or will be by the throttle.
       stopRetrying();
+      if (failedInARow >= FAILS_BEFORE_TROUBLE) sayTrouble(false);
+      failedInARow = 0;
 
       if (result.accepted) {
         lastSentPosition = sentPosition;

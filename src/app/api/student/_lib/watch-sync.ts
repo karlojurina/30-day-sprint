@@ -21,6 +21,12 @@ import { onLessonCompleted } from "@/lib/csm-events";
  * without a whop_lesson_id are silently ignored. The unique constraint on
  * (student_id, lesson_id) + ignoreDuplicates ensures this is idempotent.
  *
+ * What it says is true (backend_readiness.md, section 5, items 3, 4, 6, 7):
+ * `syncedCount` is the rows this run actually added (new lessons, and skips
+ * turned into watches), so the streak, "last active" and the "came back"
+ * check move only on new work; a failed read of the lessons is an error;
+ * Whop returning nothing is a plain zero.
+ *
  * Diagnostic: the list of Whop lesson IDs we FETCHED but couldn't match to
  * any of our lessons is saved onto student_whop_sync.last_sync_unmatched so
  * Karlo can see exactly which Whop lessons still need a mapping.
@@ -34,6 +40,7 @@ export async function syncWatchProgress({
   studentId: string;
   whopUserId: string;
 }): Promise<{
+  /** Rows this run added: new lessons, and skips turned into watches. */
   syncedCount: number;
   skippedCount: number;
   fetchedCount: number;
@@ -72,11 +79,15 @@ export async function syncWatchProgress({
           {
             student_id: studentId,
             last_sync_at: nowIso,
+            // Nothing on Whop is a plain zero: after the switch it is most
+            // students' normal state, and written as an error it showed in
+            // red as "Last error" beside real failures. Lessons opened and
+            // none finished keeps its note.
             last_sync_error:
               rawCount === 0
-                ? "Whop returned 0 total interactions for this user — admin key may not have visibility into this user's progress"
+                ? null
                 : `Whop returned ${rawCount} interactions but 0 marked completed`,
-            last_sync_error_at: nowIso,
+            last_sync_error_at: rawCount === 0 ? null : nowIso,
             last_sync_fetched: rawCount,
             last_sync_matched: 0,
             last_sync_unmatched: [],
@@ -97,10 +108,15 @@ export async function syncWatchProgress({
     void completedCount; // surfaced via interactions.length
 
     // 2. Find our lessons that match those Whop lesson IDs
-    const { data: matchedLessons } = await supabase
+    const { data: matchedLessons, error: lessonsError } = await supabase
       .from("lessons")
       .select("id, whop_lesson_id")
       .in("whop_lesson_id", completedLessonIds);
+    // A failed read is an error, never "nothing matched": the catch below
+    // writes it on the sync row and the caller answers it as a failure.
+    if (lessonsError) {
+      throw new Error(`Lessons read failed: ${lessonsError.message}`);
+    }
 
     const matched = matchedLessons ?? [];
     const matchedWhopIds = new Set(
@@ -112,28 +128,33 @@ export async function syncWatchProgress({
 
     // 3. Insert NEW completions (idempotent — existing rows are left
     //    untouched so we don't reset old completed_at timestamps).
+    //    `added` is what this run actually wrote: the rows the insert
+    //    returns (only those it added) and the rows the promotion returns.
+    const added = new Set<string>();
     if (matched.length > 0) {
       const rows = matched.map((l) => ({
         student_id: studentId,
         lesson_id: l.id,
       }));
 
-      const { error: upsertError } = await supabase
+      const { data: inserted, error: upsertError } = await supabase
         .from("student_lesson_completions")
         .upsert(rows, {
           onConflict: "student_id,lesson_id",
           ignoreDuplicates: true,
-        });
+        })
+        .select("lesson_id");
 
       if (upsertError) {
         throw new Error(`Upsert failed: ${upsertError.message}`);
       }
+      for (const r of inserted ?? []) added.add(r.lesson_id);
 
       // 3b. Promote any prior SKIP to a WATCH for the lessons the
       //     student now has on Whop. Doesn't touch already-watched
       //     rows (completed_at IS NULL filter).
       const lessonIds = matched.map((l) => l.id);
-      const { error: promoteError } = await supabase
+      const { data: promoted, error: promoteError } = await supabase
         .from("student_lesson_completions")
         .update({
           completed_at: new Date().toISOString(),
@@ -141,11 +162,13 @@ export async function syncWatchProgress({
         })
         .eq("student_id", studentId)
         .in("lesson_id", lessonIds)
-        .is("completed_at", null);
+        .is("completed_at", null)
+        .select("lesson_id");
 
       if (promoteError) {
         throw new Error(`Skip→watch promotion failed: ${promoteError.message}`);
       }
+      for (const r of promoted ?? []) added.add(r.lesson_id);
     }
 
     const nowIso = new Date().toISOString();
@@ -166,13 +189,14 @@ export async function syncWatchProgress({
       );
 
     // X.1 reactivation check — only when we actually newly-completed
-    // something. Best-effort; failures never break the sync.
-    if (matched.length > 0) {
+    // something. Best-effort; failures never break the sync. (It used to
+    // test every matched lesson, so it ran on every sync.)
+    if (added.size > 0) {
       await onLessonCompleted(supabase, studentId);
     }
 
     return {
-      syncedCount: matched.length,
+      syncedCount: added.size,
       skippedCount: interactions.length - matched.length,
       fetchedCount: interactions.length,
       matchedCount: matched.length,

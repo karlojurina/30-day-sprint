@@ -160,8 +160,8 @@ function StatusView({ status }: { status: CutoverStatus }) {
           {status.ok ? (
             <p style={{ ...T.bodyDim, marginTop: 6 }}>
               {status.phase === "after"
-                ? "The build and the database agree on the new course."
-                : "The old course is live. The values the switch needs are checked once it has run."}
+                ? "The build and the database agree on the new course. The Whop course is not checked here (below)."
+                : "The old course is live. The values the switch needs are checked once it has run. The Whop course is not checked here (below)."}
             </p>
           ) : (
             <ul style={{ marginTop: 10, paddingLeft: 18, listStyle: "disc" }}>
@@ -250,7 +250,41 @@ function StatusView({ status }: { status: CutoverStatus }) {
           </Card>
         </Section>
       </div>
+
+      <WhopCourseNotChecked phase={status.phase} lessons={db.lessons} />
     </>
+  );
+}
+
+/**
+ * Which course WHOP_COURSE_ID names is not checked: the route makes no
+ * Whop call. The check it needs is written in the route's header. A
+ * wrong course fails with no error anywhere (the backfill matches 0 and
+ * writes no error), so "All good" must not read as covering it.
+ */
+function WhopCourseNotChecked({
+  phase,
+  lessons,
+}: {
+  phase: "before" | "after";
+  lessons: number;
+}) {
+  return (
+    <Section eyebrow="Not checked here">
+      <Card padding={20}>
+        <p style={T.cardTitle}>Which course the Whop course id names</p>
+        <p style={{ ...T.bodyDim, marginTop: 6 }}>
+          This page makes no call to Whop, so it cannot tell which course
+          WHOP_COURSE_ID is. Checking it means reading that course&apos;s
+          lessons from Whop and finding their ids in the lessons table.
+        </p>
+        <p style={{ ...T.body, marginTop: 10 }}>
+          {phase === "before"
+            ? "Before the switch, production's value must still be the old course: the old dashboard's Whop sync reads it."
+            : `After the switch its lessons should be the same ${lessons} as the lessons table. Until this page checks it, finish one lesson on Whop and see it lit on /world.`}
+        </p>
+      </Card>
+    </Section>
   );
 }
 

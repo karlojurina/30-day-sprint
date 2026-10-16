@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { reEvaluateStudentOpenTasks } from "@/lib/csm-task-evaluation";
+import { CATALOG_IS_V2 } from "@/lib/catalog-tables";
 
 /**
  * Skip / un-skip a lesson. Only meaningful for grouped/optional
@@ -80,6 +81,16 @@ export async function POST(request: NextRequest) {
         error:
           "This lesson can't be skipped — it's a required action item. Watch it and ship the action to complete it.",
       },
+      { status: 400 },
+    );
+  }
+  // The new course has nothing to skip: every lesson is a video to watch or
+  // an action item, and a skip counts as done (src/lib/progress.ts), so one
+  // request here finished any of its 132 plain watch lessons
+  // (backend_readiness.md item 26). The old course keeps its skips.
+  if (CATALOG_IS_V2 && lessonRow.type === "watch") {
+    return NextResponse.json(
+      { error: "This lesson can't be skipped. Watch it to complete it." },
       { status: 400 },
     );
   }

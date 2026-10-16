@@ -113,7 +113,7 @@ export default function AuthCompletePage() {
         clearTimers();
         failToLogin(
           "session_failed",
-          `client: unreadable handoff cookie — ${describe(err)}`
+          `client: unreadable handoff cookie: ${describe(err)}`
         );
         return;
       }

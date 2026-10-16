@@ -1,7 +1,11 @@
 /**
- * When the map shows the two full-screen celebrations the old dashboard shows
- * (src/app/dashboard/page.tsx): the streak one and the discount-approved one.
- * Read by src/components/world/WorldCelebrations.tsx.
+ * When the map marks the two moments the old dashboard celebrates
+ * (src/app/dashboard/page.tsx): the streak going up and the discount
+ * approved. Read by src/components/world/WorldCelebrations.tsx. On the map
+ * the discount's is the dashboard's full-screen celebration, and since
+ * 2026-10-15 the streak's is a short moment on the number in the header
+ * (Lovro: a daily tick is routine, the full-screen moment is for milestones).
+ * The dashboard still shows its full-screen streak celebration.
  *
  * The rules and the browser keys are the dashboard's, copied as they stand
  * (client-tests/celebrations.test.mjs checks the keys against that file).
@@ -19,10 +23,11 @@ export const DISCOUNT_APPROVED_LAST_SEEN_KEY = "et.discountApproved.lastSeen";
 export const streakLastSeenKey = (studentId: string) => `et.streak.lastSeen.${studentId}`;
 
 /**
- * The streak to celebrate, or null. A streak above the one last celebrated
- * here: one finished lesson on a new day, a streak earned on another device
- * the first time this browser sees it. Never 0, never twice for one count,
- * and nothing when the stored value is not a number.
+ * The streak to mark, or null (on the map, the header's moment). A streak
+ * above the one last celebrated here: one finished lesson on a new day, a
+ * streak earned on another device the first time this browser sees it.
+ * Never 0, never twice for one count, and nothing when the stored value is
+ * not a number.
  */
 export function streakToCelebrate(current: number, lastSeenRaw: string | null): number | null {
   if (!(current > 0)) return null;

@@ -147,6 +147,26 @@
   color: var(--color-accent-strong);
 }
 
+/* The streak's moment when it goes up (useStreakMoment, WorldCelebrations.tsx;
+   2026-10-15, the daily tick is quiet): the new number rises into place, sand
+   while the moment lasts (600 ms, STREAK_MOMENT_MS), then ink. Under reduced
+   motion the rise is off (the block at the end) and the sand alone marks it. */
+.streak[data-tick] b {
+  color: var(--color-accent-strong);
+  animation: tickIn 600ms var(--ease) both;
+}
+
+@keyframes tickIn {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .flame,
 .eyebrowFlame {
   flex: 0 0 auto;
@@ -750,7 +770,8 @@ main[data-open]:has(.corner[data-open]) > svg {
 }
 
 /* Through the telescope (a7's click-in) the sky's caption takes the header's
-   row: the corner steps out until the camera comes back. */
+   row: the corner steps out until the camera comes back. The streak's moment
+   waits for it to come back (unseen, WorldCelebrations.tsx). */
 main[data-view]:has([data-tel]) .corner {
   visibility: hidden;
 }

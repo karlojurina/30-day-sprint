@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import type { Achievement } from "@/types/database";
 import { useWorldBadges, useWorldSignOut, type WorldBadges } from "./useWorldBadges";
+import { useStreakMoment } from "./WorldCelebrations";
 import c from "./corner.module.css";
 
 /**
@@ -41,8 +42,18 @@ import c from "./corner.module.css";
  * and goes, and the count in the pill turns sand while it shows. One at a time,
  * oldest first. Under a lesson page (`paused`) the whole header is hidden,
  * so it waits and plays when the student is back on the map; the lesson page
- * itself already says "You unlocked 1 achievement." Clicking it opens the
+ * itself already says "You earned 1 achievement." Clicking it opens the
  * list, where the new one is marked New.
+ *
+ * THE STREAK'S MOMENT (2026-10-15, Lovro: the daily tick is quiet, no
+ * full-screen celebration). When the streak goes up, the number in the pill
+ * rises into place and is sand for 600 ms, and a status line reads it out.
+ * useStreakMoment (WorldCelebrations.tsx) decides when it plays: only where
+ * the number can be seen. Like the toast, it waits while a lesson page hides
+ * the header; unlike the toast, it also waits out the map's loading screen,
+ * the telescope (where the group steps out), a phone's sheet over the header
+ * and a phone's list scrolled past it. Under reduced motion the number does
+ * not move; the sand alone marks it.
  *
  * THE SLOTS. `discount` (WorldV6's segment) and `playbook` (a small link,
  * CornerLink below fits it) go inside the pill between the achievements and
@@ -109,6 +120,9 @@ export function WorldCorner({
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const panelId = useId();
   const titleId = useId();
+  // The streak's moment; it plays only where its number can be seen.
+  const streakRef = useRef<HTMLSpanElement | null>(null);
+  const tick = useStreakMoment(paused, streakRef);
 
   // A place or the checkpoint opening on the left, or a lesson page, closes the
   // list. Read as which one is up, so a switch from a place to the checkpoint
@@ -197,9 +211,10 @@ export function WorldCorner({
           aria-label={statsLabel}
           onClick={toggle}
         >
-          <span className={c.streak}>
+          <span ref={streakRef} className={c.streak} data-tick={tick.on ? "" : undefined}>
             <Flame className={c.flame} lit={current > 0} />
-            <b>{current}</b>
+            {/* A new key per moment, so its animation starts again. */}
+            <b key={tick.seq}>{current}</b>
             <span className={c.unit}>{days(current)}</span>
           </span>
           <span className={c.rule} aria-hidden="true" />
@@ -233,9 +248,12 @@ export function WorldCorner({
         </button>
       </div>
 
-      {/* Read out once, from a region that is always on the page. */}
+      {/* Read out once, from regions that are always on the page: the toast's, then the streak's. */}
       <span className={c.srOnly} role="status">
-        {toast ? `Achievement unlocked: ${toast.name}.` : ""}
+        {toast ? `Achievement earned: ${toast.name}.` : ""}
+      </span>
+      <span className={c.srOnly} role="status">
+        {tick.say}
       </span>
 
       {toast && (
@@ -251,7 +269,7 @@ export function WorldCorner({
           }}
         >
           <Hex className={c.toastHex} lit />
-          <span className={c.toastEyebrow}>Achievement unlocked</span>
+          <span className={c.toastEyebrow}>Achievement earned</span>
           <span className={c.toastName}>{toast.name}</span>
         </button>
       )}

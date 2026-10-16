@@ -57,6 +57,12 @@
  *      right-aligned; the list is a full sheet with Sign out; the toast sits
  *      at the bottom; the course's count (the header's 01/08 went) heads
  *      the list of places and adds up the places' counts
+ *  11  the streak's moment in the pill (since 2026-10-15 the daily streak has
+ *      no full-screen moment; ?celebrate=1 lets it fire, the streak set to 9
+ *      then 10): while it plays the number stays inside the pill, the pill
+ *      keeps its edge, and nothing around it moves; it is read out on a line
+ *      of its own, the toast's left empty. At 1691 px and on a phone. When it
+ *      fires, and the rest of it, is v6-celebrations.mjs
  *
  * Pictures for a person, in world-tests/shots/v6/hud/ (git-ignored):
  *   state-<preset>.png      the header's right end per state (row 1)
@@ -201,6 +207,28 @@ const SNAP = () => {
     headerSeen: seen(header),
     focus: at ? { tag: at.tagName, label: at.getAttribute('aria-label'), text: norm(at.textContent).slice(0, 40), inList: !!list && list.contains(at) } : null,
     hud: window.__fixtureHud ? { preset: window.__fixtureHud.preset, held: window.__fixtureHud.held(), signOuts: window.__fixtureHud.signOuts() } : null,
+  }
+}
+
+/** The streak's moment (row 11): whether it plays, the number and its box, the pill's, the brand's, the two status lines. */
+const MOMENT_SNAP = () => {
+  const box = (el) => {
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom) }
+  }
+  const btn = document.querySelector('main header button[aria-expanded]')
+  const seg = btn?.querySelector(':scope > span')
+  const num = seg?.querySelector('b')
+  const lines = [...document.querySelectorAll('main header [role="status"]')].map((s) => s.textContent)
+  return {
+    on: !!seg?.hasAttribute('data-tick'),
+    n: num?.textContent ?? null,
+    num: box(num),
+    pill: box(btn?.parentElement),
+    brand: box(document.querySelector('main header')?.firstElementChild),
+    status: lines[0] ?? null,
+    say: lines[1] ?? null,
   }
 }
 
@@ -433,10 +461,10 @@ try {
     await present(page, FIND.toast, { timeout: 8000, what: 'row 3: no toast' })
     await sleep(600)
     const s = await page.evaluate(SNAP)
-    r.check('the toast names it: Achievement unlocked, Habit Builder', /Achievement unlocked Habit Builder/i.test(s.toast?.text ?? ''), s.toast?.text)
+    r.check('the toast names it: Achievement earned, Habit Builder', /Achievement earned Habit Builder/i.test(s.toast?.text ?? ''), s.toast?.text)
     r.check('it sits in the header row, left of the pill, clear of the brand', s.toast && s.toast.box.r <= s.pillBox.l && s.toast.box.b <= 72 && s.toast.box.l > s.brand.r, { toast: s.toast?.box, pill: s.pillBox, brand: s.brand })
     r.check('the count says 3/10, in sand', /3\/10$/.test(s.pill?.text ?? '') && s.countFresh === true && /rgb\(240, 183, 126\)/.test(s.countColor ?? ''), { text: s.pill?.text, fresh: s.countFresh, color: s.countColor })
-    r.check('the status line reads it out', s.status === 'Achievement unlocked: Habit Builder.', s.status)
+    r.check('the status line reads it out', s.status === 'Achievement earned: Habit Builder.', s.status)
     await crop(page, 'fresh-toast.png', groupEnd(s), 0)
     await waitFor(page, () => !document.querySelector('main header button[aria-hidden="true"]'), { timeout: TOAST_MS + 2000, what: 'row 3: the toast did not go' })
     const after = await page.evaluate(SNAP)
@@ -744,6 +772,37 @@ try {
       else r.check('?p=all: nothing over the list, the Next block says every lesson is done', c.rows === 8 && c.line === null && c.inNext.length === 1 && c.inNext[0] === `${c.total} of ${c.total} lessons`, c)
       if (p === 'mid') await shot(pg, 'phone-course-count.png')
       await pg.close()
+    }
+  })
+
+  await runRow(11, "the streak's moment in the pill: the number changes in place, inside the pill; nothing around it moves; its own status line", async (r) => {
+    for (const vp of [DESKTOP, PHONE]) {
+      const name = vp.width < 760 ? 'phone' : `${vp.width} px`
+      const gutter = vp.width < 760 ? 22 : 40
+      // A browser of its own per size: one context shares the browser key, and a key at 10
+      // rightly gives the next page's 9 no moment.
+      const own = await browser.createBrowserContext()
+      try {
+        const page = await openPage(own, r.row, url({ hud: 'some', celebrate: '1' }), vp)
+        // The 4's own moment plays once the loading screen has faded (on a phone, which has none, at
+        // once): it has played when its line is read out, and is over when the number lets go.
+        await waitFor(page, () => [...document.querySelectorAll('main header [role="status"]')][1]?.textContent === 'Streak: 4 days.' && !document.querySelector('main header button[aria-expanded] > span')?.hasAttribute('data-tick'), { timeout: 8000, what: `row 11 (${name}): the 4's own moment did not play` })
+        // 9, then 10: the pill grows by a digit, so the second moment comes with a wider number.
+        for (const n of [9, 10]) {
+          await page.evaluate((n) => window.__fixture.setStreak(n), n)
+          const during = await waitFor(page, (src) => {
+            const m = new Function(`return (${src})()`)()
+            return m.on ? m : null
+          }, { arg: MOMENT_SNAP.toString(), timeout: 3000, poll: 15, what: `row 11 (${name}): no moment for ${n}` })
+          await waitFor(page, () => !document.querySelector('main header button[aria-expanded] > span')?.hasAttribute('data-tick'), { timeout: 3000, what: `row 11 (${name}): the moment for ${n} did not end` })
+          const after = await page.evaluate(MOMENT_SNAP)
+          r.check(`${name}, ${n}: during its moment the number stays inside the pill, which keeps its right edge (the ${gutter} px gutter)`, during.n === String(n) && !!during.num && !!during.pill && during.num.l >= during.pill.l && during.num.r <= during.pill.r && during.num.t >= during.pill.t && during.num.b <= during.pill.b && during.pill.r === vp.width - gutter, during)
+          r.check(`${name}, ${n}: the moment moves nothing around it (the pill and the brand stand as they do after it)`, JSON.stringify(during.pill) === JSON.stringify(after.pill) && JSON.stringify(during.brand) === JSON.stringify(after.brand), { during: [during.pill, during.brand], after: [after.pill, after.brand] })
+          r.check(`${name}, ${n}: read out on its own line ("Streak: ${n} days."), the toast's line left empty`, after.say === `Streak: ${n} days.` && after.status === '', { say: after.say, status: after.status })
+        }
+      } finally {
+        await own.close().catch(() => {})
+      }
     }
   })
 } finally {

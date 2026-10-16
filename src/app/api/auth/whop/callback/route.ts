@@ -95,7 +95,7 @@ export async function GET(request: NextRequest) {
       // handles the rare race where a brand-new student tries to log
       // in before their webhook has fired.
       let whopHasAccess = false;
-      let whopSummary = "(skipped — db said active)";
+      let whopSummary = "(skipped, db said active)";
       if (!dbHasActive) {
         const diagnostic = await checkActiveMembershipDiagnostic(
           tokens.access_token
@@ -116,7 +116,7 @@ export async function GET(request: NextRequest) {
                 (m) =>
                   `${m.id ?? "?"}(status=${m.status ?? "?"},valid=${String(
                     m.valid
-                  )},product=${m.product_id ?? "—"},plan=${m.plan_id ?? "—"})`
+                  )},product=${m.product_id ?? "none"},plan=${m.plan_id ?? "none"})`
               )
               .join(" | ")
           : `no memberships (fetch ${diagnostic.fetchStatus}${

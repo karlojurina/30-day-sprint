@@ -15,6 +15,8 @@ import { parseLessonText } from "@/lib/world/lesson-text";
 import { Panel } from "@/components/world/AreaScreen";
 import { mapIsSilent, useMapModel } from "@/components/world/useMapModel";
 import { pad2 } from "@/components/world-v6/study";
+import { BOUNTY_KEY, BOUNTY_NAME } from "@/components/world-v6/source";
+import type { CatalogLessonLike } from "@/lib/world/catalog";
 import u from "@/components/world/world-ui.module.css";
 
 /**
@@ -36,8 +38,10 @@ import u from "@/components/world/world-ui.module.css";
  * sits: the place's number in route order, then
  * "Lesson i of n" among the place's lessons that count toward progress, the
  * minutes when the catalog has a length, and the action mark on an action
- * item. A lesson that does not count (the Ad Bounty row) gets the place's
- * number and name only.
+ * item. A lesson that does not count gets the place's number and name only.
+ * The Ad Bounty's lesson is its checkpoint's (map review 2026-10-15, plan
+ * item 18): "Checkpoint · Ad Bounty", a back link to the map, where the
+ * checkpoint's panel is, and no place's "Next lesson" leads into it.
  *
  * UNDER THE TITLE. A watch lesson with a video: the player, the Milestone box
  * when the lesson is an action item, then the lesson's text when it has one.
@@ -97,7 +101,13 @@ export function LessonScreen({
   const [playerFor, setPlayerFor] = useState<string | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
 
-  const placeHref = stage.href(areaId);
+  // The Ad Bounty's lesson is its own checkpoint's, not the place's it is
+  // filed under (map review 2026-10-15, plan item 18). Back and Esc go to the
+  // map, where the checkpoint's panel is still up (it has no address of its
+  // own; the browser's back lands there too), and the page names the
+  // checkpoint, not the place.
+  const bounty = isBountyLesson(lessonById(lessonId));
+  const placeHref = bounty ? stage.href() : stage.href(areaId);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -143,8 +153,11 @@ export function LessonScreen({
   }
 
   const siblings = lessonsByArea.get(areaId) ?? [];
-  const index = siblings.findIndex((l) => l.id === lessonId);
-  const next = index >= 0 ? siblings[index + 1] : undefined;
+  // The place's own lessons for "Next lesson": the Ad Bounty's is the
+  // checkpoint's, so the place's last lesson does not lead into it.
+  const own = siblings.filter((l) => !isBountyLesson(l));
+  const index = own.findIndex((l) => l.id === lessonId);
+  const next = index >= 0 ? own[index + 1] : undefined;
   const done = completedLessonIds.has(lessonId);
 
   // The eyebrow. `position` stays 0 for a lesson that is not one of the place's
@@ -160,20 +173,20 @@ export function LessonScreen({
       <div className={u.top}>
         <Link href={placeHref} scroll={false} className={u.back}>
           <span aria-hidden="true">←</span>
-          {area.name}
+          {bounty ? BOUNTY_NAME : area.name}
         </Link>
         <kbd className={u.esc}>Esc</kbd>
       </div>
 
       <p className={u.eyebrow}>
-        <span className={u.num}>{pad2(areaNumber)}</span>
+        <span className={u.num}>{bounty ? "Checkpoint" : pad2(areaNumber)}</span>
         <span aria-hidden="true">·</span>
         {position > 0 ? (
           <span>
             Lesson {position} of {counting.length}
           </span>
         ) : (
-          <span>{area.name}</span>
+          <span>{bounty ? BOUNTY_NAME : area.name}</span>
         )}
         {minutes !== null && (
           <>
@@ -244,7 +257,7 @@ export function LessonScreen({
                 {justCompleted && justCompleted.length > 0 && (
                   <span className={u.gained}>
                     {" "}
-                    You unlocked {justCompleted.length} achievement{justCompleted.length === 1 ? "" : "s"}.
+                    You earned {justCompleted.length} achievement{justCompleted.length === 1 ? "" : "s"}.
                   </span>
                 )}
               </span>
@@ -277,6 +290,15 @@ export function LessonScreen({
       )}
     </Panel>
   );
+}
+
+/**
+ * The Ad Bounty's lesson, the one the map shows as its own checkpoint's: the
+ * row with the bounty key that does not count toward progress (map-model.ts
+ * makes such a row a feature, and source.ts takes the one with this key).
+ */
+function isBountyLesson(lesson: CatalogLessonLike | null | undefined): boolean {
+  return !!lesson && lesson.feature_key === BOUNTY_KEY && !lesson.counts_toward_progress;
 }
 
 /**

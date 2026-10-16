@@ -161,7 +161,7 @@ export function DiscountApprovedCelebration({
             >
               Our team has applied the 30% discount to your
               subscription. You&rsquo;ll see it on your next Whop
-              renewal — nothing else to do.
+              renewal. Nothing else to do.
             </motion.p>
 
             <motion.p

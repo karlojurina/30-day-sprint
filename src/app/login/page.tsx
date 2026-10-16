@@ -104,7 +104,7 @@ function LoginContent() {
                   without a round-trip asking the student for logs. */}
               <p className="mt-1 text-[11px] text-[var(--color-danger)]/70 break-all font-mono">
                 {error}
-                {detail ? ` — ${detail}` : ""}
+                {detail ? `: ${detail}` : ""}
               </p>
             </motion.div>
           )}

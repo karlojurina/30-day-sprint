@@ -64,7 +64,7 @@ export function JournalView({
   // Print-stylesheet trigger — let the user open the page and decide
   // when to print, but provide a button.
   useEffect(() => {
-    document.title = `Field Journal — ${student.name ?? "Student"}`;
+    document.title = `Field Journal · ${student.name ?? "Student"} · Ecom University`;
   }, [student.name]);
 
   // v75.18: anchor the journal Day 1 on first_paid_at (original
@@ -104,7 +104,7 @@ export function JournalView({
 
       {/* Cover */}
       <section className="journal-page cover">
-        <div className="cover-mark">EcomTalent · 30-Day Sprint</div>
+        <div className="cover-mark">Ecom University · 30-Day Sprint</div>
         <h1 className="cover-title">Field Journal</h1>
         <div className="cover-name">
           {student.name ? `Compiled by ${student.name}` : "Field Journal"}

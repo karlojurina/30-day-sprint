@@ -23,8 +23,10 @@ const cormorant = Cormorant_Garamond({
   style: ["normal", "italic"],
 });
 
+// The tab of every page (Lovro, 2026-10-15). A page that names itself puts the
+// brand last, after a middle dot: "Field Journal · Sam · Ecom University".
 export const metadata: Metadata = {
-  title: "EcomTalent — Expedition",
+  title: "Ecom University",
   description: "Your 30-day expedition through ad creative.",
 };
 

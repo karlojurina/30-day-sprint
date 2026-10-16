@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { GATE_CAUSEWAY, ISLAND_PATH, LOOK as TRAIL_LOOK, PATH, PLACES, TRAIL, TRAIL_HUT, WORLD, ladderSections, type LadderSection } from "./layout";
+import { BRIDGE, GATE_CAUSEWAY, ISLAND_PATH, LOOK as TRAIL_LOOK, PATH, PLACES, TRAIL, TRAIL_HUT, WORLD, bridgeDeckAt, ladderSections, type LadderSection } from "./layout";
 import { CHECKPOINT } from "./checkpoint";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
 import { blocked } from "./footprints";
@@ -37,7 +37,21 @@ import type { QualityTier } from "./quality";
  *                    that grows at dusk and night). The next one: a gentle
  *                    pulse. Ahead: dark glass, dark iron. They replace
  *                    blocks.ts's trail lanterns and its per-place progress
- *                    lanterns.
+ *                    lanterns. Second Loom (2026-10-16): AI Ads & Content has
+ *                    none; its lessons light THE FLOATING STEPS instead (below),
+ *                    and Creative Strategy's run on from the island's path
+ *                    onto the rope bridge, on posts at its railing that sway
+ *                    with it.
+ *   THE FLOATING STEPS  (second Loom, 3:15 to 4:20) the steps up to the Sky
+ *                    Island light from the bottom as AI Ads & Content's lessons
+ *                    are watched: the lessons spread evenly over the steps
+ *                    drawn (stepsLit), each lit step's runes and the rim round
+ *                    its top turning the lanterns' warm glass, with a halo for
+ *                    reading it from afar, the next one's runes pulsing. The
+ *                    steps keep their shapes, poses and
+ *                    motion (LOCKED): only their light changes. The runes are
+ *                    dress-lakeforest.ts's (userData.stepRunes), drawn again on
+ *                    the steps' own instance matrices.
  *   PLACES WAKE UP   each place gains light and life in steps as its share
  *                    of lessons watched passes about 25, 50 and 75 percent
  *                    (smoke, then a lamp by the landmark's door, then lamps
@@ -63,14 +77,18 @@ import type { QualityTier } from "./quality";
  * (which finds the smoke sources this module adds).
  *
  * Draw calls: 4 in all, wherever the camera is, 5 while a done moment
- * plays. Lantern posts (one InstancedMesh, Lambert), lantern glass (one
- * InstancedMesh, its own shader: a flame core behind the glass, state per
- * instance, the pulse and the run by uniforms), halos (one Points call,
- * additive, <= 64 CSS px), pools of light on the ground (one InstancedMesh,
- * additive; the next lesson's is larger and pulses), and the done moment's
- * bloom, sparks and paper lantern (one Points call, hidden otherwise).
- * Nothing allocates per frame; states are written to the instance attributes
- * only when progress changes.
+ * plays, one more while a lit floating step is in view. Lantern posts (one
+ * InstancedMesh, Lambert), lantern glass (one InstancedMesh, its own shader:
+ * a flame core behind the glass, state per instance, the pulse and the run by
+ * uniforms), halos (one Points call, additive, <= 64 CSS px; the steps' too),
+ * pools of light on the ground (one InstancedMesh, additive; the next
+ * lesson's is larger and pulses), the done moment's bloom, sparks and paper
+ * lantern (one Points call, hidden otherwise), and the steps' lit runes (one
+ * InstancedMesh on the steps' own instance matrices, hidden while none is lit
+ * or next). Nothing allocates per frame; states are written to the instance
+ * attributes only when progress changes. Two things follow motion owned by
+ * blocks.ts, a few floats a frame: the bridge's lanterns its sway, and the
+ * steps' halos the bobbing steps.
  */
 
 // ── Tuning ───────────────────────────────────────────────────────────────────
@@ -96,11 +114,39 @@ const FOLD = 1;
  * A place whose single lanterns would stand closer than this along its walk
  * hangs them in pairs on double posts instead, the posts evenly spaced, each
  * lantern still one lesson (round 4). Lovro called Fundamentals' lanterns
- * "basically next to each other" at 23 apart (Loom, 2:22). Today only AI Ads
- * & Content: 22 lessons on 372 of ground (the floating steps between its two
- * pieces are LOCKED and carry none), 16.9 apart singly, 33.8 in pairs.
+ * "basically next to each other" at 23 apart (Loom, 2:22). Round 4 paired AI
+ * Ads & Content's 22 on its 372 of ground; since the second Loom it has no
+ * lanterns (its lessons light the floating steps), and no place pairs.
  */
 const PAIR_BELOW = 24;
+/**
+ * The rope bridge (second Loom, 5:06 to 5:22: "put these lanterns more spread
+ * out and then some even on the railing of the bridge"): Creative Strategy's
+ * walk runs on from the island's path over the bridge, its lanterns on posts
+ * at the deck's edge, by the hand rope, on BRIDGE_SIDE (+1 right of the way
+ * across), their arms reaching out over the rope so the lanterns hang outside
+ * the railing, clear of the camera walking the deck (LOCKED). BRIDGE_RAIL from
+ * the deck's centre line (the planks reach about 4.85, the hand rope 4.75),
+ * none within BRIDGE_CLEAR of either end (the gate posts and beam).
+ */
+const BRIDGE_SIDE: 1 | -1 = -1;
+const BRIDGE_RAIL = 4.4;
+const BRIDGE_CLEAR = 16;
+/** A bridge lantern's pool of light: on the planks this far in from its post, this wide (the deck is about 9.7). */
+const BRIDGE_POOL_IN = 2.4;
+const BRIDGE_POOL = 6.5;
+/**
+ * A lit floating step's halo (THE FLOATING STEPS): its size (lanterns: their
+ * height x 1.15), set from the slab's middle this far toward the camera, so
+ * the slab never hides it (the slab is about 19 from its middle to its rim).
+ * It is for reading the steps from afar: it fades out as the camera comes
+ * within STEP_HALO_NEAR of a step (gone at the first number, whole at the
+ * second), where the step's own lit runes and rim carry it and a halo would
+ * read as a bead stuck on the stone.
+ */
+const STEP_HALO = 24;
+const STEP_HALO_PUSH = 22;
+const STEP_HALO_NEAR: readonly [number, number] = [90, 220];
 /** A walk is checked every this many units for where a lantern may stand. */
 const WALK_STEP = 2;
 /** No water drawn within this of a lantern (water.ts waterAt: what is drawn, the lake's mirror to its edge, the river, the pool). */
@@ -155,7 +201,8 @@ const LOOK = {
 };
 
 type V3 = [number, number, number];
-type Ground = "land" | "island" | "gate";
+/** What a lantern stands on: the terrain, the Sky Island's flat top, the Gate isle's, or the rope bridge's deck (it sways). */
+type Ground = "land" | "island" | "gate" | "bridge";
 
 /**
  * Where each place's lesson lanterns stand (map review 2026-10-15, item 12;
@@ -190,6 +237,8 @@ interface Walk {
   offset?: number;
   /** The last lantern stands at the walk's end (the last place, whose walk ends at its own landmark; Video Ads II, whose walk stops short of the next place's start); otherwise one spacing short of it. */
   toEnd?: boolean;
+  /** No lanterns: the place's lessons light the floating steps (second Loom; AI Ads & Content). */
+  steps?: boolean;
 }
 
 /** Plan distance from (x, z) to the nearest point of a polyline. */
@@ -358,20 +407,29 @@ function walks(ground: (x: number, z: number) => number): Walk[] {
     },
     // Static Ads: from the jetty's foot along the lake's shore and into the forest to the Great Tree.
     { pieces: [{ pts: pathPts(iJetty, iTree), ground: "land" }] },
-    // AI Ads & Content: from the Great Tree to the floating steps' foot; the
-    // steps carry none (LOCKED); from the island's cove up the path to the
-    // terrace. 372 of ground for 22 lessons: two to a post (PAIR_BELOW).
+    // AI Ads & Content: no lanterns (second Loom, 3:15 to 4:20: "removing them
+    // and making the steps light up instead"); its lessons light the floating
+    // steps (THE FLOATING STEPS). The walk is kept for where it runs: from the
+    // Great Tree to the steps' foot, up the steps, the island's cove to the terrace.
     {
       pieces: [
         { pts: pathPts(iTree, iTree + 1), ground: "land" },
         { pts: [at(iTree + 1), [ISLAND_PATH[0][0], ISLAND_PATH[0][1], ISLAND_PATH[0][2]]], ground: null },
         { pts: ISLAND_PATH.slice(0, 3).map((p) => [p[0], p[1], p[2]] as V3), ground: "island" },
       ],
+      steps: true,
     },
     // Creative Strategy: from the terrace by the observatory along the island's
-    // path past the lookout bench to the rope bridge's head (the bridge and the
-    // bounty isle beyond carry none).
-    { pieces: [{ pts: ISLAND_PATH.slice(2).map((p) => [p[0], p[1], p[2]] as V3), ground: "island" }] },
+    // path past the lookout bench to the rope bridge's head, and on over the
+    // bridge on posts at its railing (second Loom, 5:06 to 5:22), to its far
+    // end at the bounty isle (the isle itself carries none: it is the Ad
+    // Bounty's checkpoint, item 18).
+    {
+      pieces: [
+        { pts: ISLAND_PATH.slice(2).map((p) => [p[0], p[1], p[2]] as V3), ground: "island" },
+        { pts: [[...BRIDGE.a] as V3, [...BRIDGE.b] as V3], ground: "bridge", side: BRIDGE_SIDE, offset: BRIDGE_RAIL },
+      ],
+    },
     // How To Land Clients, the last place: up the causeway from the dock toward
     // the arch, the first by the dock where the airship sets you down, the last
     // by the arch (short of its opening, where the causeway runs through it).
@@ -455,13 +513,12 @@ function stretches(): Stretch[] {
 type WakeItem = { at: number; kind: "lamp"; slot: number } | { at: number; kind: "big"; x: number; z: number } | { at: number; kind: "smoke"; x: number; z: number; rise: number; plume: "column" | "chimney" };
 const WAKE: ReadonlyArray<ReadonlyArray<WakeItem>> = [
   // a1: the campfire (blocks.ts, tagged) burns from progress 0 (log decision
-  // 51: every student starts at 0, and the fire is the Landing's life); a
-  // lamp at 25%, 50% and 75%, the signpost's lamp (dress-shore.ts) at 100%.
-  [
-    { at: 0.25, kind: "lamp", slot: 0 },
-    { at: 0.5, kind: "lamp", slot: 1 },
-    { at: 0.75, kind: "lamp", slot: 2 },
-  ],
+  // 51: every student starts at 0, and the fire is the Landing's life), the
+  // signpost's lamp (dress-shore.ts) at 100%. Second Loom (0:06 to 0:35): no
+  // lamps at 25, 50 and 75%. They stood round the signpost with its first
+  // lesson lantern, the same lantern, so five lights read as lessons bunched
+  // there, and the 75% one stood in the camp's pack (its packs have no footprint).
+  [],
   // a2: smoke from the tents' fire ring, lamps, the lookout's lamp (blocks.ts) at 100%.
   [
     // Final pass B (judge: next to the fire lookout the dense grey column read
@@ -492,13 +549,9 @@ const WAKE: ReadonlyArray<ReadonlyArray<WakeItem>> = [
     { at: 0.75, kind: "lamp", slot: 1 },
     { at: 1, kind: "big", x: 1338, z: -452 },
   ],
-  // a6: lamps into the Great Tree's clearing, the big lamp at its roots.
-  [
-    { at: 0.25, kind: "lamp", slot: 0 },
-    { at: 0.5, kind: "lamp", slot: 1 },
-    { at: 0.75, kind: "lamp", slot: 2 },
-    { at: 1, kind: "big", x: -700, z: -1052 },
-  ],
+  // a6: none (second Loom: no lanterns at AI Ads & Content; its light is the
+  // floating steps'). Its done moment's lamp is over the Great Tree (lampOf).
+  [],
   // a7: lamps by the terrace, the big lamp at the foot of its steps.
   [
     { at: 0.25, kind: "lamp", slot: 0 },
@@ -544,6 +597,21 @@ const LAMP_AT: Partial<Record<number, ReadonlyArray<readonly [number, number]>>>
 function rnd(i: number, s = 0): number {
   const v = Math.sin(i * 127.1 + s * 311.7 + 17.3) * 43758.5453;
   return v - Math.floor(v);
+}
+
+/**
+ * THE FLOATING STEPS (second Loom, 4:09 to 4:16: "22 lessons... I don't know
+ * how many steps. So every two lessons, this can light up"): how many steps
+ * are lit, from the bottom, with `done` of the place's `n` lessons watched.
+ * The steps are fewer than the lessons and more than half of them (20 drawn
+ * for 22 lessons), so the lessons spread evenly over the steps: step i lights
+ * once done reaches (i + 1) x n / steps, rounded up, and the last step lights
+ * with the last lesson. For 22 on 20, every lesson but the 1st and the 12th
+ * lights one more.
+ */
+export function stepsLit(done: number, n: number, steps: number): number {
+  if (!(n > 0) || !(steps > 0)) return 0;
+  return Math.min(steps, Math.max(0, Math.floor((done * steps) / n + 1e-9)));
 }
 
 /** The step 0..4 a place has woken to (4 = every lesson watched). */
@@ -822,6 +890,71 @@ function poolMaterial(): THREE.ShaderMaterial {
 }
 
 /**
+ * Second Loom, THE FLOATING STEPS: a lit step's runes and the chamfer round
+ * its top (its rim), laid over the carved ones (dress-lakeforest.ts) on the
+ * steps' own instance matrices. A lit step's runes take the lanterns' warm
+ * gold and its rim their amber, brightest at the top edge, at the lamp
+ * level; the next step's runes pulse between their carved teal and that
+ * warm (its rim stays stone); the done moment's run flares them in turn up
+ * the stair; all by the glass's state (STATE_GLSL). A dark step draws nothing
+ * here, so its carved runes show as they always did. Opaque and pulled toward
+ * the camera (polygonOffset), so it wins over the carved faces it lies on
+ * whichever draws first.
+ */
+function runeMaterial(): THREE.ShaderMaterial {
+  return new THREE.ShaderMaterial({
+    name: "ProgressStepRunes",
+    uniforms: THREE.UniformsUtils.merge([
+      THREE.UniformsLib.fog,
+      {
+        uTime: { value: 0 },
+        uPulse: { value: 1 },
+        uRunArea: { value: -1 },
+        uRunT: { value: 2 },
+        uLit: { value: new THREE.Color(...LOOK.lamp) },
+        uDark: { value: new THREE.Color(0.16, 0.34, 0.38) },
+        uLevel: { value: 1 },
+      },
+    ]),
+    vertexShader: /* glsl */ `
+      ${STATE_GLSL}
+      attribute float aKind;   // 0 a rune, 1 the rim
+      varying float vOn; varying float vFlare; varying float vRim;
+      #include <fog_pars_vertex>
+      void main() {
+        float flare;
+        vOn = litNow(flare);
+        vFlare = flare;
+        // The rim: 1 at the top's edge (y 3.5), 0 where the chamfer meets the sides (y 2.3).
+        vRim = aKind > 0.5 ? clamp((position.y - 2.3) / 1.2, 0.0, 1.0) : -1.0;
+        vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+        gl_Position = projectionMatrix * mvPosition;
+        // A dark step (and the next one's rim): every vertex off the far plane, so nothing is drawn.
+        if (vOn + vFlare < 0.004 || (aKind > 0.5 && aState > 1.5 && flare < 0.004)) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+        #include <fog_vertex>
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform vec3 uLit; uniform vec3 uDark; uniform float uLevel;
+      varying float vOn; varying float vFlare; varying float vRim;
+      #include <fog_pars_fragment>
+      void main() {
+        // Runes: the glass's warm gold, short of its hot core (which reads white on the teal). The rim: its amber, fading down the chamfer.
+        vec3 lit = vRim < 0.0 ? uLit * vec3(0.92, 1.05, 1.25) : uLit * vec3(0.78, 0.74, 0.8) * (0.4 + 0.6 * vRim);
+        lit *= uLevel * (1.0 + 1.6 * vFlare);
+        gl_FragColor = vec4(mix(uDark, lit, clamp(vOn + vFlare, 0.0, 1.5)), 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`,
+    fog: true,
+    side: THREE.DoubleSide,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -4,
+  });
+}
+
+/**
  * Final pass, the area-done moment's last beat (one Points call, drawn only
  * while it plays): the landmark lamp catches with a warm bloom, a few sparks
  * jump off it, and one paper lantern lifts from it and drifts up into the
@@ -1004,6 +1137,14 @@ interface Lantern {
   set?: [number, number];
   /** A lesson lantern on a double post (PAIR_BELOW): the post's number in its place; both its lanterns stand true on it. */
   post?: number;
+  /**
+   * On the rope bridge: its foot and turn in the bridge's own frame (blocks.ts
+   * RopeBridge_Sway: x along a -> b in plan from a, y up from a's height, z to
+   * the right of the way across), so it sways with the deck; and where its
+   * pool lies on the planks, with the deck's up there. x, y, z and yaw above
+   * are the same with the bridge at rest.
+   */
+  bridge?: { x: number; y: number; z: number; yaw: number; pool: [number, number, number, number, number, number] };
 }
 
 export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
@@ -1019,7 +1160,15 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     return x;
   };
 
-  const groundAt = (ground: Ground, x: number, z: number) => (ground === "island" ? WORLD.islandLevel : ground === "gate" ? WORLD.gateIsle.y : groundY(x, z));
+  const groundAt = (ground: Ground, x: number, z: number) => {
+    if (ground === "island") return WORLD.islandLevel;
+    if (ground === "gate") return WORLD.gateIsle.y;
+    if (ground !== "bridge") return groundY(x, z);
+    // The bridge's deck at rest, where (x, z) is along it.
+    const dx = BRIDGE.b[0] - BRIDGE.a[0];
+    const dz = BRIDGE.b[2] - BRIDGE.a[2];
+    return bridgeDeckAt(((x - BRIDGE.a[0]) * dx + (z - BRIDGE.a[2]) * dz) / (dx * dx + dz * dz));
+  };
   /**
    * May a lantern stand at (x, z)? Clear of every footprint by `pad`; on land
    * also its ground within `level` of the trail's beside it (`ref`), no
@@ -1186,6 +1335,16 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       if (!p.ground) continue;
       const ground = p.ground;
       const off = p.offset ?? w.offset ?? OFFSET;
+      if (ground === "bridge") {
+        // The rope bridge: its deck is clear from end to end; none by the gate posts at either end.
+        const arcs = [0];
+        for (let i = 1; i < p.pts.length; i++) arcs.push(arcs[i - 1] + Math.hypot(p.pts[i][0] - p.pts[i - 1][0], p.pts[i][2] - p.pts[i - 1][2]));
+        const len = arcs[arcs.length - 1];
+        const runs: [number, number][] = len > 2 * BRIDGE_CLEAR ? [[BRIDGE_CLEAR, len - BRIDGE_CLEAR]] : [];
+        out.push({ pts: p.pts, arcs, len, base, ground, side: p.side ?? 1, offset: off, runs });
+        base += len;
+        continue;
+      }
       if (p.wall) {
         // The ladder: along its climb in 3D, on its sections only, clear of each section's foot and top.
         const arcs = [0];
@@ -1262,6 +1421,46 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   /** Per lesson lantern: how far along its walk's room (u) and its ground (s) it stands, and on which piece. */
   const along = new Map<Lantern, { u: number; s: number; piece: number }>();
 
+  /** The rope bridge's own frame (blocks.ts RopeBridge: at BRIDGE.a, turned so +x runs along a -> b in plan). */
+  const BR = (() => {
+    const dx = BRIDGE.b[0] - BRIDGE.a[0];
+    const dz = BRIDGE.b[2] - BRIDGE.a[2];
+    const yaw = Math.atan2(-dz, dx);
+    return { x: BRIDGE.a[0], y: BRIDGE.a[1], z: BRIDGE.a[2], span: Math.hypot(dx, dz), yaw, c: Math.cos(yaw), s: Math.sin(yaw) };
+  })();
+  /**
+   * A lesson lantern at s along the bridge (plan units from its head) on
+   * `side` of the way across: its post on the deck's edge, `off` from the
+   * centre line, its arm reaching out over the hand rope so the lantern hangs
+   * outside the railing, and its pool on the planks in from the post. Posed in
+   * the bridge's frame (it sways with the deck, place() and update()) and at rest.
+   */
+  const bridgeLantern = (s: number, side: number, off: number, h: number, area: number, lesson: number): Lantern => {
+    const u = Math.min(1, Math.max(0, s / BR.span));
+    const deck = bridgeDeckAt(u) - BR.y;
+    const lx = s;
+    const ly = deck - 0.3;
+    const lz = side * off;
+    const lyaw = (-side * Math.PI) / 2;
+    // The deck's slope along the bridge there (it sags 18 at the middle), for the pool's tilt.
+    const u0 = Math.max(0, u - 0.01);
+    const u1 = Math.min(1, u + 0.01);
+    const slope = (bridgeDeckAt(u1) - bridgeDeckAt(u0)) / ((u1 - u0) * BR.span || 1);
+    const nl = Math.hypot(slope, 1);
+    return {
+      x: BR.x + lx * BR.c + lz * BR.s,
+      y: BR.y + ly,
+      z: BR.z - lx * BR.s + lz * BR.c,
+      h,
+      yaw: BR.yaw + lyaw,
+      area,
+      lesson,
+      at: 0,
+      order: 0,
+      bridge: { x: lx, y: ly, z: lz, yaw: lyaw, pool: [lx, deck + 0.05, side * (off - BRIDGE_POOL_IN), -slope / nl, 1 / nl, 0] },
+    };
+  };
+
   /**
    * Place k's n lesson lanterns: evenly spaced over the room its walk has (the
    * stretches beside it where a lantern may stand, end to end), the first at
@@ -1271,6 +1470,11 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   const placeLessons = (k: number, n: number): Lantern[] => {
     const w = WALKS[k];
     const pcs = CHECKED[k];
+    // Second Loom: a place whose lessons light the floating steps puts down no lanterns.
+    if (w.steps) {
+      placed[k] = { room: 0, spacing: 0, first: 0, sides: [], per: 1 };
+      return [];
+    }
     const runs: { pc: number; a: number; b: number; u: number }[] = [];
     let room = 0;
     pcs.forEach((pc, i) => {
@@ -1292,9 +1496,9 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     }
     const evenly = (m: number) => (m > 0 ? (room - first) / (w.toEnd ? Math.max(1, m - 1) : m) : 0);
     // Round 4: closer than PAIR_BELOW one by one, two to a post (never beside the ladder, whose
-    // brackets hold one lantern on the rock). The posts are evenly spaced; lesson 2p hangs toward
-    // the trail on post p, lesson 2p + 1 away from it.
-    const per = n >= 2 && evenly(n) < PAIR_BELOW && !pcs.some((pc) => pc.wall) ? 2 : 1;
+    // brackets hold one lantern on the rock, nor on the rope bridge, whose posts hold one each).
+    // The posts are evenly spaced; lesson 2p hangs toward the trail on post p, lesson 2p + 1 away from it.
+    const per = n >= 2 && evenly(n) < PAIR_BELOW && !pcs.some((pc) => pc.wall || pc.ground === "bridge") ? 2 : 1;
     const spacing = evenly(Math.ceil(n / per));
     placed[k] = { room, spacing, first, sides: pcs.map((pc) => pc.side), per };
     const out: Lantern[] = [];
@@ -1312,6 +1516,13 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       const br = pc.wall ? bracketAt(pc, s, pc.side, pc.offset, LESSON_H) : null;
       if (br) {
         const l: Lantern = { x: br.x, y: br.y, z: br.z, h: LESSON_H, yaw: br.yaw, area: k, lesson: j, at: 0, order: 0, face: br.face };
+        along.set(l, { u, s: pc.base + s, piece: run.pc });
+        out.push(l);
+        continue;
+      }
+      // On the rope bridge: a post at its railing (second Loom), one to a post.
+      if (pc.ground === "bridge") {
+        const l = bridgeLantern(s, pc.side, pc.offset, hj, k, j);
         along.set(l, { u, s: pc.base + s, piece: run.pc });
         out.push(l);
         continue;
@@ -1481,11 +1692,20 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   // a hand-set lamp found its own footprint when the layout was redone and
   // stepped 4 aside. Grass may touch a lantern's foot; cover.ts is sparse there.
 
+  // ── The floating steps (second Loom): the place whose lessons light them, and the steps drawn ──
+  const STEP_AREA = WALKS.findIndex((w) => w.steps);
+  const stepsMesh = (ctx.root ?? scene).getObjectByName("FloatingSteps") as THREE.InstancedMesh | undefined;
+  const nSteps = STEP_AREA >= 0 && stepsMesh?.isInstancedMesh ? Math.max(0, stepsMesh.count) : 0;
+  // The rope bridge's sway group (blocks.ts), which its lanterns follow.
+  const swayObj = (ctx.root ?? scene).getObjectByName("RopeBridge_Sway") ?? null;
+
   // ── Meshes: posts, glass, halos ──
   const { post: postGeo, glass: glassGeo } = lanternGeometry();
   track(postGeo);
   track(glassGeo);
   const CAP = 420;
+  /** The lanterns and lamps fit under this; the steps' halos follow them in the halo arrays. */
+  const LCAP = CAP - nSteps;
   const postMat = track(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
   postMat.name = "ProgressLanternPost";
   const glassMat = track(glassMaterial());
@@ -1547,6 +1767,41 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     fxMat.uniforms.uScale.value = vp.y / (2 * Math.tan((fov * Math.PI) / 360));
     fxMat.uniforms.uMaxPx.value = 120 * renderer.getPixelRatio();
   };
+  // The floating steps' lit runes: one InstancedMesh on the steps' own
+  // instance matrices (the same buffer: blocks.ts settles and bobs the steps,
+  // the runes go with them for nothing), hung under the steps' mesh so the sky
+  // zone hides both together. Its own state per step, the glass's way.
+  const stepState = new Float32Array(Math.max(1, nSteps));
+  const stepRun = new Float32Array(Math.max(1, nSteps) * 2);
+  const stepStateAttr = new THREE.InstancedBufferAttribute(stepState, 1);
+  const stepRunAttr = new THREE.InstancedBufferAttribute(stepRun, 2);
+  let runes: THREE.InstancedMesh | null = null;
+  let runeMat: THREE.ShaderMaterial | null = null;
+  const carved = stepsMesh?.userData.stepRunes as { runes?: Float32Array; rim?: Float32Array } | undefined;
+  const runeData = carved?.runes instanceof Float32Array && carved.rim instanceof Float32Array ? { runes: carved.runes, rim: carved.rim, tris: (carved.runes.length + carved.rim.length) / 9 } : null;
+  if (stepsMesh && nSteps > 0 && runeData && runeData.tris >= 1) {
+    const rg = track(new THREE.BufferGeometry());
+    const pos = new Float32Array(runeData.runes.length + runeData.rim.length);
+    pos.set(runeData.runes, 0);
+    pos.set(runeData.rim, runeData.runes.length);
+    rg.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    // 0 a rune, 1 the chamfer round the top (the rim).
+    const kind = new Float32Array(pos.length / 3);
+    kind.fill(1, runeData.runes.length / 3);
+    rg.setAttribute("aKind", new THREE.Float32BufferAttribute(kind, 1));
+    rg.setAttribute("aState", stepStateAttr);
+    rg.setAttribute("aRun", stepRunAttr);
+    runeMat = track(runeMaterial());
+    runes = new THREE.InstancedMesh(rg, runeMat, nSteps);
+    runes.instanceMatrix = stepsMesh.instanceMatrix;
+    runes.count = nSteps;
+    runes.name = "ProgressStepRunes";
+    if (stepsMesh.boundingSphere) runes.boundingSphere = stepsMesh.boundingSphere.clone();
+    else runes.frustumCulled = false;
+    runes.layers.set(NO_REFLECT_LAYER);
+    runes.visible = false;
+    stepsMesh.add(runes);
+  }
   /** The ground's up direction at (x, z), for laying a pool on a slope. */
   const upAt = (ground: Ground, x: number, z: number, out: THREE.Vector3): THREE.Vector3 => {
     if (ground !== "land") return out.set(0, 1, 0);
@@ -1572,14 +1827,106 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     haloMat.uniforms.uMinPx.value = minCss * renderer.getPixelRatio();
   };
 
+  // ── The rope bridge's lanterns follow its sway (blocks.ts turns RopeBridge_Sway every frame it is in view) ──
+  /** Indices of the lanterns on the bridge (Creative Strategy's last few), refreshed by place(). */
+  let bridgeIdx: number[] = [];
+  const swayQ = new THREE.Quaternion(NaN, 0, 0, 1);
+  const swayM = new THREE.Matrix4();
+  const _bm = new THREE.Matrix4();
+  const _bp = new THREE.Vector3();
+  const _bq = new THREE.Quaternion();
+  const _bs = new THREE.Vector3();
+  const _bn = new THREE.Vector3();
+  const _bY = new THREE.Vector3(0, 1, 0);
+  /** The bridge's frame now: its sway group's world matrix, or the frame at rest without blocks. */
+  const bridgeFrame = (): THREE.Matrix4 => {
+    if (swayObj) {
+      swayObj.updateWorldMatrix(true, false);
+      return swayM.copy(swayObj.matrixWorld);
+    }
+    return swayM.compose(_bp.set(BR.x, BR.y, BR.z), _bq.setFromAxisAngle(_bY, BR.yaw), _bs.set(1, 1, 1));
+  };
+  /** Lantern i on the bridge, posed in `frame`: its post and glass, its halo, its pool on the planks. */
+  const placeOnBridge = (i: number, l: Lantern, frame: THREE.Matrix4) => {
+    const b = l.bridge;
+    if (!b) return;
+    _bm.compose(_bp.set(b.x, b.y, b.z), _bq.setFromAxisAngle(_bY, b.yaw), _bs.setScalar(l.h)).premultiply(frame);
+    posts.setMatrixAt(i, _bm);
+    glass.setMatrixAt(i, _bm);
+    _bp.set(GLASS.x, GLASS.y, 0).applyMatrix4(_bm);
+    haloPos[i * 3] = _bp.x;
+    haloPos[i * 3 + 1] = _bp.y;
+    haloPos[i * 3 + 2] = _bp.z;
+    _bn.set(b.pool[3], b.pool[4], b.pool[5]);
+    _bm.compose(_bp.set(b.pool[0], b.pool[1], b.pool[2]), _bq.setFromUnitVectors(_bY, _bn), _bs.setScalar(BRIDGE_POOL)).premultiply(frame);
+    pools.setMatrixAt(i, _bm);
+  };
+
+  // ── The steps' halos: in the halo arrays after the lanterns, from the bobbing steps' poses ──
+  /** Where the steps' halos start in the halo arrays (place() sets it). */
+  let stepBase = 0;
+  /** Some step is lit or next (apply() sets it): only then do the steps' halos follow them. */
+  let stepsShowing = false;
+  let stepsVer = -1;
+  const stepCam = new THREE.Vector3(Infinity, 0, 0);
+  const _sm = new THREE.Matrix4();
+  const _sp = new THREE.Vector3();
+  const _sc = new THREE.Vector3();
+  /**
+   * Each step's halo: the slab's middle, as blocks.ts poses it now, brought
+   * STEP_HALO_PUSH toward the camera so the slab never hides it. Only when a
+   * step has a light to show and the steps or the camera moved (or `force`).
+   */
+  const placeStepHalos = (force: boolean): boolean => {
+    if (!stepsMesh || nSteps === 0) return false;
+    ctx.camera.getWorldPosition(_sc);
+    const ver = stepsMesh.instanceMatrix.version;
+    if (!force && ver === stepsVer && _sc.distanceToSquared(stepCam) < 1e-6) return false;
+    stepsVer = ver;
+    stepCam.copy(_sc);
+    const a = stepsMesh.instanceMatrix.array as Float32Array;
+    const [n0, n1] = STEP_HALO_NEAR;
+    for (let i = 0; i < nSteps; i++) {
+      _sm.fromArray(a, i * 16).premultiply(stepsMesh.matrixWorld);
+      _sp.set(0, 0.5, 0).applyMatrix4(_sm);
+      const dx = _sc.x - _sp.x;
+      const dy = _sc.y - _sp.y;
+      const dz = _sc.z - _sp.z;
+      const d = Math.hypot(dx, dy, dz) || 1;
+      const k = Math.min(STEP_HALO_PUSH, d * 0.5) / d;
+      const j = (stepBase + i) * 3;
+      haloPos[j] = _sp.x + dx * k;
+      haloPos[j + 1] = _sp.y + dy * k;
+      haloPos[j + 2] = _sp.z + dz * k;
+      // Near the camera the halo fades: a lit one by distance, the next one's pulse off inside the first number.
+      const f = Math.min(1, Math.max(0, (d - n0) / (n1 - n0)));
+      const st = stepState[i];
+      haloState[stepBase + i] = st > 1.5 ? (d < n0 ? 0 : 2) : st * f * f * (3 - 2 * f);
+    }
+    return true;
+  };
+
+  /** place() wrote whole buffers this frame: update() then adds no partial ranges, which would cut that upload short. */
+  let wholeUpload = true;
   const place = () => {
     const o = new THREE.Object3D();
     const po = new THREE.Object3D();
     const up = new THREE.Vector3();
     const Y = new THREE.Vector3(0, 1, 0);
-    const n = Math.min(CAP, lanterns.length);
+    const n = Math.min(LCAP, lanterns.length);
+    const frame = bridgeFrame();
+    bridgeIdx = [];
     for (let i = 0; i < n; i++) {
       const l = lanterns[i];
+      glassRun[i * 2] = haloRun[i * 2] = l.area;
+      glassRun[i * 2 + 1] = haloRun[i * 2 + 1] = l.order;
+      haloSize[i] = l.h * (l.lesson >= 0 ? 1.15 : 1.3);
+      if (l.bridge) {
+        // On the rope bridge: posed in its frame as it sways now (true on the deck, no lean).
+        bridgeIdx.push(i);
+        placeOnBridge(i, l, frame);
+        continue;
+      }
       o.position.set(l.x, l.y, l.z);
       // A slight lean, as old posts have (one set in the rock beside the ladder hangs true, and so
       // does a double post, round 4: its two lanterns share one post, which two leans would split).
@@ -1593,7 +1940,6 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       haloPos[i * 3] = gp.x;
       haloPos[i * 3 + 1] = gp.y;
       haloPos[i * 3 + 2] = gp.z;
-      haloSize[i] = l.h * (l.lesson >= 0 ? 1.15 : 1.3);
       // The pool: on the ground under the glass, tilted to the slope, about a
       // lantern's height across; for one beside the ladder, on the rock behind it.
       if (l.face) {
@@ -1609,11 +1955,22 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       po.scale.setScalar(l.h * (l.lesson >= 0 ? 2.1 : 2.5));
       po.updateMatrix();
       pools.setMatrixAt(i, po.matrix);
-      glassRun[i * 2] = haloRun[i * 2] = l.area;
-      glassRun[i * 2 + 1] = haloRun[i * 2 + 1] = l.order;
     }
+    swayQ.copy(swayObj?.quaternion ?? _bq.identity());
+    // The steps' halos follow the lanterns: their size, and their order up the stair for the done moment's run.
+    stepBase = n;
+    for (let i = 0; i < nSteps; i++) {
+      haloSize[n + i] = STEP_HALO;
+      haloRun[(n + i) * 2] = stepRun[i * 2] = STEP_AREA;
+      haloRun[(n + i) * 2 + 1] = stepRun[i * 2 + 1] = nSteps > 1 ? i / (nSteps - 1) : 1;
+    }
+    placeStepHalos(true);
+    stepRunAttr.needsUpdate = true;
     posts.count = glass.count = pools.count = n;
-    haloGeo.setDrawRange(0, n);
+    haloGeo.setDrawRange(0, n + nSteps);
+    // Whole buffers this time: no part range left from a frame before may cut the upload short.
+    wholeUpload = true;
+    for (const a of [posts.instanceMatrix, glass.instanceMatrix, pools.instanceMatrix, haloPosAttr]) a.clearUpdateRanges();
     posts.instanceMatrix.needsUpdate = true;
     glass.instanceMatrix.needsUpdate = true;
     pools.instanceMatrix.needsUpdate = true;
@@ -1786,7 +2143,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       place();
     }
     pulseIdx = -1;
-    const n = Math.min(CAP, lanterns.length);
+    const n = Math.min(LCAP, lanterns.length);
     for (let i = 0; i < n; i++) {
       const l = lanterns[i];
       let st = 0;
@@ -1802,7 +2159,32 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       }
       glassState[i] = haloState[i] = st;
     }
+    // The floating steps: lit from the bottom (stepsLit), the next one pulsing while the student is in that place.
+    if (nSteps > 0) {
+      const total = counts[STEP_AREA] ?? 0;
+      const done = Math.min(total, Math.max(0, Math.round(p.done[STEP_AREA] ?? 0)));
+      const lit = stepsLit(done, total, nSteps);
+      let any = false;
+      for (let i = 0; i < nSteps; i++) {
+        let st = i < lit ? 1 : 0;
+        if (!st && i === lit && STEP_AREA === p.current && done < total) {
+          st = 2;
+          pulseIdx = stepBase + i;
+        }
+        stepState[i] = st;
+        if (st) any = true;
+      }
+      stepStateAttr.needsUpdate = true;
+      if (runes) runes.visible = any;
+      stepsShowing = any;
+      // Their halos (state faded by distance, and where they are), for the steps and the camera as they are now: whole buffers.
+      placeStepHalos(true);
+      haloPosAttr.clearUpdateRanges();
+      haloPosAttr.needsUpdate = true;
+      wholeUpload = true;
+    }
     glassStateAttr.needsUpdate = true;
+    haloStateAttr.clearUpdateRanges();
     haloStateAttr.needsUpdate = true;
     if (pulseIdx >= 0) pulseSphere.set(new THREE.Vector3(haloPos[pulseIdx * 3], haloPos[pulseIdx * 3 + 1], haloPos[pulseIdx * 3 + 2]), 12);
     for (const s of smokes) s.o.visible = areaShare(p, s.area) >= s.at;
@@ -1834,6 +2216,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     if (Math.abs(level - lastLevel) > 1e-3) {
       lastLevel = level;
       glassMat.uniforms.uLevel.value = level;
+      if (runeMat) runeMat.uniforms.uLevel.value = level;
       haloMat.uniforms.uSize.value = LOOK.haloDay + (LOOK.haloNight - LOOK.haloDay) * night;
       haloMat.uniforms.uAlpha.value = LOOK.haloAlphaDay + (LOOK.haloAlphaNight - LOOK.haloAlphaDay) * night;
       poolMat.uniforms.uAlpha.value = LOOK.poolDay + (LOOK.poolNight - LOOK.poolDay) * night;
@@ -1843,11 +2226,16 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     }
     const t = reduced ? 0 : time;
     glassMat.uniforms.uTime.value = haloMat.uniforms.uTime.value = poolMat.uniforms.uTime.value = t;
+    if (runeMat) runeMat.uniforms.uTime.value = t;
     // The run along an area's lanterns, and the landmark lamp catching at its end.
     if (runArea >= 0) {
       const rt = runT();
       glassMat.uniforms.uRunT.value = haloMat.uniforms.uRunT.value = poolMat.uniforms.uRunT.value = rt;
       glassMat.uniforms.uRunArea.value = haloMat.uniforms.uRunArea.value = poolMat.uniforms.uRunArea.value = runArea;
+      if (runeMat) {
+        runeMat.uniforms.uRunT.value = rt;
+        runeMat.uniforms.uRunArea.value = runArea;
+      }
       if (running && rt >= 1) {
         running = false;
         apply();
@@ -1855,9 +2243,37 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       if (rt > 1.7) {
         runArea = -1;
         glassMat.uniforms.uRunArea.value = haloMat.uniforms.uRunArea.value = poolMat.uniforms.uRunArea.value = -1;
+        if (runeMat) runeMat.uniforms.uRunArea.value = -1;
       }
       changed = true;
     }
+    // The rope bridge's lanterns go with its sway (blocks.ts turns it every frame it is in view): only theirs is written.
+    if (bridgeIdx.length && swayObj && !swayObj.quaternion.equals(swayQ)) {
+      swayQ.copy(swayObj.quaternion);
+      const frame = bridgeFrame();
+      for (const i of bridgeIdx) placeOnBridge(i, lanterns[i], frame);
+      const i0 = bridgeIdx[0];
+      const nb = bridgeIdx[bridgeIdx.length - 1] - i0 + 1;
+      for (const m of [posts, glass, pools]) {
+        if (!wholeUpload) m.instanceMatrix.addUpdateRange(i0 * 16, nb * 16);
+        m.instanceMatrix.needsUpdate = true;
+      }
+      if (!wholeUpload) haloPosAttr.addUpdateRange(i0 * 3, nb * 3);
+      haloPosAttr.needsUpdate = true;
+      changed = true;
+    }
+    // The steps' halos go with the bobbing steps and stay toward the camera, fading near it, while a step shows a light.
+    if (stepsShowing && stepsMesh?.parent?.visible !== false && placeStepHalos(false)) {
+      if (!wholeUpload) {
+        haloPosAttr.addUpdateRange(stepBase * 3, nSteps * 3);
+        haloStateAttr.addUpdateRange(stepBase, nSteps);
+      }
+      haloPosAttr.needsUpdate = true;
+      haloStateAttr.needsUpdate = true;
+      if (pulseIdx >= stepBase) pulseSphere.center.set(haloPos[pulseIdx * 3], haloPos[pulseIdx * 3 + 1], haloPos[pulseIdx * 3 + 2]);
+      changed = true;
+    }
+    wholeUpload = false;
     // The bloom, the sparks and the paper lantern, from the moment the lamp catches.
     if (fxStart >= 0) {
       const ft = clock - fxStart;
@@ -1918,6 +2334,10 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       running = true;
       glassMat.uniforms.uRunT.value = haloMat.uniforms.uRunT.value = poolMat.uniforms.uRunT.value = 0;
       glassMat.uniforms.uRunArea.value = haloMat.uniforms.uRunArea.value = poolMat.uniforms.uRunArea.value = runArea;
+      if (runeMat) {
+        runeMat.uniforms.uRunT.value = 0;
+        runeMat.uniforms.uRunArea.value = runArea;
+      }
       // The last beat starts as the lamp catches. Final pass F: sized and placed
       // from the place's STOP camera, never the camera of the moment (a place
       // finished while the camera was far away made 20 unit lanterns that
@@ -1930,6 +2350,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     setLook(look: Partial<typeof LOOK>) {
       Object.assign(LOOK, look);
       (glassMat.uniforms.uLit.value as THREE.Color).setRGB(...LOOK.lamp);
+      if (runeMat) (runeMat.uniforms.uLit.value as THREE.Color).setRGB(...LOOK.lamp);
       lastLevel = -1;
       dirty = true;
     },
@@ -1943,19 +2364,31 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       posts.dispose();
       glass.dispose();
       pools.dispose();
+      if (runes) {
+        runes.removeFromParent();
+        // The steps' instance matrices are blocks.ts's: three drops an InstancedMesh's
+        // instanceMatrix buffer when the mesh is disposed, so hand it a stand-in first.
+        runes.instanceMatrix = new THREE.InstancedBufferAttribute(new Float32Array(16), 16);
+        runes.dispose();
+      }
       for (const d of disposables) d.dispose();
     },
     stats() {
       const lesson = lanterns.filter((l) => l.lesson >= 0);
       const perArea = counts.map((_, k) => lesson.filter((l) => l.area === k).length);
       return {
-        triangles: Math.round((postGeo.getAttribute("position").count / 3 + 12) * Math.min(CAP, lanterns.length)),
-        instances: Math.min(CAP, lanterns.length),
+        triangles: Math.round((postGeo.getAttribute("position").count / 3 + 12) * Math.min(LCAP, lanterns.length) + (runes && runeData ? runeData.tris * nSteps : 0)),
+        instances: Math.min(LCAP, lanterns.length),
         lessonLanterns: lesson.length,
         placeLamps: lanterns.length - lesson.length,
         perArea: perArea.join(","),
         wanted: counts.join(","),
-        calls: fx.visible ? 5 : 4,
+        // Second Loom: the place whose lessons light the floating steps (1-based, 0 for none), how many steps, how many lit.
+        stepsPlace: STEP_AREA + 1,
+        steps: nSteps,
+        stepsLit: stepState.slice(0, nSteps).reduce((m, s) => m + (s === 1 ? 1 : 0), 0),
+        bridgeLanterns: bridgeIdx.length,
+        calls: 4 + (fx.visible ? 1 : 0) + (runes?.visible ? 1 : 0),
         tagged: tagged.map((t) => `${t.o.name}@a${t.tag.place + 1}:${t.tag.at}`).join(","),
         smokes: smokes.length,
         pulse: pulseIdx,
@@ -1970,7 +2403,11 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
      * stands, and how far it is from the trail's centre line there (beside the
      * ladder: from its centre line, measured across the face, with where its
      * post's top and its glass are, for the test's rock check). And every
-     * place lamp, with the spot it was set at by hand, if it was.
+     * place lamp, with the spot it was set at by hand, if it was. Second Loom:
+     * a lantern on the rope bridge says so (bridge: its post's height over the
+     * deck there and the hand rope's), and `steps` is the floating steps: the
+     * place whose lessons light them (0-based), how many are drawn, its
+     * lesson count, and the mesh whose aState holds each step's light.
      */
     lanternLayout() {
       /** Across the face from the ladder's centre line, at the section the lantern's glass is level with. */
@@ -2002,13 +2439,17 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
             const c = Math.cos(l.yaw);
             const sn = -Math.sin(l.yaw);
             const wall = { post: [r2(l.x), r2(l.y + 0.84 * l.h), r2(l.z)], glass: [r2(l.x + c * GLASS.x * l.h), r2(l.y + GLASS.y * l.h), r2(l.z + sn * GLASS.x * l.h)], back: [r2(l.x + c * (GLASS.x - GLASS.w * 0.55) * l.h), r2(l.y + (GLASS.y - GLASS.h / 2) * l.h), r2(l.z + sn * (GLASS.x - GLASS.w * 0.55) * l.h)] };
-            return [{ i, area: l.area, lesson: l.lesson, x: r2(l.x), y: r2(l.y), z: r2(l.z), u: r2(a.u), s: r2(a.s), piece: a.piece, trail: r2(beside(pc.wall, l)), glass: wall.glass, wall, post: l.post ?? null }];
+            return [{ i, area: l.area, lesson: l.lesson, x: r2(l.x), y: r2(l.y), z: r2(l.z), u: r2(a.u), s: r2(a.s), piece: a.piece, trail: r2(beside(pc.wall, l)), glass: wall.glass, wall, post: l.post ?? null, bridge: null }];
           }
           // Round 3: where its glass hangs (the tests look for it from the place's views).
           const glass = [r2(l.x + Math.cos(l.yaw) * GLASS.x * l.h), r2(l.y + GLASS.y * l.h), r2(l.z - Math.sin(l.yaw) * GLASS.x * l.h)];
-          return [{ i, area: l.area, lesson: l.lesson, x: r2(l.x), y: r2(l.y), z: r2(l.z), u: r2(a.u), s: r2(a.s), piece: a.piece, trail: r2(trailGap(pc.pts, l.x, l.z)), glass, post: l.post ?? null }];
+          // On the rope bridge (at rest): the post's top over the deck, and the hand rope's height there (dress-sky.ts handAt).
+          const bu = l.bridge ? Math.min(1, Math.max(0, l.bridge.x / BR.span)) : 0;
+          const bridge = l.bridge ? { postTop: r2(0.84 * l.h - 0.3), handRope: r2(7 + 4.5 * (1 - 4 * bu * (1 - bu))), outside: r2(Math.abs(l.bridge.z) + GLASS.x * l.h) } : null;
+          return [{ i, area: l.area, lesson: l.lesson, x: r2(l.x), y: r2(l.y), z: r2(l.z), u: r2(a.u), s: r2(a.s), piece: a.piece, trail: r2(trailGap(pc.pts, l.x, l.z)), glass, post: l.post ?? null, bridge }];
         }),
         lamps: lanterns.flatMap((l, i) => (l.lesson >= 0 ? [] : [{ i, area: l.area, at: l.at, x: r2(l.x), z: r2(l.z), set: l.set ?? null }])),
+        steps: { place: STEP_AREA, count: nSteps, lessons: STEP_AREA >= 0 ? (counts[STEP_AREA] ?? 0) : 0, mesh: runes ? runes.name : null },
       };
     },
   };

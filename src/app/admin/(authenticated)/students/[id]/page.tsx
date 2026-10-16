@@ -15,6 +15,7 @@ import type {
 import { getDayNumber } from "@/types/database";
 import {
   LESSON_TYPE_LABELS,
+  isWhopNoneFinishedNote,
   progressPercent,
 } from "@/lib/constants";
 import { completedLessonIdsFor } from "@/lib/progress";
@@ -386,20 +387,37 @@ export default function StudentDetailPage() {
             />
           </div>
 
-          {whopSync?.last_sync_error && (
-            <div
-              style={{
-                padding: "8px 10px",
-                borderRadius: 8,
-                background: "rgba(200,74,74,0.08)",
-                fontSize: 12,
-                color: "var(--color-danger)",
-                marginBottom: 10,
-              }}
-            >
-              <strong>Last error:</strong> {whopSync.last_sync_error}
-            </div>
-          )}
+          {whopSync?.last_sync_error &&
+            (isWhopNoneFinishedNote(whopSync.last_sync_error) ? (
+              // Lessons opened on Whop and none finished: the backfill's
+              // note, not a failure, so it is not shown as one.
+              <div
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  background: "var(--color-bg-elevated)",
+                  fontSize: 12,
+                  color: "var(--color-text-secondary)",
+                  marginBottom: 10,
+                }}
+              >
+                <strong>Note:</strong> {whopSync.last_sync_error} (lessons
+                opened on Whop, none finished yet).
+              </div>
+            ) : (
+              <div
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  background: "rgba(200,74,74,0.08)",
+                  fontSize: 12,
+                  color: "var(--color-danger)",
+                  marginBottom: 10,
+                }}
+              >
+                <strong>Last error:</strong> {whopSync.last_sync_error}
+              </div>
+            ))}
 
           {whopSync?.last_sync_unmatched &&
             whopSync.last_sync_unmatched.length > 0 && (

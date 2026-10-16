@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 import { syncWatchProgress } from './_gen/watch-sync.ts'
 import { POST as visit } from './_gen/refresh-watch-sync-route.ts'
 import { FakeDb, useDb, setWhop, steps } from './_gen/stub-server.ts'
+import { whopNoneFinishedNote, isWhopNoneFinishedNote } from './_gen/constants.ts'
 
 let pass = 0
 const fails = []
@@ -84,6 +85,26 @@ console.log('\n=== "Whop returned 0" is a plain zero ===')
   const row = syncRow(db)
   ok(row.last_sync_error === 'Whop returned 2 interactions but 0 marked completed' && row.last_sync_fetched === 2,
      'lessons opened on Whop and none finished: the note is kept, word for word', show(row.last_sync_error))
+  ok(row.last_sync_error === whopNoneFinishedNote(2) && isWhopNoneFinishedNote(row.last_sync_error),
+     'written from constants.ts, whose isWhopNoneFinishedNote tells it from a failure')
+}
+{
+  // The admin student page shows that note plainly and keeps red for failures
+  // (second Loom round). The page is a client component, so its branch is
+  // checked in the source; the rule it calls is run here.
+  ok(!isWhopNoneFinishedNote('Lessons read failed: canceling statement due to statement timeout')
+     && !isWhopNoneFinishedNote('Upsert failed: permission denied') && !isWhopNoneFinishedNote(null)
+     && !isWhopNoneFinishedNote(`${whopNoneFinishedNote(2)}, and then the read failed`),
+     'a real failure, or the note with more after it, is not the note')
+  const page = read('../src/app/admin/(authenticated)/students/[id]/page.tsx')
+  const asked = page.indexOf('isWhopNoneFinishedNote(whopSync.last_sync_error) ?')
+  const note = page.indexOf('<strong>Note:</strong>', asked)
+  const error = page.indexOf('<strong>Last error:</strong>', note)
+  // The note's box is styled between the check and "Note:"; the error's box between "Note:" and "Last error:".
+  ok(asked > 0 && note > asked && error > note
+     && !page.slice(asked, note).includes('var(--color-danger)') && page.slice(note, error).includes('var(--color-danger)'),
+     'the admin student page: the note under "Note:" in plain colours, every other value under "Last error:" in red, as before',
+     `at ${asked}, ${note}, ${error}`)
 }
 
 console.log('\n=== Only rows actually added count as new ===')

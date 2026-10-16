@@ -39,6 +39,12 @@ export interface StudyArea {
   sample: readonly string[];
   /** Zero-based indices of the action items (the milestone diamonds). */
   actions: readonly number[];
+  /**
+   * Zero-based indices of the lessons the student can't finish in the app yet
+   * (a watch lesson with no video, map-model.ts): "Not recorded yet" where
+   * Watch would be. Absent: none (the fixture).
+   */
+  unrecorded?: readonly number[];
   /** A feature row outside the lesson count (the Ad Bounty isle). */
   feature?: { key: "bounty_access"; title: string };
 }

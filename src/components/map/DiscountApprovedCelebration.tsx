@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { motion, AnimatePresence, MotionConfig, useReducedMotion } from "framer-motion";
 import { SPEC_EASE } from "@/lib/motion";
 
 interface DiscountApprovedCelebrationProps {
@@ -9,6 +9,16 @@ interface DiscountApprovedCelebrationProps {
   show: boolean;
   onDismiss: () => void;
 }
+
+/** A finger, not a mouse: the closing line says tap. */
+const COARSE_QUERY = "(pointer: coarse)";
+const subscribeCoarse = (cb: () => void) => {
+  const m = window.matchMedia(COARSE_QUERY);
+  m.addEventListener("change", cb);
+  return () => m.removeEventListener("change", cb);
+};
+const getCoarse = () => window.matchMedia(COARSE_QUERY).matches;
+const getFalse = () => false;
 
 /**
  * Full-screen celebration that fires once when the team approves the
@@ -25,162 +35,195 @@ interface DiscountApprovedCelebrationProps {
  *   0.1  Big "30% OFF" springs up
  *   0.4  Eyebrow "Discount approved" fades in
  *   0.7  Subtitle explainer
- *   1.5  "Click anywhere to continue" prompt
+ *   1.5  how to close it: "Click anywhere or press Esc to close" ("Tap
+ *        anywhere to close" on a touch screen)
  *   5.0s safety net auto-dismiss
+ *
+ * 2026-10-16 (map review, Lovro's second Loom): the hero stays on one line
+ * down to a 320 px phone (its size follows the screen's width, 88 px at
+ * most); under prefers-reduced-motion nothing springs, grows or slides: the
+ * fades stay, and nothing starts small (MotionConfig reducedMotion="user"
+ * alone made the spring instant, but the hero still showed at half size for
+ * two frames, then jumped); Esc closes it, before anything under it hears
+ * the key; the closing line is readable (it was 20% white) and says how.
  */
 export function DiscountApprovedCelebration({
   show,
   onDismiss,
 }: DiscountApprovedCelebrationProps) {
-  const [visible, setVisible] = useState(false);
+  /** Closed by a click, Esc or the safety net; the exit animation then calls onDismiss. */
+  const [closed, setClosed] = useState(false);
+  // A new `show` starts open again (set while rendering, as React's docs adjust state to a prop).
+  const [shownBefore, setShownBefore] = useState(show);
+  if (show !== shownBefore) {
+    setShownBefore(show);
+    if (show) setClosed(false);
+  }
+  const visible = show && !closed;
+  const touch = useSyncExternalStore(subscribeCoarse, getCoarse, getFalse);
+  /** prefers-reduced-motion: the fades only, every scale and rise left out. */
+  const still = useReducedMotion() === true;
 
   useEffect(() => {
-    if (!show) {
-      setVisible(false);
-      return;
-    }
-    setVisible(true);
-    const t = window.setTimeout(() => setVisible(false), 5000);
-    return () => window.clearTimeout(t);
-  }, [show]);
+    if (!visible) return;
+    const t = window.setTimeout(() => setClosed(true), 5000);
+    // Esc is the celebration's while it is up: the map under it (an open
+    // place, the checkpoint) does not hear it.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setClosed(true);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.clearTimeout(t);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [visible]);
 
   function handleAnimationComplete() {
     if (!visible) onDismiss();
   }
 
   function handleClick() {
-    setVisible(false);
+    setClosed(true);
   }
 
   if (!show) return null;
 
   return (
-    <AnimatePresence onExitComplete={handleAnimationComplete}>
-      {visible && (
-        <motion.div
-          key="discount-celebration"
-          role="dialog"
-          aria-modal="true"
-          aria-label="30% discount approved"
-          onClick={handleClick}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.25, ease: SPEC_EASE }}
-          className="fixed inset-0 z-[200] flex items-center justify-center"
-          style={{
-            background:
-              "radial-gradient(ellipse at center, rgba(8,12,22,0.78) 0%, rgba(4,8,16,0.92) 100%)",
-            backdropFilter: "blur(14px) saturate(140%)",
-            WebkitBackdropFilter: "blur(14px) saturate(140%)",
-            cursor: "pointer",
-          }}
-        >
+    <MotionConfig reducedMotion="user">
+      <AnimatePresence onExitComplete={handleAnimationComplete}>
+        {visible && (
           <motion.div
-            initial={{ scale: 0.6, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            exit={{ scale: 0.92, opacity: 0 }}
-            transition={{
-              type: "spring",
-              stiffness: 220,
-              damping: 18,
-              mass: 0.9,
+            key="discount-celebration"
+            role="dialog"
+            aria-modal="true"
+            aria-label="30% discount approved"
+            onClick={handleClick}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25, ease: SPEC_EASE }}
+            className="fixed inset-0 z-[200] flex items-center justify-center"
+            style={{
+              background:
+                "radial-gradient(ellipse at center, rgba(8,12,22,0.78) 0%, rgba(4,8,16,0.92) 100%)",
+              backdropFilter: "blur(14px) saturate(140%)",
+              WebkitBackdropFilter: "blur(14px) saturate(140%)",
+              cursor: "pointer",
             }}
-            className="flex flex-col items-center"
-            style={{ position: "relative" }}
           >
-            {/* Soft warm halo behind the 30% */}
-            <div
-              aria-hidden="true"
-              style={{
-                position: "absolute",
-                top: -40,
-                width: 360,
-                height: 360,
-                borderRadius: "50%",
-                background:
-                  "radial-gradient(circle, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.04) 40%, rgba(255,255,255,0) 70%)",
-                pointerEvents: "none",
-                filter: "blur(12px)",
-              }}
-            />
-
-            {/* Big "30% OFF" hero */}
             <motion.div
-              initial={{ scale: 0.5 }}
-              animate={{ scale: 1 }}
+              initial={still ? { opacity: 0 } : { scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={still ? { opacity: 0 } : { scale: 0.92, opacity: 0 }}
               transition={{
                 type: "spring",
-                stiffness: 200,
-                damping: 14,
-                delay: 0.1,
+                stiffness: 220,
+                damping: 18,
+                mass: 0.9,
               }}
-              style={{
-                fontSize: 88,
-                fontWeight: 700,
-                letterSpacing: "-0.045em",
-                lineHeight: 1,
-                color: "#FFFFFF",
-                marginBottom: 28,
-                fontVariantNumeric: "tabular-nums",
-                textShadow: "0 0 60px rgba(255, 255, 255, 0.28)",
-              }}
+              className="flex flex-col items-center"
+              // Off the screen's edges on a phone, where the explainer would otherwise touch them.
+              style={{ position: "relative", padding: "0 24px", maxWidth: "100%" }}
             >
-              30% OFF
+              {/* Soft warm halo behind the 30% */}
+              <div
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  top: -40,
+                  width: 360,
+                  height: 360,
+                  borderRadius: "50%",
+                  background:
+                    "radial-gradient(circle, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.04) 40%, rgba(255,255,255,0) 70%)",
+                  pointerEvents: "none",
+                  filter: "blur(12px)",
+                }}
+              />
+
+              {/* Big "30% OFF" hero: one line at any width, 88 px from a 440 px screen up */}
+              <motion.div
+                initial={still ? false : { scale: 0.5 }}
+                animate={{ scale: 1 }}
+                transition={{
+                  type: "spring",
+                  stiffness: 200,
+                  damping: 14,
+                  delay: 0.1,
+                }}
+                style={{
+                  fontSize: "clamp(48px, 20vw, 88px)",
+                  fontWeight: 700,
+                  letterSpacing: "-0.045em",
+                  lineHeight: 1,
+                  whiteSpace: "nowrap",
+                  color: "#FFFFFF",
+                  marginBottom: 28,
+                  fontVariantNumeric: "tabular-nums",
+                  textShadow: "0 0 60px rgba(255, 255, 255, 0.28)",
+                }}
+              >
+                30% OFF
+              </motion.div>
+
+              <motion.p
+                initial={{ opacity: 0, y: still ? 0 : 14 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45, delay: 0.4, ease: SPEC_EASE }}
+                style={{
+                  fontSize: 14,
+                  fontWeight: 500,
+                  letterSpacing: "0.04em",
+                  textTransform: "uppercase",
+                  color: "rgba(255, 255, 255, 0.65)",
+                  marginBottom: 18,
+                }}
+              >
+                Discount approved
+              </motion.p>
+
+              <motion.p
+                initial={{ opacity: 0, y: still ? 0 : 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.55, delay: 0.7, ease: SPEC_EASE }}
+                style={{
+                  fontSize: 16,
+                  fontWeight: 500,
+                  letterSpacing: "-0.011em",
+                  color: "rgba(255, 255, 255, 0.85)",
+                  maxWidth: 420,
+                  textAlign: "center",
+                  lineHeight: 1.5,
+                }}
+              >
+                Our team has applied the 30% discount to your
+                subscription. You&rsquo;ll see it on your next Whop
+                renewal. Nothing else to do.
+              </motion.p>
+
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.5, delay: 1.5 }}
+                style={{
+                  fontSize: 13,
+                  fontWeight: 500,
+                  letterSpacing: "-0.005em",
+                  color: "rgba(255, 255, 255, 0.62)",
+                  textAlign: "center",
+                  marginTop: 36,
+                }}
+              >
+                {touch ? "Tap anywhere to close" : "Click anywhere or press Esc to close"}
+              </motion.p>
             </motion.div>
-
-            <motion.p
-              initial={{ opacity: 0, y: 14 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.45, delay: 0.4, ease: SPEC_EASE }}
-              style={{
-                fontSize: 14,
-                fontWeight: 500,
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
-                color: "rgba(255, 255, 255, 0.65)",
-                marginBottom: 18,
-              }}
-            >
-              Discount approved
-            </motion.p>
-
-            <motion.p
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, delay: 0.7, ease: SPEC_EASE }}
-              style={{
-                fontSize: 16,
-                fontWeight: 500,
-                letterSpacing: "-0.011em",
-                color: "rgba(255, 255, 255, 0.85)",
-                maxWidth: 420,
-                textAlign: "center",
-                lineHeight: 1.5,
-              }}
-            >
-              Our team has applied the 30% discount to your
-              subscription. You&rsquo;ll see it on your next Whop
-              renewal. Nothing else to do.
-            </motion.p>
-
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 0.5 }}
-              transition={{ duration: 0.5, delay: 1.5 }}
-              style={{
-                fontSize: 12,
-                fontWeight: 500,
-                letterSpacing: "-0.005em",
-                color: "rgba(255, 255, 255, 0.4)",
-                marginTop: 36,
-              }}
-            >
-              Click anywhere to continue
-            </motion.p>
           </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+        )}
+      </AnimatePresence>
+    </MotionConfig>
   );
 }

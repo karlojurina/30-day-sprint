@@ -3,13 +3,15 @@
  *
  *   node world-tests/v6-discount.mjs [--only 1,3]
  *
- * Runs against http://localhost:3111/dev/world-app?catalog=course, which must
- * already be up (this script never starts a server). The harness of
- * v6-course.mjs: the real stage, map, place route and lesson page, a pretend
- * student, no login, no server call. The student's discount comes from
- * ?discount=<preset> (src/app/dev/world-app/fixtureDiscount.tsx): the
- * offer's states in memory, Apply resolving in memory. Headless Chrome on the
- * real GPU, 1691x1278. About 3 minutes.
+ * Runs against http://localhost:3111/dev/world-app?catalog=course (row 18:
+ * the plain page, the placeholder course), which must already be up (this
+ * script never starts a server). The harness of v6-course.mjs: the real
+ * stage, map, place route and lesson page, a pretend student, no login, no
+ * server call. The student's discount comes from ?discount=<preset>
+ * (src/app/dev/world-app/fixtureDiscount.tsx; without it, a first payment 3
+ * days ago): the offer's states in memory, Apply resolving in memory.
+ * Headless Chrome on the real GPU, 1691x1278 unless a row says otherwise.
+ * About 5 minutes.
  *
  * One PASS or FAIL line per row, with what was measured. Every row loads its
  * own page in its own browser context. After the rows, one MEASURED line:
@@ -22,8 +24,9 @@
  *      with its notch is gone); the timeline has its tag between the 4th and
  *      5th places' diamonds, saying "30% off" and outlined (locked)
  *   2  the checkpoint in the world: from the rail point that frames it the
- *      cache's marker is up as a plaque ("30% off", the days), on screen; the
- *      cache is closed (no video watched, not at Video Ads II)
+ *      cache's marker is up as a plaque ("30% off" alone since 2026-10-16: its
+ *      "11d" read as "110"), on screen; the cache is closed (no video watched,
+ *      not at Video Ads II)
  *   3  the marker opens the panel (a real mouse click on the plaque): the
  *      camera parks at the cache, the panel says the deadline, how many
  *      videos to watch, the videos watched and left (no time estimate and no
@@ -49,8 +52,13 @@
  *      the panel turns to "in review", the chip too, the cache is claimed
  *   9  pending and approved say so; a student in Video Ads II (locked, ?p=mid)
  *      sees the cache's lantern lit (near)
- *  10  closed for the student: expired, before the new course, and no first
- *      payment on record show no chip, no tag and no marker
+ *  10  closed for the student (expired, before the new course, no first
+ *      payment on record): since Lovro's second Loom (2026-10-16, "clickable
+ *      at all times") the chip, the tag and the marker show, grey, and the
+ *      chip opens the panel, which says why in one line, "Closed" in its
+ *      eyebrow, and has no Apply; with no first payment (his case) the marker
+ *      is a plaque in the world, "30% off Closed", and a real click on it
+ *      opens the panel
  *  11  the questions one at a time: "1 of 6", a required one holds Next
  *      until it is answered, an optional one says so and can be left, Back
  *      keeps what was chosen; the answers sent are exactly the ones given
@@ -64,6 +72,27 @@
  *  15  phone (390x844): the chip opens the checkpoint, Apply opens the form as
  *      a full sheet, the numbers in two rows of five, every target at least
  *      40 px; sent, the checkpoint says in review
+ *  16  applied (?discount=applied): the chip and the plaque say "Yours", the
+ *      tag is done, the cache claimed; the panel says it is on the Whop
+ *      subscription, no Apply
+ *  17  rejected (?discount=rejected): the chip says "Not approved", the tag
+ *      is closed; the panel says the team did not approve it, gives the
+ *      team's reason and where to ask, no Apply
+ *  18  the plain page, as Lovro reviewed it in his second Loom (the
+ *      placeholder course, no ?discount): the pretend student paid 3 days ago,
+ *      so the chip, the tag and the marker show; the marker opens the panel,
+ *      Apply greyed; the offer's videos marked watched (the three the dev
+ *      videos give), it turns ready and Apply is on
+ *  19  phone (390x844): the 30% is a row under Video Ads II's, in the same
+ *      list item (the eight places keep their rows), there locked and closed,
+ *      at least 40 px tall, saying where it stands; it opens the checkpoint's
+ *      sheet
+ *  20  the approved celebration on a 360 px phone: "30% OFF" on one line,
+ *      inside the screen; it says how to close it ("Tap anywhere to close"
+ *      with touch, "Click anywhere or press Esc to close" without); Esc
+ *      closes it and the checkpoint open under it stays open; under
+ *      prefers-reduced-motion its "30% OFF" never springs (scale 1 on every
+ *      frame), where without it the spring starts small
  *
  * Pictures for a person, in world-tests/shots/v6/discount/ (git-ignored):
  *   world-passing.png     the cache from the passing camera (row 2)
@@ -81,6 +110,14 @@
  *   form-phone.png        the questions as a phone's sheet, 390x844 (row 15)
  *   form-phone-choice.png a choice question on the phone (row 15)
  *   panel-phone-pending.png the phone's checkpoint after sending (row 15)
+ *   panel-<preset>.png    the panel, closed: expired, before-launch,
+ *                         no-payment (row 10); applied, rejected (rows 16, 17)
+ *   world-closed.png      the closed plaque in the world, no first payment (row 10)
+ *   plain-world.png       the plain page at the cache, the plaque up (row 18)
+ *   plain-ready.png       the plain page's panel once its videos are watched (row 18)
+ *   phone-row-<preset>.png the phone's row under Video Ads II (row 19)
+ *   phone-sheet-<preset>.png its sheet (row 19)
+ *   celebration-360.png   the approved celebration on a 360 px phone (row 20)
  *
  * What a row reads:
  *   hooks      window.__worldReady, __worldFrame, __worldScrollFor(depth),
@@ -155,6 +192,12 @@ const APPLY = () => {
     cursor: cs.cursor,
     focused: document.activeElement === b,
   }
+}
+
+/** The panel's eyebrow, part by part: "Checkpoint", "after Video Ads II", then the state's word when it has one (rows 10, 16, 17). */
+const EYEBROW = () => {
+  const p = document.getElementById('cp-panel-title')?.previousElementSibling
+  return p ? [...p.children].map((c) => c.textContent.replace(/\s+/g, ' ').trim()).filter(Boolean) : null
 }
 
 /** What a press on the locked Apply could have set off (row 7). */
@@ -441,6 +484,8 @@ async function runRow(id, name, body) {
   const r = {
     row,
     open: (params, sub) => openPage(ctx, row, url(params, sub)),
+    /** A page by its own address (row 18: the plain page, no ?catalog). */
+    openPath: (urlPath) => openPage(ctx, row, urlPath),
     check: (what, ok, value) => {
       row.checks.push({ what, ok: !!ok, value })
       if (!ok) row.pass = false
@@ -502,7 +547,7 @@ try {
     const s = await page.evaluate(SNAP)
     r.row.values.depth = depth
     r.check('the marker is a plaque, on screen', s.marker?.mode === 'text' && s.cp?.marker?.visible && s.marker.box.l > 0 && s.marker.box.r < DESKTOP.width, s.marker)
-    r.check('the plaque says 30% off and the days (11d)', /30% off/i.test(s.marker?.label ?? '') && /11d/i.test(s.marker?.label ?? ''), s.marker?.label)
+    r.check('the plaque says 30% off alone (the chip has the days; "11d" read as "110")', /^30% off$/i.test(s.marker?.label ?? ''), s.marker?.label)
     r.check('the camera passes on the rail (not parked)', s.park?.id === null, s.park)
     await page.screenshot({ path: path.join(OUT, 'world-passing.png') })
     await crop(page, 'marker-label.png', s.marker?.box ? { ...s.marker.box, b: s.marker.box.b + 60, h: s.marker.box.h + 60 } : null, 40)
@@ -699,13 +744,40 @@ try {
     r.check('locked at Video Ads II (?p=mid): the lantern is lit (near)', s.cp?.look === 'near', s.cp)
   })
 
-  await runRow(10, 'closed for the student: expired, before the new course, no first payment: no chip, tag or marker', async (r) => {
-    for (const params of [{ discount: 'expired' }, { discount: 'before-launch' }, {}]) {
-      const page = await r.open(params)
-      const s = await page.evaluate(SNAP)
-      const name = params.discount ?? 'no ?discount'
-      r.check(`${name}: no chip, nothing of the offer in the header, no tag`, s.chip === null && s.chipState === null && s.tag === null, { chip: s.chip, chipState: s.chipState, tag: s.tag })
-      r.check(`${name}: the checkpoint does not show and the cache stands closed`, s.cp?.shown === false && s.cp?.look === 'closed' && (s.marker === null || s.marker.mode === 'hidden'), s.cp)
+  await runRow(10, 'closed for the student (expired, before the new course, no first payment): the chip, the tag and the marker show, grey; the panel says why, with no Apply', async (r) => {
+    for (const [preset, why] of [
+      ['expired', /This offer closed on \w{3} \d{1,2} \w{3}\. It runs for your first 14 days\./],
+      ['before-launch', /This offer is for students who joined from 9 October 2026, when the new course opened\. You joined before that, so it's closed for you\./],
+      ['no-payment', /We can't see your first payment yet\. If you joined in the last two weeks, tell the team and they'll sort it out\./],
+    ]) {
+      const page = await r.open({ discount: preset })
+      let s = await page.evaluate(SNAP)
+      r.check(`${preset}: the chip says 30% off, Closed, and carries the closed state`, /^30% off\s*Closed$/i.test(s.chip?.text ?? '') && s.chipState === 'closed', { chip: s.chip, chipState: s.chipState })
+      r.check(`${preset}: the tag is there, "30% off", closed`, s.tag?.state === 'closed' && /^30% off$/i.test(s.tag.text), s.tag)
+      r.check(`${preset}: the checkpoint shows, the cache stands closed, its marker is there in the closed look`, s.cp?.shown === true && s.cp.look === 'closed' && s.marker?.state === 'closed', { cp: s.cp, marker: s.marker })
+      const via = await click(page, FIND.chip, `row 10 (${preset}): the chip`)
+      await parked(page, `row 10 (${preset})`)
+      s = await page.evaluate(SNAP)
+      r.check(`${preset}: the chip opens the panel, the camera parked at the cache`, s.panel?.title === '30% off your next month' && s.park?.id === 'checkpoint', { via, panel: s.panel?.title, park: s.park })
+      r.check(`${preset}: it says why, in one plain line`, why.test(s.panel?.text ?? ''), s.panel?.text)
+      const eyebrow = await page.evaluate(EYEBROW)
+      r.check(`${preset}: its eyebrow ends "Closed"`, eyebrow?.at(-1) === 'Closed', eyebrow)
+      r.check(`${preset}: no Apply (it can no longer be earned)`, (await page.evaluate(FIND.apply)) === null)
+      await page.screenshot({ path: path.join(OUT, `panel-${preset}.png`) })
+      if (preset === 'no-payment') {
+        // Lovro's case in his second Loom: no first payment on the plain page, and the cache took no click.
+        await page.keyboard.press('Escape')
+        await home(page, 'row 10 (no-payment)')
+        const depth = await page.evaluate(() => window.__worldCheckpoint().depth)
+        await railTo(page, depth, 'row 10')
+        await waitFor(page, () => document.querySelector('main button[data-mode][data-cp]')?.dataset.mode === 'text', { timeout: 8000, what: 'row 10: the closed marker did not become a plaque' })
+        const m = (await page.evaluate(SNAP)).marker
+        r.check('no-payment: in the world the marker is a plaque, "30% off Closed", on screen', /^30% off\s*Closed$/i.test(m?.label ?? '') && m.box.l > 0 && m.box.r < DESKTOP.width, m)
+        await page.screenshot({ path: path.join(OUT, 'world-closed.png') })
+        const via2 = await click(page, () => document.querySelector('main button[data-mode][data-cp]')?.lastElementChild, 'row 10: the closed plaque')
+        await parked(page, 'row 10 (the plaque)')
+        r.check('no-payment: a real click on the plaque opens the panel', via2 === 'mouse' && (await page.evaluate(SNAP)).panel?.title === '30% off your next month', via2)
+      }
       await page.close()
     }
   })
@@ -852,6 +924,214 @@ try {
     } finally {
       await ctx.close().catch(() => {})
     }
+  })
+
+  for (const [id, preset, chipWord, tagState, look, words] of [
+    [16, 'applied', 'Yours', 'done', 'claimed', /It's on your Whop subscription\. You'll see 30% off on your next renewal\./],
+    [17, 'rejected', 'Not approved', 'closed', 'closed', /The team didn't approve this one\.\s*Several of the videos were skipped through in under a minute\.\s*If you think that's wrong, ask in Discord and the team will sort it out\./],
+  ]) {
+    await runRow(id, `${preset}: the chip and the tag say where it stands, the panel says what happened, no Apply`, async (r) => {
+      const page = await r.open({ discount: preset })
+      let s = await page.evaluate(SNAP)
+      r.check(`the chip says 30% off, ${chipWord}`, new RegExp(`^30% off\\s*${chipWord}$`, 'i').test(s.chip?.text ?? ''), s.chip)
+      r.check(`the tag is ${tagState}, the cache ${look}`, s.tag?.state === tagState && s.cp?.look === look, { tag: s.tag, cp: s.cp })
+      await page.evaluate(() => window.__worldPark('checkpoint'))
+      await parked(page, `row ${id}`)
+      s = await page.evaluate(SNAP)
+      r.check('the panel says what happened', words.test(s.panel?.text ?? ''), s.panel?.text)
+      const eyebrow = await page.evaluate(EYEBROW)
+      r.check(`its eyebrow ends "${chipWord}"`, eyebrow?.at(-1) === chipWord, eyebrow)
+      r.check('no Apply', (await page.evaluate(FIND.apply)) === null)
+      await page.screenshot({ path: path.join(OUT, `panel-${preset}.png`) })
+    })
+  }
+
+  await runRow(18, 'the plain page as Lovro reviewed it (no ?catalog, no ?discount): the 30% shows and opens; its videos watched, Apply turns on', async (r) => {
+    const page = await r.openPath(`${APP}?arrive=0&poster=off`)
+    let s = await page.evaluate(SNAP)
+    const dev = await page.evaluate(() => document.querySelector('[data-dev-videos]')?.getAttribute('data-dev-videos') ?? null)
+    r.row.values.devVideos = dev
+    // The placeholder course asks only for its lessons with a video: the three the dev videos give (a2l01 to a2l03). Without them it has none, and says so.
+    r.check('the chip shows with no parameter: a first payment 3 days ago', dev ? /^30% off\s*11 days left$/i.test(s.chip?.text ?? '') : /^30% off\s*Not open yet$/i.test(s.chip?.text ?? ''), { chip: s.chip, dev })
+    const [a4, a5] = [s.stops[3], s.stops[4]]
+    const mid = s.tag ? (s.tag.box.l + s.tag.box.r) / 2 : NaN
+    r.check('the tag stands between the 4th and 5th diamonds (Video Ads II and Static Ads)', !!s.tag && mid > (a4.l + a4.r) / 2 + 8 && mid < (a5.l + a5.r) / 2 - 8, { tag: s.tag, a4, a5 })
+    const depth = await page.evaluate(() => window.__worldCheckpoint().depth)
+    await railTo(page, depth, 'row 18')
+    await waitFor(page, () => document.querySelector('main button[data-mode][data-cp]')?.dataset.mode === 'text', { timeout: 8000, what: 'row 18: the marker did not become a plaque' })
+    s = await page.evaluate(SNAP)
+    r.check('at the cache the marker is a plaque, "30% off", on screen', /^30% off$/i.test(s.marker?.label ?? '') && s.marker.box.l > 0 && s.marker.box.r < DESKTOP.width, s.marker)
+    await page.screenshot({ path: path.join(OUT, 'plain-world.png') })
+    const via = await click(page, () => document.querySelector('main button[data-mode][data-cp]')?.lastElementChild, 'row 18: the plaque')
+    await parked(page, 'row 18')
+    s = await page.evaluate(SNAP)
+    r.check('a real click on the plaque opens the panel', via === 'mouse' && s.panel?.title === '30% off your next month', { via, panel: s.panel?.title })
+    if (!dev) {
+      r.check('without the dev videos: the panel says the offer is not open yet', /This offer isn't open yet\./.test(s.panel?.text ?? ''), s.panel?.text)
+      return
+    }
+    let a = await page.evaluate(APPLY)
+    r.check('locked: 0 of 3 videos, Apply greyed out with its reason', /0 of 3 videos/.test(s.panel?.text ?? '') && a?.ariaDisabled === 'true' && a.title === 'Watch all 3 videos to apply', { text: s.panel?.text, apply: a })
+    await page.evaluate(() => ['a2l01', 'a2l02', 'a2l03'].forEach((id) => window.__fixture.complete(id)))
+    await waitFor(page, () => /Every video through Video Ads II is watched/.test(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.textContent ?? ''), { timeout: 5000, what: 'row 18: the panel did not turn ready' })
+    await sleep(400)
+    a = await page.evaluate(APPLY)
+    s = await page.evaluate(SNAP)
+    r.check('the three watched: ready, Apply on (no aria-disabled, filled), the chip says to apply', a?.ariaDisabled === null && a.filled && /Apply/.test(s.chip?.text ?? ''), { apply: a, chip: s.chip })
+    await page.screenshot({ path: path.join(OUT, 'plain-ready.png') })
+  })
+
+  await runRow(19, "phone (390x844): the 30% is a row under Video Ads II's, locked and closed, and opens the checkpoint's sheet", async (r) => {
+    for (const [preset, state, says] of [
+      ['locked', /11 days left/i, /Watch all \d+ videos through Video Ads II/],
+      ['no-payment', /Closed/, /We can't see your first payment yet/],
+    ]) {
+      const ctx = await browser.createBrowserContext()
+      try {
+        const page = await openPhone(ctx, r.row, url({ discount: preset }))
+        const list = await page.evaluate(() => {
+          const items = [...(document.querySelector('main ol')?.children ?? [])]
+          return {
+            places: items.map((li) => li.querySelector('button')?.getAttribute('aria-label') ?? null),
+            cp: items.map((li, i) => (li.querySelector('button[aria-label^="Discount checkpoint"]') ? i : -1)).filter((i) => i >= 0),
+          }
+        })
+        r.check(`${preset}: the eight places keep their rows (each item's first button)`, list.places.length === 8 && list.places.every((l) => !!l && !/^Discount checkpoint/.test(l)), list.places)
+        r.check(`${preset}: the 30%'s row sits in Video Ads II's item`, list.cp.length === 1 && list.cp[0] === 3 && /^Video Ads II/.test(list.places[3] ?? ''), list)
+        // Scrolled to the middle first, then measured: the list may scroll smoothly.
+        await page.evaluate(() => document.querySelector('main ol > li > button[aria-label^="Discount checkpoint"]')?.scrollIntoView({ block: 'center' }))
+        await sleep(700)
+        const row = await page.evaluate(() => {
+          const b = document.querySelector('main ol > li > button[aria-label^="Discount checkpoint"]')
+          const x = b?.getBoundingClientRect()
+          return x ? { l: Math.round(x.left), t: Math.round(x.top), r: Math.round(x.right), b: Math.round(x.bottom), w: Math.round(x.width), h: Math.round(x.height), sy: Math.round(scrollY), text: b.textContent.replace(/\s+/g, ' ').trim() } : null
+        })
+        r.check(`${preset}: the row says 30% off, Checkpoint and where it stands; at least 40 px tall, inside the screen`, !!row && /^30% off/i.test(row.text) && /Checkpoint/i.test(row.text) && state.test(row.text) && row.h >= 40 && row.l >= 0 && row.r <= PHONE.width, row)
+        if (row) {
+          // The clip is in the page's coordinates (the scroll added) when nothing beyond the viewport is captured.
+          const top = Math.max(0, row.t - 90)
+          await page.screenshot({ path: path.join(OUT, `phone-row-${preset}.png`), clip: { x: 0, y: row.sy + top, width: PHONE.width, height: Math.min(PHONE.height - top, row.h + 180) }, captureBeyondViewport: false })
+        }
+        const via = await click(page, () => document.querySelector('main ol > li > button[aria-label^="Discount checkpoint"]'), `row 19 (${preset}): the row`)
+        await waitFor(page, () => !!document.querySelector('main section[role="dialog"][aria-labelledby="cp-panel-title"]'), { timeout: 8000, what: `row 19 (${preset}): no sheet` })
+        await sleep(500)
+        const sheet = await page.evaluate(() => document.querySelector('main section[role="dialog"][aria-labelledby="cp-panel-title"]')?.textContent.replace(/\s+/g, ' ').trim() ?? null)
+        r.check(`${preset}: it opens the checkpoint's sheet, which says where the student stands`, via === 'mouse' && /30% off your next month/.test(sheet ?? '') && says.test(sheet ?? ''), { via, sheet })
+        r.check(`${preset}: Apply ${preset === 'locked' ? 'greyed out' : 'not there'}`, preset === 'locked' ? (await page.evaluate(APPLY))?.ariaDisabled === 'true' : (await page.evaluate(FIND.apply)) === null)
+        await page.screenshot({ path: path.join(OUT, `phone-sheet-${preset}.png`) })
+      } finally {
+        await ctx.close().catch(() => {})
+      }
+    }
+  })
+
+  await runRow(20, 'the approved celebration on a 360 px phone: one line, says how to close it; Esc closes it and only it; reduced motion: no spring', async (r) => {
+    const VP = { width: 360, height: 740 }
+    const DIALOG = '[role="dialog"][aria-label="30% discount approved"]'
+    /**
+     * The hero's scale on each of the first frames it is up, from the page's
+     * first byte: read after each frame is painted (a task after the frame's
+     * callbacks), so what is read is what was on screen.
+     */
+    const recorder = (sel) => {
+      window.__heroScales = []
+      const seen = new WeakSet()
+      new MutationObserver(() => {
+        const d = document.querySelector(sel)
+        if (!d || seen.has(d)) return
+        seen.add(d)
+        const hero = [...d.querySelectorAll('div')].find((x) => x.textContent.trim() === '30% OFF')
+        let n = 0
+        const tick = () =>
+          requestAnimationFrame(() =>
+            setTimeout(() => {
+              const m = /^matrix\(([^,]+),/.exec(hero ? getComputedStyle(hero).transform : 'none')
+              window.__heroScales.push(m ? Number(m[1]) : 1)
+              if (++n < 12) tick()
+            }, 0),
+          )
+        tick()
+      }).observe(document, { subtree: true, childList: true })
+    }
+    /** The hero's line boxes and box, and the closing line's words. */
+    const LOOK = (sel) => {
+      const d = document.querySelector(sel)
+      const hero = d && [...d.querySelectorAll('div')].find((x) => x.textContent.trim() === '30% OFF')
+      if (!hero) return null
+      const range = document.createRange()
+      range.selectNodeContents(hero)
+      const lines = new Set([...range.getClientRects()].map((x) => Math.round(x.top))).size
+      const b = hero.getBoundingClientRect()
+      const ps = [...d.querySelectorAll('p')].map((p) => p.textContent.replace(/\s+/g, ' ').trim())
+      return { lines, l: Math.round(b.left), r: Math.round(b.right), fontSize: getComputedStyle(hero).fontSize, close: ps.at(-1) ?? null, overflow: document.documentElement.scrollWidth > innerWidth }
+    }
+    // The dashboard's test event shows it (WorldCelebrations hears it too) once the page is up, so
+    // its 5 s safety net cannot run out while the page loads; it records nothing.
+    const fire = (page) => page.evaluate(() => window.dispatchEvent(new Event('et:test:discount-approved')))
+    for (const reduced of [false, true]) {
+      const name = reduced ? 'reduced motion' : 'motion on'
+      const ctx = await browser.createBrowserContext()
+      try {
+        const page = await ctx.newPage()
+        tally.pages++
+        page.on('pageerror', (e) => {
+          const rec = { row: r.row.id, message: `${String(e.message).slice(0, 240)}` }
+          r.row.pageErrors.push(rec)
+          tally.pageErrors.push(rec)
+        })
+        await page.setViewport({ ...VP, deviceScaleFactor: 1, hasTouch: true, isMobile: true })
+        if (reduced) await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }])
+        await page.evaluateOnNewDocument(recorder, DIALOG)
+        await page.goto(ORIGIN + url({ discount: 'locked' }), { waitUntil: 'domcontentloaded', timeout: READY_MS })
+        await waitFor(page, () => document.querySelector('main[data-view="list"] header button[aria-label*="discount checkpoint"]') !== null, { timeout: READY_MS, poll: 400, what: `row 20 (${name}): the phone's map was not ready` })
+        await sleep(600)
+        await fire(page)
+        await waitFor(page, (sel) => !!document.querySelector(sel), { arg: DIALOG, timeout: 4000, what: `row 20 (${name}): the test event showed no celebration` })
+        await sleep(1900)
+        const look = await page.evaluate(LOOK, DIALOG)
+        const scales = await page.evaluate(() => window.__heroScales.slice())
+        r.row.values[name] = { look, scales }
+        r.check(`${name}: "30% OFF" on one line, inside the 360 px screen, nothing runs off it sideways`, look?.lines === 1 && look.l >= 0 && look.r <= VP.width && !look.overflow, look)
+        r.check(`${name}: on a touch screen it says "Tap anywhere to close"`, look?.close === 'Tap anywhere to close', look?.close)
+        if (reduced) r.check('reduced motion: "30% OFF" never springs (scale 1 on every frame it is up)', scales.length > 0 && scales.every((x) => Math.abs(x - 1) < 1e-3), scales)
+        else r.check('motion on: the spring starts small (the control for the reduced run)', scales.length > 0 && Math.min(...scales) < 0.9, scales)
+        if (!reduced) await page.screenshot({ path: path.join(OUT, 'celebration-360.png') })
+        await page.keyboard.press('Escape')
+        await waitFor(page, (sel) => !document.querySelector(sel), { arg: DIALOG, timeout: 4000, what: `row 20: Esc did not close it (${name})` })
+      } finally {
+        await ctx.close().catch(() => {})
+      }
+    }
+    // A mouse: the words say click or Esc, and Esc reaches the celebration only (the checkpoint open under it stays).
+    const page = await r.open({ discount: 'locked' })
+    await page.evaluate(() => window.__worldPark('checkpoint'))
+    await parked(page, 'row 20')
+    // Where the map hears Esc (a listener on the window, after the page's own): what reaches it is counted.
+    await page.evaluate(() => {
+      window.__escHeard = 0
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') window.__escHeard++
+      })
+    })
+    await fire(page)
+    await waitFor(page, (sel) => !!document.querySelector(sel), { arg: DIALOG, timeout: 4000, what: 'row 20: the test event showed no celebration on the desktop' })
+    await sleep(1900)
+    const look = await page.evaluate(LOOK, DIALOG)
+    r.check('with a mouse it says "Click anywhere or press Esc to close"', look?.close === 'Click anywhere or press Esc to close', look?.close)
+    await page.keyboard.press('Escape')
+    await waitFor(page, (sel) => !document.querySelector(sel), { arg: DIALOG, timeout: 4000, what: 'row 20: Esc did not close the celebration' })
+    await sleep(800)
+    const after = await page.evaluate(() => ({
+      heard: window.__escHeard,
+      cp: window.__worldCheckpoint(),
+      panel: !!document.querySelector('main section[aria-labelledby="cp-panel-title"]'),
+      park: window.__worldFrame ? { id: window.__worldFrame.parkedId, p: window.__worldFrame.parkProgress } : null,
+    }))
+    r.check('Esc closed the celebration only: no Esc reached the map, whose checkpoint is still open, not closing, the camera still parked', after.heard === 0 && after.panel && after.cp?.open === true && after.cp.closing === false && after.park?.id === 'checkpoint', after)
+    // The control: with the celebration gone, the same key reaches the map and closes the checkpoint.
+    await page.keyboard.press('Escape')
+    await home(page, 'row 20 (the control)')
+    r.check('the control: the next Esc, with nothing over the map, reaches it and closes the checkpoint', (await page.evaluate(() => window.__escHeard)) === 1, await page.evaluate(() => window.__escHeard))
   })
 } finally {
   await browser.close()

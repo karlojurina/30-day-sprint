@@ -22,8 +22,9 @@
  * Fundamentals done, 4 of Video Ads I watched: the lanterns v6-perf.mjs sees
  * lit), the checkpoint closed, quality tier 0.
  *
- * HOW. Positions are v6-perf.mjs's: the 8 stops and v6-strip.mjs's strip keys,
- * through each world's own rail. At each one, R rounds, each measuring the
+ * HOW. Positions are v6-perf.mjs's: the 8 stops, v6-strip.mjs's strip keys and
+ * the vh positions (vh1160, the descent into the magical forest), through each
+ * world's own rail. At each one, R rounds, each measuring the
  * base's page then the working tree's (the other way round on odd rounds),
  * each measurement v6-perf.mjs's route burst: pixel ratio 1.5, 8 renders, 5
  * times, the fastest. A page is brought to the front and seeded again before
@@ -44,7 +45,8 @@
  * turn, so the numbers are a comparison; v6-perf.mjs still gives the frame
  * time against the art bible's budget (section 3.1).
  *
- * Output: shots/v6/perf-ab/ab-<base>-<w>x<h>@<dpr>.json and .txt. Exit 1 when slower.
+ * Output: shots/v6/perf-ab/ab-<base>-<w>x<h>@<dpr>.json and .txt (PERF_OUT=dir moves it
+ * and the working copies). Exit 1 when slower.
  * About 7 minutes for the whole route.
  */
 import puppeteer from "puppeteer-core";
@@ -56,7 +58,9 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.join(HERE, "..");
-const OUT = path.join(HERE, "shots", "v6", "perf-ab");
+// PERF_OUT moves the whole working folder (its copies of both worlds included), as in
+// v6-perf.mjs, so two runs at once never write over each other.
+const OUT = process.env.PERF_OUT ? path.resolve(process.env.PERF_OUT) : path.join(HERE, "shots", "v6", "perf-ab");
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const HOST = "perf-ab.test";
 const W = 1691, H = 1278, DPR = 1.5;
@@ -257,6 +261,9 @@ async function openWorld(browser, v, errors) {
   return page;
 }
 
+/** v6-perf.mjs's positions in vh of scroll: 1160, the descent into the magical forest (second Loom, 2026-10-16). */
+const VH_FRAMES = [[1160, "1160 vh, down to the forest"]];
+
 async function positionsOf(page) {
   const n = await page.evaluate(() => window.__ab.keyCount());
   const stops = await page.evaluate(() => window.__ab.stops());
@@ -266,6 +273,8 @@ async function positionsOf(page) {
   for (const [, k, label] of m ? m[1].matchAll(/\[\s*(-?[\d.]+)\s*,\s*"([^"]*)"/g) : []) {
     out.push({ id: `k${k}`, label, depth: await page.evaluate((k, n) => window.__ab.depthForKey(k, n), Number(k), n) });
   }
+  // v6-perf.mjs's vh positions, through each world's own scroll budget.
+  for (const [vh, label] of VH_FRAMES) out.push({ id: `vh${vh}`, label, depth: await page.evaluate((vh) => vh / window.__worldV6Debug.debugRail().totalVh(), vh) });
   return out;
 }
 

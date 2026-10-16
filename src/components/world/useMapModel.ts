@@ -1,9 +1,17 @@
 "use client";
 
-import { useMemo } from "react";
+import { createContext, useContext, useMemo } from "react";
 import { useStudent } from "@/contexts/StudentContext";
 import { buildMapModel, type MapModel } from "@/lib/world/map-model";
 import { useWorldCatalog } from "@/lib/world/useWorldCatalog";
+
+/**
+ * Development harness only: every lesson can be finished here, video or not
+ * (the placeholder course of /dev/world-app, whose lesson page has a "Mark
+ * watched (dev)" button), so the map passes none over (map-model.ts). The app
+ * never provides it.
+ */
+export const AnyLessonFinishesContext = createContext(false);
 
 /**
  * Whether the world has something to show, read the same way by the map's
@@ -30,10 +38,11 @@ export type ReadyMapModel = Extract<MapModel, { ok: true }>;
 export function useMapModel(): { status: MapStatus; model: ReadyMapModel | null } {
   const { areas, lessonsByArea, loading, loadError } = useWorldCatalog();
   const { completedLessonIds } = useStudent();
+  const anyLessonFinishes = useContext(AnyLessonFinishesContext);
 
   const model = useMemo(
-    () => buildMapModel({ areas, lessonsByArea, completedLessonIds }),
-    [areas, lessonsByArea, completedLessonIds],
+    () => buildMapModel({ areas, lessonsByArea, completedLessonIds, anyLessonFinishes }),
+    [areas, lessonsByArea, completedLessonIds, anyLessonFinishes],
   );
 
   if (loading) return { status: "loading", model: null };

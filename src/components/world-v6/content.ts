@@ -31,7 +31,8 @@ export interface WorldContent {
 export const FIXTURE_CONTENT: WorldContent = {
   areas: STUDY_AREAS,
   total: TOTAL_LESSONS,
-  minutes: lessonMinutes,
+  // The fixture's action items are milestones with no length of their own.
+  minutes: (k, i) => (isAction(STUDY_AREAS[k], i) ? null : lessonMinutes(k, i)),
   isDone: null,
   onFeature: null,
 };
@@ -65,17 +66,28 @@ export function lessonLength(c: WorldContent, k: number, i: number): string | nu
   return m === null ? null : `${m} min`;
 }
 
-/** Total minutes of a place's watch lessons; null when any of them is not known. */
+/**
+ * Total minutes of a place: every watch lesson's, and an action item's when the
+ * catalog has its length (a watch action item with a video; a hand-in alone
+ * has none). null when a watch lesson's is not known.
+ */
 export function placeMinutes(c: WorldContent, k: number): number | null {
   const a = c.areas[k];
   let m = 0;
   for (let i = 0; i < a.lessons; i++) {
-    if (isAction(a, i)) continue;
     const one = c.minutes(k, i);
-    if (one === null) return null;
+    if (one === null) {
+      if (isAction(a, i)) continue;
+      return null;
+    }
     m += one;
   }
   return m;
+}
+
+/** Lesson i of a place can't be finished in the app yet: "Not recorded yet" where Watch would be. */
+export function notRecorded(a: StudyArea, i: number): boolean {
+  return a.unrecorded?.includes(i) ?? false;
 }
 
 /**

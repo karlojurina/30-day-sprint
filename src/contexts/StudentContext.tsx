@@ -243,11 +243,6 @@ export interface StudentContextType {
   submitDiscountFeedback: (
     answers: DiscountFeedbackAnswer[],
   ) => Promise<string | null>;
-  refreshWatchProgress: () => Promise<{
-    synced: number;
-    message: string;
-    reAuth?: boolean;
-  }>;
 
   // Sync debug — last sync result + a forced (un-throttled) re-run
   syncDiagnostics: SyncDiagnostics;
@@ -1421,57 +1416,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     [refreshFromServer]
   );
 
-  const refreshWatchProgress = useCallback(async () => {
-    if (!student) return { synced: 0, message: "Not logged in" };
-
-    const token = await getAccessToken();
-    if (!token) return { synced: 0, message: "Session expired" };
-
-    try {
-      const res = await fetch("/api/student/refresh-watch-sync", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!res.ok) {
-        const err = await res
-          .json()
-          .catch(() => ({ error: "Unknown error", reAuth: false }));
-        return {
-          synced: 0,
-          message: err.error || "Sync failed",
-          reAuth: Boolean(err.reAuth),
-        };
-      }
-
-      const data = await res.json();
-
-      const dataRes = await fetch("/api/student/data", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (dataRes.ok) {
-        const fresh = await dataRes.json();
-        setLessons(fresh.lessons);
-        setRegions(fresh.regions ?? []);
-        setCompletions(fresh.completions);
-      }
-
-      const synced = data.syncedCount ?? 0;
-      const fetched = data.fetchedCount ?? 0;
-      let message: string;
-      if (synced > 0) {
-        message = `Synced ${synced} lesson${synced === 1 ? "" : "s"} from Whop.`;
-      } else if (fetched > 0) {
-        message = `Found ${fetched} completion${fetched === 1 ? "" : "s"} on Whop, but none matched a lesson in the app.`;
-      } else {
-        message = "All up to date.";
-      }
-      return { synced, message };
-    } catch {
-      return { synced: 0, message: "Network error" };
-    }
-  }, [student]);
-
   // v50.5 - claimBountyAccess removed. Bounty Access is no longer
   // self-claimable from l057; students apply via Tally form and the
   // webhook (/api/webhooks/adbounty) is the SOLE source of
@@ -1877,7 +1821,6 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         markWatched,
         catalogSuffix,
         loadError,
-        refreshWatchProgress,
         syncDiagnostics,
         forceSync,
       }}

@@ -21,6 +21,7 @@ import {
   contentOf,
   lessonDone,
   lessonLength,
+  notRecorded,
   placeMinutes,
   progressOf,
   useContent,
@@ -128,8 +129,12 @@ import s from "./world.module.css";
  * (its own park pose; no stop and no scroll budget on the rail), the scroll
  * locks as for a place, Esc and Back come home. A place opening gives way to
  * nothing: the checkpoint's panel closes into it. What shows comes from
- * checkpointView.ts; the cache's look goes to the scene (setCheckpoint). With
- * no discount on the source none of it shows and the cache stands closed.
+ * checkpointView.ts; the cache's look goes to the scene (setCheckpoint). It
+ * shows for every student and state (Lovro's second Loom, 2026-10-16:
+ * "clickable at all times"): where the offer is closed for the student the
+ * panel says why, and Apply is there, greyed out, only while it can still be
+ * earned. On phones it is a row under Video Ads II's. With no discount on
+ * the source none of it shows and the cache stands closed.
  *
  * THE AD BOUNTY CHECKPOINT (map review 2026-10-15, plan item 18). "How To Win
  * On The Ad Bounty Program" is a lesson outside the count (the feature row of
@@ -378,7 +383,7 @@ type Dir = "none" | "fwd" | "back";
  * `corner`: the host's group at the header's right end, the brand alone at the
  * left (2026-10-15, Lovro's review): the student's streak, achievements, the
  * Playbook and Sign out (src/components/world/WorldCorner.tsx). The map calls
- * it with its discount segment (null when the offer shows nothing), which the
+ * it with its discount segment (null without a discount on the source), which the
  * group puts after the achievements, and with whether the checkpoint's panel
  * is up (open and not closing), which closes the achievements list as a place
  * opening does. It is laid out by its own stylesheet, which reads this root's
@@ -486,7 +491,8 @@ function WorldV6View({
     () => (discount ? checkpointView(discount.state, discount.now, study.place, CHECKPOINT.after) : null),
     [discount, study.place],
   );
-  const cpShown = cpView?.shown ?? false;
+  // Shown for every student and state once the source knows the discount (Lovro's second Loom, 2026-10-16).
+  const cpShown = cpView !== null;
   const cpLook: CheckpointLook = cpView?.look ?? "closed";
   /** The Ad Bounty's one lesson (plan item 18): its checkpoint shows whenever the course has it. */
   const bounty = useMemo(() => bountyOf(source, areas), [source, areas]);
@@ -625,6 +631,10 @@ function WorldV6View({
     cpKind: "discount" as Cp,
     /** The Ad Bounty's page was opened by its address with no checkpoint panel under it: the checkpoint opens once the page closes (reconcile). */
     bountySeed: false,
+    /** The phone list has been up since the scene last ran (a resize under 760 px): the next scene starts where the student was. */
+    fromList: false,
+    /** The camera's rail depth when the 3D last gave way to the list; -1 when it never did. */
+    listDepth: -1,
   });
 
   useEffect(() => {
@@ -1474,12 +1484,13 @@ function WorldV6View({
     const cpPl: Placement = { x: 0, y: 0, side: "l", d: "", overlap: 0 };
     const box: Box = { l: 0, t: 0, r: 0, b: 0 };
     /** Final pass: the other places' plaques on screen, which the card keeps off (cardPlace avoid);
-     *  and the Ad Bounty's, which shows across the island from Creative Strategy's stop. */
+     *  the Ad Bounty's, which shows across the island from Creative Strategy's stop; and the
+     *  30%'s, which shows for every student since 2026-10-16. */
     const avoidBoxes: Box[] = [];
     const plaquesBesides = (k: number): Box[] => {
       avoidBoxes.length = 0;
       for (let j = 0; j <= BT; j++) {
-        if (j === k || j === CP) continue;
+        if (j === k) continue;
         const el = markerRefs.current[j];
         const label = labelRefs.current[j];
         if (!el || !label || el.dataset.mode !== "text") continue;
@@ -2051,6 +2062,21 @@ function WorldV6View({
       // The tuning may have moved on while the world was building.
       applyTuning(sc, tuningRef.current, studyRef.current);
       writeRide();
+      // Back from the phone list (the window widened past 760 px): the camera
+      // where it was when the list took over, or at the student's place when
+      // the page opened narrow. The list's own scroll means nothing here.
+      if (u.fromList) {
+        u.fromList = false;
+        const home = u.listDepth >= 0 ? u.listDepth : sc.depthFor(STUDY_AREAS[Math.min(studyRef.current.place, N - 1)].id);
+        if (u.open >= 0 && u.savedDepth < 0) {
+          // A place opened on the list: it closes onto that depth too.
+          u.savedDepth = home;
+          u.savedMax = -1;
+        } else if (u.open < 0 && !u.cp && Number.isFinite(home)) {
+          window.scrollTo({ top: Math.round(sc.scrollYForDepth(home)), left: 0, behavior: "instant" });
+          sc.seedDepth(home);
+        }
+      }
       if (u.open >= 0 && u.savedDepth >= 0) {
         // Made while a place is open (back from the list view): start at the depth saved on open.
         sc.seedDepth(u.savedDepth);
@@ -2339,6 +2365,29 @@ function WorldV6View({
     if (view === "list") harness().__worldView = "list";
   }, [view]);
 
+  // ── Between the 3D map and the phone list (a resize across 760 px). The list
+  // opens at its top, whatever the page scroll was on the map. Leaving the 3D,
+  // the camera's depth is kept (the last frame, read before the scene effect's
+  // own clean-up empties it), and the next scene starts there (above).
+  useLayoutEffect(() => {
+    const u = ui.current;
+    if (view === "list") {
+      u.fromList = true;
+      // A place left open keeps its depth for the way back; on the list its scroll is the top.
+      if (u.locked) {
+        u.savedY = 0;
+        u.savedMax = -1;
+      }
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      return;
+    }
+    if (view !== "world") return;
+    return () => {
+      const f = lastFrame.current;
+      if (f) u.listDepth = f.depth;
+    };
+  }, [view]);
+
   // ── Pause when the tab is hidden: a background rAF loop still burns battery.
   useEffect(() => {
     if (view !== "world") return;
@@ -2587,11 +2636,12 @@ function WorldV6View({
 
   /**
    * The checkpoints on the timeline, each a tag between the place it follows
-   * and the next: the discount's while it shows, and the Ad Bounty's after
-   * Creative Strategy (plan item 18), always.
+   * and the next: the discount's whenever the source knows it (every state
+   * since 2026-10-16), and the Ad Bounty's after Creative Strategy (plan item
+   * 18), always.
    */
   const gates: Gate[] = [];
-  if (cpView?.shown) {
+  if (cpView) {
     gates.push({
       key: "discount",
       after: CHECKPOINT.after,
@@ -2599,7 +2649,7 @@ function WorldV6View({
       glyph: "tag",
       // "30% off", never "30%" alone: on a progress bar that reads as how far along.
       text: cpView.label.lead,
-      tip: { lead: cpView.label.lead, tail: cpView.chip?.tail ?? cpView.label.tail },
+      tip: { lead: cpView.label.lead, tail: cpView.chip.tail },
       label: cpAria(cpView),
       ref: cpTagRef,
       open: openCheckpoint,
@@ -2619,8 +2669,8 @@ function WorldV6View({
     });
   }
 
-  /** The discount in the header's group: the offer and where it stands, one click to its panel. Null when the header shows nothing of it. */
-  const discountSeg = cpView?.chip ? (
+  /** The discount in the header's group: the offer and where it stands, one click to its panel. Null without a discount on the source. */
+  const discountSeg = cpView ? (
     <button
       type="button"
       className={s.cpChip}
@@ -2775,14 +2825,17 @@ function WorldV6View({
                     <PlaceCount k={place} done={study.done[place]} short />
                   </span>
                 </span>
-                <button
-                  type="button"
-                  className={`${s.primary} ${s.primarySm}`}
-                  onClick={(e) => watch(place, study.placeNext, e.currentTarget)}
-                >
-                  <Play />
-                  Watch
-                </button>
+                {/* No Watch when every lesson left has no video yet (map-model.ts): the arrow still goes there. */}
+                {!notRecorded(placeArea, study.placeNext) && (
+                  <button
+                    type="button"
+                    className={`${s.primary} ${s.primarySm}`}
+                    onClick={(e) => watch(place, study.placeNext, e.currentTarget)}
+                  >
+                    <Play />
+                    Watch
+                  </button>
+                )}
               </>
             )}
           </section>
@@ -3130,6 +3183,24 @@ function WorldV6View({
                   </span>
                   <span className={s.rowDot} aria-hidden="true" />
                 </button>
+                {/* The 30% follows Video Ads II (Lovro's second Loom, 2026-10-16): the same slimmer row, there for every student and state, opening the checkpoint's sheet. */}
+                {k === CHECKPOINT.after && cpView && (
+                  <button
+                    type="button"
+                    className={`${s.areaRow} ${s.cpRow}`}
+                    data-cp={cpView.tag}
+                    aria-label={cpAria(cpView)}
+                    onClick={(e) => openCheckpoint(e.currentTarget)}
+                  >
+                    <span className={s.rowNum} aria-hidden="true">
+                      <TagGlyph className={s.cpRowGlyph} />
+                    </span>
+                    <span className={s.rowText}>
+                      <span className={s.rowName}>{cpView.label.lead}</span>
+                      <span className={s.rowMeta}>Checkpoint · {cpView.chip.tail}</span>
+                    </span>
+                  </button>
+                )}
                 {/* The Ad Bounty's checkpoint follows Creative Strategy (plan item 18): a slimmer row under its place's, in the same item, so the eight places keep their rows. */}
                 {k === BOUNTY.after && bounty && (
                   <button
@@ -3253,15 +3324,19 @@ function NextBlock({ study, onWatch }: { study: Study; onWatch: (el: HTMLElement
           </span>
         )}
       </p>
-      <button
-        type="button"
-        className={s.primary}
-        aria-label={`Watch lesson ${i + 1}, ${lessonTitle(a, i)}`}
-        onClick={(e) => onWatch(e.currentTarget)}
-      >
-        <Play />
-        Watch
-      </button>
+      {notRecorded(a, i) ? (
+        <p className={s.unrecorded}>Not recorded yet</p>
+      ) : (
+        <button
+          type="button"
+          className={s.primary}
+          aria-label={`Watch lesson ${i + 1}, ${lessonTitle(a, i)}`}
+          onClick={(e) => onWatch(e.currentTarget)}
+        >
+          <Play />
+          Watch
+        </button>
+      )}
     </>
   );
 }
@@ -3439,15 +3514,20 @@ function CardBody({ k, study, onWatch }: { k: number; study: Study; onWatch: (el
           </span>
         )}
       </p>
-      <button
-        type="button"
-        className={s.primary}
-        aria-label={`Watch lesson ${i + 1}, ${lessonTitle(a, i)}`}
-        onClick={(e) => onWatch(e.currentTarget)}
-      >
-        <Play />
-        Watch
-      </button>
+      {/* Only when every lesson left can't be finished here (map-model.ts): no Watch. */}
+      {notRecorded(a, i) ? (
+        <p className={s.unrecorded}>Not recorded yet</p>
+      ) : (
+        <button
+          type="button"
+          className={s.primary}
+          aria-label={`Watch lesson ${i + 1}, ${lessonTitle(a, i)}`}
+          onClick={(e) => onWatch(e.currentTarget)}
+        >
+          <Play />
+          Watch
+        </button>
+      )}
     </>
   );
 }
@@ -3644,9 +3724,12 @@ function PanelBody({
     const action = isAction(a, i);
     const length = lessonLength(c, idx, i);
     const state = lessonDone(c, idx, i, done) ? "done" : i === nextIdx ? "next" : action ? "action" : "todo";
+    // Loom 2: a lesson with no video yet can't be finished here. It says so
+    // where its length (or the next row's Watch) would be, and still opens.
+    const unrecorded = state !== "done" && notRecorded(a, i);
     // A lesson row the pointer enters or the keyboard reaches is the likeliest next click.
     const soon = { onPointerEnter: () => onPrefetch(i), onFocus: () => onPrefetch(i) };
-    if (state === "next") {
+    if (state === "next" && !unrecorded) {
       rows.push(
         <li key={i} className={s.nextRow} {...soon}>
           <span className={s.mark} data-m="n" aria-hidden="true" />
@@ -3680,20 +3763,24 @@ function PanelBody({
         <button
           ref={setRow(i)}
           type="button"
-          className={s.row}
+          className={state === "next" ? `${s.row} ${s.nextRow}` : s.row}
           data-state={state}
-          aria-label={`Lesson ${i + 1}, ${title}${state === "done" ? ", watched" : action ? ", action item" : ""}`}
+          aria-label={`Lesson ${i + 1}, ${title}${state === "done" ? ", watched" : unrecorded ? ", not recorded yet" : action ? ", action item" : ""}`}
           onClick={() => onOpenLesson(i)}
         >
-          <span className={s.mark} data-m={state === "done" ? "d" : action ? "a" : undefined} aria-hidden="true" />
+          <span className={s.mark} data-m={state === "done" ? "d" : state === "next" ? "n" : action ? "a" : undefined} aria-hidden="true" />
           <span className={s.rowN} aria-hidden="true">
             {i + 1}
           </span>
           <span className={s.rowT}>{title}</span>
-          {length !== null && (
-            <span className={s.rowEnd} data-action={action || undefined}>
-              {length}
-            </span>
+          {unrecorded ? (
+            <span className={s.rowEnd}>Not recorded yet</span>
+          ) : (
+            length !== null && (
+              <span className={s.rowEnd} data-action={action || undefined}>
+                {length}
+              </span>
+            )
           )}
         </button>
       </li>,
@@ -3731,8 +3818,7 @@ function PanelBody({
 
 /** What a screen reader hears for the checkpoint's marker and tag: "30% off, 11 days left". */
 function cpAria(cv: CheckpointView): string {
-  const tail = cv.chip?.tail ?? cv.label.tail;
-  return `Discount checkpoint, ${cv.label.lead}${tail ? `, ${tail}` : ""}`;
+  return `Discount checkpoint, ${cv.label.lead}, ${cv.chip.tail}`;
 }
 
 /**
@@ -3866,6 +3952,12 @@ const LAUNCH_DAY = new Date(DISCOUNT_LAUNCH_DATE).toLocaleDateString("en-GB", { 
  * (DiscountClaimCelebration, StatsWidget) where it still holds: "30% off your
  * next month", "within 48 hours", "your Whop subscription". The code is never
  * shown (the team attaches it on Whop).
+ *
+ * Since Lovro's second Loom (2026-10-16) it opens for every student and state.
+ * Where the offer is closed for the student (the 14 days over, joined before
+ * the new course, no first payment on record) it says so in one plain line,
+ * and the eyebrow says "Closed"; Apply shows only while it can still be
+ * earned (locked) or is on (ready), never as a dead button.
  */
 function CheckpointBody({
   discount,
@@ -3908,20 +4000,9 @@ function CheckpointBody({
     setError(said);
   };
 
-  const status =
-    st.kind === "ready"
-      ? "Ready"
-      : st.kind === "pending"
-        ? "In review"
-        : st.kind === "approved"
-          ? "Approved"
-          : st.kind === "applied"
-            ? "Yours"
-            : st.kind === "rejected"
-              ? "Not approved"
-              : st.kind === "expired"
-                ? "Closed"
-                : null;
+  // Locked, the line under the title has the days left; ready, "Ready"; any
+  // other state, the chip's word (checkpointView.ts): "In review", "Closed"...
+  const status = st.kind === "locked" ? null : st.kind === "ready" ? "Ready" : cv.chip.tail;
 
   // The one Apply, locked and ready. Locked it is greyed out with its reason
   // and a padlock; ready it opens the questions (useWorldDiscount.ts).
@@ -4026,7 +4107,7 @@ function CheckpointBody({
     body = (
       <p className={s.desc}>
         {st.reason === "before-launch"
-          ? `This offer is for students who joined from ${LAUNCH_DAY}, when the new course opened.`
+          ? `This offer is for students who joined from ${LAUNCH_DAY}, when the new course opened. You joined before that, so it's closed for you.`
           : st.reason === "no-payment"
             ? "We can't see your first payment yet. If you joined in the last two weeks, tell the team and they'll sort it out."
             : "This offer isn't open yet."}

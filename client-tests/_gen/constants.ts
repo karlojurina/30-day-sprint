@@ -3,6 +3,22 @@ export const WHOP_TOKEN_URL = "https://api.whop.com/oauth/token";
 export const WHOP_USERINFO_URL = "https://api.whop.com/oauth/userinfo";
 export const WHOP_API_BASE = "https://api.whop.com/api/v1";
 
+/**
+ * The note the Whop backfill (src/app/api/student/_lib/watch-sync.ts) leaves
+ * in `student_whop_sync.last_sync_error` when Whop holds lessons the student
+ * opened and none they finished. It is not a failure, so the admin student
+ * page shows it as a plain note and only anything else there as an error. It
+ * stays in that column, where the audit's production read looks for it.
+ */
+export function whopNoneFinishedNote(opened: number): string {
+  return `Whop returned ${opened} interactions but 0 marked completed`;
+}
+
+/** Is this `last_sync_error` the note above, rather than a failure? */
+export function isWhopNoneFinishedNote(text: string | null | undefined): boolean {
+  return typeof text === "string" && /^Whop returned \d+ interactions but 0 marked completed$/.test(text);
+}
+
 // Whop plan IDs that count as "paying customers" — i.e., students
 // that SHOULD get CSM tasks, day-28 DMs, and count in dashboard
 // metrics. Allowlist design: any plan_id NOT in this set is

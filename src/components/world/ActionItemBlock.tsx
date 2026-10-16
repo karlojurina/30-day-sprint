@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { actionItemView, checkDiscordLink, type CompletionHalves } from "@/lib/world/action-items";
+import {
+  PASTE_LINK_FIRST,
+  actionItemView,
+  checkDiscordLink,
+  type CompletionHalves,
+} from "@/lib/world/action-items";
 import u from "@/components/world/world-ui.module.css";
 
-/** Said when Save is pressed with nothing in the field. */
-const PASTE_FIRST = "Paste the link to your Discord message first.";
 /** Said when the request never got an answer. */
 const NO_ANSWER = "Couldn't reach the server. Nothing was saved, so try again.";
 
@@ -95,7 +98,8 @@ export function ActionItemBlock({
       return;
     }
     if (checked.link === null) {
-      setError(PASTE_FIRST);
+      // Save pressed with nothing in the field.
+      setError(PASTE_LINK_FIRST);
       return;
     }
     if (checked.link === view.link) {

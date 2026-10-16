@@ -36,6 +36,13 @@ export const DISCORD_MESSAGE_LINK_RE =
 export const DISCORD_LINK_ERROR =
   'That doesn\'t look like a Discord message link. Right-click the message in #ad-review and click "Copy Message Link."';
 
+/**
+ * Said when there is no link yet: by the lesson page when Save is pressed with
+ * nothing in the field, and by mark-action-shipped when the new course's
+ * complete button arrives with no link saved. One sentence for both.
+ */
+export const PASTE_LINK_FIRST = "Paste the link to your Discord message first.";
+
 export type DiscordLinkCheck =
   | { ok: true; link: string | null }
   | { ok: false; error: string };

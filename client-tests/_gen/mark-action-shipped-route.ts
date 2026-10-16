@@ -5,10 +5,13 @@ import { evaluateAchievements } from "./stub-server.ts";
 import { checkR2CompoundsShipped, onLessonCompleted } from "./stub-server.ts";
 import { reEvaluateStudentOpenTasks } from "./stub-server.ts";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "./stub-server.ts";
-import { actionWrite, hasActionHalf, plainWriteError, watchHalfIsSeparate } from "./action-items.ts";
-
-/** The lesson page's own words for "no link yet" (ActionItemBlock.tsx, PASTE_FIRST). */
-const PASTE_LINK_FIRST = "Paste the link to your Discord message first.";
+import {
+  PASTE_LINK_FIRST,
+  actionWrite,
+  hasActionHalf,
+  plainWriteError,
+  watchHalfIsSeparate,
+} from "./action-items.ts";
 
 /**
  * POST /api/student/mark-action-shipped

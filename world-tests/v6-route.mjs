@@ -49,6 +49,9 @@
  *   - map review 2026-10-15, item 14: the stretches from a1 to a7 at most 260
  *     vh, and no turn on the route faster than 3.4 degrees per vh (the
  *     gully's) at the default pacing.
+ *   - map review, second Loom (2026-10-16): the turn after a4 goes clockwise
+ *     (right only, through west and north, never facing the valley, no frame
+ *     filled with near ground) and faces where it goes from "turned" on.
  * Writes, to world-tests/shots/v6/route/: map.svg/png (top down),
  * profile.svg/png (height along the route), views.png (ray-marched grey
  * previews of the stops and the key moments) and report.json.
@@ -480,6 +483,10 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
   check("the way up: a3 to a4 <= 300 vh, a4 to the burst <= 200 vh at the default pacing", upVh <= 300 && hikeVh <= 200, `${r1(upVh)} vh / ${r1(hikeVh)} vh`);
   // Facing where it goes after a4: from just past a4 to the burst, the view
   // stays within 60 of the travel heading.
+  // Map review, second Loom (2026-10-16): from the "turned" mark on. Before
+  // it the camera backs off the bench and rises while it turns (the next
+  // row), so it does not face the way it moves there; round 1's rule held for
+  // the left turn into the valley, which faced forward from "traverse" + 0.5.
   const offTravel = (sa, sb) => {
     let worst = { v: 0 };
     for (let s = sa; s <= sb; s += 4) {
@@ -488,8 +495,90 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
     }
     return worst;
   };
-  const w2 = offTravel(sAtKey(L.ROUTE_MARKS.traverse + 0.5), burstS);
-  check("the traverse faces where it goes (view within 60 of the travel heading, a4 to the burst)", w2.v <= 60, `traverse to burst ${JSON.stringify(w2)}`);
+  const turnedS = sAtKey(L.ROUTE_MARKS.turned);
+  const w2 = offTravel(turnedS, burstS);
+  check("the traverse faces where it goes (view within 60 of the travel heading, from the \"turned\" mark to the burst)", w2.v <= 60, `turned to burst ${JSON.stringify(w2)}`);
+  // THE TURN AFTER a4 GOES CLOCKWISE (map review, second Loom, 2026-10-16;
+  // Lovro, first Loom 7:02 to 7:22: "turn around in a way that shows the
+  // path and not the world ... clockwise and not this way into the world";
+  // second Loom 1:26: "we are going counterclockwise when we said we're going
+  // to go clockwise"). From the a4 stop to the "turned" mark the view turns
+  // right only (never back by more than 1 degree from the furthest it has
+  // turned), 140 to 180 degrees in all, through west (the hut and its bench)
+  // and north; ground nearer than 150 fills at most a quarter of any frame
+  // on the way, every 5 vh at 1691 x 1278 and at 16:9 on the rail's own pose
+  // and lens (turned right on the spot, the bench's wall filled 68 to 99% of
+  // the frame, route-w3/clockwise-why-not.jpg); and it never faces the open
+  // valley, where it went before (bearings 100 to 200: the frames' middle
+  // stays out of them). The dark stretch, where the north wall fills the
+  // frame in its own shade, is held short by the pacing row's 3.4 degrees
+  // per vh and the camera's height by the Sky Island's sight check.
+  {
+    const nearShare = (s, aspect) => {
+      rail.sampleS(s, pose);
+      const cam = camOf(pose.position.clone(), pose.target.clone(), aspect, rail.fovAtS(s));
+      const P = cam.position;
+      const dir = new THREE.Vector3();
+      let near = 0;
+      let n = 0;
+      for (let j = 0; j < 18; j++) {
+        for (let i = 0; i < 32; i++) {
+          dir.set(((i + 0.5) / 32) * 2 - 1, 1 - ((j + 0.5) / 18) * 2, 0.5).unproject(cam).sub(P).normalize();
+          n++;
+          for (let t = 3; t <= 150; t += 3) {
+            if (P.y + dir.y * t <= terrainHeight(P.x + dir.x * t, P.z + dir.z * t)) {
+              near++;
+              break;
+            }
+          }
+        }
+      }
+      return near / n;
+    };
+    let total = 0;
+    let furthest = rail.bearingAtS(a4S);
+    let back = 0;
+    let prev = furthest;
+    let valley = false;
+    for (let s = a4S + 2; s <= turnedS; s += 2) {
+      const b = rail.bearingAtS(s);
+      total += b - prev;
+      prev = b;
+      furthest = Math.max(furthest, b);
+      back = Math.max(back, furthest - b);
+      const bb = ((b % 360) + 360) % 360;
+      if (bb >= 100 && bb <= 200) valley = true;
+    }
+    const b0 = rail.bearingAtS(a4S);
+    // The rail's bearings are unwrapped: the first one at or past b0 that
+    // points at `deg` (compass) must come before the turn's end.
+    const passes = (deg) => b0 + ((((deg - b0) % 360) + 360) % 360) <= prev;
+    const throughWest = passes(270);
+    const throughNorth = passes(0);
+    let worstNear = { v: 0 };
+    const v0 = vhAt(rail, a4S);
+    const v1 = vhAt(rail, turnedS);
+    for (let v = v0; v <= v1 + 1e-6; v += 5) {
+      let lo = a4S;
+      let hi = turnedS;
+      for (let k = 0; k < 40; k++) {
+        const m = (lo + hi) / 2;
+        if (vhAt(rail, m) < v) lo = m;
+        else hi = m;
+      }
+      const s = (lo + hi) / 2;
+      for (const [name, aspect] of [["1691x1278", 1691 / 1278], ["16:9", ASPECT]]) {
+        const sh = nearShare(s, aspect);
+        if (sh > worstNear.v) worstNear = { v: +(100 * sh).toFixed(1), vh: r1(v - v0), aspect: name };
+      }
+    }
+    report.turnAfterA4 = { total: r1(total), back: +back.toFixed(2), from: r1(b0), to: r1(prev), throughWest, throughNorth, valley, worstNear, vh: r1(v1 - v0) };
+    check(
+      "the turn after a4 goes clockwise (second Loom): a4 to \"turned\" turns right only (back at most 1 degree), 140 to 180 degrees through west and north, never facing the valley (100 to 200), ground nearer than 150 at most 25% of any frame (every 5 vh, 1691x1278 and 16:9)",
+      back <= 1 && total >= 140 && total <= 180 && throughWest && throughNorth && !valley && worstNear.v <= 25,
+      `${r1(total)} degrees right (${r1(b0)} to ${r1(prev)}), back at most ${back.toFixed(2)}, through west ${throughWest}, through north ${throughNorth}, valley ${valley}; nearest ground worst ${JSON.stringify(worstNear)}; ${r1(v1 - v0)} vh`,
+    );
+  }
   // Map review 2026-10-15, item 14 (Lovro's Loom, 5:09 to 6:02: "some
   // distances are bigger"; that evening: "if we can somehow shrink the long
   // distances ... then great"): the stretches from a1 to a7 run 160 to 260 vh
@@ -1807,17 +1896,30 @@ async function shoot(html, file, w, h) {
   // camera walks the floor under them and climbs the ladder beside them (56
   // to 115 away; with the rise through the air it was 31 to 71). So: those
   // four within 120 of the route, every other spot within 5.
+  // Map review, second Loom (2026-10-16): the traverse's middle row, which the
+  // clockwise turn after a4 replaced, is retired the same way: rocks.ts keeps
+  // its hero spot and cover.ts its near band camera there (band:traverse), so
+  // no rock and no clump moves; the camera now passes 95 from it (the rows
+  // that replaced it rise past the lit spur west of it).
   const RETIRED_FLIGHT = [[270, 231, 1349], [321, 251, 1346], [374, 271, 1340], [430, 290, 1330]];
+  const RETIRED_TRAVERSE = [1080, 470, 1196];
   const retired = (p) => RETIRED_FLIGHT.some((q) => q[0] === p[0] && q[1] === p[1] && q[2] === p[2]);
-  const heroOff = R.HERO_SPOTS.filter((p) => !retired(p)).map((p) => r1(offRoute(p[0], p[1], p[2])));
+  const retiredTraverse = (x, y, z) => x === RETIRED_TRAVERSE[0] && y === RETIRED_TRAVERSE[1] && z === RETIRED_TRAVERSE[2];
+  const heroOff = R.HERO_SPOTS.filter((p) => !retired(p) && !retiredTraverse(p[0], p[1], p[2])).map((p) => r1(offRoute(p[0], p[1], p[2])));
   const oldOff = R.HERO_SPOTS.filter(retired).map((p) => r1(offRoute(p[0], p[1], p[2])));
+  const oldTraverse = R.HERO_SPOTS.filter((p) => retiredTraverse(p[0], p[1], p[2])).map((p) => r1(offRoute(p[0], p[1], p[2])));
   check(
-    "pinned: every hero rock spot (rocks.ts HERO_SPOTS) lies within 5 of the camera's route (the four of the retired flight up the north wall: within 120)",
-    Math.max(...heroOff) <= 5 && oldOff.length === 4 && Math.max(...oldOff) <= 120,
-    { spots: heroOff.length, worst: Math.max(...heroOff), retiredFlight: oldOff },
+    "pinned: every hero rock spot (rocks.ts HERO_SPOTS) lies within 5 of the camera's route (the four of the retired flight up the north wall and the retired traverse row: within 120)",
+    Math.max(...heroOff) <= 5 && oldOff.length === 4 && Math.max(...oldOff) <= 120 && oldTraverse.length === 1 && oldTraverse[0] <= 120,
+    { spots: heroOff.length, worst: Math.max(...heroOff), retiredFlight: oldOff, retiredTraverse: oldTraverse },
   );
-  const bandOff = C.NEAR_BAND.map((c) => r1(offRoute(c.x, c.y, c.z)));
-  check("pinned: every near band camera (cover.ts NEAR_BAND) lies within 5 of the camera's route", Math.max(...bandOff) <= 5, { cameras: bandOff.length, worst: Math.max(...bandOff) });
+  const bandOff = C.NEAR_BAND.filter((c) => !retiredTraverse(c.x, c.y, c.z)).map((c) => r1(offRoute(c.x, c.y, c.z)));
+  const bandTraverse = C.NEAR_BAND.filter((c) => retiredTraverse(c.x, c.y, c.z)).map((c) => r1(offRoute(c.x, c.y, c.z)));
+  check(
+    "pinned: every near band camera (cover.ts NEAR_BAND) lies within 5 of the camera's route (the retired traverse row's: within 120)",
+    Math.max(...bandOff) <= 5 && bandTraverse.length === 1 && bandTraverse[0] <= 120,
+    { cameras: bandOff.length, worst: Math.max(...bandOff), retiredTraverse: bandTraverse },
+  );
 
   // 2. A key added early on the route (a copy of key 1, so the route's shape
   // is the same and every later key's number is one higher) and a point added

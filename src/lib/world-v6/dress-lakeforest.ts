@@ -1096,6 +1096,16 @@ function greatTree(s: Soup, toWorld: (x: number, z: number) => [number, number],
 
 // ── The floating step: carved slab, local x along the stair, top at y 3.5 ───
 
+/**
+ * Second Loom (2026-10-16, 3:15 to 4:20): AI Ads & Content's lessons light
+ * the floating steps instead of lanterns. progress-world.ts draws a lit
+ * step's runes and the chamfer round its top warm, over these carved ones, so
+ * the slab hands over exactly where they are: carvedStep() sets this to their
+ * triangles (x, y, z per vertex, in the slab's own frame), and the install
+ * puts it on the FloatingSteps mesh as userData.stepRunes.
+ */
+let stepRunes: { runes: Float32Array; rim: Float32Array } | null = null;
+
 function carvedStep(): Soup {
   const s = new Soup();
   const n = 8;
@@ -1116,7 +1126,9 @@ function carvedStep(): Soup {
   const mid = V3(0, 0, 0);
   // Top face (a few stones darker), chamfer, sides.
   fan(s, top, V3(0, 3.6, 0), (i) => (i % 3 ? P.stoneTop : P.stoneSide), null, mid);
+  const rimFrom = s.verts;
   band(s, top, edge, () => P.stoneTop, null, mid);
+  const rimTo = s.verts;
   // The underside takes teal uplight from the forest below (a fake bounce: glow, no light).
   const up = () => glow(TEAL, 0.085);
   band(s, edge, bot, (i) => (i % 2 ? P.stoneSide : P.stoneKeel), up, mid);
@@ -1159,6 +1171,7 @@ function carvedStep(): Soup {
     ribbon(s, V3(x, y0, z), V3(x + 0.6, y0 - len, z + 0.3), 0.9, V3(Math.cos(a), 0, Math.sin(a)), P.root, P.root, null, g);
   }
   // Runes: small glyphs on the sides (3 strokes each), a ring on the top.
+  const runeFrom = s.verts;
   const rune = (c: V, nrm: V, size: number, seed: number) => {
     const up = V3(0, 1, 0);
     const side = V3().crossVectors(up, nrm).normalize();
@@ -1202,6 +1215,7 @@ function carvedStep(): Soup {
     const R1 = 4.4;
     s.quad(V3(4 + Math.cos(a0) * R0, 3.66, -1 + Math.sin(a0) * R0), V3(4 + Math.cos(a1) * R0, 3.66, -1 + Math.sin(a1) * R0), V3(4 + Math.cos(a1) * R1, 3.66, -1 + Math.sin(a1) * R1), V3(4 + Math.cos(a0) * R1, 3.66, -1 + Math.sin(a0) * R1), P.stoneTop, glow(TEAL, 0.7));
   }
+  stepRunes = { runes: new Float32Array(s.p.slice(runeFrom * 3, s.verts * 3)), rim: new Float32Array(s.p.slice(rimFrom * 3, rimTo * 3)) };
   return s;
 }
 
@@ -2063,9 +2077,39 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       // overlapping discs stack into bright bands (pass 3 first cut, r5-k45.5).
       const TEALP = [0.055, 0.2, 0.185];
       const VIOLP = [0.15, 0.085, 0.23];
-      for (const [x, z, r, hue, k] of pools) {
+      // Second Loom, 2026-10-16 (the morning walk: "flat glowing panels with
+      // hard edges" over about 60 vh of the descent into the forest): a pool
+      // whose rim climbs a bank faces the camera coming down the slope and
+      // reads as a lit panel, its edge cut where the bank's curve rises through
+      // it. Measured across the disc (the steepest rise from its centre to its
+      // rim), a pool steeper than this is laid smaller, onto the flat ground
+      // round its centre (0.85 of the last size at each try), and not at all
+      // when that takes it under 0.4 of its size or a radius of 16. The slope
+      // 8 either side of the centre (below) missed the walk's pools, flat in
+      // the middle of the trail with their rims up its banks.
+      const POOL_STEEP = 0.3;
+      let steep = 0;
+      let smaller = 0;
+      for (const [x, z, r0, hue, k] of pools) {
         const col = hue ? VIOLP : TEALP;
         const sides = 12;
+        const g0 = H(x, z);
+        const rimRise = (r: number) => {
+          let m = 0;
+          for (let i = 0; i < sides; i++) {
+            const a = (i / sides) * Math.PI * 2;
+            m = Math.max(m, Math.abs(H(x + Math.cos(a) * r * (1 + 0.12 * Math.sin(a * 3 + x)), z + Math.sin(a) * r) - g0) / r);
+          }
+          return m;
+        };
+        let fit = 1;
+        while (fit > 0.4 && rimRise(r0 * fit) > POOL_STEEP) fit *= 0.85;
+        if (fit <= 0.4 || r0 * fit < 16) {
+          steep++;
+          continue;
+        }
+        if (fit < 1) smaller++;
+        const r = r0 * fit;
         const ringAt = (f: number) => {
           const out: [number, number, number][] = [];
           for (let i = 0; i < sides; i++) {
@@ -2118,7 +2162,9 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       poolMesh.layers.set(NO_REFLECT_LAYER);
       setA6.add(poolMesh);
       floorNear.push(poolMesh);
-      stats.floorPools = pools.length;
+      stats.floorPools = pools.length - steep;
+      stats.floorPoolsSteep = steep;
+      stats.floorPoolsSmaller = smaller;
       stats["tris:ForestGlowPools"] = pp.length / 9;
     }
   }
@@ -2145,10 +2191,13 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     const last = STEPS[STEPS.length - 1];
     if (last && Math.hypot(last[0] - tx, last[1] - ty, last[2] - tz) < 1) steps.count = Math.max(0, STEPS.length - 1);
     stats.stepsDrawn = steps.count;
+    // Second Loom: where the runes are, for progress-world.ts's lit steps (stepRunes above).
+    steps.userData.stepRunes = stepRunes;
     restores.push(() => {
       steps.geometry = oldGeo;
       steps.material = oldMat;
       steps.count = oldCount;
+      delete steps.userData.stepRunes;
     });
   }
 

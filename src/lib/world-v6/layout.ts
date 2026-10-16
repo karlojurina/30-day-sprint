@@ -1231,55 +1231,67 @@ const KEYS: readonly Key[] = [
   // Looking up 8 through a wide lens (48) pins the pool on the frame's bottom
   // and gives the sky over the massif 32% (B9: the massif stands 12-24 up
   // behind the falls, so a narrower lens cannot hold the pool and the sky).
-  K(820, 324, 1160, 244.5, -8, "walk", "a4", 48),
-  // Round 1: after a4 the view turns to the way ahead at once (left, over the
-  // gorge downstream and the valley), so the traverse is walked facing forward
-  // (v6 walked it backwards, looking back at the falls), and it turns north
-  // into the gully at its foot, BEFORE the climb: it crests facing the saddle.
-  // Final pass C (the art judge, the gully mark at ~3.5: from 850 to 906 vh
-  // the view drifted east onto empty peach haze over the plain, then the
-  // Climb's bare dark face and the gully's toothed rim filled the frame): the
-  // traverse holds the valley instead (the Landing's hill, the woods, the
-  // gorge's rim below, bearing 178 -> 150), which also softens the turn off
-  // a4 (94 -> 67 degrees). Then the camera rises out over the gully rather
-  // than down inside it, turning left above the rim's level, so the turn
-  // sweeps the lit rim shelf and the sunset ridges and comes over the top
-  // already facing the lake.
-  // Final pass D (the verifier: 888-912 vh showed the east haze, then the
-  // Climb's dark face close up; the gully mark ~85% dark wall): the camera
-  // rises out of the gorge sooner (y 575 at the last traverse key, 650 at the
-  // gully mark, ~30 over the rim) and starts the turn a little earlier (148,
-  // 132, then 52 at the mark), so the turn looks over the rim's edge at the
-  // lit shelf and its boulders instead of into the face below it. The far
-  // massif north east (x 1700-2000, up to ~1000 high) still fills the top of
-  // the frame for ~10 vh; it is too high to rise over. The gully mark looks
-  // 4 down through a 40 lens, so the lit shelf takes more of the frame than
-  // the massif. The fastest turn on the route drops from 38.4 to ~33 degrees
-  // per 10 vh (shots/v6/finalD/route/sheet-gully-*).
-  // Map review 2026-10-15, item 14: Lovro (Loom, 6:39 to 7:22) asked for this
-  // turn to go clockwise, to show the path and not the world. It stays as it
-  // is. The bench's own wall stands 42 to 64 from the a4 stop on every bearing
-  // from 300 round to 60, and 100 to 185 from the traverse keys, and the trail
-  // across the Climb's face has no ledge drawn to look at. These rows turned
-  // clockwise (bearings only, measured on the rail): about 60 vh of bare rock,
-  // 68 to 99% of the frame nearer than 150 and no sky, the view up to 176
-  // degrees off the way the camera travels (97 where v6-route.mjs allows 60),
-  // and the a4 stop aimed 10 degrees further right. It needs a new way up
-  // (shots/v6/review-2026-10-15/route-w3/clockwise-why-not.jpg).
-  // What changed here is the pace: the middle row is walked at 0.5, not a
-  // hike's 2.6, so the traverse's straight takes 33 vh where it took 56, and
-  // from a4 to the gully's top the view faces the valley and its haze
-  // (bearings 100 to 175) for 65 vh where it did for 92 (a5's budget 280 ->
-  // 255). The turns either side stay under the gully's 3.4 degrees per vh
-  // (3.22 off a4, was 3.09; the gully 3.36, was 3.40).
-  M("traverse", K(935, 385, 1182, 155, 0, "hike", undefined, 46)),
-  Q(0.5, K(1080, 470, 1196, 148, 2, "hike", undefined, 42)),
-  K(1262, 575, 1222, 132, 2, "hike", undefined, 40),
+  // Map review, second Loom (2026-10-16): the row is aimed 232.6 / -9.3 and
+  // stands at 325.77 so the stop is seen as it was, 239.6 / -7.9 at 325.8. The
+  // rail blurs a stop's view with its neighbours': the turn off the stop went
+  // left and pulled the aim 4.9 left of the row's 244.5; it goes right now and
+  // pulls it 7.0 right. The 1.8 of lift the old traverse gave the stop over
+  // its row went with it. life.ts (the chimney smoke's drift, the swifts'
+  // orbit) and progress-world.ts (where the done moment's lanterns start) read
+  // the row's own bearing, so they turned 11.9 with it; clouds.ts places this
+  // view's clouds from the old row (its PINNED_VIEWS).
+  K(820, 325.77, 1160, 232.6, -9.3, "walk", "a4", 48),
+  // THE TURN AFTER THE HUT GOES CLOCKWISE (map review, second Loom,
+  // 2026-10-16). Lovro, first Loom 7:02 to 7:22: "turn around in a way that
+  // shows the path and not the world ... clockwise and not this way into the
+  // world"; second Loom 1:26 to 1:42: "we are going counterclockwise when we
+  // said we're going to go clockwise". Until today the view swung left off
+  // the stop over the gorge's south rim into the open valley (bearings 100 to
+  // 175 for 65 vh) and left again into the gully (round 1 to item 14: the
+  // traverse at (935, 385, 1182), (1080, 470, 1196), (1262, 575, 1222) facing
+  // 155, 148, 132, the gully mark at (1400, 650, 1208) facing 52). Turned
+  // right in place, the view met the bench's own wall 42 to 64 away (route-w3's
+  // clockwise-why-not.jpg), so the camera now moves while it turns:
+  //   - it backs off the bench's east end over the gorge's edge, turning right
+  //     past the falls to the hut, the bench and its lanterns (bearing 300 at
+  //     +25 vh), so the bench's wall steps back as it comes into the frame;
+  //   - it turns on through north still low (315 to 365, +30 to +45 vh), the
+  //     one stretch the north wall fills: it faces away from the low sun
+  //     (gorge-sunset, 300 / 6), so it is dark, and the view crosses it at up
+  //     to 3.3 degrees per vh, under the route's 3.4 (v6-route.mjs);
+  //   - it rises 190 past the lit spur east of the bench, looking up it, to
+  //     the "turned" row (+67 vh), faces the Climb's rim, the gully and the
+  //     cache's marker at 35, and glides to the gully, turning left up it as
+  //     before.
+  // What sets the numbers (measured on the rail and on rocks.ts, cover.ts and
+  // forest.ts built offline with these rows and the old ones):
+  //   - the Sky Island stands at bearing ~310 from here and only the wall
+  //     hides it: the camera keeps under ~415 until it faces north (v6-route's
+  //     sight check at 16:9; clear at 2.1:1 too);
+  //   - no row south of z 1265: cover.ts thins the grass by its distance to
+  //     these rows, and rows at z 1282 to 1324 dealt the valley's grass again,
+  //     Base Camp's meadow included; these deal again only the stream shelf's
+  //     and the pool's (653 clumps go, 734 come, of the world's 29,700). No
+  //     rock and no tree moves;
+  //   - the stop's aim (above); the paces (Q) hold every turn under 3.4
+  //     degrees per vh and a4 to the gully's top at 140 vh, as before, so the
+  //     walk from the burst to a5 keeps its 115 of a5's 255.
+  // It costs more per frame than the turn into the valley's haze did: 4.1 to
+  // 5.8 ms from +10 to +90 vh where those frames took 2.6 to 4.9, the ground
+  // filling the frame (v6-perf-ab's method, the two turns on the same tree;
+  // decisions.md, second Loom). None is over the 6.7 cap.
+  // The traverse's old middle row stays as copies in rocks.ts HERO_SPOTS and
+  // cover.ts NEAR_BAND (band:traverse), so its rocks and grass stay put.
+  M("traverse", Q(2.2, K(858, 352, 1240, 298, 4, "hike", undefined, 58))), // backing off the bench's east end: the hut and the bench on the left
+  Q(1.4, K(955, 405, 1263, 4, -12, "hike", undefined, 62)), // facing north, still low, looking up the wall
+  M("turned", Q(1.4, K(1080, 592, 1262, 35, -2, "hike", undefined, 48))), // over the spur's top: the Climb's rim, the gully and the cache ahead
   // THE GULLY: over the notch heading north, the view swinging left onto
   // the lit shelf and the ridges ahead.
   // (a "hike" row, not "climb": CLIMB_KEYS stays the gully run whose third key
   // is the burst, as clouds.ts and v6-a1-pace.mjs read it.)
-  M("gully", K(1400, 650, 1208, 52, 4, "hike", undefined, 40)),
+  // Second Loom: 20 west and 17 south of where it stood, aimed 38 (was 52), so
+  // the glide from "turned" (35) runs into the gully without a turn right first.
+  M("gully", Q(2.2, K(1380, 655, 1225, 38, 3, "hike", undefined, 40))),
   K(1433, 667, 1124, 5, 2, "climb", undefined, 38),
   K(1436, 668, 1092, 2, 0, "climb", undefined, 36),
   // THE BURST (v5's rows, no longer locked since round 1): onto the ridge
@@ -1399,6 +1411,9 @@ export const TRAIL_VIEW: ReadonlyArray<{ bearing: number; pitch: number }> = KEY
  * the a3 -> a4 move. "wall" is where it was.
  * Decision 67 (the camera walks the trail): "crossing" is the log's north
  * end and "wall" is the key on the bench's west end, at the top of the wall.
+ * Map review, second Loom (2026-10-16): "turned" is new, the row over the lit
+ * spur east of the bench where the clockwise turn after a4 is done and the
+ * camera faces the way it goes; "traverse" is the row it backs off to first.
  */
 export const ROUTE_MARKS: Readonly<Record<string, number>> = Object.fromEntries(
   KEYS.flatMap((k, i) => (MARK_OF.has(k) ? [[MARK_OF.get(k) as string, i] as [string, number]] : [])),

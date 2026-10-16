@@ -16,8 +16,10 @@
  * Defaults: 1691 x 1278 at device pixel ratio 1.5 (the renderer caps it at the tier's cap).
  * Positions come from the page: stopDepths() for the 8 stops, and the strip frames
  * from world-tests/v6-strip.mjs's STRIP_FRAMES table (A1's file, parsed from its
- * source, key index -> depth through the page's rail and key count). KEYS=stop1,k12
- * picks a subset; STRIP="0,2,12.5" replaces the strip keys.
+ * source, key index -> depth through the page's rail and key count), then positions
+ * in vh of scroll (VH_FRAMES: 1160, the descent into the magical forest; id vh1160).
+ * KEYS=stop1,k12,vh1160 picks a subset; STRIP="0,2,12.5" replaces the strip keys and
+ * VH="1160,1185" the vh positions.
  *
  * Output: shots/v6/perf/<mode>-<w>x<h>@<dpr>.json and .txt (PERF_OUT overrides the directory).
  * The frames run long: start it in the background and poll the .txt
@@ -129,6 +131,11 @@ await page.evaluate((pinTier) => {
   };
   const oneFrame = () => {
     sc.paused = false; sc.dirty = true;
+    // The frame pacer (perf.FramePacer, 2026-09-28) skips a tick while 2 frames' fences are
+    // unsignalled, and WebGL updates a fence only between tasks: 21 ticks in one evaluate
+    // drew 2 and skipped 19, so "JS per moving frame" read 0 (2026-10-16). The readPixels
+    // below finishes every frame, so its fences are dropped before each tick.
+    sc.pacer?.clear();
     const t0 = performance.now();
     sc.tick(performance.now());
     const t1 = performance.now();
@@ -228,7 +235,8 @@ await page.evaluate((pinTier) => {
   };
 }, Number(process.env.PERF_TIER || 0)); // PERF_TIER=2: measure at a quality tier (default 0)
 
-// ── Positions: the 8 stops and the strip frames ────────────────────────────
+// ── Positions: the 8 stops, the strip frames and a few vh ──────────────────
+const VH_FRAMES = process.env.VH ? process.env.VH.split(",").map((v) => [Number(v), `${v} vh`]) : [[1160, "1160 vh, down to the forest"]];
 function stripFrames() {
   if (process.env.STRIP) return process.env.STRIP.split(",").map((k) => [Number(k), `key ${k}`]);
   try {
@@ -249,6 +257,11 @@ const positions = stopDepths.map((d, i) => ({ id: "stop" + (i + 1), label: PLACE
 if (strip && nKeys) {
   for (const [k, label] of strip) positions.push({ id: "k" + k, label, key: k, depth: await page.evaluate((k, n) => window.__perf.depthForKey(k, n), k, nKeys) });
 }
+// Positions in vh of scroll (scrollY / innerHeight x 100, the reviews' unit), for stretches
+// no strip key covers. 1160: the descent into the magical forest, where the draw calls peak
+// (66 here, 67 on the course page, 60 or more from 1145 to 1195 vh, on 2026-10-16) and no
+// frame had been timed. VH="1160,1185" replaces the list.
+for (const [vh, label] of VH_FRAMES) positions.push({ id: "vh" + vh, label, vh, depth: await page.evaluate((vh) => vh / window.__worldV6Debug.debugRail().totalVh(), vh) });
 const want = process.env.KEYS ? process.env.KEYS.split(",") : null;
 const chosen = want ? positions.filter((p) => want.includes(p.id)) : positions;
 
@@ -376,6 +389,7 @@ if (mode === "route") {
           sc.seedDepth(d);
           const p0 = r.info.programs.length;
           sc.paused = false; sc.dirty = true;
+          sc.pacer?.clear(); // as in oneFrame: else the pacer skips all but 2 ticks of each 50
           const t0 = performance.now();
           sc.tick(performance.now());
           gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);

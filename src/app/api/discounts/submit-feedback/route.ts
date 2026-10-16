@@ -30,7 +30,7 @@ import { createClient } from "@supabase/supabase-js";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { onDiscountRequested } from "@/lib/csm-events";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
-import { decideDiscountRequest, loadDiscountReads } from "@/lib/world/discount-server";
+import { decideDiscountRequest, loadDiscountReads, secondPendingRequest } from "@/lib/world/discount-server";
 
 interface IncomingAnswer {
   question_id?: unknown;
@@ -172,6 +172,11 @@ export async function POST(request: NextRequest) {
   );
 
   if (error) {
+    // Two submits at the same moment both pass the function's own duplicate
+    // check, and v106 refuses the second one's insert (23505). The first
+    // stands, so this one is answered as a request already in review.
+    const twice = secondPendingRequest(error);
+    if (twice) return NextResponse.json(twice, { status: 400 });
     return NextResponse.json(
       { error: error.message ?? "Submit failed" },
       { status: 400 },

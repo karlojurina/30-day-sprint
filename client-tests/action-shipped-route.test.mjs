@@ -10,6 +10,7 @@
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { POST } from './_gen/mark-action-shipped-route.ts'
+import { PASTE_LINK_FIRST } from './_gen/action-items.ts'
 import { FakeDb, useDb, steps, setCatalog } from './_gen/stub-server.ts'
 
 let pass = 0
@@ -24,8 +25,9 @@ const read = (rel) => fs.readFileSync(fileURLToPath(new URL(rel, import.meta.url
 
 const LINK = 'https://discord.com/channels/1100000000000000001/1200000000000000002/1300000000000000003'
 const WATCHED = '2026-10-14T09:00:00.000Z'
-// The page's words for "no link yet" (ActionItemBlock.tsx, PASTE_FIRST).
-const PASTE_FIRST = /const PASTE_FIRST = "([^"]+)";/.exec(read('../src/components/world/ActionItemBlock.tsx'))?.[1]
+// The words for "no link yet", one constant in action-items.ts (PASTE_LINK_FIRST)
+// that the lesson page (ActionItemBlock.tsx) and the route both show.
+const PASTE_FIRST = PASTE_LINK_FIRST
 
 function freshDb(completions = []) {
   const db = new FakeDb({
@@ -55,7 +57,17 @@ async function ship(lessonId, shipped = true) {
 const row = (db, id) => db.rows('student_lesson_completions').find((r) => r.lesson_id === id) ?? null
 const stepNames = () => steps.map((s) => s.step)
 
-ok(typeof PASTE_FIRST === 'string' && PASTE_FIRST.length > 0, 'the page\'s words for "no link yet" are found', show(PASTE_FIRST))
+ok(typeof PASTE_FIRST === 'string' && PASTE_FIRST.length > 0, 'the words for "no link yet" are exported by action-items.ts', show(PASTE_FIRST))
+{
+  // Both places show the one constant, and neither keeps a copy of the sentence.
+  const fromLib = /import \{[^}]*\bPASTE_LINK_FIRST\b[^}]*\} from "@\/lib\/world\/action-items";/
+  const page = read('../src/components/world/ActionItemBlock.tsx')
+  const route = read('../src/app/api/student/mark-action-shipped/route.ts')
+  ok(fromLib.test(page) && page.includes('setError(PASTE_LINK_FIRST)') && !page.includes(PASTE_FIRST),
+     'the lesson page imports it and shows it when Save is pressed with nothing in the field')
+  ok(fromLib.test(route) && route.includes('{ error: PASTE_LINK_FIRST }') && !route.includes(PASTE_FIRST),
+     'the route imports it, and answers with it')
+}
 
 console.log('\n=== New course: no link saved, nothing completed ===')
 setCatalog({ v2: true })

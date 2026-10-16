@@ -64,6 +64,14 @@
  * lesson-a5l22-action-saved.png, lesson-a5l22-action-done.png (and
  * lesson-a5l22-action-error.png).
  *
+ * ROWS 23 AND 24 CAME WITH THE SECOND LOOM (2026-10-16). The 20 watch lessons
+ * with no video (a3l11, a4l11, Creative Strategy's 18) never hold a student:
+ * the card's next lesson passes them over, their panel rows say "Not recorded
+ * yet", their page's "Next lesson" is on, a student past them stands at the
+ * next place with lessons to finish, and only once nothing else is left is
+ * one of them next, with "Not recorded yet" where Watch was (23). A place's
+ * minutes count its action items' lengths when the catalog has them (24).
+ *
  * ROW 12 PLAYS A REAL VIDEO. In course mode every lesson that has a video
  * plays the harness's test video 1, and the stand-in server holds it to that
  * clip's length (fixtureTransport.ts, COURSE MODE). So the row presses play
@@ -95,8 +103,8 @@
  * room, the last one spacing short of the walk's end, or at it for the last
  * place and for Video Ads II, round 3), and no two of a place closer than 0.6
  * of its spacing in 3D. Round 4: a place whose single lanterns would stand
- * closer than PAIR_BELOW hangs them two to a post (AI Ads & Content), its
- * posts then evenly spaced and the two of a post sharing it, arms opposite;
+ * closer than PAIR_BELOW hangs them two to a post (none since the second
+ * Loom), its posts then evenly spaced and the two of a post sharing it, arms opposite;
  * and no lantern stands nearer its piece's trail than its offset less
  * OFFSET_TOL, so none is pulled in on the inside of a sharp bend. The
  * first stands within FIRST_NEAR of the landmark's trail point (typed below,
@@ -116,6 +124,18 @@
  * student's current place: four progress states set through
  * __worldV6Debug.setWorldProgress, the glass's aState read back for every
  * lantern.
+ * The second Loom (2026-10-16) changed three places. AI Ads & Content puts
+ * down no lanterns and no waking lamps: its lessons light the floating steps
+ * up to the Sky Island instead (STEPS_PLACE), counted by lit steps: with k of
+ * its n lessons watched, the first floor(k x steps / n) steps from the bottom
+ * are lit and, in the student's current place, the one above them pulses (the
+ * aState of the "ProgressStepRunes" mesh, one per step; every state above).
+ * The Introduction has no waking lamps (they stood round the signpost with
+ * its first lantern, one in the camp's pack), and none of its lanterns stands
+ * within CAMP_CLEAR of the camp's packs. Creative Strategy's walk runs on over
+ * the rope bridge: some of its lanterns stand on posts at the bridge's
+ * railing, BRIDGE_RAIL off its centre line, their posts' tops no higher than
+ * the hand rope and their glass hanging outside it.
  *
  * A place's card only shows at the student's own place. So for the card of
  * place k the pretend student is put there first: every lesson of the places
@@ -264,10 +284,34 @@ const SPACING_TOL = 0.5
 const OFFSET_TOL = 1
 /**
  * Round 4: single lanterns that would stand closer than this along their walk hang two to a post instead
- * (progress-world.ts PAIR_BELOW; Lovro called 23 apart "basically next to each other", Loom 2:22). Today
- * only AI Ads & Content: 22 on 11 posts, the floating steps between its two pieces of ground carrying none.
+ * (progress-world.ts PAIR_BELOW; Lovro called 23 apart "basically next to each other", Loom 2:22). Round 4
+ * paired AI Ads & Content's 22; since the second Loom it has no lanterns, and no place pairs.
  */
 const PAIR_BELOW = 24
+/**
+ * The second Loom (3:15 to 4:20): AI Ads & Content (0-based place 5) lights the floating steps instead of
+ * lanterns, STEPS_DRAWN of them (layout STEPS: 21 slabs, the last under dress-sky's cove landing and not
+ * drawn), with k of its n lessons watched the first floor(k x STEPS_DRAWN / n) from the bottom.
+ */
+const STEPS_PLACE = 5
+const STEPS_DRAWN = 20
+/**
+ * The second Loom (0:06 to 0:35): the Introduction's 75% lamp stood in the camp's pack. The two packs
+ * leaning on the first log seat (dress-shore.ts, at 1327 + 3.4 along bearing 240, the second 4.6 on) have
+ * no footprint, so the test keeps every Introduction light at least CAMP_CLEAR from them.
+ */
+const CAMP_PACKS = [[1324.06, 4213.7], [1326.36, 4209.72]]
+const CAMP_CLEAR = 20
+/**
+ * The second Loom (5:06 to 5:22): Creative Strategy's lanterns run on over the rope bridge (layout BRIDGE,
+ * a to b, in plan) on posts at its railing, BRIDGE_RAIL off its centre line (progress-world.ts), the glass
+ * hanging outside the hand rope (HAND_ROPE off the centre line, dress-sky.ts), the post's top no higher than
+ * the hand rope.
+ */
+const BRIDGE_A = [-1848, -2154]
+const BRIDGE_B = [-1695, -2341]
+const BRIDGE_RAIL = 4.4
+const HAND_ROPE = 4.75
 /** No water drawn within this of a lantern's foot. */
 const WATER_GAP = 1.5
 /** The water meshes WATER_NEAR reads (water.ts, and light.ts's MirrorLake). */
@@ -315,6 +359,8 @@ const PLACES = CATALOG.areas.map((a) => {
 const lessonOf = (id) => CATALOG.lessons.find((l) => l.id === id) ?? null
 /** Whole minutes, the way the map and the lesson page round them. */
 const minutesOf = (id) => (LENGTHS[id] > 0 ? Math.max(1, Math.round(LENGTHS[id] / 60)) : null)
+/** What the app can finish (map-model.ts): a watch lesson with a video (a length in the lengths file, as courseCatalog.ts reads it) or an action item. */
+const finishable = (l) => (l.type === 'watch' && LENGTHS[l.id] > 0) || l.action_brief !== undefined
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const f = (n, d = 4) => (typeof n === 'number' ? n.toFixed(d) : String(n))
@@ -422,12 +468,13 @@ const READ_PANEL = () => {
       kind = 'next'
       n = Number(m[1])
       title = m[2]
-    } else if ((m = /^Lesson (\d+), (.*?)(, watched|, action item)?$/.exec(label))) {
+    } else if ((m = /^Lesson (\d+), (.*?)(, watched|, action item|, not recorded yet)?$/.exec(label))) {
       n = Number(m[1])
       title = m[2]
-      kind = m[3] === ', watched' ? 'done' : m[3] === ', action item' ? 'action' : 'todo'
+      // Row 23: a lesson with no video says so (", not recorded yet"), the next one too when nothing else is left.
+      kind = m[3] === ', watched' ? 'done' : m[3] === ', action item' ? 'action' : m[3] === ', not recorded yet' ? 'unrecorded' : 'todo'
     }
-    // What is left of the row once its number, its title and the Watch button's word are taken out: the minutes, "Action", or nothing.
+    // What is left of the row once its number, its title and the Watch button's word are taken out: the minutes, "Action", "Not recorded yet", or nothing.
     let tail = norm(li.textContent)
     if (n !== null && tail.startsWith(String(n))) tail = tail.slice(String(n).length)
     if (title && tail.includes(title)) tail = tail.replace(title, '')
@@ -449,7 +496,7 @@ const LANTERNS = () => {
   const sc = window.__worldV6Debug
   const st = sc && typeof sc.moduleStats === 'function' ? sc.moduleStats()['progress-world'] : null
   if (!st || typeof st !== 'object') return null
-  return { perArea: st.perArea ?? null, wanted: st.wanted ?? null, lessonLanterns: st.lessonLanterns ?? null, placeLamps: st.placeLamps ?? null, instances: st.instances ?? null }
+  return { perArea: st.perArea ?? null, wanted: st.wanted ?? null, lessonLanterns: st.lessonLanterns ?? null, placeLamps: st.placeLamps ?? null, instances: st.instances ?? null, stepsPlace: st.stepsPlace ?? null, steps: st.steps ?? null, stepsLit: st.stepsLit ?? null, bridgeLanterns: st.bridgeLanterns ?? null }
 }
 
 /**
@@ -465,17 +512,24 @@ const LANTERN_LAYOUT = () => {
 
 /**
  * Row 2: set the student's progress on the scene and read back how lit every
- * lantern is (the glass's aState per instance: 0 dark, 1 lit, 2 the next one).
+ * lantern is (the glass's aState per instance: 0 dark, 1 lit, 2 the next one),
+ * and every floating step (the second Loom: the "ProgressStepRunes" mesh's
+ * aState per step, the same three; null when the mesh is missing).
  */
 const SET_AND_READ = (p) => {
   const sc = window.__worldV6Debug
   sc.setWorldProgress(p)
   const scene = sc.debugScene ? sc.debugScene() : sc.scene
   let glass = null
+  let runes = null
   scene.traverse((o) => {
     if (o.name === 'ProgressLanternGlass') glass = o
+    if (o.name === 'ProgressStepRunes') runes = o
   })
-  return glass ? Array.from(glass.geometry.getAttribute('aState').array.slice(0, glass.count)) : null
+  return {
+    glass: glass ? Array.from(glass.geometry.getAttribute('aState').array.slice(0, glass.count)) : null,
+    steps: runes ? Array.from(runes.geometry.getAttribute('aState').array.slice(0, runes.count)) : null,
+  }
 }
 
 /**
@@ -1337,10 +1391,13 @@ async function readPanel(page, what) {
  * Put the pretend student at place k: every counting lesson of the places
  * before it is marked watched. Called right after the page starts loading,
  * before the map is live, so the map takes it as where the student already
- * was and plays no done moment.
+ * was and plays no done moment. A place with no lesson the app can finish
+ * (Creative Strategy today: no videos yet) is passed over while anything else
+ * is left (row 23, map-model.ts), so for it every other place is marked too.
  */
 async function standAt(page, k, what) {
-  const ids = PLACES.slice(0, k).flatMap((p) => p.counting.map((l) => l.id))
+  const none = PLACES[k].counting.every((l) => !finishable(l))
+  const ids = PLACES.filter((_, j) => j < k || (none && j !== k)).flatMap((p) => p.counting.map((l) => l.id))
   await waitFor(page, () => typeof window.__fixture?.complete === 'function', { timeout: LOAD_MS, poll: 60, what: `${what}: window.__fixture did not appear` })
   const mapWasLive = await page.evaluate((list) => {
     const live = window.__worldReady === true
@@ -1487,6 +1544,8 @@ const ROWS = [
   [20, 'With the server taking 1.5 s, a hovered row still opens at once'],
   [21, 'A setup action item: paste the Discord link, save it, complete the lesson'],
   [22, 'An action item with a video: the link under the text, and both halves to finish it'],
+  [23, 'A lesson with no video never holds a student'],
+  [24, "A place's minutes count its action items' lengths"],
 ]
 const nameOf = (id) => ROWS.find((r) => r[0] === id)[1]
 
@@ -1497,7 +1556,7 @@ const GAPS = [
     'How the 8 stops look with the real names',
     `not a script verdict. A person looks at the ten pictures in shots/v6/course/, one by one, and writes down what was seen: ${LOOK_AT.join(', ')}.`,
   ],
-  ['G2', 'The default page is unchanged', 'another script proves it: `node world-tests/v6-app.mjs` must still end PASS 20  FAIL 0  NOT COVERED 3.'],
+  ['G2', 'The default page is unchanged', 'another script proves it: `node world-tests/v6-app.mjs` must still end PASS 22  FAIL 0  NOT COVERED 3 (rows 21 and 22 since the second Loom).'],
   ['G3', 'Lanterns in uncleared ground cover (C12)', 'a residual for the eye, on the same ten pictures. Not a failure.'],
   ['G4', 'The real login, the real server', 'gap by design: /ship.'],
   [
@@ -1556,7 +1615,14 @@ try {
       await waitFor(page, (w) => window.__worldV6Debug?.moduleStats?.()['progress-world']?.wanted === w, { arg: want, timeout: 15000, poll: 250, soft: true, what: 'row 2: the layout' })
       const st = await page.evaluate(LANTERNS)
       r.check('the map was asked for one lantern per lesson (wanted)', st?.wanted === want, st?.wanted ?? null)
-      const all = r.check('every place put down as many (perArea equals wanted)', !!st && st.perArea === st.wanted, st ? `perArea ${st.perArea}; wanted ${st.wanted}` : null)
+      // Second Loom: AI Ads + Content puts down none, its lessons light the floating steps.
+      const wantLanterns = COUNTING.map((n, k) => (k === STEPS_PLACE ? 0 : n)).join(',')
+      const all = r.check(`every place put down as many (perArea ${wantLanterns}: ${NAMES[STEPS_PLACE]} none, its lessons light the floating steps)`, !!st && st.perArea === wantLanterns, st ? `perArea ${st.perArea}; wanted ${st.wanted}` : null)
+      r.check(
+        `${NAMES[STEPS_PLACE]}'s lessons light the ${STEPS_DRAWN} floating steps drawn`,
+        !!st && st.stepsPlace === STEPS_PLACE + 1 && st.steps === STEPS_DRAWN,
+        st ? `place ${st.stepsPlace}, ${st.steps} steps` : null,
+      )
       r.values.lanterns = st
       const lay = await page.evaluate(LANTERN_LAYOUT)
       const reported = r.check(
@@ -1576,9 +1642,46 @@ try {
           firstFromStart: byPlace[k].length ? Math.round(Math.hypot(byPlace[k][0].x - WALK_START[k][0], byPlace[k][0].z - WALK_START[k][1])) : null,
         }))
         r.check(
-          `one lantern per lesson in every place (${want}), numbered from its landmark on`,
-          byPlace.every((ls, k) => ls.length === COUNTING[k] && ls.every((l, j) => l.lesson === j)),
+          `one lantern per lesson in every place (${wantLanterns}), numbered from its landmark on`,
+          byPlace.every((ls, k) => ls.length === (k === STEPS_PLACE ? 0 : COUNTING[k]) && ls.every((l, j) => l.lesson === j)),
           byPlace.map((ls) => ls.length).join(','),
+        )
+        // Second Loom: the floating steps, as lanternLayout() reports them.
+        r.check(
+          `the floating steps are ${NAMES[STEPS_PLACE]}'s: ${STEPS_DRAWN} steps for its ${COUNTING[STEPS_PLACE]} lessons, their lit runes drawn`,
+          !!lay.steps && lay.steps.place === STEPS_PLACE && lay.steps.count === STEPS_DRAWN && lay.steps.lessons === COUNTING[STEPS_PLACE] && lay.steps.mesh === 'ProgressStepRunes',
+          lay.steps ?? null,
+        )
+        // Second Loom: no waking lamps at the Introduction (round the signpost, one in the camp's pack) or at AI Ads + Content,
+        // and no Introduction lantern by the camp's packs.
+        const lampsAt = (k) => (lay.lamps ?? []).filter((m) => m.area === k)
+        const byPacks = byPlace[0].filter((l) => CAMP_PACKS.some(([x, z]) => Math.hypot(l.x - x, l.z - z) < CAMP_CLEAR)).map(at)
+        r.check(
+          `no waking lamps at the Introduction or ${NAMES[STEPS_PLACE]}, and none of the Introduction's lanterns within ${CAMP_CLEAR} of the camp's packs`,
+          lampsAt(0).length === 0 && lampsAt(STEPS_PLACE).length === 0 && byPacks.length === 0,
+          lampsAt(0).length || lampsAt(STEPS_PLACE).length || byPacks.length
+            ? [...lampsAt(0).map((m) => `Introduction lamp at ${m.at} (${f(m.x, 0)}, ${f(m.z, 0)})`), ...lampsAt(STEPS_PLACE).map((m) => `${NAMES[STEPS_PLACE]} lamp at ${m.at}`), ...byPacks.map((s) => `by the packs: ${s}`)]
+            : `${byPlace[0].length} Introduction lanterns, the nearest to the packs ${f(Math.min(...byPlace[0].map((l) => Math.min(...CAMP_PACKS.map(([x, z]) => Math.hypot(l.x - x, l.z - z))))), 0)} away`,
+        )
+        // Second Loom: Creative Strategy's walk runs on over the rope bridge, some of its lanterns on posts at the railing.
+        const span = Math.hypot(BRIDGE_B[0] - BRIDGE_A[0], BRIDGE_B[1] - BRIDGE_A[1])
+        const across = (x, z) => Math.abs((x - BRIDGE_A[0]) * (BRIDGE_B[1] - BRIDGE_A[1]) - (z - BRIDGE_A[1]) * (BRIDGE_B[0] - BRIDGE_A[0])) / span
+        const onBridge = byPlace[6].filter((l) => l.bridge)
+        const offRail = onBridge
+          .map((l) => {
+            const post = across(l.x, l.z)
+            const glass = across(l.glass[0], l.glass[2])
+            const bad = []
+            if (Math.abs(post - BRIDGE_RAIL) > OFFSET_TOL) bad.push(`its post ${f(post, 2)} off the centre line, not ${BRIDGE_RAIL}`)
+            if (!(glass > HAND_ROPE + 0.3)) bad.push(`its glass ${f(glass, 2)} off the centre line, inside the hand rope at ${HAND_ROPE}`)
+            if (!(l.bridge.postTop <= l.bridge.handRope + 0.5)) bad.push(`its post's top ${f(l.bridge.postTop, 1)} over the deck, above the hand rope at ${f(l.bridge.handRope, 1)}`)
+            return bad.length ? `${at(l)}: ${bad.join('; ')}` : null
+          })
+          .filter(Boolean)
+        r.check(
+          `${NAMES[6]}'s lanterns run on over the rope bridge: some on posts at its railing, ${BRIDGE_RAIL} off its centre line, the glass outside the hand rope, the post no higher than it`,
+          onBridge.length >= 2 && offRail.length === 0 && byPlace[6].slice(-onBridge.length).every((l) => l.bridge),
+          offRail.length ? offRail.slice(0, 6) : `${onBridge.length} of ${byPlace[6].length} on the bridge (lessons ${onBridge.map((l) => l.lesson + 1).join(', ')}), the glass ${onBridge.map((l) => f(across(l.glass[0], l.glass[2]), 1)).join(', ')} off its centre line`,
         )
 
         // Dry ground, judged against the water as it is drawn.
@@ -1607,7 +1710,7 @@ try {
             else posts.push([l])
           }
           const single = (p.room - p.first) / (p.toEnd ? Math.max(1, ls.length - 1) : ls.length)
-          const wantPer = ls.length >= 2 && single < PAIR_BELOW && !p.pieces.some((pc) => pc.wall) ? 2 : 1
+          const wantPer = ls.length >= 2 && single < PAIR_BELOW && !p.pieces.some((pc) => pc.wall || pc.ground === 'bridge') ? 2 : 1
           if (per !== wantPer) pairs.push(`place ${k + 1}: ${per} to a post, wants ${wantPer} (one by one they would stand ${f(single, 1)} apart, the line ${PAIR_BELOW})`)
           if (per > 1) {
             posts.forEach((ps, n) => {
@@ -1650,6 +1753,8 @@ try {
         r.check('each walk starts at its landmark\'s trail point (WALK_START)', starts.every((d) => d < 1), starts.map((d) => f(d, 1)).join(', '))
         const far = byPlace
           .map((ls, k) => {
+            // Second Loom: the place whose lessons light the floating steps has no first lantern.
+            if (k === STEPS_PLACE) return null
             const d = ls.length ? Math.hypot(ls[0].x - WALK_START[k][0], ls[0].z - WALK_START[k][1]) : Infinity
             const nearest = ls.every((l) => Math.hypot(l.x - WALK_START[k][0], l.z - WALK_START[k][1]) >= d - 1e-6)
             return d <= FIRST_NEAR && nearest ? null : `place ${k + 1} ${NAMES[k]}: the first stands ${f(d, 1)} from its walk's start (at most ${FIRST_NEAR})${nearest ? '' : ', and another stands nearer'}`
@@ -1734,8 +1839,11 @@ try {
         )
 
         // Watching k lessons lights the first k from the landmark on; the next one pulses in the current place.
+        // Second Loom: AI Ads + Content's k light the first floor(k x STEPS_DRAWN / n) floating steps from the
+        // bottom, and in the current place the step above them pulses.
         const lighting = (label, p) => {
-          return page.evaluate(SET_AND_READ, p).then((states) => {
+          return page.evaluate(SET_AND_READ, p).then((read) => {
+            const states = read?.glass ?? null
             const wrong = []
             byPlace.forEach((ls, k) => {
               ls.forEach((l, rank) => {
@@ -1745,11 +1853,27 @@ try {
               })
             })
             r.check(`${label}: every place's first k lit from its landmark on, the next one pulsing in the current place`, !!states && wrong.length === 0, wrong.length ? wrong.slice(0, 6) : `done ${p.done.join(',')}`)
+            const n = COUNTING[STEPS_PLACE]
+            const k = p.done[STEPS_PLACE]
+            const lit = Math.floor((k * STEPS_DRAWN) / n + 1e-9)
+            const wantSteps = Array.from({ length: STEPS_DRAWN }, (_, i) => (i < lit ? 1 : p.current === STEPS_PLACE && i === lit && k < n ? 2 : 0))
+            const steps = read?.steps ?? null
+            const off = steps ? wantSteps.map((w, i) => (steps[i] === w ? null : `step ${i + 1}: state ${steps[i]}, wants ${w}`)).filter(Boolean) : ['no ProgressStepRunes mesh']
+            r.check(
+              `${label}: ${NAMES[STEPS_PLACE]}'s ${k} of ${n} light the first ${lit} of its ${STEPS_DRAWN} floating steps from the bottom${p.current === STEPS_PLACE && k < n ? ', the one above them pulsing' : ''}`,
+              !!steps && steps.length === STEPS_DRAWN && off.length === 0,
+              off.length ? off.slice(0, 6) : `steps ${steps.join('')}`,
+            )
             return states
           })
         }
         const someDone = [3, 5, 7, 7, 9, 4, 6, 2]
         await lighting('some of every place watched, the student in Video Ads II with 7', { lessons: COUNTING, done: someDone, current: 3, next: someDone[3] + 1 })
+        // Second Loom: the floating steps at 0, 6, 12 and 21 of AI Ads + Content's 22 watched, the student there.
+        for (const k of [0, 6, 12, 21]) {
+          const doneHere = COUNTING.map((m, j) => (j < STEPS_PLACE ? m : j === STEPS_PLACE ? k : 0))
+          await lighting(`${k} of ${NAMES[STEPS_PLACE]} watched, the student there`, { lessons: COUNTING, done: doneHere, current: STEPS_PLACE, next: k + 1 })
+        }
         // Lovro's own test at 6:16 in the Loom: 3 of Video Ads I and 7 of Video Ads II watched, nothing else.
         const loomDone = [0, 0, 3, 7, 0, 0, 0, 0]
         const states = await lighting('Lovro\'s test in the Loom (3 of Video Ads I, 7 of Video Ads II)', { lessons: COUNTING, done: loomDone, current: 3, next: loomDone[3] + 1 })
@@ -1793,11 +1917,11 @@ try {
         )
       }
       if (!st || all) return
-      // A place is short. Say which, and take its picture with every lantern lit.
+      // A place is short (or AI Ads + Content has lanterns again). Say which, and take its picture with every lantern lit.
       const got = String(st.perArea).split(',').map(Number)
-      const asked = String(st.wanted).split(',').map(Number)
+      const asked = wantLanterns.split(',').map(Number)
       const short = asked.map((n, k) => ({ k, asked: n, got: got[k] })).filter((x) => x.got !== x.asked)
-      r.values.short = short.map((x) => `place ${x.k + 1} ${NAMES[x.k]}: ${x.got} lanterns for ${x.asked} lessons`)
+      r.values.short = short.map((x) => `place ${x.k + 1} ${NAMES[x.k]}: ${x.got} lanterns, wants ${x.asked}`)
       const lit = await r.open(url('', { p: 'all', arrive: 0, poster: 'off' }))
       await ready(lit, 'row 2, every lantern lit')
       r.values.shots = []
@@ -2539,6 +2663,113 @@ try {
         { done: finished.done, next: finished.next, text: finished.text },
       )
       r.check('no request to /api in the whole row', r.api.length === 0, r.api.map((x) => `${x.method} ${x.path}`).slice(0, 3))
+    })
+
+    // 23 ── A lesson with no video never holds a student (the second Loom, 2026-10-16; map-model.ts).
+    // A watch lesson with no video can't be finished on the map, so the student's place and next
+    // lesson pass it over; it still counts in every total and says "Not recorded yet" where Watch
+    // or its length would be. Only once nothing else is left is it the next lesson.
+    await runRow(23, nameOf(23), async (r) => {
+      const counting = PLACES.flatMap((p) => p.counting)
+      const unrecorded = counting.filter((l) => !finishable(l)).map((l) => l.id)
+      r.check(
+        "the course has 20 lessons with no video: a3l11, a4l11 and Creative Strategy's 18",
+        unrecorded.length === 20 && unrecorded.includes('a3l11') && unrecorded.includes('a4l11') && PLACES[6].counting.every((l) => unrecorded.includes(l.id)),
+        unrecorded.length,
+      )
+      const every = (k) => PLACES[k].counting.map((l) => l.id)
+      const nextLink = () => {
+        const a = [...document.querySelectorAll('a')].find((x) => !x.closest('main, nextjs-portal') && /Next lesson/.test(x.textContent ?? ''))
+        return a ? { href: a.getAttribute('href'), disabled: a.getAttribute('aria-disabled') } : null
+      }
+      /** Mark these watched before the map is live, as standAt() does. */
+      const mark = async (page, ids, what) => {
+        await waitFor(page, () => typeof window.__fixture?.complete === 'function', { timeout: LOAD_MS, poll: 60, what: `${what}: window.__fixture did not appear` })
+        await page.evaluate((list) => {
+          for (const id of list) window.__fixture.complete(id)
+        }, ids)
+      }
+
+      // a) Video Ads I's lessons 1 to 10 watched: the card's next is lesson 12; row 11 says so and still opens.
+      let page = await r.open(url('', { arrive: 0, poster: 'off' }))
+      await mark(page, [...every(0), ...every(1), ...every(2).slice(0, 10)], 'row 23 a')
+      await ready(page, 'row 23 a')
+      await scrollToPlace(page, 2, 'row 23 a')
+      await waitCard(page, 'row 23 a')
+      const card = await page.evaluate(CARD, 2)
+      const t11 = PLACES[2].counting[10].title
+      const t12 = PLACES[2].counting[11].title
+      r.check("a) lessons 1 to 10 of Video Ads I watched: the card's Watch is lesson 12, past lesson 11", card?.watch === `Watch lesson 12, ${t12}`, card?.watch ?? null)
+      await openPlace(page, 2, 'row 23 a')
+      const p = await readPanel(page, 'row 23 a')
+      const r11 = p.rows.find((x) => x.n === 11)
+      const r12 = p.rows.find((x) => x.n === 12)
+      r.check('a) row 11 says "Not recorded yet" (its name too) and is not the next row', r11?.kind === 'unrecorded' && r11?.title === t11 && r11?.tail === 'Not recorded yet', r11 ?? null)
+      r.check('a) row 12 is the next row, with Watch', r12?.kind === 'next' && r12?.title === t12, r12 ?? null)
+      r.values.shotPanel = await r.shot('no-video-panel-video-ads-i')
+
+      // b) a3l11's page: "Next lesson" is on from the start and opens lesson 12, where it is off again.
+      page = await r.open(url('/a3/a3l11', { arrive: 0, poster: 'off' }))
+      await waitLesson(page, t11, 'row 23 b', LOAD_MS)
+      await sleep(800)
+      const on = await page.evaluate(nextLink)
+      r.check('b) on a3l11, not watched: "Next lesson" is on and goes to a3l12', on?.disabled === 'false' && on?.href === `${APP}/a3/a3l12`, on)
+      r.values.shotLesson = await r.shot('no-video-lesson-a3l11')
+      await click(page, () => [...document.querySelectorAll('a')].find((x) => !x.closest('main, nextjs-portal') && /Next lesson/.test(x.textContent ?? '')), null, { what: 'row 23 b: Next lesson' })
+      await waitLesson(page, t12, 'row 23 b: lesson 12')
+      await sleep(400)
+      const off = await page.evaluate(nextLink)
+      r.check('b) it opens lesson 12, whose "Next lesson" waits for its video as before', off?.disabled === 'true', off)
+
+      // c) Places 1 to 6 done: Creative Strategy (no videos yet) is passed over, and still 0 done.
+      page = await r.open(url('', { arrive: 0, poster: 'off' }))
+      await mark(page, [0, 1, 2, 3, 4, 5].flatMap(every), 'row 23 c')
+      await ready(page, 'row 23 c')
+      const c = await page.evaluate(() => ({ place: window.__worldUi?.().place ?? null, progress: window.__worldProgress?.() ?? null }))
+      r.check("c) places 1 to 6 done: the student's place is How To Land Clients", c.place === 7 && c.progress?.current === 7, c.place)
+      r.check('c) Creative Strategy is still 0 of 18', c.progress?.done?.[6] === 0 && c.progress?.lessons?.[6] === 18, c.progress?.done ?? null)
+      await scrollToPlace(page, 7, 'row 23 c')
+      await waitCard(page, 'row 23 c')
+      const card8 = await page.evaluate(CARD, 7)
+      r.check('c) the card waits there, at its lesson 1', card8?.title === NAMES[7] && card8?.watch === `Watch lesson 1, ${PLACES[7].counting[0].title}`, card8 ? { title: card8.title, watch: card8.watch } : null)
+
+      // d) Everything the app can finish is done: lesson 11 of Video Ads I is next, and the card says "Not recorded yet" where Watch was.
+      page = await r.open(url('', { arrive: 0, poster: 'off' }))
+      await mark(page, counting.filter(finishable).map((l) => l.id), 'row 23 d')
+      await ready(page, 'row 23 d')
+      const placeD = await page.evaluate(() => window.__worldUi?.().place ?? null)
+      await scrollToPlace(page, 2, 'row 23 d')
+      await waitCard(page, 'row 23 d')
+      const cardD = await page.evaluate(() => {
+        const el = document.querySelector('main section[data-side][data-show]:not([aria-label="Place done"])')
+        return el ? { text: (el.textContent ?? '').replace(/\s+/g, ' ').trim(), buttons: el.querySelectorAll('button').length } : null
+      })
+      r.check(
+        'd) everything that can be finished done: the card at Video Ads I names lesson 11, says "Not recorded yet" and has no button',
+        placeD === 2 && cardD?.buttons === 0 && /Not recorded yet/.test(cardD?.text ?? '') && (cardD?.text ?? '').includes(t11),
+        { place: placeD, card: cardD },
+      )
+      r.values.shotCard = await r.shot('no-video-card-video-ads-i')
+      r.check('no request to /api in the whole row', r.api.length === 0, r.api.map((x) => `${x.method} ${x.path}`).slice(0, 3))
+    })
+
+    // 24 ── A place's minutes count its action items' lengths (content.ts placeMinutes). Static Ads
+    // has three watch action items with a video and a length (a5l08, a5l12, a5l23); a5l22, a hand-in
+    // with no video, has none and is left out, as a length the catalog doesn't have always is.
+    await runRow(24, nameOf(24), async (r) => {
+      const k = 4
+      const rows = PLACES[k].counting
+      const sum = rows.reduce((s, l) => s + (minutesOf(l.id) ?? 0), 0)
+      const fromActions = rows.filter((l) => l.action_brief !== undefined).reduce((s, l) => s + (minutesOf(l.id) ?? 0), 0)
+      const want = `${COUNTING[k]} lessons · ${Math.round(sum / 5) * 5} min`
+      r.check('Static Ads: every watch lesson has a length, and 3 of its 4 action items have one', rows.every((l) => l.action_brief !== undefined || minutesOf(l.id) !== null) && rows.filter((l) => l.action_brief !== undefined && minutesOf(l.id) !== null).length === 3, fromActions)
+      const page = await r.open(url('', { arrive: 0, poster: 'off' }))
+      await standAt(page, k, 'row 24')
+      await ready(page, 'row 24')
+      await scrollToPlace(page, k, 'row 24')
+      await waitCard(page, 'row 24')
+      const card = await page.evaluate(CARD, k)
+      r.check(`the card says "${want}" (${fromActions} of those minutes are the action items')`, card?.count === want, card?.count ?? null)
     })
   }
 } finally {

@@ -142,6 +142,12 @@ When adding a new table, append it here. When deleting a field, scan
   `last_sync_unmatched`, `last_sync_fetched`, `last_sync_matched`
 - **Note:** Team-read RLS only — tokens are sensitive, students don't
   need to read this themselves.
+- **`last_sync_error` holds two kinds of text:** a failure, or the note
+  `whopNoneFinishedNote(N)` from `src/lib/constants.ts`, "Whop returned
+  N interactions but 0 marked completed" (lessons opened on Whop, none
+  finished). Readers tell them apart with `isWhopNoneFinishedNote`: the
+  admin student page shows the note plainly and only a failure in red.
+  Whop returning nothing writes no error at all (2026-10-16).
 
 ### `student_celebrations`
 - **Depends on:** `students`
@@ -245,11 +251,22 @@ When adding a new table, append it here. When deleting a field, scan
   completed on Whop) looks the lesson up by `whop_lesson_id` with
   `.maybeSingle()` and upserts a completion; no row means the Whop
   lesson is not in the course and the event is ignored with a 200.
+  Since 2026-10-16 a completion row that already exists (a skip, a
+  saved Discord link, an action done first) is finished too:
+  `completed_at` now, `skipped_at` cleared, the link and the action half
+  kept, a watched row left alone. On the delivery that finished the
+  lesson, and never on a retry, it then runs `afterCompletionWrite`
+  (`src/lib/complete-lesson.ts`, lesson-watched's chain: the streak, the
+  "came back" check, the badges, the CSM tasks). A failed write answers
+  500 so Whop retries.
   `syncWatchProgress` (`watch-sync.ts`, run at login, by
   `refresh-watch-sync` and on tab focus) reads the student's
   `course_lesson_interactions` for `WHOP_COURSE_ID` and matches the
   completed ones the same way; the ones it cannot match go to
-  `student_whop_sync.last_sync_unmatched`. Before the switch the column
+  `student_whop_sync.last_sync_unmatched`. Its `syncedCount` is the rows
+  it added (new lessons, and rows it finished the same way), and its
+  callers move the streak only when that is above 0; a failed lessons
+  read is an error, never "nothing matched". Before the switch the column
   has only a non-unique index, so a doubled id would make the
   webhook's `.maybeSingle()` error. v104 adds the unique index
   `lessons_whop_lesson_id_key` (where not null), and every new-course
@@ -685,9 +702,20 @@ When adding a new table, append it here. When deleting a field, scan
   reads `lesson_id, completed_at` (a video is done when `completed_at`
   is set). Writers it already had and keeps: the Whop webhook and
   `watch-sync.ts` upsert a row for a lesson matched by
-  `whop_lesson_id`. v104 archives every row into `archive_v1` and
+  `whop_lesson_id`, and both finish a row that is already there
+  (`completed_at` set, `skipped_at` cleared, `discord_message_link` and
+  `action_completed_at` kept; the webhook since 2026-10-16). v104
+  archives every row into `archive_v1` and
   empties the table; its undo moves the rows made since into
   `archive_v2` and puts the archived ones back.
+- **Who may write (v105, built 2026-10-16, not on production):** a
+  student reads their own rows ("Students can read own lesson
+  completions", FOR SELECT) and writes none; v3's FOR ALL policy is
+  dropped and recorded for the undo. Every writer above uses the
+  service role. `mark-action-shipped` completes a new-course action item
+  only once `discord_message_link` is saved on the row (400 with
+  `PASTE_LINK_FIRST` otherwise), and `skip-lesson` writes no
+  `skipped_at` for a new-course `watch` lesson.
 
 ### `student_lesson_watch` (v93)
 - **Owner:** the lesson video player under `/world` (branch
@@ -759,6 +787,16 @@ When adding a new table, append it here. When deleting a field, scan
   and lets the latest later one decide what the student sees. The
   course switch leaves the table untouched (call C10), so a request
   still pending at the switch has to be decided before it.
+- **One pending request per student (v106, built 2026-10-16, not on
+  production):** the unique index `discount_requests_one_pending_per_student`
+  on `student_id` where `status = 'pending'`. A second pending row, inserted
+  or set back to pending, is refused with 23505 and the first stands;
+  other statuses are not limited. `POST /api/discounts/request` and
+  `POST /api/discounts/submit-feedback` answer that refusal like a request
+  in review, 400 `{ error: ALREADY_APPLIED, state: "pending" }`
+  (`secondPendingRequest`, `src/lib/world/discount-server.ts`). v105 drops
+  the student insert policy, so only the server and
+  `submit_discount_with_feedback` (security definer) write rows.
 
 ### `discount_feedback_questions` + `discount_feedback_responses`
 - **Depends on:** `discount_requests`
@@ -1551,9 +1589,11 @@ watch heartbeat, and the messages it trades with Tella's frame.
 
 ### `MapModel` (`src/lib/world/map-model.ts`)
 - **Written by:** `buildMapModel()` and nothing else.
-- **Built from:** `{ areas, lessonsByArea, completedLessonIds }`: the
-  catalog's areas in route order, its lessons per area, and the
-  student's completed lesson ids.
+- **Built from:** `{ areas, lessonsByArea, completedLessonIds,
+  anyLessonFinishes? }`: the catalog's areas in route order, its
+  lessons per area, the student's completed lesson ids, and (the dev
+  page's placeholder course only, `AnyLessonFinishesContext` in
+  `useMapModel.ts`) whether every lesson can be finished there.
 - **Read by:** `useMapModel()` (`src/components/world/useMapModel.ts`)
   and `sourceData()` (`src/components/world-v6/source.ts`). `WorldMap`
   gets it through those two.
@@ -1568,6 +1608,7 @@ watch heartbeat, and the messages it trades with Tella's frame.
     action: boolean;
     done: boolean;
     hasVideo: boolean;
+    finishable: boolean;
   }
 
   export interface MapFeature {
@@ -1600,10 +1641,18 @@ watch heartbeat, and the messages it trades with Tella's frame.
   `counts_toward_progress` is one of the area's `lessons`; any other
   is one of its `features` and is in no total. `reason` is `empty`
   when there are no areas or no lessons at all, and `shape` when the
-  catalog does not have exactly eight areas. `place` is the index of
-  the first area with a counting lesson left, or 8 when none is left.
-  `placeNext` is the index of the first undone lesson in that area, or
-  -1. `minutes` is null when the catalog has no `duration_seconds`,
+  catalog does not have exactly eight areas. `finishable` is true for
+  a lesson the student can finish in the app: a `watch` lesson with a
+  video, or an action item (`requires_action`); for every lesson when
+  no lesson of the catalog has a video (a failed read of the videos
+  looks the same) or `anyLessonFinishes` is set. `place` is the index
+  of the first area with a counting lesson left that is `finishable`,
+  and `placeNext` the index of the first such lesson there (the second
+  Loom, 2026-10-16: a lesson with no video never holds a student, and
+  still counts in every total). When only lessons that are not
+  `finishable` are left, `place` is the first area with any lesson
+  left and `placeNext` its first undone lesson. `place` is 8 and
+  `placeNext` -1 when none is left. `minutes` is null when the catalog has no `duration_seconds`,
   otherwise whole minutes with a floor of 1. `hasVideo` is true only
   for a `watch` lesson whose `has_video` is true (the boolean
   `GET /api/student/data` attaches). The model holds no video id.
@@ -1651,7 +1700,11 @@ watch heartbeat, and the messages it trades with Tella's frame.
 - **Rules its reader relies on:** `areas` always has eight entries;
   each one's `id`, `landmark`, `mesh` and `depth` come from
   `STUDY_AREAS` (so from `src/lib/world-v6/layout.ts`) and its name,
-  lesson count, titles, action items and feature row from the model.
+  lesson count, titles, action items, the lessons that are not
+  `finishable` (`unrecorded`: the map says "Not recorded yet" there)
+  and feature row from the model. `study.finished` and
+  `study.progress` count the places finished in a row from the start,
+  which can be fewer than `study.place`.
   `k` is a place index 0 to 7 and `i` a lesson index inside it.
   `openK` is the place the address names, or null. `paused` is true
   while the address names a lesson. Only the first feature row of an

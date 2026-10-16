@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DiscountStandInContext, type DiscountStandIn } from "@/components/world/useWorldDiscount";
-import { requiredLessons, type DiscountLesson, type DiscountRequestRow } from "@/lib/world/discount";
+import { DISCOUNT_LAUNCH_DATE, requiredLessons, type DiscountLesson, type DiscountRequestRow } from "@/lib/world/discount";
 import type { CatalogLessonLike } from "@/lib/world/catalog";
 import type { DiscountFeedbackAnswer, DiscountFeedbackQuestion } from "@/types/database";
 
@@ -19,9 +19,21 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *                            asks for watched (added to the ?p= preset)
  *   ?discount=pending        as ready, and an application sent 2 hours ago
  *   ?discount=approved       as ready, and the application approved
+ *   ?discount=applied        as ready, and the 30% on the Whop subscription
+ *   ?discount=rejected       as ready, and the application not approved, with
+ *                            the team's reason
  *   ?discount=expired        first payment 20 days ago, nothing applied for
+ *                            (never before the launch: until 2026-10-29 the
+ *                            payment is the day after it and this student's
+ *                            clock runs on to day 20)
  *   ?discount=before-launch  first payment on 2026-09-20, before the new course
- *   no ?discount             no first payment on record: the offer is not shown
+ *   ?discount=no-payment     no first payment on record
+ *   no ?discount             as locked: a first payment 3 days ago, videos as
+ *                            ?p= has them, so the 30% shows with no parameter
+ *                            (2026-10-16, Lovro's second Loom: he reviewed
+ *                            the plain page, where it showed nothing). Mark
+ *                            every video the offer asks for watched and it
+ *                            turns ready, as for a real student.
  *
  * THE QUESTIONS. Apply opens the application's questions
  * (src/components/world/WorldDiscountForm.tsx), as on /world. They are the
@@ -43,14 +55,32 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  * went in.
  */
 
-export type DiscountPreset = "locked" | "ready" | "pending" | "approved" | "expired" | "before-launch";
-const PRESETS: readonly DiscountPreset[] = ["locked", "ready", "pending", "approved", "expired", "before-launch"];
+export type DiscountPreset =
+  | "locked"
+  | "ready"
+  | "pending"
+  | "approved"
+  | "applied"
+  | "rejected"
+  | "expired"
+  | "before-launch"
+  | "no-payment";
+const PRESETS: readonly DiscountPreset[] = ["locked", "ready", "pending", "approved", "applied", "rejected", "expired", "before-launch", "no-payment"];
+/** The presets with an application in, and its status. Their student has watched every video the offer asks for. */
+const APPLIED: Partial<Record<DiscountPreset, DiscountRequestRow["status"]>> = {
+  pending: "pending",
+  approved: "approved",
+  applied: "applied",
+  rejected: "rejected",
+};
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
 /** The pretend Apply's wait, so the button's sending state can be seen. */
 const APPLY_MS = 600;
 /** ?questions=fail: what the form shows (the words useWorldDiscount gives a request that never arrived). */
 const SEND_REFUSED = "Couldn't reach the server. Try again in a moment.";
+/** ?discount=rejected: the team's reason, as the admin's reject box would send it. */
+const FIXTURE_REJECTION = "Several of the videos were skipped through in under a minute.";
 
 /** The six questions v29 seeded, as discount_feedback_questions rows. */
 const QUESTIONS: readonly DiscountFeedbackQuestion[] = [
@@ -102,13 +132,13 @@ export function discountPresetOf(search: string | null): DiscountPreset | null {
 }
 
 /**
- * The videos a preset needs watched on top of ?p=: for ready, pending and
- * approved, every lesson the offer asks for (discount.ts requiredLessons), so
- * the map's lanterns and counts agree with the panel.
+ * The videos a preset needs watched on top of ?p=: for ready and every preset
+ * with an application in, every lesson the offer asks for (discount.ts
+ * requiredLessons), so the map's lanterns and counts agree with the panel.
  */
 export function discountPresetIds(search: string | null, lessons: readonly CatalogLessonLike[]): string[] {
   const preset = discountPresetOf(search);
-  if (preset !== "ready" && preset !== "pending" && preset !== "approved") return [];
+  if (preset === null || (preset !== "ready" && !APPLIED[preset])) return [];
   const course: DiscountLesson[] = [...lessons]
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((l) => ({
@@ -141,32 +171,40 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
   const answersRef = useRef<DiscountFeedbackAnswer[][]>([]);
   const plainRef = useRef(0);
 
+  // Expired: 20 days in, never before the launch (20 days back from today was,
+  // until 2026-10-29, so the panel said "joined before the new course"). When
+  // that puts the payment later than 20 days ago, this student's clock runs
+  // ahead to day 20 (DiscountStandIn.now); the rest of the page keeps the real one.
+  const expiredPaid = Math.max(boot - 20 * DAY_MS, Date.parse(DISCOUNT_LAUNCH_DATE) + DAY_MS);
+  const now = preset === "expired" && expiredPaid + 20 * DAY_MS > boot ? expiredPaid + 20 * DAY_MS : undefined;
+
   const firstPaidAt = useMemo(() => {
     switch (preset) {
-      case "locked":
-        return new Date(boot - 3 * DAY_MS).toISOString();
       case "ready":
         return new Date(boot - 5 * DAY_MS).toISOString();
       case "pending":
       case "approved":
+      case "applied":
+      case "rejected":
         return new Date(boot - 6 * DAY_MS).toISOString();
       case "expired":
-        return new Date(boot - 20 * DAY_MS).toISOString();
+        return new Date(expiredPaid).toISOString();
       case "before-launch":
         return "2026-09-20T10:00:00.000Z";
-      default:
+      case "no-payment":
         return null;
+      default:
+        // locked, and the page with no ?discount.
+        return new Date(boot - 3 * DAY_MS).toISOString();
     }
-  }, [preset, boot]);
+  }, [preset, boot, expiredPaid]);
 
   const requests = useMemo<DiscountRequestRow[]>(() => {
     const at = new Date(boot - 2 * HOUR_MS).toISOString();
-    const base: DiscountRequestRow[] =
-      preset === "pending"
-        ? [{ id: "fixture-request", status: "pending", created_at: at }]
-        : preset === "approved"
-          ? [{ id: "fixture-request", status: "approved", created_at: at }]
-          : [];
+    const status = preset === null ? undefined : APPLIED[preset];
+    const base: DiscountRequestRow[] = status
+      ? [{ id: "fixture-request", status, created_at: at, rejection_reason: status === "rejected" ? FIXTURE_REJECTION : null }]
+      : [];
     return [...base, ...sent];
   }, [preset, boot, sent]);
 
@@ -190,8 +228,8 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
   );
 
   const value = useMemo<DiscountStandIn>(
-    () => ({ firstPaidAt, requests, apply, questions, submit }),
-    [firstPaidAt, requests, apply, questions, submit],
+    () => ({ firstPaidAt, now, requests, apply, questions, submit }),
+    [firstPaidAt, now, requests, apply, questions, submit],
   );
 
   useEffect(() => {

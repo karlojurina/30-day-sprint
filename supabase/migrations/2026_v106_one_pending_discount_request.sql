@@ -27,9 +27,11 @@
 --   4. Shows what it did.
 --
 -- WHAT A STUDENT NOTICES
---   Nothing, normally. On a double click the second request is refused: the
---   request route answers "Failed to create request", and the feedback
---   form's function raises the database's own words. The first request is
+--   Nothing, normally. On a double click the second request is refused, and
+--   both routes that write one (the plain request and the feedback form's)
+--   answer it as a request already in review: "You already applied for the
+--   discount. We're reviewing it." (secondPendingRequest in
+--   src/lib/world/discount-server.ts, since 16 October). The first request is
 --   pending either way, and the map shows it at its next load.
 --
 -- WHEN IT REFUSES, changing nothing (every message ends "Nothing was changed.")

@@ -1,8 +1,9 @@
 // What the server copies import, standing in for the real thing. build.mjs
 // points their import lines here: Next's response, the service-role Supabase
-// client, Whop's completions read, the steps that run after a lesson, and
-// which catalog is live. Hand-written, like stub-supabase.ts and
-// stub-call-gate.ts; the routes and libraries under test are the real source.
+// client, Whop's completions read, the steps that run after a lesson (and the
+// CSM's hook for a discount request), and which catalog is live. Hand-written,
+// like stub-supabase.ts and stub-call-gate.ts; the routes and libraries under
+// test are the real source.
 //
 // THE DATABASE. Rows live in plain arrays, one per table. The client answers
 // the calls those routes make the way PostgREST answers them, where a route
@@ -13,7 +14,8 @@
 //     table does not have is an error (42703), so a route asking for a column
 //     that is not there fails here as it would there.
 //   - insert refuses a second row for a unique key (23505) and a lesson that is
-//     not in `lessons` (23503), and then writes nothing.
+//     not in `lessons` (23503), and then writes nothing. `discount_requests`
+//     has v106's partial index, refused under its real name and message.
 //   - upsert with ignoreDuplicates leaves an existing row alone and returns,
 //     with .select(), only the rows it added (INSERT ... ON CONFLICT DO NOTHING
 //     RETURNING). Without it the named columns of the existing row are
@@ -21,10 +23,13 @@
 //   - a column left out of an insert takes the table's default
 //     (student_lesson_completions.completed_at defaults to now()).
 // `fail['table.op']` makes every such call fail with that error. Every call is
-// logged in `log`, in order.
+// logged in `log`, in order. `.rpc(fn, args)` runs the test's own stand-in for
+// that database function from `functions[fn]` (none: PostgREST's "not found").
 
 type Row = Record<string, unknown>;
 type DbError = { message: string; code?: string };
+/** A unique index with a WHERE: only rows it matches are compared. */
+type PartialUnique = { name: string; key: string[]; where: (r: Row) => boolean };
 
 const now = () => new Date().toISOString();
 let seq = 0;
@@ -32,7 +37,7 @@ const newId = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, "0")}`
 const none = () => null;
 
 /** The tables whose columns are known, with each column's default. */
-const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: string[][] }> = {
+const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: string[][]; partialUnique?: PartialUnique[] }> = {
   students: {
     columns: {
       id: newId, whop_user_id: none, supabase_user_id: none, email: none, name: none,
@@ -44,6 +49,7 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
     columns: {
       id: none, region_id: none, type: () => "watch", day: none, sort_order: () => 0,
       requires_action: () => false, counts_toward_progress: () => true, whop_lesson_id: none,
+      is_gate: () => false, duration_seconds: none,
     },
     unique: [["id"]],
   },
@@ -74,6 +80,14 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
   disengagement_alerts: {
     columns: { id: newId, student_id: none, alert_type: none, is_dismissed: () => false },
   },
+  discount_requests: {
+    columns: {
+      id: newId, student_id: none, status: () => "pending", promo_code: none, whop_promo_id: none,
+      reviewed_by: none, reviewed_at: none, rejection_reason: none, gate_lesson_id: none, created_at: now,
+    },
+    // v106: at most one pending request per student.
+    partialUnique: [{ name: "discount_requests_one_pending_per_student", key: ["student_id"], where: (r) => r.status === "pending" }],
+  },
 };
 DEFS.lessons_next = DEFS.lessons;
 
@@ -87,8 +101,9 @@ function withDefaults(table: string, row: Row): Row {
 }
 
 export interface Logged {
+  /** The table, or for an rpc the function's name. */
   table: string;
-  op: "select" | "insert" | "upsert" | "update" | "delete";
+  op: "select" | "insert" | "upsert" | "update" | "delete" | "rpc";
   filters: string[];
   values?: unknown;
   options?: unknown;
@@ -101,6 +116,8 @@ export class FakeDb {
   log: Logged[] = [];
   /** Access token -> auth user id, for auth.getUser. */
   users: Record<string, string> = {};
+  /** Stand-ins for database functions, by name, for `.rpc()`: handed the arguments and a client on this database. */
+  functions: Record<string, (args: Record<string, unknown>, db: ReturnType<typeof fakeClient>) => Promise<{ data: unknown; error: DbError | null }>> = {};
   constructor(seed: Record<string, Row[]> = {}, users: Record<string, string> = {}) {
     for (const [t, rows] of Object.entries(seed)) this.tables[t] = rows.map((r) => withDefaults(t, r));
     this.users = { ...users };
@@ -231,6 +248,13 @@ function builder(db: FakeDb, table: string) {
         return { code: "23505", message: `duplicate key value violates unique constraint on ${table} (${key.join(", ")})` };
       }
     }
+    for (const idx of DEFS[table]?.partialUnique ?? []) {
+      if (!idx.where(row) || idx.key.some((k) => row[k] == null)) continue;
+      if (others.some((o) => idx.where(o) && idx.key.every((k) => o[k] === row[k]))) {
+        // Postgres's own words, as PostgREST passes them on.
+        return { code: "23505", message: `duplicate key value violates unique constraint "${idx.name}"` };
+      }
+    }
     if (table === "student_lesson_completions" && !db.rows("lessons").some((l) => l.id === row.lesson_id)) {
       return { code: "23503", message: `insert or update on table "student_lesson_completions" violates foreign key constraint (lesson_id ${String(row.lesson_id)})` };
     }
@@ -315,6 +339,12 @@ export function fakeClient(db: FakeDb) {
     from(table: string) {
       return builder(db, table);
     },
+    async rpc(fn: string, args: Record<string, unknown> = {}) {
+      db.log.push({ table: fn, op: "rpc", filters: [], values: structuredClone(args) });
+      const run = db.functions[fn];
+      if (!run) return { data: null, error: { code: "PGRST202", message: `Could not find the function public.${fn}` } };
+      return run(args, fakeClient(db));
+    },
   };
 }
 
@@ -362,6 +392,9 @@ export async function reEvaluateStudentOpenTasks(_s: unknown, studentId: string)
 export async function afterCompletionWrite(_s: unknown, studentId: string) {
   steps.push({ step: "after-lesson", studentId });
   return { newAchievements: [] as string[] };
+}
+export async function onDiscountRequested(_s: unknown, studentId: string) {
+  steps.push({ step: "discount-requested", studentId });
 }
 
 // ── Whop ─────────────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 import { createClient } from "./stub-server.ts";
 import { fetchCompletedLessonsAsAdmin } from "./stub-server.ts";
 import { onLessonCompleted } from "./stub-server.ts";
+import { whopNoneFinishedNote } from "./constants.ts";
 
 /**
  * Pull the student's completed Whop course lessons and upsert matching
@@ -82,11 +83,12 @@ export async function syncWatchProgress({
             // Nothing on Whop is a plain zero: after the switch it is most
             // students' normal state, and written as an error it showed in
             // red as "Last error" beside real failures. Lessons opened and
-            // none finished keeps its note.
+            // none finished keeps its note, which the admin student page
+            // shows as a note (isWhopNoneFinishedNote).
             last_sync_error:
               rawCount === 0
                 ? null
-                : `Whop returned ${rawCount} interactions but 0 marked completed`,
+                : whopNoneFinishedNote(rawCount),
             last_sync_error_at: rawCount === 0 ? null : nowIso,
             last_sync_fetched: rawCount,
             last_sync_matched: 0,

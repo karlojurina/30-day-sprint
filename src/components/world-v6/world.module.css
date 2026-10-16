@@ -382,8 +382,13 @@
   will-change: transform;
 }
 
+/* The ring goes on the plaque or the pin (below), never on the 0 by 0 button:
+   the root's dark halo on it was a 10 px square that stayed on screen, where
+   the marker last was, once the marker hid with the focus still on it
+   (Loom 2, 2026-10-16: "this diamond shape stays on the screen"). */
 .root .marker:focus-visible {
   outline: none;
+  box-shadow: none;
 }
 
 /* A permanent stacking context, so switching a marker between text, dot and
@@ -1559,12 +1564,13 @@
 
 /* The opening's poster at 48 px, inline, for the first paint before the
    real file arrives (about 150 ms here): a soft preview, never a dark frame.
-   Made by scaling public/world-v6/posters/k0.webp; redo it with the posters. */
+   Made by scaling public/world-v6/posters/k0.webp (cwebp -q 80 -resize 48 27);
+   redo it with the posters. */
 .poster::before {
   content: "";
   position: absolute;
   inset: -24px;
-  background: url("data:image/webp;base64,UklGRogBAABXRUJQVlA4IHwBAADQCACdASowABsAPp1AmUklo6IhKrgN+LATiWwAnTK9gCjt+EH0LxcYDb6XZKC87wc3rn1d+nK0IYbuEUsFPMuxiJ2TxEutkG0M8a+CLrMAAP5UhopFUrk0uO52vv5rX681xhp4xK18lm3LR6sQDK2C0n/RNsaDsjmC95t706I1tjiaYXlUeSNL0RSx5SHmqhnXvV9Ac3v1dqgZmNxM3PZKZRUqyv+ijuVe+TY8q3XcsuqVwqTHBOXr5MscjNAQC8RuKoZaaYj7ZDSHyI/1a5rM0O2ETpibdifijK97+piQU/smWdLuzWHWPqVKa6PpIB79LilA/K8e1wulQIR2q2yBd6QePLkSZGqXEqrYx2bUSg7N7NzqPAGQ/1008vyH9LchTykksi47iBDQtxq2hzg/303dVYoWQbU4Q0I++QPTBJB61cv1kYjtMlnZy9W8OvpDtdYcHC1yuPI/Pb0yOo3y3P6XH8AUjKRRLfKdM6W4XBk199/H7hjEHkkAAA==") center / cover no-repeat;
+  background: url("data:image/webp;base64,UklGRogBAABXRUJQVlA4IHwBAAAwCQCdASowABsAPm0wkUYkIyGhMBqoAIANiWYAsR7G+g/AXzdjdnqtMAO0CdUo2qxFFU1FEBGcIzyD9jOlE4jCUIL6x+i0gCiAXF9Ke5crHe/wAP6vdGrRE2F+N7/a2fAYE74pUPl1zIcTSs3EYF+BvUW7S/AsFErXr7BtB4fh4SV+AoDwECEAUVvmiFq3Vj/GDf0ZL7cUaTuDNP78Tvjg65XYNEISwYDKqy6ylpchsulFZoyUrco0oov3IwoAGNu2nEvqQy1FKDMteZYoLuITjB0ruDKnYI2eI/+5yt2tmGePn++jnuXSwQ9hhJFl16VPUb5F5vtQU3OTPD+QVRQmQEvEEI+toCco3u34ddxKOky9FlmGlHHaMl5nVVL+U+66ODBCvDsnVmX4anDu1a22LHyJtR8+6F/tvBgvYOe0GWmI2AvddQrJfG+M3IE1egrM2I2iIDVa/6R9G2T7D04aY2Zi51RTpbpu9/2nMv//Ebmvq0iX5jMqyOAAAA==") center / cover no-repeat;
   filter: blur(14px);
 }
 
@@ -2026,6 +2032,23 @@
 
 .cardDone .primary {
   justify-content: space-between;
+}
+
+/* Loom 2 (2026-10-16): where Watch would be when the student's next lesson has
+   no video yet, which happens only once nothing else is left to watch. A
+   quiet slot the button's size, so the card keeps its shape. */
+.unrecorded {
+  margin: 14px 0 0;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px dashed var(--color-line-strong);
+  border-radius: 9px;
+  font: 500 10.5px/1 var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink-3);
 }
 
 /* ── The chip: the student's place is off screen ── */
@@ -2668,6 +2691,16 @@
   color: var(--color-accent-strong);
 }
 
+/* Closed for the student (shown at all times since 2026-10-16): the tag in
+   grey and the offer in the second ink, as the timeline's closed tag. */
+.cpChip[data-cp="closed"] .cpChipGlyph {
+  color: var(--color-ink-3);
+}
+
+.cpChip[data-cp="closed"] b {
+  color: var(--color-ink-2);
+}
+
 /* With no host's corner (no page mounts the map that way today) the segment
    is a pill of its own, the corner's pill's look. */
 .soloPill {
@@ -2901,6 +2934,11 @@
   border-color: var(--plaque-line);
 }
 
+/* Shown at all times since 2026-10-16: closed, the tag on the plaque is grey too. */
+.cpMarker[data-cp="closed"] .cpLabelGlyph {
+  color: var(--color-ink-3);
+}
+
 .cpMarker:hover .label,
 .cpMarker[data-hover] .label,
 .cpMarker:focus-visible .label {
@@ -2915,6 +2953,18 @@
 }
 
 .cpAfter {
+  white-space: nowrap;
+}
+
+/* On a phone the state's word can be too long for the eyebrow's row ("Not
+   approved", reachable there since 2026-10-16): it moves to a line of its
+   own, whole, instead of breaking in two. */
+.view[data-cp-state] .eyebrow {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.view[data-cp-state] .eyebrowEnd {
   white-space: nowrap;
 }
 
@@ -3029,4 +3079,14 @@
 .cpRowGlyph {
   display: block;
   color: var(--color-accent);
+}
+
+/* The 30%'s row under Video Ads II (2026-10-16): its state after
+   "Checkpoint", in sand when it is ready to apply, the tag grey when closed. */
+.cpRow[data-cp="ready"] .rowMeta {
+  color: var(--color-accent-strong);
+}
+
+.cpRow[data-cp="closed"] .cpRowGlyph {
+  color: var(--color-ink-3);
 }

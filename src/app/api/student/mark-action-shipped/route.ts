@@ -5,10 +5,13 @@ import { evaluateAchievements } from "@/lib/achievements";
 import { checkR2CompoundsShipped, onLessonCompleted } from "@/lib/csm-events";
 import { reEvaluateStudentOpenTasks } from "@/lib/csm-task-evaluation";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
-import { actionWrite, hasActionHalf, plainWriteError, watchHalfIsSeparate } from "@/lib/world/action-items";
-
-/** The lesson page's own words for "no link yet" (ActionItemBlock.tsx, PASTE_FIRST). */
-const PASTE_LINK_FIRST = "Paste the link to your Discord message first.";
+import {
+  PASTE_LINK_FIRST,
+  actionWrite,
+  hasActionHalf,
+  plainWriteError,
+  watchHalfIsSeparate,
+} from "@/lib/world/action-items";
 
 /**
  * POST /api/student/mark-action-shipped

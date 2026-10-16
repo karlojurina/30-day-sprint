@@ -134,8 +134,10 @@ export function sourceData(model: ReadyModel, lock: LockMode): SourceData {
   for (let k = 0; k < n; k++) {
     const m = model.areas[k];
     const actions: number[] = [];
+    const unrecorded: number[] = [];
     m.lessons.forEach((l, i) => {
       if (l.action) actions.push(i);
+      if (!l.finishable) unrecorded.push(i);
     });
     // The Ad Bounty's row when the place has one (plan item 18: its own checkpoint's lesson), else the first.
     const feature = m.features.find((f) => f.key === BOUNTY_KEY) ?? m.features[0];
@@ -152,6 +154,7 @@ export function sourceData(model: ReadyModel, lock: LockMode): SourceData {
       description: "",
       sample: m.lessons.map((l) => l.title),
       actions,
+      unrecorded,
       feature: feature ? { key: "bounty_access", title: feature.title } : undefined,
     });
     lessonIds.push(m.lessons.map((l) => l.id));
@@ -163,6 +166,11 @@ export function sourceData(model: ReadyModel, lock: LockMode): SourceData {
 
   const place = model.place;
   const current = Math.min(place, n - 1);
+  // The places finished in a row from the start, for the scene's whole-place
+  // look (setProgress). The student's place can be past a place not finished:
+  // one whose lessons left are not recorded yet (map-model.ts).
+  let finished = 0;
+  while (finished < n && doneCount[finished] >= areas[finished].lessons) finished++;
   const state: AreaState[] = [];
   const locked: boolean[] = [];
   const unreachable: boolean[] = [];
@@ -174,8 +182,8 @@ export function sourceData(model: ReadyModel, lock: LockMode): SourceData {
 
   const study: Study = {
     current,
-    finished: place,
-    progress: place >= n ? n : place + Math.min(0.999, doneCount[place] / Math.max(1, areas[place].lessons)),
+    finished,
+    progress: finished >= n ? n : finished + Math.min(0.999, doneCount[finished] / Math.max(1, areas[finished].lessons)),
     done: doneCount,
     nextLesson: Math.max(0, model.placeNext),
     place,

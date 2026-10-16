@@ -11,7 +11,17 @@
  *  - A lesson that does not count (today: the Ad Bounty row) is a feature of
  *    the area: no lantern, in no total, still shown and still openable.
  *  - The student's place is the first area, in route order, with a counting
- *    lesson left. The next lesson is the first undone counting lesson there.
+ *    lesson left that the student can finish in the app. The next lesson is
+ *    the first such lesson there. (Loom 2, 2026-10-16: a watch lesson with no
+ *    video yet can't be finished, so it must never hold a student. It still
+ *    counts in every total, and the place it is in stays not done.) When only
+ *    such lessons are left, the place and next lesson are the first undone
+ *    ones, and the map says "Not recorded yet" where Watch would be.
+ *  - A lesson can be finished in the app when it is a watch lesson with a
+ *    video (watched to the end) or an action item (its hand-in). A course
+ *    with no video at all (a failed read of the videos looks the same,
+ *    api/student/data) and the dev page's placeholder course (its "Mark
+ *    watched (dev)" button finishes any lesson) count every lesson as one.
  *  - Minutes exist only when the catalog knows the duration. Nothing is made up.
  */
 import type { Area, CatalogLessonLike } from "./catalog";
@@ -29,6 +39,8 @@ export interface MapLesson {
   done: boolean;
   /** A watch lesson with a video behind it. */
   hasVideo: boolean;
+  /** The student can finish it in the app (see the rules above). False: "Not recorded yet". */
+  finishable: boolean;
 }
 
 export interface MapFeature {
@@ -73,6 +85,18 @@ export interface MapModelInput {
   areas: readonly Area[];
   lessonsByArea: ReadonlyMap<string, readonly CatalogLessonLike[]>;
   completedLessonIds: ReadonlySet<string>;
+  /**
+   * Every lesson can be finished here, video or not: the dev page's
+   * placeholder course, whose "Mark watched (dev)" button finishes any lesson
+   * (AnyLessonFinishesContext in components/world/useMapModel.ts). Absent in
+   * the app.
+   */
+  anyLessonFinishes?: boolean;
+}
+
+/** Can the student finish this lesson in the app: a watch lesson with a video, or an action item. */
+export function canFinishInApp(l: CatalogLessonLike): boolean {
+  return (l.type === "watch" && Boolean(l.has_video)) || l.requires_action;
 }
 
 function minutesOf(durationSeconds: number | null): number | null {
@@ -84,9 +108,18 @@ export function buildMapModel(input: MapModelInput): MapModel {
   const { areas, lessonsByArea, completedLessonIds } = input;
 
   let rows = 0;
-  for (const a of areas) rows += lessonsByArea.get(a.id)?.length ?? 0;
+  let videos = 0;
+  for (const a of areas) {
+    for (const l of lessonsByArea.get(a.id) ?? []) {
+      rows++;
+      if (l.has_video) videos++;
+    }
+  }
   if (areas.length === 0 || rows === 0) return { ok: false, reason: "empty" };
   if (areas.length !== MAP_PLACES) return { ok: false, reason: "shape" };
+  // With no video anywhere nothing tells a lesson that is not recorded from
+  // one whose video did not load: then nothing is passed over.
+  const anyFinishes = input.anyLessonFinishes === true || videos === 0;
 
   const out: MapArea[] = [];
   let total = 0;
@@ -105,6 +138,7 @@ export function buildMapModel(input: MapModelInput): MapModel {
           action: l.requires_action,
           done: isDone,
           hasVideo: l.type === "watch" && Boolean(l.has_video),
+          finishable: anyFinishes || canFinishInApp(l),
         });
         if (isDone) done++;
       } else {
@@ -123,15 +157,31 @@ export function buildMapModel(input: MapModelInput): MapModel {
     out.push({ id: a.id, name: a.name, lessons, features, done });
   }
 
-  // An area with no counting lessons has nothing left to do, so it never holds the student.
-  let place = MAP_PLACES;
-  for (let k = 0; k < out.length; k++) {
-    if (out[k].done < out[k].lessons.length) {
-      place = k;
-      break;
-    }
+  // An area with no counting lessons has nothing left to do, so it never holds
+  // the student; nor does one whose lessons left can't be finished in the app.
+  // With only those left anywhere, the first undone lesson is the next one.
+  const left = (l: MapLesson) => !l.done && l.finishable;
+  let place = out.findIndex((a) => a.lessons.some(left));
+  let placeNext = place >= 0 ? out[place].lessons.findIndex(left) : -1;
+  if (place < 0) {
+    place = out.findIndex((a) => a.done < a.lessons.length);
+    placeNext = place >= 0 ? out[place].lessons.findIndex((l) => !l.done) : -1;
   }
-  const placeNext = place < MAP_PLACES ? out[place].lessons.findIndex((l) => !l.done) : -1;
+  if (place < 0) place = MAP_PLACES;
 
   return { ok: true, areas: out, place, placeNext, doneTotal, total };
+}
+
+/**
+ * Can the student finish lesson `id` in the app, as the model counts it (the
+ * dev page's placeholder course and a course with no video say yes to all).
+ * null when the model has no such counting lesson (a feature row, another
+ * course): the caller then asks canFinishInApp().
+ */
+export function finishableIn(model: Extract<MapModel, { ok: true }>, id: string): boolean | null {
+  for (const a of model.areas) {
+    const l = a.lessons.find((x) => x.id === id);
+    if (l) return l.finishable;
+  }
+  return null;
 }

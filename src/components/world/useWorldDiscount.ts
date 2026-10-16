@@ -44,12 +44,19 @@ import type { DiscountFeedbackAnswer, DiscountFeedbackQuestion } from "@/types/d
  * and a later approval read from StudentContext is never hidden behind it.
  *
  * THE DEVELOPMENT PAGE provides DiscountStandInContext (its first payment,
- * its requests, its questions, an Apply and a submit that resolve in memory)
- * and this hook then reads no student and calls no route.
+ * its requests, its questions, an Apply and a submit that resolve in memory,
+ * and for an expired student a clock past the 14 days) and this hook then
+ * reads no student and calls no route.
  */
 
 export interface DiscountStandIn {
   firstPaidAt: string | null;
+  /**
+   * The pretend student's clock (ms), when it is not the real one: a student
+   * whose 14 days are over can only be shown on a clock past them, and until
+   * 2026-10-23 no first payment since the launch is 14 days old.
+   */
+  now?: number;
   requests: readonly DiscountRequestRow[];
   /** The plain request. Resolves null when the application went in, else the words to show. */
   apply(): Promise<string | null>;
@@ -124,11 +131,13 @@ export function useWorldDiscount(): WorldDiscountHook {
     return out;
   }, [watchedLessonIds, completedLessonIds, completions]);
 
-  const [now, setNow] = useState(() => Date.now());
+  const [tick, setTick] = useState(() => Date.now());
   useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), MINUTE_MS);
+    const id = window.setInterval(() => setTick(Date.now()), MINUTE_MS);
     return () => window.clearInterval(id);
   }, []);
+  // The development page's clock when it has one (an expired student), else the real one.
+  const now = stand?.now ?? tick;
 
   /** What this page sent, until StudentContext has a request it did not have then. */
   const [sent, setSent] = useState<Sent | null>(null);

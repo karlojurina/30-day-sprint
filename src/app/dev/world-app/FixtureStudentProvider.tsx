@@ -24,6 +24,7 @@ import { useFixtureActionItems } from "./fixtureActionItems";
 import { FixtureDiscount, discountPresetIds } from "./fixtureDiscount";
 import { FixtureHud, hudStreak } from "./fixtureHud";
 import { CelebrationStandInContext } from "@/components/world/WorldCelebrations";
+import { AnyLessonFinishesContext } from "@/components/world/useMapModel";
 
 /**
  * The pretend student behind /dev/world-app (world_v6_wiring_prd.md, Work Item 4).
@@ -74,9 +75,11 @@ import { CelebrationStandInContext } from "@/components/world/WorldCelebrations"
  *
  *   ?discount=<preset> the early-finish discount's states, in memory
  *                      (fixtureDiscount.tsx: locked, ready, pending, approved,
- *                      expired, before-launch); ready and after add the videos
+ *                      applied, rejected, expired, before-launch, no-payment);
+ *                      ready and the four with an application add the videos
  *                      the offer asks for to the ?p= preset. Without it the
- *                      pretend student has no first payment: no offer shows.
+ *                      pretend student paid 3 days ago, as locked (2026-10-16),
+ *                      so the 30% shows on the plain page too.
  *
  *   ?hud=<preset>      the map's top-left corner: the streak (on this context,
  *                      as StudentProvider carries it) and the achievements and
@@ -105,7 +108,10 @@ import { CelebrationStandInContext } from "@/components/world/WorldCelebrations"
  * lessons 1 to 9 of area 4), partial (the first 6 lessons of every area), loom
  * (Lovro's test in the map review Loom: 3 of area 3, 7 of area 4) and all; any
  * other name is p0.
- * world-tests/v6-course.mjs walks it.
+ * world-tests/v6-course.mjs walks it. Its watch lessons with no video can't
+ * be finished on the map, as in the app (map-model.ts); on the placeholder
+ * course "Mark watched (dev)" finishes any lesson, so there the map passes
+ * none over (AnyLessonFinishesContext).
  *
  * THE LESSONS' TEXT, course mode only (courseCatalog.ts, THE LESSONS' TEXT).
  * With ?text=sample the made-up sample text is on a5l22 and a5l08, and
@@ -470,9 +476,11 @@ export function FixtureStudentProvider({
       <LessonAccessContext.Provider value={PRETEND_ACCESS}>
         <LessonTransportContext.Provider value={transport}>
           <CelebrationStandInContext.Provider value={celebrate ? PRETEND_CELEBRANT : null}>
-            <FixtureDiscount search={search}>
-              <FixtureHud search={search}>{children}</FixtureHud>
-            </FixtureDiscount>
+            <AnyLessonFinishesContext.Provider value={mode !== "course"}>
+              <FixtureDiscount search={search}>
+                <FixtureHud search={search}>{children}</FixtureHud>
+              </FixtureDiscount>
+            </AnyLessonFinishesContext.Provider>
           </CelebrationStandInContext.Provider>
         </LessonTransportContext.Provider>
       </LessonAccessContext.Provider>

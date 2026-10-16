@@ -1,6 +1,9 @@
 /**
  * v6 posters (cheap laptops, 2026-09-28): the opening and the eight stops,
  * rendered on this Mac's GPU at full quality, into public/world-v6/posters/.
+ * Drawn on http://localhost:3111/dev/world-app (must already be up; this
+ * script never starts a server) with the real course at progress 0, no
+ * lesson watched: ?catalog=course&p=p0&discount=locked.
  *
  *   node world-tests/v6-posters.mjs [--q=0.8] [--budget=2.9]
  *
@@ -49,17 +52,14 @@ try {
   const page = await browser.newPage();
   await page.setViewport({ width: W, height: H, deviceScaleFactor: DPR });
   page.on("pageerror", (e) => log("pageerror", String(e).slice(0, 200)));
-  // Final pass B: the posters at progress 0 (the cutover: nothing watched, no lantern lit),
-  // through the page's own fixture key (tuning.ts KEY).
-  await page.evaluateOnNewDocument(() => {
-    try {
-      localStorage.setItem("world-v6:tuning:trail", JSON.stringify({ lock: "open", frontier: 0, finished: 0, partial: 0 }));
-    } catch {
-      /* ignore */
-    }
-  });
+  // Final pass B: the posters at progress 0 (the cutover: nothing watched, no lantern lit).
+  // Second Loom (2026-10-16): on the real course, the map /world draws. The scene lays out one
+  // lantern per lesson of the course it is shown (progress-world.ts layoutFor), so the fixture
+  // page's counts (/dev/world-v6, study.ts STUDY_AREAS) stood lanterns (Video Ads II's bench, the
+  // walk to the arch) where a student's map has none. ?discount=locked pins the cache's look to
+  // a new student's.
   const t0 = Date.now();
-  await page.goto("http://localhost:3111/dev/world-v6?poster=off", { waitUntil: "domcontentloaded", timeout: 60000 });
+  await page.goto("http://localhost:3111/dev/world-app?catalog=course&p=p0&discount=locked&poster=off", { waitUntil: "domcontentloaded", timeout: 60000 });
   await page.waitForFunction(() => window.__worldReady === true, { timeout: 80000, polling: 200 });
   log("ready", Date.now() - t0, "ms");
   const q = await page.evaluate(() => window.__worldV6Debug.qualityInfo());

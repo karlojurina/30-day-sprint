@@ -1,5 +1,5 @@
 import { buildWorldCatalog } from './_gen/catalog.ts'
-import { buildMapModel, MAP_PLACES } from './_gen/map-model.ts'
+import { buildMapModel, canFinishInApp, finishableIn, MAP_PLACES } from './_gen/map-model.ts'
 
 let pass = 0
 const fails = []
@@ -133,6 +133,60 @@ console.log('\n=== catalogs the map cannot draw ===')
   ok(none.ok === false && none.reason === 'empty', 'no catalog at all is empty, not a shape error', JSON.stringify(none))
   const noLessons = model([], {}, ({ regions }) => ({ regions, lessons: [] }))
   ok(noLessons.ok === false && noLessons.reason === 'empty', 'eight areas with no lessons is empty')
+}
+
+console.log('\n=== a lesson that can\'t be finished in the app never holds the student (Loom 2, 2026-10-16) ===')
+{
+  // As in the real course today: every watch lesson has a video but a3l11, a4l11
+  // and all of area 7; a5l24, an action item, has none and is still finished by its hand-in.
+  const vid = {}
+  for (let k = 0; k < 8; k++) {
+    for (let n = 1; n <= COUNTS[k]; n++) {
+      const id = idOf(k, n)
+      if (id === 'a3l11' || id === 'a4l11' || id === 'a5l24' || k === 6) continue
+      vid[id] = { has_video: true, duration_seconds: 300 }
+    }
+  }
+  const at = (done) => model(done, vid)
+  const fresh = at([])
+  ok(fresh.place === 0 && fresh.placeNext === 0, 'a new student starts at place 1, lesson 1', `place=${fresh.place} next=${fresh.placeNext}`)
+  ok(fresh.areas[2].lessons[10].finishable === false && fresh.areas[2].lessons[11].finishable === true, 'a watch lesson with no video can\'t be finished, one with a video can')
+  ok(fresh.areas[4].lessons[23].finishable === true, 'an action item with no video can be finished (its hand-in)')
+
+  const ten = at([...all(0), ...all(1), ...range(2, 1, 10)])
+  ok(ten.place === 2 && ten.placeNext === 11, 'lessons 1 to 10 of Video Ads I watched: next is lesson 12, past lesson 11', `place=${ten.place} next=${ten.placeNext}`)
+
+  const allBut = at([...all(0), ...all(1), ...range(2, 1, 10), ...range(2, 12, 22)])
+  ok(allBut.place === 3 && allBut.placeNext === 0, 'only lesson 11 left in Video Ads I: the student moves on to Video Ads II', `place=${allBut.place} next=${allBut.placeNext}`)
+  ok(allBut.areas[2].done === 21 && allBut.areas[2].lessons.length === 22, 'Video Ads I is 21 of 22: the lesson still counts')
+  ok(allBut.total === 144 && allBut.doneTotal === 8 + 10 + 21, 'the course total still counts it', `${allBut.doneTotal}/${allBut.total}`)
+
+  const toSeven = at([...all(0), ...all(1), ...all(2), ...all(3), ...all(4), ...all(5)])
+  ok(toSeven.place === 7 && toSeven.placeNext === 0, 'areas 1 to 6 done: Creative Strategy (no videos) is passed over for place 8', `place=${toSeven.place}`)
+  ok(toSeven.areas[6].done === 0, 'and Creative Strategy is still 0 done')
+
+  const finishableDone = at(NAMES.flatMap((_, k) => all(k)).filter((id) => id !== 'a3l11' && id !== 'a4l11' && !id.startsWith('a7')))
+  ok(finishableDone.place === 2 && finishableDone.placeNext === 10, 'everything that can be finished is done: the first lesson left (a3l11) is next, not recorded yet', `place=${finishableDone.place} next=${finishableDone.placeNext}`)
+  ok(finishableDone.areas[2].lessons[10].finishable === false, 'and the map knows it can\'t be finished')
+
+  const done = at(NAMES.flatMap((_, k) => all(k)))
+  ok(done.place === MAP_PLACES && done.placeNext === -1, 'everything done: place 8, no next lesson')
+
+  ok(finishableIn(ten, 'a3l11') === false && finishableIn(ten, 'a3l12') === true, 'finishableIn reads the model')
+  ok(finishableIn(ten, 'a7l22') === null && finishableIn(ten, 'zz') === null, 'finishableIn: null for a feature row and an unknown id')
+
+  // The dev page's placeholder course: "Mark watched (dev)" finishes any lesson, so none is passed over.
+  const { regions, lessons } = seed(vid)
+  const doneTen = new Set([...all(0), ...all(1), ...range(2, 1, 10)])
+  const c = buildWorldCatalog({ lessons, regions, completedLessonIds: doneTen, watchProgress: new Map() })
+  const dev = buildMapModel({ areas: c.areas, lessonsByArea: c.lessonsByArea, completedLessonIds: doneTen, anyLessonFinishes: true })
+  ok(dev.place === 2 && dev.placeNext === 10 && dev.areas[2].lessons[10].finishable === true, 'anyLessonFinishes: lesson 11 is next and can be finished', `next=${dev.placeNext}`)
+
+  // No video anywhere (the staging seed, or a failed read of the videos): nothing is passed over.
+  const none = model([...all(0), ...all(1), ...range(2, 1, 10)])
+  ok(none.placeNext === 10 && none.areas.every((a) => a.lessons.every((l) => l.finishable)), 'a course with no video at all passes nothing over')
+  ok(canFinishInApp({ type: 'watch', has_video: true, requires_action: false }) && canFinishInApp({ type: 'setup', has_video: false, requires_action: true }) && !canFinishInApp({ type: 'watch', has_video: false, requires_action: false }),
+     'canFinishInApp: a video, or a hand-in')
 }
 
 console.log('\n=== an area with nothing to do never holds the student ===')

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useWorldCatalog } from "@/lib/world/useWorldCatalog";
@@ -13,7 +13,8 @@ import type { CachedLessonTransport } from "@/lib/world/embed-cache";
 import { useLessonTransport } from "@/lib/world/useLessonTransport";
 import { parseLessonText } from "@/lib/world/lesson-text";
 import { Panel } from "@/components/world/AreaScreen";
-import { mapIsSilent, useMapModel } from "@/components/world/useMapModel";
+import { AnyLessonFinishesContext, mapIsSilent, useMapModel } from "@/components/world/useMapModel";
+import { canFinishInApp, finishableIn } from "@/lib/world/map-model";
 import { pad2 } from "@/components/world-v6/study";
 import { BOUNTY_KEY, BOUNTY_NAME } from "@/components/world-v6/source";
 import type { CatalogLessonLike } from "@/lib/world/catalog";
@@ -63,7 +64,14 @@ import u from "@/components/world/world-ui.module.css";
  * button completes the lesson; on a video lesson it completes the action
  * half, and the lesson is done once the video is watched too. Either way
  * "Next lesson" lights the moment the context says the lesson is done, as it
- * does after a video.
+ * does after a video. A lesson that can't be finished here at all (a watch
+ * lesson with no video yet, map-model.ts) has "Next lesson" on from the start,
+ * so it never holds a student (Loom 2, 2026-10-16).
+ *
+ * AN ADDRESS THAT DOESN'T MATCH THE COURSE says "That lesson isn't here.": a
+ * lesson id the course doesn't have, or one filed under another place than
+ * the address names. Its Back goes to that place, or to the map when the
+ * course doesn't have the place either.
  */
 export function LessonScreen({
   areaId,
@@ -92,7 +100,8 @@ export function LessonScreen({
   const shared = useLessonTransport();
   const lessonTransport = transport ?? shared;
   const { areas, lessonsByArea, lessonById, hasVideo } = useWorldCatalog();
-  const { status } = useMapModel();
+  const { status, model } = useMapModel();
+  const anyLessonFinishes = useContext(AnyLessonFinishesContext);
   // While the course is loading, or did not arrive, the host's card says so.
   const silent = mapIsSilent(status);
   const { completedLessonIds, markWatched, completions, saveDiscordLink, toggleLessonAction } = useStudent();
@@ -107,7 +116,9 @@ export function LessonScreen({
   // own; the browser's back lands there too), and the page names the
   // checkpoint, not the place.
   const bounty = isBountyLesson(lessonById(lessonId));
-  const placeHref = bounty ? stage.href() : stage.href(areaId);
+  // An address naming a place the course doesn't have goes back to the map.
+  const placeKnown = areas.some((a) => a.id === areaId);
+  const placeHref = bounty || !placeKnown ? stage.href() : stage.href(areaId);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -122,7 +133,10 @@ export function LessonScreen({
   }, []);
 
   const area = areas.find((a) => a.id === areaId);
-  const lesson = lessonById(lessonId);
+  // A lesson under another place's address isn't here either: its eyebrow,
+  // its "Next lesson" and the panel under it would all be that other place's.
+  const found = lessonById(lessonId);
+  const lesson = found && found.region_id === areaId ? found : null;
   const shown = !silent && !!area && !!lesson;
 
   // Whether this lesson gets the player, from the catalog alone, before any
@@ -159,6 +173,10 @@ export function LessonScreen({
   const index = own.findIndex((l) => l.id === lessonId);
   const next = index >= 0 ? own[index + 1] : undefined;
   const done = completedLessonIds.has(lessonId);
+  // A lesson the student can't finish here (a watch lesson with no video yet)
+  // never holds them: its "Next lesson" is on (map-model.ts, Loom 2).
+  const finishable = anyLessonFinishes || ((model && finishableIn(model, lesson.id)) ?? canFinishInApp(lesson));
+  const nextOn = done || !finishable;
 
   // The eyebrow. `position` stays 0 for a lesson that is not one of the place's
   // counting lessons, and the eyebrow then names the place.
@@ -270,14 +288,15 @@ export function LessonScreen({
               </button>
             )}
             {/* Enabled by the SERVER's completion, read back through the context —
-                never by the player's own reckoning. */}
+                never by the player's own reckoning. Or at once on a lesson
+                that can't be finished here (not recorded yet). */}
             {next && (
               <Link
-                href={done ? stage.href(areaId, next.id) : "#"}
+                href={nextOn ? stage.href(areaId, next.id) : "#"}
                 scroll={false}
-                aria-disabled={!done}
+                aria-disabled={!nextOn}
                 onClick={(e) => {
-                  if (!done) e.preventDefault();
+                  if (!nextOn) e.preventDefault();
                 }}
                 className={u.primary}
               >

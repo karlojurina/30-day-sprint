@@ -3,7 +3,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { onDiscountRequested } from "@/lib/csm-events";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
-import { decideDiscountRequest, loadDiscountReads } from "@/lib/world/discount-server";
+import { decideDiscountRequest, loadDiscountReads, secondPendingRequest } from "@/lib/world/discount-server";
 
 /**
  * The new course (2026-10-14): on a deployment that reads the v2 catalog
@@ -32,6 +32,9 @@ async function requestUnderNewCourse(supabase: SupabaseClient, studentId: string
     .single();
 
   if (error) {
+    // A second Apply sent with the first (v106 refuses it): the first stands.
+    const twice = secondPendingRequest(error);
+    if (twice) return NextResponse.json(twice, { status: 400 });
     return NextResponse.json({ error: "Failed to create request" }, { status: 500 });
   }
 
@@ -248,6 +251,10 @@ export async function POST(request: NextRequest) {
     .single();
 
   if (error) {
+    // Two Apply clicks can both pass the duplicate check above; v106 refuses
+    // the second insert, and the first stands.
+    const twice = secondPendingRequest(error);
+    if (twice) return NextResponse.json(twice, { status: 400 });
     return NextResponse.json({ error: "Failed to create request" }, { status: 500 });
   }
 

@@ -27,8 +27,12 @@ with what each one needed rewritten). A copy that still holds an `@/` import
 stops the build.
 
 Server code is copied too (since 2026-10-16): the Whop backfill and the visit
-route that runs it, the Whop webhook, `mark-action-shipped`, `skip-lesson` and
-the CSM's event hooks. Their imports go to `_gen/stub-server.ts`, a
+route that runs it, the Whop webhook, `mark-action-shipped`, `skip-lesson`,
+the CSM's event hooks, and the two routes that write a discount request
+(`request` and `submit-feedback`, for a double submit refused by v106's
+index, which the stand-in has under its real name). A database function a
+route calls through `.rpc()` is a stand-in the test writes itself, from the
+migration's body. Their imports go to `_gen/stub-server.ts`, a
 hand-written stand-in for Next's response, the service-role Supabase client
 (rows in plain arrays, answered the way PostgREST answers where a route depends
 on it: `.single()` on no row is an error, a select returns only the columns it

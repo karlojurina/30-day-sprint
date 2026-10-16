@@ -43,7 +43,8 @@
  *      and closes the list: one panel, focus in it, nothing over the cache
  *   5  the keyboard: Tab reaches the pill (focus ring), Enter opens the list
  *      with focus inside, Esc closes it and focus is back on the pill, Tab
- *      reaches Sign out and its word shows
+ *      reaches the discount segment (in the pill for every student since
+ *      2026-10-16), then Sign out, and its word shows
  *   6  Sign out goes to the app's sign-out (the stand-in counts it), from the
  *      pill and from the list
  *   7  under a lesson page the corner is not visible; an unlock that lands
@@ -628,6 +629,11 @@ try {
     await sleep(300)
     s = await page.evaluate(SNAP)
     r.check('Esc closes it and focus is back on the pill', s.list === null && s.focus?.label?.startsWith('Streak'), s.focus)
+    // Since 2026-10-16 the discount's segment is in the pill for every student (the dev page's student paid 3 days ago): Tab passes it first.
+    await page.keyboard.press('Tab')
+    await sleep(300)
+    s = await page.evaluate(SNAP)
+    r.check('the next Tab is the discount segment, between the stats and Sign out', /discount checkpoint/.test(s.focus?.label ?? ''), s.focus)
     await page.keyboard.press('Tab')
     await sleep(300)
     s = await page.evaluate(SNAP)

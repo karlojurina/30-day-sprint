@@ -369,6 +369,25 @@ const VIEW_KEYS: readonly number[] = (() => {
     TAIL_KEYS.first >= 0 ? TAIL_KEYS.first + 3 : -1, // in the arch's opening
   ].filter((k) => k >= 0);
 })();
+/**
+ * Map review, second Loom (2026-10-16): the turn after the Video Ads II hut
+ * goes clockwise now, which moved the a4 row's own view and the traverse row
+ * two after it (layout KEYS). These two views place their clouds from copies
+ * of the rows as they stood, as rocks.ts HERO_SPOTS keeps its hero rocks, so
+ * the sky stays as it was: a view's clouds go where its frame looks (the
+ * traverse's sat in a3's south-east sky), and every view draws from one
+ * random stream, so a view whose frame moves deals the clouds of every view
+ * after it again (the burst, the ridge, a5's lake reveal, a8, the arch).
+ * Position, compass bearing, pitch (positive looking down), lens.
+ */
+const PINNED_VIEWS: ReadonlyMap<number, { x: number; y: number; z: number; bearing: number; pitch: number; fov: number }> = (() => {
+  const a4 = PLACES.find((p) => p.id === "a4")?.trail ?? -1;
+  if (a4 < 0) return new Map();
+  return new Map([
+    [a4, { x: 820, y: 324, z: 1160, bearing: 244.5, pitch: -8, fov: 48 }],
+    [a4 + 2, { x: 1080, y: 470, z: 1196, bearing: 148, pitch: 2, fov: 42 }],
+  ]);
+})();
 /** Per view: cumulus and cirrus. */
 const PER_VIEW = { cumulus: 3, cirrus: 4 } as const;
 /** The frame's aspect the placement assumes (the 1691 x 1278 look size is 1.32). */
@@ -484,7 +503,7 @@ function placeClouds(light: LightModule | null): Cloud[] {
   const n = TRAIL.length - 1;
   for (const key of VIEW_KEYS) {
     if (key > n) continue;
-    const pose = keyPose(key);
+    const pose = PINNED_VIEWS.get(key) ?? keyPose(key);
     const vfov = pose.fov;
     const hfov = (2 * Math.atan(Math.tan((vfov * D2R) / 2) * ASPECT)) / D2R;
     // Pitch is positive looking down; the frame's top edge in elevation.

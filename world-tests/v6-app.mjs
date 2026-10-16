@@ -47,6 +47,12 @@
  *              a[href="/dev/world-v3"], a[href="/dev/world-codex"],
  *              section[aria-label="Bench results"]
  *
+ * Rows 21 and 22 came with the second Loom (2026-10-16): 21 scrolls on past the
+ * Introduction with the focus on its marker (Esc from its panel) and finds
+ * nothing left on screen where the marker was; 22 resizes from the 3D map to
+ * the phone list and back (the list at its top, the camera where it was) and
+ * widens a page opened narrow (the camera at the student's place).
+ *
  * Query added to the PRD's presets: arrive=1 on the rows that test the arrival
  * (the map skips it under automation otherwise), arrive=0 elsewhere, and
  * poster=off on the 3D rows so the scene's own speed probe cannot swap in the
@@ -651,6 +657,8 @@ const ROWS = [
   [18, 'Catalog not ready'],
   [19, 'No dev tools'],
   [20, 'Quiet network and console'],
+  [21, 'Nothing stays on screen where a marker was'],
+  [22, 'From the 3D map to the phone list and back'],
 ]
 const nameOf = (id) => ROWS.find((r) => r[0] === id)[1]
 
@@ -1016,6 +1024,22 @@ try {
       r.values.shotLesson = await r.shot('unknown-lesson')
       r.check('/zz says "That place isn\'t on the map."', !!place, s1.outside.slice(0, 120))
       r.check('/a2/nope says "That lesson isn\'t here."', !!lesson, s2.outside.slice(0, 120))
+      // The second Loom's morning findings: a real lesson under another place's address, and a lesson under a place the course doesn't have.
+      const back = () => {
+        const a = [...document.querySelectorAll('a')].find((x) => !x.closest('main, nextjs-portal') && /Back/.test(x.textContent ?? ''))
+        return a ? a.getAttribute('href') : null
+      }
+      for (const [sub, home, what] of [
+        ['/a7/a2l01', `${APP}/a7`, 'a real lesson (a2l01) under Creative Strategy'],
+        ['/zz/a1l01', APP, 'a lesson under a place the course does not have'],
+      ]) {
+        page = await r.open(url(sub, { p: 'mid', arrive: 0, poster: 'off' }))
+        const said = await waitFor(page, SAYS, { arg: 'That lesson isn.t here\\.', timeout: LOAD_MS, soft: true, what: `row 9: ${sub}` })
+        await sleep(800)
+        const s = await page.evaluate(SNAP)
+        const href = await page.evaluate(back)
+        r.check(`${sub} (${what}) says "That lesson isn't here." and its Back goes to ${home}`, !!said && s.lesson === null && href === home, { said: !!said, heading: s.lesson, back: href })
+      }
       r.check('no page error', r.pageErrors.length === 0, r.pageErrors.map((e) => e.message).slice(0, 2))
     })
 
@@ -1359,6 +1383,148 @@ try {
       r.check('no TUNE button', a.tune === 0 && a.tunePanel === 0, { button: a.tune, panel: a.tunePanel })
       r.check('no V3 or Astra link', a.v3 === 0 && a.astra === 0 && a.named === 0, { v3: a.v3, astra: a.astra, byName: a.named })
       r.check('no bench panel, also with ?bench=1', a.bench === 0 && b.bench === 0, { plain: a.bench, asked: b.bench })
+    })
+
+    // 21 ── Nothing stays on screen where a marker was (the second Loom, 0:40 to 1:13: "this diamond
+    // shape over here stays on the screen... when I scroll past it"). Esc from a place's panel gives
+    // the focus back to its marker, the keyboard way; the student then scrolls on past the place. The
+    // marker hides once its place has gone by, and nothing of it may stay: the 10 px square Lovro saw
+    // was the root's focus halo drawn on the marker's own 0 by 0 button, left where the marker last was.
+    await runRow(21, nameOf(21), async (r) => {
+      const page = await r.open(url('', { p: 'p0', arrive: 0, poster: 'off' }))
+      await ready(page, 'row 21')
+      await openPlace(page, 0, 'row 21')
+      await page.keyboard.press('Escape')
+      await waitPath(page, APP, 'row 21')
+      await waitNoPanel(page, 'row 21')
+      const focus = await waitFor(
+        page,
+        () => {
+          const b = document.activeElement
+          return b && b.matches('main button[data-mode]') ? { label: b.getAttribute('aria-label'), visible: b.matches(':focus-visible') } : null
+        },
+        { timeout: 15000, soft: true, what: 'row 21: the focus back on the marker' },
+      )
+      r.check("Esc gives the focus back to the Introduction's marker, the keyboard way (:focus-visible)", !!focus && /^Introduction/.test(focus.label ?? '') && focus.visible, focus)
+      /** What the map's interface paints, outside the header, the timeline, the footer, the card, chip and panels. */
+      const PAINTED = () => {
+        const main = document.querySelector('main')
+        const seen = (el) => {
+          for (let e = el; e && e !== document.documentElement; e = e.parentElement) {
+            const cs = getComputedStyle(e)
+            if (cs.display === 'none' || cs.visibility !== 'visible' || Number(cs.opacity) <= 0.02) return false
+            if (e.getAttribute?.('visibility') === 'hidden') return false
+          }
+          return true
+        }
+        const nameOf = (el) => `${el.tagName.toLowerCase()}.${String(typeof el.className === 'string' ? el.className : (el.className?.baseVal ?? '')).split(' ').map((c) => c.split('__').pop()).join('.')}`
+        const out = []
+        for (const el of main.querySelectorAll('*')) {
+          if (el.closest('header, nav, footer, section, [role="status"]')) continue
+          const cs = getComputedStyle(el)
+          const b = el.getBoundingClientRect()
+          const ring = cs.boxShadow !== 'none' || (cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0)
+          if (!(b.width > 0 && b.height > 0) && !ring) continue
+          // The layers that fill the screen (the stage, the shade, the posters) are not what this looks for.
+          if (b.width > 200 || b.height > 80) continue
+          if (b.right < 0 || b.bottom < 0 || b.left > innerWidth || b.top > innerHeight) continue
+          if (!seen(el)) continue
+          const marker = el.closest('button[data-mode]')
+          out.push({ what: nameOf(el), of: marker ? marker.getAttribute('aria-label') : null, mode: marker ? marker.dataset.mode : null, box: `${Math.round(b.left)},${Math.round(b.top)},${Math.round(b.width)},${Math.round(b.height)}` })
+        }
+        const hidden = [...main.querySelectorAll('button[data-mode="hidden"]')].map((m) => {
+          const cs = getComputedStyle(m)
+          return { of: m.getAttribute('aria-label'), shadow: cs.boxShadow, outline: cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) > 0 }
+        })
+        return { d: window.__worldDepth, intro: document.querySelector('main button[data-mode]')?.dataset.mode ?? null, out, hidden }
+      }
+      // On past the signpost toward Fundamentals, the way a student scrolls, the pointer off any landmark.
+      await page.mouse.move(DESKTOP.width - 60, 140)
+      const steps = []
+      for (let i = 0; i < 28; i++) {
+        await page.mouse.wheel({ deltaY: 120 })
+        await sleep(320)
+        steps.push(await page.evaluate(PAINTED))
+      }
+      r.values.shot = await r.shot('past-the-signpost')
+      const hiddenSteps = steps.filter((s) => s.intro === 'hidden').length
+      const moved = steps.at(-1).d - steps[0].d
+      r.check("the camera went on past the signpost: the Introduction's marker hid", hiddenSteps >= 6 && moved > 0.03, `${hiddenSteps} of ${steps.length} steps hidden, depth ${f(steps[0].d)} to ${f(steps.at(-1).d)}`)
+      const drawn = steps.flatMap((s) => s.hidden.filter((h) => h.shadow !== 'none' || h.outline).map((h) => `${h.of}: ${h.shadow}`))
+      r.check('a hidden marker draws nothing of its own, focused or not (no ring, no halo)', drawn.length === 0, drawn.length ? [...new Set(drawn)].slice(0, 3) : 'none')
+      const ofHidden = steps.flatMap((s) => s.out.filter((e) => e.mode === 'hidden').map((e) => `${e.of}: ${e.what} at ${e.box}`))
+      r.check('nothing of a hidden marker is painted', ofHidden.length === 0, ofHidden.length ? [...new Set(ofHidden)].slice(0, 3) : 'none')
+      // A stray: something outside the markers that keeps one box on screen for 6 steps while the camera moves on.
+      const runs = new Map()
+      const stuck = new Set()
+      steps.forEach((s, i) => {
+        for (const e of s.out) {
+          if (e.of !== null) continue
+          const key = `${e.what} at ${e.box}`
+          const run = runs.get(key)
+          const next = run && run.last === i - 1 ? { first: run.first, last: i } : { first: i, last: i }
+          runs.set(key, next)
+          if (next.last - next.first >= 5 && Math.abs(steps[next.last].d - steps[next.first].d) > 0.01) stuck.add(key)
+        }
+      })
+      r.check('nothing else stays at one spot on screen while the camera moves', stuck.size === 0, stuck.size ? [...stuck].slice(0, 3) : 'none')
+    })
+
+    // 22 ── From the 3D map to the phone list and back (the morning findings, 2026-10-16: the list
+    // opened 441 px down, and back on the 3D the camera was at the route's start). The list opens at
+    // its top with the student's place first; back on the 3D the camera is where it was, whatever the
+    // list's scroll; a page opened narrow and widened starts at the student's place.
+    await runRow(22, nameOf(22), async (r) => {
+      /** The camera has stopped: the depth and the scroll the same over three reads. */
+      const rest = async (p, what, timeout = 25000) => {
+        const t0 = Date.now()
+        let prev = null
+        let steady = 0
+        while (Date.now() - t0 < timeout) {
+          const now = await p.evaluate(() => ({ d: typeof window.__worldDepth === 'number' ? window.__worldDepth : null, y: Math.round(window.scrollY) }))
+          if (now.d !== null && prev && Math.abs(prev.d - now.d) < 1e-6 && prev.y === now.y) steady++
+          else steady = 0
+          if (steady >= 3) return now
+          prev = now
+          await sleep(120)
+        }
+        throw new Error(`${what}: the camera did not come to rest within ${timeout} ms`)
+      }
+      const toView = (p, v, what, timeout = READY_MS) =>
+        waitFor(p, (want) => document.querySelector('main')?.dataset.view === want && (want === 'list' || window.__worldReady === true), { arg: v, timeout, what })
+      const page = await r.open(url('', { p: 'mid', arrive: 0, poster: 'off' }))
+      await ready(page, 'row 22')
+      // Halfway between Fundamentals and Video Ads I: no stop, no card.
+      await page.evaluate(() => {
+        const d = (window.__worldDepthFor('a2') + window.__worldDepthFor('a3')) / 2
+        window.scrollTo(0, Math.round(window.__worldScrollFor(d)))
+      })
+      const before = await rest(page, 'row 22, on the map')
+      await page.setViewport({ ...PHONE, deviceScaleFactor: 1 })
+      await toView(page, 'list', 'row 22: the list')
+      await sleep(600)
+      const list = await page.evaluate(() => ({ y: Math.round(window.scrollY), next: document.querySelector('main section[aria-label="Next lesson"] h2')?.textContent?.trim() ?? null }))
+      r.check('the list opens at its top', list.y === 0, list.y)
+      r.check("its Next block is the student's place first (Video Ads II)", list.next === NAMES[3], list.next)
+      r.values.shotList = await r.shot('resize-list')
+      // The list's own scroll must not decide where the 3D comes back.
+      await page.evaluate(() => window.scrollTo(0, 400))
+      await sleep(300)
+      await page.setViewport({ ...DESKTOP, deviceScaleFactor: 1 })
+      await toView(page, 'world', 'row 22: the 3D back')
+      const back = await rest(page, 'row 22, back on the map')
+      r.check('back on the 3D map, the camera is where it was', Math.abs(back.d - before.d) < DEPTH_TOL, `${f(back.d)}, it was ${f(before.d)}`)
+      r.values.shotBack = await r.shot('resize-back')
+      // Opened narrow, then widened: the 3D starts at the student's place, not where the list was scrolled.
+      const narrow = await r.open(url('', { p: 'mid', arrive: 0, poster: 'off' }), { viewport: PHONE })
+      await toView(narrow, 'list', 'row 22: opened narrow', LOAD_MS)
+      await sleep(800)
+      await narrow.evaluate(() => window.scrollTo(0, 400))
+      await sleep(300)
+      await narrow.setViewport({ ...DESKTOP, deviceScaleFactor: 1 })
+      await toView(narrow, 'world', 'row 22: widened')
+      const at = await restAt(narrow, 3, 'row 22, widened')
+      r.check("opened narrow and widened: the camera starts at the student's place (Video Ads II)", true, `depth ${f(at.d)}, the stop is at ${f(at.t)}`)
     })
   }
 

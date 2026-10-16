@@ -7,6 +7,7 @@ import {
   GATE_CAUSEWAY,
   GORGE,
   ISLAND_DEPTH,
+  LADDER,
   ISLAND_PATH,
   LOOK,
   OBSERVATORY,
@@ -713,6 +714,8 @@ class Soup {
 
 /** Nothing comes within this of the camera's route (plus the rock's own size). */
 const RAIL_CLEAR = 30;
+/** No rock of the a4 ledge's lip within this of the ladder's foot (second Loom, the morning walk). */
+const LADDER_CLEAR = 30;
 /**
  * Where the camera passes at eye level (bible 2.2 hero rocks), as points in
  * the world: [x, y, z] of the camera there. They are copies of the route's
@@ -950,6 +953,25 @@ function gorgeAt(x: number): { z: number; y: number; hw: number } {
   }
   const l = G[G.length - 1];
   return { z: l[1], y: l[2], hw: l[3] };
+}
+
+/**
+ * The brook's mouth on the Mirror Lake (second Loom, 2026-10-16): where its
+ * last leg meets the lake, the way it runs, that leg's length, and how far its
+ * water reaches on into the lake (water.ts toLake carries the ribbon past the
+ * shore and fades it there); halfW is the ribbon's half width there.
+ */
+const BROOK_MOUTH = (() => {
+  const [x, , z] = BROOK[BROOK.length - 1];
+  const [px, , pz] = BROOK[BROOK.length - 2];
+  const len = Math.hypot(x - px, z - pz);
+  return { x, z, fx: (x - px) / len, fz: (z - pz) / len, len, reach: 40, halfW: 10 };
+})();
+/** How far (x, z) is from the brook's water at the mouth: its last leg and BROOK_MOUTH.reach on into the lake. */
+function toMouth(x: number, z: number): number {
+  const M = BROOK_MOUTH;
+  const u = Math.min(M.reach, Math.max(-M.len, (x - M.x) * M.fx + (z - M.z) * M.fz));
+  return Math.hypot(x - M.x - M.fx * u, z - M.z - M.fz * u);
 }
 
 interface Built {
@@ -1340,7 +1362,19 @@ function place(): Built {
         const g = groundY(x, z);
         const hw = 7 + rand() * 6;
         if (nearRail(x, g + hw, z, 16 + hw)) continue;
-        rock(soups.gorge, rand() < 0.5 ? "K2" : rand() < 0.5 ? "K1" : "K3", x, z, hw, PAL.gorge, rand, { dir: 90, lean: 18, hero: heroAt(x, g, z), sink: 0.25 });
+        // Second Loom, 2026-10-16 (the morning walk): none beside the ladder.
+        // There the edge turns north and the rock hung on the face the camera
+        // climbs past, 150 below the bench with no ledge under it. It is still
+        // dealt, into a soup nobody draws, and keeps its number, so every rock
+        // after it keeps its place, its faces' colours and its ring of grass.
+        const byLadder = Math.hypot(x - LADDER.foot.x, z - LADDER.foot.z) < LADDER_CLEAR;
+        const soup = byLadder ? new Soup() : soups.gorge;
+        soup.seq = soups.gorge.seq;
+        rock(soup, rand() < 0.5 ? "K2" : rand() < 0.5 ? "K1" : "K3", x, z, hw, PAL.gorge, rand, { dir: 90, lean: 18, hero: heroAt(x, g, z), sink: 0.25, foot: byLadder ? false : undefined });
+        if (byLadder) {
+          soups.gorge.seq = soup.seq;
+          ringNo++;
+        }
       }
     }
     // A few boulders on the band benches (the talus that fell and stayed).
@@ -1429,6 +1463,29 @@ function place(): Built {
         while (rr < shore + 10 && L.y - groundY(L.x + (dx / r) * rr, L.z + (dz / r) * rr) > s * 0.25) rr += 4;
         x = L.x + (dx / r) * rr;
         z = L.z + (dz / r) * rr;
+      }
+      // Second Loom, 2026-10-16 (3:01, "the river that goes straight into a
+      // rock"): the brook comes into the lake between these rocks, and the
+      // second family stood in its mouth, where its water fades into the lake.
+      // A family that reaches the brook's water (its last leg, carried on
+      // BROOK_MOUTH.reach into the lake) slides along the shore toward the
+      // side the brook comes from, until it keeps clear: the water ahead of
+      // the mouth stays open, the rocks stand on its bank. The shore walk
+      // above puts all three below the a5 frame (and the reveal's), so the
+      // stop looks the same.
+      const clear = s * 2.2 + BROOK_MOUTH.halfW;
+      if (toMouth(x, z) < clear) {
+        let a = Math.atan2(z - L.z, x - L.x);
+        const inset = lakeShoreR(a) - Math.hypot(x - L.x, z - L.z);
+        const am = Math.atan2(BROOK_MOUTH.z - L.z, BROOK_MOUTH.x - L.x);
+        // Along the shore, the way the brook's water does not run.
+        const up = BROOK_MOUTH.fx * -Math.sin(am) + BROOK_MOUTH.fz * Math.cos(am) > 0 ? -1 : 1;
+        for (let n = 0; n < 400 && toMouth(x, z) < clear; n++) {
+          a += up * 0.0025;
+          const R = lakeShoreR(a) - inset;
+          x = L.x + Math.cos(a) * R;
+          z = L.z + Math.sin(a) * R;
+        }
       }
       F(soups.high, x, z, s, 700 + k, { pebbles: 5 });
       placed.push([x, z]);

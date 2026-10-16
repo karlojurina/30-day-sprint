@@ -4,18 +4,24 @@
  * marker's label in the world, the panel's deadline, and the trail cache's
  * look (src/lib/world-v6/checkpoint.ts). Pure, so node can test it.
  *
- * WHEN IT SHOWS (Claude's call, 2026-10-14, in morning_review.md):
- *   not eligible  nothing: no chip, no tag, no marker. A student who joined
- *                 before the new course, or whose first payment is not on
- *                 record, never had this offer; the cache stands closed as
- *                 scenery.
- *   expired       the same, quietly: the window passed with no application.
- *   locked        the chip counts the days down ("11 days left").
- *   ready         the chip says to apply, with the days left.
- *   pending       the chip says it is in review; approved, that it is approved.
- *   applied       no chip (it is done); the tag and the marker stay, claimed.
- *   rejected      no chip; the tag and the marker stay, so the panel can say
- *                 why.
+ * IT SHOWS AT ALL TIMES (Lovro's second Loom, 2026-10-16: "it should be
+ * clickable at all times, but the actual button to click on apply for the
+ * discount ... should be locked"). The chip, the tag and the marker show for
+ * every student and state, and each opens the panel, which says where the
+ * student stands. This replaces the 2026-10-14 call (morning_review.md M7),
+ * which hid all three when the offer was closed for the student. What they
+ * say:
+ *   locked        "11 days left"; the plaque says "30% off" alone (its "11d"
+ *                 read as "110" at the plaque's size, and the chip above has
+ *                 the days).
+ *   ready         "Apply · 9 days left" (the plaque "Apply").
+ *   pending       "In review"; approved, "Approved".
+ *   applied       "Yours".
+ *   rejected      "Not approved".
+ *   expired       "Closed": the 14 days passed with no application.
+ *   not eligible  "Closed": joined before the new course, or no first payment
+ *                 on record. "Not open yet" when the course has no gate.
+ * Closed, rejected and not eligible take the grey look (tag "closed").
  */
 import { DISCOUNT_PERCENT, type DiscountState } from "@/lib/world/discount";
 import type { CheckpointLook } from "@/lib/world-v6/checkpoint";
@@ -28,10 +34,8 @@ export const NEAR_LESSONS = 3;
 export type CheckpointTag = "locked" | "ready" | "pending" | "done" | "closed";
 
 export interface CheckpointView {
-  /** The marker in the world and the tag on the timeline show at all. */
-  shown: boolean;
-  /** The header's chip ("30% off" and its tail), or null when it is hidden. */
-  chip: { lead: string; tail: string; ready: boolean } | null;
+  /** The header's chip: "30% off" and where it stands. */
+  chip: { lead: string; tail: string; ready: boolean };
   /** The marker's plaque: "30% off" and a short state beside it. */
   label: { lead: string; tail: string };
   tag: CheckpointTag;
@@ -55,15 +59,6 @@ export function timeLeft(endsAt: string, now: number): string | null {
   return `${d} day${d === 1 ? "" : "s"} left`;
 }
 
-/** The same, short, for the marker's plaque: "11d", "5h", "<1h"; "" once it has passed. */
-export function timeLeftShort(endsAt: string, now: number): string {
-  const ms = Date.parse(endsAt) - now;
-  if (!(ms > 0)) return "";
-  if (ms < HOUR_MS) return "<1h";
-  if (ms < DAY_MS) return `${Math.ceil(ms / HOUR_MS)}h`;
-  return `${Math.ceil(ms / DAY_MS)}d`;
-}
-
 /** "Fri 23 Oct", in the student's own time zone. */
 export function shortDate(iso: string): string {
   const t = Date.parse(iso);
@@ -83,9 +78,9 @@ export function checkpointView(state: DiscountState, now: number, place: number,
       const left = timeLeft(state.endsAt, now);
       const near = place >= after || state.lessonsLeft <= NEAR_LESSONS;
       return {
-        shown: true,
-        chip: left ? { lead, tail: left, ready: false } : null,
-        label: { lead, tail: timeLeftShort(state.endsAt, now) },
+        // No time left on this clock: the window ends within the minute, so it reads as closed.
+        chip: { lead, tail: left ?? "Closed", ready: false },
+        label: { lead, tail: "" },
         tag: "locked",
         look: near ? "near" : "closed",
         left,
@@ -95,7 +90,6 @@ export function checkpointView(state: DiscountState, now: number, place: number,
     case "ready": {
       const left = timeLeft(state.endsAt, now);
       return {
-        shown: true,
         chip: { lead, tail: left ? `Apply · ${left}` : "Apply", ready: true },
         label: { lead, tail: "Apply" },
         tag: "ready",
@@ -105,16 +99,21 @@ export function checkpointView(state: DiscountState, now: number, place: number,
       };
     }
     case "pending":
-      return { shown: true, chip: { lead, tail: "In review", ready: false }, label: { lead, tail: "In review" }, tag: "pending", look: "claimed", left: null, deadline: null };
+      return noClock(lead, "In review", "pending", "claimed");
     case "approved":
-      return { shown: true, chip: { lead, tail: "Approved", ready: false }, label: { lead, tail: "Approved" }, tag: "pending", look: "claimed", left: null, deadline: null };
+      return noClock(lead, "Approved", "pending", "claimed");
     case "applied":
-      return { shown: true, chip: null, label: { lead, tail: "Yours" }, tag: "done", look: "claimed", left: null, deadline: null };
+      return noClock(lead, "Yours", "done", "claimed");
     case "rejected":
-      return { shown: true, chip: null, label: { lead, tail: "" }, tag: "closed", look: "closed", left: null, deadline: null };
+      return noClock(lead, "Not approved", "closed", "closed");
     case "expired":
-      return { shown: false, chip: null, label: { lead, tail: "" }, tag: "closed", look: "closed", left: null, deadline: shortDate(state.endsAt) };
+      return { ...noClock(lead, "Closed", "closed", "closed"), deadline: shortDate(state.endsAt) };
     default:
-      return { shown: false, chip: null, label: { lead, tail: "" }, tag: "closed", look: "closed", left: null, deadline: null };
+      return noClock(lead, state.reason === "no-gate" ? "Not open yet" : "Closed", "closed", "closed");
   }
+}
+
+/** A state with no clock: the chip and the plaque say the same word. */
+function noClock(lead: string, tail: string, tag: CheckpointTag, look: CheckpointLook): CheckpointView {
+  return { chip: { lead, tail, ready: false }, label: { lead, tail }, tag, look, left: null, deadline: null };
 }

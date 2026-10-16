@@ -9,6 +9,8 @@
  *   decideDiscountRequest  POST /api/discounts/request: grant only on `ready`
  *   approvalVerdict        POST /api/discounts/approve: was every video done
  *                          inside the 14 days
+ *   secondPendingRequest   both routes that write a request, on either course:
+ *                          a double submit the database refused (v106)
  *
  * Everything fails closed. A read that errors, or comes back empty where a
  * row must exist, means no request and no approval: a believable "you're not
@@ -195,6 +197,27 @@ function videoTime(seconds: number): string {
   return `about ${Math.round(seconds / 360) / 10} hours of video`;
 }
 
+/** What a student with a request in review reads when they apply again. */
+export const ALREADY_APPLIED = "You already applied for the discount. We're reviewing it.";
+
+/** v106's index: at most one pending request per student. */
+const ONE_PENDING_INDEX = "discount_requests_one_pending_per_student";
+
+/**
+ * The answer to a request the database refused as the student's second
+ * pending one: SQLSTATE 23505 on v106's index, from two Apply clicks sent so
+ * close together that both passed the route's checks before either was
+ * written. The first request stands, so the student gets the answer for a
+ * request already in review, never the database's words. Null for any other
+ * error, which the route answers as before.
+ */
+export function secondPendingRequest(
+  error: { code?: string | null; message?: string | null } | null | undefined,
+): { error: string; state: "pending" } | null {
+  if (error?.code !== "23505" || !error.message?.includes(ONE_PENDING_INDEX)) return null;
+  return { error: ALREADY_APPLIED, state: "pending" };
+}
+
 /** What the student reads when the request is refused, one plain sentence or two. */
 export function discountRefusalMessage(state: DiscountState): string {
   switch (state.kind) {
@@ -226,7 +249,7 @@ export function discountRefusalMessage(state: DiscountState): string {
       }
       return "The discount can't be applied for right now. Contact support and we'll sort it out.";
     case "pending":
-      return "You already applied for the discount. We're reviewing it.";
+      return ALREADY_APPLIED;
     case "approved":
       return "Your discount is already approved.";
     case "applied":

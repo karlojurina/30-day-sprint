@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "./stub-server.ts";
 import { createClient, type SupabaseClient } from "./stub-server.ts";
+import { refuseWhileClosed } from "./student-app-gate.ts";
 import { DISCOUNT_WINDOW_DAYS } from "./constants.ts";
 import { onDiscountRequested } from "./stub-server.ts";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "./stub-server.ts";
@@ -75,6 +76,10 @@ export async function POST(request: NextRequest) {
   if (userError || !user) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
+
+  // T-078: closed to students until the new course (lib/student-app-gate.ts).
+  const closed = await refuseWhileClosed(supabase, user.id);
+  if (closed) return closed;
 
   const { data: authedStudent } = await supabase
     .from("students")

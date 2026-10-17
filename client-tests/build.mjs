@@ -122,12 +122,18 @@ gen('../src/lib/csm-triggers.ts', './_gen/csm-triggers.ts', [
 // above. The webhook's type-only import is pointed at a file that does not
 // exist, as csm-triggers.ts's is, so one that survived would fail loudly.
 const toStub = (...paths) => paths.map((p) => [`from "${p}"`, 'from "./stub-server.ts"'])
+// The closed doors before the new course (T-078): every student route asks
+// the real gate, copied here, and the routes' copies point at it. Its one
+// import is a TYPE from supabase-js, which --experimental-strip-types erases.
+gen('../src/lib/student-app-gate.ts', './_gen/student-app-gate.ts')
+const GATE = ['from "@/lib/student-app-gate"', 'from "./student-app-gate.ts"']
 gen('../src/app/api/student/_lib/watch-sync.ts', './_gen/watch-sync.ts', [
   // The note's words come from constants.ts (above), as the admin page reads them.
   ['from "@/lib/constants"', 'from "./constants.ts"'],
   ...toStub('@supabase/supabase-js', '@/lib/whop', '@/lib/csm-events'),
 ])
 gen('../src/app/api/student/refresh-watch-sync/route.ts', './_gen/refresh-watch-sync-route.ts', [
+  GATE,
   ['from "../_lib/watch-sync"', 'from "./watch-sync.ts"'],
   ...toStub('next/server', '@supabase/supabase-js', '../_lib/update-streak', '@/lib/achievements'),
 ])
@@ -136,12 +142,15 @@ gen('../src/app/api/webhooks/whop/route.ts', './_gen/whop-webhook-route.ts', [
   ['from "@/types/whop"', 'from "./types-erased.ts"'],
 ])
 gen('../src/app/api/student/mark-action-shipped/route.ts', './_gen/mark-action-shipped-route.ts', [
+  GATE,
   ['from "@/lib/world/action-items"', 'from "./action-items.ts"'],
   ...toStub('next/server', '@supabase/supabase-js', '../_lib/update-streak', '@/lib/achievements',
     '@/lib/csm-events', '@/lib/csm-task-evaluation', '@/lib/catalog-tables'),
 ])
-gen('../src/app/api/student/skip-lesson/route.ts', './_gen/skip-lesson-route.ts',
-  toStub('next/server', '@supabase/supabase-js', '@/lib/csm-task-evaluation', '@/lib/catalog-tables'))
+gen('../src/app/api/student/skip-lesson/route.ts', './_gen/skip-lesson-route.ts', [
+  GATE,
+  ...toStub('next/server', '@supabase/supabase-js', '@/lib/csm-task-evaluation', '@/lib/catalog-tables'),
+])
 // csm-events.ts imports only a TYPE from supabase-js, which --experimental-strip-types erases.
 gen('../src/lib/csm-events.ts', './_gen/csm-events.ts')
 
@@ -151,6 +160,7 @@ gen('../src/lib/csm-events.ts', './_gen/csm-events.ts')
 // database function the feedback form calls is the test's own stand-in.
 for (const [route, out] of [['request', 'discount-request-route'], ['submit-feedback', 'discount-submit-feedback-route']]) {
   gen(`../src/app/api/discounts/${route}/route.ts`, `./_gen/${out}.ts`, [
+    GATE,
     ['from "@/lib/constants"', 'from "./constants.ts"'],
     ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
     ...toStub('next/server', '@supabase/supabase-js', '@/lib/csm-events', '@/lib/catalog-tables'),

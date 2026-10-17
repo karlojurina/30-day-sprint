@@ -14,6 +14,7 @@ import {
   toIso,
 } from "@/lib/whop-members";
 import { unsignState } from "@/lib/pkce";
+import { whopLoginMayProceed } from "@/lib/student-app-gate";
 import { syncWatchProgress } from "@/app/api/student/_lib/watch-sync";
 import { evaluateAchievements } from "@/lib/achievements";
 import { updateStudentStreak } from "@/app/api/student/_lib/update-streak";
@@ -56,6 +57,15 @@ export async function GET(request: NextRequest) {
 
     // 2. Fetch user info
     const userInfo = await fetchWhopUserInfo(tokens.access_token);
+
+    // 2b. The closed doors (T-078, lib/student-app-gate.ts). While the student
+    //     app is closed, only the Whop ids in STUDENT_APP_OPEN_FOR (and a
+    //     team member's Whop account, if one exists) get past this line.
+    //     Nothing below runs for anyone else: no student row, no tokens, no
+    //     sync, no session. Open, it reads nothing and lets everyone through.
+    if (!(await whopLoginMayProceed(createServiceClient(), userInfo.sub))) {
+      return NextResponse.redirect(`${appUrl}/login?error=app_closed`);
+    }
 
     // 3. Verify active membership (bypass for whitelisted test users).
     //    Two whitelists, both optional, both comma-separated:

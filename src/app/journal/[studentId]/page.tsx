@@ -4,6 +4,8 @@ import { createServerClient } from "@supabase/ssr";
 import { createServiceClient } from "@/lib/supabase-server";
 import { STUDENT_HOME } from "@/lib/world/access";
 import { JournalView } from "./JournalView";
+import { ComingSoon } from "@/components/auth/ComingSoon";
+import { studentMayEnterAs } from "@/lib/student-app-gate";
 
 interface JournalPageProps {
   params: Promise<{ studentId: string }>;
@@ -80,6 +82,13 @@ export default async function JournalPage(props: JournalPageProps) {
   }
 
   const isStudentSelf = student.supabase_user_id === user.id;
+
+  // T-078: while the student app is closed to them, a student's own journal
+  // is the coming-soon page too. The team reads journals as before. Open, no
+  // read is made.
+  if (!isTeam && isStudentSelf && !(await studentMayEnterAs(supabase, user.id))) {
+    return <ComingSoon />;
+  }
 
   if (!isTeam && !isStudentSelf) {
     // Logged in but not authorized for this journal.

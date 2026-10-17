@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "./stub-server.ts";
 import { createClient } from "./stub-server.ts";
+import { refuseWhileClosed } from "./student-app-gate.ts";
 import { syncWatchProgress } from "./watch-sync.ts";
 import { updateStudentStreak } from "./stub-server.ts";
 import { evaluateAchievements } from "./stub-server.ts";
@@ -32,6 +33,10 @@ export async function POST(request: NextRequest) {
   if (userError || !user) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
+
+  // T-078: closed to students until the new course (lib/student-app-gate.ts).
+  const closed = await refuseWhileClosed(supabase, user.id);
+  if (closed) return closed;
 
   // Load the student so we can get their whop_user_id (the filter for
   // the admin-side fetch).

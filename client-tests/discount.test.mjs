@@ -6,8 +6,8 @@
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
-  DISCOUNT_LAUNCH_DATE, DISCOUNT_PERCENT, DISCOUNT_WINDOW_DAYS,
-  discountEndsAt, discountState, gateLessonId, requiredLessons,
+  DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, DISCOUNT_PERCENT, DISCOUNT_SHARED_DEADLINE, DISCOUNT_WINDOW_DAYS,
+  discountEndsAt, discountState, discountWindow, gateLessonId, requestCounts, requiredLessons,
 } from './_gen/discount.ts'
 import { DISCOUNT_WINDOW_DAYS as CONSTANTS_WINDOW_DAYS } from './_gen/constants.ts'
 import {
@@ -47,18 +47,36 @@ const R = (id, status, created_at, o = {}) => ({ id, status, created_at, ...o })
 
 console.log('\n=== One source for the 14 days ===')
 ok(DISCOUNT_WINDOW_DAYS === 14 && DISCOUNT_WINDOW_DAYS === CONSTANTS_WINDOW_DAYS, 'DISCOUNT_WINDOW_DAYS is constants.ts\'s, re-exported', `${DISCOUNT_WINDOW_DAYS}`)
+const zagreb = (t) => new Date(t).toLocaleString('en-GB', { timeZone: 'Europe/Zagreb' })
 ok(DISCOUNT_PERCENT === 30 && DISCOUNT_LAUNCH_DATE === '2026-10-08T22:00:00.000Z',
-   'the offer is 30% for payments from 9 October 2026 at midnight in Croatia (22:00 UTC on the 8th, CEST is UTC+2)')
-ok(new Date(DISCOUNT_LAUNCH_DATE).toLocaleString('en-GB', { timeZone: 'Europe/Zagreb' }) === '09/10/2026, 00:00:00',
-   'the cutoff is 00:00 on 9 October in Zagreb', new Date(DISCOUNT_LAUNCH_DATE).toLocaleString('en-GB', { timeZone: 'Europe/Zagreb' }))
+   'the offer is 30%, and the launch is 9 October 2026 at midnight in Croatia (22:00 UTC on the 8th, CEST is UTC+2)')
+ok(zagreb(DISCOUNT_LAUNCH_DATE) === '09/10/2026, 00:00:00', 'the launch is 00:00 on 9 October in Zagreb', zagreb(DISCOUNT_LAUNCH_DATE))
+ok(DISCOUNT_ELIGIBLE_FROM === '2026-09-08T22:00:00.000Z' && zagreb(DISCOUNT_ELIGIBLE_FROM) === '09/09/2026, 00:00:00',
+   'the earliest first payment that can earn it is 00:00 on 9 September in Zagreb (22:00 UTC on the 8th)', zagreb(DISCOUNT_ELIGIBLE_FROM))
+ok(DISCOUNT_SHARED_DEADLINE === '2026-10-23T21:59:59.999Z' && zagreb(DISCOUNT_SHARED_DEADLINE) === '23/10/2026, 23:59:59',
+   'the shared deadline is the last moment of 23 October in Zagreb', zagreb(DISCOUNT_SHARED_DEADLINE))
+ok(zagreb(Date.parse(DISCOUNT_SHARED_DEADLINE) + 1) === '24/10/2026, 00:00:00',
+   'one millisecond later it is 24 October in Zagreb: still summer time on the 23rd (the clocks go back on the 25th)', zagreb(Date.parse(DISCOUNT_SHARED_DEADLINE) + 1))
 
-console.log('\n=== discountEndsAt ===')
+console.log('\n=== discountEndsAt / discountWindow ===')
 ok(discountEndsAt(PAID)?.toISOString() === ENDS, '14 days after the first payment, to the millisecond', discountEndsAt(PAID)?.toISOString())
 ok(discountEndsAt(PAID).getTime() - Date.parse(PAID) === 14 * DAY, 'exactly 14 x 24 hours')
 ok(discountEndsAt(null) === null, 'no first payment: no end')
 ok(discountEndsAt('') === null, 'an empty date: no end')
 ok(discountEndsAt('not a date') === null, 'a date that does not parse: no end')
 ok(discountEndsAt('2026-13-45') === null, 'an impossible date: no end')
+ok(discountEndsAt('2026-09-15T10:00:00.000Z')?.toISOString() === DISCOUNT_SHARED_DEADLINE, 'a first payment on 15 September: the shared deadline')
+ok(discountEndsAt(DISCOUNT_ELIGIBLE_FROM)?.toISOString() === DISCOUNT_SHARED_DEADLINE, 'a first payment at 00:00 on 9 September in Croatia: the shared deadline')
+ok(discountEndsAt('2026-09-08T21:59:59.999Z') === null, 'the millisecond before it: no end, the offer is not open to it')
+ok(discountEndsAt('2026-06-01T00:00:00.000Z') === null, 'a June payment: no end')
+ok(discountEndsAt('2026-10-08T21:59:59.999Z')?.toISOString() === DISCOUNT_SHARED_DEADLINE, 'the millisecond before the launch: the shared deadline')
+ok(discountEndsAt(DISCOUNT_LAUNCH_DATE)?.toISOString() === '2026-10-22T22:00:00.000Z',
+   'at the launch instant: its own 14 days, to 00:00 on 23 October in Croatia', discountEndsAt(DISCOUNT_LAUNCH_DATE)?.toISOString())
+ok(same(discountWindow(null), { closed: 'no-payment' }) && same(discountWindow('garbage'), { closed: 'no-payment' }),
+   'discountWindow: no first payment, or one that does not parse, is closed as no payment')
+ok(same(discountWindow('2026-09-08T21:59:59.999Z'), { closed: 'before-launch' }), 'discountWindow: before 9 September is closed as before-launch')
+ok(discountWindow('2026-09-15T10:00:00.000Z').window === 'shared' && discountWindow(DISCOUNT_LAUNCH_DATE).window === 'own' && discountWindow(PAID).window === 'own',
+   'discountWindow: shared before the launch, own from it')
 
 console.log('\n=== gateLessonId / requiredLessons ===')
 ok(gateLessonId(COURSE) === 'x06', 'the gate is the lesson marked is_gate')
@@ -80,12 +98,22 @@ ok(requiredLessons([L('g', { is_gate: true, has_video: false })]).length === 0, 
 console.log('\n=== discountState: who cannot earn it ===')
 ok(same(state({ firstPaidAt: null }), { kind: 'not-eligible', reason: 'no-payment' }), 'no first payment', show(state({ firstPaidAt: null })))
 ok(same(state({ firstPaidAt: 'garbage' }), { kind: 'not-eligible', reason: 'no-payment' }), 'a first payment that does not parse counts as none')
-ok(same(state({ firstPaidAt: '2026-10-08T21:59:59.999Z', now: new Date('2026-10-10T00:00:00Z') }), { kind: 'not-eligible', reason: 'before-launch' }),
-   'a first payment the millisecond before midnight on 9 October in Croatia (the old course)')
+{
+  // 9 September, midnight in Croatia (UTC+2): 8 September 23:59 against 9 September 00:00.
+  const ON_19_OCT = new Date('2026-10-19T08:00:00Z')
+  ok(same(state({ firstPaidAt: '2026-09-08T21:59:00.000Z', now: ON_19_OCT }), { kind: 'not-eligible', reason: 'before-launch' }),
+     'a first payment at 23:59 on 8 September in Croatia (21:59 UTC): never')
+  ok(same(state({ firstPaidAt: '2026-09-08T21:59:59.999Z', now: ON_19_OCT }), { kind: 'not-eligible', reason: 'before-launch' }),
+     'the millisecond before midnight on 9 September in Croatia: never')
+  const s = state({ firstPaidAt: '2026-09-08T22:00:00.000Z', now: ON_19_OCT })
+  ok(s.kind === 'locked' && s.window === 'shared' && s.endsAt === DISCOUNT_SHARED_DEADLINE,
+     'a first payment at 00:00 on 9 September in Croatia is in, with the shared deadline', show(s))
+  ok(same(state({ firstPaidAt: '2026-06-01T00:00:00Z', now: ON_19_OCT }), { kind: 'not-eligible', reason: 'before-launch' }), 'a June student: never')
+}
+ok(same(state({ firstPaidAt: '2026-09-01T00:00:00Z', now: new Date('2026-09-05T00:00:00Z') }), { kind: 'not-eligible', reason: 'before-launch' }),
+   'before 9 September wins even inside that payment\'s own 14 days')
 ok(state({ firstPaidAt: '2026-10-08T23:30:00.000Z', now: new Date('2026-10-10T00:00:00Z') }).kind === 'locked',
    'a first payment at 01:30 on 9 October in Croatia (23:30 UTC on the 8th) is in')
-ok(same(state({ firstPaidAt: '2026-09-01T00:00:00Z', now: new Date('2026-09-05T00:00:00Z') }), { kind: 'not-eligible', reason: 'before-launch' }),
-   'before launch wins even inside that payment\'s own 14 days')
 ok(state({ firstPaidAt: '2026-10-08T22:00:00.000Z', now: new Date('2026-10-10T00:00:00Z') }).kind === 'locked', 'a first payment at the launch instant is in')
 ok(same(state({ lessons: COURSE.map((l) => ({ ...l, is_gate: false })) }), { kind: 'not-eligible', reason: 'no-gate' }), 'a catalog with no gate closes the offer')
 ok(same(state({ lessons: [] }), { kind: 'not-eligible', reason: 'no-gate' }), 'an empty catalog closes the offer')
@@ -97,7 +125,7 @@ ok(same(state({ lessons: COURSE.map((l) => ({ ...l, has_video: false })), now: A
 console.log('\n=== discountState: locked, ready, expired ===')
 {
   const s = state()
-  ok(same(s, { kind: 'locked', endsAt: ENDS, lessonsLeft: 3, lessonsTotal: 3, secondsLeft: 1200, nextLessonId: 'x01' }),
+  ok(same(s, { kind: 'locked', endsAt: ENDS, window: 'own', lessonsLeft: 3, lessonsTotal: 3, secondsLeft: 1200, nextLessonId: 'x01' }),
      'nothing watched: 3 of 3 left, 300 + 0 (no length) + 900 seconds, next is the first in course order', show(s))
 }
 {
@@ -111,21 +139,74 @@ console.log('\n=== discountState: locked, ready, expired ===')
 }
 {
   const s = state({ videoDoneIds: new Set(['x01', 'x05', 'x06']) })
-  ok(same(s, { kind: 'ready', endsAt: ENDS, lessonsTotal: 3 }), 'every asked-for video done inside the 14 days: ready', show(s))
+  ok(same(s, { kind: 'ready', endsAt: ENDS, window: 'own', lessonsTotal: 3 }), 'every asked-for video done inside the 14 days: ready', show(s))
 }
 ok(state({ videoDoneIds: new Set(['x01', 'x05', 'x06']), now: new Date(ENDS) }).kind === 'ready', 'still ready at the exact end of the window')
 {
   const s = state({ now: AFTER, videoDoneIds: new Set(['x01']) })
-  ok(same(s, { kind: 'expired', endsAt: ENDS, lessonsLeft: 2 }), 'after the window: expired, with the lessons that were left', show(s))
+  ok(same(s, { kind: 'expired', endsAt: ENDS, window: 'own', lessonsLeft: 2 }), 'after the window: expired, with the lessons that were left', show(s))
 }
-ok(same(state({ now: AFTER, videoDoneIds: new Set(['x01', 'x05', 'x06']) }), { kind: 'expired', endsAt: ENDS, lessonsLeft: 0 }),
+ok(same(state({ now: AFTER, videoDoneIds: new Set(['x01', 'x05', 'x06']) }), { kind: 'expired', endsAt: ENDS, window: 'own', lessonsLeft: 0 }),
    'after the window with everything done and no request: expired')
 ok(state({ now: new Date(Date.parse(ENDS) + 1) }).kind === 'expired', 'one millisecond after the window: expired')
+
+console.log('\n=== discountState: the shared deadline (a first payment from 9 September until the launch) ===')
+{
+  const SEPT = '2026-09-15T10:00:00.000Z'
+  const ALL = new Set(['x01', 'x05', 'x06'])
+  const sept = (o) => state({ firstPaidAt: SEPT, ...o })
+  // Croatia is UTC+2 until 25 October: 23:59 on the 23rd is 21:59 UTC, 00:00 on the 24th is 22:00 UTC.
+  const OCT23_2359 = new Date('2026-10-23T21:59:00.000Z')
+  const OCT24_0000 = new Date('2026-10-23T22:00:00.000Z')
+  {
+    const s = sept({ now: new Date('2026-10-19T08:00:00Z') })
+    ok(same(s, { kind: 'locked', endsAt: DISCOUNT_SHARED_DEADLINE, window: 'shared', lessonsLeft: 3, lessonsTotal: 3, secondsLeft: 1200, nextLessonId: 'x01' }),
+       'paid 15 September, on 19 October: locked, until the end of 23 October', show(s))
+  }
+  ok(sept({ now: new Date('2026-10-17T10:00:00Z') }).kind === 'locked',
+     'on 17 October, while the app is closed: locked, never expired, though the payment is a month old')
+  ok(sept({ now: OCT23_2359, videoDoneIds: ALL }).kind === 'ready', 'every video done, at 23:59 on 23 October in Croatia: ready')
+  ok(sept({ now: new Date(DISCOUNT_SHARED_DEADLINE), videoDoneIds: ALL }).kind === 'ready', 'and at the deadline\'s last millisecond: ready')
+  {
+    const s = sept({ now: OCT24_0000, videoDoneIds: ALL })
+    ok(same(s, { kind: 'expired', endsAt: DISCOUNT_SHARED_DEADLINE, window: 'shared', lessonsLeft: 0 }),
+       'at 00:00 on 24 October in Croatia: expired, even with everything done', show(s))
+  }
+  ok(sept({ now: OCT24_0000, videoDoneIds: new Set(['x01']) }).lessonsLeft === 2, 'expired, with the lessons that were left')
+  ok(sept({ now: OCT23_2359, requests: [R('r', 'pending', '2026-10-23T21:30:00.000Z')] }).kind === 'pending'
+       && sept({ now: OCT24_0000, requests: [R('r', 'pending', '2026-10-23T21:30:00.000Z')] }).kind === 'pending',
+     'a request sent at 23:30 on 23 October still decides after the deadline')
+  // The launch boundary: the shared deadline before it, the own 14 days from it.
+  const NOON_23 = new Date('2026-10-23T10:00:00Z')
+  const eve = state({ firstPaidAt: '2026-10-08T21:59:59.999Z', now: NOON_23 })
+  ok(eve.kind === 'locked' && eve.window === 'shared' && eve.endsAt === DISCOUNT_SHARED_DEADLINE,
+     'paid the millisecond before the launch: the shared deadline, so open at noon on 23 October', show(eve))
+  const launch = state({ firstPaidAt: DISCOUNT_LAUNCH_DATE, now: NOON_23 })
+  ok(launch.kind === 'expired' && launch.window === 'own' && launch.endsAt === '2026-10-22T22:00:00.000Z',
+     'paid at the launch instant: its own 14 days, over at 00:00 on 23 October in Croatia, so closed at noon that day (as Lovro set it: 14 days from a payment after the launch)', show(launch))
+}
+
+console.log('\n=== discountState: a first payment after the launch keeps its own 14 days ===')
+{
+  // A buyer after the app reopens, and a buyer on 10 October whose 14 days run past the shared deadline.
+  const P = '2026-10-20T15:30:00.000Z'
+  const P_ENDS = '2026-11-03T15:30:00.000Z'
+  const ALL = new Set(['x01', 'x05', 'x06'])
+  ok(state({ firstPaidAt: P, now: new Date('2026-11-02T15:30:00Z') }).kind === 'locked', 'paid 20 October, day 13: locked')
+  {
+    const s = state({ firstPaidAt: P, now: new Date(P_ENDS), videoDoneIds: ALL })
+    ok(same(s, { kind: 'ready', endsAt: P_ENDS, window: 'own', lessonsTotal: 3 }), 'day 14 to the millisecond: ready', show(s))
+  }
+  ok(state({ firstPaidAt: P, now: new Date(Date.parse(P_ENDS) + 1), videoDoneIds: ALL }).kind === 'expired', 'one millisecond past day 14: expired')
+  const tenth = state({ now: new Date('2026-10-24T08:00:00Z') })
+  ok(tenth.kind === 'locked' && tenth.endsAt === ENDS && tenth.window === 'own',
+     'paid 10 October, on 24 October: still open to its own day 14, the shared deadline never shortens it', show(tenth))
+}
 
 console.log('\n=== discountState: a request decides ===')
 for (const status of ['pending', 'approved', 'applied', 'rejected']) {
   const req = R('req-1', status, '2026-10-20T10:00:00.000Z', { promo_code: status === 'approved' ? 'ECOM30-ABC' : null, rejection_reason: status === 'rejected' ? 'no' : null })
-  const want = { kind: status, requestId: 'req-1', at: '2026-10-20T10:00:00.000Z', promoCode: req.promo_code, rejectionReason: req.rejection_reason }
+  const want = { kind: status, requestId: 'req-1', at: '2026-10-20T10:00:00.000Z', promoCode: req.promo_code, rejectionReason: req.rejection_reason, madeBeforeLaunch: false }
   ok(same(state({ requests: [req] }), want), `${status}: the request decides inside the window`, show(state({ requests: [req] })))
   ok(same(state({ requests: [req], now: AFTER }), want), `${status}: and after the window`)
   ok(state({ requests: [req], firstPaidAt: null }).kind === status && state({ requests: [req], firstPaidAt: '2026-09-01T00:00:00Z' }).kind === status,
@@ -143,18 +224,86 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
   ok(state({ requests: [R('a', 'pending', '2026-10-12T10:00:00Z'), R('b', 'rejected', '2026-10-14T10:00:00Z')] }).kind === 'rejected', 'a newer rejection beats an older pending one')
 }
 
-console.log('\n=== discountState: a request from the old course is ignored ===')
+console.log('\n=== discountState: a request from the old course, made before the launch ===')
 {
+  // Everyone the old course's request means nothing to: a student the offer is closed to, and one who first paid after the launch.
   const june = R('june', 'approved', '2026-06-12T10:00:00.000Z', { promo_code: 'ECOM30-OLD' })
   const s = state({ firstPaidAt: '2026-06-01T00:00:00Z', now: new Date('2026-10-15T00:00:00Z'), requests: [june] })
   ok(same(s, { kind: 'not-eligible', reason: 'before-launch' }), 'a June student with an approved June request sees "not eligible", never "approved"', show(s))
-  ok(state({ requests: [R('eve', 'pending', '2026-10-08T21:59:59.999Z')] }).kind === 'locked', 'a request the millisecond before the launch is ignored')
+  ok(same(state({ firstPaidAt: '2026-09-05T10:00:00Z', now: new Date('2026-10-19T08:00:00Z'), requests: [R('early', 'applied', '2026-09-10T10:00:00Z')] }),
+          { kind: 'not-eligible', reason: 'before-launch' }),
+     'first paid 5 September (before 9 September) with the 30% applied on 10 September: "not eligible" too')
+  ok(same(state({ firstPaidAt: null, requests: [R('old', 'approved', '2026-09-25T10:00:00Z')] }), { kind: 'not-eligible', reason: 'no-payment' }),
+     'no first payment on record, an old approved request: "no payment", as before')
+  ok(state({ requests: [R('eve', 'pending', '2026-10-08T21:59:59.999Z')] }).kind === 'locked',
+     'first paid after the launch: a request the millisecond before the launch is ignored, as before')
   ok(state({ requests: [R('at', 'pending', '2026-10-08T22:00:00.000Z')] }).kind === 'pending', 'a request at the launch instant counts')
   ok(state({ requests: [R('new', 'pending', '2026-10-12T00:00:00Z'), R('old', 'approved', '2026-07-01T00:00:00Z')] }).requestId === 'new',
      'next to a new request, an old one plays no part')
   ok(state({ requests: [R('old', 'rejected', '2026-09-30T00:00:00Z')], videoDoneIds: new Set(['x01', 'x05', 'x06']) }).kind === 'ready',
      'an old rejection does not stop a new student who is ready')
   ok(state({ requests: [R('bad', 'approved', 'not a date')] }).kind === 'locked', 'a request whose date does not parse is not counted')
+}
+
+console.log('\n=== discountState: a September joiner who already has a request from the old course (one 30% per student) ===')
+{
+  // First paid 15 September; requested on the old dashboard on 25 September.
+  // The database refuses another request while that one is pending, approved
+  // or applied (v29's function, any date; the migration harness, section 26),
+  // so the map shows that request. A rejected one does not count.
+  const SEPT = '2026-09-15T10:00:00.000Z'
+  const OLD = '2026-09-25T10:00:00.000Z'
+  const ALL = new Set(['x01', 'x05', 'x06'])
+  const sept = (requests, o = {}) => state({ firstPaidAt: SEPT, now: new Date('2026-10-20T10:00:00Z'), videoDoneIds: ALL, requests, ...o })
+  for (const status of ['pending', 'approved', 'applied']) {
+    const s = sept([R('old', status, OLD, { promo_code: status === 'pending' ? null : 'ECOM30-OLD' })])
+    ok(same(s, { kind: status, requestId: 'old', at: OLD, promoCode: status === 'pending' ? null : 'ECOM30-OLD', rejectionReason: null, madeBeforeLaunch: true }),
+       `${status} on the old course: the map shows it (never "ready", with every video done), marked as made before the launch`, show(s))
+    ok(sept([R('old', status, OLD)], { now: new Date('2026-11-01T00:00:00Z') }).kind === status, `${status}: and after the shared deadline`)
+  }
+  {
+    const s = sept([R('old', 'rejected', OLD, { rejection_reason: 'R2 not finished in time' })])
+    ok(same(s, { kind: 'ready', endsAt: DISCOUNT_SHARED_DEADLINE, window: 'shared', lessonsTotal: 3 }),
+       'rejected on the old course: it plays no part, the new offer shows (ready, every video done)', show(s))
+    ok(sept([R('old', 'rejected', OLD)], { videoDoneIds: new Set() }).kind === 'locked', 'rejected, nothing watched yet: locked')
+  }
+  // The launch is the line between an old request and a new one.
+  ok(sept([R('eve', 'rejected', '2026-10-08T21:59:59.999Z')]).kind === 'ready', 'rejected the millisecond before the launch: plays no part')
+  {
+    const s = sept([R('at', 'rejected', '2026-10-08T22:00:00.000Z', { rejection_reason: 'no' })])
+    ok(s.kind === 'rejected' && s.madeBeforeLaunch === false,
+       'rejected at the launch instant: a new-course request, it decides (D7, unchanged)', show(s))
+  }
+  ok(sept([R('eve', 'pending', '2026-10-08T21:59:59.999Z')]).madeBeforeLaunch === true, 'pending the millisecond before the launch: shown, made before the launch')
+  // Old and new together.
+  {
+    const s = sept([R('old', 'rejected', OLD), R('new', 'pending', '2026-10-12T10:00:00.000Z')])
+    ok(s.kind === 'pending' && s.requestId === 'new' && s.madeBeforeLaunch === false, 'rejected in September, applied again on 12 October: the new one', show(s))
+  }
+  ok(sept([R('old', 'applied', OLD), R('older', 'rejected', '2026-09-20T10:00:00.000Z')]).requestId === 'old',
+     'rejected on 20 September, then applied on 25 September: the applied one')
+  // The first payment boundary decides whether an old request counts at all.
+  ok(state({ firstPaidAt: '2026-09-08T21:59:59.999Z', now: new Date('2026-10-20T10:00:00Z'), requests: [R('old', 'applied', OLD)] }).kind === 'not-eligible',
+     'first paid the millisecond before 9 September: the old request plays no part, "not eligible"')
+  ok(state({ firstPaidAt: DISCOUNT_ELIGIBLE_FROM, now: new Date('2026-10-20T10:00:00Z'), requests: [R('old', 'applied', OLD)] }).kind === 'applied',
+     'first paid at 00:00 on 9 September in Croatia: the old request is shown')
+}
+
+console.log('\n=== requestCounts: the one place that says which requests count ===')
+{
+  const SEPT = '2026-09-15T10:00:00.000Z'
+  const rows = [
+    [R('a', 'pending', '2026-09-25T10:00:00Z'), SEPT, true, 'old pending, September joiner'],
+    [R('a', 'approved', '2026-09-25T10:00:00Z'), SEPT, true, 'old approved, September joiner'],
+    [R('a', 'applied', '2026-09-25T10:00:00Z'), SEPT, true, 'old applied, September joiner'],
+    [R('a', 'rejected', '2026-09-25T10:00:00Z'), SEPT, false, 'old rejected, September joiner'],
+    [R('a', 'approved', '2026-06-12T10:00:00Z'), '2026-06-01T00:00:00Z', false, 'old approved, June student'],
+    [R('a', 'approved', '2026-09-25T10:00:00Z'), null, false, 'old approved, no first payment'],
+    [R('a', 'approved', '2026-09-25T10:00:00Z'), PAID, false, 'old approved, first paid after the launch'],
+    [R('a', 'rejected', DISCOUNT_LAUNCH_DATE), '2026-06-01T00:00:00Z', true, 'any request from the launch on, whoever made it'],
+    [R('a', 'approved', 'not a date'), SEPT, false, 'a date that does not parse'],
+  ]
+  for (const [r, paid, want, label] of rows) ok(requestCounts(r, paid) === want, `${label}: ${want ? 'counts' : 'does not count'}`)
 }
 
 console.log('\n=== discount-server: rows to lessons ===')
@@ -248,12 +397,32 @@ ok(decideDiscountRequest(reads({ completions: badRead('x'), requests: badRead('y
   ok(!d.grant && d.status === 400 && d.state === 'expired' && d.error.startsWith('Your 14 days for the discount are over.'), 'expired: 400, even with every video done', d.error)
 }
 {
-  const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-10-01T00:00:00Z' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-10-05T00:00:00Z'))
-  ok(!d.grant && d.state === 'not-eligible' && d.error.includes('on or after October 9, 2026'), 'first payment before 2026-10-09: 400, not eligible', d.error)
+  const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-09-01T00:00:00Z' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-09-05T00:00:00Z'))
+  ok(!d.grant && d.status === 400 && d.state === 'not-eligible'
+       && d.error === 'The 30% discount is for students who joined on or after September 9, 2026. Your first payment was before that.',
+     'first payment before 9 September: 400, not eligible, the day named', d.error)
+}
+{
+  const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-10-01T00:00:00Z' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-10-19T08:00:00Z'))
+  ok(d.grant === true, 'first payment on 1 October, every video done, applied on 19 October: granted (refused until T-080)', show(d))
+}
+{
+  const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-09-15T10:00:00Z' }), completions: done(['x01']) }), new Date('2026-10-20T10:00:00Z'))
+  ok(!d.grant && d.state === 'locked'
+       && d.error === 'You have 2 lessons left to watch before the discount checkpoint, about 15 minutes of video. Finish them by the end of October 23, Croatia time, and apply again.',
+     'a September joiner with lessons left is told the day and whose clock it is, never "your 14 days"', d.error)
+}
+{
+  const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-09-15T10:00:00Z' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-10-23T22:00:00.000Z'))
+  ok(!d.grant && d.status === 400 && d.state === 'expired'
+       && d.error === 'The discount closed at the end of October 23, Croatia time. That was the deadline for students who joined before the new course launched.',
+     'a September joiner at 00:00 on 24 October in Croatia, every video done: expired, the day and the clock named', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: null }) }), IN_WINDOW)
-  ok(!d.grant && d.state === 'not-eligible' && d.error.startsWith("We can't find your first payment yet"), 'no first payment: 400, not eligible', d.error)
+  ok(!d.grant && d.state === 'not-eligible'
+       && d.error === "We can't find your first payment yet, so we can't check whether the discount is open to you. Contact support and we'll sort it out within 24h.",
+     'no first payment: 400, not eligible, with no length of window named (it may be 23 October, not 14 days)', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ lessons: okRead(catalogRows(COURSE).map((l) => ({ ...l, is_gate: false }))), completions: done(['x01', 'x05', 'x06']) }), IN_WINDOW)
@@ -270,14 +439,22 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
 }
 {
   const all = [
-    { kind: 'locked', lessonsLeft: 3, lessonsTotal: 3, secondsLeft: 7200, endsAt: ENDS, nextLessonId: 'x' },
-    { kind: 'expired', endsAt: ENDS, lessonsLeft: 0 },
+    { kind: 'locked', lessonsLeft: 3, lessonsTotal: 3, secondsLeft: 7200, endsAt: ENDS, window: 'own', nextLessonId: 'x' },
+    { kind: 'locked', lessonsLeft: 1, lessonsTotal: 3, secondsLeft: 0, endsAt: DISCOUNT_SHARED_DEADLINE, window: 'shared', nextLessonId: 'x' },
+    { kind: 'expired', endsAt: ENDS, window: 'own', lessonsLeft: 0 },
+    { kind: 'expired', endsAt: DISCOUNT_SHARED_DEADLINE, window: 'shared', lessonsLeft: 0 },
     ...['no-payment', 'before-launch', 'no-gate'].map((reason) => ({ kind: 'not-eligible', reason })),
-    ...['pending', 'approved', 'applied', 'rejected'].map((kind) => ({ kind, requestId: 'r', at: ENDS, promoCode: null, rejectionReason: null })),
+    ...['pending', 'approved', 'applied', 'rejected'].map((kind) => ({ kind, requestId: 'r', at: ENDS, promoCode: null, rejectionReason: null, madeBeforeLaunch: false })),
   ]
   const msgs = all.map(discountRefusalMessage)
-  ok(msgs.every((m) => m.length > 0 && !m.includes('—') && !/\bR[12]\b/.test(m)), 'every refusal is a plain sentence: no em dash, no region code', show(msgs))
+  ok(msgs.every((m) => m.length > 0 && !m.includes('—') && !/\bR[12]\b/.test(m) && !/unlock/i.test(m)),
+     'every refusal is a plain sentence: no em dash, no region code, no "unlock"', show(msgs))
   ok(msgs[0].includes('about 2 hours of video'), 'hours read as hours', msgs[0])
+  ok(msgs[1] === 'You have 1 lesson left to watch before the discount checkpoint. Finish it by the end of October 23, Croatia time, and apply again.',
+     'the shared deadline in the singular, with no length known', msgs[1])
+  ok(msgs[1].includes('Croatia time') && msgs[3].includes('Croatia time'), 'the shared deadline always says whose clock it runs on')
+  ok(!msgs[1].includes('14 days') && !msgs[3].includes('14 days') && !msgs[4].includes('14 days'),
+     'a September joiner never reads "14 days", nor does a student whose first payment is not found yet', show([msgs[1], msgs[3], msgs[4]]))
 }
 
 {
@@ -287,6 +464,32 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
   ok(!d.grant && d.state === 'not-eligible', 'and the server refuses that June student as not eligible, not as already requested', d.error)
   const d2 = decideDiscountRequest(reads({ completions: done(['x01', 'x05', 'x06']), requests: okRead([R('old', 'rejected', '2026-09-30T00:00:00Z')]) }), IN_WINDOW)
   ok(d2.grant === true, 'the server grants a ready student whose only request is from the old course')
+}
+
+console.log('\n=== decideDiscountRequest: a September joiner who already has a request from the old course ===')
+{
+  // The map and the server judge the same rows the same way, and the server
+  // refuses before the database would (v29 refuses another request while one
+  // is pending, approved or applied, whatever its date).
+  const SEPT = okRead({ first_paid_at: '2026-09-15T10:00:00.000Z' })
+  const NOW = new Date('2026-10-20T10:00:00Z')
+  const ALL = ['x01', 'x05', 'x06']
+  const words = {
+    pending: "You already applied for the discount. We're reviewing it.",
+    approved: 'Your discount is already approved.',
+    applied: 'Your discount is already on your membership.',
+  }
+  for (const status of ['pending', 'approved', 'applied', 'rejected']) {
+    const old = R('old', status, '2026-09-25T10:00:00.000Z')
+    const d = decideDiscountRequest(reads({ student: SEPT, completions: done(ALL), requests: okRead([old]) }), NOW)
+    const map = discountState({ now: NOW, firstPaidAt: '2026-09-15T10:00:00.000Z', lessons: COURSE, videoDoneIds: new Set(ALL), requests: [old] })
+    if (status === 'rejected') {
+      ok(d.grant === true && map.kind === 'ready', 'rejected on the old course, every video done: the server grants, the map shows Apply', show({ d, map: map.kind }))
+    } else {
+      ok(!d.grant && d.status === 400 && d.state === status && d.state === map.kind && d.error === words[status],
+         `${status} on the old course, every video done: refused as ${status}, in the app's own words, as the map shows it`, show(d))
+    }
+  }
 }
 
 console.log('\n=== approvalVerdict (POST /api/discounts/approve on the new course) ===')
@@ -310,13 +513,47 @@ ok(approvalVerdict(reads({ completions: done(['x01', 'x05', 'x06']) }), new Date
 }
 ok(approvalVerdict(reads({ student: okRead({ first_paid_at: null }) }), IN_WINDOW).error.startsWith('Cannot approve: student has no first_paid_at on file.'),
    'no first payment: the old route\'s words')
-ok(approvalVerdict(reads({ student: okRead({ first_paid_at: '2026-10-08T10:00:00Z' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-10-10T00:00:00Z')).error.includes('before October 9, 2026'),
-   'first payment before the launch: refused')
+{
+  const v = approvalVerdict(reads({ student: okRead({ first_paid_at: '2026-09-08T21:59:59.999Z' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-10-20T00:00:00Z'))
+  ok(!v.ok && v.status === 400
+       && v.error === 'Cannot approve: the student\'s first payment (2026-09-08T21:59:59.999Z) is before September 9, 2026. Only a first payment from then on can earn the discount.',
+     'first payment the millisecond before 9 September in Croatia: refused, the day named', v.error)
+}
+ok(approvalVerdict(reads({ student: okRead({ first_paid_at: '2026-10-08T10:00:00Z' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-10-20T00:00:00Z')).ok,
+   'first payment on 8 October, before the launch, every video done by the shared deadline: approved (refused until T-080)')
 ok(/no discount gate lesson/.test(approvalVerdict(reads({ lessons: okRead(catalogRows(COURSE).map((l) => ({ ...l, is_gate: false }))) }), IN_WINDOW).error),
    'no gate: refused')
 {
   const v = approvalVerdict(reads({ videos: badRead('denied') }), IN_WINDOW)
   ok(!v.ok && v.status === 500 && v.log.includes('lesson_videos: denied'), 'a failed read: 500, nothing approved', show(v))
+}
+
+console.log('\n=== approvalVerdict: a September joiner, judged as of the end of 23 October ===')
+{
+  const SEPT = okRead({ first_paid_at: '2026-09-15T10:00:00.000Z' })
+  // x01 came in from Whop at the app's first visit after the switch, x05 was
+  // watched in the app, and the gate (x06) was finished at `gateAt`.
+  const finished = (gateAt) => okRead([
+    { lesson_id: 'x01', completed_at: '2026-10-19T07:30:00.000Z' },
+    { lesson_id: 'x05', completed_at: '2026-10-21T18:00:00.000Z' },
+    { lesson_id: 'x06', completed_at: gateAt },
+  ])
+  const ASKED = '2026-10-23T21:30:00.000Z'
+  const LATER = new Date('2026-10-27T09:00:00Z')
+  ok(same(approvalVerdict(reads({ student: SEPT, completions: finished('2026-10-23T21:59:00.000Z') }), LATER, ASKED), { ok: true }),
+     'the gate finished at 23:59 on 23 October in Croatia, approved on 27 October: approved')
+  ok(approvalVerdict(reads({ student: SEPT, completions: finished(DISCOUNT_SHARED_DEADLINE) }), LATER, ASKED).ok,
+     'the gate finished at the deadline\'s last millisecond: approved')
+  {
+    const v = approvalVerdict(reads({ student: SEPT, completions: finished('2026-10-23T22:00:00.000Z') }), LATER, ASKED)
+    ok(!v.ok && v.status === 400
+         && v.error === 'Student has not watched every video up to the discount checkpoint by the end of October 23 (Croatia time), the deadline for a first payment before the launch: 1 of 3 still missing.',
+       'the gate finished at 00:00 on 24 October in Croatia: refused, the deadline named', v.error)
+  }
+  ok(approvalVerdict(reads({ student: SEPT, completions: finished('2026-10-22T12:00:00.000Z') }), new Date('2026-10-22T13:00:00Z'), ASKED).ok,
+     'approved before the deadline, every video done: approved')
+  ok(approvalVerdict(reads({ completions: finished('2026-10-24T11:00:00.000Z') }), LATER, ASKED).ok,
+     'paid 10 October (after the launch), the gate finished on 24 October inside its own 14 days: approved, the shared deadline is not theirs')
 }
 
 console.log('\n=== approvalVerdict: a video loaded after the request is not asked for ===')
@@ -376,10 +613,15 @@ console.log('\n=== explainOldCourseRequest: a request made before the course swi
   ok(!locked.ok && locked.status === 400 && locked.error.includes('3 of 3 still missing'), 'the new rule alone refuses it as unwatched', locked.error)
   const said = explainOldCourseRequest(locked, '2026-10-13T10:00:00Z', RESET)
   ok(same(said, { ok: false, status: 400, error: OLD_COURSE_REQUEST_REFUSAL }), 'made before the switch: the refusal says so, still a 400', show(said))
-  // The reviewer's case 1: paid 1 October, refused as before the launch.
+  // The reviewer's case 1, since T-080: paid 1 October, which now has the
+  // shared deadline, so the new rule alone refuses it as unwatched; paid
+  // 1 September, refused as before 9 September. Both read the same.
   const early = approvalVerdict(reads({ student: okRead({ first_paid_at: '2026-10-01T10:00:00Z' }) }), AT, '2026-10-12T10:00:00Z')
-  ok(early.error.includes('before October 9, 2026') && explainOldCourseRequest(early, '2026-10-12T10:00:00Z', RESET).error === OLD_COURSE_REQUEST_REFUSAL,
-     'paid 1 October, refused as before the launch: the same words')
+  ok(!early.ok && early.error.includes('3 of 3 still missing') && explainOldCourseRequest(early, '2026-10-12T10:00:00Z', RESET).error === OLD_COURSE_REQUEST_REFUSAL,
+     'paid 1 October, applied on the old course on 12 October: the same words', early.error)
+  const tooEarly = approvalVerdict(reads({ student: okRead({ first_paid_at: '2026-09-01T10:00:00Z' }) }), AT, '2026-09-10T10:00:00Z')
+  ok(tooEarly.error.includes('before September 9, 2026') && explainOldCourseRequest(tooEarly, '2026-09-10T10:00:00Z', RESET).error === OLD_COURSE_REQUEST_REFUSAL,
+     'paid 1 September, refused as before 9 September: the same words', tooEarly.error)
   ok(explainOldCourseRequest(locked, '2026-10-17T09:00:00Z', RESET) === locked, 'made after the switch: the new rule\'s own words')
   ok(explainOldCourseRequest(locked, RESET, RESET) === locked, 'made at the switch\'s instant: the new rule\'s own words')
   ok(explainOldCourseRequest(locked, '2026-10-13T10:00:00Z', null) === locked, 'no switch: unchanged')
@@ -465,6 +707,23 @@ console.log('\n=== The real course: course_catalog.json + the development page\'
   ok(decideDiscountRequest(r({ completions: done(allIds.filter((id) => id !== 'a4l17')) }), IN_WINDOW).grant === false, 'all but the gate: not granted')
   ok(decideDiscountRequest(r({ completions: done(allIds.filter((id) => id !== 'a1l01').concat(catalog.lessons.slice(gateAt).map((l) => l.id))) }), IN_WINDOW).grant === false,
      'the whole rest of the course watched but a1l01 missing: not granted')
+
+  // T-080 over the real course: paid 15 September, every required video
+  // finished after the app is back and before the end of 23 October.
+  const SEPT = okRead({ first_paid_at: '2026-09-15T10:00:00.000Z' })
+  const sept = discountState({ now: new Date('2026-10-19T08:00:00Z'), firstPaidAt: '2026-09-15T10:00:00.000Z', lessons, videoDoneIds: new Set(), requests: [] })
+  ok(sept.kind === 'locked' && sept.lessonsLeft === 59 && sept.window === 'shared' && sept.endsAt === DISCOUNT_SHARED_DEADLINE,
+     'paid 15 September, on 19 October: 59 left, until the end of 23 October', show(sept))
+  const by21st = done(allIds, '2026-10-21T10:00:00.000Z')
+  ok(decideDiscountRequest(r({ student: SEPT, completions: by21st }), new Date('2026-10-22T10:00:00Z')).grant === true,
+     'all 59 finished by 21 October, applied on 22 October: granted')
+  ok(approvalVerdict(r({ student: SEPT, completions: by21st }), new Date('2026-10-28T10:00:00Z'), '2026-10-22T10:00:00.000Z').ok,
+     'and approved on 28 October: approved, judged as of the end of 23 October')
+  const gateOn24th = okRead(allIds.map((lesson_id) => ({ lesson_id, completed_at: lesson_id === 'a4l17' ? '2026-10-23T22:00:00.000Z' : '2026-10-21T10:00:00.000Z' })))
+  ok(decideDiscountRequest(r({ student: SEPT, completions: gateOn24th }), new Date('2026-10-23T22:00:00.000Z')).state === 'expired',
+     'the gate (a4l17) finished at 00:00 on 24 October in Croatia: the request is refused as expired')
+  const late = approvalVerdict(r({ student: SEPT, completions: gateOn24th }), new Date('2026-10-28T10:00:00Z'), '2026-10-23T21:00:00.000Z')
+  ok(!late.ok && late.error.includes('1 of 59 still missing'), 'and an approval refuses it: 1 of 59 still missing', late.error)
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

@@ -8,7 +8,7 @@
  *   factsFromReads         those reads as discount.ts's input, or which failed
  *   decideDiscountRequest  POST /api/discounts/request: grant only on `ready`
  *   approvalVerdict        POST /api/discounts/approve: was every video done
- *                          inside the 14 days
+ *                          by the student's deadline (discount.ts)
  *   secondPendingRequest   both routes that write a request, on either course:
  *                          a double submit the database refused (v106)
  *
@@ -23,8 +23,9 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
-  DISCOUNT_LAUNCH_DATE,
+  DISCOUNT_ELIGIBLE_FROM,
   DISCOUNT_PERCENT,
+  DISCOUNT_SHARED_DEADLINE,
   DISCOUNT_WINDOW_DAYS,
   discountEndsAt,
   discountState,
@@ -181,12 +182,21 @@ export function factsFromReads(
   };
 }
 
-// The launch is midnight in Croatia (discount.ts), so the day is read there:
-// in UTC it falls on the evening before.
-const LAUNCH_DAY = new Date(DISCOUNT_LAUNCH_DATE).toLocaleDateString("en-US", {
+// The rule's dates are midnight in Croatia (discount.ts), so the day is read
+// there: in UTC the first one falls on the evening before. A student reads the
+// shared deadline with "Croatia time" after it: it closes at one moment
+// everywhere, 18:00 in New York and early on the 24th in Asia.
+/** "September 9, 2026": the earliest first payment that can earn it. */
+const ELIGIBLE_DAY = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString("en-US", {
   month: "long",
   day: "numeric",
   year: "numeric",
+  timeZone: "Europe/Zagreb",
+});
+/** "October 23": the last day for a first payment before the launch. */
+const SHARED_DEADLINE_DAY = new Date(DISCOUNT_SHARED_DEADLINE).toLocaleDateString("en-US", {
+  month: "long",
+  day: "numeric",
   timeZone: "Europe/Zagreb",
 });
 
@@ -224,12 +234,22 @@ export function discountRefusalMessage(state: DiscountState): string {
     case "locked": {
       const n = state.lessonsLeft;
       const time = videoTime(state.secondsLeft);
+      const by =
+        state.window === "shared"
+          ? `by the end of ${SHARED_DEADLINE_DAY}, Croatia time,`
+          : `within your ${DISCOUNT_WINDOW_DAYS} days`;
       return (
         `You have ${n} ${n === 1 ? "lesson" : "lessons"} left to watch before the discount checkpoint` +
-        `${time ? `, ${time}` : ""}. Finish ${n === 1 ? "it" : "them"} within your ${DISCOUNT_WINDOW_DAYS} days and apply again.`
+        `${time ? `, ${time}` : ""}. Finish ${n === 1 ? "it" : "them"} ${by} and apply again.`
       );
     }
     case "expired":
+      if (state.window === "shared") {
+        return (
+          `The discount closed at the end of ${SHARED_DEADLINE_DAY}, Croatia time. That was the deadline ` +
+          `for students who joined before the new course launched.`
+        );
+      }
       return (
         `Your ${DISCOUNT_WINDOW_DAYS} days for the discount are over. The ${DISCOUNT_PERCENT}% is for students ` +
         `who reach the checkpoint within ${DISCOUNT_WINDOW_DAYS} days of their first payment.`
@@ -237,13 +257,13 @@ export function discountRefusalMessage(state: DiscountState): string {
     case "not-eligible":
       if (state.reason === "before-launch") {
         return (
-          `The ${DISCOUNT_PERCENT}% discount is for students who joined on or after ${LAUNCH_DAY}, ` +
-          `when the new course launched. Your first payment was before that.`
+          `The ${DISCOUNT_PERCENT}% discount is for students who joined on or after ${ELIGIBLE_DAY}. ` +
+          `Your first payment was before that.`
         );
       }
       if (state.reason === "no-payment") {
         return (
-          `We can't find your first payment yet, so we can't check your ${DISCOUNT_WINDOW_DAYS} days. ` +
+          `We can't find your first payment yet, so we can't check whether the discount is open to you. ` +
           `Contact support and we'll sort it out within 24h.`
         );
       }
@@ -305,9 +325,13 @@ export type ApprovalVerdict =
 /**
  * POST /api/discounts/approve on the new course: the request route's rule,
  * judged at the end of the window. Every video it asks for must have been
- * done by the day the 14 days ran out, so a request may be approved late and a
- * video watched after the window does not count. The student's own requests
- * are left out (the one being approved would otherwise decide the answer).
+ * done by the student's deadline (14 days from a first payment made on or
+ * after the launch, the end of 23 October for one from 9 September until the
+ * launch: discount.ts discountWindow), so a request may be approved late and
+ * a video watched after the deadline does not count, wherever it was watched:
+ * a lesson finished on Whop carries the time the app recorded it. The
+ * student's own requests are left out (the one being approved would
+ * otherwise decide the answer).
  *
  * `requestCreatedAt` is the `created_at` of the request being approved. A
  * video loaded after it is not asked for: the student applied with every
@@ -352,14 +376,19 @@ export function approvalVerdict(
   switch (state.kind) {
     case "ready":
       return { ok: true };
-    case "locked":
+    case "locked": {
+      const by =
+        state.window === "shared"
+          ? `by the end of ${SHARED_DEADLINE_DAY} (Croatia time), the deadline for a first payment before the launch`
+          : `inside the ${DISCOUNT_WINDOW_DAYS} days`;
       return {
         ok: false,
         status: 400,
         error:
-          `Student has not watched every video up to the discount checkpoint inside the ${DISCOUNT_WINDOW_DAYS} days: ` +
+          `Student has not watched every video up to the discount checkpoint ${by}: ` +
           `${state.lessonsLeft} of ${state.lessonsTotal} still missing.`,
       };
+    }
     case "not-eligible":
       if (state.reason === "no-payment") {
         // The old route's words for the same gate.
@@ -374,7 +403,7 @@ export function approvalVerdict(
         return {
           ok: false,
           status: 400,
-          error: `Cannot approve: the student's first payment (${firstPaidAt}) is before ${LAUNCH_DAY}, when the new course launched.`,
+          error: `Cannot approve: the student's first payment (${firstPaidAt}) is before ${ELIGIBLE_DAY}. Only a first payment from then on can earn the discount.`,
         };
       }
       return {

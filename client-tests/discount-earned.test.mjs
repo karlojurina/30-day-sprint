@@ -1,6 +1,8 @@
 // Discount Earned (src/lib/achievements.ts, the discount_earned rule) counts,
-// once the new course is live, only a request made on or after the day it
-// launched, as the map does (backend_readiness.md section 5, item 21). A June
+// once the new course is live, the approvals the map shows (discount.ts
+// requestCounts): one made on or after the day the course launched, and since
+// T-080 one from before it for a student who first paid from 9 September
+// until the launch (backend_readiness.md section 5, item 21). A June
 // student's June approval re-awarded the badge after the switch while the map
 // told them the offer was not for them. Before the switch any approval counts,
 // as it always did.
@@ -39,8 +41,8 @@ async function earned(requests, opts) {
   return snap?.discountEarnedAt ?? null
 }
 /** What the map shows for the same requests: approved or applied is the offer earned. */
-const mapSays = (requests) => discountState({
-  now: new Date(Date.parse(RESET) + 86_400_000), firstPaidAt: JUNE, lessons: [], videoDoneIds: new Set(),
+const mapSays = (requests, paid = JUNE) => discountState({
+  now: new Date(Date.parse(RESET) + 86_400_000), firstPaidAt: paid, lessons: [], videoDoneIds: new Set(),
   requests: requests.map(([status, created_at], i) => ({ id: `d${i}`, status, created_at })),
 }).kind
 
@@ -73,6 +75,28 @@ for (const [label, requests, want] of [
   ok(at === want && (at !== null) === mapEarned, `${label}: ${want ? 'earned' : 'not earned'}, as the map shows it`, show({ badge: at, map }))
 }
 
+console.log('\n=== The new course is live: a September joiner\'s approval from the old course (T-080) ===')
+{
+  // First paid from 9 September until the launch: the map shows an old
+  // approval as theirs (discount.ts requestCounts), so the badge counts it.
+  const SEPT_5 = '2026-09-05T10:00:00.000Z'
+  const SEPT_10 = '2026-09-10T10:00:00.000Z'
+  const SEPT_15 = '2026-09-15T10:00:00.000Z'
+  const SEPT_25 = '2026-09-25T10:00:00.000Z'
+  for (const [label, requests, paid, want] of [
+    ['first paid 15 September, approved on 25 September', [['approved', SEPT_25]], SEPT_15, SEPT_25],
+    ['first paid 15 September, applied on 25 September', [['applied', SEPT_25]], SEPT_15, SEPT_25],
+    ['first paid 15 September, rejected on 25 September', [['rejected', SEPT_25]], SEPT_15, null],
+    ['first paid 15 September, approved on 25 September and applied on 12 October', [['approved', SEPT_25], ['applied', OCT_12]], SEPT_15, SEPT_25],
+    ['first paid 5 September (before 9 September), approved on 10 September', [['approved', SEPT_10]], SEPT_5, null],
+  ]) {
+    const at = await earned(requests, { reset: RESET, paid })
+    const map = mapSays(requests, paid)
+    const mapEarned = map === 'approved' || map === 'applied'
+    ok(at === want && (at !== null) === mapEarned, `${label}: ${want ? 'earned' : 'not earned'}, as the map shows it`, show({ badge: at, map }))
+  }
+}
+
 console.log('\n=== Through evaluateAchievements ===')
 {
   const db = dbFor([['approved', JUNE]], live)
@@ -85,6 +109,9 @@ console.log('\n=== Through evaluateAchievements ===')
   const db3 = dbFor([['approved', JUNE]])
   const got3 = await evaluateAchievements(fakeClient(db3), 's1')
   ok(got3.includes('discount_earned'), 'and before the switch, the June approval still earns it', show(got3))
+  const db4 = dbFor([['applied', '2026-09-25T10:00:00.000Z']], { reset: RESET, paid: '2026-09-15T10:00:00.000Z' })
+  const got4 = await evaluateAchievements(fakeClient(db4), 's1')
+  ok(got4.includes('discount_earned'), 'a September joiner whose 30% was applied in September, after the switch: inserted, as the map shows it', show(got4))
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

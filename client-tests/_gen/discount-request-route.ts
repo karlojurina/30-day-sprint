@@ -10,8 +10,10 @@ import { decideDiscountRequest, loadDiscountReads, secondPendingRequest } from "
  * The new course (2026-10-14): on a deployment that reads the v2 catalog
  * (CATALOG_IS_V2, true on staging and after cutover), the request is decided
  * by src/lib/world/discount.ts, the same rule the map shows: every video up to
- * the gate lesson, inside 14 days of a first payment made on or after
- * 2026-10-09. It grants only on `ready` and fails closed on any read error.
+ * the gate lesson, by the student's deadline (14 days from a first payment
+ * made on or after 2026-10-09; the end of 2026-10-23 for one from 2026-09-09
+ * until then; never for an earlier one). It grants only on `ready` and fails
+ * closed on any read error.
  * The old rule below runs everywhere else, unchanged, so the live app on the
  * v1 catalog behaves exactly as before.
  */

@@ -4,6 +4,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { motion } from "framer-motion";
 import { SPEC_EASE } from "@/lib/motion";
+import { COMING_SOON_MESSAGE } from "@/lib/student-app-gate";
 
 function LoginContent() {
   const searchParams = useSearchParams();
@@ -27,6 +28,9 @@ function LoginContent() {
     auth_failed: "Authentication failed. Try again.",
     callback_failed: "Something broke. Try again.",
     session_failed: "Couldn't create your session. Try again.",
+    // The callback while the student app is closed (T-078). The login's
+    // layout shows the coming-soon page then, so this line is the fallback.
+    app_closed: COMING_SOON_MESSAGE,
   };
 
   return (

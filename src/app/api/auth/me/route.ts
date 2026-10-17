@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { studentMayEnter } from "@/lib/student-app-gate";
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -41,6 +42,12 @@ export async function GET(request: NextRequest) {
     .single();
 
   if (student) {
+    // T-078: while the student app is closed to this student, say so
+    // (StudentGuard shows the coming-soon page). The team answered above and
+    // is never asked. Open, the answer is exactly what it was.
+    if (!studentMayEnter(student.whop_user_id)) {
+      return NextResponse.json({ role: "student", profile: student, appClosed: true });
+    }
     return NextResponse.json({ role: "student", profile: student });
   }
 

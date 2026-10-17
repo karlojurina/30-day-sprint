@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { refuseWhileClosed } from "@/lib/student-app-gate";
 import { PLAYBOOK_UNLOCK_LESSON_ID } from "@/lib/constants";
 
 /**
@@ -51,6 +52,10 @@ export async function GET(request: NextRequest) {
   if (userError || !user) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
+
+  // T-078: closed to students until the new course (lib/student-app-gate.ts).
+  const closed = await refuseWhileClosed(supabase, user.id);
+  if (closed) return closed;
 
   const { data: callerStudent } = await supabase
     .from("students")

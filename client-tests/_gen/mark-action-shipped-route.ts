@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "./stub-server.ts";
 import { createClient } from "./stub-server.ts";
-import { updateStudentStreak } from "./stub-server.ts";
+import { markStudentActive, tickStudentStreak } from "./stub-server.ts";
 import { evaluateAchievements } from "./stub-server.ts";
 import { checkR2CompoundsShipped, onLessonCompleted } from "./stub-server.ts";
 import { reEvaluateStudentOpenTasks } from "./stub-server.ts";
@@ -166,14 +166,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ completion: null });
   }
 
-  // Update streak only if we just newly fully-completed (both halves)
-  if (
-    shipped &&
-    result &&
-    result.completed_at &&
-    result.action_completed_at
-  ) {
-    await updateStudentStreak(supabase, student.id);
+  // A task done is a streak day (T-079): the action half newly done, on
+  // both courses, whether or not the lesson's video is watched yet (watching
+  // it is a streak day of its own, lesson-watched). Pressing it again on a
+  // done action, or undoing one, is no new work.
+  if (shipped && !existing?.action_completed_at && result?.action_completed_at) {
+    await tickStudentStreak(supabase, student.id);
+  }
+  // "Last active" moves where it always did: a shipped action that leaves
+  // both halves done.
+  if (shipped && result?.completed_at && result?.action_completed_at) {
+    await markStudentActive(supabase, student.id);
   }
 
   // CSM event hooks (best-effort — failures here never break the

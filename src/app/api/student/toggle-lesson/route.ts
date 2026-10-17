@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { updateStudentStreak } from "../_lib/update-streak";
+import { markStudentActive, updateStudentStreak } from "../_lib/update-streak";
 import { onLessonCompleted } from "@/lib/csm-events";
 import { evaluateAchievements } from "@/lib/achievements";
 import { reEvaluateStudentOpenTasks } from "@/lib/csm-task-evaluation";
@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
   // not stop someone ticking off a lesson they really did finish.
   const { data: guardLesson, error: guardError } = await supabase
     .from("lessons")
-    .select("type")
+    .select("type, requires_action")
     .eq("id", lessonId)
     .maybeSingle();
 
@@ -82,7 +82,9 @@ export async function POST(request: NextRequest) {
       .delete()
       .eq("id", existing.id);
 
-    await updateStudentStreak(supabase, student.id);
+    // Undoing is no work: no streak day (T-079). "Last active" moves as it
+    // always did.
+    await markStudentActive(supabase, student.id);
 
     return NextResponse.json({ action: "unchecked" });
   } else {
@@ -96,7 +98,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    await updateStudentStreak(supabase, student.id);
+    // A task ticked off is a streak day (T-079) when this row finishes the
+    // lesson: one with no action half. On a lesson with one (the new
+    // course's setup lessons) the row is half of it, and the action item's
+    // button finishes it. Unread lesson, no streak day. "Last active" moves
+    // either way, as it always did.
+    if (guardLesson && !guardLesson.requires_action) {
+      await updateStudentStreak(supabase, student.id);
+    } else {
+      await markStudentActive(supabase, student.id);
+    }
 
     // X.1 reactivation check (best-effort).
     await onLessonCompleted(supabase, student.id);

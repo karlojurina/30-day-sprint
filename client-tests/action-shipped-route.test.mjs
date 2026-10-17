@@ -104,7 +104,9 @@ console.log('\n=== New course: with the link saved, as the page does it ===')
   const got = row(db, 'a1l05')
   ok(r.status === 200 && got.completed_at !== null && got.action_completed_at !== null && got.discord_message_link === LINK,
      'a setup action item: both halves set, the link kept', show(got))
-  ok(same(stepNames(), ['streak', 'r2', 'came-back', 'achievements', 'tasks']), 'and the steps after it run, as before', show(stepNames()))
+  // Since T-079 the streak and "last active" are two steps: "streak" for the
+  // task done, "active" because both halves are now done (as before).
+  ok(same(stepNames(), ['streak', 'active', 'r2', 'came-back', 'achievements', 'tasks']), 'and the steps after it run, as before', show(stepNames()))
 }
 {
   const db = freshDb([{ lesson_id: 'a3l25', completed_at: null, discord_message_link: LINK }])
@@ -134,7 +136,10 @@ setCatalog({ v2: false })
   const got = row(db, 'l022')
   ok(r.status === 200 && got && got.action_completed_at !== null && got.completed_at === null,
      'an old-course action item with no link: the action half is recorded, as it always was', show(got))
-  ok(same(stepNames(), ['r2', 'came-back', 'achievements', 'tasks']), 'with the same steps after it', show(stepNames()))
+  // T-079 changed one thing here: a task done is a streak day on both courses,
+  // video watched or not ("last active" stays put, as before, with the video
+  // half still open). streak.test.mjs reads the streak row itself.
+  ok(same(stepNames(), ['streak', 'r2', 'came-back', 'achievements', 'tasks']), 'with the same steps after it, and now the streak day first', show(stepNames()))
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

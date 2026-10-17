@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { scoreQuiz } from "@/lib/quiz";
-import { updateStudentStreak } from "../_lib/update-streak";
+import { markStudentActive } from "../_lib/update-streak";
 import { evaluateAchievements } from "@/lib/achievements";
 
 export async function POST(request: NextRequest) {
@@ -82,7 +82,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: insertError.message }, { status: 500 });
   }
 
-  await updateStudentStreak(supabase, student.id);
+  // A quiz is not a streak day (T-079); "last active" moves as it always did.
+  await markStudentActive(supabase, student.id);
 
   // v53 (Phase 5) - achievements.
   const newAchievements = await evaluateAchievements(supabase, student.id);

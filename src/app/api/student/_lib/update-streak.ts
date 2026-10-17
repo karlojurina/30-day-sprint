@@ -2,13 +2,26 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { computeStreakUpdate, getTodayUtc } from "@/lib/streak";
 
 /**
- * Update a student's streak (student_streaks table) and bump
- * students.last_active_at in one call. Safe to call multiple times
- * per day — no-ops if already active today.
- *
+ * The streak and "last active", two signals written here.
  * v46 — streak fields live on student_streaks, not students.
+ *
+ * THE STREAK ticks only on counted work (Lovro, 2026-10-16, T-079): a lesson
+ * finished by watching it, a lesson finished on Whop newly arriving, a task
+ * newly done (src/lib/streak.ts lists the routes). A login, an app visit, a
+ * quiz, a skip, undoing and partial watching never tick it.
+ *
+ * "LAST ACTIVE" (students.last_active_at) moves where it always moved: on
+ * every login (the callback writes it itself) and in every route that ticked
+ * the streak before T-079, quizzes and undoing included. The engagement
+ * cron's "hasn't been active" alert and the team templates'
+ * days_since_last_login read it; Lovro decides it apart from the streak.
  */
-export async function updateStudentStreak(
+
+/**
+ * Tick the streak for today: the only writer of student_streaks. Safe to call
+ * several times a day; a day already counted is left alone.
+ */
+export async function tickStudentStreak(
   supabase: SupabaseClient,
   studentId: string,
 ) {
@@ -31,26 +44,40 @@ export async function updateStudentStreak(
     today,
   );
 
-  const nowIso = new Date().toISOString();
-
   if (streakUpdate) {
-    // Write streak update to its own table, then bump last_active_at
-    // on students separately.
     await supabase
       .from("student_streaks")
       .upsert(
         {
           student_id: studentId,
           ...streakUpdate,
-          updated_at: nowIso,
+          updated_at: new Date().toISOString(),
         },
         { onConflict: "student_id" },
       );
   }
+}
 
-  // Either way, bump last_active_at on students.
+/** Move students.last_active_at to now. Ticks no streak. */
+export async function markStudentActive(
+  supabase: SupabaseClient,
+  studentId: string,
+) {
   await supabase
     .from("students")
-    .update({ last_active_at: nowIso })
+    .update({ last_active_at: new Date().toISOString() })
     .eq("id", studentId);
+}
+
+/**
+ * Counted work where "last active" has always moved with the streak (a lesson
+ * finished by watching it or on Whop, a task ticked on the old course): a
+ * streak day, then "last active".
+ */
+export async function updateStudentStreak(
+  supabase: SupabaseClient,
+  studentId: string,
+) {
+  await tickStudentStreak(supabase, studentId);
+  await markStudentActive(supabase, studentId);
 }

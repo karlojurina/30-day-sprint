@@ -42,6 +42,21 @@ flags. Each test calls the route's own `POST` with a real `Request`. The login
 callback is too big to run this way, so `whop-backfill.test.mjs` checks its one
 streak line in the source and says so.
 
+Since T-079 (2026-10-17) `streak.test.mjs` runs every route that writes or
+shows the streak through its own entry point: `lesson-watched` and the webhook
+with the real chain after a lesson (`complete-lesson.ts`), the visit's
+backfill, `mark-action-shipped`, the old course's `toggle-lesson`,
+`submit-quiz` and `skip-lesson`, the app's data read, and the login callback
+itself (`GET`, with Whop's login calls, the password sign-in and the redirect
+as stand-ins in `stub-server.ts`, and the real `pkce.ts` signing the state;
+its copy leaves out the source's `//` comment lines, because two of them name
+a student and a customer's email and this repository is public).
+The streak's steps are the one exception to "recorded, never run": the stub
+records `updateStudentStreak`, `tickStudentStreak` and `markStudentActive`,
+then runs the real `update-streak.ts`, so the suite reads the
+`student_streaks` row and `students.last_active_at` each route left. Each of
+its fixes was broken on purpose once, and the suite failed every time.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

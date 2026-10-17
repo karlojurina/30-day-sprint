@@ -14,6 +14,7 @@ import type {
 import { getDayNumber } from "@/types/database";
 import { progressPercent } from "@/lib/constants";
 import { completedLessonIdsFor } from "@/lib/progress";
+import { currentStreakAsOf, getTodayUtc } from "@/lib/streak";
 
 interface StudentDrawerProps {
   studentId: string | null;
@@ -263,7 +264,7 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
                 value={overallPercent == null ? "—" : `${overallPercent}%`}
                 accent
               />
-              <Stat label="Streak" value={`${streaks?.current_streak ?? 0}d`} />
+              <Stat label="Streak" value={`${currentStreakAsOf(streaks, getTodayUtc())}d`} />
               <Stat
                 label="Joined"
                 value={new Date(student.joined_at).toLocaleDateString()}

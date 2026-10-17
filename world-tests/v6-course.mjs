@@ -12,8 +12,9 @@
  * generated one: src/app/dev/world-app/courseCatalog.ts builds the rows from
  * supabase/catalog/course_catalog.json and course-lengths.fixture.json.
  * Headless Chrome on the real GPU, autoplay allowed, muted, 1691x1278. Takes
- * about 7 minutes (31 page loads, 32 when row 2 fails, and row 12 watches a
- * 67 second clip in real time): run it in the background.
+ * about 9 minutes (42 page loads with the warm-up's three on 2026-10-16, one
+ * more when row 2 fails, and row 12 watches a 67 second clip in real time):
+ * run it in the background.
  *
  * One PASS or FAIL line per row of the table, with what was measured after it.
  * Every row loads its own fresh page in its own browser context. The five
@@ -44,9 +45,13 @@
  * as the real route can) a row clicked at once waits for it, and a row the
  * pointer rested on first still opens within 300 ms (20). Times are from the
  * click to the frame going into the page, on the page's own clock (FAST).
- * The 300 ms includes the route change to the lesson page, which on the dev
- * server is a request of its own (measured 107 to 299 ms, more on a busy
- * server), so rows 17 and 20 print it apart from the rest of the wait.
+ * Since the second Loom's second fix round the stage draws the lesson page at
+ * the click (WorldStage.tsx, open()) and the address follows once the router
+ * has the route, which under the dev server is a request of its own (250 to
+ * 600 ms on a busy machine, 2026-10-16 and 17). So the 300 ms no longer waits
+ * on it; rows 17 and 20 print when the address followed and the server's
+ * answer, and row 17 checks that the address does follow and that the page
+ * and its frame are put in once, not again when the address lands.
  * Rows 17, 18 and 20 need the test videos and are NOT COVERED without them.
  *
  * ROWS 21 AND 22 ARE ACTION ITEMS (src/components/world/ActionItemBlock.tsx,
@@ -66,11 +71,23 @@
  *
  * ROWS 23 AND 24 CAME WITH THE SECOND LOOM (2026-10-16). The 20 watch lessons
  * with no video (a3l11, a4l11, Creative Strategy's 18) never hold a student:
- * the card's next lesson passes them over, their panel rows say "Not recorded
- * yet", their page's "Next lesson" is on, a student past them stands at the
- * next place with lessons to finish, and only once nothing else is left is
- * one of them next, with "Not recorded yet" where Watch was (23). A place's
- * minutes count its action items' lengths when the catalog has them (24).
+ * the card's next lesson passes them over, their page's "Next lesson" is on, a
+ * student past them stands at the next place with lessons to finish, and only
+ * once nothing else is left is one of them next, with "Not recorded yet" where
+ * Watch was (23). In a place's panel (the fix round, .impeccable.md: never
+ * mark the negative on every row) the count of them is said once, on a line
+ * under the count line, and their rows are marked by look alone (a quiet
+ * title, no length); only a row the student has passed in their own place
+ * (row 11 under a next row 12) says "Not recorded yet", and so does the next
+ * row when only such lessons are left, with no ▶. A place's minutes count its
+ * action items' lengths when the catalog has them (24).
+ *
+ * ROW 25 CAME WITH THE FIX ROUND. A place finished right before one the map
+ * passes over (Creative Strategy, no video yet) gets a done card that names it
+ * alone: "AI Ads + Content done.", never "AI Ads + Content and Creative
+ * Strategy done." with Creative Strategy at 0 of 18, and its button starts How
+ * To Land Clients. Finished before a place already done (AI Ads + Content),
+ * Static Ads' card names both, as it always did.
  *
  * ROW 12 PLAYS A REAL VIDEO. In course mode every lesson that has a video
  * plays the harness's test video 1, and the stand-in server holds it to that
@@ -101,7 +118,8 @@
  * beside its walk where a lantern may stand (lanternLayout()'s u: every step
  * within SPACING_TOL of the place's spacing, the first at its walk's first
  * room, the last one spacing short of the walk's end, or at it for the last
- * place and for Video Ads II, round 3), and no two of a place closer than 0.6
+ * place, for Video Ads II, round 3, and for Static Ads, the second Loom's fix
+ * round), and no two of a place closer than 0.6
  * of its spacing in 3D. Round 4: a place whose single lanterns would stand
  * closer than PAIR_BELOW hangs them two to a post (none since the second
  * Loom), its posts then evenly spaced and the two of a post sharing it, arms opposite;
@@ -132,10 +150,19 @@
  * aState of the "ProgressStepRunes" mesh, one per step; every state above).
  * The Introduction has no waking lamps (they stood round the signpost with
  * its first lantern, one in the camp's pack), and none of its lanterns stands
- * within CAMP_CLEAR of the camp's packs. Creative Strategy's walk runs on over
+ * within CAMP_CLEAR of the camp's packs. Since the fix round 2 Creative
+ * Strategy has none either (they stood right of the observatory's terrace
+ * among its first lanterns). Creative Strategy's walk runs on over
  * the rope bridge: some of its lanterns stand on posts at the bridge's
  * railing, BRIDGE_RAIL off its centre line, their posts' tops no higher than
- * the hand rope and their glass hanging outside it.
+ * the hand rope and their glass hanging outside it. Its fix round: Static
+ * Ads' walk ends where the trail comes into AI Ads & Content's stop view, its
+ * last lantern at that end (its last three stood in the Great Tree's clearing
+ * in front of that stop), so none of Static Ads' lanterns shows from that stop
+ * or from AI Ads & Content's click-in view: each post, foot to top, and its
+ * glass, projected through the page's camera there, at the test's window and
+ * at PARK_ASPECT (the stop's lens is the same at every width, the click-in is
+ * solved for the window).
  *
  * A place's card only shows at the student's own place. So for the card of
  * place k the pretend student is put there first: every lesson of the places
@@ -172,9 +199,12 @@
  *              the count beside the strip, its button "Watch lesson 1, title"
  *   the panel  main section[aria-labelledby="v4-panel-title"], its #v4-panel-title,
  *              its ol > li rows (button aria-label "Lesson N, title[, action item]"
- *              and "Watch lesson N, title"), the count line (the element before
- *              the ol), and the buttons outside the ol (row 6: none is the
- *              Ad Bounty's lesson since the map review's item 18)
+ *              and "Watch lesson N, title"; a row's data-unrecorded, its mark's
+ *              data-m and the nextRow class for row 23), the count line (the p
+ *              holding the tick strip) and the p under it (row 23's note), and
+ *              the buttons outside the ol (row 6: none is the Ad Bounty's lesson
+ *              since the map review's item 18)
+ *   done card  (row 25) main section[aria-label="Place done"], its h2 and button
  *   bounty     (row 6) main section[aria-labelledby="bounty-panel-title"], its
  *              ol's button whose aria-label starts with the lesson's title;
  *              window.__worldPark('bounty')
@@ -204,8 +234,9 @@
  *              the placeholder [data-video-veil] outside `main` (data-gone,
  *              its computed opacity, visibility, pointer-events and its
  *              ::before animation-name, its box against the 16:9 box), the
- *              panel's rows by their aria-label number, and the frame's
- *              "ready" message (FAST)
+ *              panel's rows by their aria-label number, the frame's
+ *              "ready" message, and the Navigation API's currententrychange
+ *              for the address (FAST)
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
@@ -479,11 +510,19 @@ const READ_PANEL = () => {
     if (n !== null && tail.startsWith(String(n))) tail = tail.slice(String(n).length)
     if (title && tail.includes(title)) tail = tail.replace(title, '')
     tail = norm(norm(tail).replace(/Watch$/, ''))
-    rows.push({ n, kind, title, tail })
+    // Row 23 (the second Loom's fix round): a lesson with no video is marked by look, its title quiet
+    // (data-unrecorded); the row's mark (data-m: "n" is the ▶ of ready to watch); the next row's highlight.
+    const mark = li.querySelector('span[aria-hidden="true"]')
+    rows.push({ n, kind, title, tail, quiet: button?.dataset.unrecorded !== undefined, m: mark?.dataset.m ?? null, highlit: li.matches('[class*="nextRow"]') || !!li.querySelector('[class*="nextRow"]') })
   }
+  // The count line holds the tick strip (a span of <i> only); under it, since the second Loom's fix round,
+  // a line for the lessons with no video yet when the place has any (the note).
+  const prog = [...panel.querySelectorAll('p')].find((p) => [...p.children].some((c) => c.tagName === 'SPAN' && c.children.length > 0 && [...c.children].every((x) => x.tagName === 'I'))) ?? null
+  const under = prog?.nextElementSibling ?? null
   return {
     title: norm(panel.querySelector('#v4-panel-title')?.textContent),
-    count: ol?.previousElementSibling ? norm(ol.previousElementSibling.textContent) : null,
+    count: prog ? norm(prog.textContent) : null,
+    note: under && under !== ol && under.tagName === 'P' ? norm(under.textContent) : null,
     fold,
     rows,
     // After the list: the pond's row, when the place has one.
@@ -681,6 +720,34 @@ const HIDDEN_BY = ({ name, cam, pts }) => {
 }
 
 /**
+ * Row 2 (the second Loom's fix round): where each point lands in the frame of
+ * the page's camera as it is now, through its own lens, at the page's own
+ * width and at `aspect` (a wider window: the same lens, more to each side).
+ * Per point [x, y] in the frame's units ([-1, 1] across and up is inside it),
+ * once per width; null behind the camera. And the camera's place.
+ */
+const IN_FRAME = ({ pts, aspect }) => {
+  const sc = window.__worldV6Debug
+  const cam = sc.camera
+  cam.updateMatrixWorld()
+  const e = cam.matrixWorldInverse.elements
+  const t = Math.tan(((cam.fov / 2) * Math.PI) / 180)
+  const widths = [window.innerWidth / window.innerHeight, aspect]
+  const c = sc.cameraPose()
+  return {
+    cam: [c.x, c.y, c.z],
+    widths,
+    at: pts.map(([x, y, z]) => {
+      const vx = e[0] * x + e[4] * y + e[8] * z + e[12]
+      const vy = e[1] * x + e[5] * y + e[9] * z + e[13]
+      const vz = e[2] * x + e[6] * y + e[10] * z + e[14]
+      if (vz > -0.1) return null
+      return widths.map((a) => [vx / (-vz * t * a), vy / (-vz * t)])
+    }),
+  }
+}
+
+/**
  * Row 2: the ground as drawn at each point (x, z): the highest terrain
  * triangle over it, in world space, of the terrain meshes the camera draws
  * ("Terrain", "Terrain:falls", "Terrain:patchN"; not surfaces.ts's coarse
@@ -778,11 +845,12 @@ const PROBE = (tellaOrigin) => {
 
 /**
  * Rows 17 to 20, installed before the page's own scripts: when a panel row was
- * clicked, when the lesson's frame went into the page, when its player first
- * said anything and when it said "ready", and what the app's placeholder over
- * the frame looked like at each of those moments. All on the page's own clock
- * (performance.now). The frame's address is never read. reset() forgets one
- * click so the page can time a second.
+ * clicked, when the lesson's frame went into the page (and how many frames went
+ * in after the click), when the page's address left the click's, when its
+ * player first said anything and when it said "ready", and what the app's
+ * placeholder over the frame looked like at each of those moments. All on the
+ * page's own clock (performance.now). The frame's address is never read.
+ * reset() forgets one click so the page can time a second.
  *
  * "First said anything" because the real player says playbackState "idle" in
  * the same millisecond just before "ready" (measured 2026-10-14, 3 loads of
@@ -809,12 +877,41 @@ const FAST = (tellaOrigin) => {
       pulse: getComputedStyle(v, '::before').animationName,
     }
   }
-  const fresh = () => ({ click: null, heading: null, frame: null, first: null, firstSaid: null, ready: null, veilAtFrame: null, veilAtFirst: null, veilAtReady: null })
+  const fresh = () => ({ click: null, path: null, heading: null, frame: null, frames: 0, frameEl: null, address: null, first: null, firstSaid: null, ready: null, veilAtFrame: null, veilAtFirst: null, veilAtReady: null, rsc: null })
   window.__fast = { ...fresh(), veil, reset: () => Object.assign(window.__fast, fresh()) }
+  // The second Loom's second fix round: the stage draws the lesson page at the click and the address follows
+  // when the router has the route. When the address left the click's (the Navigation API's own event: Next
+  // commits a route with history.pushState), and every lesson frame that went into the page after the click.
+  const framesSeen = new WeakSet()
+  try {
+    navigation.addEventListener('currententrychange', () => {
+      const f = window.__fast
+      if (f.click !== null && f.address === null && location.pathname !== f.path) f.address = performance.now()
+    })
+  } catch {
+    // no Navigation API here: the rows print "?" for the address
+  }
+  // The fix round (2026-10-16): the router's request for the lesson route after the click (its address carries
+  // _rsc=), from its start to its last byte. On the dev server that answer is most of the route change, so the
+  // rows print it apart. Printed only, never judged.
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) {
+        const f = window.__fast
+        if (f.click === null || f.rsc !== null || e.startTime < f.click || !/[?&]_rsc=/.test(e.name)) continue
+        f.rsc = { start: e.startTime, end: e.responseEnd }
+      }
+    }).observe({ type: 'resource' })
+  } catch {
+    // no resource timing here: the rows print "?" for it
+  }
   document.addEventListener(
     'click',
     (e) => {
-      if (window.__fast.click === null && e.target instanceof Element && e.target.closest('main section[aria-labelledby="v4-panel-title"] ol')) window.__fast.click = performance.now()
+      if (window.__fast.click === null && e.target instanceof Element && e.target.closest('main section[aria-labelledby="v4-panel-title"] ol')) {
+        window.__fast.click = performance.now()
+        window.__fast.path = location.pathname
+      }
     },
     true,
   )
@@ -841,13 +938,18 @@ const FAST = (tellaOrigin) => {
     }
   })
   new MutationObserver(() => {
-    if (window.__fast.click === null) return
-    // The lesson page's heading: the route change is done (its request to the dev server included).
-    if (window.__fast.heading === null && [...document.querySelectorAll('h1')].some((h) => !h.closest('main'))) window.__fast.heading = performance.now()
-    if (window.__fast.frame !== null) return
-    if ([...document.querySelectorAll('iframe[title="Lesson video"]')].some((x) => !x.closest('main'))) {
-      window.__fast.frame = performance.now()
-      window.__fast.veilAtFrame = veil()
+    const f = window.__fast
+    if (f.click === null) return
+    // The lesson page's heading (the stage draws the page at the click; its address follows).
+    if (f.heading === null && [...document.querySelectorAll('h1')].some((h) => !h.closest('main'))) f.heading = performance.now()
+    for (const x of document.querySelectorAll('iframe[title="Lesson video"]')) {
+      if (x.closest('main') || framesSeen.has(x)) continue
+      framesSeen.add(x)
+      f.frames++
+      if (f.frame !== null) continue
+      f.frame = performance.now()
+      f.frameEl = x
+      f.veilAtFrame = veil()
     }
   }).observe(document, { childList: true, subtree: true })
 }
@@ -1362,9 +1464,25 @@ const hasVideoInJson = (id) => lessonOf(id)?.type === 'watch' && LENGTHS[id] > 0
 /** The frame went into the page after the click: both stamps, page clock. */
 const FRAME_UP = () => window.__fast.click !== null && window.__fast.frame !== null && { click: window.__fast.click, heading: window.__fast.heading, frame: window.__fast.frame }
 
-/** "312 ms from the click (the route change to the lesson page 260 ms, then 52 ms to the frame)". */
-const split = (t) =>
-  `${Math.round(t.frame - t.click)} ms from the click (the route change to the lesson page ${t.heading === null ? '?' : Math.round(t.heading - t.click)} ms, then ${t.heading === null ? '?' : Math.round(t.frame - t.heading)} ms to the frame)`
+/**
+ * When the address followed the click, and the router's request for the lesson route (FAST's rsc; its entry
+ * lands once its last byte is in), read once both are in, or after 10 s with "?" for what is not.
+ */
+async function withServer(page, t) {
+  await waitFor(page, () => window.__fast.address !== null && window.__fast.rsc !== null, { timeout: 10000, soft: true, what: 'the address and the router request' })
+  return { ...t, ...(await page.evaluate(() => ({ address: window.__fast.address, rsc: window.__fast.rsc }))) }
+}
+
+/**
+ * "48 ms from the click (the lesson page's heading 41 ms after it, the frame 7 ms after that; the address
+ * followed 352 ms after the click, the dev server's answer 339 ms from 2 ms after the click)".
+ */
+const split = (t) => {
+  const ms = (a, b) => (a === null || a === undefined || b === null ? '?' : Math.round(a - b))
+  return `${ms(t.frame, t.click)} ms from the click (the lesson page's heading ${ms(t.heading, t.click)} ms after it, the frame ${ms(t.frame, t.heading)} ms after that; the address followed ${ms(t.address, t.click)} ms after the click, ${
+    t.rsc ? `the dev server's answer ${Math.round(t.rsc.end - t.rsc.start)} ms from ${Math.round(t.rsc.start - t.click)} ms after the click` : "the dev server's answer ?"
+  })`
+}
 
 async function closePlace(page, what) {
   await page.keyboard.press('Escape')
@@ -1546,6 +1664,7 @@ const ROWS = [
   [22, 'An action item with a video: the link under the text, and both halves to finish it'],
   [23, 'A lesson with no video never holds a student'],
   [24, "A place's minutes count its action items' lengths"],
+  [25, 'A place done right before one with no video: the done card names it alone'],
 ]
 const nameOf = (id) => ROWS.find((r) => r[0] === id)[1]
 
@@ -1653,14 +1772,15 @@ try {
           lay.steps ?? null,
         )
         // Second Loom: no waking lamps at the Introduction (round the signpost, one in the camp's pack) or at AI Ads + Content,
-        // and no Introduction lantern by the camp's packs.
+        // and no Introduction lantern by the camp's packs. Its fix round 2: none at Creative Strategy either (they stood
+        // right of the observatory's terrace among its first lanterns, two on one post from its stop at progress 0).
         const lampsAt = (k) => (lay.lamps ?? []).filter((m) => m.area === k)
         const byPacks = byPlace[0].filter((l) => CAMP_PACKS.some(([x, z]) => Math.hypot(l.x - x, l.z - z) < CAMP_CLEAR)).map(at)
         r.check(
-          `no waking lamps at the Introduction or ${NAMES[STEPS_PLACE]}, and none of the Introduction's lanterns within ${CAMP_CLEAR} of the camp's packs`,
-          lampsAt(0).length === 0 && lampsAt(STEPS_PLACE).length === 0 && byPacks.length === 0,
-          lampsAt(0).length || lampsAt(STEPS_PLACE).length || byPacks.length
-            ? [...lampsAt(0).map((m) => `Introduction lamp at ${m.at} (${f(m.x, 0)}, ${f(m.z, 0)})`), ...lampsAt(STEPS_PLACE).map((m) => `${NAMES[STEPS_PLACE]} lamp at ${m.at}`), ...byPacks.map((s) => `by the packs: ${s}`)]
+          `no waking lamps at the Introduction, ${NAMES[STEPS_PLACE]} or ${NAMES[6]}, and none of the Introduction's lanterns within ${CAMP_CLEAR} of the camp's packs`,
+          lampsAt(0).length === 0 && lampsAt(STEPS_PLACE).length === 0 && lampsAt(6).length === 0 && byPacks.length === 0,
+          lampsAt(0).length || lampsAt(STEPS_PLACE).length || lampsAt(6).length || byPacks.length
+            ? [...lampsAt(0).map((m) => `Introduction lamp at ${m.at} (${f(m.x, 0)}, ${f(m.z, 0)})`), ...lampsAt(STEPS_PLACE).map((m) => `${NAMES[STEPS_PLACE]} lamp at ${m.at}`), ...lampsAt(6).map((m) => `${NAMES[6]} lamp at ${m.at} (${f(m.x, 0)}, ${f(m.z, 0)})`), ...byPacks.map((s) => `by the packs: ${s}`)]
             : `${byPlace[0].length} Introduction lanterns, the nearest to the packs ${f(Math.min(...byPlace[0].map((l) => Math.min(...CAMP_PACKS.map(([x, z]) => Math.hypot(l.x - x, l.z - z))))), 0)} away`,
         )
         // Second Loom: Creative Strategy's walk runs on over the rope bridge, some of its lanterns on posts at the railing.
@@ -1740,7 +1860,7 @@ try {
             if (Math.abs(l.trail - want) > OFFSET_TOL) offTrail.push(`${at(l)}: ${f(l.trail, 1)} from the trail's middle, not ${want}`)
           }
         })
-        r.check(`each place's lanterns evenly spaced along its walk (every step within ${SPACING_TOL} of its spacing; the last one spacing short of the next place, at its walk's end for Video Ads II and at the arch for the last)`, uneven.length === 0, uneven.length ? uneven.slice(0, 6) : lay.places.map((p, k) => `${k + 1}: ${f(p.spacing, 1)}`).join(', '))
+        r.check(`each place's lanterns evenly spaced along its walk (every step within ${SPACING_TOL} of its spacing; the last one spacing short of the next place, at its walk's end for Video Ads II and Static Ads and at the arch for the last)`, uneven.length === 0, uneven.length ? uneven.slice(0, 6) : lay.places.map((p, k) => `${k + 1}: ${f(p.spacing, 1)}`).join(', '))
         r.check('no two lanterns (or posts) of a place closer than 0.6 of its spacing', packed.length === 0, packed.length ? packed.slice(0, 6) : 'none')
         r.check(
           `no place's lanterns stand closer than ${PAIR_BELOW} along its walk: two to a post exactly where single ones would (round 4), the two on one post with their arms opposite`,
@@ -1914,6 +2034,42 @@ try {
           'no Video Ads II lantern\'s glass is hidden behind the Trail Hut from its stop or its parked view',
           near.length > 0 && behindHut.length === 0,
           behindHut.length ? behindHut.slice(0, 6) : `${near.length} lanterns within 300 of the hut, clear from ${hutViews.map((h) => `${h.view} (${h.cam.map((v) => f(v, 0)).join(', ')})`).join(' and ')}`,
+        )
+
+        // The second Loom's fix round: Static Ads' walk ends where the trail comes into AI Ads + Content's stop
+        // view, so none of its lanterns (the post at its foot, 4, 8 and 10 over it, and the glass) shows from
+        // that stop or from its click-in view, at the test's window or a wider one; and its last stands at the end.
+        const statics = byPlace[4]
+        const postPts = statics.flatMap((l) => [[l.x, l.y, l.z], [l.x, l.y + 4, l.z], [l.x, l.y + 8, l.z], [l.x, l.y + 10, l.z], l.glass])
+        await closePlace(page, 'row 2, the hut closed')
+        const a6Views = []
+        await scrollToPlace(page, STEPS_PLACE, `row 2, ${NAMES[STEPS_PLACE]}'s stop`)
+        a6Views.push({ view: 'its stop', ...(await page.evaluate(IN_FRAME, { pts: postPts, aspect: PARK_ASPECT })) })
+        await openPlaceQuietly(page, STEPS_PLACE, `row 2, ${NAMES[STEPS_PLACE]} parked`)
+        a6Views.push({ view: 'its click-in view', ...(await page.evaluate(IN_FRAME, { pts: postPts, aspect: PARK_ASPECT })) })
+        const inA6 = []
+        const lowest = []
+        for (const v of a6Views) {
+          // How near the frame's bottom edge (-1) the highest of them comes, across the frame's width.
+          let top = -Infinity
+          statics.forEach((l, j) => {
+            let hit = false
+            for (let q = 0; q < 5; q++) {
+              for (const [x, y] of v.at[j * 5 + q] ?? []) {
+                if (Math.abs(x) <= 1) top = Math.max(top, y)
+                if (Math.abs(x) <= 1 && Math.abs(y) <= 1) hit = true
+              }
+            }
+            if (hit) inA6.push(`${v.view}: ${at(l)}`)
+          })
+          lowest.push(`${v.view} from (${v.cam.map((n) => f(n, 0)).join(', ')}): the nearest at ${f(top, 2)} of the frame's height`)
+        }
+        const lastStatic = statics[statics.length - 1]
+        const tailStatic = lastStatic ? lay.places[4].room - lastStatic.u : Infinity
+        r.check(
+          `none of Static Ads' lanterns shows from ${NAMES[STEPS_PLACE]}'s stop or its click-in view (the windows ${a6Views[0]?.widths?.map((a) => a.toFixed(2)).join(' and ')} wide), its walk ending where the trail comes into that stop's view, the last at its end`,
+          statics.length === COUNTING[4] && inA6.length === 0 && lay.places[4].toEnd === true && Math.abs(tailStatic) <= SPACING_TOL,
+          inA6.length ? inA6.slice(0, 6) : `${lowest.join('; ')} (the bottom edge is -1); its last ${f(tailStatic, 1)} from its walk's end, ${lastStatic ? `at (${f(lastStatic.x, 0)}, ${f(lastStatic.z, 0)})` : 'none'}`,
         )
       }
       if (!st || all) return
@@ -2362,11 +2518,31 @@ try {
       await page.mouse.click(at.x, at.y)
       const t = await waitFor(page, FRAME_UP, { timeout: 20000, what: 'row 17: the frame after the click' })
       const ms = Math.round(t.frame - t.click)
-      r.check('the click then puts the lesson frame in the page within 300 ms', ms <= 300, split(t))
+      r.check('the click then puts the lesson frame in the page within 300 ms', ms <= 300, split(await withServer(page, t)))
       const heard = await waitFor(page, () => window.__fast.ready, { timeout: PLAYER_READY_MS, soft: true, what: 'row 17: "ready"' })
       await sleep(500)
       const all = (await page.evaluate(ASKED, id)).length
       r.check('with no second ask: still one call for it once the lesson page is up and its player has said "ready"', all === 1 && !!heard, `${all} calls; "ready" ${heard ? `${Math.round(heard - t.click)} ms after the click` : 'never heard'}`)
+      // The second Loom's second fix round: the stage draws the page at the click, so the address must still
+      // follow, and the page must stay the one page when it lands (its player not put in again).
+      const want = `${APP}/a1/${id}`
+      await waitFor(page, (p) => location.pathname === p, { arg: want, timeout: 20000, soft: true, what: 'row 17: the address' })
+      const landed = await page.evaluate(() => {
+        const f = window.__fast
+        return {
+          path: location.pathname,
+          address: f.address === null ? null : Math.round(f.address - f.click),
+          framesIn: f.frames,
+          stillTheFirst: [...document.querySelectorAll('iframe[title="Lesson video"]')].filter((x) => !x.closest('main'))[0] === f.frameEl,
+          headings: [...document.querySelectorAll('h1')].filter((h) => !h.closest('main')).length,
+        }
+      })
+      r.check(`the address follows: it becomes ${want} once the router has the route`, landed.path === want && landed.address !== null, `${landed.path}, ${landed.address === null ? 'never changed' : `${landed.address} ms after the click`}`)
+      r.check(
+        'the page is put in once: one lesson frame went into the page after the click, still the one there after the address landed and the player said "ready", under one heading',
+        landed.framesIn === 1 && landed.stillTheFirst && landed.headings === 1,
+        { framesIn: landed.framesIn, stillTheFirst: landed.stillTheFirst, headings: landed.headings },
+      )
     })
 
     // 18 ── The placeholder over the video until its player is ready
@@ -2496,7 +2672,7 @@ try {
       await sleep(400)
       const all = (await page.evaluate(ASKED, id)).length
       r.check('the stand-in really takes 1.5 s: row 5, clicked with no wait on it, has its frame 1400 ms or more after the click', coldMs >= 1400, `${coldMs} ms`)
-      r.check('row 3, with the pointer on it 2.2 s first: its frame is in the page within 300 ms of the click', asked === 1 && ms <= 300, `${split(warm)}; asked ${asked} time before it`)
+      r.check('row 3, with the pointer on it 2.2 s first: its frame is in the page within 300 ms of the click', asked === 1 && ms <= 300, `${split(await withServer(page, warm))}; asked ${asked} time before it`)
       r.check('and it was asked for once in all', all === 1, `${all} calls`)
     })
 
@@ -2704,8 +2880,9 @@ try {
       const p = await readPanel(page, 'row 23 a')
       const r11 = p.rows.find((x) => x.n === 11)
       const r12 = p.rows.find((x) => x.n === 12)
-      r.check('a) row 11 says "Not recorded yet" (its name too) and is not the next row', r11?.kind === 'unrecorded' && r11?.title === t11 && r11?.tail === 'Not recorded yet', r11 ?? null)
+      r.check('a) row 11, passed over, says "Not recorded yet" under its quiet title (its name too) and is not the next row', r11?.kind === 'unrecorded' && r11?.title === t11 && r11?.tail === 'Not recorded yet' && r11?.quiet && !r11?.highlit, r11 ?? null)
       r.check('a) row 12 is the next row, with Watch', r12?.kind === 'next' && r12?.title === t12, r12 ?? null)
+      r.check('a) the count line is as before ("10 of 25 · 15 to go") and the line under it says "1 lesson not recorded yet"', p.count === '10 of 25 · 15 to go' && p.note === '1 lesson not recorded yet', { count: p.count, note: p.note })
       r.values.shotPanel = await r.shot('no-video-panel-video-ads-i')
 
       // b) a3l11's page: "Next lesson" is on from the start and opens lesson 12, where it is off again.
@@ -2750,6 +2927,40 @@ try {
         { place: placeD, card: cardD },
       )
       r.values.shotCard = await r.shot('no-video-card-video-ads-i')
+      // Its panel: lesson 11 is the next row, and a next row with no video has no ▶ (the design file's "ready to watch").
+      await openPlace(page, 2, 'row 23 d')
+      const pd = await readPanel(page, 'row 23 d')
+      const d11 = pd.rows.find((x) => x.n === 11)
+      r.check(
+        'd) its panel: row 11 is the next row, highlighted, with no ▶ and "Not recorded yet" under its title, and no row has Watch',
+        !!d11 && d11.kind === 'unrecorded' && d11.highlit && d11.m !== 'n' && d11.tail === 'Not recorded yet' && !pd.rows.some((x) => x.kind === 'next'),
+        d11 ?? null,
+      )
+      r.values.shotNextRow = await r.shot('no-video-panel-next-row')
+
+      // e) Video Ads I's lessons 1 to 5 watched: row 11 comes after the next row and is marked by look alone. Creative
+      //    Strategy, where no lesson has a video, says so once, under its count line, and on no row.
+      page = await r.open(url('', { arrive: 0, poster: 'off' }))
+      await mark(page, [...every(0), ...every(1), ...every(2).slice(0, 5)], 'row 23 e')
+      await ready(page, 'row 23 e')
+      await openPlace(page, 2, 'row 23 e')
+      const pe = await readPanel(page, 'row 23 e')
+      const e11 = pe.rows.find((x) => x.n === 11)
+      r.check(
+        'e) lessons 1 to 5 watched: row 11, after the next row (6), is quiet, with no words and no length, its name still saying "not recorded yet"; the line under the count says "1 lesson not recorded yet"',
+        !!e11 && e11.kind === 'unrecorded' && e11.quiet && e11.tail === '' && pe.rows.find((x) => x.n === 6)?.kind === 'next' && pe.note === '1 lesson not recorded yet',
+        { row11: e11 ?? null, note: pe.note },
+      )
+      await closePlace(page, 'row 23 e')
+      await openPlace(page, 6, 'row 23 e, place 7')
+      const pc = await readPanel(page, 'row 23 e, place 7')
+      const worded = pc.rows.filter((x) => x.tail !== '')
+      r.check(
+        'e) Creative Strategy: "18 lessons", then once "18 lessons not recorded yet"; its 18 rows quiet, with no words, no length and no ▶, each named "not recorded yet"',
+        pc.count === '18 lessons' && pc.note === '18 lessons not recorded yet' && pc.rows.length === 18 && pc.rows.every((x) => x.kind === 'unrecorded' && x.quiet && x.m !== 'n') && worded.length === 0,
+        { count: pc.count, note: pc.note, rows: pc.rows.length, quiet: pc.rows.filter((x) => x.quiet).length, withWords: worded.map((x) => `${x.n}: ${x.tail}`) },
+      )
+      r.values.shotCreativeStrategy = await r.shot('no-video-panel-creative-strategy')
       r.check('no request to /api in the whole row', r.api.length === 0, r.api.map((x) => `${x.method} ${x.path}`).slice(0, 3))
     })
 
@@ -2770,6 +2981,52 @@ try {
       await waitCard(page, 'row 24')
       const card = await page.evaluate(CARD, k)
       r.check(`the card says "${want}" (${fromActions} of those minutes are the action items')`, card?.count === want, card?.count ?? null)
+    })
+
+    // 25 ── A place done right before one with no video: the done card names it alone (the fix round; WorldV6.tsx doneRun).
+    // The map passes over Creative Strategy (no video yet), so the student's place jumps from AI Ads + Content to How To
+    // Land Clients. The done card names the run of places done from the one just finished, which stops at Creative Strategy.
+    await runRow(25, nameOf(25), async (r) => {
+      const fin = (k) => PLACES[k].counting.filter(finishable).map((l) => l.id)
+      const DONE = () => {
+        const el = document.querySelector('main section[aria-label="Place done"]')
+        const h = el?.querySelector('h2')
+        return h ? { title: h.textContent.replace(/\s+/g, ' ').trim(), button: (el.querySelector('button')?.textContent ?? '').replace(/\s+/g, ' ').trim() } : null
+      }
+      /** `before` watched before the map is live (no done moment), then `last` while it is live: the done moment plays. */
+      const finish = async (before, last, what) => {
+        const page = await r.open(url('', { arrive: 0, poster: 'off' }))
+        await waitFor(page, () => typeof window.__fixture?.complete === 'function', { timeout: LOAD_MS, poll: 60, what: `${what}: window.__fixture did not appear` })
+        await page.evaluate((ids) => {
+          for (const id of ids) window.__fixture.complete(id)
+        }, before)
+        await ready(page, what)
+        await sleep(1500)
+        const pre = await page.evaluate(() => ({ place: window.__worldUi?.().place ?? null, celebrations: window.__worldCelebrations ?? 0 }))
+        await page.evaluate((id) => window.__fixture.complete(id), last)
+        await waitFor(page, () => (window.__worldCelebrations ?? 0) >= 1, { timeout: 20000, what: `${what}: no done moment played` })
+        const card = await waitFor(page, DONE, { timeout: 10000, what: `${what}: the done card did not show` })
+        const after = await page.evaluate(() => ({ place: window.__worldUi?.().place ?? null, done: window.__worldProgress?.()?.done ?? null }))
+        return { pre, card, after }
+      }
+      // a) Everything the app can finish in places 1 to 5 and AI Ads + Content but its last lesson, then that one.
+      const a6 = fin(5)
+      const a = await finish([0, 1, 2, 3, 4].flatMap(fin).concat(a6.slice(0, -1)), a6.at(-1), 'row 25 a')
+      r.check(
+        `a) ${a6.at(-1)} watched last: the done card says "${NAMES[5]} done." and its button "Start ${NAMES[7]}"; ${NAMES[6]} is still 0 of ${COUNTING[6]}`,
+        a.pre.place === 5 && a.pre.celebrations === 0 && a.card.title === `${NAMES[5]} done.` && a.card.button === `Start ${NAMES[7]}` && a.after.place === 7 && a.after.done?.[6] === 0,
+        { before: a.pre, card: a.card, after: a.after },
+      )
+      r.values.shot = await r.shot('done-card-ai-ads-content')
+      // b) Static Ads finished last, with AI Ads + Content done before it: the card names both, and stops there.
+      const a5 = fin(4)
+      const b = await finish([0, 1, 2, 3].flatMap(fin).concat(a5.slice(0, -1), fin(5)), a5.at(-1), 'row 25 b')
+      r.check(
+        `b) ${a5.at(-1)} watched last, ${NAMES[5]} done before it: "${NAMES[4]} and ${NAMES[5]} done." and "Start ${NAMES[7]}"`,
+        b.pre.place === 4 && b.pre.celebrations === 0 && b.card.title === `${NAMES[4]} and ${NAMES[5]} done.` && b.card.button === `Start ${NAMES[7]}` && b.after.place === 7,
+        { before: b.pre, card: b.card, after: b.after },
+      )
+      r.check('no request to /api in the whole row', r.api.length === 0, r.api.map((x) => `${x.method} ${x.path}`).slice(0, 3))
     })
   }
 } finally {

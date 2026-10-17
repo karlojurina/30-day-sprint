@@ -96,7 +96,13 @@ export default function WorldAppLayout({ children }: { children: React.ReactNode
       data-dev-video-seconds={devVideos?.seconds}
     >
       <FixtureStudentProvider devVideos={devVideos} courseTexts={courseTexts}>
-        <WorldStage base="/dev/world-app">{children}</WorldStage>
+        {/* devComplete: the lesson page's "Mark watched (dev)" button. Only the
+            lessons given a test video can be finished by watching, and only
+            when the harness has the video ids; the player talks to the
+            stand-in server (fixtureTransport.ts) through the provider. */}
+        <WorldStage base="/dev/world-app" devComplete>
+          {children}
+        </WorldStage>
       </FixtureStudentProvider>
     </div>
   );

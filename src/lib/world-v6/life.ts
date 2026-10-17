@@ -90,13 +90,9 @@ interface StopView {
   tanV: number;
 }
 
-/** The rail's own camera pose at TRAIL key `k` (its lens from TRAIL_FOV when layout has it). */
-function keyView(ctx: WorldCtx, k: number): StopView {
-  const L = ctx.layout;
-  const fov = (L as { TRAIL_FOV?: readonly number[] }).TRAIL_FOV?.[k] ?? L.DESIGN_FOV;
+/** A camera pose in layout KEYS units (compass bearing, pitch below the horizon, vertical lens). */
+function poseView(x: number, y: number, z: number, bearing: number, pitch: number, fov: number): StopView {
   const tanV = Math.tan(THREE.MathUtils.degToRad(fov / 2));
-  const [x, y, z] = L.TRAIL[k];
-  const { bearing, pitch } = L.TRAIL_VIEW[k];
   const b = THREE.MathUtils.degToRad(bearing);
   const pt = THREE.MathUtils.degToRad(pitch);
   const fwd = new THREE.Vector3(Math.sin(b) * Math.cos(pt), -Math.sin(pt), -Math.cos(b) * Math.cos(pt)).normalize();
@@ -105,8 +101,21 @@ function keyView(ctx: WorldCtx, k: number): StopView {
   return { pos: new THREE.Vector3(x, y, z), fwd, right, up, tanV };
 }
 
+/** The rail's own camera pose at TRAIL key `k` (its lens from TRAIL_FOV when layout has it). */
+function keyView(ctx: WorldCtx, k: number): StopView {
+  const L = ctx.layout;
+  const fov = (L as { TRAIL_FOV?: readonly number[] }).TRAIL_FOV?.[k] ?? L.DESIGN_FOV;
+  const [x, y, z] = L.TRAIL[k];
+  const { bearing, pitch } = L.TRAIL_VIEW[k];
+  return poseView(x, y, z, bearing, pitch, fov);
+}
+
+/** Each stop's view as its scenery reads it (layout stopRow): a row re-aimed only to keep its stop's frame keeps the view it had (STOP_ROW_PINS: a4's, so its chimney smoke and swifts stay put). */
 function stopViews(ctx: WorldCtx): StopView[] {
-  return ctx.layout.PLACES.map((p) => keyView(ctx, p.trail));
+  return ctx.layout.PLACES.map((_, i) => {
+    const r = ctx.layout.stopRow(i);
+    return poseView(r.x, r.y, r.z, r.bearing, r.pitch, r.fov);
+  });
 }
 
 /** The world point `dist` along stop `v`'s camera ray through NDC (nx, ny). */
@@ -1257,6 +1266,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   // ── Glow
   const gb = new GlowBuf();
   const glowGroups: GlowGroup[] = [];
+  /** The arch's motes in gb, first and past the last (gateLife moves them out while the Gate waits). */
+  let archMotes: [number, number] = [0, 0];
   const addGroup = (name: string, pts: THREE.Vector3[], pad: number, maxDist: number) => {
     const s = new THREE.Box3().setFromPoints(pts).expandByScalar(pad).getBoundingSphere(new THREE.Sphere());
     glowGroups.push({ name, sphere: s, maxDist, onScreen: false });
@@ -1361,6 +1372,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       const fx = Math.sin(ax);
       const fz = -Math.cos(ax);
       const archPts: THREE.Vector3[] = [];
+      const first = gb.count;
       for (let i = 0; i < 50; i++) {
         const u = (rand() - 0.5) * GA.openW * 0.9;
         const w = (rand() - 0.5) * 60;
@@ -1370,6 +1382,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
         gb.add(K.mote, x, y, z, 2 + rand() * 2, 1 + rand() * 1.5, 2 + rand() * 2, rand(), 0.12 + rand() * 0.08, 0, dayC, 0.7, 1.8);
         archPts.push(new THREE.Vector3(x, y, z));
       }
+      archMotes = [first, gb.count];
       addGroup("motes-arch", archPts, 12, 360);
     }
     // a5 fish rings on the Mirror Lake.
@@ -1651,6 +1664,19 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     return any;
   };
 
+  // Second Loom's fix round: the Gate's own life (the motes in the arch, the
+  // two ships leaving it) shows when the scene draws the Gate (scene.ts
+  // updateGate, scene.userData.gateShown), so nothing hangs in the sky where
+  // the isle waits for the flight. The motes move far below while it waits.
+  let gateOn = true;
+  const gateLife = () => {
+    const on = ctx.scene.userData.gateShown !== false;
+    if (on === gateOn) return;
+    gateOn = on;
+    for (let i = archMotes[0]; i < archMotes[1]; i++) gPos.setY(i, on ? gb.pos[i * 3 + 1] : -1e5);
+    gPos.needsUpdate = true;
+  };
+
   const poseShips = (t: number) => {
     let n = 0;
     let any = false;
@@ -1683,7 +1709,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
         fwd.set(s.ax * ta + s.bx * tb, 0, s.az * ta + s.bz * tb).normalize();
       }
       s.sphere.center.set(px, py, pz);
-      s.onScreen = onScreen(s.sphere, AIRSHIP_MAX_DIST);
+      s.onScreen = (gateOn || !d.name.startsWith("gate-out")) && onScreen(s.sphere, AIRSHIP_MAX_DIST);
       if (!s.onScreen) {
         // Lamps out of the way while the ship is off screen (written once, not every frame).
         if (!s.parked) {
@@ -1723,6 +1749,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     const t = timeOverride ?? (still ? FROZEN_T : time);
     const ls = lightHandle();
     refreshView();
+    gateLife();
     const b = poseBirds(t);
     const s = poseSoft(t, ls);
     const sh = poseShips(t);

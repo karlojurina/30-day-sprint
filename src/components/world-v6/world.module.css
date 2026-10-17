@@ -1564,13 +1564,13 @@
 
 /* The opening's poster at 48 px, inline, for the first paint before the
    real file arrives (about 150 ms here): a soft preview, never a dark frame.
-   Made by scaling public/world-v6/posters/k0.webp (cwebp -q 80 -resize 48 27);
+   Made by scaling public/world-v6/posters/k0.webp (cwebp -q 80 -m 6 -resize 48 27);
    redo it with the posters. */
 .poster::before {
   content: "";
   position: absolute;
   inset: -24px;
-  background: url("data:image/webp;base64,UklGRogBAABXRUJQVlA4IHwBAAAwCQCdASowABsAPm0wkUYkIyGhMBqoAIANiWYAsR7G+g/AXzdjdnqtMAO0CdUo2qxFFU1FEBGcIzyD9jOlE4jCUIL6x+i0gCiAXF9Ke5crHe/wAP6vdGrRE2F+N7/a2fAYE74pUPl1zIcTSs3EYF+BvUW7S/AsFErXr7BtB4fh4SV+AoDwECEAUVvmiFq3Vj/GDf0ZL7cUaTuDNP78Tvjg65XYNEISwYDKqy6ylpchsulFZoyUrco0oov3IwoAGNu2nEvqQy1FKDMteZYoLuITjB0ruDKnYI2eI/+5yt2tmGePn++jnuXSwQ9hhJFl16VPUb5F5vtQU3OTPD+QVRQmQEvEEI+toCco3u34ddxKOky9FlmGlHHaMl5nVVL+U+66ODBCvDsnVmX4anDu1a22LHyJtR8+6F/tvBgvYOe0GWmI2AvddQrJfG+M3IE1egrM2I2iIDVa/6R9G2T7D04aY2Zi51RTpbpu9/2nMv//Ebmvq0iX5jMqyOAAAA==") center / cover no-repeat;
+  background: url("data:image/webp;base64,UklGRmgBAABXRUJQVlA4IFwBAABwCACdASowABsAPm0uj0WkIqEYDVaoQAbEswBOmcc9B2q4LOMAUDU863QEbVYiiqaiiD07V/PWXSXHT4BxFutTk204NhPlkM5EZyTQAP6vc5TmL3e4Pz6KFJutgWpd1pdBZy7ezcRgXyp9HZUEYo8fJguAfmzJqqJoHCY6sie9KdEN7FcSLqVOYmjpLw6xbntN1e2gl/id8cHZFRgQmigXni9PdD3uue5Zp9sYp3iyfJ8txk0nQREGUxxC18eZuq1lVkkMWIbD9glrkszfZIhKCosPbQy3ZXqXEI1TniA/BF9NvxNqZhPwB1pvhQUNt7XykPNstc2MRFTc+gBOmM/8cdL4FBp0zENkuS3sjgItF6LQ8sAbCbTKGUwnuG/M2zRi888uCu2m13S3P+BglT4UqMlMgBpgrFI/bBFP7ZL6/MsOi7Ab7H8XptJvM2V8ZxbYjg/8e/PtwKSsAAA=") center / cover no-repeat;
   filter: blur(14px);
 }
 
@@ -2304,6 +2304,21 @@
   color: var(--color-milestone);
 }
 
+/* The second Loom's fix round (.impeccable.md: never mark the negative on
+   every row). A lesson with no video yet is marked by look alone: its title
+   quiet, no length. Only a row the student has passed says so in words, as
+   its .rowSub. The count is said once, under the panel's count line. */
+.root .row[data-unrecorded] .rowT {
+  color: var(--color-ink-3);
+}
+
+.progNote {
+  margin: 7px 0 0;
+  font: 500 11px/1 var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--color-ink-3);
+}
+
 .panel .video {
   margin-top: 14px;
 }
@@ -2691,16 +2706,6 @@
   color: var(--color-accent-strong);
 }
 
-/* Closed for the student (shown at all times since 2026-10-16): the tag in
-   grey and the offer in the second ink, as the timeline's closed tag. */
-.cpChip[data-cp="closed"] .cpChipGlyph {
-  color: var(--color-ink-3);
-}
-
-.cpChip[data-cp="closed"] b {
-  color: var(--color-ink-2);
-}
-
 /* With no host's corner (no page mounts the map that way today) the segment
    is a pill of its own, the corner's pill's look. */
 .soloPill {
@@ -2934,15 +2939,27 @@
   border-color: var(--plaque-line);
 }
 
-/* Shown at all times since 2026-10-16: closed, the tag on the plaque is grey too. */
+/* Shown at all times since 2026-10-16: closed, the tag on the plaque is grey too,
+   and the stem with the pin (the second fix round: it stayed sand over a grey pin). */
 .cpMarker[data-cp="closed"] .cpLabelGlyph {
   color: var(--color-ink-3);
+}
+
+.cpMarker[data-cp="closed"] .stem {
+  background: var(--color-ink-3);
 }
 
 .cpMarker:hover .label,
 .cpMarker[data-hover] .label,
 .cpMarker:focus-visible .label {
   border-color: var(--color-accent);
+}
+
+/* Closed, the hover is a place's (no sand), as the rest of its look. */
+.cpMarker[data-cp="closed"]:hover .label,
+.cpMarker[data-cp="closed"][data-hover] .label,
+.cpMarker[data-cp="closed"]:focus-visible .label {
+  border-color: var(--color-line-strong);
 }
 
 /* ── The panel ── */
@@ -2966,6 +2983,16 @@
 
 .view[data-cp-state] .eyebrowEnd {
   white-space: nowrap;
+}
+
+/* Closed for the student (the 14 days over, joined before the new course, not
+   approved): the tag and the state's word in grey, as the plaque, the
+   timeline's tag and the phone's row, never the sand of an open offer and of
+   Apply (the second fix round, 2026-10-17). No first payment keeps the open
+   look: its tag is "locked". */
+.view[data-cp="closed"] .cpEyebrowGlyph,
+.view[data-cp="closed"] .eyebrowEnd {
+  color: var(--color-ink-3);
 }
 
 .cpWhen {

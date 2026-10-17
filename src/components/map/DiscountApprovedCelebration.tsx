@@ -8,6 +8,13 @@ interface DiscountApprovedCelebrationProps {
   /** True = show the celebration. Null/false = no celebration. */
   show: boolean;
   onDismiss: () => void;
+  /**
+   * "map": the new course's map (WorldCelebrations.tsx). It plays when the
+   * application is approved, before the team has put the 30% on, so its line
+   * says the team is putting it on, in the map panel's words. The old
+   * dashboard (the default) keeps its words (D5).
+   */
+  where?: "dashboard" | "map";
 }
 
 /** A finger, not a mouse: the closing line says tap. */
@@ -45,11 +52,16 @@ const getFalse = () => false;
  * fades stay, and nothing starts small (MotionConfig reducedMotion="user"
  * alone made the spring instant, but the hero still showed at half size for
  * two frames, then jumped); Esc closes it, before anything under it hears
- * the key; the closing line is readable (it was 20% white) and says how.
+ * the key; the closing line is readable (it was 20% white) and says how. On
+ * the map (`where="map"`) the explainer no longer says the 30% is applied:
+ * "The team is putting it on your Whop subscription, and you'll see it on
+ * your next renewal. Nothing else to do.", as the map's panel says when
+ * approved.
  */
 export function DiscountApprovedCelebration({
   show,
   onDismiss,
+  where = "dashboard",
 }: DiscountApprovedCelebrationProps) {
   /** Closed by a click, Esc or the safety net; the exit animation then calls onDismiss. */
   const [closed, setClosed] = useState(false);
@@ -200,9 +212,18 @@ export function DiscountApprovedCelebration({
                   lineHeight: 1.5,
                 }}
               >
-                Our team has applied the 30% discount to your
-                subscription. You&rsquo;ll see it on your next Whop
-                renewal. Nothing else to do.
+                {where === "map" ? (
+                  <>
+                    The team is putting it on your Whop subscription, and
+                    you&rsquo;ll see it on your next renewal. Nothing else to do.
+                  </>
+                ) : (
+                  <>
+                    Our team has applied the 30% discount to your
+                    subscription. You&rsquo;ll see it on your next Whop
+                    renewal. Nothing else to do.
+                  </>
+                )}
               </motion.p>
 
               <motion.p

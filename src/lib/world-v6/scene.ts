@@ -1568,6 +1568,13 @@ export class WorldScene {
   private poseDepth = 0;
   /** The depth of the anchor the camera is parked at. */
   private parkDepth = 0;
+  /** The Gate isle is drawn (updateGate, scene.userData.gateShown), and kept while a park's view leaves it in frame. */
+  private gateShown = false;
+  private gateHold = false;
+  private readonly gateFrustum = new THREE.Frustum();
+  private readonly gateMat = new THREE.Matrix4();
+  /** The Gate isle, its arch and the loop ship's orbit over it (blocks.ts, 720 round the isle's centre). */
+  private readonly gateSphere = new THREE.Sphere(new THREE.Vector3(WORLD.gateIsle.x, WORLD.gateIsle.y + 120, WORLD.gateIsle.z), 800);
 
   // Anchors, landmarks, markers
   private anchors: AreaAnchor[] = [];
@@ -3759,11 +3766,11 @@ export class WorldScene {
         this.terrainHides(lm.visCenter.x, lm.visCenter.y, lm.visCenter.z)
       )
         m.visible = false;
-      // Round 1 verify: before the flight the Gate isle is hidden by the
-      // Gate's cloud bank (dress-sky GATE_BANK, v6-route N9), which
-      // terrainHides cannot see, so the Job Board's label floated over the
-      // bank as you came onto the Sky Island and gave the final island away.
-      // Its marker waits for the flight, as the isle does.
+      // Round 1 verify: before the flight the Gate isle is hidden (since the
+      // second Loom's fix round it is not drawn, updateGate; it was behind a
+      // cloud bank), which terrainHides cannot see, so the Job Board's label
+      // floated over it as you came onto the Sky Island and gave the final
+      // island away. Its marker waits for the flight, as the isle does.
       if (m.visible && this.anchorPlace[i] === GATE_PLACE && this.currentS < this.rail.flightS[0]) m.visible = false;
       m.proximity = clamp01(1 - (distance - 300) / Math.max(1, fogFar - 300));
     }
@@ -4017,6 +4024,9 @@ export class WorldScene {
     // (0 on the rail, 1 parked), so nightsky.ts draws the aimed constellation's
     // faint lines only through the telescope, never at the a7 rail frame.
     if (this.scene) this.scene.userData.telescopeK = this.parkTelescope ? this.parkProgress : 0;
+    // Second Loom's fix round: whether the Gate isle is drawn this frame, for
+    // blocks.ts, rocks.ts, progress-world.ts and life.ts (updateGate).
+    if (this.scene) this.scene.userData.gateShown = this.updateGate();
     for (const rec of this.modules) {
       if (rec.broken) continue;
       const m = rec.module;
@@ -4029,6 +4039,41 @@ export class WorldScene {
       }
     }
     return animating;
+  }
+
+  /**
+   * Second Loom's fix round (Lovro, 5:20 to 5:44, on the cloud bank that hid
+   * the Gate isle from the Sky Island, the bridge and the Ad Bounty: "very
+   * distracting"): the bank is gone, and the isle with everything on it waits
+   * for the flight instead, as the Job Board's marker does (projectMarkers).
+   * It is drawn from the moored deck on (the flight's first key: no screen up
+   * to 3.4:1 has the isle in the frame from the bridge's far end to the
+   * flight's turn, world-tests/v6-gate-wait.mjs, so it never pops in on the
+   * rail), and while the camera is parked at a8 or flying to or from it,
+   * wherever the rail is. A park or its flight reaches as far as its further
+   * end. Left for a view that has the isle in the frame, it stays until the
+   * camera turns from it, so it never vanishes in front of the student.
+   */
+  private updateGate(): boolean {
+    const reach =
+      this.mode === "rail"
+        ? this.currentS
+        : this.rail.sOfDepth(this.mode === "parked" ? this.parkDepth : Math.max(this.flightFromDepth, this.flightToDepth));
+    if (reach >= this.rail.flightS[0]) {
+      this.gateShown = true;
+      this.gateHold = this.mode !== "rail";
+    } else if (this.gateShown) {
+      let inFrame = false;
+      if (this.gateHold && this.camera) {
+        this.gateMat.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+        inFrame = this.gateFrustum.setFromProjectionMatrix(this.gateMat).intersectsSphere(this.gateSphere);
+      }
+      if (!inFrame) {
+        this.gateShown = false;
+        this.gateHold = false;
+      }
+    }
+    return this.gateShown;
   }
 
   private tick = (now: number) => {

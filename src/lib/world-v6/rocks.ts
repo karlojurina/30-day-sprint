@@ -714,8 +714,13 @@ class Soup {
 
 /** Nothing comes within this of the camera's route (plus the rock's own size). */
 const RAIL_CLEAR = 30;
-/** No rock of the a4 ledge's lip within this of the ladder's foot (second Loom, the morning walk). */
-const LADDER_CLEAR = 30;
+/**
+ * No rock of the a4 ledge's lip within this of the ladder's foot (second
+ * Loom, the morning walk: 30, the rock beside the ladder; its fix round: 60,
+ * the next one, 53 from the foot, that hung on the face right of the ladder
+ * where the gorge floor sees it). The next lip rock stands 80 away.
+ */
+const LADDER_CLEAR = 60;
 /**
  * Where the camera passes at eye level (bible 2.2 hero rocks), as points in
  * the world: [x, y, z] of the camera there. They are copies of the route's
@@ -812,6 +817,8 @@ interface RockOpts {
   hero?: boolean;
   /** Register a footprint (default true for anything over 3 across). */
   foot?: boolean;
+  /** Its footprint's contact shade (footprints' default for a rock when unset); 0 for a rock dealt but not drawn. */
+  shade?: number;
   /** Stretch the height by this (the lip's teeth). */
   tall?: number;
   /** Paint in three flat values, no blend (Soup.put). */
@@ -859,7 +866,7 @@ function rock(soup: Soup, key: KitKey, x: number, z: number, hw: number, pal: Pa
   soup.rocks++;
   if (hero) soup.heroes++;
   if (o.foot ?? hw > 1.5) {
-    addFootprint({ x, z, r: hw * 1.05, kind: "rock" });
+    addFootprint({ x, z, r: hw * 1.05, kind: "rock", shade: o.shade });
     rockRings.push({ place: ringPlace, n: ringNo++ });
   }
   return g - hWorld * sink + hWorld;
@@ -1363,18 +1370,20 @@ function place(): Built {
         const hw = 7 + rand() * 6;
         if (nearRail(x, g + hw, z, 16 + hw)) continue;
         // Second Loom, 2026-10-16 (the morning walk): none beside the ladder.
-        // There the edge turns north and the rock hung on the face the camera
-        // climbs past, 150 below the bench with no ledge under it. It is still
-        // dealt, into a soup nobody draws, and keeps its number, so every rock
-        // after it keeps its place, its faces' colours and its ring of grass.
+        // There the edge turns north and the rocks hung on the face the camera
+        // climbs past and sees from the gorge floor, 125 to 150 below the bench
+        // with no ledge under them. Each is still dealt, into a soup nobody
+        // draws, so every rock after it keeps its place and its faces'
+        // colours, and keeps its footprint with no contact shade (fix round),
+        // so the ground under it is not darkened and the grass round every
+        // rock is dealt as it was (cover.ts deals its rings in the order of
+        // the rock footprints: without this one, the 113 clumps of the rings
+        // after it in the hike were dealt again).
         const byLadder = Math.hypot(x - LADDER.foot.x, z - LADDER.foot.z) < LADDER_CLEAR;
         const soup = byLadder ? new Soup() : soups.gorge;
         soup.seq = soups.gorge.seq;
-        rock(soup, rand() < 0.5 ? "K2" : rand() < 0.5 ? "K1" : "K3", x, z, hw, PAL.gorge, rand, { dir: 90, lean: 18, hero: heroAt(x, g, z), sink: 0.25, foot: byLadder ? false : undefined });
-        if (byLadder) {
-          soups.gorge.seq = soup.seq;
-          ringNo++;
-        }
+        rock(soup, rand() < 0.5 ? "K2" : rand() < 0.5 ? "K1" : "K3", x, z, hw, PAL.gorge, rand, { dir: 90, lean: 18, hero: heroAt(x, g, z), sink: 0.25, shade: byLadder ? 0 : undefined });
+        if (byLadder) soups.gorge.seq = soup.seq;
       }
     }
     // A few boulders on the band benches (the talus that fell and stayed).
@@ -1865,9 +1874,18 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   const frustum = new THREE.Frustum();
   const pv = new THREE.Matrix4();
   const sphere = new THREE.Sphere();
+  // Second Loom's fix round: the Gate isle's rocks show when the scene draws
+  // the Gate (scene.ts updateGate, scene.userData.gateShown), with the isle.
+  const gateRocks = meshes.find((m) => m.name === "Rocks:gate") ?? null;
 
   return {
     name: "rocks",
+    update() {
+      const on = ctx.scene.userData.gateShown !== false;
+      if (!gateRocks || gateRocks.visible === on) return false;
+      gateRocks.visible = on;
+      return true;
+    },
     dispose() {
       root.removeFromParent();
       for (const m of meshes) m.geometry.dispose();

@@ -38,6 +38,20 @@
  * the rounds. On 2026-10-15 an A/A run (the same commit on both pages, 4
  * rounds) had a spread of 0.06 ms per position and a mean of -0.007 ms.
  *
+ * WHERE LOVRO MOVED THE ROUTE (MOVED below). A position on a stretch whose
+ * camera path was changed on purpose, at Lovro's request, shows another view
+ * in each world: there the A/B asks whether the working tree draws the SAME
+ * view slower. Both worlds are drawn from the working tree's camera at that
+ * position (pinned with the scene's debugPose, each world seeded at its own
+ * depth for it, so its light and modules follow its own rail point), and
+ * that pair is the position's effect. Each world's own view is measured too
+ * and printed beside it ("own views"), so what the new view costs stays in
+ * the record; v6-perf.mjs grades that against the frame budget. Second Loom,
+ * 2026-10-16: k39.5, inside the turn after the Video Ads II hut, which goes
+ * clockwise now (Lovro: "clockwise and not this way into the world"): the
+ * old view there was the valley's haze, the new one the wall's skyline and
+ * the lit spur, about 1.5 ms dearer at 1691 x 1278 @ 1.5.
+ *
  * NOT IN IT: the page's interface over the canvas (measured on /dev/world-v6
  * on 2026-10-15, shown against hidden, interleaved: -0.03 to +0.05 ms over
  * 10 positions, median +0.03), the
@@ -66,6 +80,10 @@ const HOST = "perf-ab.test";
 const W = 1691, H = 1278, DPR = 1.5;
 const MEAN_MAX = 0.03;
 const ONE_MAX = 0.15;
+/** Positions on a stretch Lovro had the route changed on purpose: compared at the working tree's camera (see the header). */
+const MOVED = {
+  "k39.5": "second Loom point 3 (2026-10-16): the turn after the Video Ads II hut goes clockwise",
+};
 
 const argv = process.argv.slice(2);
 const flag = (n, d = null) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] ?? d : d);
@@ -209,6 +227,23 @@ const BURST = () => {
         stopLoop();
         oneFrame(); oneFrame();
       },
+      // The camera where the seeded depth puts it, in debugPose's terms (MOVED positions).
+      pose() {
+        const c = sc.cameraPose();
+        return { x: c.x, y: c.y, z: c.z, bearing: (Math.atan2(c.dx, -c.dz) * 180) / Math.PI, pitch: c.pitch, fov: sc.camera.fov };
+      },
+      // Pin the camera there (null releases it), then draw as seed() does. The
+      // frame pacer skips a tick while earlier frames are in flight, and a
+      // skipped tick leaves the camera where it was, so it is cleared first;
+      // a pin that did not take throws rather than measure the wrong view.
+      pin(p) {
+        sc.debugPose(p);
+        stopLoop();
+        for (let i = 0; i < 2; i++) { sc.pacer?.clear?.(); oneFrame(); }
+        if (!p) return;
+        const c = sc.cameraPose();
+        if (Math.hypot(c.x - p.x, c.y - p.y, c.z - p.z) > 0.01) throw new Error(`debugPose did not take: camera at ${c.x.toFixed(1)}, ${c.y.toFixed(1)}, ${c.z.toFixed(1)}`);
+      },
       counts() {
         const auto = r.info.autoReset;
         r.info.autoReset = false;
@@ -278,9 +313,14 @@ async function positionsOf(page) {
   return out;
 }
 
-async function measure(page, depth) {
+async function measure(page, depth, pose = null) {
   await page.bringToFront();
-  return page.evaluate((d) => { window.__ab.seed(d); return window.__ab.burst(); }, depth);
+  return page.evaluate((d, p) => {
+    window.__ab.seed(d);
+    if (!p) return window.__ab.burst();
+    window.__ab.pin(p);
+    try { return window.__ab.burst(); } finally { window.__ab.pin(null); }
+  }, depth, pose);
 }
 const median = (a) => { const b = a.slice().sort((x, y) => x - y); return b.length % 2 ? b[(b.length - 1) / 2] : (b[b.length / 2 - 1] + b[b.length / 2]) / 2; };
 
@@ -301,15 +341,26 @@ async function pass(order, ids, rounds, errors) {
       const pb = pos.base.find((p) => p.id === id);
       const pw = pos.work.find((p) => p.id === id);
       if (!pb || !pw) continue;
-      await pages.base.bringToFront();
-      const cBase = await pages.base.evaluate((d) => { window.__ab.seed(d); return window.__ab.counts(); }, pb.depth);
+      // A MOVED position: both worlds drawn from the working tree's camera there.
       await pages.work.bringToFront();
-      const cWork = await pages.work.evaluate((d) => { window.__ab.seed(d); return window.__ab.counts(); }, pw.depth);
-      const base = [], work = [];
+      const pin = MOVED[id] ? await pages.work.evaluate((d) => { window.__ab.seed(d); return window.__ab.pose(); }, pw.depth) : null;
+      const countsAt = (page, d, p) => page.evaluate((d, p) => {
+        window.__ab.seed(d);
+        if (!p) return window.__ab.counts();
+        window.__ab.pin(p);
+        try { return window.__ab.counts(); } finally { window.__ab.pin(null); }
+      }, d, p);
+      await pages.base.bringToFront();
+      const cBase = await countsAt(pages.base, pb.depth, pin);
+      await pages.work.bringToFront();
+      const cWork = await countsAt(pages.work, pw.depth, pin);
+      const base = [], work = [], ownBase = [], ownWork = [];
       for (let r = 0; r < rounds; r++) {
-        for (const v of r % 2 ? ["work", "base"] : ["base", "work"]) (v === "base" ? base : work).push(await measure(pages[v], v === "base" ? pb.depth : pw.depth));
+        for (const v of r % 2 ? ["work", "base"] : ["base", "work"]) (v === "base" ? base : work).push(await measure(pages[v], v === "base" ? pb.depth : pw.depth, pin));
+        if (pin) for (const v of r % 2 ? ["work", "base"] : ["base", "work"]) (v === "base" ? ownBase : ownWork).push(await measure(pages[v], v === "base" ? pb.depth : pw.depth));
       }
       out[id] = { label: pb.label ?? "", base, work, d: median(work.map((x, i) => x - base[i])), counts: { base: cBase, work: cWork } };
+      if (pin) out[id].own = { base: ownBase, work: ownWork, d: median(ownWork.map((x, i) => x - ownBase[i])), pose: pin, why: MOVED[id] };
     }
     return out;
   } finally {
@@ -338,6 +389,11 @@ const f2 = (x) => `${x >= 0 ? "+" : ""}${x.toFixed(3)}`;
 for (const r of rows) {
   const c = r.pass1.counts;
   say(`${r.id.padEnd(7)} ${(r.label || "").slice(0, 30).padEnd(30)} ${baseRev} ${r.baseMin.toFixed(2)}  work ${r.workMin.toFixed(2)} ms  effect ${f2(r.effect)}${r.first !== undefined ? ` (first ${f2(r.first)})` : ""}  tris ${c.base.tris}->${c.work.tris}  calls ${c.base.calls}->${c.work.calls}`);
+  const own = [r.pass1.own, r.pass2.own].filter(Boolean);
+  if (own.length) {
+    r.own = { base: Math.min(...own.flatMap((o) => o.base)), work: Math.min(...own.flatMap((o) => o.work)), effect: own.reduce((s, o) => s + o.d, 0) / own.length, why: own[0].why };
+    say(`        the same view in both worlds (the working tree's camera; ${r.own.why}); own views ${r.own.base.toFixed(2)} -> ${r.own.work.toFixed(2)} ms, ${f2(r.own.effect)}: the new view's own cost, graded by v6-perf.mjs`);
+  }
 }
 const effects = rows.map((r) => r.effect);
 const mean = effects.reduce((s, x) => s + x, 0) / Math.max(1, effects.length);

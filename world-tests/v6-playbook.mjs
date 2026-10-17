@@ -18,8 +18,8 @@
  * every page the run opened (all three must be 0). Exit code 1 on any FAIL.
  *
  *   1  without ?playbook: no link, and the pill is what it was (the stats, the
- *      discount's segment, which every student has since 2026-10-16, and Sign
- *      out; no empty slot, no extra line)
+ *      discount's segment, up because the dev page's student paid 3 days ago
+ *      (2026-10-16), and Sign out; no empty slot, no extra line)
  *   2  with ?playbook=1: a link labelled Playbook to /dashboard/playbook, in
  *      the pill between the stats and Sign out (after the discount's segment:
  *      since 2026-10-15 the pill is the header's group at the right end), the
@@ -27,8 +27,9 @@
  *      takes the keyboard's focus ring
  *   3  phone (390x844): the stats stay in the header's row and the link drops
  *      to the row under them with the discount, both inside the screen and
- *      apart, with the longest streak and the chip up, open or closed (since
- *      2026-10-16 the chip is there for every student)
+ *      apart, with the longest streak and the chip up; alone without the chip
+ *      (a student who joined before the new course: the chip shows only while
+ *      the offer is open or an application is in)
  *   4  wide (3428x1230): the link in the pill, clear of everything
  *
  * Pictures for a person, in world-tests/shots/v6/playbook/ (git-ignored):
@@ -38,7 +39,7 @@
  *   map-playbook.png      the whole frame with it (row 2)
  *   phone-playbook.png    the phone's top, the link and the chip (row 3)
  *   phone-long.png        the same with a 128-day streak (row 3)
- *   phone-closed.png      a 128-day streak and the closed chip (row 3)
+ *   phone-nochip.png      a 128-day streak and no chip (row 3)
  *   wide-playbook.png     the header's left end, wide (row 4)
  */
 import puppeteer from 'puppeteer-core'
@@ -225,7 +226,7 @@ try {
     const s = await page.evaluate(SNAP)
     r.check('no Playbook link on the page', s.link === null && (await page.evaluate(() => document.querySelectorAll('a[href="/dashboard/playbook"]').length)) === 0, s.link)
     const shown = s.kids.filter((k) => k.seen)
-    // The dev page's student paid 3 days ago, so the discount's segment is up (it is for every student since 2026-10-16).
+    // The dev page's student paid 3 days ago, so the discount's segment is up (the offer is open to them).
     r.check('the pill shows three parts, the stats, the discount and Sign out', shown.length === 3 && shown[0].tag === 'BUTTON' && shown[1].slot === 'discount' && shown[2].tag === 'BUTTON', s.kids)
     r.check('the empty slot takes no room', s.kids.every((k) => k.seen || k.w === 0), s.kids)
     await crop(page, 'corner-none.png', groupEnd(s), DESKTOP, 20)
@@ -254,15 +255,16 @@ try {
   })
 
   await runRow(3, 'phone (390x844): the link fits, clear of the chip, inside the screen', async (r) => {
-    for (const [hud, discount, file] of [['some', 'locked', 'phone-playbook.png'], ['long', 'locked', 'phone-long.png'], ['long', 'no-payment', 'phone-closed.png']]) {
-      const page = await r.open({ hud, playbook: '1', ...(discount ? { discount } : {}) }, PHONE)
+    // Closed for the student (joined before the new course) the header has no chip (the fix round of 2026-10-16: it shows only while the offer is open or in review).
+    for (const [hud, discount, chipUp, file] of [['some', 'locked', true, 'phone-playbook.png'], ['long', 'locked', true, 'phone-long.png'], ['long', 'before-launch', false, 'phone-nochip.png']]) {
+      const page = await r.open({ hud, playbook: '1', discount }, PHONE)
       const s = await page.evaluate(SNAP)
-      const name = `${hud}, ${discount ? 'chip up' : 'no chip'}`
+      const name = `${hud}, ${chipUp ? 'chip up' : `no chip (${discount})`}`
       r.check(`${name}: the list view`, s.view === 'list', s.view)
       r.check(`${name}: the link is there and seen, in the pill`, s.link?.seen && s.link.inPill && s.link.href === '/dashboard/playbook', s.link)
       r.check(`${name}: the pill and the link are inside the screen (16 px gutter at least)`, s.pill && s.pill.l >= 16 && s.pill.r <= PHONE.width - 16 && s.link && s.link.box.l >= 16 && s.link.box.r <= PHONE.width - 16, { pill: s.pill, link: s.link?.box })
       // Since 2026-10-15 the stats keep the header's row (its right end) and the discount and the link drop to the row under them.
-      if (discount) {
+      if (chipUp) {
         r.check(`${name}: the discount and the link drop to the row under the stats, the discount first, apart`, s.chip && s.chip.t >= s.pill.b + 4 && s.link.box.t >= s.pill.b + 4 && apart(s.chip, s.link.box) && s.chip.r <= s.link.box.l + 1, { pill: s.pill, chip: s.chip, link: s.link?.box })
       } else {
         r.check(`${name}: with no chip the link alone drops to the row under the stats, right-aligned with them`, s.chip === null && s.link.box.t >= s.pill.b + 4 && Math.abs(s.link.box.r - s.pill.r) <= 2, { pill: s.pill, link: s.link?.box })
@@ -274,7 +276,7 @@ try {
         return { link: h(document.querySelector('main header a[href="/dashboard/playbook"]')), stats: h(document.querySelector('main header button[aria-expanded]')) }
       })
       r.check(`${name}: the link's touch target is the stats segment's`, target.link > 0 && target.link === target.stats, target)
-      r.row[`width_${hud}_${discount ?? 'nochip'}`] = s.pill?.w
+      r.row[`width_${hud}_${chipUp ? discount : 'nochip'}`] = s.pill?.w
       await page.screenshot({ path: path.join(OUT, file), clip: { x: 0, y: 0, width: PHONE.width, height: 200 } })
       await page.close()
     }

@@ -9,7 +9,6 @@ import { useStudent } from "@/contexts/StudentContext";
 import { LessonPlayer } from "@/components/world/LessonPlayer";
 import { LessonText } from "@/components/world/LessonText";
 import { ActionItemBlock } from "@/components/world/ActionItemBlock";
-import type { CachedLessonTransport } from "@/lib/world/embed-cache";
 import { useLessonTransport } from "@/lib/world/useLessonTransport";
 import { parseLessonText } from "@/lib/world/lesson-text";
 import { Panel } from "@/components/world/AreaScreen";
@@ -30,9 +29,11 @@ import u from "@/components/world/world-ui.module.css";
  *
  * It never decides completion itself, and deliberately has no way to.
  *
- * It opens over the map, which holds still underneath: the stage reads the
- * same address and pauses it. Every link here is built by the stage and leaves
- * the page scroll alone, because the page scroll is the map's camera.
+ * It opens over the map, which holds still underneath. The stage draws it
+ * (WorldStage.tsx) for the lesson the address names, or the one the map has
+ * just opened while its address is on its way, and pauses the map for it.
+ * Every link here is built by the stage and leaves the page scroll alone,
+ * because the page scroll is the map's camera.
  *
  * It wears the map's own panel, type and shapes (world-ui.module.css), in the
  * middle of the screen (Panel centred). The eyebrow says where the lesson
@@ -77,28 +78,21 @@ export function LessonScreen({
   areaId,
   lessonId,
   devComplete = false,
-  transport,
 }: {
   areaId: string;
   lessonId: string;
   /**
    * Development harness only: a button that marks the lesson watched with no
-   * video and no server. The real routes never pass it.
+   * video and no server. /world never passes it.
    */
   devComplete?: boolean;
-  /**
-   * Development harness only: what the player talks to in place of the
-   * server. The real routes never pass it, and the player then uses the real
-   * calls, through the page's embed cache (useLessonTransport.ts).
-   */
-  transport?: CachedLessonTransport;
 }) {
   const router = useRouter();
   const stage = useWorldStage();
   // The same cache the map asked into before the click, so a lesson asked for
-  // there opens with its frame at once.
-  const shared = useLessonTransport();
-  const lessonTransport = transport ?? shared;
+  // there opens with its frame at once. The development harness provides its
+  // stand-in server's through the same context (FixtureStudentProvider.tsx).
+  const lessonTransport = useLessonTransport();
   const { areas, lessonsByArea, lessonById, hasVideo } = useWorldCatalog();
   const { status, model } = useMapModel();
   const anyLessonFinishes = useContext(AnyLessonFinishesContext);

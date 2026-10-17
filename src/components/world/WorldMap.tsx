@@ -25,7 +25,8 @@ import u from "@/components/world/world-ui.module.css";
  * the map shows (buildMapModel, then sourceData). The address, read by the
  * stage, says which place is open and whether a lesson page is open over the
  * map. What the student does inside the map comes back as four callbacks, and
- * each one only changes the address. A fifth, onPrefetch, asks Next for the
+ * each one only changes the address (a lesson's page shows at the click,
+ * ahead of its address: WorldStage's open()). A fifth, onPrefetch, asks Next for the
  * lesson page's route and, for a lesson with a video, the video's address
  * before the click (embed-cache.ts), into the same cache the lesson page
  * reads (useLessonTransport.ts). Neither while the membership is not active.
@@ -111,7 +112,7 @@ const routesAsked = new Set<string>();
 /** The map with a real student in it. Mounted once the model is the eight-area one. */
 function SourcedMap({ model }: { model: ReadyMapModel }) {
   const router = useRouter();
-  const { openAreaId, lessonId, href } = useWorldStage();
+  const { openAreaId, lessonId, href, open } = useWorldStage();
   // The lesson page's own transport, so what is asked for here is what its player finds.
   const transport = useLessonTransport();
   // Nothing is asked for ahead while the membership is not active.
@@ -156,12 +157,21 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
       paused: lessonId !== null,
       onOpenArea: (k) => go(href(ids[k])),
       onCloseArea: () => go(href()),
-      onWatch: (k, i) => go(href(ids[k], data.lessonIds[k]?.[i])),
+      // A lesson's page shows at the click and its address follows (WorldStage's open()).
+      onWatch: (k, i) => {
+        const id = data.lessonIds[k]?.[i];
+        if (id) open(ids[k], id);
+        else go(href(ids[k]));
+      },
       // The feature row's page: the Ad Bounty's lesson, from its checkpoint's panel.
-      onFeature: (k) => go(href(ids[k], data.featureIds[k])),
+      onFeature: (k) => {
+        const id = data.featureIds[k];
+        if (id) open(ids[k], id);
+        else go(href(ids[k]));
+      },
       // The lesson page's route (the address onWatch pushes), once per lesson
-      // per page, so the click does not wait on it; and, for a lesson with a
-      // video, its address.
+      // per page, so the address lands at once after the click (Next skips
+      // this under `next dev`); and, for a lesson with a video, its address.
       onPrefetch: (k, i) => {
         if (!active) return;
         const lesson = model.areas[k]?.lessons[i];
@@ -176,7 +186,7 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
       bounty: data.bounty ?? undefined,
       bountyOpen: bountyPage,
     };
-  }, [model, data, openAreaId, lessonId, href, router, transport, active, discount]);
+  }, [model, data, openAreaId, lessonId, href, open, router, transport, active, discount]);
 
   // The header's group at the right: streak, achievements, the map's discount
   // segment, the Playbook link for a student who has it (PlaybookLink.tsx) and

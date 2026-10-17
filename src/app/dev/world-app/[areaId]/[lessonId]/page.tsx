@@ -1,22 +1,8 @@
-"use client";
-
-import { use } from "react";
-import { LessonScreen } from "@/components/world/LessonScreen";
-import { useFixtureTransport } from "../../fixtureTransport";
-
 /**
- * Mirrors src/app/world/[areaId]/[lessonId]/page.tsx on the dev harness.
- * `devComplete` adds the "Mark watched (dev)" button: only the three lessons
- * that are given a test video can be finished by watching, and only when the
- * harness has the video ids. `transport` is the stand-in server
- * (fixtureTransport.ts), so the player asks this app for nothing.
+ * Mirrors src/app/world/[areaId]/[lessonId]/page.tsx on the dev harness: the
+ * stage draws the lesson page (WorldStage.tsx), with the "Mark watched (dev)"
+ * button the harness's layout asks it for, so this route renders nothing.
  */
-export default function WorldAppLessonPage({
-  params,
-}: {
-  params: Promise<{ areaId: string; lessonId: string }>;
-}) {
-  const { areaId, lessonId } = use(params);
-  const transport = useFixtureTransport();
-  return <LessonScreen areaId={areaId} lessonId={lessonId} devComplete transport={transport} />;
+export default function WorldAppLessonPage() {
+  return null;
 }

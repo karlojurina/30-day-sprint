@@ -129,12 +129,18 @@ import s from "./world.module.css";
  * (its own park pose; no stop and no scroll budget on the rail), the scroll
  * locks as for a place, Esc and Back come home. A place opening gives way to
  * nothing: the checkpoint's panel closes into it. What shows comes from
- * checkpointView.ts; the cache's look goes to the scene (setCheckpoint). It
- * shows for every student and state (Lovro's second Loom, 2026-10-16:
- * "clickable at all times"): where the offer is closed for the student the
- * panel says why, and Apply is there, greyed out, only while it can still be
- * earned. On phones it is a row under Video Ads II's. With no discount on
- * the source none of it shows and the cache stands closed.
+ * checkpointView.ts; the cache's look goes to the scene (setCheckpoint). The
+ * tag and on phones a row under Video Ads II's show for every student and
+ * state (Lovro's second Loom, 2026-10-16: "clickable at all times"), and so
+ * does the marker while the camera is near the cache (CP_SHOW_WITHIN; from
+ * far away its plaque hung on the arrival card): where the offer is closed
+ * for the student the panel says why, and Apply is there, greyed out, only
+ * while it can still be earned. The header's segment shows only while the
+ * offer is open to the student or their application is in (checkpointView.ts
+ * `header`). In poster mode the marker stands where the posters' manifest has
+ * the cache, by the same rule, so no poster shows it (only a1's has the cache
+ * in frame, 3,750 away). With no discount on the source none of it shows and
+ * the cache stands closed.
  *
  * THE AD BOUNTY CHECKPOINT (map review 2026-10-15, plan item 18). "How To Win
  * On The Ad Bounty Program" is a lesson outside the count (the feature row of
@@ -207,6 +213,17 @@ const BT = N + 1;
 const SLOTS = N + 2;
 /** Opened this close (depth) to the rail point that frames the cache, with its marker on screen, the camera parks from where it is. */
 const CP_NEAR = 0.02;
+/**
+ * The 30%'s marker, and the cache's hover and click, only while the camera is
+ * this close to the cache on the ground (the second fix round, 2026-10-17).
+ * From the opening (4,340 away) and the Introduction (3,750) the cache is a
+ * speck in the far gully, and on 16:9 and wider windows its plaque hung on the
+ * arrival card, or pushed the card off its corner. On today's route the plaque
+ * is up from 611 to 288 away, after Video Ads II's stop (803). The timeline's
+ * tag and the phone's row show at all times; so does poster mode's tag (no
+ * poster has the cache near).
+ */
+const CP_SHOW_WITHIN = 1500;
 
 /** Which checkpoint's panel is up: the discount's cache, or the Ad Bounty's board. */
 type Cp = "discount" | "bounty";
@@ -1051,7 +1068,10 @@ function WorldV6View({
       }
       const sc = sceneRef.current;
       const id = cpAnchor(kind);
-      if (!u.cp && sc && u.live) {
+      // With no 3D at all (a headless scene: ?poster=on, a software renderer, a remembered verdict) no
+      // landmark is built and depthFor gives 0, the opening: the panel opens over the poster the student
+      // is on instead, and Back leaves them there (the second fix round, 2026-10-17).
+      if (!u.cp && sc && u.live && !sc.posterState().headless) {
         const depth = sc.depthFor(id);
         const m = lastFrame.current?.markers.find((x) => x.id === id);
         const at = lastFrame.current?.depth ?? -1;
@@ -1485,7 +1505,8 @@ function WorldV6View({
     const box: Box = { l: 0, t: 0, r: 0, b: 0 };
     /** Final pass: the other places' plaques on screen, which the card keeps off (cardPlace avoid);
      *  the Ad Bounty's, which shows across the island from Creative Strategy's stop; and the
-     *  30%'s, which shows for every student since 2026-10-16. */
+     *  30%'s, which shows for every student since 2026-10-16, near the cache since 2026-10-17
+     *  (no stop's card meets it on today's route). */
     const avoidBoxes: Box[] = [];
     const plaquesBesides = (k: number): Box[] => {
       avoidBoxes.length = 0;
@@ -1525,6 +1546,8 @@ function WorldV6View({
     };
     let disposed = false;
     let scene: WorldScene | null = null;
+    /** The camera is within CP_SHOW_WITHIN of the cache: apply() reads it off the scene each frame. */
+    let cpNear = false;
     let offPoster: (() => void) | null = null;
     let offOffer: (() => void) | null = null;
     let onPointerMove: ((e: PointerEvent) => void) | null = null;
@@ -1557,7 +1580,11 @@ function WorldV6View({
     const pDepths = new Float64Array(NP);
     const pOp = new Float32Array(NP).fill(-1);
     const pScale = new Float32Array(NP).fill(-1);
-    const pMarkers: ProjectedMarker[] = STUDY_AREAS.map((a) => ({ id: a.id, x: 0, y: 0, visible: false, proximity: 0, enterable: true, beyond: false }));
+    // The eight places, then the 30%'s cache and the Ad Bounty's board (2026-10-16 fix round: the
+    // manifest has had both since the posters of that day, and poster mode drew neither). pickSlot
+    // puts a checkpoint's in its slot only while it shows, as for the live frame's markers: the
+    // 30%'s only near the cache (CP_SHOW_WITHIN), which keeps it off a1's poster.
+    const pMarkers: ProjectedMarker[] = [...STUDY_AREAS.map((a) => a.id), CHECKPOINT.id, BOUNTY.id].map((id) => ({ id, x: 0, y: 0, visible: false, proximity: 0, enterable: true, beyond: false }));
     const posterFrame = (f: WorldFrame): { markers: ProjectedMarker[]; k: number } => {
       pDepths[0] = 0;
       for (let k = 0; k < N && k + 1 < NP; k++) pDepths[k + 1] = depths[k];
@@ -1693,10 +1720,15 @@ function WorldV6View({
         }
       }
 
+      // The 30% in the world only near the cache (CP_SHOW_WITHIN). In poster mode the scene's camera follows the scroll too.
+      if (cpRef.current.shown && scene) {
+        const c = scene.cameraPose();
+        cpNear = Math.hypot(c.x - CHECKPOINT.x, c.z - CHECKPOINT.z) <= CP_SHOW_WITHIN;
+      } else cpNear = false;
       bySlot.fill(null);
       if (frameMarkers) {
         for (let i = 0; i < frameMarkers.length; i++) {
-          const k = pickSlot(frameMarkers[i].id, cpRef.current.shown, btRef.current);
+          const k = pickSlot(frameMarkers[i].id, cpRef.current.shown && cpNear, btRef.current);
           if (k >= 0) bySlot[k] = frameMarkers[i];
         }
       }
@@ -2072,19 +2104,28 @@ function WorldV6View({
           // A place opened on the list: it closes onto that depth too.
           u.savedDepth = home;
           u.savedMax = -1;
+        } else if (u.cp && u.savedDepth < 0) {
+          // A checkpoint opened on the list: it closes in front of it, as one opened from far on the map does.
+          // With no 3D (headless) it has no landmark and no depth of its own: the place the list was on.
+          u.savedDepth = sc.posterState().headless ? home : sc.depthFor(cpAnchor(u.cpKind));
+          u.savedMax = -1;
         } else if (u.open < 0 && !u.cp && Number.isFinite(home)) {
           window.scrollTo({ top: Math.round(sc.scrollYForDepth(home)), left: 0, behavior: "instant" });
           sc.seedDepth(home);
         }
       }
-      if (u.open >= 0 && u.savedDepth >= 0) {
-        // Made while a place is open (back from the list view): start at the depth saved on open.
+      if ((u.open >= 0 || u.cp) && u.savedDepth >= 0) {
+        // Made while a place or a checkpoint is open (back from the list view): start at the depth saved on open.
         sc.seedDepth(u.savedDepth);
       }
       // A new scene while an area is open: put the camera where the interface says it is.
       if (u.open >= 0) {
         if (u.closing) finalizeClose();
         else sc.park(STUDY_AREAS[u.open].id);
+      } else if (u.cp) {
+        // The same for a checkpoint's panel (fix round, 2026-10-16): the new scene stood on the trail under it.
+        if (u.cpClosing) finalizeCheckpoint();
+        else sc.park(cpAnchor(u.cpKind));
       }
       // With a source: the place the address names opens now that the scene can fly there.
       reconcile(true);
@@ -2147,6 +2188,8 @@ function WorldV6View({
         const r = up ? (cpPanelRef.current?.getBoundingClientRect() ?? null) : null;
         return {
           shown: which === "bounty" ? btRef.current : cpRef.current.shown,
+          /** The 30%: the camera within CP_SHOW_WITHIN of the cache, where its marker and click are on. */
+          near: which === "bounty" ? null : cpNear,
           look: which === "bounty" ? null : cpRef.current.look,
           open: up,
           closing: up && u.cpClosing,
@@ -2225,7 +2268,7 @@ function WorldV6View({
           return;
         }
         const id = sc.pickAnchor(hover.x, hover.y);
-        setHover(pickSlot(id, cpRef.current.shown, btRef.current));
+        setHover(pickSlot(id, cpRef.current.shown && cpNear, btRef.current));
       };
       const schedulePick = () => {
         if (!hover.raf) hover.raf = requestAnimationFrame(runPick);
@@ -2251,7 +2294,7 @@ function WorldV6View({
       onStageClick = (e: MouseEvent) => {
         if (!canPick()) return;
         const id = sc.pickAnchor(e.clientX, e.clientY);
-        const k = pickSlot(id, cpRef.current.shown, btRef.current);
+        const k = pickSlot(id, cpRef.current.shown && cpNear, btRef.current);
         if (k < 0) return;
         e.preventDefault();
         setHover(-1);
@@ -2669,8 +2712,13 @@ function WorldV6View({
     });
   }
 
-  /** The discount in the header's group: the offer and where it stands, one click to its panel. Null without a discount on the source. */
-  const discountSeg = cpView ? (
+  /**
+   * The discount in the header's group: the offer and where it stands, one click to its panel.
+   * Only while the offer is open to the student or their application is in (checkpointView.ts
+   * `header`); the tag, the marker and the phone's row show in every state. Null without a
+   * discount on the source.
+   */
+  const discountSeg = cpView?.header ? (
     <button
       type="button"
       className={s.cpChip}
@@ -2788,7 +2836,7 @@ function WorldV6View({
               <DoneBody
                 k={doneCard}
                 next={study.place > doneCard && study.place < N ? study.place : -1}
-                last={Math.max(doneCard, Math.min(N, study.place) - 1)}
+                last={doneRun(study, doneCard)}
                 finished={study.place >= N ? study : null}
                 onStart={() => {
                   const u = ui.current;
@@ -3573,6 +3621,19 @@ function FinishedCount({ study, className }: { study: Study; className?: string 
   );
 }
 
+/**
+ * The last place the done card names after place k ("A and B done.", "A to C
+ * done."): the run of places done from k on, short of the student's place.
+ * Since the second Loom the student's place can be past a place that is not
+ * done, one whose lessons left are not recorded yet (map-model.ts): the run
+ * stops there, so Creative Strategy at 0 of 18 is never called done.
+ */
+function doneRun(study: Study, k: number): number {
+  let last = k;
+  while (last + 1 < Math.min(N, study.place) && study.state[last + 1] === "done") last++;
+  return last;
+}
+
 /** The done card: one line, and the way on. */
 function DoneBody({
   k,
@@ -3706,6 +3767,9 @@ function PanelBody({
   let lead = 0;
   while (lead < a.lessons && lessonDone(c, idx, lead, done)) lead++;
   const fold = lead >= 2 && !showWatched;
+  // The lessons left here with no video yet: said once, under the count line.
+  let missing = 0;
+  for (let i = 0; i < a.lessons; i++) if (!lessonDone(c, idx, i, done) && notRecorded(a, i)) missing++;
   const rows: React.ReactNode[] = [];
   if (fold) {
     rows.push(
@@ -3724,9 +3788,15 @@ function PanelBody({
     const action = isAction(a, i);
     const length = lessonLength(c, idx, i);
     const state = lessonDone(c, idx, i, done) ? "done" : i === nextIdx ? "next" : action ? "action" : "todo";
-    // Loom 2: a lesson with no video yet can't be finished here. It says so
-    // where its length (or the next row's Watch) would be, and still opens.
+    // Loom 2: a lesson with no video yet can't be finished here, and still
+    // opens. The fix round (.impeccable.md: never mark the negative on every
+    // row): the count is said once, under the count line, and such a row is
+    // marked by look alone, its title quiet and no length. Only a row the
+    // student has passed in their own place (row 11 under a next row 12) says
+    // "Not recorded yet" under its title, and the next row does when only such
+    // lessons are left.
     const unrecorded = state !== "done" && notRecorded(a, i);
+    const says = unrecorded && i <= nextIdx;
     // A lesson row the pointer enters or the keyboard reaches is the likeliest next click.
     const soon = { onPointerEnter: () => onPrefetch(i), onFocus: () => onPrefetch(i) };
     if (state === "next" && !unrecorded) {
@@ -3765,22 +3835,23 @@ function PanelBody({
           type="button"
           className={state === "next" ? `${s.row} ${s.nextRow}` : s.row}
           data-state={state}
+          data-unrecorded={(unrecorded && state !== "next") || undefined}
           aria-label={`Lesson ${i + 1}, ${title}${state === "done" ? ", watched" : unrecorded ? ", not recorded yet" : action ? ", action item" : ""}`}
           onClick={() => onOpenLesson(i)}
         >
-          <span className={s.mark} data-m={state === "done" ? "d" : state === "next" ? "n" : action ? "a" : undefined} aria-hidden="true" />
+          {/* A next row here has no video (the one with Watch is above): no ▶, which means ready to watch. */}
+          <span className={s.mark} data-m={state === "done" ? "d" : action ? "a" : undefined} aria-hidden="true" />
           <span className={s.rowN} aria-hidden="true">
             {i + 1}
           </span>
-          <span className={s.rowT}>{title}</span>
-          {unrecorded ? (
-            <span className={s.rowEnd}>Not recorded yet</span>
-          ) : (
-            length !== null && (
-              <span className={s.rowEnd} data-action={action || undefined}>
-                {length}
-              </span>
-            )
+          <span className={s.rowT}>
+            {title}
+            {says && <span className={s.rowSub}>Not recorded yet</span>}
+          </span>
+          {!unrecorded && length !== null && (
+            <span className={s.rowEnd} data-action={action || undefined}>
+              {length}
+            </span>
           )}
         </button>
       </li>,
@@ -3810,6 +3881,8 @@ function PanelBody({
         {/* Final pass D: the card's wording (a place not started read "0 of 25 · 25 to go"). */}
         <PlaceCount k={idx} done={done} />
       </p>
+      {/* The fix round: its own line, as the count line has no room beside 25 ticks for "11 of 25 · 14 to go" and this. */}
+      {missing > 0 && <p className={s.progNote}>{missing === 1 ? "1 lesson" : `${missing} lessons`} not recorded yet</p>}
       <ol className={s.rows}>{rows}</ol>
       {/* The feature row (the Ad Bounty's lesson) is no longer here: it is the one lesson of its own checkpoint (BountyBody, plan item 18). */}
     </div>
@@ -3955,8 +4028,9 @@ const LAUNCH_DAY = new Date(DISCOUNT_LAUNCH_DATE).toLocaleDateString("en-GB", { 
  *
  * Since Lovro's second Loom (2026-10-16) it opens for every student and state.
  * Where the offer is closed for the student (the 14 days over, joined before
- * the new course, no first payment on record) it says so in one plain line,
- * and the eyebrow says "Closed"; Apply shows only while it can still be
+ * the new course) it says so in one plain line, and the eyebrow says
+ * "Closed"; with no first payment on record it asks them to tell the team,
+ * and the eyebrow says "Ask the team". Apply shows only while it can still be
  * earned (locked) or is on (ready), never as a dead button.
  */
 function CheckpointBody({
@@ -4116,7 +4190,7 @@ function CheckpointBody({
   }
 
   return (
-    <div className={s.view} data-cp-state={st.kind} key="cp">
+    <div className={s.view} data-cp-state={st.kind} data-cp={cv.tag} key="cp">
       <div className={s.panelTop}>
         <button type="button" className={s.back} onClick={onBack}>
           <Arrow back />

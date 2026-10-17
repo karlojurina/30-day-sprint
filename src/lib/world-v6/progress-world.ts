@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { BRIDGE, GATE_CAUSEWAY, ISLAND_PATH, LOOK as TRAIL_LOOK, PATH, PLACES, TRAIL, TRAIL_HUT, WORLD, bridgeDeckAt, ladderSections, type LadderSection } from "./layout";
+import { BRIDGE, GATE_CAUSEWAY, ISLAND_PATH, PATH, PLACES, TRAIL, TRAIL_FOV, TRAIL_HUT, TRAIL_VIEW, WORLD, bridgeDeckAt, ladderSections, stopRow, type LadderSection } from "./layout";
 import { CHECKPOINT } from "./checkpoint";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
 import { blocked } from "./footprints";
@@ -41,7 +41,9 @@ import type { QualityTier } from "./quality";
  *                    none; its lessons light THE FLOATING STEPS instead (below),
  *                    and Creative Strategy's run on from the island's path
  *                    onto the rope bridge, on posts at its railing that sway
- *                    with it.
+ *                    with it. Its fix round: Static Ads' run ends where the
+ *                    trail comes into AI Ads & Content's stop view, so none
+ *                    stands in the Great Tree's clearing.
  *   THE FLOATING STEPS  (second Loom, 3:15 to 4:20) the steps up to the Sky
  *                    Island light from the bottom as AI Ads & Content's lessons
  *                    are watched: the lessons spread evenly over the steps
@@ -56,8 +58,11 @@ import type { QualityTier } from "./quality";
  *                    of lessons watched passes about 25, 50 and 75 percent
  *                    (smoke, then a lamp by the landmark's door, then lamps
  *                    on its path), and its landmark's own lamp at 100
- *                    percent. Finished places stay fully lit. The steps are
- *                    WAKE below; existing lamps elsewhere (the signpost's
+ *                    percent. Finished places stay fully lit. The
+ *                    Introduction, AI Ads & Content and Creative Strategy
+ *                    have none of these lamps since the second Loom (they
+ *                    read as lesson lanterns bunched by the landmark). The
+ *                    steps are WAKE below; existing lamps elsewhere (the signpost's
  *                    lamp, the lookout's, the Trail Hut's, the arch's
  *                    lanterns, the Landing's campfire) are found by their
  *                    userData.wake tag ({ place, at, set? }) and switched here.
@@ -142,11 +147,14 @@ const BRIDGE_POOL = 6.5;
  * It is for reading the steps from afar: it fades out as the camera comes
  * within STEP_HALO_NEAR of a step (gone at the first number, whole at the
  * second), where the step's own lit runes and rim carry it and a halo would
- * read as a bead stuck on the stone.
+ * read as a bead stuck on the stone. Fix round 2: 300 to 600 (was 90 to 220,
+ * which left a gold dot under each lit step's Y rune on the rise, where the
+ * camera passes the steps 120 to 330 away); AI Ads & Content's stop and its
+ * click-in see the steps from 738 and 790 on, so their halos stay whole there.
  */
 const STEP_HALO = 24;
 const STEP_HALO_PUSH = 22;
-const STEP_HALO_NEAR: readonly [number, number] = [90, 220];
+const STEP_HALO_NEAR: readonly [number, number] = [300, 600];
 /** A walk is checked every this many units for where a lantern may stand. */
 const WALK_STEP = 2;
 /** No water drawn within this of a lantern (water.ts waterAt: what is drawn, the lake's mirror to its edge, the river, the pool). */
@@ -162,7 +170,12 @@ const LEVEL = 8;
  */
 const STEEP = 1.5;
 const STEEP_E = 2;
-/** Degrees a lantern's top stays under the bottom edge of the 30% cache's park view (Video Ads II's walk ends there, round 3). */
+/**
+ * Degrees a lantern's top stays under the bottom edge of a view a walk stops
+ * short of: the 30% cache's park view (Video Ads II's walk ends there, round
+ * 3) and AI Ads & Content's stop (Static Ads' walk ends there, second Loom's
+ * fix round).
+ */
 const PARK_EDGE = 2;
 /** Room kept between a lantern and every footprint (rocks, buildings, props, bridges, the island's rills). */
 const PAD = 1.6;
@@ -235,7 +248,7 @@ interface Walk {
   pieces: Piece[];
   /** Distance from the trail's centre line to a lantern (default OFFSET). */
   offset?: number;
-  /** The last lantern stands at the walk's end (the last place, whose walk ends at its own landmark; Video Ads II, whose walk stops short of the next place's start); otherwise one spacing short of it. */
+  /** The last lantern stands at the walk's end (the last place, whose walk ends at its own landmark; Video Ads II and Static Ads, whose walks stop short of the next place's start); otherwise one spacing short of it. */
   toEnd?: boolean;
   /** No lanterns: the place's lessons light the floating steps (second Loom; AI Ads & Content). */
   steps?: boolean;
@@ -310,15 +323,25 @@ function along(pts: V3[], s: number): [number, number, number, number] {
   return [pts[0][0], pts[0][2], 1, 0];
 }
 
+/** A camera a walk stops short of: position, compass bearing, pitch below the horizon (negative looks up), vertical lens. */
+interface EdgeView {
+  x: number;
+  y: number;
+  z: number;
+  bearing: number;
+  pitch: number;
+  fov: number;
+}
+
 /**
  * How far along `pts` (plan length, of `len`) the trail runs before a lantern
- * on it would show in the 30% cache's park view (CHECKPOINT.park, the view the
- * discount panel opens on): from the trail point under that camera toward the
- * cache, the last spot where a lantern's top, on the higher of the trail's two
- * sides, stays PARK_EDGE degrees under the frame's bottom edge.
+ * on it would show in the view P: the 30% cache's park view (CHECKPOINT.park,
+ * the view the discount panel opens on) for Video Ads II, AI Ads & Content's
+ * stop for Static Ads. From the trail point under that camera onward, the last
+ * spot where a lantern's top, on the higher of the trail's two sides, stays
+ * PARK_EDGE degrees under the frame's bottom edge.
  */
-function parkViewEdge(pts: V3[], ground: (x: number, z: number) => number): { cut: number; len: number } {
-  const P = CHECKPOINT.park;
+function viewEdge(pts: V3[], ground: (x: number, z: number) => number, P: EdgeView): { cut: number; len: number } {
   const { s: s0, len } = arcTo(pts, P.x, P.z);
   const b = (P.bearing * Math.PI) / 180;
   const edge = Math.tan(((P.pitch + P.fov / 2 + PARK_EDGE) * Math.PI) / 180);
@@ -368,7 +391,16 @@ function walks(ground: (x: number, z: number) => number): Walk[] {
   // last lantern stands at that end, just under the frame (toEnd: the next
   // place's first stands 1,400 on, at the jetty, so no gap is kept for it).
   const toCache = pathPts(iGullyTop, iCache);
-  const park = parkViewEdge(toCache, ground);
+  const park = viewEdge(toCache, ground, CHECKPOINT.park);
+  // Static Ads' walk ends the same way, where the trail comes into AI Ads &
+  // Content's stop view (second Loom's fix round: its last three stood in the
+  // Great Tree's clearing in the foreground of that stop, dark until Static
+  // Ads was done, where AI Ads & Content has no lanterns and lights the
+  // floating steps). Its last lantern stands at that end, just under the frame
+  // (toEnd: AI Ads & Content puts down none, so no gap is kept for it).
+  const toTree = pathPts(iJetty, iTree);
+  const k6 = PLACES[5].trail;
+  const clearing = viewEdge(toTree, ground, { x: TRAIL[k6][0], y: TRAIL[k6][1], z: TRAIL[k6][2], bearing: TRAIL_VIEW[k6].bearing, pitch: TRAIL_VIEW[k6].pitch, fov: TRAIL_FOV[k6] });
   return [
     // Introduction: from the signpost all the way to Base Camp, on the side they stood before.
     { pieces: [{ pts: pathPts(iSign, iCamp), ground: "land", side: -1 }] },
@@ -405,8 +437,10 @@ function walks(ground: (x: number, z: number) => number): Walk[] {
       ],
       toEnd: true,
     },
-    // Static Ads: from the jetty's foot along the lake's shore and into the forest to the Great Tree.
-    { pieces: [{ pts: pathPts(iJetty, iTree), ground: "land" }] },
+    // Static Ads: from the jetty's foot along the lake's shore and into the
+    // forest toward the Great Tree, to where the trail comes into AI Ads &
+    // Content's stop view (the clearing's edge, fix round).
+    { pieces: [{ pts: shorten(toTree, clearing.len - clearing.cut), ground: "land" }], toEnd: true },
     // AI Ads & Content: no lanterns (second Loom, 3:15 to 4:20: "removing them
     // and making the steps light up instead"); its lessons light the floating
     // steps (THE FLOATING STEPS). The walk is kept for where it runs: from the
@@ -550,15 +584,15 @@ const WAKE: ReadonlyArray<ReadonlyArray<WakeItem>> = [
     { at: 1, kind: "big", x: 1338, z: -452 },
   ],
   // a6: none (second Loom: no lanterns at AI Ads & Content; its light is the
-  // floating steps'). Its done moment's lamp is over the Great Tree (lampOf).
+  // floating steps'). Its done moment starts on the Great Tree (lampOf).
   [],
-  // a7: lamps by the terrace, the big lamp at the foot of its steps.
-  [
-    { at: 0.25, kind: "lamp", slot: 0 },
-    { at: 0.5, kind: "lamp", slot: 1 },
-    { at: 0.75, kind: "lamp", slot: 2 },
-    { at: 1, kind: "big", x: -2005, z: -1493 },
-  ],
+  // a7: none (second Loom's fix round 2; Lovro: "of course you're doing it
+  // now"). Its 25, 50 and 75% lamps and its big lamp at the foot of the
+  // terrace's steps were the lesson lantern a size up, 20 to 39 from its first
+  // two lesson lanterns, so from its stop they read as lanterns bunched right
+  // of the terrace (two on one post at progress 0), as at the Introduction.
+  // Its done moment starts on the observatory (lampOf).
+  [],
   // a8: lamps on the dock and the causeway, the arch's lanterns (dress-gate.ts) at 100%.
   [
     { at: 0.25, kind: "lamp", slot: 0 },
@@ -894,14 +928,25 @@ function poolMaterial(): THREE.ShaderMaterial {
  * its top (its rim), laid over the carved ones (dress-lakeforest.ts) on the
  * steps' own instance matrices. A lit step's runes take the lanterns' warm
  * gold and its rim their amber, brightest at the top edge, at the lamp
- * level; the next step's runes pulse between their carved teal and that
+ * level; the next step's runes pulse between their carved glow and that
  * warm (its rim stays stone); the done moment's run flares them in turn up
  * the stair; all by the glass's state (STATE_GLSL). A dark step draws nothing
  * here, so its carved runes show as they always did. Opaque and pulled toward
  * the camera (polygonOffset), so it wins over the carved faces it lies on
  * whichever draws first.
+ * Fix round (the light rule): the pulse's dark end is each part's carved glow
+ * (CARVED_GLOW) at the live magic level, as dress-lakeforest.ts drives the
+ * carved runes (uMagic, light.ts's magicGlow up to 0.95), so the next step
+ * matches its neighbours at every hour. It was one fixed teal, right at a6's.
  */
+const CARVED_GLOW = {
+  /** The glyphs on the slab's sides: glow(CYAN, 0.42). */
+  side: [0.21, 0.378, 0.441],
+  /** The ring on its top: glow(TEAL, 0.7). */
+  top: [0.175, 0.588, 0.546],
+} as const;
 function runeMaterial(): THREE.ShaderMaterial {
+  const vec = (c: readonly number[]) => `vec3(${c.map((v) => v.toFixed(3)).join(", ")})`;
   return new THREE.ShaderMaterial({
     name: "ProgressStepRunes",
     uniforms: THREE.UniformsUtils.merge([
@@ -912,14 +957,14 @@ function runeMaterial(): THREE.ShaderMaterial {
         uRunArea: { value: -1 },
         uRunT: { value: 2 },
         uLit: { value: new THREE.Color(...LOOK.lamp) },
-        uDark: { value: new THREE.Color(0.16, 0.34, 0.38) },
+        uMagic: { value: 0.9 },
         uLevel: { value: 1 },
       },
     ]),
     vertexShader: /* glsl */ `
       ${STATE_GLSL}
       attribute float aKind;   // 0 a rune, 1 the rim
-      varying float vOn; varying float vFlare; varying float vRim;
+      varying float vOn; varying float vFlare; varying float vRim; varying float vTop;
       #include <fog_pars_vertex>
       void main() {
         float flare;
@@ -927,6 +972,8 @@ function runeMaterial(): THREE.ShaderMaterial {
         vFlare = flare;
         // The rim: 1 at the top's edge (y 3.5), 0 where the chamfer meets the sides (y 2.3).
         vRim = aKind > 0.5 ? clamp((position.y - 2.3) / 1.2, 0.0, 1.0) : -1.0;
+        // The ring on the top (y 3.66); the glyphs on the sides stand under y 1.2.
+        vTop = aKind < 0.5 && position.y > 3.0 ? 1.0 : 0.0;
         vec4 mvPosition = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * mvPosition;
         // A dark step (and the next one's rim): every vertex off the far plane, so nothing is drawn.
@@ -934,14 +981,16 @@ function runeMaterial(): THREE.ShaderMaterial {
         #include <fog_vertex>
       }`,
     fragmentShader: /* glsl */ `
-      uniform vec3 uLit; uniform vec3 uDark; uniform float uLevel;
-      varying float vOn; varying float vFlare; varying float vRim;
+      uniform vec3 uLit; uniform float uMagic; uniform float uLevel;
+      varying float vOn; varying float vFlare; varying float vRim; varying float vTop;
       #include <fog_pars_fragment>
       void main() {
         // Runes: the glass's warm gold, short of its hot core (which reads white on the teal). The rim: its amber, fading down the chamfer.
         vec3 lit = vRim < 0.0 ? uLit * vec3(0.92, 1.05, 1.25) : uLit * vec3(0.78, 0.74, 0.8) * (0.4 + 0.6 * vRim);
         lit *= uLevel * (1.0 + 1.6 * vFlare);
-        gl_FragColor = vec4(mix(uDark, lit, clamp(vOn + vFlare, 0.0, 1.5)), 1.0);
+        // The dark end: the part's carved glow at the live magic level.
+        vec3 dark = mix(${vec(CARVED_GLOW.side)}, ${vec(CARVED_GLOW.top)}, vTop) * uMagic;
+        gl_FragColor = vec4(mix(dark, lit, clamp(vOn + vFlare, 0.0, 1.5)), 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
@@ -973,6 +1022,8 @@ const FX_LANTERNS = 5;
 const FX_SIDE: readonly number[] = [-1, -1, -1, -1, -1, 1, -1, 0];
 /** No lantern starts nearer the stop camera than this (world units). */
 const FX_NEAR = 90;
+/** A place with no lamp of its own: its done moment starts this far in front of its landmark's face (lampOf). */
+const FX_FRONT = 3;
 /** cos 12 degrees: a lamp further off the stop's line of sight hands the lanterns' start to its landmark. */
 const FX_OFF_AXIS = Math.cos((12 * Math.PI) / 180);
 /**
@@ -1908,6 +1959,30 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
 
   /** place() wrote whole buffers this frame: update() then adds no partial ranges, which would cut that upload short. */
   let wholeUpload = true;
+  // Second Loom's fix round: the last place's lanterns and lamps stand on the
+  // Gate isle, which waits for the flight (scene.ts updateGate,
+  // scene.userData.gateShown). While it waits they are folded away (no size
+  // at their spot, the halo far below); place() puts them back.
+  const GATE_AREA = PLACES.length - 1;
+  let gateOff = false;
+  const foldGate = () => {
+    const m = new THREE.Matrix4();
+    const n = Math.min(LCAP, lanterns.length);
+    for (let i = 0; i < n; i++) {
+      if (lanterns[i].area !== GATE_AREA) continue;
+      for (const mesh of [posts, glass, pools]) {
+        mesh.getMatrixAt(i, m);
+        for (const e of [0, 1, 2, 4, 5, 6, 8, 9, 10]) m.elements[e] = 0;
+        mesh.setMatrixAt(i, m);
+      }
+      haloPos[i * 3 + 1] = -1e5;
+    }
+    wholeUpload = true;
+    for (const a of [posts.instanceMatrix, glass.instanceMatrix, pools.instanceMatrix, haloPosAttr]) {
+      a.clearUpdateRanges();
+      a.needsUpdate = true;
+    }
+  };
   const place = () => {
     const o = new THREE.Object3D();
     const po = new THREE.Object3D();
@@ -1981,6 +2056,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     posts.computeBoundingSphere();
     glass.computeBoundingSphere();
     pools.computeBoundingSphere();
+    if (gateOff) foldGate();
   };
   place();
 
@@ -2046,7 +2122,19 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   /** The done moment's last beat: when the lamp catches (module clock), -1 when idle. */
   let fxStart = -1;
   const fxBox = new THREE.Box3();
-  /** Where an area's landmark lamp is: its big lamp, else its tagged lamp (at 100%), else above the landmark. */
+  const fxRay = new THREE.Raycaster();
+  const fxRayO = new THREE.Vector3();
+  const fxRayD = new THREE.Vector3();
+  /**
+   * Where an area's landmark lamp is: its big lamp, else its tagged lamp (at
+   * 100%), else on the landmark itself. A place with no lamp of its own (AI
+   * Ads & Content and Creative Strategy since the second Loom): where the line
+   * from the place's stop camera (layout stopRow) to the landmark's middle at
+   * 0.6 of its height meets the landmark's meshes, FX_FRONT in front of them.
+   * At the middle itself the bloom and the sparks were inside the Great Tree's
+   * trunk and the observatory's dome, and the depth test hid them (fix round
+   * 2). Read once per done moment, a few thousand triangles.
+   */
   const lampOf = (k: number, out: THREE.Vector3): THREE.Vector3 => {
     const i = lanterns.findIndex((l) => l.area === k && l.lesson < 0 && l.at >= 1);
     if (i >= 0 && i < CAP) return out.set(haloPos[i * 3], haloPos[i * 3 + 1], haloPos[i * 3 + 2]);
@@ -2056,11 +2144,27 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       if (!fxBox.isEmpty()) return fxBox.getCenter(out);
     }
     const P = PLACES[k];
-    return out.set(P.pos.x, P.pos.y + P.height * 0.6, P.pos.z);
+    out.set(P.pos.x, P.pos.y + P.height * 0.6, P.pos.z);
+    const lm = scene.getObjectByName(P.mesh);
+    if (!lm) return out;
+    const row = stopRow(k);
+    fxRayO.set(row.x, row.y, row.z);
+    fxRayD.subVectors(out, fxRayO);
+    fxRay.far = fxRayD.length();
+    fxRay.set(fxRayO, fxRayD.normalize());
+    lm.updateMatrixWorld(true);
+    const meshes: THREE.Object3D[] = [];
+    lm.traverse((o) => {
+      if ((o as THREE.Mesh).isMesh) meshes.push(o);
+    });
+    const hit = fxRay.intersectObjects(meshes, false)[0];
+    if (hit) out.copy(hit.point).addScaledVector(fxRayD, -FX_FRONT);
+    return out;
   };
   /**
    * Final pass F: where the done moment's paper lanterns fly, seen from the
-   * place's stop camera (layout TRAIL at PLACES[k].trail). They lift off
+   * place's stop camera (layout stopRow: its KEYS row, or the row it had where
+   * the row was re-aimed since, STOP_ROW_PINS). They lift off
    * behind the landmark (the lamp's far side, at least FX_NEAR from that
    * camera, so the landmark hides their start and none comes near the lens),
    * spread across and drift up and away toward the side the done card is
@@ -2073,8 +2177,10 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   const fxLayout = (k: number) => {
     const u = fxMat.uniforms;
     const o = lampOf(k, u.uOrigin.value as THREE.Vector3);
-    const key = TRAIL[PLACES[k].trail];
-    fxCam.set(key[0], key[1], key[2]);
+    // The stop's row as its scenery reads it (layout stopRow): a4's keeps the
+    // row it had before the turn after the hut went clockwise (STOP_ROW_PINS).
+    const row = stopRow(k);
+    fxCam.set(row.x, row.y, row.z);
     const d0 = fxCam.distanceTo(o);
     const side = FX_SIDE[k];
     if (side === 0) {
@@ -2096,7 +2202,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     const k1 = Math.min(2.5, Math.max(0.25, (d0 + back) / 300));
     u.uK.value = k1;
     (u.uSpawn.value as THREE.Vector3).copy(fxBack).multiplyScalar(back / k1).addScaledVector(fxRight, 3);
-    const look = TRAIL_LOOK[PLACES[k].trail];
+    const look = row.look;
     const sp = u.uSpawn.value as THREE.Vector3;
     // A lamp more than 12 degrees off the stop's line of sight (a5's sits on the
     // frame's right edge): the lanterns start behind the landmark itself instead
@@ -2204,11 +2310,19 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   let running = false;
   let animating = false;
   let lastLevel = -1;
-  const lightState = () => (scene.userData.light as { state?: { lampGlow: number } } | undefined)?.state;
+  let lastMagic = -1;
+  const lightState = () => (scene.userData.light as { state?: { lampGlow: number; magicGlow?: number } } | undefined)?.state;
   const update = (time: number): boolean => {
     clock = time;
     let changed = dirty;
     dirty = false;
+    // The Gate isle's lanterns wait for the flight with it (foldGate above).
+    if ((scene.userData.gateShown === false) !== gateOff) {
+      gateOff = !gateOff;
+      if (gateOff) foldGate();
+      else place();
+      changed = true;
+    }
     // The lamp level: light.ts's lampGlow (0.4 in the afternoon, 1.1 at night), floored so a lit lantern reads in daylight.
     const lg = lightState()?.lampGlow ?? 0.7;
     const night = Math.min(1, Math.max(0, (lg - 0.45) / 0.55));
@@ -2222,6 +2336,13 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       poolMat.uniforms.uAlpha.value = LOOK.poolDay + (LOOK.poolNight - LOOK.poolDay) * night;
       // The next lesson's pool is boosted most in daylight, where the plain pools barely show.
       poolMat.uniforms.uNext.value = 1.6 - 0.8 * night;
+      changed = true;
+    }
+    // The carved runes' magic level (dress-lakeforest.ts uMagic), for the next step's pulse.
+    const magic = Math.min(lightState()?.magicGlow ?? 0.9, 0.95);
+    if (runeMat && Math.abs(magic - lastMagic) > 1e-3) {
+      lastMagic = magic;
+      runeMat.uniforms.uMagic.value = magic;
       changed = true;
     }
     const t = reduced ? 0 : time;

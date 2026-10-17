@@ -2,14 +2,14 @@
  "version": 1,
  "width": 1920,
  "height": 1080,
- "made": "2026-10-16T10:58:34.385Z",
+ "made": "2026-10-16T19:38:20.744Z",
  "quality": 0.8,
  "posters": [
   {
    "id": "k0",
    "stop": -1,
    "file": "k0.webp",
-   "bytes": 109086,
+   "bytes": 109142,
    "markers": [
     {
      "id": "a1",
@@ -87,7 +87,7 @@
    "id": "a1",
    "stop": 0,
    "file": "a1.webp",
-   "bytes": 163196,
+   "bytes": 163546,
    "markers": [
     {
      "id": "a1",
@@ -165,7 +165,7 @@
    "id": "a2",
    "stop": 1,
    "file": "a2.webp",
-   "bytes": 164800,
+   "bytes": 164574,
    "markers": [
     {
      "id": "a1",
@@ -243,7 +243,7 @@
    "id": "a3",
    "stop": 2,
    "file": "a3.webp",
-   "bytes": 93984,
+   "bytes": 93792,
    "markers": [
     {
      "id": "a1",
@@ -321,75 +321,75 @@
    "id": "a4",
    "stop": 3,
    "file": "a4.webp",
-   "bytes": 74944,
+   "bytes": 74124,
    "markers": [
     {
      "id": "a1",
-     "fx": -1.18937,
-     "fy": 0.91962,
+     "fx": -1.19234,
+     "fy": 0.92047,
      "visible": false,
      "proximity": 0.436
     },
     {
      "id": "a2",
-     "fx": -0.10031,
-     "fy": 0.74356,
+     "fx": -0.10101,
+     "fy": 0.74405,
      "visible": false,
      "proximity": 0.719
     },
     {
      "id": "a3",
-     "fx": 0.48103,
-     "fy": 0.56203,
+     "fx": 0.4807,
+     "fy": 0.56244,
      "visible": true,
      "proximity": 0.839
     },
     {
      "id": "a4",
-     "fx": 0.66813,
-     "fy": 0.59907,
+     "fx": 0.66777,
+     "fy": 0.59949,
      "visible": true,
      "proximity": 1
     },
     {
      "id": "a5",
-     "fx": -0.23081,
-     "fy": 0.95634,
+     "fx": -0.23172,
+     "fy": 0.95702,
      "visible": false,
      "proximity": 0.728
     },
     {
      "id": "a6",
-     "fx": 7.12241,
-     "fy": -5.67961,
+     "fx": 7.07998,
+     "fy": -5.59109,
      "visible": false,
      "proximity": 0.471
     },
     {
      "id": "a7",
-     "fx": 2.36696,
-     "fy": -0.59195,
+     "fx": 2.36312,
+     "fy": -0.58924,
      "visible": false,
      "proximity": 0.208
     },
     {
      "id": "a8",
-     "fx": 40.51965,
-     "fy": -28.22079,
+     "fx": 39.02877,
+     "fy": -26.43017,
      "visible": false,
      "proximity": 0
     },
     {
      "id": "checkpoint",
-     "fx": 0.43726,
-     "fy": 1.20157,
+     "fx": 0.43688,
+     "fy": 1.20218,
      "visible": false,
      "proximity": 0.883
     },
     {
      "id": "bounty",
-     "fx": 5.56157,
-     "fy": -2.21963,
+     "fx": 5.53584,
+     "fy": -2.20437,
      "visible": false,
      "proximity": 0.133
     }
@@ -399,7 +399,7 @@
    "id": "a5",
    "stop": 4,
    "file": "a5.webp",
-   "bytes": 78910,
+   "bytes": 78754,
    "markers": [
     {
      "id": "a1",
@@ -477,7 +477,7 @@
    "id": "a6",
    "stop": 5,
    "file": "a6.webp",
-   "bytes": 161206,
+   "bytes": 161208,
    "markers": [
     {
      "id": "a1",
@@ -555,7 +555,7 @@
    "id": "a7",
    "stop": 6,
    "file": "a7.webp",
-   "bytes": 59284,
+   "bytes": 58452,
    "markers": [
     {
      "id": "a1",
@@ -633,7 +633,7 @@
    "id": "a8",
    "stop": 7,
    "file": "a8.webp",
-   "bytes": 85530,
+   "bytes": 85484,
    "markers": [
     {
      "id": "a1",

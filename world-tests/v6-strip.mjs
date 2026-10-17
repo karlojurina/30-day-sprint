@@ -91,7 +91,10 @@ const STRIP_FRAMES = [
   [31.5, "on the bench, the Trail Hut ahead", "wall+0.5"],
   [34.5, "the turn at the bench's edge, out over the gorge", "wall+3.5"],
   [37, "a4 the Trail Hut", "stop:a4"],
-  [39.5, "the traverse, facing ahead", "traverse+0.5"],
+  // Second Loom (2026-10-16): the turn after a4 goes clockwise; key 39.5 is
+  // the rise past the lit spur, looking up at the peak (the name gave 38.5,
+  // which the perf scripts, reading the number, never measured).
+  [39.5, "rising past the lit spur, looking up", "traverse+1.5"],
   [42.6, "the gully, the notch of sky", "gully+0.6"],
   [45, "bursting out on the ridge", "burst"],
   [46.6, "the rim shelf, facing the saddle", "burst+1.6"],

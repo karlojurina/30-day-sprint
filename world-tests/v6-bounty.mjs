@@ -721,6 +721,8 @@ try {
     r.check('the sheet holds the checkpoint\'s panel and its lesson', s.panel?.title === 'Ad Bounty' && s.panel.rows.length === 1 && s.panel.rows[0].text.includes(LESSON.title), s.panel)
     await shot(page, 'phone-sheet.png')
     await click(page, FIND.lessonRow, LESSON.title, 'row 6: the lesson\'s row')
+    // As in row 5: the page shows at the click and its address follows (WorldStage's open(), 2026-10-17).
+    await waitFor(page, (p) => location.pathname === p, { arg: `${APP}/${PLACE.id}/${LESSON.id}`, timeout: NAV_MS, what: 'row 6: the address did not change to the lesson' })
     await waitFor(page, (t) => [...document.querySelectorAll('h1')].some((h) => !h.closest('main') && h.textContent.replace(/\s+/g, ' ').trim() === t), { arg: LESSON.title, timeout: NAV_MS, what: 'row 6: no lesson page' })
     const l = await page.evaluate(SNAP)
     r.check(`the row opens ${APP}/${PLACE.id}/${LESSON.id}`, l.path === `${APP}/${PLACE.id}/${LESSON.id}` && l.lesson === LESSON.title, { path: l.path, lesson: l.lesson })

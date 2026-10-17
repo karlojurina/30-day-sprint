@@ -23,7 +23,8 @@
  *     - a thin rim of light along every stone's inner and outer edge on the
  *       face the dock sees, driven by the sun (only when it is low behind the
  *       arch).
- *   In blocks' Set_a8 group (hidden until the camera passes the bridge head),
+ *   In blocks' Set_a8 group (both groups are hidden until the camera boards
+ *   the airship, or parks at a8: scene.ts updateGate, second Loom's fix round),
  *   hiding blocks' grey Set_a8_Block:
  *     - the Gate isle: a green gold top with a rounded brow, cut short past
  *       the arch so the island ends at a cliff behind it, a strata underside,

@@ -13,7 +13,9 @@
  *     - spires on the top (clumped toward the rim, a framing clump in the
  *       lower right of the a7 frame, nothing on the path or near the rail)
  *     - a flagstone path from the cove to the observatory and on to the bridge,
- *       small lanterns along it (lamp glow + halos)
+ *       small lanterns along it from the cove to the terrace (lamp glow +
+ *       halos); past the terrace its lanterns are Creative Strategy's lesson
+ *       lanterns (progress-world.ts, second Loom's fix round)
  *     - the bounty isle: its body, two spires, the berth's bollards and
  *       gangway, the mooring ropes (shown only while your ship is moored), and
  *       (map review item 18) the Ad Bounty's board in its own LM_Bounty group
@@ -56,8 +58,9 @@
  *       other airship from it, and blocks' empty Airship_loop group gets it
  *       here, so every airship in the world matches
  *     - caged lanterns with flame sprites (SkyFlame, one call per group) on
- *       the berth, the bounty isle, the bridge ends, the island path, the
- *       ship and the observatory porch
+ *       the berth, the bounty isle, the bridge ends, the island path's
+ *       approach from the cove to the terrace, the ship and the observatory
+ *       porch
  *
  * REPLACES nothing any more: blocks.ts no longer builds the grey observatory,
  *   island sets, glow, bridge or ship bodies (pass-3 integration removed the
@@ -79,7 +82,7 @@ import type { InstallFn, ShipPose, WorldCtx, WorldModule } from "./modules";
 import { BOUNTY_DEPTH, BRIDGE, ISLAND_DEPTH, ISLAND_LOOKOUT, ISLAND_PATH, ISLAND_RILLS, ISLAND_SPRING, LOOK, OBSERVATORY, PATH, PLACES, ROUTE_MARKS, SHIP, SHIP_MOORED, STEPS_TOP, TELESCOPE, TRAIL, WORLD, bridgeDeckAt } from "./layout";
 import { addFootprint, addPathLine } from "./footprints";
 import { railDist, trailDistFast } from "./rocks";
-import { NO_REFLECT_LAYER, type LightModule } from "./light";
+import { NO_REFLECT_LAYER } from "./light";
 import { BOUNTY } from "./bounty";
 
 // ── Tunables ────────────────────────────────────────────────────────────────
@@ -90,115 +93,13 @@ const ISLAND_TREES = 80;
 const SEA_CELL = 460;
 const SEA_KEEP = 0.62;
 /**
- * Round 1 (decision 46): the cloud bank that hides the Gate isle from the Sky
- * Island, the bridge and the bounty isle until the flight turns toward it.
- * A floating bank of cumulus over the cloud sea, a band from x0 to x1 (world
- * x) centred on z, `depth` deep in z, from `base` up to crowns that follow
- * gateBankTop(x). The flight never sees it (it lies behind or beside every
- * flight frame), and a8 and the tail look away from it. Shown only while the
- * camera is higher than `showAbove` (the rise's top, the island, the bridge,
- * the flight), so the Mirror Lake and forest frames never draw it.
- *
- * Second Loom, 2026-10-16 (5:20 to 5:44: "these huge ass clouds ... very
- * distracting"): only as big as its job. Every sight line to the Gate isle
- * (its top, its underside, the arch, the hall) from every rail frame before
- * the flight above showAbove and from the Ad Bounty's click-in, at 16:9, 1.92
- * (Lovro's window) and 2.79 (the widest review size), that terrain, the other
- * isles and the cloud layer leave open, crosses this plane at x -2,475 to
- * -1,800 and y 1,521 to 1,773, and above 1,711 only where the arch stands, x
- * -2,375 to -2,075 (from the island's south end, keys 59.5 to 61, and at 2.79
- * to 64.4). So: a low band (crowns at 1,700, 1,730 where the click-in needs
- * it) with one heap over the arch's line (1,802), each built of clusters that
- * shrink toward its ends, and a core strip inside them that no sight line
- * gets past (world-tests/v6-route.mjs N9, and every drawn face checked
- * against those sight lines, 2026-10-16). It was a wall from -2,660 to
- * -1,650 with crowns of 1,720 to 1,805 whose clusters spilled 200 past both
- * ends (drawn from -2,847 to -1,521): the left third of the frames Lovro
- * looked at from the island's path, the bridge and the board. Coloured by the
- * live key's cloud base and top (light.ts), as clouds.ts's painted clouds are,
- * so it follows the hour; it was painted for the night.
+ * Round 1 (decision 46) built a cloud bank north of the Sky Island here
+ * (GATE_BANK) to hide the Gate isle until the flight. Second Loom, 2026-10-16
+ * (5:20 to 5:44: "these huge ass clouds ... very distracting"), and its fix
+ * round: the bank is gone. The isle and everything on it are not drawn until
+ * the camera boards the airship, or parks at a8 (scene.ts updateGate,
+ * world-tests/v6-gate-wait.mjs).
  */
-export const GATE_BANK = { x0: -2480, x1: -1790, z: -3150, depth: 200, base: 1500, showAbove: 1450 } as const;
-/** The arch's sight lines through the band, x0 to x1: the bank's heap, its crown at `top`. */
-const BANK_ARCH = { x0: -2390, x1: -2055, top: 1802 } as const;
-/**
- * The band's crown outside the heap: 1,700, and 1,730 from x -1,995 to -1,925,
- * where the arch's top crosses the band as the Ad Bounty's click-in sees it
- * on the widest screens (at 1,709).
- */
-function bankLow(x: number): number {
-  return 1700 + 30 * smooth(-2015, -1995, x) * (1 - smooth(-1925, -1905, x));
-}
-/** The bank's crown height at world x: bankLow, and 1,802 over the arch's line. */
-export function gateBankTop(x: number): number {
-  const heap = smooth(BANK_ARCH.x0 - 15, BANK_ARCH.x0, x) * (1 - smooth(BANK_ARCH.x1, BANK_ARCH.x1 + 15, x));
-  const low = bankLow(x);
-  return low + (BANK_ARCH.top - low) * heap;
-}
-/** Clusters in one column at x from `floor` up to `top`, each at most wMax across. */
-function bankColumn(g: Geo, x: number, floor: number, top: number, wMax: number, c: number, COL: number): number {
-  const GB = GATE_BANK;
-  let n = 0;
-  const jx = (rnd(c, 161) - 0.5) * 16;
-  for (let y = floor, lv = 0; ; lv++) {
-    const k = Math.min(1, (y - floor) / Math.max(1, top - floor));
-    const w = wMax * (1 - 0.3 * k) * (0.85 + 0.2 * rnd(c * 13 + lv, 163));
-    const crown = y + w * 0.3 >= top;
-    const yy = crown ? top - w * 0.3 : y;
-    const rows = crown ? [-1, 1] : [0];
-    for (const r of rows) {
-      const z = GB.z + r * GB.depth * 0.3 + (rnd(c * 13 + lv, 164 + r) - 0.5) * GB.depth * 0.3;
-      const xx = x + jx + r * COL * 0.45;
-      cloud(g, xx, yy + (rnd(c * 13 + lv, 166 + r) - 0.5) * 12, z, w, 5 + Math.floor(rnd(c * 13 + lv, 167 + r) * 2), 900 + c * 17 + lv * 3 + r, false);
-      n++;
-    }
-    if (crown) break;
-    y += w * 0.34;
-  }
-  return n;
-}
-/**
- * The bank into g (cloud() clusters and the core strip); returns the clusters.
- * Exported so a sight line check can build exactly what is drawn. The band:
- * columns across x0 to x1, clusters stacked from the base to the low crown,
- * wider low down, two rows at the crown (front and back, offset) and one below
- * it, shrinking toward the ends so the bank stops near x0 and x1. The heap:
- * narrower columns over the arch's line from the band's crown up to its own,
- * shrinking toward its sides so it stops near BANK_ARCH's x0 and x1. The core
- * strip faces the island inside the clusters, from the base to 22 under the
- * crown, so no sight line finds a gap between two puffs.
- */
-export function gateBank(g: Geo): number {
-  const GB = GATE_BANK;
-  const H = BANK_ARCH;
-  let n = 0;
-  let c = 0;
-  const COL = 80;
-  for (let x = GB.x0; x <= GB.x1 + 1; x += COL, c++) {
-    const wMax = Math.min(230, 80 + 1.5 * Math.min(x - GB.x0, GB.x1 - x));
-    n += bankColumn(g, x, GB.base - rnd(c, 162) * 30, bankLow(x), wMax, c, COL);
-  }
-  const HCOL = 46;
-  const HW = 130;
-  for (let x = H.x0 + 8; x <= H.x1 - 8 + 1; x += HCOL, c++) {
-    const wMax = Math.min(HW, 50 + 1.6 * Math.min(x - H.x0, H.x1 - x));
-    n += bankColumn(g, x, bankLow(x) - 60, gateBankTop(x), wMax, c, HCOL);
-  }
-  const nrm = g.n ?? (g.n = []);
-  const zc = GB.z + 20;
-  const yb = GB.base + 25;
-  for (let x = GB.x0 + 15; x < GB.x1 - 15; x += 10) {
-    const x2 = Math.min(GB.x1 - 15, x + 10);
-    const t1 = gateBankTop(x) - 22;
-    const t2 = gateBankTop(x2) - 22;
-    for (const q of [[x, yb], [x2, yb], [x2, t2], [x, yb], [x2, t2], [x, t1]]) {
-      g.p.push(q[0], q[1], zc);
-      g.c.push(P.cloudBase[0], P.cloudBase[1], P.cloudBase[2]);
-      nrm.push(0, 0.42, 0.91);
-    }
-  }
-  return n;
-}
 /** Envelope: centre x, centre height over the deck, half length, radii (y, z). */
 const ENV = { x: -4, y: 58, len: 74, ry: 21, rz: 24 };
 /** Propeller turn rate, radians per second: idle and at full throttle. */
@@ -1968,7 +1869,6 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     // lined with caged lanterns every ~34, alternating sides, 10 off the path,
     // so a line of warm points leads the eye up to the observatory.
     const foot = TERRACE.r + TERRACE.steps * TERRACE.run + 8;
-    let approachEnd = 0;
     {
       let acc = 0;
       let next = 18;
@@ -2000,39 +1900,17 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
             placed++;
           }
           sd = -sd;
-          approachEnd = next;
           next += 34;
         }
         if (done) break;
         acc += len;
       }
     }
-    // Lanterns: every ~110 along the rest of the path, alternating sides, 11 off it.
-    let carry = 50;
-    let side = 1;
-    let along = 0;
-    for (let s = 0; s < pts.length - 1; s++) {
-      const a = pts[s];
-      const b = pts[s + 1];
-      const len = Math.hypot(b.x - a.x, b.z - a.z);
-      const ux = (b.x - a.x) / len;
-      const uz = (b.z - a.z) / len;
-      let d = carry;
-      while (d < len) {
-        const x = a.x + ux * d - uz * side * 11;
-        const z = a.z + uz * d + ux * side * 11;
-        if (along + d > approachEnd + 20 && Math.hypot(x - oPos.x, z - oPos.z) > 95 && railDist(x, I.y + 8, z) > 16) {
-          const y = I.y + islandTop(x, z);
-          land.beam([x, y, z], [x, y + 10.4, z], 0.55, P.brownDark, 4);
-          cagedLantern(land, glow, flames, halos, x, y + 12.2, z, 0.9, 9);
-          pathLamps.push(x, y + 12.2, z);
-          side = -side;
-        }
-        d += 110;
-      }
-      carry = d - len;
-      along += len;
-    }
+    // Second Loom's fix round: no lanterns along the rest of the path. Caged
+    // lanterns on tall posts stood every ~110 past the terrace, always lit,
+    // among Creative Strategy's lesson lanterns (progress-world.ts), so a lit
+    // one stood between dark ones ("see how random this is"). The lesson
+    // lanterns are the path's lanterns from the terrace to the bridge.
   }
 
 
@@ -2448,26 +2326,6 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       }
   }
 
-  // Round 1: the Gate bank (GATE_BANK, gateBank), its own mesh so it shows only from the heights.
-  const bank = new Geo();
-  const bankClusters = gateBank(bank);
-  {
-    // The bank stores light, not colour, as clouds.ts's sky clouds do: 0 is
-    // the live key's cloud base, 1 its cloud top (bankMat below takes both
-    // from the live light every frame). One ramp for the whole bank, by
-    // height (each cluster's own base-to-top ramp stacked into stripes), a
-    // little lighter where a puff faces up.
-    const lo = GATE_BANK.base - 30;
-    const hi = gateBankTop(BANK_ARCH.x0 + 1) + 10;
-    const nb = bank.n ?? [];
-    for (let i = 0; i < bank.c.length; i += 3) {
-      const t = 0.8 * smooth(lo, hi, bank.p[i + 1]) + 0.2 * Math.max(0, nb[i + 1] ?? 0);
-      bank.c[i] = t;
-      bank.c[i + 1] = t;
-      bank.c[i + 2] = t;
-    }
-  }
-
   addMesh(root, land, solid, "Sky_Land");
   // Cheap laptops (overdraw): the a7 ground and the observatory draw before the
   // world's terrain and sea (renderOrder 0 and 900), which lie far below them in
@@ -2482,23 +2340,6 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   addMesh(root, water, waterMat, "Sky_Rills");
   const cloudMesh = addMesh(root, clouds, cloudMat, "Sky_Clouds");
   cloudMesh.renderOrder = 1;
-  // Second Loom: lit as day cloud by the night's moon the smaller bank read as
-  // a bright blue stack, so it is coloured as the painted clouds are, by the
-  // live key's cloud base and top (light.ts), whatever the hour.
-  const bankU = { uBase: { value: new THREE.Color(...P.cloudBase) }, uTop: { value: new THREE.Color(...P.cloudTop) } };
-  const bankMat = track(new THREE.MeshBasicMaterial({ vertexColors: true }));
-  bankMat.name = "SkyGateBank";
-  bankMat.onBeforeCompile = (sh) => {
-    Object.assign(sh.uniforms, bankU);
-    sh.fragmentShader = sh.fragmentShader
-      .replace("#include <common>", "#include <common>\nuniform vec3 uBase;\nuniform vec3 uTop;")
-      .replace("#include <color_fragment>", "diffuseColor.rgb *= mix(uBase, uTop, vColor.r);");
-  };
-  bankMat.customProgramCacheKey = () => "sky-gate-bank";
-  const liveLight = (ctx.scene.userData.light as LightModule | undefined) ?? null;
-  const bankMesh = addMesh(root, bank, bankMat, "Sky_GateBank");
-  bankMesh.renderOrder = 1;
-  bankMesh.visible = false;
   const ropesMesh = addMesh(root, mooringRopes, solid, "Sky_MooringRopes");
   addHalos(root, halos, "Sky_Halos");
   addFlames(root, flames, "Sky_Flames");
@@ -2818,7 +2659,6 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   let animating = false;
   let lastSky = true;
   let lastRopes = true;
-  let lastBank = false;
   const update = (_time: number, dt: number): boolean => {
     let changed = false;
     ctx.camera.getWorldPosition(camPos);
@@ -2828,17 +2668,6 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       root.visible = sky;
       lastSky = sky;
       changed = true;
-    }
-    const bankOn = camPos.y > GATE_BANK.showAbove;
-    if (bankOn !== lastBank) {
-      bankMesh.visible = bankOn;
-      lastBank = bankOn;
-      changed = true;
-    }
-    // The live light's cloud colours (light.ts updates first and asks for the frame when they change).
-    if (bankOn && liveLight) {
-      bankU.uBase.value.copy(liveLight.state.cloudBase);
-      bankU.uTop.value.copy(liveLight.state.cloudTop);
     }
     ctx.shipPose(pose);
     const ropes = pose.phase === "moored" && (!shipGroup || shipGroup.visible);
@@ -2890,8 +2719,6 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
         meshes,
         trees: treeCount,
         cloudClusters,
-        gateBankClusters: bankClusters,
-        gateBankTris: bank.tris,
         buildMs,
       };
     },

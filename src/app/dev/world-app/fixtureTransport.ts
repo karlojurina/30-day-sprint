@@ -1,9 +1,6 @@
 "use client";
 
-import { useContext } from "react";
 import { tellaEmbedUrl, WATCH_SPEED_CAP } from "@/lib/world/tella";
-import type { CachedLessonTransport } from "@/lib/world/embed-cache";
-import { LessonTransportContext } from "@/lib/world/useLessonTransport";
 import {
   judgeWatch,
   WATCH_PLAYED_FLOOR,
@@ -308,14 +305,4 @@ export function createFixtureServer(opts: {
   };
 
   return { transport, watch, calls };
-}
-
-/**
- * The harness's transport, behind the embed cache, as FixtureStudentProvider
- * hands it down through the shared LessonTransportContext (the map's host
- * reads the same one). undefined outside the harness provider, where the
- * player would use the real calls.
- */
-export function useFixtureTransport(): CachedLessonTransport | undefined {
-  return useContext(LessonTransportContext) ?? undefined;
 }

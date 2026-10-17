@@ -886,7 +886,7 @@ export function install(ctx: BlocksCtx): BlocksModule {
   skyZone.name = "Zone_sky";
   const southZone = new THREE.Group();
   southZone.name = "Zone_south";
-  // The meadow from the top of the Climb on; the Harbour Isle from the bridge on.
+  // The meadow from the top of the Climb on; the Gate isle when the scene draws the Gate (the frame loop).
   const meadowZone = new THREE.Group();
   meadowZone.name = "Zone_meadow";
   const harbourZone = new THREE.Group();
@@ -897,6 +897,9 @@ export function install(ctx: BlocksCtx): BlocksModule {
   for (const o of [setOf("a8"), ...airships.filter((a) => a.kind === "loop").map((a) => a.g)]) if (o) harbourZone.add(o);
   for (const o of [setOf("a1"), setOf("a2"), setOf("a3"), setOf("a4"), flame, lookoutLamp, headLamp]) if (o) southZone.add(o);
   meadowZone.add(meadowGroup);
+  // The Stone Arch's landmark group stays where it is (the landmark index
+  // reads it at install, shown); the frame loop shows it with the Gate isle.
+  const gateArch = lmGroups.find((g) => g.userData.placeId === "a8") ?? null;
   const parent = ctx.root ?? ctx.scene;
   parent.add(root);
   root.updateMatrixWorld(true);
@@ -1056,13 +1059,20 @@ export function install(ctx: BlocksCtx): BlocksModule {
     const south = !(camPos.z < 300 && camPos.y < 1000);
     // The meadow: from the top of the Climb (over the rim) and anywhere north of the ridge.
     const meadow = camPos.z < 1000 || (camPos.z < 1400 && camPos.y > 560);
-    // The Gate isle: once the camera is past the head of the rope bridge.
-    const harbour = camPos.z < -2100;
-    if (sky !== skyZone.visible || south !== southZone.visible || meadow !== meadowZone.visible || harbour !== harbourZone.visible) {
+    // The Gate isle, the loop ship over it and the Stone Arch (second Loom's
+    // fix round): when the scene draws the Gate (scene.ts updateGate, from the
+    // moored deck on and for a park at a8; the cloud bank that hid them from
+    // the Sky Island is gone). Without the scene's word, the isle once the
+    // camera is past the head of the rope bridge, as before.
+    const gate = ctx.scene.userData.gateShown;
+    const harbour = typeof gate === "boolean" ? gate : camPos.z < -2100;
+    const arch = typeof gate === "boolean" ? gate : true;
+    if (sky !== skyZone.visible || south !== southZone.visible || meadow !== meadowZone.visible || harbour !== harbourZone.visible || (gateArch && arch !== gateArch.visible)) {
       skyZone.visible = sky;
       southZone.visible = south;
       meadowZone.visible = meadow;
       harbourZone.visible = harbour;
+      if (gateArch) gateArch.visible = arch;
       changed = true;
     }
 

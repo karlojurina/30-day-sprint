@@ -107,7 +107,8 @@ const NO_LOAD_EARLY_MS = 100
 const NO_LOAD_LATE_MS = 500
 const ENV_REQUIRED = ['DEV_TELLA_VIDEO_ID', 'DEV_TELLA_VIDEO_ID_2']
 const ENV_OPTIONAL = 'DEV_TELLA_VIDEO_SECONDS'
-const V6_TOTALS = 'PASS 20  FAIL 0  NOT COVERED 3'
+/** v6-app's totals line: 22 rows since the second Loom (rows 21 and 22), as v6-course's G2 has it. */
+const V6_TOTALS = 'PASS 22  FAIL 0  NOT COVERED 3'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const f = (n, d = 2) => (typeof n === 'number' && isFinite(n) ? n.toFixed(d) : String(n))

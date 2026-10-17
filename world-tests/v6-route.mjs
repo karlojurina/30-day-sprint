@@ -19,8 +19,10 @@
  *     the default pacing, and the tip (pitch 10 to the peak) takes >= 40 vh;
  *   - N6: from behind the first step the step centres project in one line
  *     up the frame;
- *   - N8/N9: the bridge; the flight's length (1,500-2,500); the Harbour Isle
- *     hidden (< 1% of the frame) before the flight begins;
+ *   - N8/N9: the bridge; the flight's length (1,500-2,500); the Gate isle
+ *     (the Harbour Isle once) out of the frame from the bridge's far end to
+ *     two keys into the flight, where scene.ts starts drawing it (second
+ *     Loom's fix round; a cloud bank hid it before the flight until then);
  *   - the Sky Island: hidden from stops 1-4 by terrain alone, never seen
  *     directly before stop 5, and at stop 5 its reflection is in the lake;
  *   - spacing between stops, the ravine floor below camp, the lake's shore
@@ -51,7 +53,9 @@
  *     gully's) at the default pacing.
  *   - map review, second Loom (2026-10-16): the turn after a4 goes clockwise
  *     (right only, through west and north, never facing the valley, no frame
- *     filled with near ground) and faces where it goes from "turned" on.
+ *     filled with near ground) and faces where it goes from "turned" on; its
+ *     fix round: no frame filled with the north wall (terrain within 300) and
+ *     the backing off the bench held short.
  * Writes, to world-tests/shots/v6/route/: map.svg/png (top down),
  * profile.svg/png (height along the route), views.png (ray-marched grey
  * previews of the stops and the key moments) and report.json.
@@ -226,17 +230,11 @@ harbourPts.push([hall.pos.x, hall.pos.y + hall.height, hall.pos.z]);
 
 const CL = WORLD.cloudClear;
 const inCloudAt = (x, z) => Math.hypot(x - CL.x, z - CL.z) > CL.r;
-// Round 1 (decision 46): the cloud bank north of the Sky Island (dress-sky
-// GATE_BANK) hides the Gate isle until the flight, instead of the view looking
-// up. Read from dress-sky itself (rocks first: dress-sky -> rocks -> dress-gate
-// -> dress-sky is a cycle that only resolves in that order), as a solid band:
-// x0..x1, depth across z, from its base up to gateBankTop(x) less 10 for the
-// clusters' lumpy crown; drawn only while the camera is above showAbove.
-const SKY = await import("../src/lib/world-v6/rocks.ts").then(() => import("../src/lib/world-v6/dress-sky.ts")).catch(() => null);
-const GB = SKY && SKY.GATE_BANK;
-const inBank = (x, y, z) => !!GB && x >= GB.x0 && x <= GB.x1 && Math.abs(z - GB.z) <= GB.depth / 2 && y >= GB.base && y <= SKY.gateBankTop(x) - 10;
-/** 0 = clear, 1 = terrain, 2 = cloud layer (only if terrain did not block), 3 = another island, 4 = the Gate's cloud bank (with `bank`). */
-function rayBlock(o, p, isles = false, bank = false) {
+// Round 1 (decision 46) hid the Gate isle behind a cloud bank north of the
+// Sky Island (dress-sky GATE_BANK), modelled here until the second Loom's fix
+// round, which removed it: the isle waits for the flight (scene.ts updateGate, N9).
+/** 0 = clear, 1 = terrain, 2 = cloud layer (only if terrain did not block), 3 = another island. */
+function rayBlock(o, p, isles = false) {
   const dx = p[0] - o.x;
   const dy = p[1] - o.y;
   const dz = p[2] - o.z;
@@ -251,7 +249,6 @@ function rayBlock(o, p, isles = false, bank = false) {
     const z = o.z + dz * u;
     if (terrainHeight(x, z) > y) return 1;
     if (isles && inIsle(x, y, z)) return 3;
-    if (bank && o.y > GB.showAbove && inBank(x, y, z)) return 4;
     if ((prevY - WORLD.cloudLevel) * (y - WORLD.cloudLevel) <= 0 && inCloudAt(x, z)) cloud = true;
     prevY = y;
   }
@@ -514,26 +511,29 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
   // frame in its own shade, is held short by the pacing row's 3.4 degrees
   // per vh and the camera's height by the Sky Island's sight check.
   {
+    // Shares of the frame whose ray meets the terrain within 150 and within 300.
     const nearShare = (s, aspect) => {
       rail.sampleS(s, pose);
       const cam = camOf(pose.position.clone(), pose.target.clone(), aspect, rail.fovAtS(s));
       const P = cam.position;
       const dir = new THREE.Vector3();
       let near = 0;
+      let near300 = 0;
       let n = 0;
       for (let j = 0; j < 18; j++) {
         for (let i = 0; i < 32; i++) {
           dir.set(((i + 0.5) / 32) * 2 - 1, 1 - ((j + 0.5) / 18) * 2, 0.5).unproject(cam).sub(P).normalize();
           n++;
-          for (let t = 3; t <= 150; t += 3) {
+          for (let t = 3; t <= 300; t += 3) {
             if (P.y + dir.y * t <= terrainHeight(P.x + dir.x * t, P.z + dir.z * t)) {
-              near++;
+              if (t <= 150) near++;
+              near300++;
               break;
             }
           }
         }
       }
-      return near / n;
+      return { near: near / n, near300: near300 / n };
     };
     let total = 0;
     let furthest = rail.bearingAtS(a4S);
@@ -556,27 +556,74 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
     const throughWest = passes(270);
     const throughNorth = passes(0);
     let worstNear = { v: 0 };
+    let worstWall = { v: 0 };
     const v0 = vhAt(rail, a4S);
     const v1 = vhAt(rail, turnedS);
-    for (let v = v0; v <= v1 + 1e-6; v += 5) {
-      let lo = a4S;
-      let hi = turnedS;
+    const sAtVh = (v, sLo, sHi) => {
+      let lo = sLo;
+      let hi = sHi;
       for (let k = 0; k < 40; k++) {
         const m = (lo + hi) / 2;
         if (vhAt(rail, m) < v) lo = m;
         else hi = m;
       }
-      const s = (lo + hi) / 2;
+      return (lo + hi) / 2;
+    };
+    for (let v = v0; v <= v1 + 1e-6; v += 5) {
+      const s = sAtVh(v, a4S, turnedS);
       for (const [name, aspect] of [["1691x1278", 1691 / 1278], ["16:9", ASPECT]]) {
+        // In percent on both sides (until the fix round the share was compared
+        // as a fraction with the worst kept in percent, so only the stop's frame
+        // was ever measured).
         const sh = nearShare(s, aspect);
-        if (sh > worstNear.v) worstNear = { v: +(100 * sh).toFixed(1), vh: r1(v - v0), aspect: name };
+        const near = +(100 * sh.near).toFixed(1);
+        const wall = +(100 * sh.near300).toFixed(1);
+        if (near > worstNear.v) worstNear = { v: near, vh: r1(v - v0), aspect: name };
+        if (wall > worstWall.v) worstWall = { v: wall, vh: r1(v - v0), aspect: name };
       }
     }
-    report.turnAfterA4 = { total: r1(total), back: +back.toFixed(2), from: r1(b0), to: r1(prev), throughWest, throughNorth, valley, worstNear, vh: r1(v1 - v0) };
+    // Backing off the bench: the view against the way the camera moves, every vh from the stop to "turned".
+    let offOver90 = 0;
+    let offOver120 = 0;
+    let lateOff = { v: 0 };
+    for (let v = v0 + 0.5; v <= v1; v += 1) {
+      const s = sAtVh(v, a4S, turnedS);
+      const d = Math.abs((((rail.bearingAtS(s) - rail.headingAtS(s)) % 360) + 540) % 360 - 180);
+      if (d > 90) offOver90++;
+      if (d > 120) offOver120++;
+      if (v - v0 >= 50 && d > lateOff.v) lateOff = { v: r1(d), vh: r1(v - v0) };
+    }
+    report.turnAfterA4 = { total: r1(total), back: +back.toFixed(2), from: r1(b0), to: r1(prev), throughWest, throughNorth, valley, worstNear, worstWall, offOver90, offOver120, lateOff, vh: r1(v1 - v0) };
     check(
       "the turn after a4 goes clockwise (second Loom): a4 to \"turned\" turns right only (back at most 1 degree), 140 to 180 degrees through west and north, never facing the valley (100 to 200), ground nearer than 150 at most 25% of any frame (every 5 vh, 1691x1278 and 16:9)",
       back <= 1 && total >= 140 && total <= 180 && throughWest && throughNorth && !valley && worstNear.v <= 25,
       `${r1(total)} degrees right (${r1(b0)} to ${r1(prev)}), back at most ${back.toFixed(2)}, through west ${throughWest}, through north ${throughNorth}, valley ${valley}; nearest ground worst ${JSON.stringify(worstNear)}; ${r1(v1 - v0)} vh`,
+    );
+    // Second Loom, fix round (two reviewers): the 150 rule let the north wall
+    // through. From +30 to +60 vh the wall in its own shade filled the frame
+    // edge to edge, 150 to 300 away (86 to 95% of the frame darker than luma
+    // 60). The camera looks up 12 to 26 through that stretch now, so the
+    // wall's skyline, its spruces and the sky hold the top of every frame:
+    // terrain nearer than 300 fills at most 70% of any frame from the stop to
+    // "turned" (62% at its darkest; 88% before the fix).
+    check(
+      "the turn after a4: no frame filled with the north wall (terrain nearer than 300 at most 70% of any frame from the stop to \"turned\", every 5 vh, 1691x1278 and 16:9)",
+      worstWall.v <= 70,
+      `worst ${JSON.stringify(worstWall)}`,
+    );
+    // Second Loom, fix round (a reviewer): from the stop the camera backs off
+    // the bench and rises while it turns right, so for a while its view runs
+    // against the way it moves (dead backwards, 179, at +25 vh). Round 1 made
+    // the traverse face forward after v6's long walk backwards was rejected,
+    // so the trade is held where it is until Lovro has seen it (decisions.md,
+    // second Loom, the route's fix round): more than 90 off the travel
+    // heading for at most 50 vh after the stop, more than 120 off for at most
+    // 25 vh (49 and 22 now), and within 90 from +50 vh to "turned"; from
+    // "turned" to the burst the row above holds 60.
+    check(
+      "the turn after a4 backs off the bench only briefly (view more than 90 off the travel heading at most 50 vh, more than 120 off at most 25 vh, within 90 from +50 vh to \"turned\")",
+      offOver90 <= 50 && offOver120 <= 25 && lateOff.v <= 90,
+      `${offOver90} vh over 90, ${offOver120} vh over 120, worst from +50 ${JSON.stringify(lateOff)}`,
     );
   }
   // Map review 2026-10-15, item 14 (Lovro's Loom, 5:09 to 6:02: "some
@@ -1331,12 +1378,23 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
   const dh = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
   check("N9: the camera boards the moored ship and leaves the docked one on their decks, along their headings (+/-12 deg)", e0 < 1 && e1 < 1 && dh(h0, L.SHIP_MOORED.heading) <= 12 && dh(h1, L.SHIP_DOCKED.heading) <= 12, `deck error ${r1(e0)} / ${r1(e1)}; travel ${Math.round(h0)} vs ${L.SHIP_MOORED.heading}, ${Math.round(h1)} vs ${L.SHIP_DOCKED.heading}`);
   void rs0;
-  // Harbour hidden before the flight: projected box of the visible harbour points.
+  // Second Loom's fix round: the Gate's cloud bank is gone. scene.ts
+  // (updateGate) draws the Gate isle from the moored deck on (the flight's
+  // first key) and for a park at a8, so before the flight it is never drawn.
+  // What this pins is the switch: from the bridge's far end to two keys into
+  // the flight the isle (terrain and the other isles hiding it) is out of the
+  // frame, so it never pops in or out on the rail and shows nothing before
+  // the flight turns toward it. world-tests/v6-gate-wait.mjs checks the same
+  // on the scene's own rail at 1.92, 2.79 and 3.4, and the Ad Bounty's click-in.
+  // Projected box of the visible harbour points.
   let worst = { pct: 0 };
   let firstSeen = null;
   const tF = L.FLIGHT_KEYS.first / (nK - 1);
+  const tW0 = L.BRIDGE_KEYS.last / (nK - 1);
+  const tW1 = (L.FLIGHT_KEYS.first + 2) / (nK - 1);
   for (let i = 0; i < dense.length; i += 3) {
     const d = dense[i];
+    if (d.t < tW0) continue;
     const cam = camOf(d.p, d.q, ASPECT, L.fovAtKey(d.t * (nK - 1)));
     let x0 = Infinity;
     let x1 = -Infinity;
@@ -1346,7 +1404,7 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
     for (const p of harbourPts) {
       const v = proj(cam, p[0], p[1], p[2]);
       if (!(v.z < 1 && Math.abs(v.x) <= 1.3 && Math.abs(v.y) <= 1.3)) continue;
-      if (rayBlock(d.p, p, true, !!GB) !== 0) continue;
+      if (rayBlock(d.p, p, true) !== 0) continue;
       any = true;
       x0 = Math.min(x0, v.x);
       x1 = Math.max(x1, v.x);
@@ -1358,12 +1416,13 @@ function nearGroundShare(p, q, near = 600, rowsN = 18, colsN = 32, skip = null) 
     const cy = Math.max(0, Math.min(1, y1) - Math.max(-1, y0));
     const pct = (100 * cx * cy) / 4;
     if (pct <= 0) continue;
-    if (d.t < tF) {
+    if (d.t <= tW1) {
       if (pct > worst.pct) worst = { pct: +pct.toFixed(2), s: Math.round(d.s), kind: d.kind, p: d.p.toArray().map(Math.round) };
-    } else if (!firstSeen && pct > 0.2) firstSeen = { s: Math.round(d.s), intoFlight: Math.round(d.s - f0), pct: +pct.toFixed(2) };
+    }
+    if (d.t >= tF && !firstSeen && pct > 0.2) firstSeen = { s: Math.round(d.s), intoFlight: Math.round(d.s - f0), pct: +pct.toFixed(2) };
   }
-  report.harbour = { worstBeforeFlight: worst, firstSeenInFlight: firstSeen };
-  check(`N9: Gate isle < 1% of the frame everywhere before the flight begins (terrain, islands${GB ? " and the Gate's cloud bank" : ", NO cloud bank found"})`, worst.pct < 1 && !!GB, worst.pct ? worst : "never in view");
+  report.harbour = { worstAroundTheSwitch: worst, firstSeenInFlight: firstSeen };
+  check("N9: the Gate isle is out of the frame from the bridge's far end to two keys into the flight (where scene.ts starts drawing it, at the moored deck)", worst.pct === 0, worst.pct ? worst : "never in view");
   console.log(`harbour first seen in the flight: ${JSON.stringify(firstSeen)}`);
 }
 

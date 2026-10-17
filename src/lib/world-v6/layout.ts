@@ -1231,16 +1231,16 @@ const KEYS: readonly Key[] = [
   // Looking up 8 through a wide lens (48) pins the pool on the frame's bottom
   // and gives the sky over the massif 32% (B9: the massif stands 12-24 up
   // behind the falls, so a narrower lens cannot hold the pool and the sky).
-  // Map review, second Loom (2026-10-16): the row is aimed 232.6 / -9.3 and
-  // stands at 325.77 so the stop is seen as it was, 239.6 / -7.9 at 325.8. The
+  // Map review, second Loom (2026-10-16): the row is aimed 232.6 / -8.0 and
+  // stands at 325.77 so the stop is seen as it was, 239.6 / -8.0 at 325.8. The
   // rail blurs a stop's view with its neighbours': the turn off the stop went
   // left and pulled the aim 4.9 left of the row's 244.5; it goes right now and
-  // pulls it 7.0 right. The 1.8 of lift the old traverse gave the stop over
-  // its row went with it. life.ts (the chimney smoke's drift, the swifts'
-  // orbit) and progress-world.ts (where the done moment's lanterns start) read
-  // the row's own bearing, so they turned 11.9 with it; clouds.ts places this
-  // view's clouds from the old row (its PINNED_VIEWS).
-  K(820, 325.77, 1160, 232.6, -9.3, "walk", "a4", 48),
+  // pulls it 7.0 right, and the rows after it look up, which pulls it 1.3 up.
+  // The 1.8 of lift the old traverse gave the stop over its row went with it.
+  // What was placed from this row keeps the row as it stood (STOP_ROW_PINS,
+  // below): life.ts's chimney smoke and swifts, progress-world.ts's done
+  // moment; clouds.ts keeps its own copy (PINNED_VIEWS).
+  K(820, 325.77, 1160, 232.6, -8.0, "walk", "a4", 48),
   // THE TURN AFTER THE HUT GOES CLOCKWISE (map review, second Loom,
   // 2026-10-16). Lovro, first Loom 7:02 to 7:22: "turn around in a way that
   // shows the path and not the world ... clockwise and not this way into the
@@ -1255,14 +1255,20 @@ const KEYS: readonly Key[] = [
   //   - it backs off the bench's east end over the gorge's edge, turning right
   //     past the falls to the hut, the bench and its lanterns (bearing 300 at
   //     +25 vh), so the bench's wall steps back as it comes into the frame;
-  //   - it turns on through north still low (315 to 365, +30 to +45 vh), the
-  //     one stretch the north wall fills: it faces away from the low sun
-  //     (gorge-sunset, 300 / 6), so it is dark, and the view crosses it at up
-  //     to 3.3 degrees per vh, under the route's 3.4 (v6-route.mjs);
-  //   - it rises 190 past the lit spur east of the bench, looking up it, to
-  //     the "turned" row (+67 vh), faces the Climb's rim, the gully and the
-  //     cache's marker at 35, and glides to the gully, turning left up it as
-  //     before.
+  //   - it turns on through north still low (310 to 360, +25 to +45 vh), the
+  //     stretch the north wall fills: the wall faces away from the low sun
+  //     (gorge-sunset, 300 / 6), so it is dark. The camera looks up 12 to 26
+  //     there, so the wall's skyline, its spruces and the sky hold the top of
+  //     every frame (fix round, second Loom: it looked level, and the wall in
+  //     its own shade filled the frame edge to edge from +30 to +60 vh); the
+  //     view crosses it at up to 3.3 degrees per vh, under the route's 3.4
+  //     (v6-route.mjs), and terrain nearer than 300 fills at most 70% of a
+  //     frame (62% at its darkest, +35 vh);
+  //   - it rises 190 past the lit spur east of the bench in about 17 vh,
+  //     still looking up at the peak and the spur, to the "turned" row (+63
+  //     vh), faces the Climb's rim, the gully and the cache's marker at 35,
+  //     glides 37 vh to the gully and turns left up it (40 degrees) as the
+  //     trail does.
   // What sets the numbers (measured on the rail and on rocks.ts, cover.ts and
   // forest.ts built offline with these rows and the old ones):
   //   - the Sky Island stands at bearing ~310 from here and only the wall
@@ -1275,23 +1281,28 @@ const KEYS: readonly Key[] = [
   //     rock and no tree moves;
   //   - the stop's aim (above); the paces (Q) hold every turn under 3.4
   //     degrees per vh and a4 to the gully's top at 140 vh, as before, so the
-  //     walk from the burst to a5 keeps its 115 of a5's 255.
-  // It costs more per frame than the turn into the valley's haze did: 4.1 to
-  // 5.8 ms from +10 to +90 vh where those frames took 2.6 to 4.9, the ground
+  //     walk from the burst to a5 keeps its 115 of a5's 255. Fix round: the
+  //     rise is quicker ("turned" at 0.5) and the glide to the gully slower
+  //     (its mark at 3.2), so the hut and the bench get 25 vh, the dark
+  //     stretch 21, the rise 17 and the glide 37 (they were 23, 21, 23, 37).
+  // It costs more per frame than the turn into the valley's haze did: 4.0 to
+  // 5.6 ms from +10 to +90 vh where those frames took 2.6 to 4.9, the ground
   // filling the frame (v6-perf-ab's method, the two turns on the same tree;
-  // decisions.md, second Loom). None is over the 6.7 cap.
+  // decisions.md, second Loom; the fix round's looking up took 0.3 to 0.8 off
+  // +40 to +70). None is over the 6.7 cap. v6-perf-ab compares k39.5 at one
+  // camera (its MOVED list): the view there costs 1.35 more than the haze did.
   // The traverse's old middle row stays as copies in rocks.ts HERO_SPOTS and
   // cover.ts NEAR_BAND (band:traverse), so its rocks and grass stay put.
-  M("traverse", Q(2.2, K(858, 352, 1240, 298, 4, "hike", undefined, 58))), // backing off the bench's east end: the hut and the bench on the left
-  Q(1.4, K(955, 405, 1263, 4, -12, "hike", undefined, 62)), // facing north, still low, looking up the wall
-  M("turned", Q(1.4, K(1080, 592, 1262, 35, -2, "hike", undefined, 48))), // over the spur's top: the Climb's rim, the gully and the cache ahead
+  M("traverse", Q(2.5, K(858, 352, 1240, 298, -6, "hike", undefined, 60))), // backing off the bench's east end: the hut and the bench on the left
+  Q(1.4, K(955, 405, 1263, 4, -28, "hike", undefined, 64)), // facing north, still low, looking up the wall to its skyline
+  M("turned", Q(0.5, K(1080, 592, 1262, 35, -7, "hike", undefined, 48))), // over the spur's top: the Climb's rim, the gully and the cache ahead
   // THE GULLY: over the notch heading north, the view swinging left onto
   // the lit shelf and the ridges ahead.
   // (a "hike" row, not "climb": CLIMB_KEYS stays the gully run whose third key
   // is the burst, as clouds.ts and v6-a1-pace.mjs read it.)
   // Second Loom: 20 west and 17 south of where it stood, aimed 38 (was 52), so
   // the glide from "turned" (35) runs into the gully without a turn right first.
-  M("gully", Q(2.2, K(1380, 655, 1225, 38, 3, "hike", undefined, 40))),
+  M("gully", Q(3.2, K(1380, 655, 1225, 38, 3, "hike", undefined, 40))),
   K(1433, 667, 1124, 5, 2, "climb", undefined, 38),
   K(1436, 668, 1092, 2, 0, "climb", undefined, 36),
   // THE BURST (v5's rows, no longer locked since round 1): onto the ridge
@@ -1321,9 +1332,10 @@ const KEYS: readonly Key[] = [
   K(...stepLine(720, 45), STEPS_BEARING + 1, -22, "rise"),
   M("risetop", K(-1709, 1715, -1316, STEPS_BEARING + 4, 0, "rise")),
   // v6, the stargazer's island (bible 1.17): up the one path from the cove.
-  // Round 1 (decision 46): the Gate isle is hidden by the cloud bank north of
-  // the island (dress-sky GATE_BANK, v6-route N9 counts it), not by looking up,
-  // so the island is walked looking at it: the view follows the observatory
+  // Round 1 (decision 46): the Gate isle is hidden by other means than looking
+  // up (a cloud bank north of the island until the second Loom's fix round;
+  // since then it is not drawn until the flight, scene.ts updateGate, v6-route
+  // N9), so the island is walked looking at it: the view follows the observatory
   // as the camera passes ~255 south of it (296 -> 352 -> 46), up 3 to 5. v6 looked
   // up 28 here to hide the arch while the view swung past north.
   M("arrive", K(-2030, 1710, -1305, 352, -5, "sky")),
@@ -1373,7 +1385,7 @@ const KEYS: readonly Key[] = [
   K(GATE.x + 0.616 * 285, 1644, GATE.z + 0.788 * 285, 322, -6.5, "sky", undefined, 42),
 ];
 
-function lookOf(k: Key): [number, number, number] {
+function lookOf(k: Pick<Key, "x" | "y" | "z" | "bearing" | "pitch">): [number, number, number] {
   const b = (k.bearing * Math.PI) / 180;
   const p = (k.pitch * Math.PI) / 180;
   return [
@@ -1393,6 +1405,28 @@ export const TRAIL_KIND: readonly TrailKind[] = KEYS.map((k) => k.kind);
 export const TRAIL_PACE: readonly number[] = KEYS.map((k) => k.pace ?? PACE[k.kind]);
 /** Bearing and pitch at each TRAIL point, as authored (degrees). */
 export const TRAIL_VIEW: ReadonlyArray<{ bearing: number; pitch: number }> = KEYS.map((k) => ({ bearing: k.bearing, pitch: k.pitch }));
+
+/**
+ * A stop's row as the scenery placed from it reads it. Where a stop's row was
+ * re-aimed only so that the stop keeps its frame (the rail blurs a stop's view
+ * with its neighbours'), what was placed from the row keeps the row as it
+ * stood. Map review, second Loom (2026-10-16): the a4 row, re-aimed when the
+ * turn after the Video Ads II hut went clockwise (KEYS). life.ts places the
+ * hut's chimney smoke and the swifts from it and progress-world.ts where Video
+ * Ads II's done moment starts its lanterns, so both stay as they were at
+ * 14716be (clouds.ts keeps its own copy, PINNED_VIEWS). Position, compass
+ * bearing, pitch below the horizon, vertical lens.
+ */
+export const STOP_ROW_PINS: Partial<Record<PlaceId, { x: number; y: number; z: number; bearing: number; pitch: number; fov: number }>> = {
+  a4: { x: 820, y: 324, z: 1160, bearing: 244.5, pitch: -8, fov: 48 },
+};
+
+/** Stop `i`'s row (PLACES order) as its scenery reads it: its STOP_ROW_PINS entry, else its KEYS row; `look` as LOOK has it. */
+export function stopRow(i: number): { x: number; y: number; z: number; bearing: number; pitch: number; fov: number; look: [number, number, number] } {
+  const k = PLACES[i].trail;
+  const r = STOP_ROW_PINS[PLACES[i].id] ?? { x: TRAIL[k][0], y: TRAIL[k][1], z: TRAIL[k][2], bearing: TRAIL_VIEW[k].bearing, pitch: TRAIL_VIEW[k].pitch, fov: TRAIL_FOV[k] };
+  return { ...r, look: lookOf(r) };
+}
 
 /**
  * The named rows of KEYS (M in the table): name -> KEYS index. Tests and

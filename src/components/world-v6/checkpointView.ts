@@ -6,11 +6,21 @@
  *
  * IT SHOWS AT ALL TIMES (Lovro's second Loom, 2026-10-16: "it should be
  * clickable at all times, but the actual button to click on apply for the
- * discount ... should be locked"). The chip, the tag and the marker show for
- * every student and state, and each opens the panel, which says where the
- * student stands. This replaces the 2026-10-14 call (morning_review.md M7),
- * which hid all three when the offer was closed for the student. What they
- * say:
+ * discount ... should be locked"). The tag on the timeline, the marker over
+ * the cache and the phone's row show for every student and state, and each
+ * opens the panel, which says where the student stands. This replaces the
+ * 2026-10-14 call (morning_review.md M7), which hid them when the offer was
+ * closed for the student.
+ *
+ * THE HEADER'S CHIP KEEPS M7's RULE (`header`): it shows only while the offer
+ * is open to the student (locked, ready) or their application is in (in
+ * review, approved). Applied, rejected, the 14 days over, joined before the
+ * new course, no first payment on record: no chip, so a student never carries
+ * a dead offer in the header for good (the fix round of 2026-10-16; Lovro's
+ * words were about the hut and the timeline's dot line, not the header).
+ *
+ * What they say (the chip, the tag's tip, the plaque, the phone's row and
+ * the panel's eyebrow, one word per state):
  *   locked        "11 days left"; the plaque says "30% off" alone (its "11d"
  *                 read as "110" at the plaque's size, and the chip above has
  *                 the days).
@@ -19,9 +29,12 @@
  *   applied       "Yours".
  *   rejected      "Not approved".
  *   expired       "Closed": the 14 days passed with no application.
- *   not eligible  "Closed": joined before the new course, or no first payment
- *                 on record. "Not open yet" when the course has no gate.
- * Closed, rejected and not eligible take the grey look (tag "closed").
+ *   not eligible  "Closed": joined before the new course. "Not open yet" when
+ *                 the course has no gate. "Ask the team" with no first payment
+ *                 on record, in the open (locked) look: it may be a new student
+ *                 whose payment has not reached the app, and the panel asks
+ *                 them to tell the team, so it never reads "Closed".
+ * Closed, rejected and the other not eligible take the grey look (tag "closed").
  */
 import { DISCOUNT_PERCENT, type DiscountState } from "@/lib/world/discount";
 import type { CheckpointLook } from "@/lib/world-v6/checkpoint";
@@ -36,6 +49,8 @@ export type CheckpointTag = "locked" | "ready" | "pending" | "done" | "closed";
 export interface CheckpointView {
   /** The header's chip: "30% off" and where it stands. */
   chip: { lead: string; tail: string; ready: boolean };
+  /** The header shows the chip: the offer is open to the student, or their application is in. */
+  header: boolean;
   /** The marker's plaque: "30% off" and a short state beside it. */
   label: { lead: string; tail: string };
   tag: CheckpointTag;
@@ -80,6 +95,7 @@ export function checkpointView(state: DiscountState, now: number, place: number,
       return {
         // No time left on this clock: the window ends within the minute, so it reads as closed.
         chip: { lead, tail: left ?? "Closed", ready: false },
+        header: true,
         label: { lead, tail: "" },
         tag: "locked",
         look: near ? "near" : "closed",
@@ -91,6 +107,7 @@ export function checkpointView(state: DiscountState, now: number, place: number,
       const left = timeLeft(state.endsAt, now);
       return {
         chip: { lead, tail: left ? `Apply · ${left}` : "Apply", ready: true },
+        header: true,
         label: { lead, tail: "Apply" },
         tag: "ready",
         look: "ready",
@@ -99,9 +116,9 @@ export function checkpointView(state: DiscountState, now: number, place: number,
       };
     }
     case "pending":
-      return noClock(lead, "In review", "pending", "claimed");
+      return noClock(lead, "In review", "pending", "claimed", true);
     case "approved":
-      return noClock(lead, "Approved", "pending", "claimed");
+      return noClock(lead, "Approved", "pending", "claimed", true);
     case "applied":
       return noClock(lead, "Yours", "done", "claimed");
     case "rejected":
@@ -109,11 +126,13 @@ export function checkpointView(state: DiscountState, now: number, place: number,
     case "expired":
       return { ...noClock(lead, "Closed", "closed", "closed"), deadline: shortDate(state.endsAt) };
     default:
+      // No first payment on record: what the panel asks of them, in the open look (above).
+      if (state.reason === "no-payment") return noClock(lead, "Ask the team", "locked", "closed");
       return noClock(lead, state.reason === "no-gate" ? "Not open yet" : "Closed", "closed", "closed");
   }
 }
 
-/** A state with no clock: the chip and the plaque say the same word. */
-function noClock(lead: string, tail: string, tag: CheckpointTag, look: CheckpointLook): CheckpointView {
-  return { chip: { lead, tail, ready: false }, label: { lead, tail }, tag, look, left: null, deadline: null };
+/** A state with no clock: the chip and the plaque say the same word. The header shows it only when `header`. */
+function noClock(lead: string, tail: string, tag: CheckpointTag, look: CheckpointLook, header = false): CheckpointView {
+  return { chip: { lead, tail, ready: false }, header, label: { lead, tail }, tag, look, left: null, deadline: null };
 }

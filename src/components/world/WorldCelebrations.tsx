@@ -274,5 +274,6 @@ export function WorldCelebrations({ approvedRequestId }: { approvedRequestId: st
     return () => window.removeEventListener("et:test:discount-approved", onApproved);
   }, []);
 
-  return <DiscountApprovedCelebration show={up} onDismiss={() => setApprovalShown(null)} />;
+  // The map's words: approved, the team is putting it on (the dashboard's say it is applied).
+  return <DiscountApprovedCelebration show={up} onDismiss={() => setApprovalShown(null)} where="map" />;
 }

@@ -150,6 +150,14 @@ gen('../src/app/api/student/refresh-watch-sync/route.ts', './_gen/refresh-watch-
   ['from "../_lib/watch-sync"', 'from "./watch-sync.ts"'],
   ...toStub('next/server', '@supabase/supabase-js', '../_lib/update-streak', '@/lib/achievements'),
 ])
+// The Whop read behind the backfill (fetchCompletedLessonsAsAdmin), which
+// whop-backfill.test.mjs runs on a stand-in fetch (2026-10-17: it refuses rows
+// for anyone else). Its other import is TYPES, pointed at a file that does not
+// exist as the webhook's is below.
+gen('../src/lib/whop.ts', './_gen/whop.ts', [
+  ['from "./constants"', 'from "./constants.ts"'],
+  ['from "@/types/whop"', 'from "./types-erased.ts"'],
+])
 // The webhook runs the real chain after a lesson (complete-lesson.ts, above).
 gen('../src/app/api/webhooks/whop/route.ts', './_gen/whop-webhook-route.ts', [
   ['from "@/lib/complete-lesson"', 'from "./complete-lesson.ts"'],
@@ -191,13 +199,23 @@ for (const [route, out] of [['request', 'discount-request-route'], ['submit-feed
     ...toStub('next/server', '@supabase/supabase-js', '@/lib/csm-events', '@/lib/catalog-tables'),
   ])
 }
+// The approve button (POST /api/discounts/approve), for
+// discount-september.test.mjs (2026-10-17): the team's login and Whop's promo
+// code go to stub-server.ts; the rule and the switch's date are the real
+// copies above.
+gen('../src/app/api/discounts/approve/route.ts', './_gen/discount-approve-route.ts', [
+  ['from "@/lib/constants"', 'from "./constants.ts"'],
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
+  ...toStub('next/server', '@/lib/admin-auth', '@/lib/whop', '@/lib/catalog-tables'),
+])
 
 // Every other route that writes or shows the streak (T-079, streak.test.mjs):
 // a finished video (lesson-watched, with the real chain after it), the old
 // course's task box (toggle-lesson) and quiz (submit-quiz), the app's data
 // read, and the login. quiz.ts imports only a TYPE, from an @/ path, pointed
 // at a file that does not exist as above. pkce.ts imports only Node's crypto.
-// The login's copy leaves out its `//` comment lines: two of them name a
+// The login's copy leaves out its `//` comment lines: two of them once named a
 // student and a customer's email, and this repository is public. Each of
 // these routes also asks the closed doors' gate (T-078), pointed at its copy.
 gen('../src/app/api/student/lesson-watched/route.ts', './_gen/lesson-watched-route.ts', [

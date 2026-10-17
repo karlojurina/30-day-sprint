@@ -31,7 +31,7 @@ import { areaShare, type WorldProgress } from "@/lib/world-v6/progress";
 import { SKY_MARKS } from "@/lib/world-v6/layout";
 import { CHECKPOINT, type CheckpointLook } from "@/lib/world-v6/checkpoint";
 import { BOUNTY } from "@/lib/world-v6/bounty";
-import { DISCOUNT_PERCENT, DISCOUNT_WINDOW_DAYS, DISCOUNT_LAUNCH_DATE } from "@/lib/world/discount";
+import { DISCOUNT_PERCENT, DISCOUNT_WINDOW_DAYS, DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
 import { checkpointView, shortDate, type CheckpointView } from "./checkpointView";
 import { CARD_HINTS, anchorCard, placeCard, placePanel, type Box, type Placement } from "./cardPlace";
 import { DEFAULT_TUNING, clearTuning, loadTuning, sameTuning, sanitize, saveTuning, type Tuning } from "./tuning";
@@ -4010,8 +4010,11 @@ function BountyBody({
   );
 }
 
-// The cutoff is midnight in Croatia (discount.ts), so the day is read there: in UTC it would print 8 October.
-const LAUNCH_DAY = new Date(DISCOUNT_LAUNCH_DATE).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Zagreb" });
+// The earliest first payment that can earn the 30% (discount.ts DISCOUNT_ELIGIBLE_FROM, T-080): midnight in
+// Croatia, so the day is read there, "9 September 2026" and "9 September". In UTC it would print 8 September.
+// No-break spaces keep the date on one line (on a 390 px phone it split as "9 / September 2026").
+const ELIGIBLE_DAY = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Zagreb" }).replace(/ /g, " ");
+const ELIGIBLE_DAY_NO_YEAR = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "Europe/Zagreb" }).replace(/ /g, " ");
 
 /**
  * The discount checkpoint's panel (2026-10-14): the offer, where the student
@@ -4027,11 +4030,19 @@ const LAUNCH_DAY = new Date(DISCOUNT_LAUNCH_DATE).toLocaleDateString("en-GB", { 
  * shown (the team attaches it on Whop).
  *
  * Since Lovro's second Loom (2026-10-16) it opens for every student and state.
- * Where the offer is closed for the student (the 14 days over, joined before
- * the new course) it says so in one plain line, and the eyebrow says
- * "Closed"; with no first payment on record it asks them to tell the team,
- * and the eyebrow says "Ask the team". Apply shows only while it can still be
- * earned (locked) or is on (ready), never as a dead button.
+ * Where the offer is closed for the student (the deadline passed, a first
+ * payment before 9 September) it says so in one plain line, and the eyebrow
+ * says "Closed"; with no first payment on record it asks them to tell the
+ * team, and the eyebrow says "Ask the team". Apply shows only while it can
+ * still be earned (locked) or is on (ready), never as a dead button.
+ *
+ * T-080 (Lovro, 2026-10-16): a first payment from 9 September until the
+ * launch shares one deadline, the end of 23 October in Croatia (st.window
+ * "shared"), and the panel says so while locked and once it has passed. An
+ * application made on the old dashboard (st.madeBeforeLaunch) gets its own
+ * words: "within 48 hours" and "on your next renewal" may no longer hold.
+ * Every deadline shows its date and hour in the student's own time zone
+ * (checkpointView.ts deadlineAt).
  */
 function CheckpointBody({
   discount,
@@ -4108,6 +4119,7 @@ function CheckpointBody({
           {cv.left && <span className={s.cpLeft}>{cv.left}</span>}
         </p>
         <p className={s.desc}>
+          {st.window === "shared" && "Everyone who joined before the new course opened has this same deadline. "}
           Watch all {st.lessonsTotal} videos through {after}, then apply here.
         </p>
         <div className={s.cpBar} aria-hidden="true">
@@ -4143,7 +4155,12 @@ function CheckpointBody({
       </>
     );
   } else if (st.kind === "pending") {
-    body = (
+    // An application from the old dashboard: one line, with its date in it (so no "Sent" line above).
+    body = st.madeBeforeLaunch ? (
+      <p className={s.desc}>
+        You applied on {shortDate(st.at)}, before the new course opened. The team still has to decide it. Ask in Discord if you haven&apos;t heard back.
+      </p>
+    ) : (
       <>
         <p className={s.cpWhen}>
           <span>
@@ -4156,13 +4173,21 @@ function CheckpointBody({
       </>
     );
   } else if (st.kind === "approved") {
-    body = (
+    body = st.madeBeforeLaunch ? (
+      <p className={s.desc}>
+        Your {DISCOUNT_PERCENT}% was approved before the new course opened. If it hasn&apos;t shown up on a payment yet, ask in Discord.
+      </p>
+    ) : (
       <p className={s.desc}>
         Approved. The team is putting it on your Whop subscription, and you&apos;ll see it on your next renewal. Nothing else to do.
       </p>
     );
   } else if (st.kind === "applied") {
-    body = <p className={s.desc}>It&apos;s on your Whop subscription. You&apos;ll see {DISCOUNT_PERCENT}% off on your next renewal.</p>;
+    body = st.madeBeforeLaunch ? (
+      <p className={s.desc}>You got your {DISCOUNT_PERCENT}% before the new course opened. It&apos;s one per student.</p>
+    ) : (
+      <p className={s.desc}>It&apos;s on your Whop subscription. You&apos;ll see {DISCOUNT_PERCENT}% off on your next renewal.</p>
+    );
   } else if (st.kind === "rejected") {
     body = (
       <>
@@ -4174,16 +4199,18 @@ function CheckpointBody({
   } else if (st.kind === "expired") {
     body = (
       <p className={s.desc}>
-        This offer closed on {shortDate(st.endsAt)}. It runs for your first {DISCOUNT_WINDOW_DAYS} days.
+        {st.window === "shared"
+          ? `This offer closed on ${cv.deadline}. That was the deadline for everyone who joined before the new course opened.`
+          : `This offer closed on ${cv.deadline}. It runs for your first ${DISCOUNT_WINDOW_DAYS} days.`}
       </p>
     );
   } else if (st.kind === "not-eligible") {
     body = (
       <p className={s.desc}>
         {st.reason === "before-launch"
-          ? `This offer is for students who joined from ${LAUNCH_DAY}, when the new course opened. You joined before that, so it's closed for you.`
+          ? `This offer is for students who joined from ${ELIGIBLE_DAY}. You joined before that, so it's closed for you.`
           : st.reason === "no-payment"
-            ? "We can't see your first payment yet. If you joined in the last two weeks, tell the team and they'll sort it out."
+            ? `We can't see your first payment yet. If you joined on or after ${ELIGIBLE_DAY_NO_YEAR}, tell the team and they'll sort it out.`
             : "This offer isn't open yet."}
       </p>
     );

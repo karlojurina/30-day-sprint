@@ -76,7 +76,9 @@ import { AnyLessonFinishesContext } from "@/components/world/useMapModel";
  *   ?discount=<preset> the early-finish discount's states, in memory
  *                      (fixtureDiscount.tsx: locked, ready, pending, approved,
  *                      applied, rejected, expired, before-launch, september,
- *                      september-expired, september-old-course, no-payment);
+ *                      september-expired, september-old-course,
+ *                      september-old-course-pending,
+ *                      september-old-course-approved, no-payment);
  *                      ready and the four with an application add the videos
  *                      the offer asks for to the ?p= preset. Without it the
  *                      pretend student paid 3 days ago, as locked (2026-10-16),

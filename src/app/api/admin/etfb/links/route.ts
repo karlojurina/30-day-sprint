@@ -8,7 +8,7 @@
  * that link and calls Whop ZERO times. Minting a second link splits an owner's
  * team across two links, and a later revocation then silently misses half of
  * them — a failure that has already happened by hand twice in production
- * (liaoant18888, michael51ce). The partial unique index
+ * (two owners). The partial unique index
  * etfb_team_links_one_active_per_owner is the database-level backstop.
  *
  * ORDER OF OPERATIONS. Whop first, then our row. A crash between the two leaves

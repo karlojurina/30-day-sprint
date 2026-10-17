@@ -258,8 +258,8 @@ export async function POST(request: NextRequest) {
     case "payment.succeeded":
     case "payment_succeeded": {
       // v75.10 — was an UPDATE only. If a student paid before our
-      // webhook was wired up (legacy customers like Michael
-      // Buratynskyi who joined Dec 2025), their original
+      // webhook was wired up (legacy customers, like one who joined
+      // in Dec 2025), their original
       // membership.activated event was never received, so no row
       // existed — and every subsequent renewal `payment.succeeded`
       // silent-no-op'd against a missing row. UPSERT now so any

@@ -34,7 +34,9 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *                            videos as ?p= has them. This student's clock is
  *                            held at 19 October, 10:00 in Croatia (the morning
  *                            the app reopens), so on any day the panel reads
- *                            "Apply by Fri 23 Oct" and "5 days left"
+ *                            "5 days left" and, in Croatia, "Apply by Fri 23
+ *                            Oct, 23:59" (the hour is the browser's own time
+ *                            zone: 17:59 in New York, Sat 24 Oct in Manila)
  *   ?discount=september-expired  the same student on 24 October, 10:00 in
  *                            Croatia: the shared deadline has passed
  *   ?discount=september-old-course  first payment on 2026-09-15, and the 30%
@@ -42,6 +44,11 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *                            25 September, applied): the map shows it as
  *                            theirs, with no Apply (discount.ts
  *                            requestCounts); videos as ?p= has them
+ *   ?discount=september-old-course-pending, september-old-course-approved
+ *                            the same student, that request still in review,
+ *                            or approved: the map shows it with no Apply, in
+ *                            words for an application made before the new
+ *                            course opened (madeBeforeLaunch)
  *   ?discount=no-payment     no first payment on record
  *   no ?discount             as locked: a first payment 3 days ago, videos as
  *                            ?p= has them, so the 30% shows with no parameter
@@ -82,10 +89,13 @@ export type DiscountPreset =
   | "september"
   | "september-expired"
   | "september-old-course"
+  | "september-old-course-pending"
+  | "september-old-course-approved"
   | "no-payment";
 const PRESETS: readonly DiscountPreset[] = [
   "locked", "ready", "pending", "approved", "applied", "rejected", "expired",
-  "before-launch", "september", "september-expired", "september-old-course", "no-payment",
+  "before-launch", "september", "september-expired", "september-old-course",
+  "september-old-course-pending", "september-old-course-approved", "no-payment",
 ];
 /** The presets with an application in, and its status. Their student has watched every video the offer asks for. */
 const APPLIED: Partial<Record<DiscountPreset, DiscountRequestRow["status"]>> = {
@@ -112,6 +122,12 @@ const SEPTEMBER_OLD_REQUEST: DiscountRequestRow = {
   id: "fixture-old-course-request",
   status: "applied",
   created_at: "2026-09-25T10:00:00.000Z",
+};
+/** The presets with that old request, and its status. */
+const OLD_COURSE: Partial<Record<DiscountPreset, DiscountRequestRow["status"]>> = {
+  "september-old-course": "applied",
+  "september-old-course-pending": "pending",
+  "september-old-course-approved": "approved",
 };
 
 /** The six questions v29 seeded, as discount_feedback_questions rows. */
@@ -233,6 +249,8 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
       case "september":
       case "september-expired":
       case "september-old-course":
+      case "september-old-course-pending":
+      case "september-old-course-approved":
         return SEPTEMBER_PAID;
       case "no-payment":
         return null;
@@ -245,12 +263,12 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
   const requests = useMemo<DiscountRequestRow[]>(() => {
     const at = new Date(boot - 2 * HOUR_MS).toISOString();
     const status = preset === null ? undefined : APPLIED[preset];
-    const base: DiscountRequestRow[] =
-      preset === "september-old-course"
-        ? [SEPTEMBER_OLD_REQUEST]
-        : status
-          ? [{ id: "fixture-request", status, created_at: at, rejection_reason: status === "rejected" ? FIXTURE_REJECTION : null }]
-          : [];
+    const old = preset === null ? undefined : OLD_COURSE[preset];
+    const base: DiscountRequestRow[] = old
+      ? [{ ...SEPTEMBER_OLD_REQUEST, status: old }]
+      : status
+        ? [{ id: "fixture-request", status, created_at: at, rejection_reason: status === "rejected" ? FIXTURE_REJECTION : null }]
+        : [];
     return [...base, ...sent];
   }, [preset, boot, sent]);
 

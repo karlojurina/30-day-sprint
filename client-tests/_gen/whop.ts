@@ -1,0 +1,454 @@
+import { createHmac } from "crypto";
+import {
+  WHOP_TOKEN_URL,
+  WHOP_USERINFO_URL,
+  WHOP_API_BASE,
+} from "./constants.ts";
+import type {
+  WhopTokenResponse,
+  WhopUserInfo,
+  WhopPromoCodeRequest,
+  WhopPromoCodeResponse,
+  WhopLessonInteraction,
+  WhopLessonInteractionsResponse,
+} from "./types-erased.ts";
+
+/**
+ * Exchange authorization code for tokens using PKCE
+ */
+export async function exchangeCodeForTokens(
+  code: string,
+  codeVerifier: string,
+  redirectUri: string
+): Promise<WhopTokenResponse> {
+  const res = await fetch(WHOP_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+      client_id: process.env.WHOP_CLIENT_ID!,
+      code_verifier: codeVerifier,
+    }),
+  });
+
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Whop token exchange failed: ${error}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Fetch user profile from Whop using access token
+ */
+export async function fetchWhopUserInfo(
+  accessToken: string
+): Promise<WhopUserInfo> {
+  const res = await fetch(WHOP_USERINFO_URL, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  if (!res.ok) {
+    throw new Error(`Whop userinfo failed: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Check if the user has access to any of the IDs configured in
+ * WHOP_PRODUCT_ID. The env var accepts one or more comma-separated
+ * IDs — each can be a product ID (prod_…) OR a plan ID (plan_…).
+ * Whop's /me/has_access endpoint resolves both.
+ *
+ * Use cases:
+ *   single product:        WHOP_PRODUCT_ID=prod_XXX
+ *   multiple products:     WHOP_PRODUCT_ID=prod_A,prod_B
+ *   specific plans only:   WHOP_PRODUCT_ID=plan_A,plan_B
+ *   mix:                   WHOP_PRODUCT_ID=prod_A,plan_B
+ *
+ * Returns true if ANY id matches.
+ */
+export async function checkActiveMembership(
+  accessToken: string
+): Promise<boolean> {
+  const result = await checkActiveMembershipDiagnostic(accessToken);
+  return result.hasAccess;
+}
+
+/**
+ * Diagnostic variant — returns the response from each id Whop was checked
+ * against, so we can surface meaningful errors to the login page when a
+ * membership check fails. Public so the callback can call it directly
+ * when it wants the extra detail.
+ */
+export interface MembershipCheckDiagnostic {
+  hasAccess: boolean;
+  configured: string[];
+  memberships: Array<{
+    id?: string;
+    status?: string;
+    valid?: boolean;
+    product_id?: string;
+    plan_id?: string;
+  }>;
+  fetchStatus: number | null;
+  fetchError: string | null;
+}
+
+/**
+ * Check whether the user has an active membership matching any of the
+ * IDs configured in WHOP_PRODUCT_ID.
+ *
+ * Instead of the (id-format-fussy) /me/has_access endpoint, we list the
+ * user's memberships via /me/memberships and match by product_id OR
+ * plan_id. Whop returns every membership with both IDs attached, so
+ * the env var can hold a mix of prod_ and plan_ values and we'll match
+ * whichever is set.
+ *
+ * Returns rich diagnostic so the caller can surface useful errors when
+ * a check fails — including the actual membership IDs Whop reported,
+ * which is the quickest way to discover what the right env value is.
+ */
+export async function checkActiveMembershipDiagnostic(
+  accessToken: string
+): Promise<MembershipCheckDiagnostic> {
+  const raw = process.env.WHOP_PRODUCT_ID ?? "";
+  const ids = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const res = await fetch(`${WHOP_API_BASE}/me/memberships?first=20`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  let memberships: MembershipCheckDiagnostic["memberships"] = [];
+  let fetchError: string | null = null;
+
+  if (!res.ok) {
+    fetchError = `HTTP ${res.status}`;
+    return {
+      hasAccess: false,
+      configured: ids,
+      memberships,
+      fetchStatus: res.status,
+      fetchError,
+    };
+  }
+
+  try {
+    const json = (await res.json()) as {
+      data?: Array<{
+        id?: string;
+        status?: string;
+        valid?: boolean;
+        product_id?: string;
+        plan_id?: string;
+      }>;
+    };
+    memberships = (json.data ?? []).map((m) => ({
+      id: m.id,
+      status: m.status,
+      valid: m.valid,
+      product_id: m.product_id,
+      plan_id: m.plan_id,
+    }));
+  } catch (err) {
+    fetchError = err instanceof Error ? err.message : String(err);
+  }
+
+  const hasAccess = memberships.some((m) => {
+    const isActive = m.valid === true || m.status === "active";
+    if (!isActive) return false;
+    if (ids.length === 0) return false;
+    return (
+      (m.product_id && ids.includes(m.product_id)) ||
+      (m.plan_id && ids.includes(m.plan_id))
+    );
+  });
+
+  return {
+    hasAccess,
+    configured: ids,
+    memberships,
+    fetchStatus: res.status,
+    fetchError,
+  };
+}
+
+/**
+ * Fetch the user's Whop membership(s) for our product. We want the
+ * membership's created_at / joined_at so the discount countdown can
+ * be based on their ACTUAL Whop join date, not their first login here.
+ *
+ * Returns the earliest membership's joined_at as an ISO string, or null
+ * if the API call fails. Silent failure — the caller should fall back
+ * to the current timestamp.
+ */
+export async function fetchWhopMembershipJoinDate(
+  accessToken: string
+): Promise<string | null> {
+  try {
+    // WHOP_PRODUCT_ID can be comma-separated (mix of plan + product IDs).
+    // Whop's memberships endpoint filters by product_id only — passing a
+    // plan_id there returns nothing. So: if all configured IDs look like
+    // product IDs we filter server-side; otherwise we fetch all the user's
+    // memberships and filter client-side by matching plan_id OR product_id.
+    const raw = process.env.WHOP_PRODUCT_ID ?? "";
+    const allIds = raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const productIds = allIds.filter((id) => id.startsWith("prod_"));
+    const planIds = allIds.filter((id) => id.startsWith("plan_"));
+    const allLookProductLike = allIds.length > 0 && productIds.length === allIds.length;
+
+    const params = new URLSearchParams({ first: "10" });
+    if (allLookProductLike && productIds.length === 1) {
+      params.set("product_id", productIds[0]);
+    }
+
+    const res = await fetch(
+      `${WHOP_API_BASE}/me/memberships?${params}`,
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    if (!res.ok) return null;
+
+    const json = await res.json();
+    const list: Array<{
+      created_at?: string | number;
+      joined_at?: string | number;
+      product_id?: string;
+      plan_id?: string;
+    }> = json?.data ?? [];
+    if (list.length === 0) return null;
+
+    // Filter to memberships matching one of our configured IDs (plan or product).
+    // If nothing matches, fall back to the earliest of all (safer than nothing).
+    const matching =
+      allIds.length > 0
+        ? list.filter(
+            (m) =>
+              (m.product_id && productIds.includes(m.product_id)) ||
+              (m.plan_id && planIds.includes(m.plan_id))
+          )
+        : list;
+    const pool = matching.length > 0 ? matching : list;
+
+    // Find earliest joined_at / created_at
+    const times = pool
+      .map((m) => {
+        const raw = m.joined_at ?? m.created_at;
+        if (raw == null) return null;
+        // Whop sometimes returns UNIX seconds as a number
+        if (typeof raw === "number") return new Date(raw * 1000).toISOString();
+        return raw;
+      })
+      .filter((t): t is string => typeof t === "string");
+    if (times.length === 0) return null;
+    times.sort();
+    return times[0];
+  } catch (err) {
+    console.error("fetchWhopMembershipJoinDate failed:", err);
+    return null;
+  }
+}
+
+/**
+ * Look up a Whop member's Discord user ID via the admin API.
+ *
+ * Hits /api/v2/members/{whopUserId} with WHOP_API_KEY (needs the
+ * "Read Members" scope). Returns the Discord snowflake string from
+ * social_accounts where service === "discord", or null if Discord
+ * isn't connected / lookup fails.
+ *
+ * Used by the auth callback to populate students.discord_user_id at
+ * signup time, and by the backfill route for existing students.
+ */
+export async function fetchWhopDiscordId(
+  whopUserId: string
+): Promise<string | null> {
+  const apiKey = process.env.WHOP_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const res = await fetch(
+      `https://api.whop.com/api/v2/members/${whopUserId}`,
+      { headers: { Authorization: `Bearer ${apiKey}` } }
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      social_accounts?: Array<{ service?: string; id?: string }>;
+    };
+    const discord = data.social_accounts?.find(
+      (a) => a.service === "discord"
+    );
+    return discord?.id ?? null;
+  } catch (err) {
+    console.error("fetchWhopDiscordId failed:", err);
+    return null;
+  }
+}
+
+/**
+ * Generate a deterministic password for a Whop user
+ * Used to bridge Whop OAuth to Supabase auth
+ */
+export function generateStudentPassword(whopUserId: string): string {
+  return createHmac("sha256", process.env.STUDENT_AUTH_SECRET!)
+    .update(whopUserId)
+    .digest("hex");
+}
+
+/**
+ * Refresh a Whop access token using a stored refresh_token. Used by the
+ * watch-sync endpoint to re-poll lesson progress without forcing the student
+ * to log back in.
+ */
+export async function refreshWhopTokens(
+  refreshToken: string
+): Promise<WhopTokenResponse> {
+  const res = await fetch(WHOP_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: process.env.WHOP_CLIENT_ID!,
+    }),
+  });
+
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Whop token refresh failed: ${error}`);
+  }
+
+  return res.json();
+}
+
+/**
+ * Fetch all completed course-lesson interactions for a Whop user — using
+ * the app's admin API key (`WHOP_API_KEY`).
+ *
+ * The 30 Day Sprint app's agent user has the
+ * course_analytics:read / course_lesson_interaction:read / courses:read
+ * scopes granted (Whop dashboard → app → Permissions). With those
+ * scopes, the admin key bypasses the "you can only access your own
+ * course lesson interactions" 400 error that student OAuth tokens hit.
+ *
+ * This is the path used for backfilling historical completions — Whop
+ * webhooks only fire for events going forward, so anything a student
+ * watched before our webhook was wired up would otherwise be invisible.
+ *
+ * Things we previously learned DON'T work and which this replaces:
+ * - Student OAuth token + user_id filter → 400 ("only your own…")
+ * - /me/course_lesson_interactions → 404
+ * - Dropping user_id → 400
+ */
+export async function fetchCompletedLessonsAsAdmin(
+  whopUserId: string
+): Promise<{
+  interactions: WhopLessonInteraction[];
+  rawCount: number;
+  completedCount: number;
+}> {
+  const apiKey = process.env.WHOP_API_KEY;
+  const courseId = process.env.WHOP_COURSE_ID;
+  if (!apiKey) {
+    throw new Error(
+      "WHOP_API_KEY env var not set — needed to query course_lesson_interactions as admin"
+    );
+  }
+  if (!courseId) {
+    throw new Error(
+      "WHOP_COURSE_ID env var not set — needed to query course_lesson_interactions"
+    );
+  }
+
+  // Fetch ALL interactions for this user+course (no `completed` filter on
+  // the request — Whop's filter has been observed to silently drop rows).
+  // We filter client-side after.
+  const allRaw: WhopLessonInteraction[] = [];
+  let cursor: string | undefined;
+  let more = false;
+  for (let page = 0; page < 5; page++) {
+    const params = new URLSearchParams({
+      course_id: courseId,
+      user_id: whopUserId,
+      first: "100",
+    });
+    if (cursor) params.set("after", cursor);
+
+    const res = await fetch(
+      `${WHOP_API_BASE}/course_lesson_interactions?${params}`,
+      {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      }
+    );
+
+    if (!res.ok) {
+      const error = await res.text();
+      throw new Error(
+        `Whop lesson interactions fetch failed (${res.status}) [user_id=${whopUserId}] [course_id=${courseId}]: ${error}`
+      );
+    }
+
+    const data = (await res.json()) as WhopLessonInteractionsResponse;
+    allRaw.push(...(data.data ?? []));
+    more = Boolean(data.page_info?.has_next_page);
+    if (!more) break;
+    cursor = data.page_info?.end_cursor;
+    if (!cursor) break;
+  }
+
+  // The user_id filter, checked (the release review, 17 October): a row for
+  // anyone else, or more pages than one student's interactions fill (the new
+  // course has 141 lessons), means Whop ignored it, and the backfill would
+  // mark other students' lessons as this one's. Throwing writes nothing: the
+  // backfill's catch puts the sentence on the student's sync row. The sibling
+  // reads in whop-members.ts check their user the same way.
+  if (allRaw.some((i) => i.user?.id && i.user.id !== whopUserId)) {
+    throw new Error(`Whop user_id filter ignored for ${whopUserId}, refusing to write`);
+  }
+  if (more && cursor) {
+    throw new Error(
+      `Whop has more than 5 pages of lesson interactions for ${whopUserId}, so its user_id filter looks ignored, refusing to write`
+    );
+  }
+
+  const completed = allRaw.filter((i) => i.completed === true);
+  return {
+    interactions: completed,
+    rawCount: allRaw.length,
+    completedCount: completed.length,
+  };
+}
+
+/**
+ * Create a promo code on Whop
+ */
+export async function createWhopPromoCode(
+  params: Omit<WhopPromoCodeRequest, "company_id">
+): Promise<WhopPromoCodeResponse> {
+  const res = await fetch(`${WHOP_API_BASE}/promo_codes`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.WHOP_API_KEY!}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      ...params,
+      company_id: process.env.WHOP_COMPANY_ID!,
+    }),
+  });
+
+  if (!res.ok) {
+    const error = await res.text();
+    throw new Error(`Whop promo code creation failed: ${error}`);
+  }
+
+  return res.json();
+}

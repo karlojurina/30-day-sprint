@@ -2,14 +2,14 @@
  "version": 1,
  "width": 1920,
  "height": 1080,
- "made": "2026-10-16T19:38:20.744Z",
+ "made": "2026-10-17T05:19:10.099Z",
  "quality": 0.8,
  "posters": [
   {
    "id": "k0",
    "stop": -1,
    "file": "k0.webp",
-   "bytes": 109142,
+   "bytes": 108840,
    "markers": [
     {
      "id": "a1",
@@ -87,7 +87,7 @@
    "id": "a1",
    "stop": 0,
    "file": "a1.webp",
-   "bytes": 163546,
+   "bytes": 163392,
    "markers": [
     {
      "id": "a1",
@@ -165,7 +165,7 @@
    "id": "a2",
    "stop": 1,
    "file": "a2.webp",
-   "bytes": 164574,
+   "bytes": 164824,
    "markers": [
     {
      "id": "a1",
@@ -243,7 +243,7 @@
    "id": "a3",
    "stop": 2,
    "file": "a3.webp",
-   "bytes": 93792,
+   "bytes": 93868,
    "markers": [
     {
      "id": "a1",
@@ -321,7 +321,7 @@
    "id": "a4",
    "stop": 3,
    "file": "a4.webp",
-   "bytes": 74124,
+   "bytes": 74286,
    "markers": [
     {
      "id": "a1",
@@ -399,7 +399,7 @@
    "id": "a5",
    "stop": 4,
    "file": "a5.webp",
-   "bytes": 78754,
+   "bytes": 78838,
    "markers": [
     {
      "id": "a1",
@@ -477,7 +477,7 @@
    "id": "a6",
    "stop": 5,
    "file": "a6.webp",
-   "bytes": 161208,
+   "bytes": 161106,
    "markers": [
     {
      "id": "a1",
@@ -555,7 +555,7 @@
    "id": "a7",
    "stop": 6,
    "file": "a7.webp",
-   "bytes": 58452,
+   "bytes": 58314,
    "markers": [
     {
      "id": "a1",
@@ -633,7 +633,7 @@
    "id": "a8",
    "stop": 7,
    "file": "a8.webp",
-   "bytes": 85484,
+   "bytes": 85458,
    "markers": [
     {
      "id": "a1",

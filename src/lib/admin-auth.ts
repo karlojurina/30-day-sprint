@@ -112,7 +112,7 @@ export async function requireTeam(
  * together.
  */
 export const STATS_ALLOWED_USER_IDS: readonly string[] = [
-  "2ba35d07-fdf3-41ee-87c2-4fa2e7711dfb", // jurinakarlo2@gmail.com
+  "2ba35d07-fdf3-41ee-87c2-4fa2e7711dfb", // Karlo
 ];
 
 export function isStatsOwner(id: string | null | undefined): boolean {

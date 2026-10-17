@@ -16,6 +16,8 @@ import { syncWatchProgress } from './_gen/watch-sync.ts'
 import { POST as visit } from './_gen/refresh-watch-sync-route.ts'
 import { FakeDb, useDb, setWhop, steps } from './_gen/stub-server.ts'
 import { whopNoneFinishedNote, isWhopNoneFinishedNote } from './_gen/constants.ts'
+// The real Whop read, run on a stand-in fetch in the section that says so.
+import { fetchCompletedLessonsAsAdmin as whopRead } from './_gen/whop.ts'
 
 let pass = 0
 const fails = []
@@ -209,6 +211,84 @@ console.log('\n=== The visit: the streak and "last active" move only when someth
   body = await r.json()
   ok(r.status === 500 && body.error.includes('connection reset') && stepNames().length === 0,
      'a failed lessons read answers 500 with the reason, and nothing moves (it used to answer "ok, 0 matched")', show({ status: r.status, body }))
+}
+
+console.log('\n=== Whop answering with other students\' lessons: nothing is written (2026-10-17) ===')
+{
+  // The real read (whop.ts, fetchCompletedLessonsAsAdmin) on a stand-in fetch
+  // that answers course_lesson_interactions in pages, as Whop's v1 API does:
+  // `data`, and `page_info` with `has_next_page` and `end_cursor`. The key and
+  // the course id are made up. Whop has always honoured the user_id filter on
+  // the old course; these are the answers it would give if it ignored it.
+  process.env.WHOP_API_KEY = 'test-key-not-real'
+  process.env.WHOP_COURSE_ID = 'cour_test'
+  const realFetch = globalThis.fetch
+  const asked = []
+  /** Whop answers with these pages in order; `endless` says there are more after every one. */
+  const pagesOnWhop = (pages, { endless = false } = {}) => {
+    globalThis.fetch = async (url) => {
+      asked.push(String(url))
+      const after = new URL(String(url)).searchParams.get('after')
+      const page = after ? Number(after.slice(1)) : 0
+      const more = endless || page < pages.length - 1
+      return new Response(JSON.stringify({
+        data: pages[page] ?? [],
+        page_info: { has_next_page: more, end_cursor: more ? `p${page + 1}` : null },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+  }
+  const row = (lessonId, userId, completed = true) => ({
+    id: `int_${lessonId}_${userId}`, completed, created_at: '2026-10-15T10:00:00.000Z',
+    lesson: { id: lessonId, title: lessonId }, user: { id: userId },
+  })
+  const IGNORED = `Whop user_id filter ignored for ${WHOP_USER}, refusing to write`
+  const req = () => new Request('http://app/api/student/refresh-watch-sync', { method: 'POST', headers: { authorization: 'Bearer tok-1' } })
+  try {
+    pagesOnWhop([[row('lesn_01', WHOP_USER), row('lesn_02', WHOP_USER, false)]])
+    const own = await whopRead(WHOP_USER)
+    ok(own.rawCount === 2 && own.completedCount === 1 && own.interactions[0]?.lesson.id === 'lesn_01',
+       'control: the student\'s own rows, one finished: 2 read, 1 kept', show({ raw: own.rawCount, kept: own.completedCount }))
+    const q = new URL(asked.at(-1)).searchParams
+    ok(q.get('user_id') === WHOP_USER && q.get('course_id') === 'cour_test', 'asked for this student, on the course named')
+
+    pagesOnWhop([[{ ...row('lesn_01', WHOP_USER), user: undefined }]])
+    ok((await whopRead(WHOP_USER)).completedCount === 1, 'a row with no user on it: kept, as before (nothing says whose it is)')
+
+    pagesOnWhop([[row('lesn_01', WHOP_USER), row('lesn_02', 'user_2')]])
+    const [other] = await quietly(() => whopRead(WHOP_USER))
+    ok(other instanceof Error && other.message === IGNORED,
+       'one row for another student: the read throws (it used to hand both rows on as this student\'s)', other instanceof Error ? other.message : show(other))
+
+    pagesOnWhop([[row('lesn_01', WHOP_USER)], [row('lesn_02', WHOP_USER)], [row('lesn_03', WHOP_USER)], [row('lesn_04', WHOP_USER)], [row('lesn_05', WHOP_USER)]])
+    ok((await whopRead(WHOP_USER)).rawCount === 5, 'five pages, the fifth the last: all 5 read, no refusal')
+    pagesOnWhop([[row('lesn_01', WHOP_USER)]], { endless: true })
+    const before = asked.length
+    const [cap] = await quietly(() => whopRead(WHOP_USER))
+    ok(cap instanceof Error && cap.message.includes('more than 5 pages') && cap.message.endsWith('refusing to write') && asked.length - before === 5,
+       'Whop still says there is more after 5 pages: the read throws (it used to stop there quietly and keep what it had read)', cap instanceof Error ? cap.message : show(cap))
+
+    // Through the visit, as a student's app runs it: the real read behind the backfill.
+    const db = freshDb()
+    setWhop((id) => whopRead(id))
+    pagesOnWhop([[row('lesn_01', WHOP_USER), row('lesn_02', 'user_2'), row('lesn_03', 'user_3')]])
+    const [res] = await quietly(() => visit(req()))
+    const body = await res.json()
+    ok(res.status === 500 && body.error === `Sync failed: ${IGNORED}`, 'the visit answers 500 with the reason', show({ status: res.status, body }))
+    ok(rowsOf(db).length === 0 && stepNames().length === 0,
+       'no lesson written for this student, no streak tick, no "last active", no "came back"', show({ rows: rowsOf(db).length, steps: stepNames() }))
+    ok(syncRow(db).last_sync_error === IGNORED && syncRow(db).last_sync_error_at !== null,
+       'the sentence is on the student\'s sync row, where the admin student page shows it as the last error', show(syncRow(db).last_sync_error))
+
+    steps.length = 0
+    pagesOnWhop([[row('lesn_01', WHOP_USER), row('lesn_02', WHOP_USER)]])
+    const okRes = await visit(req())
+    const okBody = await okRes.json()
+    ok(okRes.status === 200 && okBody.syncedCount === 2 && same(stepNames(), ['came-back', 'streak', 'achievements']),
+       'control: the same visit with only the student\'s own rows writes both and ticks the streak once', show({ status: okRes.status, synced: okBody.syncedCount, steps: stepNames() }))
+  } finally {
+    globalThis.fetch = realFetch
+    whop([])
+  }
 }
 
 console.log('\n=== The login: the same rule, checked in the source ===')

@@ -433,7 +433,8 @@ try {
         r.check('cold: 3 of 10, three rows held', /Achievements 3 of 10/i.test(s.list?.text ?? '') && s.list.rows.filter((x) => x.held).length === 3, s.list?.rows.filter((x) => x.held).map((x) => x.text))
       }
       if (preset === 'some') {
-        r.check('some: 4 days, best 9, keep it going', /Streak 4 days Best 9 days/i.test(s.list?.text ?? '') && /keep it going/.test(s.list?.text ?? ''), s.list?.text)
+        // T-079: a finished lesson or action item keeps it going, so the line says "Finish" (it said "Watch").
+        r.check('some: 4 days, best 9, "Finish a lesson every day to keep it going."', /Streak 4 days Best 9 days/i.test(s.list?.text ?? '') && /Finish a lesson every day to keep it going\./.test(s.list?.text ?? ''), s.list?.text)
         r.check('some: the shares of students (98% on First Steps), the column head on the first tier only', /First Steps.*98%/.test(s.list?.rows[0]?.text ?? '') && /% of students/i.test(s.list?.groups[0] ?? '') && s.list.groups.slice(1).every((g) => !/% of students/i.test(g)), { row: s.list?.rows[0], groups: s.list?.groups })
         r.check('some: the two secret ones show as Hidden', s.list?.rows.filter((x) => /^Hidden/.test(x.text)).length === 2, s.list?.rows.slice(-2))
         r.check('some: the list scrolls inside itself', s.list && s.list.scrollH > s.list.clientH, { scrollH: s.list?.scrollH, clientH: s.list?.clientH })
@@ -786,8 +787,8 @@ try {
     for (const vp of [DESKTOP, PHONE]) {
       const name = vp.width < 760 ? 'phone' : `${vp.width} px`
       const gutter = vp.width < 760 ? 22 : 40
-      // A browser of its own per size: one context shares the browser key, and a key at 10
-      // rightly gives the next page's 9 no moment.
+      // A browser of its own per size: one context shares the browser key, and the 10 one page
+      // leaves there would make the next page's 4 a new streak after a break (2026-10-17).
       const own = await browser.createBrowserContext()
       try {
         const page = await openPage(own, r.row, url({ hud: 'some', celebrate: '1' }), vp)

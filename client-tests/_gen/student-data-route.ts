@@ -79,9 +79,13 @@ export async function GET(request: NextRequest) {
       .from("student_lesson_completions")
       .select("*")
       .eq("student_id", student.id),
+    // Explicit columns, never select(*) (2026-10-17): the row also carries
+    // the Whop promo code the team attaches, which works on every plan unless
+    // WHOP_DISCOUNT_PLAN_IDS says otherwise, and the student's screens read
+    // only these four.
     supabase
       .from("discount_requests")
-      .select("*")
+      .select("id, status, created_at, rejection_reason")
       .eq("student_id", student.id)
       .order("created_at", { ascending: false })
       .limit(1)

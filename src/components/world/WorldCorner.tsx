@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import type { Achievement } from "@/types/database";
 import { useWorldBadges, useWorldSignOut, type WorldBadges } from "./useWorldBadges";
-import { useStreakMoment } from "./WorldCelebrations";
+import { useMapUp, useStreakMoment } from "./WorldCelebrations";
 import c from "./corner.module.css";
 
 /**
@@ -42,18 +42,21 @@ import c from "./corner.module.css";
  * and goes, and the count in the pill turns sand while it shows. One at a time,
  * oldest first. Under a lesson page (`paused`) the whole header is hidden,
  * so it waits and plays when the student is back on the map; the lesson page
- * itself already says "You earned 1 achievement." Clicking it opens the
- * list, where the new one is marked New.
+ * itself already says "You earned 1 achievement." Since 2026-10-17 it also
+ * waits until the map is up (useMapUp, WorldCelebrations.tsx: built, its
+ * loading screen gone, the tab in front), so its 6.5 s never run out unseen.
+ * Clicking it opens the list, where the new one is marked New.
  *
  * THE STREAK'S MOMENT (2026-10-15, Lovro: the daily tick is quiet, no
- * full-screen celebration). When the streak goes up, the number in the pill
- * rises into place and is sand for 600 ms, and a status line reads it out.
- * useStreakMoment (WorldCelebrations.tsx) decides when it plays: only where
- * the number can be seen. Like the toast, it waits while a lesson page hides
- * the header; unlike the toast, it also waits out the map's loading screen,
- * the telescope (where the group steps out), a phone's sheet over the header
- * and a phone's list scrolled past it. Under reduced motion the number does
- * not move; the sand alone marks it.
+ * full-screen celebration). When the streak goes up, or a new one starts after
+ * a break (2026-10-17), the number in the pill rises into place and is sand
+ * for 600 ms, and a status line reads it out. useStreakMoment
+ * (WorldCelebrations.tsx) decides when it plays: only where the number can be
+ * seen. Like the toast, it waits while a lesson page hides the header and
+ * until the map is up; unlike the toast, it also waits out the telescope
+ * (where the group steps out), a phone's sheet over the header and a phone's
+ * list scrolled past it. Under reduced motion the number does not move; the
+ * sand alone marks it.
  *
  * THE SLOTS. `discount` (WorldV6's segment) and `playbook` (a small link,
  * CornerLink below fits it) go inside the pill between the achievements and
@@ -174,9 +177,12 @@ export function WorldCorner({
     };
   }, [open, close]);
 
-  // The toast: the oldest unannounced unlock, while the map is in view.
+  // The toast: the oldest unannounced unlock, while the map is in view and up
+  // (useMapUp: built, its loading screen gone, the tab in front), so its 6.5 s
+  // run where it can be seen.
   const head = badges.fresh[0] ?? null;
-  const toast = head !== null && !paused ? head : null;
+  const mapUp = useMapUp(head !== null && !paused);
+  const toast = head !== null && !paused && mapUp ? head : null;
   const { announced } = badges;
   useEffect(() => {
     if (!toast) return;
@@ -325,7 +331,7 @@ function ListBody({
   const total = book.catalog.length;
   const hint =
     current > 0
-      ? "Watch a lesson every day to keep it going."
+      ? "Finish a lesson every day to keep it going."
       : longest > 0
         ? "Watch a lesson today to start a new one."
         : "Watch a lesson today to start one.";

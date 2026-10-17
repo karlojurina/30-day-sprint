@@ -140,7 +140,7 @@ export async function GET(request: NextRequest) {
 
       // v75.10 — self-heal fallback. The user-scoped /me/memberships
       // call above returns 404 for legacy customers (Whop API
-      // quirk; reliably reproduced for michael.buratynskyi@gmail.com
+      // quirk; reliably reproduced for a customer
       // who's been paying since Dec 2025). Before blocking, try the
       // admin-side v2 API (same path our daily sync-whop cron uses).
       // If we find an active membership server-to-server, upsert
@@ -154,7 +154,7 @@ export async function GET(request: NextRequest) {
       // check below) and were then hard-blocked INSIDE the dashboard by
       // MembershipBlockOverlay, which reads students.membership_status
       // and never asks Whop. Logging out and back in couldn't fix it.
-      // Kelvin Nguyen hit exactly this on 2026-07-29 and re-logged in at
+      // A student hit exactly this on 2026-07-29 and re-logged in at
       // 10:49 UTC to no effect. Now any DB/Whop divergence self-corrects
       // on the next login, for every student. Genuinely lapsed students
       // are unaffected: fetchActiveMembershipForUser returns null for

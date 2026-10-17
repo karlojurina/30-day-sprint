@@ -41,7 +41,7 @@ as $$
 $$;
 
 comment on function public.current_user_is_stats_owner() is
-  'Revenue-visibility predicate for /admin/stats. Keys on the IMMUTABLE auth.users id (jurinakarlo2@gmail.com), NOT on team_members.role — role is mutable via PATCH /api/admin/team-members/[id]. Copy this, never current_user_is_team(), for any table that holds or describes revenue.';
+  'Revenue-visibility predicate for /admin/stats. Keys on the IMMUTABLE auth.users id (Karlo), NOT on team_members.role — role is mutable via PATCH /api/admin/team-members/[id]. Copy this, never current_user_is_team(), for any table that holds or describes revenue.';
 
 grant execute on function public.current_user_is_stats_owner() to authenticated;
 

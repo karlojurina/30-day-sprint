@@ -120,7 +120,7 @@ export default async function JournalPage(props: JournalPageProps) {
       .eq("student_id", studentId),
     supabase
       .from("discount_requests")
-      .select("status, promo_code")
+      .select("status")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false })
       .limit(1)

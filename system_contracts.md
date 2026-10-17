@@ -24,14 +24,20 @@ When adding a new table, append it here. When deleting a field, scan
 ### `team_members`
 - **Depends on:** `auth.users` (Supabase auth)
 - **Depended on by:** `src/lib/admin-auth.ts` (role gate), all
-  `/api/admin/*` routes
+  `/api/admin/*` routes, `src/lib/student-app-gate.ts` (T-078: reads
+  `id`, only while `STUDENT_APP_CLOSED=true`, to let a team member's
+  Whop account through the Whop login); `/api/auth/me` answers the team
+  before it asks the gate
 - **Stable contract:** `id`, `email`, `role` (founder/admin/csm)
 
 ### `students`
 - **Depends on:** `auth.users` (Supabase auth)
 - **Depended on by:** essentially everything student-related —
   `AuthContext`, `StudentContext`, all student API routes, all CSM
-  cron jobs, admin UI
+  cron jobs, admin UI, and `src/lib/student-app-gate.ts` (T-078, only
+  while `STUDENT_APP_CLOSED=true`: `whop_user_id` by `supabase_user_id`
+  for a student route or the Field Journal, `supabase_user_id` by
+  `whop_user_id` for the Whop login)
 - **Stable contract:** `id`, `whop_user_id`, `supabase_user_id`,
   `email`, `name`, `joined_at`, `last_active_at`,
   `membership_status`, `discord_username`, `discord_user_id`,
@@ -58,6 +64,12 @@ When adding a new table, append it here. When deleting a field, scan
   outside `WHOP_PRODUCT_ID` (which the per-product sync can't see) no
   longer stay NULL. Post-v75.28
   NULL is treated as out-of-cohort everywhere — no joined_at fallback.
+  On the new course it decides the discount window (T-080,
+  `discountWindow` in `src/lib/world/discount.ts`): before 2026-09-08
+  22:00 UTC never; from then until the launch, the shared deadline at
+  the end of 23 October 2026 (Croatia); from the launch on, 14 days
+  from itself. It also decides whether an old-dashboard request still
+  counts (`requestCounts`).
   Distinct from `joined_at` which is the CURRENT subscription cycle
   start and moves on each renewal.),
   `cancel_scheduled_at` (v83 — set when Whop's
@@ -67,6 +79,14 @@ When adding a new table, append it here. When deleting a field, scan
   actually ends. Used by journey kanban + dashboard early-warning
   surfaces + the v75.47 isMonth2Converted helper. Stamped/cleared by
   sync runner from `WhopMembershipRow.cancel_at_period_end`.)
+- **`last_active_at`:** written by the login callback (every login) and
+  by `markStudentActive` / `updateStudentStreak` in
+  `src/app/api/student/_lib/update-streak.ts`: a lesson finished, the
+  backfill adding rows, mark-action-shipped leaving both halves done,
+  every toggle-lesson tick and untick that goes through, and every quiz
+  attempt. The 2-hour Whop sync keeps it. Read by the engagement cron
+  (`no_login_5d`), `csm-triggers.ts` (`days_since_last_login`) and the
+  admin pages. It is not the streak; T-079 left it as it was.
 - **Note:** As of v46/v47, students is identity + admin-flag only.
   Per-function state (streaks, milestones, Whop sync, celebrations,
   DM log) lives in sibling tables below — read CLAUDE.md
@@ -125,10 +145,20 @@ When adding a new table, append it here. When deleting a field, scan
 
 ### `student_streaks`
 - **Depends on:** `students`
-- **Depended on by:** `StudentContext` (`streak`), `src/lib/streak.ts`
-  + `src/app/api/student/_lib/update-streak.ts` (write),
-  `src/lib/day28-embed.ts` (read), admin student detail +
-  kanban drawer
+- **Depended on by:** written only by `tickStudentStreak`
+  (`src/app/api/student/_lib/update-streak.ts`, with
+  `computeStreakUpdate` from `src/lib/streak.ts`), on counted work
+  (T-079): `afterCompletionWrite` (lesson-watched, the Whop webhook);
+  the backfill's callers when it added rows (refresh-watch-sync, the
+  login callback, which hands a slow sync to `after()`);
+  mark-action-shipped (action half newly done); toggle-lesson (a task
+  with no action half ticked). A failed read writes nothing. Read by the
+  data route (`current_streak` through `currentStreakAsOf`), and so by
+  `StudentContext` (`streak`); `src/lib/achievements.ts`;
+  `src/lib/day28-embed.ts` and the journal page (longest only); and the
+  admin student page and Journey drawer (through `currentStreakAsOf`).
+- **Rule:** `current_streak` means nothing without `last_streak_date`;
+  show it through `currentStreakAsOf` (`src/lib/streak.ts`).
 - **Stable contract:** `student_id`, `current_streak`,
   `longest_streak`, `last_streak_date`
 
@@ -211,7 +241,10 @@ When adding a new table, append it here. When deleting a field, scan
   the function `rebuild_daily_snapshots` (they read `requires_action`
   and filter on `counts_toward_progress`, the second view from v98),
   `POST /api/student/toggle-lesson` (reads `type` to refuse a `watch`
-  lesson), `GET /api/cron/check-lesson-videos` (reads `id`, `type` and
+  lesson, and `requires_action`: on the new course's catalog a lesson
+  with an action half is refused, and a tick counts as a streak day
+  only on a lesson with no action half, T-079),
+  `GET /api/cron/check-lesson-videos` (reads `id`, `type` and
   `duration_seconds`, by name), and, while the catalog switch names
   this table, `GET /api/student/data`,
   `POST /api/student/lesson-video`,
@@ -715,7 +748,10 @@ When adding a new table, append it here. When deleting a field, scan
   service role. `mark-action-shipped` completes a new-course action item
   only once `discord_message_link` is saved on the row (400 with
   `PASTE_LINK_FIRST` otherwise), and `skip-lesson` writes no
-  `skipped_at` for a new-course `watch` lesson.
+  `skipped_at` for a new-course `watch` lesson. On the new course's
+  catalog `mark-action-shipped` never clears an action item:
+  `shipped: false` is refused (T-079), and `toggle-lesson` writes no
+  new-course action item.
 
 ### `student_lesson_watch` (v93)
 - **Owner:** the lesson video player under `/world` (branch
@@ -782,9 +818,17 @@ When adding a new table, append it here. When deleting a field, scan
 - **The new course's rule (branch `world-engine`):**
   `src/lib/world/discount-server.ts` reads the student's requests
   (status, `created_at`, `promo_code`, `rejection_reason`) and the map
-  reads them through `StudentContext`; `discountState()` ignores a
-  request made before 2026-10-08 22:00 UTC (the new course's launch)
-  and lets the latest later one decide what the student sees. The
+  reads them through `StudentContext`, which since 2026-10-17 gets only
+  `id`, `status`, `created_at` and `rejection_reason` from
+  `/api/student/data`, never the promo code; `discountState()` lets the
+  latest request that counts decide what the student sees.
+  `requestCounts()` (T-080) counts every request from 2026-10-08 22:00
+  UTC (the launch) on. An earlier one counts only for a student whose
+  `first_paid_at` is from 2026-09-08 22:00 UTC until the launch, and
+  only while pending, approved or applied, because v29's
+  `submit_discount_with_feedback` refuses another request while one of
+  those exists, whatever its date, so the map must never offer Apply
+  then. Discount Earned (`achievements.ts`) reads the same function. The
   course switch leaves the table untouched (call C10), so a request
   still pending at the switch has to be decided before it.
 - **One pending request per student (v106, built 2026-10-16, not on
@@ -794,9 +838,24 @@ When adding a new table, append it here. When deleting a field, scan
   other statuses are not limited. `POST /api/discounts/request` and
   `POST /api/discounts/submit-feedback` answer that refusal like a request
   in review, 400 `{ error: ALREADY_APPLIED, state: "pending" }`
-  (`secondPendingRequest`, `src/lib/world/discount-server.ts`). v105 drops
+  (`secondPendingRequest`, `src/lib/world/discount-server.ts`).
+  `SAVE_FAILED` (2026-10-17) is both routes' answer to any other failed
+  write, a 23505 on another index included, logged with the real error
+  under `[discounts/request]` or `[discounts/submit-feedback]`. v105 drops
   the student insert policy, so only the server and
   `submit_discount_with_feedback` (security definer) write rows.
+- **Only the server calls `submit_discount_with_feedback` (v107, built
+  2026-10-17, not on production):** EXECUTE for `service_role` alone,
+  and the function refuses any caller whose token is not the service
+  role's (`auth.role()`). `POST /api/discounts/submit-feedback` calls it
+  with its service-role client and the student id from the token, so the
+  route and v107 go live together (Monday, after the merge into `main`):
+  before v107, v29's own check refuses the service role. On the new
+  course the approve route also refuses a request no route could have
+  made, where the rule would approve: one created more than 5 minutes
+  after the student's deadline, or one beside another counted request
+  (`requestCounts`) that was rejected, approved or applied
+  (`madeOutsideApply`, `src/lib/world/discount-server.ts`).
 
 ### `discount_feedback_questions` + `discount_feedback_responses`
 - **Depends on:** `discount_requests`
@@ -1024,7 +1083,7 @@ index on `owner_whop_user_id where status='active'`. One active link per
 owner. Without it a retried or double-clicked mint creates a second Whop
 plan, the owner's team splits across two links, and a later revocation
 silently misses half of them. This has already happened by hand twice
-(`liaoant18888`, `michael51ce`).
+(two owners).
 
 **An `archived` link can still hold live seats.** Archiving retires the link;
 it does not revoke the people already on it. Any derivation over seats must
@@ -1394,6 +1453,13 @@ called against a database or run on a deployment.
     401 `{ error: "Invalid token" }` with a bad one.
   - 400 `{ error: "Malformed body" }` when the body is not JSON, and
     400 `{ error: "Missing lessonId" }`.
+  - 503 `{ error: "We are updating to the new course. It will be
+    released soon.", code: "student_app_closed" }` while
+    `STUDENT_APP_CLOSED=true` (T-078, `refuseWhileClosed` in
+    `src/lib/student-app-gate.ts`), right after the token check and
+    before the student row is read, unless the student's Whop id is in
+    `STUDENT_APP_OPEN_FOR`. It is 503, not 403, because the player
+    reads a 403 as "membership inactive".
   - 404 `{ error: "Student not found" }` when the account has no
     student row.
   - 403 `{ error: "Membership inactive" }` when

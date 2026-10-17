@@ -1,8 +1,9 @@
 // What the server copies import, standing in for the real thing. build.mjs
 // points their import lines here: Next's response and after(), the
-// service-role Supabase client, Whop (the completions read, and the login's
-// calls), the steps that run after a lesson (and the CSM's hook for a
-// discount request), and which catalog is live. Hand-written, like
+// service-role Supabase client, Whop (the completions read, the login's
+// calls and the approve route's promo code), the team's login, the steps that
+// run after a lesson (and the CSM's hook for a discount request), and which
+// catalog is live. Hand-written, like
 // stub-supabase.ts and stub-call-gate.ts; the routes and libraries under test
 // are the real source.
 //
@@ -31,7 +32,11 @@
 //     (student_lesson_completions.completed_at defaults to now()).
 // `fail['table.op']` makes every such call fail with that error. Every call is
 // logged in `log`, in order. `.rpc(fn, args)` runs the test's own stand-in for
-// that database function from `functions[fn]` (none: PostgREST's "not found").
+// that database function from `functions[fn]` (none: PostgREST's "not found"),
+// handing it the arguments the calling client was made with (createClient's
+// address, key and options, also logged as the call's `options`), so a
+// stand-in can tell the service role's client from one carrying a student's
+// token, as the database does.
 // `auth` answers a password sign-in from `authUsers` (email -> id and
 // password) and adds to it on admin.createUser, as the login callback needs.
 
@@ -53,7 +58,7 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
     columns: {
       id: newId, whop_user_id: none, supabase_user_id: none, email: none, name: none,
       joined_at: now, first_paid_at: none, membership_status: () => "active", cancel_scheduled_at: none,
-      last_active_at: now,
+      last_active_at: now, ad_submissions_verified: () => false,
     },
     unique: [["whop_user_id"]],
   },
@@ -136,8 +141,8 @@ export class FakeDb {
   users: Record<string, string> = {};
   /** Email -> auth user, for auth.signInWithPassword and auth.admin.createUser. */
   authUsers: Record<string, { id: string; password: string }> = {};
-  /** Stand-ins for database functions, by name, for `.rpc()`: handed the arguments and a client on this database. */
-  functions: Record<string, (args: Record<string, unknown>, db: ReturnType<typeof fakeClient>) => Promise<{ data: unknown; error: DbError | null }>> = {};
+  /** Stand-ins for database functions, by name, for `.rpc()`: handed the arguments, a client on this database, and what the calling client was made with. */
+  functions: Record<string, (args: Record<string, unknown>, db: ReturnType<typeof fakeClient>, madeWith: unknown[]) => Promise<{ data: unknown; error: DbError | null }>> = {};
   constructor(seed: Record<string, Row[]> = {}, users: Record<string, string> = {}) {
     for (const [t, rows] of Object.entries(seed)) this.tables[t] = rows.map((r) => withDefaults(t, r));
     this.users = { ...users };
@@ -345,8 +350,8 @@ function builder(db: FakeDb, table: string) {
   return b;
 }
 
-/** A client on `db`, shaped like supabase-js's for the calls the routes make. */
-export function fakeClient(db: FakeDb) {
+/** A client on `db`, shaped like supabase-js's for the calls the routes make. `madeWith` is what createClient was handed. */
+export function fakeClient(db: FakeDb, madeWith: unknown[] = []) {
   return {
     auth: {
       async getUser(token: string) {
@@ -377,10 +382,10 @@ export function fakeClient(db: FakeDb) {
       return builder(db, table);
     },
     async rpc(fn: string, args: Record<string, unknown> = {}) {
-      db.log.push({ table: fn, op: "rpc", filters: [], values: structuredClone(args) });
+      db.log.push({ table: fn, op: "rpc", filters: [], values: structuredClone(args), options: madeWith });
       const run = db.functions[fn];
       if (!run) return { data: null, error: { code: "PGRST202", message: `Could not find the function public.${fn}` } };
-      return run(args, fakeClient(db));
+      return run(args, fakeClient(db), madeWith);
     },
   };
 }
@@ -391,9 +396,9 @@ let current: FakeDb | null = null;
 export function useDb(db: FakeDb) {
   current = db;
 }
-export function createClient(..._args: unknown[]) {
+export function createClient(...args: unknown[]) {
   if (!current) throw new Error("no database: call useDb() first");
-  return fakeClient(current);
+  return fakeClient(current, args);
 }
 export const createServiceClient = createClient;
 
@@ -479,6 +484,12 @@ export function setWhop(fn: (whopUserId: string) => Promise<WhopAnswer>) {
 export async function fetchCompletedLessonsAsAdmin(whopUserId: string) {
   return whopAnswer(whopUserId);
 }
+/** The promo codes the approve route asked Whop for, in order. */
+export const promoCodes: Array<Record<string, unknown>> = [];
+export async function createWhopPromoCode(params: Record<string, unknown>) {
+  promoCodes.push(structuredClone(params));
+  return { id: `promo_${promoCodes.length}` };
+}
 export async function fetchActiveMembershipForUser(_whopUserId: string) {
   return null;
 }
@@ -514,6 +525,16 @@ export async function fetchWhopDiscordId(_whopUserId: string) {
 }
 export function generateStudentPassword(whopUserId: string) {
   return `password-for-${whopUserId}`;
+}
+
+// ── src/lib/admin-auth (POST /api/discounts/approve) ─────────────────────────
+// Every request is a founder's, and the route gets the service-role client,
+// as the real requireTeam hands it.
+export async function requireTeam(_request: Request, _roles?: string[]) {
+  return { supabase: createClient(), teamMember: { id: "team-1", role: "founder" } };
+}
+export function isAuthFailure(result: { error?: unknown }) {
+  return result.error !== undefined;
 }
 
 // ── src/lib/catalog-tables ───────────────────────────────────────────────────

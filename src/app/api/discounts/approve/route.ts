@@ -26,7 +26,11 @@ import {
  * student's Whop subscription in the Whop dashboard, then calls
  * POST /api/discounts/mark-applied to close the loop.
  *
- * The student never sees the code.
+ * The app never shows the student the code, and since 2026-10-17
+ * /api/student/data doesn't send it. It is no secret from them all the
+ * same: a logged-in student can read their own row straight from the
+ * database (the policy "Students can read own discount requests"), so what
+ * the code can take off is set here, by WHOP_DISCOUNT_PLAN_IDS below.
  *
  * Body:
  *   requestId  — id of the discount_requests row (required)
@@ -82,16 +86,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
   }
 
-  if (!override && !studentRow.ad_submissions_verified) {
-    return NextResponse.json(
-      {
-        error:
-          "Ad submissions not verified yet — tick the verification flag on the student's detail page first",
-      },
-      { status: 400 }
-    );
-  }
-
   if (CATALOG_IS_V2) {
     // The new course: the request route's rule (src/lib/world/discount.ts),
     // judged at the end of the student's window (their 14 days, or 23
@@ -99,19 +93,30 @@ export async function POST(request: NextRequest) {
     // as it skips every gate of the old rule below.
     if (!override) {
       const reads = await loadDiscountReads(supabase, discountReq.student_id, LESSONS_TABLE);
-      let verdict = approvalVerdict(reads, new Date(), discountReq.created_at);
+      // The course switch: a request made before it is judged by the videos
+      // the new course had at the switch, and a refusal of it over the videos
+      // says it was made on the old course. The date can change the verdict,
+      // so a failed read of it approves nothing.
+      let resetAt: string | null;
+      try {
+        resetAt = await getCurriculumResetAt(supabase);
+      } catch (e) {
+        console.error(
+          `[discount approve] request ${requestId}: nothing approved, the course switch could not be read: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        return NextResponse.json(
+          { error: "Couldn't read the course switch date, so nothing was approved. Try again." },
+          { status: 500 },
+        );
+      }
+      // The request's id too: approvalVerdict also refuses a request the
+      // app's Apply could not have made (late, or after another counted one).
+      let verdict = approvalVerdict(reads, new Date(), discountReq.created_at, discountReq.id, resetAt);
       if (!verdict.ok && verdict.status === 400) {
-        // A request made before the course switch gets a refusal that says
-        // so. The switch date only changes the words, so a failed read of it
-        // keeps the refusal as it is.
-        try {
-          const resetAt = await getCurriculumResetAt(supabase);
-          verdict = explainOldCourseRequest(verdict, discountReq.created_at, resetAt);
-        } catch (e) {
-          console.error(
-            `[discount approve] request ${requestId}: the course switch could not be read, the refusal keeps its words: ${e instanceof Error ? e.message : String(e)}`,
-          );
-        }
+        // A request made before the switch, refused over its videos, gets a
+        // refusal that says so; one refused over the first payment keeps its
+        // words.
+        verdict = explainOldCourseRequest(verdict, discountReq.created_at, resetAt);
       }
       if (!verdict.ok) {
         if (verdict.log) console.error(`[discount approve] request ${requestId}: ${verdict.log}`);
@@ -215,6 +220,20 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+  }
+
+  // After the rule, so the team first reads a refusal over the first payment
+  // or the videos: Generate anyway skips every check, and someone who saw
+  // only this refusal could press it for a student the rule turns away (the
+  // release review, 17 October).
+  if (!override && !studentRow.ad_submissions_verified) {
+    return NextResponse.json(
+      {
+        error:
+          "Ad submissions not verified yet — tick the verification flag on the student's detail page first",
+      },
+      { status: 400 }
+    );
   }
 
   if (override) {

@@ -96,7 +96,7 @@ groups, where volume is genuinely larger.
 
 ### Fourth: the evidence is the content, so set it like content
 
-The attribution line — `link labelled rdsmith · owner identified by Whop username in
+The attribution line — `link labelled ownername · owner identified by Whop username in
 the label` — is exactly what Lovro means by "connect and confirm." It is currently 11px
 tertiary meta, buried inside a collapsed panel, on the same line as the owner's email.
 
@@ -106,14 +106,14 @@ already good plain English; it just needs to be visible.
 ### Card anatomy, in reading order
 
 ```
-Ray Smith                                          [ Close link ]
-rdsmith032@gmail.com
+Owner Name                                         [ Close link ]
+owner@example.com
 
-  Link "rdsmith" · matched by Whop username · 2 people
+  Link "ownername" · matched by Whop username · 2 people
 
-  ☐  basti8475@gmail.com     mem_EmDVRg35L0aNGc   joined 10 Jul   [Open in Whop] [Keep]
-  ☐  rdsmith032@gmail.com    mem_fS6onoLPCNSCot   joined 10 Jul   [Open in Whop] [Keep]
-                                                  @iwillberich
+  ☐  seat.one@example.com    mem_xxxxxxxxxxxxxx   joined 10 Jul   [Open in Whop] [Keep]
+  ☐  seat.two@example.com    mem_xxxxxxxxxxxxxx   joined 10 Jul   [Open in Whop] [Keep]
+                                                  @discordhandle
 ```
 
 ## 5. Key states
@@ -165,11 +165,11 @@ Keep the plain-English voice already in the file — `HOW_MATCHED`, the error re
 - **Untrustworthy banner:** `3 plans could not be read from Whop. Some owners may show as
   cancelled when they are not. Actions are off until this clears.`
 - **Empty:** `Nothing to remove.` + `Read live from Whop at 18:11.`
-- **Card evidence line:** `Link "rdsmith" · matched by Whop username · 2 people`
+- **Card evidence line:** `Link "ownername" · matched by Whop username · 2 people`
 - **Unconfirmed:** `Not sure this link is theirs — matched on name only.` + `Confirm this is right`
 - **Closed:** `Link closed · 2 people still to remove in Whop`
 - **Identity:** one consistent format — name, falling back to email, falling back to Whop
-  user id. The raw `internal_notes` label ("b", "Aaronkim") moves into the evidence line
+  user id. The raw `internal_notes` label ("b", or a first name alone) moves into the evidence line
   where it belongs as evidence, and stops appearing as a card title.
 
 ## 8. Recommended references

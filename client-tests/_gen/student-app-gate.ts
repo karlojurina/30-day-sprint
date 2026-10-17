@@ -39,6 +39,18 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * one door a team member could meet is the Whop login, if a team_members row
  * ever pointed at a Whop account; whopLoginMayProceed lets that one through.
  *
+ * WHAT IT CAN'T STOP: a student who still holds a session can call the
+ * database straight with the app's public key, and no Vercel value reaches
+ * that. Two such calls can write. The heartbeat (record_lesson_heartbeat):
+ * while closed the player never mounts and lesson-watched makes no
+ * completion, so only a hand-written call could bank watch seconds (T-048).
+ * And, until v107 is pasted on Monday, the feedback form's function
+ * (submit_discount_with_feedback, v29): one call makes a pending discount
+ * request, past the closure and past the request routes' checks of the first
+ * payment, the deadline and the videos. v107 lets only the service role call
+ * it, and the approval refuses a request made after the student's deadline
+ * or beside another counted one (approvalVerdict in world/discount-server.ts).
+ *
  * Every check reads the environment when it runs, never at module load, so a
  * test can set the values case by case. Vercel applies a changed value only on
  * the next deploy, so a page built at deploy time and the routes agree.

@@ -15,7 +15,7 @@
  * need); ?hud= sets the streak, ?discount=approved an approved application,
  * window.__fixture.setStreak(n) the streak going up as a refresh after a
  * finished video would. Headless Chrome on the real GPU, 1691x1278 unless a
- * row says otherwise. About two minutes.
+ * row says otherwise. About three minutes.
  *
  * Since 2026-10-15 the streak opens no full-screen moment (Lovro: a daily
  * tick is routine). The number in the pill gets a moment of 600 ms at most
@@ -29,7 +29,14 @@
  * loading screen gone (its opacity under 0.05), no telescope up, and the
  * number's centre the top of the page there, on the screen. The recorder
  * notes those four at each start, and every row that checks a moment checks
- * them.
+ * them. Since 2026-10-17 the discount's celebration (5 s on its own timer)
+ * opens only once the map is up too: the recorder notes the map's state when
+ * any dialog opens (its view, whether it is loading, the loading screen's
+ * opacity, the tab), and rows 4, 5 and 15 check it. And a new streak after a
+ * break gets its moment (rows 13 and 14): before, it waited until it passed
+ * the number the browser had marked for the old one. And an approval of an
+ * application made on the old dashboard, before the launch, is not celebrated
+ * on the map (row 16): its words promised the 30% on the next renewal.
  *
  * One PASS or FAIL line per row, with what was measured. After the rows, one
  * MEASURED line: requests to /api, requests to Supabase and page errors over
@@ -45,11 +52,13 @@
  *      does not
  *   3  a streak already celebrated on the dashboard (its key already 4): no
  *      moment on the map
- *   4  an approved application never celebrated here: the discount one, its
- *      key set to the request; a reload does not bring it back; one already
- *      celebrated on the dashboard (the key already set) does not show
- *   5  both at once: the discount's celebration first, the number's moment
- *      only once it has closed (one at a time, as before)
+ *   4  an approved application never celebrated here: the discount one, once
+ *      the map is up (not over the loading picture, where its 5 s could run
+ *      out before the map came), its key set to the request; a reload does
+ *      not bring it back; one already celebrated on the dashboard (the key
+ *      already set) does not show
+ *   5  both at once: the discount's celebration first, once the map is up,
+ *      the number's moment only once it has closed (one at a time, as before)
  *   6  without ?celebrate=1 (no signed-in student): neither fires, nothing
  *      is written
  *   7  the dashboard's test events: et:test:streak plays the number's moment
@@ -70,6 +79,23 @@
  *      the place's sheet (over the header) and while the list is scrolled
  *      past the header, records nothing, and plays once the header is back
  *      in view
+ *  13  a streak of 5 celebrated, broken to 0, then 1: at 0 no moment and the
+ *      key forgotten (0); at 1 the moment plays once; broken again and 1
+ *      again (a new streak stopping where the old one did): once more
+ *  14  a break this browser never saw at 0 (its key 9, from the old
+ *      dashboard, the streak now 4): one moment, on 4, at load; a reload does
+ *      not bring it back
+ *  15  an approved application while a lesson page is open: no celebration
+ *      over the lesson page and nothing recorded; back on the map it opens,
+ *      the map up, and is recorded
+ *  16  an approval of an application made on the old dashboard, before the
+ *      launch (?discount=september-old-course-approved, a September joiner's
+ *      request of 25 September): no celebration in the 10 s after the map is
+ *      ready, the key left unset (the map's words, "you'll see it on your
+ *      next renewal", may not hold for it; the panel says where it stands);
+ *      the number's moment plays, held by nothing; the dashboard's test event
+ *      still opens the celebration on that page (row 4 is the approval made
+ *      on the new course, which opens it)
  *
  * Pictures for a person, in world-tests/shots/v6/celebrations/ (git-ignored).
  * The number's moment lasts 600 ms, so its pictures hold it by hand after the
@@ -124,6 +150,7 @@ const results = []
  * dialog that opens ('dialog-on') or closes ('dialog-off'), with
  * performance.now(). At a start: the number, its animations (name and
  * length), its colour, opacity and transform, and its box beside the pill's.
+ * At a dialog's opening: the map's state (mapAt).
  */
 const RECORD = () => {
   const log = (window.__moments = [])
@@ -132,6 +159,13 @@ const RECORD = () => {
     if (!el) return null
     const r = el.getBoundingClientRect()
     return { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom) }
+  }
+  // The map (WorldV6's root): its view, whether its world is still building, its loading screen's
+  // opacity (the status line that is a child of <main>; none on a phone's list) and the tab.
+  const mapAt = () => {
+    const main = document.querySelector('main[data-view]')
+    const loader = main ? [...main.children].find((el) => el.getAttribute('role') === 'status') : null
+    return { view: main?.getAttribute('data-view') ?? null, loading: !!main?.hasAttribute('data-loading'), loader: loader ? Number(getComputedStyle(loader).opacity) : null, tab: document.visibilityState }
   }
   const tickOf = (seg) => {
     const b = seg.querySelector('b')
@@ -169,7 +203,7 @@ const RECORD = () => {
         continue
       }
       for (const node of m.addedNodes) {
-        for (const d of all(node, '[role="dialog"]')) log.push({ kind: 'dialog-on', t: now(), label: d.getAttribute('aria-label'), path: location.pathname })
+        for (const d of all(node, '[role="dialog"]')) log.push({ kind: 'dialog-on', t: now(), label: d.getAttribute('aria-label'), path: location.pathname, map: mapAt() })
         for (const seg of all(node, '[data-tick]')) log.push({ kind: 'tick-on', inserted: true, t: now(), path: location.pathname, ...tickOf(seg) })
       }
       for (const node of m.removedNodes) for (const d of all(node, '[role="dialog"]')) log.push({ kind: 'dialog-off', t: now(), label: d.getAttribute('aria-label') })
@@ -229,6 +263,10 @@ const dialogs = (log) => log.filter((e) => e.kind === 'dialog-on')
 const ended = () => (window.__moments ?? []).some((e) => e.kind === 'tick-off')
 /** A start a person could see: the pill's segment visible, no loading screen over it (opacity under 0.05), no telescope up, and the number's centre the top of the page, on the screen. */
 const inSight = (e) => e.vis === 'visible' && (e.loader === null || e.loader < 0.05) && e.tel === false && e.hit === true
+/** A dialog that opened with the map up: its view known, not loading, its loading screen gone (opacity under 0.05, or none on a phone's list), the tab in front. */
+const mapWasUp = (e) => !!e?.map && e.map.view !== null && e.map.view !== 'unknown' && e.map.loading === false && (e.map.loader === null || e.map.loader < 0.05) && e.map.tab === 'visible'
+/** The discount celebration's opening in a record. */
+const discountOpened = (log) => log.find((e) => e.kind === 'dialog-on' && e.label === '30% discount approved') ?? null
 /** One start, on `n`, in sight: the rise (one animation, tickIn, 600 ms at most), in the token's sand. */
 const rose = (on, n, sand) => on.length === 1 && on[0].n === n && inSight(on[0]) && on[0].anims.length === 1 && /tickIn/.test(on[0].anims[0].name ?? '') && on[0].anims[0].ms > 0 && on[0].anims[0].ms <= MOMENT_MS && on[0].color === sand
 
@@ -296,10 +334,13 @@ async function openPage(ctx, row, urlPath, { viewport = DESKTOP, before = null, 
     if (u.origin === ORIGIN && u.pathname.startsWith('/api')) tally.api.push({ row: row.id, path: u.pathname })
     if (/supabase/i.test(u.hostname)) tally.supabase.push({ row: row.id, host: u.hostname, path: u.pathname })
   })
-  // What a browser already holds before the page loads (the dashboard's keys).
+  // What a browser already holds before the page loads (the dashboard's keys): once per tab, so
+  // a reload finds what the page left there (row 14).
   if (before) await page.evaluateOnNewDocument((entries) => {
     try {
+      if (sessionStorage.getItem('__seeded') === '1') return
       for (const [k, v] of entries) localStorage.setItem(k, v)
+      sessionStorage.setItem('__seeded', '1')
     } catch {
       // A page whose storage is off: nothing to seed.
     }
@@ -429,6 +470,8 @@ try {
     await waitFor(page, discountUp, { timeout: 4000, what: 'row 4: no discount celebration' })
     await sleep(1600)
     let s = await snap(page)
+    const opened = discountOpened(await record(page))
+    r.check('it opened once the map was up (built, the loading screen gone, the tab in front), so its 5 s start in sight', mapWasUp(opened), opened)
     r.check('the discount celebration is up: 30% OFF, Discount approved', /30% OFF/.test(s.discount?.text ?? '') && /Discount approved/i.test(s.discount?.text ?? ''), s.discount?.text)
     r.check('the key holds the request (the dashboard\'s key)', s.keys?.discount === 'fixture-request', s.keys)
     await page.screenshot({ path: path.join(OUT, 'discount-map.png') })
@@ -456,6 +499,7 @@ try {
     await sleep(1200)
     let log = await record(page)
     let s = await snap(page)
+    r.check('the discount celebration opened once the map was up', mapWasUp(discountOpened(log)), discountOpened(log))
     r.check('the discount celebration is up, and under it the number has had no moment, nothing recorded for it', s.discount !== null && starts(log).length === 0 && s.keys?.streak === null, { discount: !!s.discount, log, keys: s.keys })
     await page.mouse.click(400, 400)
     await waitFor(page, ended, { timeout: 5000, what: 'row 5: no moment after the discount closed' })
@@ -624,6 +668,108 @@ try {
     log = await record(page)
     s = await snap(page)
     r.check('back at the top: one moment, on 5, in sight; the key says 5; read out "Streak: 5 days."', rose(starts(log), '5', s.sand) && s.keys?.streak === '5' && s.say === 'Streak: 5 days.', { on: starts(log), keys: s.keys, say: s.say })
+  })
+
+  await runRow(13, 'a streak of 5 celebrated, broken to 0, then 1: the key forgotten at 0, the moment once at 1; broken again and 1 again: once more', async (r) => {
+    const page = await r.open({ hud: 'some', celebrate: '1' })
+    await waitFor(page, ended, { timeout: 8000, what: 'row 13: no moment for 4 at load' })
+    await forget(page)
+    await page.evaluate(() => window.__fixture.setStreak(5))
+    await waitFor(page, ended, { timeout: 4000, what: 'row 13: no moment for 5' })
+    let log = await record(page)
+    let s = await snap(page)
+    r.check('5 celebrated: one moment, on 5, in sight; the key says 5', rose(starts(log), '5', s.sand) && s.keys?.streak === '5', { on: starts(log), keys: s.keys })
+    // A day with nothing counted: the streak shows 0 (currentStreakAsOf), as a refresh would bring it.
+    await forget(page)
+    await page.evaluate(() => window.__fixture.setStreak(0))
+    await sleep(1500)
+    log = await record(page)
+    s = await snap(page)
+    r.check('broken (0): no moment, no dialog, the pill says 0 days; the 5 forgotten (the key says 0)', starts(log).length === 0 && dialogs(log).length === 0 && /^0 days 4\/10$/i.test(s.pill ?? '') && s.keys?.streak === '0', { log, pill: s.pill, keys: s.keys })
+    // A lesson watched in full on a new day: the new streak's first day.
+    await forget(page)
+    await page.evaluate(() => window.__fixture.setStreak(1))
+    await waitFor(page, ended, { timeout: 4000, what: "row 13: no moment for the new streak's 1" })
+    // Long enough for a second moment to show, were there one.
+    await sleep(1500)
+    log = await record(page)
+    s = await snap(page)
+    r.check('then 1: the moment plays once, on 1, in sight: the rise (600 ms at most), in sand; no dialog', rose(starts(log), '1', s.sand) && dialogs(log).length === 0, starts(log))
+    r.check('the pill says 1 day, read out "Streak: 1 day.", the key says 1', /^1 day 4\/10$/i.test(s.pill ?? '') && s.say === 'Streak: 1 day.' && s.keys?.streak === '1', { pill: s.pill, say: s.say, keys: s.keys })
+    // Broken again, and a new streak that stops where the old one did: only the forgotten key tells the two 1s apart.
+    await forget(page)
+    await page.evaluate(() => window.__fixture.setStreak(0))
+    await sleep(1200)
+    log = await record(page)
+    s = await snap(page)
+    r.check('broken again: no moment, the key says 0', starts(log).length === 0 && s.keys?.streak === '0', { log, keys: s.keys })
+    await forget(page)
+    await page.evaluate(() => window.__fixture.setStreak(1))
+    await waitFor(page, ended, { timeout: 4000, what: 'row 13: no moment for the second new streak\'s 1' })
+    await sleep(1500)
+    log = await record(page)
+    s = await snap(page)
+    r.check('a new 1 after an old 1: once more, on 1, in sight; the key says 1', rose(starts(log), '1', s.sand) && s.keys?.streak === '1', { on: starts(log), keys: s.keys })
+  })
+
+  await runRow(14, "a break this browser never saw at 0 (its key 9 from the old dashboard, the streak now 4): one moment, on 4, at load; not after a reload", async (r) => {
+    const page = await r.open({ hud: 'some', celebrate: '1' }, { before: [[STREAK_KEY, '9']] })
+    await waitFor(page, ended, { timeout: 8000, what: "row 14: no moment for the new streak's 4" })
+    await sleep(1200)
+    let log = await record(page)
+    let s = await snap(page)
+    r.check('the new streak (4, below the 9 marked for the old one): one moment, on 4, in sight; no dialog', rose(starts(log), '4', s.sand) && dialogs(log).length === 0, { on: starts(log), sand: s.sand })
+    r.check('read out "Streak: 4 days."; the key says 4', s.say === 'Streak: 4 days.' && s.keys?.streak === '4', { say: s.say, keys: s.keys })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await waitFor(page, () => window.__worldReady === true, { timeout: READY_MS, poll: 400, what: 'row 14: the map did not come back after the reload' })
+    await sleep(2000)
+    log = await record(page)
+    s = await snap(page)
+    r.check('after a reload: no moment, no dialog, the key still 4', starts(log).length === 0 && dialogs(log).length === 0 && s.keys?.streak === '4', { log, keys: s.keys })
+  })
+
+  await runRow(15, 'an approved application while a lesson page is open: no celebration over it, nothing recorded; back on the map it opens, the map up', async (r) => {
+    const page = await r.open({ discount: 'approved', celebrate: '1' }, { sub: '/a1/a1l01' })
+    // The map builds under the lesson page meanwhile.
+    await sleep(2500)
+    let log = await record(page)
+    let s = await snap(page)
+    r.check('on the lesson page: no celebration over it, the key not written', /\/a1\/a1l01$/.test(s.path) && s.discount === null && discountOpened(log) === null && s.keys?.discount === null, { path: s.path, log, keys: s.keys })
+    // No picture of the lesson page: the dev test video's first frame has people's names in it.
+    await page.keyboard.press('Escape')
+    await waitFor(page, () => location.pathname === '/dev/world-app/a1', { timeout: 10000, what: 'row 15: Esc did not go back to the place' })
+    await waitFor(page, discountUp, { timeout: 10000, what: 'row 15: no celebration back on the map' })
+    await sleep(600)
+    log = await record(page)
+    s = await snap(page)
+    const opened = discountOpened(log)
+    r.check("back on the map: the celebration, opened on the place's page with the map up", !!opened && opened.path === '/dev/world-app/a1' && mapWasUp(opened) && s.discount !== null, opened)
+    r.check('recorded once it opened: the key holds the request', s.keys?.discount === 'fixture-request', s.keys)
+  })
+
+  await runRow(16, "an approval of an application made on the old dashboard, before the launch (september-old-course-approved): no celebration on the map, nothing recorded, the number's moment not held", async (r) => {
+    const page = await r.open({ hud: 'some', discount: 'september-old-course-approved', celebrate: '1' })
+    const t0 = Date.now()
+    // The stand-in is on and the map is up: the 4 this browser never saw gets its moment.
+    await waitFor(page, ended, { timeout: 8000, what: 'row 16: the number had no moment' })
+    // 10 s from the map's ready in all (open() returns 900 ms after it): an approved 30% opens once the
+    // loading screen's 700 ms fade is over (row 4), and its own timer would close it after 5 s.
+    await sleep(Math.max(0, 9100 - (Date.now() - t0)))
+    let log = await record(page)
+    let s = await snap(page)
+    const on = starts(log)
+    r.check('in the 10 s after the map was ready: no 30% celebration, nor any other dialog', dialogs(log).length === 0 && s.discount === null && s.fullScreen === null, dialogs(log))
+    r.check("nothing recorded for it: the 30% key unset (the old dashboard's moment for this approval, under the same key)", s.keys?.discount === null, s.keys)
+    r.check("the number's moment, once, on 4, in sight, held by nothing; the key says 4", rose(on, '4', s.sand) && s.keys?.streak === '4', { on, keys: s.keys })
+    // A control on the same page: the celebration is mounted and could open (row 7's test event), and records nothing.
+    await forget(page)
+    await page.evaluate(() => window.dispatchEvent(new Event('et:test:discount-approved')))
+    await waitFor(page, discountUp, { timeout: 4000, what: 'row 16: et:test:discount-approved did nothing' })
+    log = await record(page)
+    r.check('control: the dashboard\'s test event still opens the celebration here, the map up', mapWasUp(discountOpened(log)), discountOpened(log))
+    await dismiss(page, 'row 16 (control)')
+    s = await snap(page)
+    r.check('and records nothing: the 30% key still unset', s.keys?.discount === null, s.keys)
   })
 } finally {
   await browser.close()

@@ -373,6 +373,7 @@ export async function fetchCompletedLessonsAsAdmin(
   // We filter client-side after.
   const allRaw: WhopLessonInteraction[] = [];
   let cursor: string | undefined;
+  let more = false;
   for (let page = 0; page < 5; page++) {
     const params = new URLSearchParams({
       course_id: courseId,
@@ -397,9 +398,25 @@ export async function fetchCompletedLessonsAsAdmin(
 
     const data = (await res.json()) as WhopLessonInteractionsResponse;
     allRaw.push(...(data.data ?? []));
-    if (!data.page_info?.has_next_page) break;
-    cursor = data.page_info.end_cursor;
+    more = Boolean(data.page_info?.has_next_page);
+    if (!more) break;
+    cursor = data.page_info?.end_cursor;
     if (!cursor) break;
+  }
+
+  // The user_id filter, checked (the release review, 17 October): a row for
+  // anyone else, or more pages than one student's interactions fill (the new
+  // course has 141 lessons), means Whop ignored it, and the backfill would
+  // mark other students' lessons as this one's. Throwing writes nothing: the
+  // backfill's catch puts the sentence on the student's sync row. The sibling
+  // reads in whop-members.ts check their user the same way.
+  if (allRaw.some((i) => i.user?.id && i.user.id !== whopUserId)) {
+    throw new Error(`Whop user_id filter ignored for ${whopUserId}, refusing to write`);
+  }
+  if (more && cursor) {
+    throw new Error(
+      `Whop has more than 5 pages of lesson interactions for ${whopUserId}, so its user_id filter looks ignored, refusing to write`
+    );
   }
 
   const completed = allRaw.filter((i) => i.completed === true);

@@ -14,10 +14,11 @@
  *
  * THE HEADER'S CHIP KEEPS M7's RULE (`header`): it shows only while the offer
  * is open to the student (locked, ready) or their application is in (in
- * review, approved). Applied, rejected, the 14 days over, joined before the
- * new course, no first payment on record: no chip, so a student never carries
- * a dead offer in the header for good (the fix round of 2026-10-16; Lovro's
- * words were about the hut and the timeline's dot line, not the header).
+ * review, approved). Applied, rejected, the student's deadline passed, a first
+ * payment before 9 September, or no first payment on record: no chip, so a
+ * student never carries a dead offer in the header for good (the fix round of
+ * 2026-10-16; Lovro's words were about the hut and the timeline's dot line,
+ * not the header).
  *
  * What they say (the chip, the tag's tip, the plaque, the phone's row and
  * the panel's eyebrow, one word per state):
@@ -28,8 +29,8 @@
  *   pending       "In review"; approved, "Approved".
  *   applied       "Yours".
  *   rejected      "Not approved".
- *   expired       "Closed": the 14 days passed with no application.
- *   not eligible  "Closed": joined before the new course. "Not open yet" when
+ *   expired       "Closed": the student's deadline passed with no application.
+ *   not eligible  "Closed": a first payment before 9 September. "Not open yet" when
  *                 the course has no gate. "Ask the team" with no first payment
  *                 on record, in the open (locked) look: it may be a new student
  *                 whose payment has not reached the app, and the panel asks
@@ -57,7 +58,7 @@ export interface CheckpointView {
   look: CheckpointLook;
   /** "11 days left", "5 hours left", or null when the clock does not apply. */
   left: string | null;
-  /** The last day to apply, "Fri 23 Oct", or null. */
+  /** The last moment to apply, "Fri 23 Oct, 23:59" in the student's own time zone (deadlineAt), or null. */
   deadline: string | null;
 }
 
@@ -82,6 +83,19 @@ export function shortDate(iso: string): string {
 }
 
 /**
+ * A deadline with its hour, "Fri 23 Oct, 23:59", in the student's own time
+ * zone (T-080). The date alone misled: the shared deadline, the end of 23
+ * October in Croatia, is Fri 23 Oct, 17:59 in New York and Sat 24 Oct, 05:59
+ * in Manila, where it read "Sat 24 Oct" with no hour. The hour also fits the
+ * own 14 days, which end at the hour of the first payment.
+ */
+export function deadlineAt(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "";
+  return new Date(t).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+/**
  * The view for a state. `place` is the student's place on the map (0..8),
  * `after` the place the checkpoint follows (checkpoint.ts CHECKPOINT.after):
  * a locked student at that place, or a few videos away, sees the lantern lit.
@@ -100,7 +114,7 @@ export function checkpointView(state: DiscountState, now: number, place: number,
         tag: "locked",
         look: near ? "near" : "closed",
         left,
-        deadline: shortDate(state.endsAt),
+        deadline: deadlineAt(state.endsAt),
       };
     }
     case "ready": {
@@ -112,7 +126,7 @@ export function checkpointView(state: DiscountState, now: number, place: number,
         tag: "ready",
         look: "ready",
         left,
-        deadline: shortDate(state.endsAt),
+        deadline: deadlineAt(state.endsAt),
       };
     }
     case "pending":
@@ -124,7 +138,7 @@ export function checkpointView(state: DiscountState, now: number, place: number,
     case "rejected":
       return noClock(lead, "Not approved", "closed", "closed");
     case "expired":
-      return { ...noClock(lead, "Closed", "closed", "closed"), deadline: shortDate(state.endsAt) };
+      return { ...noClock(lead, "Closed", "closed", "closed"), deadline: deadlineAt(state.endsAt) };
     default:
       // No first payment on record: what the panel asks of them, in the open look (above).
       if (state.reason === "no-payment") return noClock(lead, "Ask the team", "locked", "closed");

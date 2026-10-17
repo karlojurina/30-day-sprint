@@ -8,9 +8,11 @@
  *   factsFromReads         those reads as discount.ts's input, or which failed
  *   decideDiscountRequest  POST /api/discounts/request: grant only on `ready`
  *   approvalVerdict        POST /api/discounts/approve: was every video done
- *                          by the student's deadline (discount.ts)
+ *                          by the student's deadline (discount.ts), and could
+ *                          the app's Apply have made the request
  *   secondPendingRequest   both routes that write a request, on either course:
  *                          a double submit the database refused (v106)
+ *   SAVE_FAILED            those routes' answer to any other failed write
  *
  * Everything fails closed. A read that errors, or comes back empty where a
  * row must exist, means no request and no approval: a believable "you're not
@@ -29,6 +31,7 @@ import {
   DISCOUNT_WINDOW_DAYS,
   discountEndsAt,
   discountState,
+  requestCounts,
 } from "./discount";
 import type { DiscountLesson, DiscountRequestRow, DiscountState } from "./discount";
 
@@ -210,6 +213,14 @@ function videoTime(seconds: number): string {
 /** What a student with a request in review reads when they apply again. */
 export const ALREADY_APPLIED = "You already applied for the discount. We're reviewing it.";
 
+/**
+ * What a student reads when saving the request fails for any other reason: a
+ * foreign key, a value that is not a uuid, the database function's own
+ * refusal, no connection. The route logs the real error; the database's words
+ * never reach the student.
+ */
+export const SAVE_FAILED = "Something went wrong saving that. Try again, or ask the team in Discord.";
+
 /** v106's index: at most one pending request per student. */
 const ONE_PENDING_INDEX = "discount_requests_one_pending_per_student";
 
@@ -219,7 +230,7 @@ const ONE_PENDING_INDEX = "discount_requests_one_pending_per_student";
  * close together that both passed the route's checks before either was
  * written. The first request stands, so the student gets the answer for a
  * request already in review, never the database's words. Null for any other
- * error, which the route answers as before.
+ * error, which the route answers with SAVE_FAILED.
  */
 export function secondPendingRequest(
   error: { code?: string | null; message?: string | null } | null | undefined,
@@ -318,9 +329,70 @@ export function decideDiscountRequest(reads: DiscountReads, now: Date): RequestD
   };
 }
 
+/**
+ * Which state of the new rule refused a request: what explainOldCourseRequest
+ * reads. "late-request" and "another-request" are madeOutsideApply's.
+ */
+export type ApprovalRefusal = "locked" | "before-launch" | "no-payment" | "no-gate" | "late-request" | "another-request";
+
 export type ApprovalVerdict =
   | { ok: true }
-  | { ok: false; status: number; error: string; log?: string };
+  | { ok: false; status: number; error: string; log?: string; reason?: ApprovalRefusal };
+
+/**
+ * How long after a student's deadline a request made through the app can
+ * still be stamped: a request route decides on its own clock, then inserts,
+ * and the database stamps the insert with its own now(). Vercel stops a
+ * function after 5 minutes at most, so nothing the app allowed in time is
+ * written later than this.
+ */
+export const REQUEST_GRACE_MS = 5 * 60_000;
+
+/**
+ * POST /api/discounts/approve on the new course: a refusal for a request the
+ * app's Apply could not have made, or null. Both request routes refuse an
+ * application after the student's deadline, and one from a student who holds
+ * another request that counts (discount.ts requestCounts) and was rejected,
+ * approved or applied. The feedback form's database function checks neither,
+ * and until v107 a student holding a session could call it straight (the
+ * release review, 17 October). `asked` is the request's `created_at` in
+ * milliseconds (NaN when it does not parse: then only the second check runs);
+ * `requestId` is the request being approved, never counted as "another".
+ */
+function madeOutsideApply(
+  requests: readonly DiscountRequestRow[],
+  firstPaidAt: string | null,
+  asked: number,
+  endsAt: Date | null,
+  requestId: string | undefined,
+): ApprovalVerdict | null {
+  if (endsAt && Number.isFinite(asked) && asked > endsAt.getTime() + REQUEST_GRACE_MS) {
+    return {
+      ok: false,
+      status: 400,
+      error:
+        `Cannot approve: this request was made at ${new Date(asked).toISOString()}, after the student's deadline ` +
+        `(${endsAt.toISOString()}), and the app refuses an application that late. Judge it by hand; Generate anyway skips the check.`,
+      reason: "late-request",
+    };
+  }
+  const other = requests
+    .filter((r) => r.id !== requestId && r.status !== "pending" && requestCounts(r, firstPaidAt))
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
+  if (!other) return null;
+  const why =
+    other.status === "rejected"
+      ? "was rejected, and the app refuses a new application after a rejection"
+      : other.status === "approved"
+        ? `was already approved, and the ${DISCOUNT_PERCENT}% is one per student`
+        : `is already on their membership, and the ${DISCOUNT_PERCENT}% is one per student`;
+  return {
+    ok: false,
+    status: 400,
+    error: `Cannot approve: this student's other request (made ${other.created_at}) ${why}. Judge it by hand; Generate anyway skips the check.`,
+    reason: "another-request",
+  };
+}
 
 /**
  * POST /api/discounts/approve on the new course: the request route's rule,
@@ -339,11 +411,29 @@ export type ApprovalVerdict =
  * What the student sees is unchanged. A request date that does not parse, or a
  * video with no date, asks for the video (the side that approves nothing by
  * mistake).
+ *
+ * `resetAt` is the course switch (`curriculum_reset_at`), or null before it.
+ * A request made before the switch was made on the old course, when the app
+ * showed none of the new course's videos, so the videos it is judged by are
+ * the ones loaded by the switch, and the student still has until their
+ * deadline to watch them. Without this every new-course video counted as
+ * loaded after a September request, nothing was asked for, and the approval
+ * read the same whether or not the student had finished (the release review,
+ * 17 October).
+ *
+ * Where the rule would approve, it then refuses a request the app's Apply
+ * could not have made (madeOutsideApply, 17 October): one made more than
+ * REQUEST_GRACE_MS after the student's deadline, or one beside another of the
+ * student's requests that counts and was rejected, approved or applied.
+ * Every other answer keeps its words. `requestId` is the id of the request
+ * being approved.
  */
 export function approvalVerdict(
   reads: DiscountReads,
   now: Date,
   requestCreatedAt: string | null,
+  requestId?: string,
+  resetAt?: string | null,
 ): ApprovalVerdict {
   const f = factsFromReads(reads);
   if (!f.ok) {
@@ -356,10 +446,14 @@ export function approvalVerdict(
   }
   const { firstPaidAt, completions } = f.facts;
   const asked = requestCreatedAt == null ? NaN : Date.parse(requestCreatedAt);
+  // The videos the request is judged by: those loaded when it was made, or at
+  // the switch for a request made before it (resetAt above).
+  const reset = resetAt == null ? NaN : Date.parse(resetAt);
+  const videosAsOf = Number.isFinite(asked) && Number.isFinite(reset) && reset > asked ? reset : asked;
   const loadedLater = new Set(
-    Number.isFinite(asked)
+    Number.isFinite(videosAsOf)
       ? reads.videos.data!
-          .filter((v) => v.created_at != null && Date.parse(v.created_at) > asked)
+          .filter((v) => v.created_at != null && Date.parse(v.created_at) > videosAsOf)
           .map((v) => v.lesson_id)
       : [],
   );
@@ -375,7 +469,7 @@ export function approvalVerdict(
   });
   switch (state.kind) {
     case "ready":
-      return { ok: true };
+      return madeOutsideApply(f.facts.requests, firstPaidAt, asked, endsAt, requestId) ?? { ok: true };
     case "locked": {
       const by =
         state.window === "shared"
@@ -387,6 +481,7 @@ export function approvalVerdict(
         error:
           `Student has not watched every video up to the discount checkpoint ${by}: ` +
           `${state.lessonsLeft} of ${state.lessonsTotal} still missing.`,
+        reason: "locked",
       };
     }
     case "not-eligible":
@@ -397,6 +492,7 @@ export function approvalVerdict(
           status: 400,
           error:
             "Cannot approve: student has no first_paid_at on file. Run the Whop sync (Refresh on /admin) to backfill, then retry. If still NULL, this student's Whop membership history needs manual review.",
+          reason: "no-payment",
         };
       }
       if (state.reason === "before-launch") {
@@ -404,6 +500,7 @@ export function approvalVerdict(
           ok: false,
           status: 400,
           error: `Cannot approve: the student's first payment (${firstPaidAt}) is before ${ELIGIBLE_DAY}. Only a first payment from then on can earn the discount.`,
+          reason: "before-launch",
         };
       }
       return {
@@ -412,6 +509,7 @@ export function approvalVerdict(
         error:
           "Cannot approve: the course has no discount gate lesson (is_gate), or no lesson up to it has a video, so nobody can qualify. Check the catalog and lesson_videos.",
         log: "nothing approved: the catalog has no gate lesson, or no video up to it",
+        reason: "no-gate",
       };
     default:
       // Unreachable with no requests and the clock held inside the window.
@@ -424,10 +522,16 @@ export const OLD_COURSE_REQUEST_REFUSAL =
 
 /**
  * POST /api/discounts/approve on the new course: a refusal of a request made
- * before the course switch (`curriculum_reset_at`), in words that say so. The
- * old course's progress was archived at the switch, so the new rule's reason
- * says nothing about that student. A verdict that approves, a failed read
- * (500), no switch, or a date that does not parse comes back as it went in.
+ * before the course switch (`curriculum_reset_at`), in words that say so,
+ * when the refusal is about the videos. The old course's progress was
+ * archived at the switch, and the request was judged by the new course's
+ * videos as they stood at the switch (approvalVerdict's `resetAt`), so "N of
+ * M still missing" ("locked") keeps the new rule's words after the old-course
+ * sentence, and "no video to check" ("no-gate") gets the sentence alone. A
+ * first payment before 9 September, or none on
+ * file, reads the same on either course, so those refusals keep their own
+ * words. A verdict that approves, a failed read (500), no switch, or a date
+ * that does not parse comes back as it went in.
  */
 export function explainOldCourseRequest(
   verdict: ApprovalVerdict,
@@ -435,8 +539,15 @@ export function explainOldCourseRequest(
   resetAt: string | null,
 ): ApprovalVerdict {
   if (verdict.ok || verdict.status !== 400 || resetAt == null) return verdict;
+  if (verdict.reason !== "locked" && verdict.reason !== "no-gate") return verdict;
   const asked = Date.parse(requestCreatedAt);
   const reset = Date.parse(resetAt);
   if (!Number.isFinite(asked) || !Number.isFinite(reset) || asked >= reset) return verdict;
-  return { ok: false, status: 400, error: OLD_COURSE_REQUEST_REFUSAL };
+  return {
+    ...verdict,
+    error:
+      verdict.reason === "locked"
+        ? `${OLD_COURSE_REQUEST_REFUSAL} The new rule says: ${verdict.error}`
+        : OLD_COURSE_REQUEST_REFUSAL,
+  };
 }

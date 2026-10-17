@@ -8,12 +8,15 @@
  * The dashboard still shows its full-screen streak celebration.
  *
  * The rules and the browser keys are the dashboard's, copied as they stand
- * (client-tests/celebrations.test.mjs checks the keys against that file).
- * Sharing the keys is the dedupe across both: a streak or an approval already
- * celebrated on the dashboard in this browser is not celebrated again on the
- * map, and the other way round. The dashboard page keeps its own copy until
- * WI-12 deletes it. Neither calls /api/student/celebration-seen: that route
- * serves /dashboard-mockup's region and milestone moments, not these two.
+ * (client-tests/celebrations.test.mjs checks the keys against that file),
+ * but for a streak after a break, which since 2026-10-17 the map marks and the
+ * dashboard does not (streakToCelebrate). Sharing the keys is the dedupe
+ * across both: a streak or an approval already celebrated on the dashboard in
+ * this browser is not celebrated again on the map, and the other way round.
+ * The key stays a whole number, so the dashboard still reads what the map
+ * writes. The dashboard page keeps its own copy until WI-12 deletes it.
+ * Neither calls /api/student/celebration-seen: that route serves
+ * /dashboard-mockup's region and milestone moments, not these two.
  */
 
 /** The last approved request celebrated in this browser (its id). One key for every account, as on the dashboard. */
@@ -24,16 +27,21 @@ export const streakLastSeenKey = (studentId: string) => `et.streak.lastSeen.${st
 
 /**
  * The streak to mark, or null (on the map, the header's moment). A streak
- * above the one last celebrated here: one finished lesson on a new day, a
- * streak earned on another device the first time this browser sees it.
- * Never 0, never twice for one count, and nothing when the stored value is
- * not a number.
+ * that differs from the one last marked here. Above it: one finished lesson
+ * on a new day, a streak earned on another device the first time this browser
+ * sees it. Below it: a new streak after a break this browser did not see,
+ * since a streak only goes up until it breaks (2026-10-17; it used to wait
+ * until the new streak passed the old number, and the dashboard still does).
+ * The map writes the key's 0 when it shows a broken streak
+ * (WorldCelebrations.tsx), so a new streak that stops where the old one did
+ * is marked too. Never 0, never twice for one count, and nothing when the
+ * stored value is not a number.
  */
 export function streakToCelebrate(current: number, lastSeenRaw: string | null): number | null {
   if (!(current > 0)) return null;
   const lastSeen = lastSeenRaw ? parseInt(lastSeenRaw, 10) : 0;
   if (Number.isNaN(lastSeen)) return null;
-  return current > lastSeen ? current : null;
+  return current !== lastSeen ? current : null;
 }
 
 /** True when this approved request has not been celebrated in this browser. */

@@ -27,7 +27,6 @@ interface Completion {
 
 interface DiscountRequest {
   status: string;
-  promo_code: string | null;
 }
 
 interface MonthReview {

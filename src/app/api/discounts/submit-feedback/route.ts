@@ -7,7 +7,8 @@
  *   - That endpoint creates the discount_requests row on its own; it's
  *     called as a bare Apply click.
  *   - This endpoint creates the row AND the 6 feedback responses atomically
- *     via the submit_discount_with_feedback Postgres function (v29).
+ *     via the submit_discount_with_feedback Postgres function (v29), which
+ *     only the service role may call since v107.
  *
  * Body:
  *   {
@@ -31,7 +32,7 @@ import { refuseWhileClosed } from "@/lib/student-app-gate";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { onDiscountRequested } from "@/lib/csm-events";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
-import { decideDiscountRequest, loadDiscountReads, secondPendingRequest } from "@/lib/world/discount-server";
+import { SAVE_FAILED, decideDiscountRequest, loadDiscountReads, secondPendingRequest } from "@/lib/world/discount-server";
 
 interface IncomingAnswer {
   question_id?: unknown;
@@ -151,24 +152,15 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Atomic insert via the v29 RPC function.
-  //
-  // The RPC has an internal authorization guard (auth.uid() must match
-  // the student or be a team member). The service-role client above has
-  // no user identity — auth.uid() is null there — so calling the RPC
-  // through it makes the guard raise "Not authorized" and nothing is
-  // written. Call it through a client carrying the student's own JWT so
-  // auth.uid() resolves to them and the guard passes. The inserts still
-  // run with the function's security-definer privileges (RLS-exempt).
-  const userClient = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      auth: { persistSession: false },
-      global: { headers: { Authorization: `Bearer ${token}` } },
-    },
-  );
-  const { data, error } = await userClient.rpc(
+  // Atomic insert via the database function (v29, made the server's only by
+  // v107). It is called with the service-role client above and the student
+  // id taken from the token, never with the student's own session: since
+  // v107 the function refuses every caller but the service role, so a
+  // student can't call it straight and skip the checks above (and the
+  // closed doors). Until v107 is pasted, v29's own check refuses this call
+  // ("Not authorized to submit feedback for this student", in the log below)
+  // and the student reads SAVE_FAILED: v107 goes in with this code.
+  const { data, error } = await supabase.rpc(
     "submit_discount_with_feedback",
     {
       p_student_id: studentId,
@@ -182,10 +174,10 @@ export async function POST(request: NextRequest) {
     // stands, so this one is answered as a request already in review.
     const twice = secondPendingRequest(error);
     if (twice) return NextResponse.json(twice, { status: 400 });
-    return NextResponse.json(
-      { error: error.message ?? "Submit failed" },
-      { status: 400 },
-    );
+    // Anything else (a foreign key, a bad uuid, the function's own refusal):
+    // one plain sentence for the student, the real error for the server log.
+    console.error(`[discounts/submit-feedback] student ${studentId}: saving the request failed`, error);
+    return NextResponse.json({ error: SAVE_FAILED }, { status: 400 });
   }
 
   const requestId = typeof data === "string" ? data : null;

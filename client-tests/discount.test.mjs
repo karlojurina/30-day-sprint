@@ -11,7 +11,7 @@ import {
 } from './_gen/discount.ts'
 import { DISCOUNT_WINDOW_DAYS as CONSTANTS_WINDOW_DAYS } from './_gen/constants.ts'
 import {
-  LESSON_COLUMNS, OLD_COURSE_REQUEST_REFUSAL, REQUEST_COLUMNS, VIDEO_COLUMNS,
+  LESSON_COLUMNS, OLD_COURSE_REQUEST_REFUSAL, REQUEST_COLUMNS, REQUEST_GRACE_MS, VIDEO_COLUMNS,
   approvalVerdict, decideDiscountRequest, discountRefusalMessage, explainOldCourseRequest, factsFromReads,
   loadDiscountReads, toDiscountLessons, videoDoneIds,
 } from './_gen/discount-server.ts'
@@ -601,6 +601,112 @@ console.log('\n=== approvalVerdict: a video loaded after the request is not aske
   }
 }
 
+console.log('\n=== approvalVerdict: a request made before the switch is judged by the videos the course had at the switch (2026-10-17) ===')
+{
+  // The release review's case: a September joiner applied on the old
+  // dashboard on 25 September, the new course's videos went into
+  // lesson_videos on 14 October, the switch is 19 October, Approve on the 21st.
+  const RESET = '2026-10-19T05:00:00.000Z'
+  const SEPT = okRead({ first_paid_at: '2026-09-15T10:00:00.000Z' })
+  const OLD = '2026-09-25T10:00:00.000Z'
+  const AT = new Date('2026-10-21T09:00:00Z')
+  const loaded = (at, x05At = at) => okRead(COURSE.filter((l) => l.has_video).map((l) => ({ lesson_id: l.id, created_at: l.id === 'x05' ? x05At : at })))
+  const OCT14 = loaded('2026-10-14T00:00:00.000Z')
+  const allDone = done(['x01', 'x05', 'x06'], '2026-10-19T07:30:00Z')
+  ok(same(approvalVerdict(reads({ student: SEPT, videos: OCT14, completions: allDone }), AT, OLD, 'old', RESET), { ok: true }),
+     'every video done by the deadline: approved by the normal button')
+  {
+    const v = approvalVerdict(reads({ student: SEPT, videos: OCT14, completions: done(['x01'], '2026-10-19T07:30:00Z') }), AT, OLD, 'old', RESET)
+    ok(!v.ok && v.status === 400 && v.reason === 'locked' && v.error.includes('2 of 3 still missing')
+         && explainOldCourseRequest(v, OLD, RESET).error === `${OLD_COURSE_REQUEST_REFUSAL} The new rule says: ${v.error}`,
+       'two still missing: refused with the count, after the old-course sentence', explainOldCourseRequest(v, OLD, RESET).error)
+  }
+  {
+    // Without the switch's date, which is how the approve route judged it until this round.
+    const finished = approvalVerdict(reads({ student: SEPT, videos: OCT14, completions: allDone }), AT, OLD, 'old')
+    const nothing = approvalVerdict(reads({ student: SEPT, videos: OCT14, completions: okRead([]) }), AT, OLD, 'old')
+    ok(finished.reason === 'no-gate' && nothing.reason === 'no-gate' && finished.error === nothing.error,
+       'without it: every video counts as loaded after the request, and finished and unwatched read exactly the same (the reviewer\'s case)', finished.error)
+    ok(approvalVerdict(reads({ student: SEPT, videos: OCT14, completions: allDone }), AT, OLD, 'old', null).reason === 'no-gate'
+         && approvalVerdict(reads({ student: SEPT, videos: OCT14, completions: allDone }), AT, OLD, 'old', 'not a date').reason === 'no-gate',
+       'no switch yet (null), or a date that does not parse: the request\'s own date, as before')
+  }
+  ok(approvalVerdict(reads({ student: SEPT, videos: loaded('2026-10-14T00:00:00.000Z', '2026-10-20T00:00:00.000Z'), completions: done(['x01', 'x06'], '2026-10-19T07:30:00Z') }), AT, OLD, 'old', RESET).ok,
+     'a video loaded after the switch is still not asked for')
+  {
+    // A request made after the switch keeps its own date: x05 loaded after it is not asked for.
+    const ASKED = '2026-10-20T10:00:00.000Z'
+    const v = approvalVerdict(reads({ student: SEPT, videos: loaded('2026-10-14T00:00:00.000Z', '2026-10-20T12:00:00.000Z'), completions: done(['x01', 'x06'], '2026-10-19T07:30:00Z') }), AT, ASKED, 'q', RESET)
+    ok(v.ok, 'a request made after the switch: its own date decides, as before', show(v))
+  }
+  {
+    const v = approvalVerdict(reads({ student: SEPT, videos: OCT14, completions: done(['x01', 'x05', 'x06'], '2026-10-24T08:00:00Z') }), new Date('2026-10-27T09:00:00Z'), OLD, 'old', RESET)
+    ok(!v.ok && v.reason === 'locked' && v.error.includes('3 of 3 still missing'), 'the deadline still holds: videos watched on 24 October do not count', v.error)
+  }
+  ok(!approvalVerdict(reads({ student: SEPT, videos: loaded('2026-10-20T00:00:00.000Z'), completions: done(['x01']) }), AT, 'not a date', 'old', RESET).ok,
+     'a request date that does not parse: every video asked for, switch or not')
+}
+
+console.log('\n=== approvalVerdict: a request the app\'s Apply could not have made (17 October) ===')
+{
+  // Until v107 a student holding a session could call the feedback form's
+  // database function straight, past the request routes. Where the rule
+  // would approve, the approval refuses a request made after the deadline
+  // (past REQUEST_GRACE_MS) and one beside another counted request that was
+  // rejected, approved or applied. PAID is 10 October: the deadline is ENDS.
+  const ALL = done(['x01', 'x05', 'x06'])
+  const LATE_AT = new Date('2026-11-01T00:00:00Z')
+  const plus = (ms) => new Date(Date.parse(ENDS) + ms).toISOString()
+  ok(REQUEST_GRACE_MS === 5 * 60_000, 'the grace for a route\'s own insert is 5 minutes, the longest Vercel lets a function run')
+  ok(approvalVerdict(reads({ completions: ALL }), LATE_AT, plus(REQUEST_GRACE_MS)).ok,
+     'a request stamped 5 minutes after the deadline, to the millisecond: approved (a route that decided in time can insert that late)')
+  {
+    const v = approvalVerdict(reads({ completions: ALL }), LATE_AT, plus(REQUEST_GRACE_MS + 1), 'q')
+    ok(!v.ok && v.status === 400 && v.reason === 'late-request'
+         && v.error === `Cannot approve: this request was made at ${plus(REQUEST_GRACE_MS + 1)}, after the student's deadline (${ENDS}), and the app refuses an application that late. Judge it by hand; Generate anyway skips the check.`,
+       'one millisecond later: refused, the request\'s time and the deadline named', v.error)
+  }
+  ok(approvalVerdict(reads({ completions: ALL }), LATE_AT, null).ok && approvalVerdict(reads({ completions: ALL }), LATE_AT, 'not a date').ok,
+     'no request date, or one that does not parse: the late check cannot run (the route always has one: created_at is not null)')
+  const asked = '2026-10-15T08:00:00.000Z'
+  const said = (status) => {
+    const v = approvalVerdict(reads({ completions: ALL, requests: okRead([R('q', 'pending', asked), R('o', status, '2026-10-12T10:00:00.000Z')]) }), IN_WINDOW, asked, 'q')
+    return v.ok ? 'approved' : `${v.reason}: ${v.error}`
+  }
+  ok(said('rejected') === "another-request: Cannot approve: this student's other request (made 2026-10-12T10:00:00.000Z) was rejected, and the app refuses a new application after a rejection. Judge it by hand; Generate anyway skips the check.",
+     'another request, made after the launch and rejected: refused', said('rejected'))
+  ok(said('approved').endsWith('was already approved, and the 30% is one per student. Judge it by hand; Generate anyway skips the check.')
+       && said('applied').endsWith('is already on their membership, and the 30% is one per student. Judge it by hand; Generate anyway skips the check.'),
+     'another request approved or applied: refused, one 30% per student', `${said('approved')} | ${said('applied')}`)
+  ok(said('pending') === 'approved', 'another pending request is no reason (from v106 there is never a second one; before it, the stable Whop code refused a second approval)')
+  {
+    const rejectedOnly = reads({ completions: ALL, requests: okRead([R('o', 'rejected', '2026-10-12T10:00:00.000Z')]) })
+    ok(approvalVerdict(rejectedOnly, IN_WINDOW, asked, 'o').ok && !approvalVerdict(rejectedOnly, IN_WINDOW, asked).ok,
+       'the request being approved is never "another" (by its id); with no id given every request is')
+  }
+  {
+    // A first payment from 9 September: a request from before the launch counts unless it was rejected (requestCounts).
+    const SEPT = okRead({ first_paid_at: '2026-09-15T10:00:00.000Z' })
+    const OLD = '2026-09-25T10:00:00.000Z'
+    const withOld = (status) => approvalVerdict(reads({ student: SEPT, completions: ALL, requests: okRead([R('old', status, OLD), R('q', 'pending', asked)]) }),
+      new Date('2026-10-20T00:00:00Z'), asked, 'q')
+    ok(withOld('rejected').ok, 'paid 15 September, rejected on the old dashboard before the launch: approved (that request does not count)')
+    ok(withOld('approved').reason === 'another-request' && withOld('applied').reason === 'another-request',
+       'paid 15 September, approved or applied on the old dashboard: refused, one 30% per student')
+  }
+  {
+    const v = approvalVerdict(reads({ completions: done(['x01']), requests: okRead([R('o', 'rejected', '2026-10-12T10:00:00.000Z')]) }), IN_WINDOW, asked, 'q')
+    ok(!v.ok && v.reason === 'locked' && v.error.includes('2 of 3 still missing'), 'where the rule refuses anyway, its own words stand', v.error)
+  }
+  {
+    const late = approvalVerdict(reads({ completions: ALL }), LATE_AT, plus(REQUEST_GRACE_MS + 1), 'q')
+    const other = approvalVerdict(reads({ completions: ALL, requests: okRead([R('o', 'rejected', '2026-10-12T10:00:00.000Z')]) }), IN_WINDOW, asked, 'q')
+    ok(explainOldCourseRequest(late, plus(REQUEST_GRACE_MS + 1), '2026-12-01T00:00:00Z') === late
+         && explainOldCourseRequest(other, asked, '2026-10-16T18:30:00.000Z') === other,
+       'made before the switch, either refusal keeps its own words (it says why, and ends "Generate anyway skips the check")')
+  }
+}
+
 console.log('\n=== explainOldCourseRequest: a request made before the course switch ===')
 {
   const RESET = '2026-10-16T18:30:00.000Z'
@@ -612,16 +718,29 @@ console.log('\n=== explainOldCourseRequest: a request made before the course swi
   const locked = approvalVerdict(reads({ student: okRead({ first_paid_at: '2026-10-10T10:00:00Z' }), completions: okRead([]) }), AT, '2026-10-13T10:00:00Z')
   ok(!locked.ok && locked.status === 400 && locked.error.includes('3 of 3 still missing'), 'the new rule alone refuses it as unwatched', locked.error)
   const said = explainOldCourseRequest(locked, '2026-10-13T10:00:00Z', RESET)
-  ok(same(said, { ok: false, status: 400, error: OLD_COURSE_REQUEST_REFUSAL }), 'made before the switch: the refusal says so, still a 400', show(said))
+  ok(same(said, { ...locked, error: `${OLD_COURSE_REQUEST_REFUSAL} The new rule says: ${locked.error}` }),
+     'made before the switch: the refusal says so, then the new rule\'s own words, still a 400', show(said))
   // The reviewer's case 1, since T-080: paid 1 October, which now has the
-  // shared deadline, so the new rule alone refuses it as unwatched; paid
-  // 1 September, refused as before 9 September. Both read the same.
+  // shared deadline, so the new rule alone refuses it as unwatched.
   const early = approvalVerdict(reads({ student: okRead({ first_paid_at: '2026-10-01T10:00:00Z' }) }), AT, '2026-10-12T10:00:00Z')
-  ok(!early.ok && early.error.includes('3 of 3 still missing') && explainOldCourseRequest(early, '2026-10-12T10:00:00Z', RESET).error === OLD_COURSE_REQUEST_REFUSAL,
+  ok(!early.ok && early.error.includes('3 of 3 still missing')
+       && explainOldCourseRequest(early, '2026-10-12T10:00:00Z', RESET).error === `${OLD_COURSE_REQUEST_REFUSAL} The new rule says: ${early.error}`,
      'paid 1 October, applied on the old course on 12 October: the same words', early.error)
+  // A refusal over the first payment reads the same on either course, so it
+  // keeps its words. Until the release review (2026-10-17) the old-course
+  // sentence replaced it, ending "Generate anyway skips the check".
   const tooEarly = approvalVerdict(reads({ student: okRead({ first_paid_at: '2026-09-01T10:00:00Z' }) }), AT, '2026-09-10T10:00:00Z')
-  ok(tooEarly.error.includes('before September 9, 2026') && explainOldCourseRequest(tooEarly, '2026-09-10T10:00:00Z', RESET).error === OLD_COURSE_REQUEST_REFUSAL,
-     'paid 1 September, refused as before 9 September: the same words', tooEarly.error)
+  ok(tooEarly.error.includes('before September 9, 2026') && explainOldCourseRequest(tooEarly, '2026-09-10T10:00:00Z', RESET) === tooEarly,
+     'paid 1 September, refused as before 9 September: the refusal keeps its own words', tooEarly.error)
+  const noPay = approvalVerdict(reads({ student: okRead({ first_paid_at: null }) }), AT, '2026-10-13T10:00:00Z')
+  ok(noPay.error.startsWith('Cannot approve: student has no first_paid_at on file.') && explainOldCourseRequest(noPay, '2026-10-13T10:00:00Z', RESET) === noPay,
+     'no first payment on file: the refusal keeps its own words', noPay.error)
+  // Every video loaded after the request: nothing to check it against.
+  const loaded12 = okRead(COURSE.filter((l) => l.has_video).map((l) => ({ lesson_id: l.id, created_at: '2026-10-12T00:00:00Z' })))
+  const noVideo = approvalVerdict(reads({ student: okRead({ first_paid_at: '2026-09-15T10:00:00Z' }), videos: loaded12 }), AT, '2026-09-25T10:00:00Z')
+  const noVideoSaid = explainOldCourseRequest(noVideo, '2026-09-25T10:00:00Z', RESET)
+  ok(/no discount gate lesson/.test(noVideo.error) && noVideoSaid.error === OLD_COURSE_REQUEST_REFUSAL && noVideoSaid.status === 400 && noVideoSaid.log === noVideo.log,
+     'applied on the old course before any video was loaded: the old-course sentence alone, still a 400, the log line kept', noVideoSaid.error)
   ok(explainOldCourseRequest(locked, '2026-10-17T09:00:00Z', RESET) === locked, 'made after the switch: the new rule\'s own words')
   ok(explainOldCourseRequest(locked, RESET, RESET) === locked, 'made at the switch\'s instant: the new rule\'s own words')
   ok(explainOldCourseRequest(locked, '2026-10-13T10:00:00Z', null) === locked, 'no switch: unchanged')

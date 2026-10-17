@@ -1570,7 +1570,7 @@
   content: "";
   position: absolute;
   inset: -24px;
-  background: url("data:image/webp;base64,UklGRmgBAABXRUJQVlA4IFwBAABwCACdASowABsAPm0uj0WkIqEYDVaoQAbEswBOmcc9B2q4LOMAUDU863QEbVYiiqaiiD07V/PWXSXHT4BxFutTk204NhPlkM5EZyTQAP6vc5TmL3e4Pz6KFJutgWpd1pdBZy7ezcRgXyp9HZUEYo8fJguAfmzJqqJoHCY6sie9KdEN7FcSLqVOYmjpLw6xbntN1e2gl/id8cHZFRgQmigXni9PdD3uue5Zp9sYp3iyfJ8txk0nQREGUxxC18eZuq1lVkkMWIbD9glrkszfZIhKCosPbQy3ZXqXEI1TniA/BF9NvxNqZhPwB1pvhQUNt7XykPNstc2MRFTc+gBOmM/8cdL4FBp0zENkuS3sjgItF6LQ8sAbCbTKGUwnuG/M2zRi888uCu2m13S3P+BglT4UqMlMgBpgrFI/bBFP7ZL6/MsOi7Ab7H8XptJvM2V8ZxbYjg/8e/PtwKSsAAA=") center / cover no-repeat;
+  background: url("data:image/webp;base64,UklGRp4BAABXRUJQVlA4IJIBAAAQCACdASowABsAPm0skUWkIqGYBABABsSzBuLiHKzfBLtVv8qavPi6YABO0CP8UVKFs+n9j3PObV2qMlHr6Z7znvb3yzgg84uAAP6vdH5bcUTvcIeQjV1cMfpEwnxIPwLyp8DoHRI/2ALaJtLpDdszSteuM1aMlAJ+QWDL1LgututbNvMWuwKRD7ElHSXdH6NFCBdIPz5+J3xwdiCY/4CC6U+xDct2ntGNT3KgcqiW/Kyo6JOojVb+Uv/S4ghbTF2SsBpDsNtkZ3M43CGPmpejZim2lePa2PH/BHZ/93t/Gtyt+K08n+P/TfxyhWf9Z7UPd+dQdfUTnu6U52gSAvEgz2R2g+21B/Bmhn54MrGfGT335tg+nv/X09WPtoN3+HNNf6jxCv6oGXVz+kQr3kvbqWRt/W4puCFwfEycPvVfB+kU/jqlo/6Vy/sXsuSazLk0b36Xz9ddVDqB+JiW+clSYIOCkxyhHQzyWwvNjW4M93jFr+BaZAgeLF5W7qHjQaS+G1YTmqSb7Pf+LJFjGCcgAAA=") center / cover no-repeat;
   filter: blur(14px);
 }
 

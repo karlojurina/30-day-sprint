@@ -256,7 +256,7 @@ export async function* listMembershipsForProduct(
  * Look up the active (or past_due) membership for a single user, by
  * whop_user_id. Used by the OAuth callback to self-heal student rows
  * for legacy customers who joined before our webhook was wired up
- * (Karlo's bug 2026-05-30 — Michael Buratynskyi). Falls back across
+ * (Karlo's bug 2026-05-30 — one legacy customer). Falls back across
  * every product configured in WHOP_PRODUCT_ID.
  *
  * Returns null if no active membership exists for any of our
@@ -589,9 +589,9 @@ export async function fetchAllMemberships(): Promise<SyncEntry[]> {
       // sync stamped membership_status='canceled' on a fully paid-up
       // student and the dashboard hard-blocked them — every run, forever,
       // because a dead membership's created_at never stops being the
-      // newest. That's what locked Kelvin Nguyen (user_uJq98jGPhJfRr)
-      // out on 2026-07-29: his live mem_RahKXMQGRohtvj lost to his
-      // canceled duplicate mem_0xlEPe5fq0FqQj.
+      // newest. That's what locked a paying student out on
+      // 2026-07-29: his live membership lost to his canceled
+      // duplicate.
       //
       // Access wins over recency. Recency only breaks ties WITHIN the
       // same access class, which preserves the old behavior for the

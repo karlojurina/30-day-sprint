@@ -80,23 +80,23 @@ The chain **link → owner → owner's subscription → their team's seats** is 
 Worked example, verified live:
 
 ```
-plan_Va4BldAvwhNiW  "Waitlist slimconvert2c"  ($997 ETfB)
-  └ user_LDDwfn3g5Pqs3  damian@trynativebloom.com  active
-plan_8HUsF795Qk9Ua  "Iskander - slimconvert2c"  ($0 Apex)
-  └ 5 valid seats, one of which is that SAME user_LDDwfn3g5Pqs3
+plan_Va4BldAvwhNiW  "Waitlist <whop username>"  ($997 ETfB)
+  └ <owner's Whop user id>  <owner's address>  active
+plan_8HUsF795Qk9Ua  "<owner's name> - <whop username>"  ($0 Apex)
+  └ 5 valid seats, one of which is that SAME Whop user id
 ```
 
 **But coverage is poor, and it is worst where the members are.** Of 118 Apex plans:
 
 - 55 notes parse as `Name - username` (machine-joinable)
-- 61 are a bare free-text name — "Leo", "Reda", "Teoh", "Ruben", "Ashish", "Alex Birch"
+- 61 are a bare free-text name — a first name alone, or a first and last name
 - 2 carry no note at all
 
 The naming convention only hardened around **2026-07-13**. The seats are concentrated in the
 older, less-attributable links: **140 seats pre-cutover vs 41 post.**
 
 `internal_notes` values are also **not unique** — 148 distinct values across 154 populated
-notes, with "Alex Birch" appearing on two different plans, plus duplicates of "App Access" and
+notes, with one owner's full name appearing on two different plans, plus duplicates of "App Access" and
 one plan literally named `test`.
 
 > **Design rule: `plan_id` is the join key. `internal_notes` is a display label only.**

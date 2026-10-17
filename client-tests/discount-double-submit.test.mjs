@@ -5,21 +5,36 @@
 // (POST /api/discounts/request and POST /api/discounts/submit-feedback) answer
 // that the way they answer a request already in review: 400, "You already
 // applied for the discount. We're reviewing it.", state "pending". Never the
-// database's words, and the first request stands. Any other failure is
-// answered as before.
+// database's words, and the first request stands. Any other failure, on either
+// route and either course, is answered with one plain sentence (SAVE_FAILED,
+// 17 October), the status as before, and the real error goes to the server
+// log. The closed doors (T-078) still answer before any of it.
 //
 // The routes are the real source, copied by build.mjs with their imports
 // pointed at stub-server.ts (a stand-in database that has v106's index under
 // its real name and message, the catalog flags, the CSM's hook recorded) and
 // at the real discount-server.ts. The feedback form's database function
-// (submit_discount_with_feedback, v29) is a stand-in written here from v29's
-// body. What the database itself does with two inserts is proven in the
-// migration harness, section 26.
+// (submit_discount_with_feedback) is a stand-in written here from v107's body:
+// the service role only, then v29's duplicate check and inserts. The route
+// calls it with its service-role client (17 October). What the database
+// itself does with two inserts is proven in the migration harness, section
+// 26, and the real v107 in section 27.
+import { inspect } from 'node:util'
 import { POST as requestRoute } from './_gen/discount-request-route.ts'
 import { POST as feedbackRoute } from './_gen/discount-submit-feedback-route.ts'
-import { ALREADY_APPLIED, secondPendingRequest } from './_gen/discount-server.ts'
+import { ALREADY_APPLIED, SAVE_FAILED, secondPendingRequest } from './_gen/discount-server.ts'
+import { COMING_SOON_MESSAGE } from './_gen/student-app-gate.ts'
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
-import { FakeDb, useDb as installDb, steps, setCatalog } from './_gen/stub-server.ts'
+import { FakeDb, createClient, useDb as installDb, steps, setCatalog } from './_gen/stub-server.ts'
+
+// The keys the routes make their clients with (made up here), so the
+// function's stand-in can tell the service role's client from a student's.
+process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key'
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key'
+/** A client made with the service role's key and no student token, as the database tells by the request's token. */
+const asServiceRole = (madeWith) => madeWith?.[1] === process.env.SUPABASE_SERVICE_ROLE_KEY && !madeWith?.[2]?.global?.headers?.Authorization
+/** What PostgREST answers a caller the function is not granted to (v107: everyone but the service role). */
+const NOT_GRANTED = { code: '42501', message: 'permission denied for function submit_discount_with_feedback' }
 
 let pass = 0
 const fails = []
@@ -41,6 +56,18 @@ const INDEX_SAYS = 'duplicate key value violates unique constraint "discount_req
 const IN_REVIEW = { error: ALREADY_APPLIED, state: 'pending' }
 /** Never shown to a student. */
 const dbWords = (body) => /duplicate key|unique constraint|discount_requests_one_pending_per_student|23505/.test(show(body))
+/** What a student reads for any other failed write. */
+const PLAIN = { error: SAVE_FAILED }
+/** Postgres's and PostgREST's words for the other failures below, none of which may reach a student. */
+const pgWords = (body) => /violates|constraint|foreign key|invalid input|syntax|uuid|integer|duplicate key|permission denied|already exists|not authorized|could not find|schema cache|fetch failed|discount_requests|discount_feedback|PGRST|P0001|23503|23505|22P02|42501/i.test(show(body))
+
+/** Runs `fn`, keeping what it writes with console.error (the server log) off the test's output and in `log`. */
+async function heard(fn) {
+  const real = console.error
+  const lines = []
+  console.error = (...args) => { lines.push(args.map((a) => (typeof a === 'string' ? a : inspect(a, { breakLength: Infinity }))).join(' ')) }
+  try { return { r: await fn(), log: lines.join('\n') } } finally { console.error = real }
+}
 
 /** A student who is ready to apply on the new course: both videos up to the gate watched, inside the 14 days. */
 function newCourseDb() {
@@ -88,7 +115,8 @@ function oldCourseDb() {
 }
 
 /**
- * submit_discount_with_feedback (v29), standing in: its duplicate check, the
+ * submit_discount_with_feedback as v107 leaves it, standing in: anyone but the
+ * service role is refused before it runs, then v29's duplicate check, the
  * request, then the answers. After its check each call waits until `together`
  * calls have checked, as two sessions do: neither sees the other's row before
  * it commits, so both checks pass and v106's index decides between the
@@ -98,7 +126,8 @@ function feedbackFunction(db, together = 1) {
   let checked = 0
   let release
   const allChecked = new Promise((r) => { release = r })
-  db.functions.submit_discount_with_feedback = async (args, client) => {
+  db.functions.submit_discount_with_feedback = async (args, client, madeWith) => {
+    if (!asServiceRole(madeWith)) return { data: null, error: NOT_GRANTED }
     const { data: existing } = await client.from('discount_requests').select('id')
       .eq('student_id', args.p_student_id).in('status', ['pending', 'approved', 'applied']).limit(1).maybeSingle()
     if (++checked >= together) release()
@@ -127,6 +156,26 @@ const submit = () => call(feedbackRoute, 'submit-feedback', { studentId: 's1', a
 const stepNames = () => steps.map((s) => s.step)
 /** The two answers of a double submit, the one that went in first. */
 const split = ([a, b]) => (a.status === 200 ? [a, b] : [b, a])
+
+console.log('\n=== The questions form calls the database function as the server (v107) ===')
+{
+  const db = newCourseDb()
+  feedbackFunction(db)
+  // A studentId in the body is ignored: the route takes the student from the token.
+  const r = await call(feedbackRoute, 'submit-feedback', { studentId: 'someone-else', answers: ANSWERS })
+  const calls = db.calls('submit_discount_with_feedback', 'rpc')
+  const [, key, opts] = calls[0]?.options ?? []
+  ok(r.status === 200 && typeof r.body.request_id === 'string' && calls.length === 1
+       && key === process.env.SUPABASE_SERVICE_ROLE_KEY && opts?.global?.headers?.Authorization === undefined
+       && calls[0].values.p_student_id === 's1' && calls[0].values.p_answers.length === ANSWERS.length,
+     'one call, with the service-role client and the student id from the token, never the student\'s own session: the request is made',
+     show({ status: r.status, key, auth: opts?.global?.headers?.Authorization ?? null, student: calls[0]?.values?.p_student_id }))
+  const student = createClient('http://db.test', process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, { global: { headers: { Authorization: 'Bearer tok-1' } } })
+  const straight = await student.rpc('submit_discount_with_feedback', { p_student_id: 's1', p_answers: [] })
+  ok(same(straight.error, NOT_GRANTED) && db.rows('discount_requests').length === 1,
+     'the same function called straight with a student\'s own token, as the route did before 17 October: refused, nothing written (the stand-in follows v107; the migration harness runs the real one)',
+     show(straight.error))
+}
 
 console.log('\n=== The words ===')
 ok(same(secondPendingRequest({ code: '23505', message: INDEX_SAYS }), IN_REVIEW), 'v106\'s refusal reads as a request in review', show(secondPendingRequest({ code: '23505', message: INDEX_SAYS })))
@@ -187,30 +236,96 @@ console.log('\n=== The questions form, old course: two submits at the same momen
   ok(won.status === 200 && typeof won.body.request_id === 'string', 'the first is made', show(won))
   ok(lost.status === 400 && same(lost.body, IN_REVIEW) && !dbWords(lost.body), 'the second: the answer for a request in review', show(lost))
   ok(db.rows('discount_requests').length === 1 && db.rows('discount_feedback_responses').length === ANSWERS.length, 'one request, one set of answers')
-  const later = await submit()
-  ok(later.status === 400 && later.body.error === 'A discount request already exists for this student',
-     'a later submit is refused by the function\'s own check, in its own words, as before', show(later))
+  const { r: later, log } = await heard(submit)
+  ok(later.status === 400 && same(later.body, PLAIN) && log.includes('A discount request already exists for this student'),
+     'a later submit is refused by the function\'s own check: the student reads the plain sentence (it showed the function\'s "A discount request already exists for this student"), and that sentence goes to the server log', show(later))
 }
 
-console.log('\n=== Any other failure is answered as before ===')
-{
-  const db = newCourseDb()
-  db.fail['discount_requests.insert'] = { code: '42501', message: 'permission denied for table discount_requests' }
-  const r = await apply()
-  ok(r.status === 500 && same(r.body, { error: 'Failed to create request' }) && steps.length === 0, 'Apply, another failure: 500 "Failed to create request", no hook', show(r))
+console.log('\n=== Any other failure: one plain sentence for the student, the real error in the server log ===')
+// Each failure below is what Postgres or PostgREST hands back. Apply's
+// statuses stay 500 and the questions form's 400, as they were; only the
+// words change. Before 17 October Apply said "Failed to create request" and
+// logged nothing, and the questions form passed the database's own sentence on.
+const NO_CONNECTION = { code: '', message: 'TypeError: fetch failed', details: 'Error: connect ECONNREFUSED', hint: '' }
+/** Apply's insert into discount_requests, refused. */
+const INSERT_FAULTS = [
+  { code: '42501', message: 'permission denied for table discount_requests' },
+  { code: '23505', message: 'duplicate key value violates unique constraint "discount_requests_pkey"' },
+  { code: '23503', message: 'insert or update on table "discount_requests" violates foreign key constraint "discount_requests_student_id_fkey"' },
+  { code: '22P02', message: 'invalid input syntax for type uuid: "s1"' },
+  NO_CONNECTION,
+]
+/** The questions form's database function, failing. The two P0001 sentences are v29's own (v107 keeps them); 42501 is v107 refusing a caller it is not granted to. */
+const FUNCTION_FAULTS = [
+  { code: '23503', message: 'insert or update on table "discount_feedback_responses" violates foreign key constraint "discount_feedback_responses_question_id_fkey"' },
+  { code: '22P02', message: 'invalid input syntax for type uuid: "q1"' },
+  { code: '22P02', message: 'invalid input syntax for type integer: "9.5"' },
+  { code: 'P0001', message: 'Not authorized to submit feedback for this student' },
+  { code: 'P0001', message: 'A discount request already exists for this student' },
+  NOT_GRANTED,
+  { code: '23505', message: 'duplicate key value violates unique constraint "discount_requests_pkey"' },
+  { code: 'PGRST202', message: 'Could not find the function public.submit_discount_with_feedback(p_answers, p_student_id) in the schema cache' },
+  NO_CONNECTION,
+]
+const codes = (faults) => faults.map((f) => f.code || 'no connection').join(', ')
+
+for (const [course, fresh] of [['new course', newCourseDb], ['old course', oldCourseDb]]) {
+  const wrong = []
+  let sample = null
+  for (const fault of INSERT_FAULTS) {
+    const db = fresh()
+    db.fail['discount_requests.insert'] = fault
+    const { r, log } = await heard(apply)
+    const name = fault.code || 'no connection'
+    if (db.calls('discount_requests', 'insert').length !== 1) wrong.push(`${name}: never reached the insert`)
+    if (r.status !== 500 || !same(r.body, PLAIN) || pgWords(r.body)) wrong.push(`${name}: answered ${show(r)}`)
+    if (!log.includes('[discounts/request] student s1') || !log.includes(fault.message) || !log.includes(fault.code)) wrong.push(`${name}: logged ${show(log)}`)
+    if (db.rows('discount_requests').length !== 0 || steps.length !== 0) wrong.push(`${name}: wrote a request or ran the team's hook`)
+    if (fault.code === '23503') sample = { r, log }
+  }
+  ok(wrong.length === 0,
+     `Apply, ${course}, ${INSERT_FAULTS.length} other failures (${codes(INSERT_FAULTS)}): 500 with the plain sentence, the real error in the server log, nothing written`,
+     wrong.length ? wrong.join('; ') : `${show(sample.r)}  log: ${sample.log}`)
 }
-{
-  const db = newCourseDb()
-  db.fail['discount_requests.insert'] = { code: '23505', message: 'duplicate key value violates unique constraint "discount_requests_pkey"' }
-  const r = await apply()
-  ok(r.status === 500 && r.body.error === 'Failed to create request', 'Apply, a 23505 on another index: not taken for a second request', show(r))
+
+for (const [course, fresh] of [['new course', newCourseDb], ['old course', oldCourseDb]]) {
+  const wrong = []
+  let sample = null
+  for (const fault of FUNCTION_FAULTS) {
+    const db = fresh()
+    db.functions.submit_discount_with_feedback = async () => ({ data: null, error: fault })
+    const { r, log } = await heard(submit)
+    const name = `${fault.code || 'no connection'} ${fault.message.slice(0, 24)}`
+    if (db.calls('submit_discount_with_feedback', 'rpc').length !== 1) wrong.push(`${name}: never reached the function`)
+    if (r.status !== 400 || !same(r.body, PLAIN) || pgWords(r.body)) wrong.push(`${name}: answered ${show(r)}`)
+    if (!log.includes('[discounts/submit-feedback] student s1') || !log.includes(fault.message) || !log.includes(fault.code)) wrong.push(`${name}: logged ${show(log)}`)
+    if (db.rows('discount_requests').length !== 0 || steps.length !== 0) wrong.push(`${name}: wrote a request or ran the team's hook`)
+    if (fault.code === '23503') sample = { r, log }
+  }
+  ok(wrong.length === 0,
+     `the questions form, ${course}, ${FUNCTION_FAULTS.length} other failures (${codes(FUNCTION_FAULTS)}): 400 with the plain sentence, the real error in the server log, nothing written`,
+     wrong.length ? wrong.join('; ') : `${show(sample.r)}  log: ${sample.log}`)
 }
+
+console.log('\n=== The closed doors still answer first (T-078) ===')
 {
-  const db = newCourseDb()
-  db.functions.submit_discount_with_feedback = async () => ({ data: null, error: { code: '23503', message: 'insert or update on table "discount_feedback_responses" violates foreign key constraint' } })
-  const r = await submit()
-  ok(r.status === 400 && r.body.error.includes('foreign key') && r.body.state === undefined && steps.length === 0,
-     'the questions form, another failure: passed on as before, not read as a second request', show(r))
+  const before = process.env.STUDENT_APP_CLOSED
+  process.env.STUDENT_APP_CLOSED = 'true'
+  try {
+    for (const [name, send, arm] of [
+      ['Apply', apply, (db) => { db.fail['discount_requests.insert'] = INSERT_FAULTS[2] }],
+      ['the questions form', submit, (db) => { db.functions.submit_discount_with_feedback = async () => ({ data: null, error: FUNCTION_FAULTS[0] }) }],
+    ]) {
+      const db = newCourseDb()
+      arm(db)
+      const { r, log } = await heard(send)
+      ok(r.status === 503 && same(r.body, { error: COMING_SOON_MESSAGE, code: 'student_app_closed' }) && db.log.length === 0 && log === '',
+         `${name}, the app closed with a failure waiting behind it: the coming-soon answer, not one database call, nothing logged`, `${r.status} ${show(r.body)}`)
+    }
+  } finally {
+    if (before === undefined) delete process.env.STUDENT_APP_CLOSED
+    else process.env.STUDENT_APP_CLOSED = before
+  }
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

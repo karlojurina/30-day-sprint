@@ -4,7 +4,7 @@ import { refuseWhileClosed } from "@/lib/student-app-gate";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { onDiscountRequested } from "@/lib/csm-events";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
-import { decideDiscountRequest, loadDiscountReads, secondPendingRequest } from "@/lib/world/discount-server";
+import { SAVE_FAILED, decideDiscountRequest, loadDiscountReads, secondPendingRequest } from "@/lib/world/discount-server";
 
 /**
  * The new course (2026-10-14): on a deployment that reads the v2 catalog
@@ -38,7 +38,9 @@ async function requestUnderNewCourse(supabase: SupabaseClient, studentId: string
     // A second Apply sent with the first (v106 refuses it): the first stands.
     const twice = secondPendingRequest(error);
     if (twice) return NextResponse.json(twice, { status: 400 });
-    return NextResponse.json({ error: "Failed to create request" }, { status: 500 });
+    // Anything else: one plain sentence for the student, the real error for the log.
+    console.error(`[discounts/request] student ${studentId}: saving the request failed`, error);
+    return NextResponse.json({ error: SAVE_FAILED }, { status: 500 });
   }
 
   // CSM W2.6 admin task (best-effort).
@@ -262,7 +264,9 @@ export async function POST(request: NextRequest) {
     // the second insert, and the first stands.
     const twice = secondPendingRequest(error);
     if (twice) return NextResponse.json(twice, { status: 400 });
-    return NextResponse.json({ error: "Failed to create request" }, { status: 500 });
+    // Anything else: one plain sentence for the student, the real error for the log.
+    console.error(`[discounts/request] student ${studentId}: saving the request failed`, error);
+    return NextResponse.json({ error: SAVE_FAILED }, { status: 500 });
   }
 
   // CSM W2.6 admin task (best-effort).

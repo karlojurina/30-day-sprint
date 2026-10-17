@@ -3659,6 +3659,9 @@ await cutover(db, '')
 
 const V105F = '2026_v105_close_student_write_policies.sql'
 const V106F = '2026_v106_one_pending_discount_request.sql'
+const V107F = '2026_v107_feedback_function_server_only.sql'
+// Section 26's database as it ends (v105 and v106 in), kept for section 27.
+let feedbackDb = null
 const READ_OWN = 'Students can read own lesson completions'
 const DOORS = [['student_lesson_completions', 'Students can manage own lesson completions'],
                ['discount_requests', 'Students can create discount requests'],
@@ -4229,6 +4232,176 @@ console.log('\n=== 26. v106: one pending discount request per student (T-057), a
     note(sameJson(got, [`pending: ${REFUSED}`, `approved: ${REFUSED}`, `applied: ${REFUSED}`, 'rejected: written (rejected,pending)']),
          'T-080: with a request from before the launch (25 September), the feedback form\'s function refuses another while that one is pending, approved or applied, and writes one after a rejected one: the rule discount.ts requestCounts mirrors',
          asJson(got))
+  }
+  feedbackDb = await d.clone()
+  await d.close()
+}
+
+console.log('\n=== 27. v107: only the server calls the feedback form\'s function, and its undo ===')
+{
+  const v107 = read(V107F)
+  const undo107 = undoText('2026_v107_undo.sql')
+  // Section 26's database: v105 and v106 in, as production will be. S1 holds
+  // a pending request; S7 has none.
+  const d = feedbackDb
+  feedbackDb = null
+  const FN = 'public.submit_discount_with_feedback(uuid, jsonb)'
+  const NOT_AUTHORIZED = 'Not authorized to submit feedback for this student'
+  // auth.role() as Supabase defines it: the role in the request's own token.
+  // base.sql has only auth.uid().
+  await d.exec(`create or replace function auth.role() returns text language sql stable as $$
+    select coalesce(nullif(current_setting('request.jwt.claim.role', true), ''),
+                    (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'))::text
+  $$;`)
+  // A call as PostgREST makes it: the role, and the token's claims beside it.
+  const claims = (role, uid = '') => `select set_config('request.jwt.claims', '${JSON.stringify(uid ? { role, sub: uid } : { role })}', true)`
+  const QID = (await d.query(`select id::text as id from discount_feedback_questions order by order_num limit 1`)).rows[0].id
+  const callFor = n => `select public.submit_discount_with_feedback('${UID(n)}', '[{"question_id": "${QID}", "answer_scale": 8}]'::jsonb)::text as id`
+  const madeFor = n => `select r.status, (select count(*)::int from discount_feedback_responses f where f.discount_request_id = r.id) as answers
+                          from discount_requests r where r.student_id = '${UID(n)}' order by r.created_at`
+  const studentCalls = (dd, n) => asRole(dd, 'authenticated', [claims('authenticated', UID(n)), callFor(n)], { uid: UID(n), check: madeFor(n) })
+  const serverCalls = (dd, n) => asRole(dd, 'service_role', [claims('service_role'), callFor(n)], { check: madeFor(n) })
+  const visitorCalls = (dd, n) => asRole(dd, 'anon', [claims('anon'), callFor(n)])
+  const can = async (dd = d) => asJson((await dd.query(`select has_function_privilege('anon', '${FN}', 'execute') as visitor,
+      has_function_privilege('authenticated', '${FN}', 'execute') as student,
+      has_function_privilege('service_role', '${FN}', 'execute') as server`)).rows[0])
+  const defOf = async (dd = d) => (await dd.query(`select pg_get_functiondef('${FN}'::regprocedure) as def`)).rows[0].def
+  // The body from the duplicate check on, which v107 keeps word for word.
+  const tailOf = async (dd = d) => {
+    const src = (await dd.query(`select prosrc from pg_proc where oid = '${FN}'::regprocedure`)).rows[0].prosrc
+    return src.slice(src.indexOf('-- Duplicate check'))
+  }
+  const denied = r => !r.ok && r.code === '42501' && /permission denied for function submit_discount_with_feedback/.test(r.said)
+  const ONLY_SERVER = asJson({ visitor: false, student: false, server: true })
+  const PENDING_ONE = [{ status: 'pending', answers: 1 }]
+
+  // ── before v107 (v29, as production has it) ──
+  const v29Def = await defOf(), v29Tail = await tailOf()
+  {
+    const student = await studentCalls(d, 7)
+    const server = await serverCalls(d, 7)
+    note(student.ok && sameJson(student.checked, PENDING_ONE) && !server.ok && server.said.includes(NOT_AUTHORIZED),
+         "before v107 (v29): a student's own session writes a pending request and its answer through the function, with nothing checked but who they are; the service role is refused",
+         `${student.ok ? asJson(student.checked) : told(student)} / server ${told(server)}`)
+  }
+
+  // ── v107, first run ──
+  const catalogBefore = await catalogOf(d), rowsBefore = await rowsOf(d)
+  {
+    const MARK = '-- ─────────────── 2. The function, for the server only'
+    const c = await d.clone()
+    const rr = await runFile(c, probeAt(v107, MARK, 'v107_timeout', `current_setting('lock_timeout')`))
+    const timeout = await probed(c, 'v107_timeout')
+    await c.close()
+    note(v107.includes(MARK) && rr.ok && timeout.v === '5s' && timeout.after === '0',
+         'v107 runs with lock_timeout 5s, and the setting ends with its commit', `${timeout.v}, after ${timeout.after}`)
+  }
+  let r = await runFile(d, v107)
+  const v107Def = await defOf()
+  note(r.ok && r.rows.length === 1 && r.rows[0].v107?.startsWith('v107 ran now: only the server can call submit_discount_with_feedback.')
+       && r.rows[0].visitor_can === false && r.rows[0].student_can === false && r.rows[0].server_can === true
+       && await can() === ONLY_SERVER,
+       'v107 runs: only the service role may call the function, a visitor and a student may not, and its one row says so', told(r))
+  note(await catalogOf(d) === catalogBefore && await rowsOf(d) === rowsBefore && await tailOf() === v29Tail
+       && /SECURITY DEFINER/.test(v107Def) && /SET search_path TO 'public'/.test(v107Def)
+       && v107Def.includes("if coalesce(auth.role(), '') <> 'service_role' then") && !v107Def.includes('auth.uid()'),
+       "v107 keeps the name, arguments, result, security definer, search_path, owner, and v29's duplicate check and inserts word for word; every policy, table grant and row is as before",
+       v107Def.split('\n').slice(0, 7).join(' '))
+  {
+    const student = await studentCalls(d, 7)
+    const visitor = await visitorCalls(d, 7)
+    note(denied(student) && denied(visitor) && await rowsOf(d) === rowsBefore,
+         "after v107: a student's own session and a visitor are refused before the function runs (42501), and nothing is written",
+         `${told(student)} / ${visitor.code}`)
+    const server = await serverCalls(d, 7)
+    note(server.ok && /^[0-9a-f-]{36}$/.test(server.rows[0]?.id ?? '') && sameJson(server.checked, PENDING_ONE),
+         'after v107: the service role (the route) writes the request and its answer, and gets the request id back',
+         server.ok ? asJson(server.checked) : told(server))
+    const pendingAlready = (await d.query(`select count(*)::int as n from discount_requests where student_id = '${UID(1)}' and status = 'pending'`)).rows[0].n
+    const dup = await asRole(d, 'service_role', [claims('service_role'), callFor(1)])
+    note(pendingAlready === 1 && !dup.ok && dup.code === 'P0001' && dup.said === 'A discount request already exists for this student',
+         "after v107: v29's duplicate check still refuses another request while one is pending, in v29's words", told(dup))
+    // T-090's check on production, right after the paste: one call with the
+    // app's own key for a student id no row has. Past the server check, the
+    // request's insert fails on its foreign key, so it writes nothing. The two
+    // other answers are what the route would meet too: the key's token
+    // carrying no service_role (the function's own refusal), or the call not
+    // made as service_role at all (no EXECUTE).
+    const NOBODY = `select public.submit_discount_with_feedback('00000000-0000-0000-0000-000000000000', '[]'::jsonb)::text as id`
+    const ghost = await asRole(d, 'service_role', [claims('service_role'), NOBODY])
+    const noClaim = await asRole(d, 'service_role', [NOBODY])
+    const notServer = await asRole(d, 'anon', [claims('service_role'), NOBODY])
+    note(!ghost.ok && ghost.code === '23503' && /discount_requests/.test(ghost.said)
+           && !noClaim.ok && noClaim.code === 'P0001' && noClaim.said === NOT_AUTHORIZED && denied(notServer),
+         "T-090's check: the service role's call for a student id no row has fails on the request's foreign key (23503); with no service_role in its token the function refuses it (P0001), and as another role it is refused before it runs (42501)",
+         `${told(ghost)} / ${told(noClaim)} / ${notServer.code}`)
+  }
+  {
+    // The seatbelt, should a later file grant it again.
+    const c = await d.clone()
+    await c.exec(`grant execute on function ${FN} to authenticated;`)
+    const regranted = await studentCalls(c, 7)
+    await c.close()
+    note(!regranted.ok && regranted.code === 'P0001' && regranted.said === NOT_AUTHORIZED,
+         "the seatbelt: with EXECUTE granted to authenticated again, the function itself refuses a student's session in v29's words, and writes nothing",
+         told(regranted))
+  }
+  {
+    // The SQL editor runs as the owner and sends no request token.
+    const owner = await runFile(d, `select public.submit_discount_with_feedback('${UID(7)}', '[]'::jsonb) as id`)
+    note(!owner.ok && owner.code === 'P0001' && owner.said.includes(NOT_AUTHORIZED) && await rowsOf(d) === rowsBefore,
+         "a call from the SQL editor (the owner, no request token) is refused too: only the route's calls go through", told(owner))
+  }
+
+  // ── run again ──
+  {
+    const was = await stateOf(d)
+    r = await runFile(d, v107)
+    note(r.ok && r.rows[0]?.v107 === 'v107 was already in place. This run changed nothing.'
+         && await stateOf(d) === was && await defOf() === v107Def && await can() === ONLY_SERVER,
+         'v107 run again: "already in place", and nothing changed', told(r))
+  }
+  {
+    const c = await d.clone()
+    const rr = await runFile(c, read(V105F))
+    await c.close()
+    note(rr.ok && rr.rows[0]?.v105 === 'v105 was already in place. This run changed nothing.',
+         "v105 pasted again after v107: its check of the feedback form's function (security definer, run as its owner) still passes, and it changes nothing",
+         told(rr))
+  }
+
+  // ── refusals ──
+  for (const [what, breakSql, sentence] of [
+    ['the function missing', `drop function ${FN};`, 'does not exist, so there is nothing to give to the server alone'],
+    ['auth.role() missing', 'drop function auth.role();', 'auth.role() does not exist'],
+  ]) {
+    const c = await d.clone()
+    await c.exec(breakSql)
+    const was = await stateOf(c)
+    const rr = await runFile(c, v107)
+    note(stopped(rr, sentence) && await stateOf(c) === was, `v107 refuses with ${what}, says so, and changes nothing`, told(rr))
+    await c.close()
+  }
+
+  // ── the undo ──
+  {
+    r = await runFile(d, undo107)
+    note(r.ok && r.rows[0]?.student_can === true && r.rows[0]?.v29_body === true
+         && await defOf() === v29Def && await catalogOf(d) === catalogBefore
+         && await can() === asJson({ visitor: false, student: true, server: true }),
+         "the undo of v107 puts back v29's function exactly (pg_get_functiondef as before v107) and its grant to authenticated; a visitor stays without EXECUTE",
+         told(r))
+    const student = await studentCalls(d, 7)
+    const server = await serverCalls(d, 7)
+    note(student.ok && sameJson(student.checked, PENDING_ONE) && !server.ok && server.said.includes(NOT_AUTHORIZED),
+         "after the undo: a student's own session writes through the function again and the service role is refused, so the undo goes only with the old route, as its header says",
+         `${student.ok ? asJson(student.checked) : told(student)} / server ${told(server)}`)
+    const was = await stateOf(d)
+    r = await runFile(d, undo107)
+    note(r.ok && await stateOf(d) === was && await defOf() === v29Def, 'a second undo of v107 changes nothing', told(r))
+    r = await runFile(d, v107)
+    note(r.ok && r.rows[0]?.v107?.startsWith('v107 ran now') && await defOf() === v107Def && await can() === ONLY_SERVER,
+         'v107 applies again after its undo: the same function and grants as its first run', told(r))
   }
   await d.close()
 }

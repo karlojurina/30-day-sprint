@@ -207,7 +207,10 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
       <WorldV6 source={source} corner={corner} />
       {/* Over the map, outside it: the discount's questions and the two celebrations. */}
       <WorldDiscountForm form={discountForm} paused={lessonId !== null} />
-      <WorldCelebrations approvedRequestId={discountNow.kind === "approved" ? discountNow.requestId : null} />
+      <WorldCelebrations
+        approvedRequestId={discountNow.kind === "approved" && !discountNow.madeBeforeLaunch ? discountNow.requestId : null}
+        paused={lessonId !== null}
+      />
     </>
   );
 }

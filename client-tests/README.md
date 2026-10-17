@@ -42,6 +42,19 @@ flags. Each test calls the route's own `POST` with a real `Request`. The login
 callback is too big to run this way, so `whop-backfill.test.mjs` checks its one
 streak line in the source and says so.
 
+The closed doors before the new course (T-078, 2026-10-17) have two tests.
+`student-app-gate.test.mjs` imports `src/lib/student-app-gate.ts` straight
+from `src/` (its one import is a type, so there is nothing to rewrite), asks
+the rule open, closed, allowlisted and for the team against a small database
+that records every read, and reads the source of every route under
+`/api/student` and of the team's surfaces. The same file runs on `main`, where
+no harness exists. `student-app-gate-routes.test.mjs` runs 8 real student
+routes (the data route, lesson-video, lesson-watched, the Whop backfill,
+mark-action-shipped, skip-lesson and the two discount writes) through the real
+gate's copy: unset, closed, closed with the student listed, closed with
+someone else listed. The callback's door is checked in the source, for the
+reason above.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

@@ -154,6 +154,28 @@ gen('../src/app/api/student/skip-lesson/route.ts', './_gen/skip-lesson-route.ts'
 // csm-events.ts imports only a TYPE from supabase-js, which --experimental-strip-types erases.
 gen('../src/lib/csm-events.ts', './_gen/csm-events.ts')
 
+// Three more student routes, for the closed doors' route test (T-078,
+// student-app-gate-routes.test.mjs): the map's video address, its "I finished
+// watching", and the data route behind every student page. lesson-watched
+// runs the real complete-lesson.ts, whose own imports are all in stub-server.ts.
+gen('../src/lib/complete-lesson.ts', './_gen/complete-lesson.ts',
+  toStub('@/app/api/student/_lib/update-streak', '@/lib/csm-events', '@/lib/achievements', '@/lib/csm-task-evaluation'))
+gen('../src/app/api/student/lesson-watched/route.ts', './_gen/lesson-watched-route.ts', [
+  GATE,
+  ['from "@/lib/world/watch-rules"', 'from "./watch-rules.ts"'],
+  ['from "@/lib/complete-lesson"', 'from "./complete-lesson.ts"'],
+  ...toStub('next/server', '@supabase/supabase-js', '@/lib/catalog-tables'),
+])
+gen('../src/app/api/student/lesson-video/route.ts', './_gen/lesson-video-route.ts', [
+  GATE,
+  ['from "@/lib/world/tella"', 'from "./tella.ts"'],
+  ...toStub('next/server', '@supabase/supabase-js', '@/lib/catalog-tables'),
+])
+gen('../src/app/api/student/data/route.ts', './_gen/student-data-route.ts', [
+  GATE,
+  ...toStub('next/server', '@supabase/supabase-js', '@/lib/catalog-tables'),
+])
+
 // The two routes that write a discount request (second Loom round, 16
 // October): a double submit refused by v106 is answered as a request in
 // review. Their imports go to stub-server.ts or to the real copies above; the

@@ -418,7 +418,12 @@ export function mapStatus(_m: unknown) {
 // Live bindings: a copy that imports these reads the value set last.
 export let CATALOG_IS_V2 = false;
 export let LESSONS_TABLE = "lessons";
+// The data route also names the suffix and the areas' table (T-078's route test).
+export let CATALOG_TABLE_SUFFIX = "";
+export let REGIONS_TABLE = "regions";
 export function setCatalog(o: { v2: boolean; lessonsTable?: string }) {
   CATALOG_IS_V2 = o.v2;
   LESSONS_TABLE = o.lessonsTable ?? "lessons";
+  CATALOG_TABLE_SUFFIX = LESSONS_TABLE === "lessons_next" ? "_next" : "";
+  REGIONS_TABLE = `regions${CATALOG_TABLE_SUFFIX}`;
 }

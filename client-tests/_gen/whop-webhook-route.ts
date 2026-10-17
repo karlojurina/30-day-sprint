@@ -10,7 +10,7 @@ import type {
   WhopLessonInteractionWebhookData,
 } from "./types-erased.ts";
 import { createHmac } from "crypto";
-import { afterCompletionWrite } from "./stub-server.ts";
+import { afterCompletionWrite } from "./complete-lesson.ts";
 
 /**
  * Verify a Whop webhook using the Standard Webhooks / Svix signature

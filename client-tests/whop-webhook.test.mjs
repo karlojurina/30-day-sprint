@@ -7,8 +7,10 @@
 // finished it. A completion carries the time it arrives (Decision 4 is
 // Lovro's; this keeps today's answer).
 // The route is the real source, copied by build.mjs with its imports pointed
-// at stub-server.ts. Every delivery is signed the way Whop signs it (Standard
-// Webhooks), with a secret made up here.
+// at stub-server.ts, and since T-079 at the real complete-lesson.ts, whose
+// four steps stub-server.ts records (the streak's also runs; streak.test.mjs
+// reads what it wrote). Every delivery is signed the way Whop signs it
+// (Standard Webhooks), with a secret made up here.
 import { createHmac, randomBytes } from 'node:crypto'
 import { POST } from './_gen/whop-webhook-route.ts'
 import { FakeDb, useDb, steps } from './_gen/stub-server.ts'
@@ -70,6 +72,8 @@ function freshDb(completions = []) {
 }
 const row = (db, lessonId) => db.rows('student_lesson_completions').find((r) => r.student_id === 's1' && r.lesson_id === lessonId)
 const stepNames = () => steps.map((s) => s.step)
+/** afterCompletionWrite's four steps, in its order. */
+const AFTER_LESSON = ['streak', 'came-back', 'achievements', 'tasks']
 
 console.log('\n=== A lesson with no row yet ===')
 {
@@ -80,7 +84,7 @@ console.log('\n=== A lesson with no row yet ===')
   ok(r.status === 200 && got && got.completed_at !== null, 'the row is written', show({ status: r.status, row: got }))
   ok(got.completed_at >= before && got.completed_at !== '2026-10-01T00:00:00.000Z',
      'it carries the time it arrived, not a time from the payload (Decision 4, kept as today)', got.completed_at)
-  ok(steps.length === 1 && stepNames()[0] === 'after-lesson' && steps[0].studentId === 's1',
+  ok(same(stepNames(), AFTER_LESSON) && steps.every((s) => s.studentId === 's1'),
      'the after-lesson steps run once, for that student (they never ran here)', show(steps))
 
   steps.length = 0
@@ -97,7 +101,7 @@ console.log('\n=== A lesson whose row already exists ===')
   ok(r.status === 200 && got.completed_at !== null && got.skipped_at === null,
      'a skipped lesson finished on Whop becomes a watch, as the backfill does it (it was left as a skip)', show(got))
   ok(db.rows('student_lesson_completions').length === 1, 'still one row')
-  ok(same(stepNames(), ['after-lesson']), 'and the after-lesson steps run once', show(stepNames()))
+  ok(same(stepNames(), AFTER_LESSON), 'and the after-lesson steps run once', show(stepNames()))
 }
 {
   const db = freshDb([{ lesson_id: 'a3l25', completed_at: null, discord_message_link: LINK }])
@@ -105,7 +109,7 @@ console.log('\n=== A lesson whose row already exists ===')
   const got = row(db, 'a3l25')
   ok(r.status === 200 && got.completed_at !== null && got.discord_message_link === LINK && got.action_completed_at === null,
      'an action item with its link saved: the video half is finished, the link kept, the action half stays the student\'s', show(got))
-  ok(same(stepNames(), ['after-lesson']), 'the after-lesson steps run once', show(stepNames()))
+  ok(same(stepNames(), AFTER_LESSON), 'the after-lesson steps run once', show(stepNames()))
 }
 {
   const db = freshDb([{ lesson_id: 'a3l25', completed_at: null, action_completed_at: EARLIER, discord_message_link: LINK }])
@@ -113,7 +117,7 @@ console.log('\n=== A lesson whose row already exists ===')
   const got = row(db, 'a3l25')
   ok(got.completed_at !== null && got.action_completed_at === EARLIER,
      'an action done before its video: the video half is finished, the action\'s time kept', show(got))
-  ok(same(stepNames(), ['after-lesson']), 'the after-lesson steps run once (the lesson is now done)', show(stepNames()))
+  ok(same(stepNames(), AFTER_LESSON), 'the after-lesson steps run once (the lesson is now done)', show(stepNames()))
 }
 {
   const db = freshDb([{ lesson_id: 'a1l01', completed_at: EARLIER }])

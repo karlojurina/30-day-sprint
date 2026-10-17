@@ -38,9 +38,52 @@ hand-written stand-in for Next's response, the service-role Supabase client
 on it: `.single()` on no row is an error, a select returns only the columns it
 names, `ON CONFLICT DO NOTHING` returns only the rows it added), Whop's
 completions read, the steps after a lesson (recorded in order) and the catalog
-flags. Each test calls the route's own `POST` with a real `Request`. The login
-callback is too big to run this way, so `whop-backfill.test.mjs` checks its one
-streak line in the source and says so.
+flags. Each test calls the route's own `POST` with a real `Request`.
+`whop-backfill.test.mjs` also checks the login callback's one streak line in
+the source; since T-079 `streak.test.mjs` runs the callback itself (below).
+
+Since T-079 (2026-10-17) `streak.test.mjs` runs every route that writes or
+shows the streak through its own entry point: `lesson-watched` and the webhook
+with the real chain after a lesson (`complete-lesson.ts`), the visit's
+backfill, `mark-action-shipped`, the old course's `toggle-lesson`,
+`submit-quiz` and `skip-lesson`, the app's data read, and the login callback
+itself (`GET`, with Whop's login calls, the password sign-in and the redirect
+as stand-ins in `stub-server.ts`, and the real `pkce.ts` signing the state;
+its copy leaves out the source's `//` comment lines, because two of them name
+a student and a customer's email and this repository is public).
+The streak's steps are the one exception to "recorded, never run": the stub
+records `updateStudentStreak`, `tickStudentStreak` and `markStudentActive`,
+then runs the real `update-streak.ts`, so the suite reads the
+`student_streaks` row and `students.last_active_at` each route left. Next's
+`after()` is a stand-in too: it keeps the work a route hands it in
+`afterTasks`, so a test can let the response go first and then wait for that
+work, and `setAfterMissing(true)` makes it throw as Next's does where the
+platform has no `waitUntil`. Each of the suite's fixes was broken on purpose
+once, and the suite failed every time.
+
+The closed doors before the new course (T-078, 2026-10-17) have two tests.
+`student-app-gate.test.mjs` imports `src/lib/student-app-gate.ts` straight
+from `src/` (its one import is a type, so there is nothing to rewrite), asks
+the rule open, closed, allowlisted and for the team against a small database
+that records every read, and reads the source of every route under
+`/api/student` and of the team's surfaces. The same file runs on `main`, where
+no harness exists. `student-app-gate-routes.test.mjs` runs 8 real student
+routes (the data route, lesson-video, lesson-watched, the Whop backfill,
+mark-action-shipped, skip-lesson and the two discount writes) through the real
+gate's copy: unset, closed, closed with the student listed, closed with
+someone else listed. The callback's door is checked in the source;
+`streak.test.mjs` runs the callback itself with the app open.
+
+`discount-september.test.mjs` (T-080, 2026-10-17) runs a September joiner's
+week through the backfill, the webhook and the request route on a calendar it
+sets itself: `at(iso, fn)` swaps the global `Date` for one whose `new Date()`
+and `Date.now()` answer that moment, for the length of `fn`, so the stand-in
+database stamps a completion (its `now()` default) and the route judges at the
+moment the story needs, on whatever day the suite runs. It drives both ways
+the map applies (the questions form's route and the plain request) for a
+student who already holds a request from the old dashboard; the form's
+database function stands in from v29's body, and the migration harness
+(section 26) runs the real one on the same four cases.
 
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the

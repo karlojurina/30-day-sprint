@@ -4,12 +4,14 @@
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-function gen(srcRel, outRel, rewrites = []) {
+function gen(srcRel, outRel, rewrites = [], { dropLineComments = false } = {}) {
   const src = fileURLToPath(new URL(srcRel, import.meta.url))
   const out = fileURLToPath(new URL(outRel, import.meta.url))
   let s = fs.readFileSync(src, 'utf8')
   s = s.replace('"use client";\n', '')
   for (const [from, to] of rewrites) s = s.split(from).join(to)
+  // Lines that are only a `//` comment, left out of the copy (the code is untouched).
+  if (dropLineComments) s = s.split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n')
   if (s.includes('@/')) throw new Error(`an unrewritten @/ import remains in ${srcRel}`)
   fs.writeFileSync(out, s)
   console.log(`generated ${outRel} from the real source`)
@@ -114,6 +116,18 @@ gen('../src/lib/csm-triggers.ts', './_gen/csm-triggers.ts', [
   ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
 ])
 
+// The streak (T-079): its math and its writer, which stub-server.ts runs for
+// real behind its recorded steps, and the chain after a lesson, which the
+// lesson-watched route and the webhook below run as it is. update-streak.ts
+// imports only a TYPE from supabase-js, which --experimental-strip-types erases.
+gen('../src/lib/streak.ts', './_gen/streak.ts')
+gen('../src/app/api/student/_lib/update-streak.ts', './_gen/update-streak.ts', [
+  ['from "@/lib/streak"', 'from "./streak.ts"'],
+])
+const toStub = (...paths) => paths.map((p) => [`from "${p}"`, 'from "./stub-server.ts"'])
+gen('../src/lib/complete-lesson.ts', './_gen/complete-lesson.ts',
+  toStub('@/app/api/student/_lib/update-streak', '@/lib/csm-events', '@/lib/achievements', '@/lib/csm-task-evaluation'))
+
 // The server code behind the backend fixes of 16 October (backend_readiness.md
 // section 5): the Whop backfill and the visit route that runs it, the Whop
 // webhook, mark-action-shipped, skip-lesson and the CSM's event hooks. Their
@@ -121,29 +135,49 @@ gen('../src/lib/csm-triggers.ts', './_gen/csm-triggers.ts', [
 // Whop, the steps after a lesson, the catalog flags) or to the real copies
 // above. The webhook's type-only import is pointed at a file that does not
 // exist, as csm-triggers.ts's is, so one that survived would fail loudly.
-const toStub = (...paths) => paths.map((p) => [`from "${p}"`, 'from "./stub-server.ts"'])
+// The closed doors before the new course (T-078): every student route asks
+// the real gate, copied here, and the routes' copies point at it. Its imports
+// are TYPES (supabase-js, next), which --experimental-strip-types erases.
+gen('../src/lib/student-app-gate.ts', './_gen/student-app-gate.ts')
+const GATE = ['from "@/lib/student-app-gate"', 'from "./student-app-gate.ts"']
 gen('../src/app/api/student/_lib/watch-sync.ts', './_gen/watch-sync.ts', [
   // The note's words come from constants.ts (above), as the admin page reads them.
   ['from "@/lib/constants"', 'from "./constants.ts"'],
   ...toStub('@supabase/supabase-js', '@/lib/whop', '@/lib/csm-events'),
 ])
 gen('../src/app/api/student/refresh-watch-sync/route.ts', './_gen/refresh-watch-sync-route.ts', [
+  GATE,
   ['from "../_lib/watch-sync"', 'from "./watch-sync.ts"'],
   ...toStub('next/server', '@supabase/supabase-js', '../_lib/update-streak', '@/lib/achievements'),
 ])
+// The webhook runs the real chain after a lesson (complete-lesson.ts, above).
 gen('../src/app/api/webhooks/whop/route.ts', './_gen/whop-webhook-route.ts', [
-  ...toStub('next/server', '@/lib/supabase-server', '@/lib/whop-members', '@/lib/complete-lesson'),
+  ['from "@/lib/complete-lesson"', 'from "./complete-lesson.ts"'],
+  ...toStub('next/server', '@/lib/supabase-server', '@/lib/whop-members'),
   ['from "@/types/whop"', 'from "./types-erased.ts"'],
 ])
 gen('../src/app/api/student/mark-action-shipped/route.ts', './_gen/mark-action-shipped-route.ts', [
+  GATE,
   ['from "@/lib/world/action-items"', 'from "./action-items.ts"'],
   ...toStub('next/server', '@supabase/supabase-js', '../_lib/update-streak', '@/lib/achievements',
     '@/lib/csm-events', '@/lib/csm-task-evaluation', '@/lib/catalog-tables'),
 ])
-gen('../src/app/api/student/skip-lesson/route.ts', './_gen/skip-lesson-route.ts',
-  toStub('next/server', '@supabase/supabase-js', '@/lib/csm-task-evaluation', '@/lib/catalog-tables'))
+gen('../src/app/api/student/skip-lesson/route.ts', './_gen/skip-lesson-route.ts', [
+  GATE,
+  ...toStub('next/server', '@supabase/supabase-js', '@/lib/csm-task-evaluation', '@/lib/catalog-tables'),
+])
 // csm-events.ts imports only a TYPE from supabase-js, which --experimental-strip-types erases.
 gen('../src/lib/csm-events.ts', './_gen/csm-events.ts')
+
+// The map's video address, for the closed doors' route test (T-078,
+// student-app-gate-routes.test.mjs). The test's other two routes, the map's
+// "I finished watching" (lesson-watched) and the data route behind every
+// student page, are generated with the streak's routes below, GATE included.
+gen('../src/app/api/student/lesson-video/route.ts', './_gen/lesson-video-route.ts', [
+  GATE,
+  ['from "@/lib/world/tella"', 'from "./tella.ts"'],
+  ...toStub('next/server', '@supabase/supabase-js', '@/lib/catalog-tables'),
+])
 
 // The two routes that write a discount request (second Loom round, 16
 // October): a double submit refused by v106 is answered as a request in
@@ -151,8 +185,48 @@ gen('../src/lib/csm-events.ts', './_gen/csm-events.ts')
 // database function the feedback form calls is the test's own stand-in.
 for (const [route, out] of [['request', 'discount-request-route'], ['submit-feedback', 'discount-submit-feedback-route']]) {
   gen(`../src/app/api/discounts/${route}/route.ts`, `./_gen/${out}.ts`, [
+    GATE,
     ['from "@/lib/constants"', 'from "./constants.ts"'],
     ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
     ...toStub('next/server', '@supabase/supabase-js', '@/lib/csm-events', '@/lib/catalog-tables'),
   ])
 }
+
+// Every other route that writes or shows the streak (T-079, streak.test.mjs):
+// a finished video (lesson-watched, with the real chain after it), the old
+// course's task box (toggle-lesson) and quiz (submit-quiz), the app's data
+// read, and the login. quiz.ts imports only a TYPE, from an @/ path, pointed
+// at a file that does not exist as above. pkce.ts imports only Node's crypto.
+// The login's copy leaves out its `//` comment lines: two of them name a
+// student and a customer's email, and this repository is public. Each of
+// these routes also asks the closed doors' gate (T-078), pointed at its copy.
+gen('../src/app/api/student/lesson-watched/route.ts', './_gen/lesson-watched-route.ts', [
+  GATE,
+  ['from "@/lib/world/watch-rules"', 'from "./watch-rules.ts"'],
+  ['from "@/lib/complete-lesson"', 'from "./complete-lesson.ts"'],
+  ...toStub('next/server', '@supabase/supabase-js', '@/lib/catalog-tables'),
+])
+gen('../src/app/api/student/toggle-lesson/route.ts', './_gen/toggle-lesson-route.ts', [
+  GATE,
+  ...toStub('next/server', '@supabase/supabase-js', '../_lib/update-streak', '@/lib/csm-events',
+    '@/lib/achievements', '@/lib/csm-task-evaluation', '@/lib/catalog-tables'),
+])
+gen('../src/lib/quiz.ts', './_gen/quiz.ts', [['"@/types/database"', '"./types-erased.ts"']])
+gen('../src/app/api/student/submit-quiz/route.ts', './_gen/submit-quiz-route.ts', [
+  GATE,
+  ['from "@/lib/quiz"', 'from "./quiz.ts"'],
+  ...toStub('next/server', '@supabase/supabase-js', '../_lib/update-streak', '@/lib/achievements'),
+])
+gen('../src/app/api/student/data/route.ts', './_gen/student-data-route.ts', [
+  GATE,
+  ['from "@/lib/streak"', 'from "./streak.ts"'],
+  ...toStub('next/server', '@supabase/supabase-js', '@/lib/catalog-tables'),
+])
+gen('../src/lib/pkce.ts', './_gen/pkce.ts')
+gen('../src/app/api/auth/whop/callback/route.ts', './_gen/whop-callback-route.ts', [
+  GATE,
+  ['from "@/lib/pkce"', 'from "./pkce.ts"'],
+  ['from "@/app/api/student/_lib/watch-sync"', 'from "./watch-sync.ts"'],
+  ...toStub('next/server', '@/lib/supabase-server', '@/lib/whop', '@/lib/whop-members', '@/lib/achievements',
+    '@/app/api/student/_lib/update-streak', '@supabase/supabase-js'),
+], { dropLineComments: true })

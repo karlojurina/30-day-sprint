@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { refuseWhileClosed } from "@/lib/student-app-gate";
 import {
   CATALOG_IS_V2,
   CATALOG_TABLE_SUFFIX,
   LESSONS_TABLE,
   REGIONS_TABLE,
 } from "@/lib/catalog-tables";
+import { currentStreakAsOf, getTodayUtc } from "@/lib/streak";
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -24,6 +26,10 @@ export async function GET(request: NextRequest) {
   if (userError || !user) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
+
+  // T-078: closed to students until the new course (lib/student-app-gate.ts).
+  const closed = await refuseWhileClosed(supabase, user.id);
+  if (closed) return closed;
 
   const { data: student } = await supabase
     .from("students")
@@ -200,7 +206,16 @@ export async function GET(request: NextRequest) {
     quizAttempts: quizAttemptsRes.data ?? [],
     monthReview: monthReviewRes.data ?? null,
     milestones: milestonesRes.data ?? null,
-    streaks: streaksRes.data ?? null,
+    // The streak as it stands today (src/lib/streak.ts, currentStreakAsOf):
+    // one whose last counted day is before yesterday has broken, and the
+    // stored count stays until the next counted day. The map's corner and
+    // the old dashboard show this number.
+    streaks: streaksRes.data
+      ? {
+          ...streaksRes.data,
+          current_streak: currentStreakAsOf(streaksRes.data, getTodayUtc()),
+        }
+      : null,
     whopSync: whopSyncRes.data ?? null,
     celebrations: celebrationsRes.data ?? null,
     dmLog: dmLogRes.data ?? null,

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { refuseWhileClosed } from "@/lib/student-app-gate";
 import { scoreQuiz } from "@/lib/quiz";
-import { updateStudentStreak } from "../_lib/update-streak";
+import { markStudentActive } from "../_lib/update-streak";
 import { evaluateAchievements } from "@/lib/achievements";
 
 export async function POST(request: NextRequest) {
@@ -33,6 +34,10 @@ export async function POST(request: NextRequest) {
   if (userError || !user) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
+
+  // T-078: closed to students until the new course (lib/student-app-gate.ts).
+  const closed = await refuseWhileClosed(supabase, user.id);
+  if (closed) return closed;
 
   const { data: student } = await supabase
     .from("students")
@@ -82,7 +87,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: insertError.message }, { status: 500 });
   }
 
-  await updateStudentStreak(supabase, student.id);
+  // A quiz is not a streak day (T-079); "last active" moves as it always did.
+  await markStudentActive(supabase, student.id);
 
   // v53 (Phase 5) - achievements.
   const newAchievements = await evaluateAchievements(supabase, student.id);

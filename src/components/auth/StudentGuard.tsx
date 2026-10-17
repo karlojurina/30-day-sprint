@@ -3,9 +3,10 @@
 import { useAuth } from "@/contexts/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
+import { ComingSoon } from "@/components/auth/ComingSoon";
 
 export function StudentGuard({ children }: { children: ReactNode }) {
-  const { isStudent, isTeam, loading, authError } = useAuth();
+  const { isStudent, isTeam, loading, authError, studentAppClosed } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -39,6 +40,10 @@ export function StudentGuard({ children }: { children: ReactNode }) {
   }
 
   if (!isStudent) return null;
+
+  // T-078: the student app is closed to this student. Nothing under the
+  // guard mounts: no provider, no data request, no dashboard.
+  if (studentAppClosed) return <ComingSoon />;
 
   return <>{children}</>;
 }

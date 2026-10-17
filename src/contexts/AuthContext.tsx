@@ -26,6 +26,10 @@ interface AuthState {
   teamMember: TeamMember | null;
   isStudent: boolean;
   isTeam: boolean;
+  /** True while the student app is closed to this student (T-078,
+   *  lib/student-app-gate.ts). The server decides it, in /api/auth/me;
+   *  StudentGuard then shows the coming-soon page. Never true for the team. */
+  studentAppClosed: boolean;
   loading: boolean;
   /** Why the auth load failed, or null if it completed cleanly. A null
    *  student with a null authError means genuinely signed out; a null
@@ -51,6 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [student, setStudent] = useState<Student | null>(null);
   const [teamMember, setTeamMember] = useState<TeamMember | null>(null);
+  const [studentAppClosed, setStudentAppClosed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   /** Last identity we loaded a profile for. Guards against refetching on
@@ -122,12 +127,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await res.json();
 
       if (data.role === "team") {
+        setStudentAppClosed(false);
         setTeamMember(data.profile);
         setStudent(null);
       } else if (data.role === "student") {
+        // Set before the student, so no render holds a student without it.
+        setStudentAppClosed(data.appClosed === true);
         setStudent(data.profile);
         setTeamMember(null);
       } else {
+        setStudentAppClosed(false);
         setTeamMember(null);
         setStudent(null);
         // Authenticated, but no team_members or students row matches. A real
@@ -215,6 +224,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setStudent(null);
         setTeamMember(null);
+        setStudentAppClosed(false);
         setAuthError(null);
       }
     });
@@ -231,6 +241,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
     setStudent(null);
     setTeamMember(null);
+    setStudentAppClosed(false);
   }, [supabase]);
 
   return (
@@ -243,6 +254,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         teamMember,
         isStudent: !!student,
         isTeam: !!teamMember,
+        studentAppClosed,
         loading,
         authError,
         signOut,

@@ -1400,8 +1400,8 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       if (data.attempt) {
         setQuizAttempts((prev) => [...prev, data.attempt]);
       }
-      // v50.4 — submit-quiz also ticks the streak server-side. Refresh
-      // so the dashboard's celebration effect can fire.
+      // v50.4 — refresh after a quiz. Since T-079 (2026-10-17) a quiz
+      // ticks no streak; the refresh is kept as it was.
       void refreshFromServer(token, "submit-quiz", { throttled: false });
       // v53 (Phase 5) - signal AchievementsButton to re-poll.
       if (typeof window !== "undefined")

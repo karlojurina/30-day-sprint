@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import {
   exchangeCodeForTokens,
@@ -14,6 +14,7 @@ import {
   toIso,
 } from "@/lib/whop-members";
 import { unsignState } from "@/lib/pkce";
+import { whopLoginMayProceed } from "@/lib/student-app-gate";
 import { syncWatchProgress } from "@/app/api/student/_lib/watch-sync";
 import { evaluateAchievements } from "@/lib/achievements";
 import { updateStudentStreak } from "@/app/api/student/_lib/update-streak";
@@ -56,6 +57,19 @@ export async function GET(request: NextRequest) {
 
     // 2. Fetch user info
     const userInfo = await fetchWhopUserInfo(tokens.access_token);
+
+    // 2b. The closed doors (T-078, lib/student-app-gate.ts). While the student
+    //     app is closed, only the Whop ids in STUDENT_APP_OPEN_FOR (and a
+    //     team member's Whop account, if one exists) get past this line.
+    //     Nothing below runs for anyone else: no student row, no tokens, no
+    //     sync, no session. Open, it reads nothing and lets everyone through.
+    if (!(await whopLoginMayProceed(createServiceClient(), userInfo.sub))) {
+      // The refused Whop id goes to the logs, so a test account turned away
+      // by a typo in STUDENT_APP_OPEN_FOR (or a browser signed in to another
+      // Whop account) can be told apart: the page itself looks the same.
+      console.warn(`[whop-callback] student app closed, refused ${userInfo.sub}`);
+      return NextResponse.redirect(`${appUrl}/login?error=app_closed`);
+    }
 
     // 3. Verify active membership (bypass for whitelisted test users).
     //    Two whitelists, both optional, both comma-separated:
@@ -405,10 +419,9 @@ export async function GET(request: NextRequest) {
       // anything.
       //
       // Chained onto the sync rather than run beside it, so it always sees
-      // the rows the sync just wrote. It stays INSIDE the existing 2.5s race
-      // below, so login is never slowed beyond the budget that was already
-      // there; a student who times out is picked up on their next login or
-      // their next action.
+      // the rows the sync just wrote. The redirect still waits 2.5s at most
+      // (the race below); a sync that runs longer finishes after the
+      // redirect, kept alive by after().
       const syncPromise = syncWatchProgress({
         studentId: upsertedStudent.id,
         whopUserId: userInfo.sub,
@@ -443,6 +456,18 @@ export async function GET(request: NextRequest) {
         }),
         timeoutPromise,
       ]);
+      // When the timer wins, nothing else keeps this function alive after
+      // the redirect, and it can be stopped between the rows the sync adds
+      // and their streak day; a later sync finds those rows there and counts
+      // no day for them (T-079). after() keeps it alive until the rows, the
+      // streak day and the badges are written (on Vercel through waitUntil).
+      // after() throws where the platform has no waitUntil, and a login
+      // must never fail on that, so it then goes on as before.
+      try {
+        after(syncPromise.catch(() => null));
+      } catch (err) {
+        console.error("[callback] after() unavailable, the sync may not finish:", err);
+      }
     }
 
     // 6. Create a session for the browser

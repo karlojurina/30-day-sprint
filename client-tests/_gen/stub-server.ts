@@ -1,9 +1,16 @@
 // What the server copies import, standing in for the real thing. build.mjs
-// points their import lines here: Next's response, the service-role Supabase
-// client, Whop's completions read, the steps that run after a lesson (and the
-// CSM's hook for a discount request), and which catalog is live. Hand-written,
-// like stub-supabase.ts and stub-call-gate.ts; the routes and libraries under
-// test are the real source.
+// points their import lines here: Next's response and after(), the
+// service-role Supabase client, Whop (the completions read, and the login's
+// calls), the steps that run after a lesson (and the CSM's hook for a
+// discount request), and which catalog is live. Hand-written, like
+// stub-supabase.ts and stub-call-gate.ts; the routes and libraries under test
+// are the real source.
+//
+// THE STREAK is the one step that is not only recorded: updateStudentStreak,
+// tickStudentStreak and markStudentActive are recorded ("streak", "streak",
+// "active"), then run for real (the copy of update-streak.ts) on the client
+// the route passes in, so a test can read the student_streaks row and
+// students.last_active_at they wrote (streak.test.mjs).
 //
 // THE DATABASE. Rows live in plain arrays, one per table. The client answers
 // the calls those routes make the way PostgREST answers them, where a route
@@ -25,6 +32,10 @@
 // `fail['table.op']` makes every such call fail with that error. Every call is
 // logged in `log`, in order. `.rpc(fn, args)` runs the test's own stand-in for
 // that database function from `functions[fn]` (none: PostgREST's "not found").
+// `auth` answers a password sign-in from `authUsers` (email -> id and
+// password) and adds to it on admin.createUser, as the login callback needs.
+
+import * as realStreak from "./update-streak.ts";
 
 type Row = Record<string, unknown>;
 type DbError = { message: string; code?: string };
@@ -42,8 +53,15 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
     columns: {
       id: newId, whop_user_id: none, supabase_user_id: none, email: none, name: none,
       joined_at: now, first_paid_at: none, membership_status: () => "active", cancel_scheduled_at: none,
+      last_active_at: now,
     },
     unique: [["whop_user_id"]],
+  },
+  student_streaks: {
+    columns: {
+      student_id: none, current_streak: () => 0, longest_streak: () => 0, last_streak_date: none, updated_at: now,
+    },
+    unique: [["student_id"]],
   },
   lessons: {
     columns: {
@@ -116,6 +134,8 @@ export class FakeDb {
   log: Logged[] = [];
   /** Access token -> auth user id, for auth.getUser. */
   users: Record<string, string> = {};
+  /** Email -> auth user, for auth.signInWithPassword and auth.admin.createUser. */
+  authUsers: Record<string, { id: string; password: string }> = {};
   /** Stand-ins for database functions, by name, for `.rpc()`: handed the arguments and a client on this database. */
   functions: Record<string, (args: Record<string, unknown>, db: ReturnType<typeof fakeClient>) => Promise<{ data: unknown; error: DbError | null }>> = {};
   constructor(seed: Record<string, Row[]> = {}, users: Record<string, string> = {}) {
@@ -335,6 +355,23 @@ export function fakeClient(db: FakeDb) {
           ? { data: { user: { id } }, error: null }
           : { data: { user: null }, error: { message: "invalid JWT" } };
       },
+      async signInWithPassword({ email, password }: { email: string; password: string }) {
+        const u = db.authUsers[email];
+        if (!u || u.password !== password) {
+          return { data: { user: null, session: null }, error: { message: "Invalid login credentials" } };
+        }
+        return {
+          data: { user: { id: u.id }, session: { access_token: `access-${u.id}`, refresh_token: `refresh-${u.id}` } },
+          error: null,
+        };
+      },
+      admin: {
+        async createUser({ email, password }: { email: string; password: string }) {
+          const id = newId();
+          db.authUsers[email] = { id, password };
+          return { data: { user: { id } }, error: null };
+        },
+      },
     },
     from(table: string) {
       return builder(db, table);
@@ -361,7 +398,11 @@ export function createClient(..._args: unknown[]) {
 export const createServiceClient = createClient;
 
 // ── next/server ──────────────────────────────────────────────────────────────
-export class NextRequest extends Request {}
+export class NextRequest extends Request {
+  get nextUrl() {
+    return new URL(this.url);
+  }
+}
 export const NextResponse = {
   json(body: unknown, init: ResponseInit = {}) {
     return new Response(JSON.stringify(body), {
@@ -369,12 +410,47 @@ export const NextResponse = {
       headers: { "content-type": "application/json" },
     });
   },
+  /** A 307 to `url`, with the cookies the route sets kept in `cookies.jar`. */
+  redirect(url: string | URL) {
+    const jar: Record<string, string> = {};
+    return Object.assign(new Response(null, { status: 307, headers: { location: String(url) } }), {
+      cookies: { jar, set: (name: string, value: string) => { jar[name] = value; } },
+    });
+  },
 };
+/**
+ * The work routes hand to after(), in order, so a test can wait for what runs
+ * past the response (Next keeps the function alive for it, on Vercel through
+ * waitUntil). `setAfterMissing(true)` makes after() throw as Next's does
+ * where the platform has no waitUntil.
+ */
+export const afterTasks: Promise<unknown>[] = [];
+let afterMissing = false;
+export function setAfterMissing(v: boolean) {
+  afterMissing = v;
+}
+export function after(task: Promise<unknown> | (() => unknown)) {
+  if (afterMissing) {
+    throw new Error("`after()` will not work correctly, because `waitUntil` is not available in the current environment.");
+  }
+  afterTasks.push(typeof task === "function" ? Promise.resolve().then(task) : task);
+}
 
 // ── The steps that run after a lesson, recorded in order ─────────────────────
 export const steps: Array<{ step: string; studentId: string; lessonId?: string }> = [];
-export async function updateStudentStreak(_s: unknown, studentId: string) {
+// The streak's three are recorded, then run for real (the header says why).
+type StreakClient = Parameters<typeof realStreak.updateStudentStreak>[0];
+export async function updateStudentStreak(s: unknown, studentId: string) {
   steps.push({ step: "streak", studentId });
+  await realStreak.updateStudentStreak(s as StreakClient, studentId);
+}
+export async function tickStudentStreak(s: unknown, studentId: string) {
+  steps.push({ step: "streak", studentId });
+  await realStreak.tickStudentStreak(s as StreakClient, studentId);
+}
+export async function markStudentActive(s: unknown, studentId: string) {
+  steps.push({ step: "active", studentId });
+  await realStreak.markStudentActive(s as StreakClient, studentId);
 }
 export async function evaluateAchievements(_s: unknown, studentId: string) {
   steps.push({ step: "achievements", studentId });
@@ -388,10 +464,6 @@ export async function checkR2CompoundsShipped(_s: unknown, studentId: string, le
 }
 export async function reEvaluateStudentOpenTasks(_s: unknown, studentId: string) {
   steps.push({ step: "tasks", studentId });
-}
-export async function afterCompletionWrite(_s: unknown, studentId: string) {
-  steps.push({ step: "after-lesson", studentId });
-  return { newAchievements: [] as string[] };
 }
 export async function onDiscountRequested(_s: unknown, studentId: string) {
   steps.push({ step: "discount-requested", studentId });
@@ -413,12 +485,46 @@ export async function fetchActiveMembershipForUser(_whopUserId: string) {
 export function mapStatus(_m: unknown) {
   return "active";
 }
+export function toIso(value: number | string | null): string | null {
+  return value == null ? null : new Date(value).toISOString();
+}
+
+// The login's calls (auth/whop/callback). The code exchange and the user read
+// answer for `whopUser`; the student password is a function of the Whop id, as
+// the real one is.
+let whopUser = { sub: "user_1", email: "student@example.com", name: "A Student", picture: null as string | null, username: "student" };
+/** Who Whop says is logging in from now on. */
+export function setWhopUser(u: typeof whopUser) {
+  whopUser = u;
+}
+export async function exchangeCodeForTokens(_code: string, _verifier: string, _redirectUri: string) {
+  return { access_token: "whop-access", refresh_token: "whop-refresh" };
+}
+export async function fetchWhopUserInfo(_accessToken: string) {
+  return { ...whopUser };
+}
+export async function checkActiveMembershipDiagnostic(_accessToken: string) {
+  return { hasAccess: false, configured: true, fetchStatus: 200, fetchError: null, memberships: [] };
+}
+export async function fetchWhopMembershipJoinDate(_accessToken: string) {
+  return null;
+}
+export async function fetchWhopDiscordId(_whopUserId: string) {
+  return null;
+}
+export function generateStudentPassword(whopUserId: string) {
+  return `password-for-${whopUserId}`;
+}
 
 // ── src/lib/catalog-tables ───────────────────────────────────────────────────
 // Live bindings: a copy that imports these reads the value set last.
 export let CATALOG_IS_V2 = false;
 export let LESSONS_TABLE = "lessons";
+export let REGIONS_TABLE = "regions";
+export let CATALOG_TABLE_SUFFIX = "";
 export function setCatalog(o: { v2: boolean; lessonsTable?: string }) {
   CATALOG_IS_V2 = o.v2;
   LESSONS_TABLE = o.lessonsTable ?? "lessons";
+  CATALOG_TABLE_SUFFIX = LESSONS_TABLE.slice("lessons".length);
+  REGIONS_TABLE = `regions${CATALOG_TABLE_SUFFIX}`;
 }

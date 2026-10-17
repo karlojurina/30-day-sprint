@@ -1,13 +1,22 @@
+import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { cookies } from "next/headers";
 import { createServerClient } from "@supabase/ssr";
 import { createServiceClient } from "@/lib/supabase-server";
 import { JournalView } from "./JournalView";
 import { ComingSoon } from "@/components/auth/ComingSoon";
-import { studentMayEnterAs } from "@/lib/student-app-gate";
+import { comingSoonMetadata, studentMayEnterAs } from "@/lib/student-app-gate";
 
 interface JournalPageProps {
   params: Promise<{ studentId: string }>;
+}
+
+/**
+ * T-078: while closed, the tab and a link preview read the new name. The
+ * team's own view still renames its tab to the journal once it loads.
+ */
+export function generateMetadata(): Metadata {
+  return comingSoonMetadata();
 }
 
 /**

@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
@@ -27,6 +28,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  *   - every student API route: refuses right after its token check, before any
  *     read or write (refuseWhileClosed).
  *   - the Field Journal page, for a student's own journal.
+ *   - the tab title and link preview of every page that can show the
+ *     coming-soon page (comingSoonMetadata): the login, the dashboard, the
+ *     dashboard mockup and the Field Journal.
  *
  * THE TEAM IS OUTSIDE IT. Team members sign in with email and password at
  * /admin/login, an account separate from any Whop login, and nothing on that
@@ -83,6 +87,19 @@ export function mayEnter(input: {
 /** Whether the student app is closed on this deploy. */
 export function studentAppClosed(): boolean {
   return isClosedValue(process.env.STUDENT_APP_CLOSED);
+}
+
+/**
+ * The tab title and link preview of a page that can show the coming-soon
+ * page, for its generateMetadata. Closed: "Ecom University" and Lovro's
+ * sentence, so the browser tab, a bookmark and a link pasted into Discord read
+ * the new name. It can't know who is looking, so a listed test account sees
+ * the same title. Open: nothing, so the root layout's own title and
+ * description stand exactly as before.
+ */
+export function comingSoonMetadata(): Metadata {
+  if (!studentAppClosed()) return {};
+  return { title: "Ecom University", description: COMING_SOON_MESSAGE };
 }
 
 function openForList(): string[] {

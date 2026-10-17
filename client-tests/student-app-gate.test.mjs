@@ -1,8 +1,8 @@
 // The closed doors before the new course (T-078): src/lib/student-app-gate.ts,
 // the one rule every closed door asks, and where the doors sit.
 //
-// The module has no import Node has to resolve (its one import is a TYPE,
-// which --experimental-strip-types erases), so this test imports the real file
+// The module has no import Node has to resolve (its imports are TYPES, which
+// --experimental-strip-types erases), so this test imports the real file
 // straight from src/, with no copy. The database is a small stand-in that
 // records every read, so "open asks nothing of the database" is checked, not
 // assumed. The second half reads the source of the routes and pages: every
@@ -189,6 +189,21 @@ for (const [label, db] of [
 env({})
 ok(await gate.whopLoginMayProceed(fakeDb(), STAFF) === true, 'open: the Whop login asks nothing about the team')
 
+console.log('\n=== The tab and a link preview: the new name while closed, the root\'s own otherwise ===')
+for (const values of [{}, { STUDENT_APP_CLOSED: 'false' }, { STUDENT_APP_OPEN_FOR: LISTED }]) {
+  env(values)
+  ok(show(gate.comingSoonMetadata()) === '{}', `${show(values)}: nothing, so the root layout's title and description stand`,
+     show(gate.comingSoonMetadata()))
+}
+for (const values of [{ STUDENT_APP_CLOSED: 'true' }, { STUDENT_APP_CLOSED: 'true', STUDENT_APP_OPEN_FOR: LISTED }]) {
+  env(values)
+  const m = gate.comingSoonMetadata()
+  ok(m.title === 'Ecom University' && m.description === gate.COMING_SOON_MESSAGE && Object.keys(m).length === 2,
+     `${show(values)}: "Ecom University" and Lovro's sentence`, show(m))
+  ok(!/[—–]/.test(show(m)), `${show(values)}: no em dash in the tab or the preview`)
+}
+env({})
+
 // ── The source: where the doors are, and where they are not ─────────────────
 function walk(rel) {
   const abs = path.join(ROOT, rel)
@@ -259,6 +274,10 @@ console.log('\n=== The Whop login refuses before it writes anything ===')
   ok(later.every(([, i]) => i > iGate), 'and before the membership check, any read, write, account or sync',
      `gate@${iGate} ` + later.map(([p, i]) => `${p}@${i}`).join(' '))
   ok(s.includes('return NextResponse.redirect(`${appUrl}/login?error=app_closed`);'), 'a refusal goes to /login?error=app_closed')
+  const iWarn = s.indexOf('console.warn(`[whop-callback] student app closed, refused ${userInfo.sub}`);\n')
+  const iRefused = s.indexOf('return NextResponse.redirect(`${appUrl}/login?error=app_closed`);')
+  ok(iWarn > iGate && iRefused > iWarn && s.slice(iWarn, iRefused).split('\n').length === 2,
+     'and is logged first, with the Whop id Whop sent and nothing else', `warn@${iWarn} redirect@${iRefused}`)
   ok(read('src/app/login/page.tsx').includes('app_closed: COMING_SOON_MESSAGE'), 'and the login page knows that code')
 }
 
@@ -285,6 +304,16 @@ console.log('\n=== The pages ===')
   const journal = read('src/app/journal/[studentId]/page.tsx')
   ok(journal.includes('if (!isTeam && isStudentSelf && !(await studentMayEnterAs(supabase, user.id))) {'),
      'the Field Journal: a student\'s own journal is the coming-soon page, the team reads as before')
+  // Every page or layout that can show the coming-soon page takes the new
+  // name for its tab while closed. The root layout stays as it is (it differs
+  // on world-engine); /world already names itself "Ecom University" there.
+  const META = 'export function generateMetadata(): Metadata {\n  return comingSoonMetadata();\n}'
+  const shows = walk('src/app').filter((f) => f.endsWith('.tsx') && /<(ComingSoon|StudentGuard)\b/.test(read(f)))
+  const untitled = shows.filter((f) => !read(f).includes(META)
+    && !(f === 'src/app/world/layout.tsx' && read(f).includes('title: "Ecom University"')))
+  ok(shows.length >= 4 && untitled.length === 0,
+     `every place the coming-soon page can show (${shows.length}) reads "Ecom University" in the tab while closed`,
+     untitled.length ? `untitled: ${untitled.join(', ')}` : shows.map((f) => f.replace('src/app/', '')).join(', '))
 }
 
 console.log('\n=== The browser learns only a yes or no ===')

@@ -64,6 +64,10 @@ export async function GET(request: NextRequest) {
     //     Nothing below runs for anyone else: no student row, no tokens, no
     //     sync, no session. Open, it reads nothing and lets everyone through.
     if (!(await whopLoginMayProceed(createServiceClient(), userInfo.sub))) {
+      // The refused Whop id goes to the logs, so a test account turned away
+      // by a typo in STUDENT_APP_OPEN_FOR (or a browser signed in to another
+      // Whop account) can be told apart: the page itself looks the same.
+      console.warn(`[whop-callback] student app closed, refused ${userInfo.sub}`);
       return NextResponse.redirect(`${appUrl}/login?error=app_closed`);
     }
 

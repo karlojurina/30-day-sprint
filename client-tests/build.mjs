@@ -123,8 +123,8 @@ gen('../src/lib/csm-triggers.ts', './_gen/csm-triggers.ts', [
 // exist, as csm-triggers.ts's is, so one that survived would fail loudly.
 const toStub = (...paths) => paths.map((p) => [`from "${p}"`, 'from "./stub-server.ts"'])
 // The closed doors before the new course (T-078): every student route asks
-// the real gate, copied here, and the routes' copies point at it. Its one
-// import is a TYPE from supabase-js, which --experimental-strip-types erases.
+// the real gate, copied here, and the routes' copies point at it. Its imports
+// are TYPES (supabase-js, next), which --experimental-strip-types erases.
 gen('../src/lib/student-app-gate.ts', './_gen/student-app-gate.ts')
 const GATE = ['from "@/lib/student-app-gate"', 'from "./student-app-gate.ts"']
 gen('../src/app/api/student/_lib/watch-sync.ts', './_gen/watch-sync.ts', [

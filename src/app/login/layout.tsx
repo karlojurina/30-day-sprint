@@ -1,5 +1,11 @@
+import type { Metadata } from "next";
 import { ComingSoon } from "@/components/auth/ComingSoon";
-import { studentAppClosed } from "@/lib/student-app-gate";
+import { comingSoonMetadata, studentAppClosed } from "@/lib/student-app-gate";
+
+/** T-078: while closed, the tab and a link preview read the new name. */
+export function generateMetadata(): Metadata {
+  return comingSoonMetadata();
+}
 
 /**
  * While the student app is closed (STUDENT_APP_CLOSED, T-078) the login is

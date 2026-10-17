@@ -42,6 +42,13 @@ flags. Each test calls the route's own `POST` with a real `Request`. The login
 callback is too big to run this way, so `whop-backfill.test.mjs` checks its one
 streak line in the source and says so.
 
+`discount-september.test.mjs` (T-080, 2026-10-17) runs a September joiner's
+week through the backfill, the webhook and the request route on a calendar it
+sets itself: `at(iso, fn)` swaps the global `Date` for one whose `new Date()`
+and `Date.now()` answer that moment, for the length of `fn`, so the stand-in
+database stamps a completion (its `now()` default) and the route judges at the
+moment the story needs, on whatever day the suite runs.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

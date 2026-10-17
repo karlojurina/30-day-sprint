@@ -94,8 +94,9 @@ export async function POST(request: NextRequest) {
 
   if (CATALOG_IS_V2) {
     // The new course: the request route's rule (src/lib/world/discount.ts),
-    // judged at the end of the 14 days. `override` skips it, as it skips
-    // every gate of the old rule below.
+    // judged at the end of the student's window (their 14 days, or 23
+    // October for a first payment before the launch). `override` skips it,
+    // as it skips every gate of the old rule below.
     if (!override) {
       const reads = await loadDiscountReads(supabase, discountReq.student_id, LESSONS_TABLE);
       let verdict = approvalVerdict(reads, new Date(), discountReq.created_at);

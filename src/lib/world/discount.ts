@@ -3,9 +3,14 @@
  *
  * The offer (Lovro, 2026-10-14): 30% off when the student has watched every
  * video up to the discount checkpoint, which sits between Video Ads II (the
- * Trail Hut) and Static Ads (the Boathouse), within 14 days of their first
- * payment. Only students whose first payment is on or after the day the new
- * course launched (9 October 2026, from midnight in Croatia) can earn it.
+ * Trail Hut) and Static Ads (the Boathouse), in time. Who can earn it, and by
+ * when (Lovro, 2026-10-16, T-080; every date from midnight in Croatia):
+ *   - a first payment on or after the launch (9 October 2026): 14 days from
+ *     that payment;
+ *   - a first payment from 9 September 2026 until the launch: until the end
+ *     of 23 October 2026, one deadline they all share (they watch on Whop
+ *     while the app is closed and apply once it is back);
+ *   - a first payment before 9 September 2026: never.
  *
  * "The videos up to the checkpoint" are the counting watch lessons, in course
  * order, up to and including the gate lesson (`is_gate`), that have a video.
@@ -26,11 +31,34 @@ export { DISCOUNT_WINDOW_DAYS };
  * The new course launched on Whop on 9 October 2026; earlier buyers bought the
  * old course. The cutoff is midnight that day in Croatia: 9 October 00:00 CEST
  * (UTC+2) is 8 October 22:00 UTC. Shown to students as a date in
- * Europe/Zagreb, never UTC, or it would read "October 8".
+ * Europe/Zagreb, never UTC, or it would read "October 8". A first payment from
+ * here on has its own 14 days, and a request made before it was made on the
+ * old course.
  */
 export const DISCOUNT_LAUNCH_DATE = "2026-10-08T22:00:00.000Z";
+/**
+ * The earliest first payment that can earn it: 9 September 2026 at midnight
+ * in Croatia, 00:00 CEST (UTC+2), which is 8 September 22:00 UTC.
+ */
+export const DISCOUNT_ELIGIBLE_FROM = "2026-09-08T22:00:00.000Z";
+/**
+ * The deadline shared by every first payment from DISCOUNT_ELIGIBLE_FROM until
+ * the launch: the end of 23 October 2026 in Croatia, still summer time (CEST,
+ * UTC+2; the clocks go back on 25 October). 24 October begins at 22:00 UTC on
+ * the 23rd. The window's end counts as inside it (discountState here, the
+ * approval's videoDoneIds), so the deadline is the millisecond before, and in
+ * Croatia it reads as 23 October.
+ */
+export const DISCOUNT_SHARED_DEADLINE = "2026-10-23T21:59:59.999Z";
 
 const DAY_MS = 86_400_000;
+
+/**
+ * Which deadline a student has. "own": 14 days from their own first payment,
+ * made on or after the launch. "shared": DISCOUNT_SHARED_DEADLINE, the end of
+ * 23 October, for a first payment from 9 September until the launch.
+ */
+export type DiscountWindow = "own" | "shared";
 
 export interface DiscountLesson {
   id: string;
@@ -50,18 +78,23 @@ export interface DiscountRequestRow {
 }
 
 export type DiscountState =
-  /** "no-gate" also covers a gate with no video up to it: there is nothing to reach. */
+  /**
+   * "no-gate" also covers a gate with no video up to it: there is nothing to
+   * reach. "before-launch" is a first payment before DISCOUNT_ELIGIBLE_FROM
+   * (9 September); the name is from when the launch was the cutoff.
+   */
   | { kind: "not-eligible"; reason: "no-payment" | "before-launch" | "no-gate" }
-  | { kind: "expired"; endsAt: string; lessonsLeft: number }
+  | { kind: "expired"; endsAt: string; window: DiscountWindow; lessonsLeft: number }
   | {
       kind: "locked";
       endsAt: string;
+      window: DiscountWindow;
       lessonsLeft: number;
       lessonsTotal: number;
       secondsLeft: number;
       nextLessonId: string | null;
     }
-  | { kind: "ready"; endsAt: string; lessonsTotal: number }
+  | { kind: "ready"; endsAt: string; window: DiscountWindow; lessonsTotal: number }
   | {
       kind: "pending" | "approved" | "applied" | "rejected";
       requestId: string;
@@ -95,12 +128,26 @@ export function requiredLessons(lessons: readonly DiscountLesson[]): DiscountLes
     .filter((l) => l.type === "watch" && l.counts_toward_progress && l.has_video);
 }
 
-/** When the offer ends for this student, or null without a first payment. */
-export function discountEndsAt(firstPaidAt: string | null): Date | null {
-  if (!firstPaidAt) return null;
+/**
+ * Whether the offer is open to this first payment, and if so until when: the
+ * one place the dates of the rule are read. Closed with no first payment, one
+ * that does not parse, or one before DISCOUNT_ELIGIBLE_FROM.
+ */
+export function discountWindow(
+  firstPaidAt: string | null,
+): { endsAt: Date; window: DiscountWindow } | { closed: "no-payment" | "before-launch" } {
+  if (!firstPaidAt) return { closed: "no-payment" };
   const t = Date.parse(firstPaidAt);
-  if (!Number.isFinite(t)) return null;
-  return new Date(t + DISCOUNT_WINDOW_DAYS * DAY_MS);
+  if (!Number.isFinite(t)) return { closed: "no-payment" };
+  if (t < Date.parse(DISCOUNT_ELIGIBLE_FROM)) return { closed: "before-launch" };
+  if (t < Date.parse(DISCOUNT_LAUNCH_DATE)) return { endsAt: new Date(DISCOUNT_SHARED_DEADLINE), window: "shared" };
+  return { endsAt: new Date(t + DISCOUNT_WINDOW_DAYS * DAY_MS), window: "own" };
+}
+
+/** When the offer ends for this student, or null when it is not open to them (discountWindow). */
+export function discountEndsAt(firstPaidAt: string | null): Date | null {
+  const w = discountWindow(firstPaidAt);
+  return "closed" in w ? null : w.endsAt;
 }
 
 export function discountState(input: DiscountInput): DiscountState {
@@ -124,11 +171,8 @@ export function discountState(input: DiscountInput): DiscountState {
     };
   }
 
-  const endsAt = discountEndsAt(firstPaidAt);
-  if (!firstPaidAt || !endsAt) return { kind: "not-eligible", reason: "no-payment" };
-  if (Date.parse(firstPaidAt) < Date.parse(DISCOUNT_LAUNCH_DATE)) {
-    return { kind: "not-eligible", reason: "before-launch" };
-  }
+  const open = discountWindow(firstPaidAt);
+  if ("closed" in open) return { kind: "not-eligible", reason: open.closed };
   if (!gateLessonId(lessons)) return { kind: "not-eligible", reason: "no-gate" };
 
   const required = requiredLessons(lessons);
@@ -138,15 +182,17 @@ export function discountState(input: DiscountInput): DiscountState {
   if (required.length === 0) return { kind: "not-eligible", reason: "no-gate" };
   const left = required.filter((l) => !videoDoneIds.has(l.id));
 
-  if (now.getTime() > endsAt.getTime()) {
-    return { kind: "expired", endsAt: endsAt.toISOString(), lessonsLeft: left.length };
+  const endsAt = open.endsAt.toISOString();
+  if (now.getTime() > open.endsAt.getTime()) {
+    return { kind: "expired", endsAt, window: open.window, lessonsLeft: left.length };
   }
   if (left.length === 0) {
-    return { kind: "ready", endsAt: endsAt.toISOString(), lessonsTotal: required.length };
+    return { kind: "ready", endsAt, window: open.window, lessonsTotal: required.length };
   }
   return {
     kind: "locked",
-    endsAt: endsAt.toISOString(),
+    endsAt,
+    window: open.window,
     lessonsLeft: left.length,
     lessonsTotal: required.length,
     secondsLeft: left.reduce((sum, l) => sum + (l.duration_seconds ?? 0), 0),

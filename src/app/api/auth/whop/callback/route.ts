@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import {
   exchangeCodeForTokens,
@@ -419,10 +419,9 @@ export async function GET(request: NextRequest) {
       // anything.
       //
       // Chained onto the sync rather than run beside it, so it always sees
-      // the rows the sync just wrote. It stays INSIDE the existing 2.5s race
-      // below, so login is never slowed beyond the budget that was already
-      // there; a student who times out is picked up on their next login or
-      // their next action.
+      // the rows the sync just wrote. The redirect still waits 2.5s at most
+      // (the race below); a sync that runs longer finishes after the
+      // redirect, kept alive by after().
       const syncPromise = syncWatchProgress({
         studentId: upsertedStudent.id,
         whopUserId: userInfo.sub,
@@ -457,6 +456,18 @@ export async function GET(request: NextRequest) {
         }),
         timeoutPromise,
       ]);
+      // When the timer wins, nothing else keeps this function alive after
+      // the redirect, and it can be stopped between the rows the sync adds
+      // and their streak day; a later sync finds those rows there and counts
+      // no day for them (T-079). after() keeps it alive until the rows, the
+      // streak day and the badges are written (on Vercel through waitUntil).
+      // after() throws where the platform has no waitUntil, and a login
+      // must never fail on that, so it then goes on as before.
+      try {
+        after(syncPromise.catch(() => null));
+      } catch (err) {
+        console.error("[callback] after() unavailable, the sync may not finish:", err);
+      }
     }
 
     // 6. Create a session for the browser

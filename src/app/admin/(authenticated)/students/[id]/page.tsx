@@ -19,6 +19,7 @@ import {
   progressPercent,
 } from "@/lib/constants";
 import { completedLessonIdsFor } from "@/lib/progress";
+import { currentStreakAsOf, getTodayUtc } from "@/lib/streak";
 import {
   AdminPage,
   Section,
@@ -302,7 +303,7 @@ export default function StudentDetailPage() {
           value={overallPercent == null ? "—" : `${overallPercent}%`}
           tone="accent"
         />
-        <Stat label="Streak" value={`${streaks?.current_streak ?? 0}d`} />
+        <Stat label="Streak" value={`${currentStreakAsOf(streaks, getTodayUtc())}d`} />
         <Stat
           label="Joined"
           value={new Date(student.joined_at).toLocaleDateString()}

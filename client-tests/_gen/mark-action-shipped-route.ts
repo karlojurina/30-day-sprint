@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "./stub-server.ts";
 import { createClient } from "./stub-server.ts";
 import { refuseWhileClosed } from "./student-app-gate.ts";
-import { updateStudentStreak } from "./stub-server.ts";
+import { markStudentActive, tickStudentStreak } from "./stub-server.ts";
 import { evaluateAchievements } from "./stub-server.ts";
 import { checkR2CompoundsShipped, onLessonCompleted } from "./stub-server.ts";
 import { reEvaluateStudentOpenTasks } from "./stub-server.ts";
@@ -19,7 +19,9 @@ import {
  *
  * Toggles the action_completed_at column on a compound lesson's
  * completion row. Used when the student manually clicks "I shipped
- * the ad" (or undoes it) on a compound lesson in the LessonSheet.
+ * the ad" (or undoes it) on a compound lesson in the LessonSheet. On the
+ * new course's catalog an undo is refused (T-079): its lesson page has no
+ * undo button.
  *
  * Safe to call on a row that doesn't yet exist (creates it with only
  * action_completed_at set, completed_at=null) or that already has the
@@ -94,6 +96,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // On the new course a completed action item stays completed. The lesson
+  // page has no undo, and an undo followed by a new press would count a
+  // streak day with no new work (T-079). The old course keeps its undo.
+  if (!shipped && CATALOG_IS_V2) {
+    return NextResponse.json(
+      { error: "A completed action item can't be undone." },
+      { status: 400 }
+    );
+  }
+
   // Check existing row
   const { data: existing, error: existingError } = await supabase
     .from("student_lesson_completions")
@@ -105,8 +117,8 @@ export async function POST(request: NextRequest) {
   // On the new course an action item is completed only once its Discord link
   // is saved (backend_readiness.md item 15, morning review A3). The page asks
   // for the link first; this holds the same rule here, so a request made
-  // without the page cannot complete one. Undoing needs no link. The old
-  // course is left exactly as it was.
+  // without the page cannot complete one. The old course is left exactly as
+  // it was, and there undoing needs no link.
   if (shipped && CATALOG_IS_V2) {
     // .single() answers "no row" with PGRST116, which is not a failure.
     if (existingError && existingError.code !== "PGRST116") {
@@ -171,14 +183,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ completion: null });
   }
 
-  // Update streak only if we just newly fully-completed (both halves)
-  if (
-    shipped &&
-    result &&
-    result.completed_at &&
-    result.action_completed_at
-  ) {
-    await updateStudentStreak(supabase, student.id);
+  // A task done is a streak day (T-079): the action half newly done, on
+  // both courses, whether or not the lesson's video is watched yet (watching
+  // it is a streak day of its own, lesson-watched). Pressing it again on a
+  // done action, or undoing one, is no new work.
+  if (shipped && !existing?.action_completed_at && result?.action_completed_at) {
+    await tickStudentStreak(supabase, student.id);
+  }
+  // "Last active" moves where it always did: a shipped action that leaves
+  // both halves done.
+  if (shipped && result?.completed_at && result?.action_completed_at) {
+    await markStudentActive(supabase, student.id);
   }
 
   // CSM event hooks (best-effort — failures here never break the

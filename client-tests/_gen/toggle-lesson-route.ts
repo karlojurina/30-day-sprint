@@ -1,0 +1,152 @@
+import { NextRequest, NextResponse } from "./stub-server.ts";
+import { createClient } from "./stub-server.ts";
+import { refuseWhileClosed } from "./student-app-gate.ts";
+import { markStudentActive, updateStudentStreak } from "./stub-server.ts";
+import { onLessonCompleted } from "./stub-server.ts";
+import { evaluateAchievements } from "./stub-server.ts";
+import { reEvaluateStudentOpenTasks } from "./stub-server.ts";
+import { CATALOG_IS_V2 } from "./stub-server.ts";
+
+export async function POST(request: NextRequest) {
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader?.startsWith("Bearer ")) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const token = authHeader.slice(7);
+  const { lessonId } = await request.json();
+
+  if (!lessonId) {
+    return NextResponse.json({ error: "Missing lessonId" }, { status: 400 });
+  }
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } }
+  );
+
+  const { data: { user }, error: userError } = await supabase.auth.getUser(token);
+  if (userError || !user) {
+    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+  }
+
+  // T-078: closed to students until the new course (lib/student-app-gate.ts).
+  const closed = await refuseWhileClosed(supabase, user.id);
+  if (closed) return closed;
+
+  const { data: student } = await supabase
+    .from("students")
+    .select("id")
+    .eq("supabase_user_id", user.id)
+    .single();
+
+  if (!student) {
+    return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
+
+  // v93 — watch lessons complete themselves.
+  //
+  // This route marks a lesson done on the student's say-so, which is correct
+  // for setup/action lessons (they ARE self-reported) and wrong for a watch
+  // lesson once the app hosts the video: it would let anyone tick off a
+  // 24-minute lesson with one fetch from devtools. Completion for those goes
+  // through /api/student/lesson-watched, which re-reads the telemetry.
+  //
+  // Safe for the live dashboard, verified rather than assumed: both
+  // toggleLesson() call sites in LessonSheet.tsx are non-watch. :861 is behind
+  // `!isWatchType`, and :578 is the discount gate l049, which the canonical
+  // catalog (v20:427) defines as type 'action'.
+  //
+  // Fails OPEN on a read error. The guard defends against a hand-crafted
+  // request, not against an honest student, and a transient database blip must
+  // not stop someone ticking off a lesson they really did finish.
+  const { data: guardLesson, error: guardError } = await supabase
+    .from("lessons")
+    .select("type, requires_action")
+    .eq("id", lessonId)
+    .maybeSingle();
+
+  if (!guardError && guardLesson?.type === "watch") {
+    return NextResponse.json(
+      { error: "Watch lessons complete themselves." },
+      { status: 400 },
+    );
+  }
+
+  // On the new course a lesson with an action half is finished with the
+  // action item's button (mark-action-shipped), and the new app never calls
+  // this route. Here a tick would write half of one, and an untick would
+  // delete the row with its saved link, so completing it again would count a
+  // streak day with no new work (T-079). The old course's tasks have no
+  // action half, so they are unchanged.
+  if (CATALOG_IS_V2 && !guardError && guardLesson?.requires_action) {
+    return NextResponse.json(
+      { error: "Complete this action item on its lesson page." },
+      { status: 400 },
+    );
+  }
+
+  // Check if lesson is already completed
+  const { data: existing } = await supabase
+    .from("student_lesson_completions")
+    .select("id")
+    .eq("student_id", student.id)
+    .eq("lesson_id", lessonId)
+    .single();
+
+  if (existing) {
+    await supabase
+      .from("student_lesson_completions")
+      .delete()
+      .eq("id", existing.id);
+
+    // Undoing is no work: no streak day (T-079). "Last active" moves as it
+    // always did.
+    await markStudentActive(supabase, student.id);
+
+    return NextResponse.json({ action: "unchecked" });
+  } else {
+    const { data, error } = await supabase
+      .from("student_lesson_completions")
+      .insert({ student_id: student.id, lesson_id: lessonId })
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    // A task ticked off is a streak day (T-079) when this row finishes the
+    // lesson: one with no action half. On a lesson with one the row is half
+    // of it (the new course's are refused above). Unread lesson, no streak
+    // day. "Last active" moves either way, as it always did.
+    if (guardLesson && !guardLesson.requires_action) {
+      await updateStudentStreak(supabase, student.id);
+    } else {
+      await markStudentActive(supabase, student.id);
+    }
+
+    // X.1 reactivation check (best-effort).
+    await onLessonCompleted(supabase, student.id);
+
+    // v53 (Phase 5) - achievements. Best-effort; failure here
+    // shouldn't block the completion.
+    const newlyUnlocked = await evaluateAchievements(
+      supabase,
+      student.id,
+    );
+
+    // v75.21 - real-time CSM task dismissal. Watching a lesson can
+    // invalidate nolessons.*/pace.* tasks; dismiss them in the same
+    // request so the VA queue doesn't show stale items. Best-effort;
+    // failure is logged but doesn't break the lesson-completion path.
+    await reEvaluateStudentOpenTasks(supabase, student.id);
+
+    return NextResponse.json({
+      action: "checked",
+      completion: data,
+      newAchievements: newlyUnlocked,
+    });
+  }
+}

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { refuseWhileClosed } from "@/lib/student-app-gate";
-import { updateStudentStreak } from "../_lib/update-streak";
+import { markStudentActive, updateStudentStreak } from "../_lib/update-streak";
 import { onLessonCompleted } from "@/lib/csm-events";
 import { evaluateAchievements } from "@/lib/achievements";
 import { reEvaluateStudentOpenTasks } from "@/lib/csm-task-evaluation";
+import { CATALOG_IS_V2 } from "@/lib/catalog-tables";
 
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -62,13 +63,26 @@ export async function POST(request: NextRequest) {
   // not stop someone ticking off a lesson they really did finish.
   const { data: guardLesson, error: guardError } = await supabase
     .from("lessons")
-    .select("type")
+    .select("type, requires_action")
     .eq("id", lessonId)
     .maybeSingle();
 
   if (!guardError && guardLesson?.type === "watch") {
     return NextResponse.json(
       { error: "Watch lessons complete themselves." },
+      { status: 400 },
+    );
+  }
+
+  // On the new course a lesson with an action half is finished with the
+  // action item's button (mark-action-shipped), and the new app never calls
+  // this route. Here a tick would write half of one, and an untick would
+  // delete the row with its saved link, so completing it again would count a
+  // streak day with no new work (T-079). The old course's tasks have no
+  // action half, so they are unchanged.
+  if (CATALOG_IS_V2 && !guardError && guardLesson?.requires_action) {
+    return NextResponse.json(
+      { error: "Complete this action item on its lesson page." },
       { status: 400 },
     );
   }
@@ -87,7 +101,9 @@ export async function POST(request: NextRequest) {
       .delete()
       .eq("id", existing.id);
 
-    await updateStudentStreak(supabase, student.id);
+    // Undoing is no work: no streak day (T-079). "Last active" moves as it
+    // always did.
+    await markStudentActive(supabase, student.id);
 
     return NextResponse.json({ action: "unchecked" });
   } else {
@@ -101,7 +117,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    await updateStudentStreak(supabase, student.id);
+    // A task ticked off is a streak day (T-079) when this row finishes the
+    // lesson: one with no action half. On a lesson with one the row is half
+    // of it (the new course's are refused above). Unread lesson, no streak
+    // day. "Last active" moves either way, as it always did.
+    if (guardLesson && !guardLesson.requires_action) {
+      await updateStudentStreak(supabase, student.id);
+    } else {
+      await markStudentActive(supabase, student.id);
+    }
 
     // X.1 reactivation check (best-effort).
     await onLessonCompleted(supabase, student.id);

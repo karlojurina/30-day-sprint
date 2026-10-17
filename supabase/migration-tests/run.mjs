@@ -4204,6 +4204,32 @@ console.log('\n=== 26. v106: one pending discount request per student (T-057), a
          r3.ok ? (r4.ok ? r4.rows[0]?.value : told(r4)) : told(r3))
     await c.close()
   }
+
+  // T-080: the database's own rule that the map and the request routes mirror
+  // (src/lib/world/discount.ts, requestCounts). A student who first paid from
+  // 9 September can hold a request from the old dashboard, made before the
+  // launch on 9 October. The feedback form's function refuses another request
+  // while that one is pending, approved or applied, whatever its date, and
+  // writes one after a rejected one. Run with the student's own session, and
+  // rolled back. base.sql predates v21, which gave production the 'applied'
+  // status, so v21 runs first.
+  {
+    const c = await d.clone()
+    await c.exec(read('2026_v21_discount_applied_state.sql'))
+    const got = []
+    for (const status of ['pending', 'approved', 'applied', 'rejected']) {
+      await c.exec(`delete from discount_requests where student_id = '${UID(6)}';
+                    insert into discount_requests (student_id, status, created_at) values ('${UID(6)}', '${status}', '2026-09-25 10:00:00+00');`)
+      const r = await asStudent(c, 6, `select public.submit_discount_with_feedback('${UID(6)}', '[]'::jsonb)::text as id`,
+        { check: `select string_agg(status, ',' order by created_at) as s from discount_requests where student_id = '${UID(6)}'` })
+      got.push(`${status}: ${r.ok ? `written (${r.checked?.[0]?.s})` : r.said}`)
+    }
+    await c.close()
+    const REFUSED = 'A discount request already exists for this student'
+    note(sameJson(got, [`pending: ${REFUSED}`, `approved: ${REFUSED}`, `applied: ${REFUSED}`, 'rejected: written (rejected,pending)']),
+         'T-080: with a request from before the launch (25 September), the feedback form\'s function refuses another while that one is pending, approved or applied, and writes one after a rejected one: the rule discount.ts requestCounts mirrors',
+         asJson(got))
+  }
   await d.close()
 }
 

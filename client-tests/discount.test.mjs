@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
   DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, DISCOUNT_PERCENT, DISCOUNT_SHARED_DEADLINE, DISCOUNT_WINDOW_DAYS,
-  discountEndsAt, discountState, discountWindow, gateLessonId, requiredLessons,
+  discountEndsAt, discountState, discountWindow, gateLessonId, requestCounts, requiredLessons,
 } from './_gen/discount.ts'
 import { DISCOUNT_WINDOW_DAYS as CONSTANTS_WINDOW_DAYS } from './_gen/constants.ts'
 import {
@@ -206,7 +206,7 @@ console.log('\n=== discountState: a first payment after the launch keeps its own
 console.log('\n=== discountState: a request decides ===')
 for (const status of ['pending', 'approved', 'applied', 'rejected']) {
   const req = R('req-1', status, '2026-10-20T10:00:00.000Z', { promo_code: status === 'approved' ? 'ECOM30-ABC' : null, rejection_reason: status === 'rejected' ? 'no' : null })
-  const want = { kind: status, requestId: 'req-1', at: '2026-10-20T10:00:00.000Z', promoCode: req.promo_code, rejectionReason: req.rejection_reason }
+  const want = { kind: status, requestId: 'req-1', at: '2026-10-20T10:00:00.000Z', promoCode: req.promo_code, rejectionReason: req.rejection_reason, madeBeforeLaunch: false }
   ok(same(state({ requests: [req] }), want), `${status}: the request decides inside the window`, show(state({ requests: [req] })))
   ok(same(state({ requests: [req], now: AFTER }), want), `${status}: and after the window`)
   ok(state({ requests: [req], firstPaidAt: null }).kind === status && state({ requests: [req], firstPaidAt: '2026-09-01T00:00:00Z' }).kind === status,
@@ -224,23 +224,86 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
   ok(state({ requests: [R('a', 'pending', '2026-10-12T10:00:00Z'), R('b', 'rejected', '2026-10-14T10:00:00Z')] }).kind === 'rejected', 'a newer rejection beats an older pending one')
 }
 
-console.log('\n=== discountState: a request from the old course is ignored ===')
+console.log('\n=== discountState: a request from the old course, made before the launch ===')
 {
+  // Everyone the old course's request means nothing to: a student the offer is closed to, and one who first paid after the launch.
   const june = R('june', 'approved', '2026-06-12T10:00:00.000Z', { promo_code: 'ECOM30-OLD' })
   const s = state({ firstPaidAt: '2026-06-01T00:00:00Z', now: new Date('2026-10-15T00:00:00Z'), requests: [june] })
   ok(same(s, { kind: 'not-eligible', reason: 'before-launch' }), 'a June student with an approved June request sees "not eligible", never "approved"', show(s))
-  ok(state({ requests: [R('eve', 'pending', '2026-10-08T21:59:59.999Z')] }).kind === 'locked', 'a request the millisecond before the launch is ignored')
+  ok(same(state({ firstPaidAt: '2026-09-05T10:00:00Z', now: new Date('2026-10-19T08:00:00Z'), requests: [R('early', 'applied', '2026-09-10T10:00:00Z')] }),
+          { kind: 'not-eligible', reason: 'before-launch' }),
+     'first paid 5 September (before 9 September) with the 30% applied on 10 September: "not eligible" too')
+  ok(same(state({ firstPaidAt: null, requests: [R('old', 'approved', '2026-09-25T10:00:00Z')] }), { kind: 'not-eligible', reason: 'no-payment' }),
+     'no first payment on record, an old approved request: "no payment", as before')
+  ok(state({ requests: [R('eve', 'pending', '2026-10-08T21:59:59.999Z')] }).kind === 'locked',
+     'first paid after the launch: a request the millisecond before the launch is ignored, as before')
   ok(state({ requests: [R('at', 'pending', '2026-10-08T22:00:00.000Z')] }).kind === 'pending', 'a request at the launch instant counts')
   ok(state({ requests: [R('new', 'pending', '2026-10-12T00:00:00Z'), R('old', 'approved', '2026-07-01T00:00:00Z')] }).requestId === 'new',
      'next to a new request, an old one plays no part')
   ok(state({ requests: [R('old', 'rejected', '2026-09-30T00:00:00Z')], videoDoneIds: new Set(['x01', 'x05', 'x06']) }).kind === 'ready',
      'an old rejection does not stop a new student who is ready')
   ok(state({ requests: [R('bad', 'approved', 'not a date')] }).kind === 'locked', 'a request whose date does not parse is not counted')
-  // T-080 leaves this as it was, and it is Lovro's call: a September joiner
-  // who got the old course's 30% can earn the new one too.
-  const sept = state({ firstPaidAt: '2026-09-15T10:00:00Z', now: new Date('2026-10-19T08:00:00Z'), requests: [R('sept', 'approved', '2026-09-25T10:00:00Z', { promo_code: 'ECOM30-OLD' })] })
-  ok(sept.kind === 'locked' && sept.window === 'shared',
-     'a September joiner approved on the old course in September: that request plays no part, the new offer shows', show(sept))
+}
+
+console.log('\n=== discountState: a September joiner who already has a request from the old course (one 30% per student) ===')
+{
+  // First paid 15 September; requested on the old dashboard on 25 September.
+  // The database refuses another request while that one is pending, approved
+  // or applied (v29's function, any date; the migration harness, section 26),
+  // so the map shows that request. A rejected one does not count.
+  const SEPT = '2026-09-15T10:00:00.000Z'
+  const OLD = '2026-09-25T10:00:00.000Z'
+  const ALL = new Set(['x01', 'x05', 'x06'])
+  const sept = (requests, o = {}) => state({ firstPaidAt: SEPT, now: new Date('2026-10-20T10:00:00Z'), videoDoneIds: ALL, requests, ...o })
+  for (const status of ['pending', 'approved', 'applied']) {
+    const s = sept([R('old', status, OLD, { promo_code: status === 'pending' ? null : 'ECOM30-OLD' })])
+    ok(same(s, { kind: status, requestId: 'old', at: OLD, promoCode: status === 'pending' ? null : 'ECOM30-OLD', rejectionReason: null, madeBeforeLaunch: true }),
+       `${status} on the old course: the map shows it (never "ready", with every video done), marked as made before the launch`, show(s))
+    ok(sept([R('old', status, OLD)], { now: new Date('2026-11-01T00:00:00Z') }).kind === status, `${status}: and after the shared deadline`)
+  }
+  {
+    const s = sept([R('old', 'rejected', OLD, { rejection_reason: 'R2 not finished in time' })])
+    ok(same(s, { kind: 'ready', endsAt: DISCOUNT_SHARED_DEADLINE, window: 'shared', lessonsTotal: 3 }),
+       'rejected on the old course: it plays no part, the new offer shows (ready, every video done)', show(s))
+    ok(sept([R('old', 'rejected', OLD)], { videoDoneIds: new Set() }).kind === 'locked', 'rejected, nothing watched yet: locked')
+  }
+  // The launch is the line between an old request and a new one.
+  ok(sept([R('eve', 'rejected', '2026-10-08T21:59:59.999Z')]).kind === 'ready', 'rejected the millisecond before the launch: plays no part')
+  {
+    const s = sept([R('at', 'rejected', '2026-10-08T22:00:00.000Z', { rejection_reason: 'no' })])
+    ok(s.kind === 'rejected' && s.madeBeforeLaunch === false,
+       'rejected at the launch instant: a new-course request, it decides (D7, unchanged)', show(s))
+  }
+  ok(sept([R('eve', 'pending', '2026-10-08T21:59:59.999Z')]).madeBeforeLaunch === true, 'pending the millisecond before the launch: shown, made before the launch')
+  // Old and new together.
+  {
+    const s = sept([R('old', 'rejected', OLD), R('new', 'pending', '2026-10-12T10:00:00.000Z')])
+    ok(s.kind === 'pending' && s.requestId === 'new' && s.madeBeforeLaunch === false, 'rejected in September, applied again on 12 October: the new one', show(s))
+  }
+  ok(sept([R('old', 'applied', OLD), R('older', 'rejected', '2026-09-20T10:00:00.000Z')]).requestId === 'old',
+     'rejected on 20 September, then applied on 25 September: the applied one')
+  // The first payment boundary decides whether an old request counts at all.
+  ok(state({ firstPaidAt: '2026-09-08T21:59:59.999Z', now: new Date('2026-10-20T10:00:00Z'), requests: [R('old', 'applied', OLD)] }).kind === 'not-eligible',
+     'first paid the millisecond before 9 September: the old request plays no part, "not eligible"')
+  ok(state({ firstPaidAt: DISCOUNT_ELIGIBLE_FROM, now: new Date('2026-10-20T10:00:00Z'), requests: [R('old', 'applied', OLD)] }).kind === 'applied',
+     'first paid at 00:00 on 9 September in Croatia: the old request is shown')
+}
+
+console.log('\n=== requestCounts: the one place that says which requests count ===')
+{
+  const SEPT = '2026-09-15T10:00:00.000Z'
+  const rows = [
+    [R('a', 'pending', '2026-09-25T10:00:00Z'), SEPT, true, 'old pending, September joiner'],
+    [R('a', 'approved', '2026-09-25T10:00:00Z'), SEPT, true, 'old approved, September joiner'],
+    [R('a', 'applied', '2026-09-25T10:00:00Z'), SEPT, true, 'old applied, September joiner'],
+    [R('a', 'rejected', '2026-09-25T10:00:00Z'), SEPT, false, 'old rejected, September joiner'],
+    [R('a', 'approved', '2026-06-12T10:00:00Z'), '2026-06-01T00:00:00Z', false, 'old approved, June student'],
+    [R('a', 'approved', '2026-09-25T10:00:00Z'), null, false, 'old approved, no first payment'],
+    [R('a', 'approved', '2026-09-25T10:00:00Z'), PAID, false, 'old approved, first paid after the launch'],
+    [R('a', 'rejected', DISCOUNT_LAUNCH_DATE), '2026-06-01T00:00:00Z', true, 'any request from the launch on, whoever made it'],
+    [R('a', 'approved', 'not a date'), SEPT, false, 'a date that does not parse'],
+  ]
+  for (const [r, paid, want, label] of rows) ok(requestCounts(r, paid) === want, `${label}: ${want ? 'counts' : 'does not count'}`)
 }
 
 console.log('\n=== discount-server: rows to lessons ===')
@@ -346,18 +409,20 @@ ok(decideDiscountRequest(reads({ completions: badRead('x'), requests: badRead('y
 {
   const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-09-15T10:00:00Z' }), completions: done(['x01']) }), new Date('2026-10-20T10:00:00Z'))
   ok(!d.grant && d.state === 'locked'
-       && d.error === 'You have 2 lessons left to watch before the discount checkpoint, about 15 minutes of video. Finish them by October 23 and apply again.',
-     'a September joiner with lessons left is told the day, never "your 14 days"', d.error)
+       && d.error === 'You have 2 lessons left to watch before the discount checkpoint, about 15 minutes of video. Finish them by the end of October 23, Croatia time, and apply again.',
+     'a September joiner with lessons left is told the day and whose clock it is, never "your 14 days"', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-09-15T10:00:00Z' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-10-23T22:00:00.000Z'))
   ok(!d.grant && d.status === 400 && d.state === 'expired'
-       && d.error === 'The discount closed at the end of October 23. That was the deadline for students who joined before the new course launched.',
-     'a September joiner at 00:00 on 24 October in Croatia, every video done: expired, the day named', d.error)
+       && d.error === 'The discount closed at the end of October 23, Croatia time. That was the deadline for students who joined before the new course launched.',
+     'a September joiner at 00:00 on 24 October in Croatia, every video done: expired, the day and the clock named', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: null }) }), IN_WINDOW)
-  ok(!d.grant && d.state === 'not-eligible' && d.error.startsWith("We can't find your first payment yet"), 'no first payment: 400, not eligible', d.error)
+  ok(!d.grant && d.state === 'not-eligible'
+       && d.error === "We can't find your first payment yet, so we can't check whether the discount is open to you. Contact support and we'll sort it out within 24h.",
+     'no first payment: 400, not eligible, with no length of window named (it may be 23 October, not 14 days)', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ lessons: okRead(catalogRows(COURSE).map((l) => ({ ...l, is_gate: false }))), completions: done(['x01', 'x05', 'x06']) }), IN_WINDOW)
@@ -379,15 +444,17 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
     { kind: 'expired', endsAt: ENDS, window: 'own', lessonsLeft: 0 },
     { kind: 'expired', endsAt: DISCOUNT_SHARED_DEADLINE, window: 'shared', lessonsLeft: 0 },
     ...['no-payment', 'before-launch', 'no-gate'].map((reason) => ({ kind: 'not-eligible', reason })),
-    ...['pending', 'approved', 'applied', 'rejected'].map((kind) => ({ kind, requestId: 'r', at: ENDS, promoCode: null, rejectionReason: null })),
+    ...['pending', 'approved', 'applied', 'rejected'].map((kind) => ({ kind, requestId: 'r', at: ENDS, promoCode: null, rejectionReason: null, madeBeforeLaunch: false })),
   ]
   const msgs = all.map(discountRefusalMessage)
   ok(msgs.every((m) => m.length > 0 && !m.includes('—') && !/\bR[12]\b/.test(m) && !/unlock/i.test(m)),
      'every refusal is a plain sentence: no em dash, no region code, no "unlock"', show(msgs))
   ok(msgs[0].includes('about 2 hours of video'), 'hours read as hours', msgs[0])
-  ok(msgs[1] === 'You have 1 lesson left to watch before the discount checkpoint. Finish it by October 23 and apply again.',
+  ok(msgs[1] === 'You have 1 lesson left to watch before the discount checkpoint. Finish it by the end of October 23, Croatia time, and apply again.',
      'the shared deadline in the singular, with no length known', msgs[1])
-  ok(!msgs[1].includes('14 days') && !msgs[3].includes('14 days'), 'a September joiner never reads "14 days"')
+  ok(msgs[1].includes('Croatia time') && msgs[3].includes('Croatia time'), 'the shared deadline always says whose clock it runs on')
+  ok(!msgs[1].includes('14 days') && !msgs[3].includes('14 days') && !msgs[4].includes('14 days'),
+     'a September joiner never reads "14 days", nor does a student whose first payment is not found yet', show([msgs[1], msgs[3], msgs[4]]))
 }
 
 {
@@ -397,6 +464,32 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
   ok(!d.grant && d.state === 'not-eligible', 'and the server refuses that June student as not eligible, not as already requested', d.error)
   const d2 = decideDiscountRequest(reads({ completions: done(['x01', 'x05', 'x06']), requests: okRead([R('old', 'rejected', '2026-09-30T00:00:00Z')]) }), IN_WINDOW)
   ok(d2.grant === true, 'the server grants a ready student whose only request is from the old course')
+}
+
+console.log('\n=== decideDiscountRequest: a September joiner who already has a request from the old course ===')
+{
+  // The map and the server judge the same rows the same way, and the server
+  // refuses before the database would (v29 refuses another request while one
+  // is pending, approved or applied, whatever its date).
+  const SEPT = okRead({ first_paid_at: '2026-09-15T10:00:00.000Z' })
+  const NOW = new Date('2026-10-20T10:00:00Z')
+  const ALL = ['x01', 'x05', 'x06']
+  const words = {
+    pending: "You already applied for the discount. We're reviewing it.",
+    approved: 'Your discount is already approved.',
+    applied: 'Your discount is already on your membership.',
+  }
+  for (const status of ['pending', 'approved', 'applied', 'rejected']) {
+    const old = R('old', status, '2026-09-25T10:00:00.000Z')
+    const d = decideDiscountRequest(reads({ student: SEPT, completions: done(ALL), requests: okRead([old]) }), NOW)
+    const map = discountState({ now: NOW, firstPaidAt: '2026-09-15T10:00:00.000Z', lessons: COURSE, videoDoneIds: new Set(ALL), requests: [old] })
+    if (status === 'rejected') {
+      ok(d.grant === true && map.kind === 'ready', 'rejected on the old course, every video done: the server grants, the map shows Apply', show({ d, map: map.kind }))
+    } else {
+      ok(!d.grant && d.status === 400 && d.state === status && d.state === map.kind && d.error === words[status],
+         `${status} on the old course, every video done: refused as ${status}, in the app's own words, as the map shows it`, show(d))
+    }
+  }
 }
 
 console.log('\n=== approvalVerdict (POST /api/discounts/approve on the new course) ===')

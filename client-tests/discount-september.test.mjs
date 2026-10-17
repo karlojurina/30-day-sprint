@@ -3,8 +3,8 @@
 // 23 October in Croatia, and the lessons they finish on Whop count.
 //
 // What decides is the real source, copied by build.mjs: the Whop backfill a
-// visit runs (watch-sync.ts), the Whop webhook, the request route, and
-// approvalVerdict over the reads loadDiscountReads makes, which is what
+// visit runs (watch-sync.ts), the Whop webhook, both routes that write a
+// request, and approvalVerdict over the reads loadDiscountReads makes, which is what
 // POST /api/discounts/approve runs on the new course (the route also needs a
 // team login, the ads tick and Whop's promo code, none of which is the rule).
 // The database is stub-server.ts's stand-in as the switch leaves it:
@@ -18,14 +18,24 @@
 // end in the app is stamped by the heartbeat's database function with the
 // same now(), so here it is a row inserted at that moment. The request route
 // judges `new Date()`.
+//
+// Both ways the map's Apply goes are driven: the questions form
+// (POST /api/discounts/submit-feedback, what Apply opens while any question
+// is active, the default) and the plain request (no active questions). The
+// form's database function, submit_discount_with_feedback (v29), stands in
+// here from v29's body; the migration harness, section 26, runs the real one
+// on the same four old requests.
 import fs from 'node:fs'
 import { createHmac, randomBytes } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { syncWatchProgress } from './_gen/watch-sync.ts'
 import { POST as webhook } from './_gen/whop-webhook-route.ts'
 import { POST as requestRoute } from './_gen/discount-request-route.ts'
-import { approvalVerdict, loadDiscountReads } from './_gen/discount-server.ts'
-import { requiredLessons } from './_gen/discount.ts'
+import { POST as feedbackRoute } from './_gen/discount-submit-feedback-route.ts'
+import {
+  OLD_COURSE_REQUEST_REFUSAL, approvalVerdict, discountRefusalMessage, explainOldCourseRequest, loadDiscountReads,
+} from './_gen/discount-server.ts'
+import { discountState, requiredLessons } from './_gen/discount.ts'
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
 import { FakeDb, fakeClient, useDb as installDb, setCatalog, setWhop, steps } from './_gen/stub-server.ts'
 
@@ -78,19 +88,41 @@ const REQUIRED = requiredLessons(LESSONS.map((l) => ({ ...l, has_video: l.id in 
 const GATE = REQUIRED.at(-1)
 
 const SEPT_15 = '2026-09-15T10:00:00.000Z'
-function freshDb(paid = SEPT_15) {
+function freshDb(paid = SEPT_15, requests = []) {
   setCatalog({ v2: true, lessonsTable: 'lessons' })
   const db = new FakeDb({
     students: [{ id: 's1', whop_user_id: 'user_1', supabase_user_id: 'auth-1', first_paid_at: paid, joined_at: paid }],
     lessons: LESSONS,
     lesson_videos: Object.keys(lengths).map((lesson_id) => ({ lesson_id, created_at: '2026-10-12T00:00:00.000Z' })),
     student_lesson_completions: [],
-    discount_requests: [],
+    discount_requests: requests.map((r) => ({ student_id: 's1', promo_code: null, rejection_reason: null, ...r })),
   }, { 'tok-1': 'auth-1' })
   installDb(db)
+  feedbackFunction(db)
   steps.length = 0
   return db
 }
+
+/**
+ * submit_discount_with_feedback (v29), standing in: its duplicate check
+ * (pending, approved or applied, whatever the date), the request, then the
+ * answers. What it says when it refuses is v29's own sentence.
+ */
+function feedbackFunction(db) {
+  db.functions.submit_discount_with_feedback = async (args, client) => {
+    const { data: existing } = await client.from('discount_requests').select('id')
+      .eq('student_id', args.p_student_id).in('status', ['pending', 'approved', 'applied']).limit(1).maybeSingle()
+    if (existing) return { data: null, error: { code: 'P0001', message: 'A discount request already exists for this student' } }
+    const { data: row, error } = await client.from('discount_requests').insert({ student_id: args.p_student_id }).select('id').single()
+    if (error) return { data: null, error }
+    for (const a of args.p_answers) {
+      await client.from('discount_feedback_responses').insert({ discount_request_id: row.id, question_id: a.question_id })
+    }
+    return { data: row.id, error: null }
+  }
+}
+/** Never shown to a student: the database's own sentence. */
+const dbWords = (body) => /already exists for this student|duplicate key|unique constraint/.test(show(body))
 
 /** Whop answers the backfill with these lessons finished. */
 const onWhop = (ids) => setWhop(async () => ({
@@ -133,6 +165,34 @@ async function apply() {
     body: JSON.stringify({ studentId: 's1' }),
   })))
   return { status: res.status, body: await res.json() }
+}
+
+/** The map's Apply while questions are active (the default): the questions form, POST /api/discounts/submit-feedback. */
+const ANSWERS = [{ question_id: 'q1', answer_scale: 9 }, { question_id: 'q4', answer_text: 'the hooks lesson' }]
+async function submit() {
+  const res = await hush(() => feedbackRoute(new Request('http://app/api/discounts/submit-feedback', {
+    method: 'POST',
+    headers: { authorization: 'Bearer tok-1', 'content-type': 'application/json' },
+    body: JSON.stringify({ studentId: 's1', answers: ANSWERS }),
+  })))
+  return { status: res.status, body: await res.json() }
+}
+
+/**
+ * What the map shows (useWorldDiscount): discountState over the student's
+ * first payment, the course with its videos, the lessons whose video is
+ * done, and the newest request only (/api/student/data reads one).
+ */
+function mapSays(db, nowIso) {
+  const student = db.rows('students')[0]
+  const videos = new Set(db.rows('lesson_videos').map((v) => v.lesson_id))
+  const lessons = [...db.rows('lessons')].sort((a, b) => a.sort_order - b.sort_order).map((l) => ({
+    id: l.id, type: l.type, counts_toward_progress: l.counts_toward_progress !== false, is_gate: l.is_gate === true,
+    has_video: videos.has(l.id), duration_seconds: l.duration_seconds ?? null,
+  }))
+  const done = new Set(db.rows('student_lesson_completions').filter((c) => c.completed_at).map((c) => c.lesson_id))
+  const newest = [...db.rows('discount_requests')].sort((a, b) => RealDate.parse(b.created_at) - RealDate.parse(a.created_at))[0]
+  return discountState({ now: new RealDate(nowIso), firstPaidAt: student.first_paid_at, lessons, videoDoneIds: done, requests: newest ? [newest] : [] })
 }
 
 /** The approve route's judgment, on `day`, of a request made at `asked`. */
@@ -179,8 +239,8 @@ console.log('\n=== The same student, the gate finished at 00:00:30 on 24 October
   ok(hook === 200 && completedAt(db, GATE) === '2026-10-23T22:00:30.000Z', 'the gate comes in 30 seconds into 24 October in Croatia')
   const sent = await at('2026-10-23T22:05:00.000Z', apply)
   ok(sent.status === 400 && sent.body.state === 'expired'
-       && sent.body.error === 'The discount closed at the end of October 23. That was the deadline for students who joined before the new course launched.',
-     'Apply at 00:05 on 24 October: refused as expired, the day named', show(sent))
+       && sent.body.error === 'The discount closed at the end of October 23, Croatia time. That was the deadline for students who joined before the new course launched.',
+     'Apply at 00:05 on 24 October: refused as expired, the day and the clock named', show(sent))
   ok(db.rows('discount_requests').length === 0, 'and no request is written')
   const v = await approve(db, '2026-10-27T09:00:00.000Z', null)
   ok(!v.ok && v.status === 400 && v.error.includes('by the end of October 23') && v.error.includes('1 of 59 still missing'),
@@ -223,6 +283,57 @@ console.log('\n=== Paid at 00:00 on 9 September in Croatia: in ===')
   ok(sent.status === 200 && sent.body.status === 'pending', 'every video done, Apply on 20 October: the request goes in', show(sent))
   const v = await approve(db, '2026-10-21T09:00:00.000Z', db.rows('discount_requests')[0]?.created_at ?? null)
   ok(v.ok === true, 'and the team approves it', show(v))
+}
+
+console.log('\n=== Paid 15 September, already holding a request from the old course: the map, both ways to apply and the database agree ===')
+{
+  // The request was made on the old dashboard on 25 September. Every video
+  // is done (from Whop, on 19 October), and the student opens the map on
+  // 20 October.
+  const OLD = '2026-09-25T10:00:00.000Z'
+  const NOW = '2026-10-20T10:00:00.000Z'
+  const withOld = async (status) => {
+    const db = freshDb(SEPT_15, [{ id: 'old', status, created_at: OLD, promo_code: status === 'pending' || status === 'rejected' ? null : 'ECOM30-S1OLD' }])
+    onWhop(REQUIRED)
+    await at('2026-10-19T07:30:00.000Z', backfill)
+    return db
+  }
+  for (const status of ['pending', 'approved', 'applied']) {
+    for (const [way, send] of [['the questions form', submit], ['the plain request', apply]]) {
+      const db = await withOld(status)
+      const map = mapSays(db, NOW)
+      const r = await at(NOW, send)
+      ok(map.kind === status && map.madeBeforeLaunch === true && r.status === 400 && r.body.state === status
+           && r.body.error === discountRefusalMessage(map) && !dbWords(r.body),
+         `old ${status}, ${way}: the map shows "${status}" with no Apply, and a stale Apply is refused as ${status} in the app's own words, never the database's`,
+         show({ map: map.kind, r }))
+      ok(db.calls('submit_discount_with_feedback', 'rpc').length === 0 && db.rows('discount_requests').length === 1
+           && !steps.some((s) => s.step === 'discount-requested'),
+         `old ${status}, ${way}: refused before the database function, nothing written, no team task`)
+    }
+  }
+  for (const [way, send] of [['the questions form', submit], ['the plain request', apply]]) {
+    const db = await withOld('rejected')
+    const before = mapSays(db, NOW)
+    const r = await at(NOW, send)
+    const made = db.rows('discount_requests').find((x) => x.id !== 'old')
+    ok(before.kind === 'ready' && r.status === 200 && made?.status === 'pending' && made.created_at === NOW,
+       `old rejected, ${way}: the map shows Apply and the request goes in`, show({ before: before.kind, r: r.status }))
+    const after = mapSays(db, NOW)
+    ok(after.kind === 'pending' && after.madeBeforeLaunch === false && steps.some((s) => s.step === 'discount-requested'),
+       `old rejected, ${way}: the map then shows the new request in review, and the team's task is made`)
+    const v = await approve(db, '2026-10-27T09:00:00.000Z', made?.created_at ?? null)
+    ok(v.ok === true, `old rejected, ${way}: the team approves the new request on 27 October`, show(v))
+  }
+  {
+    // The team then decides the old request still in review.
+    const db = await withOld('pending')
+    const v = await approve(db, '2026-10-21T09:00:00.000Z', OLD)
+    const said = explainOldCourseRequest(v, OLD, '2026-10-19T05:00:00.000Z')
+    ok(!v.ok && v.status === 400 && said.error === OLD_COURSE_REQUEST_REFUSAL,
+       'the team approving that old pending request is told to judge it by hand (Generate anyway skips the check), as for any request made before the switch',
+       said.error)
+  }
 }
 
 ok(Date === RealDate, 'the clock is the real one again')

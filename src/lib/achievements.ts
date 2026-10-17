@@ -34,7 +34,7 @@ import {
   daysOnCourse,
   getCurriculumResetAt,
 } from "./curriculum-reset";
-import { DISCOUNT_LAUNCH_DATE } from "./world/discount";
+import { requestCounts } from "./world/discount";
 
 export interface AchievementSnapshot {
   /** Lesson IDs the student has completed (skipped or watched OR
@@ -295,18 +295,19 @@ export async function buildAchievementSnapshot(
     (milestonesRes.data as {
       bounty_access_claimed_at: string | null;
     } | null) ?? { bounty_access_claimed_at: null };
-  // Discount Earned, as the map shows the offer (discount.ts, discountState):
-  // once the new course is live, only a request made on or after the day it
-  // launched counts. A June student's June approval was re-awarded after the
-  // switch while the map told them the offer was not for them
-  // (backend_readiness.md, section 5, item 21). Before the switch any
-  // approval counts, as it always did.
-  const launchMs = Date.parse(DISCOUNT_LAUNCH_DATE);
+  // Discount Earned, as the map shows the offer (discount.ts, requestCounts):
+  // once the new course is live, an approval counts when the map shows it. One
+  // made on or after the day the course launched does; one made before it
+  // does only for a student who first paid from 9 September until the launch,
+  // whose old-course 30% the map shows as theirs (T-080). A June student's
+  // June approval does not: it was re-awarded after the switch while the map
+  // told them the offer was not for them (backend_readiness.md, section 5,
+  // item 21). Before the switch any approval counts, as it always did.
   const approvals =
-    (discountRes.data as Array<{ created_at: string }> | null) ?? [];
+    (discountRes.data as Array<{ status: string; created_at: string }> | null) ?? [];
   const discount =
     approvals.find(
-      (r) => resetRes.resetAt === null || Date.parse(r.created_at) >= launchMs,
+      (r) => resetRes.resetAt === null || requestCounts(r, student.first_paid_at),
     ) ?? null;
 
   // v90: these reads had no error check at all, so a failed query was

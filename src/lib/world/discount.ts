@@ -11,6 +11,9 @@
  *     of 23 October 2026, one deadline they all share (they watch on Whop
  *     while the app is closed and apply once it is back);
  *   - a first payment before 9 September 2026: never.
+ * It is one 30% per student: a request already made decides the state, and
+ * one made on the old dashboard still does, unless it was rejected, for a
+ * student who first paid from 9 September until the launch (requestCounts).
  *
  * "The videos up to the checkpoint" are the counting watch lessons, in course
  * order, up to and including the gate lesson (`is_gate`), that have a video.
@@ -33,7 +36,7 @@ export { DISCOUNT_WINDOW_DAYS };
  * (UTC+2) is 8 October 22:00 UTC. Shown to students as a date in
  * Europe/Zagreb, never UTC, or it would read "October 8". A first payment from
  * here on has its own 14 days, and a request made before it was made on the
- * old course.
+ * old course (requestCounts says when one still counts).
  */
 export const DISCOUNT_LAUNCH_DATE = "2026-10-08T22:00:00.000Z";
 /**
@@ -101,6 +104,13 @@ export type DiscountState =
       at: string;
       promoCode: string | null;
       rejectionReason: string | null;
+      /**
+       * The request was made before the launch, on the old dashboard, by a
+       * student who first paid from 9 September (requestCounts). Its 30% is
+       * from the old course, so "the team confirms within 48 hours" and "on
+       * your next renewal" may no longer hold. Never true for "rejected".
+       */
+      madeBeforeLaunch: boolean;
     };
 
 export interface DiscountInput {
@@ -110,7 +120,7 @@ export interface DiscountInput {
   lessons: readonly DiscountLesson[];
   /** Lessons whose video is done (`completed_at` set), action half or not. */
   videoDoneIds: ReadonlySet<string>;
-  /** The student's discount requests, any order. Those created before DISCOUNT_LAUNCH_DATE are ignored. */
+  /** The student's discount requests, any order. Those requestCounts leaves out are ignored. */
   requests: readonly DiscountRequestRow[];
 }
 
@@ -150,16 +160,46 @@ export function discountEndsAt(firstPaidAt: string | null): Date | null {
   return "closed" in w ? null : w.endsAt;
 }
 
+/**
+ * Whether a discount request decides where the student stands: the one place
+ * that says which requests count, read by discountState (the map, the request
+ * routes) and by Discount Earned (achievements.ts).
+ *
+ *   - Made from the launch on: on the new course, so it counts.
+ *   - Made before the launch, on the old dashboard, by a student who first
+ *     paid from 9 September until the launch (the shared window, T-080): it
+ *     counts while it is pending, approved or applied. The 30% is one per
+ *     student, and the database refuses another request while one of those
+ *     exists, whatever its date (v29's submit_discount_with_feedback; v106
+ *     allows one pending), so the map shows that request and never an Apply
+ *     the database would refuse. A rejected one does not count: a student
+ *     turned down on the old course's rule can earn it on the new one.
+ *   - Made before the launch by anyone else: it does not count. That is the
+ *     June student's approved June request, for a student the offer is
+ *     closed to. A student who first paid from the launch on should not have
+ *     one: the routes refuse a request with no first payment on record, and
+ *     first_paid_at never moves later (whop-sync-runner.ts).
+ *   - A date that does not parse: it does not count.
+ */
+export function requestCounts(
+  request: { status: string; created_at: string },
+  firstPaidAt: string | null,
+): boolean {
+  const t = Date.parse(request.created_at);
+  if (!Number.isFinite(t)) return false;
+  if (t >= Date.parse(DISCOUNT_LAUNCH_DATE)) return true;
+  if (request.status === "rejected") return false;
+  const w = discountWindow(firstPaidAt);
+  return !("closed" in w) && w.window === "shared";
+}
+
 export function discountState(input: DiscountInput): DiscountState {
   const { now, firstPaidAt, lessons, videoDoneIds, requests } = input;
 
-  // A request already made decides the state, whatever the clock says now.
-  // Only a request made on the new course: one created before the launch was
-  // made on the old course (a June student's approved June request), and the
-  // new map never shows it. A date that does not parse is not counted.
-  const launch = Date.parse(DISCOUNT_LAUNCH_DATE);
+  // A request already made decides the state, whatever the clock says now:
+  // the newest of those that count (requestCounts).
   const latest = requests
-    .filter((r) => Date.parse(r.created_at) >= launch)
+    .filter((r) => requestCounts(r, firstPaidAt))
     .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
   if (latest) {
     return {
@@ -168,6 +208,7 @@ export function discountState(input: DiscountInput): DiscountState {
       at: latest.created_at,
       promoCode: latest.promo_code ?? null,
       rejectionReason: latest.rejection_reason ?? null,
+      madeBeforeLaunch: Date.parse(latest.created_at) < Date.parse(DISCOUNT_LAUNCH_DATE),
     };
   }
 

@@ -183,7 +183,9 @@ export function factsFromReads(
 }
 
 // The rule's dates are midnight in Croatia (discount.ts), so the day is read
-// there: in UTC the first one falls on the evening before.
+// there: in UTC the first one falls on the evening before. A student reads the
+// shared deadline with "Croatia time" after it: it closes at one moment
+// everywhere, 18:00 in New York and early on the 24th in Asia.
 /** "September 9, 2026": the earliest first payment that can earn it. */
 const ELIGIBLE_DAY = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString("en-US", {
   month: "long",
@@ -232,7 +234,10 @@ export function discountRefusalMessage(state: DiscountState): string {
     case "locked": {
       const n = state.lessonsLeft;
       const time = videoTime(state.secondsLeft);
-      const by = state.window === "shared" ? `by ${SHARED_DEADLINE_DAY}` : `within your ${DISCOUNT_WINDOW_DAYS} days`;
+      const by =
+        state.window === "shared"
+          ? `by the end of ${SHARED_DEADLINE_DAY}, Croatia time,`
+          : `within your ${DISCOUNT_WINDOW_DAYS} days`;
       return (
         `You have ${n} ${n === 1 ? "lesson" : "lessons"} left to watch before the discount checkpoint` +
         `${time ? `, ${time}` : ""}. Finish ${n === 1 ? "it" : "them"} ${by} and apply again.`
@@ -241,8 +246,8 @@ export function discountRefusalMessage(state: DiscountState): string {
     case "expired":
       if (state.window === "shared") {
         return (
-          `The discount closed at the end of ${SHARED_DEADLINE_DAY}. That was the deadline for students ` +
-          `who joined before the new course launched.`
+          `The discount closed at the end of ${SHARED_DEADLINE_DAY}, Croatia time. That was the deadline ` +
+          `for students who joined before the new course launched.`
         );
       }
       return (
@@ -258,7 +263,7 @@ export function discountRefusalMessage(state: DiscountState): string {
       }
       if (state.reason === "no-payment") {
         return (
-          `We can't find your first payment yet, so we can't check your ${DISCOUNT_WINDOW_DAYS} days. ` +
+          `We can't find your first payment yet, so we can't check whether the discount is open to you. ` +
           `Contact support and we'll sort it out within 24h.`
         );
       }

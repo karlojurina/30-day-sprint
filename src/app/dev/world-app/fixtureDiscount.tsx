@@ -37,6 +37,11 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *                            "Apply by Fri 23 Oct" and "5 days left"
  *   ?discount=september-expired  the same student on 24 October, 10:00 in
  *                            Croatia: the shared deadline has passed
+ *   ?discount=september-old-course  first payment on 2026-09-15, and the 30%
+ *                            already got on the old dashboard (a request of
+ *                            25 September, applied): the map shows it as
+ *                            theirs, with no Apply (discount.ts
+ *                            requestCounts); videos as ?p= has them
  *   ?discount=no-payment     no first payment on record
  *   no ?discount             as locked: a first payment 3 days ago, videos as
  *                            ?p= has them, so the 30% shows with no parameter
@@ -76,10 +81,11 @@ export type DiscountPreset =
   | "before-launch"
   | "september"
   | "september-expired"
+  | "september-old-course"
   | "no-payment";
 const PRESETS: readonly DiscountPreset[] = [
   "locked", "ready", "pending", "approved", "applied", "rejected", "expired",
-  "before-launch", "september", "september-expired", "no-payment",
+  "before-launch", "september", "september-expired", "september-old-course", "no-payment",
 ];
 /** The presets with an application in, and its status. Their student has watched every video the offer asks for. */
 const APPLIED: Partial<Record<DiscountPreset, DiscountRequestRow["status"]>> = {
@@ -101,6 +107,12 @@ const SEPTEMBER_PAID = "2026-09-15T10:00:00.000Z";
 /** Their clocks: 19 October, 10:00 in Croatia (CEST, UTC+2), the morning the app reopens; and 24 October, 10:00. */
 const SEPTEMBER_CLOCK = Date.parse("2026-10-19T08:00:00.000Z");
 const SEPTEMBER_EXPIRED_CLOCK = Date.parse("2026-10-24T08:00:00.000Z");
+/** ?discount=september-old-course: that student's 30% from the old dashboard, on their membership since September. */
+const SEPTEMBER_OLD_REQUEST: DiscountRequestRow = {
+  id: "fixture-old-course-request",
+  status: "applied",
+  created_at: "2026-09-25T10:00:00.000Z",
+};
 
 /** The six questions v29 seeded, as discount_feedback_questions rows. */
 const QUESTIONS: readonly DiscountFeedbackQuestion[] = [
@@ -220,6 +232,7 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
         return "2026-09-05T10:00:00.000Z";
       case "september":
       case "september-expired":
+      case "september-old-course":
         return SEPTEMBER_PAID;
       case "no-payment":
         return null;
@@ -232,9 +245,12 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
   const requests = useMemo<DiscountRequestRow[]>(() => {
     const at = new Date(boot - 2 * HOUR_MS).toISOString();
     const status = preset === null ? undefined : APPLIED[preset];
-    const base: DiscountRequestRow[] = status
-      ? [{ id: "fixture-request", status, created_at: at, rejection_reason: status === "rejected" ? FIXTURE_REJECTION : null }]
-      : [];
+    const base: DiscountRequestRow[] =
+      preset === "september-old-course"
+        ? [SEPTEMBER_OLD_REQUEST]
+        : status
+          ? [{ id: "fixture-request", status, created_at: at, rejection_reason: status === "rejected" ? FIXTURE_REJECTION : null }]
+          : [];
     return [...base, ...sent];
   }, [preset, boot, sent]);
 

@@ -1,9 +1,10 @@
 // What the server copies import, standing in for the real thing. build.mjs
-// points their import lines here: Next's response, the service-role Supabase
-// client, Whop (the completions read, and the login's calls), the steps that
-// run after a lesson (and the CSM's hook for a discount request), and which
-// catalog is live. Hand-written, like stub-supabase.ts and stub-call-gate.ts;
-// the routes and libraries under test are the real source.
+// points their import lines here: Next's response and after(), the
+// service-role Supabase client, Whop (the completions read, and the login's
+// calls), the steps that run after a lesson (and the CSM's hook for a
+// discount request), and which catalog is live. Hand-written, like
+// stub-supabase.ts and stub-call-gate.ts; the routes and libraries under test
+// are the real source.
 //
 // THE STREAK is the one step that is not only recorded: updateStudentStreak,
 // tickStudentStreak and markStudentActive are recorded ("streak", "streak",
@@ -417,6 +418,23 @@ export const NextResponse = {
     });
   },
 };
+/**
+ * The work routes hand to after(), in order, so a test can wait for what runs
+ * past the response (Next keeps the function alive for it, on Vercel through
+ * waitUntil). `setAfterMissing(true)` makes after() throw as Next's does
+ * where the platform has no waitUntil.
+ */
+export const afterTasks: Promise<unknown>[] = [];
+let afterMissing = false;
+export function setAfterMissing(v: boolean) {
+  afterMissing = v;
+}
+export function after(task: Promise<unknown> | (() => unknown)) {
+  if (afterMissing) {
+    throw new Error("`after()` will not work correctly, because `waitUntil` is not available in the current environment.");
+  }
+  afterTasks.push(typeof task === "function" ? Promise.resolve().then(task) : task);
+}
 
 // ── The steps that run after a lesson, recorded in order ─────────────────────
 export const steps: Array<{ step: string; studentId: string; lessonId?: string }> = [];

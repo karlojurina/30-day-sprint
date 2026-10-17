@@ -4,6 +4,7 @@ import { markStudentActive, updateStudentStreak } from "../_lib/update-streak";
 import { onLessonCompleted } from "@/lib/csm-events";
 import { evaluateAchievements } from "@/lib/achievements";
 import { reEvaluateStudentOpenTasks } from "@/lib/csm-task-evaluation";
+import { CATALOG_IS_V2 } from "@/lib/catalog-tables";
 
 export async function POST(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -68,6 +69,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // On the new course a lesson with an action half is finished with the
+  // action item's button (mark-action-shipped), and the new app never calls
+  // this route. Here a tick would write half of one, and an untick would
+  // delete the row with its saved link, so completing it again would count a
+  // streak day with no new work (T-079). The old course's tasks have no
+  // action half, so they are unchanged.
+  if (CATALOG_IS_V2 && !guardError && guardLesson?.requires_action) {
+    return NextResponse.json(
+      { error: "Complete this action item on its lesson page." },
+      { status: 400 },
+    );
+  }
+
   // Check if lesson is already completed
   const { data: existing } = await supabase
     .from("student_lesson_completions")
@@ -99,10 +113,9 @@ export async function POST(request: NextRequest) {
     }
 
     // A task ticked off is a streak day (T-079) when this row finishes the
-    // lesson: one with no action half. On a lesson with one (the new
-    // course's setup lessons) the row is half of it, and the action item's
-    // button finishes it. Unread lesson, no streak day. "Last active" moves
-    // either way, as it always did.
+    // lesson: one with no action half. On a lesson with one the row is half
+    // of it (the new course's are refused above). Unread lesson, no streak
+    // day. "Last active" moves either way, as it always did.
     if (guardLesson && !guardLesson.requires_action) {
       await updateStudentStreak(supabase, student.id);
     } else {

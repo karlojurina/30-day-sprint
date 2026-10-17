@@ -186,7 +186,7 @@ gen('../src/app/api/student/lesson-watched/route.ts', './_gen/lesson-watched-rou
 ])
 gen('../src/app/api/student/toggle-lesson/route.ts', './_gen/toggle-lesson-route.ts',
   toStub('next/server', '@supabase/supabase-js', '../_lib/update-streak', '@/lib/csm-events',
-    '@/lib/achievements', '@/lib/csm-task-evaluation'))
+    '@/lib/achievements', '@/lib/csm-task-evaluation', '@/lib/catalog-tables'))
 gen('../src/lib/quiz.ts', './_gen/quiz.ts', [['"@/types/database"', '"./types-erased.ts"']])
 gen('../src/app/api/student/submit-quiz/route.ts', './_gen/submit-quiz-route.ts', [
   ['from "@/lib/quiz"', 'from "./quiz.ts"'],

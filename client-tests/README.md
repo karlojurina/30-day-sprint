@@ -38,9 +38,9 @@ hand-written stand-in for Next's response, the service-role Supabase client
 on it: `.single()` on no row is an error, a select returns only the columns it
 names, `ON CONFLICT DO NOTHING` returns only the rows it added), Whop's
 completions read, the steps after a lesson (recorded in order) and the catalog
-flags. Each test calls the route's own `POST` with a real `Request`. The login
-callback is too big to run this way, so `whop-backfill.test.mjs` checks its one
-streak line in the source and says so.
+flags. Each test calls the route's own `POST` with a real `Request`.
+`whop-backfill.test.mjs` also checks the login callback's one streak line in
+the source; since T-079 `streak.test.mjs` runs the callback itself (below).
 
 Since T-079 (2026-10-17) `streak.test.mjs` runs every route that writes or
 shows the streak through its own entry point: `lesson-watched` and the webhook
@@ -54,8 +54,12 @@ a student and a customer's email and this repository is public).
 The streak's steps are the one exception to "recorded, never run": the stub
 records `updateStudentStreak`, `tickStudentStreak` and `markStudentActive`,
 then runs the real `update-streak.ts`, so the suite reads the
-`student_streaks` row and `students.last_active_at` each route left. Each of
-its fixes was broken on purpose once, and the suite failed every time.
+`student_streaks` row and `students.last_active_at` each route left. Next's
+`after()` is a stand-in too: it keeps the work a route hands it in
+`afterTasks`, so a test can let the response go first and then wait for that
+work, and `setAfterMissing(true)` makes it throw as Next's does where the
+platform has no `waitUntil`. Each of the suite's fixes was broken on purpose
+once, and the suite failed every time.
 
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the

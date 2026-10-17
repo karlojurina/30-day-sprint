@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "./stub-server.ts";
+import { NextRequest, NextResponse, after } from "./stub-server.ts";
 import { createServiceClient } from "./stub-server.ts";
 import {
   exchangeCodeForTokens,
@@ -296,6 +296,11 @@ export async function GET(request: NextRequest) {
         }),
         timeoutPromise,
       ]);
+      try {
+        after(syncPromise.catch(() => null));
+      } catch (err) {
+        console.error("[callback] after() unavailable, the sync may not finish:", err);
+      }
     }
 
     const anonClient = createClient(

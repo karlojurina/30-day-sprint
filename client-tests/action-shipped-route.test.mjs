@@ -116,11 +116,14 @@ console.log('\n=== New course: with the link saved, as the page does it ===')
      'a video action item before its video: the action half only, as before', show(got))
 }
 {
-  // Undoing needs no link: a student can always take a completion back.
+  // Since T-079 a completed action item can't be undone on the new course:
+  // its lesson page has no undo, and an undo followed by a new press counted
+  // a streak day with no new work (streak.test.mjs holds the streak side).
   const db = freshDb([{ lesson_id: 'a1l05', completed_at: WATCHED, action_completed_at: WATCHED, discord_message_link: null }])
   const r = await ship('a1l05', false)
   const got = row(db, 'a1l05')
-  ok(r.status === 200 && got.completed_at === null && got.action_completed_at === null, 'undoing with no link saved: allowed, both halves cleared', show(got))
+  ok(r.status === 400 && r.body.error === "A completed action item can't be undone." && got.completed_at === WATCHED && got.action_completed_at === WATCHED && steps.length === 0,
+     'undoing a completed action item: refused, both halves kept, no step runs (it used to clear both)', show({ r, got }))
 }
 {
   const db = freshDb()
@@ -140,6 +143,13 @@ setCatalog({ v2: false })
   // video watched or not ("last active" stays put, as before, with the video
   // half still open). streak.test.mjs reads the streak row itself.
   ok(same(stepNames(), ['streak', 'r2', 'came-back', 'achievements', 'tasks']), 'with the same steps after it, and now the streak day first', show(stepNames()))
+}
+{
+  // Undoing needs no link here, as it always did.
+  const db = freshDb([{ lesson_id: 'l022', completed_at: WATCHED, action_completed_at: WATCHED, discord_message_link: null }])
+  const r = await ship('l022', false)
+  const got = row(db, 'l022')
+  ok(r.status === 200 && got.completed_at === WATCHED && got.action_completed_at === null, 'an old-course undo with no link saved: allowed, the action half cleared, as before', show(got))
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

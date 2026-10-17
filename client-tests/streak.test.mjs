@@ -7,8 +7,11 @@
 //      adding a row it did not have, on a visit or at login);
 //   c. finishes a task (mark-action-shipped; the old course's task box).
 // Nothing else: not a login, a visit, a backfill that adds nothing, a skip,
-// partial watching, a quiz or undoing. And the streak shown is 0 once its
-// last counted day is before yesterday (UTC, the streak's own day).
+// partial watching, a quiz or undoing. On the new course a done task can't be
+// undone, so undoing and completing again can't count a day. A failed read of
+// the streak writes nothing, and the login's sync finishes past its redirect.
+// And the streak shown is 0 once its last counted day is before yesterday
+// (UTC, the streak's own day).
 //
 // Every route here is the real source, copied by build.mjs with its imports
 // pointed at stub-server.ts, whose streak steps run the real update-streak.ts
@@ -31,7 +34,7 @@ import { GET as login } from './_gen/whop-callback-route.ts'
 import { signState } from './_gen/pkce.ts'
 import { currentStreakAsOf, getTodayUtc } from './_gen/streak.ts'
 // useDb under another name: ESLint's React rules take a "use..." call for a hook.
-import { FakeDb, useDb as openDb, setWhop, setCatalog, steps, NextRequest } from './_gen/stub-server.ts'
+import { FakeDb, useDb as openDb, setWhop, setCatalog, steps, NextRequest, afterTasks, setAfterMissing } from './_gen/stub-server.ts'
 
 let pass = 0
 const fails = []
@@ -221,6 +224,26 @@ setCatalog({ v2: true })
   ok(same(streakOf(db), { current: 1, longest: 6, last: TODAY }), 'after a broken streak it starts again at 1, the best kept', show(streakOf(db)))
 }
 
+console.log('\n=== When the streak row can\'t be read or written ===')
+{
+  // A long streak, and the read of it fails (a timeout, a dropped connection,
+  // which supabase-js hands back as an error, never a throw). It used to count
+  // from zero and write 1 over the streak and the best.
+  const db = freshDb({ streak: { current_streak: 40, longest_streak: 55, last_streak_date: YESTERDAY }, watch: [watchRow('a1l01', 590, 500)] })
+  db.fail['student_streaks.select'] = { message: 'canceling statement due to statement timeout' }
+  const r = await finishWatching('a1l01')
+  ok(r.status === 200 && r.body.completed === true, 'the lesson is finished all the same', show(r.body))
+  ok(same(streakOf(db), { current: 40, longest: 55, last: YESTERDAY }), 'the streak and the best stay 40 and 55: nothing is written', show(streakOf(db)))
+  ok(r.log.some((l) => l.includes('[streak] read failed')), 'and the failed read is logged', show(r.log.filter((l) => l.includes('[streak]'))))
+}
+{
+  const db = freshDb({ watch: [watchRow('a1l01', 590, 500)] })
+  db.fail['student_streaks.upsert'] = { message: 'connection reset' }
+  const r = await finishWatching('a1l01')
+  ok(r.status === 200 && r.body.completed === true && same(streakOf(db), KEPT), 'a failed write: the lesson is finished, the streak row as it was', show(streakOf(db)))
+  ok(r.log.some((l) => l.includes('[streak] write failed')), 'and the failed write is logged (it was dropped without a word)', show(r.log.filter((l) => l.includes('[streak]'))))
+}
+
 console.log('\n=== b. A lesson finished on Whop newly arriving ===')
 {
   const db = freshDb()
@@ -275,9 +298,17 @@ console.log('\n=== c. Finishing a task ===')
   ok(moved(db), '"last active" moves, as it did before (both halves done)')
 }
 {
+  // The new course: a done task stays done. The lesson page has no undo, and
+  // an undo followed by a new press counted a streak day with no new work.
   const db = freshDb({ completions: [{ lesson_id: 'a1l05', completed_at: YESTERDAY_AT, action_completed_at: YESTERDAY_AT, discord_message_link: LINK }] })
-  const r = await pressComplete('a1l05', false)
-  ok(r.status === 200 && same(streakOf(db), KEPT) && !moved(db), 'undoing a task: no tick, and "last active" stays, as before', show(streakOf(db)))
+  const undo = await pressComplete('a1l05', false)
+  const row = rowOf(db, 'a1l05')
+  ok(undo.status === 400 && undo.body.error === "A completed action item can't be undone."
+     && row.completed_at === YESTERDAY_AT && row.action_completed_at === YESTERDAY_AT && row.discord_message_link === LINK,
+     'undoing a task is refused: both halves and the link stay', show(undo.body))
+  ok(same(streakOf(db), KEPT) && !moved(db), 'nothing ticks, and "last active" stays', show(streakOf(db)))
+  const again = await pressComplete('a1l05')
+  ok(again.status === 200 && same(streakOf(db), KEPT), 'completing it again after that counts nothing: the task was done yesterday', show(streakOf(db)))
 }
 {
   const db = freshDb()
@@ -289,6 +320,13 @@ setCatalog({ v2: false })
   const db = freshDb({ lessons: OLD_COURSE })
   const r = await pressComplete('l022')
   ok(r.status === 200 && same(streakOf(db), TICKED), 'the old course: an action item\'s task ticks too', show(streakOf(db)))
+}
+{
+  // The old dashboard keeps its undo button (no student reaches it after the switch).
+  const db = freshDb({ lessons: OLD_COURSE, completions: [{ lesson_id: 'l022', completed_at: YESTERDAY_AT, action_completed_at: YESTERDAY_AT, discord_message_link: LINK }] })
+  const r = await pressComplete('l022', false)
+  ok(r.status === 200 && rowOf(db, 'l022').action_completed_at === null && same(streakOf(db), KEPT) && !moved(db),
+     'the old course: undoing a task still works, ticks nothing, and "last active" stays, as before', show(streakOf(db)))
 }
 {
   const db = freshDb({ lessons: OLD_COURSE })
@@ -304,12 +342,31 @@ setCatalog({ v2: false })
   ok(moved(db), '"last active" moves, as it did before')
 }
 {
-  // The new course's setup lessons go through the action item's button; a
-  // request to the old task box writes half of one, which finishes nothing.
+  // A task box row on a lesson with an action half is half of it, which
+  // finishes nothing. The old course has no such task; the new course's are
+  // refused (next).
   const db = freshDb()
   const r = await tickTask('a1l05')
-  ok(r.body.action === 'checked' && same(streakOf(db), KEPT), 'the old task box on a new-course setup lesson: half a lesson, no tick', show(streakOf(db)))
+  ok(r.body.action === 'checked' && same(streakOf(db), KEPT), 'the old catalog, the task box on a lesson with an action half: half a lesson, no tick', show(streakOf(db)))
   ok(moved(db), '"last active" moves, as it did before')
+}
+setCatalog({ v2: true })
+{
+  // The new course's action items are finished with their own button, and
+  // the new app never calls the task box. It refuses them: its tick wrote
+  // half of one, and its untick deleted the row with its saved link, so
+  // completing it again counted a day.
+  const db = freshDb()
+  const r = await tickTask('a1l05')
+  ok(r.status === 400 && rowOf(db, 'a1l05') === null && same(streakOf(db), KEPT) && !moved(db),
+     'the new course, the task box on an action item: refused, nothing written', show(r.body))
+}
+{
+  const db = freshDb({ completions: [{ lesson_id: 'a1l05', completed_at: YESTERDAY_AT, action_completed_at: YESTERDAY_AT, discord_message_link: LINK }] })
+  const r = await tickTask('a1l05')
+  ok(r.status === 400 && rowOf(db, 'a1l05')?.discord_message_link === LINK && rowOf(db, 'a1l05')?.action_completed_at === YESTERDAY_AT
+     && same(streakOf(db), KEPT) && !moved(db),
+     'and its untick on a done action item: refused, the row and its link stay', show(r.body))
 }
 
 console.log('\n=== Nothing else ticks it ===')
@@ -333,6 +390,37 @@ setCatalog({ v2: true })
   const r = await logIn()
   ok(loggedIn(r) && rowOf(db, 'a1l02') && same(streakOf(db), TICKED),
      'logging in when Whop has a lesson the app did not: that lesson ticks it (b), the login does not', show(streakOf(db)))
+}
+{
+  // Whop answers after the login's 2.5 s timer. The student is signed in
+  // first, and after() keeps the rest running (on Vercel through waitUntil),
+  // so the lesson's row and its streak day land together: a row written
+  // without its day would never get one, the next sync finds it there.
+  const db = freshDb()
+  let answer
+  const late = new Promise((resolve) => { answer = resolve })
+  setWhop(async () => { await late; return { interactions: [{ lesson: { id: 'lesn_02' }, completed: true }], rawCount: 1, completedCount: 1 } })
+  afterTasks.length = 0
+  // The route's 2.5 s timer goes off at once here.
+  const realSetTimeout = globalThis.setTimeout
+  globalThis.setTimeout = (fn, ms, ...rest) => realSetTimeout(fn, ms >= 2500 ? 0 : ms, ...rest)
+  let r
+  try { r = await logIn() } finally { globalThis.setTimeout = realSetTimeout }
+  ok(loggedIn(r) && rowOf(db, 'a1l02') === null && same(streakOf(db), KEPT), 'the sync runs past the timer: the student is signed in before Whop answers', show({ status: r.status, streak: streakOf(db) }))
+  ok(afterTasks.length === 1, 'and the rest of the sync is handed to after()', show({ handed: afterTasks.length }))
+  await quietly(async () => { answer(); await Promise.all(afterTasks) })
+  ok(rowOf(db, 'a1l02')?.completed_at && same(streakOf(db), TICKED), 'when that work is done, the lesson is in and its streak day counted', show(streakOf(db)))
+}
+{
+  // Next's after() throws where the platform has no waitUntil. A login must
+  // never fail on that.
+  const db = freshDb()
+  whopHas(['lesn_02'])
+  setAfterMissing(true)
+  let r
+  try { r = await logIn() } finally { setAfterMissing(false) }
+  ok(loggedIn(r) && same(streakOf(db), TICKED), 'with after() unavailable the student is signed in all the same', show({ status: r.status, location: r.location }))
+  ok(r.log.some((l) => l.includes('after() unavailable')), 'and that is logged', show(r.log.filter((l) => l.includes('after()'))))
 }
 {
   const db = freshDb({ completions: [{ lesson_id: 'a1l01', completed_at: YESTERDAY_AT }, { lesson_id: 'a1l02', completed_at: YESTERDAY_AT }] })

@@ -28,11 +28,19 @@ export async function tickStudentStreak(
   // Fetch current streak state from the sibling table. If no row
   // exists yet, treat as fresh (zeroes) so a first-activity day
   // bootstraps the streak.
-  const { data: streaks } = await supabase
+  const { data: streaks, error: readError } = await supabase
     .from("student_streaks")
     .select("current_streak, longest_streak, last_streak_date")
     .eq("student_id", studentId)
     .maybeSingle();
+  // A failed read is no answer. Counting from zero would write 1 over the
+  // student's streak and their best, so nothing is written this time.
+  if (readError) {
+    console.error(
+      `[streak] read failed for student=${studentId}, no tick: ${readError.message}`,
+    );
+    return;
+  }
 
   const today = getTodayUtc();
   const streakUpdate = computeStreakUpdate(
@@ -45,7 +53,7 @@ export async function tickStudentStreak(
   );
 
   if (streakUpdate) {
-    await supabase
+    const { error: writeError } = await supabase
       .from("student_streaks")
       .upsert(
         {
@@ -55,6 +63,11 @@ export async function tickStudentStreak(
         },
         { onConflict: "student_id" },
       );
+    if (writeError) {
+      console.error(
+        `[streak] write failed for student=${studentId}: ${writeError.message}`,
+      );
+    }
   }
 }
 

@@ -1484,7 +1484,7 @@ its header says after a good run, and each planted fault on its line.
 |-----|---------|-------------|
 | `sync-whop` | every 2h at :00 (v85.5, was daily) | Syncs Whop memberships (`runWhopCommunitySync`); it pulls no lessons (this row said it pulled watch history into `student_lesson_completions` until 2026-10-17; the code has no lesson step). Also stamps `students.cancel_scheduled_at` from Whop's `cancel_at_period_end` field (v75.46). 2h cadence exists FOR the cancel flag: cancel click → save task within ~2h15m instead of up to 24h. **v85.6:** a user holding several memberships is deduped by ACCESS first, `created_at` recency only as a tiebreak within the same access class (`grantsAccess` in `src/lib/whop-members.ts`). Was recency-only, which let a dead duplicate outrank a live membership and hard-block a paid student on every run. |
 | `snapshot-progress` | daily 00:30 UTC (deliberately NOT 2h) | Writes yesterday+today rows to `daily_progress_snapshots` + the daily Canceling count to `canceling_snapshots` (v76). Daily-grain by design — one row per day. Reads canonical `student_progress_counts` view (v75.28) so dashboard live values match snapshot trend values. |
-| `check-engagement` | every 2h at :10 (v85.5) | Detect churn signals → `disengagement_alerts`. With `engagement_alerts_enabled` on, posts the new ones to the team's Discord, since 2026-10-20 one message per embed of at most 4096 characters (one embed for every alert was refused from about 22 on); a post that fails marks the run failed in `cron_runs` with the reason. An open alert is never posted again. |
+| `check-engagement` | every 2h at :10 (v85.5) | Detect churn signals → `disengagement_alerts`. With `engagement_alerts_enabled` on, posts the new ones to the team's Discord, since 2026-10-20 one message per embed of at most 4096 characters (one embed for every alert was refused from about 22 on); a post that fails marks the run failed in `cron_runs` with the reason. The two toggles are read before the insert, and a failed read stops the run with nothing written (2026-10-20). An open alert is never posted again: one whose post did not go out stays unposted, and nothing closes an open alert, so a student is flagged once per type (open, the choice is Lovro's). |
 | `check-csm-tasks` | every 2h at :15 (v85.5) | Evaluate `templates.trigger_config` → `tasks`. Includes auto-dismiss for orphan tasks (v75.19). v85.1: 3c also dismisses any non-canceling-aware open task for a canceling student ("save-the-sale flow owns this student"). |
 | `check-na-tasks` | every 2h at :20 (v85.5) | Not-Activated escalation (Day 3/5/7/10) |
 | `day28-dm` | NO cron trigger (removed pre-v85; route retained) | Day-28 Discord DM route still exists for manual/preview fire, but nothing schedules it — the platform currently sends zero automated student DMs. |
@@ -1507,10 +1507,10 @@ returned no rows; no student was judged"). Since 2026-10-20 (the bug
 hunt's cron-2) the same holds for a failed read of the student pool,
 the milestones or a student's completions in `check-na-tasks`,
 `check-engagement` and `check-csm-tasks`, and of `check-engagement`'s
-open alerts and `check-csm-tasks`' past-due canceling students: the run
-fails in `cron_runs` and writes nothing. The two reads by a pool-wide
-list of ids go 100 ids at a time. What changes after the
-switch is under [The course switch](#the-course-switch-cutover). The
+open alerts and its two Discord toggles and `check-csm-tasks`' past-due
+canceling students: the run fails in `cron_runs` and writes nothing. The
+two reads by a pool-wide list of ids go 100 ids at a time. What changes
+after the switch is under [The course switch](#the-course-switch-cutover). The
 runs to watch on the evening: the first `check-engagement`,
 `check-csm-tasks` and `check-na-tasks` after the switch, and the next
 00:30 snapshot (ship order steps 14 and 15).

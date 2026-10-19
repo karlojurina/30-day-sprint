@@ -892,13 +892,15 @@ When adding a new table, append it here. When deleting a field, scan
 
 ### `disengagement_alerts`
 - **Depends on:** `students`
-- **Depended on by:** `/admin/alerts`, CSM cron (alert → task mapping
+- **Depended on by:** CSM cron (alert → task mapping
   via `pickExistingAlertScenario` in
   `/api/cron/check-csm-tasks/route.ts`), the team's Discord post from
   `/api/cron/check-engagement` (`buildAlertsEmbeds` in
   `src/lib/discord.ts`: one message per embed of at most 4096
-  characters; a post that fails marks the run failed). An open alert of
-  a type blocks a new one, so an alert is posted once.
+  characters; a post that fails marks the run failed). No admin page
+  lists these rows (`/admin/alerts` was removed on 2026-05-25). An open
+  alert of a type blocks a new one and nothing in the app closes it
+  (v104 did once, below), so an alert is posted at most once.
 - **Stable contract:** `student_id`, `alert_type`, `created_at`,
   `dismissed_at`
 - **At the course switch (v104):** open `no_tasks_7d` and
@@ -1031,7 +1033,8 @@ When adding a new table, append it here. When deleting a field, scan
   the work errored." Best-effort writes — never throw, so audit
   failures don't break business logic. Since 2026-10-20 `failed` also
   means, for `check-engagement`, a Discord post of new alerts that did
-  not go out (`error_message` names each part and Discord's answer),
+  not go out (`error_message` names each part and Discord's answer) or
+  a failed read of its two Discord toggles (the run wrote nothing),
   and for the three CSM crons a failed read of the student pool, the
   milestones or the completions (the run wrote nothing).
 

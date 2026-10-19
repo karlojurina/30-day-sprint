@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { postTeamAlert, buildAlertsEmbeds } from "@/lib/discord";
-import { isDmEnabled } from "@/lib/dm-toggles";
+import { readDmEnabled } from "@/lib/dm-toggles";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import { csmSprintWindowCutoffIso } from "@/lib/constants";
 import {
@@ -268,6 +268,19 @@ export async function GET(request: NextRequest) {
   // Set when the toggle is on and a post did not go out.
   let discordFailure: string | null = null;
   if (alerts.length > 0) {
+    // The /admin/discord toggles (the master switch and this one), read
+    // with their error before the insert (2026-10-20, cron-1). A failed
+    // read stops the run and writes nothing, so the next run finds these
+    // alerts again: taken as "off", it would insert them unposted and
+    // say success.
+    const toggle = await readDmEnabled(supabase, "engagement_alerts_enabled");
+    if (toggle.error) {
+      const message = `Discord toggles fetch failed: ${toggle.error}`;
+      console.error(`[check-engagement] ${message}`);
+      await logCronFinish(runId, "failed", { error: message });
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+
     const { error } = await supabase
       .from("disengagement_alerts")
       .insert(alerts);
@@ -283,7 +296,7 @@ export async function GET(request: NextRequest) {
     // the only place the team sees no_login_5d and no_tasks_7d, and an
     // open alert is never sent again, so a post that fails marks the run
     // failed in cron_runs.
-    if (await isDmEnabled(supabase, "engagement_alerts_enabled")) {
+    if (toggle.enabled) {
       const studentsById = new Map(students.map((s) => [s.id, s]));
       const baseUrl =
         process.env.NEXT_PUBLIC_APP_URL ?? "https://30-day-sprint-smkv.vercel.app";

@@ -30,21 +30,39 @@ const ALL_KEYS: DmToggleKey[] = [
  * Returns true only when BOTH the master switch and the per-message
  * switch are enabled. Either being false / missing returns false —
  * fail closed so a misconfigured row can never accidentally send.
+ * A failed read is false too; a caller that must tell it apart from
+ * "off" uses readDmEnabled.
  */
 export async function isDmEnabled(
   supabase: SupabaseClient,
   key: Exclude<DmToggleKey, "dms_master_enabled">,
 ): Promise<boolean> {
-  const { data } = await supabase
+  return (await readDmEnabled(supabase, key)).enabled;
+}
+
+/**
+ * isDmEnabled's answer with the read's error (2026-10-20, cron-1).
+ * check-engagement reads it before inserting its alerts and stops on an
+ * error: taken as "off", a failed read would insert the alerts unposted,
+ * and an open alert is never posted again.
+ */
+export async function readDmEnabled(
+  supabase: SupabaseClient,
+  key: Exclude<DmToggleKey, "dms_master_enabled">,
+): Promise<{ enabled: boolean; error: string | null }> {
+  const { data, error } = await supabase
     .from("admin_config")
     .select("key, value")
     .in("key", ["dms_master_enabled", key]);
+  if (error) return { enabled: false, error: error.message };
   const byKey = new Map<string, string>(
     (data ?? []).map((r) => [r.key as string, r.value as string]),
   );
-  return (
-    byKey.get("dms_master_enabled") === "true" && byKey.get(key) === "true"
-  );
+  return {
+    enabled:
+      byKey.get("dms_master_enabled") === "true" && byKey.get(key) === "true",
+    error: null,
+  };
 }
 
 /** Loads every switch's current value. Used by the settings UI. */

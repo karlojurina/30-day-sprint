@@ -130,9 +130,12 @@ embed, and a post that fails marks the run failed with the reason.
 `cron-failed-reads.test.mjs` runs check-na-tasks, check-engagement and
 check-csm-tasks the same way, with `failWhen` failing one read at a time (the
 student pool, the milestones, one student's completions, the open alerts, the
-past-due canceling students): each run now stops with a 500, cron_runs failed
-and nothing written, where the copy from 70c934a wrote wrong tasks, alerts or
-dismissals and said success. With 250 students the pool-wide reads go out
+past-due canceling students, and since the review of 20 October
+check-engagement's two Discord toggles, now read before its insert): each run
+now stops with a 500, cron_runs failed and nothing written, where the copy
+from 70c934a wrote wrong tasks, alerts or dismissals and said success (a
+failed toggles read: the new alerts inserted unposted, for good). With 250
+students the pool-wide reads go out
 100 ids at a time, each request line under 4,500 characters; the old single
 request passed 8 KB and was refused. The copies of `dm-toggles.ts`,
 check-na-tasks and check-csm-tasks (now and at 70c934a) leave out every

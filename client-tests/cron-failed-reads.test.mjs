@@ -13,7 +13,11 @@
 // students (their save task dismissed for good). The likeliest failure is
 // not a fault at all: one .in() list for the whole pool makes a request URL
 // past a gateway's limit at about 200 students, so both pool-wide reads are
-// now read 100 ids at a time, as outreach-insights.ts reads them.
+// now read 100 ids at a time, as outreach-insights.ts reads them. Since the
+// review of 20 October (cron-1) check-engagement also reads the two
+// /admin/discord toggles with their error, before the insert: a failed read
+// taken as "off" inserted the new alerts unposted, and an open alert is never
+// posted again.
 //
 // Each cron runs as it is: the real route and the libraries it imports,
 // copied here with their import lines pointed at the copies, and a real
@@ -265,6 +269,41 @@ const OPEN_ONLY = ['3:no_lessons_3d']
   db.failWhen = failing((r) => r.table === 'students')
   const r = await run(ENG.now, 'check-engagement')
   ok(stoppedClean(r, FAILED_READ), 'NOW, the student pool read failing: the same (as it already was)', told(r))
+}
+{
+  // The /admin/discord toggles (cron-1, review of 20 October): both switches
+  // in one request, key=in.(dms_master_enabled,engagement_alerts_enabled).
+  // The course switch's row is its own request (key=eq.curriculum_reset_at).
+  const toggles = (r) => r.table === 'admin_config' && (param(r, 'key') ?? '').startsWith('in.')
+  db = engDb()
+  db.failWhen = failing(toggles)
+  const before = await run(ENG.before, 'check-engagement')
+  ok(show(alertsOf()) === show(['2:no_lessons_3d', '3:no_lessons_3d']) && before.body.discord_reason === 'paused-by-toggle' && theRun().status === 'success',
+     'BEFORE, the toggles read failing: the new alert is inserted, taken as paused, never posted (an open alert is never posted again), and the run says success',
+     show({ alerts: alertsOf(), reason: before.body.discord_reason, run: theRun().status }))
+  db = engDb()
+  db.failWhen = failing(toggles)
+  const r = await run(ENG.now, 'check-engagement')
+  ok(stoppedClean(r, FAILED_READ) && r.body.error.startsWith('Discord toggles fetch failed') && show(alertsOf()) === show(OPEN_ONLY),
+     'NOW: the toggles are read before the insert, so the run stops with a 500, cron_runs failed with the reason, and nothing written', told(r))
+  db.failWhen = null
+  const next = await run(ENG.now, 'check-engagement')
+  ok(next.status === 200 && show(alertsOf()) === show(['2:no_lessons_3d', '3:no_lessons_3d']) && theRun().status === 'success',
+     'the next run, the read answering: the same alert is found and inserted', show(alertsOf()))
+}
+{
+  // The other callers (day28-dm, and the summary posts of check-csm-tasks and
+  // check-na-tasks) keep isDmEnabled, which answers a failed read with "off".
+  const { isDmEnabled, readDmEnabled } = await import('./_gen/dm-toggles.ts')
+  const { createServiceClient } = await import('./_gen/supabase-server.ts')
+  db = new StandInDb({ admin_config: [{ key: 'dms_master_enabled', value: 'true' }, { key: 'csm_task_summary_enabled', value: 'true' }] })
+  const sb = createServiceClient()
+  const on = [await isDmEnabled(sb, 'csm_task_summary_enabled'), await readDmEnabled(sb, 'csm_task_summary_enabled')]
+  db.failWhen = failing((r) => r.table === 'admin_config')
+  const failed = [await isDmEnabled(sb, 'csm_task_summary_enabled'), await readDmEnabled(sb, 'csm_task_summary_enabled')]
+  ok(on[0] === true && show(on[1]) === show({ enabled: true, error: null }) && failed[0] === false && show(failed[1]) === show({ enabled: false, error: FAILED_READ }),
+     'isDmEnabled as before: on when both switches are on, off on a failed read; readDmEnabled gives the same answer and the error',
+     show({ on, failed }))
 }
 {
   // 250 students, each with an alert already open: no new one is due.

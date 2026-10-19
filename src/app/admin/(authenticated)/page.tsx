@@ -163,7 +163,8 @@ export default function AdminDashboard() {
         // Mirror /api/admin/tasks filtering exactly so the dashboard
         // count and the Tasks page count agree. !inner forces the
         // join; the eq + gte on the joined columns hides tasks for
-        // csm_exempt students and pre-launch joiners.
+        // csm_exempt students and pre-launch joiners, and a task with
+        // no template is no queue task (the route filters it too).
         supabase
           .from("tasks")
           .select(
@@ -171,6 +172,7 @@ export default function AdminDashboard() {
             { count: "exact", head: true },
           )
           .eq("status", "open")
+          .not("template_id", "is", null)
           .eq("student.csm_exempt", false)
           // v75.18: filter on first_paid_at (original signup).
           .gte("student.first_paid_at", TASKS_STUDENT_JOIN_CUTOFF),

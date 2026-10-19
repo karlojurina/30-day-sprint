@@ -184,6 +184,13 @@ export default function AdminTasksKanban() {
   const { teamMember } = useAuth();
 
   const [rows, setRows] = useState<TaskRow[]>([]);
+  // The exact number of each, from the route's head counts: the Sent and
+  // Dismissed lists hold only the newest 500 (fix lane G1, admin-5).
+  const [counts, setCounts] = useState<Record<StatusKey, number>>({
+    open: 0,
+    completed: 0,
+    dismissed: 0,
+  });
   const [status, setStatus] = useState<StatusKey>("open");
   const [studentSearch, setStudentSearch] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -219,8 +226,9 @@ export default function AdminTasksKanban() {
           data: { session },
         } = await supabase.auth.getSession();
         const token = session?.access_token;
-        // Pull all statuses in one round-trip so the tabs can show
-        // their counts without re-fetching when the user switches.
+        // Every open task, the newest 500 sent and dismissed, and the
+        // exact count of each, in one round trip, so switching tabs
+        // fetches nothing.
         const params = new URLSearchParams();
         params.set("status", "all");
         if (studentSearch.trim()) params.set("student", studentSearch.trim());
@@ -233,8 +241,9 @@ export default function AdminTasksKanban() {
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error ?? `HTTP ${res.status}`);
         }
-        const { tasks } = await res.json();
+        const { tasks, counts: exact } = await res.json();
         setRows(tasks as TaskRow[]);
+        setCounts(exact as Record<StatusKey, number>);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -319,19 +328,6 @@ export default function AdminTasksKanban() {
       setConfig(c);
     })();
   }, [supabase]);
-
-  // Tab counts come from the unfiltered (by status) rows.
-  const counts = useMemo(() => {
-    return rows.reduce(
-      (acc, r) => {
-        if (r.status === "open") acc.open++;
-        else if (r.status === "completed") acc.completed++;
-        else if (r.status === "dismissed") acc.dismissed++;
-        return acc;
-      },
-      { open: 0, completed: 0, dismissed: 0 },
-    );
-  }, [rows]);
 
   /**
    * Open tab: tasks grouped into priority tiers (canceling first),
@@ -437,6 +433,11 @@ export default function AdminTasksKanban() {
       : historyGroups.today.length === 0 &&
         historyGroups.this_week.length === 0 &&
         historyGroups.older.length === 0;
+  // Sent and Dismissed show the newest 500; their tab counts are exact.
+  const shownHistory =
+    historyGroups.today.length +
+    historyGroups.this_week.length +
+    historyGroups.older.length;
 
   const renderRow = (row: TaskRow) => (
     <TaskRow
@@ -724,6 +725,13 @@ export default function AdminTasksKanban() {
                   </Section>
                 );
               })}
+          {status !== "open" &&
+            shownHistory > 0 &&
+            shownHistory < counts[status] && (
+              <p style={{ ...T.meta, marginBottom: 20 }}>
+                Showing the newest {shownHistory} of {counts[status]}.
+              </p>
+            )}
           {isQueueEmpty && (
             <Card>
               <EmptyState

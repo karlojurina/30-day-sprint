@@ -106,10 +106,11 @@ export interface WorldCatalog {
   gateLesson: CatalogLessonLike | null;
   lessonById(lessonId: string): CatalogLessonLike | null;
   /**
-   * True when the catalog came back empty. The world must show a retry rather
-   * than an empty continent: /api/student/data swallows its fetch error
-   * (StudentContext:607 only console.errors), so an empty array is
-   * indistinguishable from a failed request without this.
+   * True when the catalog came back empty: a course with no places or no
+   * lessons. The world shows a card with a retry rather than an empty
+   * continent. A load that failed is not this: /api/student/data answers 500
+   * when one of its reads fails, and StudentContext then sets loadError
+   * (T-026, 2026-10-20).
    */
   isEmpty: boolean;
 }

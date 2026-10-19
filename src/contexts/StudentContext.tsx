@@ -205,11 +205,11 @@ export interface StudentContextType {
   /** Which catalog the payload came from: "" (live) or "_next" (staging). */
   catalogSuffix: string;
   /**
-   * Set when the initial /api/student/data fetch failed. Until now that error
-   * was only console.error'd (:607), so a failed request and a genuinely empty
-   * course looked identical to every consumer — the world would render an
-   * empty continent with nothing to retry and nothing logged anywhere a human
-   * would see.
+   * Set when the first /api/student/data load failed: a request that died, or
+   * a non-OK answer (the route answers 500 when one of its reads fails),
+   * asked three times. Without it a failed load and a course with no lessons
+   * look the same to every reader. Cleared, with everything loaded, by the
+   * next refresh that is answered (T-026, 2026-10-20).
    */
   loadError: string | null;
   /** Upsert a rating for a lesson. Optimistic; server reconciles
@@ -236,6 +236,13 @@ export interface StudentContextType {
   // Discount feedback form (v29) — Apply button now opens a 6-question
   // form that's submitted atomically with the discount_requests row.
   discountFeedbackQuestions: DiscountFeedbackQuestion[];
+  /**
+   * Reads the active questions again (the browser client, RLS: active rows
+   * only) into discountFeedbackQuestions. Resolves to them, or to null when
+   * the read failed, which leaves the list as it was. The map's Apply asks
+   * before it sends an application without the form (useWorldDiscount.ts).
+   */
+  loadDiscountFeedbackQuestions: () => Promise<DiscountFeedbackQuestion[] | null>;
   discountFeedbackOpen: boolean;
   openDiscountFeedback: () => void;
   closeDiscountFeedback: () => void;
@@ -267,6 +274,11 @@ const studentDataGate = createCallGate(
   STUDENT_DATA_MIN_INTERVAL_MS,
 );
 
+/** A first load that fails is asked again after these waits, and only then
+ *  says it failed (loadError): a read that timed out under load is usually
+ *  answered a second or two later (T-026, 2026-10-20). */
+const FIRST_LOAD_RETRY_MS = [1_000, 3_000] as const;
+
 export const StudentContext = createContext<StudentContextType | null>(null);
 
 async function getAccessToken() {
@@ -276,6 +288,22 @@ async function getAccessToken() {
   // prevent refresh storms; see the correction on getSharedSession.
   const session = await getSharedSession(supabase);
   return session?.access_token ?? null;
+}
+
+/** GET /api/student/data. Resolves to its JSON, or to why there is none: a
+ *  request that failed, or a non-OK answer (the route answers 500 when one of
+ *  its reads fails). */
+async function readStudentData(token: string) {
+  try {
+    const res = await fetch("/api/student/data", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return { failed: `Could not load your course (HTTP ${res.status}).` };
+    return { fresh: await res.json() };
+  } catch (err) {
+    console.error("Failed to fetch student data:", err);
+    return { failed: err instanceof Error ? err.message : "Could not load your course." };
+  }
 }
 
 export function StudentProvider({ children }: { children: ReactNode }) {
@@ -390,6 +418,20 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     return out;
   }
 
+  function foldQuizQuestions(
+    rows: QuizQuestion[] | null | undefined,
+  ): Record<string, QuizQuestion[]> {
+    const out: Record<string, QuizQuestion[]> = {};
+    for (const q of rows ?? []) {
+      if (!out[q.quiz_id]) out[q.quiz_id] = [];
+      out[q.quiz_id].push(q);
+    }
+    for (const key of Object.keys(out)) {
+      out[key].sort((a, b) => a.sort_order - b.sort_order);
+    }
+    return out;
+  }
+
   function foldRegionQuiz(
     rows: Array<{
       region_id: string;
@@ -470,152 +512,62 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     whopCourseIdMasked: null,
   });
 
-  // The first load is keyed on the student's id, never on the row (map-1,
-  // lessons-2, progress-2, 2026-10-20). refreshFromServer below hands
-  // AuthContext a freshly parsed row after every refresh, and while this effect
-  // was keyed on that object each refresh ran the whole first load again: a
-  // second /api/student/data outside the 5 s gate, completions replaced without
-  // the v74 guard, and a failure of that second fetch set loadError, which took
-  // the map and an open lesson away until a reload.
-  const studentId = student?.id;
-  useEffect(() => {
-    if (!studentId) return;
+  // Whether the student's data has arrived since their first load began: from
+  // that load, or from a refresh that stood in for it after it failed. The
+  // first load's retries stop once it has (T-026).
+  const loadedRef = useRef(false);
 
-    async function fetchData() {
-      const token = await getAccessToken();
-      if (!token) {
-        setLoading(false);
-        return;
-      }
+  // Whether discountFeedbackQuestions holds any. Until it does, every refresh
+  // reads them again (map-1, 2026-10-20): a read that failed, or one that never
+  // ran because the first load failed, would otherwise leave the 30% with no
+  // questions for the rest of the visit, and the map's Apply would send the
+  // application without the form the team reads.
+  const questionsHeldRef = useRef(false);
 
-      try {
-        const res = await fetch("/api/student/data", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (!res.ok) {
-          setLoading(false);
-          return;
-        }
-
-        const data = await res.json();
-        setRegions(data.regions ?? []);
-        setLessons(data.lessons ?? []);
-        setCompletions(data.completions ?? []);
-        setDiscountRequest(data.discountRequest ?? null);
-        // v46 — sibling tables. Each can be null if the row doesn't
-        // exist yet (e.g. brand new student) — treat null as defaults.
-        setMilestones((data.milestones as StudentMilestones | null) ?? null);
-        setWhopSync((data.whopSync as StudentWhopSync | null) ?? null);
-        setCelebrations(
-          (data.celebrations as StudentCelebrations | null) ?? null,
-        );
-        setRegionQuizMap(
-          foldRegionQuiz(
-            data.regionQuiz as Array<{
-              region_id: string;
-              quiz_passed_at: string | null;
-              quiz_attempts: number;
-              best_score_pct: number | null;
-              last_score_pct: number | null;
-              last_attempt_at: string | null;
-            }> | null,
-            studentId,
-          ),
-        );
-        setLessonRatings(
-          foldLessonRatings(
-            (data.lessonRatings ?? []) as Array<{
-              lesson_id: string;
-              stars: number;
-              comment: string | null;
-            }>,
-          ),
-        );
-        setWatchProgress((prev) =>
-          mergeWatchProgress(
-            prev,
-            (data.watchProgress ?? []) as StudentLessonWatch[],
-          ),
-        );
-        setCatalogSuffix((data.catalogSuffix as string | undefined) ?? "");
-        setStreak({
-          current: (data.streaks as StudentStreaks | null)?.current_streak ?? 0,
-          longest: (data.streaks as StudentStreaks | null)?.longest_streak ?? 0,
-        });
-
-        setQuizzes(data.quizzes ?? []);
-        setQuizAttempts(data.quizAttempts ?? []);
-        const qMap: Record<string, QuizQuestion[]> = {};
-        for (const q of data.quizQuestions ?? []) {
-          if (!qMap[q.quiz_id]) qMap[q.quiz_id] = [];
-          qMap[q.quiz_id].push(q);
-        }
-        for (const key of Object.keys(qMap)) {
-          qMap[key].sort(
-            (a: QuizQuestion, b: QuizQuestion) => a.sort_order - b.sort_order
-          );
-        }
-        setQuizQuestions(qMap);
-        setMonthReview(data.monthReview ?? null);
-        // Discount feedback form questions — fetched separately via the
-        // browser client + RLS (only active rows visible to students).
-        const sbForQuestions = createClient();
-        const { data: questions } = await sbForQuestions
-          .from("discount_feedback_questions")
-          .select("*")
-          .eq("is_active", true)
-          .order("order_num");
-        setDiscountFeedbackQuestions(
-          (questions as DiscountFeedbackQuestion[] | null) ?? [],
-        );
-        const ws = data.whopSync as StudentWhopSync | null;
-        setSyncDiagnostics({
-          lastSyncAt: ws?.last_sync_at ?? null,
-          fetchedCount: ws?.last_sync_fetched ?? null,
-          matchedCount: ws?.last_sync_matched ?? null,
-          unmatchedWhopIds: ws?.last_sync_unmatched ?? [],
-          lastError: ws?.last_sync_error ?? null,
-          lastErrorAt: ws?.last_sync_error_at ?? null,
-          whopUserId: data.student?.whop_user_id ?? null,
-          whopCourseIdMasked: data.whopCourseIdMasked ?? null,
-        });
-        // Loaded: an error from an earlier load no longer holds.
-        setLoadError(null);
-      } catch (err) {
-        console.error("Failed to fetch student data:", err);
-        setLoadError(
-          err instanceof Error ? err.message : "Could not load your course.",
-        );
-      }
-      setLoading(false);
+  const loadDiscountFeedbackQuestions = useCallback(async (): Promise<
+    DiscountFeedbackQuestion[] | null
+  > => {
+    // The browser client and RLS: students see only the active rows.
+    try {
+      const { data, error } = await createClient()
+        .from("discount_feedback_questions")
+        .select("*")
+        .eq("is_active", true)
+        .order("order_num");
+      if (error || !data) return null;
+      const rows = data as DiscountFeedbackQuestion[];
+      questionsHeldRef.current = rows.length > 0;
+      setDiscountFeedbackQuestions(rows);
+      return rows;
+    } catch {
+      return null;
     }
+  }, []);
 
-    fetchData();
-  }, [studentId]);
-
-  // Pull /api/student/data and refresh completions + sync diagnostics
-  // + the discount request. Used after every sync (silent or forced)
-  // so the debug panel stays live AND so an admin-side discount
-  // approval picks up on the next tab-refocus instead of going stale
-  // until full page refresh.
+  // Pull /api/student/data and apply all of it. The first load is this
+  // (below), and so is every refresh: after every sync (silent or forced) so
+  // the debug panel stays live AND so an admin-side discount approval picks up
+  // on the next tab-refocus instead of going stale until full page refresh.
+  // One function, so a refresh brings everything the first load brings, and a
+  // refresh answered after a failed first load is a whole first load (T-026).
+  // Resolves to null, or to why nothing was applied: a request that failed,
+  // or a non-OK answer (the route answers 500 when one of its reads fails).
+  // Then what is shown stays as it is.
   const refreshFromServer = useCallback(async (
     token: string,
     trigger = "unknown",
     opts: { throttled?: boolean } = {},
-  ) => {
+  ): Promise<string | null> => {
     // Background refetches are capped; anything the student actually clicked
     // opts out, because throttling those would visibly stall the UI (a streak
     // that doesn't tick after toggling a lesson). Default is THROTTLED so a
     // new automatic caller is capped without anyone remembering to.
     // Skipping a background refresh is safe — worst case the view is a few
     // seconds stale until the next focus.
-    if (opts.throttled !== false && !studentDataGate.allow(trigger)) return;
-    const dataRes = await fetch("/api/student/data", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!dataRes.ok) return;
-    const fresh = await dataRes.json();
+    if (opts.throttled !== false && !studentDataGate.allow(trigger)) return null;
+    const read = await readStudentData(token);
+    if (read.failed !== undefined) return read.failed;
+    const fresh = read.fresh;
     // v74 - merge instead of replace: any lesson the user just touched
     // (within RECENT_TOGGLE_WINDOW_MS) keeps its LOCAL completion row
     // so a stale read-replica response can't undo their action.
@@ -696,10 +648,9 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       ),
     );
     setCatalogSuffix((fresh.catalogSuffix as string | undefined) ?? "");
-    // The catalog too, since the first load no longer runs again after every
-    // refresh (progress-2): this is what brings a video added during the
-    // session (has_video) into an open tab. An empty list is never applied,
-    // so a read that failed cannot empty a map that has loaded.
+    // The catalog, which also brings a video added during the session
+    // (has_video) into an open tab (progress-2). An empty list is never
+    // applied, so a map that has loaded keeps its places and lessons.
     const freshLessons = (fresh.lessons ?? []) as Lesson[];
     if (freshLessons.length > 0) setLessons(freshLessons);
     const freshRegions = (fresh.regions ?? []) as Region[];
@@ -708,6 +659,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       current: (fresh.streaks as StudentStreaks | null)?.current_streak ?? 0,
       longest: (fresh.streaks as StudentStreaks | null)?.longest_streak ?? 0,
     });
+    // The old course's quizzes and month review.
+    setQuizzes(fresh.quizzes ?? []);
+    setQuizAttempts(fresh.quizAttempts ?? []);
+    setQuizQuestions(foldQuizQuestions(fresh.quizQuestions as QuizQuestion[] | null));
+    setMonthReview(fresh.monthReview ?? null);
     const ws = fresh.whopSync as StudentWhopSync | null;
     setSyncDiagnostics({
       lastSyncAt: ws?.last_sync_at ?? null,
@@ -719,7 +675,55 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       whopUserId: fresh.student?.whop_user_id ?? null,
       whopCourseIdMasked: fresh.whopCourseIdMasked ?? null,
     });
-  }, [setStudent]);
+    // The 30% questions, until some are held (questionsHeldRef).
+    if (!questionsHeldRef.current) await loadDiscountFeedbackQuestions();
+    // Loaded: the map can come up, and an error from a failed first load no
+    // longer holds.
+    loadedRef.current = true;
+    setLoadError(null);
+    setLoading(false);
+    return null;
+  }, [setStudent, loadDiscountFeedbackQuestions]);
+
+  // The first load, keyed on the student's id, never on the row (map-1,
+  // lessons-2, progress-2, 2026-10-20): refreshFromServer hands AuthContext a
+  // freshly parsed row after every refresh, and while this effect was keyed on
+  // that object each refresh ran the whole first load again. It is
+  // refreshFromServer, unthrottled. One that fails is asked again
+  // (FIRST_LOAD_RETRY_MS) and only then sets loadError: the map says "Your
+  // course didn't load." instead of "There are no lessons here yet.", and the
+  // Playbook page does not send a graduate away (T-026). Any refresh answered
+  // after that loads everything and clears it.
+  const studentId = student?.id;
+  useEffect(() => {
+    if (!studentId) return;
+    let stopped = false;
+    let retry = 0;
+    loadedRef.current = false;
+
+    async function firstLoad(attempt: number) {
+      const token = await getAccessToken();
+      if (stopped || loadedRef.current) return;
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+      const failed = await refreshFromServer(token, "first-load", { throttled: false });
+      if (stopped || failed === null || loadedRef.current) return;
+      if (attempt < FIRST_LOAD_RETRY_MS.length) {
+        retry = window.setTimeout(() => void firstLoad(attempt + 1), FIRST_LOAD_RETRY_MS[attempt]);
+        return;
+      }
+      setLoadError(failed);
+      setLoading(false);
+    }
+
+    void firstLoad(0);
+    return () => {
+      stopped = true;
+      window.clearTimeout(retry);
+    };
+  }, [studentId, refreshFromServer]);
 
   /**
    * v93 — a watch lesson just completed itself.
@@ -1821,6 +1825,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         saveDiscordLink,
         skipLesson,
         discountFeedbackQuestions,
+        loadDiscountFeedbackQuestions,
         discountFeedbackOpen,
         openDiscountFeedback,
         closeDiscountFeedback,

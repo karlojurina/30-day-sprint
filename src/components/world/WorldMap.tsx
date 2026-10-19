@@ -89,8 +89,8 @@ export function WorldMap() {
   }
 
   if (status === "empty") {
-    // An empty catalog is also how a failed catalog query and a refused data
-    // request arrive today (useMapModel), so this card offers the retry too.
+    // A course with no places or no lessons. A load that failed is the card
+    // above (useMapModel); this one keeps the retry all the same.
     return (
       <Card kind="empty">
         <p className={u.message}>There are no lessons here yet.</p>

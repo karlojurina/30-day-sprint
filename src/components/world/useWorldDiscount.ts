@@ -30,6 +30,12 @@ import type { DiscountFeedbackAnswer, DiscountFeedbackQuestion } from "@/types/d
  * which on the new course checks the same rule as a plain request). On
  * success the form closes and the state turns to "in review".
  *
+ * WITH NONE HELD Apply first reads them again
+ * (StudentContext.loadDiscountFeedbackQuestions): the visit's own read may
+ * have failed, and /api/discounts/request takes a plain request whether or
+ * not there are questions. A read that fails sends nothing and says so; one
+ * that finds some opens the form.
+ *
  * WITH NO ACTIVE QUESTIONS Apply sends the plain request: it posts to
  * /api/discounts/request exactly as the old dashboard's
  * StudentContext.requestDiscount does (the session's Bearer token, the
@@ -167,7 +173,7 @@ export function useWorldDiscount(): WorldDiscountHook {
 
   // The questions: the stand-in's, or the active ones StudentContext loaded
   // (the development page's context has none of its own).
-  const { discountFeedbackQuestions, submitDiscountFeedback } = ctx;
+  const { discountFeedbackQuestions, loadDiscountFeedbackQuestions, submitDiscountFeedback } = ctx;
   const questions = useMemo(
     () => sortQuestions(stand ? stand.questions : (discountFeedbackQuestions ?? [])),
     [stand, discountFeedbackQuestions],
@@ -207,10 +213,21 @@ export function useWorldDiscount(): WorldDiscountHook {
   }, [stand, studentId, requestId]);
 
   const apply = useCallback(async (): Promise<string | null> => {
+    if (questions.length === 0 && !stand) {
+      // None held: StudentContext's read may have failed, or never run (a
+      // failed first load). Read them now, so an application never goes in
+      // without the form while the team has questions (map-1, 2026-10-20).
+      const read = await loadDiscountFeedbackQuestions?.();
+      if (!read) return NO_REACH;
+      if (read.length > 0) {
+        setFormOpen(true);
+        return null;
+      }
+    }
     if (questions.length === 0) return sendPlain();
     setFormOpen(true);
     return null;
-  }, [questions.length, sendPlain]);
+  }, [questions.length, stand, loadDiscountFeedbackQuestions, sendPlain]);
 
   const close = useCallback(() => setFormOpen(false), []);
 

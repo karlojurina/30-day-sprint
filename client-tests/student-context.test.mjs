@@ -93,6 +93,10 @@ const server = {
   lessons: [],
   completions: [],
   streak: { current_streak: 2, longest_streak: 3 },
+  /** student_milestones: null, or a row (a graduate has playbook_unlocked_at). */
+  milestones: null,
+  /** POST /api/discounts/request: applications sent with no answers. */
+  plainRequests: 0,
   /** GET /api/student/data answers, oldest first: 'ok', 'reject' (a dead connection), or a status. Empty: 'ok'. */
   dataPlan: [],
   /** When set, the next data read is taken at the moment it is asked and answered when this resolves. */
@@ -123,7 +127,7 @@ function seed() {
     { id: 'c1', student_id: 's1', lesson_id: 'a1l01', completed_at: '2026-10-19T18:00:00.000Z', action_completed_at: null, skipped_at: null, discord_message_link: null },
     { id: 'c5', student_id: 's1', lesson_id: 'a1l05', completed_at: '2026-10-19T18:10:00.000Z', action_completed_at: '2026-10-19T18:10:00.000Z', skipped_at: null, discord_message_link: null },
   ]
-  Object.assign(server, { dataPlan: [], holdData: null, dataOver: null, syncStatus: 200, onSync: null, holdSync: null, dataReads: 0, syncs: 0 })
+  Object.assign(server, { milestones: null, plainRequests: 0, dataPlan: [], holdData: null, dataOver: null, syncStatus: 200, onSync: null, holdSync: null, dataReads: 0, syncs: 0 })
 }
 function payload() {
   return {
@@ -133,7 +137,7 @@ function payload() {
     completions: server.completions,
     discountRequest: null,
     quizzes: [], quizQuestions: [], quizAttempts: [], monthReview: null,
-    milestones: null,
+    milestones: server.milestones,
     streaks: server.streak,
     whopSync: null, celebrations: null, dmLog: null,
     regionQuiz: [], lessonRatings: [], watchProgress: [],
@@ -177,6 +181,11 @@ globalThis.fetch = async (input, init = {}) => {
     row.discord_message_link = link
     return json({ completion: { ...row } })
   }
+  if (method === 'POST' && url === '/api/discounts/request') {
+    // The plain 30% request: an application with no answers for the team.
+    server.plainRequests++
+    return json({ id: 'r1', status: 'pending', created_at: new Date(clock).toISOString(), rejection_reason: null })
+  }
   server.unexpected.push(`${method} ${url}`)
   return json({ error: 'not here' }, 404)
 }
@@ -194,6 +203,8 @@ fs.writeFileSync(path.join(TMP, 'supabase-browser.mjs'), [
   '// The browser client: a session for getAccessToken, and plain tables for the reads.',
   'export const tables = { discount_feedback_questions: [], achievements: [], student_achievements: [], achievement_unlock_stats: [] }',
   'export const reads = []',
+  '/** table -> how many of its next reads fail, as postgrest-js reports one: no data, an error. */',
+  'export const failing = new Map()',
   'function from(table) {',
   '  const preds = []',
   '  const b = {',
@@ -202,6 +213,10 @@ fs.writeFileSync(path.join(TMP, 'supabase-browser.mjs'), [
   '    order() { return b },',
   '    then(res, rej) {',
   '      reads.push(table)',
+  '      if (failing.get(table) > 0) {',
+  '        failing.set(table, failing.get(table) - 1)',
+  "        return Promise.resolve({ data: null, error: { message: 'canceling statement due to statement timeout' } }).then(res, rej)",
+  '      }',
   '      const rows = (tables[table] ?? []).filter((r) => preds.every((p) => p(r))).map((r) => ({ ...r }))',
   '      return Promise.resolve({ data: rows, error: null }).then(res, rej)',
   '    },',
@@ -243,9 +258,23 @@ const { AuthStandIn } = await import(SPEC['./AuthContext'])
 const browserDb = await import(SPEC['@/lib/supabase-browser'])
 const { StudentProvider, useStudent } = await load('src/contexts/StudentContext.tsx')
 const { useWorldBadges } = await load('src/components/world/useWorldBadges.ts')
+// The map's own reading of the provider (which card /world shows) and the
+// 30% panel's hook, from src/, over the same provider: their imports go to
+// the copy of StudentContext loaded above and to build.mjs's real copies.
+Object.assign(SPEC, {
+  '@/contexts/StudentContext': fileUrl(path.join(TMP, 'StudentContext.mjs')),
+  '@/lib/world/catalog': fileUrl(here('./_gen/catalog.ts')),
+  '@/lib/world/map-model': fileUrl(here('./_gen/map-model.ts')),
+  '@/lib/world/discount': fileUrl(here('./_gen/discount.ts')),
+  '@/lib/discount-feedback': fileUrl(here('./_gen/discount-feedback.ts')),
+})
+SPEC['@/lib/world/useWorldCatalog'] = fileUrl(path.join(TMP, 'useWorldCatalog.mjs'))
+await load('src/lib/world/useWorldCatalog.ts')
+const { useMapModel } = await load('src/components/world/useMapModel.ts')
+const { useWorldDiscount } = await load('src/components/world/useWorldDiscount.ts')
 
 // ── Mounting ─────────────────────────────────────────────────────────────────
-const view = { ctx: null, setStudent: null, renders: [] }
+const view = { ctx: null, setStudent: null, renders: [], map: null, mapStatuses: [], discount: null }
 function AuthHost({ initial, children }) {
   // A plain useState setter, as the real AuthProvider hands out.
   const [student, setStudent] = React.useState(initial)
@@ -262,12 +291,26 @@ function BadgeProbe() {
   view.badges = useWorldBadges()
   return null
 }
+/** Which card /world shows, every render: loading, error, empty, shape or ready. */
+function MapProbe() {
+  const { status } = useMapModel()
+  view.map = status
+  view.mapStatuses.push(status)
+  return null
+}
+function DiscountProbe() {
+  view.discount = useWorldDiscount()
+  return null
+}
 /** Lets React, the stand-in requests and their promise chains run. */
 const settle = async () => { for (let i = 0; i < 40; i++) await new Promise((r) => setImmediate(r)) }
+/** Real time, for the first load's retry timers (FIRST_LOAD_RETRY_MS: 1 s, then 3 s). */
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 async function mount(...extra) {
   // Past the module-level 5 s gate and the 30 s sync throttle of the last mount.
   advance(60_000)
   view.renders = []
+  view.mapStatuses = []
   const container = Object.assign(new Target(), {
     nodeType: 1, nodeName: 'DIV', tagName: 'DIV', namespaceURI: null, ownerDocument: doc, childNodes: [], firstChild: null,
   })
@@ -380,17 +423,144 @@ console.log('\n=== A saved Discord link is not put back by a read from before th
   root.unmount()
 }
 
-console.log('\n=== An error from a failed load is cleared by the next good one (map-1) ===')
+// ── A first load that fails (T-026, review findings 1 and 2) ─────────────────
+const QUESTIONS = [
+  { id: 'q2', question_text: 'How did the course go?', question_type: 'open_text', order_num: 2, is_active: true, is_required: true },
+  { id: 'q1', question_text: 'How sure are you?', question_type: 'scale', scale_min: 1, scale_max: 10, order_num: 1, is_active: true, is_required: true },
+]
+const GRADUATE = { student_id: 's1', playbook_unlocked_at: '2026-10-19T18:00:00.000Z' }
+/** The Playbook page's redirect fires on a render with loading false, no loadError and playbookUnlocked false. */
+const bounced = () => view.renders.filter((c) => !c.loading && !c.loadError && !c.playbookUnlocked).length
+const questionReads = () => browserDb.reads.filter((t) => t === 'discount_feedback_questions').length
+
+console.log('\n=== A first load answered 500 is asked again: the map never shows an empty course (T-026) ===')
 {
   seed()
-  server.dataPlan = ['reject']
-  const root = await mount()
-  ok(typeof view.ctx.loadError === 'string', 'a first load that dies on the network says so', show(view.ctx.loadError))
-  // Another student signs in on the same page (the load is keyed on the id).
-  view.setStudent({ ...STUDENT, id: 's2' })
+  browserDb.tables.discount_feedback_questions = QUESTIONS
+  server.syncStatus = 502 // no sync refresh: the retry alone
+  server.dataPlan = [500]
+  const root = await mount(h(MapProbe))
+  ok(view.ctx.loading === true && view.ctx.loadError === null && view.map === 'loading',
+     'after the 500 the map still says it is loading while the retry waits', `loading ${view.ctx.loading}, map ${view.map}`)
+  await sleep(1_100)
   await settle()
-  ok(view.ctx.loadError === null && view.ctx.lessons.length === 5, 'the next good load clears it', `loadError ${show(view.ctx.loadError)}`)
+  ok(server.dataReads === 2 && view.ctx.loading === false && view.ctx.loadError === null && view.ctx.lessons.length === 5 && view.ctx.completions.length === 2,
+     'the retry 1 s later loads it', `${server.dataReads} reads, ${view.ctx.lessons.length} lessons, loadError ${show(view.ctx.loadError)}`)
+  ok(view.ctx.discountFeedbackQuestions.length === 2, 'the 30% questions with it', `${view.ctx.discountFeedbackQuestions.length} questions`)
+  ok(!view.mapStatuses.includes('empty') && !view.mapStatuses.includes('error'),
+     'and no render showed "There are no lessons here yet." or the error card', show([...new Set(view.mapStatuses)]))
   root.unmount()
+}
+
+console.log('\n=== A first load that keeps failing says so, and a refresh answered later loads everything (T-026) ===')
+{
+  seed()
+  browserDb.tables.discount_feedback_questions = QUESTIONS
+  server.milestones = GRADUATE
+  server.syncStatus = 502
+  server.dataPlan = [500, 'reject', 500]
+  const root = await mount(h(MapProbe))
+  await sleep(1_100)
+  await settle()
+  ok(server.dataReads === 2 && view.ctx.loading === true && view.ctx.loadError === null, 'asked again after 1 s, still loading', `${server.dataReads} reads`)
+  await sleep(3_100)
+  await settle()
+  ok(server.dataReads === 3 && view.ctx.loading === false && typeof view.ctx.loadError === 'string',
+     'asked a third time after 3 s more, then loadError is set', `${server.dataReads} reads, loadError ${show(view.ctx.loadError)}`)
+  ok(view.map === 'error' && !view.mapStatuses.includes('empty'),
+     '/world shows "Your course didn\'t load." with Try again, never "There are no lessons here yet."', `map ${view.map}, ${show([...new Set(view.mapStatuses)])}`)
+  ok(view.ctx.playbookUnlocked === false && bounced() === 0,
+     'a graduate on the Playbook page is not sent away: no render has loading false with no error and no Playbook', `${bounced()} such renders`)
+  // Back to the tab later: the sync fails again, the focus refresh is answered.
+  advance(31_000)
+  window.dispatchEvent(new Event('focus'))
+  await settle()
+  ok(view.ctx.loadError === null && view.ctx.loading === false && view.ctx.lessons.length === 5 && view.ctx.regions.length === 2 && view.ctx.completions.length === 2 && view.ctx.streak.current === 2,
+     'the refresh loads everything and clears the error', `loadError ${show(view.ctx.loadError)}, ${view.ctx.lessons.length} lessons, streak ${view.ctx.streak.current}`)
+  ok(view.ctx.playbookUnlocked === true && view.ctx.discountFeedbackQuestions.length === 2 && view.map === 'shape',
+     'the graduate has the Playbook, the 30% has its questions, the map has its places', `playbook ${view.ctx.playbookUnlocked}, ${view.ctx.discountFeedbackQuestions.length} questions, map ${view.map}`)
+  ok(bounced() === 0, 'and at no render on the way was the graduate sent away', `${bounced()} such renders`)
+  root.unmount()
+}
+
+console.log('\n=== The review\'s case: first load 500, then the sync\'s refresh is answered (map-1) ===')
+{
+  seed()
+  browserDb.tables.discount_feedback_questions = QUESTIONS
+  server.dataPlan = [500]
+  const root = await mount(h(MapProbe))
+  ok(server.dataReads === 2 && view.ctx.lessons.length === 5 && view.ctx.regions.length === 2 && view.ctx.discountFeedbackQuestions.length === 2,
+     'the sync\'s refresh is a whole first load: lessons, places and the 30% questions (they stayed 0 for the visit)', `${view.ctx.lessons.length} lessons, ${view.ctx.regions.length} places, ${view.ctx.discountFeedbackQuestions.length} questions`)
+  ok(view.ctx.loading === false && view.ctx.loadError === null && !view.mapStatuses.includes('empty'), 'loaded, with no empty card on the way', show([...new Set(view.mapStatuses)]))
+  await sleep(1_100)
+  await settle()
+  ok(server.dataReads === 2, 'the retry it had waiting asks nothing: the data is in', `${server.dataReads} reads`)
+  const before = questionReads()
+  advance(31_000)
+  window.dispatchEvent(new Event('focus'))
+  await settle()
+  ok(view.ctx.discountFeedbackQuestions.length === 2 && questionReads() === before,
+     'still there after a return to the tab 31 s later, and not read again while held', `${view.ctx.discountFeedbackQuestions.length} questions, ${questionReads() - before} reads`)
+  root.unmount()
+}
+
+console.log('\n=== The questions\' own read fails once: the next refresh reads them again (map-1) ===')
+{
+  seed()
+  browserDb.tables.discount_feedback_questions = QUESTIONS
+  browserDb.failing.set('discount_feedback_questions', 1)
+  server.syncStatus = 502
+  const root = await mount()
+  ok(view.ctx.loading === false && view.ctx.lessons.length === 5 && view.ctx.discountFeedbackQuestions.length === 0,
+     'the course loads, the questions do not', `${view.ctx.discountFeedbackQuestions.length} questions`)
+  advance(6_000)
+  window.dispatchEvent(new Event('focus'))
+  await settle()
+  ok(view.ctx.discountFeedbackQuestions.length === 2, 'the next refresh brings them', `${view.ctx.discountFeedbackQuestions.length} questions`)
+  root.unmount()
+}
+
+console.log('\n=== Apply reads the questions before it would send an application without the form (map-1) ===')
+{
+  // A student whose 30% is open: paid 2 days ago, every video up to the gate watched.
+  const ready = () => {
+    seed()
+    STUDENT.first_paid_at = new Date(clock - 2 * 86_400_000).toISOString()
+    server.lessons = server.lessons.map((l) => (l.id === 'a1l02' ? { ...l, is_gate: true } : l))
+    server.completions.push({ id: 'c2', student_id: 's1', lesson_id: 'a1l02', completed_at: '2026-10-19T18:05:00.000Z', action_completed_at: null, skipped_at: null, discord_message_link: null })
+    browserDb.tables.discount_feedback_questions = QUESTIONS
+    browserDb.failing.set('discount_feedback_questions', 1)
+    server.syncStatus = 502
+  }
+  const paidAt = STUDENT.first_paid_at
+  ready()
+  let root = await mount(h(DiscountProbe))
+  ok(view.discount.state.kind === 'ready' && view.ctx.discountFeedbackQuestions.length === 0,
+     'the 30% is open to apply for, and the visit\'s read of the questions failed', `${view.discount.state.kind}, ${view.ctx.discountFeedbackQuestions.length} questions`)
+  let said = await view.discount.apply()
+  await settle()
+  ok(said === null && view.discount.form.open === true && view.discount.form.questions.length === 2 && server.plainRequests === 0,
+     'Apply reads them, finds 2 and opens the form: no application goes in without the answers', `said ${show(said)}, form ${view.discount.form.open}, ${view.discount.form.questions.length} questions, ${server.plainRequests} plain requests`)
+  root.unmount()
+
+  ready()
+  root = await mount(h(DiscountProbe))
+  browserDb.failing.set('discount_feedback_questions', 1)
+  said = await view.discount.apply()
+  await settle()
+  ok(typeof said === 'string' && /reach the server/.test(said) && view.discount.form.open === false && server.plainRequests === 0,
+     'a read that fails again sends nothing and says so', show(said))
+  root.unmount()
+
+  ready()
+  browserDb.tables.discount_feedback_questions = []
+  root = await mount(h(DiscountProbe))
+  said = await view.discount.apply()
+  await settle()
+  ok(said === null && view.discount.form.open === false && server.plainRequests === 1,
+     'with no active questions at all, Apply sends the plain request, as before', `${server.plainRequests} plain requests`)
+  root.unmount()
+  STUDENT.first_paid_at = paidAt
 }
 
 // ── The badges (progress-3, streak-1) ────────────────────────────────────────
@@ -456,10 +626,12 @@ console.log('\n=== The Whop sync tells the corner to read the badges again (prog
 
 console.log('\n=== Nothing else was asked of the server ===')
 ok(server.unexpected.length === 0, 'every request was one this file answers, with the token', show(server.unexpected))
+// A refresh whose request dies resolves to its reason now (the first load needs
+// it); it used to reject inside the focus handler, a line in the console.
+ok(unhandled.length === 0, 'no refresh rejected anywhere', show(unhandled))
 
 fs.rmSync(TMP, { recursive: true, force: true })
 Date.now = realNow
-console.log(`\n  (a focus refresh whose read failed rejected inside the focus handler ${unhandled.length} time(s), as it does in a browser's console)`)
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)
 if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1) }
 process.exit(0)

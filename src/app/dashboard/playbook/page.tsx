@@ -41,6 +41,7 @@ export default function PlaybookPage() {
   const { student } = useAuth();
   const {
     loading: studentLoading,
+    loadError,
     playbookUnlocked,
     playbookWelcomeSeenAt,
     dismissPlaybookWelcome,
@@ -52,12 +53,15 @@ export default function PlaybookPage() {
   // the old course), or the legacy auto-unlock (30+ days since the first
   // payment AND 80% complete). It is false until the student's data has
   // loaded, so nobody is sent away before then: from /world this page
-  // mounts a fresh provider, which starts empty.
+  // mounts a fresh provider, which starts empty. Nor while that load has
+  // failed (loadError): with no data the gate is false for a graduate too
+  // (T-026, 2026-10-20). The page says so below, and a refresh that loads
+  // clears it.
   useEffect(() => {
-    if (student && !studentLoading && !playbookUnlocked) {
+    if (student && !studentLoading && !loadError && !playbookUnlocked) {
       router.replace(COURSE_HREF);
     }
-  }, [student, studentLoading, playbookUnlocked, router]);
+  }, [student, studentLoading, loadError, playbookUnlocked, router]);
 
   const [nodes, setNodes] = useState<PlaybookNode[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,6 +91,37 @@ export default function PlaybookPage() {
   // completed) so it only fires when the student has actually earned
   // access, not when bounty was claimed independently.
   const showWelcome = playbookUnlocked && !playbookWelcomeSeenAt;
+
+  // The student's data did not load: nothing tells whether the Playbook is
+  // theirs, so the page waits here instead of sending them away.
+  if (student && !studentLoading && loadError && !playbookUnlocked) {
+    return (
+      <div
+        className="flex flex-col items-center justify-center gap-4 min-h-screen"
+        style={{ background: "var(--color-bg-primary)" }}
+      >
+        <p style={{ fontSize: 15, color: "rgba(255,255,255,0.74)" }}>
+          Your course didn&apos;t load.
+        </p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          style={{
+            padding: "10px 16px",
+            fontSize: 13,
+            fontWeight: 600,
+            borderRadius: 8,
+            border: "none",
+            background: "var(--color-gold)",
+            color: "var(--color-bg-primary)",
+            cursor: "pointer",
+          }}
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
 
   // A locked student sees the spinner until the effect above sends them on.
   if (!student || loading || studentLoading || !playbookUnlocked) {

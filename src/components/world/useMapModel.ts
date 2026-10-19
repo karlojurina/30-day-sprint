@@ -18,12 +18,11 @@ export const AnyLessonFinishesContext = createContext(false);
  * host and by the routes that paint over it.
  *
  *   loading  the catalog has not arrived
- *   error    it failed to load
- *   empty    it arrived with no areas or no lessons. A failed catalog query and
- *            a refused data request both arrive like this today (the data
- *            route answers 500 for a failed catalog query, and StudentContext
- *            sets no error on a non-OK response), so "empty" is treated as
- *            "may have failed" wherever it is shown
+ *   error    it failed to load: the data route answers 500 when one of its
+ *            reads fails, and StudentContext sets loadError once a failed
+ *            first load has been asked three times (T-026, 2026-10-20)
+ *   empty    it arrived with no areas or no lessons: a course with nothing in
+ *            it. Its card keeps a retry all the same
  *   shape    it is a real catalog, but not the eight-area one the map draws
  *   ready    the map can be mounted
  *

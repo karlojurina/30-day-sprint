@@ -581,9 +581,12 @@ for (const [label, streak, shown] of [
 }
 {
   // The corner and the old dashboard take the number from that answer; the
-  // team's two student views ask the same rule of the row they read.
+  // team's two student views ask the same rule of the row they read. Since
+  // T-026 (2026-10-20) the first load and every refetch are one function,
+  // refreshFromServer, so the line is there once (student-context.test.mjs
+  // runs the first load through it).
   const ctx = read('../src/contexts/StudentContext.tsx')
-  ok((ctx.match(/current: \((?:data|fresh)\.streaks as StudentStreaks \| null\)\?\.current_streak \?\? 0,/g) ?? []).length === 2,
+  ok((ctx.match(/current: \((?:data|fresh)\.streaks as StudentStreaks \| null\)\?\.current_streak \?\? 0,/g) ?? []).length === 1,
      'StudentContext copies the answer\'s current_streak, at load and on every refetch')
   ok(/const current = streak\?\.current \?\? 0;/.test(read('../src/components/world/WorldCorner.tsx')), 'and the corner shows StudentContext\'s number')
   for (const page of ['../src/app/admin/(authenticated)/journey/StudentDrawer.tsx', '../src/app/admin/(authenticated)/students/[id]/page.tsx']) {

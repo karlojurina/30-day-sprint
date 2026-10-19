@@ -1856,9 +1856,12 @@ watch heartbeat, and the messages it trades with Tella's frame.
   `ready`. `mapIsSilent` is true for `loading`, `error` and `empty`;
   in those three the routes drawn over the map render nothing, and the
   host's card is the whole message. In `shape` a lesson page still
-  opens. A failed catalog query and a refused data request both arrive
-  as `empty` today: the data route answers 200 with empty rows, and
-  `StudentContext` sets no error on a non-OK response.
+  opens. A load that failed arrives as `error` (T-026, 2026-10-20):
+  `GET /api/student/data` answers 500 when one of its reads fails, and
+  `StudentContext` asks a failed first load twice more (after 1 s and
+  3 s), then sets `loadError`. Any refresh answered after that loads
+  everything and clears it. `empty` is a course with no places or no
+  lessons.
 
 ### `LessonTransport` (`src/lib/world/lesson-transport.ts`)
 - **What it is:** the three calls the lesson player makes (the

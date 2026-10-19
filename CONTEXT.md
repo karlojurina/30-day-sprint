@@ -146,12 +146,12 @@ on 2026-10-14:
   `/world`, the real Playbook page, and the CSM and engagement crons
   against the switched data (their first tick).
 - **Service.** `npm run test:migrations` runs migrations v92 to v101 and
-  v103 to v107 (no v102 exists) on a local Postgres, among them the heartbeat function, the snapshot
+  v103 to v108 (no v102 exists) on a local Postgres, among them the heartbeat function, the snapshot
   rebuild, v100's undo, the morning kit, the course catalog (v101) with
   its generator and its undo, the video load, the cutover's two
   migrations with their undos and its two checks, v105 and v106 (the
-  backend audit's fixes, 2026-10-16) and v107 (the release review,
-  2026-10-17) with their undos. Since
+  backend audit's fixes, 2026-10-16), v107 (the release review,
+  2026-10-17) and v108 (the bug hunt, 2026-10-20) with their undos. Since
   2026-10-16 the Whop webhook's handler runs through its own `POST` in
   `npm run test:client` (`whop-webhook`), on a stand-in database, never
   a real one. One cron route has a test:
@@ -771,7 +771,13 @@ tested in the harness (section 27), not pasted: only the service role
 may then call `submit_discount_with_feedback`. It goes in on Monday
 after the merge into `main` and before the doors open, because the
 route on `world-engine` calls the function with the service role and
-`main`'s with the student's session (`tasks.md` T-090). The files that take them back are described at the end of
+`main`'s with the student's session (`tasks.md` T-090). v108
+(2026-10-20, the bug hunt's cron-3) is built offline and tested in the
+harness (section 29), not pasted: only the service role may then call
+`increment_region_quiz_attempts`, v55's security definer function, which
+wrote any student's `student_region_quiz` row for anyone holding the
+public key. Nothing in the app calls it, and v108 needs no other file
+before it: it can be pasted at any time. The files that take them back are described at the end of
 this section. The header of
 `prd1-postchecks.sql` says its rows 40 to 48 describe v94's placeholder
 seed and report differences once v101 has run; the check for v101 is
@@ -1232,7 +1238,9 @@ about those migrations comes from their text.
   (v55's "student writes own" policy is dropped); the server writes them.
 - `student_region_quiz` — per-(student, region) quiz_passed_at +
   quiz_attempts + best_score_pct + last_score_pct + last_attempt_at
-  (v54 + v65). regions.quiz_format controls which mini-game wrapper
+  (v54 + v65). After v108 (built 2026-10-20, not on production) only
+  the service role may call v55's `increment_region_quiz_attempts`,
+  which writes any student's row and is called by nothing in the app. regions.quiz_format controls which mini-game wrapper
   to render (v70: r1 → `swipe_cards`, r2 → `stack_builder`,
   r3 → `constellation`, r4 → `vault_tumblers`). v65 - quiz_passed_at
   now stamps on first attempt at ≥ 50% (was: 100% deck clear).
@@ -1344,6 +1352,11 @@ the Supabase SQL editor by hand, and only to undo.
   student's session (`main` before Monday's merge): `world-engine`'s
   route calls it with the service role, which v29 refuses, so with that
   code live every questions form would answer `SAVE_FAILED`.
+- `2026_v108_undo.sql` (2026-10-20, the same): drops
+  `increment_region_quiz_attempts` and makes it again from v55's own
+  text, so it comes back with exactly the grants v55's run gave it (v55
+  wrote no grant line: they are the database's defaults). It reopens the
+  back door.
 
 **The morning kit (`supabase/diagnostics/`)**
 

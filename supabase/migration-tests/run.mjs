@@ -4541,5 +4541,164 @@ console.log('\n=== 28. the Whop sync read (diagnostics/whop-sync-proof.sql), bef
   await d.close()
 }
 
+// ════════════════════════════════════════════════════════════════════
+// 29: v108 and its undo (bug hunt of 19 October, cron-3). v55 made
+// increment_region_quiz_attempts security definer, with no check of who
+// calls it and no grant line, so it kept the grants a new function gets:
+// Postgres's to public, which anon and authenticated inherit, and on
+// Supabase the API roles' own (default privileges). Each world on a
+// database of its own: base.sql, a region and two students, and v55's
+// function and comment lifted verbatim. Calls are made as the API roles,
+// inside a transaction that is rolled back.
+// ════════════════════════════════════════════════════════════════════
+console.log('\n=== 29. v108: only the server calls increment_region_quiz_attempts, and its undo ===')
+{
+  const V55F = '2026_v55_audit_security_cleanup.sql'
+  const v108 = read('2026_v108_revoke_region_quiz_function.sql')
+  const undo108 = undoText('2026_v108_undo.sql')
+  const v55fn = lift(V55F, 'create or replace function increment_region_quiz_attempts(', '$$;')
+  const v55comment = lift(V55F, 'comment on function increment_region_quiz_attempts(uuid, text) is')
+  const FN = 'public.increment_region_quiz_attempts(uuid, text)'
+  const ONLY_SERVER = asJson({ visitor: false, student: false, server: true })
+  const EVERYONE = asJson({ visitor: true, student: true, server: true })
+  note(undo108.includes(`drop function if exists ${FN};`) && undo108.includes(`${v55fn}\n\n${v55comment}`),
+       "the undo drops the function and makes it again from v55's function and comment, word for word")
+
+  for (const [world, seam] of [
+    ['as on Supabase', 'alter default privileges in schema public grant all on functions to anon, authenticated, service_role;'],
+    ['on plain Postgres', null],
+  ]) {
+    const say = (pass, label, detail = '') => note(pass, `${label} [${world}]`, detail)
+    const d = new PGlite()
+    await d.exec(fs.readFileSync(new URL('base.sql', import.meta.url), 'utf8'))
+    if (seam) await d.exec(seam)
+    await d.exec(v55fn)
+    await d.exec(v55comment)
+    await d.exec(`insert into regions (id, order_num, name, terrain) values ('r1', 1, 'Foundation', 'shore');
+                  insert into students (id, supabase_user_id) values ('${UID(1)}', '${UID(1)}'), ('${UID(2)}', '${UID(2)}');`)
+    // The function as the catalog holds it: its ACL as stored (null is the
+    // default grant to public), its definition, comment and owner.
+    const fnState = async (dd = d) => asJson((await dd.query(`select p.proacl::text as acl, pg_get_functiondef(p.oid) as def,
+        obj_description(p.oid, 'pg_proc') as comment, pg_get_userbyid(p.proowner)::text as owner
+      from pg_proc p where p.oid = to_regprocedure('${FN}')`)).rows)
+    const shape = async () => { const s = JSON.parse(await fnState()); return asJson(s.map(({ acl, ...rest }) => rest)) }
+    const aclOf = async () => {
+      const s = JSON.parse(await fnState())
+      return s.length === 0 ? 'no function' : s[0].acl ?? 'null (the default grant to public)'
+    }
+    const can = async () => asJson((await d.query(`select has_function_privilege('anon', '${FN}', 'execute') as visitor,
+        has_function_privilege('authenticated', '${FN}', 'execute') as student,
+        has_function_privilege('service_role', '${FN}', 'execute') as server`)).rows[0])
+    // Student 2's quiz row written by someone else's call: a visitor, student 1, or the server.
+    const callFor2 = role => asRole(d, role, `select public.increment_region_quiz_attempts('${UID(2)}', 'r1') as n`,
+      { uid: role === 'authenticated' ? UID(1) : '', check: `select quiz_attempts from student_region_quiz where student_id = '${UID(2)}'` })
+    const denied = r => !r.ok && r.code === '42501' && /permission denied for function increment_region_quiz_attempts/.test(r.said)
+
+    // ── before v108 (v55, as production has it) ──
+    const before = await fnState(), shapeBefore = await shape(), stateBefore = await stateOf(d)
+    {
+      const visitor = await callFor2('anon')
+      const student = await callFor2('authenticated')
+      say(await can() === EVERYONE && visitor.ok && sameJson(visitor.checked, [{ quiz_attempts: 1 }]) && student.ok && sameJson(student.checked, [{ quiz_attempts: 1 }]),
+          "before v108: a visitor with only the public key, and student 1, can each create student 2's quiz row with one call",
+          `${await can()} acl ${await aclOf()}`)
+    }
+
+    // ── v108, first run ──
+    {
+      const MARK = '-- ─────────────── 1 to 3. Who may call it'
+      const c = await d.clone()
+      const rr = await runFile(c, probeAt(v108, MARK, 'v108_timeout', `current_setting('lock_timeout')`))
+      const timeout = await probed(c, 'v108_timeout')
+      await c.close()
+      say(v108.includes(MARK) && rr.ok && timeout.v === '5s' && timeout.after === '0',
+          'v108 runs with lock_timeout 5s, and the setting ends with its commit', `${timeout.v}, after ${timeout.after}`)
+    }
+    let r = await runFile(d, v108)
+    const after = await fnState()
+    say(r.ok && r.rows.length === 1 && r.rows[0].v108?.startsWith('v108 ran now: only the server can call increment_region_quiz_attempts.')
+        && r.rows[0].visitor_can === false && r.rows[0].student_can === false && r.rows[0].server_can === true && await can() === ONLY_SERVER,
+        'v108 runs: anon and authenticated lose EXECUTE, the service role keeps it, and its one row says so', `${told(r)} acl ${await aclOf()}`)
+    {
+      const visitor = await callFor2('anon')
+      const student = await callFor2('authenticated')
+      const server = await callFor2('service_role')
+      say(denied(visitor) && denied(student) && server.ok && sameJson(server.checked, [{ quiz_attempts: 1 }]),
+          'after v108: a visitor and a student are refused before the function runs (42501); the service role still calls it',
+          `${visitor.code} / ${student.code} / server ${server.ok ? 'ok' : told(server)}`)
+    }
+    {
+      const acl = await aclOf()
+      const owner = (await d.query(`select has_function_privilege('postgres', '${FN}', 'execute') as o`)).rows[0].o
+      say(seam ? acl === '{postgres=X/postgres,service_role=X/postgres}' && JSON.parse(before)[0].acl.includes('service_role=X/postgres')
+               : acl === '{postgres=X/postgres,service_role=X/postgres}' && JSON.parse(before)[0].acl === null,
+          seam ? "the service role keeps its own grant from Supabase's defaults, as it was; the owner keeps EXECUTE"
+               : 'the service role held EXECUTE through public and now holds it directly; the owner keeps EXECUTE',
+          `${JSON.parse(before)[0].acl} -> ${acl}`)
+      // stateOf: every policy, table grant, function (name, security
+      // definer, owner) and row; the function's ACL is the one thing apart.
+      say(owner && await shape() === shapeBefore && await stateOf(d) === stateBefore,
+          "v108 changes only who may call it: the function's body, comment and owner, every other grant and every row are as they were")
+    }
+
+    // ── run again ──
+    {
+      const was = await stateOf(d)
+      r = await runFile(d, v108)
+      say(r.ok && r.rows[0]?.v108 === 'v108 was already in place. This run changed nothing.'
+          && await stateOf(d) === was && await fnState() === after && await can() === ONLY_SERVER,
+          'v108 run again: "already in place", and nothing changed', told(r))
+    }
+
+    // ── the undo ──
+    {
+      const MARK = `drop function if exists ${FN};`
+      const c = await d.clone()
+      const rr = await runFile(c, probeAt(undo108, MARK, 'u108_timeout', `current_setting('lock_timeout')`))
+      const timeout = await probed(c, 'u108_timeout')
+      await c.close()
+      say(rr.ok && timeout.v === '5s' && timeout.after === '0', 'the undo runs with lock_timeout 5s, and the setting ends with its commit')
+    }
+    r = await runFile(d, undo108)
+    say(r.ok && r.rows[0]?.visitor_can === true && r.rows[0]?.student_can === true && r.rows[0]?.server_can === true
+        && await fnState() === before && await stateOf(d) === stateBefore,
+        "the undo puts the grants back exactly as v55 left them (the ACL as stored, byte for byte), with v55's body, comment and owner, and every row as before",
+        `acl ${await aclOf()}`)
+    {
+      const visitor = await callFor2('anon')
+      say(visitor.ok && sameJson(visitor.checked, [{ quiz_attempts: 1 }]), 'after the undo a visitor can call it again: it reopens the door, as its header says')
+      const was = await stateOf(d)
+      r = await runFile(d, undo108)
+      say(r.ok && await fnState() === before && await stateOf(d) === was, 'a second undo changes nothing', told(r))
+      r = await runFile(d, v108)
+      say(r.ok && r.rows[0]?.v108?.startsWith('v108 ran now') && await fnState() === after && await can() === ONLY_SERVER,
+          'v108 applies again after its undo: the same grants as its first run', told(r))
+    }
+
+    // ── nothing to close, and a refusal ──
+    {
+      const c = await d.clone()
+      await c.exec(`drop function ${FN};`)
+      const was = await stateOf(c)
+      const rr = await runFile(c, v108)
+      say(rr.ok && rr.rows[0]?.v108 === 'increment_region_quiz_attempts does not exist, so there was nothing to close. This run changed nothing.'
+          && rr.rows[0].visitor_can === null && await stateOf(c) === was,
+          'with the function gone, v108 says there was nothing to close, and changes nothing', told(rr))
+      await c.close()
+    }
+    if (!seam) {
+      const c = await d.clone()
+      await runFile(c, undo108)
+      await c.exec('drop role anon;')
+      const was = await stateOf(c), fnWas = await fnState(c)
+      const rr = await runFile(c, v108)
+      say(stopped(rr, 'These roles are missing: anon.') && await stateOf(c) === was && await fnState(c) === fnWas,
+          'with the role anon missing, v108 refuses, says so, and changes nothing', told(rr))
+      await c.close()
+    }
+    await d.close()
+  }
+}
+
 console.log(`\n${'='.repeat(60)}\n  PASS ${ok.length}   FAIL ${fail.length}`)
 if (fail.length) { console.log('\nFAILURES:'); fail.forEach(f => console.log('  - ' + f)); process.exit(1) }

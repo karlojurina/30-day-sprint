@@ -25,12 +25,15 @@ function describe(err: unknown): string {
 }
 
 /** Every failure path leaves with a code AND a detail, so a screenshot of
- *  the login screen is enough to route the ticket. */
+ *  the login screen is enough to route the ticket. Both ways out of this
+ *  page replace it in the history (login-4): pressing Back never lands on
+ *  the spent handoff again, which said "sign-in expired" to a student who
+ *  was signed in, or spun forever when restored from the back-forward cache. */
 function failToLogin(code: string, detail?: string): void {
   const query = detail
     ? `?error=${code}&detail=${encodeURIComponent(detail.slice(0, 200))}`
     : `?error=${code}`;
-  window.location.href = `/login${query}`;
+  window.location.replace(`/login${query}`);
 }
 
 type Tokens = { access_token: string; refresh_token: string };
@@ -129,7 +132,8 @@ export default function AuthCompletePage() {
       if (failure) {
         failToLogin("session_failed", `client: ${failure}`);
       } else {
-        window.location.href = STUDENT_HOME;
+        // Replaced, not pushed (login-4): Back from the map never lands here.
+        window.location.replace(STUDENT_HOME);
       }
     })();
 

@@ -263,9 +263,13 @@ prefixed `server:`
 or `client:` so the two sides that both emit `session_failed` stay
 distinguishable. **Add a map entry in `src/app/login/LoginError.tsx`
 (moved out of `page.tsx` 2026-10-19) whenever you add a code** — an unmapped code falls through to a generic sentence
-and the branch is lost. Both spinner gates (`auth/complete`,
-`AuthContext`) now have hard 15s watchdogs; neither can hang
-indefinitely again.
+and the branch is lost. Both spinner gates have hard watchdogs
+(`auth/complete` 20 s, `AuthContext` 15 s); neither can hang
+indefinitely again. A copy of `auth/complete` restored from the
+back-forward cache could, since its effect never runs again, and a
+fresh load of it said "sign-in expired" to a signed-in student; since
+login-4 (2026-10-20) both its exits replace it in the history
+(`location.replace`), so Back from the map never lands on it.
 
 **⚠️ The 429 logout — ROOT CAUSE, confirmed by source-level trace
 (v85.13, 2026-08-28).** Two independent defects, both now fixed:

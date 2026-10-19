@@ -37,6 +37,10 @@ import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
 import { fetchEarliestMembershipDateForUser } from "@/lib/whop-members";
 
 export const maxDuration = 300;
+// Runs in iad1, next to Whop, while the project's functions run in dub1 next
+// to the database (vercel.json): each student costs at least one Whop call and
+// at most one database write. The counts: CONTEXT.md, "Where the functions run".
+export const preferredRegion = "iad1";
 
 export async function POST(request: NextRequest) {
   // v75.34: dual auth — accept CRON_SECRET for service-level one-time

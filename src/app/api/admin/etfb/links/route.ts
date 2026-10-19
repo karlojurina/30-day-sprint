@@ -32,6 +32,10 @@ import {
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
+// Runs in iad1, next to Whop, while the project's functions run in dub1 next
+// to the database (vercel.json): it makes more Whop calls in a row than its 4
+// database trips. The counts: CONTEXT.md, "Where the functions run".
+export const preferredRegion = "iad1";
 
 export async function POST(request: NextRequest) {
   const auth = await requireTeam(request);

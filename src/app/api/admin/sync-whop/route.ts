@@ -26,6 +26,10 @@ import { runWhopCommunitySync } from "@/lib/whop-sync-runner";
 // default 60s to match the cron endpoint so the Refresh button can't
 // hit a different ceiling.
 export const maxDuration = 300;
+// Runs in iad1, next to Whop, while the project's functions run in dub1 next
+// to the database (vercel.json): it makes far more Whop calls in a row than
+// database trips. The counts: CONTEXT.md, "Where the functions run".
+export const preferredRegion = "iad1";
 
 export async function POST(request: NextRequest) {
   const auth = await requireTeam(request, ["founder", "admin"]);

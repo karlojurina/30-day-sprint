@@ -213,7 +213,9 @@ Two surfaces in one Next.js app:
 - **Tella**: lesson video for `/world`, played as an embed in an iframe
   on `https://www.tella.tv`. Until 2026-10-12 this branch played it
   through Bunny Stream, which no code uses now.
-- **Vercel** — hosting + cron jobs + Analytics
+- **Vercel** — hosting + cron jobs + Analytics. Functions run in Dublin
+  (`dub1`), next to the database, except seven Whop-bound routes
+  ([Where the functions run](#where-the-functions-run-deploy-regions)).
 
 ## Student Surfaces
 
@@ -1410,6 +1412,68 @@ runs to watch on the evening: the first `check-engagement`,
 **Manual triggers** (Karlo/team):
 - "↻ Refresh everything" button (dashboard + `/admin/tasks`) → `/api/admin/refresh-everything` runs sync-whop, rebuild_daily_snapshots RPC, then 3 CSM crons in parallel (v75.22)
 - One-time first_paid_at backfill: `/api/admin/backfill-first-paid-at` (v75.34) — accepts CRON_SECRET fallback auth for terminal use.
+
+## Where the functions run (deploy regions)
+
+The database is in AWS `eu-west-1`, Ireland (read from its DNS address
+against AWS's published ranges, 2026-10-19). Before this setting every
+function ran in Vercel's default `iad1`, Washington, so each database
+round trip crossed the Atlantic: about 70 to 80 ms each, measured from
+Croatia, against a few ms from the same region. `vercel.json` sets
+`"regions": ["dub1"]` (Dublin) for the whole project. Prerendered pages
+and static files come from Vercel's edge as before, and the watch
+heartbeat goes from the browser straight to Supabase, so neither moves.
+
+Whop's API is in the US, so a route that calls Whop more times in a row
+than it reads the database gets slower in Dublin, by about 75 to 90 ms per
+Whop call. Seven routes stay in `iad1` with
+`export const preferredRegion = "iad1"`. Counted from the code (a batch
+run side by side counts once):
+
+| Route | Whop calls in a row | Database trips in a row |
+|---|---|---|
+| `GET /api/cron/sync-whop` | one page per 50 memberships of each product in `WHOP_PRODUCT_ID`, 200 ms apart (78 pages for the main product on 2026-09-17), then up to 25 first-paid lookups, 200 ms apart | about 19 (the two `cron_runs` writes, `sync_runs`, the existing rows and the upserts in batches of 500), plus 1 for each first-paid date found |
+| `POST /api/admin/sync-whop` | the same | the same, plus 2 for the team login |
+| `POST /api/admin/backfill-first-paid-at` | at least 1 per student (up to 10 pages), 200 ms apart; its own header says a run may come near its 300 s limit | 1 for the list (plus 2 for a team login), then at most 1 per student |
+| `GET /api/admin/backfill-discord-ids` | 1 per student | 1 for the list, then at most 1 per student |
+| `GET /api/admin/etfb` | 1, then the longest of three page walks run side by side (every plan, every ETfB membership, every Apex membership, 50 a page), then up to 2 rounds of member lookups; all inside a 20 s read budget | 3 or 4 |
+| `POST /api/admin/etfb/links` | 4, plus the longer of two walks (every plan, every ETfB membership) | 4 |
+| `GET /api/admin/stats` | 2 or 3 rounds (up to 24 requests side by side, then the per-product check) | 2 |
+
+In Dublin `sync-whop` would gain about 6 to 9 s on its Whop pages and win
+back 1.4 to 3 s on the database: a few seconds slower every 2 hours, and
+"Refresh everything" waits for it. The other six are slower or no faster
+there.
+
+Routes that call an outside service but read the database more stay in
+Dublin: the Whop login callback (about 14 database trips, 4 or 5 Whop
+calls; about 0.6 s faster per login), `refresh-watch-sync` (8 to 11
+against 1 or 2), `discounts/approve` (about 8 against 1),
+`etfb/links/[planId]/archive` (4 against 1), the Whop webhook (1 to 5
+database trips per event; only a deactivation asks Whop first, 1 to 5
+calls, and nobody waits for a webhook), `refresh-everything` (4 of its
+own; its `sync-whop` call runs in `iad1`), the unscheduled
+`check-lesson-videos` (per video 1 Tella request and 1 write, started at
+least 700 ms apart, so the region hardly matters), and the check crons and
+`day28-dm` (database reads with 1 or 2 Discord posts; `day28-dm` makes 2
+Discord calls against 4 database trips per student). A new route that
+calls Whop more times in a row than it reads the database gets the same
+`preferredRegion` export; count both before choosing.
+
+**Not yet seen working.** Next's own documentation in this version
+(`node_modules/next/dist/docs/.../preferredRegion.md`) says Vercel honours
+`preferredRegion` only on the edge runtime. Vercel's Functions API
+reference (read 2026-10-20) lists `preferredRegion` among the App Router
+route options, and `next build` writes it into
+`.next/server/functions-config-manifest.json` as each route's `regions`.
+Vercel's documented fallback is per-function `regions` under `functions`
+in `vercel.json`. Check on a preview deploy before production: the
+`x-vercel-id` header of any API response reads `edge::function::id`, so an
+unauthenticated `POST /api/admin/sync-whop` (a 401) should show `iad1` and
+`/api/auth/me` should show `dub1`. Two function regions need a paid plan
+(Vercel allows Pro up to 5, Hobby one, and a deploy over the limit fails
+before its build); the plan was inferred from the 2-hourly crons and
+`maxDuration = 300`, not read in the dashboard.
 
 ## Key Libraries (`src/lib/`)
 

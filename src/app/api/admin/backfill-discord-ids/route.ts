@@ -15,6 +15,11 @@ import { fetchWhopDiscordId } from "@/lib/whop";
  *   curl "https://YOUR-DOMAIN/api/admin/backfill-discord-ids" \
  *     -H "Authorization: Bearer $CRON_SECRET"
  */
+// Runs in iad1, next to Whop, while the project's functions run in dub1 next
+// to the database (vercel.json): each student costs one Whop call and at most
+// one database write. The counts: CONTEXT.md, "Where the functions run".
+export const preferredRegion = "iad1";
+
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {

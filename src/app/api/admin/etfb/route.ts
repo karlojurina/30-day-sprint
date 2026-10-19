@@ -43,6 +43,11 @@ export const dynamic = "force-dynamic";
 // Interactive page load, not a cron. The house 300 would hold a browser tab
 // for five minutes against a wedged upstream.
 export const maxDuration = 30;
+// Runs in iad1, next to Whop, while the project's functions run in dub1 next
+// to the database (vercel.json): its Whop pages in a row outnumber its 3 or 4
+// database trips, inside a 20 s read budget. The counts: CONTEXT.md, "Where
+// the functions run".
+export const preferredRegion = "iad1";
 
 function noStore(res: NextResponse) {
   res.headers.set("Cache-Control", "no-store");

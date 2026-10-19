@@ -88,6 +88,16 @@ student who already holds a request from the old dashboard; the form's
 database function stands in from v29's body, and the migration harness
 (section 26) runs the real one on the same four cases.
 
+`terrain-identical.test.mjs` (2026-10-20) proves that the map's faster
+terrain (`src/lib/world-v6/terrain.ts`) gives every number the old one gave.
+The old one is `fixtures/terrain-70c934a.ts`, byte for byte the file at
+production's commit; `build.mjs` copies the current one and `layout.ts`, the
+test copies the fixture, and both run over the meshes the scene builds, about
+3.8 million heights and shore radii over the world and past it, and the edges
+of the new code's tables. Every value is compared as its bytes and the whole
+through SHA-256; then both are timed. A change to the terrain's output on
+purpose fails it by design: the test's header says what to do.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

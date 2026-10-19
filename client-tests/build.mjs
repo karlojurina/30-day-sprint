@@ -248,3 +248,11 @@ gen('../src/app/api/auth/whop/callback/route.ts', './_gen/whop-callback-route.ts
   ...toStub('next/server', '@/lib/supabase-server', '@/lib/whop', '@/lib/whop-members', '@/lib/achievements',
     '@/app/api/student/_lib/update-streak', '@supabase/supabase-js'),
 ], { dropLineComments: true })
+
+// The map's terrain (speed, 2026-10-20; terrain-identical.test.mjs, which
+// copies the frozen old terrain the same way). layout.ts has no imports and
+// copies across untouched; terrain.ts's layout import gains the .ts Node
+// needs, and "three" resolves from node_modules as it is. Not committed
+// (client-tests/.gitignore): 2,500 lines that every run writes again.
+gen('../src/lib/world-v6/layout.ts', './_gen/world-layout.ts')
+gen('../src/lib/world-v6/terrain.ts', './_gen/terrain.ts', [['from "./layout"', 'from "./world-layout.ts"']])

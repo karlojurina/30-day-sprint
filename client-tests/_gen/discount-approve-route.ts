@@ -22,6 +22,11 @@ import {
  * If Whop API generation fails, we DO NOT mark the row approved —
  * Astrid retries. Better than approving without a code.
  *
+ * Step 3 writes only while the row is still pending. If someone else
+ * decided the request while Whop made the code, nothing is approved: 409,
+ * and the code that was made has to be deleted in Whop (fix lane G1,
+ * admin-4).
+ *
  * After this returns, Astrid manually attaches the code to the
  * student's Whop subscription in the Whop dashboard, then calls
  * POST /api/discounts/mark-applied to close the loop.
@@ -282,7 +287,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { error: updateError } = await supabase
+  // Still pending: another team member (or another tab) may have rejected
+  // the request while Whop made the code, and their decision stands.
+  const { data: approvedRows, error: updateError } = await supabase
     .from("discount_requests")
     .update({
       status: "approved",
@@ -291,13 +298,26 @@ export async function POST(request: NextRequest) {
       reviewed_at: new Date().toISOString(),
       reviewed_by: reviewerId ?? null,
     })
-    .eq("id", requestId);
+    .eq("id", requestId)
+    .eq("status", "pending")
+    .select("id");
 
   if (updateError) {
     console.error("Failed to update discount request:", updateError);
     return NextResponse.json(
       { error: "Code was created on Whop but the DB update failed. Check the discount_requests row and reconcile manually." },
       { status: 500 }
+    );
+  }
+  if (!approvedRows || approvedRows.length === 0) {
+    console.error(
+      `[discount approve] request ${requestId}: the Whop code ${code} (${whopPromoId}) was created, but the request had already been decided, so nothing was approved. Delete the code in Whop.`,
+    );
+    return NextResponse.json(
+      {
+        error: `The Whop code ${code} was created, but this request had already been decided, so the code must be deleted in Whop.`,
+      },
+      { status: 409 },
     );
   }
 

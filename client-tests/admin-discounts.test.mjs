@@ -3,6 +3,9 @@
 //
 //   admin-1 / discount-1: Cancel (or Esc) on the Reject prompt rejected the
 //   request anyway, with no reason, and on the new course a rejection is final.
+//   admin-4 / discount-3: Reject overwrote a request another team member (or
+//   another tab) had already approved or marked applied, and Approve's last
+//   write overwrote a rejection that landed while Whop made the code.
 //
 // The routes run as they are. This file copies each one into _gen/ with only
 // its import lines rewritten, as build.mjs and discount-queue.test.mjs do: the
@@ -47,11 +50,21 @@ const LOGIN = [
   ['from "@/lib/admin-auth"', 'from "./stub-admin.ts"'],
 ]
 copyRoute('src/app/api/discounts/reject/route.ts', 'admin-reject-route', LOGIN)
+copyRoute('src/app/api/discounts/approve/route.ts', 'admin-approve-route', [
+  ...LOGIN,
+  ['from "@/lib/whop"', 'from "./stub-admin.ts"'],
+  ['from "@/lib/catalog-tables"', 'from "./stub-server.ts"'],
+  ['from "@/lib/constants"', 'from "./constants.ts"'],
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
+])
 
 const reject = { now: (await import('./_gen/admin-reject-route.ts')).POST, old: (await import('./_gen/admin-reject-route.old.ts')).POST }
+const approve = { now: (await import('./_gen/admin-approve-route.ts')).POST, old: (await import('./_gen/admin-approve-route.old.ts')).POST }
+const routes = (v) => ({ '/api/discounts/reject': reject[v], '/api/discounts/approve': approve[v] })
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
 const { FakeDb, useDb: installDb } = await import('./_gen/stub-server.ts')
-const { setTeam } = await import('./_gen/stub-admin.ts')
+const { setTeam, promoCodes, whileWhopAnswers } = await import('./_gen/stub-admin.ts')
 
 let pass = 0
 const fails = []
@@ -118,13 +131,30 @@ function tab(source, routes, { answer = null, teamMember = { id: 'team-1' } } = 
     return new Function(...names, `${componentFunction(source, name)}\nreturn ${name};`)(...names.map((n) => scope[n]))
   }
   const handleReject = bind('handleReject')
-  return { seen, reject: (id) => logged(() => handleReject(id)) }
+  const handleApprove = bind('handleApprove')
+  return {
+    seen,
+    reject: (id) => logged(() => handleReject(id)),
+    approve: (id, override = false) => logged(() => handleApprove(id, override)),
+  }
 }
 
+/**
+ * One student and their requests. The catalog flag is stub-server.ts's
+ * default, the old course, whose rule needs only these two lessons done in
+ * the 14 days: the shortest way to a request the rule approves. What these
+ * checks are about, the route's last write, is the same on both courses.
+ */
 function freshDb(requests) {
   const db = new FakeDb({
-    students: [{ id: 's1', first_paid_at: '2026-10-02T10:00:00.000Z', ad_submissions_verified: true }],
-    discount_requests: requests.map((r) => ({ student_id: 's1', created_at: '2026-10-20T10:00:00.000Z', ...r })),
+    students: [{ id: 'a1b2c3d4-0000-4000-8000-000000000001', first_paid_at: '2026-10-02T10:00:00.000Z', ad_submissions_verified: true }],
+    lessons: [{ id: 'l001', region_id: 'r1' }, { id: 'l002', region_id: 'r2' }],
+    student_lesson_completions: ['l001', 'l002'].map((lesson_id) => ({
+      student_id: 'a1b2c3d4-0000-4000-8000-000000000001', lesson_id, completed_at: '2026-10-03T10:00:00.000Z',
+    })),
+    discount_requests: requests.map((r) => ({
+      student_id: 'a1b2c3d4-0000-4000-8000-000000000001', created_at: '2026-10-05T10:00:00.000Z', ...r,
+    })),
   })
   installDb(db)
   setTeam({ id: 'team-1', role: 'founder' })
@@ -159,6 +189,82 @@ for (const [answer, says] of [[null, 'Cancel'], ['', 'OK on an empty box'], ['ad
 }
 ok(/const reason = prompt\("Rejection reason \(optional\):"\);\s*(\/\/[^\n]*\n\s*)*if \(reason === null\) return;\s*setProcessing\(requestId\);/.test(page.now),
    'in the source, the null check sits between the prompt and the first state change')
+
+console.log('\n=== admin-4 / discount-3: only a pending request can be decided ===')
+const ALREADY = 'This request was already decided.'
+/** POST /api/discounts/reject straight, as a stale tab's button sends it. */
+const rejectStraight = async (v, requestId, reason = 'changed my mind') =>
+  (await logged(async () => {
+    const res = await reject[v](new Request('http://app/api/discounts/reject', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId, reason }),
+    }))
+    return { status: res.status, body: await res.json() }
+  })).value
+for (const [status, extra] of [
+  ['approved', { promo_code: 'ECOM30-A1B2C3', whop_promo_id: 'promo_7', reviewed_by: 'team-2', reviewed_at: '2026-10-20T09:00:00.000Z' }],
+  ['applied', { promo_code: 'ECOM30-A1B2C3', whop_promo_id: 'promo_7', applied_at: '2026-10-20T09:30:00.000Z' }],
+  ['rejected', { rejection_reason: 'ads not verified', reviewed_at: '2026-10-20T09:00:00.000Z' }],
+]) {
+  const db = freshDb([{ id: 'r1', status, ...extra }])
+  const before = show(row(db, 'r1'))
+  const r = await rejectStraight('now', 'r1')
+  ok(r.status === 409 && r.body.error === ALREADY && show(row(db, 'r1')) === before,
+     `Reject on a request already ${status}: 409 "${ALREADY}", the row untouched`, show(r))
+}
+{
+  const db = freshDb([{ id: 'r1', status: 'approved', promo_code: 'ECOM30-A1B2C3', whop_promo_id: 'promo_7' }])
+  const r = await rejectStraight('old', 'r1')
+  ok(r.status === 200 && row(db, 'r1').status === 'rejected' && row(db, 'r1').promo_code === 'ECOM30-A1B2C3',
+     `control: the route at ${BASE} turns an approved request with a live code into a rejected one`, show(row(db, 'r1')))
+}
+
+for (const v of ['now', 'old']) {
+  // Two tabs on the Pending tab. A approves; B, never reloaded, presses Reject.
+  const db = freshDb([{ id: 'r1', status: 'pending' }])
+  const codes = promoCodes.length
+  const a = tab(page[v], routes(v), { teamMember: { id: 'team-1' } })
+  const b = tab(page[v], routes(v), { answer: 'not this one', teamMember: { id: 'team-2' } })
+  await a.approve('r1')
+  const approved = show(row(db, 'r1'))
+  await b.reject('r1')
+  const r = row(db, 'r1')
+  if (v === 'now') {
+    ok(a.seen.reloads === 1 && r.status === 'approved' && r.promo_code === 'ECOM30-A1B2C3' && show(r) === approved,
+       'two tabs: A approves (one code), then B\'s stale Reject leaves the approved row exactly as it was', show(r))
+    ok(b.seen.errors.r1 === ALREADY && b.seen.reloads === 0,
+       'and B\'s page shows the refusal inline, in plain words', show(b.seen.errors))
+  } else {
+    ok(r.status === 'rejected' && r.promo_code === 'ECOM30-A1B2C3' && promoCodes.length === codes + 1 && b.seen.reloads === 1,
+       `control: at ${BASE} B's Reject wins, and the code made on Whop for A stays live on a rejected request`, show(r))
+  }
+}
+
+for (const v of ['now', 'old']) {
+  // A presses Approve. While Whop makes the code, B (another tab, or Karlo
+  // beside Astrid) rejects the same request, still pending at that moment.
+  const db = freshDb([{ id: 'r1', status: 'pending' }])
+  const codes = promoCodes.length
+  const a = tab(page[v], routes(v), { teamMember: { id: 'team-1' } })
+  const b = tab(page[v], routes(v), { answer: 'not this one', teamMember: { id: 'team-2' } })
+  let bDuring = null
+  whileWhopAnswers(async () => { bDuring = await b.reject('r1') })
+  const { lines } = await a.approve('r1')
+  whileWhopAnswers(null)
+  const r = row(db, 'r1')
+  const made = promoCodes.slice(codes).map((p) => p.code)
+  if (v === 'now') {
+    const sentence = 'The Whop code ECOM30-A1B2C3 was created, but this request had already been decided, so the code must be deleted in Whop.'
+    ok(bDuring !== null && b.seen.reloads === 1 && r.status === 'rejected' && r.rejection_reason === 'not this one' && r.promo_code === null,
+       'a rejection that lands while Whop makes the code stands: rejected, B\'s reason, no code on the row', show(r))
+    ok(show(made) === show(['ECOM30-A1B2C3']) && a.seen.errors.r1 === sentence && a.seen.reloads === 0,
+       'A reads the 409 inline: the code was made and must be deleted in Whop', show({ made, shown: a.seen.errors.r1 }))
+    ok(lines.some((l) => l.includes('request r1') && l.includes('ECOM30-A1B2C3') && l.includes('Delete the code in Whop')),
+       'and the server log names the request and the code', show(lines))
+  } else {
+    ok(r.status === 'approved' && r.promo_code === 'ECOM30-A1B2C3' && r.rejection_reason === 'not this one',
+       `control: at ${BASE} Approve's last write turns B's rejection back into an approval, keeping B's reason`, show(r))
+  }
+}
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)
 if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1) }

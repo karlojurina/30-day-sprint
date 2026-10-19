@@ -176,7 +176,17 @@ import s from "./world.module.css";
 const N = STUDY_AREAS.length;
 /** The window.__world* test hooks: every build but production. */
 const HOOKS = process.env.NODE_ENV !== "production";
-const NARROW_QUERY = "(width < 760px)";
+/**
+ * The phone's list: narrow screens, and short ones (bug hunt 2026-10-19,
+ * phones-1 and map-2). A phone held sideways is 780 to 932 px wide and 304 to
+ * 430 px tall, and the 3D layout was only ever measured from 700 px tall: the
+ * welcome's Continue sat on the opening's pins, the timeline covered the
+ * card's Watch, a place's panel had no lesson above its fold, and turning the
+ * phone built the 3D behind an open lesson. Its twins in the stylesheets
+ * (world.module.css, world-ui.module.css) and the landing poster's <source>
+ * say the same, so client-tests/phone-view.test.mjs checks them together.
+ */
+const NARROW_QUERY = "(width < 760px), (height < 500px)";
 /** Final pass C: the place whose click-in goes through the telescope (scene.ts TEL_PARK_PLACE, a7). */
 const TEL_K = SKY_MARKS.findIndex((m) => m.id === "a7");
 const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";
@@ -397,7 +407,7 @@ const PLAIN_HOOKS = [
   "__worldCheckpoint",
 ] as const;
 
-/** A transparent pixel: the landing poster's fallback below 760 px, where the page is a list and needs no poster. */
+/** A transparent pixel: the landing poster's fallback on a phone's size (NARROW_QUERY), where the page is a list and needs no poster. */
 const BLANK_GIF = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 const NP = POSTER_IDS.length;
 
@@ -2802,7 +2812,7 @@ function WorldV6View({
           {POSTER_IDS.map((id, i) =>
             i === 0 ? (
               <picture key={id}>
-                <source media="(min-width: 760px)" srcSet={posterSrc(id)} />
+                <source media="(min-width: 760px) and (min-height: 500px)" srcSet={posterSrc(id)} />
                 <img
                   ref={(el) => {
                     posterImgs.current[0] = el;
@@ -3471,7 +3481,7 @@ function NextBlock({ study, onWatch }: { study: Study; onWatch: (el: HTMLElement
   );
 }
 
-/** Final pass C: the phone's window on the world (under 760 px no 3D ever loads). */
+/** Final pass C: the phone's window on the world (on a phone's size, NARROW_QUERY, no 3D ever loads). */
 const HERO_H = 620;
 /** Where the landmark's pin sits in the window: centred, just under the header, so the structure
  *  hangs below it in the open band above the Next block's text (196 zoomed the lookout to fill it). */

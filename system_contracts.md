@@ -894,7 +894,11 @@ When adding a new table, append it here. When deleting a field, scan
 - **Depends on:** `students`
 - **Depended on by:** `/admin/alerts`, CSM cron (alert → task mapping
   via `pickExistingAlertScenario` in
-  `/api/cron/check-csm-tasks/route.ts`)
+  `/api/cron/check-csm-tasks/route.ts`), the team's Discord post from
+  `/api/cron/check-engagement` (`buildAlertsEmbeds` in
+  `src/lib/discord.ts`: one message per embed of at most 4096
+  characters; a post that fails marks the run failed). An open alert of
+  a type blocks a new one, so an alert is posted once.
 - **Stable contract:** `student_id`, `alert_type`, `created_at`,
   `dismissed_at`
 - **At the course switch (v104):** open `no_tasks_7d` and
@@ -1025,7 +1029,11 @@ When adding a new table, append it here. When deleting a field, scan
   "Vercel scheduled this cron but the secret was wrong" from
   "Vercel didn't schedule it at all" from "scheduled + auth ok but
   the work errored." Best-effort writes — never throw, so audit
-  failures don't break business logic.
+  failures don't break business logic. Since 2026-10-20 `failed` also
+  means, for `check-engagement`, a Discord post of new alerts that did
+  not go out (`error_message` names each part and Discord's answer),
+  and for the three CSM crons a failed read of the student pool, the
+  milestones or the completions (the run wrote nothing).
 
 ### `student_rewards` + `hidden_rewards`
 - **Depends on:** `students`

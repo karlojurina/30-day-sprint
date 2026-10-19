@@ -26,10 +26,13 @@
  * it. Write mode then writes the member's sync row with the same columns and
  * values as the backfill (never the token columns) and ticks the streak only
  * when a row it added was opened on Whop on the run's own UTC day (Lovro's
- * call A, 2026-10-19). It moves no "last active", awards no badge, runs no
- * "came back" check and no CSM task check, and posts nothing to Discord: the
- * next login or visit evaluates the badges against the true days, and the
- * crons read the rows.
+ * call A, 2026-10-19) and the member's streak does not count that day yet: a
+ * tick on a counted day changes nothing, so it is neither counted nor listed
+ * in changes.streak_ticked, the streak rows the undo puts back from the
+ * snapshot. It moves no "last active", awards no badge, runs no "came back"
+ * check and no CSM task check, and posts nothing to Discord: the next login
+ * or visit evaluates the badges against the true days, and the crons read the
+ * rows.
  *
  * FAILURES are counted by kind, never by message: the read's message carries
  * the member's Whop id and the course id. A failed member gets no write at
@@ -38,7 +41,10 @@
  * failures of one kind in a row, and when 25 members with finished Whop
  * lessons matched no lesson at all (WHOP_COURSE_ID names another course). A
  * 429 is waited out (the seconds Whop names, or 15, at most 30) and retried
- * twice; a third ends the call with the cursor before that member.
+ * twice; a third ends the call with the cursor before that member, and so
+ * does a wait that would end past the 240 s budget. A Whop read still
+ * unanswered 285 s into the call is given up the same way, so the call
+ * answers before maxDuration (300 s) with its change log and its cursor.
  *
  * The design and the reasons: _admin/prds/night-2026-10-19/whop_catchup.md,
  * section 7, in the workspace (outside this repository).
@@ -58,6 +64,12 @@ import { getTodayUtc } from "./streak.ts";
 
 /** No new member is started after this, so a call answers before maxDuration (300 s). */
 export const CATCHUP_DEADLINE_MS = 240_000;
+/**
+ * No Whop read is waited on past this point of a call. A member started just
+ * inside the budget can still meet a read that stalls; at this point the call
+ * gives it up and answers, 15 s before Vercel stops the function.
+ */
+export const CATCHUP_READ_LIMIT_MS = 285_000;
 /** 4 Whop requests a second, start to start: about 6 of Whop's 10 stay free for the logins and visits sharing the key. */
 const WHOP_GAP_MS = 250;
 /** Whop's page size for course_lesson_interactions (whop.ts asks for first=100). */
@@ -239,6 +251,31 @@ function waitAfter429Ms(named: number | null): number {
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+const READ_TIMED_OUT = Symbol("no Whop answer by the read limit");
+type WhopRead = Awaited<ReturnType<typeof fetchCompletedLessonsAsAdmin>>;
+
+/**
+ * The member's Whop read, or READ_TIMED_OUT when Whop has not answered by
+ * CATCHUP_READ_LIMIT_MS into the call. A read that fails rejects as it does
+ * on its own. whop.ts takes no abort signal, so a read given up on runs on
+ * unwatched and its answer is dropped (Promise.race keeps its rejection
+ * handled). The timer is cleared either way, so none outlives the call.
+ */
+async function readBeforeLimit(whopUserId: string, startedAtMs: number): Promise<WhopRead | typeof READ_TIMED_OUT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<typeof READ_TIMED_OUT>((resolve) => {
+    timer = setTimeout(
+      () => resolve(READ_TIMED_OUT),
+      Math.max(0, startedAtMs + CATCHUP_READ_LIMIT_MS - Date.now()),
+    );
+  });
+  try {
+    return await Promise.race([fetchCompletedLessonsAsAdmin(whopUserId), limit]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function inChunks<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
@@ -360,8 +397,8 @@ export async function runWhopCatchup(
       return inARow.count >= SAME_KIND_IN_A_ROW_STOP;
     };
 
-    // 1. Whop, paced, a 429 waited out and retried.
-    let read: Awaited<ReturnType<typeof fetchCompletedLessonsAsAdmin>> | null = null;
+    // 1. Whop, paced, a 429 waited out and retried, no read waited on past the limit.
+    let read: WhopRead | null = null;
     let failKind: WhopFailKind | null = null;
     let endBefore: CatchupStop | null = null;
     for (let attempt = 0; ; attempt++) {
@@ -369,7 +406,16 @@ export async function runWhopCatchup(
       if (wait > 0) await sleep(wait);
       const start = Date.now();
       try {
-        read = await fetchCompletedLessonsAsAdmin(m.whop_user_id);
+        const got = await readBeforeLimit(m.whop_user_id, startedAtMs);
+        if (got === READ_TIMED_OUT) {
+          // Not finished and no failure: the cursor stays before this member,
+          // nothing of theirs is written, and the next call starts with them.
+          whop.requests += 1;
+          console.warn(`[whop-catchup] student=${m.id} no Whop answer ${CATCHUP_READ_LIMIT_MS / 1000} s into the call, the call ends before them`);
+          endBefore = "time budget";
+          break;
+        }
+        read = got;
         // A member past 100 interactions took a second page: the next start waits for both.
         const pages = Math.max(1, Math.ceil(read.rawCount / WHOP_PAGE_SIZE));
         whop.requests += pages;
@@ -554,12 +600,27 @@ export async function runWhopCatchup(
     }
 
     // 6. The streak (call A): a day only for a lesson added now that Whop
-    //    says was opened today, UTC, the day tickStudentStreak counts.
-    if (added.some((t) => t.whopDay === getTodayUtc())) {
-      streakCount += 1;
-      if (write) {
-        await tickStudentStreak(supabase, m.id);
-        changes.streak_ticked.push(m.id);
+    //    says was opened today, UTC, the day tickStudentStreak counts, and
+    //    only while the member's streak does not count today yet. A tick on
+    //    a counted day changes nothing, so the member is neither counted nor
+    //    listed in changes.streak_ticked, whose rows the undo restores from
+    //    the snapshot. A streak that cannot be read gets no tick, as
+    //    tickStudentStreak itself does after a failed read.
+    const today = getTodayUtc();
+    if (added.some((t) => t.whopDay === today)) {
+      const { data: streakRow, error: streakError } = await supabase
+        .from("student_streaks")
+        .select("last_streak_date")
+        .eq("student_id", m.id)
+        .maybeSingle();
+      if (streakError) {
+        console.error(`[whop-catchup] student=${m.id} streak read failed, no tick: ${streakError.message}`);
+      } else if (streakRow?.last_streak_date !== today) {
+        streakCount += 1;
+        if (write) {
+          await tickStudentStreak(supabase, m.id);
+          changes.streak_ticked.push(m.id);
+        }
       }
     }
 

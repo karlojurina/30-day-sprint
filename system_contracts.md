@@ -156,7 +156,9 @@ When adding a new table, append it here. When deleting a field, scan
   mark-action-shipped (action half newly done); toggle-lesson (a task
   with no action half ticked); the Whop catch-up (`src/lib/whop-catchup.ts`,
   T-089), for a lesson it adds that Whop says was opened that day (UTC),
-  with no "last active". A failed read writes nothing. Read by the
+  with no "last active", and only when the streak does not count that day
+  yet (it reads `last_streak_date` first, so its change log leaves out a
+  member whose day already counted). A failed read writes nothing. Read by the
   data route (`current_streak` through `currentStreakAsOf`), and so by
   `StudentContext` (`streak`); `src/lib/achievements.ts`;
   `src/lib/day28-embed.ts` and the journal page (longest only); and the

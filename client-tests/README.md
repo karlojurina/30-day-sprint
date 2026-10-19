@@ -94,13 +94,26 @@ real team login (`admin-auth.ts`, so 401 and 403 are its own answers, on the
 stand-in's auth and `team_members`). Whop is the real `whop.ts` read on a
 stand-in `fetch` that pages like Whop's v1, so every failure the run sorts by
 kind is the read's own message. Its clock is the suite's: `new Date()` and
-`Date.now()` answer it and `setTimeout` moves it by the time asked, so the
-pace (4 Whop requests a second), a 429's wait and the 240 s budget pass in
-milliseconds and are measured. For it `stub-server.ts` gained `.range()` (for
+`Date.now()` answer it, and `setTimeout` sets a timer on it. Timers fire in
+the order they fall due, one per turn of the event loop, each moving the
+clock to its time, and `clearTimeout` drops one; Whop's answer time is such a
+timer. So the pace (4 Whop requests a second), a 429's wait, the 240 s budget
+and the 285 s limit on one Whop read pass in milliseconds and are measured,
+and a read that answers late loses to that limit as it would on Vercel. A
+login racing the run is a hook on the stand-in's log: it writes the same
+lesson after the run read the rows and before the run's insert or update
+applies. For it `stub-server.ts` gained `.range()` (for
 `fetchAllRowsPaginated`), the columns a select named on its log entry, and
 `students.csm_exempt` and `whop_plan_id`. Each of 19 rules was broken once in a
-copy of the run, and the suite failed every time. `streak.test.mjs` runs the
-catch-up's one streak rule too.
+copy of the run, and the suite failed every time. The review the same night
+found 6 breaks it let through: no `ignoreDuplicates` on the insert, no guard
+on an empty `completed_at` when finishing a row, no budget check before a
+429's wait, the streak ticked from the planned rows and the finishes counted
+from the planned ones instead of the rows written, and no pace after a failed
+read. The sections added in its fix round fail on each of those 6, and on 8
+breaks of the two rules that round added (the read limit, and no tick for a
+streak that already counts today). `streak.test.mjs` runs the catch-up's one
+streak rule too.
 
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the

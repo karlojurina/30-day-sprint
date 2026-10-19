@@ -13,10 +13,13 @@
 // stand-in; the streak's writer is recorded in `steps`, then run for real.
 //
 // The clock is the suite's: `new Date()` and `Date.now()` answer it, and
-// setTimeout moves it by the time asked and fires at once. So the pace (4
-// Whop requests a second, start to start), a 429's wait and the 240 s budget
-// pass in milliseconds and are measured on that clock. An answer from Whop
-// takes `latency` on it (0 unless a section says).
+// setTimeout sets a timer on it. Timers fire in the order they fall due, one
+// per turn of the event loop, each moving the clock to its time as it fires;
+// clearTimeout drops one. So the pace (4 Whop requests a second, start to
+// start), a 429's wait, the 240 s budget and the 285 s limit on one Whop read
+// pass in milliseconds and are measured on that clock, and a read that
+// answers late loses to the limit as it would on Vercel. An answer from Whop
+// takes `latency` on it, as a timer (0 unless a section says).
 //
 // Every Whop id, email, name, key, secret and course id here is made up.
 import { POST as catchup, maxDuration } from './_gen/whop-catchup-route.ts'
@@ -38,6 +41,7 @@ const same = (a, b) => show(a) === show(b)
 // ── The clock ────────────────────────────────────────────────────────────────
 const RealDate = Date
 const realSetTimeout = globalThis.setTimeout
+const realClearTimeout = globalThis.clearTimeout
 const realFetch = globalThis.fetch
 const NOW = '2026-10-20T07:00:00.000Z'
 let clock = RealDate.parse(NOW)
@@ -49,10 +53,34 @@ class Clock extends RealDate {
   static now() { return clock }
 }
 globalThis.Date = Clock
-globalThis.setTimeout = (fn, ms = 0, ...args) => {
-  clock += Math.max(0, Number(ms) || 0)
-  return realSetTimeout(fn, 0, ...args)
+/** The timers set on the suite's clock and not fired yet. */
+let timers = []
+let timersSet = 0
+let pumping = false
+/** On the next turn of the event loop, after everything already under way has run, fire the timer due first. */
+function pump() {
+  if (pumping || timers.length === 0) return
+  pumping = true
+  realSetTimeout(() => {
+    pumping = false
+    timers.sort((a, b) => a.due - b.due || a.n - b.n)
+    const t = timers.shift()
+    if (t) {
+      clock = Math.max(clock, t.due)
+      t.fn(...t.args)
+    }
+    pump()
+  }, 0)
 }
+globalThis.setTimeout = (fn, ms = 0, ...args) => {
+  const t = { due: clock + Math.max(0, Number(ms) || 0), n: ++timersSet, fn, args, ref: () => t, unref: () => t }
+  timers.push(t)
+  pump()
+  return t
+}
+globalThis.clearTimeout = (t) => { timers = timers.filter((x) => x !== t) }
+/** `ms` on the suite's clock. */
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 // ── The deployment's values ──────────────────────────────────────────────────
 const COURSE = 'cour_TESTcatchup01'
@@ -77,7 +105,7 @@ globalThis.fetch = async (url, init = {}) => {
   const after = u.searchParams.get('after')
   const page = after ? Number(after.slice(1)) : 0
   asked.push({ user, page, at: clock, key: init.headers?.Authorization, course: u.searchParams.get('course_id') })
-  clock += latency
+  if (latency > 0) await wait(latency)
   const held = onWhop[user]
   if (typeof held === 'function') return held(asked.filter((a) => a.user === user).length)
   const rows = held ?? []
@@ -126,6 +154,8 @@ function freshDb({ members = [], completions = [], sync = [], milestones = [], s
   steps.length = 0
   asked = []
   latency = 0
+  // A read a section gave up on is never answered: its timer goes with the clock.
+  timers = []
   clock = RealDate.parse(NOW)
   return db
 }
@@ -390,6 +420,67 @@ console.log('\n=== Write: Whop\'s times on the rows, the sync rows as the backfi
   ok(show(db.rows('student_lesson_completions')) === before && steps.length === 0, 'and every row and time is as the first pass left it, with no step')
 }
 
+console.log('\n=== A login writing the same lesson while the run writes: the login\'s row stays as the login wrote it ===')
+{
+  // Both lessons were opened on Whop today, so a row the run wrongly claimed
+  // would tick the streak too. 81 has no row when the run reads, and a login
+  // adds one (06:59:59) just as the run's insert goes out. 82 has a skipped
+  // row, and a login finishes it just as the run's update goes out.
+  const LOGIN_AT = '2026-10-20T06:59:59.000Z'
+  onWhop = {
+    [W(81)]: [opened(W(81), 'lesn_TEST02', '2026-10-20T06:30:00.000Z')],
+    [W(82)]: [opened(W(82), 'lesn_TEST04', '2026-10-20T06:30:00.000Z')],
+  }
+  const db = freshDb({
+    members: [member(81), member(82)],
+    completions: [{ id: 'row-82', student_id: sid(82), lesson_id: 'a1l04', completed_at: null, skipped_at: '2026-10-19T20:00:00.000Z' }],
+  })
+  /** `land` runs once, as the run's first `op` on the completions is logged: after the run read the rows, before the database applies its write. */
+  const loginLands = (op, land) => {
+    const push = db.log.push.bind(db.log)
+    let landed = false
+    db.log.push = (q) => {
+      if (!landed && q.table === 'student_lesson_completions' && q.op === op) { landed = true; land() }
+      return push(q)
+    }
+  }
+  loginLands('upsert', () => db.rows('student_lesson_completions').push({ id: 'row-81', student_id: sid(81), lesson_id: 'a1l02', completed_at: LOGIN_AT, skipped_at: null }))
+  loginLands('update', () => Object.assign(rowOf(db, 82, 'a1l04'), { completed_at: LOGIN_AT, skipped_at: null }))
+  const r = await call({ mode: 'write' })
+  ok(r.body.ok === true && same(rowsOf(db, 81).map((x) => [x.id, x.completed_at]), [['row-81', LOGIN_AT]]) && r.body.rows.inserted === 0 && same(r.body.changes.inserted, []),
+     'a row a login added after the run\'s read keeps the login\'s time, and the run claims it nowhere (inserted 0, not in the change log)', show({ rows: rowsOf(db, 81), changes: r.body.changes.inserted }))
+  const r82 = rowOf(db, 82, 'a1l04')
+  ok(r82.completed_at === LOGIN_AT && r82.skipped_at === null && r.body.rows.promoted === 0 && same(r.body.changes.promoted, []),
+     'a skipped row a login finished after the run\'s read keeps the login\'s time, and the run claims no finish (promoted 0, not in the change log)', show({ row: r82, changes: r.body.changes.promoted }))
+  ok(steps.length === 0 && r.body.streak_ticked === 0 && same(r.body.changes.streak_ticked, []) && r.body.students.got_rows === 0 && r.body.students.already_all_in_app === 2,
+     'no streak tick for rows the run did not write, and both members count as already having everything', show({ steps, students: r.body.students }))
+}
+
+console.log('\n=== A streak that already counts today: no tick, not counted, not in the change log ===')
+{
+  // Both opened a lesson on Whop at 06:30 today that the app does not have.
+  // 41's streak already counts today (work in the app at 06:45); 42 has no
+  // streak row yet.
+  onWhop = Object.fromEntries([41, 42].map((n) => [W(n), [opened(W(n), 'lesn_TEST02', '2026-10-20T06:30:00.000Z')]]))
+  const counted = { student_id: sid(41), current_streak: 4, longest_streak: 6, last_streak_date: '2026-10-20', updated_at: '2026-10-20T06:45:00.000Z' }
+  let db = freshDb({ members: [member(41), member(42)], streaks: [counted] })
+  const streakOf = (n) => db.rows('student_streaks').find((x) => x.student_id === sid(n))
+  const d = await call({ mode: 'dry' })
+  ok(d.body.streak_today === 1 && writes(db).length === 0, 'dry: one member would get today\'s day, the one whose day is not counted yet', show({ streak_today: d.body.streak_today }))
+  const r = await call({ mode: 'write' })
+  const s41 = streakOf(41)
+  ok(s41.current_streak === 4 && s41.longest_streak === 6 && s41.last_streak_date === '2026-10-20' && s41.updated_at === counted.updated_at,
+     'the streak that counts today is left exactly as it was', show(s41))
+  ok(r.body.rows.inserted === 2 && r.body.streak_ticked === 1 && same(r.body.changes.streak_ticked, [sid(42)]) && same(steps, [{ step: 'streak', studentId: sid(42) }]) &&
+     streakOf(42)?.current_streak === 1 && streakOf(42).last_streak_date === '2026-10-20',
+     'write: both rows added, one tick, and the change log lists only the streak the run changed (42, now 1 today)', show({ ticked: r.body.streak_ticked, listed: r.body.changes.streak_ticked, steps }))
+  db = freshDb({ members: [member(42)] })
+  db.fail['student_streaks.select'] = { message: 'statement timeout' }
+  const f = await call({ mode: 'write' })
+  ok(f.body.ok === true && f.body.rows.inserted === 1 && f.body.streak_ticked === 0 && same(f.body.changes.streak_ticked, []) && steps.length === 0 && db.rows('student_streaks').length === 0,
+     'a streak that cannot be read: the row is written, no tick, nothing listed', show({ ticked: f.body.streak_ticked, steps }))
+}
+
 console.log('\n=== A 429: waited out and retried; a third ends the call before that member ===')
 {
   const X = [21, 22, 23]
@@ -428,6 +519,22 @@ console.log('\n=== A 429: waited out and retried; a third ends the call before t
     const next = await call({ mode: 'write', after: t.next_after })
     ok(next.body.ok === true && next.body.this_call.checked === 2 && next.body.this_call.remaining === 0 && rowOf(db, 22, 'a1l01') && rowOf(db, 23, 'a1l01'),
        'the next call, from that cursor, takes the member again and goes on', show(next.body.this_call))
+  }
+  {
+    // The first read takes 230 s; the next member, started inside the
+    // budget, gets a 429 naming 30 s, a wait that would end at 260 s.
+    onWhop = {
+      [W(24)]: async () => { await wait(230_000); return pageOf([opened(W(24), 'lesn_TEST01', '2026-10-18T10:00:00.000Z')]) },
+      [W(25)]: () => answer('{"error":{"message":"Too many requests. Try again in 30 seconds."}}', 429),
+    }
+    const db = freshDb({ members: [member(24), member(25)] })
+    const r = await call({ mode: 'write' })
+    const t = r.body.this_call
+    ok(r.body.ok === true && t.stopped_because === 'time budget' && t.next_after === `0:${sid(24)}` && t.duration_ms === 230_000 &&
+       asked.filter((a) => a.user === W(25)).length === 1 && r.body.whop.retried_429 === 0 && r.body.whop.failed.rate_limited === 0 &&
+       rowOf(db, 24, 'a1l01') && rowsOf(db, 25).length === 0 && !syncOf(db, 25),
+       'a 429 at 230 s naming 30 s: no wait past the budget and no retry; the call ends at once with the cursor before that member, nothing of theirs written',
+       show({ t, whop: r.body.whop }))
   }
 }
 
@@ -527,6 +634,19 @@ console.log('\n=== The pace: at most 4 Whop requests a second, start to start ==
   const gaps = starts.slice(1).map((t, i) => t - starts[i])
   ok(same(gaps, [250, 500, 250, 250]), '250 ms between members, 500 after the one that took two pages', show(gaps))
   ok(asked.length === 6 && r.body.whop.requests === 6 && r.body.students.opened_none_finished === 1, '6 requests, counted as 6', show(r.body.whop))
+
+  // A failed read keeps the pace too: a 500 is one request, Whop paging forever is 5.
+  onWhop = {
+    [W(66)]: () => answer('{"error":"upstream"}', 500),
+    [W(67)]: (nth) => answer({ data: [], page_info: { has_next_page: true, end_cursor: `p${nth}` } }),
+    [W(68)]: [],
+  }
+  freshDb({ members: [66, 67, 68].map((n) => member(n)) })
+  const failed = await call({ mode: 'dry' })
+  const failedStarts = asked.filter((a) => a.page === 0).map((a) => a.at)
+  const failedGaps = failedStarts.slice(1).map((t, i) => t - failedStarts[i])
+  ok(same(failedGaps, [250, 1250]) && failed.body.whop.requests === 1 + 5 + 1,
+     'after a failed read the next member still waits: 250 ms after a 500, 1,250 after the 5 pages of a read that never ends', show(failedGaps))
 }
 
 console.log('\n=== The time budget: a cursor, and the next call starts after it ===')
@@ -554,6 +674,38 @@ console.log('\n=== The time budget: a cursor, and the next call starts after it 
   ok(pass2.length === 1 && pass2[0].body.rows.inserted === 1 && rowOf(db, 70, 'a1l02'), 'a full pass from the start adds only that member\'s row', show(pass2[0].body.rows))
   const pass3 = await wholePass('write')
   ok(pass3.every((x) => x.body.ok && x.body.rows.inserted === 0 && x.body.rows.promoted === 0), 'and the pass after it adds 0', show(pass3.map((x) => x.body.rows.inserted)))
+}
+
+console.log('\n=== A Whop read still unanswered 285 s into a call: the call answers anyway, before Vercel\'s 300 s ===')
+{
+  /** Whop answers member `n` after `ms` on the suite's clock. */
+  const slow = (n, ms) => async () => { await wait(ms); return pageOf([opened(W(n), 'lesn_TEST01', '2026-10-18T10:00:00.000Z')]) }
+  // 77's read ends 239 s into the call, so 78 is started inside the budget;
+  // Whop then takes 90 s to answer for 78.
+  onWhop = { [W(77)]: slow(77, 239_000), [W(78)]: slow(78, 90_000), [W(79)]: [] }
+  const db = freshDb({ members: [77, 78, 79].map((n) => member(n)) })
+  const r = await call({ mode: 'write' })
+  const t = r.body.this_call
+  ok(r.status === 200 && r.body.ok === true && t.stopped_because === 'time budget' && t.duration_ms === 285_000 && t.next_after === `0:${sid(77)}` && t.remaining === 2,
+     'a member started at 239 s whose read takes 90 s: the call gives the read up at 285 s and answers, with the cursor before that member', show(t))
+  ok(rowOf(db, 77, 'a1l01') && same(r.body.changes.inserted.map((x) => x[1]), [sid(77)]) && rowsOf(db, 78).length === 0 && !syncOf(db, 78),
+     'the member before it is written and in the change log; nothing of that member is written, the sync row included')
+  ok(!usersAsked().includes(W(79)) && r.body.whop.requests === 2 && r.body.students.failed === 0 && logged.some((l) => l.includes('no Whop answer 285 s into the call')),
+     'no one after it is asked, it counts as no failure, and the log says why the call ended', show(r.body.whop))
+  // The read given up on is never answered.
+  timers = []
+  onWhop[W(78)] = slow(78, 1_000)
+  const next = await call({ mode: 'write', after: t.next_after })
+  ok(next.body.ok === true && next.body.this_call.remaining === 0 && rowOf(db, 78, 'a1l01') && syncOf(db, 78),
+     'the next call, from that cursor, takes that member first and writes them', show(next.body.this_call))
+
+  // The limit is no tighter than it has to be.
+  onWhop = { [W(77)]: slow(77, 239_000), [W(78)]: slow(78, 45_000) }
+  const kept = freshDb({ members: [77, 78].map((n) => member(n)) })
+  const k = await call({ mode: 'write' })
+  ok(k.body.ok === true && k.body.this_call.stopped_because === 'done' && k.body.this_call.duration_ms === 284_000 && rowOf(kept, 78, 'a1l01'),
+     'a read that answers 284 s into the call is waited for, and its member written', show(k.body.this_call))
+  ok(timers.length === 0, 'and once the call has answered, none of its timers is left running', String(timers.length))
 }
 
 console.log('\n=== The snapshot: the rows the write can change, no token column, no Whop request ===')
@@ -597,8 +749,10 @@ console.log('\n=== No answer, and no log line, holds an email, a Whop user id or
 
 globalThis.Date = RealDate
 globalThis.setTimeout = realSetTimeout
+globalThis.clearTimeout = realClearTimeout
 globalThis.fetch = realFetch
-ok(Date === RealDate && globalThis.fetch === realFetch, 'the clock and fetch are the real ones again')
+ok(Date === RealDate && globalThis.setTimeout === realSetTimeout && globalThis.clearTimeout === realClearTimeout && globalThis.fetch === realFetch,
+   'the clock, the timers and fetch are the real ones again')
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)
 if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1) }

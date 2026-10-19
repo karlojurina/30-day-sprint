@@ -30,6 +30,8 @@ export async function POST(request: NextRequest) {
       status: "rejected",
       rejection_reason: reason || null,
       reviewed_at: new Date().toISOString(),
+      // The logged-in team member, as approve records it.
+      reviewed_by: auth.teamMember.id,
     })
     .eq("id", requestId)
     .eq("status", "pending")

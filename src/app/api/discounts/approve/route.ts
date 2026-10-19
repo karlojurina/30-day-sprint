@@ -39,7 +39,9 @@ import {
  *
  * Body:
  *   requestId  — id of the discount_requests row (required)
- *   reviewerId — id of the team_member approving (optional, audit only)
+ *   reviewerId — ignored. The reviewer recorded (reviewed_by, and the
+ *                "Generate anyway" log line) is the logged-in team member,
+ *                never what the browser sends (admin PRD review, 2026-10-19).
  */
 export async function POST(request: NextRequest) {
   // v75.31: TEAM-only. Previously this route was anonymous — anyone
@@ -50,9 +52,8 @@ export async function POST(request: NextRequest) {
   const supabase = auth.supabase;
 
   const body = await request.json();
-  const { requestId, reviewerId, override } = body as {
+  const { requestId, override } = body as {
     requestId?: string;
-    reviewerId?: string;
     // v77: team can force-approve past the eligibility gates
     // (ad-verification, missing first_paid_at, R1+R2 completion, window).
     // The admin reviews every application manually and is the control —
@@ -235,7 +236,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error:
-          "Ad submissions not verified yet — tick the verification flag on the student's detail page first",
+          "Ad submissions not verified yet. Tick the verification flag on the student's detail page first.",
       },
       { status: 400 }
     );
@@ -243,7 +244,7 @@ export async function POST(request: NextRequest) {
 
   if (override) {
     console.warn(
-      `[discount approve] OVERRIDE by team member ${reviewerId ?? "unknown"} — request ${requestId}, student ${discountReq.student_id}. Eligibility gates skipped.`,
+      `[discount approve] OVERRIDE by team member ${auth.teamMember.id}, request ${requestId}, student ${discountReq.student_id}. Eligibility gates skipped.`,
     );
   }
 
@@ -296,7 +297,7 @@ export async function POST(request: NextRequest) {
       promo_code: code,
       whop_promo_id: whopPromoId,
       reviewed_at: new Date().toISOString(),
-      reviewed_by: reviewerId ?? null,
+      reviewed_by: auth.teamMember.id,
     })
     .eq("id", requestId)
     .eq("status", "pending")

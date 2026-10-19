@@ -14,7 +14,8 @@ import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
  *
  * Body:
  *   requestId — id of the discount_requests row (required)
- *   appliedBy — id of the team_member doing the marking (optional, audit only)
+ *   appliedBy — ignored. applied_by is the logged-in team member, never
+ *               what the browser sends (admin PRD review, 2026-10-19).
  */
 export async function POST(request: NextRequest) {
   const auth = await requireTeam(request, ["founder", "admin", "csm"]);
@@ -22,9 +23,8 @@ export async function POST(request: NextRequest) {
   const supabase = auth.supabase;
 
   const body = await request.json();
-  const { requestId, appliedBy } = body as {
+  const { requestId } = body as {
     requestId?: string;
-    appliedBy?: string;
   };
 
   if (!requestId) {
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
 
   if (discountReq.status !== "approved") {
     return NextResponse.json(
-      { error: `Can't mark applied — current status is "${discountReq.status}". Only approved requests can be marked applied.` },
+      { error: `Only an approved request can be marked applied. This one is "${discountReq.status}".` },
       { status: 400 }
     );
   }
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     .update({
       status: "applied",
       applied_at: new Date().toISOString(),
-      applied_by: appliedBy ?? null,
+      applied_by: auth.teamMember.id,
     })
     .eq("id", requestId);
 

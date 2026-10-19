@@ -6,6 +6,9 @@
 //   admin-4 / discount-3: Reject overwrote a request another team member (or
 //   another tab) had already approved or marked applied, and Approve's last
 //   write overwrote a rejection that landed while Whop made the code.
+//   The admin PRD review (2026-10-19): who approved, rejected or marked a
+//   request applied is the logged-in team member, never what the browser
+//   sends, and the routes' refusals are plain sentences with no em dash.
 //
 // The routes run as they are. This file copies each one into _gen/ with only
 // its import lines rewritten, as build.mjs and discount-queue.test.mjs do: the
@@ -59,9 +62,14 @@ copyRoute('src/app/api/discounts/approve/route.ts', 'admin-approve-route', [
   ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
 ])
 
+copyRoute('src/app/api/discounts/mark-applied/route.ts', 'admin-mark-applied-route', LOGIN)
+
 const reject = { now: (await import('./_gen/admin-reject-route.ts')).POST, old: (await import('./_gen/admin-reject-route.old.ts')).POST }
 const approve = { now: (await import('./_gen/admin-approve-route.ts')).POST, old: (await import('./_gen/admin-approve-route.old.ts')).POST }
-const routes = (v) => ({ '/api/discounts/reject': reject[v], '/api/discounts/approve': approve[v] })
+const markApplied = { now: (await import('./_gen/admin-mark-applied-route.ts')).POST, old: (await import('./_gen/admin-mark-applied-route.old.ts')).POST }
+const routes = (v) => ({
+  '/api/discounts/reject': reject[v], '/api/discounts/approve': approve[v], '/api/discounts/mark-applied': markApplied[v],
+})
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
 const { FakeDb, useDb: installDb } = await import('./_gen/stub-server.ts')
 const { setTeam, promoCodes, whileWhopAnswers } = await import('./_gen/stub-admin.ts')
@@ -132,10 +140,12 @@ function tab(source, routes, { answer = null, teamMember = { id: 'team-1' } } = 
   }
   const handleReject = bind('handleReject')
   const handleApprove = bind('handleApprove')
+  const handleMarkApplied = bind('handleMarkApplied')
   return {
     seen,
     reject: (id) => logged(() => handleReject(id)),
     approve: (id, override = false) => logged(() => handleApprove(id, override)),
+    markApplied: (id) => logged(() => handleMarkApplied(id)),
   }
 }
 
@@ -265,6 +275,80 @@ for (const v of ['now', 'old']) {
        `control: at ${BASE} Approve's last write turns B's rejection back into an approval, keeping B's reason`, show(r))
   }
 }
+
+console.log('\n=== Admin PRD review: who decided is the logged-in team member ===')
+for (const v of ['now', 'old']) {
+  // Astrid (a CSM) is logged in; the page in her browser sends another id,
+  // as a stale or edited page could. Her login decides what is recorded.
+  // Three students, one pending request each (v106 allows no more): r3's
+  // ads are not verified, so only Generate anyway approves it.
+  const db = freshDb([{ id: 'r1', status: 'pending' }, { id: 'r2', status: 'pending' }, { id: 'r3', status: 'pending' }])
+  for (const [i, sid, verified] of [[1, 'c0000000-0000-4000-8000-000000000003', true], [2, 'b0000000-0000-4000-8000-000000000002', false]]) {
+    db.rows('discount_requests')[i].student_id = sid
+    db.rows('students').push({ id: sid, first_paid_at: '2026-10-02T10:00:00.000Z', ad_submissions_verified: verified })
+  }
+  setTeam({ id: 'team-astrid', role: 'csm' })
+  const t = tab(page[v], routes(v), { answer: 'not this one', teamMember: { id: 'team-karlo' } })
+  await t.approve('r1')
+  await t.markApplied('r1')
+  await t.reject('r2')
+  const { lines } = await t.approve('r3', true)
+  const [r1, r2, r3] = ['r1', 'r2', 'r3'].map((id) => row(db, id))
+  const override = lines.find((l) => l.includes('OVERRIDE')) ?? ''
+  if (v === 'now') {
+    ok(r1.status === 'applied' && r1.reviewed_by === 'team-astrid' && r1.applied_by === 'team-astrid',
+       'Approve, then Mark applied: reviewed_by and applied_by are the login, whatever the page sends', show({ reviewed_by: r1.reviewed_by, applied_by: r1.applied_by }))
+    ok(r2.status === 'rejected' && r2.reviewed_by === 'team-astrid', 'Reject records the login as the reviewer (it recorded nobody)', show(r2.reviewed_by))
+    ok(r3.status === 'approved' && r3.reviewed_by === 'team-astrid' && override.includes('team-astrid') && !override.includes('team-karlo'),
+       'Generate anyway: the row and the log line name the login', override)
+  } else {
+    ok(r1.reviewed_by === 'team-karlo' && r1.applied_by === 'team-karlo' && r2.reviewed_by === null && override.includes('team-karlo'),
+       `control: at ${BASE} the routes record whatever the page sends, and Reject records nobody`, show({ r1: [r1.reviewed_by, r1.applied_by], r2: r2.reviewed_by, override }))
+  }
+}
+
+console.log('\n=== Admin PRD review: the refusals are plain sentences ===')
+for (const v of ['now', 'old']) {
+  const db = freshDb([{ id: 'r1', status: 'pending' }])
+  const t = tab(page[v], routes(v))
+  await t.markApplied('r1')
+  const said = t.seen.errors.r1 ?? ''
+  if (v === 'now') {
+    ok(row(db, 'r1').status === 'pending' && said === 'Only an approved request can be marked applied. This one is "pending".',
+       'Mark applied on a pending request: refused in two plain sentences', said)
+  } else {
+    ok(said.includes('—'), `control: at ${BASE} that refusal carries an em dash`, said)
+  }
+}
+for (const v of ['now', 'old']) {
+  const db = freshDb([{ id: 'r1', status: 'pending' }])
+  db.rows('students')[0].ad_submissions_verified = false
+  const t = tab(page[v], routes(v))
+  await t.approve('r1')
+  const said = t.seen.errors.r1 ?? ''
+  if (v === 'now') {
+    ok(row(db, 'r1').status === 'pending' && said === "Ad submissions not verified yet. Tick the verification flag on the student's detail page first.",
+       'Approve with the ads not verified: refused in plain sentences, still pending', said)
+  } else {
+    ok(said.includes('—'), `control: at ${BASE} that refusal carries an em dash`, said)
+  }
+}
+/** Every string and template text in a file's code (comments left out). */
+function stringsIn(source) {
+  const sf = ts.createSourceFile('route.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  const out = []
+  const visit = (node) => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) out.push(node.text)
+    else if (ts.isTemplateExpression(node)) out.push(node.head.text, ...node.templateSpans.map((s) => s.literal.text))
+    ts.forEachChild(node, visit)
+  }
+  visit(sf)
+  return out
+}
+const ROUTE_FILES = ['approve', 'reject', 'mark-applied'].map((r) => `src/app/api/discounts/${r}/route.ts`)
+const dashed = (src) => ROUTE_FILES.flatMap((f) => stringsIn(src(f)).filter((s) => s.includes('—')))
+ok(dashed(fromSrc).length === 0, 'no string the three routes send or log holds an em dash', show(dashed(fromSrc)))
+ok(dashed(fromBase).length === 3, `control: at ${BASE} three did`, show(dashed(fromBase)))
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)
 if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1) }

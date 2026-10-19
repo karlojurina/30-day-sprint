@@ -522,8 +522,10 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
   `created_at` and `rejection_reason`, never the Whop promo code (the
   Field Journal reads only `status`, for the same reason).
   When the `lesson_videos` read fails, as it will on a database v100
-  has not been applied to, it logs one error per request and every
-  lesson gets `has_video: false`. Since 2026-10-17 (T-079) its
+  has not been applied to, it logs one error per request, every
+  lesson gets `has_video: false`, and the answer says so in
+  `lessonVideosFailed: true`; a refresh then keeps the `has_video`
+  the map already had (2026-10-20). Since 2026-10-17 (T-079) its
   `streaks.current_streak` is the streak as it stands today: 0 once
   `last_streak_date` is before yesterday (UTC), from
   `currentStreakAsOf` in `src/lib/streak.ts`. The stored row is left

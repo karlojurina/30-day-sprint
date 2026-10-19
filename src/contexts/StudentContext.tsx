@@ -650,9 +650,21 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     setCatalogSuffix((fresh.catalogSuffix as string | undefined) ?? "");
     // The catalog, which also brings a video added during the session
     // (has_video) into an open tab (progress-2). An empty list is never
-    // applied, so a map that has loaded keeps its places and lessons.
+    // applied, so a map that has loaded keeps its places and lessons. When
+    // the route could not read which lessons have a video
+    // (lessonVideosFailed), every has_video in the answer is false: each
+    // lesson keeps the one it had (map-1), so a hiccup does not turn an open
+    // map's lessons into "Not recorded yet". A first load has none to keep,
+    // and shows them so until a refresh reads them.
     const freshLessons = (fresh.lessons ?? []) as Lesson[];
-    if (freshLessons.length > 0) setLessons(freshLessons);
+    if (freshLessons.length > 0 && fresh.lessonVideosFailed === true) {
+      setLessons((prev) => {
+        const had = new Map(prev.map((l) => [l.id, l.has_video]));
+        return freshLessons.map((l) => (had.has(l.id) ? { ...l, has_video: had.get(l.id) } : l));
+      });
+    } else if (freshLessons.length > 0) {
+      setLessons(freshLessons);
+    }
     const freshRegions = (fresh.regions ?? []) as Region[];
     if (freshRegions.length > 0) setRegions(freshRegions);
     setStreak({

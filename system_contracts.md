@@ -1529,9 +1529,14 @@ called against a database or run on a deployment.
   signed in, lapsed members included, and with Tella the id is the
   video's address. The types match: `Lesson` and `CatalogLessonLike` have
   `has_video` and no field for a Tella id.
-- **On a failed read:** the route logs one error and every lesson gets
-  `has_video: false`, so every lesson shows "Not recorded yet." That
-  is the state of any deployment whose database does not have v100.
+- **On a failed read:** the route logs one error, every lesson gets
+  `has_video: false`, and since 2026-10-20 the answer carries
+  `lessonVideosFailed: true` (false when the read worked). A refresh
+  in `StudentContext` then keeps each lesson's earlier `has_video`, so
+  a map that is open does not turn its lessons into "Not recorded yet"
+  (map-1). A first load has none to keep: every lesson shows "Not
+  recorded yet." until a refresh reads the table. That is the state of
+  any deployment whose database does not have v100.
 
 ### `GET /api/cron/check-lesson-videos` (the lesson video lock check)
 - **What it is:** a job that asks Tella whether every lesson video is

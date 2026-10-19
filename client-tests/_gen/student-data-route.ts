@@ -175,7 +175,9 @@ export async function GET(request: NextRequest) {
   // streak row as a streak of 0. Both callers keep what they already show on a
   // non-OK answer. A student who never applied for the 30% has no
   // discount_requests row, which .single() answers with PGRST116: that is the
-  // usual case, not a failure.
+  // usual case, not a failure. The lesson_videos read is answered all the
+  // same (a database without v100 has no such table), and says it failed in
+  // lessonVideosFailed below.
   const failedReads: string[] = [];
   if (regionsRes.error) failedReads.push(`${REGIONS_TABLE}: ${regionsRes.error.message}`);
   if (lessonsRes.error) failedReads.push(`${LESSONS_TABLE}: ${lessonsRes.error.message}`);
@@ -219,6 +221,11 @@ export async function GET(request: NextRequest) {
     student,
     regions: regionsRes.data ?? [],
     lessons,
+    // Every has_video above is false because the read of lesson_videos failed,
+    // whatever the truth: StudentContext's refresh then keeps each lesson's
+    // earlier has_video, so a hiccup does not turn an open map's lessons into
+    // "Not recorded yet" (map-1, 2026-10-20).
+    lessonVideosFailed: Boolean(lessonVideosRes.error),
     watchProgress: watchProgressRes.data ?? [],
     // Which catalog produced the rows above. The world renders a "not
     // recorded yet" slot for lessons with no video, and this tells the client

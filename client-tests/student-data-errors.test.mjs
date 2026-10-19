@@ -62,6 +62,7 @@ console.log('\n=== A healthy read answers 200, as before ===')
      'the course, the completions, the streak and the milestones', `status ${r.status}`)
   ok(r.body.discountRequest === null && r.logged.length === 0,
      'a student who never applied for the 30% (no row: PGRST116 from .single()) is not a failure', `discountRequest ${JSON.stringify(r.body.discountRequest)}`)
+  ok(r.body.lessonVideosFailed === false, 'and the answer says the read of which lessons have a video worked', `lessonVideosFailed ${r.body.lessonVideosFailed}`)
   const withRequest = await load(freshDb({ discount: true }))
   ok(withRequest.status === 200 && withRequest.body.discountRequest?.status === 'pending', 'and one who did gets the request')
 }
@@ -89,14 +90,18 @@ for (const table of ['regions', 'lessons']) {
   ok(r.logged.some((l) => l.includes(`${table}: upstream request timeout`)), '  and the server log names it', r.logged.join(' | '))
 }
 
-console.log('\n=== What stays as it was ===')
+console.log('\n=== A failed read of which lessons have a video is answered, and says so (map-1) ===')
 {
-  // The video list's failure is logged and answered (every lesson "not recorded yet"), as the route chose before.
+  // Logged and answered, as the route chose before (a database without v100
+  // has no lesson_videos), and now marked: every has_video in this answer is
+  // false whatever the truth, so StudentContext's refresh keeps its own
+  // (student-context.test.mjs runs that side).
   const db = freshDb()
   db.fail['lesson_videos.select'] = failing()
   const r = await load(db)
   ok(r.status === 200 && r.body.lessons.every((l) => l.has_video === false) && r.logged.some((l) => l.includes('lesson_videos read failed')),
      'a failed read of which lessons have a video is still logged and answered', `status ${r.status}`)
+  ok(r.body.lessonVideosFailed === true, '  and the answer says the read failed', `lessonVideosFailed ${r.body.lessonVideosFailed}`)
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

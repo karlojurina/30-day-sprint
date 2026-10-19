@@ -400,6 +400,46 @@ console.log('\n=== The catalog still reaches an open tab (progress-2) ===')
   root.unmount()
 }
 
+console.log('\n=== A refresh whose read of the videos failed leaves an open map\'s videos alone (map-1) ===')
+{
+  seed()
+  const root = await mount()
+  ok(lesson('a1l01')?.has_video === true && lesson('a2l01')?.has_video === true, 'two lessons with a video on the map', show([lesson('a1l01')?.has_video, lesson('a2l01')?.has_video]))
+  // The route could not read lesson_videos: every has_video in its answer is
+  // false, and it says so. A lesson's title changed in the same answer.
+  server.lessons = server.lessons.map((l) => (l.id === 'a1l02' ? { ...l, title: 'Renamed' } : l))
+  server.dataOver = { lessons: server.lessons.map((l) => ({ ...l, has_video: false })), lessonVideosFailed: true }
+  advance(6_000)
+  window.dispatchEvent(new Event('focus'))
+  await settle()
+  server.dataOver = null
+  ok(lesson('a1l01')?.has_video === true && lesson('a2l01')?.has_video === true && lesson('a1l03')?.has_video === false,
+     'each lesson keeps the has_video it had: none turns into "Not recorded yet"', show(view.ctx.lessons.map((l) => l.has_video)))
+  ok(lesson('a1l02')?.title === 'Renamed', '  while the rest of the answer is applied (a renamed lesson)', show(lesson('a1l02')?.title))
+  // The next answer that read the videos is taken as it is: a video added since, one taken down.
+  server.lessons = server.lessons.map((l) => (l.id === 'a1l03' ? { ...l, has_video: true } : l.id === 'a2l01' ? { ...l, has_video: false } : l))
+  advance(6_000)
+  window.dispatchEvent(new Event('focus'))
+  await settle()
+  ok(lesson('a1l03')?.has_video === true && lesson('a2l01')?.has_video === false, 'and a refresh that read them applies them as they are', show(view.ctx.lessons.map((l) => l.has_video)))
+  root.unmount()
+}
+{
+  // A first load has none to keep: the lessons show as not recorded until a refresh reads them.
+  seed()
+  server.dataPlan = ['ok']
+  server.dataOver = { lessons: server.lessons.map((l) => ({ ...l, has_video: false })), lessonVideosFailed: true }
+  server.holdSync = deferred()
+  const sync = server.holdSync
+  const root = await mount()
+  ok(view.ctx.lessons.length === 5 && view.ctx.lessons.every((l) => l.has_video === false), 'a first load whose read of the videos failed: none to keep, every lesson without one')
+  server.dataOver = null
+  sync.resolve()
+  await settle()
+  ok(lesson('a1l01')?.has_video === true && lesson('a1l03')?.has_video === false, 'the sync\'s refresh reads them and brings them in', show(view.ctx.lessons.map((l) => l.has_video)))
+  root.unmount()
+}
+
 console.log('\n=== A saved Discord link is not put back by a read from before the save (progress-2) ===')
 {
   seed()

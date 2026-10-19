@@ -568,58 +568,151 @@
 
 /* ── Scroll cue ────────────────────────────────────────────── */
 
+/* 2026-10-19 (Lovro, the launch night: "the little scroll to go into the map
+   at the bottom middle above the progress bar"): the word and a chevron in
+   full ink, just above the timeline's checkpoint tags. The 10 px word in the
+   second ink with a line under it was hard to find over the lake. */
 .cue {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 104px;
+  bottom: 92px;
   z-index: 3;
   margin: 0 auto;
   width: max-content;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  font: 600 10px/1 var(--mono);
-  letter-spacing: 0.16em;
+  gap: 7px;
+  font: 600 11px/1 var(--mono);
+  letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--color-ink-2);
+  color: var(--color-ink);
   /* Final pass E: a tight halo on the letters only. The soft backing that sat
      behind the word and its line read as a dark stain on the lake. */
   text-shadow:
-    0 1px 2px rgba(20, 15, 18, 0.6),
-    0 0 10px rgba(20, 15, 18, 0.32);
+    0 0 2px rgba(20, 15, 18, 0.85),
+    0 1px 3px rgba(20, 15, 18, 0.75),
+    0 0 12px rgba(20, 15, 18, 0.5);
   pointer-events: none;
 }
 
-.cueLine {
+.cueChevron {
   display: block;
-  width: 1px;
-  height: 26px;
-  background: linear-gradient(var(--color-ink-2), rgba(201, 185, 168, 0));
-  transform-origin: top center;
-  /* Four passes, then it rests as a still line (backwards fill returns it to
-     the base style). Nothing on this page loops forever. */
-  animation: cue 2.4s var(--ease) 4 backwards;
+  filter: drop-shadow(0 1px 2px rgba(20, 15, 18, 0.7));
+  /* Six gentle bobs, then it rests (nothing on this page loops forever). It
+     bobs again when the student comes back to the top; under reduced motion
+     it stays still (the rule at the end of Sizes). */
+  animation: cueBob 1.6s var(--ease) 6;
 }
 
-.cue[data-off] .cueLine {
+.cue[data-off] .cueChevron {
   animation: none;
 }
 
-@keyframes cue {
-  0% {
-    transform: scaleY(0);
-    opacity: 1;
-  }
-  55% {
-    transform: scaleY(1);
-    opacity: 1;
-  }
+@keyframes cueBob {
+  0%,
   100% {
-    transform: scaleY(1);
-    opacity: 0;
+    transform: translateY(0);
   }
+  50% {
+    transform: translateY(4px);
+  }
+}
+
+/* ── The welcome (2026-10-19) ──
+   With a source, over the opening's sky: "Welcome, {first name}", one line,
+   Continue (WorldV6, THE WELCOME). Centred under the header, above the
+   places. No backdrop filter: a soft painted dark behind the words, as the
+   telescope's caption has, so the ink reads on the brightest sky. Hidden
+   until the frame loop has drawn a frame and set data-on; the loop writes its
+   opacity. Only the button takes the pointer. */
+.welcome {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: clamp(104px, 21vh, 300px);
+  z-index: 3;
+  margin: 0 auto;
+  width: min(640px, calc(100vw - 2 * var(--gutter)));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+}
+
+.welcome[data-on] {
+  visibility: visible;
+}
+
+/* Measured at 1691x1278 and 1366x768 with the words hidden: without it the
+   line had 2:1 on the sky; with it the line keeps 4.5:1 and the title 3:1. */
+.welcome::before {
+  content: "";
+  position: absolute;
+  inset: -64px -80px;
+  z-index: -1;
+  background: radial-gradient(
+    closest-side,
+    rgba(29, 24, 38, 0.6),
+    rgba(29, 24, 38, 0.52) 48%,
+    rgba(29, 24, 38, 0.24) 76%,
+    rgba(29, 24, 38, 0)
+  );
+}
+
+.welcomeTitle {
+  margin: 0;
+  max-width: 100%;
+  font-size: clamp(34px, 3.3vw, 54px);
+  line-height: 1.06;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--color-ink);
+  text-shadow: 0 2px 18px var(--shadow-ink);
+  overflow-wrap: anywhere;
+}
+
+.welcomeLine {
+  margin: 12px 0 0;
+  font-size: clamp(16px, 1.2vw, 19px);
+  line-height: 1.4;
+  font-weight: 500;
+  color: var(--color-ink);
+  text-shadow: 0 1px 12px var(--shadow-ink);
+}
+
+.root .welcomeGo {
+  width: auto;
+  margin-top: 22px;
+  padding: 0 18px 0 24px;
+  gap: 12px;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+/* Phones: the two lines head the list, under the place's picture, where the
+   Next block began; the Next block follows them. No button, no cue. */
+.listWelcome .welcomeTitle {
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.listWelcome .welcomeLine {
+  margin-top: 8px;
+  font-size: 15px;
+  color: var(--color-ink-2);
+}
+
+.phoneWorld + .list .listWelcome {
+  padding-top: 228px;
+}
+
+.phoneWorld + .list .listWelcome + .listNext {
+  padding-top: 28px;
 }
 
 /* ── Footer (dev only: the builds to compare, and the pitch) ── */
@@ -1606,7 +1699,7 @@
   text-shadow: 0 1px 3px rgba(20, 15, 18, 0.7);
 }
 
-.root[data-loading] :is(.card, .chip, .timeline, .cue, .markers) {
+.root[data-loading] :is(.card, .chip, .timeline, .cue, .markers, .welcome) {
   visibility: hidden;
 }
 

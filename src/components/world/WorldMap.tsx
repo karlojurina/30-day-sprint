@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { createContext, useContext, useMemo, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/contexts/AuthContext";
 import { WorldV6 } from "@/components/world-v6/WorldV6";
 import { sourceData, type WorldDiscount, type WorldSource } from "@/components/world-v6/source";
 import tokens from "@/components/world-v6/tokens.module.css";
@@ -17,6 +18,15 @@ import { useLessonAccess, useLessonTransport } from "@/lib/world/useLessonTransp
 import { STUDENT_HOME, WORLD_LOCK_MODE } from "@/lib/world/access";
 import { posterSrc } from "@/lib/world-v6/poster";
 import u from "@/components/world/world-ui.module.css";
+
+/** The development harness's pretend student's name (FixtureStudentProvider.tsx). /world provides nothing and reads AuthContext. */
+export const StudentNameStandInContext = createContext<string | null>(null);
+
+/** The first word of a name ("Maya Brooks" gives "Maya"), or null when there is none. */
+function firstNameOf(name: string | null | undefined): string | null {
+  const first = name?.trim().split(/\s+/)[0];
+  return first ? first : null;
+}
 
 /**
  * The map's host: joins the catalog, the student and the address to the map.
@@ -49,6 +59,12 @@ import u from "@/components/world/world-ui.module.css";
  *
  * The cards wear the map's own floating panel, as the screens beside them do
  * (world-ui.module.css).
+ *
+ * The welcome at the map's start (2026-10-19) greets the student by the first
+ * word of their name: AuthContext's `student.name`, the field the header's
+ * "Signed in as" reads (WorldCorner.tsx). The development harness has no
+ * signed-in student: its pretend one's name stands in through
+ * StudentNameStandInContext.
  */
 export function WorldMap() {
   const { status, model } = useMapModel();
@@ -117,6 +133,10 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
   const transport = useLessonTransport();
   // Nothing is asked for ahead while the membership is not active.
   const { active } = useLessonAccess();
+  // The welcome's name: the pretend student's on the development harness, else the signed-in one's.
+  const { student } = useAuth();
+  const standInName = useContext(StudentNameStandInContext);
+  const firstName = firstNameOf(standInName ?? student?.name);
 
   const data = useMemo(() => sourceData(model, WORLD_LOCK_MODE), [model]);
 
@@ -155,6 +175,7 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
       openK: at >= 0 ? at : null,
       // A lesson address implies its place is open underneath.
       paused: lessonId !== null,
+      firstName,
       onOpenArea: (k) => go(href(ids[k])),
       onCloseArea: () => go(href()),
       // A lesson's page shows at the click and its address follows (WorldStage's open()).
@@ -186,7 +207,7 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
       bounty: data.bounty ?? undefined,
       bountyOpen: bountyPage,
     };
-  }, [model, data, openAreaId, lessonId, href, open, router, transport, active, discount]);
+  }, [model, data, openAreaId, lessonId, href, open, router, transport, active, discount, firstName]);
 
   // The header's group at the right: streak, achievements, the map's discount
   // segment, the Playbook link for a student who has it (PlaybookLink.tsx) and

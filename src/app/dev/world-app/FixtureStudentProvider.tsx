@@ -25,6 +25,7 @@ import { FixtureDiscount, discountPresetIds } from "./fixtureDiscount";
 import { FixtureHud, hudStreak } from "./fixtureHud";
 import { CelebrationStandInContext } from "@/components/world/WorldCelebrations";
 import { AnyLessonFinishesContext } from "@/components/world/useMapModel";
+import { StudentNameStandInContext } from "@/components/world/WorldMap";
 
 /**
  * The pretend student behind /dev/world-app (world_v6_wiring_prd.md, Work Item 4).
@@ -102,6 +103,10 @@ import { AnyLessonFinishesContext } from "@/components/world/useMapModel";
  *
  *   ?questions=<preset> the discount application's questions
  *                      (fixtureDiscount.tsx: none, fail; default the six).
+ *
+ * The pretend student is called Maya Brooks (a made-up name), so the welcome
+ * at the map's start reads "Welcome, Maya" (WorldMap.tsx,
+ * StudentNameStandInContext).
  *
  * THE REAL COURSE. ?catalog=course swaps the generated catalog for the rows of
  * courseCatalog.ts: the 8 areas and 141 lessons of
@@ -310,6 +315,8 @@ function flagOf(search: string | null, name: string): boolean {
 
 /** ?celebrate=1: the pretend student behind the map's celebrations. */
 const PRETEND_CELEBRANT = { studentId: "fixture-student" };
+/** The pretend student's name, as a students row holds it. Made up. */
+const PRETEND_NAME = "Maya Brooks";
 type FixtureWindow = Window & { __fixture?: FixtureHook };
 
 /** The query string never changes under the provider: it is read once and kept. */
@@ -490,9 +497,11 @@ export function FixtureStudentProvider({
         <LessonTransportContext.Provider value={transport}>
           <CelebrationStandInContext.Provider value={celebrate ? PRETEND_CELEBRANT : null}>
             <AnyLessonFinishesContext.Provider value={mode !== "course"}>
-              <FixtureDiscount search={search}>
-                <FixtureHud search={search}>{children}</FixtureHud>
-              </FixtureDiscount>
+              <StudentNameStandInContext.Provider value={PRETEND_NAME}>
+                <FixtureDiscount search={search}>
+                  <FixtureHud search={search}>{children}</FixtureHud>
+                </FixtureDiscount>
+              </StudentNameStandInContext.Provider>
             </AnyLessonFinishesContext.Provider>
           </CelebrationStandInContext.Provider>
         </LessonTransportContext.Provider>

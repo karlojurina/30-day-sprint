@@ -32,6 +32,12 @@ export interface WorldSource {
   openK: number | null;
   /** A lesson page is open over the map: draw nothing, take no keys, hold progress. */
   paused: boolean;
+  /**
+   * The student's first name, for the welcome at the map's start ("Welcome,
+   * Maya"); null or absent when there is none ("Welcome"). The first word of
+   * the students row's name (WorldMap.tsx).
+   */
+  firstName?: string | null;
   /** The student opened place k inside the map. */
   onOpenArea(k: number): void;
   /** The student closed the open place inside the map. */

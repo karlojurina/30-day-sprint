@@ -278,7 +278,11 @@ console.log('\n=== The Whop login refuses before it writes anything ===')
   const iRefused = s.indexOf('return NextResponse.redirect(`${appUrl}/login?error=app_closed`);')
   ok(iWarn > iGate && iRefused > iWarn && s.slice(iWarn, iRefused).split('\n').length === 2,
      'and is logged first, with the Whop id Whop sent and nothing else', `warn@${iWarn} redirect@${iRefused}`)
-  ok(read('src/app/login/page.tsx').includes('app_closed: COMING_SOON_MESSAGE'), 'and the login page knows that code')
+  // The ?error= map left page.tsx for LoginError.tsx with the new login
+  // (297e999, 2026-10-19); the page renders it inside its Suspense.
+  ok(read('src/app/login/LoginError.tsx').includes('app_closed: COMING_SOON_MESSAGE')
+     && read('src/app/login/page.tsx').includes('<LoginError />'),
+     'and the login page knows that code', 'LoginError.tsx, which page.tsx renders')
 }
 
 console.log('\n=== The pages ===')

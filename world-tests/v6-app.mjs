@@ -57,6 +57,16 @@
  * (the map skips it under automation otherwise), arrive=0 elsewhere, and
  * poster=off on the 3D rows so the scene's own speed probe cannot swap in the
  * still views halfway through a row (row 16 forces them with poster=on).
+ *
+ * THE WELCOME (2026-10-19). With a source the map has no arrival of its own
+ * any more: it opens on the welcome ("Welcome, Maya", the pretend student's
+ * first name) and its Continue makes the arrival's trip. The arrival rows (1,
+ * 2, 5, 11, 17) press Continue where they used to wait for it; their
+ * arrive=1 now changes nothing, and row 23 keeps it to prove the map stays
+ * at the opening past the old 900 ms. Row 23 reads the welcome
+ * (main section[aria-labelledby="welcome-title"], shown while it has
+ * data-on), its Continue, the scroll cue (the div holding "Scroll") and the
+ * phone's two lines (main .list's h2#welcome-title).
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
@@ -268,6 +278,8 @@ const SAYS = (source) => {
 
 /** What a row clicks. Each returns one element or null. */
 const FIND = {
+  /** The welcome's Continue (2026-10-19). */
+  continue: () => document.querySelector('main section[aria-labelledby="welcome-title"] button'),
   cardWatch: () => document.querySelector('main section[data-side][data-show]:not([aria-label="Place done"]) button'),
   doneButton: () => document.querySelector('main section[aria-label="Place done"][data-show] button'),
   marker: (k) => {
@@ -388,6 +400,42 @@ async function restAt(page, k, what, timeout = 25000) {
   throw new Error(
     `${what}: the camera did not come to rest at place ${k + 1} within ${timeout} ms (depth ${f(last?.d)}, the place is at ${f(last?.t)}, scrollY ${last?.y})`,
   )
+}
+
+/**
+ * The welcome at the start, as a student sees it (2026-10-19): the block, its
+ * words, Continue, and the scroll cue. `shown` is the block's data-on and
+ * computed visibility; the opacities are the computed ones the frame loop
+ * writes. Null parts are not in the DOM.
+ */
+const WELCOME = () => {
+  const norm = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
+  const sec = document.querySelector('main section[aria-labelledby="welcome-title"]')
+  const cue = [...document.querySelectorAll('main div[aria-hidden="true"]')].find((d) => /^Scroll$/i.test(norm(d.textContent))) ?? null
+  const button = sec?.querySelector('button') ?? null
+  const header = document.querySelector('main header')?.getBoundingClientRect() ?? null
+  const box = sec?.getBoundingClientRect() ?? null
+  const mid = box ? document.elementFromPoint(box.left + box.width / 2, box.top + 12) : null
+  return {
+    shown: sec ? sec.dataset.on !== undefined && getComputedStyle(sec).visibility === 'visible' : null,
+    opacity: sec ? Number(getComputedStyle(sec).opacity) : null,
+    title: sec ? norm(sec.querySelector('#welcome-title')?.textContent) : null,
+    line: sec ? norm(sec.querySelector('p')?.textContent) : null,
+    button: button ? norm(button.textContent) : null,
+    // pointer-events none but the button: a point on the title reaches what is under it.
+    passThrough: mid ? !sec.contains(mid) : null,
+    belowHeader: box && header ? Math.round(box.top - header.bottom) : null,
+    cue: cue ? { text: norm(cue.textContent), opacity: Number(getComputedStyle(cue).opacity), off: cue.dataset.off !== undefined, chevron: !!cue.querySelector('svg') } : null,
+  }
+}
+
+/** With a source the map waits at the opening (2026-10-19): press the welcome's Continue, the arrival's trip. */
+async function pressContinue(page, what) {
+  await waitFor(page, () => document.querySelector('main section[aria-labelledby="welcome-title"]')?.dataset.on !== undefined, {
+    timeout: 15000,
+    what: `${what}: the welcome did not show`,
+  })
+  return click(page, FIND.continue, null, { what: `${what}: Continue` })
 }
 
 /** Put the page scroll on place k's stop, the way the timeline does, and wait for the camera. */
@@ -659,6 +707,7 @@ const ROWS = [
   [20, 'Quiet network and console'],
   [21, 'Nothing stays on screen where a marker was'],
   [22, 'From the 3D map to the phone list and back'],
+  [23, 'The welcome at the start'],
 ]
 const nameOf = (id) => ROWS.find((r) => r[0] === id)[1]
 
@@ -696,10 +745,11 @@ try {
     await runRow(1, nameOf(1), async (r) => {
       const page = await r.open(url('', { p: 'p0', arrive: 1, poster: 'off' }))
       await ready(page, 'row 1')
+      await pressContinue(page, 'row 1')
       const rest = await restAt(page, 0, 'row 1')
       const card = await waitCard(page, 'row 1')
       const s = await page.evaluate(SNAP)
-      r.check('the camera rests at place 1', true, `depth ${f(rest.d)}, the stop is at ${f(rest.t)}, ${rest.ms} ms after ready`)
+      r.check('the camera rests at place 1', true, `depth ${f(rest.d)}, the stop is at ${f(rest.t)}, ${rest.ms} ms after Continue`)
       r.check('the card says Introduction', card?.title === 'Introduction', card?.title ?? null)
       r.check('the card names the first lesson', !!card && card.text.includes(lessonTitle(1, 1)), card?.text ?? null)
       r.check('__worldProgress().done is all zeros', !!s.progress && s.progress.done.length === 8 && s.progress.done.every((d) => d === 0), s.progress?.done ?? null)
@@ -711,10 +761,11 @@ try {
     await runRow(2, nameOf(2), async (r) => {
       const page = await r.open(url('', { p: 'mid', arrive: 1, poster: 'off' }))
       await ready(page, 'row 2')
+      await pressContinue(page, 'row 2')
       const rest = await restAt(page, 3, 'row 2')
       const card = await waitCard(page, 'row 2')
       const s = await page.evaluate(SNAP)
-      r.check('the camera rests at place 4', true, `depth ${f(rest.d)}, the stop is at ${f(rest.t)}, ${rest.ms} ms after ready`)
+      r.check('the camera rests at place 4', true, `depth ${f(rest.d)}, the stop is at ${f(rest.t)}, ${rest.ms} ms after Continue`)
       r.check('the card says Video Ads II', card?.title === 'Video Ads II', card?.title ?? null)
       r.check('the card says 18 of 22', !!card && /(^|\D)18 of 22/.test(card.text), card?.text ?? null)
       r.check(`the timeline marks place ${CURRENT_MID.place} of ${CURRENT_MID.of} as the student's, Video Ads II (the header's old 04/08, see CURRENT_MID)`, s.current?.place === CURRENT_MID.place && s.current.of === CURRENT_MID.of && s.current.label === CURRENT_MID.label, s.current)
@@ -820,6 +871,7 @@ try {
     await runRow(5, nameOf(5), async (r) => {
       const page = await r.open(url('', { p: 'last', arrive: 1, poster: 'off' }))
       await ready(page, 'row 5')
+      await pressContinue(page, 'row 5')
       await restAt(page, 3, 'row 5')
       const card = await waitCard(page, 'row 5')
       const before = await page.evaluate(SNAP)
@@ -1071,11 +1123,12 @@ try {
     await runRow(11, nameOf(11), async (r) => {
       const page = await r.open(url('', { p: 'all', arrive: 1, poster: 'off' }))
       await ready(page, 'row 11')
+      await pressContinue(page, 'row 11')
       const rest = await restAt(page, 7, 'row 11')
       const card = await waitCard(page, 'row 11')
       await sleep(600)
       const s = await page.evaluate(SNAP)
-      r.check('the camera rests at place 8', true, `depth ${f(rest.d)}, the stop is at ${f(rest.t)}, ${rest.ms} ms after ready`)
+      r.check('the camera rests at place 8', true, `depth ${f(rest.d)}, the stop is at ${f(rest.t)}, ${rest.ms} ms after Continue`)
       r.check('the card reads "Every place done."', card?.title === 'Every place done.', card?.title ?? null)
       r.check(`the card reads "${TOTAL} of ${TOTAL} lessons"`, !!card && card.text.includes(`${TOTAL} of ${TOTAL} lessons`), card?.text ?? null)
       r.check('no chip', s.chip === null, s.chip)
@@ -1246,43 +1299,37 @@ try {
     // 17 ── Reduced motion
     await runRow(17, nameOf(17), async (r) => {
       const page = await r.open(url('', { p: 'mid', arrive: 1, poster: 'off' }), { reducedMotion: true })
-      // Arrival: every depth read from ready on is the opening's or place 4's, with nothing between.
+      // Arrival (the welcome's Continue since 2026-10-19): every depth read from
+      // the press on is the opening's or place 4's, with nothing between.
+      await ready(page, 'row 17')
+      await pressContinue(page, 'row 17')
       const reads = []
-      let readyAt = null
+      const pressedAt = Date.now()
       let landedAt = null
-      const t0 = Date.now()
-      while (Date.now() - t0 < 75000) {
+      while (Date.now() - pressedAt < 12000) {
         let v = null
         try {
           v = await page.evaluate(() => ({
-            ready: window.__worldReady === true,
-            error: window.__worldError ?? null,
             d: typeof window.__worldDepth === 'number' ? window.__worldDepth : null,
             a4: window.__worldDepthFor ? window.__worldDepthFor('a4') : null,
           }))
         } catch {
           v = null
         }
-        if (v) {
-          if (v.error) throw new Error(`row 17: the scene failed: ${v.error}`)
-          if (v.ready && readyAt === null) readyAt = Date.now()
-          if (v.ready && v.d !== null && v.a4 !== null) {
-            reads.push(v)
-            if (landedAt === null && Math.abs(v.d - v.a4) < DEPTH_TOL) landedAt = Date.now()
-          }
-          if (landedAt !== null && Date.now() - landedAt > 700) break
-          if (readyAt !== null && Date.now() - readyAt > 12000) break
+        if (v && v.d !== null && v.a4 !== null) {
+          reads.push(v)
+          if (landedAt === null && Math.abs(v.d - v.a4) < DEPTH_TOL) landedAt = Date.now()
         }
+        if (landedAt !== null && Date.now() - landedAt > 700) break
         await sleep(40)
       }
-      if (readyAt === null) throw new Error('row 17: the map never reported ready')
       const between = reads.filter((v) => Math.abs(v.d - reads[0].d) > 1e-3 && Math.abs(v.d - v.a4) > DEPTH_TOL).map((v) => f(v.d))
       r.check(
         'arrival is instant',
-        landedAt !== null && between.length === 0 && landedAt - readyAt < 3000,
+        landedAt !== null && between.length === 0 && landedAt - pressedAt < 3000,
         landedAt === null
           ? `never reached place 4 (last depth ${f(reads.at(-1)?.d)})`
-          : `at place 4 ${landedAt - readyAt} ms after ready (the wait is 900 ms); ${reads.length} reads, ${between.length} between the opening and place 4`,
+          : `at place 4 ${landedAt - pressedAt} ms after Continue; ${reads.length} reads, ${between.length} between the opening and place 4`,
       )
       await waitCard(page, 'row 17')
       r.values.shot = await r.shot('reduced-motion')
@@ -1525,6 +1572,95 @@ try {
       await toView(narrow, 'world', 'row 22: widened')
       const at = await restAt(narrow, 3, 'row 22, widened')
       r.check("opened narrow and widened: the camera starts at the student's place (Video Ads II)", true, `depth ${f(at.d)}, the stop is at ${f(at.t)}`)
+    })
+
+    // 23 ── The welcome at the start (Lovro, 2026-10-19, the launch night: "Welcome, name / This is
+    // your map through the course. / Continue / That's it. / And scroll yeah"). With ?arrive=1 the old
+    // arrival would have flown off 900 ms after ready: the map now waits at the opening, the welcome
+    // and the scroll cue up. Tab reaches Continue first, with its ring; Enter makes the arrival's trip.
+    // Back at the top it all returns; scrolled in by the wheel it all goes. On a phone the two lines
+    // head the list, with no button and no cue.
+    await runRow(23, nameOf(23), async (r) => {
+      const page = await r.open(url('', { p: 'p0', arrive: 1, poster: 'off' }))
+      await ready(page, 'row 23')
+      await waitFor(page, () => document.querySelector('main section[aria-labelledby="welcome-title"]')?.dataset.on !== undefined, {
+        timeout: 15000,
+        what: 'row 23: the welcome did not show',
+      })
+      await sleep(1600)
+      const start = { ...(await page.evaluate(SNAP)), welcome: await page.evaluate(WELCOME) }
+      r.values.shot = await r.shot('welcome')
+      const w0 = start.welcome
+      r.check('the map waits at the opening (no trip of its own, 1.6 s after the welcome showed, with ?arrive=1)', start.depth !== null && start.depth < 1e-3 && start.y < 2, `depth ${f(start.depth)}, scrollY ${start.y}`)
+      r.check('the welcome is up: "Welcome, Maya"', w0.shown === true && w0.opacity >= 0.99 && w0.title === 'Welcome, Maya', { shown: w0.shown, opacity: w0.opacity, title: w0.title })
+      r.check('its line: "This is your map through the course."', w0.line === 'This is your map through the course.', w0.line)
+      r.check('its button: "Continue"', w0.button === 'Continue', w0.button)
+      r.check('the scroll cue is up: "Scroll" and its chevron', !!w0.cue && w0.cue.text === 'Scroll' && w0.cue.chevron && w0.cue.opacity >= 0.99, w0.cue)
+      r.check('the welcome takes no pointer but the button (a point on its title reaches the map)', w0.passThrough === true, w0.passThrough)
+      r.check('the welcome sits under the header', typeof w0.belowHeader === 'number' && w0.belowHeader >= 0, `${w0.belowHeader} px below it`)
+      // The keyboard: the first Tab lands on Continue, with the focus ring; Enter goes.
+      await page.keyboard.press('Tab')
+      const focus = await page.evaluate(() => {
+        const a = document.activeElement
+        return a ? { text: (a.textContent ?? '').trim(), inWelcome: !!a.closest('section[aria-labelledby="welcome-title"]'), ring: a.matches(':focus-visible') && getComputedStyle(a).outlineStyle !== 'none' } : null
+      })
+      r.check('the first Tab lands on Continue, its focus ring drawn', !!focus && focus.inWelcome && focus.text === 'Continue' && focus.ring, focus)
+      await page.keyboard.press('Enter')
+      const rest = await restAt(page, 0, 'row 23, after Continue')
+      const card = await waitCard(page, 'row 23, after Continue')
+      const w1 = await page.evaluate(WELCOME)
+      r.values.shotIn = await r.shot('after-continue')
+      r.check('Continue moves into the map: the camera rests at place 1 and its card shows', card?.title === 'Introduction', `depth ${f(rest.d)}, the stop is at ${f(rest.t)}; card ${card?.title ?? null}`)
+      r.check('there the welcome and the cue are gone', w1.shown === false && !!w1.cue && w1.cue.opacity <= 0.001 && w1.cue.off, { welcome: w1.shown, opacity: w1.opacity, cue: w1.cue })
+      // Back at the top, it all returns.
+      await page.evaluate(() => window.scrollTo(0, 0))
+      const back = await waitFor(
+        page,
+        () => {
+          const sec = document.querySelector('main section[aria-labelledby="welcome-title"]')
+          return typeof window.__worldDepth === 'number' && window.__worldDepth < 1e-4 && sec?.dataset.on !== undefined && Number(getComputedStyle(sec).opacity) >= 0.99
+        },
+        { timeout: 20000, soft: true, what: 'row 23: the welcome back at the top' },
+      )
+      const w2 = await page.evaluate(WELCOME)
+      r.check('scrolled back to the top, the welcome and the cue come back', !!back && w2.shown === true && !!w2.cue && w2.cue.opacity >= 0.99, { welcome: w2.shown, opacity: w2.opacity, cue: w2.cue })
+      // Scrolled in by the wheel, the way a student does, until halfway to the first place: it all goes.
+      await page.mouse.move(DESKTOP.width - 60, DESKTOP.height / 2)
+      const half = await page.evaluate(() => window.__worldDepthFor('a1') / 2)
+      let d = 0
+      for (let i = 0; i < 24 && d < half; i++) {
+        await page.mouse.wheel({ deltaY: 120 })
+        await sleep(250)
+        d = await page.evaluate(() => window.__worldDepth)
+      }
+      await sleep(400)
+      const w3 = await page.evaluate(WELCOME)
+      r.check(
+        'scrolled in halfway to the first place, the welcome and the cue are gone (and Continue with them)',
+        d >= half && w3.shown === false && !!w3.cue && w3.cue.opacity <= 0.001,
+        { depth: f(d), halfway: f(half), welcome: w3.shown, opacity: w3.opacity, cue: w3.cue },
+      )
+      // The phone: the two lines head the list, with no button and no cue.
+      const phone = await r.open(url('', { p: 'p0' }), { viewport: PHONE })
+      await waitFor(phone, () => document.querySelector('main')?.dataset.view === 'list', { timeout: LOAD_MS, poll: 200, what: 'row 23: the list view did not show at 390x844' })
+      await phone.evaluate(() => document.fonts.ready.then(() => true))
+      await sleep(600)
+      const list = await phone.evaluate(() => {
+        const norm = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
+        const h = document.querySelector('main h2#welcome-title')
+        const next = document.querySelector('main section[aria-label="Next lesson"]')
+        return {
+          title: norm(h?.textContent),
+          line: norm(h?.nextElementSibling?.textContent),
+          aboveNext: !!h && !!next && h.getBoundingClientRect().bottom <= next.getBoundingClientRect().top,
+          onScreen: !!h && h.getBoundingClientRect().top >= 0 && h.getBoundingClientRect().bottom <= innerHeight,
+          continueButton: [...document.querySelectorAll('main button')].some((b) => norm(b.textContent) === 'Continue'),
+          cue: [...document.querySelectorAll('main *')].some((e) => e.children.length === 0 && /^Scroll$/i.test(norm(e.textContent))),
+        }
+      })
+      r.values.shotPhone = await r.shot('welcome-phone')
+      r.check('on the phone the list opens with "Welcome, Maya" and the line, above the Next block, on screen', list.title === 'Welcome, Maya' && list.line === 'This is your map through the course.' && list.aboveNext && list.onScreen, list)
+      r.check('on the phone there is no Continue and no scroll cue', !list.continueButton && !list.cue, { continue: list.continueButton, cue: list.cue })
     })
   }
 

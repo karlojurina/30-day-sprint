@@ -157,6 +157,20 @@ import s from "./world.module.css";
  * (source.onFeature), which the host opens over the checkpoint. Always open:
  * it never locks and shows whenever the course has the lesson
  * (source.bounty; the dev page's fixture row without a source).
+ *
+ * THE WELCOME (2026-10-19, Lovro, the launch night). With a source the map
+ * opens on a welcome over the opening's sky, in Lovro's words and no others:
+ * "Welcome, {first name}" (source.firstName; "Welcome" without one), "This is
+ * your map through the course." and a Continue button. It replaces the
+ * arrival's own trip: the map no longer flies to the student's place 900 ms
+ * after it is ready (a button that left before it could be read), Continue
+ * makes that same trip (travel to the student's place, the first one for a
+ * new student). It fades out over the first 40% of the scroll to the first
+ * place and comes back at the top; pointer-events none but the button, gone
+ * from the tab order once faded. The scroll cue above the timeline ("Scroll"
+ * and a chevron that bobs a few times) fades out as the scroll starts. On
+ * phones the same two lines head the list, with no button and no cue. The
+ * dev page has no source and no welcome, and keeps the old arrival.
  */
 
 const N = STUDY_AREAS.length;
@@ -169,6 +183,8 @@ const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";
 const MODE_NAMES = ["hidden", "dot", "text"] as const;
 /** V3's rail ended at 0.88; V4's depth is the share of the whole budget, so the route ends at 1. */
 const END_DEPTH = 1;
+/** The welcome (with a source) fades out between these shares of the way to the first place, and back in at the top. */
+const WELCOME_FADE: readonly [number, number] = [0.03, 0.4];
 const HINT_MS = 2400;
 /** The camera counts as resting once it is this close (depth) to where the scroll says. */
 const SETTLE_EPS = 2.5e-4;
@@ -178,7 +194,7 @@ const REST_MS = 160;
 const ARRIVE_VH = 32;
 /** The panel's place in the click-in frame: under the header, off the left edge. */
 const PANEL_TOP = 92;
-/** Auto-travel to the student's place starts this long after the world is ready. */
+/** Auto-travel to the student's place starts this long after the world is ready (the dev page: with a source the welcome's Continue makes the trip). */
 const ARRIVE_DELAY_MS = 900;
 /**
  * Long travel (final pass B). A hop longer than this (depth) no longer scrubs
@@ -535,6 +551,8 @@ function WorldV6View({
   const trackRef = useRef<HTMLDivElement | null>(null);
   const caretRef = useRef<HTMLSpanElement | null>(null);
   const cueRef = useRef<HTMLDivElement | null>(null);
+  /** The welcome over the opening (with a source), faded by the frame loop. */
+  const welcomeRef = useRef<HTMLElement | null>(null);
   const shadeRef = useRef<HTMLDivElement | null>(null);
   /** Final pass C: the telescope's lens (vignette) and its caption, faded by the a7 park. */
   const lensRef = useRef<HTMLDivElement | null>(null);
@@ -1469,6 +1487,9 @@ function WorldV6View({
       caretX: -1,
       cue: -1,
       cueOff: false,
+      welcome: -1,
+      /** The welcome's data-on as last written: 1, 0, or -1 before the first frame. */
+      welcomeOn: -1,
       // The card (2026-09-28): which element and place are up, and where it was placed from.
       cardEl: null as HTMLElement | null,
       cardK: -1,
@@ -1558,6 +1579,7 @@ function WorldV6View({
     let offTier: (() => void) | null = null;
     // The progress surfaces as mounted with this scene (cleared on the way out).
     const uiEls = [cardRef.current, doneElRef.current, chipRef.current];
+    const welcomeEl = welcomeRef.current;
     const markerEls = markerRefs.current;
     const leaderEl = leaderRef.current;
     const leaderPinEl = leaderPinRef.current;
@@ -1969,7 +1991,8 @@ function WorldV6View({
       }
       const cue = cueRef.current;
       if (cue) {
-        const a = (1 - smooth(0.004, 0.03, f.depth / END_DEPTH)) * chrome;
+        // Gone once the scroll has started: 3 vh in it fades, by 30 vh it is out (2026-10-19).
+        const a = (1 - smooth(0.0015, 0.015, f.depth / END_DEPTH)) * chrome;
         if (Math.abs(a - cache.cue) > 0.004 || (a === 0 && cache.cue !== 0)) {
           cache.cue = a;
           cue.style.opacity = a.toFixed(3);
@@ -1979,6 +2002,24 @@ function WorldV6View({
           cache.cueOff = off;
           if (off) cue.dataset.off = "";
           else delete cue.dataset.off;
+        }
+      }
+      // The welcome (with a source): out over the first 40% of the way to the
+      // first place, back at the top, and away while a place or a checkpoint is up.
+      const welcome = welcomeRef.current;
+      if (welcome) {
+        const wa = (1 - smooth(WELCOME_FADE[0], WELCOME_FADE[1], f.depth / Math.max(1e-6, depths[0]))) * chrome;
+        if (Math.abs(wa - cache.welcome) > 0.004 || (wa === 0 && cache.welcome !== 0)) {
+          cache.welcome = wa;
+          welcome.style.opacity = wa.toFixed(3);
+        }
+        // Hidden until the loop has drawn a frame (the stylesheet), and once
+        // faded out: then it takes no click and no Tab.
+        const on = wa > 0.001 ? 1 : 0;
+        if (on !== cache.welcomeOn) {
+          cache.welcomeOn = on;
+          if (on) welcome.dataset.on = "";
+          else delete welcome.dataset.on;
         }
       }
 
@@ -2325,11 +2366,13 @@ function WorldV6View({
       // the render harnesses keep the page where they put it.
       const arrive = query.get("arrive");
       const automated = typeof navigator !== "undefined" && navigator.webdriver && arrive !== "1";
-      // With a source: no bench, and no arrival when the address already names
-      // a place (it has just opened, above) or while a lesson page is open.
+      // With a source: no bench, and no arrival of its own. The welcome holds
+      // the student at the opening and its Continue makes this trip
+      // (2026-10-19); before it, the address naming a place or a lesson page
+      // being open held it back too.
       const src = sourceRef.current;
       const benching = !src && query.get("bench") === "1";
-      if (arrive !== "0" && !automated && !benching && window.scrollY < 2 && !(src && src.openK !== null)) {
+      if (arrive !== "0" && !automated && !benching && !src && window.scrollY < 2) {
         window.clearTimeout(u.arriveTimer);
         u.arriveTimer = window.setTimeout(() => {
           // Final pass E: a student with every place done travels to the arch (the ending, decision 55).
@@ -2362,6 +2405,7 @@ function WorldV6View({
       window.clearTimeout(u.restTimer);
       // A remount (fast refresh, the view flipping) must not leave a card up with no loop behind it.
       for (const el of uiEls) if (el) delete el.dataset.show;
+      if (welcomeEl) delete welcomeEl.dataset.on;
       for (const el of markerEls) if (el) delete el.dataset.card;
       leaderEl?.removeAttribute("d");
       leaderPinEl?.setAttribute("visibility", "hidden");
@@ -2812,6 +2856,24 @@ function WorldV6View({
             </g>
           </svg>
 
+          {/* The welcome (2026-10-19), with a source: over the opening, faded by
+              the frame loop. Ahead of the card in the tab order, so at the top
+              Tab lands on Continue; once it has faded the card's Watch is first. */}
+          {hasSource && (
+            <section ref={welcomeRef} className={s.welcome} aria-labelledby="welcome-title" inert={isOpen || cpOpen || loading}>
+              <WelcomeWords name={source?.firstName ?? null} />
+              {/* The arrival's trip: to the student's place (the arch once every place is done). */}
+              <button
+                type="button"
+                className={`${s.primary} ${s.welcomeGo}`}
+                onClick={() => travel(Math.min(studyRef.current.place, N - 1))}
+              >
+                Continue
+                <Arrow />
+              </button>
+            </section>
+          )}
+
           {/* The card: beside the student's place when the camera rests there.
               First in the tab order, so Tab lands on Watch. */}
           <section
@@ -2890,7 +2952,9 @@ function WorldV6View({
 
           <div ref={cueRef} className={s.cue} aria-hidden="true">
             <span>Scroll</span>
-            <i className={s.cueLine} />
+            <svg className={s.cueChevron} width="14" height="8" viewBox="0 0 14 8" fill="none">
+              <path d="M1.5 1.5 7 6.5l5.5-5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </div>
 
           <div ref={markersRef} className={s.markers} inert={isOpen || cpOpen || loading}>
@@ -3200,6 +3264,12 @@ function WorldV6View({
       {view === "list" && (
         <div className={s.list} inert={isOpen}>
           {phase === "failed" && <p className={s.note}>The 3D map could not load in this browser, so here is the list.</p>}
+          {/* The welcome's two lines (2026-10-19), with a source: no button and no cue here. */}
+          {hasSource && (
+            <div className={s.listWelcome}>
+              <WelcomeWords name={source?.firstName ?? null} />
+            </div>
+          )}
           <section className={s.listNext} aria-label="Next lesson">
             <NextBlock study={study} onWatch={(el) => watch(place, study.placeNext, el)} />
           </section>
@@ -3334,6 +3404,18 @@ function WorldV6View({
         </div>
       )}
     </main>
+  );
+}
+
+/** The welcome's two lines (2026-10-19, Lovro's words): over the opening, and at the top of the phone's list. */
+function WelcomeWords({ name }: { name: string | null }) {
+  return (
+    <>
+      <h2 id="welcome-title" className={s.welcomeTitle}>
+        {name ? `Welcome, ${name}` : "Welcome"}
+      </h2>
+      <p className={s.welcomeLine}>This is your map through the course.</p>
+    </>
   );
 }
 

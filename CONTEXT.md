@@ -725,14 +725,23 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
   row only for a product in `WHOP_PRODUCT_ID` (comma separated); the
   company's webhook sends every product's events, and another product's
   used to be written as `active`. Another product's event answers 200
-  and writes nothing (its membership ending asks Whop nothing either).
+  and writes nothing (its membership ending asks Whop nothing either),
+  with one exception: a membership ending that the student's row still
+  points at (`whop_membership_id`) is the row the old webhook made for
+  it, which the sync never closes (it walks only the course's
+  memberships). That row is settled as before login-1: re-pointed at a
+  course membership Whop lists, else canceled, and the write lands only
+  while the row still points at it. A row a `payment.succeeded` made
+  carries the payment's id (`pay_...`), which no membership event
+  names: only a cleanup closes those.
   An event with no product writes only the course membership Whop lists
   for that user, with its own status, and a deactivation with no product
-  and no course membership on Whop leaves the row for the sync.
+  and no course membership on Whop leaves the row for the sync, unless
+  the row points at the membership that ended (then it is canceled).
   `supabase/diagnostics/non-course-members-read.sql` counts the active
   and past_due rows the last successful sync did not rewrite; the
-  `whop-webhook-product` client test runs the route on the real Whop
-  lookup with a stand-in fetch
+  `whop-webhook-product` and `whop-webhook-old-rows` client tests run
+  the route on the real Whop lookup with a stand-in fetch
 - `POST /api/webhooks/adbounty` — Zak's ad-bounty system fires here on
   enrollment → stamps `student_milestones.bounty_access_claimed_at`
   (sole source of that timestamp)

@@ -43,6 +43,9 @@ Since login-1 (2026-10-20) the webhook's copy imports the real
 `whop-members.ts` instead of the stand-in, so `whop-webhook-product.test.mjs`
 runs the real Whop lookup on a stand-in `fetch`; that copy leaves out every
 comment line (`dropComments`), since one of them names two people.
+`whop-webhook-old-rows.test.mjs` runs the same copy for a row the webhook
+wrote for another product before login-1, which closes when that membership
+ends.
 `whop-backfill.test.mjs` also checks the login callback's one streak line in
 the source; since T-079 `streak.test.mjs` runs the callback itself (below).
 

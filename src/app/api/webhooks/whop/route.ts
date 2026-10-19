@@ -257,15 +257,50 @@ export async function POST(request: NextRequest) {
     case "membership.went_invalid":
     case "membership_went_invalid": {
       const membership = payload.data as WhopMembership;
+      const product = eventProductId(membership);
+      const ofCourse = product !== null && courseProductIds().includes(product);
+
+      // login-1 review: the row a membership made. Until login-1 the webhook
+      // wrote a membership of any product as active, and the sync, which
+      // walks only the course's memberships, never closes such a row. So a
+      // membership that is not the course's (or that the payload does not
+      // name) still settles the row when the row points at it, as before
+      // login-1: re-pointed at a course membership Whop lists, else
+      // canceled. A course member's row points at a course membership after
+      // every sync (every 2 hours).
+      let rowPointsAtIt = false;
+      if (!ofCourse) {
+        const { data: madeByIt, error: readError } = await supabase
+          .from("students")
+          .select("id")
+          .eq("whop_user_id", membership.user.id)
+          .eq("whop_membership_id", membership.id)
+          .maybeSingle();
+        if (readError) {
+          // 500 so Whop retries: this event may be the only one that closes the row.
+          console.error("Webhook: student read failed:", readError);
+          return NextResponse.json(
+            { error: "Database error" },
+            { status: 500 },
+          );
+        }
+        rowPointsAtIt = madeByIt !== null;
+      }
 
       // login-1: another product's membership ending says nothing about the
-      // course. Answer 200, ask Whop nothing, leave the row as it is.
-      const product = eventProductId(membership);
-      if (product && !courseProductIds().includes(product)) {
+      // course when the row points elsewhere. Answer 200, ask Whop nothing,
+      // leave the row as it is.
+      if (product && !ofCourse && !rowPointsAtIt) {
         console.info(
           `[whop-webhook] ${eventName} for product ${product}, not the course: nothing written`,
         );
         break;
+      }
+      if (rowPointsAtIt) {
+        console.info(
+          `[whop-webhook] ${eventName} for ${product ? `product ${product}` : "no named product"}: ` +
+            `the row points at ${membership.id}, settled as before login-1`,
+        );
       }
 
       // v85.6 — a user can hold several memberships at once (re-subscribe,
@@ -279,7 +314,7 @@ export async function POST(request: NextRequest) {
         // Still entitled — re-point the row at the surviving membership
         // instead of revoking. Keeps whop_membership_id / whop_plan_id
         // pointing at the thing that actually grants access.
-        const { error: repointError } = await supabase
+        let repoint = supabase
           .from("students")
           .update({
             whop_membership_id: surviving.id,
@@ -288,6 +323,13 @@ export async function POST(request: NextRequest) {
             canceled_at: null,
           })
           .eq("whop_user_id", membership.user.id);
+        // login-1 review: a write made because the row points at this
+        // membership lands only while it still does (the sync or a course
+        // activation may re-point the row while Whop is asked).
+        if (rowPointsAtIt) {
+          repoint = repoint.eq("whop_membership_id", membership.id);
+        }
+        const { error: repointError } = await repoint;
         if (repointError) {
           console.error("Webhook: student re-point failed:", repointError);
           return NextResponse.json(
@@ -304,9 +346,11 @@ export async function POST(request: NextRequest) {
 
       // login-1: with no product in the payload this may be another
       // product's membership, and Whop answering nothing may be a failed
-      // read. A course member is never canceled on that: the sync (every 2
-      // hours) settles the row from the course's own memberships.
-      if (!product) {
+      // read. A row that points elsewhere is not canceled on that: the sync
+      // (every 2 hours) settles it from the course's own memberships. A row
+      // that points at this membership is canceled below, since the sync may
+      // never see it (login-1 review, above).
+      if (!product && !rowPointsAtIt) {
         console.info(
           `[whop-webhook] ${eventName} names no product and Whop lists no course ` +
             `membership for ${membership.user.id}: nothing written, the sync settles it`,
@@ -314,7 +358,7 @@ export async function POST(request: NextRequest) {
         break;
       }
 
-      const { error } = await supabase
+      let cancel = supabase
         .from("students")
         .update({
           membership_status: "canceled",
@@ -323,6 +367,11 @@ export async function POST(request: NextRequest) {
           canceled_at: new Date().toISOString(),
         })
         .eq("whop_user_id", membership.user.id);
+      // As for the re-point above: only while the row still points at it.
+      if (rowPointsAtIt) {
+        cancel = cancel.eq("whop_membership_id", membership.id);
+      }
+      const { error } = await cancel;
 
       if (error) {
         // v75.30: return 500 so Whop retries. membership.deactivated

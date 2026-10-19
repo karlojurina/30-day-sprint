@@ -296,13 +296,22 @@ console.log('\n=== admin-3: a template that is off shows it, and can be turned o
      'a CSM (the page shows them no button) is refused by the route, and the page shows why', show(csm.seen.errors))
 }
 {
+  // Since the review of admin-3 the row takes on and off from
+  // src/lib/template-on-off.ts and renders it with TemplateOnOff, and only
+  // where the switch stops the template's tasks; template-on-off.test.mjs
+  // runs both. These read that the wiring is still there.
   const src = templatesPage.now
-  ok(/\{!t\.is_active && \(\s*<span\s+title="This template is off\."\s+style=\{\{[^}]*\}\}\s*>\s*Off\s*<\/span>/.test(src),
-     'in the source, each row\'s header shows "Off" when the template is off (every row, for every role)')
-  ok(/\{canEdit && \(\s*<button\s+type="button"\s+disabled=\{saving === t\.id \|\| turnOnWaits\}\s+onClick=\{\(\) => void setActive\(t\.id, !t\.is_active\)\}/.test(src)
-       && src.includes('{t.is_active ? "Turn off" : "Turn on"}') && src.includes('"This template is off."'),
+  const row = fromSrc('src/components/admin/TemplateOnOff.tsx')
+  const rule = fromSrc('src/lib/template-on-off.ts')
+  ok(/\{onOff\.kind === "switch" && !onOff\.on && \(\s*<span\s+title="This template is off\."\s+style=\{\{[^}]*\}\}\s*>\s*Off\s*<\/span>/.test(src)
+       && src.includes('const onOff = onOffView(t, live, dirty);'),
+     'in the source, each row\'s header shows "Off" when the template is off and its switch works (every row, for every role)')
+  ok(/<TemplateOnOff\s+view=\{onOff\}\s+canEdit=\{canEdit\}\s+busy=\{saving === t\.id\}\s+onToggle=\{\(\) => void setActive\(t\.id, !t\.is_active\)\}\s*\/>/.test(src)
+       && /\{canEdit && \(\s*<button\s+type="button"\s+disabled=\{disabled\}\s+onClick=\{onToggle\}/.test(row)
+       && row.includes('{view.on ? "Turn off" : "Turn on"}') && rule.includes('line: "This template is off."'),
      'the open row says on or off, and founders and admins get Turn on / Turn off, wired to setActive')
-  ok(src.includes('const turnOnWaits = !t.is_active && dirty;') && src.includes('Save your changes first, then turn it on.'),
+  ok(rule.includes('if (dirty) return "Save your changes first, then turn it on.";')
+       && /const disabled = busy \|\| waits;/.test(row) && row.includes('{view.turnOnWaits}'),
      'Turn on waits while the row has unsaved changes, and says why, so a template never goes live on the conditions being replaced')
   ok(!templatesPage.old.includes('is_active'), `control: at ${BASE} the page never read or sent is_active`)
 }

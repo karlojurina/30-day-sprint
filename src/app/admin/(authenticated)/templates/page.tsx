@@ -25,7 +25,10 @@ import {
   stripBucketGlyph,
 } from "@/lib/templates";
 import { TriggerBuilder } from "@/components/admin/TriggerBuilder";
+import { TemplateOnOff } from "@/components/admin/TemplateOnOff";
 import { AdminPage, PageHeader, Button, T } from "@/components/admin/ui";
+import { onOffView, readLiveCourse } from "@/lib/template-on-off";
+import type { LiveRead } from "@/lib/template-on-off";
 
 // v58 - day-based ordering. After the v57 rename the week column
 // holds day-prefixed buckets (D01, D03, D05, D07, D10, D14, D21, M2)
@@ -122,6 +125,9 @@ export default function AdminTemplatesPage() {
   const [savedId, setSavedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // The live course, read with the templates: which switches work depends
+  // on it (src/lib/template-on-off.ts).
+  const [live, setLive] = useState<LiveRead>({ course: null, error: null });
   // "New custom template" modal state.
   const [newModalOpen, setNewModalOpen] = useState(false);
   const [newDraft, setNewDraft] = useState<DraftFields>(emptyDraft());
@@ -165,11 +171,23 @@ export default function AdminTemplatesPage() {
 
   async function load() {
     setLoading(true);
-    const { data } = await supabase
-      .from("templates")
-      .select("*")
-      .order("week", { nullsFirst: false })
-      .order("scenario_id");
+    const [{ data }, course] = await Promise.all([
+      supabase
+        .from("templates")
+        .select("*")
+        .order("week", { nullsFirst: false })
+        .order("scenario_id"),
+      // A failed read hides the switches that depend on the course and
+      // says why on each of those rows; the editor still loads.
+      readLiveCourse(supabase).then(
+        (c): LiveRead => ({ course: c, error: null }),
+        (e: unknown): LiveRead => ({
+          course: null,
+          error: e instanceof Error ? e.message : String(e),
+        }),
+      ),
+    ]);
+    setLive(course);
     const list = ((data as Template[] | null) ?? []).sort(
       (a, b) => weekRank(a.week) - weekRank(b.week) || a.scenario_id.localeCompare(b.scenario_id),
     );
@@ -347,7 +365,8 @@ export default function AdminTemplatesPage() {
    * it is. The course switch (v104) turned off the templates whose
    * conditions read the old course; the team rewrites one, saves it, then
    * turns it back on here (T-060). The crons read conditions only from
-   * templates that are on.
+   * templates that are on. The button shows only where the switch works
+   * (src/lib/template-on-off.ts).
    */
   async function setActive(id: string, isActive: boolean) {
     setError(null);
@@ -508,9 +527,9 @@ export default function AdminTemplatesPage() {
                     })
                   : null;
                 const glyph = BUCKET_GLYPH[t.bucket] ?? "·";
-                // Turning a template on waits for its unsaved changes, so it
-                // never goes live on the conditions being replaced.
-                const turnOnWaits = !t.is_active && dirty;
+                // The on/off switch, only where it stops the template's
+                // tasks, and why Turn on waits (template-on-off.ts).
+                const onOff = onOffView(t, live, dirty);
 
                 return (
                   <div
@@ -595,7 +614,7 @@ export default function AdminTemplatesPage() {
                           </span>
                         );
                       })()}
-                      {!t.is_active && (
+                      {onOff.kind === "switch" && !onOff.on && (
                         <span
                           title="This template is off."
                           style={{
@@ -654,52 +673,14 @@ export default function AdminTemplatesPage() {
                         className="px-4 pb-4"
                         style={{ borderTop: "1px solid var(--color-border)" }}
                       >
-                        {/* On or off (is_active), for every template. */}
-                        <div
-                          className="flex items-center gap-3 flex-wrap"
-                          style={{ marginTop: 14 }}
-                        >
-                          <span
-                            style={{
-                              fontSize: 13,
-                              color: t.is_active
-                                ? "var(--color-text-secondary)"
-                                : "var(--color-warning)",
-                            }}
-                          >
-                            {t.is_active
-                              ? "This template is on."
-                              : "This template is off."}
-                          </span>
-                          {canEdit && (
-                            <button
-                              type="button"
-                              disabled={saving === t.id || turnOnWaits}
-                              onClick={() => void setActive(t.id, !t.is_active)}
-                              style={{
-                                ...ghostBtnStyle(),
-                                opacity:
-                                  saving === t.id || turnOnWaits ? 0.5 : 1,
-                                cursor:
-                                  saving === t.id || turnOnWaits
-                                    ? "not-allowed"
-                                    : "pointer",
-                              }}
-                            >
-                              {t.is_active ? "Turn off" : "Turn on"}
-                            </button>
-                          )}
-                          {canEdit && turnOnWaits && (
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: "var(--color-text-tertiary)",
-                              }}
-                            >
-                              Save your changes first, then turn it on.
-                            </span>
-                          )}
-                        </div>
+                        {/* On or off (is_active) where the switch works,
+                            else one line on what makes its tasks. */}
+                        <TemplateOnOff
+                          view={onOff}
+                          canEdit={canEdit}
+                          busy={saving === t.id}
+                          onToggle={() => void setActive(t.id, !t.is_active)}
+                        />
 
                         {/* Editable fields */}
                         <div style={{ marginTop: 14 }}>

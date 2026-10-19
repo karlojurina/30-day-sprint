@@ -20,8 +20,9 @@ export default function DashboardLayout({
         {children}
         {/* v71 - Hard gate for non-active subscriptions. Renders
             ABOVE all dashboard content (z-index 200) and has no
-            close button. Only escape hatches: Renew (Whop checkout)
-            or Sign out. Covers /dashboard + /dashboard/playbook. */}
+            close button. Only escape hatches: Renew (Whop checkout;
+            for past_due, Whop's page to update the payment) or Sign
+            out. Covers /dashboard + /dashboard/playbook. */}
         <MembershipBlockOverlay />
       </StudentProvider>
     </StudentGuard>

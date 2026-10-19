@@ -14,8 +14,12 @@
  *   2. Sign out → drops the session, returns to /login
  * No close button. No dismissable state.
  *
- * Copy is intentionally one message for all 3 non-active statuses
- * per Karlo's call (simpler than per-status variants).
+ * Copy is one message for canceled and expired per Karlo's call
+ * (simpler than per-status variants). past_due has its own since
+ * login-2 (2026-10-20): a renewal whose charge failed, which Whop is
+ * still retrying. Still blocked, but the way out is Whop's page for
+ * updating the payment, never the checkout, which could sell them a
+ * second membership while Whop retried the first card.
  */
 
 import { useState } from "react";
@@ -23,6 +27,10 @@ import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 
 const RENEW_URL = "https://whop.com/checkout/plan_4ZrwR4PmBsVsx";
+/** Where a member updates the payment method on file: the page Whop's help
+ *  for failed payments sends members to. Not yet tried with a past_due
+ *  account. */
+const UPDATE_PAYMENT_URL = "https://whop.com/@me/settings/memberships";
 
 export function MembershipBlockOverlay() {
   const { student, signOut } = useAuth();
@@ -31,9 +39,10 @@ export function MembershipBlockOverlay() {
   const [signOutTrouble, setSignOutTrouble] = useState<string | null>(null);
 
   if (!student) return null;
-  // Only block when the membership isn't active. The 3 non-active
-  // statuses (canceled, past_due, expired) all get the same message.
+  // Only block when the membership isn't active (canceled, past_due,
+  // expired). past_due gets its own words and link, below.
   if (student.membership_status === "active") return null;
+  const paymentFailed = student.membership_status === "past_due";
 
   return (
     <motion.div
@@ -99,7 +108,7 @@ export function MembershipBlockOverlay() {
               color: "rgba(255,255,255,0.45)",
             }}
           >
-            Subscription not active
+            {paymentFailed ? "Payment failed" : "Subscription not active"}
           </p>
 
           <h2
@@ -111,7 +120,12 @@ export function MembershipBlockOverlay() {
               color: "rgba(255,255,255,0.96)",
             }}
           >
-            Hey {student.name?.split(" ")[0] ?? "there"}, your subscription isn&rsquo;t active right now.
+            Hey {student.name?.split(" ")[0] ?? "there"},{" "}
+            {paymentFailed ? (
+              <>your last payment did not go through.</>
+            ) : (
+              <>your subscription isn&rsquo;t active right now.</>
+            )}
           </h2>
 
           <p
@@ -122,12 +136,20 @@ export function MembershipBlockOverlay() {
               letterSpacing: "-0.005em",
             }}
           >
-            Renew to get back into the dashboard, your progress, and the bounty program. We&rsquo;ve kept everything where you left it.
+            {paymentFailed ? (
+              <>
+                Update your payment method on Whop. Once the payment goes through, refresh this page and you&rsquo;re back in. We&rsquo;ve kept everything where you left it.
+              </>
+            ) : (
+              <>
+                Renew to get back into the dashboard, your progress, and the bounty program. We&rsquo;ve kept everything where you left it.
+              </>
+            )}
           </p>
 
-          {/* Renew CTA - primary */}
+          {/* Renew CTA - primary (past_due: update the payment instead) */}
           <a
-            href={RENEW_URL}
+            href={paymentFailed ? UPDATE_PAYMENT_URL : RENEW_URL}
             target="_blank"
             rel="noopener noreferrer"
             style={{
@@ -150,7 +172,7 @@ export function MembershipBlockOverlay() {
                 "0 8px 22px rgba(0,0,0,0.32), 0 1px 0 rgba(255,255,255,0.60) inset, 0 -1px 0 rgba(0,0,0,0.15) inset",
             }}
           >
-            Renew on Whop
+            {paymentFailed ? "Update payment on Whop" : "Renew on Whop"}
             <svg
               width="14"
               height="14"

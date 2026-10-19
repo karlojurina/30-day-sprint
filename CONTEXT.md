@@ -779,7 +779,12 @@ about those migrations comes from their text.
   - **`membership_status` is the sole dashboard access gate.**
     `MembershipBlockOverlay` (mounted on `/dashboard/layout.tsx`, and
     on `/world/layout.tsx` on branch `world-engine`) hard-blocks on
-    anything other than `'active'` and never asks Whop.
+    anything other than `'active'` and never asks Whop. Canceled and
+    expired get "Renew on Whop" (the checkout); `past_due` (a renewal
+    Whop is still retrying) gets "Your last payment did not go through"
+    and Whop's page for updating the payment
+    (`https://whop.com/@me/settings/memberships`), never the checkout
+    (login-2, 2026-10-20; letting past_due in is the owner's call).
     `POST /api/student/lesson-video` applies the same test on the
     server before it reads a video's id. So a
     stale value here locks out a fully paid student while every Whop-

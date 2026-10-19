@@ -32,7 +32,7 @@
  *      videos to watch, the videos watched and left (no time estimate and no
  *      Watch row since Lovro's review of 2026-10-15), and shows Apply greyed
  *      out: aria-disabled, still in the keyboard's path, no fill, its reason
- *      ("Watch all 59 videos to apply") its title and its description in the
+ *      ("Watch all 61 videos to apply" on the real course since 19 October) its title and its description in the
  *      accessibility tree
  *   4  Esc comes home: the panel goes, the camera is back on the rail where it
  *      was, the page scrolls again

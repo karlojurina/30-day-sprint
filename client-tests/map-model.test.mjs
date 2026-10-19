@@ -137,8 +137,8 @@ console.log('\n=== catalogs the map cannot draw ===')
 
 console.log('\n=== a lesson that can\'t be finished in the app never holds the student (Loom 2, 2026-10-16) ===')
 {
-  // As in the real course today: every watch lesson has a video but a3l11, a4l11
-  // and all of area 7; a5l24, an action item, has none and is still finished by its hand-in.
+  // As in the real course on 16 October: every watch lesson had a video but a3l11, a4l11
+  // and all of area 7 (a3l11 and a4l11 got theirs on 19 October); a5l24, an action item, has none and is still finished by its hand-in.
   const vid = {}
   for (let k = 0; k < 8; k++) {
     for (let n = 1; n <= COUNTS[k]; n++) {

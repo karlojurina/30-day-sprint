@@ -4037,7 +4037,7 @@ const ELIGIBLE_DAY_NO_YEAR = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString
  * plays here (Lovro's review, 2026-10-15), so a locked student sees the
  * videos watched and to go, and Apply greyed out until every one is watched.
  * It is aria-disabled, not disabled, so the keyboard and a screen reader
- * still reach it and hear why: its title, "Watch all 59 videos to apply", is
+ * still reach it and hear why: its title, "Watch all 61 videos to apply" on the real course, is
  * both the hover's tip and its description. apply() takes no click, Enter or
  * Space before the state is ready. The copy reuses the old dashboard's
  * (DiscountClaimCelebration, StatsWidget) where it still holds: "30% off your

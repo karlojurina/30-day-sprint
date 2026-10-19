@@ -1,0 +1,418 @@
+
+const WHOP_MEMBERSHIPS_BASE = "https://api.whop.com/api/v2";
+
+export async function whopFetchWithRetry(
+  url: string,
+  headers: HeadersInit,
+  maxRetries = 5,
+): Promise<Response> {
+  let lastRes: Response | null = null;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch(url, { headers });
+    if (res.status !== 429) return res;
+    lastRes = res;
+    if (attempt === maxRetries) break;
+    const retryAfterHeader = res.headers.get("retry-after");
+    const retryAfterSec = retryAfterHeader
+      ? parseInt(retryAfterHeader, 10)
+      : NaN;
+    let waitMs = !isNaN(retryAfterSec)
+      ? retryAfterSec * 1000
+      : Math.min(30_000, 1_000 * Math.pow(2, attempt));
+    waitMs += Math.floor(Math.random() * 250);
+    console.warn(
+      `[whop-api] 429 rate-limited; waiting ${waitMs}ms before retry ${attempt + 1}/${maxRetries}`,
+    );
+    await new Promise((r) => setTimeout(r, waitMs));
+  }
+  return lastRes!;
+}
+
+export interface WhopMembershipRow {
+  id: string;
+  user: string | null;
+  email: string | null;
+  status: string | null;
+  valid: boolean | null;
+  created_at: number | string | null;
+  expires_at: number | string | null;
+  renewal_period_end?: number | string | null;
+  cancel_at_period_end?: boolean | null;
+  discord?: { id?: string; username?: string } | null;
+  discord_user_id?: string | null;
+  product?: string | null;
+  plan?: string | null;
+}
+
+export function mapStatus(
+  row: Pick<WhopMembershipRow, "status" | "valid">,
+): "active" | "past_due" | "canceled" | "expired" {
+  const s = (row.status ?? "").toLowerCase();
+
+  if (row.valid === true) {
+    return s === "past_due" ? "past_due" : "active";
+  }
+  if (row.valid === false) {
+    return s === "expired" ? "expired" : "canceled";
+  }
+
+  if (s === "active" || s === "trialing" || s === "completed") return "active";
+  if (s === "past_due") return "past_due";
+  if (s === "expired") return "expired";
+  if (s === "canceled" || s === "suspended") return "canceled";
+  return "active";
+}
+
+export function toIso(value: number | string | null): string | null {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    const d = new Date(value);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  const ms = value > 10_000_000_000 ? value : value * 1000;
+  const d = new Date(ms);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+interface FetchOptions {
+  perPage?: number;
+  maxPages?: number;
+}
+
+export async function* listMembershipsForProduct(
+  productId: string,
+  opts: FetchOptions = {},
+): AsyncGenerator<WhopMembershipRow> {
+  const apiKey = process.env.WHOP_API_KEY;
+  if (!apiKey) throw new Error("WHOP_API_KEY not set");
+  const perPage = opts.perPage ?? 50;
+  const maxPages = opts.maxPages ?? 500;
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    Accept: "application/json",
+  };
+
+  let page = 1;
+  while (page <= maxPages) {
+    if (page > 1) await new Promise((r) => setTimeout(r, 200));
+    const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?product_id=${encodeURIComponent(
+      productId,
+    )}&page=${page}&per=${perPage}`;
+    const res = await whopFetchWithRetry(url, headers);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(
+        `Whop API ${res.status} on memberships?product_id=${productId}: ${body.slice(0, 200)}`,
+      );
+    }
+    const json = (await res.json()) as {
+      data?: WhopMembershipRow[];
+      pagination?: {
+        current_page?: number;
+        total_page?: number;
+        total_count?: number;
+      };
+    };
+    const items = Array.isArray(json.data) ? json.data : [];
+    const foreign = items.filter((m) => m.product && m.product !== productId);
+    if (foreign.length > 0) {
+      const others = Array.from(new Set(foreign.map((m) => m.product)));
+      throw new Error(
+        `Whop product_id filter not honoured for ${productId}: page ${page} ` +
+          `returned ${foreign.length}/${items.length} rows for other products ` +
+          `(${others.slice(0, 3).join(", ")}). Refusing to sync an unfiltered list.`,
+      );
+    }
+    for (const item of items) {
+      yield item;
+    }
+    const currentPage = json.pagination?.current_page ?? page;
+    const totalPage = json.pagination?.total_page ?? currentPage;
+    if (currentPage >= totalPage) break;
+    page = currentPage + 1;
+    if (page > maxPages) {
+      throw new Error(
+        `Whop memberships walk for ${productId} exceeded maxPages (${maxPages}); ` +
+          `Whop reported ${totalPage} pages. Refusing to return a truncated list.`,
+      );
+    }
+  }
+}
+
+export async function fetchActiveMembershipForUser(
+  whopUserId: string,
+): Promise<WhopMembershipRow | null> {
+  const apiKey = process.env.WHOP_API_KEY;
+  if (!apiKey) {
+    console.warn(
+      `[self-heal] ABORT: WHOP_API_KEY not set (whop_user_id=${whopUserId})`,
+    );
+    return null;
+  }
+  const productIds = (process.env.WHOP_PRODUCT_ID ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (productIds.length === 0) {
+    console.warn(
+      `[self-heal] ABORT: WHOP_PRODUCT_ID empty (whop_user_id=${whopUserId})`,
+    );
+    return null;
+  }
+
+  console.info(
+    `[self-heal] starting for whop_user_id=${whopUserId} productIds=${productIds.join(",")}`,
+  );
+
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    Accept: "application/json",
+  };
+  try {
+    const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?user_id=${encodeURIComponent(whopUserId)}&per_page=50`;
+    const res = await whopFetchWithRetry(url, headers);
+    console.info(
+      `[self-heal] strategy1 user_id-only: HTTP ${res.status} for ${whopUserId}`,
+    );
+    if (res.ok) {
+      const json = (await res.json()) as { data?: WhopMembershipRow[] };
+      const rows = json.data ?? [];
+      console.info(
+        `[self-heal] strategy1 returned ${rows.length} memberships: ${JSON.stringify(
+          rows.map((r) => ({
+            id: r.id,
+            user: r.user,
+            product: r.product,
+            plan: r.plan,
+            status: r.status,
+            valid: r.valid,
+          })),
+        )}`,
+      );
+      const allMatchUser = rows.every(
+        (r) => !r.user || r.user === whopUserId,
+      );
+      if (!allMatchUser) {
+        console.warn(
+          `[self-heal] strategy1 user_id filter appears ignored (got memberships for other users); falling through`,
+        );
+      } else {
+        const myActive = rows.find((m) => {
+          const matchesProduct =
+            !m.product || productIds.includes(m.product);
+          if (!matchesProduct) return false;
+          const status = mapStatus(m);
+          return status === "active" || status === "past_due";
+        });
+        if (myActive) {
+          console.info(
+            `[self-heal] strategy1 MATCH id=${myActive.id} status=${myActive.status} valid=${myActive.valid}`,
+          );
+          return myActive;
+        }
+        console.info(
+          `[self-heal] strategy1 found ${rows.length} memberships but none active+matching our products`,
+        );
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[self-heal] strategy1 threw: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  for (const pid of productIds) {
+    const url =
+      `${WHOP_MEMBERSHIPS_BASE}/memberships?product_id=` +
+      `${encodeURIComponent(pid)}&user_id=${encodeURIComponent(whopUserId)}` +
+      `&per_page=50`;
+    try {
+      const res = await whopFetchWithRetry(url, headers);
+      console.info(
+        `[self-heal] strategy2 product=${pid}: HTTP ${res.status} for ${whopUserId}`,
+      );
+      if (!res.ok) continue;
+      const json = (await res.json()) as { data?: WhopMembershipRow[] };
+      const rows = (json.data ?? []).filter(
+        (r) => !r.user || r.user === whopUserId,
+      );
+      console.info(
+        `[self-heal] strategy2 product=${pid} returned ${rows.length} (post-filter) memberships: ${JSON.stringify(
+          rows.map((r) => ({
+            id: r.id,
+            user: r.user,
+            product: r.product,
+            plan: r.plan,
+            status: r.status,
+            valid: r.valid,
+          })),
+        )}`,
+      );
+      const active = rows.find((m) => {
+        const status = mapStatus(m);
+        return status === "active" || status === "past_due";
+      });
+      if (active) {
+        console.info(
+          `[self-heal] strategy2 MATCH product=${pid} id=${active.id} status=${active.status}`,
+        );
+        return active;
+      }
+    } catch (err) {
+      console.warn(
+        `[self-heal] strategy2 product=${pid} threw: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      continue;
+    }
+  }
+
+  try {
+    const url = `${WHOP_MEMBERSHIPS_BASE}/members/${encodeURIComponent(whopUserId)}`;
+    const res = await whopFetchWithRetry(url, headers);
+    console.info(
+      `[self-heal] strategy3 /members/{id}: HTTP ${res.status} for ${whopUserId}`,
+    );
+    if (res.ok) {
+      const data = (await res.json()) as {
+        memberships?: WhopMembershipRow[];
+      };
+      const rows = data.memberships ?? [];
+      console.info(
+        `[self-heal] strategy3 member endpoint returned ${rows.length} embedded memberships: ${JSON.stringify(
+          rows.map((r) => ({
+            id: r.id,
+            product: r.product,
+            plan: r.plan,
+            status: r.status,
+            valid: r.valid,
+          })),
+        )}`,
+      );
+      const active = rows.find((m) => {
+        const matchesProduct =
+          !m.product || productIds.includes(m.product);
+        if (!matchesProduct) return false;
+        const status = mapStatus(m);
+        return status === "active" || status === "past_due";
+      });
+      if (active) {
+        console.info(
+          `[self-heal] strategy3 MATCH id=${active.id} status=${active.status}`,
+        );
+        return active;
+      }
+    }
+  } catch (err) {
+    console.warn(
+      `[self-heal] strategy3 threw: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  console.warn(
+    `[self-heal] EXHAUSTED all strategies for whop_user_id=${whopUserId} — no active membership found anywhere`,
+  );
+  return null;
+}
+
+export async function fetchEarliestMembershipDateForUser(
+  whopUserId: string,
+): Promise<{ firstPaidIso: string | null; foundCount: number }> {
+  const apiKey = process.env.WHOP_API_KEY;
+  if (!apiKey) throw new Error("WHOP_API_KEY not set");
+  const headers = {
+    Authorization: `Bearer ${apiKey}`,
+    Accept: "application/json",
+  };
+
+  let earliest: string | null = null;
+  let foundCount = 0;
+  let page = 1;
+  const PER_PAGE = 50;
+  for (let i = 0; i < 10; i++) {
+    const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?user_id=${encodeURIComponent(
+      whopUserId,
+    )}&per_page=${PER_PAGE}&page=${page}`;
+    const res = await whopFetchWithRetry(url, headers);
+    if (!res.ok) {
+      throw new Error(`Whop API HTTP ${res.status} for user ${whopUserId}`);
+    }
+    const json = (await res.json()) as {
+      data?: Array<{ user: string | null; created_at: number | string | null }>;
+      pagination?: { current_page?: number; total_page?: number };
+    };
+    const rows = json.data ?? [];
+
+    const allMatchUser = rows.every((r) => !r.user || r.user === whopUserId);
+    if (!allMatchUser) {
+      throw new Error(
+        `Whop user_id filter ignored for ${whopUserId} — refusing to write`,
+      );
+    }
+
+    for (const r of rows) {
+      const iso = toIso(r.created_at);
+      if (!iso) continue;
+      foundCount += 1;
+      if (!earliest || iso < earliest) earliest = iso;
+    }
+
+    const totalPages = json.pagination?.total_page ?? 1;
+    if (page >= totalPages) break;
+    page += 1;
+  }
+
+  return { firstPaidIso: earliest, foundCount };
+}
+
+export type SyncEntry = WhopMembershipRow & {
+  _firstPaidAt: string | null;
+};
+
+function grantsAccess(row: WhopMembershipRow): boolean {
+  const s = mapStatus(row);
+  return s === "active" || s === "past_due";
+}
+
+export async function fetchAllMemberships(): Promise<SyncEntry[]> {
+  const raw = process.env.WHOP_PRODUCT_ID ?? "";
+  const productIds = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (productIds.length === 0) {
+    throw new Error("WHOP_PRODUCT_ID not set");
+  }
+  type Acc = { latest: WhopMembershipRow; firstPaidAt: string | null };
+  const byUser = new Map<string, Acc>();
+  for (const pid of productIds) {
+    for await (const row of listMembershipsForProduct(pid)) {
+      if (!row.user) continue;
+      const createdIso = toIso(row.created_at);
+      const existing = byUser.get(row.user);
+      if (!existing) {
+        byUser.set(row.user, { latest: row, firstPaidAt: createdIso });
+        continue;
+      }
+      if (
+        createdIso &&
+        (!existing.firstPaidAt || createdIso < existing.firstPaidAt)
+      ) {
+        existing.firstPaidAt = createdIso;
+      }
+      const curGrants = grantsAccess(existing.latest);
+      const rowGrants = grantsAccess(row);
+      if (rowGrants !== curGrants) {
+        if (rowGrants) existing.latest = row;
+      } else {
+        const latestIso = toIso(existing.latest.created_at);
+        if (createdIso && latestIso && createdIso > latestIso) {
+          existing.latest = row;
+        }
+      }
+    }
+  }
+  return Array.from(byUser.values()).map(({ latest, firstPaidAt }) => ({
+    ...latest,
+    _firstPaidAt: firstPaidAt,
+  }));
+}

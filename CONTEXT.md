@@ -720,7 +720,19 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
   lesson it then runs the steps the app runs after one
   (`afterCompletionWrite`: the streak, the "came back" check, the badges,
   the CSM tasks), once, never on a retry; until then a row that existed
-  was dropped silently. A failed write answers 500 so Whop retries
+  was dropped silently. A failed write answers 500 so Whop retries.
+  Membership and payment events (login-1, 2026-10-20) write a student
+  row only for a product in `WHOP_PRODUCT_ID` (comma separated); the
+  company's webhook sends every product's events, and another product's
+  used to be written as `active`. Another product's event answers 200
+  and writes nothing (its membership ending asks Whop nothing either).
+  An event with no product writes only the course membership Whop lists
+  for that user, with its own status, and a deactivation with no product
+  and no course membership on Whop leaves the row for the sync.
+  `supabase/diagnostics/non-course-members-read.sql` counts the active
+  and past_due rows the last successful sync did not rewrite; the
+  `whop-webhook-product` client test runs the route on the real Whop
+  lookup with a stand-in fetch
 - `POST /api/webhooks/adbounty` — Zak's ad-bounty system fires here on
   enrollment → stamps `student_milestones.bounty_access_claimed_at`
   (sole source of that timestamp)

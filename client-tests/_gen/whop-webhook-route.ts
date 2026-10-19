@@ -3,7 +3,7 @@ import { createServiceClient } from "./stub-server.ts";
 import {
   fetchActiveMembershipForUser,
   mapStatus,
-} from "./stub-server.ts";
+} from "./whop-members.ts";
 import type {
   WhopWebhookPayload,
   WhopMembership,
@@ -79,6 +79,71 @@ function verifyWebhookSignature(
   return false;
 }
 
+/**
+ * The course's Whop products (login-1, 2026-10-20), read as the sync and the
+ * login's Whop check read them: WHOP_PRODUCT_ID, comma separated. The
+ * company's webhook sends the events of every product it sells, and only a
+ * membership of the course opens the course (system-docs/whop_login_handoff.md:
+ * "Apply the same product + plan filter to webhook payloads").
+ */
+function courseProductIds(): string[] {
+  return (process.env.WHOP_PRODUCT_ID ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * The product a membership or payment event is about: `product.id` in Whop's
+ * payloads, `product_id` or a bare `product` id in older shapes. Null when
+ * the payload names none.
+ */
+function eventProductId(data: unknown): string | null {
+  const d = (data ?? {}) as { product?: unknown; product_id?: unknown };
+  if (typeof d.product === "string") return d.product || null;
+  if (d.product && typeof d.product === "object") {
+    const id = (d.product as { id?: unknown }).id;
+    if (typeof id === "string" && id) return id;
+  }
+  return typeof d.product_id === "string" && d.product_id ? d.product_id : null;
+}
+
+/**
+ * What an activation or a payment may write on the student's row (login-1).
+ * A course product: the event's membership, active, as before. Another
+ * product: nothing (the caller answers 200). No product in the payload: only
+ * a course membership Whop lists for this user, with its own id, plan and
+ * status, so a real course member is never left out and nobody else gets in.
+ */
+async function courseAccess(
+  data: WhopMembership,
+  eventName: string,
+): Promise<{ membershipId: string; planId: string | null; status: string } | null> {
+  const courseIds = courseProductIds();
+  const product = eventProductId(data);
+  if (product) {
+    if (courseIds.includes(product)) {
+      return { membershipId: data.id, planId: data.plan_id ?? null, status: "active" };
+    }
+    const message =
+      `[whop-webhook] ${eventName} for product ${product}, not the course ` +
+      `(${courseIds.join(",") || "WHOP_PRODUCT_ID is empty"}): nothing written`;
+    // An empty WHOP_PRODUCT_ID turns every membership away: say it loudly.
+    if (courseIds.length) console.info(message);
+    else console.error(message);
+    return null;
+  }
+  const row = await fetchActiveMembershipForUser(data.user.id);
+  if (!row) {
+    console.info(
+      `[whop-webhook] ${eventName} names no product and Whop lists no course ` +
+        `membership for ${data.user.id}: nothing written`,
+    );
+    return null;
+  }
+  return { membershipId: row.id, planId: row.plan ?? null, status: mapStatus(row) };
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.text();
 
@@ -135,6 +200,9 @@ export async function POST(request: NextRequest) {
     case "membership.went_valid":
     case "membership_went_valid": {
       const membership = payload.data as WhopMembership;
+      // login-1: another product's membership writes nothing (courseAccess).
+      const access = await courseAccess(membership, eventName);
+      if (!access) break;
       // v75.26: pre-fetch to detect INSERT vs UPDATE. We only set
       // first_paid_at on INSERT — never on UPDATE — to preserve the
       // original signup date for returning customers. Without this,
@@ -149,17 +217,17 @@ export async function POST(request: NextRequest) {
 
       const upsertPayload: Record<string, unknown> = {
         whop_user_id: membership.user.id,
-        whop_membership_id: membership.id,
+        whop_membership_id: access.membershipId,
         email: membership.user.email,
         name: membership.user.name,
         discord_username: membership.user.username,
-        membership_status: "active",
+        membership_status: access.status,
         joined_at: membership.joined_at || new Date().toISOString(),
         // Clear canceled_at on re-activation so the snapshot cron's
         // churned_count doesn't double-count a re-enrolled student.
         canceled_at: null,
         // v79: classify paying / free at the source event.
-        whop_plan_id: membership.plan_id ?? null,
+        whop_plan_id: access.planId,
       };
 
       // INSERT path: stamp first_paid_at so the new student isn't
@@ -189,6 +257,16 @@ export async function POST(request: NextRequest) {
     case "membership.went_invalid":
     case "membership_went_invalid": {
       const membership = payload.data as WhopMembership;
+
+      // login-1: another product's membership ending says nothing about the
+      // course. Answer 200, ask Whop nothing, leave the row as it is.
+      const product = eventProductId(membership);
+      if (product && !courseProductIds().includes(product)) {
+        console.info(
+          `[whop-webhook] ${eventName} for product ${product}, not the course: nothing written`,
+        );
+        break;
+      }
 
       // v85.6 — a user can hold several memberships at once (re-subscribe,
       // refund + rebuy, free-plan claim, or a duplicate created by
@@ -220,6 +298,18 @@ export async function POST(request: NextRequest) {
         console.info(
           `[whop-webhook] ${membership.id} deactivated for ${membership.user.id} ` +
             `but ${surviving.id} still grants access — kept active, re-pointed.`,
+        );
+        break;
+      }
+
+      // login-1: with no product in the payload this may be another
+      // product's membership, and Whop answering nothing may be a failed
+      // read. A course member is never canceled on that: the sync (every 2
+      // hours) settles the row from the course's own memberships.
+      if (!product) {
+        console.info(
+          `[whop-webhook] ${eventName} names no product and Whop lists no course ` +
+            `membership for ${membership.user.id}: nothing written, the sync settles it`,
         );
         break;
       }
@@ -271,6 +361,11 @@ export async function POST(request: NextRequest) {
         );
         break;
       }
+      // login-1: a payment for another product writes nothing (courseAccess).
+      // It used to mark the row active: a lapsed student got back in until
+      // the next sync, and someone with no course membership got in.
+      const paymentAccess = await courseAccess(membership, eventName);
+      if (!paymentAccess) break;
       // v75.26: same INSERT-only first_paid_at pattern as
       // membership.activated above. payment.succeeded fires on EVERY
       // recurring renewal, so blindly setting first_paid_at here
@@ -285,14 +380,14 @@ export async function POST(request: NextRequest) {
 
       const paymentUpsertPayload: Record<string, unknown> = {
         whop_user_id: membership.user.id,
-        whop_membership_id: membership.id,
+        whop_membership_id: paymentAccess.membershipId,
         email: membership.user.email,
         name: membership.user.name,
         discord_username: membership.user.username,
-        membership_status: "active",
+        membership_status: paymentAccess.status,
         joined_at: membership.joined_at || new Date().toISOString(),
         canceled_at: null,
-        whop_plan_id: membership.plan_id ?? null,
+        whop_plan_id: paymentAccess.planId,
       };
 
       if (!existingPaymentStudent) {

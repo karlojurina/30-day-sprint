@@ -4,7 +4,7 @@
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
-function gen(srcRel, outRel, rewrites = [], { dropLineComments = false } = {}) {
+function gen(srcRel, outRel, rewrites = [], { dropLineComments = false, dropComments = false } = {}) {
   const src = fileURLToPath(new URL(srcRel, import.meta.url))
   const out = fileURLToPath(new URL(outRel, import.meta.url))
   let s = fs.readFileSync(src, 'utf8')
@@ -12,6 +12,8 @@ function gen(srcRel, outRel, rewrites = [], { dropLineComments = false } = {}) {
   for (const [from, to] of rewrites) s = s.split(from).join(to)
   // Lines that are only a `//` comment, left out of the copy (the code is untouched).
   if (dropLineComments) s = s.split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n')
+  // dropComments also leaves out the lines of /* */ comments (each must start its own line).
+  if (dropComments) s = s.split('\n').filter((l) => !/^(\/\/|\/\*|\*)/.test(l.trimStart())).join('\n')
   if (s.includes('@/')) throw new Error(`an unrewritten @/ import remains in ${srcRel}`)
   fs.writeFileSync(out, s)
   console.log(`generated ${outRel} from the real source`)
@@ -158,10 +160,15 @@ gen('../src/lib/whop.ts', './_gen/whop.ts', [
   ['from "./constants"', 'from "./constants.ts"'],
   ['from "@/types/whop"', 'from "./types-erased.ts"'],
 ])
-// The webhook runs the real chain after a lesson (complete-lesson.ts, above).
+// The webhook runs the real chain after a lesson (complete-lesson.ts, above)
+// and, since login-1, the real Whop lookup (whop-members.ts has no imports) on
+// a stand-in fetch (whop-webhook-product.test.mjs). Its copy leaves out every
+// comment line: one names two people, and this repository is public.
+gen('../src/lib/whop-members.ts', './_gen/whop-members.ts', [], { dropComments: true })
 gen('../src/app/api/webhooks/whop/route.ts', './_gen/whop-webhook-route.ts', [
   ['from "@/lib/complete-lesson"', 'from "./complete-lesson.ts"'],
-  ...toStub('next/server', '@/lib/supabase-server', '@/lib/whop-members'),
+  ['from "@/lib/whop-members"', 'from "./whop-members.ts"'],
+  ...toStub('next/server', '@/lib/supabase-server'),
   ['from "@/types/whop"', 'from "./types-erased.ts"'],
 ])
 gen('../src/app/api/student/mark-action-shipped/route.ts', './_gen/mark-action-shipped-route.ts', [

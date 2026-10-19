@@ -6,7 +6,7 @@ import { buildTerrainGeometry, terrainHeight } from "./terrain";
 import type { InstallFn, LandmarkBase, LockMode, LockState, ModuleSpec, ShipPose, WorldCtx, WorldModule } from "./modules";
 import { Governor, PIXEL_RATIO_FLOOR, TIER2_HOLD_MS, TIER_CONTENT_STEP, WORST_TO_OPENING_RATIO, headroomCheck, median, nearLine, pickTier, recallTier, refineTier, rememberTier, tierSpec, type QualityTier } from "./quality";
 import { FramePacer, IdleLadder, burstProbe, createGpuLoad, quickProbe, measureOverdraw, readGpuName, rendererOptionsForTier, screenMegapixels, warmCompile, webglAvailable, type BurstResult, type GpuLoad, type OverdrawOptions, type OverdrawResult } from "./perf";
-import { POSTER_RULES, recallPosterVerdict, rememberPoster, type PosterKind, type PosterPreference } from "./poster";
+import { POSTER_RULES, posterPreference, posterVerdictStored, recallPosterVerdict, rememberPoster, type PosterKind, type PosterPreference } from "./poster";
 import { addPathLine, footprintStats, resetFootprints } from "./footprints";
 import { NO_PROGRESS, sameProgress, type WorldProgress } from "./progress";
 import { CHECKPOINT, type CheckpointLook } from "./checkpoint";
@@ -176,6 +176,22 @@ const DEFAULT_MODULES: ReadonlyArray<ModuleSpec> = [
   ["progress-world", () => import("./progress-world")],
   ["life", () => import("./life")],
 ];
+
+/**
+ * Start downloading the modules' code before a scene exists (speed,
+ * 2026-10-20). WorldPreload.tsx calls this while the page still waits for
+ * the login and the student's data; the scene asked for the 17 modules only
+ * once its terrain was built. Skipped wherever the scene will show the
+ * posters and install nothing (init() below): ?poster=on, a poster verdict
+ * kept from an earlier visit, a software renderer, no WebGL. The bundler
+ * keeps each module's promise, so the scene's own imports get these.
+ */
+export function preloadModules(search: string): void {
+  if (posterPreference(search) === "on" || posterVerdictStored()) return;
+  const gpuName = readGpuName();
+  if (gpuName ? pickTier(gpuName, 0).software : !webglAvailable()) return;
+  for (const [, load] of DEFAULT_MODULES) load().catch(() => {});
+}
 
 /**
  * v6: the trail registers its line plus 4 (world_art_bible_v6.md 2.3), one
@@ -1255,6 +1271,15 @@ function smoothMax(a: number, b: number, k: number): number {
 /** Give the browser a turn (input, paint) between slices of load work. Not throttled like setTimeout in a hidden tab. */
 /** Cheap laptops: the 3D keeps drawing under the posters' crossfade this long, ms (world.module.css .poster transition). */
 const POSTER_FADE_MS = 900;
+/**
+ * The load probe after the reveal (confirmAfterReveal, speed 2026-10-20): it
+ * runs in its own task once this many frames are drawn in a row with the
+ * camera still, so WorldV6 (which drops the landing poster after 3 frames) has
+ * begun the poster's fade, and a glide or a park is not stalled by it...
+ */
+const CONFIRM_AFTER_FRAMES = 4;
+/** ...or this long after ready whatever the frames do (reduced motion and a paused page draw none), ms. */
+const CONFIRM_LATER_MAX_MS = 4000;
 /** The rest check (restCheckTick): no input and a still camera this long before a burst, and between climbs, ms. */
 const REST_CHECK_IDLE_MS = 4000;
 /** After a check that found no clear headroom (and was not hopeless), wait this long, ms. */
@@ -1404,6 +1429,14 @@ export class WorldScene {
 
   private readonly rail: Rail;
   private readonly moduleSpecs: ReadonlyArray<ModuleSpec>;
+  /** The modules' imports, started in the constructor when the scene can draw (an import that fails resolves to its error). */
+  private moduleImports: Promise<unknown>[] | null = null;
+  /**
+   * The load probe waiting for the live 3D to be on screen (confirmAfterReveal):
+   * confirmTier's arguments and the still frames drawn since ready. Null when
+   * it ran (or runs) behind the loading screen.
+   */
+  private confirmLater: { t0: number; pending: number; frames: number } | null = null;
   private readonly wantFallbacks: boolean;
   private ctx: WorldCtx | null = null;
 
@@ -1681,6 +1714,11 @@ export class WorldScene {
       tail: 0,
     };
     this.init();
+    // Speed (2026-10-20): the modules' code downloads from now, while the
+    // terrain is built, where it was asked for only after it. installModules()
+    // awaits these promises in the same order as before. A headless scene
+    // (the posters) installs nothing and downloads nothing.
+    if (!this.headless) this.moduleImports = this.moduleSpecs.map(([, load]) => load().catch((e: unknown) => e));
     // Anchors default to the eight layout places, so the scene runs on its own.
     this.setAnchors(PLACES.map((p, i) => ({ id: p.id, depth: this.rail.stopDepth(i), landmark: p.mesh })));
     if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
@@ -1894,8 +1932,10 @@ export class WorldScene {
     this.indexTrees(scene);
     // v6: compile every program and upload every buffer behind the loading
     // screen, then confirm the tier (world_art_bible_v6.md 3.1 "Load", 3.2 "Confirm").
-    await this.warmUpAndProbe();
+    const warm = await this.warmUp();
     if (this.disposed || !this.scene) return;
+    if (warm && this.confirmAfterReveal(warm.pending)) this.confirmLater = { ...warm, frames: 0 };
+    else if (warm) this.confirmTier(warm.t0, warm.pending);
 
     this.ready = true;
     this.qualityReport.readyMs = Math.round(performance.now());
@@ -1905,6 +1945,39 @@ export class WorldScene {
       this.beginPark(this.parkedId);
     }
     this.placeOnRail(this.currentDepth);
+    this.dirty = true;
+    this.wake();
+    if (this.confirmLater) setTimeout(() => this.runConfirmLater(), CONFIRM_LATER_MAX_MS);
+  }
+
+  /**
+   * Speed (2026-10-20): whether the load probe (confirmTier, 0.2 to 0.3 s
+   * waiting on the GPU) can run once the live 3D is on screen instead of
+   * behind the loading screen, so the map shows that much sooner. Only on a
+   * first visit (no remembered tier) of a GPU the name table puts at tier 0,
+   * with every program compiled and no posters: there the probe keeps tier 0,
+   * so nothing on screen changes after it. Everywhere the probe is likely to
+   * change the tier or bring the posters (and under the dev simulators) it
+   * still runs before the reveal.
+   */
+  private confirmAfterReveal(pending: number): boolean {
+    return (
+      this.tierOverride === null &&
+      this.qualityReport.recalled === null &&
+      this.quality.tier === 0 &&
+      pending === 0 &&
+      !this.posterReason &&
+      this.slowGpuFactor <= 1 &&
+      !this.coldStall
+    );
+  }
+
+  /** The deferred load probe, once: from tickBody after CONFIRM_AFTER_FRAMES still frames, or the fallback timer. */
+  private runConfirmLater() {
+    const c = this.confirmLater;
+    if (!c || this.disposed) return;
+    this.confirmLater = null;
+    this.confirmTier(c.t0, c.pending);
     this.dirty = true;
     this.wake();
   }
@@ -1941,12 +2014,17 @@ export class WorldScene {
    *     or when the page was hidden during the measurement.
    * Afterwards the rest check (restCheckTick) may climb a low tier while the
    * student rests.
+   *
+   * warmUp() is the compile; confirmTier() the probe and what follows, behind
+   * the loading screen, or once the live 3D shows where confirmAfterReveal()
+   * says so (speed, 2026-10-20). Returns what confirmTier needs, or null when
+   * there is nothing to draw with.
    */
-  private async warmUpAndProbe() {
+  private async warmUp(): Promise<{ t0: number; pending: number } | null> {
     const renderer = this.renderer;
     const scene = this.scene;
     const camera = this.camera;
-    if (!renderer || !scene || !camera) return;
+    if (!renderer || !scene || !camera) return null;
     this.prepareFrame();
     const mirror = scene.getObjectByName("MirrorLake") as (THREE.Object3D & { getRenderTarget?: () => THREE.WebGLRenderTarget }) | undefined;
     if ((this.slowGpuFactor > 1 || this.coldStall) && !this.gpuLoad) {
@@ -1964,7 +2042,7 @@ export class WorldScene {
       this.qualityReport.warm = `warmCompile threw: ${e instanceof Error ? e.message : String(e)}`;
       console.error("[world-v6] warm compile threw", e);
     }
-    if (this.disposed) return;
+    if (this.disposed) return null;
     if (pending > 0 && this.posterPref === "auto") {
       this.enterPoster(`shaders still compiling after ${((performance.now() - t0) / 1000).toFixed(1)} s (${pending} left)`, "compile", false, true);
     }
@@ -1974,6 +2052,15 @@ export class WorldScene {
       this.gpuLoad.mesh.visible = false;
     }
     if (this.coldStall) this.armColdStall(this.coldStall);
+    return { t0, pending };
+  }
+
+  /** The load probe and the tier it confirms, the governor and the rest check (see warmUp). `t0`: when the compile began. */
+  private confirmTier(t0: number, pending: number) {
+    const renderer = this.renderer;
+    const scene = this.scene;
+    const camera = this.camera;
+    if (!renderer || !scene || !camera) return;
     // Why a measurement now may not be this machine's own: then it is applied
     // for this visit and not remembered.
     const untrusted: string[] = [];
@@ -2656,7 +2743,7 @@ export class WorldScene {
     // v6: footprints start empty for this mount; the trail registers first.
     resetFootprints();
     registerTrailFootprints([Layout.PATH, Layout.GATE_CAUSEWAY]);
-    const imports = this.moduleSpecs.map(([, load]) => load().catch((e: unknown) => e));
+    const imports = this.moduleImports ?? this.moduleSpecs.map(([, load]) => load().catch((e: unknown) => e));
     for (let i = 0; i < this.moduleSpecs.length; i++) {
       const name = this.moduleSpecs[i][0];
       await yieldToBrowser();
@@ -4177,6 +4264,12 @@ export class WorldScene {
       if (renderer.domElement.style.visibility) renderer.domElement.style.visibility = "";
       renderer.render(this.scene, this.camera);
       this.pacer?.submitted();
+      // The deferred load probe (confirmAfterReveal): counts still frames, in its own task after this one.
+      const c = this.confirmLater;
+      if (c) {
+        c.frames = movingNow ? 0 : c.frames + 1;
+        if (c.frames === CONFIRM_AFTER_FRAMES) setTimeout(() => this.runConfirmLater(), 0);
+      }
       this.frame.triangles = renderer.info.render.triangles;
       this.frame.calls = renderer.info.render.calls;
     } else if (renderer && !drawing && renderer.domElement.style.visibility !== "hidden") {

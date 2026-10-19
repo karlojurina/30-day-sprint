@@ -176,7 +176,8 @@ import s from "./world.module.css";
 const N = STUDY_AREAS.length;
 /** The window.__world* test hooks: every build but production. */
 const HOOKS = process.env.NODE_ENV !== "production";
-const NARROW_QUERY = "(width < 760px)";
+/** Under this width the map is the list (no three.js); WorldPreload.tsx reads it too. */
+export const NARROW_QUERY = "(width < 760px)";
 /** Final pass C: the place whose click-in goes through the telescope (scene.ts TEL_PARK_PLACE, a7). */
 const TEL_K = SKY_MARKS.findIndex((m) => m.id === "a7");
 const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";

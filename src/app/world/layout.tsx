@@ -5,6 +5,8 @@ import { StudentProvider } from "@/contexts/StudentContext";
 import { MembershipBlockOverlay } from "@/components/onboarding/MembershipBlockOverlay";
 import { WorldStage } from "@/components/world/WorldStage";
 import { WorldAccessGate } from "@/components/world/WorldAccessGate";
+import { WorldPreload } from "@/components/world-v6/WorldPreload";
+import { WORLD_IS_LIVE } from "@/lib/world/access";
 
 /**
  * The world's shell. Deliberately the same three wrappers as
@@ -23,6 +25,11 @@ import { WorldAccessGate } from "@/components/world/WorldAccessGate";
  * The font is scoped to the world: the map and the screens over it read
  * Bricolage Grotesque through --font-v2-display (JetBrains Mono comes from the
  * root layout's variable). Same call as app/dev/world-v6/page.tsx.
+ *
+ * WorldPreload sits outside the guard on purpose (speed, 2026-10-20): the 3D
+ * map's code starts downloading while the login and the student's data are
+ * on their way. Only once the world is open to everyone: before that the
+ * gate decides first, as above.
  */
 
 const display = Bricolage_Grotesque({
@@ -43,15 +50,18 @@ export default function WorldLayout({
   children: React.ReactNode;
 }) {
   return (
-    <StudentGuard>
-      <StudentProvider>
-        <WorldAccessGate>
-          <div className={display.variable}>
-            <WorldStage>{children}</WorldStage>
-          </div>
-        </WorldAccessGate>
-        <MembershipBlockOverlay />
-      </StudentProvider>
-    </StudentGuard>
+    <>
+      <WorldPreload when={WORLD_IS_LIVE} />
+      <StudentGuard>
+        <StudentProvider>
+          <WorldAccessGate>
+            <div className={display.variable}>
+              <WorldStage>{children}</WorldStage>
+            </div>
+          </WorldAccessGate>
+          <MembershipBlockOverlay />
+        </StudentProvider>
+      </StudentGuard>
+    </>
   );
 }

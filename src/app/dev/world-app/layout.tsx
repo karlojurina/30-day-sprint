@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { notFound } from "next/navigation";
 import { Bricolage_Grotesque } from "next/font/google";
 import { WorldStage } from "@/components/world/WorldStage";
+import { WorldPreload } from "@/components/world-v6/WorldPreload";
 import { isTellaVideoId } from "@/lib/world/tella";
 import { matchCourseTexts } from "./courseCatalog";
 import { FixtureStudentProvider } from "./FixtureStudentProvider";
@@ -13,7 +14,8 @@ import type { DevVideos } from "./fixtureTransport";
  * (world_v6_wiring_prd.md, Work Item 4; driven by world-tests/v6-app.mjs).
  *
  * Same stage, same host, same map, same place route and same lesson page as
- * src/app/world/. Only the three wrappers above the stage differ: the auth
+ * src/app/world/, and the same early download of the map's code
+ * (WorldPreload). Only the three wrappers above the stage differ: the auth
  * guard, StudentProvider and the access gate are replaced by
  * FixtureStudentProvider, which serves a generated catalog in the staging
  * seed's shape and makes no network request. Mounting StudentProvider here
@@ -95,6 +97,7 @@ export default function WorldAppLayout({ children }: { children: React.ReactNode
       data-dev-videos={devVideos ? 2 : undefined}
       data-dev-video-seconds={devVideos?.seconds}
     >
+      <WorldPreload />
       <FixtureStudentProvider devVideos={devVideos} courseTexts={courseTexts}>
         {/* devComplete: the lesson page's "Mark watched (dev)" button. Only the
             lessons given a test video can be finished by watching, and only

@@ -470,8 +470,16 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     whopCourseIdMasked: null,
   });
 
+  // The first load is keyed on the student's id, never on the row (map-1,
+  // lessons-2, progress-2, 2026-10-20). refreshFromServer below hands
+  // AuthContext a freshly parsed row after every refresh, and while this effect
+  // was keyed on that object each refresh ran the whole first load again: a
+  // second /api/student/data outside the 5 s gate, completions replaced without
+  // the v74 guard, and a failure of that second fetch set loadError, which took
+  // the map and an open lesson away until a reload.
+  const studentId = student?.id;
   useEffect(() => {
-    if (!student) return;
+    if (!studentId) return;
 
     async function fetchData() {
       const token = await getAccessToken();
@@ -512,7 +520,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
               last_score_pct: number | null;
               last_attempt_at: string | null;
             }> | null,
-            student?.id,
+            studentId,
           ),
         );
         setLessonRatings(
@@ -572,6 +580,8 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           whopUserId: data.student?.whop_user_id ?? null,
           whopCourseIdMasked: data.whopCourseIdMasked ?? null,
         });
+        // Loaded: an error from an earlier load no longer holds.
+        setLoadError(null);
       } catch (err) {
         console.error("Failed to fetch student data:", err);
         setLoadError(
@@ -582,7 +592,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     }
 
     fetchData();
-  }, [student]);
+  }, [studentId]);
 
   // Pull /api/student/data and refresh completions + sync diagnostics
   // + the discount request. Used after every sync (silent or forced)
@@ -686,6 +696,14 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       ),
     );
     setCatalogSuffix((fresh.catalogSuffix as string | undefined) ?? "");
+    // The catalog too, since the first load no longer runs again after every
+    // refresh (progress-2): this is what brings a video added during the
+    // session (has_video) into an open tab. An empty list is never applied,
+    // so a read that failed cannot empty a map that has loaded.
+    const freshLessons = (fresh.lessons ?? []) as Lesson[];
+    if (freshLessons.length > 0) setLessons(freshLessons);
+    const freshRegions = (fresh.regions ?? []) as Region[];
+    if (freshRegions.length > 0) setRegions(freshRegions);
     setStreak({
       current: (fresh.streaks as StudentStreaks | null)?.current_streak ?? 0,
       longest: (fresh.streaks as StudentStreaks | null)?.longest_streak ?? 0,
@@ -1253,6 +1271,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
       if (!token) return "Not signed in";
 
       const normalized = link && link.trim().length > 0 ? link.trim() : null;
+
+      // v74's guard, as the toggles use it (progress-2): a refresh that left
+      // before this save and lands after it keeps the local row instead of
+      // putting the saved link back to the empty form.
+      markRecentlyToggled(lessonId);
 
       // Optimistic update
       setCompletions((prev) =>

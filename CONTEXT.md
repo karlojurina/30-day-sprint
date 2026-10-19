@@ -337,10 +337,13 @@ ever had** — every diagnosis before it depended on a student sending
 screenshots. If the loop survives the cap, that log line names the
 trigger.
 
-**STILL UNKNOWN: what drives the loop.** Candidate worth checking first —
-`StudentContext.tsx:695` calls `setStudent(fresh.student)` with a fresh
-object on every refresh, and the data effect depends on `[student]`, so
-each refresh re-triggers a full fetch. A closed cycle was never traced.
+**STILL UNKNOWN: what drives the loop.** The first candidate is ruled
+out (2026-10-20): `refreshFromServer` calls `setStudent(fresh.student)`
+with a fresh object on every refresh, and the data effect depended on
+`[student]`, so each refresh ran one more full fetch. Traced, that was one
+extra fetch per refresh, never a closed cycle. The effect is keyed on the
+student's id since (map-1, lessons-2, progress-2), and `refreshFromServer`
+now also brings in the lessons and places, skipping an empty list.
 
 **A failed auth load is NOT the same as being signed out (v85.11).**
 `AuthContext` exposes `authError`. A null student with a null

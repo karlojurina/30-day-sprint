@@ -143,18 +143,30 @@ export function WorldCorner({
   if (paused && open) setOpen(false);
   if (!open && signOutTrouble !== null) setSignOutTrouble(null);
 
+  // `open` as last drawn, for doSignOut, which reads it once its request is
+  // answered: the click's own `open` is stale by then if the list was closed
+  // while the request was out.
+  const openRef = useRef(open);
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
   const close = useCallback((refocus: boolean) => {
     setOpen(false);
     if (refocus) pillRef.current?.focus({ preventScroll: true });
   }, []);
+
+  const openList = () => {
+    setSheet(rootRef.current?.closest("[data-view]")?.getAttribute("data-view") === "list");
+    setOpen(true);
+  };
 
   const toggle = () => {
     if (open) {
       close(false);
       return;
     }
-    setSheet(rootRef.current?.closest("[data-view]")?.getAttribute("data-view") === "list");
-    setOpen(true);
+    openList();
   };
 
   // Open: the keyboard starts on the list's heading. Esc (before the map's own
@@ -197,7 +209,9 @@ export function WorldCorner({
   // (LessonPlayer.tsx says the same). Signed out, the guard sends them to /login.
   // A sign-out that did not happen keeps them here with a line saying so
   // (login-5), in the list above its own Sign out: the pill's button has no
-  // room for a sentence, so a press there opens the list.
+  // room for a sentence, so a press there opens the list. So does a press in
+  // the list that was closed while its request was out: a closed list drops
+  // the line (above).
   const doSignOut = async () => {
     if (leaving) return;
     setLeaving(true);
@@ -206,7 +220,7 @@ export function WorldCorner({
     setLeaving(false);
     if (trouble === null) return;
     setSignOutTrouble(trouble);
-    if (!open) toggle();
+    if (!openRef.current) openList();
   };
 
   const count = status === "ready" && total > 0;

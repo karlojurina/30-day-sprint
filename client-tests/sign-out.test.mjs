@@ -16,8 +16,8 @@
 // in node_modules, keeping its session in a store this file can read; only
 // the requests are answered here: /api/auth/me, and auth's logout, which
 // fails offline, fails with a 500, or works. The two screens with a Sign out
-// button for students are React components with elements, so they are checked
-// in the source, as heartbeat-trouble.test.mjs checks LessonPlayer's line.
+// button for students, the map's corner and the closed-membership card, are
+// run in headless Chrome by client-tests/student-screens-sim.test.mjs.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -168,18 +168,10 @@ for (const [mode, what] of [[204, 'answered'], [401, 'refused for an expired tok
 }
 ok(net.logouts === 4 && net.unexpected.length === 0, 'one logout request per press, and nothing else asked', `${net.logouts} logouts, ${show(net.unexpected)}`)
 
-console.log('\n=== The line, and the two student screens that show it ===')
+console.log('\n=== The line the student screens show (student-screens-sim.test.mjs shows it on them) ===')
 {
   ok(typeof SIGN_OUT_FAILED_TEXT === 'string' && /sign you out/.test(SIGN_OUT_FAILED_TEXT) && /connection/.test(SIGN_OUT_FAILED_TEXT) && !/—|unlock|EcomTalent/i.test(SIGN_OUT_FAILED_TEXT),
      'one plain line: not signed out, check the connection', show(SIGN_OUT_FAILED_TEXT))
-  const corner = read('../src/components/world/WorldCorner.tsx')
-  ok(!/signOut\(\)\.catch\(\(\) => \{\}\)/.test(corner) && /const trouble = await signOut\(\)\.catch\(\(\) => SIGN_OUT_FAILED_TEXT\);/.test(corner),
-     'the map\'s corner no longer swallows a failed sign-out')
-  ok(/setSignOutTrouble\(trouble\);\s*if \(!open\) toggle\(\);/.test(corner) && /<p role="alert" className=\{c\.hint\}>\s*\{signOutTrouble\}/.test(corner),
-     '  it opens its list and shows the line above the list\'s own Sign out')
-  const overlay = read('../src/components/onboarding/MembershipBlockOverlay.tsx')
-  ok(/setSignOutTrouble\(await signOut\(\)\)/.test(overlay) && /role="alert"[\s\S]{0,400}\{signOutTrouble\}/.test(overlay),
-     'the closed-membership card\'s "Or sign out" shows it too')
 }
 
 fs.rmSync(TMP, { recursive: true, force: true })

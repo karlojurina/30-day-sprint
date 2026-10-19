@@ -88,6 +88,19 @@ student who already holds a request from the old dashboard; the form's
 database function stands in from v29's body, and the migration harness
 (section 26) runs the real one on the same four cases.
 
+`thirty-view.test.mjs` (admin rebuild, work item 2, 2026-10-20) runs the
+admin's bulk 30% loader (`src/lib/admin/thirty-data.ts`) and the 30% page's
+builder (`thirty-view.ts`) against `loadDiscountReads`, one student at a time,
+on the same stand-in database, for every fixture: the reads, the state, the
+counts and every verdict must match. For it the stand-in answers the way
+PostgREST does where paging depends on it: no select returns more than 1000
+rows, `.range()` returns one page after the order, `.order()` called twice
+orders by both columns, `failWhen` fails one batch of a bulk read, and
+`shuffle` hands rows back in no fixed order wherever a read's order leaves
+them open. Two controls the suite writes into `_gen` (a loader whose reads
+skip paging, and one whose completions are paged without a unique order) must
+fail the same check, and do.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

@@ -30,7 +30,19 @@
 //     overwritten (merge-duplicates), and the row is returned.
 //   - a column left out of an insert takes the table's default
 //     (student_lesson_completions.completed_at defaults to now()).
-// `fail['table.op']` makes every such call fail with that error. Every call is
+//   - a select hands back at most MAX_ROWS (1000) rows, PostgREST's max-rows
+//     on Supabase, whatever .limit() or .range() asks for. .range(from, to)
+//     is the page from row `from` to row `to`, after the order. .order() can
+//     be called more than once: each call adds a column, as supabase-js does,
+//     and a null sorts last going up and first going down, as in Postgres.
+// `fail['table.op']` makes every such call fail with that error, and
+// `failWhen(call)` fails the calls it returns an error for (one batch of a
+// bulk read, say: the call's filters are in `call.filters`). With `shuffle`
+// set to a number, every select's rows are shuffled (seeded by that number
+// and the call's place in the log, so a run repeats) before the order is
+// applied: rows the order does not tell apart come back in no fixed order,
+// as Postgres may hand them, and pages read without an order on a unique key
+// repeat some rows and skip others, as they can there. Every call is
 // logged in `log`, in order. `.rpc(fn, args)` runs the test's own stand-in for
 // that database function from `functions[fn]` (none: PostgREST's "not found"),
 // handing it the arguments the calling client was made with (createClient's
@@ -52,6 +64,9 @@ let seq = 0;
 const newId = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, "0")}`;
 const none = () => null;
 
+/** PostgREST's max-rows on Supabase: no select answers more rows than this. */
+export const MAX_ROWS = 1000;
+
 /** The tables whose columns are known, with each column's default. */
 const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: string[][]; partialUnique?: PartialUnique[] }> = {
   students: {
@@ -59,8 +74,25 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
       id: newId, whop_user_id: none, supabase_user_id: none, email: none, name: none,
       joined_at: now, first_paid_at: none, membership_status: () => "active", cancel_scheduled_at: none,
       last_active_at: now, ad_submissions_verified: () => false,
+      discord_user_id: none, discord_username: none, whop_plan_id: none, csm_exempt: () => false,
     },
     unique: [["whop_user_id"]],
+  },
+  team_members: {
+    columns: { id: newId, email: none, full_name: none, role: () => "csm", created_at: now },
+    unique: [["id"]],
+  },
+  discount_feedback_questions: {
+    columns: {
+      id: newId, order_num: () => 0, question_text: none, question_type: () => "open_text", options: none,
+      scale_min: none, scale_max: none, is_required: () => false, is_active: () => true, created_at: now,
+    },
+  },
+  discount_feedback_responses: {
+    columns: {
+      id: newId, discount_request_id: none, question_id: none, answer_scale: none, answer_choice: none,
+      answer_text: none, created_at: now,
+    },
   },
   student_streaks: {
     columns: {
@@ -70,7 +102,7 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
   },
   lessons: {
     columns: {
-      id: none, region_id: none, type: () => "watch", day: none, sort_order: () => 0,
+      id: none, region_id: none, type: () => "watch", title: none, day: none, sort_order: () => 0,
       requires_action: () => false, counts_toward_progress: () => true, whop_lesson_id: none,
       is_gate: () => false, duration_seconds: none,
     },
@@ -97,7 +129,8 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
   tasks: {
     columns: {
       id: newId, student_id: none, scenario_id: none, template_id: none, status: () => "open",
-      behavior_summary: none, created_at: now, dismissed_at: none, notes: none,
+      behavior_summary: none, created_at: now, completed_at: none, completed_by: none, dismissed_at: none, notes: none,
+      outcome: none,
     },
   },
   disengagement_alerts: {
@@ -107,6 +140,7 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
     columns: {
       id: newId, student_id: none, status: () => "pending", promo_code: none, whop_promo_id: none,
       reviewed_by: none, reviewed_at: none, rejection_reason: none, gate_lesson_id: none, created_at: now,
+      applied_at: none, applied_by: none,
     },
     // v106: at most one pending request per student.
     partialUnique: [{ name: "discount_requests_one_pending_per_student", key: ["student_id"], where: (r) => r.status === "pending" }],
@@ -136,6 +170,10 @@ export interface Logged {
 export class FakeDb {
   tables: Record<string, Row[]> = {};
   fail: Record<string, DbError> = {};
+  /** Fails a call when it returns an error, after `fail` is asked (the header says when to use it). */
+  failWhen: ((call: Logged) => DbError | null) | null = null;
+  /** A seed: when set, every select's rows are shuffled before its order is applied (the header says why). */
+  shuffle: number | null = null;
   log: Logged[] = [];
   /** Access token -> auth user id, for auth.getUser. */
   users: Record<string, string> = {};
@@ -167,12 +205,47 @@ function project(table: string, rows: Row[], cols: string): { data: Row[] | null
   return { data: rows.map((r) => Object.fromEntries(names.map((c) => [c, r[c] ?? null]))), error: null };
 }
 
+/** The rows in a shuffled order, the same for the same seed (mulberry32, then Fisher-Yates). */
+function shuffled(rows: Row[], seed: number): Row[] {
+  let a = seed >>> 0;
+  const random = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const out = [...rows];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/** Postgres's order by these columns: a null sorts last going up and first going down. */
+function byColumns(orders: Array<[string, boolean]>) {
+  return (x: Row, y: Row): number => {
+    for (const [c, asc] of orders) {
+      const a = x[c] as string | number | null | undefined;
+      const b = y[c] as string | number | null | undefined;
+      if (a === b || (a == null && b == null)) continue;
+      if (a == null) return asc ? 1 : -1;
+      if (b == null) return asc ? -1 : 1;
+      if (a < b) return asc ? -1 : 1;
+      if (a > b) return asc ? 1 : -1;
+    }
+    return 0;
+  };
+}
+
 function builder(db: FakeDb, table: string) {
   const q: Logged = { table, op: "select", filters: [], returning: null };
   const preds: Array<(r: Row) => boolean> = [];
   let cols = "*";
   let single: "one" | "maybe" | null = null;
-  let order: [string, boolean] | null = null;
+  const orders: Array<[string, boolean]> = [];
+  let page: [number, number] | null = null;
   let lim: number | null = null;
   let values: Row | Row[] | null = null;
   let opts: { onConflict?: string; ignoreDuplicates?: boolean } = {};
@@ -197,11 +270,15 @@ function builder(db: FakeDb, table: string) {
     is: (c: string, v: unknown) => filter(`${c} is ${String(v)}`, (r) => (r[c] ?? null) === v),
     gte: (c: string, v: unknown) => filter(`${c}>=${String(v)}`, (r) => r[c] != null && (r[c] as string) >= (v as string)),
     order(c: string, o: { ascending?: boolean } = {}) {
-      order = [c, o.ascending !== false];
+      orders.push([c, o.ascending !== false]);
       return b;
     },
     limit(n: number) {
       lim = n;
+      return b;
+    },
+    range(from: number, to: number) {
+      page = [from, to];
       return b;
     },
     insert(v: Row | Row[]) {
@@ -287,18 +364,17 @@ function builder(db: FakeDb, table: string) {
   }
 
   function run(): { data: Row[] | null; error: DbError | null } {
-    const fail = db.fail[`${table}.${q.op}`];
+    const fail = db.fail[`${table}.${q.op}`] ?? db.failWhen?.(q);
     if (fail) return { data: null, error: fail };
     const list = values === null ? [] : Array.isArray(values) ? values : [values];
 
     if (q.op === "select") {
       let rows = matching();
-      if (order) {
-        const [c, asc] = order;
-        rows = [...rows].sort((x, y) => ((x[c] as string) < (y[c] as string) ? -1 : (x[c] as string) > (y[c] as string) ? 1 : 0) * (asc ? 1 : -1));
-      }
+      if (db.shuffle !== null) rows = shuffled(rows, db.shuffle + db.log.length);
+      if (orders.length) rows = [...rows].sort(byColumns(orders));
+      if (page) rows = rows.slice(page[0], page[1] + 1);
       if (lim !== null) rows = rows.slice(0, lim);
-      return project(table, rows, cols);
+      return project(table, rows.slice(0, MAX_ROWS), cols);
     }
 
     if (q.op === "insert") {

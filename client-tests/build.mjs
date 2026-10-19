@@ -210,6 +210,32 @@ gen('../src/app/api/discounts/approve/route.ts', './_gen/discount-approve-route.
   ...toStub('next/server', '@/lib/admin-auth', '@/lib/whop', '@/lib/catalog-tables'),
 ])
 
+// The 30% for every student at once (admin rebuild, WI-2, thirty-view.test.mjs):
+// the bulk loader and the 30% page's builder, with the plan and date helpers
+// they use. The rule is the real copies above; the pages helper has no
+// imports; which catalog is live goes to stub-server.ts. The loader's
+// Supabase import and the builder's imports from the loader are TYPES, which
+// --experimental-strip-types erases.
+gen('../src/lib/supabase-pagination.ts', './_gen/supabase-pagination.ts')
+gen('../src/lib/admin/plans.ts', './_gen/plans.ts', [['from "@/lib/constants"', 'from "./constants.ts"']])
+gen('../src/lib/admin/croatia-dates.ts', './_gen/croatia-dates.ts')
+const RULE = [
+  ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+  ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
+]
+gen('../src/lib/admin/thirty-view.ts', './_gen/thirty-view.ts', [
+  ...RULE,
+  ['from "./plans"', 'from "./plans.ts"'],
+  ['from "./croatia-dates"', 'from "./croatia-dates.ts"'],
+  ['from "./thirty-data"', 'from "./thirty-data.ts"'],
+])
+gen('../src/lib/admin/thirty-data.ts', './_gen/thirty-data.ts', [
+  ...RULE,
+  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+  ['from "./thirty-view"', 'from "./thirty-view.ts"'],
+  ...toStub('@/lib/catalog-tables'),
+])
+
 // Every other route that writes or shows the streak (T-079, streak.test.mjs):
 // a finished video (lesson-watched, with the real chain after it), the old
 // course's task box (toggle-lesson) and quiz (submit-quiz), the app's data

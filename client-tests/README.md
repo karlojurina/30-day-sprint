@@ -149,9 +149,11 @@ renders the action item or the 30% form without the dev server: it parses
 `world-ui.module.css` and `discount-form.module.css` into their rules and runs
 the cascade for a phone (pointer coarse, 390x844) and a mouse (1366x768). The
 link field and the text answer are 16px on the phone, so iOS Safari does not
-zoom into them, and 13px and 15px with a mouse, as before. On 2026-10-20 the
-same two files were also loaded into headless Chrome with touch emulation and
-read back the same sizes (13px and 15px on touch before the fix).
+zoom into them, and 13px and 15px with a mouse, as before. Its cascade is
+its own; `node world-tests/phones-input-zoom.mjs` loads the same two files
+into headless Chrome (touch emulation and a mouse) and reads the sizes back
+from the browser's cascade, with the files at 70c934a beside them (13px and
+15px on touch).
 
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the

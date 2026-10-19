@@ -15,6 +15,8 @@
 // declarations, source order), finds every rule that sets the field's font
 // size, and runs the cascade for a mouse at 1366x768 and a phone at 390x844.
 // It also checks that the components put these classes on these fields.
+// world-tests/phones-input-zoom.mjs loads the same files into headless Chrome
+// and lets the browser run the cascade.
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 

@@ -306,6 +306,10 @@ export default function DiscountsPage() {
 
   async function handleReject(requestId: string) {
     const reason = prompt("Rejection reason (optional):");
+    // Cancel or Esc gives null: back out, nothing is sent. A rejection is
+    // final on the new course (the student can't apply again), so only OK
+    // rejects, with no reason when the box is left empty.
+    if (reason === null) return;
     setProcessing(requestId);
     clearActionError(requestId);
 

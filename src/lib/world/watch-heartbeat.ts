@@ -90,6 +90,29 @@ const FAILS_BEFORE_TROUBLE = 3;
 const THROTTLE_MS = 15_000;
 
 /**
+ * The most v100's record_lesson_heartbeat credits one beat: 60 s of video
+ * (v_max_delta), and 20 s on a lesson's first stored beat (v_first_delta). It
+ * also credits no more than 2.5 times the clock since the beat it stored
+ * before. So after beats have failed for a while the bank holds more than one
+ * beat can deliver, and everything sent used to leave the bank on an accepted
+ * answer, credited or not: a lesson watched through a minute of failed beats
+ * stopped counting (lessons-1, 2026-10-20). A beat now carries at most these,
+ * and only what the answer's total shows was credited leaves the bank. The
+ * same numbers live in the migration; changing one without the other is a
+ * bug, as for WATCH_SPEED_CAP.
+ */
+const MAX_BEAT_DELTA_S = 60;
+const FIRST_BEAT_DELTA_S = 20;
+
+/** The row's played total in an answer, or null when it is not a number (read as watch-rules.ts reads it). */
+function totalOf(r: HeartbeatResult): number | null {
+  const v: unknown = r.watched_seconds;
+  if (v === null || v === undefined) return null;
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
  * Hard backstop against a runaway loop, independent of what calls us. Module
  * level on purpose — a per-instance gate resets on every remount and never
  * holds, which is exactly how the 2026-08-27 refresh storm got through.
@@ -312,7 +335,13 @@ export function createWatchHeartbeat(
       return;
     }
 
-    const sentDelta = playedSinceWrite;
+    // 20 s until a beat of this visit has been accepted (the lesson may have no
+    // stored row yet, and the answer to the first has no earlier total to
+    // measure against), 60 s after. The rest stays banked for the next beats.
+    const sentDelta = Math.min(
+      playedSinceWrite,
+      lastAccepted ? MAX_BEAT_DELTA_S : FIRST_BEAT_DELTA_S,
+    );
     const sentPosition = position;
     inFlight = true;
 
@@ -363,11 +392,23 @@ export function createWatchHeartbeat(
       failedInARow = 0;
 
       if (result.accepted) {
+        // What the server credited: the row's total now, less its total at the
+        // last accepted answer. It can be less than was sent (see
+        // MAX_BEAT_DELTA_S), and the rest stays banked. The first accepted
+        // answer has no earlier total, and what it carried (at most
+        // FIRST_BEAT_DELTA_S) is what the server credits a first beat. A total
+        // that is not a number counts the whole beat, as before.
+        const totalBefore = lastAccepted ? totalOf(lastAccepted) : null;
+        const totalNow = totalOf(result);
+        const credited =
+          totalBefore !== null && totalNow !== null
+            ? Math.min(sentDelta, Math.max(0, totalNow - totalBefore))
+            : sentDelta;
         lastSentPosition = sentPosition;
         lastAccepted = result;
         // Only now is the delta safely banked. A refused beat keeps it, so a
         // rate-limited write never silently discards watch time.
-        playedSinceWrite = Math.max(0, playedSinceWrite - sentDelta);
+        playedSinceWrite = Math.max(0, playedSinceWrite - credited);
       }
 
       opts.onResult?.(result, { reason, force });

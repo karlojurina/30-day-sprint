@@ -38,15 +38,23 @@ function ok(cond, label, detail = '') {
   else { fails.push(label); console.log(` FAIL  ${label}${detail ? ` — ${detail}` : ''}`) }
 }
 
-const accepted = (extra = {}) => (args) => ({
-  accepted: true,
-  max_position_seconds: args.p_position_seconds,
-  last_position_seconds: args.p_position_seconds,
-  watched_seconds: 0,
-  threshold_met: false,
-  threshold_crossed: false,
-  ...extra,
-})
+// v100 answers an accepted beat with the row's new total: what it held plus
+// what the beat was credited. These stand-ins credit every beat in full, so a
+// responder keeps the sum of the deltas sent to it. Since lessons-1
+// (2026-10-20) the heartbeat reads that total to learn what was credited, and
+// a responder answering 0 every time would say "nothing was credited".
+const accepted = (extra = {}) => {
+  let total = 0
+  return (args) => ({
+    accepted: true,
+    max_position_seconds: args.p_position_seconds,
+    last_position_seconds: args.p_position_seconds,
+    watched_seconds: (total += args.p_delta_seconds),
+    threshold_met: false,
+    threshold_crossed: false,
+    ...extra,
+  })
+}
 
 // Real playback: the player ticks ~3.7x/second, and the event loop runs
 // between ticks — so an in-flight request actually gets to resolve.
@@ -227,9 +235,10 @@ function rig(extra = {}) {
   // section's final write cannot hold this section's first one back.
   advance(1000)
   const sent = []
+  const answer = accepted()
   const beat = createWatchHeartbeat({
     lessonId: 'l001', durationSeconds: 753,
-    rpc: async (args) => { sent.push(args); return { data: accepted()(args), error: null } },
+    rpc: async (args) => { sent.push(args); return { data: answer(args), error: null } },
     now: () => clock,
     ...extra,
   })
@@ -582,6 +591,7 @@ const failing = () => ({ data: null, error: { message: 'the database call failed
 /** A heartbeat whose rpc answers from a script: `answer(args, n)` returns { data, error } or throws. */
 function scripted(answer, extra = {}) {
   advance(1000)
+  goodAnswer = accepted()
   const sent = []
   const beat = createWatchHeartbeat({
     lessonId: 'l001', durationSeconds: 753,
@@ -591,7 +601,9 @@ function scripted(answer, extra = {}) {
   })
   return { beat, sent }
 }
-const good = (args) => ({ data: accepted()(args), error: null })
+/** An accepted answer from this heartbeat's own stand-in row (scripted() starts a new one). */
+let goodAnswer = accepted()
+const good = (args) => ({ data: goodAnswer(args), error: null })
 /** Plays 2s at 1x from `from`, 8 reports. The first report of a heartbeat writes at once. */
 async function playTwoSeconds(beat, from) {
   let t = from
@@ -731,7 +743,8 @@ console.log('\n=== 21. a failing database call is tried every 15s, not twice a s
   ok(sent.length === 4, 'a minute against a call that always fails is 4 calls (it was measured at 120)', `${sent.length} calls`)
   const gaps = sent.slice(1).map((a, i) => a.at - sent[i].at)
   ok(gaps.every((g) => g >= 15_000 && g <= 16_000), 'each one 15s after the last', gaps.join(', '))
-  ok(near(sent[3].p_delta_seconds, sent[3].p_position_seconds - 0.25), 'and each carries everything played so far: nothing banked is dropped',
+  // Since lessons-1 a beat carries at most what v100 credits one: 20 s until a beat has been accepted.
+  ok(near(sent[3].p_delta_seconds, Math.min(20, sent[3].p_position_seconds - 0.25)), 'and each carries what was played so far, up to the 20 s v100 credits a first beat: nothing banked is dropped',
      `the last carried ${sent[3].p_delta_seconds.toFixed(2)}s at ${sent[3].p_position_seconds.toFixed(2)}s`)
   beat.destroy()
 }

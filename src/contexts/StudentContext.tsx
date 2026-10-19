@@ -802,6 +802,12 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) return;
+      // Badges awarded on the server for lessons finished on Whop (by this
+      // sync, or by Whop's webhook before it) reach the map's corner only
+      // through this event (progress-3, streak-1). Sent after every sync, not
+      // only when its newAchievements is non-empty: a badge the webhook already
+      // awarded is never in the sync's answer.
+      window.dispatchEvent(new Event("et:achievements-changed"));
       // NOT throttled: onVisible fires runSilentSync() and refreshFromServer()
       // together, and "visibility" takes the 5s gate at t=0 with PRE-sync data.
       // By the time the Whop round-trip above finishes, this refresh — the one
@@ -828,6 +834,8 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json().catch(() => null);
+      // As after the silent sync: badges it awarded reach the corner.
+      if (res.ok) window.dispatchEvent(new Event("et:achievements-changed"));
       // Always re-read the student row so the panel reflects the latest
       // diagnostic columns even when the sync itself errored.
       await refreshFromServer(token, "force-sync", { throttled: false });

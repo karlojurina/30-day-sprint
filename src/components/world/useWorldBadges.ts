@@ -15,7 +15,8 @@ import type { Achievement, AchievementUnlockStats, StudentAchievement } from "@/
  * the student's own unlocks (`student_achievements`) and the share of
  * students holding each (`achievement_unlock_stats`). The window event
  * `et:achievements-changed` (LessonPlayer fires it when a lesson is counted,
- * StudentContext after its own writes) reads the student's unlocks again.
+ * StudentContext after its own writes and after each Whop sync) reads the
+ * student's unlocks again.
  *
  * An unlock that arrives while the page is open goes into `fresh`, oldest
  * first, for the corner's toast, and into `newIds`, for the list's "New" mark.

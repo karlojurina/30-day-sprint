@@ -10,6 +10,13 @@
 // extra fetch failed it set loadError, which nothing cleared: the map and an
 // open lesson page were replaced by "Your course didn't load." until a reload.
 //
+// AND THE BADGES (progress-3, streak-1). Badges awarded on the server for
+// lessons finished on Whop (the visit's sync, Whop's webhook) never reached an
+// open map: the corner reads the student's unlocks again only on the window
+// event `et:achievements-changed`, and the Whop sync never sent it. The last
+// sections run the corner's real hook (src/components/world/useWorldBadges.ts)
+// beside the provider and watch its count and its toast queue.
+//
 // HOW IT RUNS. The provider is the real source, read from src/ on every run
 // and turned into JavaScript by the app's own TypeScript (transpileModule, as
 // world-tests/lesson-player-sim.mjs does for the lesson player), then loaded
@@ -233,7 +240,9 @@ const React = require('react')
 const { createRoot } = require('react-dom/client')
 const h = React.createElement
 const { AuthStandIn } = await import(SPEC['./AuthContext'])
+const browserDb = await import(SPEC['@/lib/supabase-browser'])
 const { StudentProvider, useStudent } = await load('src/contexts/StudentContext.tsx')
+const { useWorldBadges } = await load('src/components/world/useWorldBadges.ts')
 
 // ── Mounting ─────────────────────────────────────────────────────────────────
 const view = { ctx: null, setStudent: null, renders: [] }
@@ -247,6 +256,10 @@ function StudentProbe() {
   const ctx = useStudent()
   view.ctx = ctx
   view.renders.push(ctx)
+  return null
+}
+function BadgeProbe() {
+  view.badges = useWorldBadges()
   return null
 }
 /** Lets React, the stand-in requests and their promise chains run. */
@@ -377,6 +390,67 @@ console.log('\n=== An error from a failed load is cleared by the next good one (
   view.setStudent({ ...STUDENT, id: 's2' })
   await settle()
   ok(view.ctx.loadError === null && view.ctx.lessons.length === 5, 'the next good load clears it', `loadError ${show(view.ctx.loadError)}`)
+  root.unmount()
+}
+
+// ── The badges (progress-3, streak-1) ────────────────────────────────────────
+let badgeEvents = 0
+window.addEventListener('et:achievements-changed', () => { badgeEvents++ })
+const CATALOG = [
+  { id: 'first_lesson', name: 'First Steps', sort_order: 1 },
+  { id: 'triple_threat', name: 'Triple Threat', sort_order: 2 },
+  { id: 'habit_builder', name: 'Habit Builder', sort_order: 3 },
+]
+/** A badge the server awards: a student_achievements row the browser can read. */
+const award = (id) => browserDb.tables.student_achievements.push({ student_id: 's1', achievement_id: id, unlocked_at: new Date(clock).toISOString() })
+const held = () => [...view.badges.book.mine.keys()].sort()
+const toasts = () => view.badges.fresh.map((a) => a.name)
+
+console.log('\n=== The Whop sync tells the corner to read the badges again (progress-3, streak-1) ===')
+{
+  seed()
+  browserDb.tables.achievements = CATALOG
+  browserDb.tables.student_achievements = []
+  // The visit's sync is slow (it pages through Whop), so the corner reads the badges first.
+  server.holdSync = deferred()
+  const sync = server.holdSync
+  // On the server the sync backfills the lessons finished on Whop and awards a badge for them.
+  server.onSync = () => { award('first_lesson'); return { newAchievements: ['first_lesson'] } }
+  badgeEvents = 0
+  const root = await mount(h(BadgeProbe))
+  ok(view.badges.status === 'ready' && held().length === 0, 'the corner has read the badges before the sync answers: none held', `${view.badges.status}, ${show(held())}`)
+  sync.resolve()
+  await settle()
+  ok(badgeEvents === 1, 'the sync\'s answer sends et:achievements-changed once', `${badgeEvents} events`)
+  ok(show(held()) === show(['first_lesson']), 'so the count in the pill goes up without a reload', show(held()))
+  ok(show(toasts()) === show(['First Steps']) && view.badges.newIds.has('first_lesson'), 'and the toast plays it, marked New in the list', show(toasts()))
+
+  // Whop's webhook awards one while the map is open; the sync on the return to the tab lists none.
+  view.badges.announced()
+  award('triple_threat')
+  server.onSync = () => ({ newAchievements: [] })
+  advance(31_000)
+  window.dispatchEvent(new Event('focus'))
+  await settle()
+  ok(badgeEvents === 2 && show(held()) === show(['first_lesson', 'triple_threat']) && show(toasts()) === show(['Triple Threat']),
+     'a badge the webhook awarded is picked up at the next sync, whose answer lists none', `${badgeEvents} events, ${show(held())}, toasts ${show(toasts())}`)
+  root.unmount()
+}
+{
+  seed()
+  browserDb.tables.student_achievements = []
+  server.syncStatus = 502
+  badgeEvents = 0
+  const root = await mount(h(BadgeProbe))
+  ok(badgeEvents === 0, 'a sync that fails sends nothing', `${badgeEvents} events`)
+  // The debug panel's forced sync: once when it works, not when it fails.
+  advance(1_000)
+  const failed = await view.ctx.forceSync()
+  server.syncStatus = 200
+  advance(1_000)
+  const worked = await view.ctx.forceSync()
+  await settle()
+  ok(failed.ok === false && worked.ok === true && badgeEvents === 1, 'a forced sync sends it when it works, and not when it fails', `${badgeEvents} events`)
   root.unmount()
 }
 

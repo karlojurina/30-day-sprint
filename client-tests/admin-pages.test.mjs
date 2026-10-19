@@ -4,6 +4,8 @@
 //   admin-2: the drawer on /admin/journey showed the previous student's
 //   discount application (status and Whop code) and streak on a student who
 //   had none, and a slow answer for one student could land on the next.
+//   admin-3: /admin/templates never showed which templates are off (the
+//   course switch turned some off) and could not turn one back on.
 //
 // No browser runs here (the repo has no DOM harness), so each fix is checked
 // on the real source in the ways that need none:
@@ -16,8 +18,11 @@
 //     stripped, run the way React runs an effect when the student changes on
 //     one mounted drawer (the last run's cleanup, then the effect again), on
 //     stub-server.ts's database;
-//   - the drawer as it was at BASE, run the same way, to show each check
-//     fails on the old code.
+//   - the templates page's own handler, taken from the source the same way,
+//     with fetch() going to a copy of the real PUT route (its login pointed
+//     at stub-admin.ts), and its markup read from the source;
+//   - the pages as they were at BASE, run or read the same way, to show each
+//     check fails on the old code.
 import fs from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -223,6 +228,83 @@ for (const v of ['now', 'old']) {
     ok(after.student === 'stu-a' && after.application === 'approved ECOM30-STUAAA',
        `control: at ${BASE} A's late answer takes over B's drawer`, show(after))
   }
+}
+
+// ── admin-3: templates on and off ───────────────────────────────────────────
+
+const TEMPLATE_ROUTE = 'src/app/api/admin/templates/[id]/route.ts'
+write(fromSrc(TEMPLATE_ROUTE), TEMPLATE_ROUTE, './_gen/admin-template-route.ts', [
+  ['from "next/server"', 'from "./stub-server.ts"'],
+  ['from "@/lib/admin-auth"', 'from "./stub-admin.ts"'],
+])
+const { PUT: putTemplate } = await import('./_gen/admin-template-route.ts')
+const { setTeam } = await import('./_gen/stub-admin.ts')
+
+const TEMPLATES = 'src/app/admin/(authenticated)/templates/page.tsx'
+const templatesPage = { now: fromSrc(TEMPLATES), old: fromBase(TEMPLATES) }
+/** The function `name` declared in `source`, as written there. */
+function declared(source, name) {
+  const sf = parse(source)
+  const fn = find(sf, (n) => ts.isFunctionDeclaration(n) && n.name?.text === name)
+  if (!fn) throw new Error(`no function ${name}`)
+  return fn.getText(sf)
+}
+/** The templates page's state (recorded) and its setActive, with fetch() going to the PUT route. */
+function templatesTab(rows) {
+  const seen = { requests: [], errors: [], saving: [], rows }
+  const scope = {
+    setError: (e) => { if (e) seen.errors.push(e) },
+    setSaving: (v) => { seen.saving.push(v) },
+    setRows: (f) => { seen.rows = typeof f === 'function' ? f(seen.rows) : f },
+    supabase: { auth: { getSession: async () => ({ data: { session: { access_token: 'team-token' } } }) } },
+    fetch: async (url, init) => {
+      const id = /^\/api\/admin\/templates\/([^/]+)$/.exec(url)?.[1]
+      if (!id) throw new Error(`no route for ${url}`)
+      seen.requests.push({ id, method: init.method, body: JSON.parse(init.body) })
+      return putTemplate(new Request(`http://app${url}`, init), { params: Promise.resolve({ id }) })
+    },
+  }
+  return { seen, setActive: closedOver(declared(templatesPage.now, 'setActive'), scope) }
+}
+
+console.log('\n=== admin-3: a template that is off shows it, and can be turned on and off ===')
+{
+  // A custom template the course switch turned off: its conditions read an area's pace.
+  const OFF = {
+    id: 'tpl-quiet', scenario_id: 'C-a1b2c3', is_custom: true, is_active: false, title: 'Quiet after area 2',
+    bucket: 'at_risk', body: 'Hey {firstName}', trigger_config: { all: [{ metric: 'region_pace', op: 'lt', value: 1 }] },
+  }
+  const db = new FakeDb({ templates: [OFF] })
+  installDb(db)
+  setTeam({ id: 'team-karlo', role: 'founder' })
+  const t = templatesTab([{ ...OFF }])
+  await t.setActive('tpl-quiet', true)
+  const live = db.rows('templates')[0]
+  ok(show(t.seen.requests) === show([{ id: 'tpl-quiet', method: 'PUT', body: { is_active: true } }])
+       && live.is_active === true && live.title === OFF.title && show(live.trigger_config) === show(OFF.trigger_config),
+     'Turn on sends PUT { is_active: true } and nothing else: the template is on, its text and conditions as saved', show(t.seen.requests))
+  ok(t.seen.rows[0].is_active === true && t.seen.errors.length === 0 && show(t.seen.saving) === show(['tpl-quiet', null]),
+     'the page takes the row the route answered (the Off badge goes), with no error, and the button is free again', show(t.seen.rows[0]))
+  await t.setActive('tpl-quiet', false)
+  ok(show(t.seen.requests[1]?.body) === show({ is_active: false }) && db.rows('templates')[0].is_active === false && t.seen.rows[0].is_active === false,
+     'Turn off sends { is_active: false } and the template is off again')
+
+  setTeam({ id: 'team-astrid', role: 'csm' })
+  const csm = templatesTab([{ ...db.rows('templates')[0] }])
+  await csm.setActive('tpl-quiet', true)
+  ok(db.rows('templates')[0].is_active === false && show(csm.seen.errors) === show(['Requires role: founder or admin']) && csm.seen.rows[0].is_active === false,
+     'a CSM (the page shows them no button) is refused by the route, and the page shows why', show(csm.seen.errors))
+}
+{
+  const src = templatesPage.now
+  ok(/\{!t\.is_active && \(\s*<span\s+title="This template is off\."\s+style=\{\{[^}]*\}\}\s*>\s*Off\s*<\/span>/.test(src),
+     'in the source, each row\'s header shows "Off" when the template is off (every row, for every role)')
+  ok(/\{canEdit && \(\s*<button\s+type="button"\s+disabled=\{saving === t\.id \|\| turnOnWaits\}\s+onClick=\{\(\) => void setActive\(t\.id, !t\.is_active\)\}/.test(src)
+       && src.includes('{t.is_active ? "Turn off" : "Turn on"}') && src.includes('"This template is off."'),
+     'the open row says on or off, and founders and admins get Turn on / Turn off, wired to setActive')
+  ok(src.includes('const turnOnWaits = !t.is_active && dirty;') && src.includes('Save your changes first, then turn it on.'),
+     'Turn on waits while the row has unsaved changes, and says why, so a template never goes live on the conditions being replaced')
+  ok(!templatesPage.old.includes('is_active'), `control: at ${BASE} the page never read or sent is_active`)
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

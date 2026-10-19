@@ -342,6 +342,39 @@ export default function AdminTemplatesPage() {
     setSaving(null);
   }
 
+  /**
+   * Turns a template on or off (is_active) on its own, leaving the draft as
+   * it is. The course switch (v104) turned off the templates whose
+   * conditions read the old course; the team rewrites one, saves it, then
+   * turns it back on here (T-060). The crons read conditions only from
+   * templates that are on.
+   */
+  async function setActive(id: string, isActive: boolean) {
+    setError(null);
+    setSaving(id);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      const res = await fetch(`/api/admin/templates/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ is_active: isActive }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `HTTP ${res.status}`);
+      }
+      const { template } = await res.json();
+      setRows((prev) => prev.map((r) => (r.id === id ? template : r)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setSaving(null);
+  }
+
   function updateDraft(
     id: string,
     field: keyof DraftFields,
@@ -475,6 +508,9 @@ export default function AdminTemplatesPage() {
                     })
                   : null;
                 const glyph = BUCKET_GLYPH[t.bucket] ?? "·";
+                // Turning a template on waits for its unsaved changes, so it
+                // never goes live on the conditions being replaced.
+                const turnOnWaits = !t.is_active && dirty;
 
                 return (
                   <div
@@ -559,6 +595,23 @@ export default function AdminTemplatesPage() {
                           </span>
                         );
                       })()}
+                      {!t.is_active && (
+                        <span
+                          title="This template is off."
+                          style={{
+                            fontSize: 10,
+                            padding: "2px 6px",
+                            borderRadius: 3,
+                            background: "rgba(212,162,76,0.14)",
+                            color: "var(--color-warning)",
+                            fontWeight: 600,
+                            letterSpacing: "0.08em",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          Off
+                        </span>
+                      )}
                       {t.is_admin_only && (
                         <span
                           style={{
@@ -601,6 +654,53 @@ export default function AdminTemplatesPage() {
                         className="px-4 pb-4"
                         style={{ borderTop: "1px solid var(--color-border)" }}
                       >
+                        {/* On or off (is_active), for every template. */}
+                        <div
+                          className="flex items-center gap-3 flex-wrap"
+                          style={{ marginTop: 14 }}
+                        >
+                          <span
+                            style={{
+                              fontSize: 13,
+                              color: t.is_active
+                                ? "var(--color-text-secondary)"
+                                : "var(--color-warning)",
+                            }}
+                          >
+                            {t.is_active
+                              ? "This template is on."
+                              : "This template is off."}
+                          </span>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              disabled={saving === t.id || turnOnWaits}
+                              onClick={() => void setActive(t.id, !t.is_active)}
+                              style={{
+                                ...ghostBtnStyle(),
+                                opacity:
+                                  saving === t.id || turnOnWaits ? 0.5 : 1,
+                                cursor:
+                                  saving === t.id || turnOnWaits
+                                    ? "not-allowed"
+                                    : "pointer",
+                              }}
+                            >
+                              {t.is_active ? "Turn off" : "Turn on"}
+                            </button>
+                          )}
+                          {canEdit && turnOnWaits && (
+                            <span
+                              style={{
+                                fontSize: 12,
+                                color: "var(--color-text-tertiary)",
+                              }}
+                            >
+                              Save your changes first, then turn it on.
+                            </span>
+                          )}
+                        </div>
+
                         {/* Editable fields */}
                         <div style={{ marginTop: 14 }}>
                           <Field label="Title">

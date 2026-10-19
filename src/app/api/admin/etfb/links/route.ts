@@ -32,10 +32,11 @@ import {
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 30;
-// Runs in iad1, next to Whop, while the project's functions run in dub1 next
-// to the database (vercel.json): it makes more Whop calls in a row than its 4
-// database trips. The counts: CONTEXT.md, "Where the functions run".
-export const preferredRegion = "iad1";
+// Pinned to iad1, next to Whop, by this file's entry under `functions` in
+// vercel.json, while the project's functions run in dub1 next to the
+// database: it makes more Whop calls in a row than its 4 database trips.
+// Vercel takes a Node route's region only from vercel.json, and a moved file
+// loses the pin. The counts: CONTEXT.md, "Where the functions run".
 
 export async function POST(request: NextRequest) {
   const auth = await requireTeam(request);

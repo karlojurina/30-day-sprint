@@ -98,6 +98,16 @@ of the new code's tables. Every value is compared as its bytes and the whole
 through SHA-256; then both are timed. A change to the terrain's output on
 purpose fails it by design: the test's header says what to do.
 
+`function-regions.test.mjs` (2026-10-20) reads `vercel.json` and the source
+under `src/app`. The project runs in `dub1`; each route pinned to `iad1`
+under `functions` must be an exact path to an App Router route file that
+exists, with its regions named; and no route may export `preferredRegion`
+outside the edge runtime. Vercel takes a Node route's region only from
+`vercel.json`, and its CLI lets a `src/app/` entry that matches no file pass
+in silence, so a moved route would otherwise lose its pin unnoticed. A
+renamed key and a `preferredRegion` export were each put in once on purpose,
+and the test failed both times.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

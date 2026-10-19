@@ -37,10 +37,12 @@ import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
 import { fetchEarliestMembershipDateForUser } from "@/lib/whop-members";
 
 export const maxDuration = 300;
-// Runs in iad1, next to Whop, while the project's functions run in dub1 next
-// to the database (vercel.json): each student costs at least one Whop call and
-// at most one database write. The counts: CONTEXT.md, "Where the functions run".
-export const preferredRegion = "iad1";
+// Pinned to iad1, next to Whop, by this file's entry under `functions` in
+// vercel.json, while the project's functions run in dub1 next to the
+// database: each student costs at least one Whop call and at most one
+// database write. Vercel takes a Node route's region only from vercel.json,
+// and a moved file loses the pin. The counts: CONTEXT.md, "Where the
+// functions run".
 
 export async function POST(request: NextRequest) {
   // v75.34: dual auth — accept CRON_SECRET for service-level one-time

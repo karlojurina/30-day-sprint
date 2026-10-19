@@ -1278,7 +1278,11 @@ const POSTER_FADE_MS = 900;
  * begun the poster's fade, and a glide or a park is not stalled by it...
  */
 const CONFIRM_AFTER_FRAMES = 4;
-/** ...or this long after ready whatever the frames do (reduced motion and a paused page draw none), ms. */
+/**
+ * ...or this long after ready whatever the frames do (reduced motion and a
+ * paused page draw none), ms. Whichever comes first, a camera that is moving
+ * or has left the opening by then skips the probe (runConfirmLater).
+ */
 const CONFIRM_LATER_MAX_MS = 4000;
 /** The rest check (restCheckTick): no input and a still camera this long before a burst, and between climbs, ms. */
 const REST_CHECK_IDLE_MS = 4000;
@@ -1433,10 +1437,11 @@ export class WorldScene {
   private moduleImports: Promise<unknown>[] | null = null;
   /**
    * The load probe waiting for the live 3D to be on screen (confirmAfterReveal):
-   * confirmTier's arguments and the still frames drawn since ready. Null when
-   * it ran (or runs) behind the loading screen.
+   * confirmTier's arguments, the still frames drawn since ready, and the rail
+   * depth the load compiled at (the opening, the view the probe is for). Null
+   * when it ran (or runs) behind the loading screen.
    */
-  private confirmLater: { t0: number; pending: number; frames: number } | null = null;
+  private confirmLater: { t0: number; pending: number; frames: number; depth: number } | null = null;
   private readonly wantFallbacks: boolean;
   private ctx: WorldCtx | null = null;
 
@@ -1934,7 +1939,7 @@ export class WorldScene {
     // screen, then confirm the tier (world_art_bible_v6.md 3.1 "Load", 3.2 "Confirm").
     const warm = await this.warmUp();
     if (this.disposed || !this.scene) return;
-    if (warm && this.confirmAfterReveal(warm.pending)) this.confirmLater = { ...warm, frames: 0 };
+    if (warm && this.confirmAfterReveal(warm.pending)) this.confirmLater = { ...warm, frames: 0, depth: this.currentDepth };
     else if (warm) this.confirmTier(warm.t0, warm.pending);
 
     this.ready = true;
@@ -1972,14 +1977,36 @@ export class WorldScene {
     );
   }
 
-  /** The deferred load probe, once: from tickBody after CONFIRM_AFTER_FRAMES still frames, or the fallback timer. */
+  /**
+   * The deferred load probe, once: from tickBody after CONFIRM_AFTER_FRAMES
+   * still frames, or the fallback timer. With the camera moving, or still but
+   * away from the opening, the probe is skipped (review of 2026-10-20): its
+   * 0.25 s or more on the main thread would stall a glide, a flight or a park
+   * about to begin, and a burst anywhere but the opening is not what
+   * refineTier and WORST_TO_OPENING_RATIO were made for. The governor and the
+   * rest check start either way, as after a remembered tier 0, so a moving
+   * camera's frames are watched from now instead of from its next rest.
+   */
   private runConfirmLater() {
     const c = this.confirmLater;
     if (!c || this.disposed) return;
     this.confirmLater = null;
-    this.confirmTier(c.t0, c.pending);
+    const skip = this.cameraMoving() ? "the camera was moving" : !this.atOpening(c.depth) ? "the camera had left the opening" : null;
+    this.confirmTier(c.t0, c.pending, skip);
     this.dirty = true;
     this.wake();
+  }
+
+  /** tickBody's movingNow between frames: a glide to the scroll (read now, a scroll the loop has not followed yet counts), a flight, or a park about to begin. */
+  private cameraMoving(): boolean {
+    if (this.mode === "flight" || this.parkPending) return true;
+    const target = this.parkedId !== null ? Math.min(this.targetDepth, this.depthMax) : this.readScrollDepth(this.targetDepth);
+    return Math.abs(target - this.currentDepth) >= DEPTH_EPS;
+  }
+
+  /** The camera on the rail at `depth` (the load's opening), no park and no harness pose. */
+  private atOpening(depth: number): boolean {
+    return this.mode === "rail" && this.parkedId === null && this.poseOverride === null && Math.abs(this.currentDepth - depth) < DEPTH_EPS;
   }
 
   /** One frame's preparation without the render: the camera posed, modules updated, the fog set. */
@@ -2055,8 +2082,13 @@ export class WorldScene {
     return { t0, pending };
   }
 
-  /** The load probe and the tier it confirms, the governor and the rest check (see warmUp). `t0`: when the compile began. */
-  private confirmTier(t0: number, pending: number) {
+  /**
+   * The load probe and the tier it confirms, the governor and the rest check
+   * (see warmUp). `t0`: when the compile began. `skipProbe`: why the deferred
+   * probe does not measure (runConfirmLater); then only the governor and the
+   * rest check start, as after a remembered tier 0.
+   */
+  private confirmTier(t0: number, pending: number, skipProbe: string | null = null) {
     const renderer = this.renderer;
     const scene = this.scene;
     const camera = this.camera;
@@ -2077,7 +2109,10 @@ export class WorldScene {
     const recalled = this.qualityReport.recalled as number | null;
     /** The rest check's start: a clean burst at the tier the load ends on (ms), "unknown", or null (the tier above was measured and failed). */
     let restHint: number | "unknown" | null = "unknown";
-    if (this.tierOverride === null && (recalled === null || recalled > 0)) {
+    if (skipProbe !== null) {
+      this.qualityReport.probeSkipped = skipProbe;
+      restHint = null;
+    } else if (this.tierOverride === null && (recalled === null || recalled > 0)) {
       this.prepareFrame();
       let progs0 = programs();
       const prProbe = renderer.getPixelRatio();
@@ -2171,7 +2206,9 @@ export class WorldScene {
           restHint = p3.capped || probe2.length ? null : p3m.ms;
           if (p3m.ms > POSTER_RULES.probeTier3Ms) {
             // Only automatic mode goes to the posters on its own: after "Try 3D anyway" the 3D stays, at tier 3.
-            if (this.posterPref === "auto") this.enterPoster(`the opening at tier 3 takes ${p3m.ms.toFixed(0)} ms (over ${POSTER_RULES.probeTier3Ms})`, "slow", trusted(), true);
+            // At once behind the loading screen, where the posters are already up; after the
+            // reveal (the deferred probe) the 3D keeps drawing under their fade, as for the governor's.
+            if (this.posterPref === "auto") this.enterPoster(`the opening at tier 3 takes ${p3m.ms.toFixed(0)} ms (over ${POSTER_RULES.probeTier3Ms})`, "slow", trusted(), !this.ready);
           } else if (!p3.capped && !probe2.length) {
             // Tier 3 measured clean: a stall that capped the first probe shows up here as headroom.
             const h = headroomCheck(3, p3m.ms, renderer.getPixelRatio(), dpr, prSteps);

@@ -65,9 +65,11 @@ When adding a new table, append it here. When deleting a field, scan
   longer stay NULL. Post-v75.28
   NULL is treated as out-of-cohort everywhere — no joined_at fallback.
   On the new course it decides the discount window (T-080,
-  `discountWindow` in `src/lib/world/discount.ts`): before 2026-09-08
-  22:00 UTC never; from then until the launch, the shared deadline at
-  the end of 23 October 2026 (Croatia); from the launch on, 14 days
+  `discountWindow` in `src/lib/world/discount.ts`): before 2026-09-30
+  22:00 UTC (midnight on 1 October in Croatia; 2026-09-08 22:00 UTC
+  until Lovro moved it on 2026-10-19) never; from then until the
+  launch, the shared deadline at the end of 23 October 2026 (Croatia);
+  from the launch on, 14 days
   from itself. It also decides whether an old-dashboard request still
   counts (`requestCounts`).
   Distinct from `joined_at` which is the CURRENT subscription cycle
@@ -824,7 +826,8 @@ When adding a new table, append it here. When deleting a field, scan
   latest request that counts decide what the student sees.
   `requestCounts()` (T-080) counts every request from 2026-10-08 22:00
   UTC (the launch) on. An earlier one counts only for a student whose
-  `first_paid_at` is from 2026-09-08 22:00 UTC until the launch, and
+  `first_paid_at` is from 2026-09-30 22:00 UTC (1 October in Croatia;
+  2026-09-08 22:00 UTC until 2026-10-19) until the launch, and
   only while pending, approved or applied, because v29's
   `submit_discount_with_feedback` refuses another request while one of
   those exists, whatever its date, so the map must never offer Apply

@@ -1,6 +1,9 @@
-// T-080 end to end: a student whose first payment was on 15 September (after
-// 9 September, before the launch on 9 October) has until the end of
-// 23 October in Croatia, and the lessons they finish on Whop count.
+// T-080 end to end: a student whose first payment was on 2 October (after
+// 1 October, before the launch on 9 October) has until the end of
+// 23 October in Croatia, and the lessons they finish on Whop count. The file
+// is named for the group as it began, from 9 September; Lovro moved the first
+// date to 1 October on 2026-10-19, and a September payment is now refused
+// (its own section below).
 //
 // What decides is the real source, copied by build.mjs: the Whop backfill a
 // visit runs (watch-sync.ts), the Whop webhook, both routes that write a
@@ -92,8 +95,8 @@ const LESSONS = catalog.lessons.map((l, i) => ({
 const REQUIRED = requiredLessons(LESSONS.map((l) => ({ ...l, has_video: l.id in lengths }))).map((l) => l.id)
 const GATE = REQUIRED.at(-1)
 
-const SEPT_15 = '2026-09-15T10:00:00.000Z'
-function freshDb(paid = SEPT_15, requests = []) {
+const OCT_2 = '2026-10-02T10:00:00.000Z'
+function freshDb(paid = OCT_2, requests = []) {
   setCatalog({ v2: true, lessonsTable: 'lessons' })
   const db = new FakeDb({
     students: [{ id: 's1', whop_user_id: 'user_1', supabase_user_id: 'auth-1', first_paid_at: paid, joined_at: paid }],
@@ -208,9 +211,9 @@ async function approve(db, day, asked, id, resetAt) {
 const completedAt = (db, id) => db.rows('student_lesson_completions').find((r) => r.lesson_id === id)?.completed_at ?? null
 
 console.log('\n=== The course this runs on ===')
-ok(REQUIRED.length === 59 && GATE === 'a4l17', '59 videos up to the gate, a4l17', `${REQUIRED.length}, gate ${GATE}`)
+ok(REQUIRED.length === 61 && GATE === 'a4l17', '61 videos up to the gate, a4l17', `${REQUIRED.length}, gate ${GATE}`)
 
-console.log('\n=== Paid 15 September, finished on Whop and in the app by 23 October: it counts ===')
+console.log('\n=== Paid 2 October, finished on Whop and in the app by 23 October: it counts ===')
 {
   const db = freshDb()
   // While the app is closed the student watches on Whop. The first visit
@@ -220,9 +223,9 @@ console.log('\n=== Paid 15 September, finished on Whop and in the app by 23 Octo
   const rows = db.rows('student_lesson_completions')
   ok(sync.syncedCount === 50 && rows.length === 50 && rows.every((r) => r.completed_at === '2026-10-19T07:30:00.000Z'),
      'the visit on 19 October brings the 50 lessons finished on Whop in, stamped with that moment', show({ synced: sync.syncedCount, rows: rows.length }))
-  // Eight more in the app on Wednesday evening.
-  await at('2026-10-21T18:00:00.000Z', () => watchedInApp(db, REQUIRED.slice(50, 58)))
-  ok(completedAt(db, REQUIRED[57]) === '2026-10-21T18:00:00.000Z', 'eight watched in the app on 21 October')
+  // The rest but the gate in the app on Wednesday evening.
+  await at('2026-10-21T18:00:00.000Z', () => watchedInApp(db, REQUIRED.slice(50, -1)))
+  ok(completedAt(db, REQUIRED.at(-2)) === '2026-10-21T18:00:00.000Z', 'the rest but the gate watched in the app on 21 October')
   // The gate on Whop on Friday at 22:00 in Croatia, reported by the webhook.
   const hook = await at('2026-10-23T20:00:00.000Z', () => webhookFinished(GATE))
   ok(hook === 200 && completedAt(db, GATE) === '2026-10-23T20:00:00.000Z',
@@ -238,18 +241,18 @@ console.log('\n=== Paid 15 September, finished on Whop and in the app by 23 Octo
 console.log('\n=== The same student, the gate finished at 00:00:30 on 24 October: too late ===')
 {
   const db = freshDb()
-  onWhop(REQUIRED.slice(0, 58))
+  onWhop(REQUIRED.slice(0, -1))
   await at('2026-10-19T07:30:00.000Z', backfill)
   const hook = await at('2026-10-23T22:00:30.000Z', () => webhookFinished(GATE))
   ok(hook === 200 && completedAt(db, GATE) === '2026-10-23T22:00:30.000Z', 'the gate comes in 30 seconds into 24 October in Croatia')
   const sent = await at('2026-10-23T22:05:00.000Z', apply)
   ok(sent.status === 400 && sent.body.state === 'expired'
-       && sent.body.error === 'The discount closed at the end of October 23, Croatia time. That was the deadline for students who joined before the new course launched.',
+       && sent.body.error === 'The discount closed at the end of October 23, Croatia time. That was the deadline for students who joined from October 1 until the new course launched.',
      'Apply at 00:05 on 24 October: refused as expired, the day and the clock named', show(sent))
   ok(db.rows('discount_requests').length === 0, 'and no request is written')
   const v = await approve(db, '2026-10-27T09:00:00.000Z', null)
-  ok(!v.ok && v.status === 400 && v.error.includes('by the end of October 23') && v.error.includes('1 of 59 still missing'),
-     'the approval would refuse it too: 1 of 59 still missing (only Generate anyway skips the check)', v.error)
+  ok(!v.ok && v.status === 400 && v.error.includes('by the end of October 23') && v.error.includes('1 of 61 still missing'),
+     'the approval would refuse it too: 1 of 61 still missing (only Generate anyway skips the check)', v.error)
 }
 
 console.log('\n=== Everything finished on Whop in time, but the app first opened on 24 October ===')
@@ -260,28 +263,42 @@ console.log('\n=== Everything finished on Whop in time, but the app first opened
   const db = freshDb()
   onWhop(REQUIRED)
   await at('2026-10-24T07:00:00.000Z', backfill)
-  ok(db.rows('student_lesson_completions').length === 59 && completedAt(db, GATE) === '2026-10-24T07:00:00.000Z',
-     'the first visit, on 24 October at 09:00 in Croatia, brings all 59 in with that moment')
+  ok(db.rows('student_lesson_completions').length === 61 && completedAt(db, GATE) === '2026-10-24T07:00:00.000Z',
+     'the first visit, on 24 October at 09:00 in Croatia, brings all 61 in with that moment')
   const sent = await at('2026-10-24T07:05:00.000Z', apply)
   ok(sent.status === 400 && sent.body.state === 'expired', 'Apply then: refused as expired, the 23 October deadline has passed', show(sent))
 }
 
-console.log('\n=== Paid at 23:59 on 8 September in Croatia: never ===')
+console.log('\n=== Paid at 23:59 on 30 September in Croatia: never ===')
 {
-  const db = freshDb('2026-09-08T21:59:00.000Z')
+  const db = freshDb('2026-09-30T21:59:00.000Z')
   onWhop(REQUIRED)
   await at('2026-10-19T07:30:00.000Z', backfill)
   const sent = await at('2026-10-20T10:00:00.000Z', apply)
   ok(sent.status === 400 && sent.body.state === 'not-eligible'
-       && sent.body.error === 'The 30% discount is for students who joined on or after September 9, 2026. Your first payment was before that.',
+       && sent.body.error === 'The 30% discount is for students who joined on or after October 1, 2026, Croatia time. Your first payment was before that.',
      'every video done, Apply on 20 October: not eligible, the day named', show(sent))
   const v = await approve(db, '2026-10-27T09:00:00.000Z', null)
-  ok(!v.ok && v.error.includes('before September 9, 2026'), 'and the approval refuses it', v.error)
+  ok(!v.ok && v.error.includes('before October 1, 2026'), 'and the approval refuses it', v.error)
 }
 
-console.log('\n=== Paid at 00:00 on 9 September in Croatia: in ===')
+console.log('\n=== Paid 15 September: in while the first date was 9 September, never since it moved to 1 October ===')
 {
-  const db = freshDb('2026-09-08T22:00:00.000Z')
+  const db = freshDb('2026-09-15T10:00:00.000Z')
+  onWhop(REQUIRED)
+  await at('2026-10-19T07:30:00.000Z', backfill)
+  const map = mapSays(db, '2026-10-20T10:00:00.000Z')
+  const sent = await at('2026-10-20T10:00:00.000Z', apply)
+  const form = await at('2026-10-20T10:00:00.000Z', submit)
+  ok(map.kind === 'not-eligible' && map.reason === 'before-launch' && sent.status === 400 && sent.body.state === 'not-eligible'
+       && sent.body.error === 'The 30% discount is for students who joined on or after October 1, 2026, Croatia time. Your first payment was before that.'
+       && form.status === 400 && form.body.state === 'not-eligible' && db.rows('discount_requests').length === 0,
+     'every video in from Whop, on 20 October: the map says closed, and both ways to apply refuse with the day named, nothing written', show({ map, sent: sent.body, form: form.body }))
+}
+
+console.log('\n=== Paid at 00:00 on 1 October in Croatia: in ===')
+{
+  const db = freshDb('2026-09-30T22:00:00.000Z')
   onWhop(REQUIRED)
   await at('2026-10-19T07:30:00.000Z', backfill)
   const sent = await at('2026-10-20T10:00:00.000Z', apply)
@@ -290,15 +307,15 @@ console.log('\n=== Paid at 00:00 on 9 September in Croatia: in ===')
   ok(v.ok === true, 'and the team approves it', show(v))
 }
 
-console.log('\n=== Paid 15 September, already holding a request from the old course: the map, both ways to apply and the database agree ===')
+console.log('\n=== Paid 2 October, already holding a request from the old course: the map, both ways to apply and the database agree ===')
 {
-  // The request was made on the old dashboard on 25 September. Every video
+  // The request was made on the old dashboard on 6 October. Every video
   // is done (from Whop, on 19 October), and the student opens the map on
   // 20 October.
-  const OLD = '2026-09-25T10:00:00.000Z'
+  const OLD = '2026-10-06T10:00:00.000Z'
   const NOW = '2026-10-20T10:00:00.000Z'
   const withOld = async (status) => {
-    const db = freshDb(SEPT_15, [{ id: 'old', status, created_at: OLD, promo_code: status === 'pending' || status === 'rejected' ? null : 'ECOM30-S1OLD' }])
+    const db = freshDb(OCT_2, [{ id: 'old', status, created_at: OLD, promo_code: status === 'pending' || status === 'rejected' ? null : 'ECOM30-S1OLD' }])
     onWhop(REQUIRED)
     await at('2026-10-19T07:30:00.000Z', backfill)
     return db
@@ -340,11 +357,11 @@ console.log('\n=== Paid 15 September, already holding a request from the old cou
     const db = await withOld('pending')
     const v = await approve(db, '2026-10-21T09:00:00.000Z', OLD, 'old', RESET)
     ok(v.ok === true, 'the team approving that old pending request, every video in from Whop on 19 October: approved', show(v))
-    const unwatched = freshDb(SEPT_15, [{ id: 'old', status: 'pending', created_at: OLD }])
+    const unwatched = freshDb(OCT_2, [{ id: 'old', status: 'pending', created_at: OLD }])
     const refused = await approve(unwatched, '2026-10-21T09:00:00.000Z', OLD, 'old', RESET)
     const said = explainOldCourseRequest(refused, OLD, RESET)
     ok(!said.ok && said.status === 400 && said.error === `${OLD_COURSE_REQUEST_REFUSAL} The new rule says: ${refused.error}`
-         && refused.error.endsWith('59 of 59 still missing.'),
+         && refused.error.endsWith('61 of 61 still missing.'),
        'the same request with nothing watched: the old-course sentence, then the new rule\'s count', said.error)
     const before = [db, unwatched].map(async (d) => explainOldCourseRequest(await approve(d, '2026-10-21T09:00:00.000Z', OLD, 'old'), OLD, RESET).error)
     const [a, b] = await Promise.all(before)
@@ -374,7 +391,7 @@ console.log('\n=== A request the database function wrote on the closed weekend, 
     const { db, made, asked } = await madeOnWeekend('2026-08-15T10:00:00.000Z')
     const said = await team(db, asked)
     ok(made && asked === WEEKEND && !said.ok && said.status === 400
-         && said.error === "Cannot approve: the student's first payment (2026-08-15T10:00:00.000Z) is before September 9, 2026. Only a first payment from then on can earn the discount.",
+         && said.error === "Cannot approve: the student's first payment (2026-08-15T10:00:00.000Z) is before October 1, 2026. Only a first payment from then on can earn the discount.",
        'paid 15 August: the team reads the refusal over the first payment, never "Judge it by hand"', said.error)
   }
   {
@@ -384,11 +401,11 @@ console.log('\n=== A request the database function wrote on the closed weekend, 
        'no first payment on file: the team reads that refusal in its own words', said.error)
   }
   {
-    const { db, made, asked } = await madeOnWeekend(SEPT_15)
+    const { db, made, asked } = await madeOnWeekend(OCT_2)
     const said = await team(db, asked)
     ok(made && !said.ok && said.status === 400 && said.error.startsWith(`${OLD_COURSE_REQUEST_REFUSAL} The new rule says: `)
-         && said.error.endsWith('59 of 59 still missing.'),
-       'paid 15 September, nothing watched yet: the old-course sentence, then the new rule\'s count', said.error)
+         && said.error.endsWith('61 of 61 still missing.'),
+       'paid 2 October, nothing watched yet: the old-course sentence, then the new rule\'s count', said.error)
     // Monday morning: the first visit after the switch brings every video in from Whop.
     onWhop(REQUIRED)
     await at('2026-10-19T07:30:00.000Z', backfill)
@@ -403,11 +420,11 @@ console.log('\n=== A request the app\'s Apply could not have made: Approve refus
   // database function straight (the stand-in here, like v29, writes for any
   // caller). v29 checks only who is asking and whether a pending, approved or
   // applied request is there: never the first payment, the deadline or the
-  // videos. Paid 20 September, every video in from Whop on 20 October.
-  const SEPT_20 = '2026-09-20T10:00:00.000Z'
+  // videos. Paid 3 October, every video in from Whop on 20 October.
+  const OCT_3 = '2026-10-03T10:00:00.000Z'
   const straight = (db, iso) => at(iso, () => fakeClient(db).rpc('submit_discount_with_feedback', { p_student_id: 's1', p_answers: ANSWERS }))
   const everyVideo = async () => {
-    const db = freshDb(SEPT_20)
+    const db = freshDb(OCT_3)
     onWhop(REQUIRED)
     await at('2026-10-20T07:30:00.000Z', backfill)
     return db
@@ -457,7 +474,7 @@ console.log('\n=== The approve button itself, POST /api/discounts/approve (2026-
   // date read from admin_config, the rule, the ads tick, then Whop's promo
   // code (a stand-in that records what it is asked for) and the row's update.
   const RESET = '2026-10-19T05:00:00.000Z'
-  const OLD = '2026-09-25T10:00:00.000Z'
+  const OLD = '2026-10-06T10:00:00.000Z'
   const switched = (db, adsVerified) => {
     db.rows('admin_config').push({ key: 'curriculum_reset_at', value: RESET })
     db.rows('students')[0].ad_submissions_verified = adsVerified
@@ -473,36 +490,47 @@ console.log('\n=== The approve button itself, POST /api/discounts/approve (2026-
     })))
     return { status: res.status, body: await res.json(), codes: promoCodes.length - codesBefore, row: db.rows('discount_requests').find((r) => r.id === id) }
   })
-  const OLD_UNWATCHED = `${OLD_COURSE_REQUEST_REFUSAL} The new rule says: Student has not watched every video up to the discount checkpoint by the end of October 23 (Croatia time), the deadline for a first payment before the launch: 59 of 59 still missing.`
+  const OLD_UNWATCHED = `${OLD_COURSE_REQUEST_REFUSAL} The new rule says: Student has not watched every video up to the discount checkpoint by the end of October 23 (Croatia time), the deadline for a first payment before the launch: 61 of 61 still missing.`
   {
-    // The release review's case: a September joiner's request from the old dashboard, decided after the switch.
-    const db = switched(freshDb(SEPT_15, [{ id: 'old', status: 'pending', created_at: OLD }]), true)
+    // The release review's case: an early-October joiner's request from the old dashboard, decided after the switch.
+    const db = switched(freshDb(OCT_2, [{ id: 'old', status: 'pending', created_at: OLD }]), true)
     onWhop(REQUIRED)
     await at('2026-10-19T07:30:00.000Z', backfill)
     const r = await press(db, 'old', '2026-10-21T09:00:00.000Z')
     ok(r.status === 200 && r.body.success === true && r.codes === 1 && r.row.status === 'approved' && r.row.promo_code === r.body.promoCode,
-       'paid 15 September, applied on the old dashboard on 25 September, every video in from Whop on 19 October: Approve approves it and makes the code (it said "Judge it by hand")',
+       'paid 2 October, applied on the old dashboard on 6 October, every video in from Whop on 19 October: Approve approves it and makes the code (it said "Judge it by hand")',
        show({ status: r.status, body: r.body }))
   }
   {
-    const db = switched(freshDb(SEPT_15, [{ id: 'old', status: 'pending', created_at: OLD }]), true)
+    // The same for a September joiner, the release review's own case: since the first date moved to 1 October the
+    // rule refuses it over the first payment, in those words (Generate anyway still skips every check).
+    const db = switched(freshDb('2026-09-15T10:00:00.000Z', [{ id: 'old', status: 'pending', created_at: '2026-09-25T10:00:00.000Z' }]), true)
+    onWhop(REQUIRED)
+    await at('2026-10-19T07:30:00.000Z', backfill)
+    const r = await press(db, 'old', '2026-10-21T09:00:00.000Z')
+    ok(r.status === 400 && r.body.error === "Cannot approve: the student's first payment (2026-09-15T10:00:00.000Z) is before October 1, 2026. Only a first payment from then on can earn the discount."
+         && r.codes === 0 && r.row.status === 'pending',
+       'paid 15 September, applied on the old dashboard on 25 September, every video in from Whop: Approve refuses it over the first payment, no code, still pending', r.body.error)
+  }
+  {
+    const db = switched(freshDb(OCT_2, [{ id: 'old', status: 'pending', created_at: OLD }]), true)
     const r = await press(db, 'old', '2026-10-21T09:00:00.000Z')
     ok(r.status === 400 && r.body.error === OLD_UNWATCHED && r.codes === 0 && r.row.status === 'pending',
-       'the same request with nothing watched: refused, the old-course sentence and then "59 of 59 still missing", no code, still pending', r.body.error)
+       'the same request with nothing watched: refused, the old-course sentence and then "61 of 61 still missing", no code, still pending', r.body.error)
     onWhop(REQUIRED.slice(0, 51))
     await at('2026-10-19T07:30:00.000Z', backfill)
     const part = await press(db, 'old', '2026-10-21T09:00:00.000Z')
-    ok(part.status === 400 && part.body.error.endsWith('8 of 59 still missing.') && part.codes === 0,
-       '51 of them in from Whop: the count says 8 still missing', part.body.error)
+    ok(part.status === 400 && part.body.error.endsWith('10 of 61 still missing.') && part.codes === 0,
+       '51 of them in from Whop: the count says 10 still missing', part.body.error)
   }
   {
-    // A first payment before 9 September with the ads not ticked: until this
+    // A first payment before 1 October with the ads not ticked: until this
     // round the ads refusal came first, and Generate anyway on it would have
     // given the 30% without the team ever reading why the rule refuses.
     const WEEKEND = '2026-10-17T10:00:00.000Z'
     const db = switched(freshDb('2026-08-15T10:00:00.000Z', [{ id: 'wk', status: 'pending', created_at: WEEKEND }]), false)
     const r = await press(db, 'wk', '2026-10-20T09:00:00.000Z')
-    ok(r.status === 400 && r.body.error === "Cannot approve: the student's first payment (2026-08-15T10:00:00.000Z) is before September 9, 2026. Only a first payment from then on can earn the discount."
+    ok(r.status === 400 && r.body.error === "Cannot approve: the student's first payment (2026-08-15T10:00:00.000Z) is before October 1, 2026. Only a first payment from then on can earn the discount."
          && r.codes === 0 && r.row.status === 'pending',
        'paid 15 August, ads not verified: the team reads the first-payment refusal, not the ads one', r.body.error)
     const anyway = await press(db, 'wk', '2026-10-20T09:05:00.000Z', true)
@@ -510,7 +538,7 @@ console.log('\n=== The approve button itself, POST /api/discounts/approve (2026-
        'Generate anyway still skips every check, as it always did (MORNING.md step 4 tells the team not to press it there)', show(anyway.body))
   }
   {
-    const db = switched(freshDb(SEPT_15), false)
+    const db = switched(freshDb(OCT_2), false)
     onWhop(REQUIRED)
     await at('2026-10-19T07:30:00.000Z', backfill)
     const sent = await at('2026-10-20T10:00:00.000Z', apply)
@@ -522,7 +550,7 @@ console.log('\n=== The approve button itself, POST /api/discounts/approve (2026-
     ok(ticked.status === 200 && ticked.codes === 1 && ticked.row.status === 'approved', 'ticked: approved, one code', show(ticked.body))
   }
   {
-    const db = switched(freshDb(SEPT_15, [{ id: 'old', status: 'pending', created_at: OLD }]), true)
+    const db = switched(freshDb(OCT_2, [{ id: 'old', status: 'pending', created_at: OLD }]), true)
     onWhop(REQUIRED)
     await at('2026-10-19T07:30:00.000Z', backfill)
     db.fail['admin_config.select'] = { message: 'permission denied for table admin_config' }
@@ -537,7 +565,7 @@ console.log('\n=== What a student\'s browser gets of their request: never the pr
   // GET /api/student/data, behind every student page. The code works on every
   // plan of the company while WHOP_DISCOUNT_PLAN_IDS is unset (T-084), and the
   // student's screens read only the status, the dates and the team's reason.
-  const db = freshDb(SEPT_15, [{ id: 'ok1', status: 'approved', created_at: '2026-10-20T10:00:00.000Z', promo_code: 'ECOM30-S1', whop_promo_id: 'promo_9' }])
+  const db = freshDb(OCT_2, [{ id: 'ok1', status: 'approved', created_at: '2026-10-20T10:00:00.000Z', promo_code: 'ECOM30-S1', whop_promo_id: 'promo_9' }])
   const res = await hush(() => appData(new Request('http://app/api/student/data', { headers: { authorization: 'Bearer tok-1' } })))
   const body = await res.json()
   const got = body.discountRequest
@@ -546,7 +574,7 @@ console.log('\n=== What a student\'s browser gets of their request: never the pr
   ok(db.rows('discount_requests')[0].promo_code === 'ECOM30-S1' && !show(body).includes('ECOM30-S1') && !show(body).includes('promo_9'),
      'the code and its Whop id are on the row, and nowhere in the answer')
   const lessons = LESSONS.map((l) => ({ ...l, has_video: l.id in lengths }))
-  const st = discountState({ now: new RealDate('2026-10-21T10:00:00.000Z'), firstPaidAt: SEPT_15, lessons, videoDoneIds: new Set(), requests: [got] })
+  const st = discountState({ now: new RealDate('2026-10-21T10:00:00.000Z'), firstPaidAt: OCT_2, lessons, videoDoneIds: new Set(), requests: [got] })
   ok(st.kind === 'approved' && st.requestId === 'ok1' && st.madeBeforeLaunch === false, 'and the map still reads it as approved', show({ kind: st.kind, id: st.requestId }))
   const journal = fs.readFileSync(fileURLToPath(new URL('../src/app/journal/[studentId]/page.tsx', import.meta.url)), 'utf8')
   ok(/from\("discount_requests"\)\s*\.select\("status"\)/.test(journal) && !journal.includes('promo_code'),

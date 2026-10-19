@@ -805,7 +805,7 @@ select line, name, lessons, counting, action_items, with_video, with_whop_id, va
 --   a1 .. a8   lessons 8, 11, 25, 17, 26, 22, 19, 13; counting the same
 --              except a7 (18); with_whop_id equal to lessons on every row;
 --              with_video the number of lessons whose video is loaded
---   total      141 lessons, 140 counting, 9 action items, 141 with_whop_id
+--   total      141 lessons, 140 counting, 10 action items, 141 with_whop_id
 --   then reset_at and nine counts. graduates_stamped and logins_backfilled
 --   should match the preflight's (d) rows, tasks_dismissed and
 --   alerts_dismissed its (e) rows, templates_deactivated its (b) count.

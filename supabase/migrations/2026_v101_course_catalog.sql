@@ -11,13 +11,13 @@
 --
 -- Part of the course-catalog PRD (_admin/prds/course-catalog/
 -- course_catalog_prd.md, section 9). The data file holds the course
--- "Ad Creative Program" as it was read on 2026-10-13.
+-- "Ad Creative Program" as it was read on 2026-10-13, checked again on 2026-10-19.
 --
 -- WHAT THIS FILE DOES
 --   1. Gives the 8 areas of regions_next the course's own chapter names.
 --   2. Rewrites lessons_next. v94 seeded it with 145 placeholder lessons
 --      ("Fundamentals · lesson 3"). After this file it holds the 141
---      lessons of the course: id, area, type, title, order, the 9 action
+--      lessons of the course: id, area, type, title, order, the 10 action
 --      items with their briefs, the one gate (a4l17), the special
 --      rows (a7l19, feature key bounty_access, outside the lesson count),
 --      and every lesson's Whop lesson id (whop_lesson_id, a column this file
@@ -255,8 +255,8 @@ declare
     ['a7l12', 'Winning Ad Breakdown: Episode 5', 'watch'],
     ['a7l13', 'Winning Ad Breakdown: Episode 6', 'watch'],
     ['a7l14', 'How We Use AI For Creative Strategy', 'watch'],
-    ['a7l15', 'Your Creative Strategy Workspace', 'watch'],
-    ['a7l16', 'CS Workspace Onboarding Walkthrough', 'watch'],
+    ['a7l15', 'Creative Strategy Workspace Overview', 'watch'],
+    ['a7l16', 'How To Setup Creative Strategy Workspace', 'watch'],
     ['a7l17', 'Making Your First Ad', 'watch'],
     ['a7l18', 'Making The Workspace Your Own', 'watch'],
     ['a7l19', 'How To Win On The Ad Bounty Program', 'watch'],
@@ -411,7 +411,7 @@ values
   ('a3l14', 'a3', 'watch', 'Premiere Pro Starter Course', null, 33, false, null, false, false, null, null, true, null, 'lesn_GM5vHgPalb3XY'),
   ('a3l15', 'a3', 'watch', 'Asset Management', null, 34, false, null, false, false, null, null, true, null, 'lesn_9oqTEV90xGiAD'),
   ('a3l16', 'a3', 'watch', 'What a Brief Is & How to Work With It', null, 35, false, null, false, false, null, null, true, null, 'lesn_BZsTm3En9zj7k'),
-  ('a3l17', 'a3', 'watch', 'Your First Boss Battle', null, 36, false, null, false, false, null, null, true, null, 'lesn_tqVoEVlvmqcNg'),
+  ('a3l17', 'a3', 'watch', 'Your First Boss Battle', null, 36, true, 'Edit your first ad from the brief, step by step with the lessons that follow, then submit it.', false, false, null, null, true, null, 'lesn_tqVoEVlvmqcNg'),
   ('a3l18', 'a3', 'watch', 'A-Roll - Your First Boss Battle', null, 37, false, null, false, false, null, null, true, null, 'lesn_K9rw8c7czrnxh'),
   ('a3l19', 'a3', 'watch', 'Music - Your First Boss Battle', null, 38, false, null, false, false, null, null, true, null, 'lesn_PNwFBoNG6qUAi'),
   ('a3l20', 'a3', 'watch', 'B-Roll - Your First Boss Battle', null, 39, false, null, false, false, null, null, true, null, 'lesn_n5tesFEBVoEDP'),
@@ -499,8 +499,8 @@ values
   ('a7l12', 'a7', 'watch', 'Winning Ad Breakdown: Episode 5', null, 121, false, null, false, false, null, null, true, null, 'lesn_w5o84jabPcAHP'),
   ('a7l13', 'a7', 'watch', 'Winning Ad Breakdown: Episode 6', null, 122, false, null, false, false, null, null, true, null, 'lesn_rdcDDOkeLRZpr'),
   ('a7l14', 'a7', 'watch', 'How We Use AI For Creative Strategy', null, 123, false, null, false, false, null, null, true, null, 'lesn_Zo0MgXznAjwTQ'),
-  ('a7l15', 'a7', 'watch', 'Your Creative Strategy Workspace', null, 124, false, null, false, false, null, null, true, null, 'lesn_3T60HczIAmTe1'),
-  ('a7l16', 'a7', 'watch', 'CS Workspace Onboarding Walkthrough', null, 125, false, null, false, false, null, null, true, null, 'lesn_TlEOXVjBbmWoo'),
+  ('a7l15', 'a7', 'watch', 'Creative Strategy Workspace Overview', null, 124, false, null, false, false, null, null, true, null, 'lesn_3T60HczIAmTe1'),
+  ('a7l16', 'a7', 'watch', 'How To Setup Creative Strategy Workspace', null, 125, false, null, false, false, null, null, true, null, 'lesn_TlEOXVjBbmWoo'),
   ('a7l17', 'a7', 'watch', 'Making Your First Ad', null, 126, false, null, false, false, null, null, true, null, 'lesn_0tPgz1h8mixNu'),
   ('a7l18', 'a7', 'watch', 'Making The Workspace Your Own', null, 127, false, null, false, false, null, null, true, null, 'lesn_qREYYoc7gXFFA'),
   ('a7l19', 'a7', 'watch', 'How To Win On The Ad Bounty Program', null, 128, false, null, false, false, null, null, false, 'bounty_access', 'lesn_ZrEgiuDjhXOY2'),
@@ -602,8 +602,8 @@ begin
   if f.specials <> 'a7l19:bounty_access:outside the count' then
     raise exception 'The rows with a feature key or outside the lesson count would be: %. They must be: a7l19:bounty_access:outside the count. Nothing was changed.', f.specials;
   end if;
-  if f.actions <> 9 or f.no_brief <> 0 then
-    raise exception 'There would be % action items, % of them with no brief. The course has 9, each with its brief. Nothing was changed.', f.actions, f.no_brief;
+  if f.actions <> 10 or f.no_brief <> 0 then
+    raise exception 'There would be % action items, % of them with no brief. The course has 10, each with its brief. Nothing was changed.', f.actions, f.no_brief;
   end if;
   if f.setups <> 5 then
     raise exception '% lessons would have the type setup and the course has 5. Nothing was changed.', f.setups;
@@ -648,13 +648,13 @@ select t.area, t.name, t.rows, t.counting, t.action_items, t.with_length
 --     area    rows  counting  action_items
 --     a1        8         8             0
 --     a2       11        11             0
---     a3       25        25             1
+--     a3       25        25             2
 --     a4       17        17             0
 --     a5       26        26             4
 --     a6       22        22             4
 --     a7       19        18             0
 --     a8       13        13             0
---     total   141       140             9
+--     total   141       140            10
 --   with_length is 0 on every row until load-lesson-videos.sql has run. After
 --   it, with_length is the number of lessons that have a video.
 --   If the file stopped with a message ending "Nothing was changed.", it is

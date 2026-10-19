@@ -23,7 +23,8 @@ import {
  * student's application approved: WorldCelebrations, mounted beside the map.
  * The approval is the map's own discount state (useWorldDiscount.ts). An
  * application made before the launch, on the old dashboard (madeBeforeLaunch,
- * a September joiner's, which the map shows since T-080), is not celebrated
+ * of a student who first paid from 1 October until the launch, which the map
+ * shows since T-080), is not celebrated
  * here (WorldMap.tsx passes null): its 30% may already be on a past payment,
  * so the map's words, you'll see it on your next renewal, may not hold, and
  * the panel says where it stands in its own words. The old dashboard had its

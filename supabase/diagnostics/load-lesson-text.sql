@@ -1,6 +1,6 @@
 -- ============================================================
--- Put the written instructions of the course's action items on their
--- lessons: description, for every lesson in the list.
+-- Put the text written under the course's lessons on Whop on the same
+-- lessons in the app: description, for every lesson in the list.
 --
 -- THIS FILE IS A TEMPLATE. It holds no text and it must never hold one here:
 -- the repository is public and the texts carry the links to the course's
@@ -81,8 +81,9 @@
 -- IT DOES NOT TOUCH duration_seconds, action_brief, lesson_videos or anything
 -- else: the description column of the course's lessons, and nothing more.
 --
--- AFTER v101 RUNS AGAIN the texts are gone: v101 writes description = null on
--- every lesson of the course. Paste the newest filled copy of this file again.
+-- AFTER v101 RUNS AGAIN the texts stay: v101 never writes description on a
+-- lesson that is already there, and a lesson it adds starts with none
+-- (migration tests, section 20). A lesson it deletes takes its text with it.
 --
 -- Needs migration 2026_v101_course_catalog.sql to have run.
 -- ============================================================

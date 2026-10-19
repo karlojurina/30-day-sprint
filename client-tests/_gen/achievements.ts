@@ -298,7 +298,7 @@ export async function buildAchievementSnapshot(
   // Discount Earned, as the map shows the offer (discount.ts, requestCounts):
   // once the new course is live, an approval counts when the map shows it. One
   // made on or after the day the course launched does; one made before it
-  // does only for a student who first paid from 9 September until the launch,
+  // does only for a student who first paid from 1 October until the launch,
   // whose old-course 30% the map shows as theirs (T-080). A June student's
   // June approval does not: it was re-awarded after the switch while the map
   // told them the offer was not for them (backend_readiness.md, section 5,

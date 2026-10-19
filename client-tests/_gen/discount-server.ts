@@ -188,12 +188,20 @@ export function factsFromReads(
 // The rule's dates are midnight in Croatia (discount.ts), so the day is read
 // there: in UTC the first one falls on the evening before. A student reads the
 // shared deadline with "Croatia time" after it: it closes at one moment
-// everywhere, 18:00 in New York and early on the 24th in Asia.
-/** "September 9, 2026": the earliest first payment that can earn it. */
+// everywhere, 18:00 in New York and early on the 24th in Asia. The refusal of
+// a first payment before the first day says it too: 05:59 on 1 October in
+// Manila is still 30 September in Croatia (the cutoff fix round, 2026-10-19).
+/** "October 1, 2026": the earliest first payment that can earn it. */
 const ELIGIBLE_DAY = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString("en-US", {
   month: "long",
   day: "numeric",
   year: "numeric",
+  timeZone: "Europe/Zagreb",
+});
+/** "October 1": the same day, in a sentence that needs no year. */
+const ELIGIBLE_DAY_NO_YEAR = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString("en-US", {
+  month: "long",
+  day: "numeric",
   timeZone: "Europe/Zagreb",
 });
 /** "October 23": the last day for a first payment before the launch. */
@@ -258,7 +266,7 @@ export function discountRefusalMessage(state: DiscountState): string {
       if (state.window === "shared") {
         return (
           `The discount closed at the end of ${SHARED_DEADLINE_DAY}, Croatia time. That was the deadline ` +
-          `for students who joined before the new course launched.`
+          `for students who joined from ${ELIGIBLE_DAY_NO_YEAR} until the new course launched.`
         );
       }
       return (
@@ -268,7 +276,7 @@ export function discountRefusalMessage(state: DiscountState): string {
     case "not-eligible":
       if (state.reason === "before-launch") {
         return (
-          `The ${DISCOUNT_PERCENT}% discount is for students who joined on or after ${ELIGIBLE_DAY}. ` +
+          `The ${DISCOUNT_PERCENT}% discount is for students who joined on or after ${ELIGIBLE_DAY}, Croatia time. ` +
           `Your first payment was before that.`
         );
       }
@@ -398,7 +406,7 @@ function madeOutsideApply(
  * POST /api/discounts/approve on the new course: the request route's rule,
  * judged at the end of the window. Every video it asks for must have been
  * done by the student's deadline (14 days from a first payment made on or
- * after the launch, the end of 23 October for one from 9 September until the
+ * after the launch, the end of 23 October for one from 1 October until the
  * launch: discount.ts discountWindow), so a request may be approved late and
  * a video watched after the deadline does not count, wherever it was watched:
  * a lesson finished on Whop carries the time the app recorded it. The
@@ -417,9 +425,9 @@ function madeOutsideApply(
  * showed none of the new course's videos, so the videos it is judged by are
  * the ones loaded by the switch, and the student still has until their
  * deadline to watch them. Without this every new-course video counted as
- * loaded after a September request, nothing was asked for, and the approval
- * read the same whether or not the student had finished (the release review,
- * 17 October).
+ * loaded after a request from the old dashboard, nothing was asked for, and
+ * the approval read the same whether or not the student had finished (the
+ * release review, 17 October).
  *
  * Where the rule would approve, it then refuses a request the app's Apply
  * could not have made (madeOutsideApply, 17 October): one made more than
@@ -528,7 +536,7 @@ export const OLD_COURSE_REQUEST_REFUSAL =
  * videos as they stood at the switch (approvalVerdict's `resetAt`), so "N of
  * M still missing" ("locked") keeps the new rule's words after the old-course
  * sentence, and "no video to check" ("no-gate") gets the sentence alone. A
- * first payment before 9 September, or none on
+ * first payment before 1 October, or none on
  * file, reads the same on either course, so those refusals keep their own
  * words. A verdict that approves, a failed read (500), no switch, or a date
  * that does not parse comes back as it went in.

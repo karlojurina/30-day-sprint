@@ -4,16 +4,17 @@
  * The offer (Lovro, 2026-10-14): 30% off when the student has watched every
  * video up to the discount checkpoint, which sits between Video Ads II (the
  * Trail Hut) and Static Ads (the Boathouse), in time. Who can earn it, and by
- * when (Lovro, 2026-10-16, T-080; every date from midnight in Croatia):
+ * when (Lovro, 2026-10-16, T-080; the first date moved from 9 September to
+ * 1 October by Lovro on 2026-10-19; every date from midnight in Croatia):
  *   - a first payment on or after the launch (9 October 2026): 14 days from
  *     that payment;
- *   - a first payment from 9 September 2026 until the launch: until the end
+ *   - a first payment from 1 October 2026 until the launch: until the end
  *     of 23 October 2026, one deadline they all share (they watch on Whop
  *     while the app is closed and apply once it is back);
- *   - a first payment before 9 September 2026: never.
+ *   - a first payment before 1 October 2026: never.
  * It is one 30% per student: a request already made decides the state, and
  * one made on the old dashboard still does, unless it was rejected, for a
- * student who first paid from 9 September until the launch (requestCounts).
+ * student who first paid from 1 October until the launch (requestCounts).
  *
  * "The videos up to the checkpoint" are the counting watch lessons, in course
  * order, up to and including the gate lesson (`is_gate`), that have a video.
@@ -40,10 +41,13 @@ export { DISCOUNT_WINDOW_DAYS };
  */
 export const DISCOUNT_LAUNCH_DATE = "2026-10-08T22:00:00.000Z";
 /**
- * The earliest first payment that can earn it: 9 September 2026 at midnight
- * in Croatia, 00:00 CEST (UTC+2), which is 8 September 22:00 UTC.
+ * The earliest first payment that can earn it: 1 October 2026 at midnight in
+ * Croatia, 00:00 CEST (UTC+2), which is 30 September 22:00 UTC. Shown to
+ * students as a date in Europe/Zagreb, never UTC, or it would read
+ * "30 September". Until 2026-10-19 it was 9 September; Lovro moved it to
+ * keep the rule simple.
  */
-export const DISCOUNT_ELIGIBLE_FROM = "2026-09-08T22:00:00.000Z";
+export const DISCOUNT_ELIGIBLE_FROM = "2026-09-30T22:00:00.000Z";
 /**
  * The deadline shared by every first payment from DISCOUNT_ELIGIBLE_FROM until
  * the launch: the end of 23 October 2026 in Croatia, still summer time (CEST,
@@ -59,7 +63,7 @@ const DAY_MS = 86_400_000;
 /**
  * Which deadline a student has. "own": 14 days from their own first payment,
  * made on or after the launch. "shared": DISCOUNT_SHARED_DEADLINE, the end of
- * 23 October, for a first payment from 9 September until the launch.
+ * 23 October, for a first payment from 1 October until the launch.
  */
 export type DiscountWindow = "own" | "shared";
 
@@ -84,7 +88,7 @@ export type DiscountState =
   /**
    * "no-gate" also covers a gate with no video up to it: there is nothing to
    * reach. "before-launch" is a first payment before DISCOUNT_ELIGIBLE_FROM
-   * (9 September); the name is from when the launch was the cutoff.
+   * (1 October); the name is from when the launch was the cutoff.
    */
   | { kind: "not-eligible"; reason: "no-payment" | "before-launch" | "no-gate" }
   | { kind: "expired"; endsAt: string; window: DiscountWindow; lessonsLeft: number }
@@ -106,7 +110,7 @@ export type DiscountState =
       rejectionReason: string | null;
       /**
        * The request was made before the launch, on the old dashboard, by a
-       * student who first paid from 9 September (requestCounts). Its 30% is
+       * student who first paid from 1 October (requestCounts). Its 30% is
        * from the old course, so "the team confirms within 48 hours" and "on
        * your next renewal" may no longer hold. Never true for "rejected".
        */
@@ -167,7 +171,7 @@ export function discountEndsAt(firstPaidAt: string | null): Date | null {
  *
  *   - Made from the launch on: on the new course, so it counts.
  *   - Made before the launch, on the old dashboard, by a student who first
- *     paid from 9 September until the launch (the shared window, T-080): it
+ *     paid from 1 October until the launch (the shared window, T-080): it
  *     counts while it is pending, approved or applied. The 30% is one per
  *     student, and the database refuses another request while one of those
  *     exists, whatever its date (v29's submit_discount_with_feedback; v106

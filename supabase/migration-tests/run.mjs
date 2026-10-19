@@ -1559,8 +1559,9 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
             line('total', 'the whole course', COURSE.lessons)]
   }
   // The post-conditions of the PRD (section 9.C, step 7), as its own numbers.
+  // Action items: the PRD's 9, and a3l17 since 2026-10-19 (Lovro), so 10.
   const THE_COURSE = { n: 141, counting: 140, lo: 1, hi: 141, orders: 141, sizes: '8,11,25,17,26,22,19,13', crossings: 0, gates: 'a4l17',
-                       special: 'a7l19/bounty_access/false', actions: 9, no_brief: 0, setups: 5, placeholders: 0 }
+                       special: 'a7l19/bounty_access/false', actions: 10, no_brief: 0, setups: 5, placeholders: 0 }
   const facts = async d => (await rowsOn(d, `select
       count(*)::int as n,
       count(*) filter (where counts_toward_progress)::int as counting,
@@ -1714,7 +1715,7 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
          r.rows.map(x => `${x.area}:${x.rows}`).join(' '))
     const f = await facts(db)
     note(sameJson(f, THE_COURSE),
-         'the post-conditions hold: 141 rows, 140 counting, sort_order 1 to 141 and rising with the areas, 8/11/25/17/26/22/19/13, gate a4l17, a7l19 the one feature row, 9 action items with briefs, 5 setup, no placeholder title',
+         'the post-conditions hold: 141 rows, 140 counting, sort_order 1 to 141 and rising with the areas, 8/11/25/17/26/22/19/13, gate a4l17, a7l19 the one feature row, 10 action items with briefs, 5 setup, no placeholder title',
          JSON.stringify(f))
     const got = await catalogRows(db)
     const firstOff = got.findIndex((row, i) => !sameJson(row, wantRows[i]))
@@ -3323,8 +3324,8 @@ const cutover = async (d, where) => {
     })
     const areaGot = r.ok ? r.rows.slice(1, 9).map(x => [x.line, x.name, x.lessons, x.counting, x.action_items, x.with_video, x.with_whop_id]) : []
     const tot = r.rows[9] ?? {}
-    say(sameJson(areaGot, areaWant) && tot.line === 'total' && tot.lessons === 141 && tot.counting === 140 && tot.action_items === 9 && tot.with_whop_id === 141,
-        labelOf("...one row per area as the data file has it, with a Whop id on every lesson, and a total of 141, 140 counting, 9 action items"),
+    say(sameJson(areaGot, areaWant) && tot.line === 'total' && tot.lessons === 141 && tot.counting === 140 && tot.action_items === 10 && tot.with_whop_id === 141,
+        labelOf("...one row per area as the data file has it, with a Whop id on every lesson, and a total of 141, 140 counting, 10 action items"),
         areaGot.map(x => `${x[0]}:${x[2]}/${x[5]}v`).join(' '))
     const sum = Object.fromEntries((r.rows ?? []).slice(10).map(x => [x.line, x.value]))
     say(sum.reset_at === reset && sum.archived_completions === String(want.counts.student_lesson_completions)
@@ -4210,8 +4211,9 @@ console.log('\n=== 26. v106: one pending discount request per student (T-057), a
 
   // T-080: the database's own rule that the map and the request routes mirror
   // (src/lib/world/discount.ts, requestCounts). A student who first paid from
-  // 9 September can hold a request from the old dashboard, made before the
-  // launch on 9 October. The feedback form's function refuses another request
+  // 1 October (9 September until 2026-10-19) can hold a request from the old
+  // dashboard, made before the launch on 9 October. The feedback form's
+  // function refuses another request
   // while that one is pending, approved or applied, whatever its date, and
   // writes one after a rejected one. Run with the student's own session, and
   // rolled back. base.sql predates v21, which gave production the 'applied'
@@ -4222,7 +4224,7 @@ console.log('\n=== 26. v106: one pending discount request per student (T-057), a
     const got = []
     for (const status of ['pending', 'approved', 'applied', 'rejected']) {
       await c.exec(`delete from discount_requests where student_id = '${UID(6)}';
-                    insert into discount_requests (student_id, status, created_at) values ('${UID(6)}', '${status}', '2026-09-25 10:00:00+00');`)
+                    insert into discount_requests (student_id, status, created_at) values ('${UID(6)}', '${status}', '2026-10-06 10:00:00+00');`)
       const r = await asStudent(c, 6, `select public.submit_discount_with_feedback('${UID(6)}', '[]'::jsonb)::text as id`,
         { check: `select string_agg(status, ',' order by created_at) as s from discount_requests where student_id = '${UID(6)}'` })
       got.push(`${status}: ${r.ok ? `written (${r.checked?.[0]?.s})` : r.said}`)
@@ -4230,7 +4232,7 @@ console.log('\n=== 26. v106: one pending discount request per student (T-057), a
     await c.close()
     const REFUSED = 'A discount request already exists for this student'
     note(sameJson(got, [`pending: ${REFUSED}`, `approved: ${REFUSED}`, `applied: ${REFUSED}`, 'rejected: written (rejected,pending)']),
-         'T-080: with a request from before the launch (25 September), the feedback form\'s function refuses another while that one is pending, approved or applied, and writes one after a rejected one: the rule discount.ts requestCounts mirrors',
+         'T-080: with a request from before the launch (6 October), the feedback form\'s function refuses another while that one is pending, approved or applied, and writes one after a rejected one: the rule discount.ts requestCounts mirrors',
          asJson(got))
   }
   feedbackDb = await d.clone()
@@ -4403,6 +4405,139 @@ console.log('\n=== 27. v107: only the server calls the feedback form\'s function
     note(r.ok && r.rows[0]?.v107?.startsWith('v107 ran now') && await defOf() === v107Def && await can() === ONLY_SERVER,
          'v107 applies again after its undo: the same function and grants as its first run', told(r))
   }
+  await d.close()
+}
+
+// ════════════════════════════════════════════════════════════════════
+// 28: diagnostics/whop-sync-proof.sql, the read behind the first point of
+// Lovro's preview review (19 October): two lessons he finished on Whop that
+// the app didn't show. Before the switch the lookup both Whop paths run (the
+// webhook and the backfill, lessons by whop_lesson_id) finds no lesson of the
+// new course in `lessons`, and the key into `lessons` refuses a completion
+// for one; after v104 the same lookup finds them and the completion writes.
+// The read runs the way the SQL editor runs it, on one database before the
+// switch and after it, and changes nothing.
+// ════════════════════════════════════════════════════════════════════
+console.log('\n=== 28. the Whop sync read (diagnostics/whop-sync-proof.sql), before the switch and after v104 ===')
+{
+  const d = await chainDatabase()
+  const raw = diagnostic('whop-sync-proof.sql')
+  const PLACE = 'REPLACE_WITH_THE_TEST_ACCOUNTS_EMAIL'
+  const EMAIL = 'whop-sync-one@example.test'
+  const [T1, T2] = [1, 2].map(n => `c2800000-0000-0000-0000-00000000000${n}`)
+  const [A, B] = ['a1l01', 'a1l02'].map(id => COURSE.lessons.find(l => l.id === id))
+  const OTHER = 'lesn_notinthiscourse01'
+  const LOOKUP = `select id from lessons where whop_lesson_id in ('${A.whop_lesson_id}', '${B.whop_lesson_id}') order by id`
+  const dump = async () => {
+    const out = {}
+    for (const { tablename: t } of await rowsOn(d, `select tablename from pg_tables where schemaname = 'public' order by 1`)) {
+      out[t] = (await rowsOn(d, `select * from public."${t}"`)).map(asJson).sort()
+    }
+    return asJson(out)
+  }
+  // The file as the owner runs it, with `email` on the line marked HERE.
+  const readFor = async email => {
+    const was = await dump()
+    const r = await runFile(d, raw.replace(PLACE, email))
+    return { ...r, same: await dump() === was, part: p => r.rows.filter(x => x.part.startsWith(p)).map(x => [x.item, x.detail]) }
+  }
+  const told = r => r.ok ? asJson(r.rows.map(x => [x.part, x.item, x.detail])) : `${r.code}: ${r.said.slice(0, 120)}`
+  // A moment as the read writes it: Croatia time.
+  const at = async (sql, fmt = 'Dy DD Mon HH24:MI:SS') =>
+    (await rowsOn(d, `select to_char((${sql}) at time zone 'Europe/Zagreb', '${fmt}') as t`))[0].t
+
+  note(countOf(raw, PLACE) === 1, 'the Whop sync read holds its placeholder once, on the line marked HERE',
+       raw.split('\n').find(l => l.includes(PLACE))?.trim())
+
+  // ── before the switch ──
+  await d.exec(`
+    insert into students (id, supabase_user_id, email, first_paid_at, whop_plan_id, membership_status) values
+      ('${T1}', '${T1}', '${EMAIL}',                    '2026-10-02 10:00:00+00', 'plan_4ZrwR4PmBsVsx', 'active'),
+      ('${T2}', '${T2}', 'whop-sync-two@example.test', '2026-10-03 10:00:00+00', 'plan_4ZrwR4PmBsVsx', 'active');
+    -- The check at the account's login: Whop gave 3 finished lessons, 2 of
+    -- them the new course's, and none matched the old course in lessons.
+    insert into student_whop_sync (student_id, last_sync_at, last_sync_fetched, last_sync_matched, last_sync_unmatched) values
+      ('${T1}', '2026-10-19 08:30:00+00', 3, 0, array['${A.whop_lesson_id}', '${B.whop_lesson_id}', '${OTHER}']);`)
+
+  let r = await readFor(PLACE)
+  note(r.ok && r.same && sameJson(r.part('b.'), [['none', 'No student has an email like the one on the line marked HERE.']])
+       && r.rows.every(x => x.part < 'c'),
+       'left as it is, the read finds no account, says to fix the email, and shows no check', told(r))
+  r = await readFor('whop-sync-')
+  note(r.ok && r.same && sameJson(r.part('b.').map(x => x[1].endsWith(' · one of 2, write the whole address')), [true, true])
+       && r.rows.every(x => x.part < 'c'),
+       'an email that finds two accounts lists both, asks for the whole address and shows nothing of either', told(r))
+  r = await readFor('whop-sync-two@example.test')
+  note(r.ok && r.same && sameJson(r.part('c.'), [['never', 'No check has run for this account.']]),
+       'an account with no check reads "never"', told(r))
+
+  r = await readFor(EMAIL)
+  note(r.ok && r.same, 'before the switch the read runs and changes nothing', told(r))
+  note(sameJson(r.part('a.').map(x => [x[0], x[1].endsWith(' with a Whop lesson id · the switch has not run')]), [['the old course', true]]),
+       'part a: the old course, the switch has not run', asJson(r.part('a.')))
+  note(sameJson(r.part('b.'), [[EMAIL, `student ${T1} · active`]]), 'part b: the one account', asJson(r.part('b.')))
+  note(sameJson(r.part('c.'), [['Mon 19 Oct 10:30:00', 'Whop sent 3 · matched 0 · unmatched 3']]),
+       'part c: the check in Croatia time, and what Whop gave it', asJson(r.part('c.')))
+  note(sameJson(r.part('d.').sort(), [[A.whop_lesson_id, `new course a1l01 · ${A.title}`],
+                                      [B.whop_lesson_id, `new course a1l02 · ${B.title}`],
+                                      [OTHER, 'not in the new course']].sort()),
+       "part d: each unmatched Whop lesson by its place in the new course, or 'not in the new course'", asJson(r.part('d.')))
+  note(r.part('e.').length === 0, 'part e: nothing done in the app')
+
+  note(sameJson(await rowsOn(d, LOOKUP), []),
+       'before the switch the lookup the webhook and the backfill run (lessons by whop_lesson_id) finds neither a1l01 nor a1l02')
+  {
+    const e = await d.query(`insert into student_lesson_completions (student_id, lesson_id) values ('${T1}', 'a1l01')`).then(() => null, x => x)
+    note(e?.code === '23503', "before the switch a completion of a1l01 is refused by the key into lessons, so nothing finished on the new course can be recorded",
+         e ? `${e.code}: ${e.message.slice(0, 80)}` : 'it went through')
+  }
+
+  // ── the switch ──
+  let s = await runFile(d, read(V103F))
+  note(s.ok, 'v103 runs here', s.ok ? '' : `${s.code}: ${s.said.slice(0, 120)}`)
+  s = await runFile(d, read(V104F))
+  note(s.ok, 'v104 runs here', s.ok ? '' : `${s.code}: ${s.said.slice(0, 120)}`)
+
+  // ── after the switch ──
+  note(sameJson((await rowsOn(d, LOOKUP)).map(x => x.id), ['a1l01', 'a1l02']),
+       'after v104 the same lookup finds a1l01 and a1l02 by the Whop lesson ids of the catalog')
+  const SWITCH = `(select value::timestamptz from admin_config where key = 'curriculum_reset_at')`
+  // What the webhook writes for lesson A, two minutes after the switch.
+  await d.exec(`insert into student_lesson_completions (student_id, lesson_id, completed_at) values ('${T1}', 'a1l01', ${SWITCH} + interval '2 minutes');`)
+  r = await readFor(EMAIL)
+  note(r.ok && r.same, 'after v104 the read runs and changes nothing', told(r))
+  note(sameJson(r.part('a.'), [['the new course', `141 lessons, 141 with a Whop lesson id · the switch ran ${await at(SWITCH, 'Dy DD Mon HH24:MI')}`]]),
+       'part a: the new course, 141 lessons with their Whop lesson ids, and when the switch ran', asJson(r.part('a.')))
+  note(sameJson(r.part('c.'), [['Mon 19 Oct 10:30:00', 'Whop sent 3 · matched 0 · unmatched 3 · before the switch']]),
+       "part c: a check from before the switch says so", asJson(r.part('c.')))
+  note(sameJson(r.part('e.'), [[`a1l01 · ${A.title}`, `watched ${await at(`${SWITCH} + interval '2 minutes'`)} · later than the last check`]]),
+       'part e: the completion the webhook wrote reads "later than the last check"', asJson(r.part('e.')))
+
+  // The check on the next visit: B, finished on Whop, now matched too.
+  await d.exec(`
+    insert into student_lesson_completions (student_id, lesson_id, completed_at) values ('${T1}', 'a1l02', ${SWITCH} + interval '3 minutes');
+    update student_whop_sync set last_sync_at = ${SWITCH} + interval '3 minutes 1 second', last_sync_fetched = 2,
+           last_sync_matched = 2, last_sync_unmatched = '{}' where student_id = '${T1}';`)
+  r = await readFor(EMAIL)
+  note(r.ok && r.same && sameJson(r.part('c.'), [[await at(`${SWITCH} + interval '3 minutes 1 second'`), 'Whop sent 2 · matched 2 · unmatched 0']])
+       && r.part('d.').length === 0
+       && sameJson(r.part('e.'), [[`a1l01 · ${A.title}`, `watched ${await at(`${SWITCH} + interval '2 minutes'`)}`],
+                                  [`a1l02 · ${B.title}`, `watched ${await at(`${SWITCH} + interval '3 minutes'`)}`]]),
+       'after a check: matched 2, unmatched 0, nothing in part d, and both lessons in part e, neither later than the check', told(r))
+
+  // The two sentences the check writes in place of a count.
+  await d.exec(`update student_whop_sync set last_sync_error = 'Whop returned 2 interactions but 0 marked completed',
+                last_sync_error_at = last_sync_at where student_id = '${T1}';`)
+  r = await readFor(EMAIL)
+  const checkAt = await at(`${SWITCH} + interval '3 minutes 1 second'`)
+  note(r.ok && sameJson(r.part('c.'), [[checkAt, `Whop sent 2 · matched 2 · unmatched 0 · note ${checkAt}: Whop returned 2 interactions but 0 marked completed`]]),
+       'part c: the "0 marked completed" sentence, written with the check, reads as a note', asJson(r.part('c.')))
+  await d.exec(`update student_whop_sync set last_sync_error = 'Whop user_id filter ignored for user_x, refusing to write',
+                last_sync_error_at = last_sync_at + interval '1 minute' where student_id = '${T1}';`)
+  r = await readFor(EMAIL)
+  const errAt = await at(`${SWITCH} + interval '4 minutes 1 second'`)
+  note(r.ok && sameJson(r.part('c.'), [[checkAt, `Whop sent 2 · matched 2 · unmatched 0 · error ${errAt}: Whop user_id filter ignored for user_x, refusing to write`]]),
+       'part c: a failure after the last check reads as an error, with its own time', asJson(r.part('c.')))
   await d.close()
 }
 

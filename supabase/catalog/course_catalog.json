@@ -1,7 +1,7 @@
 {
  "course": "Ad Creative Program",
- "read": "2026-10-13",
- "source": "The course as it stands in the course builder on Whop, read through Whop's API on 2026-10-13 (141 lessons, 8 chapters). The order and every title are Whop's. The split of Video Ads into two places, the place of the Ad Bounty lesson, the gate and the action briefs are decisions recorded in _admin/prds/course-catalog/course_catalog_prd.md, section 3.",
+ "read": "2026-10-13, checked again on 2026-10-19",
+ "source": "The course as it stands in the course builder on Whop, read through Whop's API on 2026-10-13 (141 lessons, 8 chapters). The order and every title are Whop's. The split of Video Ads into two places, the place of the Ad Bounty lesson, the gate and the action briefs are decisions recorded in _admin/prds/course-catalog/course_catalog_prd.md, section 3. Checked again through Whop's API on 2026-10-19: the same 141 lessons in the same order under the same Whop lesson ids, and Whop had renamed a7l15 and a7l16, so they carry Whop's new titles. Your First Boss Battle (a3l17) is an action item since 2026-10-19, Lovro's call; its brief is written from the course's titles (_admin/prds/map-review-2026-10-15/decisions.md, Preview review, 2026-10-19).",
  "areas": [
   {
    "id": "a1",
@@ -287,6 +287,7 @@
    "area": "a3",
    "title": "Your First Boss Battle",
    "type": "watch",
+   "action_brief": "Edit your first ad from the brief, step by step with the lessons that follow, then submit it.",
    "whop_lesson_id": "lesn_tqVoEVlvmqcNg"
   },
   {
@@ -911,14 +912,14 @@
   {
    "id": "a7l15",
    "area": "a7",
-   "title": "Your Creative Strategy Workspace",
+   "title": "Creative Strategy Workspace Overview",
    "type": "watch",
    "whop_lesson_id": "lesn_3T60HczIAmTe1"
   },
   {
    "id": "a7l16",
    "area": "a7",
-   "title": "CS Workspace Onboarding Walkthrough",
+   "title": "How To Setup Creative Strategy Workspace",
    "type": "watch",
    "whop_lesson_id": "lesn_TlEOXVjBbmWoo"
   },

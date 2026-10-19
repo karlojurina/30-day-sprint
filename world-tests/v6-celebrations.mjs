@@ -89,8 +89,9 @@
  *      over the lesson page and nothing recorded; back on the map it opens,
  *      the map up, and is recorded
  *  16  an approval of an application made on the old dashboard, before the
- *      launch (?discount=september-old-course-approved, a September joiner's
- *      request of 25 September): no celebration in the 10 s after the map is
+ *      launch (?discount=october-old-course-approved, the request of 6 October
+ *      of a student who first paid on 2 October; a September joiner's until
+ *      the first date moved to 1 October): no celebration in the 10 s after the map is
  *      ready, the key left unset (the map's words, "you'll see it on your
  *      next renewal", may not hold for it; the panel says where it stands);
  *      the number's moment plays, held by nothing; the dashboard's test event
@@ -747,8 +748,8 @@ try {
     r.check('recorded once it opened: the key holds the request', s.keys?.discount === 'fixture-request', s.keys)
   })
 
-  await runRow(16, "an approval of an application made on the old dashboard, before the launch (september-old-course-approved): no celebration on the map, nothing recorded, the number's moment not held", async (r) => {
-    const page = await r.open({ hud: 'some', discount: 'september-old-course-approved', celebrate: '1' })
+  await runRow(16, "an approval of an application made on the old dashboard, before the launch (october-old-course-approved): no celebration on the map, nothing recorded, the number's moment not held", async (r) => {
+    const page = await r.open({ hud: 'some', discount: 'october-old-course-approved', celebrate: '1' })
     const t0 = Date.now()
     // The stand-in is on and the map is up: the 4 this browser never saw gets its moment.
     await waitFor(page, ended, { timeout: 8000, what: 'row 16: the number had no moment' })
@@ -770,6 +771,10 @@ try {
     await dismiss(page, 'row 16 (control)')
     s = await snap(page)
     r.check('and records nothing: the 30% key still unset', s.keys?.discount === null, s.keys)
+    // An unknown preset falls back to locked, with no approval to hold back, and the row would pass on nothing
+    // (the presets were renamed on 2026-10-19, when the 30%'s first date moved to 1 October).
+    const fx = await page.evaluate(() => ({ preset: window.__fixtureDiscount?.preset ?? null, requests: window.__fixtureDiscount?.requests() ?? [] }))
+    r.check('the pretend student holds one approved request made before the launch (the preset loaded)', fx.preset === 'october-old-course-approved' && fx.requests.length === 1 && fx.requests[0].status === 'approved' && Date.parse(fx.requests[0].created_at) < Date.parse('2026-10-08T22:00:00.000Z'), fx)
   })
 } finally {
   await browser.close()

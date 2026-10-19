@@ -85,6 +85,25 @@
  *      checkpoint's panel all the same, parked at the board, no place's panel,
  *      focus on its heading. Before WorldV6 opened the checkpoint for such a
  *      page, both landed on the opening frame with no panel.
+ *  11  Apply to Ad Bounties (Lovro's preview review, 2026-10-19: "a big button
+ *      ... like with the 30% off one"), on the map's panel (?discount=ready, so
+ *      the 30%'s Apply can be pressed): one link under the lesson, outside its
+ *      list, reading "Apply to Ad Bounties", to the program's sign-up page
+ *      (APPLY), target _blank, rel noopener noreferrer, named for a screen
+ *      reader as opening a new tab; drawn as the 30%'s Apply (height, width,
+ *      font, colours, corner, no underline, typed in APPLY_LOOK), and not faded
+ *      (opacity 1, and the panel's bottom fade, mask-image, ends inside the
+ *      padding under it). The keyboard: from the heading, where focus lands,
+ *      Tab reaches the lesson's row and then the link, with a visible focus
+ *      ring, and Enter opens a new tab at the page's address that does not
+ *      know its opener, while the map stays where it was with the panel up. A
+ *      mouse click on it does the same.
+ *  12  the phone's sheet (390x844, ?discount=ready) has the same link, drawn
+ *      as the 30% sheet's Apply, and a click on it opens the page in a new tab.
+ *      The page's host is mapped to this machine for the whole run
+ *      (--host-resolver-rules, port 9, where nothing listens), so the new tabs
+ *      send nothing to it: each lands on Chrome's error page with the page's
+ *      address in its history.
  *
  * Pictures for a person, in world-tests/shots/v6/bounty/ (git-ignored):
  *   world-bridge.png   the isle from the rope bridge, the marker and the tag (row 1)
@@ -93,6 +112,8 @@
  *   lesson-page.png    the lesson's page over the parked board (row 5)
  *   phone-list.png     the phone's list round the checkpoint's row (row 6)
  *   phone-sheet.png    the phone's sheet (row 6)
+ *   apply-panel.png    the panel with Apply to Ad Bounties, its focus ring on (row 11)
+ *   apply-sheet.png    the phone's sheet with it (row 12)
  *
  * What a row reads:
  *   hooks      window.__worldReady, __worldFrame, __worldScrollFor(depth),
@@ -112,6 +133,10 @@
  *              back link the a in the row before that (LessonScreen.tsx)
  *   discount   main header button[aria-label*="discount checkpoint"] (the
  *              header's segment), main section[aria-labelledby="cp-panel-title"]
+ *   Apply      (rows 11, 12) the panel's a or button whose text starts "Apply",
+ *              its own text nodes for its words (a hidden span adds "(opens in
+ *              a new tab)" for a screen reader); the 30%'s phone row:
+ *              main ol > li > button[aria-label^="Discount checkpoint"]
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
@@ -164,6 +189,10 @@ const BOARD = { x: -1689.6, z: -2408.0 }
 const ON_BRIDGE = 0.3044
 /** The camera's near plane is 2 (scene.ts NEAR): no triangle may come this close. */
 const NEAR_GAP = 2.5
+/** Rows 11 and 12: the panel's link to the program's sign-up page (a public page, Lovro 2026-10-19). */
+const APPLY = { words: 'Apply to Ad Bounties', href: 'https://creators.ecombounty.com', host: 'creators.ecombounty.com' }
+/** The computed look the bounty's Apply must share with the 30%'s Apply when it can be pressed. */
+const APPLY_LOOK = ['height', 'width', 'fontSize', 'fontWeight', 'fontFamily', 'letterSpacing', 'color', 'background', 'radius', 'underline']
 
 const tally = { pages: 0, api: [], supabase: [], pageErrors: [] }
 const results = []
@@ -186,6 +215,74 @@ const FIND = {
   lessonBack: () => [...document.querySelectorAll('h1')].find((h) => !h.closest('main'))?.previousElementSibling?.previousElementSibling?.querySelector('a') ?? null,
   /** The header's discount segment. */
   chip: () => document.querySelector('main header button[aria-label*="discount checkpoint"]'),
+  /** Rows 11 and 12: the bounty panel's (or sheet's) Apply. */
+  apply: () => [...(document.querySelector('main section[aria-labelledby="bounty-panel-title"]')?.querySelectorAll('a, button') ?? [])].find((el) => /^\s*Apply/.test(el.textContent)) ?? null,
+}
+
+/**
+ * Rows 11 and 12: a panel's Apply as drawn. Its words (its own text nodes:
+ * the hidden "(opens in a new tab)" is a span), its whole text, address, tab
+ * and rel; where it sits against the panel's lesson list; its computed look;
+ * and, on the map's panel, where the panel's bottom fade starts against it.
+ */
+const APPLY_OF = (sel) => {
+  const panel = document.querySelector(sel)
+  if (!panel) return null
+  const all = [...panel.querySelectorAll('a, button')].filter((el) => /^\s*Apply/.test(el.textContent))
+  const el = all[0]
+  if (!el) return { count: 0 }
+  const c = getComputedStyle(el)
+  const r = el.getBoundingClientRect()
+  const ol = panel.querySelector('ol')
+  const olr = ol?.getBoundingClientRect() ?? null
+  const pr = panel.getBoundingClientRect()
+  // The map's panel scrolls in its inner box, whose mask fades its last N px (world.module.css .panelInner).
+  const inner = panel.querySelector(':scope > div')
+  let fade = null
+  if (inner && panel.getAttribute('role') !== 'dialog') {
+    const ir = inner.getBoundingClientRect()
+    const mask = getComputedStyle(inner).maskImage || getComputedStyle(inner).webkitMaskImage || 'none'
+    const px = /calc\(100% - ([\d.]+)px\)/.exec(mask)
+    fade = { mask, from: px ? Math.round(ir.bottom - Number(px[1])) : mask === 'none' ? null : NaN, linkBottom: Math.round(r.bottom), scrolled: inner.scrollTop }
+  }
+  const norm = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
+  return {
+    count: all.length,
+    tag: el.tagName,
+    words: norm([...el.childNodes].filter((n) => n.nodeType === 3).map((n) => n.textContent).join('')),
+    text: norm(el.textContent),
+    href: el.getAttribute('href'),
+    target: el.getAttribute('target'),
+    rel: el.getAttribute('rel'),
+    inList: !!ol && ol.contains(el),
+    rows: ol ? ol.querySelectorAll(':scope > li').length : 0,
+    belowList: olr ? Math.round(r.top - olr.bottom) : null,
+    inPanel: r.left >= pr.left - 0.5 && r.right <= pr.right + 0.5 && r.top >= pr.top - 0.5 && r.bottom <= pr.bottom + 0.5,
+    opacity: { link: c.opacity, panel: getComputedStyle(panel).opacity, inline: panel.style.opacity || null },
+    look: {
+      height: Math.round(r.height),
+      width: Math.round(r.width),
+      fontSize: c.fontSize,
+      fontWeight: c.fontWeight,
+      fontFamily: c.fontFamily,
+      letterSpacing: c.letterSpacing,
+      color: c.color,
+      background: c.backgroundColor,
+      radius: c.borderTopLeftRadius,
+      underline: c.textDecorationLine,
+    },
+    fade,
+    box: { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) },
+    panelBox: { l: Math.round(pr.left), t: Math.round(pr.top), w: Math.round(pr.width), h: Math.round(pr.height) },
+  }
+}
+
+/** What has focus: its tag, its words, whether the browser draws its focus ring, and the ring's style. */
+const FOCUSED = () => {
+  const e = document.activeElement
+  if (!e || e === document.body) return null
+  const c = getComputedStyle(e)
+  return { tag: e.tagName, id: e.id || null, label: e.getAttribute('aria-label'), text: (e.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 60), visible: e.matches(':focus-visible'), outline: `${c.outlineStyle} ${c.outlineWidth}` }
 }
 
 /** The lesson page as drawn: its heading, its eyebrow's words, its back link, its "Next lesson" links, and every link to the bounty's page. */
@@ -397,6 +494,33 @@ async function crop(page, file, b, pad = 16, view = DESKTOP) {
 const shot = (page, file) => page.screenshot({ path: path.join(OUT, file), captureBeyondViewport: false })
 
 /**
+ * Rows 11 and 12: do `act` (Enter on the link, or a click on it) and wait for
+ * the new tab it opens in this context at the sign-up page's address. The
+ * page's host is mapped to this machine (the launch's --host-resolver-rules),
+ * so the tab lands on Chrome's error page, the address in its history.
+ * Returns that address, where the tab landed, and whether it knows its
+ * opener; closes it and brings the map's page back to the front.
+ */
+async function newTabFrom(ctx, page, act, what) {
+  const known = new Set(ctx.targets())
+  const wait = ctx.waitForTarget((t) => t.type() === 'page' && !known.has(t) && t.url().startsWith(APPLY.href), { timeout: 10000 })
+  await act()
+  const t = await wait.catch(() => null)
+  if (!t) throw new Error(`${what}: no new tab opened at ${APPLY.href}`)
+  const tab = await t.page()
+  await sleep(700)
+  const cdp = await tab.createCDPSession()
+  const h = await cdp.send('Page.getNavigationHistory')
+  const url = h.entries[h.currentIndex]?.url ?? t.url()
+  const opener = await tab.evaluate(() => window.opener !== null).catch(() => null)
+  const landed = tab.url()
+  await tab.close()
+  await page.bringToFront()
+  await sleep(300)
+  return { url, landed, opener }
+}
+
+/**
  * Row 7, in the page: the nearest triangle of the isle's dressing and your
  * ship to the camera at route distance s. The static meshes' triangles near
  * the isle are gathered once (world space); the ship's in its own frame, the
@@ -552,7 +676,16 @@ function checkPanel(r, s) {
 browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: 'new',
-  args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--no-sandbox', '--hide-scrollbars', '--autoplay-policy=no-user-gesture-required'],
+  args: [
+    '--use-angle=metal',
+    '--enable-gpu',
+    '--ignore-gpu-blocklist',
+    '--no-sandbox',
+    '--hide-scrollbars',
+    '--autoplay-policy=no-user-gesture-required',
+    // Rows 11 and 12 open the sign-up page in new tabs: its host stays on this machine (port 9, nothing listens).
+    `--host-resolver-rules=MAP ${APPLY.host} 127.0.0.1:9`,
+  ],
 })
 
 try {
@@ -829,6 +962,93 @@ try {
       r.check(`${way}: the map's address, the checkpoint's panel up, parked at the board's view, no place's panel, focus on its heading`, s.path === APP && !!s.panel && s.park?.id === 'bounty' && off < 0.5 && !place && s.panel.focusHeading === true, { path: s.path, panel: !!s.panel, park: s.park, off, place, focus: s.panel?.focusHeading })
       await page.close()
     }
+  })
+
+  // 11 ── Apply to Ad Bounties, on the map's panel
+  await runRow(11, 'Apply to Ad Bounties: a link under the lesson, drawn as the 30%\'s Apply; Tab and Enter, and a click, open the sign-up page in a new tab', async (r) => {
+    const page = await r.open({ discount: 'ready' })
+    // The control: the 30%'s Apply when it can be pressed, at this size.
+    await page.evaluate(() => window.__worldPark('checkpoint'))
+    await waitFor(page, () => window.__worldFrame?.parkedId === 'checkpoint' && window.__worldFrame.parkProgress >= 0.999 && !!document.querySelector('main section[aria-labelledby="cp-panel-title"]'), { timeout: PARK_MS, what: 'row 11: the 30%\'s panel did not open' })
+    await sleep(800)
+    const cp = await page.evaluate(APPLY_OF, 'main section[aria-labelledby="cp-panel-title"]')
+    r.values.cp = cp
+    r.check('the control: the 30%\'s panel has its Apply, a button that can be pressed (?discount=ready)', cp?.count === 1 && cp.tag === 'BUTTON' && cp.opacity.link === '1', cp ? { tag: cp.tag, words: cp.words, look: cp.look } : null)
+    await page.keyboard.press('Escape')
+    await waitFor(page, () => !document.querySelector('main section[aria-labelledby="cp-panel-title"]') && (window.__worldFrame?.parkProgress ?? 1) === 0 && document.body.style.overflow !== 'hidden', { timeout: PARK_MS, what: 'row 11: the 30%\'s panel did not close' })
+    await sleep(300)
+    // The bounty's panel, opened from its tag as a person would.
+    await click(page, FIND.tag, null, 'row 11: the tag')
+    await parked(page, 'row 11')
+    const a = await page.evaluate(APPLY_OF, 'main section[aria-labelledby="bounty-panel-title"]')
+    r.values.apply = a
+    r.check(`one link under the lesson, outside its list (still 1 row), reading "${APPLY.words}"`, a?.count === 1 && a.tag === 'A' && a.words === APPLY.words && !a.inList && a.rows === 1 && a.belowList >= 8 && a.inPanel, a ? { count: a.count, tag: a.tag, words: a.words, inList: a.inList, rows: a.rows, belowList: a.belowList, inPanel: a.inPanel } : null)
+    r.check(`it goes to ${APPLY.href} in a new tab (target _blank, rel noopener noreferrer), and a screen reader hears that`, a?.href === APPLY.href && a.target === '_blank' && /\bnoopener\b/.test(a.rel ?? '') && /\bnoreferrer\b/.test(a.rel ?? '') && /opens in a new tab/.test(a.text), a ? { href: a.href, target: a.target, rel: a.rel, text: a.text } : null)
+    const diff = APPLY_LOOK.filter((k) => a?.look?.[k] !== cp?.look?.[k])
+    r.check(`it is drawn as the 30%'s Apply (${APPLY_LOOK.join(', ')}), no underline`, !!a?.look && !!cp?.look && diff.length === 0 && a.look.underline === 'none', diff.length ? diff.map((k) => ({ k, bounty: a?.look?.[k], cp: cp?.look?.[k] })) : a?.look)
+    r.check('nothing fades it: opacity 1, and the panel\'s bottom fade starts at or below its bottom edge', a?.opacity.link === '1' && a.opacity.panel === '1' && (a.opacity.inline === null || a.opacity.inline === '1') && !!a.fade && a.fade.scrolled === 0 && (a.fade.from === null || a.fade.from >= a.fade.linkBottom), a ? { opacity: a.opacity, fade: a.fade } : null)
+    // The keyboard: focus lands on the heading; Tab reaches the lesson's row, then the link.
+    const seq = [await page.evaluate(FOCUSED)]
+    for (let i = 0; i < 4 && seq[seq.length - 1]?.tag !== 'A'; i++) {
+      await page.keyboard.press('Tab')
+      seq.push(await page.evaluate(FOCUSED))
+    }
+    r.values.tabs = seq
+    const last = seq[seq.length - 1]
+    r.check('from the heading, Tab reaches the lesson\'s row and then the link, its focus ring drawn', seq[0]?.id === 'bounty-panel-title' && seq.length === 3 && seq[1]?.tag === 'BUTTON' && (seq[1].label ?? seq[1].text).includes(LESSON.title) && last?.tag === 'A' && last.text.startsWith(APPLY.words) && last.visible && !/^none/.test(last.outline), seq)
+    await crop(page, 'apply-panel.png', a.panelBox)
+    const byKey = await newTabFrom(r.ctx, page, () => page.keyboard.press('Enter'), 'row 11: Enter')
+    r.values.enter = byKey
+    const after = await page.evaluate(SNAP)
+    r.check('Enter opens a new tab at the sign-up page that does not know its opener; the map stays, the panel up', byKey.url.startsWith(APPLY.href) && byKey.opener === false && after.path === APP && !!after.panel && after.park?.id === 'bounty', { tab: byKey, path: after.path, panel: !!after.panel, park: after.park })
+    const byMouse = await newTabFrom(
+      r.ctx,
+      page,
+      async () => {
+        r.values.click = await click(page, FIND.apply, null, 'row 11: the link')
+      },
+      'row 11: a click',
+    )
+    r.values.mouse = byMouse
+    r.check('a mouse click on it (it is on top) opens one too', r.values.click === 'mouse' && byMouse.url.startsWith(APPLY.href) && byMouse.opener === false, { via: r.values.click, tab: byMouse })
+    r.check('both tabs landed on Chrome\'s error page: the run sent nothing to the sign-up page\'s host', byKey.landed.startsWith('chrome-error:') && byMouse.landed.startsWith('chrome-error:'), [byKey.landed, byMouse.landed])
+  })
+
+  // 12 ── Apply to Ad Bounties, on the phone's sheet
+  await runRow(12, 'A phone: the sheet has the same link, drawn as the 30% sheet\'s Apply; a click on it opens the sign-up page in a new tab', async (r) => {
+    const page = await openPhone(r.ctx, r.row, url({ discount: 'ready' }))
+    const sheet = (title) => `main section[role="dialog"][aria-labelledby="${title}"]`
+    const openSheet = async (row, title, what) => {
+      await click(page, (q) => document.querySelector(q), row, what)
+      await waitFor(page, (q) => !!document.querySelector(q), { arg: sheet(title), timeout: 8000, what: `${what}: no sheet` })
+      await sleep(500)
+    }
+    // The control: the 30% sheet's Apply when it can be pressed.
+    await openSheet('main ol > li > button[aria-label^="Discount checkpoint"]', 'cp-panel-title', 'row 12: the 30%\'s row')
+    const cp = await page.evaluate(APPLY_OF, sheet('cp-panel-title'))
+    r.values.cp = cp
+    r.check('the control: the 30%\'s sheet has its Apply, a button that can be pressed', cp?.count === 1 && cp.tag === 'BUTTON', cp ? { tag: cp.tag, words: cp.words, look: cp.look } : null)
+    await click(page, (q) => [...(document.querySelector(q)?.querySelectorAll('button') ?? [])].find((b) => /All areas/.test(b.textContent)) ?? null, sheet('cp-panel-title'), 'row 12: All areas')
+    await waitFor(page, (q) => !document.querySelector(q), { arg: sheet('cp-panel-title'), timeout: 8000, what: 'row 12: the 30%\'s sheet did not close' })
+    await sleep(400)
+    await openSheet('main ol > li > button[aria-label^="Ad Bounty checkpoint"]', 'bounty-panel-title', 'row 12: the bounty\'s row')
+    const a = await page.evaluate(APPLY_OF, sheet('bounty-panel-title'))
+    r.values.apply = a
+    r.check(`one link under the lesson, outside its list, reading "${APPLY.words}", to ${APPLY.href} in a new tab`, a?.count === 1 && a.tag === 'A' && a.words === APPLY.words && !a.inList && a.rows === 1 && a.belowList >= 8 && a.href === APPLY.href && a.target === '_blank' && /\bnoopener\b/.test(a.rel ?? '') && /\bnoreferrer\b/.test(a.rel ?? ''), a ? { count: a.count, tag: a.tag, words: a.words, inList: a.inList, belowList: a.belowList, href: a.href, target: a.target, rel: a.rel } : null)
+    const diff = APPLY_LOOK.filter((k) => a?.look?.[k] !== cp?.look?.[k])
+    r.check('it is drawn as the 30% sheet\'s Apply', !!a?.look && !!cp?.look && diff.length === 0, diff.length ? diff.map((k) => ({ k, bounty: a?.look?.[k], cp: cp?.look?.[k] })) : a?.look)
+    r.check('it is on the screen as the sheet opens, at least 40 px tall', !!a?.box && a.box.t >= 0 && a.box.b <= PHONE.height && a.box.h >= 40, a?.box ?? null)
+    await shot(page, 'apply-sheet.png')
+    const tab = await newTabFrom(
+      r.ctx,
+      page,
+      async () => {
+        r.values.click = await click(page, FIND.apply, null, 'row 12: the link')
+      },
+      'row 12: a click',
+    )
+    r.values.tab = tab
+    r.check('a click on it opens a new tab at the sign-up page that does not know its opener, sending nothing to its host', r.values.click === 'mouse' && tab.url.startsWith(APPLY.href) && tab.opener === false && tab.landed.startsWith('chrome-error:'), { via: r.values.click, tab })
   })
 } finally {
   await browser.close()

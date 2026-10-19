@@ -3178,7 +3178,7 @@ function WorldV6View({
           )}
 
           {cpOpen && cpKind === "bounty" && bounty && (
-            <section ref={cpPanelRef} className={`${s.panel} ${s.cpPanel}`} aria-labelledby="bounty-panel-title" inert={cpClosing}>
+            <section ref={cpPanelRef} className={`${s.panel} ${s.cpPanel} ${s.btPanel}`} aria-labelledby="bounty-panel-title" inert={cpClosing}>
               <div className={s.panelInner}>
                 <BountyBody bounty={bounty} backLabel="Back to map" onBack={closeCheckpoint} headingRef={cpHeadingRef} />
               </div>
@@ -3911,6 +3911,9 @@ function bountyAria(b: WorldBounty): string {
   return `${BOUNTY_NAME} checkpoint, ${b.done ? "watched" : "1 lesson"}`;
 }
 
+/** The Ad Bounty program's sign-up page, a public page (Lovro, 2026-10-19): the panel's Apply opens it. */
+const BOUNTY_APPLY_URL = "https://creators.ecombounty.com";
+
 /**
  * The Ad Bounty checkpoint's panel (map review 2026-10-15, plan item 18): what
  * the program is in one plain line, in the course's own words for it (a
@@ -3921,6 +3924,11 @@ function bountyAria(b: WorldBounty): string {
  * lesson's own page (content.onFeature, the address of the old feature row).
  * On the dev page without a source the row is a plain line, as the feature
  * row was. Always open: nothing here is locked or counted.
+ *
+ * Under the lesson, Apply to Ad Bounties (Lovro's preview review, 2026-10-19:
+ * "a big button ... like with the 30% off one"): the 30%'s Apply as it looks
+ * when it can be pressed, shown in every state, a link that opens the
+ * program's sign-up page in a new tab.
  */
 function BountyBody({
   bounty,
@@ -4006,12 +4014,19 @@ function BountyBody({
       </h2>
       <p className={s.desc}>Make ads for real brands and earn a share of the ad spend while they run.</p>
       <ol className={s.rows}>{row}</ol>
+      <a className={`${s.primary} ${s.btApply}`} href={BOUNTY_APPLY_URL} target="_blank" rel="noopener noreferrer">
+        Apply to Ad Bounties
+        <span className={s.srOnly}> (opens in a new tab)</span>
+        <Arrow />
+      </a>
     </div>
   );
 }
 
 // The earliest first payment that can earn the 30% (discount.ts DISCOUNT_ELIGIBLE_FROM, T-080): midnight in
-// Croatia, so the day is read there, "9 September 2026" and "9 September". In UTC it would print 8 September.
+// Croatia, so the day is read there, "1 October 2026" and "1 October" (9 September until 2026-10-19). In UTC it
+// would print 30 September. The closed line says "Croatia time" after it: 05:59 on 1 October in Manila is still
+// 30 September in Croatia.
 // No-break spaces keep the date on one line (on a 390 px phone it split as "9 / September 2026").
 const ELIGIBLE_DAY = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Zagreb" }).replace(/ /g, " ");
 const ELIGIBLE_DAY_NO_YEAR = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "Europe/Zagreb" }).replace(/ /g, " ");
@@ -4031,14 +4046,15 @@ const ELIGIBLE_DAY_NO_YEAR = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString
  *
  * Since Lovro's second Loom (2026-10-16) it opens for every student and state.
  * Where the offer is closed for the student (the deadline passed, a first
- * payment before 9 September) it says so in one plain line, and the eyebrow
+ * payment before 1 October) it says so in one plain line, and the eyebrow
  * says "Closed"; with no first payment on record it asks them to tell the
  * team, and the eyebrow says "Ask the team". Apply shows only while it can
  * still be earned (locked) or is on (ready), never as a dead button.
  *
- * T-080 (Lovro, 2026-10-16): a first payment from 9 September until the
- * launch shares one deadline, the end of 23 October in Croatia (st.window
- * "shared"), and the panel says so while locked and once it has passed. An
+ * T-080 (Lovro, 2026-10-16; from 1 October since 2026-10-19): a first payment
+ * from 1 October until the launch shares one deadline, the end of 23 October
+ * in Croatia (st.window "shared"), and the panel says so while locked and
+ * once it has passed. An
  * application made on the old dashboard (st.madeBeforeLaunch) gets its own
  * words: "within 48 hours" and "on your next renewal" may no longer hold.
  * Every deadline shows its date and hour in the student's own time zone
@@ -4119,7 +4135,7 @@ function CheckpointBody({
           {cv.left && <span className={s.cpLeft}>{cv.left}</span>}
         </p>
         <p className={s.desc}>
-          {st.window === "shared" && "Everyone who joined before the new course opened has this same deadline. "}
+          {st.window === "shared" && `Everyone who joined from ${ELIGIBLE_DAY_NO_YEAR} until the new course opened has this same deadline. `}
           Watch all {st.lessonsTotal} videos through {after}, then apply here.
         </p>
         <div className={s.cpBar} aria-hidden="true">
@@ -4200,7 +4216,7 @@ function CheckpointBody({
     body = (
       <p className={s.desc}>
         {st.window === "shared"
-          ? `This offer closed on ${cv.deadline}. That was the deadline for everyone who joined before the new course opened.`
+          ? `This offer closed on ${cv.deadline}. That was the deadline for everyone who joined from ${ELIGIBLE_DAY_NO_YEAR} until the new course opened.`
           : `This offer closed on ${cv.deadline}. It runs for your first ${DISCOUNT_WINDOW_DAYS} days.`}
       </p>
     );
@@ -4208,7 +4224,7 @@ function CheckpointBody({
     body = (
       <p className={s.desc}>
         {st.reason === "before-launch"
-          ? `This offer is for students who joined from ${ELIGIBLE_DAY}. You joined before that, so it's closed for you.`
+          ? `This offer is for students who joined from ${ELIGIBLE_DAY}, Croatia time. You joined before that, so it's closed for you.`
           : st.reason === "no-payment"
             ? `We can't see your first payment yet. If you joined on or after ${ELIGIBLE_DAY_NO_YEAR}, tell the team and they'll sort it out.`
             : "This offer isn't open yet."}

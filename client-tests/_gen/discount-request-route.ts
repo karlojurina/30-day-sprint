@@ -11,7 +11,7 @@ import { SAVE_FAILED, decideDiscountRequest, loadDiscountReads, secondPendingReq
  * (CATALOG_IS_V2, true on staging and after cutover), the request is decided
  * by src/lib/world/discount.ts, the same rule the map shows: every video up to
  * the gate lesson, by the student's deadline (14 days from a first payment
- * made on or after 2026-10-09; the end of 2026-10-23 for one from 2026-09-09
+ * made on or after 2026-10-09; the end of 2026-10-23 for one from 2026-10-01
  * until then; never for an earlier one). It grants only on `ready` and fails
  * closed on any read error.
  * The old rule below runs everywhere else, unchanged, so the live app on the

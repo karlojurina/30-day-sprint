@@ -69,8 +69,9 @@
  * lesson-a5l22-action-saved.png, lesson-a5l22-action-done.png (and
  * lesson-a5l22-action-error.png).
  *
- * ROWS 23 AND 24 CAME WITH THE SECOND LOOM (2026-10-16). The 20 watch lessons
- * with no video (a3l11, a4l11, Creative Strategy's 18) never hold a student:
+ * ROWS 23 AND 24 CAME WITH THE SECOND LOOM (2026-10-16). The 18 watch lessons
+ * with no video (Creative Strategy's 18; a4l11 and a3l11 too until they got
+ * theirs on 2026-10-19) never hold a student:
  * the card's next lesson passes them over, their page's "Next lesson" is on, a
  * student past them stands at the next place with lessons to finish, and only
  * once nothing else is left is one of them next, with "Not recorded yet" where
@@ -78,9 +79,14 @@
  * mark the negative on every row) the count of them is said once, on a line
  * under the count line, and their rows are marked by look alone (a quiet
  * title, no length); only a row the student has passed in their own place
- * (row 11 under a next row 12) says "Not recorded yet", and so does the next
- * row when only such lessons are left, with no ▶. A place's minutes count its
- * action items' lengths when the catalog has them (24).
+ * (row 11 under a next row 12, while a3l11 had no video) says "Not recorded
+ * yet", and so does the next row when only such lessons are left, with no ▶.
+ * Since a3l11 got its video no place mixes lessons with and without one, so
+ * row 23 can no longer show a lesson passed over inside a place, or that
+ * passed row's words, on the real course (map-model.test.mjs still passes one
+ * over on made-up data): a3l11 now holds the student like any lesson with a
+ * video, and the rest is shown on Creative Strategy. A place's minutes count
+ * its action items' lengths when the catalog has them (24).
  *
  * ROW 25 CAME WITH THE FIX ROUND. A place finished right before one the map
  * passes over (Creative Strategy, no video yet) gets a done card that names it
@@ -276,8 +282,8 @@ const NAMES = ['Introduction', 'Marketing Fundamentals', 'Video Ads I', 'Video A
 /** Lessons that count toward progress, per place (a7l19 is the pond row and does not). */
 const COUNTING = [8, 11, 25, 17, 26, 22, 18, 13]
 const TOTAL = 140
-/** The action items: the 1-based row numbers in each place's panel. */
-const ACTION_ROWS = [[], [], [25], [], [8, 12, 22, 23], [3, 10, 17, 19], [], []]
+/** The action items: the 1-based row numbers in each place's panel. Video Ads I's row 17, Your First Boss Battle, since 2026-10-19. */
+const ACTION_ROWS = [[], [], [17, 25], [], [8, 12, 22, 23], [3, 10, 17, 19], [], []]
 /**
  * The Ad Bounty lesson: filed under place 7 in the catalog, outside the lesson
  * count. Since the map review's item 18 (2026-10-15) it is the one lesson of
@@ -2613,24 +2619,27 @@ try {
         onLoad.length <= 1 && onLoad.every((x) => x === 'a1l01'),
         onLoad,
       )
-      const noVideo = 'a3l11'
+      // Since a3l11 got its video (2026-10-19) no place has a watch lesson with no video beside one with a
+      // video: the lesson with no video is Creative Strategy's row 4, and the one with a video stays a3l10,
+      // row 10 of place 3, reached first.
+      const noVideo = 'a7l04'
       const withVideo = 'a3l10'
       await openPlaceQuietly(page, 2, 'row 19, place 3')
-      const p11 = await rowPoint(page, 11, 'row 19')
-      await page.mouse.move(p11.x, p11.y)
-      await sleep(600)
-      const focused = await page.evaluate(FOCUS_ROW, 11)
-      await sleep(600)
-      const none = (await page.evaluate(ASKED, noVideo)).length
       const p10 = await rowPoint(page, 10, 'row 19')
       await page.mouse.move(p10.x, p10.y)
       await sleep(600)
       const one = (await page.evaluate(ASKED, withVideo)).length
-      r.check(`course_catalog.json: ${noVideo} is a watch lesson with no video, ${withVideo} has one`, !hasVideoInJson(noVideo) && hasVideoInJson(withVideo), { [noVideo]: hasVideoInJson(noVideo), [withVideo]: hasVideoInJson(withVideo) })
-      r.check(`row 11 (${noVideo}, no video): reached by the pointer and by the keyboard, never asked for`, none === 0 && focused, `${none} calls; focused ${focused}`)
-      r.check(`row 10 beside it (${withVideo}, a video): reached by the pointer, asked for once`, one === 1, `${one} calls`)
       await closePlace(page, 'row 19')
       await openPlaceQuietly(page, 6, 'row 19, place 7')
+      const p4 = await rowPoint(page, 4, 'row 19, place 7')
+      await page.mouse.move(p4.x, p4.y)
+      await sleep(600)
+      const focused = await page.evaluate(FOCUS_ROW, 4)
+      await sleep(600)
+      const none = (await page.evaluate(ASKED, noVideo)).length
+      r.check(`course_catalog.json: ${noVideo} is a watch lesson with no video, ${withVideo} has one`, !hasVideoInJson(noVideo) && hasVideoInJson(withVideo), { [noVideo]: hasVideoInJson(noVideo), [withVideo]: hasVideoInJson(withVideo) })
+      r.check(`place 7's row 4 (${noVideo}, no video): reached by the pointer and by the keyboard, never asked for`, none === 0 && focused, `${none} calls; focused ${focused}`)
+      r.check(`place 3's row 10 (${withVideo}, a video): reached by the pointer, asked for once`, one === 1, `${one} calls`)
       for (const n of [1, 2, 3]) {
         const p = await rowPoint(page, n, 'row 19, place 7')
         await page.mouse.move(p.x, p.y)
@@ -2844,13 +2853,15 @@ try {
     // 23 ── A lesson with no video never holds a student (the second Loom, 2026-10-16; map-model.ts).
     // A watch lesson with no video can't be finished on the map, so the student's place and next
     // lesson pass it over; it still counts in every total and says "Not recorded yet" where Watch
-    // or its length would be. Only once nothing else is left is it the next lesson.
+    // or its length would be. Only once nothing else is left is it the next lesson. Since a3l11 got
+    // its video (2026-10-19) it holds the student like any lesson with a video (a, b, e), and the
+    // lessons with no video are Creative Strategy's alone (b, c, d, e).
     await runRow(23, nameOf(23), async (r) => {
       const counting = PLACES.flatMap((p) => p.counting)
       const unrecorded = counting.filter((l) => !finishable(l)).map((l) => l.id)
       r.check(
-        "the course has 20 lessons with no video: a3l11, a4l11 and Creative Strategy's 18",
-        unrecorded.length === 20 && unrecorded.includes('a3l11') && unrecorded.includes('a4l11') && PLACES[6].counting.every((l) => unrecorded.includes(l.id)),
+        "the course has 18 lessons with no video: Creative Strategy's 18 (a4l11 and a3l11 have had one since 2026-10-19)",
+        unrecorded.length === 18 && !unrecorded.includes('a3l11') && !unrecorded.includes('a4l11') && PLACES[6].counting.every((l) => unrecorded.includes(l.id)),
         unrecorded.length,
       )
       const every = (k) => PLACES[k].counting.map((l) => l.id)
@@ -2866,7 +2877,7 @@ try {
         }, ids)
       }
 
-      // a) Video Ads I's lessons 1 to 10 watched: the card's next is lesson 12; row 11 says so and still opens.
+      // a) Video Ads I's lessons 1 to 10 watched: the card's next is lesson 11, Your Editing Software, a video since 2026-10-19.
       let page = await r.open(url('', { arrive: 0, poster: 'off' }))
       await mark(page, [...every(0), ...every(1), ...every(2).slice(0, 10)], 'row 23 a')
       await ready(page, 'row 23 a')
@@ -2875,28 +2886,37 @@ try {
       const card = await page.evaluate(CARD, 2)
       const t11 = PLACES[2].counting[10].title
       const t12 = PLACES[2].counting[11].title
-      r.check("a) lessons 1 to 10 of Video Ads I watched: the card's Watch is lesson 12, past lesson 11", card?.watch === `Watch lesson 12, ${t12}`, card?.watch ?? null)
+      const min11 = `${minutesOf('a3l11')} min`
+      r.check("a) lessons 1 to 10 of Video Ads I watched: the card's Watch is lesson 11", card?.watch === `Watch lesson 11, ${t11}`, card?.watch ?? null)
       await openPlace(page, 2, 'row 23 a')
       const p = await readPanel(page, 'row 23 a')
       const r11 = p.rows.find((x) => x.n === 11)
       const r12 = p.rows.find((x) => x.n === 12)
-      r.check('a) row 11, passed over, says "Not recorded yet" under its quiet title (its name too) and is not the next row', r11?.kind === 'unrecorded' && r11?.title === t11 && r11?.tail === 'Not recorded yet' && r11?.quiet && !r11?.highlit, r11 ?? null)
-      r.check('a) row 12 is the next row, with Watch', r12?.kind === 'next' && r12?.title === t12, r12 ?? null)
-      r.check('a) the count line is as before ("10 of 25 · 15 to go") and the line under it says "1 lesson not recorded yet"', p.count === '10 of 25 · 15 to go' && p.note === '1 lesson not recorded yet', { count: p.count, note: p.note })
-      r.values.shotPanel = await r.shot('no-video-panel-video-ads-i')
+      r.check(`a) row 11 is the next row, highlighted, with its ▶, its length (${min11}) and Watch`, r11?.kind === 'next' && r11?.title === t11 && r11?.tail === min11 && !r11?.quiet && r11?.m === 'n' && r11?.highlit, r11 ?? null)
+      r.check('a) row 12 comes after it and is not the next row', r12?.kind === 'todo' && r12?.title === t12 && !r12?.highlit, r12 ?? null)
+      r.check('a) the count line is as before ("10 of 25 · 15 to go"), with no line under it: every lesson of Video Ads I has a video', p.count === '10 of 25 · 15 to go' && p.note === null, { count: p.count, note: p.note })
+      r.values.shotPanel = await r.shot('panel-video-ads-i-lesson-11-next')
 
-      // b) a3l11's page: "Next lesson" is on from the start and opens lesson 12, where it is off again.
+      // b) a3l11's page: "Next lesson" is off until it is watched, like any lesson with a video. Creative Strategy's first
+      //    lesson, with no video, has it on from the start, and it opens the lesson after it, where it is on as well.
       page = await r.open(url('/a3/a3l11', { arrive: 0, poster: 'off' }))
       await waitLesson(page, t11, 'row 23 b', LOAD_MS)
       await sleep(800)
-      const on = await page.evaluate(nextLink)
-      r.check('b) on a3l11, not watched: "Next lesson" is on and goes to a3l12', on?.disabled === 'false' && on?.href === `${APP}/a3/a3l12`, on)
-      r.values.shotLesson = await r.shot('no-video-lesson-a3l11')
-      await click(page, () => [...document.querySelectorAll('a')].find((x) => !x.closest('main, nextjs-portal') && /Next lesson/.test(x.textContent ?? '')), null, { what: 'row 23 b: Next lesson' })
-      await waitLesson(page, t12, 'row 23 b: lesson 12')
-      await sleep(400)
       const off = await page.evaluate(nextLink)
-      r.check('b) it opens lesson 12, whose "Next lesson" waits for its video as before', off?.disabled === 'true', off)
+      r.check('b) on a3l11, not watched: "Next lesson" is off until it is watched, like any lesson with a video', off?.disabled === 'true' && off?.href === '#', off)
+      r.values.shotLesson = await r.shot('lesson-a3l11-next-off')
+      const [s1, s2] = PLACES[6].counting
+      page = await r.open(url(`/a7/${s1.id}`, { arrive: 0, poster: 'off' }))
+      await waitLesson(page, s1.title, 'row 23 b, place 7', LOAD_MS)
+      await sleep(800)
+      const on = await page.evaluate(nextLink)
+      r.check(`b) on ${s1.id}, no video, not watched: "Next lesson" is on and goes to ${s2.id}`, on?.disabled === 'false' && on?.href === `${APP}/a7/${s2.id}`, on)
+      r.values.shotNoVideoLesson = await r.shot(`no-video-lesson-${s1.id}`)
+      await click(page, () => [...document.querySelectorAll('a')].find((x) => !x.closest('main, nextjs-portal') && /Next lesson/.test(x.textContent ?? '')), null, { what: 'row 23 b: Next lesson' })
+      await waitLesson(page, s2.title, `row 23 b: ${s2.id}`)
+      await sleep(400)
+      const onToo = await page.evaluate(nextLink)
+      r.check(`b) it opens ${s2.id}, whose "Next lesson" is on as well (no video either)`, onToo?.disabled === 'false', onToo)
 
       // c) Places 1 to 6 done: Creative Strategy (no videos yet) is passed over, and still 0 done.
       page = await r.open(url('', { arrive: 0, poster: 'off' }))
@@ -2910,35 +2930,42 @@ try {
       const card8 = await page.evaluate(CARD, 7)
       r.check('c) the card waits there, at its lesson 1', card8?.title === NAMES[7] && card8?.watch === `Watch lesson 1, ${PLACES[7].counting[0].title}`, card8 ? { title: card8.title, watch: card8.watch } : null)
 
-      // d) Everything the app can finish is done: lesson 11 of Video Ads I is next, and the card says "Not recorded yet" where Watch was.
+      // d) Everything the app can finish is done: lesson 1 of Creative Strategy is next, and the card says "Not recorded yet" where Watch was.
       page = await r.open(url('', { arrive: 0, poster: 'off' }))
       await mark(page, counting.filter(finishable).map((l) => l.id), 'row 23 d')
       await ready(page, 'row 23 d')
       const placeD = await page.evaluate(() => window.__worldUi?.().place ?? null)
-      await scrollToPlace(page, 2, 'row 23 d')
+      await scrollToPlace(page, 6, 'row 23 d')
       await waitCard(page, 'row 23 d')
       const cardD = await page.evaluate(() => {
         const el = document.querySelector('main section[data-side][data-show]:not([aria-label="Place done"])')
         return el ? { text: (el.textContent ?? '').replace(/\s+/g, ' ').trim(), buttons: el.querySelectorAll('button').length } : null
       })
       r.check(
-        'd) everything that can be finished done: the card at Video Ads I names lesson 11, says "Not recorded yet" and has no button',
-        placeD === 2 && cardD?.buttons === 0 && /Not recorded yet/.test(cardD?.text ?? '') && (cardD?.text ?? '').includes(t11),
+        'd) everything that can be finished done: the card at Creative Strategy names lesson 1, says "Not recorded yet" and has no button',
+        placeD === 6 && cardD?.buttons === 0 && /Not recorded yet/.test(cardD?.text ?? '') && (cardD?.text ?? '').includes(s1.title),
         { place: placeD, card: cardD },
       )
-      r.values.shotCard = await r.shot('no-video-card-video-ads-i')
-      // Its panel: lesson 11 is the next row, and a next row with no video has no ▶ (the design file's "ready to watch").
-      await openPlace(page, 2, 'row 23 d')
+      r.values.shotCard = await r.shot('no-video-card-creative-strategy')
+      // Its panel: lesson 1 is the next row, and a next row with no video has no ▶ (the design file's "ready to watch").
+      await openPlace(page, 6, 'row 23 d')
       const pd = await readPanel(page, 'row 23 d')
-      const d11 = pd.rows.find((x) => x.n === 11)
+      const d1 = pd.rows.find((x) => x.n === 1)
       r.check(
-        'd) its panel: row 11 is the next row, highlighted, with no ▶ and "Not recorded yet" under its title, and no row has Watch',
-        !!d11 && d11.kind === 'unrecorded' && d11.highlit && d11.m !== 'n' && d11.tail === 'Not recorded yet' && !pd.rows.some((x) => x.kind === 'next'),
-        d11 ?? null,
+        'd) its panel: row 1 is the next row, highlighted, with no ▶ and "Not recorded yet" under its title, and no row has Watch',
+        !!d1 && d1.kind === 'unrecorded' && d1.highlit && d1.m !== 'n' && d1.tail === 'Not recorded yet' && !pd.rows.some((x) => x.kind === 'next'),
+        d1 ?? null,
+      )
+      // The rows after the next row, in the student's own place, are marked by look alone (e checked it on a3l11's row until it got its video).
+      const afterD = pd.rows.filter((x) => x.n > 1)
+      r.check(
+        'd) rows 2 to 18, after the next row, are quiet, with no words and no length, each named "not recorded yet"',
+        afterD.length === COUNTING[6] - 1 && afterD.every((x) => x.kind === 'unrecorded' && x.quiet && x.tail === ''),
+        { rows: afterD.length, quiet: afterD.filter((x) => x.quiet).length, withWords: afterD.filter((x) => x.tail !== '').map((x) => `${x.n}: ${x.tail}`) },
       )
       r.values.shotNextRow = await r.shot('no-video-panel-next-row')
 
-      // e) Video Ads I's lessons 1 to 5 watched: row 11 comes after the next row and is marked by look alone. Creative
+      // e) Video Ads I's lessons 1 to 5 watched: row 11 comes after the next row as any lesson with a video does. Creative
       //    Strategy, where no lesson has a video, says so once, under its count line, and on no row.
       page = await r.open(url('', { arrive: 0, poster: 'off' }))
       await mark(page, [...every(0), ...every(1), ...every(2).slice(0, 5)], 'row 23 e')
@@ -2947,8 +2974,8 @@ try {
       const pe = await readPanel(page, 'row 23 e')
       const e11 = pe.rows.find((x) => x.n === 11)
       r.check(
-        'e) lessons 1 to 5 watched: row 11, after the next row (6), is quiet, with no words and no length, its name still saying "not recorded yet"; the line under the count says "1 lesson not recorded yet"',
-        !!e11 && e11.kind === 'unrecorded' && e11.quiet && e11.tail === '' && pe.rows.find((x) => x.n === 6)?.kind === 'next' && pe.note === '1 lesson not recorded yet',
+        `e) lessons 1 to 5 watched: row 11, after the next row (6), is a plain row with its length (${min11}), its title not quiet and its name not saying "not recorded yet"; no line under the count`,
+        !!e11 && e11.kind === 'todo' && !e11.quiet && e11.tail === min11 && pe.rows.find((x) => x.n === 6)?.kind === 'next' && pe.note === null,
         { row11: e11 ?? null, note: pe.note },
       )
       await closePlace(page, 'row 23 e')

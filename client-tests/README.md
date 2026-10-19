@@ -74,8 +74,11 @@ gate's copy: unset, closed, closed with the student listed, closed with
 someone else listed. The callback's door is checked in the source;
 `streak.test.mjs` runs the callback itself with the app open.
 
-`discount-september.test.mjs` (T-080, 2026-10-17) runs a September joiner's
-week through the backfill, the webhook and the request route on a calendar it
+`discount-september.test.mjs` (T-080, 2026-10-17) runs the week of a student
+who first paid in early October (from 1 October until the launch; the group
+began on 9 September until Lovro moved it on 2026-10-19, hence the name, and a
+September payment is now refused there too) through the backfill, the
+webhook and the request route on a calendar it
 sets itself: `at(iso, fn)` swaps the global `Date` for one whose `new Date()`
 and `Date.now()` answer that moment, for the length of `fn`, so the stand-in
 database stamps a completion (its `now()` default) and the route judges at the

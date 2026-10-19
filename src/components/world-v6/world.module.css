@@ -3117,3 +3117,25 @@
 .cpRow[data-cp="closed"] .cpRowGlyph {
   color: var(--color-ink-3);
 }
+
+/* Apply to Ad Bounties (Lovro's preview review, 2026-10-19), under the
+   panel's lesson: the 30%'s Apply as it looks when it can be pressed, on the
+   map's panel and the phone's sheet. It is a link (the program's sign-up page,
+   in a new tab), and `.root button` gives a button its font, so it takes the
+   same font here (the panel's 16 px regular, which the 30%'s Apply renders
+   in) and no underline. */
+.root .btApply {
+  margin-top: 16px;
+  font: inherit;
+  text-decoration: none;
+}
+
+/* "It gets a bit faded" (the same review). The panel's bottom fade is for a
+   list that scrolls, and it is 28 px tall, so over this short panel it fell
+   on the last thing in it at rest: "Not recorded yet" reached 84% of its ink,
+   and it would lay a dark band over the Apply's lower 12 px (as it does on the
+   30%'s). Here it fades the 16 px of bottom padding only: nothing at rest is
+   faded, and a panel too tall for its frame still fades as it scrolls. */
+.btPanel .panelInner {
+  mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent);
+}

@@ -15,7 +15,7 @@
  * THE HEADER'S CHIP KEEPS M7's RULE (`header`): it shows only while the offer
  * is open to the student (locked, ready) or their application is in (in
  * review, approved). Applied, rejected, the student's deadline passed, a first
- * payment before 9 September, or no first payment on record: no chip, so a
+ * payment before 1 October, or no first payment on record: no chip, so a
  * student never carries a dead offer in the header for good (the fix round of
  * 2026-10-16; Lovro's words were about the hut and the timeline's dot line,
  * not the header).
@@ -30,7 +30,7 @@
  *   applied       "Yours".
  *   rejected      "Not approved".
  *   expired       "Closed": the student's deadline passed with no application.
- *   not eligible  "Closed": a first payment before 9 September. "Not open yet" when
+ *   not eligible  "Closed": a first payment before 1 October. "Not open yet" when
  *                 the course has no gate. "Ask the team" with no first payment
  *                 on record, in the open (locked) look: it may be a new student
  *                 whose payment has not reached the app, and the panel asks

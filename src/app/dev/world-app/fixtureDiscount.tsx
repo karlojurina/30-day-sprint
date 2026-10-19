@@ -26,9 +26,13 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *                            (never before the launch: until 2026-10-29 the
  *                            payment is the day after it and this student's
  *                            clock runs on to day 20)
- *   ?discount=before-launch  first payment on 2026-09-05, before 9 September,
+ *   ?discount=before-launch  first payment on 2026-09-05, before 1 October,
  *                            the earliest first payment that can earn it
- *   ?discount=september      first payment on 2026-09-15, after 9 September
+ *   ?discount=september      first payment on 2026-09-15. It had the shared
+ *                            deadline while the first date was 9 September;
+ *                            since Lovro moved it to 1 October (2026-10-19)
+ *                            the offer is closed to it: "Closed", no Apply
+ *   ?discount=october        first payment on 2026-10-02, after 1 October
  *                            and before the launch, so the deadline is the
  *                            shared one, the end of 23 October (discount.ts);
  *                            videos as ?p= has them. This student's clock is
@@ -37,14 +41,14 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *                            "5 days left" and, in Croatia, "Apply by Fri 23
  *                            Oct, 23:59" (the hour is the browser's own time
  *                            zone: 17:59 in New York, Sat 24 Oct in Manila)
- *   ?discount=september-expired  the same student on 24 October, 10:00 in
+ *   ?discount=october-expired  the same student on 24 October, 10:00 in
  *                            Croatia: the shared deadline has passed
- *   ?discount=september-old-course  first payment on 2026-09-15, and the 30%
+ *   ?discount=october-old-course  first payment on 2026-10-02, and the 30%
  *                            already got on the old dashboard (a request of
- *                            25 September, applied): the map shows it as
+ *                            6 October, applied): the map shows it as
  *                            theirs, with no Apply (discount.ts
  *                            requestCounts); videos as ?p= has them
- *   ?discount=september-old-course-pending, september-old-course-approved
+ *   ?discount=october-old-course-pending, october-old-course-approved
  *                            the same student, that request still in review,
  *                            or approved: the map shows it with no Apply, in
  *                            words for an application made before the new
@@ -87,15 +91,16 @@ export type DiscountPreset =
   | "expired"
   | "before-launch"
   | "september"
-  | "september-expired"
-  | "september-old-course"
-  | "september-old-course-pending"
-  | "september-old-course-approved"
+  | "october"
+  | "october-expired"
+  | "october-old-course"
+  | "october-old-course-pending"
+  | "october-old-course-approved"
   | "no-payment";
 const PRESETS: readonly DiscountPreset[] = [
   "locked", "ready", "pending", "approved", "applied", "rejected", "expired",
-  "before-launch", "september", "september-expired", "september-old-course",
-  "september-old-course-pending", "september-old-course-approved", "no-payment",
+  "before-launch", "september", "october", "october-expired", "october-old-course",
+  "october-old-course-pending", "october-old-course-approved", "no-payment",
 ];
 /** The presets with an application in, and its status. Their student has watched every video the offer asks for. */
 const APPLIED: Partial<Record<DiscountPreset, DiscountRequestRow["status"]>> = {
@@ -112,22 +117,24 @@ const APPLY_MS = 600;
 const SEND_REFUSED = "Couldn't reach the server. Try again in a moment.";
 /** ?discount=rejected: the team's reason, as the admin's reject box would send it. */
 const FIXTURE_REJECTION = "Several of the videos were skipped through in under a minute.";
-/** ?discount=september and september-expired: a first payment between 9 September and the launch. */
+/** ?discount=september: a first payment in September, before 1 October, the first date since 2026-10-19. */
 const SEPTEMBER_PAID = "2026-09-15T10:00:00.000Z";
+/** ?discount=october and october-expired: a first payment between 1 October and the launch. */
+const OCTOBER_PAID = "2026-10-02T10:00:00.000Z";
 /** Their clocks: 19 October, 10:00 in Croatia (CEST, UTC+2), the morning the app reopens; and 24 October, 10:00. */
-const SEPTEMBER_CLOCK = Date.parse("2026-10-19T08:00:00.000Z");
-const SEPTEMBER_EXPIRED_CLOCK = Date.parse("2026-10-24T08:00:00.000Z");
-/** ?discount=september-old-course: that student's 30% from the old dashboard, on their membership since September. */
-const SEPTEMBER_OLD_REQUEST: DiscountRequestRow = {
+const OCTOBER_CLOCK = Date.parse("2026-10-19T08:00:00.000Z");
+const OCTOBER_EXPIRED_CLOCK = Date.parse("2026-10-24T08:00:00.000Z");
+/** ?discount=october-old-course: that student's 30% from the old dashboard, asked for on 6 October, before the launch. */
+const OCTOBER_OLD_REQUEST: DiscountRequestRow = {
   id: "fixture-old-course-request",
   status: "applied",
-  created_at: "2026-09-25T10:00:00.000Z",
+  created_at: "2026-10-06T10:00:00.000Z",
 };
 /** The presets with that old request, and its status. */
 const OLD_COURSE: Partial<Record<DiscountPreset, DiscountRequestRow["status"]>> = {
-  "september-old-course": "applied",
-  "september-old-course-pending": "pending",
-  "september-old-course-approved": "approved",
+  "october-old-course": "applied",
+  "october-old-course-pending": "pending",
+  "october-old-course-approved": "approved",
 };
 
 /** The six questions v29 seeded, as discount_feedback_questions rows. */
@@ -227,10 +234,10 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
   const now =
     preset === "expired" && expiredPaid + 20 * DAY_MS > boot
       ? expiredPaid + 20 * DAY_MS
-      : preset === "september"
-        ? SEPTEMBER_CLOCK
-        : preset === "september-expired"
-          ? SEPTEMBER_EXPIRED_CLOCK
+      : preset === "october"
+        ? OCTOBER_CLOCK
+        : preset === "october-expired"
+          ? OCTOBER_EXPIRED_CLOCK
           : undefined;
 
   const firstPaidAt = useMemo(() => {
@@ -247,11 +254,13 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
       case "before-launch":
         return "2026-09-05T10:00:00.000Z";
       case "september":
-      case "september-expired":
-      case "september-old-course":
-      case "september-old-course-pending":
-      case "september-old-course-approved":
         return SEPTEMBER_PAID;
+      case "october":
+      case "october-expired":
+      case "october-old-course":
+      case "october-old-course-pending":
+      case "october-old-course-approved":
+        return OCTOBER_PAID;
       case "no-payment":
         return null;
       default:
@@ -265,7 +274,7 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
     const status = preset === null ? undefined : APPLIED[preset];
     const old = preset === null ? undefined : OLD_COURSE[preset];
     const base: DiscountRequestRow[] = old
-      ? [{ ...SEPTEMBER_OLD_REQUEST, status: old }]
+      ? [{ ...OCTOBER_OLD_REQUEST, status: old }]
       : status
         ? [{ id: "fixture-request", status, created_at: at, rejection_reason: status === "rejected" ? FIXTURE_REJECTION : null }]
         : [];

@@ -23,12 +23,23 @@
  *
  * Making the crons read the switch for the built-ins would change which tasks
  * are made, so it is a change of its own.
+ *
+ * Turn on also waits while the template's saved conditions read something the
+ * live course does not have: a lesson or an area it does not have (an action
+ * item, for "shipped"), or, once the course is new, one of the three metrics
+ * that measure pace on the old 30-day plan. These are the conditions v104
+ * turned templates off for, held against the live course, so a template
+ * rewritten for it can go back on. On the new course "is not shipped" or "is
+ * not complete" on an old lesson or area is true for every student, so such
+ * a template would make a task for each of them, and the cron's auto-dismiss
+ * keeps reading its conditions after it is turned off again, so those tasks
+ * would stay open.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { triggers } from "./csm-triggers.ts";
 import { getCurriculumResetAt } from "./curriculum-reset.ts";
-import type { Template } from "./types-erased.ts";
+import type { Condition, Template, TriggerConfig } from "./types-erased.ts";
 
 /** The scenarios csm-events.ts makes tasks for, finding the template by scenario alone. */
 export const EVENT_HOOK_SCENARIOS: ReadonlySet<string> = new Set([
@@ -57,6 +68,12 @@ const BUILT_IN_RULES: ReadonlySet<string> = new Set(Object.keys(triggers));
 export interface LiveCourse {
   /** True once admin_config.curriculum_reset_at exists. */
   courseIsNew: boolean;
+  /** Every area id in `regions`. */
+  regions: ReadonlySet<string>;
+  /** Every lesson id in `lessons`. */
+  lessons: ReadonlySet<string>;
+  /** The lessons with an action item (requires_action). */
+  actionLessons: ReadonlySet<string>;
 }
 
 /** The page's read of the live course: the course, or why it could not be read. */
@@ -69,7 +86,72 @@ export interface LiveRead {
 export async function readLiveCourse(
   supabase: SupabaseClient,
 ): Promise<LiveCourse> {
-  return { courseIsNew: (await getCurriculumResetAt(supabase)) != null };
+  const [resetAt, regionsRes, lessonsRes] = await Promise.all([
+    getCurriculumResetAt(supabase),
+    supabase.from("regions").select("id"),
+    supabase.from("lessons").select("id, requires_action"),
+  ]);
+  if (regionsRes.error) {
+    throw new Error(`the areas could not be read: ${regionsRes.error.message}`);
+  }
+  if (lessonsRes.error) {
+    throw new Error(`the lessons could not be read: ${lessonsRes.error.message}`);
+  }
+  const regions = (regionsRes.data ?? []) as Array<{ id: string }>;
+  const lessons = (lessonsRes.data ?? []) as Array<{
+    id: string;
+    requires_action: boolean;
+  }>;
+  // An empty read would call every lesson and area "not in the course".
+  if (regions.length === 0 || lessons.length === 0) {
+    throw new Error("the areas or the lessons came back empty");
+  }
+  return {
+    courseIsNew: resetAt != null,
+    regions: new Set(regions.map((r) => r.id)),
+    lessons: new Set(lessons.map((l) => l.id)),
+    actionLessons: new Set(
+      lessons.filter((l) => l.requires_action).map((l) => l.id),
+    ),
+  };
+}
+
+/** The metrics that measure pace on the old course's 30-day plan; on the new course they never match. */
+const CLOCK_METRICS: ReadonlySet<string> = new Set([
+  "progress_ratio",
+  "progress_label",
+  "region_pace",
+]);
+
+function conditionsOf(config: TriggerConfig | null): Condition[] {
+  const all = config?.all;
+  return Array.isArray(all) ? all : [];
+}
+
+/** A condition that names a lesson or an area, or measures the old 30-day pace: v104's test. */
+function readsCourse(c: Condition): boolean {
+  return "lesson_id" in c || "region" in c || CLOCK_METRICS.has(c.metric);
+}
+
+/**
+ * The conditions of `config` that the live course cannot answer: a lesson or
+ * an area it does not have (for "shipped", a lesson with an action item), or
+ * a clock metric once the course is new.
+ */
+export function offCourseConditions(
+  config: TriggerConfig | null,
+  course: LiveCourse,
+): Condition[] {
+  return conditionsOf(config).filter(
+    (c) =>
+      (CLOCK_METRICS.has(c.metric) && course.courseIsNew) ||
+      ("region" in c && !course.regions.has(c.region)) ||
+      ("lesson_id" in c &&
+        !(c.metric === "lesson_shipped"
+          ? course.actionLessons
+          : course.lessons
+        ).has(c.lesson_id)),
+  );
 }
 
 /** What a template's row shows about on and off. */
@@ -115,16 +197,41 @@ export function onOffView(
     kind: "switch",
     on: false,
     line: "This template is off.",
-    turnOnWaits: turnOnWaits(dirty),
+    turnOnWaits: turnOnWaits(t, live, dirty),
   };
 }
 
 /** Why Turn on waits for a template that is off, or null when it can go on. */
-function turnOnWaits(dirty: boolean): string | null {
+function turnOnWaits(
+  t: Pick<Template, "trigger_config">,
+  live: LiveRead,
+  dirty: boolean,
+): string | null {
   // Turning a template on waits for its unsaved changes, so it never goes
   // live on the conditions being replaced.
   if (dirty) return "Save your changes first, then turn it on.";
-  return null;
+  // Nor on saved conditions that read a course that is not live.
+  if (!conditionsOf(t.trigger_config).some(readsCourse)) return null;
+  if (!live.course) {
+    return `The course could not be read, so this template cannot be turned on yet (${unread(live)}).`;
+  }
+  const off = offCourseConditions(t.trigger_config, live.course);
+  if (off.length === 0) return null;
+  const { lessons, courseIsNew } = live.course;
+  // "Shipped" on a lesson the course has, but with no action item, is never true.
+  if (
+    off.every(
+      (c) =>
+        "lesson_id" in c &&
+        c.metric === "lesson_shipped" &&
+        lessons.has(c.lesson_id),
+    )
+  ) {
+    return "This template asks whether a lesson with no action item was shipped, which is never true. Rewrite it, save, then turn it on.";
+  }
+  return courseIsNew
+    ? "This template's conditions still name the old course. Rewrite them, save, then turn it on."
+    : "This template's conditions name a lesson or area that is not in the course. Rewrite them, save, then turn it on.";
 }
 
 function unread(live: LiveRead): string {

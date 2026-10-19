@@ -6,6 +6,11 @@
 //   and on the old course noship.* and pace.*) whether their template is on or
 //   off, and csm-events.ts makes W2.2, W2.6 and X.1 by scenario alone. Turning
 //   one of those off read "Off" and changed nothing.
+//   Finding 2: Turn on waited only for unsaved changes, so a template the
+//   course switch (v104) turned off could go back on with conditions that
+//   still name the old course. On the new course "UGC Ad (l020) is not
+//   shipped" is true for every student, so the next run makes its task for
+//   each of them.
 //
 // No browser runs here (the repo has no DOM harness), so the fix is checked
 // on the real source in the ways that need none:
@@ -215,14 +220,13 @@ function templateSet(withConditions) {
   ]
 }
 
-/** The template ids check-csm-tasks' steps 1 and 2 would make tasks with. */
-function cronMakes(courseName, templates) {
+/** The tasks check-csm-tasks' steps 1 and 2 would make for `people` (by default the cohort above). */
+function cronMakes(courseName, templates, people = cohort(courseName), alerts = ALERTS) {
   const c = COURSES[courseName]
-  const people = cohort(courseName)
   const rows = cronSteps1And2(
     people.map((p) => p.student), c.lessons, templates, [],
     { data: people.filter((p) => p.login).map((p) => ({ student_id: p.student.id, first_sprint_login_at: p.login })) },
-    new Map(people.map((p) => [p.student.id, p.completions])), ALERTS,
+    new Map(people.map((p) => [p.student.id, p.completions])), alerts,
     { regionOrder: c.regionOrder, resetAt: c.resetAt },
     CSM.SCENARIO_BUCKET, CSM.alertTask, CSM.snapshotIsCanceling, CSM.buildStudentSnapshot, CSM.triggers,
     CSM.evaluateCustomTrigger)
@@ -445,6 +449,189 @@ console.log('\n=== Finding 1: the page reads the course and renders the row from
      'in the source, each row takes its view from onOffView: the header shows "Off" only where the switch works, and the open row renders TemplateOnOff wired to setActive')
   ok(!src.includes('turnOnWaits') && !/\{!t\.is_active && \(/.test(src),
      'and the page no longer decides on or off itself (admin-3\'s badge read !t.is_active on every row)')
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+console.log('\n=== Finding 2: the live course, as the page reads it ===')
+{
+  const n = LIVE.new.course, o = LIVE.old.course
+  ok(n.courseIsNew === true && n.regions.size === 8 && n.lessons.size === 141
+       && show([...n.actionLessons].sort()) === show([...NEW_ACTIONS].sort()),
+     'the new course: switched, its 8 areas, its 141 lessons and its action lessons', show([...n.actionLessons]))
+  ok(o.courseIsNew === false && show([...o.regions]) === show(['r1', 'r2', 'r3', 'r4']) && o.lessons.size === 65
+       && show([...o.actionLessons].sort()) === show(['l018', 'l020', 'l022', 'l024', 'l049']),
+     'the old course: not switched, r1 to r4, its 65 lessons and its 5 action lessons')
+  for (const [table, words] of [['regions', 'the areas could not be read: '], ['lessons', 'the lessons could not be read: '],
+    ['admin_config', 'admin_config.curriculum_reset_at could not be read: ']]) {
+    const db = courseDb('new')
+    db.fail[`${table}.select`] = { message: 'permission denied' }
+    const said = await ONOFF.readLiveCourse(fakeClient(db)).then(() => null, (e) => e.message)
+    ok(said === `${words}permission denied`, `a failed read of ${table} throws, with what failed`, said)
+  }
+  const empty = courseDb('new')
+  empty.tables.regions = []
+  const said = await ONOFF.readLiveCourse(fakeClient(empty)).then(() => null, (e) => e.message)
+  ok(said === 'the areas or the lessons came back empty',
+     'an empty read throws too, so no lesson or area is called "not in the course" by mistake', said)
+}
+
+/** Why Turn on waits for an off template with these conditions (null: it can go on). */
+const waitsFor = (all, live, scenario_id = 'C-a1b2c3') => {
+  const v = ONOFF.onOffView({ scenario_id, is_active: false, trigger_config: { all } }, live, false)
+  return v.kind === 'switch' ? v.turnOnWaits : `(no switch: ${v.line})`
+}
+const OLD_COURSE_WORDS = 'This template\'s conditions still name the old course. Rewrite them, save, then turn it on.'
+const NOT_IN_COURSE_WORDS = 'This template\'s conditions name a lesson or area that is not in the course. Rewrite them, save, then turn it on.'
+
+console.log('\n=== Finding 2: what an old-course condition does on the new course, in the real evaluator and the cron ===')
+// Three students on the new course: one finished area 1 and shipped its
+// action item (a1l05), one watched 2 lessons, one did nothing yet.
+const THREE = (() => {
+  const people = [
+    student('finished-a1', 9, NEW_LESSONS.filter((l) => l.region_id === 'a1').map((l) => l.id)),
+    student('two-lessons', 6, ['a1l01', 'a1l02']),
+    student('nothing-yet', 4),
+  ]
+  people[0].completions.find((c) => c.lesson_id === 'a1l05').action_completed_at = iso(NOW - DAY)
+  return people
+})()
+const NEW_TOTALS = {}
+for (const l of NEW_LESSONS) NEW_TOTALS[l.region_id] = (NEW_TOTALS[l.region_id] ?? 0) + 1
+const newSnaps = () => THREE.map((p) => CSM.buildStudentSnapshot(p.student, p.completions, NEW_LESSONS, NEW_TOTALS, [],
+  { first_sprint_login_at: p.login }, { regionOrder: COURSES.new.regionOrder, resetAt: RESET_AT }))
+const matching = (c) => newSnaps().filter((s) => CSM.evaluateCustomTrigger(s, { all: [c] }).match).map((s) => s.student.id)
+{
+  // As v104 found them: conditions on the old course's lessons, areas and 30-day pace.
+  const asV104Found = [
+    { metric: 'lesson_shipped', lesson_id: 'l020', op: 'is_not' },
+    { metric: 'lesson_watched', lesson_id: 'l018', op: 'is_not' },
+    { metric: 'region_complete', region: 'r1', op: 'is_not' },
+    { metric: 'region_completion_pct', region: 'r2', op: 'less_than', value: 50 },
+    { metric: 'region_lessons_watched', region: 'r1', op: 'at_most', value: 3 },
+    { metric: 'lesson_shipped', lesson_id: 'l020', op: 'is' },
+    { metric: 'region_complete', region: 'r1', op: 'is' },
+    { metric: 'progress_ratio', op: 'less_than', value: 0.5 },
+    { metric: 'progress_label', op: 'is', value: 'behind' },
+    { metric: 'region_pace', op: 'is', value: 'behind' },
+  ]
+  const told = asV104Found.map((c) => ({ c, matches: matching(c).length, waits: waitsFor([c], LIVE.new) }))
+  ok(told.every((x) => x.matches === 0 || x.matches === THREE.length),
+     'on the new course each of them matches all 3 students or none: the real evaluator cannot tell them apart',
+     told.map((x) => `${x.c.metric} ${x.c.lesson_id ?? x.c.region ?? x.c.value} ${x.c.op}: ${x.matches}/3`).join(', '))
+  ok(told.every((x) => x.waits === OLD_COURSE_WORDS),
+     'and the page will not turn on a template holding any of them, and says why', told.find((x) => x.waits !== OLD_COURSE_WORDS)?.waits ?? OLD_COURSE_WORDS)
+  // A lesson of the new course with no action item: "shipped" is never true
+  // for it (the editor never offers one; only data written by hand can hold it).
+  const noItem = { metric: 'lesson_shipped', lesson_id: 'a1l01', op: 'is_not' }
+  ok(matching(noItem).length === THREE.length && waitsFor([noItem], LIVE.new)
+       === 'This template asks whether a lesson with no action item was shipped, which is never true. Rewrite it, save, then turn it on.',
+     '"a1l01 is not shipped" (a lesson with no action item) also matches all 3, and Turn on waits with its own line', waitsFor([noItem], LIVE.new))
+  const rewritten = [
+    { metric: 'lesson_shipped', lesson_id: 'a1l05', op: 'is_not' },
+    { metric: 'region_complete', region: 'a1', op: 'is_not' },
+    { metric: 'lesson_watched', lesson_id: 'a1l01', op: 'is' },
+    { metric: 'region_completion_pct', region: 'a1', op: 'less_than', value: 50 },
+  ]
+  const fresh = rewritten.map((c) => ({ c, who: matching(c), waits: waitsFor([c], LIVE.new) }))
+  ok(fresh.every((x) => x.who.length > 0 && x.who.length < THREE.length && x.waits === null),
+     'rewritten on the new course\'s lessons and areas, each tells the students apart, and Turn on is free',
+     fresh.map((x) => `${x.c.lesson_id ?? x.c.region}: ${x.who.join('+')}`).join(', '))
+}
+{
+  // The founder's case: a custom at_risk template v104 turned off, "UGC Ad (l020) is not shipped", turned on.
+  const tpl = (scenario_id, cond) => ({ id: `tpl-${scenario_id}`, scenario_id, bucket: 'at_risk', is_custom: true,
+    is_active: true, is_admin_only: false, trigger_config: { all: [cond] } })
+  const studentsWith = (rows, scenario) => [...new Set(rows.filter((r) => r.scenario_id === scenario).map((r) => r.student_id))].sort()
+  const old = studentsWith(cronMakes('new', [tpl('C-old020', { metric: 'lesson_shipped', lesson_id: 'l020', op: 'is_not' })], THREE, []), 'C-old020')
+  ok(show(old) === show(['finished-a1', 'nothing-yet', 'two-lessons']),
+     'turned on, check-csm-tasks (steps 1 and 2, lifted from the route) would make that task for every student, the one who shipped included', show(old))
+  const fixed = studentsWith(cronMakes('new', [tpl('C-new105', { metric: 'lesson_shipped', lesson_id: 'a1l05', op: 'is_not' })], THREE, []), 'C-new105')
+  ok(show(fixed) === show(['nothing-yet', 'two-lessons']),
+     'rewritten to the new course\'s action item a1l05, it would make it only for the two who have not shipped', show(fixed))
+  ok(waitsFor([{ metric: 'lesson_shipped', lesson_id: 'l020', op: 'is_not' }], LIVE.new) === OLD_COURSE_WORDS
+       && waitsFor([{ metric: 'lesson_shipped', lesson_id: 'a1l05', op: 'is_not' }], LIVE.new) === null,
+     'so the page refuses the first and lets the second go on')
+  // The cron's auto-dismiss reads conditions from every template, on or off.
+  ok(/const templateByScenario = new Map\(templates\.map\(\(t\) => \[t\.scenario_id, t\]\)\);/.test(csmRoute),
+     'and turning it off again would leave those tasks open: the route\'s auto-dismiss (3c) reads the conditions of templates that are off too')
+}
+
+console.log('\n=== Finding 2: Turn on waits while the saved conditions read a course that is not live ===')
+{
+  const cases = [
+    ['the 30-day pace on the new course', [{ metric: 'region_pace', op: 'is', value: 'ahead' }], LIVE.new, OLD_COURSE_WORDS],
+    ['one old condition among good ones', [{ metric: 'day_number', op: 'at_least', value: 3 },
+      { metric: 'lesson_watched', lesson_id: 'l049', op: 'is' }], LIVE.new, OLD_COURSE_WORDS],
+    ['an area with no id', [{ metric: 'region_complete', region: null, op: 'is_not' }], LIVE.new, OLD_COURSE_WORDS],
+    ['conditions with no lesson, area or pace', [{ metric: 'days_since_last_completion', op: 'at_least', value: 5 },
+      { metric: 'has_logged_into_app', op: 'is' }, { metric: 'is_canceling', op: 'is_not' },
+      { metric: 'membership_status', op: 'is', value: 'active' }, { metric: 'total_lessons_watched', op: 'at_most', value: 2 }],
+      LIVE.new, null],
+    ['no conditions at all', [], LIVE.new, null],
+    ['the old course: its own lessons, areas and pace', [{ metric: 'lesson_shipped', lesson_id: 'l020', op: 'is_not' },
+      { metric: 'region_complete', region: 'r1', op: 'is' }, { metric: 'progress_label', op: 'is', value: 'behind' }], LIVE.old, null],
+    ['the old course: a lesson of the new one', [{ metric: 'lesson_shipped', lesson_id: 'a1l05', op: 'is_not' }], LIVE.old, NOT_IN_COURSE_WORDS],
+    ['the course unread, conditions that need it', [{ metric: 'region_complete', region: 'a1', op: 'is' }], LIVE.unread,
+      `The course could not be read, so this template cannot be turned on yet (${UNREAD}).`],
+    ['the course unread, conditions that do not', [{ metric: 'day_number', op: 'at_least', value: 3 }], LIVE.unread, null],
+  ]
+  for (const [label, all, live, want] of cases) {
+    const got = waitsFor(all, live)
+    ok(got === want, `${label}: ${want === null ? 'Turn on is free' : 'Turn on waits'}`, got ?? 'free')
+  }
+  const old = [{ metric: 'lesson_shipped', lesson_id: 'l020', op: 'is_not' }]
+  const dirty = ONOFF.onOffView({ scenario_id: 'C-a1b2c3', is_active: false, trigger_config: { all: old } }, LIVE.new, true)
+  ok(dirty.turnOnWaits === 'Save your changes first, then turn it on.', 'unsaved changes still come first: the saved conditions are being replaced')
+  const on = ONOFF.onOffView({ scenario_id: 'C-a1b2c3', is_active: true, trigger_config: { all: old } }, LIVE.new, false)
+  ok(on.kind === 'switch' && on.on && on.turnOnWaits === null, 'a template that is on can always be turned off')
+  ok(waitsFor(old, LIVE.new, 'noship.r1.day7') === OLD_COURSE_WORDS && waitsFor(old, LIVE.new, 'stalled.whop.day5') === OLD_COURSE_WORDS,
+     'built-ins whose switch works wait the same way (noship.r1.day7 on the new course, stalled.whop.day5)')
+}
+
+console.log('\n=== Finding 2: v104\'s test, held against the live course ===')
+{
+  // Every metric, with the lessons and areas of both courses, ids no course
+  // has, and none. v104 turned off a template when a condition named a lesson
+  // or an area, or measured the 30-day pace.
+  const lessonIds = ['l001', 'l018', 'l020', 'l022', 'l024', 'l049', 'l078', 'a1l01', 'a1l05', 'a2l07', 'a8l16', 'l999', '', null]
+  const regionIds = ['r1', 'r2', 'r3', 'r4', 'a1', 'a4', 'a8', 'r9', '', null]
+  const all = []
+  for (const metric of ['lesson_shipped', 'lesson_watched']) for (const lesson_id of lessonIds) for (const op of ['is', 'is_not']) all.push({ metric, lesson_id, op })
+  for (const region of regionIds) {
+    for (const op of ['is', 'is_not']) all.push({ metric: 'region_complete', region, op })
+    for (const metric of ['region_lessons_watched', 'region_completion_pct']) all.push({ metric, region, op: 'at_least', value: 1 })
+  }
+  for (const metric of ['day_number', 'total_lessons_watched', 'days_since_last_completion', 'days_since_last_login', 'progress_ratio'])
+    all.push({ metric, op: 'at_least', value: 1 })
+  for (const metric of ['progress_label', 'region_pace']) all.push({ metric, op: 'is', value: 'behind' })
+  for (const metric of ['has_logged_into_app', 'is_canceling']) all.push({ metric, op: 'is' })
+  all.push({ metric: 'membership_status', op: 'is', value: 'active' })
+  const v104 = (c) => 'lesson_id' in c || 'region' in c || ['progress_ratio', 'progress_label', 'region_pace'].includes(c.metric)
+  const wrong = []
+  for (const name of ['old', 'new']) {
+    const course = LIVE[name].course
+    for (const c of all) {
+      const waits = waitsFor([c], LIVE[name]) !== null
+      const known = 'region' in c ? course.regions.has(c.region)
+        : 'lesson_id' in c ? (c.metric === 'lesson_shipped' ? course.actionLessons : course.lessons).has(c.lesson_id)
+          : !(course.courseIsNew && v104(c))
+      if (waits && !v104(c)) wrong.push(`${name}: waits on ${show(c)}, which v104 left on`)
+      if (waits === known) wrong.push(`${name}: ${show(c)} ${waits ? 'waits' : 'is free'}`)
+    }
+  }
+  ok(wrong.length === 0,
+     `${all.length} conditions on each course: Turn on waits exactly for those v104 would turn off whose lesson or area the live course does not have, or whose pace it does not keep`,
+     wrong.slice(0, 6).join('; '))
+}
+
+console.log('\n=== Finding 2: the row, rendered ===')
+{
+  const view = ONOFF.onOffView({ scenario_id: 'C-a1b2c3', is_active: false,
+    trigger_config: { all: [{ metric: 'lesson_shipped', lesson_id: 'l020', op: 'is_not' }] } }, LIVE.new, false)
+  const html = renderToString(TemplateOnOff({ view, canEdit: true, busy: false, onToggle: () => {} }))
+  ok(/<button type="button" disabled=""[^>]*>Turn on<\/button>/.test(html)
+       && html.includes(OLD_COURSE_WORDS.replace(/'/g, '&#x27;')) && html.includes('This template is off.'),
+     'an off template on l020 renders "This template is off.", Turn on not pressable, and the line beside it', html)
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

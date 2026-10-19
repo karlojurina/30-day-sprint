@@ -4581,7 +4581,8 @@ console.log('\n=== 29. v108: only the server calls increment_region_quiz_attempt
     const fnState = async (dd = d) => asJson((await dd.query(`select p.proacl::text as acl, pg_get_functiondef(p.oid) as def,
         obj_description(p.oid, 'pg_proc') as comment, pg_get_userbyid(p.proowner)::text as owner
       from pg_proc p where p.oid = to_regprocedure('${FN}')`)).rows)
-    const shape = async () => { const s = JSON.parse(await fnState()); return asJson(s.map(({ acl, ...rest }) => rest)) }
+    // Everything but the ACL: what v108 must leave as it was.
+    const shape = async () => asJson(JSON.parse(await fnState()).map(x => Object.fromEntries(Object.entries(x).filter(([k]) => k !== 'acl'))))
     const aclOf = async () => {
       const s = JSON.parse(await fnState())
       return s.length === 0 ? 'no function' : s[0].acl ?? 'null (the default grant to public)'

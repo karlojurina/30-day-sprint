@@ -356,7 +356,18 @@ export function PacePill({
 
 /* ─── Buttons ─── */
 
-type ButtonVariant = "primary" | "ghost" | "danger" | "subtle";
+/**
+ * "ink" and "raised" are the dark look's (admin-tokens.module.css; admin
+ * rebuild PRD, call C15):
+ *   - ink: the kit's ink button on a dark ground, Stalactite fill and a
+ *     Gunpowder label. The one primary action of a screen; the sign-in pages
+ *     use it. Its colours are fixed, so it belongs on the dark ground only.
+ *   - raised: a row action, a pill on the raised surface with a hairline.
+ * "primary" and "danger" keep their fixed white label, which measures about
+ * 2:1 on Airy Blue and 3.4:1 on the dark red, so inside the token class a
+ * page uses ink or raised instead.
+ */
+type ButtonVariant = "primary" | "ghost" | "danger" | "subtle" | "ink" | "raised";
 type ButtonSize = "sm" | "md";
 
 function buttonStyle(
@@ -401,6 +412,26 @@ function buttonStyle(
       background: "var(--color-bg-elevated)",
       color: "var(--color-text-primary)",
       border: "1px solid var(--color-border)",
+    };
+  }
+  if (variant === "ink") {
+    // The kit's tap target (44px) and button radius (12px).
+    return {
+      ...base,
+      background: "#F7F6F3",
+      color: "#18181A",
+      borderRadius: "var(--radius-control)",
+      minHeight: 44,
+      justifyContent: "center",
+    };
+  }
+  if (variant === "raised") {
+    return {
+      ...base,
+      background: "var(--color-bg-elevated)",
+      color: "var(--color-text-primary)",
+      border: "1px solid var(--color-border)",
+      borderRadius: "var(--radius-pill)",
     };
   }
   // ghost

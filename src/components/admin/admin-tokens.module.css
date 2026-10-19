@@ -1,0 +1,140 @@
+/*
+ * The admin's dark look, as one class (admin rebuild PRD, section 9, call C1).
+ *
+ * The values are the brand kit's dark theme: the page Gunpowder #18181A,
+ * surfaces #212124 and #2A2A2E, #333337 pressed, text Stalactite #F7F6F3 at
+ * 92% and 58%, hairlines at 10% and 20%, Airy Blue for links and the selected
+ * state, and the kit's four status colours. 38% is for disabled controls only:
+ * it measures 3.4:1 on the page, so readable words sit at 58% (6.2:1).
+ *
+ * Who carries it: the top bar's own header (AdminTopNav.tsx), the <main> of
+ * the rebuilt pages (Today and 30% off, chosen in (authenticated)/layout.tsx),
+ * the inner wrapper of the two sign-in pages, and the dev pages under
+ * /dev/admin. The other admin pages keep the light look of .admin-shell.
+ *
+ * Always on an element INSIDE .admin-shell, never on the same element.
+ * .admin-shell (globals.css, which is never edited) sets the same variables
+ * for the light look. This selector is wrapped in :where() so it weighs
+ * nothing, the pattern of world-v6/tokens.module.css: on a shared element the
+ * .admin-shell rule would win, while on a child the child's own declarations
+ * beat what it inherits, whatever their weight. .admin-shell has to stay on
+ * the page because it is what turns off the student side's paper grain
+ * (body:has(.admin-shell)::before in globals.css).
+ */
+
+:where(.tokens) {
+  --color-bg-primary: #18181a;
+  --color-bg-card: #212124;
+  --color-bg-elevated: #2a2a2e;
+  --color-fill-secondary: #333337;
+
+  --color-text-primary: rgba(247, 246, 243, 0.92);
+  --color-text-secondary: rgba(247, 246, 243, 0.58);
+  --color-text-tertiary: rgba(247, 246, 243, 0.58);
+  --color-text-disabled: rgba(247, 246, 243, 0.38);
+
+  --color-border: rgba(247, 246, 243, 0.1);
+  --color-border-strong: rgba(247, 246, 243, 0.2);
+
+  --color-accent-dark: #93b7d5;
+  --color-accent-glow: rgba(147, 183, 213, 0.16);
+
+  --color-danger: #ff453a;
+  --color-warning: #ff9f0a;
+  --color-success: #30d158;
+  --color-neutral: #98989d;
+
+  --radius-chip: 8px;
+  --radius-control: 12px;
+  --radius-card: 16px;
+  --radius-sheet: 20px;
+  --radius-pill: 999px;
+
+  /* The kit's motion: 150ms for hover and press, on the plain ease. The
+     same values the root already holds, kept here so the scope carries
+     every variable the admin's pieces read. */
+  --ease-default: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --duration-quick: 150ms;
+
+  /* The kit's app font: the system face first, Inter (already loaded by the
+     root layout as --font-inter) behind it. Nothing new is downloaded. */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    var(--font-inter), "Helvetica Neue", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+
+  /* Every carrier stands on the page ground, so text that names no colour
+     reads light on dark instead of inheriting .admin-shell's dark ink. */
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+/*
+ * The rules globals.css fixes for the light look under .admin-shell, restyled
+ * for the dark look. Each selector here is one class heavier than the light
+ * rule it replaces (.admin-shell .pill-tone-success is two classes, this is
+ * three; the :hover rule is three plus a pseudo-class, this is four), so it
+ * wins in whatever order the stylesheets load. .list-row and .section-label
+ * read var(--color-border) and var(--color-text-secondary), so they follow
+ * the tokens above with no rule here.
+ */
+
+/* Pills: a 16% tint of the status colour, a dot of it, and the words.
+   The words are the status colour where that measures at least 4.5:1 on the
+   page, a card and a raised surface (success 5.2, warning 5.1, accent 4.9 at
+   the lowest). Red and grey on their own tint measure under 4.5:1 (danger
+   3.9 on a card, neutral 4.3), so their words use the readable text levels
+   (danger at 92%: 9.7 at the lowest; neutral at 58%: 4.6) and the dot and
+   the tint carry the colour. Status is never colour alone: the dot and the
+   word go with it. */
+:global(.admin-shell) .tokens :global(.pill-tone) {
+  border-color: transparent;
+}
+
+:global(.admin-shell) .tokens :global(.pill-tone)::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--pill-status, currentColor);
+}
+
+:global(.admin-shell) .tokens :global(.pill-tone-success) {
+  --pill-status: var(--color-success);
+  background: rgba(48, 209, 88, 0.16);
+  color: var(--color-success);
+}
+
+:global(.admin-shell) .tokens :global(.pill-tone-warning) {
+  --pill-status: var(--color-warning);
+  background: rgba(255, 159, 10, 0.16);
+  color: var(--color-warning);
+}
+
+:global(.admin-shell) .tokens :global(.pill-tone-danger) {
+  --pill-status: var(--color-danger);
+  background: rgba(255, 69, 58, 0.16);
+  color: var(--color-text-primary);
+}
+
+:global(.admin-shell) .tokens :global(.pill-tone-accent) {
+  --pill-status: var(--color-accent-dark);
+  background: rgba(147, 183, 213, 0.16);
+  color: var(--color-accent-dark);
+}
+
+:global(.admin-shell) .tokens :global(.pill-tone-neutral) {
+  --pill-status: var(--color-neutral);
+  background: rgba(152, 152, 157, 0.16);
+  color: var(--color-text-secondary);
+}
+
+/* Surfaces: the kit's dark card is a surface with a 1px hairline. No
+   shadows: depth comes from the surface steps. */
+:global(.admin-shell) .tokens :global(.surface-resting),
+:global(.admin-shell) .tokens :global(.surface-hover),
+:global(.admin-shell) .tokens :global(.surface-resting):hover,
+:global(.admin-shell) .tokens :global(.surface-elevated) {
+  border: 1px solid var(--color-border);
+  box-shadow: none;
+}

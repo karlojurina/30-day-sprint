@@ -9,7 +9,8 @@
  * The pretend student of FixtureStudentProvider.tsx (?p=mid), no login, no
  * server call. Headless Chrome on the real GPU. The context is taken away with
  * WEBGL_lose_context.loseContext() on the scene's own context, as Chrome does
- * after repeated GPU resets, and given back (restoreContext) only in row 2.
+ * after repeated GPU resets, and given back (restoreContext) only in rows 2
+ * to 4.
  *
  * WHAT WAS WRONG. scene.ts set contextLost and its frame loop stopped for
  * good: nothing switched to the still views, so the map froze on its last
@@ -35,6 +36,20 @@
  *      draws frames.
  *   2  control, 1440x900: the context lost and given back after 1 s. At 4.5 s
  *      no still views, the canvas shown, and a scroll draws 3D frames.
+ *
+ * A context given back after the 3 s (2026-10-20 review: a GPU process that
+ * restarts after a driver reset can take longer) used to leave the still
+ * views and the no-WebGL notice up until a reload, with no "Try" button.
+ * Since then it takes them off, and the 3 s count only while the tab is
+ * visible (a background tab's context may wait for the tab):
+ *   3  1440x900: the context lost, the still views up at 4 s, then given
+ *      back: the still views go (the layer hidden, the canvas shown, no
+ *      notice), not as a "Try 3D anyway" (the scene's `trying` stays false),
+ *      and a scroll draws 3D frames with draw calls on the context.
+ *   4  1440x900: the tab in the background (document.hidden, as the scene
+ *      reads it) when the context is lost: no still views after 4.5 s. Back
+ *      in front: none 1 s later, the still views at 4 s; given back then,
+ *      they go and the 3D draws.
  * After the rows, one MEASURED line: requests to /api, requests to Supabase
  * and page errors over every page the run opened (all three must be 0).
  * Exit code 1 on any FAIL. Pictures for a person, in
@@ -99,7 +114,7 @@ const STATE = (notice) => {
   const note = [...document.querySelectorAll('main p[role="status"]')].find((e) => e.textContent.includes(notice)) ?? null
   const panel = document.querySelector('main section[aria-labelledby="v4-panel-title"]')
   return {
-    poster: p ? { on: p.on, kind: p.kind, headless: p.headless, layerShown: p.layerShown, shown: p.shown.filter((s) => s.opacity > 0).map((s) => `${s.id}:${s.opacity.toFixed(2)}`) } : null,
+    poster: p ? { on: p.on, kind: p.kind, headless: p.headless, trying: p.trying, layerShown: p.layerShown, shown: p.shown.filter((s) => s.opacity > 0).map((s) => `${s.id}:${s.opacity.toFixed(2)}`) } : null,
     notice: !!note,
     tryButton: !!note?.querySelector('button'),
     canvas: gl ? getComputedStyle(gl).visibility : null,
@@ -188,6 +203,38 @@ async function scrollAndFollow(page, dy) {
   await sleep(1800)
   const after = await page.evaluate(() => ({ frames: window.__worldFrameCount, depth: window.__worldDepth, want: window.__worldV6Debug?.scrollDepth?.() ?? null }))
   return { before, after }
+}
+
+/**
+ * The tab to the background (true) or back in front (false), as the page reads
+ * it: document.hidden and visibilityState, then the visibilitychange event.
+ * Headless Chrome keeps its one tab visible, so the two are set on the page.
+ */
+const HIDE = (hidden) => {
+  if (hidden) {
+    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+  } else {
+    delete document.hidden
+    delete document.visibilityState
+  }
+  document.dispatchEvent(new Event('visibilitychange'))
+  return document.hidden
+}
+
+/** The 3D after the context came back: the still views gone, the canvas shown, and a scroll that draws with draw calls. */
+async function threeDrawsAgain(r, page, at) {
+  // The posters fade out once the 3D has drawn 3 frames (WorldV6 revealLive).
+  const gone = await waitFor(page, () => {
+    const p = window.__worldPoster?.()
+    return p && !p.on && !p.layerShown
+  }, { timeout: 8000, what: 'the still views did not go' }).catch(() => false)
+  const s = await page.evaluate(STATE, NOTICE)
+  r.check(`${at}: the still views go: the layer hidden, the canvas shown, no notice`, gone === true && s.poster?.on === false && s.poster.layerShown === false && s.canvas === 'visible' && !s.notice, { poster: s.poster, canvas: s.canvas, notice: s.notice })
+  r.check(`${at}: not as a "Try 3D anyway" (the scene is not trying)`, s.poster?.trying === false, s.poster)
+  const sc = await scrollAndFollow(page, 135)
+  const gl = await page.evaluate(() => ({ lost: window.__worldV6Debug.renderer.getContext().isContextLost(), calls: window.__worldFrame?.calls ?? null }))
+  r.check(`${at}: a scroll draws 3D frames (draw calls made), the context back`, sc.after.frames > sc.before.frames && gl.lost === false && gl.calls > 0, { ...sc, ...gl })
 }
 
 browser = await puppeteer.launch({
@@ -282,6 +329,40 @@ try {
     const sc = await scrollAndFollow(page, 135)
     const gl = await page.evaluate(() => ({ lost: window.__worldV6Debug.renderer.getContext().isContextLost(), calls: window.__worldFrame?.calls ?? null }))
     r.check('a scroll draws 3D frames again (draw calls made), the context back', sc.after.frames > sc.before.frames && gl.lost === false && gl.calls > 0, { ...sc, ...gl })
+    await page.close()
+  })
+
+  await runRow(3, 'the context given back after the still views took over: they go, and the 3D draws again', async (r) => {
+    const vp = { width: 1440, height: 900 }
+    const at = `${vp.width}x${vp.height}`
+    const page = await r.open(url({ p: 'mid' }), vp)
+    await page.evaluate(LOSE)
+    await sleep(4000)
+    const s = await page.evaluate(STATE, NOTICE)
+    r.check(`${at}: at 4 s the still views and the no-WebGL notice are up`, s.poster?.on === true && s.poster.kind === 'nowebgl' && s.notice && s.canvas === 'hidden', { poster: s.poster, notice: s.notice, canvas: s.canvas })
+    await page.evaluate(() => window.__loseExt.restoreContext())
+    await threeDrawsAgain(r, page, `${at}, given back at 4 s`)
+    await page.close()
+  })
+
+  await runRow(4, 'the context lost while the tab is in the background: the 3 s count only once it is back in front', async (r) => {
+    const vp = { width: 1440, height: 900 }
+    const at = `${vp.width}x${vp.height}`
+    const page = await r.open(url({ p: 'mid' }), vp)
+    r.check(`${at}: the tab is in the background`, (await page.evaluate(HIDE, true)) === true, true)
+    await page.evaluate(LOSE)
+    await sleep(4500)
+    const hidden = await page.evaluate(STATE, NOTICE)
+    r.check(`${at}: 4.5 s in the background: no still views`, hidden.poster?.on === false, hidden.poster)
+    r.check(`${at}: the tab back in front`, (await page.evaluate(HIDE, false)) === false, false)
+    await sleep(1000)
+    const early = await page.evaluate(STATE, NOTICE)
+    r.check(`${at}: 1 s in front: still no still views`, early.poster?.on === false, early.poster)
+    await sleep(3000)
+    const s = await page.evaluate(STATE, NOTICE)
+    r.check(`${at}: 4 s in front, the context not given back: the still views and the notice`, s.poster?.on === true && s.poster.kind === 'nowebgl' && s.notice, { poster: s.poster, notice: s.notice })
+    await page.evaluate(() => window.__loseExt.restoreContext())
+    await threeDrawsAgain(r, page, `${at}, given back then`)
     await page.close()
   })
 } finally {

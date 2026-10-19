@@ -1259,7 +1259,10 @@ const POSTER_FADE_MS = 900;
  * A lost WebGL context the browser has not given back after this long, ms,
  * puts the map on its posters, as for a browser with no WebGL (bug hunt
  * 2026-10-19, map-3): Chrome stops giving it back on a site whose WebGL
- * caused repeated GPU resets.
+ * caused repeated GPU resets. Counted only while the tab is visible (a
+ * background tab's context may wait for the tab to come back), and a context
+ * given back after it takes the posters off again (2026-10-20 review: a GPU
+ * process restarting after a driver reset can take longer than this).
  */
 const CONTEXT_LOST_POSTER_MS = 3000;
 /** The rest check (restCheckTick): no input and a still camera this long before a burst, and between climbs, ms. */
@@ -1445,6 +1448,8 @@ export class WorldScene {
   private contextLost = false;
   /** The wait for a lost context to come back before the posters take over (CONTEXT_LOST_POSTER_MS), or null. */
   private lostTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The posters are up because that wait ran out: the context coming back takes them off. */
+  private posterFromLoss = false;
   private dirty = true;
   private reducedMotion = false;
   // v6 quality and idle (quality.ts, perf.ts; world_art_bible_v6.md 3.1, 3.2)
@@ -1638,9 +1643,12 @@ export class WorldScene {
     this.wake();
   };
   private readonly onVisibility = () => {
-    if (document.hidden) this.visibleSince = Infinity;
-    else {
+    if (document.hidden) {
+      this.visibleSince = Infinity;
+      this.disarmLostTimer();
+    } else {
       this.visibleSince = performance.now();
+      this.armLostTimer();
       this.wake();
     }
   };
@@ -1653,20 +1661,35 @@ export class WorldScene {
     // Never given back, the frame loop stayed stopped: the labels froze over a
     // blank canvas, and a panel opened after it stayed invisible over a locked
     // page (map-3). The posters take over, and tick runs on without the renderer.
-    if (this.lostTimer === null) {
-      this.lostTimer = setTimeout(() => {
-        this.lostTimer = null;
-        if (!this.disposed && this.contextLost) this.enterPoster("the WebGL context was lost and not given back", "nowebgl", false, true);
-      }, CONTEXT_LOST_POSTER_MS);
-    }
+    this.armLostTimer();
   };
   private readonly onContextRestored = () => {
-    if (this.lostTimer !== null) clearTimeout(this.lostTimer);
-    this.lostTimer = null;
+    this.disarmLostTimer();
     this.contextLost = false;
     this.pacer?.clear();
+    // Given back after the posters took over (a GPU process restart can take
+    // longer than the wait): they come off and the 3D draws again, as it does
+    // for a context given back in time. Not a "Try 3D anyway": nothing was slow.
+    if (this.posterFromLoss) this.clearPoster();
     this.wake();
   };
+
+  /** Starts the wait for a lost context (CONTEXT_LOST_POSTER_MS), only while the tab is visible. */
+  private armLostTimer() {
+    if (this.lostTimer !== null || !this.contextLost || this.disposed || document.hidden) return;
+    this.lostTimer = setTimeout(() => {
+      this.lostTimer = null;
+      if (this.disposed || !this.contextLost || this.posterReason) return;
+      this.enterPoster("the WebGL context was lost and not given back", "nowebgl", false, true);
+      this.posterFromLoss = true;
+    }, CONTEXT_LOST_POSTER_MS);
+  }
+
+  /** Stops that wait: the context came back, the tab went to the background, or the scene is disposed. */
+  private disarmLostTimer() {
+    if (this.lostTimer !== null) clearTimeout(this.lostTimer);
+    this.lostTimer = null;
+  }
 
   constructor(container: HTMLElement, opts: WorldSceneOptions = {}) {
     this.container = container;
@@ -2421,7 +2444,8 @@ export class WorldScene {
    * The tuning panel and the page's "Try the 3D map": true forces the posters,
    * false brings the 3D back (and forgets a remembered verdict). Returns false
    * when there is no 3D to bring back (headless, or a WebGL context lost and
-   * not given back: the page must reload).
+   * not given back yet: the page must reload; one given back later takes the
+   * posters it caused off by itself).
    */
   setPoster(on: boolean, reason = "forced from the tuning panel"): boolean {
     if (on) {
@@ -2442,6 +2466,17 @@ export class WorldScene {
     this.qualityReport.trying = this.tryingLive;
     this.governor?.posterRearm(performance.now());
     if (this.tryingLive) this.governor?.setPosterMs(POSTER_RULES.tryGovernorMs);
+    this.clearPoster();
+    return true;
+  }
+
+  /**
+   * The posters come off and the 3D draws again: setPoster(false), and a lost
+   * context given back after the posters took over (onContextRestored). The
+   * page's onPoster(null) fades the posters out once the 3D has drawn.
+   */
+  private clearPoster() {
+    this.posterFromLoss = false;
     this.posterReason = null;
     this.posterKind = null;
     this.qualityReport.poster = null;
@@ -2450,7 +2485,6 @@ export class WorldScene {
     this.notifyPoster();
     this.dirty = true;
     this.wake();
-    return true;
   }
 
   /** False once the posters have covered the 3D: nothing is drawn or animated then. */
@@ -4387,8 +4421,7 @@ export class WorldScene {
     this.raf = 0;
     if (this.animTimer !== null) clearTimeout(this.animTimer);
     this.animTimer = null;
-    if (this.lostTimer !== null) clearTimeout(this.lostTimer);
-    this.lostTimer = null;
+    this.disarmLostTimer();
     this.frameCb = null;
     for (const rec of this.modules) {
       try {

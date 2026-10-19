@@ -1512,6 +1512,41 @@ called against a database or run on a deployment.
   other failure with `notRecorded` as "not recorded", and anything
   else as an error whose `error` text it shows.
 
+### `GET /api/student/data`: a failed read
+- **What changed (2026-10-20, progress-1, map-1):** the route reads
+  about 17 things at once and answered 200 whatever came back. It now
+  answers 500 with `{ "error": "Could not load your data. Try again." }`
+  when the read of the regions, the lessons, or the student's
+  completions, streak or milestones fails, or when the discount read
+  fails with anything but `PGRST116`. That code is what `.single()`
+  says for a student who never applied for the 30%, the usual case, so
+  it is let through. The server log names each failed read
+  (`[student/data] reads failed: ...`). 500 is what the other student
+  routes answer; 503 is the closed doors' gate (T-078).
+- **What it does not cover:** a failed `lesson_videos` read is answered
+  200 and marked (`lessonVideosFailed`, below). The other reads
+  (quizzes, quiz questions and attempts, the month review, the Whop
+  sync row, celebrations, the DM log, region quizzes, ratings, the
+  watch rows) are answered as before when they fail: empty, or null.
+- **Why:** each of those reads, failed, answered as a believable empty
+  state: no completions as every lantern out and all 61 videos left for
+  the 30%, no streak row as a streak of 0, no milestones as a
+  graduate's Playbook link gone, no discount row as an in-review
+  request back to Apply, no lessons as "There are no lessons here
+  yet.". postgrest-js retries a GET only after a network error or a
+  503/520, so a pool timeout or a 500 under load comes back as an
+  error with no data.
+- **Read by:** `StudentContext.refreshFromServer`, which is the first
+  load and every refresh: on a non-OK answer it applies nothing. A
+  first load is asked again after 1 s and 3 s, then sets `loadError`;
+  a refresh answered later loads everything and clears it. The
+  toggles' own reads after a failed write keep their rows on a non-OK
+  answer.
+- **Proven:** `client-tests/student-data-errors.test.mjs` runs the real
+  route on stub-server's FakeDb (18 checks on 2026-10-20);
+  `client-tests/student-context.test.mjs` runs the provider's side.
+  Neither meets a real database.
+
 ### `GET /api/student/data`: the `has_video` field
 - **What changed:** every object in the `lessons` array carries
   `has_video: boolean`, true when a `lesson_videos` row exists for the
@@ -2003,7 +2038,22 @@ watch heartbeat, and the messages it trades with Tella's frame.
   - Any completed call moves the throttle clock, a failed one
     included, so a database call that keeps failing is tried every 15
     seconds. A refused or failed beat keeps its played seconds banked,
-    and the next beat carries them.
+    and the next beats carry them.
+  - A beat carries at most what v100's `record_lesson_heartbeat`
+    credits one: 20 seconds of played time until a beat of this visit
+    has been accepted, 60 seconds after (`FIRST_BEAT_DELTA_S` and
+    `MAX_BEAT_DELTA_S`; the same numbers live in the migration, and
+    changing one without the other is a bug). The rest stays banked.
+    Since 2026-10-20 (lessons-1).
+  - On an accepted answer only what it shows was credited leaves the
+    bank: its `watched_seconds` less the last accepted answer's. The
+    first accepted answer counts what it carried, and one whose
+    `watched_seconds` is not a number counts the whole beat. The server
+    also credits no more than 2.5 times the clock since the beat it
+    stored before, so after a run of failed beats the backlog goes out
+    over the next beats instead of leaving the bank uncredited. Before
+    this a lesson watched through a minute or two of failed beats was
+    refused at the end ("Skipped parts don't count.").
   - Nothing is written before a position has been reported.
   - Played seconds are counted as an allowance that carries over:
     each report adds 2.5 times the clock seconds since the last one to
@@ -2015,8 +2065,20 @@ watch heartbeat, and the messages it trades with Tella's frame.
     taken for a failed beat.
 - **Proven and unproven:** `client-tests/watch-heartbeat.test.mjs`, 91
   checks on 2026-10-12, runs this file from the real source with a
-  stand-in for the database call and the clock. It has never called
-  the real database function on production.
+  stand-in for the database call and the clock; since 2026-10-20 its
+  stand-ins answer an accepted beat with the row's running total, as
+  v100 does. `client-tests/watch-heartbeat-credit.test.mjs` (15
+  checks, 2026-10-20) gives the heartbeat a stand-in with v100's own
+  arithmetic and asserts on what was credited, judged by the real
+  `judgeWatch`: lessons watched at 1x through 2 and 3.5 minutes of
+  failed beats are credited in full, and so is 600 s at 2x through a
+  minute of them; healthy watches at 1x to 2.5x are credited once. At
+  2.5x the server's clock rule leaves no room to make up a backlog
+  while the video plays (75.7% at the end of a 370 s lesson after 45 s
+  of failed beats); the heartbeat keeps it for a later beat (91.9% once
+  the tab is hidden), and closing that fully needs a change to the
+  SQL, which is Lovro's call. Neither suite has ever called the real
+  database function on production.
 
 ### The Tella player messages (`src/lib/world/tella-player.ts`)
 - **What it is:** what Tella's player and the lesson page say to each

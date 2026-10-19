@@ -13,7 +13,7 @@ import { useLessonTransport } from "@/lib/world/useLessonTransport";
 import { parseLessonText } from "@/lib/world/lesson-text";
 import { Panel } from "@/components/world/AreaScreen";
 import { AnyLessonFinishesContext, mapIsSilent, useMapModel } from "@/components/world/useMapModel";
-import { canFinishInApp, finishableIn } from "@/lib/world/map-model";
+import { canFinishInApp, finishableIn, isPassed } from "@/lib/world/map-model";
 import { pad2 } from "@/components/world-v6/study";
 import { BOUNTY_KEY, BOUNTY_NAME } from "@/components/world-v6/source";
 import type { CatalogLessonLike } from "@/lib/world/catalog";
@@ -62,10 +62,12 @@ import u from "@/components/world/world-ui.module.css";
  * AN ACTION ITEM (requires_action) gets its hand-in last, under the text (or
  * under the Milestone box when there is no text): the Discord link, Save, and
  * the complete button (ActionItemBlock.tsx). On a lesson with no video the
- * button completes the lesson; on a video lesson it completes the action
- * half, and the lesson is done once the video is watched too. Either way
- * "Next lesson" lights the moment the context says the lesson is done, as it
- * does after a video. A lesson that can't be finished here at all (a watch
+ * button completes the lesson, and "Next lesson" lights the moment the context
+ * says it is done. On a video lesson it completes the action half, and the
+ * lesson is done once the video is watched too; "Next lesson" lights as soon
+ * as the video is watched (its watch half in, from the app or from Whop),
+ * while the hand-in stays open in the block (isPassed in map-model.ts,
+ * 2026-10-19). A lesson that can't be finished here at all (a watch
  * lesson with no video yet, map-model.ts) has "Next lesson" on from the start,
  * so it never holds a student (Loom 2, 2026-10-16).
  *
@@ -98,7 +100,8 @@ export function LessonScreen({
   const anyLessonFinishes = useContext(AnyLessonFinishesContext);
   // While the course is loading, or did not arrive, the host's card says so.
   const silent = mapIsSilent(status);
-  const { completedLessonIds, markWatched, completions, saveDiscordLink, toggleLessonAction } = useStudent();
+  const { completedLessonIds, watchedLessonIds, markWatched, completions, saveDiscordLink, toggleLessonAction } =
+    useStudent();
   const [justCompleted, setJustCompleted] = useState<string[] | null>(null);
   // The lesson the player was put up for. It stays up for that lesson.
   const [playerFor, setPlayerFor] = useState<string | null>(null);
@@ -168,9 +171,10 @@ export function LessonScreen({
   const next = index >= 0 ? own[index + 1] : undefined;
   const done = completedLessonIds.has(lessonId);
   // A lesson the student can't finish here (a watch lesson with no video yet)
-  // never holds them: its "Next lesson" is on (map-model.ts, Loom 2).
+  // never holds them: its "Next lesson" is on (map-model.ts, Loom 2). Nor does
+  // an action item once its video is watched: its hand-in stays open (isPassed).
   const finishable = anyLessonFinishes || ((model && finishableIn(model, lesson.id)) ?? canFinishInApp(lesson));
-  const nextOn = done || !finishable;
+  const nextOn = isPassed(lesson, done, watchedLessonIds.has(lessonId)) || !finishable;
 
   // The eyebrow. `position` stays 0 for a lesson that is not one of the place's
   // counting lessons, and the eyebrow then names the place.
@@ -282,8 +286,9 @@ export function LessonScreen({
               </button>
             )}
             {/* Enabled by the SERVER's completion, read back through the context —
-                never by the player's own reckoning. Or at once on a lesson
-                that can't be finished here (not recorded yet). */}
+                never by the player's own reckoning (on an action item, its
+                watch half). Or at once on a lesson that can't be finished
+                here (not recorded yet). */}
             {next && (
               <Link
                 href={nextOn ? stage.href(areaId, next.id) : "#"}

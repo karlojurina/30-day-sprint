@@ -45,7 +45,8 @@ import { AnyLessonFinishesContext } from "@/components/world/useMapModel";
  *
  * Only the fields the world tree reads are supplied: useWorldCatalog reads
  * lessons, regions, completedLessonIds, watchProgress, loading and loadError;
- * WorldMap and LessonScreen read completedLessonIds; LessonScreen and
+ * WorldMap and LessonScreen read completedLessonIds and watchedLessonIds
+ * (useWorldDiscount the second too); LessonScreen and
  * LessonPlayer call markWatched; LessonPlayer reads watchProgress and
  * patchWatchProgress (kept here the way StudentProvider keeps them, so a
  * lesson left halfway resumes). LessonScreen's action item block reads
@@ -373,6 +374,14 @@ export function FixtureStudentProvider({
     for (const id of actionItems.doneIds) ids.add(id);
     return ids;
   }, [preset, watched, actionItems.doneIds]);
+  // The lessons whose watch half is in, as StudentProvider has them
+  // (`completed_at` set): every done lesson, and an action item whose video is
+  // watched while its hand-in is still open, which the map and the lesson page
+  // pass when they find the next lesson (map-model.ts isPassed).
+  const watchedLessonIds = useMemo(
+    () => new Set([...completedLessonIds, ...actionItems.watchedIds]),
+    [completedLessonIds, actionItems.watchedIds],
+  );
 
   const markWatched = useCallback((id: string) => {
     setWatched((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
@@ -458,6 +467,7 @@ export function FixtureStudentProvider({
         lessons: rows.lessons,
         regions: rows.regions,
         completedLessonIds,
+        watchedLessonIds,
         watchProgress,
         loading: mode === null || mode === "loading",
         loadError: mode === "error" ? LOAD_ERROR : null,
@@ -471,7 +481,7 @@ export function FixtureStudentProvider({
         // The corner's Playbook link (?playbook=1).
         playbookUnlocked,
       }) as unknown as StudentContextType,
-    [rows, mode, completedLessonIds, watchProgress, patchWatchProgress, markWatched, actionItems, streak, playbookUnlocked],
+    [rows, mode, completedLessonIds, watchedLessonIds, watchProgress, patchWatchProgress, markWatched, actionItems, streak, playbookUnlocked],
   );
 
   return (

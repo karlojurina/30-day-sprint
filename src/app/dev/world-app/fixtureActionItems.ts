@@ -55,6 +55,8 @@ const DONE_BEFORE = "2026-10-01T09:00:00.000Z";
 export interface FixtureActionItems {
   /** Action items whose own row is complete: the provider adds them to the done set. */
   doneIds: ReadonlySet<string>;
+  /** Action items whose own row has its watch half (`completed_at`), done or not: the provider adds them to the watched set. */
+  watchedIds: ReadonlySet<string>;
   /**
    * The context's fields for them, given the catalog, the done set and the
    * provider's own markWatched (which marks a whole lesson done).
@@ -71,6 +73,7 @@ export function useFixtureActionItems(): FixtureActionItems {
 
   return useMemo(() => {
     const doneIds = new Set([...rows].filter(([, r]) => r.done).map(([id]) => id));
+    const watchedIds = new Set([...rows].filter(([, r]) => r.completed_at).map(([id]) => id));
 
     /** Change one lesson's row with `next`, and work out again whether it is complete. */
     const change = (lesson: CatalogLessonLike, next: (cur: FixtureActionRow | null) => FixtureActionRow | null) =>
@@ -88,6 +91,7 @@ export function useFixtureActionItems(): FixtureActionItems {
 
     return {
       doneIds,
+      watchedIds,
       contextFor(lessons, done, markDone) {
         const byId = new Map(lessons.map((l) => [l.id, l]));
 

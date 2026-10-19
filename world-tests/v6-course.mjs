@@ -64,7 +64,9 @@
  * lesson" (21). On a5l08 (an action item with a video) the block sits under
  * the text, the complete button is there once the link is saved, and the
  * lesson is done only with both halves, in either order: the video alone is
- * not enough, the button alone is not enough (22). Row 21 takes the three
+ * not enough, the button alone is not enough. Since 2026-10-19 the video
+ * alone lights "Next lesson" while the hand-in stays open, and the button
+ * alone does not (map-model.ts, isPassed) (22). Row 21 takes the three
  * pictures a person looks at (G6): lesson-a5l22-action-empty.png,
  * lesson-a5l22-action-saved.png, lesson-a5l22-action-done.png (and
  * lesson-a5l22-action-error.png).
@@ -2793,9 +2795,9 @@ try {
       await sleep(500)
       const watchedOnly = await page.evaluate(ACTION, arg)
       r.check(
-        'the video watched with no link: the lesson is not done, "Next lesson" stays off, still no complete button',
-        watchedOnly.done === false && !watchedOnly.saysDone && watchedOnly.next?.disabled === 'true' && watchedOnly.state === 'empty' && watchedOnly.complete === null,
-        { done: watchedOnly.done, saysDone: watchedOnly.saysDone, next: watchedOnly.next, state: watchedOnly.state },
+        `the video watched with no link: the lesson is not done and its hand-in still open (the field, no complete button), and "Next lesson" is lit and leads to ${nextId}`,
+        watchedOnly.done === false && !watchedOnly.saysDone && watchedOnly.state === 'empty' && !!watchedOnly.input && watchedOnly.complete === null && watchedOnly.next?.disabled === 'false' && watchedOnly.next?.href === `${APP}/a5/${nextId}`,
+        { done: watchedOnly.done, saysDone: watchedOnly.saysDone, next: watchedOnly.next, state: watchedOnly.state, input: !!watchedOnly.input },
       )
       await typeLink(page, GOOD_LINK, 'row 22')
       await pressBlockButton(page, '^Save$', 'row 22: Save')

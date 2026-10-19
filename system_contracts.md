@@ -1659,10 +1659,12 @@ watch heartbeat, and the messages it trades with Tella's frame.
 ### `MapModel` (`src/lib/world/map-model.ts`)
 - **Written by:** `buildMapModel()` and nothing else.
 - **Built from:** `{ areas, lessonsByArea, completedLessonIds,
-  anyLessonFinishes? }`: the catalog's areas in route order, its
-  lessons per area, the student's completed lesson ids, and (the dev
-  page's placeholder course only, `AnyLessonFinishesContext` in
-  `useMapModel.ts`) whether every lesson can be finished there.
+  watchedLessonIds, anyLessonFinishes? }`: the catalog's areas in route
+  order, its lessons per area, the student's completed lesson ids, the
+  ids whose watch half is in (`StudentContext.watchedLessonIds`:
+  `completed_at` set), and (the dev page's placeholder course only,
+  `AnyLessonFinishesContext` in `useMapModel.ts`) whether every lesson
+  can be finished there.
 - **Read by:** `useMapModel()` (`src/components/world/useMapModel.ts`)
   and `sourceData()` (`src/components/world-v6/source.ts`). `WorldMap`
   gets it through those two.
@@ -1676,6 +1678,7 @@ watch heartbeat, and the messages it trades with Tella's frame.
     minutes: number | null;
     action: boolean;
     done: boolean;
+    passed: boolean;
     hasVideo: boolean;
     finishable: boolean;
   }
@@ -1714,13 +1717,21 @@ watch heartbeat, and the messages it trades with Tella's frame.
   a lesson the student can finish in the app: a `watch` lesson with a
   video, or an action item (`requires_action`); for every lesson when
   no lesson of the catalog has a video (a failed read of the videos
-  looks the same) or `anyLessonFinishes` is set. `place` is the index
-  of the first area with a counting lesson left that is `finishable`,
-  and `placeNext` the index of the first such lesson there (the second
+  looks the same) or `anyLessonFinishes` is set. `passed` is true for
+  a done lesson, and for an action item that is a `watch` lesson once
+  its watch half is in (`watchedLessonIds`: watched in the app or
+  synced from Whop) while its hand-in is still open (`isPassed()`,
+  2026-10-19); a setup action item has no watch half, so it is passed
+  only once done. `done`, every count and whether a place is done
+  never read `passed`. `place` is the index of the first area with a
+  counting lesson that is `finishable` and not `passed`, and
+  `placeNext` the index of the first such lesson there (the second
   Loom, 2026-10-16: a lesson with no video never holds a student, and
-  still counts in every total). When only lessons that are not
-  `finishable` are left, `place` is the first area with any lesson
-  left and `placeNext` its first undone lesson. `place` is 8 and
+  still counts in every total; 2026-10-19: nor does an action item
+  whose video is watched). When only other lessons are left, `place`
+  is the first area with any lesson left and `placeNext` its first
+  undone lesson (an open hand-in, or a lesson with no video).
+  `LessonScreen` lights "Next lesson" by the same `isPassed()`. `place` is 8 and
   `placeNext` -1 when none is left. `minutes` is null when the catalog has no `duration_seconds`,
   otherwise whole minutes with a floor of 1. `hasVideo` is true only
   for a `watch` lesson whose `has_video` is true (the boolean

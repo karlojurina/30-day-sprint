@@ -37,12 +37,12 @@ export type ReadyMapModel = Extract<MapModel, { ok: true }>;
 
 export function useMapModel(): { status: MapStatus; model: ReadyMapModel | null } {
   const { areas, lessonsByArea, loading, loadError } = useWorldCatalog();
-  const { completedLessonIds } = useStudent();
+  const { completedLessonIds, watchedLessonIds } = useStudent();
   const anyLessonFinishes = useContext(AnyLessonFinishesContext);
 
   const model = useMemo(
-    () => buildMapModel({ areas, lessonsByArea, completedLessonIds, anyLessonFinishes }),
-    [areas, lessonsByArea, completedLessonIds, anyLessonFinishes],
+    () => buildMapModel({ areas, lessonsByArea, completedLessonIds, watchedLessonIds, anyLessonFinishes }),
+    [areas, lessonsByArea, completedLessonIds, watchedLessonIds, anyLessonFinishes],
   );
 
   if (loading) return { status: "loading", model: null };

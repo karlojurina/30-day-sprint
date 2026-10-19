@@ -1,5 +1,7 @@
+import fs from 'node:fs'
 import { buildWorldCatalog } from './_gen/catalog.ts'
-import { buildMapModel, canFinishInApp, finishableIn, MAP_PLACES } from './_gen/map-model.ts'
+import { buildMapModel, canFinishInApp, finishableIn, isPassed, MAP_PLACES } from './_gen/map-model.ts'
+import { isLessonComplete } from './_gen/progress.ts'
 
 let pass = 0
 const fails = []
@@ -41,12 +43,12 @@ function seed(over = {}) {
   return { regions, lessons }
 }
 
-/** The real path: the catalog boundary first, then the adapter, exactly as the host does it. */
+/** The real path: the catalog boundary first, then the adapter, exactly as the host does it. Every done lesson's watch half is in. */
 function model(done, over = {}, pick = (x) => x) {
   const { regions, lessons } = pick(seed(over))
   const completedLessonIds = new Set(done)
   const c = buildWorldCatalog({ lessons, regions, completedLessonIds, watchProgress: new Map() })
-  return buildMapModel({ areas: c.areas, lessonsByArea: c.lessonsByArea, completedLessonIds })
+  return buildMapModel({ areas: c.areas, lessonsByArea: c.lessonsByArea, completedLessonIds, watchedLessonIds: completedLessonIds })
 }
 const range = (k, from, to) => Array.from({ length: to - from + 1 }, (_, i) => idOf(k, from + i))
 const all = (k) => range(k, 1, k === 6 ? 21 : COUNTS[k])
@@ -179,7 +181,7 @@ console.log('\n=== a lesson that can\'t be finished in the app never holds the s
   const { regions, lessons } = seed(vid)
   const doneTen = new Set([...all(0), ...all(1), ...range(2, 1, 10)])
   const c = buildWorldCatalog({ lessons, regions, completedLessonIds: doneTen, watchProgress: new Map() })
-  const dev = buildMapModel({ areas: c.areas, lessonsByArea: c.lessonsByArea, completedLessonIds: doneTen, anyLessonFinishes: true })
+  const dev = buildMapModel({ areas: c.areas, lessonsByArea: c.lessonsByArea, completedLessonIds: doneTen, watchedLessonIds: doneTen, anyLessonFinishes: true })
   ok(dev.place === 2 && dev.placeNext === 10 && dev.areas[2].lessons[10].finishable === true, 'anyLessonFinishes: lesson 11 is next and can be finished', `next=${dev.placeNext}`)
 
   // No video anywhere (the staging seed, or a failed read of the videos): nothing is passed over.
@@ -195,6 +197,82 @@ console.log('\n=== an area with nothing to do never holds the student ===')
   const m = model(all(0), {}, ({ regions, lessons }) => ({ regions, lessons: lessons.filter((l) => l.region_id !== 'a2') }))
   ok(m.ok === true && m.areas[1].lessons.length === 0, 'the empty area is still one of the eight')
   ok(m.place === 2 && m.placeNext === 0, 'and the place skips it', `place=${m.place}`)
+}
+
+console.log('\n=== an action item holds the student only until its video is watched (2026-10-19) ===')
+{
+  // The real course, as the development page builds it (src/app/dev/world-app/courseCatalog.ts):
+  // course_catalog.json, with a video on every watch lesson the lengths file has.
+  const read = (rel) => JSON.parse(fs.readFileSync(new URL(rel, import.meta.url), 'utf8'))
+  const file = read('../supabase/catalog/course_catalog.json')
+  const lengths = read('../src/app/dev/world-app/course-lengths.fixture.json')
+  const regions = file.areas.map((a, i) => ({ id: a.id, order_num: i + 1, name: a.name }))
+  const lessons = file.lessons.map((l, i) => ({
+    id: l.id, region_id: l.area, type: l.type, title: l.title, description: null, sort_order: i + 1,
+    requires_action: l.action_brief !== undefined, action_brief: l.action_brief ?? null,
+    is_optional: false, is_gate: l.gate === true, counts_toward_progress: l.counts !== false, feature_key: l.feature_key ?? null,
+    has_video: lengths[l.id] !== undefined && l.type === 'watch', duration_seconds: lengths[l.id] ?? null,
+  }))
+  const byId = new Map(lessons.map((l) => [l.id, l]))
+  const counting = lessons.filter((l) => l.counts_toward_progress).map((l) => l.id)
+  /** Every counting lesson from the first to `id`, in course order. */
+  const upTo = (id) => counting.slice(0, counting.indexOf(id) + 1)
+  const AT = '2026-10-19T15:00:00.000Z'
+  /** A row with the watch half only: the video watched in the app, or the lesson synced from Whop. */
+  const watchedRow = (id) => ({ lesson_id: id, completed_at: AT, action_completed_at: null, skipped_at: null })
+  /** A row with both halves on an action item (handed in), the watch half on any other lesson. */
+  const doneRow = (id) => ({ lesson_id: id, completed_at: AT, action_completed_at: byId.get(id).requires_action ? AT : null, skipped_at: null })
+  /** The map for these completion rows, read as StudentContext reads them: done by isLessonComplete, watched by completed_at. */
+  const student = (rows) => {
+    const completedLessonIds = new Set(rows.filter((c) => isLessonComplete(c, byId.get(c.lesson_id))).map((c) => c.lesson_id))
+    const watchedLessonIds = new Set(rows.filter((c) => c.completed_at).map((c) => c.lesson_id))
+    const c = buildWorldCatalog({ lessons, regions, completedLessonIds, watchProgress: new Map() })
+    return buildMapModel({ areas: c.areas, lessonsByArea: c.lessonsByArea, completedLessonIds, watchedLessonIds })
+  }
+  /** The next lesson's id (the card, the chip, the panel's next row and the phone's Next block all show it), or null. */
+  const nextOf = (m) => (m.place < MAP_PLACES ? m.areas[m.place].lessons[m.placeNext]?.id ?? null : null)
+  const lessonIn = (m, id) => m.areas.flatMap((a) => a.lessons).find((l) => l.id === id)
+
+  const a3l17 = byId.get('a3l17')
+  const a3l25 = byId.get('a3l25')
+  const a5l22 = byId.get('a5l22')
+  ok(a3l17.requires_action && a3l17.type === 'watch' && a3l17.has_video && a3l17.title === 'Your First Boss Battle', 'the course: a3l17, Your First Boss Battle, is an action item with a video')
+  ok(a3l25.requires_action && a3l25.type === 'watch' && a3l25.has_video, 'the course: a3l25 is an action item with a video')
+  ok(a5l22.requires_action && a5l22.type === 'setup' && !a5l22.has_video, 'the course: a5l22 is an action item with no video (a setup step)')
+
+  // a3l17's video watched in the app, its hand-in not in.
+  const before = student(upTo('a3l16').map(doneRow))
+  ok(nextOf(before) === 'a3l17', 'lessons up to a3l16 watched: a3l17 is next, until its video is watched', nextOf(before))
+  const watched17 = student([...upTo('a3l16').map(doneRow), watchedRow('a3l17')])
+  ok(nextOf(watched17) === 'a3l18' && watched17.place === 2, 'a3l17\'s video watched, its hand-in not in: a3l18 is next', `${nextOf(watched17)} at place ${watched17.place + 1}`)
+  const open17 = lessonIn(watched17, 'a3l17')
+  ok(open17.action && !open17.done && open17.passed, 'and a3l17 stays an open action item: not done (the panel row and its tick show it open)', JSON.stringify(open17))
+  ok(watched17.areas[2].done === 16 && watched17.doneTotal === 8 + 11 + 16, 'the counts are done lessons only: 16 in Video Ads I, 35 in all', `${watched17.areas[2].done} / ${watched17.doneTotal}`)
+  const actionOnly = student([...upTo('a3l16').map(doneRow), { lesson_id: 'a3l17', completed_at: null, action_completed_at: AT, skipped_at: null }])
+  ok(nextOf(actionOnly) === 'a3l17', 'its hand-in in and its video not watched: a3l17 is still next', nextOf(actionOnly))
+
+  // Day one: Whop progress up to a4l05 arrives as the watch half of every lesson.
+  const whop = student(upTo('a4l05').map(watchedRow))
+  ok(nextOf(whop) === 'a4l06' && whop.place === 3, 'Whop progress up to a4l05, a3l17 and a3l25 not handed in: a4l06 is next', `${nextOf(whop)} at place ${whop.place + 1}`)
+  ok(['a3l17', 'a3l25'].every((id) => !lessonIn(whop, id).done && lessonIn(whop, id).passed), 'and a3l17 and a3l25 are both still open')
+  ok(whop.areas[2].done === 23 && whop.areas[2].lessons.length === 25, 'Video Ads I is 23 of 25: the place is not done while a hand-in is open', `${whop.areas[2].done} of ${whop.areas[2].lessons.length}`)
+  ok(whop.doneTotal === upTo('a4l05').length - 2 && whop.total === 140, 'the course count leaves the two open hand-ins out', `${whop.doneTotal}/${whop.total}`)
+
+  // A setup action item has no watch half to pass, even when Whop sent a completion for it.
+  const setup = student(upTo('a5l22').map(watchedRow))
+  ok(nextOf(setup) === 'a5l22' && setup.place === 4, 'Whop progress up to a5l22, a setup action item: a5l22 is next while its hand-in is not in', nextOf(setup))
+  ok(!lessonIn(setup, 'a5l22').done && !lessonIn(setup, 'a5l22').passed, 'and it is neither done nor passed')
+  const handedIn = student([...upTo('a5l21').map(watchedRow), doneRow('a5l22')])
+  ok(nextOf(handedIn) === 'a5l23', 'its hand-in in: a5l23 is next', nextOf(handedIn))
+
+  // With nothing else left, the open hand-in is the next lesson, in its own place.
+  const rest = counting.filter((id) => canFinishInApp(byId.get(id)))
+  const last = student(rest.map((id) => (id === 'a3l17' || id === 'a3l25' ? watchedRow(id) : doneRow(id))))
+  ok(last.place === 2 && nextOf(last) === 'a3l17', 'everything the app can finish done but the hand-ins of a3l17 and a3l25: a3l17 is next, in Video Ads I', `${nextOf(last)} at place ${last.place + 1}`)
+  ok(last.areas[2].done === 23 && last.place < MAP_PLACES, 'and Video Ads I is 23 of 25, the course not finished')
+
+  ok(isPassed(a3l17, false, true) && !isPassed(a3l17, false, false) && !isPassed(a5l22, false, true) && isPassed(a5l22, true, true) && !isPassed(byId.get('a3l18'), false, true),
+     'isPassed: an action item with a video by its watch half, a setup action item and a plain lesson only once done')
 }
 
 console.log(`\n============================================================\n  PASS ${pass}   FAIL ${fails.length}`)

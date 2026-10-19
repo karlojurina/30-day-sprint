@@ -120,16 +120,7 @@ export function useWorldDiscount(): WorldDiscountHook {
   const stand = useContext(DiscountStandInContext);
   const { student } = useAuth();
   const ctx = useStudent();
-  const { lessons, discountRequest, completions, completedLessonIds, watchedLessonIds } = ctx;
-  // The development page's provider has no watchedLessonIds: there it is its
-  // completed lessons plus any completion row with its video done (an action
-  // item whose link is not in yet).
-  const videoDone = useMemo<ReadonlySet<string>>(() => {
-    if (watchedLessonIds) return watchedLessonIds;
-    const out = new Set(completedLessonIds);
-    for (const c of completions ?? []) if (c.completed_at) out.add(c.lesson_id);
-    return out;
-  }, [watchedLessonIds, completedLessonIds, completions]);
+  const { lessons, discountRequest, watchedLessonIds: videoDone } = ctx;
 
   const [tick, setTick] = useState(() => Date.now());
   useEffect(() => {

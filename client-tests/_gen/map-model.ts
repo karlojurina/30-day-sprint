@@ -17,6 +17,13 @@
  *    counts in every total, and the place it is in stays not done.) When only
  *    such lessons are left, the place and next lesson are the first undone
  *    ones, and the map says "Not recorded yet" where Watch would be.
+ *  - An action item holds the student only until its video is watched
+ *    (2026-10-19, isPassed): once its watch half is in, from the app or from
+ *    Whop, the next lesson is found past it. Its hand-in stays open: the lesson
+ *    is not done until that is in too, nor is its place, and every count stays
+ *    as it was. With only such hand-ins and lessons not recorded yet left, the
+ *    first undone one is next, as above. An action item with no video (a setup
+ *    step) has no watch half to pass, so it is next until its hand-in is in.
  *  - A lesson can be finished in the app when it is a watch lesson with a
  *    video (watched to the end) or an action item (its hand-in). A course
  *    with no video at all (a failed read of the videos looks the same,
@@ -37,6 +44,12 @@ export interface MapLesson {
   /** An action item (the milestone diamond). */
   action: boolean;
   done: boolean;
+  /**
+   * The student is past it when the next lesson is found: done, or an action
+   * item whose video is watched while its hand-in is still open (isPassed).
+   * What is shown and counted is `done`.
+   */
+  passed: boolean;
   /** A watch lesson with a video behind it. */
   hasVideo: boolean;
   /** The student can finish it in the app (see the rules above). False: "Not recorded yet". */
@@ -86,6 +99,12 @@ export interface MapModelInput {
   lessonsByArea: ReadonlyMap<string, readonly CatalogLessonLike[]>;
   completedLessonIds: ReadonlySet<string>;
   /**
+   * The lessons whose watch half is in: completed_at set, watched in the app
+   * or arrived from Whop (StudentContext's watchedLessonIds). An action item
+   * in it no longer holds the student (isPassed).
+   */
+  watchedLessonIds: ReadonlySet<string>;
+  /**
    * Every lesson can be finished here, video or not: the dev page's
    * placeholder course, whose "Mark watched (dev)" button finishes any lesson
    * (AnyLessonFinishesContext in components/world/useMapModel.ts). Absent in
@@ -99,13 +118,29 @@ export function canFinishInApp(l: CatalogLessonLike): boolean {
   return (l.type === "watch" && Boolean(l.has_video)) || l.requires_action;
 }
 
+/**
+ * Is the student past this lesson when the next one is found (the map's next
+ * lesson, and "Next lesson" on the lesson's page)? Yes once it is done. An
+ * action item that is a watch lesson is passed as soon as its watch half is in
+ * (`watched`: completed_at set, watched in the app or arrived from Whop): its
+ * hand-in stays open, and it is done only once that is in too. An action item
+ * with no video (a setup step) has no watch half, so it waits for its hand-in.
+ */
+export function isPassed(
+  l: Pick<CatalogLessonLike, "type" | "requires_action">,
+  done: boolean,
+  watched: boolean,
+): boolean {
+  return done || (l.requires_action && l.type === "watch" && watched);
+}
+
 function minutesOf(durationSeconds: number | null): number | null {
   if (durationSeconds === null || !(durationSeconds > 0)) return null;
   return Math.max(1, Math.round(durationSeconds / 60));
 }
 
 export function buildMapModel(input: MapModelInput): MapModel {
-  const { areas, lessonsByArea, completedLessonIds } = input;
+  const { areas, lessonsByArea, completedLessonIds, watchedLessonIds } = input;
 
   let rows = 0;
   let videos = 0;
@@ -137,6 +172,7 @@ export function buildMapModel(input: MapModelInput): MapModel {
           minutes: minutesOf(l.duration_seconds),
           action: l.requires_action,
           done: isDone,
+          passed: isPassed(l, isDone, watchedLessonIds.has(l.id)),
           hasVideo: l.type === "watch" && Boolean(l.has_video),
           finishable: anyFinishes || canFinishInApp(l),
         });
@@ -158,9 +194,10 @@ export function buildMapModel(input: MapModelInput): MapModel {
   }
 
   // An area with no counting lessons has nothing left to do, so it never holds
-  // the student; nor does one whose lessons left can't be finished in the app.
+  // the student; nor does one whose lessons left can't be finished in the app,
+  // or are action items whose video is watched (their hand-ins still open).
   // With only those left anywhere, the first undone lesson is the next one.
-  const left = (l: MapLesson) => !l.done && l.finishable;
+  const left = (l: MapLesson) => !l.passed && l.finishable;
   let place = out.findIndex((a) => a.lessons.some(left));
   let placeNext = place >= 0 ? out[place].lessons.findIndex(left) : -1;
   if (place < 0) {

@@ -251,7 +251,11 @@ line is enough to route a ticket without asking the student for logs.
 Codes: `no_membership`, `session_expired` (the 60s `pending_session`
 handoff cookie was gone — usually a reloaded `/auth/complete` tab),
 `session_timeout` (auth host never answered), `session_failed`,
-`auth_failed`, `state_invalid`, `missing_params`, `callback_failed`,
+`auth_failed`, `login_busy` (the Whop login's password sign-in failed
+twice, half a second apart, with something other than "invalid login
+credentials": a rate limit in a login rush, a 5xx or the network; only
+that one error creates an account, login-3, 2026-10-20),
+`state_invalid`, `missing_params`, `callback_failed`,
 `access_denied`, `profile_load_failed`, `app_closed` (the callback
 while the student app is closed, T-078; the login's layout shows the
 coming-soon page then, so the map entry is a fallback). Details are

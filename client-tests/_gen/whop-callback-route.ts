@@ -20,6 +20,19 @@ import { evaluateAchievements } from "./stub-server.ts";
 import { updateStudentStreak } from "./stub-server.ts";
 import { createClient } from "./stub-server.ts";
 
+/**
+ * login-3 (2026-10-20): the one sign-in error that means this Whop user has
+ * no account yet. auth-js reports it with the code invalid_credentials
+ * (status 400); an auth server too old for codes sends only the message. A
+ * rate limit (429 in a login rush), a 5xx or a network failure is not a
+ * missing account: creating one then failed as "already registered" and the
+ * student read "Authentication failed".
+ */
+function isNoAccountYet(error: { code?: string; message?: string }): boolean {
+  if (error.code) return error.code === "invalid_credentials";
+  return /invalid login credentials/i.test(error.message ?? "");
+}
+
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const code = searchParams.get("code");
@@ -170,8 +183,24 @@ export async function GET(request: NextRequest) {
     const password = generateStudentPassword(userInfo.sub);
 
     let userId: string;
-    const { data: signInData, error: signInError } =
-      await authClient.auth.signInWithPassword({ email, password });
+    let signIn = await authClient.auth.signInWithPassword({ email, password });
+    if (signIn.error && !isNoAccountYet(signIn.error)) {
+      console.warn(
+        `[whop-callback] sign-in for ${userInfo.sub} failed (${signIn.error.message}), trying once more`,
+      );
+      await new Promise((r) => setTimeout(r, 500));
+      signIn = await authClient.auth.signInWithPassword({ email, password });
+    }
+    const { data: signInData, error: signInError } = signIn;
+
+    if (signInError && !isNoAccountYet(signInError)) {
+      console.error("Supabase sign-in failed twice, not a missing account:", signInError);
+      return NextResponse.redirect(
+        `${appUrl}/login?error=login_busy&detail=${encodeURIComponent(
+          `server: ${signInError.message}`.slice(0, 200)
+        )}`
+      );
+    }
 
     if (signInError) {
       const { data: signUpData, error: signUpError } =

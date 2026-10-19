@@ -39,6 +39,8 @@
 // token, as the database does.
 // `auth` answers a password sign-in from `authUsers` (email -> id and
 // password) and adds to it on admin.createUser, as the login callback needs.
+// `signInAnswers` are given first, in order (a rate limit, a network
+// failure), and `authLog` records every sign-in and createUser (login-3).
 
 import * as realStreak from "./update-streak.ts";
 
@@ -145,6 +147,10 @@ export class FakeDb {
   users: Record<string, string> = {};
   /** Email -> auth user, for auth.signInWithPassword and auth.admin.createUser. */
   authUsers: Record<string, { id: string; password: string }> = {};
+  /** What auth.signInWithPassword answers before it looks at authUsers, first in first out. */
+  signInAnswers: Array<{ data: unknown; error: unknown }> = [];
+  /** Every sign-in and createUser, in order, with the client that made it (the service role's is made with no arguments). */
+  authLog: Array<{ call: "signIn" | "createUser"; email: string; client: "service" | "anon" }> = [];
   /** Stand-ins for database functions, by name, for `.rpc()`: handed the arguments, a client on this database, and what the calling client was made with. */
   functions: Record<string, (args: Record<string, unknown>, db: ReturnType<typeof fakeClient>, madeWith: unknown[]) => Promise<{ data: unknown; error: DbError | null }>> = {};
   constructor(seed: Record<string, Row[]> = {}, users: Record<string, string> = {}) {
@@ -374,9 +380,13 @@ export function fakeClient(db: FakeDb, madeWith: unknown[] = []) {
           : { data: { user: null }, error: { message: "invalid JWT" } };
       },
       async signInWithPassword({ email, password }: { email: string; password: string }) {
+        db.authLog.push({ call: "signIn", email, client: madeWith.length ? "anon" : "service" });
+        const queued = db.signInAnswers.shift();
+        if (queued) return queued;
         const u = db.authUsers[email];
         if (!u || u.password !== password) {
-          return { data: { user: null, session: null }, error: { message: "Invalid login credentials" } };
+          // auth-js's answer to a wrong email or password: AuthApiError, status 400, code invalid_credentials.
+          return { data: { user: null, session: null }, error: { message: "Invalid login credentials", status: 400, code: "invalid_credentials" } };
         }
         return {
           data: { user: { id: u.id }, session: { access_token: `access-${u.id}`, refresh_token: `refresh-${u.id}` } },
@@ -385,6 +395,11 @@ export function fakeClient(db: FakeDb, madeWith: unknown[] = []) {
       },
       admin: {
         async createUser({ email, password }: { email: string; password: string }) {
+          db.authLog.push({ call: "createUser", email, client: madeWith.length ? "anon" : "service" });
+          if (db.authUsers[email]) {
+            // Supabase's answer for an email that already has an account.
+            return { data: { user: null }, error: { message: "A user with this email address has already been registered", status: 422, code: "email_exists" } };
+          }
           const id = newId();
           db.authUsers[email] = { id, password };
           return { data: { user: { id } }, error: null };

@@ -31,6 +31,9 @@ export function LoginError() {
     missing_params: "Sign-in didn't complete. Try again.",
     access_denied: "Sign-in was cancelled on Whop.",
     auth_failed: "Authentication failed. Try again.",
+    // The callback when the sign-in server is busy (a rate limit in a login
+    // rush, a 5xx), after one retry (login-3).
+    login_busy: "Too many people are signing in right now. Try again in a minute.",
     callback_failed: "Something broke. Try again.",
     session_failed: "Couldn't create your session. Try again.",
     // The callback while the student app is closed (T-078). The login's

@@ -1,7 +1,8 @@
 /**
  * When the map marks the two moments the old dashboard celebrates
  * (src/app/dashboard/page.tsx): the streak going up and the discount
- * approved. Read by src/components/world/WorldCelebrations.tsx. On the map
+ * approved (on the map also once applied: approvalOnMap). Read by
+ * src/components/world/WorldCelebrations.tsx and WorldMap.tsx. On the map
  * the discount's is the dashboard's full-screen celebration, and since
  * 2026-10-15 the streak's is a short moment on the number in the header
  * (Lovro: a daily tick is routine, the full-screen moment is for milestones).
@@ -47,4 +48,26 @@ export function streakToCelebrate(current: number, lastSeenRaw: string | null): 
 /** True when this approved request has not been celebrated in this browser. */
 export function approvalToCelebrate(approvedRequestId: string | null, lastSeen: string | null): boolean {
   return !!approvedRequestId && lastSeen !== approvedRequestId;
+}
+
+/**
+ * The application the map's full-screen moment is for (WorldMap.tsx), or null:
+ * the student's discount state (discount.ts discountState) approved, or
+ * applied since. The team often presses Approve and Mark applied in one
+ * sitting, so most students are next on the map once it is applied, and the
+ * moment kept for an approved discount (Lovro, decision 11 B) only matched
+ * the approved state (bug hunt 2026-10-19, streak-2). Its key is still the
+ * request id, so one celebrated while approved is not shown again once
+ * applied. An application made on the old dashboard before the launch
+ * (madeBeforeLaunch) gets none: its 30% may already be on a past payment.
+ * `applied`: the 30% is on the subscription, which the moment's line says.
+ */
+export function approvalOnMap(state: {
+  kind: string;
+  requestId?: string;
+  madeBeforeLaunch?: boolean;
+}): { requestId: string; applied: boolean } | null {
+  if (state.kind !== "approved" && state.kind !== "applied") return null;
+  if (!state.requestId || state.madeBeforeLaunch) return null;
+  return { requestId: state.requestId, applied: state.kind === "applied" };
 }

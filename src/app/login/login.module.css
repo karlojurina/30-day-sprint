@@ -1,0 +1,386 @@
+/*
+ * The login (Lovro, 2026-10-19: "make the login prettier"). The map's
+ * opening still, full bleed, under a plum shade; the logo where the map's
+ * header has it; the words where the map's welcome stands
+ * (world-v6/world.module.css, .welcome), so signing in and arriving read as
+ * one place.
+ *
+ * Every colour, font and curve is a token from world-v6/tokens.module.css (the
+ * root carries its .tokens class). Sizes follow .impeccable.md: radius 9 on a
+ * button, touch targets at least 40px, motion on transform and opacity only.
+ *
+ * Phones (under 760px, the map's own breakpoint) put the words at the bottom
+ * over solid plum, as the phone's list puts them under the place's picture,
+ * and the button full width where a thumb reaches it.
+ */
+
+.root {
+  /* The world's error red (.impeccable.md), which tokens.module.css does not
+     carry yet. Real errors only. */
+  --color-danger: #c9584f;
+
+  position: relative;
+  isolation: isolate;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* The welcome's top on the map. */
+  padding: clamp(104px, 21vh, 300px) var(--gutter) 64px;
+  background: var(--color-surface-0);
+  color: var(--color-ink);
+  font-family: var(--display);
+  font-weight: 400;
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.root :focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: var(--focus-halo);
+}
+
+/* ── The still and its shade ───────────────────────────────── */
+
+.still {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 50%;
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Darker at the top for the logo, a light dusk over the sky, and the bright
+   lake pulled down so the words stay the brightest thing on the page. */
+.shade {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgba(29, 24, 38, 0.55) 0,
+    rgba(29, 24, 38, 0.2) 160px,
+    rgba(29, 24, 38, 0.14) 55%,
+    rgba(29, 24, 38, 0.5) 100%
+  );
+}
+
+/* ── Header: the logo alone, as on the map ─────────────────── */
+
+.header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 72px;
+  padding: 0 var(--gutter);
+  display: flex;
+  align-items: center;
+  animation: fade 600ms var(--ease) both;
+}
+
+/* Karlo's lockup as it came: 20px tall on a computer, its width from its own
+   proportions, no shadow or filter on it (the brand's rules). */
+.logo {
+  flex: none;
+  display: block;
+  width: auto;
+  height: 20px;
+}
+
+/* ── The words ─────────────────────────────────────────────── */
+
+.content {
+  position: relative;
+  width: min(640px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/* The welcome's backing on the map (world.module.css .welcome::before,
+   measured there at 1691x1278 and 1366x768: 4.5:1 for the line, 3:1 for the
+   title on the brightest sky), spread wider with a longer tail: on a still
+   that never moves, the welcome's tighter edge showed as a dark oval. Every
+   word sits nearer the centre than on the map, so at least as dark. */
+.content::before {
+  content: "";
+  position: absolute;
+  inset: -140px -220px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    closest-side,
+    rgba(29, 24, 38, 0.6),
+    rgba(29, 24, 38, 0.52) 40%,
+    rgba(29, 24, 38, 0.32) 62%,
+    rgba(29, 24, 38, 0.14) 80%,
+    rgba(29, 24, 38, 0.04) 92%,
+    rgba(29, 24, 38, 0)
+  );
+}
+
+.title {
+  margin: 0;
+  max-width: 100%;
+  font-size: clamp(34px, 3.4vw, 56px);
+  line-height: 1.06;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+  text-shadow: 0 2px 18px var(--shadow-ink);
+  animation: rise 600ms var(--ease) both;
+}
+
+.line {
+  margin: 14px 0 0;
+  max-width: 32em;
+  font-size: clamp(16px, 1.2vw, 19px);
+  line-height: 1.45;
+  font-weight: 500;
+  color: var(--color-ink);
+  text-wrap: pretty;
+  text-shadow: 0 1px 12px var(--shadow-ink);
+  animation: rise 600ms var(--ease) 70ms both;
+}
+
+/* ── The error (?error=): opaque, so it reads on any part of the still ── */
+
+.error {
+  margin-top: 22px;
+  width: min(100%, 440px);
+  padding: 12px 16px 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  text-align: left;
+  border: 1px solid rgba(201, 88, 79, 0.65);
+  border-radius: 9px;
+  background: var(--plaque);
+  box-shadow: 0 12px 32px rgba(20, 15, 18, 0.4);
+  animation: rise 300ms var(--ease) both;
+}
+
+.errorDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--color-danger);
+}
+
+.errorText {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+/* The code always shows, the detail when there is one: a screenshot of this
+   line routes the ticket. */
+.errorCode {
+  margin: 4px 0 0;
+  font: 500 11px/1.4 var(--mono);
+  color: var(--color-ink-3);
+  overflow-wrap: anywhere;
+}
+
+/* ── The two links ─────────────────────────────────────────── */
+
+/* The map's primary button (world.module.css .primary, .welcomeGo). */
+.signIn {
+  margin-top: 26px;
+  min-width: 260px;
+  height: 50px;
+  padding: 0 20px 0 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border-radius: 9px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.005em;
+  text-decoration: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 180ms var(--ease),
+    transform 180ms var(--ease);
+  animation: rise 600ms var(--ease) 140ms both;
+}
+
+.signIn:hover {
+  background: var(--color-accent-strong);
+}
+
+.signIn:active {
+  background: var(--color-accent-deep);
+  transform: translateY(1px);
+}
+
+/* globals.css rounds every focused link to 4px; these keep their own. */
+.root .signIn:focus-visible {
+  border-radius: 9px;
+}
+
+.arrow {
+  flex: none;
+  transition: transform 180ms var(--ease);
+}
+
+.signIn:hover .arrow {
+  transform: translateX(2px);
+}
+
+.team {
+  margin-top: 10px;
+  min-height: 40px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-ink-2);
+  text-decoration: none;
+  text-shadow: 0 1px 12px var(--shadow-ink);
+  transition: color 180ms var(--ease);
+  animation: fade 600ms var(--ease) 220ms both;
+}
+
+.team:hover {
+  color: var(--color-ink);
+}
+
+.root .team:focus-visible {
+  border-radius: 5px;
+}
+
+/* ── Motion ────────────────────────────────────────────────── */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header,
+  .title,
+  .line,
+  .error,
+  .signIn,
+  .team {
+    animation: none;
+  }
+
+  .signIn,
+  .arrow,
+  .team {
+    transition: none;
+  }
+}
+
+/* ── Sizes ─────────────────────────────────────────────────── */
+
+@media (width < 1100px) {
+  .root {
+    --gutter: 28px;
+  }
+}
+
+@media (width < 760px) {
+  .root {
+    justify-content: flex-end;
+    padding: 96px 22px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .header {
+    padding: 0 22px;
+  }
+
+  .logo {
+    height: 16px;
+  }
+
+  /* The still fills the top 70%, so it shows the scene at a wider angle
+     than a full-height crop (which was all sky), and fades into the solid
+     plum the words sit on before its own bottom edge. */
+  .still {
+    bottom: auto;
+    height: 70svh;
+    object-position: 12% 50%;
+  }
+
+  .shade {
+    background: linear-gradient(
+      to bottom,
+      rgba(29, 24, 38, 0.5) 0,
+      rgba(29, 24, 38, 0) 120px,
+      rgba(29, 24, 38, 0) 40%,
+      rgba(29, 24, 38, 0.78) 58%,
+      var(--color-surface-0) 69%
+    );
+  }
+
+  .content {
+    width: 100%;
+    align-items: stretch;
+    text-align: left;
+  }
+
+  .content::before {
+    display: none;
+  }
+
+  .title {
+    font-size: 34px;
+    line-height: 1.08;
+  }
+
+  .line {
+    margin-top: 12px;
+    font-size: 16px;
+    color: var(--color-ink-2);
+  }
+
+  .error {
+    width: 100%;
+  }
+
+  .signIn {
+    width: 100%;
+    min-width: 0;
+    height: 52px;
+    margin-top: 24px;
+  }
+
+  .team {
+    align-self: center;
+    margin-top: 8px;
+  }
+}

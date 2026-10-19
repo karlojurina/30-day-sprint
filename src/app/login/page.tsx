@@ -1,178 +1,89 @@
-"use client";
-
-import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { motion } from "framer-motion";
-import { SPEC_EASE } from "@/lib/motion";
-import { COMING_SOON_MESSAGE } from "@/lib/student-app-gate";
+import { Bricolage_Grotesque } from "next/font/google";
+import tokens from "@/components/world-v6/tokens.module.css";
+import { LoginError } from "./LoginError";
+import s from "./login.module.css";
 
-function LoginContent() {
-  const searchParams = useSearchParams();
-  const error = searchParams.get("error");
-  const detail = searchParams.get("detail");
+/**
+ * The login (Lovro, 2026-10-19: "make the login prettier"): the map's
+ * opening still with the words where the map's welcome stands, the logo
+ * where the map's header has it, the world's tokens and type.
+ *
+ * A server page, so the still, the words and the button are in the HTML and
+ * paint before the scripts load. Only the error reads the address
+ * (LoginError), so only it waits inside Suspense.
+ *
+ * The world's display face, scoped to this page as app/world/layout.tsx
+ * scopes it to the map (JetBrains Mono comes from the root layout).
+ */
 
-  // Every code any auth path can emit. Keep this in sync with the
-  // `?error=` redirects in api/auth/whop/callback and auth/complete —
-  // an unmapped code renders the useless generic fallback below.
-  const errorMessages: Record<string, string> = {
-    no_membership: "Active Ecom University membership required.",
-    session_expired: "That sign-in attempt expired. Start again below.",
-    session_timeout:
-      "Couldn't reach our servers. Check your connection, then try again.",
-    profile_load_failed:
-      "Signed in, but we couldn't load your account. Try again.",
-    state_mismatch: "Security check failed. Try again.",
-    state_invalid: "Security check failed. Try again.",
-    missing_params: "Sign-in didn't complete. Try again.",
-    access_denied: "Sign-in was cancelled on Whop.",
-    auth_failed: "Authentication failed. Try again.",
-    callback_failed: "Something broke. Try again.",
-    session_failed: "Couldn't create your session. Try again.",
-    // The callback while the student app is closed (T-078). The login's
-    // layout shows the coming-soon page then, so this line is the fallback.
-    app_closed: COMING_SOON_MESSAGE,
-  };
-
-  return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center px-5">
-      {/* Background glow */}
-      <div
-        aria-hidden
-        className="fixed inset-0 pointer-events-none"
-        style={{
-          background:
-            "radial-gradient(ellipse 60% 50% at 50% 40%, var(--color-accent-glow) 0%, transparent 65%)",
-          opacity: 0.4,
-        }}
-      />
-
-      <div className="relative w-full max-w-[440px]">
-        <motion.div
-          initial="hidden"
-          animate="visible"
-          variants={{
-            hidden: {},
-            visible: {
-              transition: { staggerChildren: 0.08, delayChildren: 0.05 },
-            },
-          }}
-          className="text-center sm:text-left"
-        >
-          <motion.div
-            variants={{
-              hidden: { opacity: 0, y: 8 },
-              visible: { opacity: 1, y: 0 },
-            }}
-            transition={{ duration: 0.5, ease: SPEC_EASE }}
-            className="mono-label-accent mb-3"
-          >
-            Ecom University · 30-Day Sprint
-          </motion.div>
-
-          <motion.h1
-            variants={{
-              hidden: { opacity: 0, y: 10 },
-              visible: { opacity: 1, y: 0 },
-            }}
-            transition={{ duration: 0.6, ease: SPEC_EASE }}
-            className="display-heading text-[48px] sm:text-[64px] leading-[0.92] mb-4"
-          >
-            You&apos;re
-            <br />
-            <span className="text-[var(--color-accent)]">in.</span> Let&apos;s go.
-          </motion.h1>
-
-          <motion.p
-            variants={{
-              hidden: { opacity: 0, y: 10 },
-              visible: { opacity: 1, y: 0 },
-            }}
-            transition={{ duration: 0.6, ease: SPEC_EASE }}
-            className="text-[15px] leading-relaxed text-[var(--color-text-secondary)] mb-8 max-w-[360px] mx-auto sm:mx-0"
-          >
-            Sign in with Whop. Your 30 days start the moment you&apos;re in.
-          </motion.p>
-
-          {error && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3 }}
-              className="mb-6 px-4 py-3 rounded-xl bg-[var(--color-danger)]/10 border border-[var(--color-danger)]/30"
-            >
-              <p className="text-[14px] text-[var(--color-danger)]">
-                {errorMessages[error] || "Something broke. Try again."}
-              </p>
-              {/* The code always renders, detail when we have one. A
-                  screenshot of this line is enough to route the ticket
-                  without a round-trip asking the student for logs. */}
-              <p className="mt-1 text-[11px] text-[var(--color-danger)]/70 break-all font-mono">
-                {error}
-                {detail ? `: ${detail}` : ""}
-              </p>
-            </motion.div>
-          )}
-
-          <motion.div
-            variants={{
-              hidden: { opacity: 0, y: 10 },
-              visible: { opacity: 1, y: 0 },
-            }}
-            transition={{ duration: 0.6, ease: SPEC_EASE }}
-          >
-            <a
-              href="/api/auth/whop/authorize"
-              className="
-                inline-flex items-center justify-center w-full
-                px-6 py-4 rounded-xl
-                bg-[var(--color-accent)] hover:bg-[var(--color-accent-dark)]
-                text-[var(--color-bg-primary)] font-semibold text-[16px]
-                transition-colors
-              "
-            >
-              Sign in with Whop
-            </a>
-          </motion.div>
-
-          <motion.p
-            variants={{
-              hidden: { opacity: 0 },
-              visible: { opacity: 1 },
-            }}
-            transition={{ duration: 0.6, delay: 0.2 }}
-            className="mt-6 mono-label text-center sm:text-left"
-          >
-            <a
-              href="/admin/login"
-              className="hover:text-[var(--color-text-primary)] transition-colors"
-            >
-              Team login →
-            </a>
-          </motion.p>
-        </motion.div>
-      </div>
-    </div>
-  );
-}
+const display = Bricolage_Grotesque({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-v2-display",
+  axes: ["opsz"],
+});
 
 export default function LoginPage() {
   return (
-    <Suspense
-      fallback={
-        <div
-          role="status"
-          aria-live="polite"
-          className="flex items-center justify-center min-h-screen"
-        >
-          <div
+    <main className={`${tokens.tokens} ${display.variable} ${s.root}`}>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        className={s.still}
+        src="/world-v6/posters/k0.webp"
+        width={1920}
+        height={1080}
+        alt=""
+        fetchPriority="high"
+        draggable={false}
+      />
+      <div aria-hidden="true" className={s.shade} />
+
+      <header className={s.header}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          className={s.logo}
+          src="/brand/ecomu-ad-creative-white.svg"
+          width={3142}
+          height={233}
+          alt="Ecom University, Ad Creative"
+          draggable={false}
+        />
+      </header>
+
+      <div className={s.content}>
+        <h1 className={s.title}>Your map through the course.</h1>
+        <p className={s.line}>
+          Sign in with your Whop account to pick up where you left off.
+        </p>
+
+        <Suspense fallback={null}>
+          <LoginError />
+        </Suspense>
+
+        <a href="/api/auth/whop/authorize" className={s.signIn}>
+          Sign in with Whop
+          <svg
+            className={s.arrow}
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
             aria-hidden="true"
-            className="w-8 h-8 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin"
-          />
-          <span className="sr-only">Loading…</span>
-        </div>
-      }
-    >
-      <LoginContent />
-    </Suspense>
+          >
+            <path
+              d="M2.5 8h10.5M9.5 4.5 13 8l-3.5 3.5"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </a>
+        <a href="/admin/login" className={s.team}>
+          Team login →
+        </a>
+      </div>
+    </main>
   );
 }

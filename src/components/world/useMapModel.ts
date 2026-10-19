@@ -21,9 +21,9 @@ export const AnyLessonFinishesContext = createContext(false);
  *   error    it failed to load
  *   empty    it arrived with no areas or no lessons. A failed catalog query and
  *            a refused data request both arrive like this today (the data
- *            route answers 200 with empty rows, and StudentContext sets no
- *            error on a non-OK response), so "empty" is treated as "may have
- *            failed" wherever it is shown
+ *            route answers 500 for a failed catalog query, and StudentContext
+ *            sets no error on a non-OK response), so "empty" is treated as
+ *            "may have failed" wherever it is shown
  *   shape    it is a real catalog, but not the eight-area one the map draws
  *   ready    the map can be mounted
  *

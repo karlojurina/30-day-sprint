@@ -169,6 +169,27 @@ export async function GET(request: NextRequest) {
     supabase.from("lesson_videos").select("lesson_id"),
   ]);
 
+  // A failed read must never answer as a believable empty state (progress-1,
+  // map-1, 2026-10-20): no lessons read as "There are no lessons here yet.",
+  // no completions as every lantern out and all 61 videos left for the 30%, no
+  // streak row as a streak of 0. Both callers keep what they already show on a
+  // non-OK answer. A student who never applied for the 30% has no
+  // discount_requests row, which .single() answers with PGRST116: that is the
+  // usual case, not a failure.
+  const failedReads: string[] = [];
+  if (regionsRes.error) failedReads.push(`${REGIONS_TABLE}: ${regionsRes.error.message}`);
+  if (lessonsRes.error) failedReads.push(`${LESSONS_TABLE}: ${lessonsRes.error.message}`);
+  if (completionsRes.error) failedReads.push(`student_lesson_completions: ${completionsRes.error.message}`);
+  if (streaksRes.error) failedReads.push(`student_streaks: ${streaksRes.error.message}`);
+  if (milestonesRes.error) failedReads.push(`student_milestones: ${milestonesRes.error.message}`);
+  if (discountRes.error && discountRes.error.code !== "PGRST116") {
+    failedReads.push(`discount_requests: ${discountRes.error.message}`);
+  }
+  if (failedReads.length > 0) {
+    console.error(`[student/data] reads failed: ${failedReads.join("; ")}`);
+    return NextResponse.json({ error: "Could not load your data. Try again." }, { status: 500 });
+  }
+
   if (lessonVideosRes.error) {
     // Without this line a failed read looks exactly like a course with no
     // videos: every lesson renders "Not recorded yet" and nothing says why.

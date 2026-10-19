@@ -18,6 +18,7 @@
  * per Karlo's call (simpler than per-status variants).
  */
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -25,6 +26,9 @@ const RENEW_URL = "https://whop.com/checkout/plan_4ZrwR4PmBsVsx";
 
 export function MembershipBlockOverlay() {
   const { student, signOut } = useAuth();
+  // The line when a sign-out did not happen (login-5): the session is kept,
+  // so the student stays on this card and is told why.
+  const [signOutTrouble, setSignOutTrouble] = useState<string | null>(null);
 
   if (!student) return null;
   // Only block when the membership isn't active. The 3 non-active
@@ -162,10 +166,29 @@ export function MembershipBlockOverlay() {
             </svg>
           </a>
 
+          {signOutTrouble !== null && (
+            <p
+              role="alert"
+              style={{
+                alignSelf: "center",
+                marginTop: 4,
+                fontSize: 13,
+                lineHeight: 1.5,
+                textAlign: "center",
+                color: "rgba(255,255,255,0.74)",
+              }}
+            >
+              {signOutTrouble}
+            </p>
+          )}
+
           {/* Sign out - secondary, smaller */}
           <button
             type="button"
-            onClick={() => void signOut()}
+            onClick={async () => {
+              setSignOutTrouble(null);
+              setSignOutTrouble(await signOut());
+            }}
             style={{
               alignSelf: "center",
               marginTop: 6,

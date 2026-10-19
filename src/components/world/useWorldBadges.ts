@@ -184,12 +184,14 @@ export function useWorldBadges(): WorldBadges {
   return { status, book, fresh, newIds, announced, retry: live.retry };
 }
 
-/** The app's sign-out, or the development page's stand-in. */
-export function useWorldSignOut(): () => Promise<void> {
+/** The app's sign-out, or the development page's stand-in. Resolves to null,
+ *  or to the line to show when the sign-out did not happen (AuthContext). */
+export function useWorldSignOut(): () => Promise<string | null> {
   const stand = useContext(HudStandInContext);
   const { signOut } = useAuth();
   return useCallback(async () => {
-    if (stand) await stand.signOut();
-    else await signOut();
+    if (!stand) return signOut();
+    await stand.signOut();
+    return null;
   }, [stand, signOut]);
 }

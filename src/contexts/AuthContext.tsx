@@ -36,8 +36,14 @@ interface AuthState {
    *  student WITH an authError means we couldn't tell. Guards must not
    *  treat those the same. */
   authError: string | null;
-  signOut: () => Promise<void>;
+  /** Resolves to null once signed out, or to SIGN_OUT_FAILED_TEXT when the
+   *  sign-out did not happen: the session and this state are then kept. */
+  signOut: () => Promise<string | null>;
 }
+
+/** What a sign-out that did not happen says (login-5). */
+export const SIGN_OUT_FAILED_TEXT =
+  "Couldn't sign you out. Check your connection and try again.";
 
 const AuthContext = createContext<AuthState | null>(null);
 
@@ -235,13 +241,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [supabase, fetchProfile, isSessionHandoff]);
 
-  const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
+  // The state is cleared only once auth-js has removed the session (login-5,
+  // 2026-10-20). When the logout request fails on the network or with a 5xx,
+  // auth-js answers { error } and keeps the session (GoTrueClient.js,
+  // _signOut). Clearing the state anyway sent the guard to /login while the
+  // browser still held a working session: on a shared computer the next person
+  // to open the site was in that student's account.
+  const signOut = useCallback(async (): Promise<string | null> => {
+    let failed: boolean;
+    try {
+      const { error } = await supabase.auth.signOut();
+      failed = Boolean(error);
+    } catch {
+      failed = true;
+    }
+    if (failed) return SIGN_OUT_FAILED_TEXT;
     setUser(null);
     setSession(null);
     setStudent(null);
     setTeamMember(null);
     setStudentAppClosed(false);
+    return null;
   }, [supabase]);
 
   return (

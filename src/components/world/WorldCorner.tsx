@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { useAuth } from "@/contexts/AuthContext";
+import { SIGN_OUT_FAILED_TEXT, useAuth } from "@/contexts/AuthContext";
 import { useStudent } from "@/contexts/StudentContext";
 import type { Achievement } from "@/types/database";
 import { useWorldBadges, useWorldSignOut, type WorldBadges } from "./useWorldBadges";
@@ -118,6 +118,8 @@ export function WorldCorner({
   /** Full sheet (the map's list view), read from the map's root when the list opens. */
   const [sheet, setSheet] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  /** The line when a sign-out did not happen (login-5), shown in the list. */
+  const [signOutTrouble, setSignOutTrouble] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const pillRef = useRef<HTMLButtonElement | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
@@ -139,6 +141,7 @@ export function WorldCorner({
     if (left !== null && open) setOpen(false);
   }
   if (paused && open) setOpen(false);
+  if (!open && signOutTrouble !== null) setSignOutTrouble(null);
 
   const close = useCallback((refocus: boolean) => {
     setOpen(false);
@@ -192,11 +195,18 @@ export function WorldCorner({
 
   // Not a `finally`: the React compiler gives up on a component that has one
   // (LessonPlayer.tsx says the same). Signed out, the guard sends them to /login.
+  // A sign-out that did not happen keeps them here with a line saying so
+  // (login-5), in the list above its own Sign out: the pill's button has no
+  // room for a sentence, so a press there opens the list.
   const doSignOut = async () => {
     if (leaving) return;
     setLeaving(true);
-    await signOut().catch(() => {});
+    setSignOutTrouble(null);
+    const trouble = await signOut().catch(() => SIGN_OUT_FAILED_TEXT);
     setLeaving(false);
+    if (trouble === null) return;
+    setSignOutTrouble(trouble);
+    if (!open) toggle();
   };
 
   const count = status === "ready" && total > 0;
@@ -302,6 +312,11 @@ export function WorldCorner({
               <kbd className={c.esc}>Esc</kbd>
             </div>
             <ListBody badges={badges} current={current} longest={longest} held={held} />
+            {signOutTrouble !== null && (
+              <p role="alert" className={c.hint}>
+                {signOutTrouble}
+              </p>
+            )}
             <div className={c.foot}>
               <span className={c.who}>{student?.name ? `Signed in as ${student.name}` : null}</span>
               <button type="button" className={c.signOut} disabled={leaving} onClick={doSignOut}>

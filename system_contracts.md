@@ -154,7 +154,9 @@ When adding a new table, append it here. When deleting a field, scan
   the backfill's callers when it added rows (refresh-watch-sync, the
   login callback, which hands a slow sync to `after()`);
   mark-action-shipped (action half newly done); toggle-lesson (a task
-  with no action half ticked). A failed read writes nothing. Read by the
+  with no action half ticked); the Whop catch-up (`src/lib/whop-catchup.ts`,
+  T-089), for a lesson it adds that Whop says was opened that day (UTC),
+  with no "last active". A failed read writes nothing. Read by the
   data route (`current_streak` through `currentStreakAsOf`), and so by
   `StudentContext` (`streak`); `src/lib/achievements.ts`;
   `src/lib/day28-embed.ts` and the journal page (longest only); and the
@@ -168,7 +170,12 @@ When adding a new table, append it here. When deleting a field, scan
 - **Depends on:** `students`
 - **Depended on by:** `/api/auth/whop/callback` (token write),
   `src/app/api/student/_lib/watch-sync.ts` (all sync diagnostics),
-  `StudentContext` (`syncDiagnostics`), admin student detail page
+  `StudentContext` (`syncDiagnostics`), admin student detail page,
+  `src/lib/whop-catchup.ts` (T-089, 2026-10-20: writes the same
+  diagnostics columns with the same values as the backfill for every
+  member it reads from Whop, and nothing for a member whose read
+  failed; never names the token columns; its snapshot reads the
+  diagnostics columns, with the Whop ids in an old error hidden)
 - **Stable contract:** `student_id`, `access_token`, `refresh_token`,
   `last_sync_at`, `last_sync_error`, `last_sync_error_at`,
   `last_sync_unmatched`, `last_sync_fetched`, `last_sync_matched`
@@ -695,6 +702,9 @@ When adding a new table, append it here. When deleting a field, scan
       offered after the switch.
     - `GET /api/admin/cutover-status`: the phase and the problem list;
       500.
+    - `POST /api/admin/whop-catchup` (T-089): runs only after the
+      switch, since before it `lessons` holds the old course; no row
+      answers 409, a failed read 500, and nothing runs.
     - `/admin/settings` and `PUT /api/admin/config` compare the key
       (`CURRICULUM_RESET_KEY`) to lock it, and read nothing.
   - **Read in SQL:** the trigger function `daily_snapshots_reset_floor()`
@@ -703,7 +713,8 @@ When adding a new table, append it here. When deleting a field, scan
     v104 (refuses without it); the undo of v103 (refuses with it); v101
     (refuses with it); `cutover-preflight.sql` (expects it absent) and
     `cutover-postcheck.sql` (expects it to agree with
-    `archive_v1.meta`).
+    `archive_v1.meta`); `whop-catchup-proof.sql` (counts the watched
+    lessons dated before it).
   - Readable by any team member and writable by founders and admins
     (v27's policies); the crons read it with the service role. A
     student's client reads no row and gets null, so no student-side
@@ -743,6 +754,18 @@ When adding a new table, append it here. When deleting a field, scan
   archives every row into `archive_v1` and
   empties the table; its undo moves the rows made since into
   `archive_v2` and puts the archived ones back.
+- **The Whop catch-up writes here too (T-089, 2026-10-20):**
+  `src/lib/whop-catchup.ts`, run by `POST /api/admin/whop-catchup`, for
+  every active or past_due member, matched by `whop_lesson_id` as the
+  backfill does. It sends a time where the others let the database stamp
+  now(): `completed_at` is Whop's `created_at` (when the member opened
+  the lesson on Whop), or the run's clock when Whop's is later or
+  missing. A new row goes in with `ignoreDuplicates`, so a row that
+  exists keeps its time; a row with no `completed_at` is finished
+  (`completed_at` set, `skipped_at` cleared, `.is("completed_at", null)`
+  on the update). Every row it adds or finishes is in its write answer's
+  change log (`changes.inserted`, `changes.promoted`), for an undo. It
+  never writes `discord_message_link` or `action_completed_at`.
 - **Who may write (v105, built 2026-10-16, not on production):** a
   student reads their own rows ("Students can read own lesson
   completions", FOR SELECT) and writes none; v3's FOR ALL policy is

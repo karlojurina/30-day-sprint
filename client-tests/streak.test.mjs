@@ -4,7 +4,8 @@
 // Whop counts as watched). A day counts when, that day, the student:
 //   a. finishes a lesson by watching it (lesson-watched: 95% reached, 80% played);
 //   b. has a lesson finished on Whop newly arrive (the webhook, or the backfill
-//      adding a row it did not have, on a visit or at login);
+//      adding a row it did not have, on a visit or at login; the Whop
+//      catch-up, T-089, only for a lesson Whop says was opened that day);
 //   c. finishes a task (mark-action-shipped; the old course's task box).
 // Nothing else: not a login, a visit, a backfill that adds nothing, a skip,
 // partial watching, a quiz or undoing. On the new course a done task can't be
@@ -31,6 +32,7 @@ import { POST as toggle } from './_gen/toggle-lesson-route.ts'
 import { POST as quiz } from './_gen/submit-quiz-route.ts'
 import { GET as appData } from './_gen/student-data-route.ts'
 import { GET as login } from './_gen/whop-callback-route.ts'
+import { POST as catchup } from './_gen/whop-catchup-route.ts'
 import { signState } from './_gen/pkce.ts'
 import { currentStreakAsOf, getTodayUtc } from './_gen/streak.ts'
 // useDb under another name: ESLint's React rules take a "use..." call for a hook.
@@ -271,6 +273,42 @@ console.log('\n=== b. A lesson finished on Whop newly arriving ===')
   ok(r.body.syncedCount === 1 && rowOf(db, 'a1l02').completed_at && same(streakOf(db), TICKED),
      'a lesson skipped in the app and finished on Whop: it becomes watched, and that ticks', show(streakOf(db)))
 }
+{
+  // The Whop catch-up (T-089, POST /api/admin/whop-catchup, write): Lovro's
+  // call A, a day only for a lesson it adds that Whop says was opened today
+  // (UTC), and never "last active". It reads Whop through the real whop.ts,
+  // answered here by a stand-in fetch; whop-catchup.test.mjs runs the rest.
+  const env = ['WHOP_API_KEY', 'WHOP_COURSE_ID', 'CRON_SECRET'].map((k) => [k, process.env[k]])
+  Object.assign(process.env, { WHOP_API_KEY: 'test-key-not-real', WHOP_COURSE_ID: 'cour_test', CRON_SECRET: 'a made-up cron secret' })
+  const realFetch = globalThis.fetch
+  const whopOpened = (createdAt) => {
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      data: [{ id: 'int_1', completed: true, created_at: createdAt, lesson: { id: 'lesn_01', title: 'a1l01' }, user: { id: 'user_1' } }],
+      page_info: { has_next_page: false, end_cursor: null },
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  const catchUp = () => call(catchup, new Request('http://app/api/admin/whop-catchup', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${process.env.CRON_SECRET}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ mode: 'write' }),
+  }))
+  const switched = { admin_config: [{ key: 'curriculum_reset_at', value: '2026-10-19T16:34:00.000Z' }] }
+  try {
+    let db = freshDb({ extra: switched })
+    whopOpened(new Date().toISOString())
+    let r = await catchUp()
+    ok(r.status === 200 && r.body.rows.inserted === 1 && same(streakOf(db), TICKED) && !moved(db),
+       'the catch-up adds a lesson Whop says was opened today: the streak ticks, "last active" stays', show({ streak: streakOf(db), inserted: r.body.rows?.inserted }))
+    db = freshDb({ extra: switched })
+    whopOpened(YESTERDAY_AT)
+    r = await catchUp()
+    ok(r.status === 200 && rowOf(db, 'a1l01')?.completed_at === YESTERDAY_AT && same(streakOf(db), KEPT) && !moved(db),
+       'a lesson opened on Whop yesterday: added with that time, no tick, "last active" stays', show({ streak: streakOf(db), at: rowOf(db, 'a1l01')?.completed_at }))
+  } finally {
+    globalThis.fetch = realFetch
+    for (const [k, v] of env) { if (v === undefined) delete process.env[k]; else process.env[k] = v }
+  }
+}
 
 console.log('\n=== c. Finishing a task ===')
 {
@@ -493,7 +531,8 @@ console.log('\n=== Who can write the streak ===')
     fs.readFileSync(path.join(dir, f), 'utf8').split('\n').some((l) => l.includes('student_streaks') && !l.trim().startsWith('--')))
   ok(same(naming, ['2026_v46_split_student_state.sql']), 'in the database, only v46 names it in code', show(naming))
   const callers = ['src/app/api/student/_lib/update-streak.ts', 'src/lib/complete-lesson.ts', 'src/app/api/student/refresh-watch-sync/route.ts',
-    'src/app/api/auth/whop/callback/route.ts', 'src/app/api/student/mark-action-shipped/route.ts', 'src/app/api/student/toggle-lesson/route.ts']
+    'src/app/api/auth/whop/callback/route.ts', 'src/app/api/student/mark-action-shipped/route.ts', 'src/app/api/student/toggle-lesson/route.ts',
+    'src/lib/whop-catchup.ts']
   const tickers = new Set()
   // Code only: comments that name the function (StudentContext's do) are dropped.
   const code = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1')

@@ -248,3 +248,30 @@ gen('../src/app/api/auth/whop/callback/route.ts', './_gen/whop-callback-route.ts
   ...toStub('next/server', '@/lib/supabase-server', '@/lib/whop', '@/lib/whop-members', '@/lib/achievements',
     '@/app/api/student/_lib/update-streak', '@supabase/supabase-js'),
 ], { dropLineComments: true })
+
+// The Whop catch-up (T-089, whop-catchup.test.mjs): the route and the run as
+// they are. The run reads Whop through the real whop.ts (above), which the
+// test answers with a stand-in fetch, so a failure is sorted from the read's
+// own message. The team login is the real admin-auth.ts on the stand-in's
+// auth and team_members, so 401 and 403 are its own answers; its type-only
+// import is pointed at a file that does not exist, as above. The streak's
+// writer is the stub's (recorded, then run for real). supabase-pagination.ts
+// has no imports (outreach-cutover.test.mjs writes the same copy).
+gen('../src/lib/supabase-pagination.ts', './_gen/supabase-pagination.ts')
+gen('../src/lib/admin-auth.ts', './_gen/admin-auth.ts', [
+  ['from "@/types/database"', 'from "./types-erased.ts"'],
+  ...toStub('next/server', '@supabase/supabase-js'),
+])
+gen('../src/lib/whop-catchup.ts', './_gen/whop-catchup.ts', [
+  ['from "@/lib/whop"', 'from "./whop.ts"'],
+  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+  ['from "@/lib/constants"', 'from "./constants.ts"'],
+  ['from "@/lib/streak"', 'from "./streak.ts"'],
+  ...toStub('@/app/api/student/_lib/update-streak'),
+])
+gen('../src/app/api/admin/whop-catchup/route.ts', './_gen/whop-catchup-route.ts', [
+  ['from "@/lib/whop-catchup"', 'from "./whop-catchup.ts"'],
+  ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ...toStub('next/server', '@/lib/supabase-server'),
+])

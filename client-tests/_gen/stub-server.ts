@@ -59,6 +59,8 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
       id: newId, whop_user_id: none, supabase_user_id: none, email: none, name: none,
       joined_at: now, first_paid_at: none, membership_status: () => "active", cancel_scheduled_at: none,
       last_active_at: now, ad_submissions_verified: () => false,
+      // v38 and v79, read by the Whop catch-up's pool (whop-catchup.test.mjs).
+      csm_exempt: () => false, whop_plan_id: none,
     },
     unique: [["whop_user_id"]],
   },
@@ -131,6 +133,8 @@ export interface Logged {
   values?: unknown;
   options?: unknown;
   returning?: string | null;
+  /** For a select, the columns it named ("*" for all). */
+  columns?: string;
 }
 
 export class FakeDb {
@@ -174,6 +178,7 @@ function builder(db: FakeDb, table: string) {
   let single: "one" | "maybe" | null = null;
   let order: [string, boolean] | null = null;
   let lim: number | null = null;
+  let rng: [number, number] | null = null;
   let values: Row | Row[] | null = null;
   let opts: { onConflict?: string; ignoreDuplicates?: boolean } = {};
   let ran = false;
@@ -202,6 +207,12 @@ function builder(db: FakeDb, table: string) {
     },
     limit(n: number) {
       lim = n;
+      return b;
+    },
+    /** Rows `from` to `to`, both counted, as fetchAllRowsPaginated asks for a page (logged as a filter). */
+    range(from: number, to: number) {
+      rng = [from, to];
+      q.filters.push(`range ${from}-${to}`);
       return b;
     },
     insert(v: Row | Row[]) {
@@ -242,6 +253,7 @@ function builder(db: FakeDb, table: string) {
     if (ran) throw new Error(`a query on ${table} ran twice`);
     ran = true;
     q.values = values === null ? undefined : structuredClone(values);
+    if (q.op === "select") q.columns = cols;
     db.log.push(q);
     return Promise.resolve(shape(run()));
   }
@@ -298,6 +310,7 @@ function builder(db: FakeDb, table: string) {
         rows = [...rows].sort((x, y) => ((x[c] as string) < (y[c] as string) ? -1 : (x[c] as string) > (y[c] as string) ? 1 : 0) * (asc ? 1 : -1));
       }
       if (lim !== null) rows = rows.slice(0, lim);
+      if (rng !== null) rows = rows.slice(rng[0], rng[1] + 1);
       return project(table, rows, cols);
     }
 

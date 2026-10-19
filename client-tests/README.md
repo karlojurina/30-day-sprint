@@ -88,6 +88,20 @@ student who already holds a request from the old dashboard; the form's
 database function stands in from v29's body, and the migration harness
 (section 26) runs the real one on the same four cases.
 
+`whop-catchup.test.mjs` (T-089, 2026-10-20) runs `POST /api/admin/whop-catchup`
+through its own `POST`: the route, the run (`src/lib/whop-catchup.ts`) and the
+real team login (`admin-auth.ts`, so 401 and 403 are its own answers, on the
+stand-in's auth and `team_members`). Whop is the real `whop.ts` read on a
+stand-in `fetch` that pages like Whop's v1, so every failure the run sorts by
+kind is the read's own message. Its clock is the suite's: `new Date()` and
+`Date.now()` answer it and `setTimeout` moves it by the time asked, so the
+pace (4 Whop requests a second), a 429's wait and the 240 s budget pass in
+milliseconds and are measured. For it `stub-server.ts` gained `.range()` (for
+`fetchAllRowsPaginated`), the columns a select named on its log entry, and
+`students.csm_exempt` and `whop_plan_id`. Each of 19 rules was broken once in a
+copy of the run, and the suite failed every time. `streak.test.mjs` runs the
+catch-up's one streak rule too.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

@@ -27,8 +27,19 @@ interface StudentDrawerProps {
  * lighter chrome. Click "Open full page" to jump to the full detail.
  *
  * Slide-in animation; click backdrop or Escape to dismiss.
+ *
+ * Keyed by the student, so each one opens on fresh state. The journey page
+ * keeps the drawer mounted, and its state used to survive from one student
+ * to the next: a student with no application or no streak row showed the
+ * previous student's (their status and Whop code, their streak), and a slow
+ * answer for the previous student could land on the next (fix lane G1,
+ * admin-2).
  */
-export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
+export function StudentDrawer(props: StudentDrawerProps) {
+  return <StudentDrawerBody key={props.studentId ?? ""} {...props} />;
+}
+
+function StudentDrawerBody({ studentId, onClose }: StudentDrawerProps) {
   const supabase = createClient();
   const [student, setStudent] = useState<Student | null>(null);
   const [regions, setRegions] = useState<Region[]>([]);
@@ -42,10 +53,12 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
   const [loading, setLoading] = useState(true);
   const [savingVerification, setSavingVerification] = useState(false);
 
+  // A fresh mount per student (above): loading is true and every value
+  // empty until this student's answers land. Answers that arrive after the
+  // drawer moved on are dropped.
   useEffect(() => {
     if (!studentId) return;
-    setLoading(true);
-    setStudent(null);
+    let cancelled = false;
 
     async function fetchAll() {
       const [
@@ -77,15 +90,21 @@ export function StudentDrawer({ studentId, onClose }: StudentDrawerProps) {
           .maybeSingle(),
       ]);
 
-      if (studentRes.data) setStudent(studentRes.data);
+      if (cancelled) return;
+      // This student's values come from this student's answers, every
+      // time: no row (no application, no streak yet) reads as none.
+      setStudent(studentRes.data ?? null);
       if (regionsRes.data) setRegions(regionsRes.data);
       if (lessonsRes.data) setLessons(lessonsRes.data);
-      if (completionsRes.data) setCompletions(completionsRes.data);
-      if (discountRes.data) setDiscountRequest(discountRes.data);
-      if (streaksRes.data) setStreaks(streaksRes.data as StudentStreaks);
+      setCompletions(completionsRes.data ?? []);
+      setDiscountRequest(discountRes.data ?? null);
+      setStreaks((streaksRes.data as StudentStreaks | null) ?? null);
       setLoading(false);
     }
     fetchAll();
+    return () => {
+      cancelled = true;
+    };
   }, [studentId, supabase]);
 
   // Escape closes

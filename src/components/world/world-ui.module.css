@@ -669,6 +669,15 @@
   border-color: var(--color-danger);
 }
 
+/* iOS Safari zooms into a focused text field under 16px and stays zoomed
+   after the keyboard closes. On a touch screen the field takes 16px; with
+   a mouse it keeps 13px. */
+@media (pointer: coarse) {
+  .input {
+    font-size: 16px;
+  }
+}
+
 /* The quiet button beside the accent one: Cancel, Edit link. */
 .secondary {
   height: 40px;

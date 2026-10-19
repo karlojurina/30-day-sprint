@@ -307,6 +307,15 @@ main:has(~ .root) section[aria-labelledby="cp-panel-title"] {
   border-color: var(--color-line-strong);
 }
 
+/* iOS Safari zooms into a focused text field under 16px and stays zoomed
+   after the keyboard closes. On a touch screen the answer takes 16px; with
+   a mouse it keeps 15px. */
+@media (pointer: coarse) {
+  .text {
+    font-size: 16px;
+  }
+}
+
 .error {
   margin: 12px 0 0;
   font-size: 13px;

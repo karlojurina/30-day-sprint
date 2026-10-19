@@ -141,6 +141,15 @@ members and this repository is public; the code is checked unchanged on
 every run (TypeScript prints the source and the copy without comments, and a
 difference stops the test).
 
+`phones-input-zoom.test.mjs` (phones-2) is a source check, since no harness
+renders the action item or the 30% form without the dev server: it parses
+`world-ui.module.css` and `discount-form.module.css` into their rules and runs
+the cascade for a phone (pointer coarse, 390x844) and a mouse (1366x768). The
+link field and the text answer are 16px on the phone, so iOS Safari does not
+zoom into them, and 13px and 15px with a mouse, as before. On 2026-10-20 the
+same two files were also loaded into headless Chrome with touch emulation and
+read back the same sizes (13px and 15px on touch before the fix).
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

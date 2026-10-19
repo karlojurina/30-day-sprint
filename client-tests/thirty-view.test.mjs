@@ -25,11 +25,13 @@ import fs from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { loadThirtyData } from './_gen/thirty-data.ts'
-import { VERDICT_TEXT, buildThirtyView, studentAppView, whopPulled } from './_gen/thirty-view.ts'
+import {
+  VERDICT_TEXT, aboutHours, buildThirtyView, judgeRequest, studentAppView, thirtyReasonText, verdictWithAds, videosLeftText, whopPulled,
+} from './_gen/thirty-view.ts'
 import { approvalVerdict, explainOldCourseRequest, factsFromReads, loadDiscountReads, videoDoneIds } from './_gen/discount-server.ts'
 import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_SHARED_DEADLINE, discountState, requiredLessons } from './_gen/discount.ts'
 import { YEARLY_WHOP_PLAN_IDS, planLabel } from './_gen/plans.ts'
-import { dayLabel, deadlineLabel } from './_gen/croatia-dates.ts'
+import { clockLabel, dayLabel, dayTimeLabel, deadlineLabel } from './_gen/croatia-dates.ts'
 import { FakeDb, MAX_ROWS, fakeClient, setCatalog } from './_gen/stub-server.ts'
 
 let pass = 0
@@ -611,6 +613,46 @@ console.log('\n=== The controls: the same check on a loader that skips paging, o
   ok(loose.differences.length > 0, `completions paged in an order that is not unique: the check fails, ${loose.differences.length} differences`, loose.differences.slice(0, 3).join(', '))
   const steady = await bothWays(world(main, WED, { shuffle: 12345 }), WED)
   ok(steady.differences.length === 0, 'the real loader on a different shuffle: no difference')
+}
+
+// ── What the 30% page adds (work item 3) ───────────────────────────────────
+console.log('\n=== The 30% page: the ads tick redone on the page, C4\'s words ===')
+{
+  // After "Ads verified" is saved the page redoes the ads check itself
+  // (verdictWithAds) instead of reading every student again. It must land
+  // where the builder would, for every pending request, ticked or not.
+  const loaded = await loadThirtyData(fakeClient(world(main, WED)))
+  const pending = loaded.data.requests.filter((r) => r.status === 'pending')
+  const wrong = []
+  for (const r of pending) {
+    const reads = loaded.data.reads.get(r.student_id)
+    const off = judgeRequest(reads, new Date(WED), r, RESET, false).verdict
+    const on = judgeRequest(reads, new Date(WED), r, RESET, true).verdict
+    if (!isDeepStrictEqual(verdictWithAds(off, true), on)) wrong.push(`${r.id} ticked`)
+    if (!isDeepStrictEqual(verdictWithAds(on, false), off)) wrong.push(`${r.id} unticked`)
+  }
+  ok(pending.length >= 5 && wrong.length === 0,
+     `the tick redone on the page equals the builder's verdict, both ways, for all ${pending.length} pending requests`, wrong.join(', '))
+}
+{
+  const shared = { deadline: DISCOUNT_SHARED_DEADLINE, videosDone: 57, videosTotal: 61, secondsLeft: 2400 }
+  ok(dayTimeLabel(DISCOUNT_SHARED_DEADLINE) === 'Fri 23 Oct, 23:59' && clockLabel('2026-10-20T08:30:00.000Z') === '10:30'
+       && clockLabel('2026-10-26T09:00:00.000Z') === '10:00' && dayTimeLabel(null) === '' && clockLabel('nope') === '',
+     'the deadline without the zone, and the clock, in Croatia on both sides of the clocks going back')
+  ok(thirtyReasonText('thirty_closing', shared) === '30% closes Fri 23 Oct, 23:59: 4 videos left (about 1 h)',
+     'C4, 30% closing', thirtyReasonText('thirty_closing', shared))
+  ok(thirtyReasonText('thirty_ready', { ...shared, videosDone: 61, secondsLeft: 0 }) === 'Can apply for the 30% now, until Fri 23 Oct, 23:59',
+     'C4, 30% ready', thirtyReasonText('thirty_ready', { ...shared, videosDone: 61, secondsLeft: 0 }))
+  ok(thirtyReasonText('thirty_closing', { ...shared, videosDone: 60, secondsLeft: 0 }) === '30% closes Fri 23 Oct, 23:59: 1 video left',
+     'one video, and no length known: no hours', thirtyReasonText('thirty_closing', { ...shared, videosDone: 60, secondsLeft: 0 }))
+  ok(aboutHours(null) === null && aboutHours(0) === null && aboutHours(600) === 'about 1 h' && aboutHours(5400) === 'about 2 h'
+       && aboutHours(9000) === 'about 3 h' && videosLeftText(1) === '1 video left' && videosLeftText(4) === '4 videos left',
+     'about H h: the nearest hour, never under 1; one video, many videos')
+  const sentences = [
+    thirtyReasonText('thirty_closing', shared), thirtyReasonText('thirty_ready', shared),
+    thirtyReasonText('thirty_closing', { ...shared, deadline: null }), thirtyReasonText('thirty_ready', { ...shared, deadline: null }),
+  ]
+  ok(sentences.every((t) => t.length > 0 && !/—|unlock|ecomtalent/i.test(t)), 'none holds an em dash, "unlock" or "EcomTalent"', show(sentences))
 }
 
 // ── Words ──────────────────────────────────────────────────────────────────

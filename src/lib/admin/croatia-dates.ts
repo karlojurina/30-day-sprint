@@ -4,6 +4,9 @@
  *
  *   dayLabel       "Fri 16 Oct"
  *   deadlineLabel  "Fri 23 Oct, 23:59 (Croatia time)"
+ *   dayTimeLabel   "Fri 23 Oct, 23:59", where the line already says the
+ *                  zone or needs to stay short (C4's 30% reasons)
+ *   clockLabel     "09:41", for "Updated 09:41"
  *
  * In UTC the shared deadline, the end of 23 October in Croatia, falls at
  * 21:59 on the 23rd, and the first day of the offer (1 October) falls on the
@@ -56,4 +59,18 @@ export function deadlineLabel(iso: string | null | undefined): string {
   const c = inCroatia(iso);
   if (!c) return "";
   return `${dayLabel(iso)}, ${two(c.hour)}:${two(c.minute)} (Croatia time)`;
+}
+
+/** "Fri 23 Oct, 23:59": deadlineLabel without the zone. An empty string for no date or one that does not parse. */
+export function dayTimeLabel(iso: string | null | undefined): string {
+  const c = inCroatia(iso);
+  if (!c) return "";
+  return `${dayLabel(iso)}, ${two(c.hour)}:${two(c.minute)}`;
+}
+
+/** "09:41": the time of day in Croatia. An empty string for no date or one that does not parse. */
+export function clockLabel(iso: string | null | undefined): string {
+  const c = inCroatia(iso);
+  if (!c) return "";
+  return `${two(c.hour)}:${two(c.minute)}`;
 }

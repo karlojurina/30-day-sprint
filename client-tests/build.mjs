@@ -236,6 +236,27 @@ gen('../src/lib/admin/thirty-data.ts', './_gen/thirty-data.ts', [
   ...toStub('@/lib/catalog-tables'),
 ])
 
+// The admin rebuild's routes (work items 3 and 4, admin-today-routes.test.mjs).
+// The REAL team check, admin-auth.ts, not stub-server.ts's stand-in: its
+// Next response and its Supabase client go to stub-server.ts, so the token
+// is looked up in the stand-in's users and the role in its team_members, and
+// a route answers 401, 403 or 200 for that login as it would on Vercel. The
+// copy is remade from the source on every run, so its stats allowlist cannot
+// drift from the one in src/. Its other import is a TYPE, pointed at a file
+// that does not exist, as csm-triggers.ts's is. GET /api/admin/thirty runs
+// over that check and the real loader and builder above.
+gen('../src/lib/admin-auth.ts', './_gen/admin-auth.ts', [
+  ...toStub('next/server', '@supabase/supabase-js'),
+  ['"@/types/database"', '"./types-erased.ts"'],
+])
+gen('../src/app/api/admin/thirty/route.ts', './_gen/admin-thirty-route.ts', [
+  ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ['from "@/lib/admin/thirty-data"', 'from "./thirty-data.ts"'],
+  ['from "@/lib/admin/thirty-view"', 'from "./thirty-view.ts"'],
+  ...toStub('next/server'),
+])
+
 // Every other route that writes or shows the streak (T-079, streak.test.mjs):
 // a finished video (lesson-watched, with the real chain after it), the old
 // course's task box (toggle-lesson) and quiz (submit-quiz), the app's data

@@ -101,6 +101,20 @@ them open. Two controls the suite writes into `_gen` (a loader whose reads
 skip paging, and one whose completions are paged without a unique order) must
 fail the same check, and do.
 
+`admin-today-routes.test.mjs` (admin rebuild, work item 3, 2026-10-20; work
+item 4 adds Today's routes to it) runs the rebuilt admin's routes through
+their own handlers, starting with `GET /api/admin/thirty`. Its login is the
+real team check: `build.mjs` copies `src/lib/admin-auth.ts` with Next's
+response and the Supabase client pointed at `stub-server.ts`, so the token is
+looked up in the stand-in's users and the member in its `team_members` (a
+founder, two csm members and a student who can sign in, all made up), and a
+call gets the 401, 403 or 200 it would get on Vercel. The route's answer must
+equal the loader and the builder run on the same database at the same moment,
+read nothing it may not and write nothing, and fail in plain words. Eight
+mutations of the copies (a role left out, a failed login or read answered
+with a list, the switch's date dropped, the failed read unnamed,
+`maxDuration`, a login with no team row let through) each make it fail.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

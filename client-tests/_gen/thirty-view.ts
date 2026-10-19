@@ -38,7 +38,7 @@ import {
 import type { ApprovalRefusal, ApprovalVerdict, DiscountFacts, DiscountReads, VideoRow } from "./discount-server.ts";
 import { planLabel } from "./plans.ts";
 import type { PlanLabel } from "./plans.ts";
-import { dayLabel } from "./croatia-dates.ts";
+import { dayLabel, dayTimeLabel } from "./croatia-dates.ts";
 import type { ThirtyAnswer, ThirtyCompletion, ThirtyContact, ThirtyData, ThirtyLesson, ThirtyStudent } from "./thirty-data.ts";
 
 /** A team member as a row names them. `name` is null when the id is no longer a team member. */
@@ -174,6 +174,51 @@ export const VERDICT_TEXT = {
   readFailed: "Couldn't read this student's progress, so there is no verdict. Reload the page to try again.",
   unknown: "The rule could not judge this request. Judge it by hand.",
 } as const;
+
+/**
+ * The verdict once the "Ads verified" tick changes on the page: the rule's
+ * answer stays, and the ads check, which the approve route runs last, is
+ * done again, as toVerdict does it. The page calls this after the tick is
+ * saved, so Approve opens (or closes) without reading every student again.
+ */
+export function verdictWithAds(verdict: Verdict, adsVerified: boolean): Verdict {
+  if (verdict.ok && !adsVerified) return { ok: false, reason: "ads", text: VERDICT_TEXT.ads, oldCourse: false };
+  if (!verdict.ok && verdict.reason === "ads" && adsVerified) {
+    return { ok: true, reason: null, text: VERDICT_TEXT.yes, oldCourse: false };
+  }
+  return verdict;
+}
+
+/** "about 2 h": the length of the videos still to watch, to the nearest hour and never under 1. Null when there is none. */
+export function aboutHours(seconds: number | null | undefined): string | null {
+  if (seconds == null || !(seconds > 0)) return null;
+  return `about ${Math.max(1, Math.round(seconds / 3600))} h`;
+}
+
+/** "1 video left", "4 videos left". */
+export function videosLeftText(left: number): string {
+  return `${left} ${left === 1 ? "video" : "videos"} left`;
+}
+
+/** The two 30% reasons a student can need a message for (admin rebuild PRD, C4). */
+export type ThirtyReasonKind = "thirty_closing" | "thirty_ready";
+
+/**
+ * C4's words for the two 30% reasons, which Today shows and a mark records
+ * (behavior_summary): "30% closes Fri 23 Oct, 23:59: 4 videos left (about
+ * 1 h)" and "Can apply for the 30% now, until Fri 23 Oct, 23:59". One place,
+ * so Today and the 30% page record the same sentence.
+ */
+export function thirtyReasonText(kind: ThirtyReasonKind, facts: Facts): string {
+  const until = facts.deadline ? dayTimeLabel(facts.deadline) : "";
+  if (kind === "thirty_ready") {
+    return until ? `Can apply for the 30% now, until ${until}` : "Can apply for the 30% now";
+  }
+  const left = (facts.videosTotal ?? 0) - (facts.videosDone ?? 0);
+  const hours = aboutHours(facts.secondsLeft);
+  const rest = `${videosLeftText(left)}${hours ? ` (${hours})` : ""}`;
+  return until ? `30% closes ${until}: ${rest}` : `30% still open: ${rest}`;
+}
 
 /**
  * Can this member be on Can still earn: a first payment from 1 October (the

@@ -1039,8 +1039,10 @@ When adding a new table, append it here. When deleting a field, scan
 
 ### `daily_progress_snapshots`
 - **Depends on:** `students`, `lessons`
-- **Depended on by:** `/admin/insights`, `/admin` dashboard sparklines,
-  pace metric math, retention analysis
+- **Depended on by:** `/admin/insights`, the `/admin` Dashboard (see
+  "The Dashboard's reads" below: the Active and Churned lines,
+  Churned's total, and Avg progress's number and line), pace metric
+  math, retention analysis
 - **Stable contract:** `snapshot_date` (primary key, daily grain),
   all-paying-members counts (`active_count`, `joined_count`,
   `churned_count`, `avg_progress`) AND cohort-only counts
@@ -1086,7 +1088,8 @@ When adding a new table, append it here. When deleting a field, scan
 ### `canceling_snapshots` (v84)
 - **Depends on:** `students` (`cancel_scheduled_at`, status, plan,
   `first_paid_at`)
-- **Depended on by:** `/admin` dashboard Canceling tile trend line
+- **Depended on by:** the `/admin` Dashboard's Canceling line (see "The
+  Dashboard's reads" below)
 - **Stable contract:** `snapshot_date` (primary key, daily grain),
   `canceling_count_cohort` (launch-cohort paying students in Whop's
   "Canceling" state at snapshot time)
@@ -1094,8 +1097,43 @@ When adding a new table, append it here. When deleting a field, scan
   separate from `daily_progress_snapshots`: the `rebuild_daily_snapshots()`
   RPC deletes+reinserts that table, and point-in-time canceling state
   cannot be recomputed for past dates — keeping it here makes the
-  history rebuild-proof. History starts at the v76 ship date; the
-  dashboard renders missing dates as 0.
+  history rebuild-proof. History starts at the v76 ship date. Since
+  admin rebuild 2 the Dashboard draws a missing date as a gap in the
+  line; it used to draw it as 0.
+
+### The Dashboard's reads (admin rebuild 2, WI-2, D3; branch `night/a2-dash`, not on production)
+
+`/admin` reads with the signed-in team member's browser client (the
+tables' team policies apply), in `readDashboard` in
+`src/app/admin/(authenticated)/page.tsx`; what the numbers mean is
+`src/lib/admin/dashboard-metrics.ts`. It writes nothing; Refresh calls
+`POST /api/admin/refresh-everything`, unchanged. A read that fails is
+shown as "Couldn't load" on every tile it feeds, never as 0.
+
+- `students`: `id, membership_status, whop_plan_id, first_paid_at,
+  canceled_at, cancel_scheduled_at`, where `whop_membership_id` is set,
+  the status is active, past_due or canceled, the plan is in
+  `PAYING_WHOP_PLAN_IDS` and `first_paid_at >= ADMIN_STUDENT_JOIN_CUTOFF`,
+  paged by `id`. Month 2 keeps those who first paid on or after
+  `DISCOUNT_LAUNCH_DATE`; Active, Canceling and Bounty use them all.
+- `student_milestones`: `student_id, bounty_access_claimed_at` where the
+  stamp is set, paged by `student_id` (Bounty Program · joined).
+- `tasks`: a head count of the open tasks with a template whose student
+  is not `csm_exempt` and first paid from `TASKS_STUDENT_JOIN_CUTOFF`
+  (the filters of `GET /api/admin/tasks`), and `created_at >=
+  admin_config.tasks_reset_at` when that key exists (D7). Without its
+  floor the count is not asked for.
+- `discount_requests`: a head count of `status = 'pending'` and
+  `created_at >= DISCOUNT_ELIGIBLE_FROM`, the 30% page's Applied tab.
+- `daily_progress_snapshots`: the 14 UTC days up to today (the cohort
+  columns, their legacy fallbacks and `created_at`, read as when the
+  row was built). Avg progress keeps the rows from the UTC date of
+  `curriculum_reset_at` on.
+- `canceling_snapshots`: the same 14 days.
+- `admin_config`: the keys `curriculum_reset_at` and `tasks_reset_at`
+  in one read. `tasks_reset_at` is written by the tasks reset (v109,
+  another lane of admin rebuild 2); with no row every open task counts.
+  A value that is not a date and time fails the tile that needs it.
 
 ### `sync_runs` (v77)
 - **Depends on:** —

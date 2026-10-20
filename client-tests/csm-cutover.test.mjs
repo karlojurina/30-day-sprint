@@ -12,6 +12,16 @@ import { fileURLToPath } from 'node:url'
 
 const BASE = '410e011' // HEAD when Work Item 3 started: the commit that added curriculum-reset.ts
 
+// Admin rebuild 2 (D12) renamed one metric's words, on purpose: "Subscription
+// status" became "Membership status". Every comparison with BASE puts the
+// old words back first, so the parity still covers every other word.
+const MEMBERSHIP_WORDS = {
+  old: 'Subscription status',
+  now: 'Membership status',
+  back: (text) => (typeof text === 'string' ? text.split('Membership status').join('Subscription status') : text),
+}
+const asOldWords = (r) => (r && typeof r.summary === 'string' ? { ...r, summary: MEMBERSHIP_WORDS.back(r.summary) } : r)
+
 const here = (p) => fileURLToPath(new URL(p, import.meta.url))
 const gitShow = (path) =>
   execFileSync('git', ['show', `${BASE}:${path}`], { cwd: here('..'), encoding: 'utf8' })
@@ -259,10 +269,11 @@ console.log(`\n=== Old course, no reset: parity with ${BASE} (14 students × day
           const a = OLD.triggers[id](oldSnap), b = NEW.triggers[id](newSnap)
           if (a !== b) note(`${p.id} day ${day} ${vlabel}: ${id} ${JSON.stringify(a)} vs ${JSON.stringify(b)}`)
         }
-        // every DSL condition over every metric, and its words
+        // every DSL condition over every metric, and its words (admin rebuild
+        // 2's one rename, MEMBERSHIP_WORDS below, put back for the comparison)
         for (const cfg of OLD_CONFIGS) {
           comparisons++
-          const a = OLD.evaluateCustomTrigger(oldSnap, cfg), b = NEW.evaluateCustomTrigger(newSnap, cfg)
+          const a = OLD.evaluateCustomTrigger(oldSnap, cfg), b = asOldWords(NEW.evaluateCustomTrigger(newSnap, cfg))
           if (!eq(a, b)) note(`${p.id} day ${day} ${vlabel}: ${JSON.stringify(cfg)} ${JSON.stringify(a)} vs ${JSON.stringify(b)}`)
         }
         // the alert mapping: old = the route at BASE (pickExistingAlertScenario
@@ -308,11 +319,14 @@ console.log(`\n=== Old course, no reset: parity with ${BASE} (14 students × day
   ok(eq(OLD.SCENARIO_BUCKET, NEW.SCENARIO_BUCKET) && eq(OLD.REGION_LABEL, NEW.REGION_LABEL) && eq(OLD.ACTION_LESSONS, NEW.ACTION_LESSONS),
      'SCENARIO_BUCKET, REGION_LABEL, ACTION_LESSONS identical')
   ok(Object.keys(OLD.METRICS).join() === Object.keys(NEW.METRICS).join() &&
-     Object.keys(OLD.METRICS).every((m) => OLD.METRICS[m].label === NEW.METRICS[m].label && OLD.METRICS[m].input === NEW.METRICS[m].input),
-     'METRICS: same ids, labels and inputs')
+     Object.keys(OLD.METRICS).every((m) => OLD.METRICS[m].label === MEMBERSHIP_WORDS.back(NEW.METRICS[m].label) && OLD.METRICS[m].input === NEW.METRICS[m].input),
+     'METRICS: same ids, labels and inputs (with membership_status renamed)')
+  ok(OLD.METRICS.membership_status.label === MEMBERSHIP_WORDS.old && NEW.METRICS.membership_status.label === MEMBERSHIP_WORDS.now
+       && NEW.METRICS.membership_status.describe({ metric: 'membership_status', op: 'is', value: 'active' }) === 'Membership status is active',
+     'admin rebuild 2 (D12): the membership_status metric reads "Membership status", in the TriggerBuilder and in the summaries, where it read "Subscription status"')
   let describeDiffs = 0
-  for (const c of OLD_CONDS) if (OLD.METRICS[c.metric].describe(c) !== NEW.METRICS[c.metric].describe(c)) describeDiffs++
-  ok(describeDiffs === 0, 'every condition is described in the same words', `${OLD_CONDS.length} conditions (r1..r4 and an unknown r9)`)
+  for (const c of OLD_CONDS) if (OLD.METRICS[c.metric].describe(c) !== MEMBERSHIP_WORDS.back(NEW.METRICS[c.metric].describe(c))) describeDiffs++
+  ok(describeDiffs === 0, 'every condition is described in the same words (with membership_status renamed)', `${OLD_CONDS.length} conditions (r1..r4 and an unknown r9)`)
   let paceDiffs = 0, paceCases = 0
   for (let d = 0; d < 40; d++) for (const done of [0, 1, 10, 32, 64]) for (const r of OLD_REGIONS) {
     paceCases++

@@ -4,10 +4,11 @@
  * Shared hook: counts of students currently on the 30-day journey
  * split by pace label — behind / on_pace / ahead.
  *
- * Used by:
- *   - the admin sidebar's Student-journey nav button (small badge)
- *   - the /admin/journey page header (three-stat overview)
- *   - /admin/insights/progress (detailed pace breakdown card)
+ * Used by /admin/insights/progress (detailed pace breakdown card). The
+ * sidebar badge and the journey's header that also used it are gone; since
+ * admin rebuild 2 the journey, All students and a student's page count
+ * activity themselves (src/lib/admin/journey-board.ts and its siblings),
+ * from loadCourseActivity and the ACTIVITY_* words below.
  *
  * Cohort: only students who joined ON OR AFTER
  * ADMIN_STUDENT_JOIN_CUTOFF (May 1 2026). Active + past_due only.

@@ -342,12 +342,20 @@ function randomTables(seed) {
 const omit = (o, keys) => Object.fromEntries(Object.entries(o).filter(([k]) => !keys.includes(k)))
 const strip = (o) => omit(o, ['computed_at'])
 // The new answer with the new fields taken off, to set beside the old one.
+// Admin rebuild 2 added tasks_floor (D7, the tasks reset: null when no floor
+// is handed in, as here) and renamed the canceling family's label (D12:
+// "still subscribed" became "still a member"); admin-people.test.mjs checks
+// both. The words are put back here so every number is still compared.
+const OLD_CANCELING_LABEL = 'still subscribed, cancel withdrawn'
 function asOld(n) {
-  const rest = omit(strip(n), ['reset_at'])
+  const rest = omit(strip(n), ['reset_at', 'tasks_floor'])
   return {
     ...rest,
     totals: omit(rest.totals, ['graded_on_old_course']),
-    templates: rest.templates.map((r) => omit(r, ['graded_on_old_course'])),
+    templates: rest.templates.map((r) => ({
+      ...omit(r, ['graded_on_old_course']),
+      ...(r.family === 'canceling' && r.success_label === 'still a member, cancel withdrawn' ? { success_label: OLD_CANCELING_LABEL } : {}),
+    })),
   }
 }
 const saysNoSwitch = (n) =>

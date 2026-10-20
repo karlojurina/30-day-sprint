@@ -589,11 +589,17 @@ for (const [label, streak, shown] of [
   ok((ctx.match(/current: \((?:data|fresh)\.streaks as StudentStreaks \| null\)\?\.current_streak \?\? 0,/g) ?? []).length === 1,
      'StudentContext copies the answer\'s current_streak, at load and on every refetch')
   ok(/const current = streak\?\.current \?\? 0;/.test(read('../src/components/world/WorldCorner.tsx')), 'and the corner shows StudentContext\'s number')
-  for (const page of ['../src/app/admin/(authenticated)/journey/StudentDrawer.tsx', '../src/app/admin/(authenticated)/students/[id]/page.tsx']) {
-    const src = read(page)
-    ok(src.includes('<Stat label="Streak" value={`${currentStreakAsOf(streaks, getTodayUtc())}d`} />') && !src.includes('streaks?.current_streak'),
-       `${path.basename(path.dirname(page)) === '[id]' ? 'the student page' : 'the Journey drawer'}: the team sees the same number`)
-  }
+  // Since admin rebuild 2 (D9) the student page and the Journey drawer both
+  // draw StatGrid (StudentDetailView.tsx) from buildStudentDetail
+  // (student-detail.ts), which asks currentStreakAsOf of the row it read, on
+  // the day the page was read (admin-people.test.mjs runs it).
+  const builder = read('../src/lib/admin/student-detail.ts')
+  const view = read('../src/components/admin/students/StudentDetailView.tsx')
+  const journey = read('../src/components/admin/journey/JourneyView.tsx')
+  ok(builder.includes('currentStreakAsOf(reads.streak.data, nowIso.slice(0, 10))') && !builder.includes('.current_streak ??')
+       && view.includes('<Stat label="Streak" value={readValue(s.streak, (d) => `${d} ${d === 1 ? "day" : "days"}`)} />')
+       && view.includes('<StatGrid student={s} nowMs={nowMs} />') && journey.includes('<StatGrid student={loaded.data} nowMs={Date.parse(loaded.data.generatedAt)} compact />'),
+     'the student page and the Journey drawer: the team sees the same number')
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

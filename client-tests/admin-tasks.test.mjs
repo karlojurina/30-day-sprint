@@ -1,5 +1,6 @@
 // admin-tasks.test.mjs: the CSM's task queue, GET /api/admin/tasks and the
-// page and tile that read it (fix lane G1, 2026-10-20).
+// page and tile that read it (fix lane G1, 2026-10-20; the reset, admin
+// rebuild 2, D7).
 //
 //   admin-5: the queue loaded the newest 500 tasks of any status in one read.
 //   Once 500 newer tasks existed, an older open task left To do (the only
@@ -9,13 +10,18 @@
 //   records into `tasks` (scenario "support.*", no template, completed or
 //   dismissed). The route must filter template-less rows in the query,
 //   before any limit, so they never take a slot or a count.
+//   The reset (admin rebuild 2, D7): once v109 wrote
+//   admin_config.tasks_reset_at, To do, Sent and Dismissed hold the tasks
+//   created on or after it, and the older ones are on the read-only Archived
+//   tab. A failed read of the reset is a 500, never the old queue on To do.
 //
 // The route runs as it is: this file copies it into _gen/ with only its
 // import lines rewritten (the team's login to stub-admin.ts, which hands the
-// route the stand-in below; Next to stub-server.ts; constants.ts as build.mjs
-// copies it, so run that first; supabase-pagination.ts as
-// outreach-cutover.test.mjs copies it). The route as it was at BASE
-// (production, where this lane started) runs beside it on the same data.
+// route the stand-in below; Next to stub-server.ts; constants.ts and
+// tasks-reset.ts as build.mjs copies them, so run that first;
+// supabase-pagination.ts as outreach-cutover.test.mjs copies it). The route
+// as it was at BASE (production, where this lane started) runs beside it on
+// the same data.
 //
 // The stand-in database answers the calls the route makes the way PostgREST
 // does where the route depends on it:
@@ -30,7 +36,9 @@
 //     last ascending, first descending), limit, range.
 //   - at most 1000 rows per answer, as Supabase's max-rows cuts every one.
 //   - { count: "exact", head: true }: the number of matching rows, no rows.
-// Every query is recorded as the calls made on it.
+//   - admin_config: select, eq, in, maybeSingle, from `tables.admin_config`.
+// Every query is recorded as the calls made on it (tasks in `queries`,
+// admin_config in `configQueries`).
 import fs from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -61,7 +69,8 @@ const IMPORTS = [
 // supabase-pagination.ts has no imports; outreach-cutover.test.mjs makes the same copy.
 write(fromSrc('src/lib/supabase-pagination.ts'), 'src/lib/supabase-pagination.ts', './_gen/supabase-pagination.ts', [])
 write(fromSrc(ROUTE), ROUTE, './_gen/admin-tasks-route.ts',
-  [...IMPORTS, ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"']])
+  [...IMPORTS, ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+   ['from "@/lib/admin/tasks-reset"', 'from "./tasks-reset.ts"']])
 write(fromBase(ROUTE), `${ROUTE}@${BASE}`, './_gen/admin-tasks-route.old.ts', IMPORTS)
 
 const route = { now: (await import('./_gen/admin-tasks-route.ts')).GET, old: (await import('./_gen/admin-tasks-route.old.ts')).GET }
@@ -123,11 +132,32 @@ function parseOr(expr) {
   return (r) => parts.some((f) => f(r))
 }
 
+function configBuilder(db) {
+  const q = { table: 'admin_config', calls: [], preds: [] }
+  db.configQueries.push(q)
+  const answer = (single) => {
+    const injected = db.failWhen(q)
+    if (injected) return { data: null, error: injected }
+    const rows = (db.tables.admin_config ?? []).filter((r) => q.preds.every((f) => f(r)))
+    if (single) return { data: rows[0] ? { ...rows[0] } : null, error: null }
+    return { data: rows.map((r) => ({ ...r })), error: null }
+  }
+  const b = {
+    select(cols) { q.calls.push(['select', cols]); return b },
+    eq(c, v) { q.calls.push(['eq', c, v]); q.preds.push((r) => r[c] === v); return b },
+    in(c, vs) { q.calls.push(['in', c, vs]); q.preds.push((r) => vs.includes(r[c])); return b },
+    maybeSingle() { q.calls.push(['maybeSingle']); return Promise.resolve(answer(true)) },
+    then(res, rej) { return Promise.resolve(answer(false)).then(res, rej) },
+  }
+  return b
+}
+
 function tasksDb(tables) {
-  const db = { tables, queries: [], failWhen: () => null }
+  const db = { tables, queries: [], configQueries: [], failWhen: () => null }
   db.client = {
     from(table) {
-      if (table !== 'tasks') throw new Error(`the stand-in answers only tasks, not ${table}`)
+      if (table === 'admin_config') return configBuilder(db)
+      if (table !== 'tasks') throw new Error(`the stand-in answers only tasks and admin_config, not ${table}`)
       const q = { select: '*', head: false, count: null, base: [], embedded: {}, orders: [], limit: null, range: null, calls: [] }
       db.queries.push(q)
       const own = (c) => !c.includes('.')
@@ -142,6 +172,11 @@ function tasksDb(tables) {
         gte(c, v) {
           q.calls.push(['gte', c, v])
           if (own(c)) q.base.push((r) => r[c] != null && r[c] >= v); else onEmbed(c, (x) => x != null && x >= v)
+          return b
+        },
+        lt(c, v) {
+          q.calls.push(['lt', c, v])
+          if (own(c)) q.base.push((r) => r[c] != null && r[c] < v); else onEmbed(c, (x) => x != null && x < v)
           return b
         },
         not(c, op, v) {
@@ -239,6 +274,7 @@ function task(student_id, template_id, status, createdMs, extra = {}) {
 async function ask(v, db, query = 'status=all&limit=500') {
   setTeam({ id: 'team-csm-1', role: 'csm' }, db.client)
   db.queries.length = 0
+  db.configQueries.length = 0
   const res = await route[v](new Request(`http://app/api/admin/tasks?${query}`))
   return { status: res.status, body: await res.json() }
 }
@@ -259,7 +295,7 @@ console.log('\n=== 600 support records newer than one open cron task ===')
   const open = r.body.tasks?.filter((t) => t.status === 'open') ?? []
   ok(r.status === 200 && open.length === 1 && open[0].id === tasks[0].id && open[0].template?.scenario_id === 'nolessons',
      'the open cron task is returned, with its template', show({ status: r.status, open: open.map((t) => t.id) }))
-  ok(r.body.tasks.length === 1 && show(r.body.counts) === show({ open: 1, completed: 0, dismissed: 0 }),
+  ok(r.body.tasks.length === 1 && show(r.body.counts) === show({ open: 1, completed: 0, dismissed: 0, archived: 0 }),
      'and counted: To do 1; no support record is listed or counted in any tab', show(r.body.counts))
   const tasksQueries = db.queries.filter((q) => !q.head)
   ok(db.queries.length > 0 && db.queries.every((q) => q.calls.some((c) => show(c) === show(['not', 'template_id', 'is', null]))),
@@ -285,8 +321,8 @@ console.log('\n=== More than 500 tasks: every open one, exact counts ===')
   const openIds = new Set(tasks.filter((t) => t.status === 'open').map((t) => t.id))
   ok(r.status === 200 && by('open').length === 1151 && by('open').every((t) => openIds.has(t.id)) && by('open').some((t) => t.id === tasks[0].id),
      'all 1151 open tasks come back, the oldest among them, past PostgREST\'s 1000 rows', `${by('open').length}`)
-  ok(show(r.body.counts) === show({ open: 1151, completed: 650, dismissed: 120 }),
-     'the tab counts are exact: 1151 / 650 / 120', show(r.body.counts))
+  ok(show(r.body.counts) === show({ open: 1151, completed: 650, dismissed: 120, archived: 0 }),
+     'the tab counts are exact: 1151 / 650 / 120 (and no reset yet, so nothing archived)', show(r.body.counts))
   const sent = by('completed')
   const newestSent = tasks.filter((t) => t.status === 'completed').sort((a, b) => (a.completed_at < b.completed_at ? 1 : -1)).slice(0, 500).map((t) => t.id)
   ok(sent.length === 500 && show(sent.map((t) => t.id)) === show(newestSent) && by('dismissed').length === 120,
@@ -313,10 +349,10 @@ console.log('\n=== The cohort, the search and a bucket still filter, in lists an
     student('team', { csm_exempt: true }), student('early', { first_paid_at: '2026-05-01T10:00:00.000Z' })]
   const db = tasksDb({ tasks, students, templates: [template('tpl-nolessons'), template('tpl-stalled', 'cancel_path')] })
   const all = await ask('now', db)
-  ok(show(all.body.tasks.map((t) => t.id).sort()) === show([tasks[0].id, tasks[3].id]) && show(all.body.counts) === show({ open: 1, completed: 1, dismissed: 0 }),
+  ok(show(all.body.tasks.map((t) => t.id).sort()) === show([tasks[0].id, tasks[3].id]) && show(all.body.counts) === show({ open: 1, completed: 1, dismissed: 0, archived: 0 }),
      'a csm_exempt student\'s task and a pre-cutoff joiner\'s are neither listed nor counted', show(all.body.counts))
   const found = await ask('now', db, 'status=all&limit=500&student=alina')
-  ok(show(found.body.tasks.map((t) => t.id)) === show([tasks[0].id]) && show(found.body.counts) === show({ open: 1, completed: 0, dismissed: 0 }),
+  ok(show(found.body.tasks.map((t) => t.id)) === show([tasks[0].id]) && show(found.body.counts) === show({ open: 1, completed: 0, dismissed: 0, archived: 0 }),
      'a search narrows the list and the counts alike', show(found.body.counts))
   const sentBucket = []
   for (let i = 1; i <= 8; i++) sentBucket.push(task('s1', i <= 3 ? 'tpl-nolessons' : 'tpl-stalled', 'completed', T0 + (10 + i) * MIN))
@@ -342,18 +378,107 @@ console.log('\n=== A failed read is an error, never a short queue ===')
   ok(c.status === 500 && c.body.error === 'permission denied for table tasks', 'a failed count: 500, never a made-up 0', show(c.body))
 }
 
+console.log('\n=== The reset (v109): To do, Sent and Dismissed from tasks_reset_at on, older tasks on Archived ===')
+{
+  // v109 ran at RESET: it dismissed the tasks open then (their notes end
+  // " [reset for the new program]"). The crons opened new ones after it.
+  const RESET = iso(T0 + 600 * MIN)
+  const before = (i) => T0 + i * MIN // before the reset
+  const after = (i) => T0 + (600 + i) * MIN // after it
+  const reset = (t) => ({ ...t, status: 'dismissed', dismissed_at: RESET, notes: `${t.notes ?? ''} [reset for the new program]` })
+  const old = [
+    task('s1', 'tpl-stalled', 'completed', before(1)),
+    task('s2', 'tpl-stalled', 'dismissed', before(2)),
+    reset(task('s1', 'tpl-nolessons', 'open', before(3))),
+    reset(task('s2', 'tpl-nolessons', 'open', before(4), { notes: 'checked twice' })),
+  ]
+  const fresh = [
+    task('s1', 'tpl-stalled', 'open', after(1)),
+    task('s2', 'tpl-stalled', 'open', after(2)),
+    task('s1', 'tpl-nolessons', 'completed', after(3)),
+    task('s2', 'tpl-nolessons', 'dismissed', after(4)),
+  ]
+  // Not listed anywhere, before or after: a support record (no template) and an exempt student's task.
+  const hidden = [task('s1', null, 'completed', before(5)), task('team', 'tpl-stalled', 'completed', before(6)),
+    task('s1', null, 'dismissed', after(5)), task('team', 'tpl-stalled', 'open', after(6))]
+  const students = [student('s1'), student('s2'), student('team', { csm_exempt: true })]
+  const templates = [template('tpl-nolessons'), template('tpl-stalled', 'cancel_path')]
+  const LINKS = [{ key: 'program_login_link', value: 'https://app.example.com/login' }, { key: 'discord_invite_link', value: '' }]
+  const db = tasksDb({ tasks: [...old, ...fresh, ...hidden], students, templates,
+    admin_config: [{ key: 'tasks_reset_at', value: RESET }, ...LINKS, { key: 'curriculum_reset_at', value: iso(T0) }] })
+  const r = await ask('now', db)
+  const ids = (xs) => xs.map((t) => t.id)
+  const of = (status) => r.body.tasks.filter((t) => t.status === status).map((t) => t.id)
+  ok(r.status === 200 && show(of('open')) === show(ids(fresh.slice(0, 2))) && show(of('completed')) === show([fresh[2].id])
+       && show(of('dismissed')) === show([fresh[3].id]),
+     'To do, Sent and Dismissed hold only the tasks created on or after tasks_reset_at', show({ open: of('open'), sent: of('completed'), dismissed: of('dismissed') }))
+  ok(show(ids(r.body.archived)) === show(ids([...old].reverse())) && r.body.archived.every((t) => t.template && t.student),
+     'Archived holds every older task, whatever its status (the reset ones, sent, dismissed), newest first, joined like the rest',
+     show(r.body.archived.map((t) => `${t.status}:${t.id.slice(-2)}`)))
+  ok(show(r.body.counts) === show({ open: 2, completed: 1, dismissed: 1, archived: 4 }),
+     'the counts are exact on both sides of the line: 2 / 1 / 1, and 4 archived; no support record or exempt student\'s task in either', show(r.body.counts))
+  ok(r.body.resetAt === RESET && show(r.body.links) === show({ program_login_link: 'https://app.example.com/login', discord_invite_link: '' })
+       && typeof r.body.generatedAt === 'string',
+     'the answer carries the reset and the two links a DM prints (an empty link stays empty, for the page to flag)', show({ resetAt: r.body.resetAt, links: r.body.links }))
+  const listQueries = db.queries.filter((q) => q.calls.some((c) => c[0] === 'eq' && c[1] === 'status'))
+  const archivedQueries = db.queries.filter((q) => q.calls.some((c) => c[0] === 'lt'))
+  ok(listQueries.length === 6 && listQueries.every((q) => q.calls.some((c) => show(c) === show(['gte', 'created_at', RESET])))
+       && archivedQueries.length === 2 && archivedQueries.every((q) => q.calls.some((c) => show(c) === show(['lt', 'created_at', RESET]))
+         && !q.calls.some((c) => c[0] === 'eq' && c[1] === 'status')),
+     'the line is drawn in the database: every list and count asks created_at >= tasks_reset_at, the Archived read and count created_at < it, of any status',
+     `${listQueries.length} list reads and counts, ${archivedQueries.length} archived`)
+  ok(db.configQueries.length === 1 && show(db.configQueries[0].calls.find((c) => c[0] === 'in')) === show(['in', 'key', ['tasks_reset_at', 'program_login_link', 'discord_invite_link']]),
+     'the reset and the two links come from one read of admin_config', show(db.configQueries.map((q) => q.calls)))
+  const capped = await ask('now', db, 'status=archived&limit=3')
+  ok(capped.status === 200 && capped.body.tasks.length === 0 && show(ids(capped.body.archived)) === show(ids([...old].reverse().slice(0, 3)))
+       && capped.body.counts.archived === 4,
+     '?status=archived alone: the newest 3 under limit=3, counted 4, and no list read', show(ids(capped.body.archived)))
+  const oldRoute = await ask('old', db)
+  ok(oldRoute.status === 200 && ids(oldRoute.body.tasks).includes(old[0].id) && ids(oldRoute.body.tasks).includes(old[2].id) && !('archived' in oldRoute.body),
+     `control: at ${BASE} the route had no line: the old sent and reset tasks were on Sent and Dismissed with the new ones`, show(pageCountsAtBase(oldRoute.body.tasks)))
+}
+{
+  // Before v109 runs: no line, nothing archived, no archived read.
+  const tasks = [task('s1', 'tpl-nolessons', 'open', T0), task('s1', 'tpl-nolessons', 'completed', T0 + MIN)]
+  const db = tasksDb({ tasks, students: [student('s1')], templates: [template('tpl-nolessons')], admin_config: [] })
+  const r = await ask('now', db)
+  ok(r.status === 200 && r.body.resetAt === null && r.body.archived.length === 0 && show(r.body.counts) === show({ open: 1, completed: 1, dismissed: 0, archived: 0 })
+       && !db.queries.some((q) => q.calls.some((c) => c[0] === 'lt' || (c[0] === 'gte' && c[1] === 'created_at')))
+       && show(r.body.links) === show({ program_login_link: '', discord_invite_link: '' }),
+     'before v109: every task on the lists as before, Archived empty and never read, resetAt null, links unset read as ""', show(r.body.counts))
+}
+{
+  // The reset cannot be read: a 500 with the reason, never the old queue as new.
+  const tasks = [task('s1', 'tpl-nolessons', 'open', T0)]
+  const db = tasksDb({ tasks, students: [student('s1')], templates: [template('tpl-nolessons')], admin_config: [{ key: 'tasks_reset_at', value: iso(T0 + MIN) }] })
+  db.failWhen = (q) => (q.table === 'admin_config' ? { message: 'permission denied for table admin_config' } : null)
+  const r = await ask('now', db)
+  ok(r.status === 500 && r.body.error === "Couldn't read when the tasks were reset (admin_config.tasks_reset_at): permission denied for table admin_config"
+       && !('tasks' in r.body) && db.queries.length === 0,
+     'a failed read of tasks_reset_at: 500 with the reason, no list, and no task read', show(r.body))
+  db.failWhen = () => null
+  db.tables.admin_config = [{ key: 'tasks_reset_at', value: '2026-10-20 21:30' }]
+  const bad = await ask('now', db)
+  ok(bad.status === 500 && /^admin_config\.tasks_reset_at holds "2026-10-20 21:30", which is not a date and time with its zone/.test(bad.body.error ?? ''),
+     'a tasks_reset_at that is not a date with its zone: 500 saying so, never a guess', show(bad.body))
+}
+
 console.log('\n=== The queue page and the dashboard tile read the same numbers ===')
 {
+  // Since admin rebuild 2 the page is src/components/admin/tasks/TasksView.tsx,
+  // and its tabs are tabsFor in src/lib/admin/tasks-view.ts
+  // (admin-people.test.mjs runs it on the route's counts).
   const PAGE = 'src/app/admin/(authenticated)/tasks/page.tsx'
+  const VIEW = 'src/components/admin/tasks/TasksView.tsx'
   const DASH = 'src/app/admin/(authenticated)/page.tsx'
-  const page = { now: fromSrc(PAGE), old: fromBase(PAGE) }
+  const page = { now: fromSrc(VIEW), old: fromBase(PAGE) }
+  const rules = fromSrc('src/lib/admin/tasks-view.ts')
   const dash = { now: fromSrc(DASH), old: fromBase(DASH) }
-  ok(/const \{ tasks, counts: exact \} = await res\.json\(\);\s*setRows\(tasks as TaskRow\[\]\);\s*setCounts\(exact as Record<StatusKey, number>\);/.test(page.now)
-       && !/rows\.reduce\(/.test(page.now)
-       && /count: counts\.open \}/.test(page.now) && /count: counts\.completed \}/.test(page.now) && /count: counts\.dismissed,/.test(page.now),
+  ok(/const tabs = tabsFor\(data\);/.test(page.now) && /<TabStrip label="Task lists" tabs=\{tabs\}/.test(page.now)
+       && /count: answer\.counts\[t\] \?\? 0/.test(rules) && !/rows\.reduce\(/.test(page.now),
      'the tabs show the route\'s exact counts, no longer a count of the rows the page holds')
-  ok(page.now.includes('Showing the newest {shownHistory} of {counts[status]}.'),
-     'a Sent or Dismissed list cut at 500 says so under it')
+  ok(page.now.includes('Showing the newest {shown} of {data.counts[current]}.'),
+     'a Sent, Dismissed or Archived list cut at 500 says so under it')
   ok(/rows\.reduce\(/.test(page.old) && !page.old.includes('setCounts'), `control: at ${BASE} the page counted its own 500 rows`)
   const tile = (src) => /\.from\("tasks"\)\s*\.select\(\s*"id, student:students!inner\(csm_exempt, joined_at\)",\s*\{ count: "exact", head: true \},?\s*\)\s*\.eq\("status", "open"\)\s*\.not\("template_id", "is", null\)/.test(src)
   ok(tile(dash.now), 'the dashboard\'s "Open tasks" counts open tasks with a template, as the queue does')

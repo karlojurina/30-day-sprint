@@ -4948,5 +4948,275 @@ console.log('\n=== 30. the admin spot check (diagnostics/admin-today-spotcheck.s
   await d.close()
 }
 
+// ════════════════════════════════════════════════════════════════════
+// 31: v109 and its undo (admin rebuild 2, D7): the Tasks queue starts fresh
+// for the new program. On a database of its own: base.sql with v27's one
+// open task per student and scenario lifted verbatim (the undo has to step
+// around it), made-up students, templates and a team member, and tasks in
+// every state. Open: two of a cron's scenario (one with notes, one
+// without), one of a custom template, one of an exempt student, one with
+// no template. Sent and dismissed ones, which must not move.
+// ════════════════════════════════════════════════════════════════════
+console.log('\n=== 31. v109: the tasks reset (admin rebuild 2, D7), and its undo ===')
+{
+  const v109 = read('2026_v109_tasks_reset.sql')
+  const undo109 = undoText('2026_v109_undo.sql')
+  const MARK_NOTE = ' [reset for the new program]'
+  const LOCK109 = 'lock table public.tasks in share row exclusive mode;'
+  const S = n => `31000000-0000-0000-0000-${String(n).padStart(12, '0')}`
+  const TK = n => `31a00000-0000-0000-0000-${String(n).padStart(12, '0')}`
+  const TEAM31 = '31c00000-0000-0000-0000-000000000001'
+  const d = new PGlite()
+  await d.exec(fs.readFileSync(new URL('base.sql', import.meta.url), 'utf8'))
+  await d.exec(lift('2026_v27_csm_layer.sql', 'create unique index if not exists idx_tasks_unique_open'))
+  await d.exec(`
+    insert into team_members (id, email) values ('${TEAM31}', 'robin@example.com');
+    insert into students (id, email, csm_exempt, first_paid_at, membership_status) values
+      ('${S(1)}', 'one@example.com', false, '2026-10-02 10:00:00+00', 'active'),
+      ('${S(2)}', 'two@example.com', false, '2026-10-05 10:00:00+00', 'active'),
+      ('${S(3)}', 'three@example.com', true, '2026-10-06 10:00:00+00', 'active'),
+      ('${S(4)}', 'four@example.com', false, '2026-09-20 10:00:00+00', 'past_due');
+    insert into templates (id, scenario_id, bucket, title, trigger_description, body) values
+      ('31b00000-0000-0000-0000-000000000001', 'stalled.discord.day3', 'at_risk', 'Stalled day 3', 'No login by day 3', 'Hey {firstName}'),
+      ('31b00000-0000-0000-0000-000000000002', 'C-42c1aa', 'cancel_path', 'Is cancelling', 'Canceling', 'Hey {firstName}');
+    insert into tasks (id, student_id, scenario_id, template_id, status, behavior_summary, created_at, completed_at, completed_by,
+                       dismissed_at, dismissed_by, notes, outcome, outcome_at, outcome_by) values
+      ('${TK(1)}', '${S(1)}', 'stalled.discord.day3', '31b00000-0000-0000-0000-000000000001', 'open', 'No login (Day 3)',
+       '2026-10-18 09:15:00+00', null, null, null, null, null, null, null, null),
+      ('${TK(2)}', '${S(2)}', 'stalled.discord.day3', '31b00000-0000-0000-0000-000000000001', 'open', null,
+       '2026-10-19 09:15:00+00', null, null, null, null, 'checked twice', null, null, null),
+      ('${TK(3)}', '${S(2)}', 'C-42c1aa', '31b00000-0000-0000-0000-000000000002', 'open', 'Is cancelling',
+       '2026-10-17 11:15:00+00', null, null, null, null, null, null, null, null),
+      ('${TK(4)}', '${S(3)}', 'stalled.discord.day3', '31b00000-0000-0000-0000-000000000001', 'open', null,
+       '2026-10-16 09:15:00+00', null, null, null, null, null, null, null, null),
+      ('${TK(5)}', '${S(4)}', 'support.nostart', null, 'open', null,
+       '2026-10-15 09:15:00+00', null, null, null, null, null, null, null, null),
+      ('${TK(6)}', '${S(1)}', 'nolessons.day3', null, 'completed', 'No lesson (Day 3)',
+       '2026-10-05 09:15:00+00', '2026-10-05 12:00:00+00', '${TEAM31}', null, null, null, 'replied', '2026-10-06 08:00:00+00', '${TEAM31}'),
+      ('${TK(7)}', '${S(2)}', 'nolessons.day7', null, 'dismissed', null,
+       '2026-10-07 09:15:00+00', null, null, '2026-10-07 15:00:00+00', '${TEAM31}', 'Already replied in Discord', null, null, null),
+      ('${TK(8)}', '${S(4)}', 'pace.behind', null, 'dismissed', null,
+       '2026-10-01 09:15:00+00', null, null, '2026-10-19 14:33:33.972+00', null,
+       'Dismissed by the course switch: the old course''s progress was reset.', null, null, null);`)
+  const OPEN = [1, 2, 3, 4, 5].map(TK)
+  const tasksNow = async (dd = d) => (await dd.query(`select * from tasks order by id`)).rows
+  const byId = rows => Object.fromEntries(rows.map(r => [r.id, r]))
+  const copyOf = async (dd = d, table = 'reset_2026_10') => (await dd.query(`select * from archive_tasks."${table}" order by id`)).rows
+  const configOf = async (dd = d) => (await dd.query(`select key, value, description from admin_config order by key`)).rows
+  const tasksBefore = await tasksNow()
+  const configBefore = await configOf()
+  // Everything outside tasks, admin_config and the new schema: what v109 must not touch.
+  const outsideOf = async (dd = d) => {
+    const c = JSON.parse(await catalogOf(dd))
+    const rows = JSON.parse(await rowsOf(dd))
+    delete rows.tasks
+    delete rows.admin_config
+    const notArchive = x => x.s !== 'archive_tasks' && x.n !== 'archive_tasks'
+    return asJson({ ...c, schemas: c.schemas.filter(notArchive), tables: c.tables.filter(notArchive),
+                    indexes: c.indexes.filter(notArchive), grants: c.grants.filter(notArchive), rows })
+  }
+  const outsideBefore = await outsideOf()
+
+  // ── its lock ──
+  {
+    const MARK = '-- ─────────────── 2. Already reset? ───────────────'
+    const c = await d.clone()
+    const rr = await runFile(c, probeAt(probeAt(v109, MARK, 'v109_locked', lockedIn('ShareRowExclusiveLock')),
+                                        MARK, 'v109_timeout', `current_setting('lock_timeout')`))
+    const locked = await probed(c, 'v109_locked'), timeout = await probed(c, 'v109_timeout')
+    await c.close()
+    note(v109.includes(MARK) && rr.ok && locked.v === 'tasks' && timeout.v === '5s' && timeout.after === '0',
+         'v109 holds tasks in SHARE ROW EXCLUSIVE (reads go on, a cron\'s insert or a click waits) before it reads anything, with lock_timeout 5s, and the setting ends with its commit',
+         `${locked.v} [${timeout.v}, after ${timeout.after}] ${rr.ok ? '' : told(rr)}`)
+    const c2 = await d.clone()
+    const was = await stateOf(c2)
+    const busy = await runFile(c2, v109.replace(LOCK109, TIMED_OUT))
+    note(v109.includes(LOCK109) && busy.code === '55P03'
+         && busy.said.includes('Another session held the tasks table for more than 5 seconds')
+         && busy.said.includes('so the reset did not start. Nothing was changed. Paste it again in a minute.') && await stateOf(c2) === was,
+         'v109 with its lock timing out (55P03, raised in place of the lock): "Nothing was changed. Paste it again in a minute.", and nothing changed', told(busy))
+    await c2.close()
+  }
+
+  // ── the first run ──
+  let r = await runFile(d, v109)
+  const moment = r.rows?.[0]?.tasks_reset_at
+  const momentMs = Date.parse(moment ?? '')
+  note(r.ok && r.rows.length === 1 && ISO_Z.test(moment ?? '')
+       && r.rows[0].v109 === `The tasks reset ran now, at ${moment}: 5 open tasks were copied to archive_tasks.reset_2026_10 and dismissed.`
+       && r.rows[0].tasks_in_the_copy === 5 && r.rows[0].open_now === 0,
+       'v109 runs: one row says the reset ran now, at its moment (UTC, like 2026-10-20T21:30:00.000Z), with 5 open tasks copied and dismissed and none open now',
+       told(r))
+  const after = byId(await tasksNow())
+  const before = byId(tasksBefore)
+  {
+    const wrong = OPEN.filter(id => {
+      const t = after[id], b = before[id]
+      return !(t.status === 'dismissed' && t.dismissed_at?.getTime() === momentMs && t.dismissed_by === null
+               && t.notes === (b.notes ?? '') + MARK_NOTE
+               && asJson({ ...t, status: b.status, dismissed_at: b.dismissed_at, dismissed_by: b.dismissed_by, notes: b.notes }) === asJson(b))
+    })
+    note(wrong.length === 0,
+         "each open task is dismissed at the run's moment, by nobody, with \" [reset for the new program]\" after its notes (\"checked twice [reset for the new program]\"; no notes: \" [reset for the new program]\"), every other column as it was: a cron's, a custom template's, an exempt student's and one with no template alike",
+         asJson(wrong.map(id => [id, after[id].status, after[id].notes])))
+    const closed = [TK(6), TK(7), TK(8)]
+    note(closed.every(id => asJson(after[id]) === asJson(before[id])),
+         'the sent and dismissed tasks, the course switch\'s dismissal among them, are byte for byte as they were')
+  }
+  {
+    const copy = await copyOf()
+    const sameAsBefore = copy.every(row => {
+      const { reset_at: at, ...rest } = row
+      return at?.getTime() === momentMs && asJson(rest) === asJson(before[row.id])
+    })
+    note(sameJson(copy.map(x => x.id), OPEN) && sameAsBefore,
+         'archive_tasks.reset_2026_10 holds the 5 tasks that were open, every column as it was before the run, with reset_at the moment',
+         asJson(copy.map(x => x.id.slice(-2))))
+    const cols = (await d.query(`select column_name::text as c from information_schema.columns
+                                  where table_schema = 'archive_tasks' and table_name = 'reset_2026_10' order by ordinal_position`)).rows.map(x => x.c)
+    const taskCols = (await d.query(`select column_name::text as c from information_schema.columns
+                                      where table_schema = 'public' and table_name = 'tasks' order by ordinal_position`)).rows.map(x => x.c)
+    note(sameJson(cols, ['reset_at', ...taskCols]), "the copy's columns are reset_at, then every column of tasks", cols.join(','))
+    const reads = (await d.query(`select has_schema_privilege(r, 'archive_tasks', 'usage') as schema_use,
+                                         has_table_privilege(r, 'archive_tasks.reset_2026_10', 'select') as can_read
+                                    from unnest(array['anon', 'authenticated', 'service_role']) as x(r)`)).rows
+    note(reads.length === 3 && reads.every(x => x.schema_use === false && x.can_read === false),
+         'nobody but the owner reads the copy: no USAGE on archive_tasks and no SELECT on the table for anon, authenticated or service_role',
+         asJson(reads))
+  }
+  {
+    const cfg = await configOf()
+    const row = cfg.find(x => x.key === 'tasks_reset_at')
+    note(row?.value === moment && /Set by migration 2026_v109/.test(row?.description ?? '')
+         && asJson(cfg.filter(x => x.key !== 'tasks_reset_at')) === asJson(configBefore),
+         'admin_config gains tasks_reset_at = the moment, with a description naming v109, and nothing else in it moves', row?.value)
+    note(await outsideOf() === outsideBefore, 'every other table, row, policy, index and grant is as it was')
+    // The floor the app reads: created_at on or after tasks_reset_at. Every reset task falls before it.
+    const floor = (await d.query(`select count(*) filter (where created_at >= (select value::timestamptz from admin_config where key = 'tasks_reset_at'))::int as after,
+                                         count(*)::int as all_ from tasks`)).rows[0]
+    note(floor.after === 0 && floor.all_ === 8, 'every task is now older than tasks_reset_at, so the app\'s To do, Sent and Dismissed start empty', asJson(floor))
+  }
+
+  // ── run again ──
+  {
+    const was = await stateOf(d)
+    const copyWas = asJson(await copyOf())
+    r = await runFile(d, v109)
+    note(r.ok && r.rows[0]?.v109 === `The tasks reset already ran, at ${moment}. This run changed nothing.`
+         && r.rows[0].tasks_in_the_copy === 5 && await stateOf(d) === was && asJson(await copyOf()) === copyWas,
+         'v109 run again: "already ran", and nothing changed', told(r))
+  }
+
+  // ── the crons and the team after the reset ──
+  // A cron opens stalled.discord.day3 again for student 1 (check-na-tasks
+  // reads no tasks). The team moves the custom template's task back to To do
+  // (the transition route nulls the stamps and the notes), and dismisses the
+  // exempt student's with their own reason.
+  await d.exec(`
+    insert into tasks (id, student_id, scenario_id, template_id, status, created_at)
+      values ('${TK(9)}', '${S(1)}', 'stalled.discord.day3', '31b00000-0000-0000-0000-000000000001', 'open', now() + interval '2 hours');
+    update tasks set status = 'open', dismissed_at = null, dismissed_by = null, notes = null where id = '${TK(3)}';
+    update tasks set dismissed_at = now() + interval '3 hours', dismissed_by = '${TEAM31}', notes = 'Team test account' where id = '${TK(4)}';`)
+  const beforeUndo = byId(await tasksNow())
+
+  // ── the undo ──
+  {
+    const MARK = '-- ─────────────── 1 and 2. Is the reset in place'
+    const c = await d.clone()
+    const rr = await runFile(c, probeAt(probeAt(undo109, MARK, 'u109_locked', lockedIn('ShareRowExclusiveLock')),
+                                        MARK, 'u109_timeout', `current_setting('lock_timeout')`))
+    const locked = await probed(c, 'u109_locked'), timeout = await probed(c, 'u109_timeout')
+    await c.close()
+    note(undo109.includes(MARK) && rr.ok && locked.v === 'tasks' && timeout.v === '5s' && timeout.after === '0',
+         'the undo holds tasks in SHARE ROW EXCLUSIVE before it reads anything, with lock_timeout 5s', `${locked.v} [${timeout.v}]`)
+    const c2 = await d.clone()
+    const was = await stateOf(c2)
+    const busy = await runFile(c2, undo109.replace(LOCK109, TIMED_OUT))
+    note(undo109.includes(LOCK109) && busy.code === '55P03'
+         && busy.said.includes('so the undo did not start. Nothing was changed. Paste it again in a minute.') && await stateOf(c2) === was,
+         'the undo with its lock timing out: "Nothing was changed. Paste it again in a minute.", and nothing changed', told(busy))
+    await c2.close()
+  }
+  {
+    const c = await d.clone()
+    await c.exec(`alter table archive_tasks.reset_2026_10 rename to kept_by_hand;`)
+    const was = await stateOf(c)
+    const rr = await runFile(c, undo109)
+    note(stopped(rr, 'but archive_tasks.reset_2026_10 is missing, so nothing can be put back from it.') && await stateOf(c) === was,
+         'the undo with the copy missing refuses, says so, and changes nothing', told(rr))
+    await c.close()
+  }
+  {
+    const c = await d.clone()
+    await c.exec(`update archive_tasks.reset_2026_10 set reset_at = reset_at - interval '1 day' where id = '${TK(2)}';`)
+    const was = await stateOf(c)
+    const rr = await runFile(c, undo109)
+    note(stopped(rr, 'Rows of archive_tasks.reset_2026_10 from another moment than tasks_reset_at') && rr.said.includes('): 1. Nothing was changed.') && await stateOf(c) === was,
+         'the undo with a row of the copy from another moment refuses, and changes nothing', told(rr))
+    await c.close()
+  }
+  r = await runFile(d, undo109)
+  const renamed = r.rows?.[0]?.copy_renamed_to ?? ''
+  note(r.ok && r.rows.length === 1 && /^archive_tasks\.reset_2026_10_undone_\d{8}_\d{4}$/.test(renamed)
+       && r.rows[0].v109_undo === `The tasks reset is undone: 2 tasks are open again. The copy is now ${renamed}.`
+       && r.rows[0].tasks_reopened === 2 && r.rows[0].changed_since === 2 && r.rows[0].newer_open_task === 1 && r.rows[0].student_gone === 0,
+       'the undo runs: 2 tasks open again, 2 kept as the team changed them, 1 kept behind the newer open task, and the copy renamed',
+       told(r))
+  {
+    const now = byId(await tasksNow())
+    note(asJson(now[TK(2)]) === asJson(before[TK(2)]) && asJson(now[TK(5)]) === asJson(before[TK(5)]),
+         'the two reset tasks nobody touched are back byte for byte as before v109: open, their notes ("checked twice", none) as they were')
+    note(asJson(now[TK(1)]) === asJson(beforeUndo[TK(1)]) && now[TK(9)].status === 'open',
+         'student 1\'s reset stalled task stays dismissed, since the cron\'s newer one of the same scenario is open (one open task per student and scenario)')
+    note(asJson(now[TK(3)]) === asJson(beforeUndo[TK(3)]) && asJson(now[TK(4)]) === asJson(beforeUndo[TK(4)]),
+         'the task the team moved back to To do and the one they dismissed with their own reason stay as the team left them')
+    note([TK(6), TK(7), TK(8)].every(id => asJson(now[id]) === asJson(before[id])), 'the sent and dismissed tasks still have not moved')
+    note(asJson(await configOf()) === asJson(configBefore), 'admin_config is as before v109: no tasks_reset_at')
+    const tables = (await d.query(`select tablename::text as t from pg_tables where schemaname = 'archive_tasks' order by 1`)).rows.map(x => x.t)
+    note(sameJson(tables, [renamed.split('.')[1]]) && sameJson((await copyOf(d, renamed.split('.')[1])).map(x => x.id), OPEN),
+         'the copy, all 5 rows, is kept under its new name', tables.join(','))
+  }
+  {
+    const was = await stateOf(d)
+    r = await runFile(d, undo109)
+    note(r.ok && r.rows[0]?.v109_undo === 'The tasks reset is not in place (admin_config has no tasks_reset_at). This run changed nothing.'
+         && r.rows[0].tasks_reopened === null && await stateOf(d) === was,
+         'a second undo: "not in place", and nothing changed', told(r))
+  }
+
+  // ── v109 again after its undo ──
+  {
+    const open = (await d.query(`select id from tasks where status = 'open' order by id`)).rows.map(x => x.id)
+    r = await runFile(d, v109)
+    note(r.ok && r.rows[0]?.v109?.startsWith('The tasks reset ran now') && r.rows[0].tasks_in_the_copy === open.length
+         && r.rows[0].open_now === 0 && sameJson((await copyOf()).map(x => x.id), open),
+         `v109 runs again after its undo: a new copy of the ${open.length} tasks open now, the first copy kept beside it`, told(r))
+  }
+  {
+    // A copy left behind with no tasks_reset_at: v109 refuses rather than mix two resets.
+    const c = await d.clone()
+    await c.exec(`delete from admin_config where key = 'tasks_reset_at';`)
+    const was = await stateOf(c)
+    const rr = await runFile(c, v109)
+    note(stopped(rr, 'The table archive_tasks.reset_2026_10 exists, but admin_config has no tasks_reset_at') && await stateOf(c) === was,
+         'v109 with a copy left from an earlier reset and no tasks_reset_at refuses, says so, and changes nothing', told(rr))
+    await c.close()
+  }
+  {
+    // With nothing open, the reset still sets its moment, with an empty copy.
+    const c = new PGlite()
+    await c.exec(fs.readFileSync(new URL('base.sql', import.meta.url), 'utf8'))
+    const rr = await runFile(c, v109)
+    note(rr.ok && /^The tasks reset ran now, at .*: 0 open tasks were copied/.test(rr.rows[0]?.v109 ?? '') && rr.rows[0].tasks_in_the_copy === 0
+         && ISO_Z.test(rr.rows[0].tasks_reset_at ?? ''),
+         'on a queue with nothing open, v109 still writes tasks_reset_at, with an empty copy', told(rr))
+    const ru = await runFile(c, undo109)
+    note(ru.ok && ru.rows[0]?.tasks_reopened === 0 && (await c.query(`select count(*)::int as n from admin_config`)).rows[0].n === 0,
+         'and its undo takes the moment back out', told(ru))
+    await c.close()
+  }
+  await d.close()
+}
+
 console.log(`\n${'='.repeat(60)}\n  PASS ${ok.length}   FAIL ${fail.length}`)
 if (fail.length) { console.log('\nFAILURES:'); fail.forEach(f => console.log('  - ' + f)); process.exit(1) }

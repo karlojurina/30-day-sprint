@@ -14,7 +14,8 @@ import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { syncWatchProgress } from './_gen/watch-sync.ts'
 import { POST as visit } from './_gen/refresh-watch-sync-route.ts'
-import { FakeDb, useDb, setWhop, steps } from './_gen/stub-server.ts'
+// useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
+import { FakeDb, useDb as installDb, setWhop, steps } from './_gen/stub-server.ts'
 import { whopNoneFinishedNote, isWhopNoneFinishedNote } from './_gen/constants.ts'
 // The real Whop read, run on a stand-in fetch in the section that says so.
 import { fetchCompletedLessonsAsAdmin as whopRead } from './_gen/whop.ts'
@@ -56,7 +57,7 @@ function freshDb(extra = {}) {
     ],
     ...extra,
   }, { 'tok-1': 'auth-1' })
-  useDb(db)
+  installDb(db)
   steps.length = 0
   return db
 }
@@ -98,15 +99,18 @@ console.log('\n=== "Whop returned 0" is a plain zero ===')
      && !isWhopNoneFinishedNote('Upsert failed: permission denied') && !isWhopNoneFinishedNote(null)
      && !isWhopNoneFinishedNote(`${whopNoneFinishedNote(2)}, and then the read failed`),
      'a real failure, or the note with more after it, is not the note')
-  const page = read('../src/app/admin/(authenticated)/students/[id]/page.tsx')
-  const asked = page.indexOf('isWhopNoneFinishedNote(whopSync.last_sync_error) ?')
-  const note = page.indexOf('<strong>Note:</strong>', asked)
-  const error = page.indexOf('<strong>Last error:</strong>', note)
-  // The note's box is styled between the check and "Note:"; the error's box between "Note:" and "Last error:".
-  ok(asked > 0 && note > asked && error > note
-     && !page.slice(asked, note).includes('var(--color-danger)') && page.slice(note, error).includes('var(--color-danger)'),
-     'the admin student page: the note under "Note:" in plain colours, every other value under "Last error:" in red, as before',
-     `at ${asked}, ${note}, ${error}`)
+  // Since admin rebuild 2 (D9) the page's reads and rules are in
+  // student-detail.ts (it asks isWhopNoneFinishedNote) and its look in
+  // StudentDetailView.tsx: in the dark look the words stay readable and the
+  // red goes to a dot (admin-people.test.mjs runs the builder itself).
+  const lib = read('../src/lib/admin/student-detail.ts')
+  const page = read('../src/components/admin/students/StudentDetailView.tsx')
+  const asked = lib.indexOf('note: isWhopNoneFinishedNote(errorText)')
+  const dot = page.indexOf('<Dot color={v.error.note ? "var(--color-neutral)" : "var(--color-danger)"} />')
+  const words = page.indexOf('{v.error.note ? "Note: " : "Last error: "}', dot)
+  ok(asked > 0 && dot > 0 && words > dot,
+     'the admin student page: the note under "Note:" with a grey dot, every other value under "Last error:" with a red dot',
+     `at ${asked}, ${dot}, ${words}`)
 }
 
 console.log('\n=== Only rows actually added count as new ===')

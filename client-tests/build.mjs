@@ -431,3 +431,45 @@ gen('../src/app/api/cron/refresh-membership-discounts/route.ts', './_gen/refresh
   ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
   ...toStub('next/server', '@/lib/supabase-server'),
 ])
+
+// ── Admin rebuild 2, lane WI-5 and WI-6 (Tasks, All students, the student page,
+// the journey), for admin-tasks.test.mjs and admin-people.test.mjs. The tasks
+// reset (tasks-reset.ts: one import, a TYPE from supabase-js, which
+// --experimental-strip-types erases). The Tasks page's rules (tasks-view.ts)
+// read the buckets' order from templates.ts, whose {dayNumber} comes from
+// database.ts (no imports, erasable types only), and isCanceling from
+// metrics-definitions.ts. The three student pages' readers and builders read
+// the 30% page's whopPulled from the thirty-view.ts copy above; their
+// CourseActivity is a TYPE from a client module, pointed at a file that does
+// not exist, as csm-triggers.ts's types are.
+gen('../src/lib/admin/tasks-reset.ts', './_gen/tasks-reset.ts')
+gen('../src/types/database.ts', './_gen/database.ts')
+gen('../src/lib/templates.ts', './_gen/templates.ts', [['from "@/types/database"', 'from "./database.ts"']])
+gen('../src/lib/admin/metrics-definitions.ts', './_gen/metrics-definitions.ts', [['from "@/lib/constants"', 'from "./constants.ts"']])
+gen('../src/lib/admin/tasks-view.ts', './_gen/tasks-view.ts', [
+  ['from "@/lib/templates"', 'from "./templates.ts"'],
+  ['from "@/lib/admin/metrics-definitions"', 'from "./metrics-definitions.ts"'],
+  ['from "@/lib/admin/croatia-dates"', 'from "./croatia-dates.ts"'],
+  ['from "./tasks-reset"', 'from "./tasks-reset.ts"'],
+])
+gen('../src/lib/admin/people-common.ts', './_gen/people-common.ts')
+const PEOPLE = [
+  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+  ['from "@/lib/constants"', 'from "./constants.ts"'],
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ['from "@/lib/useJourneyPaceCounts"', 'from "./types-erased.ts"'],
+  ['from "./people-common"', 'from "./people-common.ts"'],
+]
+gen('../src/lib/admin/students-list.ts', './_gen/students-list.ts', PEOPLE)
+gen('../src/lib/admin/student-detail.ts', './_gen/student-detail.ts', [
+  ...PEOPLE,
+  ['from "@/lib/progress"', 'from "./progress.ts"'],
+  ['from "@/lib/streak"', 'from "./streak.ts"'],
+  ['from "@/lib/admin/metrics-definitions"', 'from "./metrics-definitions.ts"'],
+  ['from "@/lib/admin/thirty-view"', 'from "./thirty-view.ts"'],
+])
+gen('../src/lib/admin/journey-board.ts', './_gen/journey-board.ts', [
+  ...PEOPLE,
+  ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+  ['from "@/lib/admin/metrics-definitions"', 'from "./metrics-definitions.ts"'],
+])

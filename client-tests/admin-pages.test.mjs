@@ -12,15 +12,13 @@
 //
 // No browser runs here (the repo has no DOM harness), so each fix is checked
 // on the real source in the ways that need none:
-//   - the drawer module itself, compiled by TypeScript (types out, JSX to
-//     react/jsx-runtime calls, as Next's compiler does) with its imports
-//     pointed at stand-ins or build.mjs's copies (run it first; `npm run
-//     test:client` does): its exported StudentDrawer is called as React calls
-//     it, and a fresh drawer is rendered to HTML by React's server renderer;
-//   - its data effect, taken from the source with TypeScript's parser, types
-//     stripped, run the way React runs an effect when the student changes on
-//     one mounted drawer (the last run's cleanup, then the effect again), on
-//     stub-server.ts's database;
+//   - the drawer (since admin rebuild 2, JourneyDrawer in JourneyView.tsx,
+//     fed by useStudent of StudentDetailView.tsx): the board's key read from
+//     the source, and useStudent itself, taken from the source with
+//     TypeScript's parser, types stripped, run on a small stand-in for
+//     React's hooks the way React runs it when the student changes on one
+//     mounted drawer (the last run's cleanup, then the effect again), with
+//     the transport's answers held back to land late;
 //   - the templates page's own handler, taken from the source the same way,
 //     with fetch() going to a copy of the real PUT route (its login pointed
 //     at stub-admin.ts), and its markup read from the source;
@@ -32,7 +30,6 @@ import fs from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
-import { renderToString } from 'react-dom/server'
 
 const BASE = '70c934a' // production when fix lane G1 started
 
@@ -60,8 +57,7 @@ const ok = (c, label, detail = '') => {
 const show = (v) => JSON.stringify(v)
 
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
-const { FakeDb, fakeClient, useDb: installDb } = await import('./_gen/stub-server.ts')
-const { currentStreakAsOf, getTodayUtc } = await import('./_gen/streak.ts')
+const { FakeDb, useDb: installDb } = await import('./_gen/stub-server.ts')
 
 // ── Reading the source ──────────────────────────────────────────────────────
 
@@ -82,157 +78,132 @@ function closedOver(text, scope) {
   const names = Object.keys(scope)
   return new Function(...names, `${js}\nreturn __f;`)(...names.map((n) => scope[n]))
 }
-/** The callback of the useEffect that declares the function `inner`. */
-function effectDeclaring(source, inner, scope) {
-  const sf = parse(source)
-  const call = find(sf, (n) => ts.isCallExpression(n) && n.expression.getText(sf) === 'useEffect' && n.arguments[0]
-    && find(n.arguments[0], (m) => ts.isFunctionDeclaration(m) && m.name?.text === inner))
-  if (!call) throw new Error(`no useEffect declaring ${inner}`)
-  return closedOver(call.arguments[0].getText(sf), scope)
-}
 const settle = () => new Promise((r) => setImmediate(r))
 
 // ── admin-2: the journey drawer ─────────────────────────────────────────────
+//
+// Since admin rebuild 2 (D8, D9) the drawer is JourneyDrawer in
+// src/components/admin/journey/JourneyView.tsx, and its data comes from
+// useStudent in src/components/admin/students/StudentDetailView.tsx (the
+// student page's own hook), through a transport. The fix stays in two
+// places: the board mounts the drawer keyed by the student's id, so each
+// student opens on fresh state; and useStudent drops an answer that lands
+// after it moved on. The hook is taken from the source with TypeScript's
+// parser and run on a small stand-in for React's hooks (mountHook, below),
+// as React runs it on one mounted drawer when the student changes: the
+// worst case, which the key already prevents.
 
-const DRAWER = 'src/app/admin/(authenticated)/journey/StudentDrawer.tsx'
-const drawer = { now: fromSrc(DRAWER), old: fromBase(DRAWER) }
-write(ts.transpileModule(drawer.now, {
-  compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX },
-}).outputText, DRAWER, './_gen/admin-student-drawer.mjs', [
-  // next/link renders an <a>; nothing here follows it.
-  ['import Link from "next/link";', 'const Link = (props) => props.children;'],
-  ['from "@/lib/supabase-browser"', 'from "./stub-server.ts"'],
-  // Only the header's "Day N" reads it, and no check here does.
-  ['import { getDayNumber } from "@/types/database";', 'const getDayNumber = () => 1;'],
-  ['from "@/lib/constants"', 'from "./constants.ts"'],
-  ['from "@/lib/progress"', 'from "./progress.ts"'],
-  ['from "@/lib/streak"', 'from "./streak.ts"'],
-])
-const { StudentDrawer } = await import('./_gen/admin-student-drawer.mjs')
-
-const TODAY = getTodayUtc()
-/** Student A applied (approved, with a code) and has a 5-day streak; student B has neither, as most students. */
-function journeyDb() {
-  const student = (id) => ({ id, name: `Student ${id.slice(-1).toUpperCase()}`, joined_at: '2026-10-02T10:00:00.000Z',
-    first_paid_at: '2026-10-02T10:00:00.000Z', last_active_at: '2026-10-20T08:00:00.000Z', membership_status: 'active' })
-  const db = new FakeDb({
-    students: [student('stu-a'), student('stu-b')],
-    regions: [{ id: 'a1', name: 'Area 1', order_num: 1 }],
-    lessons: [{ id: 'a1l01', region_id: 'a1', type: 'watch', day: 1, sort_order: 1, counts_toward_progress: true }],
-    student_lesson_completions: [{ student_id: 'stu-a', lesson_id: 'a1l01', completed_at: '2026-10-19T09:00:00.000Z' }],
-    discount_requests: [{ id: 'req-a', student_id: 'stu-a', status: 'approved', promo_code: 'ECOM30-STUAAA', created_at: '2026-10-19T10:00:00.000Z' }],
-    student_streaks: [{ student_id: 'stu-a', current_streak: 5, longest_streak: 5, last_streak_date: TODAY }],
-  })
-  installDb(db)
-  return db
-}
+const JOURNEY_VIEW = 'src/components/admin/journey/JourneyView.tsx'
+const DETAIL_VIEW = 'src/components/admin/students/StudentDetailView.tsx'
+const OLD_DRAWER = 'src/app/admin/(authenticated)/journey/StudentDrawer.tsx'
+const journeyView = fromSrc(JOURNEY_VIEW)
+const detailView = fromSrc(DETAIL_VIEW)
 
 /**
- * One mounted drawer: its state, and its data effect from `source` run as
- * React runs it when the student changes (the last run's cleanup, then the
- * effect for the new student).
+ * One mounted component's hooks, standing in for React's: state, refs and
+ * callbacks kept by their place, and after each call the effects whose
+ * dependencies changed run, the last run's cleanup first, as React runs
+ * them. `makeHook` is handed these hooks and answers the hook to call.
  */
-function mountedDrawer(source) {
-  const state = {}
-  let cleanup = null
-  const set = (k) => (v) => { state[k] = typeof v === 'function' ? v(state[k]) : v }
-  return {
-    state,
-    open(studentId, supabase) {
-      if (cleanup) cleanup()
-      const effect = effectDeclaring(source, 'fetchAll', {
-        studentId, supabase,
-        setStudent: set('student'), setRegions: set('regions'), setLessons: set('lessons'),
-        setCompletions: set('completions'), setDiscountRequest: set('discountRequest'),
-        setStreaks: set('streaks'), setLoading: set('loading'),
-      })
-      cleanup = effect() ?? null
+function mountHook(makeHook) {
+  const slots = []
+  const effects = []
+  let i = 0
+  const same = (a, b) => a.length === b.length && a.every((d, j) => Object.is(d, b[j]))
+  const hooks = {
+    useState(init) {
+      const k = i++
+      if (!(k in slots)) slots[k] = { v: typeof init === 'function' ? init() : init }
+      const slot = slots[k]
+      return [slot.v, (next) => { slot.v = typeof next === 'function' ? next(slot.v) : next }]
+    },
+    useRef(init) {
+      const k = i++
+      if (!(k in slots)) slots[k] = { current: init }
+      return slots[k]
+    },
+    useCallback(fn, deps) {
+      const k = i++
+      if (slots[k] && same(deps, slots[k].deps)) return slots[k].fn
+      slots[k] = { fn, deps }
+      return fn
+    },
+    useEffect(fn, deps) {
+      const k = i++
+      if (effects[k] && same(deps, effects[k].deps)) return
+      if (effects[k]?.cleanup) effects[k].cleanup()
+      effects[k] = { deps, cleanup: fn() ?? null }
     },
   }
+  const hook = makeHook(hooks)
+  return (...args) => {
+    i = 0
+    return hook(...args)
+  }
 }
-/** What the drawer shows from that state: the Discount line's source and the Streak stat (the real currentStreakAsOf). */
-const shown = (s) => ({
-  student: s.student?.id ?? null,
-  application: s.discountRequest ? `${s.discountRequest.status} ${s.discountRequest.promo_code ?? ''}`.trim() : null,
-  streak: currentStreakAsOf(s.streaks, TODAY),
-  completions: s.completions?.length ?? null,
-})
+/** The function `name` declared in `source`, as written there. */
+function functionText(source, name) {
+  const sf = parse(source)
+  const fn = find(sf, (n) => ts.isFunctionDeclaration(n) && n.name?.text === name)
+  if (!fn) throw new Error(`no function ${name}`)
+  return fn.getText(sf)
+}
+/** useStudent from the source, as plain JavaScript over the hooks it is handed. */
+const useStudentOn = (hooks) =>
+  closedOver(functionText(detailView, 'useStudent').replace(/^export function useStudent/, 'function'), hooks)
 
-/** A client whose answers wait for `gate`: a slow network for one student. */
-function slow(client, gate) {
-  const wrap = (b) => new Proxy(b, {
-    get(t, p) {
-      if (p === 'then') return (res, rej) => gate.then(() => t.then(res, rej))
-      if (p === 'single' || p === 'maybeSingle') return () => gate.then(() => t[p]())
-      const v = t[p]
-      return typeof v === 'function' ? (...a) => { const r = v.apply(t, a); return r === t ? wrap(t) : r } : v
-    },
-  })
-  return { ...client, from: (table) => wrap(client.from(table)) }
+/** Student A applied (approved, with a code) and has a 5-day streak; student B has neither, as most students. */
+const STUDENTS = {
+  'stu-a': { id: 'stu-a', discount: { ok: true, data: { status: 'approved', text: 'Approved', code: 'ECOM30-STUAAA', askedAt: '2026-10-19T10:00:00.000Z' } },
+    streak: { ok: true, data: 5 } },
+  'stu-b': { id: 'stu-b', discount: { ok: true, data: null }, streak: { ok: true, data: 0 } },
 }
+/** What the drawer shows from useStudent's state: whose detail, their 30% request and their streak. */
+const shown = ({ loaded }) => ({
+  kind: loaded.kind,
+  student: loaded.kind === 'ready' ? loaded.data.id : null,
+  application: loaded.kind === 'ready' && loaded.data.discount.data ? `${loaded.data.discount.data.status} ${loaded.data.discount.data.code ?? ''}`.trim() : null,
+  streak: loaded.kind === 'ready' ? loaded.data.streak.data : null,
+})
 
 console.log('\n=== admin-2: the journey drawer shows the clicked student only ===')
 {
-  const opened = StudentDrawer({ studentId: 'stu-b', onClose: () => {} })
-  const closed = StudentDrawer({ studentId: null, onClose: () => {} })
-  ok(opened.key === 'stu-b' && opened.type.name === 'StudentDrawerBody' && opened.props.studentId === 'stu-b'
-       && closed.key === '' && closed.type === opened.type,
-     'the drawer hands each student a body keyed by their id, so React mounts it fresh for each one (closed: key "")',
-     show({ opened: opened.key, closed: closed.key }))
-  const journey = fromSrc('src/app/admin/(authenticated)/journey/page.tsx')
-  ok(/import \{ StudentDrawer \} from "\.\/StudentDrawer";/.test(journey) && /<StudentDrawer\s/.test(journey)
-       && !/export function StudentDrawerBody/.test(drawer.now),
-     'the journey page renders that keyed drawer, and the body is not exported to be mounted without the key')
-  ok(/export function StudentDrawer\(\{ studentId, onClose \}: StudentDrawerProps\) \{\s*const supabase = createClient\(\);\s*const \[student, setStudent\] = useState/.test(drawer.old),
+  ok(/\{drawer && <JourneyDrawer key=\{drawer\} studentId=\{drawer\} transport=\{transport\} onClose=\{\(\) => setDrawer\(null\)\} \/>\}/.test(journeyView)
+       && /function JourneyDrawer\(\{ studentId, transport, onClose \}: \{[^}]*\}\) \{\s*const \{ loaded, busy, retry, patch \} = useStudent\(transport, studentId\);/.test(journeyView),
+     'the board mounts the drawer keyed by the student\'s id, so React mounts it fresh for each one, and its state is useStudent\'s alone')
+  ok(/export function StudentDrawer\(\{ studentId, onClose \}: StudentDrawerProps\) \{\s*const supabase = createClient\(\);\s*const \[student, setStudent\] = useState/.test(fromBase(OLD_DRAWER)),
      `control: at ${BASE} the exported drawer held the state itself, unkeyed, and the page keeps it mounted`)
-  journeyDb()
-  const html = renderToString(opened)
-  ok(html.includes('Close drawer') && html.includes('animate-spin') && !html.includes('Application') && !html.includes('ECOM30'),
-     'a freshly mounted drawer, rendered by React, shows the spinner and nothing of anyone\'s application', `${html.length} chars`)
 }
-for (const v of ['now', 'old']) {
-  // The effect alone, on ONE mounted drawer (the worst case, which the key
-  // above already prevents): A, then B.
-  const db = journeyDb()
-  const d = mountedDrawer(drawer[v])
-  d.open('stu-a', fakeClient(db))
+{
+  // A alone: A's request, its code and its streak.
+  const transport = { loadStudent: async (id) => ({ ok: true, status: 200, data: STUDENTS[id] }) }
+  const render = mountHook(useStudentOn)
+  render(transport, 'stu-a')
   await settle()
-  const a = shown(d.state)
-  d.open('stu-b', fakeClient(db))
-  await settle()
-  const b = shown(d.state)
-  if (v === 'now') {
-    ok(a.application === 'approved ECOM30-STUAAA' && a.streak === 5,
-       'A: application approved with its code, a 5-day streak', show(a))
-    ok(b.student === 'stu-b' && b.application === null && b.streak === 0 && b.completions === 0 && d.state.loading === false,
-       'then B, with no request and no streak row: "No application submitted" and 0d, even on the same mounted drawer', show(b))
-  } else {
-    ok(b.student === 'stu-b' && b.application === 'approved ECOM30-STUAAA' && b.streak === 5,
-       `control: at ${BASE} B shows A's approved application, A's code and A's streak`, show(b))
-  }
+  const a = shown(render(transport, 'stu-a'))
+  ok(a.student === 'stu-a' && a.application === 'approved ECOM30-STUAAA' && a.streak === 5,
+     'A: the request approved with its code, a 5-day streak', show(a))
 }
-for (const v of ['now', 'old']) {
-  // A's answers are slow. The team closes A and opens B; B's answers land,
-  // then A's late ones do.
-  const db = journeyDb()
-  const d = mountedDrawer(drawer[v])
-  let release = null
-  const gate = new Promise((r) => { release = r })
-  d.open('stu-a', slow(fakeClient(db), gate))
-  d.open('stu-b', fakeClient(db))
+{
+  // A, then B, on ONE mounted hook. A's answer is slow: B's lands first, then A's.
+  const asked = []
+  const transport = { loadStudent: (id) => new Promise((resolve) => asked.push({ id, resolve })) }
+  const answer = (id) => asked.find((x) => x.id === id).resolve({ ok: true, status: 200, data: STUDENTS[id] })
+  const render = mountHook(useStudentOn)
+  render(transport, 'stu-a')
+  const opening = shown(render(transport, 'stu-b'))
+  answer('stu-b')
   await settle()
-  const before = shown(d.state)
-  release()
+  const before = shown(render(transport, 'stu-b'))
+  answer('stu-a')
   await settle()
   await settle()
-  const after = shown(d.state)
-  if (v === 'now') {
-    ok(before.student === 'stu-b' && show(after) === show(before) && after.application === null,
-       'a slow answer for A that lands after B opened is dropped: the drawer still shows B', show(after))
-  } else {
-    ok(after.student === 'stu-a' && after.application === 'approved ECOM30-STUAAA',
-       `control: at ${BASE} A's late answer takes over B's drawer`, show(after))
-  }
+  const after = shown(render(transport, 'stu-b'))
+  ok(opening.kind === 'loading' && opening.student === null, 'B opening shows loading, nothing of A\'s', show(opening))
+  ok(before.student === 'stu-b' && before.application === null && before.streak === 0,
+     'B, with no request and no streak: no request and 0 days, even on the same mounted hook', show(before))
+  ok(show(after) === show(before), 'a slow answer for A that lands after B opened is dropped: the drawer still shows B', show(after))
+  ok(show(asked.map((x) => x.id)) === show(['stu-a', 'stu-b']), 'one read for each student', show(asked.map((x) => x.id)))
 }
 
 // ── admin-3: templates on and off ───────────────────────────────────────────
@@ -334,12 +305,16 @@ function approvalTexts(source) {
 }
 console.log('\n=== The ads tick on the student page and in the drawer: approving the 30% no longer needs it ===')
 {
-  const now = { page: approvalTexts(fromSrc(STUDENT_PAGE)), drawer: approvalTexts(drawer.now) }
-  const old = { page: approvalTexts(fromBase(STUDENT_PAGE)), drawer: approvalTexts(drawer.old) }
-  ok(show(now) === show({
-    page: ['Tick this once you’ve confirmed the student submitted all action items in the Discord ad-review channel. Approving the 30% no longer needs it.'],
-    drawer: ['Approving the 30% no longer needs it. Tick after confirming submissions in Discord.'],
-  }), 'under "Ad submissions verified", both say approving the 30% no longer needs the tick, and neither says it is required', show(now))
+  // Since admin rebuild 2 both are DiscountBlock in StudentDetailView.tsx: the
+  // page's words, and the drawer's shorter ones (compact, from JourneyView.tsx).
+  const texts = approvalTexts(detailView)
+  ok(show(texts) === show([
+    'Approving the 30% no longer needs it. Tick after confirming submissions in Discord.',
+    'Tick this once you’ve confirmed the student submitted all action items in the Discord ad-review channel. Approving the 30% no longer needs it.',
+  ]) && /<DiscountBlock student=\{loaded\.data\} transport=\{transport\} onSaved=\{\(v\) => patch\(\{ adVerified: v \}\)\} compact \/>/.test(journeyView)
+     && /<DiscountBlock student=\{s\} transport=\{transport\} onSaved=\{\(v\) => patch\(\{ adVerified: v \}\)\} \/>/.test(detailView),
+     'under "Ad submissions verified", the page and the drawer (compact) both say approving the 30% no longer needs the tick, and neither says it is required', show(texts))
+  const old = { page: approvalTexts(fromBase(STUDENT_PAGE)), drawer: approvalTexts(fromBase(OLD_DRAWER)) }
   ok(old.page.length === 1 && old.drawer.length === 1
        && [...old.page, ...old.drawer].every((t) => /Required (for|before) discount approval/.test(t)),
      `control: at ${BASE} both said the tick was required for the approval`, show(old))

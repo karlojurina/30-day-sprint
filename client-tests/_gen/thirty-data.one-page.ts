@@ -160,7 +160,7 @@ export interface ThirtyData {
   reads: Map<string, DiscountReads>;
   /** Per student id: their completions on the lessons the offer asks for and on the action items, or null where that read failed. */
   completions: Map<string, ThirtyCompletion[] | null>;
-  /** The listed requests: every pending one, whatever its date, and the rest made from DISCOUNT_ELIGIBLE_FROM on, by id. */
+  /** The listed requests: every pending one and every approved one, whatever their date, and the rest made from DISCOUNT_ELIGIBLE_FROM on, by id. */
   requests: ThirtyRequest[];
   /** The survey's questions, by order. */
   questions: ThirtyQuestion[];
@@ -229,7 +229,11 @@ const failure = (name: string, r: Read<unknown>) => `${name}: ${r.error?.message
 
 export async function loadThirtyData(db: SupabaseClient): Promise<ThirtyLoad> {
   // The pending requests, then the decided ones: a request decided in between
-  // is on both lists (kept once below, as decided), never on neither.
+  // is on both lists (kept once below, as decided), never on neither. The
+  // decided ones are those made from DISCOUNT_ELIGIBLE_FROM on, plus every
+  // approved one made before it: an approved request whose code was never
+  // added in Whop must stay on the Approved tab whatever its date. Both
+  // decided reads start after the pending one, so the later read wins.
   const pendingRead = paged<ThirtyRequest>(() =>
     db.from("discount_requests").select(LISTED_REQUEST_COLUMNS).eq("status", "pending").order("id"),
   );
@@ -243,12 +247,23 @@ export async function loadThirtyData(db: SupabaseClient): Promise<ThirtyLoad> {
         .order("id"),
     ),
   );
+  const oldApprovedRead = pendingRead.then(() =>
+    paged<ThirtyRequest>(() =>
+      db
+        .from("discount_requests")
+        .select(LISTED_REQUEST_COLUMNS)
+        .eq("status", "approved")
+        .lt("created_at", DISCOUNT_ELIGIBLE_FROM)
+        .order("id"),
+    ),
+  );
   // Everything that does not depend on who is listed, at once.
-  const [catalog, videos, pending, decided, offer, questions, team] = await Promise.all([
+  const [catalog, videos, pending, decided, oldApproved, offer, questions, team] = await Promise.all([
     paged<ThirtyLesson>(() => db.from(LESSONS_TABLE).select(CATALOG_COLUMNS).order("sort_order").order("id")),
     paged<VideoRow>(() => db.from("lesson_videos").select(VIDEO_COLUMNS).order("lesson_id")),
     pendingRead,
     decidedRead,
+    oldApprovedRead,
     paged<ThirtyStudent>(() =>
       db.from("students").select(STUDENT_COLUMNS).gte("first_paid_at", DISCOUNT_ELIGIBLE_FROM).order("id"),
     ),
@@ -264,6 +279,7 @@ export async function loadThirtyData(db: SupabaseClient): Promise<ThirtyLoad> {
   const failed: string[] = [];
   if (!pending.data) failed.push(failure("discount_requests (pending)", pending));
   if (!decided.data) failed.push(failure("discount_requests (decided)", decided));
+  if (!oldApproved.data) failed.push(failure("discount_requests (approved before the offer)", oldApproved));
   if (!offer.data) failed.push(failure("students (first payment from 1 October)", offer));
   if (!questions.data) failed.push(failure("discount_feedback_questions", questions));
   if (!team.data) failed.push(failure("team_members", team));
@@ -274,6 +290,7 @@ export async function loadThirtyData(db: SupabaseClient): Promise<ThirtyLoad> {
   const byRequest = new Map<string, ThirtyRequest>();
   for (const r of pending.data!) byRequest.set(r.id, r);
   for (const r of decided.data!) byRequest.set(r.id, r);
+  for (const r of oldApproved.data!) byRequest.set(r.id, r);
   const requests = [...byRequest.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   // The students holding a listed request who are not in the offer (a first

@@ -365,10 +365,10 @@ ok(show(wv.questions) === show([
   { id: 'q2', orderNum: 2, text: 'What should the course add?' },
   { id: 'q3', orderNum: 3, text: 'Where did you hear about us?' },
 ]), 'the survey\'s questions, in their order')
-ok(wv.requests.map((r) => r.id).join() === 'r-p2,r-e2,r-r,r-g,r-a,r-n,r-p1,r-u,r-t,r-h1,r-h2',
-   'listed: every pending request and every decided one from 1 October on, newest first (r-v from August and r-w from September are not)', wv.requests.map((r) => r.id).join())
-ok(!W.data.students.some((s) => s.id === 's-e' || s.id === 's-v') && W.data.students.some((s) => s.id === 's-e2') && W.data.students.some((s) => s.id === 's-n'),
-   'read: everyone with a first payment from 1 October, and the holders of listed requests from before it or with none')
+ok(wv.requests.map((r) => r.id).join() === 'r-p2,r-e2,r-r,r-g,r-a,r-n,r-p1,r-u,r-t,r-h1,r-h2,r-w,r-v',
+   'listed: every pending request, every approved one whatever its date (r-w from September and r-v from August, codes never added in Whop), and the other decided ones from 1 October on, newest first', wv.requests.map((r) => r.id).join())
+ok(!W.data.students.some((s) => s.id === 's-e') && W.data.students.some((s) => s.id === 's-v') && W.data.students.some((s) => s.id === 's-e2') && W.data.students.some((s) => s.id === 's-n'),
+   'read: everyone with a first payment from 1 October, and the holders of listed requests (an old approved one included) from before it or with none')
 
 {
   const a = request(wv, 'r-a')

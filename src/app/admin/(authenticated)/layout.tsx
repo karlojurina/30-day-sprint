@@ -47,7 +47,12 @@ export default function AdminLayout({
         <AdminTopNav
           member={teamMember}
           pathname={pathname}
-          onSignOut={signOut}
+          onSignOut={async () => {
+            // signOut answers the failure's sentence (or null) since the bug
+            // hunt's login-5: a failed sign-out keeps the session, so say so.
+            const error = await signOut();
+            if (error) window.alert(error);
+          }}
         />
         <main className={mainClass}>{children}</main>
       </div>

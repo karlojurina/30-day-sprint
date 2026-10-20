@@ -93,7 +93,16 @@ async function logged(fn) {
 // ── The page's handlers, as the page has them ───────────────────────────────
 
 const PAGE = 'src/app/admin/(authenticated)/discounts/page.tsx'
-const page = { now: fromSrc(PAGE), old: fromBase(PAGE) }
+// The admin rebuild (night/admin, 2026-10-20) replaced this page with ThirtyView,
+// whose Reject is an inline panel with no prompt. The page with lane G1's fixes
+// is kept as client-tests/fixtures/discounts-page-g1.tsx (a byte copy of it on
+// night/main-ready) and drives the routes here, so every route check below
+// still runs; the Cancel check is about that page, which production runs until
+// the rebuild ships. Retire the page checks once it has.
+const FIXTURE = 'client-tests/fixtures/discounts-page-g1.tsx'
+const hasHandlers = (src) => /function handleReject\(/.test(src)
+const page = { now: hasHandlers(fromSrc(PAGE)) ? fromSrc(PAGE) : fromSrc(FIXTURE), old: fromBase(PAGE) }
+if (!hasHandlers(fromSrc(PAGE))) console.log(`  note  the page is the admin rebuild's; its old handlers come from ${FIXTURE}`)
 
 /**
  * A function declared inside a component, as plain JavaScript: found with

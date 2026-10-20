@@ -4132,7 +4132,8 @@ function BountyBody({
  * after "This closed on ..." or "Your 2 weeks have passed." where it is closed.
  * T-080's shared deadline (a first payment from 1 October until the launch:
  * the end of 23 October in Croatia, st.window "shared") is unchanged and
- * reaches those students only as the date in "Apply by". An
+ * reaches those students as the date in "Apply by" and, once it has passed,
+ * in "This closed on". An
  * application made on the old dashboard (st.madeBeforeLaunch) gets its own
  * words: "within 48 hours" and "on your next renewal" may no longer hold.
  * Every deadline shows its date and hour in the student's own time zone

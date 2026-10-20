@@ -185,8 +185,9 @@ export function discountEndsAt(firstPaidAt: string | null): Date | null {
  *     the live writers only fill an empty first_paid_at. The exception is the
  *     one-off repair (POST /api/admin/first-paid-repair, 2026-10-20), which
  *     moves a free membership's date later to the first real payment: a
- *     request made under the old date can then stop counting, and the
- *     repair's answer counts those students (thirty.requests_change).
+ *     request made under the old date can then stop counting, or be left
+ *     uncounted beside a 30% the new date opens, and the repair's answer
+ *     counts both (thirty.requests_change, thirty.open_with_old_request).
  *   - A date that does not parse: it does not count.
  */
 export function requestCounts(

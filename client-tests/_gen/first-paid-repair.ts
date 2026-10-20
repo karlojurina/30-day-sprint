@@ -24,8 +24,9 @@
  *     times, not strings): changed to it. Counted by direction (later,
  *     earlier, from empty) and by how far it moves, by what it does to the 30%
  *     (discount.ts's dates: 1 October and the 9 October launch, Croatia, both
- *     ways) and by whether one of the student's 30% requests starts or stops
- *     counting (requestCounts);
+ *     ways), by whether one of the student's 30% requests starts or stops
+ *     counting (requestCounts), and by whether the new date opens the 30% to
+ *     a student holding a live request that does not count under it;
  *   - a first payment at the stored time: unchanged;
  *   - no first payment (a free member, a seat given away, a comp): counted,
  *     split by whether a date is stored, and left exactly as it is. Never
@@ -46,7 +47,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { walkFirstPayments, type FirstPaymentWalk, type PaymentReadFail } from "./first-payment.ts";
 import { fetchAllRowsPaginated } from "./supabase-pagination.ts";
-import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "./discount.ts";
+import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, discountWindow, requestCounts } from "./discount.ts";
 
 /** No page of the walk starts after this. */
 export const REPAIR_WALK_BUDGET_MS = 240_000;
@@ -172,20 +173,34 @@ export interface RepairRequest {
   created_at: string;
 }
 
-/** Of the changes, the students with a 30% request that starts or stops counting under the new date (requestCounts). */
-export function countRequestFlips(changes: readonly RepairChange[], requests: readonly RepairRequest[]): number {
+/**
+ * Of the changes, what the new date does to the students' 30% requests:
+ *   requests_change: a request starts or stops counting (requestCounts);
+ *   open_with_old_request: the new date opens the 30% (discountWindow not
+ *     closed) while the student holds a pending, approved or applied request
+ *     that does not count under it. The map then ignores that request and
+ *     can offer Apply, though one 30% was already asked for or given.
+ */
+export function countRequestEffects(
+  changes: readonly RepairChange[],
+  requests: readonly RepairRequest[],
+): { requests_change: number; open_with_old_request: number } {
   const byStudent = new Map<string, RepairRequest[]>();
   for (const r of requests) {
     const list = byStudent.get(r.student_id) ?? [];
     list.push(r);
     byStudent.set(r.student_id, list);
   }
-  let flips = 0;
+  const live = new Set(["pending", "approved", "applied"]);
+  const counts = { requests_change: 0, open_with_old_request: 0 };
   for (const c of changes) {
     const theirs = byStudent.get(c.id) ?? [];
-    if (theirs.some((r) => requestCounts(r, c.from) !== requestCounts(r, c.to))) flips += 1;
+    if (theirs.some((r) => requestCounts(r, c.from) !== requestCounts(r, c.to))) counts.requests_change += 1;
+    if (!("closed" in discountWindow(c.to)) && theirs.some((r) => live.has(r.status) && !requestCounts(r, c.to))) {
+      counts.open_with_old_request += 1;
+    }
   }
-  return flips;
+  return counts;
 }
 
 /** Every student with a Whop id, past PostgREST's 1,000-row cap. Throws on a failed read. */
@@ -315,9 +330,9 @@ export async function runFirstPaidRepair(
     };
   }
 
-  let requestsChange: number;
+  let requestEffects: ReturnType<typeof countRequestEffects>;
   try {
-    requestsChange = countRequestFlips(plan.changes, await readRequests(supabase, plan.changes.map((c) => c.id)));
+    requestEffects = countRequestEffects(plan.changes, await readRequests(supabase, plan.changes.map((c) => c.id)));
   } catch (e) {
     console.error(`[first-paid-repair] ${e instanceof Error ? e.message : String(e)}`);
     return {
@@ -332,7 +347,7 @@ export async function runFirstPaidRepair(
     walk: walkShown,
     students: plan.students,
     moves: plan.moves,
-    thirty: { ...plan.thirty, requests_change: requestsChange },
+    thirty: { ...plan.thirty, ...requestEffects },
   };
 
   if (mode === "dry") {

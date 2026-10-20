@@ -18,7 +18,7 @@
 //
 // Every Whop id, email, name, key and secret here is made up.
 import { POST as repair, maxDuration } from './_gen/first-paid-repair-route.ts'
-import { planFirstPaidRepair, countRequestFlips } from './_gen/first-paid-repair.ts'
+import { planFirstPaidRepair, countRequestEffects } from './_gen/first-paid-repair.ts'
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
 import { FakeDb, useDb as installDb } from './_gen/stub-server.ts'
 
@@ -178,8 +178,14 @@ const PAYMENTS = () => [
   ...Array.from({ length: 230 }, (_, i) => pay(`user_TESTother${String(i).padStart(4, '0')}`, '2026-07-01T00:00:00.000Z', 97)),
 ]
 const REQUESTS = [
+  // Approved before the launch: it starts counting once 13's date is in the 1 to 8 October window.
   { id: 'req-13', student_id: sid(13), status: 'approved', created_at: '2026-10-04T10:00:00.000Z' },
+  // Made after the launch: it counts under any date.
   { id: 'req-1', student_id: sid(1), status: 'pending', created_at: '2026-10-15T10:00:00.000Z' },
+  // Approved on the old dashboard under the promo date: it counts under neither date, and the new one opens the 30%.
+  { id: 'req-10', student_id: sid(10), status: 'approved', created_at: '2026-09-25T10:00:00.000Z' },
+  // Rejected before the launch: it never counts, and holds nothing.
+  { id: 'req-2', student_id: sid(2), status: 'rejected', created_at: '2026-10-05T10:00:00.000Z' },
 ]
 /** What the repair should write: [student, from, to]. */
 const CHANGES = [
@@ -239,7 +245,7 @@ const PLAN_COUNTS = {
     earlier: { all: 2, under_a_minute: 0, a_day_or_more: 2 },
     from_empty: 2,
   },
-  thirty: { opens_was_before_oct_1: 3, opens_was_empty: 1, closes: 1, to_after_launch: 2, to_before_launch: 1, requests_change: 1 },
+  thirty: { opens_was_before_oct_1: 3, opens_was_empty: 1, closes: 1, to_after_launch: 2, to_before_launch: 1, requests_change: 1, open_with_old_request: 1 },
 }
 
 console.log('\n=== Who may run it ===')
@@ -290,7 +296,7 @@ let dry
   ok(same(dry.moves, PLAN_COUNTS.moves),
      'moves: 5 later (2 by under a minute, 3 by a day or more), 2 earlier (by days), 2 from empty', show(dry.moves))
   ok(same(dry.thirty, PLAN_COUNTS.thirty),
-     'the 30%: opens for 3 dated before 1 October and 1 empty one, closes for 1, 2 move past the launch and 1 before it, 1 request starts counting', show(dry.thirty))
+     'the 30%: opens for 3 dated before 1 October and 1 empty one, closes for 1, 2 move past the launch and 1 before it, 1 request starts counting, 1 opens beside an old approval', show(dry.thirty))
   const w = dry.walk
   ok(w.complete === true && w.stopped_because === 'done' && w.pages === 3 && w.requests === 3 && w.retried_429 === 0,
      'the walk: 3 pages, complete', show({ pages: w.pages, requests: w.requests }))
@@ -316,10 +322,17 @@ console.log('\n=== The plan, as a function ===')
   ok(same(plan.changes, [{ id: 'a', from: '2026-09-05T10:00:00+00:00', to: '2026-10-14T10:00:05.000Z' }, { id: 'd', from: 'not a date', to: '2026-10-14T10:00:05.000Z' }]),
      'a stored date and a payment at another time change; the same time written two ways does not; no payment stays out', show(plan.changes))
   ok(plan.moves.from_empty === 1 && plan.thirty.opens_was_empty === 1, 'a stored value that does not read counts as empty (its guard still names it)')
-  ok(countRequestFlips([{ id: 'x', from: '2026-09-25T00:00:00Z', to: '2026-10-03T00:00:00Z' }], [{ student_id: 'x', status: 'approved', created_at: '2026-10-04T00:00:00Z' }]) === 1 &&
-     countRequestFlips([{ id: 'x', from: '2026-09-25T00:00:00Z', to: '2026-10-03T00:00:00Z' }], [{ student_id: 'x', status: 'rejected', created_at: '2026-10-04T00:00:00Z' }]) === 0 &&
-     countRequestFlips([{ id: 'x', from: '2026-09-05T00:00:00Z', to: '2026-10-14T00:00:00Z' }], [{ student_id: 'x', status: 'pending', created_at: '2026-10-15T00:00:00Z' }]) === 0,
-     'a request flips when requestCounts reads it differently: an approval from before the launch, into the shared window, yes; a rejected one or one from after the launch, no')
+  const effects = (from, to, status, createdAt) =>
+    countRequestEffects([{ id: 'x', from, to }], [{ student_id: 'x', status, created_at: createdAt }])
+  ok(same(effects('2026-09-25T00:00:00Z', '2026-10-03T00:00:00Z', 'approved', '2026-10-04T00:00:00Z'), { requests_change: 1, open_with_old_request: 0 }) &&
+     same(effects('2026-09-25T00:00:00Z', '2026-10-03T00:00:00Z', 'rejected', '2026-10-04T00:00:00Z'), { requests_change: 0, open_with_old_request: 0 }) &&
+     same(effects('2026-09-05T00:00:00Z', '2026-10-14T00:00:00Z', 'pending', '2026-10-15T00:00:00Z'), { requests_change: 0, open_with_old_request: 0 }),
+     'a request flips when requestCounts reads it differently: an approval from before the launch, into the 1 to 8 October window, yes; a rejected one or one from after the launch, no')
+  ok(same(effects('2026-09-05T00:00:00Z', '2026-10-14T00:00:00Z', 'approved', '2026-09-12T00:00:00Z'), { requests_change: 0, open_with_old_request: 1 }) &&
+     same(effects('2026-10-03T00:00:00Z', '2026-10-14T00:00:00Z', 'pending', '2026-10-04T00:00:00Z'), { requests_change: 1, open_with_old_request: 1 }) &&
+     same(effects('2026-09-05T00:00:00Z', '2026-09-06T00:00:00Z', 'approved', '2026-09-12T00:00:00Z'), { requests_change: 0, open_with_old_request: 0 }) &&
+     same(effects('2026-09-05T00:00:00Z', '2026-10-14T00:00:00Z', 'rejected', '2026-09-12T00:00:00Z'), { requests_change: 0, open_with_old_request: 0 }),
+     'a new date that opens the 30% beside a live request that does not count under it is counted (the report\'s case with an old approval, or a shared-window request moved past the launch); not when the 30% stays closed, nor for a rejected request')
 }
 
 console.log('\n=== The snapshot: the rows the write would change, nothing written ===')

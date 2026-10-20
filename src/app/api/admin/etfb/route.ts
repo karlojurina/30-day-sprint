@@ -43,6 +43,12 @@ export const dynamic = "force-dynamic";
 // Interactive page load, not a cron. The house 300 would hold a browser tab
 // for five minutes against a wedged upstream.
 export const maxDuration = 30;
+// Pinned to iad1, next to Whop, by this file's entry under `functions` in
+// vercel.json, while the project's functions run in dub1 next to the
+// database: its Whop pages in a row outnumber its 3 or 4 database trips,
+// inside a 20 s read budget. Vercel takes a Node route's region only from
+// vercel.json, and a moved file loses the pin. The counts: CONTEXT.md,
+// "Where the functions run".
 
 function noStore(res: NextResponse) {
   res.headers.set("Cache-Control", "no-store");

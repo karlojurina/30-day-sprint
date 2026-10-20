@@ -29,9 +29,14 @@ import { BROOK, GORGE, PATH, PLACES, RIVER, STREAM, WORLD } from "./layout";
  * course. The opening's islet in the bay went on 2026-10-15 with its boulders
  * (Lovro's Loom).
  *
- * terrainHeight allocates nothing and runs in ~2 microseconds in node
- * (measured: 200k random calls). buildTerrainGeometry(320) takes ~180 ms.
+ * terrainHeight runs in about 1 microsecond in node (2026-10-20, 200k random
+ * calls; 2.3 before the speed-up that day, which changed no output: see
+ * client-tests/terrain-identical.test.mjs). buildTerrainGeometry(320) takes
+ * about 75 ms warm and 170 ms on a page's first build, which also fills the
+ * hash table and the segment grids.
  * TUNING: the tables and constants below; world-tests/v6-route.mjs re-checks.
+ * Changing an output on purpose fails terrain-identical by design: its
+ * header says what to do.
  */
 
 // ── Tunables ─────────────────────────────────────────────────────────────────
@@ -395,10 +400,34 @@ function smin(a: number, b: number, k: number): number {
   const h = clamp01(0.5 + (0.5 * (b - a)) / k);
   return b + (a - b) * h - k * h * (1 - h);
 }
+/**
+ * Whether (a, b) can lie closer than r to the origin (speed, 2026-10-20).
+ * Math.hypot is slow and never below either leg, so where this is false the
+ * distance is r or more. The callers pass Infinity then, which every test and
+ * smooth() they feed treats exactly as any distance of r or more: no height
+ * changes by a bit.
+ */
+function near(a: number, b: number, r: number): boolean {
+  return a < r && a > -r && b < r && b > -r;
+}
 function hash(x: number, y: number): number {
   const v = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
   return v - Math.floor(v);
 }
+
+/**
+ * hash() at the lattice corners noise() reads, kept once computed (speed,
+ * 2026-10-20: hash was the top function of the map's load). noise() only
+ * ever asks for whole-number corners, and every corner comes back many times:
+ * each ground height reads about 20 noises of 4 corners. The table holds the
+ * very value hash() returned, so no height changes by a bit
+ * (client-tests/terrain-identical.test.mjs runs the old code beside this
+ * one). Corners outside it are computed as before. 2 MB, filled as it is read.
+ */
+const LATTICE_HALF = 256;
+const LATTICE_W = 2 * LATTICE_HALF;
+let lattice: Float64Array | null = null;
+
 function noise(x: number, y: number): number {
   const ix = Math.floor(x);
   const iy = Math.floor(y);
@@ -406,10 +435,29 @@ function noise(x: number, y: number): number {
   let v = y - iy;
   u = u * u * (3 - 2 * u);
   v = v * v * (3 - 2 * v);
-  const a = hash(ix, iy);
-  const b = hash(ix + 1, iy);
-  const c = hash(ix, iy + 1);
-  const d = hash(ix + 1, iy + 1);
+  let a: number;
+  let b: number;
+  let c: number;
+  let d: number;
+  // NaN or infinite corners fail this test and take the plain path.
+  if (ix >= -LATTICE_HALF && ix < LATTICE_HALF - 1 && iy >= -LATTICE_HALF && iy < LATTICE_HALF - 1) {
+    const T = lattice ?? (lattice = new Float64Array(LATTICE_W * LATTICE_W).fill(NaN));
+    const k = (iy + LATTICE_HALF) * LATTICE_W + ix + LATTICE_HALF;
+    // NaN marks a corner not computed yet (hash() itself never returns NaN here).
+    a = T[k];
+    if (a !== a) a = T[k] = hash(ix, iy);
+    b = T[k + 1];
+    if (b !== b) b = T[k + 1] = hash(ix + 1, iy);
+    c = T[k + LATTICE_W];
+    if (c !== c) c = T[k + LATTICE_W] = hash(ix, iy + 1);
+    d = T[k + LATTICE_W + 1];
+    if (d !== d) d = T[k + LATTICE_W + 1] = hash(ix + 1, iy + 1);
+  } else {
+    a = hash(ix, iy);
+    b = hash(ix + 1, iy);
+    c = hash(ix, iy + 1);
+    d = hash(ix + 1, iy + 1);
+  }
   return (a + (b - a) * u) * (1 - v) + (c + (d - c) * u) * v;
 }
 /** Three octaves, 0..1. */
@@ -456,6 +504,150 @@ function nearest(rows: ReadonlyArray<ReadonlyArray<number>>, zi: number, x: numb
   qD = Math.sqrt(best);
 }
 
+/**
+ * A polyline's segments with a grid of the ones each cell can need (speed,
+ * 2026-10-20). nearest() and bench() scanned every segment for every height;
+ * a point needs only the segments that can be nearest to it. For a cell with
+ * centre c, half-diagonal R and nearest segment Dc away, a point inside it is
+ * at most Dc + R from the line, so its nearest segment is at most Dc + 2R from
+ * c: the cell keeps every segment that close, plus SEG_SLACK for rounding.
+ * The kept segments are tried in the polyline's order with the same sums and
+ * the same strict "<", so the pick, ties included, is the full scan's.
+ * Outside the grid the full scan runs. `low` is a floor under the distance
+ * from any point of the cell to the line (bench()'s reach test).
+ */
+interface SegGrid {
+  /** Per segment, in the polyline's order: start, step and squared length. */
+  ax: Float64Array;
+  az: Float64Array;
+  dx: Float64Array;
+  dz: Float64Array;
+  l2: Float64Array;
+  /** Every segment the scan reads, in order (a zero-length one never wins, so it is left out). */
+  all: Int32Array;
+  /** Cell k's segments are ids[start[k]] to ids[start[k + 1] - 1], in order. */
+  start: Int32Array;
+  ids: Int32Array;
+  low: Float64Array;
+}
+const SEG_CELL = 200;
+const SEG_SLACK = 2;
+const SEG_X0 = WORLD.minX - 400;
+const SEG_Z0 = WORLD.minZ - 400;
+const SEG_NX = Math.ceil((WORLD.maxX - WORLD.minX + 800) / SEG_CELL);
+const SEG_NZ = Math.ceil((WORLD.maxZ - WORLD.minZ + 800) / SEG_CELL);
+
+/** `pts` as [x, z]; `keep(i)` says whether the segment from point i to i + 1 counts. */
+function segGrid(pts: ReadonlyArray<readonly [number, number]>, keep: (i: number) => boolean): SegGrid {
+  const n = Math.max(0, pts.length - 1);
+  const ax = new Float64Array(n);
+  const az = new Float64Array(n);
+  const dx = new Float64Array(n);
+  const dz = new Float64Array(n);
+  const l2 = new Float64Array(n);
+  const used: number[] = [];
+  for (let i = 0; i < n; i++) {
+    ax[i] = pts[i][0];
+    az[i] = pts[i][1];
+    dx[i] = pts[i + 1][0] - ax[i];
+    dz[i] = pts[i + 1][1] - az[i];
+    l2[i] = dx[i] * dx[i] + dz[i] * dz[i];
+    if (keep(i) && l2[i] > 0) used.push(i);
+  }
+  const all = Int32Array.from(used);
+  const R = SEG_CELL * Math.SQRT1_2;
+  const cells = SEG_NX * SEG_NZ;
+  const start = new Int32Array(cells + 1);
+  const low = new Float64Array(cells);
+  const ids: number[] = [];
+  const dist = new Float64Array(n);
+  for (let j = 0; j < SEG_NZ; j++) {
+    for (let i = 0; i < SEG_NX; i++) {
+      const cx = SEG_X0 + (i + 0.5) * SEG_CELL;
+      const cz = SEG_Z0 + (j + 0.5) * SEG_CELL;
+      let dc = Infinity;
+      for (let m = 0; m < all.length; m++) {
+        const s = all[m];
+        const px = cx - ax[s];
+        const pz = cz - az[s];
+        const u = clamp01((px * dx[s] + pz * dz[s]) / l2[s]);
+        const ex = px - dx[s] * u;
+        const ez = pz - dz[s] * u;
+        dist[s] = Math.sqrt(ex * ex + ez * ez);
+        if (dist[s] < dc) dc = dist[s];
+      }
+      const k = j * SEG_NX + i;
+      start[k] = ids.length;
+      for (let m = 0; m < all.length; m++) if (dist[all[m]] <= dc + 2 * R + SEG_SLACK) ids.push(all[m]);
+      low[k] = dc - R - SEG_SLACK;
+    }
+  }
+  start[cells] = ids.length;
+  return { ax, az, dx, dz, l2, all, start, ids: Int32Array.from(ids), low };
+}
+
+/** The cell (x, z) falls in, or -1 outside the grid (NaN and infinities too). */
+function segCell(x: number, z: number): number {
+  const fi = (x - SEG_X0) / SEG_CELL;
+  const fj = (z - SEG_Z0) / SEG_CELL;
+  if (!(fi >= 0 && fi < SEG_NX && fj >= 0 && fj < SEG_NZ)) return -1;
+  return Math.floor(fj) * SEG_NX + Math.floor(fi);
+}
+
+/** nearest() over a SegGrid: the same qD, qI, qU and qSide, bit for bit. */
+function nearestOn(g: SegGrid, x: number, z: number): void {
+  const k = segCell(x, z);
+  const list = k < 0 ? g.all : g.ids;
+  const from = k < 0 ? 0 : g.start[k];
+  const to = k < 0 ? list.length : g.start[k + 1];
+  let best = Infinity;
+  for (let m = from; m < to; m++) {
+    const i = list[m];
+    const dx = g.dx[i];
+    const dz = g.dz[i];
+    const px = x - g.ax[i];
+    const pz = z - g.az[i];
+    const u = clamp01((px * dx + pz * dz) / g.l2[i]);
+    const ex = px - dx * u;
+    const ez = pz - dz * u;
+    const d2 = ex * ex + ez * ez;
+    if (d2 < best) {
+      best = d2;
+      qI = i;
+      qU = u;
+      qSide = dx * pz - dz * px < 0 ? -1 : 1;
+    }
+  }
+  qD = Math.sqrt(best);
+}
+
+/** The grids carves() and bench() read, built on the first height asked for. */
+interface SegGrids {
+  gorge: SegGrid;
+  river: SegGrid;
+  stream: SegGrid;
+  brook: SegGrid;
+  /** PATH's segments with carve on, as bench() reads them. */
+  bench: SegGrid;
+}
+let grids: SegGrids | null = null;
+const xzOf = (rows: ReadonlyArray<ReadonlyArray<number>>, zi: number) => rows.map((r) => [r[0], r[zi]] as const);
+function segGrids(): SegGrids {
+  if (grids) return grids;
+  const every = () => true;
+  grids = {
+    gorge: segGrid(xzOf(GORGE, 1), every),
+    river: segGrid(xzOf(RIVER, 2), every),
+    stream: segGrid(xzOf(STREAM, 2), every),
+    brook: segGrid(xzOf(BROOK, 2), every),
+    bench: segGrid(
+      PATH.map((p) => [p.x, p.z] as const),
+      (i) => PATH[i].carve,
+    ),
+  };
+  return grids;
+}
+
 function ridgeAt(x: number, out: { z: number; h: number }): void {
   const r = RIDGE;
   let i = 0;
@@ -500,14 +692,19 @@ function landform(x: number, z: number): number {
   const zc = ridgeScratch.z;
   const s = shelf(x, z);
   const north = smooth(zc + 300, zc - 300, z);
-  let h = s + (basinFloor(x, z, s) - s) * north;
+  // Speed (2026-10-20), here and below: work is skipped only where its result
+  // could not change h. South of the ridge north is 0, and s plus a product
+  // with 0 is s (unless s is 0, when the sign of the zero could change).
+  let h = north === 0 && s !== 0 ? s : s + (basinFloor(x, z, s) - s) * north;
 
   // The ridge: a crest line with peaks along it, steeper on the gorge side.
   const dz = z - zc;
   const sig = dz > 0 ? RIDGE_SIGMA_S : RIDGE_SIGMA_N;
   const crest = ridgeScratch.h * (0.86 + 0.28 * fbm(x / 430, 3.1));
-  const g = Math.exp(-(dz * dz) / (sig * sig)) * (0.9 + 0.2 * noise(x / 160, z / 160));
-  if (crest > h) h += (crest - h) * g;
+  if (crest > h) {
+    const g = Math.exp(-(dz * dz) / (sig * sig)) * (0.9 + 0.2 * noise(x / 160, z / 160));
+    h += (crest - h) * g;
+  }
 
   for (let i = 0; i < PEAKS.length; i++) {
     const p = PEAKS[i];
@@ -520,8 +717,13 @@ function landform(x: number, z: number): number {
   }
   h = climbShelf(x, z, h);
   // Craggy detail that grows with height, softened on the meadow and forest floor.
-  const soft = softness(x, z);
-  h += (fbm(x / 140, z / 140) - 0.5) * 60 * smooth(250, 1100, h) * (1 - (1 - SOFT_NOISE) * soft);
+  // Below 250 the growth is 0: the detail is a zero, which leaves h as it is
+  // unless h is 0 (or NaN, when the growth is NaN and the sum runs).
+  const grow = smooth(250, 1100, h);
+  if (grow !== 0 || h === 0) {
+    const soft = softness(x, z);
+    h += (fbm(x / 140, z / 140) - 0.5) * 60 * grow * (1 - (1 - SOFT_NOISE) * soft);
+  }
   return h;
 }
 
@@ -529,8 +731,12 @@ function landform(x: number, z: number): number {
 function softness(x: number, z: number): number {
   const M = WORLD.meadow;
   const F = WORLD.forest;
-  const m = 1 - smooth(M.r * 0.75, M.r, Math.hypot(x - M.x, z - M.z));
-  const f = 1 - smooth(F.r * 0.8, F.r, Math.hypot(x - F.x, z - F.z));
+  const mx = x - M.x;
+  const mz = z - M.z;
+  const fx = x - F.x;
+  const fz = z - F.z;
+  const m = 1 - smooth(M.r * 0.75, M.r, near(mx, mz, M.r) ? Math.hypot(mx, mz) : Infinity);
+  const f = 1 - smooth(F.r * 0.8, F.r, near(fx, fz, F.r) ? Math.hypot(fx, fz) : Infinity);
   return m > f ? m : f;
 }
 
@@ -545,7 +751,7 @@ function climbShelf(x: number, z: number, h: number): number {
   const nz = C.topZ - z;
   if (nz < -80) return h;
   const back = nz > CLIMB_SHELF_DEPTH ? nz - CLIMB_SHELF_DEPTH : 0;
-  const d = Math.hypot(ex, back);
+  const d = near(ex, back, CLIMB_SHELF_BLEND) ? Math.hypot(ex, back) : Infinity;
   const w = 1 - smooth(0, CLIMB_SHELF_BLEND, d);
   if (w <= 0 || h >= C.rimY) return h;
   return h + (C.rimY - h) * w;
@@ -568,7 +774,8 @@ function northBands(e: number): number {
 
 /** The gorge, the river channel in its floor, and the stream feeding the falls. */
 function carves(x: number, z: number, h: number): number {
-  nearest(GORGE, 1, x, z);
+  const lines = segGrids();
+  nearestOn(lines.gorge, x, z);
   const a = GORGE[qI];
   const b = GORGE[qI + 1];
   const u = qU;
@@ -598,7 +805,7 @@ function carves(x: number, z: number, h: number): number {
     }
   }
 
-  nearest(RIVER, 2, x, z);
+  nearestOn(lines.river, x, z);
   // Nothing before the river's first point (the pool): its round end cap
   // would otherwise cut a notch into the falls cliff.
   if (!(qI === 0 && qU === 0)) {
@@ -609,7 +816,7 @@ function carves(x: number, z: number, h: number): number {
     if (c < h) h = c;
   }
 
-  nearest(STREAM, 2, x, z);
+  nearestOn(lines.stream, x, z);
   {
     const sa = STREAM[qI];
     const sb = STREAM[qI + 1];
@@ -619,7 +826,7 @@ function carves(x: number, z: number, h: number): number {
     if (c < h) h = c;
   }
 
-  nearest(BROOK, 2, x, z);
+  nearestOn(lines.brook, x, z);
   if (qD < 120) {
     const ba = BROOK[qI];
     const bb = BROOK[qI + 1];
@@ -634,20 +841,26 @@ function carves(x: number, z: number, h: number): number {
  *  the notch through the ridge. The fill only acts beside a segment (not
  *  past its ends), so the bench never fills in the cliff beside the falls. */
 function bench(x: number, z: number, h: number): number {
+  // The carve segments from the grid (segGrid): the same pick as a scan of
+  // every one, and a cell wholly past the reach returns h as the scan would.
+  const g = segGrids().bench;
+  const k = segCell(x, z);
+  if (k >= 0 && g.low[k] >= BENCH_REACH1) return h;
+  const list = k < 0 ? g.all : g.ids;
+  const from = k < 0 ? 0 : g.start[k];
+  const to = k < 0 ? list.length : g.start[k + 1];
   let best = Infinity;
   let py = 0;
   let inside = false;
-  for (let i = 0; i < PATH.length - 1; i++) {
+  for (let m = from; m < to; m++) {
+    const i = list[m];
     const A = PATH[i];
-    if (!A.carve) continue;
     const B = PATH[i + 1];
-    const dx = B.x - A.x;
-    const dz = B.z - A.z;
-    const px = x - A.x;
-    const pz = z - A.z;
-    // Cheap reject: farther than the reach from both ends and the segment.
-    const l2 = dx * dx + dz * dz;
-    const ur = (px * dx + pz * dz) / l2;
+    const dx = g.dx[i];
+    const dz = g.dz[i];
+    const px = x - g.ax[i];
+    const pz = z - g.az[i];
+    const ur = (px * dx + pz * dz) / g.l2[i];
     const u = clamp01(ur);
     const ex = px - dx * u;
     const ez = pz - dz * u;
@@ -738,7 +951,9 @@ function padsAndWater(x: number, z: number, h: number): number {
   // v6: the lookout's knoll (a dome under PLACES a2; its pad flattens the top).
   {
     const A2 = PLACES[1].pos;
-    const dk = Math.hypot(x - A2.x, z - A2.z);
+    const kx = x - A2.x;
+    const kz = z - A2.z;
+    const dk = near(kx, kz, KNOLL.r) ? Math.hypot(kx, kz) : Infinity;
     if (dk < KNOLL.r) {
       const k = dk / KNOLL.r;
       h += KNOLL.h * (1 - k * k) * (1 - k * k);
@@ -748,14 +963,16 @@ function padsAndWater(x: number, z: number, h: number): number {
   h = upperFalls(x, z, h);
   for (let i = 0; i < PADS.length; i++) {
     const p = PADS[i];
-    const d = Math.hypot(x - p[0], z - p[2]);
+    const px = x - p[0];
+    const pz = z - p[2];
+    const d = near(px, pz, p[3] + p[4]) ? Math.hypot(px, pz) : Infinity;
     if (d < p[3] + p[4]) h += (p[1] - h) * (1 - smooth(p[3], p[3] + p[4], d));
   }
   // The Mirror Lake (item 15c): the bed inside the shore, the bank outside it.
   const L = WORLD.lake;
   const dxl = x - L.x;
   const dzl = z - L.z;
-  const dl = Math.hypot(dxl, dzl);
+  const dl = near(dxl, dzl, L.r + LAKE_REACH) ? Math.hypot(dxl, dzl) : Infinity;
   if (dl < L.r + LAKE_REACH) {
     const R = lakeShoreR(Math.atan2(dzl, dxl));
     if (dl < R) {
@@ -775,7 +992,9 @@ function padsAndWater(x: number, z: number, h: number): number {
     }
   }
   const Pl = WORLD.pool;
-  const dp = Math.hypot(x - Pl.x, z - Pl.z);
+  const qx = x - Pl.x;
+  const qz = z - Pl.z;
+  const dp = near(qx, qz, Pl.r) ? Math.hypot(qx, qz) : Infinity;
   if (dp < Pl.r) {
     // The bowl, scaled to the shore (poolShoreR), and the ground's rise out of
     // it to POOL_LAND over the 16 across the shore, which crosses the water
@@ -792,7 +1011,8 @@ function padsAndWater(x: number, z: number, h: number): number {
 
 // ── Public ───────────────────────────────────────────────────────────────────
 
-/** Ground height at (x, z). Deterministic; no allocation. Outside WORLD it
+/** Ground height at (x, z). Deterministic; no allocation after the first call,
+ *  which makes the segment grids and the hash table (filled as it is read). Outside WORLD it
  *  keeps going (sea to the south and east, land elsewhere). */
 export function terrainHeight(x: number, z: number): number {
   let h = landform(x, z);

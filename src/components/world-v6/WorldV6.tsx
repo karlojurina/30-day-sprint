@@ -190,9 +190,10 @@ const HOOKS = process.env.NODE_ENV !== "production";
  * browser bar or devtools opens. Its twins in the stylesheets
  * (world.module.css, world-ui.module.css) and the landing poster's <source>
  * say the same, so client-tests/phone-view.test.mjs and
- * phone-view-laptops.test.mjs check them together.
+ * phone-view-laptops.test.mjs check them together. WorldPreload.tsx reads it
+ * too, so a screen that gets the list never downloads the 3D map's code.
  */
-const NARROW_QUERY = "(width < 760px), (height < 500px) and (pointer: coarse)";
+export const NARROW_QUERY = "(width < 760px), (height < 500px) and (pointer: coarse)";
 /** Final pass C: the place whose click-in goes through the telescope (scene.ts TEL_PARK_PLACE, a7). */
 const TEL_K = SKY_MARKS.findIndex((m) => m.id === "a7");
 const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";

@@ -19,6 +19,11 @@ import {
 // batched upserts. Default 60s isn't enough on first run with
 // thousands of members. 300s is Vercel Pro's max for fluid functions.
 export const maxDuration = 300;
+// Pinned to iad1, next to Whop, by this file's entry under `functions` in
+// vercel.json, while the project's functions run in dub1 next to the
+// database: it makes far more Whop calls in a row than database trips.
+// Vercel takes a Node route's region only from vercel.json, and a moved file
+// loses the pin. The counts: CONTEXT.md, "Where the functions run".
 
 const ROUTE_NAME = "sync-whop";
 

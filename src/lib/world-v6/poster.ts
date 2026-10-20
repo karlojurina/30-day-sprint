@@ -198,6 +198,19 @@ export function rememberPoster(verdict: { kind: PosterKind; reason: string } | n
 }
 
 /**
+ * Whether any verdict is stored, valid or not, read without touching it
+ * (scene.ts preloadModules: the scene's own recall decides and drops an
+ * expired one, as before). Never throws.
+ */
+export function posterVerdictStored(): boolean {
+  try {
+    return typeof localStorage !== "undefined" && localStorage.getItem(STORE_KEY) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * What a previous visit remembered. `verdict` is null when there is none or it
  * no longer holds; `expired` says why it was dropped (older than the TTL, from
  * the future, or written before verdicts carried a date), and the entry is

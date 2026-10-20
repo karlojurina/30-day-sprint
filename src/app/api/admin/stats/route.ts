@@ -53,6 +53,11 @@ export const dynamic = "force-dynamic";
 // 300s ceiling means a wedged upstream holds a browser tab for five minutes
 // and bills fluid compute for the whole wait.
 export const maxDuration = 30;
+// Pinned to iad1, next to Whop, by this file's entry under `functions` in
+// vercel.json, while the project's functions run in dub1 next to the
+// database: 2 or 3 rounds of Whop calls in a row against 2 database trips.
+// Vercel takes a Node route's region only from vercel.json, and a moved file
+// loses the pin. The counts: CONTEXT.md, "Where the functions run".
 
 /** Hard cap on tiles per request — the browser, not the server, is the limit. */
 const MAX_METRICS = 12;

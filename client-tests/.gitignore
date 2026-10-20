@@ -2,3 +2,8 @@ client-tests/_gen/watch-heartbeat.ts
 client-tests/_gen/watch-rules.ts
 client-tests/_gen/catalog.ts
 client-tests/_gen/access.ts
+# Paths here are relative to client-tests/. The terrain copies build.mjs and
+# terrain-identical.test.mjs write on every run:
+_gen/world-layout.ts
+_gen/terrain.ts
+_gen/terrain-70c934a.ts

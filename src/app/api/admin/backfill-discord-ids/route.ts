@@ -15,6 +15,11 @@ import { fetchWhopDiscordId } from "@/lib/whop";
  *   curl "https://YOUR-DOMAIN/api/admin/backfill-discord-ids" \
  *     -H "Authorization: Bearer $CRON_SECRET"
  */
+// Pinned to iad1, next to Whop, by this file's entry under `functions` in
+// vercel.json, while the project's functions run in dub1 next to the
+// database: each student costs one Whop call and at most one database write.
+// Vercel takes a Node route's region only from vercel.json, and a moved file
+// loses the pin. The counts: CONTEXT.md, "Where the functions run".
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {

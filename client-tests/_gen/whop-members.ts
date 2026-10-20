@@ -319,6 +319,17 @@ function grantsAccess(row: WhopMembershipRow): boolean {
   return s === "active" || s === "past_due";
 }
 
+const ETFB_OR_APEX_PRODUCT_IDS: ReadonlySet<string> = new Set([
+  "prod_bGNf1u02RruKC",
+  "prod_vCHZUO8dU4ts2",
+]);
+
+export function isEtfbOrApexProduct(
+  productId: string | null | undefined,
+): boolean {
+  return productId != null && ETFB_OR_APEX_PRODUCT_IDS.has(productId);
+}
+
 export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
   const raw = process.env.WHOP_PRODUCT_ID ?? "";
   const productIds = raw
@@ -328,26 +339,32 @@ export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
   if (productIds.length === 0) {
     throw new Error("WHOP_PRODUCT_ID not set");
   }
-  type Acc = { latest: WhopMembershipRow };
+  type Acc = { latest: WhopMembershipRow; course: boolean };
   const byUser = new Map<string, Acc>();
   for (const pid of productIds) {
+    const course = !isEtfbOrApexProduct(pid);
     for await (const row of listMembershipsForProduct(pid)) {
       if (!row.user) continue;
       const createdIso = toIso(row.created_at);
       const existing = byUser.get(row.user);
       if (!existing) {
-        byUser.set(row.user, { latest: row });
+        byUser.set(row.user, { latest: row, course });
         continue;
       }
       const curGrants = grantsAccess(existing.latest);
       const rowGrants = grantsAccess(row);
+      let wins: boolean;
       if (rowGrants !== curGrants) {
-        if (rowGrants) existing.latest = row;
+        wins = rowGrants;
+      } else if (rowGrants && course !== existing.course) {
+        wins = course;
       } else {
         const latestIso = toIso(existing.latest.created_at);
-        if (createdIso && latestIso && createdIso > latestIso) {
-          existing.latest = row;
-        }
+        wins = Boolean(createdIso && latestIso && createdIso > latestIso);
+      }
+      if (wins) {
+        existing.latest = row;
+        existing.course = course;
       }
     }
   }

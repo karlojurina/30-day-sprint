@@ -66,6 +66,9 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
       csm_exempt: () => false, whop_plan_id: none,
       // Read by the Whop sync's pre-read (first-payment.test.mjs runs the sync).
       discord_user_id: none, discord_username: none, canceled_at: none,
+      // Read by the webhook before an ETfB or Apex membership writes a row
+      // (whop-product-setting.test.mjs).
+      whop_membership_id: none,
     },
     unique: [["whop_user_id"]],
   },

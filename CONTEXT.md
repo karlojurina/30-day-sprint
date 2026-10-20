@@ -810,18 +810,40 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
   it was set. The login check, the self-heal, the 2-hour sync and this
   webhook read the one list, so a membership of any of the three gets
   in and one of any other product is turned away
-  (`whop-product-setting` client test); "the course" below means the
-  products the list names. What the wider list brings: the sync makes
-  a row for every Apex and ETfB member, and on plans outside
-  `PAYING_WHOP_PLAN_IDS` they stay out of the admin surfaces and the
-  CSM crons and get no first payment from the sync (an Apex seat is a
-  free team link, so with no payment of its own its `first_paid_at`
-  stays empty and the 30% checkpoint reads "Ask the team"); a course
-  member who also holds a newer Apex seat or ETfB membership has the
-  row pointed at it and its plan, by the sync (the newest membership
-  that grants access wins) or by that product's webhook event, which
-  takes them off the paying plan. Another product's event answers 200
-  and writes nothing (its membership ending asks Whop nothing either),
+  (`whop-product-setting` client test). A fifth reader,
+  `fetchWhopMembershipJoinDate` in `src/lib/whop.ts`, gives a new
+  student's `joined_at`: with more than one id it reads the user's
+  first 10 memberships of any product and takes the earliest on a
+  listed product, or the earliest of all 10 when none is listed. "The
+  course" below means the products the list names. What the wider
+  list brings: the sync makes a row for every Apex and ETfB member, and
+  on plans outside `PAYING_WHOP_PLAN_IDS` they stay out of the admin
+  surfaces and the CSM crons and get no first payment from the sync
+  (an Apex seat is a free team link, so with no payment of its own its
+  `first_paid_at` stays empty and the 30% checkpoint reads "Ask the
+  team"). A course member who also holds an Apex seat or an ETfB
+  membership stays on the course product's membership and its plan,
+  and so in the CSM crons' pool (2026-10-20, `isEtfbOrApexProduct` in
+  `src/lib/whop-members.ts`; the course product is any listed product
+  but ETfB and Apex): among memberships that grant access the sync
+  takes the course product's over an ETfB or Apex one, the newest
+  within the same kind, and an ETfB or Apex activation or payment
+  leaves a row that is already active or past_due on another
+  membership as it is (the next sync points it at the one that wins).
+  Such an event still writes a row for a user with none, a row that is
+  not active or past_due, and a row already on its membership; a
+  failed read of the row answers 500. Not covered yet: the lookup
+  `fetchActiveMembershipForUser`, which the login's self-heal, a
+  membership's ending and an event with no product use, still takes
+  the first membership Whop lists that grants access, so a row it
+  re-points can land on an ETfB or Apex membership beside a valid
+  course one until the next sync. Without this rule the sync takes
+  the newest membership that grants access and the webhook writes every
+  such event, so a newer Apex seat or ETfB membership would take a
+  paying student off the paying plan, and the CSM cron would drop them
+  from its pool and dismiss their open tasks. Another product's event
+  answers 200 and writes nothing (its membership ending asks Whop
+  nothing either),
   with one exception: a membership ending that the student's row still
   points at (`whop_membership_id`) is the row the old webhook made for
   it, which the sync never closes (it walks only the course's
@@ -1616,7 +1638,7 @@ the same rows, at that day's clock and with `now()` set to 25 October.
 
 | Job | Cadence | What it does |
 |-----|---------|-------------|
-| `sync-whop` | every 2h at :00 (v85.5, was daily) | Syncs Whop memberships (`runWhopCommunitySync`); it pulls no lessons (this row said it pulled watch history into `student_lesson_completions` until 2026-10-17; the code has no lesson step). Also stamps `students.cancel_scheduled_at` from Whop's `cancel_at_period_end` field (v75.46). 2h cadence exists FOR the cancel flag: cancel click → save task within ~2h15m instead of up to 24h. **v85.6:** a user holding several memberships is deduped by ACCESS first, `created_at` recency only as a tiebreak within the same access class (`grantsAccess` in `src/lib/whop-members.ts`). Was recency-only, which let a dead duplicate outrank a live membership and hard-block a paid student on every run. |
+| `sync-whop` | every 2h at :00 (v85.5, was daily) | Syncs Whop memberships (`runWhopCommunitySync`); it pulls no lessons (this row said it pulled watch history into `student_lesson_completions` until 2026-10-17; the code has no lesson step). Also stamps `students.cancel_scheduled_at` from Whop's `cancel_at_period_end` field (v75.46). 2h cadence exists FOR the cancel flag: cancel click → save task within ~2h15m instead of up to 24h. **v85.6:** a user holding several memberships is deduped by ACCESS first, `created_at` recency only as a tiebreak within the same access class (`grantsAccess` in `src/lib/whop-members.ts`). Was recency-only, which let a dead duplicate outrank a live membership and hard-block a paid student on every run. **2026-10-20:** between memberships that grant access, the course product's wins over an ETfB or Apex one before recency (`isEtfbOrApexProduct`), so a paying student who takes a newer Apex seat stays on the paying plan. |
 | `snapshot-progress` | daily 00:30 UTC (deliberately NOT 2h) | Writes yesterday+today rows to `daily_progress_snapshots` + the daily Canceling count to `canceling_snapshots` (v76). Daily-grain by design — one row per day. Reads canonical `student_progress_counts` view (v75.28) so dashboard live values match snapshot trend values. |
 | `check-engagement` | every 2h at :10 (v85.5) | Detect churn signals → `disengagement_alerts`. With `engagement_alerts_enabled` on, posts the new ones to the team's Discord, since 2026-10-20 one message per embed of at most 4096 characters (one embed for every alert was refused from about 22 on); a post that fails marks the run failed in `cron_runs` with the reason. The two toggles are read before the insert, and a failed read stops the run with nothing written (2026-10-20). An open alert is never posted again: one whose post did not go out stays unposted, and nothing closes an open alert, so a student is flagged once per type (open, the choice is Lovro's). |
 | `check-csm-tasks` | every 2h at :15 (v85.5) | Evaluate `templates.trigger_config` → `tasks`. Includes auto-dismiss for orphan tasks (v75.19). v85.1: 3c also dismisses any non-canceling-aware open task for a canceling student ("save-the-sale flow owns this student"). |

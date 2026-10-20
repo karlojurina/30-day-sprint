@@ -459,12 +459,44 @@ function grantsAccess(row: WhopMembershipRow): boolean {
   return s === "active" || s === "past_due";
 }
 
+/**
+ * ETfB for brands and Apex team seats, the two products production's
+ * WHOP_PRODUCT_ID names beside the course since 2026-10-20 (the owner's call
+ * that their members keep the app). The same ids as ETFB_PRODUCT_ID and
+ * TEAM_SEAT_PRODUCT_ID in src/lib/etfb.ts, written out here because etfb.ts
+ * and this module import nothing from each other (etfb.ts says why);
+ * whop-product-setting.test.mjs checks that the two agree.
+ */
+const ETFB_OR_APEX_PRODUCT_IDS: ReadonlySet<string> = new Set([
+  "prod_bGNf1u02RruKC",
+  "prod_vCHZUO8dU4ts2",
+]);
+
+/**
+ * Is this product ETfB for brands or Apex team seats? A membership of any
+ * other product WHOP_PRODUCT_ID names is the course's. When a user holds more
+ * than one membership that grants access, the course's wins over an ETfB or
+ * Apex one: in the sync's dedupe (fetchAllMemberships, below) and in the
+ * webhook's activations and payments (src/app/api/webhooks/whop/route.ts). So
+ * a course student who also holds an Apex seat or an ETfB membership keeps the
+ * course membership and its plan, and stays on PAYING_WHOP_PLAN_IDS, the pool
+ * the CSM crons read.
+ */
+export function isEtfbOrApexProduct(
+  productId: string | null | undefined,
+): boolean {
+  return productId != null && ETFB_OR_APEX_PRODUCT_IDS.has(productId);
+}
+
 /** Convenience: collect every membership across every product id in
  *  WHOP_PRODUCT_ID. Per-user dedupe: keeps the membership that best
- *  represents current access (for current state). It computes no
- *  first-paid date: a membership's created_at is when access started,
- *  paid or not, so first_paid_at comes from the student's first real
- *  payment (src/lib/first-payment.ts, the first-paid fix, 2026-10-20). */
+ *  represents current access (for current state): one that grants access
+ *  over one that does not; among several that grant access, the course's
+ *  over an ETfB or Apex one (isEtfbOrApexProduct); then the newest
+ *  created_at. It computes no first-paid date: a membership's created_at
+ *  is when access started, paid or not, so first_paid_at comes from the
+ *  student's first real payment (src/lib/first-payment.ts, the first-paid
+ *  fix, 2026-10-20). */
 export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
   const raw = process.env.WHOP_PRODUCT_ID ?? "";
   const productIds = raw
@@ -474,15 +506,19 @@ export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
   if (productIds.length === 0) {
     throw new Error("WHOP_PRODUCT_ID not set");
   }
-  type Acc = { latest: WhopMembershipRow };
+  type Acc = { latest: WhopMembershipRow; course: boolean };
   const byUser = new Map<string, Acc>();
   for (const pid of productIds) {
+    // A row is the course's, or ETfB's or Apex's, by the product it was
+    // listed under: listMembershipsForProduct refuses a page holding any
+    // other product.
+    const course = !isEtfbOrApexProduct(pid);
     for await (const row of listMembershipsForProduct(pid)) {
       if (!row.user) continue;
       const createdIso = toIso(row.created_at);
       const existing = byUser.get(row.user);
       if (!existing) {
-        byUser.set(row.user, { latest: row });
+        byUser.set(row.user, { latest: row, course });
         continue;
       }
       // Track the row that represents "current state."
@@ -501,15 +537,27 @@ export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
       // Access wins over recency. Recency only breaks ties WITHIN the
       // same access class, which preserves the old behavior for the
       // normal single-membership case and for genuinely churned users.
+      //
+      // 2026-10-20: and between two that grant access, the course's wins
+      // over an ETfB or Apex one, whichever is newer. Newest-wins would
+      // point a paying course student who takes a newer Apex seat at the
+      // seat and its free plan, outside PAYING_WHOP_PLAN_IDS: the CSM cron
+      // would drop them from its pool and dismiss their open tasks.
+      // Recency still decides within the same kind.
       const curGrants = grantsAccess(existing.latest);
       const rowGrants = grantsAccess(row);
+      let wins: boolean;
       if (rowGrants !== curGrants) {
-        if (rowGrants) existing.latest = row;
+        wins = rowGrants;
+      } else if (rowGrants && course !== existing.course) {
+        wins = course;
       } else {
         const latestIso = toIso(existing.latest.created_at);
-        if (createdIso && latestIso && createdIso > latestIso) {
-          existing.latest = row;
-        }
+        wins = Boolean(createdIso && latestIso && createdIso > latestIso);
+      }
+      if (wins) {
+        existing.latest = row;
+        existing.course = course;
       }
     }
   }

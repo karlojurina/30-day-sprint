@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import {
   fetchActiveMembershipForUser,
+  isEtfbOrApexProduct,
   mapStatus,
 } from "@/lib/whop-members";
 import type {
@@ -114,16 +115,18 @@ function eventProductId(data: unknown): string | null {
  * product: nothing (the caller answers 200). No product in the payload: only
  * a course membership Whop lists for this user, with its own id, plan and
  * status, so a real course member is never left out and nobody else gets in.
+ * `product` is the product of the membership written (null when Whop's row
+ * names none), for etfbOrApexMayWrite.
  */
 async function courseAccess(
   data: WhopMembership,
   eventName: string,
-): Promise<{ membershipId: string; planId: string | null; status: string } | null> {
+): Promise<{ membershipId: string; planId: string | null; status: string; product: string | null } | null> {
   const courseIds = courseProductIds();
   const product = eventProductId(data);
   if (product) {
     if (courseIds.includes(product)) {
-      return { membershipId: data.id, planId: data.plan_id ?? null, status: "active" };
+      return { membershipId: data.id, planId: data.plan_id ?? null, status: "active", product };
     }
     const message =
       `[whop-webhook] ${eventName} for product ${product}, not the course ` +
@@ -141,7 +144,67 @@ async function courseAccess(
     );
     return null;
   }
-  return { membershipId: row.id, planId: row.plan ?? null, status: mapStatus(row) };
+  return { membershipId: row.id, planId: row.plan ?? null, status: mapStatus(row), product: row.product ?? null };
+}
+
+/**
+ * The memberships an event names: its own id (a membership's, or a payment's
+ * `pay_...`) and a payment's membership (`membership.id`, `membership` as a
+ * bare id, or `membership_id`).
+ */
+function eventMembershipIds(data: unknown): string[] {
+  const d = (data ?? {}) as { id?: unknown; membership?: unknown; membership_id?: unknown };
+  const ids: unknown[] = [d.id, d.membership_id];
+  if (d.membership && typeof d.membership === "object") {
+    ids.push((d.membership as { id?: unknown }).id);
+  } else {
+    ids.push(d.membership);
+  }
+  return ids.filter((id): id is string => typeof id === "string" && id !== "");
+}
+
+/**
+ * May an activation or a payment of an ETfB or Apex membership write the
+ * student's row? The course wins (2026-10-20), as in the sync's dedupe
+ * (fetchAllMemberships): a row that is already active or past_due on another
+ * membership is left as it is, so a course student who also holds an Apex
+ * seat or an ETfB membership keeps the course membership and its plan, and
+ * stays in the CSM crons' pool (PAYING_WHOP_PLAN_IDS). The sync, every 2
+ * hours, points any such row at the membership that wins. It still writes a
+ * row for a user with none, a row that is not active or past_due, and a row
+ * that already points at the event's membership or at `writes`, the one the
+ * write would point it at. Null when the row could not be read: the caller
+ * answers 500, so Whop sends the event again.
+ */
+async function etfbOrApexMayWrite(
+  supabase: ReturnType<typeof createServiceClient>,
+  data: WhopMembership,
+  writes: string,
+  eventName: string,
+): Promise<boolean | null> {
+  const { data: row, error } = await supabase
+    .from("students")
+    .select("whop_membership_id, membership_status")
+    .eq("whop_user_id", data.user.id)
+    .maybeSingle();
+  if (error) {
+    console.error("Webhook: student read failed:", error);
+    return null;
+  }
+  if (!row) return true;
+  if (row.membership_status !== "active" && row.membership_status !== "past_due") {
+    return true;
+  }
+  const named = [...eventMembershipIds(data), writes];
+  if (row.whop_membership_id && named.includes(row.whop_membership_id)) {
+    return true;
+  }
+  console.info(
+    `[whop-webhook] ${eventName} for an ETfB or Apex membership (${writes}): the row is already ` +
+      `${row.membership_status} on ${row.whop_membership_id ?? "no membership id"}, left as it is ` +
+      `for the sync; nothing written`,
+  );
+  return false;
 }
 
 export async function POST(request: NextRequest) {
@@ -203,6 +266,23 @@ export async function POST(request: NextRequest) {
       // login-1: another product's membership writes nothing (courseAccess).
       const access = await courseAccess(membership, eventName);
       if (!access) break;
+      // An ETfB or Apex membership leaves a row on another membership as
+      // it is: the course wins (etfbOrApexMayWrite).
+      if (isEtfbOrApexProduct(access.product)) {
+        const mayWrite = await etfbOrApexMayWrite(
+          supabase,
+          membership,
+          access.membershipId,
+          eventName,
+        );
+        if (mayWrite === null) {
+          return NextResponse.json(
+            { error: "Database error" },
+            { status: 500 },
+          );
+        }
+        if (!mayWrite) break;
+      }
       // first_paid_at is never sent (the first-paid fix, 2026-10-20): a
       // new row starts without one, and the login or the 2-hour sync
       // fills it from the student's first real payment
@@ -402,6 +482,23 @@ export async function POST(request: NextRequest) {
       // the next sync, and someone with no course membership got in.
       const paymentAccess = await courseAccess(membership, eventName);
       if (!paymentAccess) break;
+      // As for membership.activated above: an ETfB or Apex payment leaves a
+      // row on another membership as it is.
+      if (isEtfbOrApexProduct(paymentAccess.product)) {
+        const mayWrite = await etfbOrApexMayWrite(
+          supabase,
+          membership,
+          paymentAccess.membershipId,
+          eventName,
+        );
+        if (mayWrite === null) {
+          return NextResponse.json(
+            { error: "Database error" },
+            { status: 500 },
+          );
+        }
+        if (!mayWrite) break;
+      }
       // first_paid_at is never sent, as for membership.activated above:
       // the login or the sync fills an empty one from the first real
       // payment, and this fires on every renewal.

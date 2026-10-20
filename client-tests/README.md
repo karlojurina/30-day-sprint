@@ -24,7 +24,11 @@ against a retyped copy it would be testing a fiction.
 
 The other modules under test are copied the same way (`build.mjs` lists them,
 with what each one needed rewritten). A copy that still holds an `@/` import
-stops the build.
+stops the build. So does a copy that leaves out comment lines
+(`dropComments`, `dropLineComments`) and then makes other JavaScript than its
+source with the imports rewritten, both run through TypeScript's
+`transpileModule` with comments removed (2026-10-20): a line of code that
+starts with `//` or `*` stops the build instead of going missing.
 
 Server code is copied too (since 2026-10-16): the Whop backfill and the visit
 route that runs it, the Whop webhook, `mark-action-shipped`, `skip-lesson`,
@@ -237,12 +241,13 @@ backfill's time limits, the cursor) each failed this suite or
 `first-payment.test.mjs`.
 
 `whop-product-setting.test.mjs` (login-1 merged onto main, 2026-10-20) runs
-production's `WHOP_PRODUCT_ID` exactly as Lovro set it that day so that Apex
-and ETfB members keep the app: three product ids (the course, ETfB for brands,
-Apex team seats), no plan id. The four readers of it run on that value: the
-login's `GET`, from a second copy of the callback
-(`whop-callback-route-real-whop.ts`) whose login check
-(`checkActiveMembershipDiagnostic`, `whop.ts`) and self-heal
+production's `WHOP_PRODUCT_ID` exactly as the owner set it that day so that
+Apex and ETfB members keep the app: three product ids (the course, ETfB for
+brands, Apex team seats), no plan id. Four readers of it run on that value (a
+fifth, `fetchWhopMembershipJoinDate`, a new student's `joined_at`, runs inside
+the login's copy, and no check reads what it gives): the login's `GET`, from a
+second copy of the callback (`whop-callback-route-real-whop.ts`) whose login
+check (`checkActiveMembershipDiagnostic`, `whop.ts`) and self-heal
 (`fetchActiveMembershipForUser`, `whop-members.ts`) are the real copies, once
 with the company key's reads failing (the login check decides alone) and once
 with the student's token getting the 404 legacy customers get (the self-heal
@@ -254,11 +259,29 @@ Whop about the three products only. It also pins what the setting brings with
 it: a member of another product whose row the old webhook wrote active still
 gets in (the login asks the database first); the Apex seat and the ETfB member,
 on plans outside `PAYING_WHOP_PLAN_IDS`, get no first payment from the sync;
-and a course member who also holds a newer Apex seat has the sync point the
-row at the seat and its plan. Ten breaks (each reader taking any product or
-only the first id, the sync's dedupe turned around, the webhook or the sync
-writing `first_paid_at` again) each failed it, and the course alone in
-`WHOP_PRODUCT_ID` fails 19 of its 32 checks.
+and the course wins (same day): a course member who also holds a newer Apex
+seat or ETfB membership keeps the course membership and its plan. In the sync,
+with the course listed first and then last: the course's membership over a
+newer ETfB one, the newer of two Apex seats and of two course memberships, and
+a valid seat over a canceled course membership. In the webhook: an Apex or
+ETfB activation, an ETfB payment, and an event with no product whose lookup
+finds the seat leave a course student's row (active or past_due) as it is,
+with Whop not asked when the payload names the product; a failed read of the
+row answers 500; a lapsed row, a row already on the event's membership (a
+payment's `membership.id` too) and a user with no row are still written, and
+the course's own activation still points a row on a seat at the course.
+`isEtfbOrApexProduct`'s two ids are checked against `etfb.ts`'s. For it
+`stub-server.ts` gained `students.whop_membership_id`, which the webhook reads
+before an ETfB or Apex event writes. Ten breaks (each reader taking any product
+or only the first id, the sync's dedupe turned around, the webhook or the sync
+writing `first_paid_at` again) each failed it at the merge. 13 breaks of the
+course rule each fail it: in the sync, the rule dropped, decided before access,
+and recency turned around within a kind; in `isEtfbOrApexProduct`, an id
+mistyped and a missing product taken for ETfB or Apex; in the webhook, the
+check dropped on an activation or on a payment, keyed on the payload's product,
+past_due not counted, a row on the event's own membership or a user with no
+row left unwritten, a payment's membership not read, and a failed read writing
+anyway. The course alone in `WHOP_PRODUCT_ID` fails 30 of its 52 checks.
 
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the

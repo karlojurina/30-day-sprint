@@ -7,9 +7,9 @@
 --
 -- WHY. Until the fix of login-1 the Whop webhook wrote 'active' for a
 -- membership of any product of the company, and the login lets an 'active'
--- or 'past_due' row in without asking Whop. So someone who holds only
--- another product (an Apex seat, an ETfB membership, a one-time product)
--- could have a row that opens the whole course. This counts those rows.
+-- or 'past_due' row in without asking Whop. So someone who holds only a
+-- product WHOP_PRODUCT_ID does not name (a one-time product, say) could
+-- have a row that opens the whole course. This counts those rows.
 --
 -- HOW IT TELLS THEM APART. The Whop sync (sync-whop, every 2 hours)
 -- rewrites the row of everyone Whop lists under the course products in

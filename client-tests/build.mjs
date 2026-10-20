@@ -3,6 +3,13 @@
 // copied byte for byte apart from its import lines.
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
+
+/** The JavaScript TypeScript makes of a file, every comment left out. */
+const codeOf = (text, fileName) => ts.transpileModule(text, {
+  fileName,
+  compilerOptions: { removeComments: true, target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
+}).outputText
 
 function gen(srcRel, outRel, rewrites = [], { dropLineComments = false, dropComments = false } = {}) {
   const src = fileURLToPath(new URL(srcRel, import.meta.url))
@@ -10,12 +17,20 @@ function gen(srcRel, outRel, rewrites = [], { dropLineComments = false, dropComm
   let s = fs.readFileSync(src, 'utf8')
   s = s.replace('"use client";\n', '')
   for (const [from, to] of rewrites) s = s.split(from).join(to)
+  const withComments = s
   // Lines that are only a `//` comment, left out of the copy (the code is untouched).
   if (dropLineComments) s = s.split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n')
   // dropComments also leaves out the lines of /* */ comments (each must start its own line).
   if (dropComments) s = s.split('\n').filter((l) => !/^(\/\/|\/\*|\*)/.test(l.trimStart())).join('\n')
   if (s.includes('@/')) throw new Error(`an unrewritten @/ import remains in ${srcRel}`)
   fs.writeFileSync(out, s)
+  // A line of code that starts with // or * (a line inside a template string,
+  // a `* b` carried over from the line above) would be left out with the
+  // comments. So the copy as written and the source it was cut from, its
+  // imports already rewritten, must make the same JavaScript.
+  if ((dropLineComments || dropComments) && codeOf(fs.readFileSync(out, 'utf8'), out) !== codeOf(withComments, out)) {
+    throw new Error(`${outRel}: leaving out the comment lines of ${srcRel} changed its code (a line of code starts with // or *)`)
+  }
   console.log(`generated ${outRel} from the real source`)
 }
 

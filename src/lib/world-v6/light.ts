@@ -55,7 +55,17 @@ import { LAKE_PAD, lakeShoreR, terrainHeight } from "./terrain";
  * railU value at each of the eight stops, in order.
  *
  * Nothing animates on its own: update() only does work when railU or the
- * camera moved, and the idle loop keeps sleeping.
+ * camera moved, and the idle loop keeps sleeping. The one exception is the
+ * night layer's ease (below), 1.5 s at a time.
+ *
+ * The night layer (2026-10-20 night; option D of
+ * _admin/prds/map-review-2026-10-15/real_time_light.md): the light still
+ * follows the place, and on top of it the student's own clock (clock.ts,
+ * through the scene's setNight) blends each key from the opening to the
+ * forest toward a night of its own (NIGHT_ROWS). From Creative Strategy on
+ * nothing changes. By day the light is the old light value for value
+ * (client-tests/night-clock.test.mjs). state.night is the night's weight
+ * where the camera is; the modules that darken for the night read it.
  *
  * Draw calls: the reflection pass redraws whatever the mirrored camera sees.
  * Objects that should not appear in the lake (markers, tiny props) can go on

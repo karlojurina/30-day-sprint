@@ -276,7 +276,7 @@ console.log('\n=== admin-3: a template that is off shows it, and can be turned o
   }
   const db = new FakeDb({ templates: [OFF] })
   installDb(db)
-  setTeam({ id: 'team-karlo', role: 'founder' })
+  setTeam({ id: 'team-founder-1', role: 'founder' })
   const t = templatesTab([{ ...OFF }])
   await t.setActive('tpl-quiet', true)
   const live = db.rows('templates')[0]
@@ -289,7 +289,7 @@ console.log('\n=== admin-3: a template that is off shows it, and can be turned o
   ok(show(t.seen.requests[1]?.body) === show({ is_active: false }) && db.rows('templates')[0].is_active === false && t.seen.rows[0].is_active === false,
      'Turn off sends { is_active: false } and the template is off again')
 
-  setTeam({ id: 'team-astrid', role: 'csm' })
+  setTeam({ id: 'team-csm-1', role: 'csm' })
   const csm = templatesTab([{ ...db.rows('templates')[0] }])
   await csm.setActive('tpl-quiet', true)
   ok(db.rows('templates')[0].is_active === false && show(csm.seen.errors) === show(['Requires role: founder or admin']) && csm.seen.rows[0].is_active === false,

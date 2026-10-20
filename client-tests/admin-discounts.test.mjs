@@ -250,8 +250,8 @@ for (const v of ['now', 'old']) {
 }
 
 for (const v of ['now', 'old']) {
-  // A presses Approve. While Whop makes the code, B (another tab, or Karlo
-  // beside Astrid) rejects the same request, still pending at that moment.
+  // A presses Approve. While Whop makes the code, B (another tab, or a second
+  // team member) rejects the same request, still pending at that moment.
   const db = freshDb([{ id: 'r1', status: 'pending' }])
   const codes = promoCodes.length
   const a = tab(page[v], routes(v), { teamMember: { id: 'team-1' } })
@@ -278,7 +278,7 @@ for (const v of ['now', 'old']) {
 
 console.log('\n=== Admin PRD review: who decided is the logged-in team member ===')
 for (const v of ['now', 'old']) {
-  // Astrid (a CSM) is logged in; the page in her browser sends another id,
+  // A CSM is logged in; the page in their browser sends another id,
   // as a stale or edited page could. Her login decides what is recorded.
   // Three students, one pending request each (v106 allows no more): r3's
   // ads are not verified, so only Generate anyway approves it.
@@ -287,8 +287,8 @@ for (const v of ['now', 'old']) {
     db.rows('discount_requests')[i].student_id = sid
     db.rows('students').push({ id: sid, first_paid_at: '2026-10-02T10:00:00.000Z', ad_submissions_verified: verified })
   }
-  setTeam({ id: 'team-astrid', role: 'csm' })
-  const t = tab(page[v], routes(v), { answer: 'not this one', teamMember: { id: 'team-karlo' } })
+  setTeam({ id: 'team-csm-1', role: 'csm' })
+  const t = tab(page[v], routes(v), { answer: 'not this one', teamMember: { id: 'team-founder-1' } })
   await t.approve('r1')
   await t.markApplied('r1')
   await t.reject('r2')
@@ -296,13 +296,13 @@ for (const v of ['now', 'old']) {
   const [r1, r2, r3] = ['r1', 'r2', 'r3'].map((id) => row(db, id))
   const override = lines.find((l) => l.includes('OVERRIDE')) ?? ''
   if (v === 'now') {
-    ok(r1.status === 'applied' && r1.reviewed_by === 'team-astrid' && r1.applied_by === 'team-astrid',
+    ok(r1.status === 'applied' && r1.reviewed_by === 'team-csm-1' && r1.applied_by === 'team-csm-1',
        'Approve, then Mark applied: reviewed_by and applied_by are the login, whatever the page sends', show({ reviewed_by: r1.reviewed_by, applied_by: r1.applied_by }))
-    ok(r2.status === 'rejected' && r2.reviewed_by === 'team-astrid', 'Reject records the login as the reviewer (it recorded nobody)', show(r2.reviewed_by))
-    ok(r3.status === 'approved' && r3.reviewed_by === 'team-astrid' && override.includes('team-astrid') && !override.includes('team-karlo'),
+    ok(r2.status === 'rejected' && r2.reviewed_by === 'team-csm-1', 'Reject records the login as the reviewer (it recorded nobody)', show(r2.reviewed_by))
+    ok(r3.status === 'approved' && r3.reviewed_by === 'team-csm-1' && override.includes('team-csm-1') && !override.includes('team-founder-1'),
        'Generate anyway: the row and the log line name the login', override)
   } else {
-    ok(r1.reviewed_by === 'team-karlo' && r1.applied_by === 'team-karlo' && r2.reviewed_by === null && override.includes('team-karlo'),
+    ok(r1.reviewed_by === 'team-founder-1' && r1.applied_by === 'team-founder-1' && r2.reviewed_by === null && override.includes('team-founder-1'),
        `control: at ${BASE} the routes record whatever the page sends, and Reject records nobody`, show({ r1: [r1.reviewed_by, r1.applied_by], r2: r2.reviewed_by, override }))
   }
 }

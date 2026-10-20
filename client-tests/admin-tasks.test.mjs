@@ -237,7 +237,7 @@ function task(student_id, template_id, status, createdMs, extra = {}) {
 
 /** GET /api/admin/tasks, as the page asks for it unless `query` says otherwise. */
 async function ask(v, db, query = 'status=all&limit=500') {
-  setTeam({ id: 'team-astrid', role: 'csm' }, db.client)
+  setTeam({ id: 'team-csm-1', role: 'csm' }, db.client)
   db.queries.length = 0
   const res = await route[v](new Request(`http://app/api/admin/tasks?${query}`))
   return { status: res.status, body: await res.json() }

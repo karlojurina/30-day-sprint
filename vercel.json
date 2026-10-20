@@ -5,10 +5,7 @@
     "src/app/api/admin/sync-whop/route.ts": { "regions": ["iad1"] },
     "src/app/api/admin/backfill-first-paid-at/route.ts": { "regions": ["iad1"] },
     "src/app/api/admin/first-paid-repair/route.ts": { "regions": ["iad1"] },
-    "src/app/api/admin/backfill-discord-ids/route.ts": { "regions": ["iad1"] },
-    "src/app/api/admin/etfb/route.ts": { "regions": ["iad1"] },
-    "src/app/api/admin/etfb/links/route.ts": { "regions": ["iad1"] },
-    "src/app/api/admin/stats/route.ts": { "regions": ["iad1"] }
+    "src/app/api/admin/backfill-discord-ids/route.ts": { "regions": ["iad1"] }
   },
   "crons": [
     {

@@ -268,7 +268,7 @@ export async function GET(request: NextRequest) {
   // Set when the toggle is on and a post did not go out.
   let discordFailure: string | null = null;
   if (alerts.length > 0) {
-    // The /admin/discord toggles (the master switch and this one), read
+    // The Discord toggles in admin_config (the master switch and this one), read
     // with their error before the insert (2026-10-20, cron-1). A failed
     // read stops the run and writes nothing, so the next run finds these
     // alerts again: taken as "off", it would insert them unposted and
@@ -291,8 +291,8 @@ export async function GET(request: NextRequest) {
 
     // Post these new alerts to the team's Discord channel, one message
     // per embed: Discord refuses an embed over 4096 characters, which one
-    // embed for every alert passed at about 22. Gated by /admin/discord
-    // toggle; default off until launch. On the new course this post is
+    // embed for every alert passed at about 22. Gated by the Discord
+    // toggles in admin_config; default off until launch. On the new course this post is
     // the only place the team sees no_login_5d and no_tasks_7d, and an
     // open alert is never sent again, so a post that fails marks the run
     // failed in cron_runs.

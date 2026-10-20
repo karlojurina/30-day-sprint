@@ -243,15 +243,16 @@ gen('../src/lib/admin/thirty-data.ts', './_gen/thirty-data.ts', [
   ...toStub('@/lib/catalog-tables'),
 ])
 
-// The admin rebuild's routes (work items 3 and 4, admin-today-routes.test.mjs).
-// The REAL team check, admin-auth.ts, not stub-server.ts's stand-in: its
-// Next response and its Supabase client go to stub-server.ts, so the token
-// is looked up in the stand-in's users and the role in its team_members, and
-// a route answers 401, 403 or 200 for that login as it would on Vercel. The
-// copy is remade from the source on every run, so its stats allowlist cannot
-// drift from the one in src/. Its other import is a TYPE, pointed at a file
-// that does not exist, as csm-triggers.ts's is. GET /api/admin/thirty runs
-// over that check and the real loader and builder above.
+// The admin rebuild's routes (admin-routes.test.mjs): GET /api/admin/thirty
+// (work item 3) and PUT /api/admin/config (admin rebuild 2, D6). The REAL
+// team check, admin-auth.ts, not stub-server.ts's stand-in: its Next
+// response and its Supabase client go to stub-server.ts, so the token is
+// looked up in the stand-in's users and the role in its team_members, and a
+// route answers 401, 403 or 200 for that login as it would on Vercel. Its
+// other import is a TYPE, pointed at a file that does not exist, as
+// csm-triggers.ts's is. GET /api/admin/thirty runs over that check and the
+// real loader and builder above; PUT /api/admin/config over it and the 6
+// keys of config-keys.ts, whose one import is a TYPE pointed the same way.
 gen('../src/lib/admin-auth.ts', './_gen/admin-auth.ts', [
   ...toStub('next/server', '@supabase/supabase-js'),
   ['"@/types/database"', '"./types-erased.ts"'],
@@ -263,49 +264,25 @@ gen('../src/app/api/admin/thirty/route.ts', './_gen/admin-thirty-route.ts', [
   ['from "@/lib/admin/thirty-view"', 'from "./thirty-view.ts"'],
   ...toStub('next/server'),
 ])
+gen('../src/lib/admin/config-keys.ts', './_gen/config-keys.ts', [
+  ['from "@/lib/dm-toggles"', 'from "./types-erased.ts"'],
+])
+gen('../src/app/api/admin/config/route.ts', './_gen/admin-config-route.ts', [
+  ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ['from "@/lib/admin/config-keys"', 'from "./config-keys.ts"'],
+  ...toStub('next/server'),
+])
 
-// Today (admin rebuild, work item 4; support-list.test.mjs and the Today half
-// of admin-today-routes.test.mjs): the list's builder, its loader and its two
-// routes, over the same team check and stand-in database as the 30% route.
-// The builder fills in the queue's templates with the real renderTemplate,
-// whose {dayNumber} comes from database.ts; database.ts has no imports and
-// only erasable types, so it copies across untouched. metrics-definitions.ts
-// (isCanceling) imports constants.ts, the same copy discount-queue.test.mjs
-// makes. The routes' Supabase import is a TYPE, which
-// --experimental-strip-types erases.
-gen('../src/types/database.ts', './_gen/database.ts')
-gen('../src/lib/templates.ts', './_gen/templates.ts', [['from "@/types/database"', 'from "./database.ts"']])
-gen('../src/lib/admin/metrics-definitions.ts', './_gen/metrics-definitions.ts', [['from "@/lib/constants"', 'from "./constants.ts"']])
-gen('../src/lib/admin/support-list.ts', './_gen/support-list.ts', [
-  ...RULE,
-  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
-  ['from "@/lib/admin/metrics-definitions"', 'from "./metrics-definitions.ts"'],
-  ['from "@/lib/templates"', 'from "./templates.ts"'],
-  ['from "./plans"', 'from "./plans.ts"'],
-  ['from "./thirty-view"', 'from "./thirty-view.ts"'],
-  ['from "./thirty-data"', 'from "./thirty-data.ts"'],
+// The admin's frame and what admin rebuild 2 removed (WI-1,
+// admin-frame.test.mjs): the top bar's entries for each role, the home every
+// sign-in lands on, which pages wear the dark look (admin-frame.ts, whose one
+// import is a TYPE pointed at a file that does not exist), and the 2 Whop
+// product ids that moved out of etfb.ts (whop-products.ts, no imports).
+gen('../src/lib/admin/admin-frame.ts', './_gen/admin-frame.ts', [
+  ['"@/types/database"', '"./types-erased.ts"'],
 ])
-gen('../src/lib/admin/today-data.ts', './_gen/today-data.ts', [
-  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
-  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
-  ['from "@/lib/templates"', 'from "./templates.ts"'],
-  ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
-  ['from "./thirty-data"', 'from "./thirty-data.ts"'],
-  ['from "./thirty-view"', 'from "./thirty-view.ts"'],
-  ['from "./support-list"', 'from "./support-list.ts"'],
-])
-gen('../src/app/api/admin/today/route.ts', './_gen/admin-today-route.ts', [
-  ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
-  ['from "@/lib/admin/today-data"', 'from "./today-data.ts"'],
-  ['from "@/lib/admin/support-list"', 'from "./support-list.ts"'],
-  ...toStub('next/server'),
-])
-gen('../src/app/api/admin/today/mark/route.ts', './_gen/admin-today-mark-route.ts', [
-  ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
-  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
-  ['from "@/lib/admin/support-list"', 'from "./support-list.ts"'],
-  ...toStub('next/server'),
-])
+gen('../src/lib/whop-products.ts', './_gen/whop-products.ts')
 
 // Every other route that writes or shows the streak (T-079, streak.test.mjs):
 // a finished video (lesson-watched, with the real chain after it), the old

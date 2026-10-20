@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button } from "@/components/admin/ui";
 import tokens from "@/components/admin/admin-tokens.module.css";
+import { ADMIN_HOME } from "@/lib/admin/admin-frame";
 import { createClient } from "@/lib/supabase-browser";
 import { useRouter } from "next/navigation";
 
@@ -39,8 +40,8 @@ export default function TeamLoginPage() {
       return;
     }
 
-    // Signing in lands on Today (admin rebuild PRD, call C2).
-    window.location.href = "/admin/today";
+    // Signing in lands on the Dashboard (admin rebuild 2, D1).
+    window.location.href = ADMIN_HOME;
   }
 
   return (

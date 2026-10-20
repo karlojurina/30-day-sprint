@@ -26,24 +26,13 @@
  * The page's clock is FIXTURE_NOW, so every date and "days left" reads the
  * same on every run.
  *
- * TODAY (/dev/admin/today). The same idea: a small database of made-up
- * members, their course facts and their tasks in the queue, and every load
- * runs the real buildSupportRows over it (src/lib/admin/support-list.ts),
- * the builder behind GET /api/admin/today, with the 30% from the same
- * made-up course. Mark messaged, Not needed, Undo and Replied / No reply
- * change that database the way the routes do.
- *
- *   ?state=full | empty | loading | error   (default full)
- *
- * Today's clock starts at TODAY_FIXTURE_NOW, Wed 28 Oct: more than 7 days
- * after the course switch, so every reason shows, Stalled included. Each
- * change moves it a minute on, so a mark is undoable right after it.
+ * Today's fixtures went with Today (admin rebuild 2, D2). The people below
+ * who are on no tab (Can still earn, which the page no longer shows) still
+ * feed the answer's canStillEarn, as the route's answer still carries it.
  */
 
 import { buildThirtyView } from "@/lib/admin/thirty-view";
 import type { ThirtyView } from "@/lib/admin/thirty-view";
-import { SUPPORT_SCENARIO, buildSupportRows } from "@/lib/admin/support-list";
-import type { SupportInput, SupportStudent, SupportTask, SupportTemplate, TodayView } from "@/lib/admin/support-list";
 import type {
   ThirtyAnswer,
   ThirtyCompletion,
@@ -54,15 +43,7 @@ import type {
   ThirtyRequest,
   ThirtyStudent,
 } from "@/lib/admin/thirty-data";
-import type {
-  Answer,
-  MarkAnswer,
-  MarkBody,
-  ReasonKind,
-  ThirtyTransport,
-  TodayTransport,
-  UndoResult,
-} from "@/lib/admin/admin-transport";
+import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
 import { DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
 import type { CatalogLessonRow, DiscountReads, VideoRow } from "@/lib/world/discount-server";
 
@@ -168,8 +149,6 @@ interface Ask {
 }
 
 interface Contact {
-  /** Set on a contact a mark wrote: its support record's id, for Undo. */
-  id?: string;
   studentId: string;
   scenarioId: string;
   completedAt: string;
@@ -240,7 +219,7 @@ function fullDb(): FixtureDb {
       { id: "p-dana", name: "Dana Whitfield", plan: MONTHLY, paid: "2026-10-07T09:00:00.000Z", done: 12, synced: null },
       { id: "p-sam", name: "Sam Taylor", discordUsername: "samtaylor", plan: MONTHLY, status: "past_due", paid: "2026-10-15T09:00:00.000Z", done: 5 },
       { id: "p-zoe", name: "Zoe Achterberg", discordUserId: "100000000000000117", plan: YEARLY, paid: "2026-10-11T08:00:00.000Z", done: 30 },
-      // Can still earn, with no video watched yet and the queue's nolessons.day7 task open: Mark messaged closes it.
+      // Can still earn, with no video watched yet and the queue's nolessons.day7 task open.
       { id: "p-ava", name: "Ava Lindgren", discordUsername: "ava.lind", plan: MONTHLY, paid: "2026-10-13T10:00:00.000Z", done: 0 },
       // Never listed: exempt from messages, and a canceled member.
       { id: "p-kai", name: "Kai Lund", plan: MONTHLY, exempt: true, paid: "2026-10-03T09:00:00.000Z", done: 10 },
@@ -471,12 +450,9 @@ export function parseFixtureState(value: string | null): FixtureState {
 
 /** One call the page made, for world-tests to read (window.__adminCalls on the dev page). */
 export interface FixtureCall {
-  name: "loadThirty" | "approve" | "reject" | "markApplied" | "mark" | "loadToday" | "undo" | "setOutcome";
+  name: "loadThirty" | "approve" | "reject" | "markApplied";
   args: unknown[];
 }
-
-/** The scenario of the record a mark makes for each computed headline (C5, support-list.ts). An open task's mark makes none. */
-const SCENARIO_OF: Partial<Record<ReasonKind, string>> = SUPPORT_SCENARIO;
 
 /** A made-up code in the approve route's shape, ECOM30- and six characters, the same for the same student. */
 function codeFor(studentId: string): string {
@@ -577,451 +553,6 @@ export function fixtureThirtyTransport(opts: {
         return later<null>({ ok: false, status: 400, error: `Only an approved request can be marked applied. This one is "${a.status}".` });
       }
       Object.assign(a, { status: "applied", appliedAt: at(), appliedBy: ME });
-      return later<null>({ ok: true, status: 200, data: null });
-    },
-
-    mark(body: MarkBody) {
-      calls.push({ name: "mark", args: [body] });
-      // As the route: every task named must be an open queue task of this student, or nothing is written.
-      const open = db.queue.filter((t) => body.openTaskIds.includes(t.id) && t.studentId === body.studentId && t.status === "open");
-      if (open.length !== body.openTaskIds.length) {
-        return later<MarkAnswer>({
-          ok: false,
-          status: 400,
-          error: "A task on this row is not an open task of this student in the Tasks queue, so nothing was saved. Reload the list.",
-        });
-      }
-      const when = at();
-      const scenarioId = SCENARIO_OF[body.headlineKind];
-      const supportId = scenarioId ? `support-${minute}` : null;
-      // A message marked as sent is a completed task: the row's last contact (C12).
-      if (body.action === "messaged" && scenarioId) {
-        db.contacts.push({ id: supportId ?? undefined, studentId: body.studentId, scenarioId, completedAt: when, completedBy: ME });
-      }
-      // The student's open queue tasks close with it, same member, same moment (C5).
-      for (const t of open) Object.assign(t, { status: "completed", completedAt: when, completedBy: ME });
-      return later<MarkAnswer>({
-        ok: true,
-        status: 201,
-        data: { supportId, movedIds: open.map((t) => t.id), at: when },
-      });
-    },
-
-    undo(ids: string[]) {
-      calls.push({ name: "undo", args: [ids] });
-      const results: UndoResult[] = ids.map((id) => {
-        const contact = db.contacts.findIndex((c) => c.id === id);
-        if (contact >= 0) {
-          db.contacts.splice(contact, 1);
-          return { id, ok: true, status: 200 };
-        }
-        const t = db.queue.find((x) => x.id === id && x.status === "completed" && x.completedBy === ME);
-        if (!t) return { id, ok: false, status: 404, error: "Not found. It may have been undone already." };
-        Object.assign(t, { status: "open", completedAt: null, completedBy: null });
-        return { id, ok: true, status: 200 };
-      });
-      return later({ ok: true, status: 200, data: { results } });
-    },
-  };
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// TODAY (/dev/admin/today)
-// ════════════════════════════════════════════════════════════════════════════
-
-/** Wed 28 Oct 2026, 09:30 in Croatia: where Today's dev clock starts (the header says why). */
-export const TODAY_FIXTURE_NOW = "2026-10-28T08:30:00.000Z";
-
-const minutesBefore = (n: number) => new Date(Date.parse(TODAY_FIXTURE_NOW) - n * 60_000).toISOString();
-
-/** The course's areas, made-up names. */
-const AREAS = new Map([
-  ["a1", "First steps"],
-  ["a2", "Ad basics"],
-  ["a3", "Hooks"],
-  ["a4", "Editing"],
-]);
-
-interface TodayPerson {
-  id: string;
-  name: string;
-  email?: string;
-  discordUserId?: string;
-  discordUsername?: string;
-  plan: string | null;
-  status?: string;
-  /** When they clicked cancel in Whop. */
-  cancelAt?: string;
-  /** Left out: a Whop membership. false: none. */
-  membership?: boolean;
-  exempt?: boolean;
-  highChurn?: boolean;
-  paid: string;
-  /** Their first app login; null: never. */
-  openedApp: string | null;
-  /** Counted lessons done, and the last one. */
-  lessons?: number;
-  lastLesson?: string;
-  area?: string;
-  /** The newest app heartbeat. */
-  heartbeat?: string;
-  /** The last Whop backfill. Left out: one after the switch. null: none ever. */
-  synced?: string | null;
-  /** The first `done` of the 30%'s 61 videos, finished at `doneAt`. */
-  done?: number;
-  doneAt?: string;
-}
-
-interface TodayDb {
-  people: TodayPerson[];
-  tasks: SupportTask[];
-}
-
-function task(t: Partial<SupportTask> & Pick<SupportTask, "id" | "student_id" | "scenario_id" | "status" | "created_at">): SupportTask {
-  return {
-    template_id: null,
-    behavior_summary: null,
-    completed_at: null,
-    completed_by: null,
-    dismissed_at: null,
-    dismissed_by: null,
-    notes: null,
-    outcome: null,
-    ...t,
-  };
-}
-
-function todayFullDb(): TodayDb {
-  return {
-    people: [
-      // Cancelling, and the payment failed too: the cancel is the headline, the payment a chip.
-      {
-        id: "t-mara", name: "Mara Quinn", discordUserId: "100000000000000201", discordUsername: "mara.q", plan: MONTHLY,
-        status: "past_due", cancelAt: "2026-10-26T07:00:00.000Z", paid: "2026-09-12T09:00:00.000Z",
-        openedApp: "2026-09-12T10:00:00.000Z", lessons: 14, lastLesson: "2026-10-27T18:00:00.000Z", area: "a2",
-      },
-      // Payment failed, on the yearly plan.
-      {
-        id: "t-owen", name: "Owen Pratt", discordUsername: "owenp", plan: YEARLY, status: "past_due",
-        paid: "2026-08-03T09:00:00.000Z", openedApp: "2026-08-03T11:00:00.000Z", lessons: 30,
-        lastLesson: "2026-10-27T09:00:00.000Z", area: "a3",
-      },
-      // The 30% closes tomorrow with 9 videos left, and no lesson for 3 days: two reasons.
-      {
-        id: "t-lina", name: "Lina Sorensen", discordUserId: "100000000000000203", plan: MONTHLY,
-        paid: "2026-10-15T09:00:00.000Z", openedApp: "2026-10-15T09:30:00.000Z", lessons: 52,
-        lastLesson: "2026-10-24T20:00:00.000Z", area: "a4", done: 52, doneAt: "2026-10-24T20:00:00.000Z",
-      },
-      // Every video done: can apply for the 30% now.
-      {
-        id: "t-ravi", name: "Ravi Menon", discordUsername: "ravi.m", plan: MONTHLY, paid: "2026-10-20T09:00:00.000Z",
-        openedApp: "2026-10-20T09:10:00.000Z", lessons: 61, lastLesson: "2026-10-26T19:00:00.000Z", area: "a4",
-        done: 61, doneAt: "2026-10-26T19:00:00.000Z",
-      },
-      // Stalled: no lesson since the evening of the switch.
-      {
-        id: "t-hugo", name: "Hugo Brandt", discordUsername: "hugo_b", plan: MONTHLY, paid: "2026-09-20T09:00:00.000Z",
-        openedApp: "2026-09-20T10:00:00.000Z", lessons: 6, lastLesson: "2026-10-19T18:00:00.000Z", area: "a1",
-      },
-      // Slipping: no lesson for 5 days.
-      {
-        id: "t-nadia", name: "Nadia Kerr", discordUserId: "100000000000000206", plan: YEARLY, paid: "2026-07-14T09:00:00.000Z",
-        openedApp: "2026-07-14T10:00:00.000Z", lessons: 22, lastLesson: "2026-10-23T07:00:00.000Z", area: "a2",
-      },
-      // Opened the app, no lesson on the new course; the queue's nolessons.day7 task is open, so the row copies its message.
-      { id: "t-tom", name: "Tom Ashby", discordUsername: "tom.ashby", plan: MONTHLY, paid: "2026-10-01T09:00:00.000Z", openedApp: "2026-10-02T08:00:00.000Z" },
-      // Never opened the app, no Whop backfill either; the queue's stalled.discord.day5 task is open.
-      { id: "t-grace", name: "Grace Liu", discordUsername: "grace.liu", plan: MONTHLY, paid: "2026-10-22T09:00:00.000Z", openedApp: null, synced: null },
-      // Only a task in the queue (the welcome), nothing the app computes: its template names {bookingLink}, which no longer exists.
-      {
-        id: "t-felix", name: "Felix Ward", discordUserId: "100000000000000209", plan: MONTHLY, paid: "2026-10-27T15:00:00.000Z",
-        openedApp: "2026-10-27T15:05:00.000Z", lessons: 3, lastLesson: "2026-10-28T07:00:00.000Z", area: "a1", done: 3,
-        doneAt: "2026-10-28T07:00:00.000Z",
-      },
-      // C14: no Whop backfill since the switch. Not started (a backfill the day before) and Stopped (none ever): the folded group.
-      { id: "t-ivy", name: "Ivy Chen", discordUsername: "ivy.chen", plan: MONTHLY, paid: "2026-09-25T09:00:00.000Z", openedApp: "2026-09-25T10:00:00.000Z", synced: "2026-10-18T10:00:00.000Z" },
-      {
-        id: "t-sam", name: "Sam Ortiz", plan: YEARLY, paid: "2026-08-20T09:00:00.000Z", openedApp: "2026-08-20T10:00:00.000Z",
-        lessons: 2, lastLesson: "2026-10-20T12:00:00.000Z", area: "a1", synced: null,
-      },
-      // Another plan: shown under All plans only.
-      {
-        id: "t-leo", name: "Leo Park", discordUsername: "leopark", plan: OTHER, paid: "2026-10-10T09:00:00.000Z",
-        openedApp: "2026-10-10T09:30:00.000Z", lessons: 4, lastLesson: "2026-10-21T10:00:00.000Z", area: "a1", done: 4,
-      },
-      // A long name, email and Discord name, for a phone's width.
-      {
-        id: "t-max", name: "Maximiliana Featherstonehaugh-Wolstenholme",
-        email: "maximiliana.featherstonehaugh.wolstenholme@example.com", discordUsername: "maximiliana.featherstonehaugh",
-        plan: MONTHLY, paid: "2026-10-25T09:00:00.000Z", openedApp: null,
-      },
-      // Never on the list: exempt; canceled; high churn risk and never opened; a heartbeat yesterday; no Whop membership.
-      { id: "t-kai", name: "Kai Moss", plan: MONTHLY, exempt: true, paid: "2026-10-02T09:00:00.000Z", openedApp: null },
-      { id: "t-nina", name: "Nina Vale", plan: MONTHLY, status: "canceled", paid: "2026-09-02T09:00:00.000Z", openedApp: null },
-      { id: "t-zed", name: "Zed Rowe", plan: MONTHLY, highChurn: true, paid: "2026-10-05T09:00:00.000Z", openedApp: null },
-      {
-        id: "t-ada", name: "Ada Finch", plan: MONTHLY, paid: "2026-09-10T09:00:00.000Z", openedApp: "2026-09-10T10:00:00.000Z",
-        lessons: 9, lastLesson: "2026-10-22T09:00:00.000Z", heartbeat: "2026-10-27T20:00:00.000Z", area: "a2",
-      },
-      { id: "t-pat", name: "Pat Doyle", plan: MONTHLY, membership: false, paid: "2026-10-01T09:00:00.000Z", openedApp: null },
-      // Handled, so hidden for now: Stopped and messaged on Mon 26 Oct (7 days); Not started and marked by
-      // Robin 5 minutes ago (Undo brings her back); Cancelling and marked not needed an hour ago (3 days).
-      {
-        id: "t-bea", name: "Bea Holt", discordUserId: "100000000000000215", plan: MONTHLY, paid: "2026-09-05T09:00:00.000Z",
-        openedApp: "2026-09-05T10:00:00.000Z", lessons: 11, lastLesson: "2026-10-21T09:00:00.000Z", area: "a2",
-      },
-      { id: "t-cora", name: "Cora Diaz", discordUsername: "cora.d", plan: MONTHLY, paid: "2026-09-28T09:00:00.000Z", openedApp: "2026-09-28T10:00:00.000Z" },
-      {
-        id: "t-eli", name: "Eli Moreno", plan: YEARLY, cancelAt: "2026-10-27T10:00:00.000Z", paid: "2026-06-01T09:00:00.000Z",
-        openedApp: "2026-06-01T10:00:00.000Z", lessons: 40, lastLesson: "2026-10-27T12:00:00.000Z", area: "a3",
-      },
-    ],
-    tasks: [
-      // Open in the Tasks queue.
-      task({
-        id: "q-tom", student_id: "t-tom", scenario_id: "nolessons.day7", template_id: "tpl-nolessons7", status: "open",
-        behavior_summary: "Logged in, no lesson on the new course yet (Day 7)", created_at: "2026-10-26T10:15:00.000Z",
-      }),
-      task({
-        id: "q-grace", student_id: "t-grace", scenario_id: "stalled.discord.day5", template_id: "tpl-stalled5", status: "open",
-        behavior_summary: "Paid 5 days ago, never logged in", created_at: "2026-10-27T10:20:00.000Z",
-      }),
-      task({
-        id: "q-felix", student_id: "t-felix", scenario_id: "welcome.day1", template_id: "tpl-welcome", status: "open",
-        behavior_summary: "Joined yesterday: send the welcome message", created_at: "2026-10-27T16:00:00.000Z",
-      }),
-      // Handled in the last 7 days.
-      task({
-        id: "h-bea", student_id: "t-bea", scenario_id: "support.stopped", status: "completed",
-        behavior_summary: "No lesson for 5 days", created_at: "2026-10-26T09:00:00.000Z",
-        completed_at: "2026-10-26T09:00:00.000Z", completed_by: "tm-jamie", outcome: "replied",
-      }),
-      task({
-        id: "h-cora", student_id: "t-cora", scenario_id: "support.nostart", status: "completed",
-        behavior_summary: "No lesson on the new course yet (course day 9)", created_at: minutesBefore(5),
-        completed_at: minutesBefore(5), completed_by: ME,
-      }),
-      task({
-        id: "h-cora-q", student_id: "t-cora", scenario_id: "nolessons.day7", template_id: "tpl-nolessons7", status: "completed",
-        behavior_summary: "Logged in, no lesson on the new course yet (Day 7)", created_at: "2026-10-26T10:15:00.000Z",
-        completed_at: minutesBefore(5), completed_by: ME,
-      }),
-      task({
-        id: "h-eli", student_id: "t-eli", scenario_id: "support.cancel", status: "dismissed",
-        behavior_summary: "Clicked cancel less than 1 day ago", created_at: minutesBefore(60),
-        dismissed_at: minutesBefore(60), dismissed_by: ME, notes: "Spoke on a call, he is moving to the yearly plan.",
-      }),
-      task({
-        id: "h-mara", student_id: "t-mara", scenario_id: "support.pastdue", status: "completed",
-        behavior_summary: "Payment failed", created_at: "2026-10-24T08:00:00.000Z",
-        completed_at: "2026-10-24T08:00:00.000Z", completed_by: "tm-jamie", outcome: "no_reply",
-      }),
-      task({
-        id: "h-nina", student_id: "t-nina", scenario_id: "stalled.whop.day7", template_id: "tpl-stalled5", status: "completed",
-        behavior_summary: "Paid 7 days ago, never logged in", created_at: "2026-10-20T10:00:00.000Z",
-        completed_at: "2026-10-23T11:00:00.000Z", completed_by: "tm-jamie",
-      }),
-      // Closed by the app: a stage the next one replaced.
-      task({
-        id: "h-app-1", student_id: "t-tom", scenario_id: "nolessons.day3", template_id: "tpl-nolessons3", status: "dismissed",
-        behavior_summary: "Logged in, no lesson on the new course yet (Day 3)", created_at: "2026-10-22T10:15:00.000Z",
-        dismissed_at: "2026-10-26T10:15:00.000Z", notes: "Replaced by a later stage",
-      }),
-      task({
-        id: "h-app-2", student_id: "t-ivy", scenario_id: "nolessons.day3", template_id: "tpl-nolessons3", status: "dismissed",
-        behavior_summary: "Logged in, no lesson on the new course yet (Day 3)", created_at: "2026-10-22T10:15:00.000Z",
-        dismissed_at: "2026-10-26T10:15:00.000Z", notes: "Replaced by a later stage",
-      }),
-    ],
-  };
-}
-
-const TODAY_TEMPLATES: SupportTemplate[] = [
-  {
-    id: "tpl-nolessons7", scenario_id: "nolessons.day7", title: "No lesson yet, day 7", is_active: true,
-    body: "Hey {firstName}, I noticed you haven't started the new course yet. The first lesson is short, about 6 minutes. Here is where you start: {programLink}",
-  },
-  {
-    id: "tpl-nolessons3", scenario_id: "nolessons.day3", title: "No lesson yet, day 3", is_active: true,
-    body: "Hey {firstName}, how is it going so far? If anything is unclear about where to start, tell me.",
-  },
-  {
-    id: "tpl-stalled5", scenario_id: "stalled.discord.day5", title: "Never logged in, day 5", is_active: true,
-    body: "Hey {firstName}, you joined a few days ago but haven't opened the app yet. Here is where you start: {programLink}",
-  },
-  {
-    id: "tpl-welcome", scenario_id: "welcome.day1", title: "Welcome", is_active: true,
-    body: "Welcome, {firstName}! Book your first call here: {bookingLink}",
-  },
-  {
-    id: "tpl-support-cancel", scenario_id: "support.cancel", title: "Clicked cancel", is_active: true,
-    body: "Hey {firstName}, I saw you clicked cancel. Was something not working for you? If you tell me what, I can try to fix it.",
-  },
-  {
-    id: "tpl-support-30ready", scenario_id: "support.30ready", title: "Can apply for the 30%", is_active: true,
-    body: "Hey {firstName}, you finished every video up to the checkpoint, so you can apply for the 30% now. Open the map and press Apply before your deadline.",
-  },
-];
-
-/** The made-up database as loadTodayData hands it to buildSupportRows, the 30% included. */
-function todayInput(db: TodayDb): SupportInput {
-  const thirty = toData({
-    queue: [],
-    people: db.people.map((p) => ({
-      id: p.id,
-      name: p.name,
-      discordUserId: p.discordUserId,
-      discordUsername: p.discordUsername,
-      plan: p.plan,
-      status: p.status,
-      exempt: p.exempt,
-      paid: p.paid,
-      synced: p.synced,
-      done: p.done ?? 0,
-      doneAt: p.doneAt,
-    })),
-    asks: [],
-    contacts: [],
-  });
-  const students: SupportStudent[] = db.people.map((p) => ({
-    id: p.id,
-    name: p.name,
-    email: p.email ?? `${p.id}@example.com`,
-    discord_user_id: p.discordUserId ?? null,
-    discord_username: p.discordUsername ?? null,
-    whop_plan_id: p.plan,
-    whop_membership_id: p.membership === false ? null : `mem_${p.id}`,
-    membership_status: p.status ?? "active",
-    cancel_scheduled_at: p.cancelAt ?? null,
-    first_paid_at: p.paid,
-    joined_at: p.paid,
-    csm_exempt: p.exempt ?? false,
-    high_churn_risk: p.highChurn ?? false,
-  }));
-  const map = <T>(pick: (p: TodayPerson) => T | undefined) =>
-    new Map(db.people.flatMap((p) => (pick(p) === undefined ? [] : [[p.id, pick(p) as T] as const])));
-  return {
-    resetAt: RESET_AT,
-    callerId: ME,
-    lessonsTotal: 140,
-    students,
-    progress: map((p) => p.lessons),
-    lastLesson: map((p) => p.lastLesson),
-    currentArea: map((p) => p.area),
-    areas: AREAS,
-    firstLogin: new Set(db.people.filter((p) => p.openedApp !== null).map((p) => p.id)),
-    lastSyncAt: thirty.lastSyncAt,
-    lastHeartbeat: map((p) => p.heartbeat),
-    tasks: db.tasks,
-    templates: TODAY_TEMPLATES,
-    team: TEAM,
-    names: new Map(db.people.map((p) => [p.id, p.name] as const)),
-    config: { program_login_link: "https://example.com/start", discord_invite_link: "" },
-    thirty,
-  };
-}
-
-/**
- * Today's transport, answered from the made-up database. Each answer comes a
- * moment later, as a real one would, so the busy states show.
- */
-export function fixtureTodayTransport(opts: { state: FixtureState }): TodayTransport & { calls: FixtureCall[] } {
-  const db: TodayDb = opts.state === "empty" ? { people: [], tasks: [] } : todayFullDb();
-  const calls: FixtureCall[] = [];
-  let minute = 0;
-  let seq = 0;
-  /** The dev clock: TODAY_FIXTURE_NOW, a minute on for each change. */
-  const clock = () => new Date(Date.parse(TODAY_FIXTURE_NOW) + 60_000 * minute);
-  const later = <T>(answer: Answer<T>) => new Promise<Answer<T>>((resolve) => setTimeout(() => resolve(answer), 300));
-  const view = (): TodayView => {
-    const now = clock();
-    const { rows, handled } = buildSupportRows(todayInput(db), now);
-    return { generatedAt: now.toISOString(), resetAt: RESET_AT, lessonsTotal: 140, rows, handled };
-  };
-
-  return {
-    calls,
-
-    loadToday() {
-      calls.push({ name: "loadToday", args: [] });
-      if (opts.state === "loading") return new Promise<Answer<TodayView>>(() => {});
-      if (opts.state === "error") {
-        return later<TodayView>({
-          ok: false,
-          status: 500,
-          error: "Couldn't read everything Today needs, so nothing is shown. Try again.",
-        });
-      }
-      return later<TodayView>({ ok: true, status: 200, data: view() });
-    },
-
-    mark(body: MarkBody) {
-      calls.push({ name: "mark", args: [body] });
-      minute++;
-      const at = clock().toISOString();
-      const done = body.action === "messaged";
-      const closing = done
-        ? { completed_at: at, completed_by: ME, dismissed_at: null, dismissed_by: null }
-        : { dismissed_at: at, dismissed_by: ME, completed_at: null, completed_by: null };
-      const open = db.tasks.filter((t) => body.openTaskIds.includes(t.id) && t.student_id === body.studentId && t.status === "open");
-      if (open.length !== body.openTaskIds.length) {
-        return later<MarkAnswer>({
-          ok: false,
-          status: 400,
-          error: "A task on this row is not an open task of this student in the Tasks queue, so nothing was saved. Reload the list.",
-        });
-      }
-      let supportId: string | null = null;
-      if (body.headlineKind !== "open_task") {
-        supportId = `s-${++seq}`;
-        db.tasks.push(
-          task({
-            id: supportId,
-            student_id: body.studentId,
-            scenario_id: SUPPORT_SCENARIO[body.headlineKind],
-            status: done ? "completed" : "dismissed",
-            behavior_summary: body.reasonsText,
-            created_at: at,
-            notes: body.note ?? null,
-            ...closing,
-          }),
-        );
-      }
-      for (const t of open) Object.assign(t, { status: done ? "completed" : "dismissed", ...closing, ...(body.note ? { notes: body.note } : {}) });
-      return later<MarkAnswer>({ ok: true, status: 201, data: { supportId, movedIds: open.map((t) => t.id), at } });
-    },
-
-    undo(ids: string[]) {
-      calls.push({ name: "undo", args: [ids] });
-      const nowMs = clock().getTime();
-      minute++;
-      const results: UndoResult[] = ids.map((id) => {
-        const t = db.tasks.find((x) => x.id === id);
-        const at = t ? (t.status === "completed" ? t.completed_at : t.status === "dismissed" ? t.dismissed_at : null) : null;
-        const by = t ? (t.status === "completed" ? t.completed_by : t.dismissed_by) : null;
-        if (!t || !at) return { id, ok: false, status: 404, error: "Not found. It may have been undone already." };
-        if (by !== ME) return { id, ok: false, status: 403, error: "Only the team member who marked it can undo it." };
-        if (nowMs - Date.parse(at) > 15 * 60_000) {
-          return { id, ok: false, status: 409, error: "It was marked more than 15 minutes ago, so it can't be undone here." };
-        }
-        if (t.scenario_id.startsWith("support.") && t.template_id === null) {
-          db.tasks = db.tasks.filter((x) => x.id !== id);
-          return { id, ok: true, status: 200 };
-        }
-        if (db.tasks.some((x) => x.status === "open" && x.student_id === t.student_id && x.scenario_id === t.scenario_id)) {
-          return { id, ok: false, status: 409, error: "The Tasks queue has a newer open task of this kind for the student, so this one stays closed." };
-        }
-        Object.assign(t, { status: "open", completed_at: null, completed_by: null, dismissed_at: null, dismissed_by: null, notes: null });
-        return { id, ok: true, status: 200 };
-      });
-      return later({ ok: true, status: 200, data: { results } });
-    },
-
-    setOutcome(taskId: string, outcome: "replied" | "no_reply" | null) {
-      calls.push({ name: "setOutcome", args: [taskId, outcome] });
-      const t = db.tasks.find((x) => x.id === taskId && x.status === "completed");
-      if (!t) return later<null>({ ok: false, status: 404, error: "Task not found or not in Sent" });
-      t.outcome = outcome;
       return later<null>({ ok: true, status: 200, data: null });
     },
   };

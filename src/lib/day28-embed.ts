@@ -4,12 +4,10 @@
  * Used by:
  *   • /api/cron/day28-dm — the nightly cron that fires for students
  *     exactly 28 days into their sprint.
- *   • /api/admin/preview-day28-dm — the admin "test fire" button on
- *     /admin/discord, which sends the same embed to DISCORD_TEST_DM_RECIPIENT
- *     so the team can preview formatting without mutating real students.
  *
- * Pulling this out means changes to the embed (fields, color, footer,
- * copy) land in both places at once and never drift.
+ * The admin's "test fire" route (/api/admin/preview-day28-dm) and its
+ * page, /admin/discord, were removed in admin rebuild 2; the cron is
+ * the only caller now.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";

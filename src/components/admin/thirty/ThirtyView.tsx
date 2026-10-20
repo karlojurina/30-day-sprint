@@ -17,21 +17,16 @@ import {
   TAP,
   WhopNotPulled,
   firstName,
-  lastContactText,
   pressPill,
-  timeLeftText,
 } from "@/components/admin/list-parts";
 import type { Notice } from "@/components/admin/list-parts";
 import { adminTransport } from "@/lib/admin/admin-transport";
-import type { Answer, ThirtyTransport, UndoResult } from "@/lib/admin/admin-transport";
+import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel, deadlineLabel } from "@/lib/admin/croatia-dates";
-import { MARKED_OTHERWISE } from "@/lib/admin/support-list";
-import { aboutHoursWords, thirtyReasonText } from "@/lib/admin/thirty-view";
 import type {
   Facts,
   StudentBrief,
   TeamRef,
-  ThirtyEarnRow,
   ThirtyRequestRow,
   ThirtyView as ThirtyPayload,
   Verdict,
@@ -42,12 +37,13 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * The 30% page, /admin/discounts (admin rebuild PRD, work item 3, calls C9
  * to C11 and C16).
  *
- * Five tabs: To decide (every pending request, oldest first), Can still
- * earn (members who can still finish in time), Approved (the code is made),
- * Code added in Whop (the code is on the membership) and Rejected. Every row
- * comes from GET /api/admin/thirty, which runs the student app's own rule;
- * this file only shows it and sends the team's decisions to the existing
- * routes.
+ * Four tabs: To decide (every pending request, oldest first), Approved (the
+ * code is made), Code added in Whop (the code is on the membership) and
+ * Rejected. Can still earn and its Mark messaged went with Today (admin
+ * rebuild 2, D2); the answer still carries canStillEarn, which this page no
+ * longer shows. Every row comes from GET /api/admin/thirty, which runs the
+ * student app's own rule; this file only shows it and sends the team's
+ * decisions to the existing routes.
  *
  * A pending request shows the approve route's verdict beside Approve, which
  * opens exactly when the rule says yes. "Approve anyway" asks once more,
@@ -59,11 +55,9 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * What a decision did shows in a fixed place at the bottom of the window
  * (NoticeStack, list-parts.tsx), where it is seen however far down the row
  * was: a success hides itself after 15 seconds, a refusal stays until it is
- * dismissed, and a Whop code in either can be copied from it. Mark messaged
- * on Can still earn closes the student's open tasks in the Tasks queue with
- * it (C5), and its notice offers Undo. When the list cannot be read again
- * after a change, a second line says so and the row just decided keeps its
- * buttons off until a read works.
+ * dismissed, and a Whop code in either can be copied from it. When the list
+ * cannot be read again after a change, a second line says so and the row
+ * just decided keeps its buttons off until a read works.
  *
  * The address: ?student=<id> keeps every tab to that student (the student
  * page links here, C16), ?tab= picks the tab.
@@ -73,17 +67,16 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * made-up data and no login.
  */
 
-type TabKey = "decide" | "earn" | "approved" | "code-added" | "rejected";
+type TabKey = "decide" | "approved" | "code-added" | "rejected";
 
-const TAB_ORDER: TabKey[] = ["decide", "earn", "approved", "code-added", "rejected"];
+const TAB_ORDER: TabKey[] = ["decide", "approved", "code-added", "rejected"];
 const TAB_LABEL: Record<TabKey, string> = {
   decide: "To decide",
-  earn: "Can still earn",
   approved: "Approved",
   "code-added": "Code added in Whop",
   rejected: "Rejected",
 };
-const TAB_STATUS: Record<Exclude<TabKey, "earn">, ThirtyRequestRow["status"]> = {
+const TAB_STATUS: Record<TabKey, ThirtyRequestRow["status"]> = {
   decide: "pending",
   approved: "approved",
   "code-added": "applied",
@@ -96,7 +89,6 @@ const LAUNCH_DAY = dayLabel(DISCOUNT_LAUNCH_DATE);
 const TAB_NOTE: Record<TabKey, string> = {
   decide:
     "Requests waiting for a decision, whatever their date, oldest first. Approve creates the student's Whop code.",
-  earn: `Members who first paid from ${FROM_DAY}, still have a membership, and can still finish before their deadline. Soonest deadline first.`,
   approved: "The code is made. Add it to the student's membership in Whop, then press Mark code added.",
   "code-added": `The code is on the student's membership. Requests from ${FROM_DAY} on, newest first.`,
   rejected: `Requests from ${FROM_DAY} on, newest first.`,
@@ -104,14 +96,10 @@ const TAB_NOTE: Record<TabKey, string> = {
 
 const TAB_EMPTY: Record<TabKey, string> = {
   decide: "No request is waiting for a decision.",
-  earn: "Nobody can still earn the 30% right now.",
   approved: "No code is waiting to be added in Whop.",
   "code-added": "No code has been added in Whop yet.",
   rejected: "No request has been rejected.",
 };
-
-/** Can still earn has nobody to show, and some members could not be read: "nobody" would not be true. */
-const EARN_UNREAD = "Nobody to show until the list can be read. Press Refresh.";
 
 /** The id of the "may be out of date" line among the notices. */
 const STALE_ID = -1;
@@ -128,8 +116,8 @@ type Loaded = { kind: "loading" } | { kind: "error"; error: string } | { kind: "
 /** What a row's button hands back: null when it went through, else a sentence to show on the row. */
 type RowResult = Promise<string | null>;
 
-/** The last button's notice, with the ids its Undo takes back after Mark messaged. */
-type PageNotice = Omit<Notice, "id" | "action"> & { undo?: { ids: string[]; name: string } };
+/** The last button's notice. */
+type PageNotice = Omit<Notice, "id" | "action">;
 
 function studentName(s: StudentBrief): string {
   return s.name?.trim() || s.email || "No name on file";
@@ -167,14 +155,6 @@ function listIsStale(kind: "approve" | "reject" | "applied", status: number): bo
   return status === 409 || status === 404 || (status === 400 && kind !== "reject");
 }
 
-/** One sentence for an Undo whose entries did not all go through. */
-function undoFailures(results: UndoResult[]): string | null {
-  const bad = results.filter((r) => !r.ok);
-  if (bad.length === 0) return null;
-  const first = bad[0].error ?? "It could not be undone.";
-  return bad.length === 1 ? first : `${bad.length} entries were not undone. The first: ${first}`;
-}
-
 const byAsked = (a: ThirtyRequestRow, b: ThirtyRequestRow) =>
   Date.parse(a.askedAt) - Date.parse(b.askedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
@@ -191,9 +171,8 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   const [notice, setNotice] = useState<(PageNotice & { id: number }) | null>(null);
   /** The list could not be read again after a change: what it shows may be out of date. */
   const [stale, setStale] = useState(false);
-  /** The rows changed since the last read that worked (request ids, and student ids on Can still earn): their buttons stay off until a read works. */
+  /** The requests changed since the last read that worked: their buttons stay off until a read works. */
   const [locked, setLocked] = useState<ReadonlySet<string>>(() => new Set());
-  const [undoing, setUndoing] = useState(false);
   const [pickedTab, setPickedTab] = useState<TabKey | null>(null);
   const seq = useRef(0);
 
@@ -308,49 +287,6 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
     return null;
   }
 
-  async function markMessaged(row: ThirtyEarnRow): RowResult {
-    const kind = row.state === "ready" ? "thirty_ready" : "thirty_closing";
-    const name = studentName(row.student);
-    const r = await transport.mark({
-      studentId: row.student.id,
-      action: "messaged",
-      headlineKind: kind,
-      reasonsText: thirtyReasonText(kind, row.facts),
-      // The student's open tasks in the Tasks queue close with the mark (C5): nobody sends the queue's message after this one.
-      openTaskIds: row.openTasks.map((t) => t.id),
-    });
-    if (!r.ok) {
-      // A second mark that says the other thing, or a refusal that is not about the list: on the row.
-      if (r.code === MARKED_OTHERWISE || !(r.status === 400 || r.status === 404 || r.status === 409)) return r.error;
-      show({ tone: "danger", text: `${name}: ${r.error}` });
-      await reload();
-      return null;
-    }
-    lock(row.student.id);
-    const ids = [r.data.supportId, ...r.data.movedIds].filter((x): x is string => typeof x === "string");
-    show({ tone: "success", text: `Marked ${name} as messaged.`, ...(ids.length ? { undo: { ids, name } } : {}) });
-    await reload();
-    return null;
-  }
-
-  /** The Undo in Mark messaged's notice: the record and the queue tasks it closed, as Today's Undo. */
-  async function undoFromNotice({ ids, name }: { ids: string[]; name: string }) {
-    setUndoing(true);
-    const r = await transport.undo(ids);
-    setUndoing(false);
-    if (!r.ok) {
-      show({ tone: "danger", text: `${name}: ${r.error}` });
-      return;
-    }
-    const problem = undoFailures(r.data.results);
-    show(
-      problem
-        ? { tone: "danger", text: `${name}: ${problem}` }
-        : { tone: "success", text: `Undone. ${name} is no longer marked as messaged.` },
-    );
-    await reload();
-  }
-
   function closeNotice(id: number) {
     if (id === STALE_ID) {
       setStale(false);
@@ -360,20 +296,13 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   }
 
   const notices: Notice[] = [];
-  if (notice) {
-    const { undo: mark, ...shown } = notice;
-    notices.push(mark ? { ...shown, action: { label: "Undo", busy: undoing } } : shown);
-  }
+  if (notice) notices.push(notice);
   if (stale) notices.push({ id: STALE_ID, tone: "warning", text: STALE_TEXT });
-  /** The Undo of the notice `id`, if it is still the one shown. */
-  const undoNotice = (id: number) => {
-    if (notice && notice.id === id && notice.undo) void undoFromNotice(notice.undo);
-  };
 
   const header = (meta: React.ReactNode, action?: React.ReactNode) => (
     <ListHeader
       title="30% off"
-      description="Every request for the 30%, and who can still earn it before their deadline."
+      description="Every request for the 30%."
       meta={meta}
       action={action}
     />
@@ -399,7 +328,6 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
 
   const data = loaded.data;
   const requests = student ? data.requests.filter((r) => r.student.id === student) : data.requests;
-  const earn = student ? data.canStillEarn.filter((e) => e.student.id === student) : data.canStillEarn;
   const byStatus = (status: ThirtyRequestRow["status"]) => requests.filter((r) => r.status === status);
   const lists = {
     // The longest wait first: the answer reads newest first, as the decided tabs show it.
@@ -408,16 +336,12 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
     "code-added": byStatus(TAB_STATUS["code-added"]),
     rejected: byStatus(TAB_STATUS.rejected),
   };
-  const count = (t: TabKey) => (t === "earn" ? earn.length : lists[t].length);
+  const count = (t: TabKey) => lists[t].length;
   // With one student and no tab asked for, open the first tab that has them.
   const tab: TabKey =
     pickedTab ?? urlTab ?? (student ? (TAB_ORDER.find((t) => count(t) > 0) ?? "decide") : "decide");
-  const studentShown = requests[0]?.student ?? earn[0]?.student ?? null;
-  const emptyTitle = student
-    ? "This student has nothing on this tab."
-    : tab === "earn" && data.unchecked > 0
-      ? EARN_UNREAD
-      : TAB_EMPTY[tab];
+  const studentShown = requests[0]?.student ?? null;
+  const emptyTitle = student ? "This student has nothing on this tab." : TAB_EMPTY[tab];
 
   return (
     <ListPage>
@@ -428,7 +352,7 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
         </Button>,
       )}
 
-      <NoticeStack notices={notices} onClose={closeNotice} onAction={undoNotice} />
+      <NoticeStack notices={notices} onClose={closeNotice} />
 
       {data.requiredCount === null && (
         <Warning>
@@ -450,9 +374,7 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
           }}
         >
           <p style={{ ...T.body, flex: "1 1 220px" }}>
-            {studentShown
-              ? `Showing ${studentName(studentShown)} only.`
-              : "Showing one student only. They have no 30% request and are not on Can still earn."}
+            {studentShown ? `Showing ${studentName(studentShown)} only.` : "Showing one student only. They have no 30% request."}
           </p>
           <Button variant="raised" size="md" onClick={() => showEveryone(tab)}>
             Show everyone
@@ -467,54 +389,34 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
       />
       <p style={{ ...T.bodyDim, lineHeight: 1.5, marginBottom: 16 }}>{TAB_NOTE[tab]}</p>
 
-      {tab === "earn" && data.unchecked > 0 && (
-        <Warning>
-          {data.unchecked === 1
-            ? "1 member is left out of this list because their progress couldn't be read."
-            : `${data.unchecked} members are left out of this list because their progress couldn't be read.`}{" "}
-          Press Refresh to try again.
-        </Warning>
-      )}
-
       {count(tab) === 0 ? (
         <Card>
           <EmptyState title={emptyTitle} />
         </Card>
       ) : (
         <Card padding={0}>
-          {tab === "earn"
-            ? earn.map((row) => (
-                <EarnRow
-                  key={row.student.id}
-                  row={row}
-                  now={data.generatedAt}
-                  locked={locked.has(row.student.id)}
-                  stale={stale}
-                  onMarkMessaged={markMessaged}
-                />
-              ))
-            : lists[tab].map((row) =>
-                row.status === "pending" ? (
-                  <PendingRow
-                    key={row.id}
-                    row={row}
-                    questions={data.questions}
-                    locked={locked.has(row.id)}
-                    stale={stale}
-                    onApprove={approve}
-                    onReject={reject}
-                  />
-                ) : (
-                  <DecidedRow
-                    key={row.id}
-                    row={row}
-                    questions={data.questions}
-                    locked={locked.has(row.id)}
-                    stale={stale}
-                    onMarkApplied={markApplied}
-                  />
-                ),
-              )}
+          {lists[tab].map((row) =>
+            row.status === "pending" ? (
+              <PendingRow
+                key={row.id}
+                row={row}
+                questions={data.questions}
+                locked={locked.has(row.id)}
+                stale={stale}
+                onApprove={approve}
+                onReject={reject}
+              />
+            ) : (
+              <DecidedRow
+                key={row.id}
+                row={row}
+                questions={data.questions}
+                locked={locked.has(row.id)}
+                stale={stale}
+                onMarkApplied={markApplied}
+              />
+            ),
+          )}
         </Card>
       )}
     </ListPage>
@@ -992,82 +894,6 @@ function DecidedRow({
       )}
 
       <Answers answers={row.answers} questions={questions} />
-    </div>
-  );
-}
-
-/** A member who can still earn the 30%: deadline, videos left, last contact (C12), their open queue tasks, and Mark messaged. */
-function EarnRow({
-  row,
-  now,
-  locked,
-  stale,
-  onMarkMessaged,
-}: {
-  row: ThirtyEarnRow;
-  now: string;
-  locked: boolean;
-  stale: boolean;
-  onMarkMessaged: (row: ThirtyEarnRow) => RowResult;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const f = row.facts;
-  const left = timeLeftText(f.deadline, now);
-  const total = f.videosTotal ?? 0;
-  const done = f.videosDone ?? 0;
-  const hours = aboutHoursWords(f.secondsLeft);
-  const videos =
-    row.state === "ready"
-      ? `All ${total} videos done. Can apply for the 30% now.`
-      : `${done} of ${total} videos done, ${total - done} left${hours ? ` (${hours})` : ""}`;
-
-  return (
-    <div className="list-row" style={ROW}>
-      <StudentHead
-        student={row.student}
-        extra={
-          <>
-            {row.state === "ready" && <Pill tone="success">Can apply now</Pill>}
-            {!row.student.whopPulled && <WhopNotPulled />}
-          </>
-        }
-        actions={
-          <Button
-            variant="raised"
-            size="md"
-            busy={busy}
-            disabled={locked}
-            onClick={async () => {
-              setBusy(true);
-              setError(null);
-              const e = await onMarkMessaged(row);
-              setBusy(false);
-              if (e) setError(e);
-            }}
-          >
-            Mark messaged
-          </Button>
-        }
-      />
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        <p style={{ ...T.body, lineHeight: 1.5 }}>
-          {f.deadline ? `Deadline ${deadlineLabel(f.deadline)}${left ? `, ${left}` : ""}` : "No 30% deadline"}
-        </p>
-        <p style={{ ...T.body, lineHeight: 1.5 }}>{videos}</p>
-        <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{lastContactText(row.lastContact)}</p>
-        {row.openTasks.map((t) => (
-          <p key={t.id} style={{ ...T.bodyDim, lineHeight: 1.5 }}>
-            {`Also open in the Tasks queue since ${dayLabel(t.createdAt)}. Marking this row closes it too.`}
-          </p>
-        ))}
-      </div>
-      {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
-      {error && (
-        <p role="alert" style={ERROR_TEXT}>
-          {error}
-        </p>
-      )}
     </div>
   );
 }

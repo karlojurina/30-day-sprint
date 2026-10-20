@@ -18,9 +18,9 @@ import type { FixtureCall } from "../fixtures";
  *   ?conflict=1   the decision buttons answer as if another team member
  *                 decided the request first (fixtures.ts says how)
  *   ?reload=fail  the list loads once, then every read of it fails
- *   ?tab=decide | earn | approved | code-added | rejected
+ *   ?tab=decide | approved | code-added | rejected
  *   ?student=<id>  one student on every tab, as the student page links it
- *                  (p-maya, p-theo, p-ethan ... in fixtures.ts)
+ *                  (p-maya, p-ethan, p-omar ... in fixtures.ts)
  *
  * The calls the page made are on window.__adminCalls, for world-tests.
  */

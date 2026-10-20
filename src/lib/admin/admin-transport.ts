@@ -2,7 +2,6 @@
 
 import { createClient, getSharedSession } from "@/lib/supabase-browser";
 import type { ThirtyView } from "@/lib/admin/thirty-view";
-import type { ReasonKind, TodayView } from "@/lib/admin/support-list";
 
 /**
  * The rebuilt admin pages' calls to the server, behind one interface (admin
@@ -14,44 +13,21 @@ import type { ReasonKind, TodayView } from "@/lib/admin/support-list";
  * (src/app/dev/admin/fixtures.ts), and every state of a page can be looked
  * at with no login and no database.
  *
- * The 30% page's half (work item 3): its read, the three discount routes,
- * and Today's mark route, which "Mark messaged" on Can still earn calls,
- * with its Undo. The ads tick's call went with the tick (2026-10-20).
- * Today's half (work item 4): its read, the mark route's POST and DELETE
- * (Undo), and the task outcome route (Replied / No reply).
+ * The 30% page's calls (work item 3): its read and the three discount
+ * routes. The ads tick's call went with the tick (2026-10-20). Today's
+ * calls, and the 30% page's "Mark messaged" and its Undo through Today's
+ * mark route, went with Today (admin rebuild 2, D2).
  *
  * No call throws. Every answer is `{ ok: true, data }` or `{ ok: false,
  * error }`, where `error` is a sentence the page can show: the route's own
  * words, or, for a signed-out session or no connection, this file's. A
  * refusal can also carry the route's `code`, for a page that treats one
- * refusal apart (the mark route's "marked-otherwise").
+ * refusal apart.
  */
 
 export type Answer<T> =
   | { ok: true; status: number; data: T }
   | { ok: false; status: number; error: string; code?: string };
-
-/** The reasons a student can need a message for (admin rebuild PRD, C4 and section 8), defined in support-list.ts. */
-export type { ReasonKind };
-
-/** POST /api/admin/today/mark (section 8). */
-export interface MarkBody {
-  studentId: string;
-  action: "messaged" | "not_needed";
-  headlineKind: ReasonKind;
-  /** Every reason on the row, in words: it becomes the record's behavior_summary. */
-  reasonsText: string;
-  /** Required for not_needed. */
-  note?: string;
-  /** The open queue tasks on the row, which the mark closes with the same actor and time. */
-  openTaskIds: string[];
-}
-
-export interface MarkAnswer {
-  supportId: string | null;
-  movedIds: string[];
-  at: string;
-}
 
 /** What the 30% page (src/components/admin/thirty/ThirtyView.tsx) calls. */
 export interface ThirtyTransport {
@@ -63,30 +39,6 @@ export interface ThirtyTransport {
   reject(requestId: string, reason: string | null): Promise<Answer<null>>;
   /** POST /api/discounts/mark-applied: the code is on the student's membership in Whop. */
   markApplied(requestId: string): Promise<Answer<null>>;
-  /** POST /api/admin/today/mark. */
-  mark(body: MarkBody): Promise<Answer<MarkAnswer>>;
-  /** DELETE /api/admin/today/mark: the Undo beside Mark messaged's notice. */
-  undo(ids: string[]): Promise<Answer<{ results: UndoResult[] }>>;
-}
-
-/** One entry of an Undo: done, or why not (403 another member's, 409 too old or a newer open task, 404 nothing to undo). */
-export interface UndoResult {
-  id: string;
-  ok: boolean;
-  status: number;
-  error?: string;
-}
-
-/** What Today (src/components/admin/today/TodayView.tsx) calls. */
-export interface TodayTransport {
-  /** GET /api/admin/today. */
-  loadToday(): Promise<Answer<TodayView>>;
-  /** POST /api/admin/today/mark: Mark messaged or Not needed, closing the row's open queue tasks with it. */
-  mark(body: MarkBody): Promise<Answer<MarkAnswer>>;
-  /** DELETE /api/admin/today/mark: undo a mark (its support record and the queue tasks it closed). */
-  undo(ids: string[]): Promise<Answer<{ results: UndoResult[] }>>;
-  /** POST /api/admin/tasks/[id]/outcome: Replied, No reply, or null to clear it, on a completed task. */
-  setOutcome(taskId: string, outcome: "replied" | "no_reply" | null): Promise<Answer<null>>;
 }
 
 const NO_SERVER = "Couldn't reach the server. Check the connection and try again.";
@@ -102,7 +54,7 @@ type Json = Record<string, unknown> | null;
  * record the id sent, so sending it keeps both right.
  */
 async function send<T>(
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST",
   path: string,
   body?: (memberId: string) => unknown,
 ): Promise<Answer<T>> {
@@ -145,17 +97,8 @@ async function send<T>(
 }
 
 /** The real calls, with the signed-in team member's session. */
-export const adminTransport: ThirtyTransport & TodayTransport = {
+export const adminTransport: ThirtyTransport = {
   loadThirty: () => send<ThirtyView>("GET", "/api/admin/thirty"),
-
-  loadToday: () => send<TodayView>("GET", "/api/admin/today"),
-
-  undo: (ids) => send<{ results: UndoResult[] }>("DELETE", "/api/admin/today/mark", () => ({ ids })),
-
-  async setOutcome(taskId, outcome) {
-    const r = await send<unknown>("POST", `/api/admin/tasks/${encodeURIComponent(taskId)}/outcome`, () => ({ outcome }));
-    return r.ok ? { ...r, data: null } : r;
-  },
 
   async approve(requestId, override) {
     const r = await send<{ promoCode?: string }>("POST", "/api/discounts/approve", (me) => ({
@@ -178,6 +121,4 @@ export const adminTransport: ThirtyTransport & TodayTransport = {
     }));
     return r.ok ? { ...r, data: null } : r;
   },
-
-  mark: (body) => send<MarkAnswer>("POST", "/api/admin/today/mark", () => body),
 };

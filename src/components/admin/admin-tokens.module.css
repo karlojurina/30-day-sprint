@@ -8,7 +8,7 @@
  * it measures 3.4:1 on the page, so readable words sit at 58% (6.2:1).
  *
  * Who carries it: the top bar's own header (AdminTopNav.tsx), the <main> of
- * the rebuilt pages (Today and 30% off, chosen in (authenticated)/layout.tsx),
+ * the rebuilt pages (REBUILT_PAGES in (authenticated)/layout.tsx),
  * the inner wrapper of the two sign-in pages, and the dev pages under
  * /dev/admin. The other admin pages keep the light look of .admin-shell.
  *

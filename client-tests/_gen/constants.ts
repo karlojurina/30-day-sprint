@@ -181,7 +181,7 @@ export const LAUNCH_DATE = "2026-05-25T00:00:00.000Z";
 
 // Hard cutoff for admin list views — only show students who joined
 // on or after the launch date. Filters Students list, dashboard
-// tiles, month-2 conversion, Journey, Insights, Discord test page.
+// tiles, month-2 conversion, Journey, Insights.
 //
 // The Insights `daily_progress_snapshots` table is backfilled to
 // 2026-01-01 separately — it stays intact and shows pre-launch

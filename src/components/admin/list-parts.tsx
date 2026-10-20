@@ -8,8 +8,8 @@ import type { LastContact } from "@/lib/admin/thirty-view";
 
 /**
  * Pieces the rebuilt list pages share (admin rebuild PRD): the 30% page
- * (thirty/ThirtyView.tsx) and Today. They read the dark look's tokens
- * (admin-tokens.module.css) and sit inside it.
+ * (thirty/ThirtyView.tsx), and Today until admin rebuild 2 removed it. They
+ * read the dark look's tokens (admin-tokens.module.css) and sit inside it.
  *
  *   ListPage          the page's frame: ui.tsx's AdminPage, with the kit's
  *                     16px side gutter on a phone
@@ -33,8 +33,8 @@ import type { LastContact } from "@/lib/admin/thirty-view";
 export const TAP = 44;
 
 /**
- * A pill that is pressed or not: Today's reason chips and plan choice, the
- * 30% page's tabs. Raised surface and hairline; pressed in Airy Blue.
+ * A pill that is pressed or not: the 30% page's tabs. Raised surface and
+ * hairline; pressed in Airy Blue.
  */
 export function pressPill(pressed: boolean): React.CSSProperties {
   return {
@@ -199,7 +199,7 @@ export function DiscordReach({ discord }: { discord: { userId: string | null; us
   return <span style={{ ...T.bodyDim, whiteSpace: "nowrap" }}>No Discord linked</span>;
 }
 
-/** C12: the newest message the team marked as sent, from Today or the Tasks queue. */
+/** C12: the newest message the team marked as sent, from the Tasks queue (or Today, before it was removed). */
 export function lastContactText(contact: LastContact | null): string {
   if (!contact) return "No message yet";
   const by = firstName(contact.by?.name);

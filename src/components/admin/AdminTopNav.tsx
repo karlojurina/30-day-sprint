@@ -3,128 +3,40 @@
 import Link from "next/link";
 import { useEffect, useId, useRef, useState } from "react";
 import type { TeamMember } from "@/types/database";
+import {
+  ADMIN_HOME,
+  entriesFor,
+  isActive,
+  type NavEntry,
+  type NavGroup,
+  type NavLeaf,
+} from "@/lib/admin/admin-frame";
 import { Button } from "./ui";
 import tokens from "./admin-tokens.module.css";
 
 /**
- * The admin's top bar (admin rebuild PRD, call C2), in the dark look of
- * admin-tokens.module.css: the white Ecom University lockup, then Today,
- * 30% off, Tasks, Students (two pages), Dashboard and More (everything
- * else), and the profile on the right.
+ * The admin's top bar (admin rebuild 2, D1), in the dark look of
+ * admin-tokens.module.css: the white Ecom University lockup (to the
+ * Dashboard), then Dashboard, 30% off, Tasks, Students (two pages), Feedback
+ * (two pages), Templates, Insights and Team, and the profile on the right.
+ * The entries and their role flags are ADMIN_NAV in
+ * src/lib/admin/admin-frame.ts.
  *
  * From 1100px wide the entries sit in the bar and the two groups open as
  * dropdowns. Under 1100px one Menu button opens every entry, and the
  * profile, as a full-width list under the bar. Nothing in the bar scrolls
- * sideways: the wide layout fits with room to spare at 1100px, and on a
- * narrow phone the lockup shrinks before anything overflows. The nav itself
- * still gets no overflow rule, because that would clip the dropdowns.
+ * sideways: at 1100px a founder's 8 entries fit beside a name of about
+ * 120px with the lockup at full size (216px); a longer name, up to the
+ * profile's 180px, shrinks the lockup first (to 128px at 1100px, measured
+ * 2026-10-20), and on a narrow phone too the lockup shrinks before anything
+ * overflows. The nav itself still gets no overflow rule, because that would
+ * clip the dropdowns.
  *
  * The member, the address and sign-out come in as props, so the dev page
  * (src/app/dev/admin/frame) can draw the bar for any role with no login.
- *
- * The role flags hide links only. Every page and route checks the role
- * itself.
  */
 
-type Role = TeamMember["role"];
-
-type NavLeaf = {
-  type: "leaf";
-  href: string;
-  label: string;
-  /** Active on this address only, not on the addresses under it. */
-  exact?: boolean;
-  founderOnly?: boolean;
-  csmHidden?: boolean;
-};
-
-type NavGroup = {
-  type: "group";
-  label: string;
-  children: NavLeaf[];
-};
-
-type NavEntry = NavLeaf | NavGroup;
-
-const NAV: NavEntry[] = [
-  { type: "leaf", href: "/admin/today", label: "Today" },
-  { type: "leaf", href: "/admin/discounts", label: "30% off" },
-  { type: "leaf", href: "/admin/tasks", label: "Tasks" },
-  {
-    type: "group",
-    label: "Students",
-    children: [
-      { type: "leaf", href: "/admin/students", label: "All students" },
-      { type: "leaf", href: "/admin/journey", label: "Student journey" },
-    ],
-  },
-  { type: "leaf", href: "/admin", label: "Dashboard", exact: true },
-  {
-    type: "group",
-    label: "More",
-    children: [
-      { type: "leaf", href: "/admin/insights/progress", label: "Insights" },
-      // v87: ETfB brand owners and their free team-seat links. Neither
-      // founderOnly nor csmHidden on purpose: this is Astrid's tool and her
-      // role is csm, so either flag would hide her own work queue.
-      { type: "leaf", href: "/admin/etfb", label: "Brand Owners" },
-      { type: "leaf", href: "/admin/templates", label: "Templates" },
-      // The flags the Feedback and Settings groups used to give their pages.
-      {
-        type: "leaf",
-        href: "/admin/feedback/lessons",
-        label: "Lesson feedback",
-        csmHidden: true,
-      },
-      {
-        type: "leaf",
-        href: "/admin/feedback/survey",
-        label: "Survey",
-        csmHidden: true,
-      },
-      // v86: Whop revenue. The flag only hides the link; the page is a
-      // dynamic server component that checks isStatsOwner(), and
-      // /api/admin/stats checks again on its own.
-      { type: "leaf", href: "/admin/stats", label: "Stats", founderOnly: true },
-      { type: "leaf", href: "/admin/settings", label: "Settings", csmHidden: true },
-      { type: "leaf", href: "/admin/discord", label: "Discord test", csmHidden: true },
-      {
-        type: "leaf",
-        href: "/admin/team",
-        label: "Team",
-        founderOnly: true,
-        csmHidden: true,
-      },
-    ],
-  },
-];
-
 const BAR_HEIGHT = 60;
-
-function leafVisible(leaf: NavLeaf, role: Role | undefined): boolean {
-  if (leaf.founderOnly && role !== "founder") return false;
-  if (leaf.csmHidden && role === "csm") return false;
-  return true;
-}
-
-/** The entries a role sees. A group with no visible page is left out. */
-function entriesFor(role: Role | undefined): NavEntry[] {
-  const out: NavEntry[] = [];
-  for (const entry of NAV) {
-    if (entry.type === "leaf") {
-      if (leafVisible(entry, role)) out.push(entry);
-      continue;
-    }
-    const children = entry.children.filter((c) => leafVisible(c, role));
-    if (children.length > 0) out.push({ ...entry, children });
-  }
-  return out;
-}
-
-function isActive(leaf: NavLeaf, pathname: string): boolean {
-  if (leaf.exact) return pathname === leaf.href;
-  return pathname === leaf.href || pathname.startsWith(`${leaf.href}/`);
-}
 
 export function AdminTopNav({
   member,
@@ -173,7 +85,7 @@ export function AdminTopNav({
         style={{ height: BAR_HEIGHT, gap: 16 }}
       >
         <Link
-          href="/admin/today"
+          href={ADMIN_HOME}
           className="flex items-center"
           style={{ minWidth: 0, height: "100%", textDecoration: "none" }}
         >
@@ -479,8 +391,9 @@ function MenuPanel({
   onClose: () => void;
 }) {
   // A group sits between two hairlines, so the entry after it reads as top
-  // level again. The profile row takes a hairline of its own only when no
-  // group above it already drew one.
+  // level again. Two groups in a row (Students, then Feedback) share the
+  // line between them, and the profile row takes a hairline of its own only
+  // when no group above it already drew one.
   const lastIsGroup = entries[entries.length - 1]?.type === "group";
   return (
     <div
@@ -502,7 +415,7 @@ function MenuPanel({
     >
       <nav aria-label="Admin">
         <ul style={{ listStyle: "none", margin: 0, padding: "8px 0 0" }}>
-          {entries.map((entry) =>
+          {entries.map((entry, i) =>
             entry.type === "leaf" ? (
               <li key={entry.href}>
                 <MenuRow leaf={entry} pathname={pathname} onClose={onClose} />
@@ -511,7 +424,8 @@ function MenuPanel({
               <li
                 key={entry.label}
                 style={{
-                  borderTop: "1px solid var(--color-border)",
+                  borderTop:
+                    entries[i - 1]?.type === "group" ? "none" : "1px solid var(--color-border)",
                   borderBottom: "1px solid var(--color-border)",
                   padding: "4px 0",
                 }}

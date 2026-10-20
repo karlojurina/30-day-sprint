@@ -1,41 +1,42 @@
 /**
- * The rebuilt admin pages in a real browser (admin rebuild PRD, work item 5):
- * the top bar, the two sign-in pages, Today and the 30% page, in every state,
- * at a phone's width and two desktop widths.
+ * The rebuilt admin pages in a real browser (admin rebuild PRD, work item 5;
+ * admin rebuild 2, WI-1): the top bar, the two sign-in pages and the 30%
+ * page, in every state, at a phone's width and two desktop widths. Today,
+ * which this file also drew, was removed in admin rebuild 2 (D2).
  *
- *   node world-tests/admin-pages.mjs [--only routes,frame,signin,today,thirty]
+ *   node world-tests/admin-pages.mjs [--only routes,frame,signin,thirty]
  *
  * Opens BASE_URL (default http://localhost:3226): a development server
  * started for the run in the app root, `PORT=3226 npx next dev`. This script
  * never starts one. The dev pages need nothing from .env.local; the
- * set-password form needs a server with no Supabase settings (see signin).
+ * set-password form and the sign-in that lands need a server with no
+ * Supabase settings (see signin).
  *
  *   routes  client-tests/build.mjs, then the route suite
- *           (client-tests/admin-today-routes.test.mjs) as npm run test:client
- *           runs it, with ADMIN_ROUTE_ERRORS_OUT set: it must pass, and every
- *           error sentence a route answered there is held to the words below
+ *           (client-tests/admin-routes.test.mjs: GET /api/admin/thirty and
+ *           PUT /api/admin/config) as npm run test:client runs it, with
+ *           ADMIN_ROUTE_ERRORS_OUT set: it must pass, and every error
+ *           sentence a route answered there is held to the words below
  *   frame   /dev/admin/frame for a founder, a csm and an admin, over a light
- *           and a dark page: the bar's entries for each role and the marked
- *           one; under 1100px the Menu with every entry; above it More, and
- *           Escape closing both
+ *           page and the Dashboard in the dark look: the bar reads Dashboard
+ *           · 30% off · Tasks · Students · Feedback · Templates · Insights ·
+ *           Team for each role's flags, with no "More", Dashboard marked on
+ *           /admin, no plan or subscription in it, and the lockup to /admin;
+ *           under 1100px the Menu with every entry; above it each dropdown,
+ *           and Escape closing them; at 1100px wide a founder's bar fits
+ *           with the lockup at full size, and with a name longer than the
+ *           profile's 180px the lockup shrinks and nothing overlaps
  *   signin  /admin/login, and its refusal (Supabase's answer given here);
  *           /admin/set-password with no invite; and, when the server has no
  *           Supabase settings, its form with a made-up invite and its own
- *           check of the two passwords (NOT COVERED otherwise, with why)
- *   today   /dev/admin/today full, empty, loading and error, then its paths
- *           by clicks: the reasons and their order, chips, plans, search,
- *           Mark messaged and Undo, Not needed and its reason, Handled;
- *           a phone's first screen (the first row whole, the chips one
- *           sideways row, Refresh beside the title), every tap 44px, the
- *           focus ring, a mark low on the page with its notice in the
- *           window, one mark at a time on a row
+ *           check of the two passwords, and a sign-in with Supabase's yes
+ *           given here that opens /admin (NOT COVERED otherwise, with why)
  *   thirty  /dev/admin/discounts: every tab full and empty, partial,
  *           novideos, loading and error, then its paths by clicks: the
  *           verdict beside Approve, Approve anyway, Reject, a 409 on approve
  *           (the code to delete pinned in the window, copyable) and on
  *           reject, a failed reload (its own line, the decided row's buttons
- *           off), Mark code added, Mark messaged (closing the student's open
- *           queue task, with Undo), ?student=; the tabs whole on a phone,
+ *           off), Mark code added, ?student=; the 4 tabs whole on a phone,
  *           To decide oldest first, every tap 44px
  *
  * Every state at 390x844, 1280x720 and 1440x900 (a few click states at one
@@ -98,11 +99,11 @@ if (wanted('routes')) {
   expect(build.status === 0, 'client-tests/build.mjs copies the routes and their libraries', `${build.stderr}`.slice(-300))
   const file = path.join(os.tmpdir(), `admin-route-errors-${process.pid}.json`)
   fs.rmSync(file, { force: true })
-  const run = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', 'client-tests/admin-today-routes.test.mjs'], {
+  const run = spawnSync(process.execPath, ['--experimental-strip-types', '--no-warnings', 'client-tests/admin-routes.test.mjs'], {
     cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, ADMIN_ROUTE_ERRORS_OUT: file },
   })
   const summary = (`${run.stdout}`.match(/PASS \d+\s+FAIL \d+/) || ['no summary line'])[0].replace(/\s+/g, ' ')
-  expect(run.status === 0, `client-tests/admin-today-routes.test.mjs passes: ${summary}`,
+  expect(run.status === 0, `client-tests/admin-routes.test.mjs passes: ${summary}`,
     `${run.stdout}`.split('\n').filter((l) => l.startsWith(' FAIL')).slice(0, 3).join(' | ') || `${run.stderr}`.slice(-300))
   let sentences = null
   try { sentences = JSON.parse(fs.readFileSync(file, 'utf8')) } catch { sentences = null }
@@ -115,7 +116,7 @@ if (wanted('routes')) {
   for (const s of distinct.slice(0, 40)) console.log(`       "${s}"`)
 }
 
-const needBrowser = ['frame', 'signin', 'today', 'thirty'].some(wanted)
+const needBrowser = ['frame', 'signin', 'thirty'].some(wanted)
 if (!needBrowser) finish()
 
 fs.mkdirSync(OUT, { recursive: true })
@@ -272,7 +273,6 @@ async function press(handle) {
 }
 /** The header says "Updating" while the page reads its list again: wait until it is done. */
 const settled = () => page.waitForFunction(() => !document.body.innerText.includes('· Updating'), { timeout: 10000 })
-const openAllDetails = () => page.evaluate(() => document.querySelectorAll('details').forEach((d) => { d.open = true }))
 /**
  * Buttons, chips and tabs, and the links and labels drawn as buttons, on the
  * page under the bar, that are under 44px tall (the kit's touch target). The
@@ -287,27 +287,35 @@ const smallTaps = () => page.evaluate(() => [...document.querySelectorAll('main 
   .filter((x) => x.h < 44))
 
 // ════════════════════════════════════════════════════════════════════════════
-// frame: the top bar for each role, over a light page and a dark one
+// frame: the top bar for each role, over a light page and the Dashboard
 // ════════════════════════════════════════════════════════════════════════════
 if (wanted('frame')) {
   const from = consoleErrors.length
-  const ENTRIES = {
-    founder: ['Today', '30% off', 'Tasks', 'All students', 'Student journey', 'Dashboard', 'Insights', 'Brand Owners', 'Templates', 'Lesson feedback', 'Survey', 'Stats', 'Settings', 'Discord test', 'Team'],
-    csm: ['Today', '30% off', 'Tasks', 'All students', 'Student journey', 'Dashboard', 'Insights', 'Brand Owners', 'Templates'],
-    admin: ['Today', '30% off', 'Tasks', 'All students', 'Student journey', 'Dashboard', 'Insights', 'Brand Owners', 'Templates', 'Lesson feedback', 'Survey', 'Settings', 'Discord test'],
+  // Admin rebuild 2, D1: Dashboard · 30% off · Tasks · Students ▾ · Feedback ▾ · Templates · Insights · Team, no "More".
+  // Feedback's two pages are hidden from the csm role, and Team is a founder's only, as before.
+  const BAR = {
+    founder: ['Dashboard', '30% off', 'Tasks', 'Students', 'Feedback', 'Templates', 'Insights', 'Team'],
+    csm: ['Dashboard', '30% off', 'Tasks', 'Students', 'Templates', 'Insights'],
+    admin: ['Dashboard', '30% off', 'Tasks', 'Students', 'Feedback', 'Templates', 'Insights'],
   }
+  const GROUPS = { Students: ['All students', 'Student journey'], Feedback: ['Lesson feedback', 'Survey'] }
+  /** Every entry a role may open, as the phone's Menu lists them: each group's pages in its place. */
+  const ENTRIES = Object.fromEntries(Object.entries(BAR).map(([role, bar]) => [role, bar.flatMap((e) => GROUPS[e] ?? [e])]))
   const visibleLabels = (selector) => page.$$eval(selector, (els) => els
     .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' })
     .map((e) => e.textContent.replace(/\s+/g, ' ').trim()))
+  /** D12 for the frame: the bar never speaks of a plan or a subscription. */
+  const barSaysPlan = () => page.$eval('header', (h) => /\b(plans?|subscriptions?|subscribed)\b/i.test(h.innerText))
   for (const role of ['founder', 'csm', 'admin']) {
     for (const ground of ['light', 'dark']) {
       for (const size of SIZES) {
         const [w, h] = size
-        const label = `frame, ${role}, ${ground} page, ${w}x${h}`
+        const label = `frame, ${role}, ${ground === 'dark' ? 'the Dashboard' : 'a light page'}, ${w}x${h}`
         console.log(`\n${label}`)
         await go(`/dev/admin/frame?role=${role}&ground=${ground}`, size)
         await page.waitForSelector(`[data-frame-role="${role}"][data-frame-ground="${ground}"]`)
         await check(label, `frame-${role}-${ground}-${w}`)
+        expect(await page.$eval('header a:has(img)', (a) => a.getAttribute('href') === '/admin'), `${label}: the lockup links to the Dashboard, /admin`)
         if (w < 1100) {
           const menu = await page.$('header button[aria-controls]')
           const shown = menu && (await menu.evaluate((b) => getComputedStyle(b).display !== 'none' && b.textContent.includes('Menu')))
@@ -319,9 +327,19 @@ if (wanted('frame')) {
           await page.waitForSelector('header [id] nav')
           const rows = await visibleLabels('header [id] nav a')
           expect(JSON.stringify(rows) === JSON.stringify(ENTRIES[role]), `${label}: the Menu lists every entry a ${role} may open, in order (${rows.length})`, JSON.stringify(rows))
+          const current = await page.$$eval('header [id] nav a[aria-current="page"]', (as) => as.map((a) => a.textContent.trim()))
+          expect(JSON.stringify(current) === JSON.stringify([ground === 'dark' ? 'Dashboard' : 'Tasks']), `${label}: the Menu marks the page it sits over`, JSON.stringify(current))
           expect((await menu.evaluate((b) => b.getAttribute('aria-expanded'))) === 'true', `${label}: aria-expanded is true while it is open`)
+          // Students and Feedback sit next to each other: one hairline between them, never two.
+          const doubled = await page.evaluate(() => {
+            const items = [...document.querySelectorAll('header [id] nav > ul > li')]
+            const px = (el, side) => parseFloat(getComputedStyle(el)[`border${side}Width`]) || 0
+            return items.slice(1).filter((li, i) => px(items[i], 'Bottom') > 0 && px(li, 'Top') > 0).length
+          })
+          expect(doubled === 0, `${label}: one hairline between two groups, never two`, String(doubled))
+          expect(!(await barSaysPlan()), `${label}, Menu open: no plan or subscription in the bar`)
           await check(`${label}, Menu open`, `frame-${role}-${ground}-${w}-menu`)
-          // A founder's list is taller than a phone: the panel scrolls inside itself.
+          // A founder's list may be taller than a phone: the panel scrolls inside itself.
           const unreachable = await page.evaluate(() => [...document.querySelectorAll('header [id] nav a')].filter((a) => {
             a.scrollIntoView({ block: 'nearest' })
             const r = a.getBoundingClientRect()
@@ -335,11 +353,11 @@ if (wanted('frame')) {
           const menuShown = await page.$eval('header button[aria-controls]', (b) => getComputedStyle(b).display !== 'none')
           expect(!menuShown, `${label}: no Menu button on a wide window`)
           const top = await visibleLabels('header nav[aria-label="Admin"] > a, header nav[aria-label="Admin"] > div > button')
-          expect(JSON.stringify(top) === JSON.stringify(['Today', '30% off', 'Tasks', 'Students', 'Dashboard', 'More']),
-            `${label}: the bar reads Today · 30% off · Tasks · Students · Dashboard · More`, JSON.stringify(top))
+          expect(JSON.stringify(top) === JSON.stringify(BAR[role]), `${label}: the bar reads ${BAR[role].join(' · ')}`, JSON.stringify(top))
           const active = await page.$$eval('header nav [data-active]', (els) => els.map((e) => e.textContent.trim()))
-          const wantActive = ground === 'dark' ? ['Today'] : ['Tasks']
+          const wantActive = ground === 'dark' ? ['Dashboard'] : ['Tasks']
           expect(JSON.stringify(active) === JSON.stringify(wantActive), `${label}: ${wantActive[0]} is marked as the page it sits over`, JSON.stringify(active))
+          expect(!(await barSaysPlan()), `${label}: no plan or subscription in the bar`)
           const outside = await page.evaluate(() => {
             const header = document.querySelector('header')
             return [...header.querySelectorAll(':scope > div > *')]
@@ -348,17 +366,47 @@ if (wanted('frame')) {
               .filter((r) => r.right > window.innerWidth || r.left < 0).length
           })
           expect(outside === 0, `${label}: the lockup, every entry and the profile fit inside the window`)
-          const buttons = await page.$$('header nav[aria-label="Admin"] > div > button')
-          await buttons[buttons.length - 1].click()
-          await page.waitForSelector('header [role="menu"]')
-          const items = await visibleLabels('header [role="menu"] a')
-          expect(JSON.stringify(items) === JSON.stringify(ENTRIES[role].slice(6)), `${label}: More lists ${items.join(', ')}`, JSON.stringify(items))
-          await check(`${label}, More open`, `frame-${role}-${ground}-${w}-more`)
-          await page.keyboard.press('Escape')
-          expect((await page.$('header [role="menu"]')) === null, `${label}: Escape closes More`)
+          const groups = await page.$$('header nav[aria-label="Admin"] > div > button')
+          const names = await Promise.all(groups.map((g) => g.evaluate((b) => b.textContent.trim())))
+          expect(JSON.stringify(names) === JSON.stringify(BAR[role].filter((e) => GROUPS[e])), `${label}: the dropdowns are ${names.join(' and ')}`, JSON.stringify(names))
+          for (const [i, name] of names.entries()) {
+            await groups[i].click()
+            await page.waitForSelector('header [role="menu"]')
+            const items = await visibleLabels('header [role="menu"] a')
+            expect(JSON.stringify(items) === JSON.stringify(GROUPS[name]), `${label}: ${name} lists ${items.join(', ')}`, JSON.stringify(items))
+            await check(`${label}, ${name} open`, `frame-${role}-${ground}-${w}-${name.toLowerCase()}`)
+            await page.keyboard.press('Escape')
+            expect((await page.$('header [role="menu"]')) === null, `${label}: Escape closes ${name}`)
+          }
         }
       }
     }
+  }
+  // 1100px is where the entries move into the bar. A founder's 8 fit there
+  // beside the profile with the lockup at full size (216px); with a name
+  // longer than the profile's 180px the lockup shrinks first, and nothing
+  // overlaps or overflows.
+  for (const [role, name] of [['founder', ''], ['admin', ''], ['founder', 'long']]) {
+    const label = `frame, ${role}${name ? ' with a long name' : ''}, the Dashboard, 1100x800`
+    console.log(`\n${label}`)
+    await go(`/dev/admin/frame?role=${role}&ground=dark${name ? `&name=${name}` : ''}`, [1100, 800])
+    await page.waitForSelector(`[data-frame-role="${role}"]`)
+    const fit = await page.evaluate(() => {
+      const nav = document.querySelector('header nav[aria-label="Admin"]').getBoundingClientRect()
+      const img = document.querySelector('header a img').getBoundingClientRect()
+      const signOut = [...document.querySelectorAll('header button')].find((b) => b.textContent.trim() === 'Sign out' && b.getBoundingClientRect().width > 0)
+      const profile = signOut ? signOut.parentElement.parentElement.getBoundingClientRect() : null
+      return { navLeft: Math.round(nav.left), navRight: Math.round(nav.right), lockup: Math.round(img.width), profileLeft: profile ? Math.round(profile.left) : null, width: innerWidth }
+    })
+    const clear = fit.profileLeft !== null && fit.navLeft >= fit.lockup && fit.navRight <= fit.profileLeft - 12 && fit.navRight < fit.width
+    if (name) {
+      expect(clear && fit.lockup >= 120,
+        `${label}: the entries stay clear of the profile and the lockup shrinks to fit (lockup ${fit.lockup}px, entries end at ${fit.navRight}px, profile starts at ${fit.profileLeft}px)`, JSON.stringify(fit))
+    } else {
+      expect(clear && fit.lockup >= 215,
+        `${label}: the entries fit between the full-size lockup and the profile (lockup ${fit.lockup}px, entries end at ${fit.navRight}px, profile starts at ${fit.profileLeft}px)`, JSON.stringify(fit))
+    }
+    await check(label, `frame-${role}${name ? '-long' : ''}-dark-1100`)
   }
   const errs = newConsoleErrors(from)
   expect(errs.length === 0, 'frame: no error in the browser console', errs.slice(0, 3).join(' || '))
@@ -467,6 +515,49 @@ if (wanted('signin')) {
   } else {
     gap('/admin/set-password with an invite', 'the login page never called Supabase, so its project is unknown')
   }
+  // Admin rebuild 2, D1: a sign-in Supabase says yes to opens the Dashboard,
+  // /admin. Supabase's yes is a made-up session given here; the address the
+  // page then opens is answered here with a page of one word, so no app code
+  // runs after it and nothing is asked of a real server. Every cookie the
+  // sign-in set is deleted after.
+  if (supabaseHost) {
+    const label = '/admin/login, a sign-in that goes through, 1280x720'
+    console.log(`\n${label}`)
+    const b64u = (s) => Buffer.from(s).toString('base64url')
+    const now = Math.floor(Date.now() / 1000)
+    const user = { id: '00000000-0000-4000-8000-000000000002', aud: 'authenticated', role: 'authenticated', email: 'team.member@example.com', app_metadata: {}, user_metadata: {}, created_at: new Date().toISOString() }
+    const jwt = [b64u(JSON.stringify({ alg: 'HS256', typ: 'JWT' })), b64u(JSON.stringify({ sub: user.id, email: user.email, exp: now + 3600, role: 'authenticated', aud: 'authenticated' })), b64u('not-a-signature')].join('.')
+    let landed = null
+    answerHere = (req) => {
+      const u = new URL(req.url())
+      if (u.pathname.endsWith('/auth/v1/token')) {
+        if (req.method() === 'OPTIONS') { req.respond({ status: 204, headers: CORS }); return true }
+        req.respond({ status: 200, headers: CORS, contentType: 'application/json',
+          body: JSON.stringify({ access_token: jwt, token_type: 'bearer', expires_in: 3600, expires_at: now + 3600, refresh_token: 'made-up-refresh-token', user }) })
+        return true
+      }
+      if (u.hostname.endsWith('.supabase.co')) { req.respond({ status: 503, headers: CORS, body: '' }); return true }
+      if (u.origin === ORIGIN && u.pathname === '/api/auth/me') { req.respond({ status: 401, contentType: 'application/json', body: '{"error":"Not a team member"}' }); return true }
+      if (u.origin === ORIGIN && req.isNavigationRequest() && u.pathname !== '/admin/login') {
+        landed = `${u.pathname}${u.search}`
+        req.respond({ status: 200, contentType: 'text/html', body: '<!doctype html><html lang="en"><head><title>Landed</title></head><body><p>Landed</p></body></html>' })
+        return true
+      }
+      return false
+    }
+    await go('/admin/login', [1280, 720])
+    await page.waitForSelector('#email')
+    await page.type('#email', user.email)
+    await page.type('#password', 'a-made-up-password')
+    await page.click('button[type="submit"]')
+    await page.waitForFunction(() => document.title === 'Landed', { timeout: 20000 }).catch(() => {})
+    expect(landed === '/admin', `${label}: it opens the Dashboard, /admin (it opened ${landed})`)
+    answerHere = null
+    const cookies = await page.cookies(ORIGIN)
+    if (cookies.length) await page.deleteCookie(...cookies)
+  } else {
+    gap('/admin/login, a sign-in that goes through', 'the login page never called Supabase, so its answer could not be given here')
+  }
   // The answers given here log in the console: the refusal's 400 from Supabase,
   // and the 401 for the made-up invite's /api/auth/me. Nothing else may.
   const errs = newConsoleErrors(from, [/status of 400 .*\/auth\/v1\/token/, /status of 401 .*\/api\/auth\/me\]$/])
@@ -475,324 +566,14 @@ if (wanted('signin')) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// today: /dev/admin/today
-// ════════════════════════════════════════════════════════════════════════════
-if (wanted('today')) {
-  const from = consoleErrors.length
-  const open = (query, size) => go(`/dev/admin/today${query}`, size)
-  const waitReady = () => page.waitForFunction(() => document.body.innerText.includes('to message'), { timeout: 30000 })
-  const row = (name) => page.evaluateHandle((n) => [...document.querySelectorAll('.list-row')].find((r) => r.querySelector('a')?.textContent === n) ?? null, name)
-  const hero = () => page.evaluate(() => {
-    const label = [...document.querySelectorAll('span')].find((s) => /^students? to message$/.test(s.textContent.trim()))
-    return label ? Number(label.previousElementSibling?.textContent) : null
-  })
-  const mainNames = () => page.evaluate(() => {
-    const details = [...document.querySelectorAll('details')]
-    return [...document.querySelectorAll('.list-row')].filter((r) => !details.some((d) => d.contains(r))).map((r) => r.querySelector('a')?.textContent)
-  })
-
-  for (const size of SIZES) {
-    const [w, h] = size
-    {
-      const label = `Today, full, ${w}x${h}`
-      console.log(`\n${label}`)
-      await open('', size)
-      await waitReady()
-      await check(label, `today-full-${w}`)
-      await openAllDetails()
-      await check(`${label}, folded groups and messages open`, `today-full-open-${w}`)
-    }
-    {
-      const label = `Today, empty, ${w}x${h}`
-      console.log(`\n${label}`)
-      await open('?state=empty', size)
-      await waitReady()
-      expect((await bodyText()).includes('Nobody needs a message right now.') && (await hero()) === 0, `${label}: "Nobody needs a message right now.", and the number is 0`)
-      await openAllDetails()
-      await check(label, `today-empty-${w}`)
-    }
-    {
-      const label = `Today, loading, ${w}x${h}`
-      console.log(`\n${label}`)
-      await open('?state=loading', size)
-      await page.waitForSelector('.animate-pulse')
-      expect((await page.$('.animate-spin')) === null, `${label}: skeleton rows, no spinner`)
-      await check(label, `today-loading-${w}`)
-    }
-    {
-      const label = `Today, error, ${w}x${h}`
-      console.log(`\n${label}`)
-      await open('?state=error', size)
-      await page.waitForSelector('[role="alert"]')
-      const t = await page.$eval('[role="alert"]', (e) => e.textContent)
-      expect(t.includes("Couldn't load Today's list.") && t.includes("Couldn't read everything Today needs") && t.includes('Retry'),
-        `${label}: the error sentence, the route's own words and Retry`, t)
-      await check(label, `today-error-${w}`)
-    }
-  }
-
-  console.log('\nToday: the list, as C3 to C8 and C12 to C14 put it')
-  {
-    await open('')
-    await waitReady()
-    const names = await mainNames()
-    expect(JSON.stringify(names) === JSON.stringify(['Mara Quinn', 'Owen Pratt', 'Lina Sorensen', 'Ravi Menon', 'Hugo Brandt', 'Nadia Kerr', 'Tom Ashby', 'Grace Liu', 'Maximiliana Featherstonehaugh-Wolstenholme', 'Felix Ward']),
-      'the most urgent reason first, the longest wait first; exempt, canceled, high churn, heartbeat, handled and other-plan members left out', names.join(', '))
-    expect((await hero()) === 10, 'the number: 10 students to message (the folded group and other plans outside it)', String(await hero()))
-    const body = await bodyText()
-    for (const s of ['Clicked cancel 2 days ago', 'Payment failed', '30% closes Thu 29 Oct, 10:00: 9 videos left (about',
-      'Can apply for the 30% now, until Tue 3 Nov, 10:00', 'No lesson for 8 days', 'Stalled', 'No lesson for 5 days', 'Slipping',
-      'No lesson on the new course yet (course day 9)', 'Paid 5 days ago, never opened the app', 'Joined yesterday: send the welcome message']) {
-      expect(body.includes(s), `C4's words: "${s}"`)
-    }
-    // Grace paid Thu 22 Oct at 11:00 in Croatia, 5 days and 23 hours before the page's clock: 5 whole days, not 6.
-    expect(!body.includes('Paid 6 days ago'), 'Never opened says the whole days that have passed, as the queue\'s own task does ("Paid 5 days ago")')
-    const tom = await row('Tom Ashby')
-    expect(await tom.evaluate((r) => r.textContent.includes('Also open in the Tasks queue since Mon 26 Oct. Marking this row closes it too.')
-      && !r.textContent.includes('(Day 7)')),
-      "a computed headline over an open queue task: the task's line says since when, without its old summary and its other day count")
-    const mara = await row('Mara Quinn')
-    expect(await mara.evaluate((r) => r.textContent.includes('Clicked cancel 2 days ago') && [...r.querySelectorAll('li')].some((li) => li.textContent === 'Payment failed')),
-      'two reasons on one student: the cancel as the headline, Payment failed as a chip')
-    expect(await mara.evaluate((r) => !!r.querySelector('a[href="https://discord.com/users/100000000000000201"]') && r.textContent.includes('Open in Discord')), 'C7: Open in Discord with the id')
-    expect(await mara.evaluate((r) => r.textContent.includes('Messaged Sat 24 Oct by Jamie, no reply')), 'C12: the last message, by whom, and the reply')
-    expect(await mara.evaluate((r) => r.textContent.includes('Course day 9') && r.textContent.includes('14 of 140 lessons') && r.textContent.includes('In Ad basics')
-      && r.textContent.includes('Last lesson Tue 27 Oct') && r.textContent.includes('Paid Sat 12 Sep')), 'C8: the course day, the lessons, the area, the last lesson, the first payment')
-    expect(await mara.evaluate((r) => r.textContent.includes('Message for this reason') && [...r.querySelectorAll('button')].some((b) => b.textContent === 'Copy message')),
-      "C6: the reason's own message, with Copy message")
-    const grace = await row('Grace Liu')
-    expect(await grace.evaluate((r) => r.textContent.includes('Copy @grace.liu') && r.textContent.includes('Whop progress not pulled yet')
-      && r.textContent.includes('Message from the Tasks queue') && r.textContent.includes('Marking this row closes it too')),
-      "Grace: Copy @name, the C14 chip, the open task's message, and that marking closes it")
-    expect(await grace.evaluate((r) => r.textContent.includes('30%: 0 of 61 videos, deadline Thu 5 Nov')), 'the 30% where no 30% reason says it')
-    expect(await (await row('Felix Ward')).evaluate((r) => r.textContent.includes('The message still has {bookingLink} in it.')), 'a variable that could not be filled in is named')
-    expect(await (await row('Nadia Kerr')).evaluate((r) => r.textContent.includes('No saved message for this reason yet. Write your own.') && ![...r.querySelectorAll('button')].some((b) => b.textContent === 'Copy message')),
-      'no message for the reason: nothing to copy (C6)')
-    expect(await (await row('Maximiliana Featherstonehaugh-Wolstenholme')).evaluate((r) => r.textContent.includes('No Discord linked') || r.textContent.includes('Copy @maximiliana.featherstonehaugh')),
-      'C7 on the longest name')
-    expect(body.includes('Whop progress not pulled yet (2)') && body.includes('Handled in the last 7 days ('), 'the folded group and Handled, both folded')
-    expect(body.includes('1 student on another plan is hidden. Choose All plans to see them.'), 'other plans hidden, and said so')
-    await openAllDetails()
-    const opened = await bodyText()
-    expect(opened.includes('Their Whop progress has not been copied into the app since the course switch, so lessons they watched on Whop do not count yet.'),
-      'the folded group says why in plain words')
-    expect(!opened.includes('Payment failed: Payment failed') && !opened.includes('Stopped: No lesson') && !/From the Tasks queue \(/.test(opened),
-      'Handled names each reason once, and a queue task without words by where it came from only')
-  }
-
-  console.log('\nToday: a phone\'s first screen, taps, focus')
-  {
-    await open('', [390, 844])
-    await waitReady()
-    const first = await page.evaluate(() => {
-      const r = document.querySelector('.list-row').getBoundingClientRect()
-      return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: innerHeight }
-    })
-    expect(first.bottom <= first.height, `390x844: the first student's whole row is on the first screen (it ends at ${first.bottom}px of ${first.height})`, JSON.stringify(first))
-    const chips = await page.$eval('[aria-label="Reasons"]', (g) => ({ h: Math.round(g.getBoundingClientRect().height), ox: getComputedStyle(g).overflowX }))
-    expect(chips.h <= 48 && chips.ox === 'auto', '390x844: the reason chips are one row that scrolls sideways in its own box', JSON.stringify(chips))
-    const refresh = await page.evaluate(() => {
-      const h1 = document.querySelector('h1').getBoundingClientRect()
-      const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Refresh').getBoundingClientRect()
-      return Math.abs((h1.top + h1.bottom) / 2 - (b.top + b.bottom) / 2) < 12
-    })
-    expect(refresh, '390x844: Refresh sits beside the title, not on a line of its own')
-    for (const size of SIZES) {
-      await viewport(size)
-      await sleep(150)
-      const small = await smallTaps()
-      expect(small.length === 0, `Today, ${size.join('x')}: every button, chip and link styled as one is 44px tall or more`, JSON.stringify(small.slice(0, 4)))
-    }
-    await viewport([1280, 720])
-    const meta = await page.evaluate(() => {
-      const p = [...document.querySelectorAll('header p')].find((x) => x.textContent.startsWith('Updated'))
-      return p ? getComputedStyle(p).fontSize : null
-    })
-    expect(meta === '12px', '"Updated 09:30" is 12px, the kit\'s floor for text that is not an eyebrow', String(meta))
-    await page.$eval('input[type="search"]', (i) => i.focus())
-    await page.keyboard.press('Tab')
-    const ring = await page.evaluate(() => {
-      const a = document.activeElement
-      const cs = getComputedStyle(a)
-      return { tag: a.tagName, color: cs.outlineColor, width: cs.outlineWidth, offset: cs.outlineOffset, scheme: getComputedStyle(a).colorScheme }
-    })
-    expect(ring.color === 'rgb(247, 246, 243)' && ring.width === '2px' && ring.offset === '2px' && ring.scheme === 'dark',
-      'keyboard focus is the kit\'s 2px Stalactite ring, 2px off, and the browser draws its controls in its dark scheme', JSON.stringify(ring))
-  }
-
-  console.log('\nToday: a mark low on the page, its notice in view')
-  {
-    for (const size of [[1440, 900], [390, 844]]) {
-      await open('', size)
-      await waitReady()
-      await press(await buttonIn(await row('Nadia Kerr'), 'Mark messaged'))
-      await page.waitForFunction(() => document.body.innerText.includes('Marked Nadia Kerr as messaged.'), { timeout: 10000 })
-      await settled()
-      const n = await page.evaluate(() => {
-        const el = [...document.querySelectorAll('[role="status"]')].find((x) => x.textContent.includes('Marked Nadia Kerr as messaged.'))
-        const r = el.getBoundingClientRect()
-        return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: innerHeight, scrollY: Math.round(scrollY), undo: [...el.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Undo') }
-      })
-      expect(n.scrollY > 0 && n.top >= 0 && n.bottom <= n.height && n.undo,
-        `${size.join('x')}: Mark messaged on the 6th row: the notice and its Undo are in the window, where the click was (scrolled ${n.scrollY}px)`, JSON.stringify(n))
-      await check(`Today, a mark low on the page, ${size.join('x')}`, `today-mark-low-${size[0]}`)
-    }
-  }
-
-  console.log('\nToday: Not needed cannot be saved while Mark messaged is on its way')
-  {
-    await open('')
-    await waitReady()
-    await press(await buttonIn(await row('Hugo Brandt'), 'Not needed'))
-    await page.waitForSelector('input[placeholder^="For example"]')
-    await page.type('input[placeholder^="For example"]', 'He is on holiday until Monday.')
-    const hugo = await row('Hugo Brandt')
-    await press(await buttonIn(hugo, 'Mark messaged'))
-    const saveOff = await (await buttonIn(hugo, 'Save as not needed')).evaluate((b) => b.disabled)
-    await page.waitForFunction(() => document.body.innerText.includes('Marked Hugo Brandt as messaged.'), { timeout: 10000 })
-    await settled()
-    expect(saveOff && (await calls()).filter((x) => x.name === 'mark').length === 1,
-      'one mark at a time: with Mark messaged on its way, Save as not needed is off, and only one call is made')
-  }
-
-  console.log('\nToday: chips, plans, search')
-  {
-    await open('')
-    await waitReady()
-    await press(await button('All plans'))
-    await sleep(150)
-    expect((await hero()) === 11 && (await mainNames()).includes('Leo Park'), 'All plans adds Leo, on another plan: 11')
-    await press(await page.evaluateHandle(() => [...document.querySelectorAll('[aria-label="Reasons"] button')].find((b) => b.textContent.startsWith('Stopped'))))
-    await sleep(150)
-    const stopped = await mainNames()
-    expect(JSON.stringify(stopped) === JSON.stringify(['Hugo Brandt', 'Leo Park', 'Nadia Kerr']) && (await hero()) === 3, 'the Stopped chip: 3, the longest wait first', stopped.join(', '))
-    await page.type('input[type="search"]', '@hugo')
-    await sleep(150)
-    expect(JSON.stringify(await mainNames()) === JSON.stringify(['Hugo Brandt']) && (await hero()) === 1, 'a search for @discord narrows it to one')
-    await page.click('input[type="search"]', { clickCount: 3 })
-    await page.type('input[type="search"]', 'nobody at all')
-    await sleep(150)
-    expect((await bodyText()).includes('No student matches the search and the filter.'), 'nothing matches: said so, with Show everyone')
-    for (const size of SIZES) {
-      await viewport(size)
-      await check(`Today, nothing matches, ${size.join('x')}`, `today-nomatch-${size[0]}`)
-    }
-    await viewport([1280, 720])
-    await press(await button('Show everyone'))
-    await sleep(150)
-    expect((await hero()) === 10, 'Show everyone: back to the default, 10')
-    await viewport([390, 844])
-    await check('Today, the filters, 390x844', 'today-filters-390')
-  }
-
-  console.log('\nToday: Mark messaged, then Undo from the notice')
-  {
-    await open('')
-    await waitReady()
-    await press(await buttonIn(await row('Tom Ashby'), 'Mark messaged'))
-    await page.waitForFunction(() => document.body.innerText.includes('Marked Tom Ashby as messaged.'), { timeout: 10000 })
-    await settled()
-    const mark = (await calls()).find((x) => x.name === 'mark')
-    expect(mark && mark.args[0].studentId === 't-tom' && mark.args[0].action === 'messaged' && mark.args[0].headlineKind === 'not_started'
-      && mark.args[0].reasonsText === 'No lesson on the new course yet (course day 9)' && JSON.stringify(mark.args[0].openTaskIds) === '["q-tom"]',
-      "one call: the headline's kind, every reason in words, and the open queue task", JSON.stringify(mark?.args[0]))
-    expect(!(await mainNames()).includes('Tom Ashby') && (await hero()) === 9, 'Tom leaves the list: 9')
-    for (const size of SIZES) {
-      await viewport(size)
-      await check(`Today, after a mark, ${size.join('x')}`, `today-after-mark-${size[0]}`)
-    }
-    await openAllDetails()
-    const handled = await bodyText()
-    expect(handled.includes('Tom Ashby') && /Messaged\s*Wed 28 Oct, 09:31 by Robin/.test(handled), 'Handled: Tom, messaged by Robin at 09:31')
-    for (const size of SIZES) {
-      await viewport(size)
-      await check(`Today, after a mark, Handled open, ${size.join('x')}`, `today-after-mark-handled-${size[0]}`)
-    }
-    await viewport([1280, 720])
-    await press(await button('Undo'))
-    await page.waitForFunction(() => document.body.innerText.includes('Undone. Tom Ashby is back on the list'), { timeout: 10000 })
-    await settled()
-    const undo = (await calls()).find((x) => x.name === 'undo')
-    expect(undo && undo.args[0].length === 2 && undo.args[0].includes('q-tom'), 'Undo sends the record and the queue task together', JSON.stringify(undo?.args))
-    expect((await mainNames()).includes('Tom Ashby') && (await hero()) === 10, 'Tom is back: 10')
-  }
-
-  console.log('\nToday: Not needed needs a reason')
-  {
-    await open('')
-    await waitReady()
-    await press(await buttonIn(await row('Hugo Brandt'), 'Not needed'))
-    await page.waitForSelector('input[placeholder^="For example"]')
-    const save = await buttonIn(await row('Hugo Brandt'), 'Save as not needed')
-    expect((await save.evaluate((b) => b.disabled)) && (await bodyText()).includes('Write a reason to save.'), 'Save is disabled, and says why beside it')
-    for (const size of SIZES) {
-      await viewport(size)
-      await check(`Today, the Not needed panel, ${size.join('x')}`, `today-notneeded-${size[0]}`)
-    }
-    await viewport([1280, 720])
-    await page.type('input[placeholder^="For example"]', 'He is on holiday until Monday.')
-    await press(await buttonIn(await row('Hugo Brandt'), 'Save as not needed'))
-    await page.waitForFunction(() => document.body.innerText.includes('Marked Hugo Brandt as not needed.'), { timeout: 10000 })
-    await settled()
-    const m = (await calls()).find((x) => x.name === 'mark')
-    expect(m?.args[0].action === 'not_needed' && m.args[0].note === 'He is on holiday until Monday.' && m.args[0].headlineKind === 'stopped', 'not_needed, with the reason', JSON.stringify(m?.args[0]))
-    await openAllDetails()
-    expect((await bodyText()).includes('Reason: He is on holiday until Monday.'), 'Handled shows the reason')
-  }
-
-  console.log('\nToday: Handled, with Replied / No reply and Undo on my own entries')
-  {
-    await open('')
-    await waitReady()
-    await openAllDetails()
-    const entries = await page.evaluate(() => {
-      const d = [...document.querySelectorAll('details')].find((x) => x.querySelector('summary')?.textContent.startsWith('Handled'))
-      return [...d.querySelectorAll('.list-row')].map((r) => ({
-        text: r.textContent.slice(0, 120),
-        undo: [...r.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Undo'),
-        replied: [...r.querySelectorAll('button')].some((b) => b.textContent.includes('Replied')),
-      }))
-    })
-    const cora = entries.find((g) => g.text.startsWith('Cora Diaz'))
-    const eli = entries.find((g) => g.text.startsWith('Eli Moreno'))
-    const bea = entries.find((g) => g.text.startsWith('Bea Holt'))
-    const app = entries.find((g) => g.text.startsWith('2 students'))
-    expect(cora?.undo && cora.replied, 'Cora, my mark 5 minutes ago: Undo, and Replied / No reply', JSON.stringify(cora))
-    expect(eli && !eli.undo && !eli.replied, 'Eli, my Not needed an hour ago: no Undo, no reply buttons')
-    expect(bea && !bea.undo && bea.replied, "Bea, Jamie's: Replied / No reply, no Undo")
-    expect(app && !app.undo && !app.replied && app.text.includes('by the app'), 'two tasks the app closed: one entry, by the app', JSON.stringify(app))
-    const beaRow = await page.evaluateHandle(() => [...document.querySelectorAll('.list-row')].find((r) => r.textContent.startsWith('Bea Holt')))
-    expect(await beaRow.evaluate((r) => [...r.querySelectorAll('button')].find((b) => b.textContent.includes('Replied')).getAttribute('aria-pressed') === 'true'),
-      "Bea's saved reply shows pressed")
-    await press(await buttonIn(beaRow, 'No reply'))
-    await sleep(800)
-    await settled()
-    const out = (await calls()).find((x) => x.name === 'setOutcome')
-    expect(out && out.args[0] === 'h-bea' && out.args[1] === 'no_reply', 'No reply goes to the outcome route for that task', JSON.stringify(out?.args))
-    await openAllDetails()
-    const coraRow = await page.evaluateHandle(() => [...document.querySelectorAll('.list-row')].find((r) => r.textContent.startsWith('Cora Diaz')))
-    await press(await buttonIn(coraRow, 'Undo'))
-    await page.waitForFunction(() => document.body.innerText.includes('Undone. Cora Diaz'), { timeout: 10000 })
-    await settled()
-    expect((await mainNames()).includes('Cora Diaz'), 'Undo from Handled: Cora is back on the list')
-    for (const size of SIZES) {
-      await viewport(size)
-      await check(`Today, after an Undo from Handled, ${size.join('x')}`, `today-after-undo-${size[0]}`)
-    }
-  }
-  const errs = newConsoleErrors(from)
-  expect(errs.length === 0, 'Today: no error in the browser console', errs.slice(0, 3).join(' || '))
-}
-
-// ════════════════════════════════════════════════════════════════════════════
 // thirty: /dev/admin/discounts
 // ════════════════════════════════════════════════════════════════════════════
 if (wanted('thirty')) {
   const from = consoleErrors.length
-  const TABS = ['decide', 'earn', 'approved', 'code-added', 'rejected']
+  // Can still earn and its Mark messaged went with Today (admin rebuild 2, D2).
+  const TABS = ['decide', 'approved', 'code-added', 'rejected']
   const EMPTY = {
     decide: 'No request is waiting for a decision.',
-    earn: 'Nobody can still earn the 30% right now.',
     approved: 'No code is waiting to be added in Whop.',
     'code-added': 'No code has been added in Whop yet.',
     rejected: 'No request has been rejected.',
@@ -829,9 +610,6 @@ if (wanted('thirty')) {
         `${label}: the row says there is no verdict, in words`)
       expect((await (await buttonIn(nina, 'Approve')).evaluate((b) => b.disabled)) && !(await isNull(await buttonIn(nina, 'Approve anyway'))), `${label}: Approve disabled, Approve anyway offered`)
       await check(label, `thirty-partial-decide-${w}`)
-      await press(await page.evaluateHandle(() => [...document.querySelectorAll('[role="tab"]')].find((t) => t.textContent.startsWith('Can still earn'))))
-      await page.waitForFunction(() => document.body.innerText.includes('1 member is left out of this list'))
-      await check(`30% off, one student unreadable, Can still earn, ${w}x${h}`, `thirty-partial-earn-${w}`)
     }
     {
       const label = `30% off, the videos unreadable, To decide, ${w}x${h}`
@@ -842,12 +620,6 @@ if (wanted('thirty')) {
       const verdicts = await page.$$eval('.list-row', (rs) => rs.map((r) => r.textContent.includes("Couldn't read this student's progress, so there is no verdict. Press Refresh to try again.")))
       expect(verdicts.length === 6 && verdicts.every(Boolean), `${label}: every pending row says there is no verdict, and to press Refresh`, JSON.stringify(verdicts))
       await check(label, `thirty-novideos-decide-${w}`)
-      await press(await page.evaluateHandle(() => [...document.querySelectorAll('[role="tab"]')].find((t) => t.textContent.startsWith('Can still earn'))))
-      await page.waitForFunction(() => document.body.innerText.includes('members are left out of this list'))
-      const earnText = await bodyText()
-      expect(earnText.includes('Nobody to show until the list can be read. Press Refresh.') && !earnText.includes('Nobody can still earn the 30% right now.'),
-        `${label.replace('To decide', 'Can still earn')}: under "left out", the empty list never says "nobody can still earn"`)
-      await check(label.replace('To decide', 'Can still earn'), `thirty-novideos-earn-${w}`)
     }
     {
       const label = `30% off, the tabs and taps, ${w}x${h}`
@@ -855,8 +627,8 @@ if (wanted('thirty')) {
       await open('?tab=decide', size)
       await waitReady()
       const tabs = await page.$$eval('[role="tab"]', (ts) => ts.map((t) => { const r = t.getBoundingClientRect(); return { left: r.left, right: r.right, h: r.height, width: innerWidth } }))
-      expect(tabs.length === 5 && tabs.every((t) => t.left >= 0 && t.right <= t.width && t.h >= 44),
-        `${label}: all five tabs whole in the window, 44px tall (they wrap on a phone)`, JSON.stringify(tabs.map((t) => Math.round(t.right))))
+      expect(tabs.length === 4 && tabs.every((t) => t.left >= 0 && t.right <= t.width && t.h >= 44),
+        `${label}: all four tabs whole in the window, 44px tall (they wrap on a phone)`, JSON.stringify(tabs.map((t) => Math.round(t.right))))
       const small = await smallTaps()
       expect(small.length === 0, `${label}: every button, tab and link styled as one is 44px tall or more`, JSON.stringify(small.slice(0, 4)))
       const order = await page.$$eval('.list-row', (rs) => rs.map((r) => r.querySelector('a')?.textContent))
@@ -930,7 +702,7 @@ if (wanted('thirty')) {
       && made.every((c) => c.name === 'loadThirty' || c.name === 'approve'),
       'Approve on Jonah: one approve call without override, and no other call before it', JSON.stringify(made.map((c) => c.name)))
     const counts = await tabCounts()
-    expect(counts[0] === 'To decide 5' && counts[2] === 'Approved 3', 'Jonah moves from To decide to Approved', counts.join(' | '))
+    expect(counts[0] === 'To decide 5' && counts[1] === 'Approved 3', 'Jonah moves from To decide to Approved', counts.join(' | '))
     for (const size of SIZES) {
       await viewport(size)
       await check(`30% off, after Approve on Jonah, ${size.join('x')}`, `thirty-decide-approved-${size[0]}`)
@@ -959,7 +731,7 @@ if (wanted('thirty')) {
     expect(after.some((c) => c.name === 'approve' && c.args[0] === 'r-priya' && c.args[1] === true), 'the second click sends approve with override', JSON.stringify(after.filter((c) => c.name === 'approve')))
     expect(after.filter((c) => c.name === 'loadThirty').length === 2, 'and the list is read again')
     const counts = await tabCounts()
-    expect(counts[0] === 'To decide 5' && counts[2] === 'Approved 3', 'Priya moves from To decide to Approved', counts.join(' | '))
+    expect(counts[0] === 'To decide 5' && counts[1] === 'Approved 3', 'Priya moves from To decide to Approved', counts.join(' | '))
     await check('30% off, after Approve anyway, 1280x720', 'thirty-after-override-1280')
   }
 
@@ -1052,7 +824,7 @@ if (wanted('thirty')) {
     }
   }
 
-  console.log('\n30% off: Mark code added, and Mark messaged')
+  console.log('\n30% off: Mark code added')
   {
     await open('?tab=approved')
     await waitReady()
@@ -1063,62 +835,14 @@ if (wanted('thirty')) {
     await page.waitForFunction(() => document.body.innerText.includes('Marked the code as added in Whop for Ethan Cole.'), { timeout: 10000 })
     await settled()
     const counts = await tabCounts()
-    expect(counts[2] === 'Approved 1' && counts[3] === 'Code added in Whop 3', 'Ethan moves to Code added in Whop', counts.join(' | '))
-
-    await open('?tab=earn')
-    await waitReady()
-    const order = await page.$$eval('.list-row', (rs) => rs.map((r) => r.querySelector('a')?.textContent))
-    expect(JSON.stringify(order) === JSON.stringify(['Theo Marsh', 'Dana Whitfield', 'Zoe Achterberg', 'Ava Lindgren', 'Iris Kowalski', 'Sam Taylor']),
-      'Can still earn: the soonest deadline first, then the fewest videos left; exempt and canceled members left out', order.join(', '))
-    const theo = await row('Theo Marsh')
-    expect(await theo.evaluate((r) => r.textContent.includes('Deadline Fri 23 Oct, 23:59 (Croatia time), 3 days left') && /50 of 61 videos done, 11 left \(about \d+ hours?\)/.test(r.textContent)
-      && r.textContent.includes('Messaged Fri 16 Oct by Jamie, replied')), 'Theo: the deadline and the time left, the videos left and the hours in words, the last message')
-    expect(await (await row('Dana Whitfield')).evaluate((r) => r.textContent.includes('Whop progress not pulled yet') && r.textContent.includes('No message yet')), 'Dana: the C14 chip, no message yet')
-    expect(await (await row('Iris Kowalski')).evaluate((r) => r.textContent.includes('All 61 videos done. Can apply for the 30% now.') && r.textContent.includes('Can apply now')
-      && r.textContent.includes('Messaged Mon 19 Oct by Robin, no reply yet')), 'Iris: ready, with the C12 line')
-    await press(await buttonIn(theo, 'Mark messaged'))
-    await page.waitForFunction(() => document.body.innerText.includes('Marked Theo Marsh as messaged.'), { timeout: 10000 })
-    await settled()
-    const mark = (await calls()).find((x) => x.name === 'mark')
-    expect(mark && mark.args[0].studentId === 'p-theo' && mark.args[0].action === 'messaged' && mark.args[0].headlineKind === 'thirty_closing'
-      && mark.args[0].reasonsText.startsWith('30% closes Fri 23 Oct, 23:59: 11 videos left (about'), "Mark messaged calls Today's mark route with thirty_closing and C4's words", JSON.stringify(mark?.args[0]))
-    expect(await (await row('Theo Marsh')).evaluate((r) => r.textContent.includes('Messaged Tue 20 Oct by Robin, no reply yet')), "after the reload Theo's last message is the new one")
-    await press(await buttonIn(await row('Iris Kowalski'), 'Mark messaged'))
-    await page.waitForFunction(() => document.body.innerText.includes('Marked Iris Kowalski as messaged.'), { timeout: 10000 })
-    await settled()
-    const iMark = (await calls()).filter((x) => x.name === 'mark')[1]
-    expect(iMark?.args[0].headlineKind === 'thirty_ready' && iMark.args[0].reasonsText === 'Can apply for the 30% now, until Wed 28 Oct, 10:00',
-      'a ready row marks thirty_ready with its words', JSON.stringify(iMark?.args[0]))
-    for (const size of SIZES) {
-      await viewport(size)
-      await check(`30% off, Can still earn after two marks, ${size.join('x')}`, `thirty-earn-marked-${size[0]}`)
-    }
-
-    // Ava has the queue's nolessons.day7 task open: the mark closes it with the same member and moment.
-    await viewport([1280, 720])
-    const ava = await row('Ava Lindgren')
-    expect(await ava.evaluate((r) => r.textContent.includes('Also open in the Tasks queue since Tue 20 Oct. Marking this row closes it too.')),
-      'Ava: her open task in the Tasks queue, and that marking her closes it')
-    await press(await buttonIn(ava, 'Mark messaged'))
-    await page.waitForFunction(() => document.body.innerText.includes('Marked Ava Lindgren as messaged.'), { timeout: 10000 })
-    await settled()
-    const aMark = (await calls()).filter((x) => x.name === 'mark')[2]
-    expect(JSON.stringify(aMark?.args[0].openTaskIds) === '["q-ava"]', "Mark messaged sends her open task, so the Tasks queue closes it too", JSON.stringify(aMark?.args[0]))
-    expect(!(await (await row('Ava Lindgren')).evaluate((r) => r.textContent.includes('Also open in the Tasks queue'))), 'after the reload her task is no longer open')
-    await check('30% off, Mark messaged with an open queue task, 1280x720', 'thirty-earn-ava-1280')
-    await press(await button('Undo'))
-    await page.waitForFunction(() => document.body.innerText.includes('Undone. Ava Lindgren is no longer marked as messaged.'), { timeout: 10000 })
-    await settled()
-    const undo = (await calls()).find((x) => x.name === 'undo')
-    expect(undo && undo.args[0].length === 2 && undo.args[0].includes('q-ava'), "the notice's Undo takes back the mark and reopens the queue task, as Today's does", JSON.stringify(undo?.args))
-    expect(await (await row('Ava Lindgren')).evaluate((r) => r.textContent.includes('Also open in the Tasks queue since Tue 20 Oct.')), 'her task is open again')
+    expect(counts[1] === 'Approved 1' && counts[2] === 'Code added in Whop 3', 'Ethan moves to Code added in Whop', counts.join(' | '))
   }
 
   console.log('\n30% off: ?student= keeps every tab to one student')
   {
     await open('?student=p-ethan')
     await waitReady()
-    expect(JSON.stringify(await tabCounts()) === JSON.stringify(['To decide 0', 'Can still earn 0', 'Approved 1', 'Code added in Whop 0', 'Rejected 0']),
+    expect(JSON.stringify(await tabCounts()) === JSON.stringify(['To decide 0', 'Approved 1', 'Code added in Whop 0', 'Rejected 0']),
       'Ethan: every tab counts him alone', (await tabCounts()).join(' | '))
     expect((await page.$eval('[role="tab"][aria-selected="true"]', (t) => t.textContent)).startsWith('Approved'), 'the first tab that has him opens')
     expect((await bodyText()).includes('Showing Ethan Cole only.'), 'the banner names him')
@@ -1135,10 +859,10 @@ if (wanted('thirty')) {
     await sleep(300)
     const all = await tabCounts()
     expect(all[0] === 'To decide 6' && !page.url().includes('student='), 'Show everyone: the filter goes, the tab stays', `${all.join(' | ')} ${page.url()}`)
-    await open('?student=p-maya&tab=earn')
+    await open('?student=p-maya&tab=approved')
     await waitReady()
-    const mayaEarn = await tabCounts()
-    expect(mayaEarn[0] === 'To decide 1' && (await bodyText()).includes('This student has nothing on this tab.'), '?tab= wins over the first tab with rows', mayaEarn.join(' | '))
+    const mayaCounts = await tabCounts()
+    expect(mayaCounts[0] === 'To decide 1' && (await bodyText()).includes('This student has nothing on this tab.'), '?tab= wins over the first tab with rows', mayaCounts.join(' | '))
   }
   const errs = newConsoleErrors(from)
   expect(errs.length === 0, '30% off: no error in the browser console', errs.slice(0, 3).join(' || '))

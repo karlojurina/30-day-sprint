@@ -1,9 +1,11 @@
 /**
- * Read + write the automated-Discord-send toggles.
+ * Read the automated-Discord-send toggles.
  *
  * All toggles live in admin_config (one row per switch, value =
- * "true" / "false" text). UI flips them at /admin/discord; the
- * cron routes call isDmEnabled() to short-circuit before sending.
+ * "true" / "false" text). The team sets them through PUT
+ * /api/admin/config (src/lib/admin/config-keys.ts, admin rebuild 2,
+ * D6); the cron routes call isDmEnabled() to short-circuit before
+ * sending.
  *
  * Seeded by migration 2026_v40_dm_pause_switches.sql — every
  * switch defaults to "false" so nothing fires until Karlo opts in.
@@ -11,8 +13,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-/** Stable keys. Adding a new switch? Update this union + the v40
- *  migration's INSERT + the /admin/discord settings UI. */
+/** Stable keys. Adding a new switch? Update this union + a migration's
+ *  INSERT + CONFIG_SWITCH_KEYS in src/lib/admin/config-keys.ts. */
 export type DmToggleKey =
   | "dms_master_enabled"
   | "day28_dm_enabled"
@@ -65,7 +67,10 @@ export async function readDmEnabled(
   };
 }
 
-/** Loads every switch's current value. Used by the settings UI. */
+/**
+ * Loads every switch's current value. No caller since the Discord test
+ * page went (admin rebuild 2); kept as the one reader of all 4.
+ */
 export async function readAllDmToggles(
   supabase: SupabaseClient,
 ): Promise<Record<DmToggleKey, boolean>> {
@@ -79,17 +84,4 @@ export async function readAllDmToggles(
   const out: Partial<Record<DmToggleKey, boolean>> = {};
   for (const k of ALL_KEYS) out[k] = byKey.get(k) === "true";
   return out as Record<DmToggleKey, boolean>;
-}
-
-/** Writes a single toggle. UI is the only caller. */
-export async function writeDmToggle(
-  supabase: SupabaseClient,
-  key: DmToggleKey,
-  value: boolean,
-): Promise<{ error: string | null }> {
-  const { error } = await supabase
-    .from("admin_config")
-    .update({ value: value ? "true" : "false" })
-    .eq("key", key);
-  return { error: error?.message ?? null };
 }

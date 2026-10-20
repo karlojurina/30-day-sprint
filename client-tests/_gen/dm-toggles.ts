@@ -54,15 +54,3 @@ export async function readAllDmToggles(
   for (const k of ALL_KEYS) out[k] = byKey.get(k) === "true";
   return out as Record<DmToggleKey, boolean>;
 }
-
-export async function writeDmToggle(
-  supabase: SupabaseClient,
-  key: DmToggleKey,
-  value: boolean,
-): Promise<{ error: string | null }> {
-  const { error } = await supabase
-    .from("admin_config")
-    .update({ value: value ? "true" : "false" })
-    .eq("key", key);
-  return { error: error?.message ?? null };
-}

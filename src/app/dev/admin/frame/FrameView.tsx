@@ -26,16 +26,23 @@ const MEMBERS = {
   admin: { full_name: "Robin Hale", role: "admin" },
 } as const;
 
+/** ?name=long: a made-up name longer than the profile's 180px, for any role. */
+const LONG_NAME = "Maximiliana Featherstonehaugh-Wolstenholme";
+
 export function FrameView({
   role,
   ground,
+  longName = false,
 }: {
   role: FrameRole;
   ground: FrameGround;
+  longName?: boolean;
 }) {
-  // The bar marks the page it sits over: Tasks keeps the light look, Today
-  // is a rebuilt page.
-  const pathname = ground === "dark" ? "/admin/today" : "/admin/tasks";
+  const member = longName ? { ...MEMBERS[role], full_name: LONG_NAME } : MEMBERS[role];
+  // The bar marks the page it sits over: Tasks keeps the light look for now,
+  // and the dark ground stands for the Dashboard (/admin), where signing in
+  // lands (admin rebuild 2, D1).
+  const pathname = ground === "dark" ? "/admin" : "/admin/tasks";
   return (
     <div
       className="flex flex-col min-h-screen"
@@ -43,7 +50,7 @@ export function FrameView({
       data-frame-ground={ground}
     >
       <AdminTopNav
-        member={MEMBERS[role]}
+        member={member}
         pathname={pathname}
         onSignOut={() => {}}
       />
@@ -98,7 +105,7 @@ function DarkPage() {
   return (
     <AdminPage>
       <PageHeader
-        title="Today"
+        title="Dashboard"
         meta="Updated 09:41"
         actions={<Button variant="raised">Refresh</Button>}
       />
@@ -143,7 +150,7 @@ function DarkPage() {
       </Section>
 
       <Card>
-        <EmptyState title="Nobody needs a message right now." />
+        <EmptyState title="Nothing to show yet." />
       </Card>
     </AdminPage>
   );
@@ -167,7 +174,7 @@ function SampleRow({
       <Pill tone={tone}>{reason}</Pill>
       <span style={{ flex: 1 }} />
       <Button variant="raised">Open in Discord</Button>
-      <Button variant="raised">Mark messaged</Button>
+      <Button variant="raised">Approve</Button>
     </div>
   );
 }

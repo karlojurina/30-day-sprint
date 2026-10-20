@@ -13,9 +13,9 @@ import { AdminPage, PageHeader, Card, Button, Pill, T } from "@/components/admin
  * blank white page with no message, no reload affordance, and nothing in the
  * UI to say what happened.
  *
- * Added alongside the Stats page (which parses JSON from an external API and
- * renders stored layout JSON), but it protects all 18 admin pages equally and
- * is worth having regardless of that feature.
+ * Added alongside the Stats page (v86, removed in admin rebuild 2), it
+ * protects every admin page equally. "Back to dashboard" goes to /admin,
+ * the Dashboard, where signing in lands too.
  */
 export default function AdminError({
   error,
@@ -34,7 +34,7 @@ export default function AdminError({
     <AdminPage>
       <PageHeader
         title="Something broke on this page"
-        description="The rest of the admin area is unaffected — this page failed to render."
+        description="The rest of the admin area still works. Only this page failed to render."
       />
       <Card padding={16}>
         <div className="flex items-center" style={{ gap: 10, marginBottom: 12 }}>

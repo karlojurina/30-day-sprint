@@ -7,9 +7,11 @@ import { FrameView, type FrameGround, type FrameRole } from "./FrameView";
  *   ?role=founder | csm | admin   whose bar (default founder); each role sees
  *                                 the entries its flags allow
  *   ?ground=light | dark          the page under the bar (default light): one
- *                                 of the pages that keep the light look, or a
- *                                 page in the dark look, both built from
- *                                 ui.tsx pieces
+ *                                 of the pages that keep the light look, or
+ *                                 the Dashboard in the dark look, both built
+ *                                 from ui.tsx pieces
+ *   ?name=long                    the member's name longer than the profile's
+ *                                 180px, for the bar's narrowest wide width
  *
  * Under 1100px wide the bar shows one Menu button; click it to see the list.
  */
@@ -35,6 +37,7 @@ export default async function AdminFramePage({
     <FrameView
       role={pick(params.role, ROLES, "founder")}
       ground={pick(params.ground, GROUNDS, "light")}
+      longName={params.name === "long"}
     />
   );
 }

@@ -214,10 +214,11 @@ export function videosLeftText(left: number): string {
 export type ThirtyReasonKind = "thirty_closing" | "thirty_ready";
 
 /**
- * C4's words for the two 30% reasons, which Today shows and a mark records
- * (behavior_summary): "30% closes Fri 23 Oct, 23:59: 4 videos left (about
- * 1 h)" and "Can apply for the 30% now, until Fri 23 Oct, 23:59". One place,
- * so Today and the 30% page record the same sentence.
+ * C4's words for the two 30% reasons: "30% closes Fri 23 Oct, 23:59: 4
+ * videos left (about 1 h)" and "Can apply for the 30% now, until Fri 23 Oct,
+ * 23:59". Today showed them and Mark messaged recorded them; both went in
+ * admin rebuild 2, so no page calls this now (thirty-view.test.mjs still
+ * checks its words).
  */
 export function thirtyReasonText(kind: ThirtyReasonKind, facts: Facts): string {
   const until = facts.deadline ? dayTimeLabel(facts.deadline) : "";

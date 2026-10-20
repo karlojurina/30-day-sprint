@@ -5,10 +5,10 @@ import tokens from "@/components/admin/admin-tokens.module.css";
 
 /**
  * The <main> of the dev admin pages. Each page under /dev/admin stands in for
- * a page rebuilt in the dark look (Today, 30% off), so it gets the token
- * class, as the real layout gives it to those pages. The one exception is
- * /dev/admin/frame: it shows the bar above a light page as well, so it lays
- * out its own grounds.
+ * a page rebuilt in the dark look (30% off, and each lane's page of admin
+ * rebuild 2), so it gets the token class, as the real layout gives it to
+ * those pages. The one exception is /dev/admin/frame: it shows the bar above
+ * a light page as well, so it lays out its own grounds.
  */
 export function DevAdminMain({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

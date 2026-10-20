@@ -4,6 +4,7 @@ import { AdminTopNav } from "@/components/admin/AdminTopNav";
 import tokens from "@/components/admin/admin-tokens.module.css";
 import { TeamGuard } from "@/components/auth/TeamGuard";
 import { useAuth } from "@/contexts/AuthContext";
+import { isRebuiltPage } from "@/lib/admin/admin-frame";
 import { usePathname } from "next/navigation";
 // v75.51: AdminScopeProvider + ScopeToggle removed. Every admin
 // surface is now LAUNCH COHORT only. Pre-launch customers stay out
@@ -19,14 +20,23 @@ import { usePathname } from "next/navigation";
  * PRD, call C1) get the token class on <main>, which paints them dark from
  * the bar to the bottom of the window. The bar carries the token class on
  * its own header, so it is dark over every page.
+ *
+ * REBUILT_PAGES: each address covers its page and the pages under it, except
+ * "/admin" (the Dashboard), which covers itself only (isRebuiltPage,
+ * src/lib/admin/admin-frame.ts). Each lane of admin rebuild 2 adds its pages
+ * under its own line, so the lanes' additions merge without touching.
  */
-const REBUILT_PAGES = ["/admin/today", "/admin/discounts"];
+const REBUILT_PAGES: readonly string[] = [
+  "/admin/discounts",
 
-function isRebuiltPage(pathname: string): boolean {
-  return REBUILT_PAGES.some(
-    (p) => pathname === p || pathname.startsWith(`${p}/`),
-  );
-}
+  // WI-2, Dashboard:
+
+  // WI-5 and WI-6, Tasks, All students, student detail, Student journey:
+
+  // WI-7, Lesson feedback:
+
+  // WI-8 and WI-9, Templates, Survey, Team, Insights:
+];
 
 export default function AdminLayout({
   children,
@@ -35,7 +45,7 @@ export default function AdminLayout({
 }) {
   const pathname = usePathname();
   const { teamMember, signOut } = useAuth();
-  const mainClass = isRebuiltPage(pathname)
+  const mainClass = isRebuiltPage(pathname, REBUILT_PAGES)
     ? `flex-1 overflow-auto ${tokens.tokens}`
     : "flex-1 overflow-auto";
   return (

@@ -902,7 +902,8 @@ export async function GET(request: NextRequest) {
 
   // ─── 4. Team Discord summary ──────────────────────────────
   // Task generation above always runs (writes to DB only). Only the
-  // public summary post is gated — controlled from /admin/discord.
+  // public summary post is gated, by csm_task_summary_enabled in
+  // admin_config (set through PUT /api/admin/config).
 
   let discordPosted: boolean | null = null;
   if (createdCount > 0) {

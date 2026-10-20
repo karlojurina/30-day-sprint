@@ -1,6 +1,7 @@
 /**
  * The 30% for every student at once: the reads behind the admin's 30% page
- * (GET /api/admin/thirty) and the 30% reasons on Today.
+ * (GET /api/admin/thirty). Today, which read them too, was removed in admin
+ * rebuild 2.
  *
  * The student app judges one student from five reads (loadDiscountReads in
  * discount-server.ts). Five reads for each of about 300 students would be
@@ -124,7 +125,7 @@ export interface ThirtyAnswer {
   answer_text: string | null;
 }
 
-/** A completed task: a message the team sent, from Today or from the Tasks queue. */
+/** A completed task: a message the team sent, from the Tasks queue or a record Today wrote before it was removed. */
 export interface ThirtyContact {
   student_id: string;
   scenario_id: string;
@@ -135,8 +136,8 @@ export interface ThirtyContact {
 
 /**
  * An open task in the Tasks queue of a member who can still earn the 30%.
- * Mark messaged on the 30% page closes it with the same actor and moment, as
- * Today's mark does, so Tasks and Today never disagree about the student.
+ * Mark messaged closed it from the 30% page until admin rebuild 2 removed
+ * that button with Today; the answer still carries it.
  */
 export interface ThirtyOpenTask {
   id: string;

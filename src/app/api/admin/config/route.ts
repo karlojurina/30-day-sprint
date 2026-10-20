@@ -3,11 +3,17 @@
  * PUT  /api/admin/config         — update a single row by key (founder/admin only)
  *
  * Body for PUT: { key: string, value: string }
+ *
+ * PUT writes only the 6 keys of src/lib/admin/config-keys.ts (admin rebuild
+ * 2, D6): the 2 message links and the 4 Discord switches, a switch only as
+ * "true" or "false". Every other key is refused with a 400 and nothing is
+ * written.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
 import { CURRICULUM_RESET_KEY } from "@/lib/curriculum-reset";
+import { configWriteError } from "@/lib/admin/config-keys";
 
 export async function GET(request: NextRequest) {
   const auth = await requireTeam(request);
@@ -31,7 +37,7 @@ export async function PUT(request: NextRequest) {
 
   const body = await request.json().catch(() => null);
   const key = typeof body?.key === "string" ? body.key.trim() : "";
-  const value = typeof body?.value === "string" ? body.value : "";
+  const value: unknown = body?.value;
 
   if (!key) {
     return NextResponse.json({ error: "Missing key" }, { status: 400 });
@@ -44,6 +50,10 @@ export async function PUT(request: NextRequest) {
       { status: 400 },
     );
   }
+  const refused = configWriteError(key, value);
+  if (refused) {
+    return NextResponse.json({ error: refused }, { status: 400 });
+  }
 
   const { data, error } = await auth.supabase
     .from("admin_config")
@@ -54,11 +64,15 @@ export async function PUT(request: NextRequest) {
     })
     .eq("key", key)
     .select()
-    .single();
+    .maybeSingle();
 
-  if (error || !data) {
+  if (error) {
+    console.error("[admin/config] update failed", key, error.message);
+    return NextResponse.json({ error: "Couldn't save the setting. Try again." }, { status: 500 });
+  }
+  if (!data) {
     return NextResponse.json(
-      { error: error?.message ?? "Config key not found" },
+      { error: "This setting has no row in the database, so nothing was saved." },
       { status: 404 },
     );
   }

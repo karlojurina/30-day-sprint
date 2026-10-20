@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 
   const supabase = createServiceClient();
 
-  // Pause gate — controlled from /admin/discord. Default off.
+  // Pause gate: day28_dm_enabled in admin_config. Default off.
   if (!(await isDmEnabled(supabase, "day28_dm_enabled"))) {
     await logCronFinish(runId, "success", { rowsAffected: 0 });
     return NextResponse.json({ paused: true, checked: 0, sent: 0 });

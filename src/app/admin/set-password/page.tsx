@@ -12,8 +12,8 @@
  *   1. Page mounts, reads supabase.auth.getSession()
  *   2. If no session: tell them the link expired or send to /admin/login
  *   3. If session: show password + confirm fields
- *   4. On submit: supabase.auth.updateUser({ password }) → /admin/today,
- *      where signing in lands too (admin rebuild PRD, call C2)
+ *   4. On submit: supabase.auth.updateUser({ password }) → /admin, the
+ *      Dashboard, where signing in lands too (admin rebuild 2, D1)
  *
  * v75.4 - new with the team-management invite flow.
  *
@@ -25,6 +25,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@/components/admin/ui";
 import tokens from "@/components/admin/admin-tokens.module.css";
+import { ADMIN_HOME } from "@/lib/admin/admin-frame";
 import { createClient } from "@/lib/supabase-browser";
 
 export default function SetPasswordPage() {
@@ -75,7 +76,7 @@ export default function SetPasswordPage() {
       setLoading(false);
       return;
     }
-    window.location.href = "/admin/today";
+    window.location.href = ADMIN_HOME;
   }
 
   return (

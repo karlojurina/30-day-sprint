@@ -14,7 +14,9 @@ import {
  * Approve a pending discount request.
  *
  * Flow (one click for Astrid):
- *   1. Validate eligibility (R1+R2 done within window, ad submissions verified)
+ *   1. Validate eligibility: the course's 30% rule, below. Since 2026-10-20
+ *      the ads are not checked (Lovro's decision: the 30% already asks for
+ *      61 videos), so students.ad_submissions_verified decides nothing here.
  *   2. Call Whop API to generate a 30%-off, 1-month, single-use promo code
  *   3. Store promo_code + whop_promo_id + status='approved' on our row
  *   4. Return the code so the admin UI can show it for copy-paste
@@ -55,7 +57,7 @@ export async function POST(request: NextRequest) {
   const { requestId, override } = body as {
     requestId?: string;
     // v77: team can force-approve past the eligibility gates
-    // (ad-verification, missing first_paid_at, R1+R2 completion, window).
+    // (missing first_paid_at, R1+R2 completion, window).
     // The admin reviews every application manually and is the control —
     // surfaced as the "Generate anyway" button in the admin UI.
     override?: boolean;
@@ -84,7 +86,7 @@ export async function POST(request: NextRequest) {
 
   const { data: studentRow } = await supabase
     .from("students")
-    .select("id, joined_at, first_paid_at, ad_submissions_verified")
+    .select("id, joined_at, first_paid_at")
     .eq("id", discountReq.student_id)
     .single();
 
@@ -226,20 +228,6 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-  }
-
-  // After the rule, so the team first reads a refusal over the first payment
-  // or the videos: Generate anyway skips every check, and someone who saw
-  // only this refusal could press it for a student the rule turns away (the
-  // release review, 17 October).
-  if (!override && !studentRow.ad_submissions_verified) {
-    return NextResponse.json(
-      {
-        error:
-          "Ad submissions not verified yet. Tick the verification flag on the student's detail page first.",
-      },
-      { status: 400 }
-    );
   }
 
   if (override) {

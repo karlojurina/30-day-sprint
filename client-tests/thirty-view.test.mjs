@@ -26,7 +26,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { loadThirtyData } from './_gen/thirty-data.ts'
 import {
-  VERDICT_TEXT, aboutHours, aboutHoursWords, buildThirtyView, judgeRequest, studentAppView, thirtyReasonText, verdictWithAds, videosLeftText, whopPulled,
+  VERDICT_TEXT, aboutHours, aboutHoursWords, buildThirtyView, judgeRequest, studentAppView, thirtyReasonText, videosLeftText, whopPulled,
 } from './_gen/thirty-view.ts'
 import { approvalVerdict, explainOldCourseRequest, factsFromReads, loadDiscountReads, videoDoneIds } from './_gen/discount-server.ts'
 import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_SHARED_DEADLINE, discountState, requiredLessons } from './_gen/discount.ts'
@@ -124,7 +124,7 @@ function world(f, at, { shuffle = 7, videos } = {}) {
 const main = fixtures()
 {
   const { person, watched, request } = main
-  // A: shared window (first payment 2 Oct), all 61 done, pending, ads verified.
+  // A: shared window (first payment 2 Oct), all 61 done, pending, the ads ticked (since 2026-10-20 the tick decides nothing).
   // Two action items among the 61: one handed in with its Discord link, one only watched.
   person('s-a', 'Ana Example', '2026-10-02T10:00:00.000Z', {
     ad_submissions_verified: true, discord_user_id: '100000000000000001', discord_username: 'ana.example',
@@ -187,7 +187,7 @@ const main = fixtures()
   person('s-m', 'Mo Example', '2026-10-07T10:00:00.000Z', { csm_exempt: true })
   watched('s-m', REQUIRED.slice(0, 10), FROM_WHOP)
   // The rule's other answers. N: no first payment on file. P: a second request after a rejected one.
-  // Q: asked two days after the deadline. R: everything done, the ads not verified.
+  // Q: asked two days after the deadline. R: everything done, the ads never ticked.
   person('s-n', 'Ny Example', null)
   request('s-n', 'r-n', '2026-10-20T09:00:00.000Z')
   person('s-p', 'Pe Example', '2026-10-03T11:00:00.000Z', { ad_submissions_verified: true })
@@ -289,10 +289,10 @@ async function bothWays(db, nowIso, { load = loadThirtyData, skip = new Set(), r
     const jb = approve(data.reads.get(r.student.id), now, r)
     const jp = approve(per.get(r.student.id), now, r)
     if (!isDeepStrictEqual(jb, jp)) differences.push(`${r.id} verdict`)
-    // The page's verdict is that answer, then the ads check.
+    // The page's verdict is that answer alone: no ads check since 2026-10-20 (Lovro).
     const rule = jp.said
-    const reason = rule.ok ? (r.student.adsVerified ? null : 'ads') : rule.status === 500 ? 'read-failed' : (rule.reason ?? 'unknown')
-    if (r.verdict.ok !== (rule.ok && r.student.adsVerified) || r.verdict.reason !== reason
+    const reason = rule.ok ? null : rule.status === 500 ? 'read-failed' : (rule.reason ?? 'unknown')
+    if (r.verdict.ok !== rule.ok || r.verdict.reason !== reason
         || r.verdict.oldCourse !== (!jp.raw.ok && rule.error !== jp.raw.error)) {
       differences.push(`${r.id} the page's verdict`)
     }
@@ -319,7 +319,7 @@ const earning = (view, id) => view.canStillEarn.find((r) => r.student.id === id)
 /** "The verdict says yes exactly when the shown count is full", but for the two refusals about how the request was made. */
 function countMatchesVerdict(view) {
   return view.requests.filter((r) => r.status === 'pending' && !['late-request', 'another-request'].includes(r.verdict.reason))
-    .filter((r) => (r.verdict.ok || r.verdict.reason === 'ads') !== (r.facts.videosTotal > 0 && r.facts.videosDone === r.facts.videosTotal))
+    .filter((r) => r.verdict.ok !== (r.facts.videosTotal > 0 && r.facts.videosDone === r.facts.videosTotal))
     .map((r) => r.id)
 }
 
@@ -385,8 +385,8 @@ ok(!W.data.students.some((s) => s.id === 's-e') && W.data.students.some((s) => s
      'A: the survey answers in the questions\' order, the scale as a number', show(a.answers))
   ok(show(a.student) === show({
     id: 's-a', name: 'Ana Example', email: 's-a@example.com', discord: { userId: '100000000000000001', username: 'ana.example' },
-    plan: 'Monthly', status: 'active', csmExempt: false, adsVerified: true, whopPulled: true,
-  }), 'A: the student as the row shows them', show(a.student))
+    plan: 'Monthly', status: 'active', csmExempt: false, whopPulled: true,
+  }), 'A: the student as the row shows them, with no ads tick (2026-10-20)', show(a.student))
 }
 {
   const b = earning(wv, 's-b')
@@ -437,8 +437,8 @@ ok(app(W.per.get('s-m'), new Date(WED)).kind === 'locked' && !earning(wv, 's-m')
 ok(request(wv, 'r-n').verdict.reason === 'no-payment' && request(wv, 'r-n').verdict.text === VERDICT_TEXT.noPayment, 'no first payment on file: the verdict says so')
 ok(request(wv, 'r-p2').verdict.reason === 'another-request' && request(wv, 'r-p2').facts.videosDone === 61,
    'a second request after a rejected one: refused as another request, every video done')
-ok(request(wv, 'r-r').verdict.reason === 'ads' && !request(wv, 'r-r').verdict.ok && request(wv, 'r-r').verdict.text === VERDICT_TEXT.ads,
-   'every video done, ads not verified: the rule says yes, the verdict waits for the ads tick')
+ok(request(wv, 'r-r').verdict.ok && request(wv, 'r-r').verdict.reason === null && request(wv, 'r-r').verdict.text === VERDICT_TEXT.yes,
+   'R: every video done, the ads never ticked: the verdict is yes, as the rule says (it waited for the ads tick until 2026-10-20)', show(request(wv, 'r-r').verdict))
 {
   const t = request(wv, 'r-t')
   const u = request(wv, 'r-u')
@@ -719,23 +719,32 @@ console.log('\n=== The controls: the same checks on loaders that read completion
 }
 
 // ── What the 30% page adds (work item 3) ───────────────────────────────────
-console.log('\n=== The 30% page: the ads tick redone on the page, C4\'s words ===')
+console.log('\n=== The 30% page: no ads tick since 2026-10-20 (Lovro), C4\'s words ===')
 {
-  // After "Ads verified" is saved the page redoes the ads check itself
-  // (verdictWithAds) instead of reading every student again. It must land
-  // where the builder would, for every pending request, ticked or not.
-  const loaded = await loadThirtyData(fakeClient(world(main, WED)))
-  const pending = loaded.data.requests.filter((r) => r.status === 'pending')
-  const wrong = []
-  for (const r of pending) {
-    const reads = loaded.data.reads.get(r.student_id)
-    const off = judgeRequest(reads, new Date(WED), r, RESET, false).verdict
-    const on = judgeRequest(reads, new Date(WED), r, RESET, true).verdict
-    if (!isDeepStrictEqual(verdictWithAds(off, true), on)) wrong.push(`${r.id} ticked`)
-    if (!isDeepStrictEqual(verdictWithAds(on, false), off)) wrong.push(`${r.id} unticked`)
-  }
-  ok(pending.length >= 5 && wrong.length === 0,
-     `the tick redone on the page equals the builder's verdict, both ways, for all ${pending.length} pending requests`, wrong.join(', '))
+  // Approve opens on the rule's yes alone: students.ad_submissions_verified is
+  // not read, so the same database with every student's tick flipped builds
+  // the very same answer, and every pending verdict is the rule's.
+  const kept = world(main, WED)
+  const flipped = world(main, WED)
+  for (const s of flipped.rows('students')) s.ad_submissions_verified = s.ad_submissions_verified !== true
+  const ticks = (db) => db.rows('students').map((s) => s.ad_submissions_verified === true)
+  const a = await loadThirtyData(fakeClient(kept))
+  const b = await loadThirtyData(fakeClient(flipped))
+  const va = buildThirtyView(a.data, new Date(WED), RESET)
+  const vb = buildThirtyView(b.data, new Date(WED), RESET)
+  const pending = va.requests.filter((r) => r.status === 'pending')
+  ok(ticks(kept).some(Boolean) && ticks(kept).some((t) => !t) && ticks(kept).every((t, i) => t !== ticks(flipped)[i]),
+     'the fixtures hold ticked and unticked students, and the second database has every tick the other way')
+  ok(a.ok && b.ok && isDeepStrictEqual(va, vb) && pending.length >= 5,
+     `every tick flipped: the same answer, all ${pending.length} pending verdicts and Can still earn included`)
+  const notRule = pending.filter((r) => r.verdict.ok !== approve(a.data.reads.get(r.student.id), new Date(WED), r).said.ok
+    || r.verdict.ok !== judgeRequest(a.data.reads.get(r.student.id), new Date(WED), { id: r.id, created_at: r.askedAt }, RESET).verdict.ok)
+  ok(notRule.length === 0 && pending.some((r) => r.verdict.ok) && pending.some((r) => !r.verdict.ok),
+     'every pending verdict says yes exactly when the rule does (yes and no both among them)', notRule.map((r) => r.id).join(', '))
+  const sent = show(va)
+  ok(!sent.includes('adsVerified') && !sent.includes('ad_submissions') && !/\bads (are )?(not )?verified|Ads verified/i.test(sent),
+     'the answer carries no ads tick and no sentence about one')
+  ok(Object.values(VERDICT_TEXT).every((t) => !/\bads?\b/i.test(t)), 'no verdict sentence mentions the ads', show(Object.keys(VERDICT_TEXT)))
 }
 {
   const shared = { deadline: DISCOUNT_SHARED_DEADLINE, videosDone: 57, videosTotal: 61, secondsLeft: 2400 }

@@ -15,10 +15,10 @@ import type { ReasonKind, TodayView } from "@/lib/admin/support-list";
  * at with no login and no database.
  *
  * The 30% page's half (work item 3): its read, the three discount routes,
- * the ads tick, and Today's mark route, which "Mark messaged" on Can still
- * earn calls, with its Undo. Today's half (work item 4): its read, the mark
- * route's POST and DELETE (Undo), and the task outcome route (Replied / No
- * reply).
+ * and Today's mark route, which "Mark messaged" on Can still earn calls,
+ * with its Undo. The ads tick's call went with the tick (2026-10-20).
+ * Today's half (work item 4): its read, the mark route's POST and DELETE
+ * (Undo), and the task outcome route (Replied / No reply).
  *
  * No call throws. Every answer is `{ ok: true, data }` or `{ ok: false,
  * error }`, where `error` is a sentence the page can show: the route's own
@@ -57,14 +57,12 @@ export interface MarkAnswer {
 export interface ThirtyTransport {
   /** GET /api/admin/thirty. */
   loadThirty(): Promise<Answer<ThirtyView>>;
-  /** POST /api/discounts/approve. `override` is "Approve anyway": it skips the 30% rule and the ads check. */
+  /** POST /api/discounts/approve. `override` is "Approve anyway": it skips the 30% rule. */
   approve(requestId: string, override: boolean): Promise<Answer<{ promoCode: string | null }>>;
   /** POST /api/discounts/reject. The student sees the reason. */
   reject(requestId: string, reason: string | null): Promise<Answer<null>>;
   /** POST /api/discounts/mark-applied: the code is on the student's membership in Whop. */
   markApplied(requestId: string): Promise<Answer<null>>;
-  /** POST /api/admin/verify-ad-submissions: the "Ads verified" tick. */
-  verifyAds(studentId: string, verified: boolean): Promise<Answer<{ verified: boolean }>>;
   /** POST /api/admin/today/mark. */
   mark(body: MarkBody): Promise<Answer<MarkAnswer>>;
   /** DELETE /api/admin/today/mark: the Undo beside Mark messaged's notice. */
@@ -179,14 +177,6 @@ export const adminTransport: ThirtyTransport & TodayTransport = {
       appliedBy: me,
     }));
     return r.ok ? { ...r, data: null } : r;
-  },
-
-  async verifyAds(studentId, verified) {
-    const r = await send<{ verified?: boolean }>("POST", "/api/admin/verify-ad-submissions", () => ({
-      studentId,
-      verified,
-    }));
-    return r.ok ? { ...r, data: { verified: r.data?.verified ?? verified } } : r;
   },
 
   mark: (body) => send<MarkAnswer>("POST", "/api/admin/today/mark", () => body),

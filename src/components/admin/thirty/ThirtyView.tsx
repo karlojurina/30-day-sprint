@@ -26,11 +26,10 @@ import { adminTransport } from "@/lib/admin/admin-transport";
 import type { Answer, ThirtyTransport, UndoResult } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel, deadlineLabel } from "@/lib/admin/croatia-dates";
 import { MARKED_OTHERWISE } from "@/lib/admin/support-list";
-import { aboutHoursWords, thirtyReasonText, verdictWithAds } from "@/lib/admin/thirty-view";
+import { aboutHoursWords, thirtyReasonText } from "@/lib/admin/thirty-view";
 import type {
   Facts,
   StudentBrief,
-  Submission,
   TeamRef,
   ThirtyEarnRow,
   ThirtyRequestRow,
@@ -51,9 +50,11 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * routes.
  *
  * A pending request shows the approve route's verdict beside Approve, which
- * opens only when the rule says yes and the ads are verified. "Approve
- * anyway" asks once more, inline, then sends the approval with `override`,
- * which skips the 30% rule and the ads check (C9).
+ * opens exactly when the rule says yes. "Approve anyway" asks once more,
+ * inline, then sends the approval with `override`, which skips the 30% rule
+ * (C9). Since 2026-10-20 a row has no "Ads verified" tick and no action
+ * items' hand-ins (C10 kept them as the tick's evidence): Lovro dropped the
+ * ads check from approving, since the 30% already asks for 61 videos.
  *
  * What a decision did shows in a fixed place at the bottom of the window
  * (NoticeStack, list-parts.tsx), where it is seen however far down the row
@@ -152,7 +153,6 @@ function decisionError(kind: "approve" | "reject" | "applied", r: { status: numb
   if (r.status === 409) return r.error;
   if (r.status === 404) return "This request no longer exists.";
   if (kind === "approve" && r.status === 400) {
-    if (/^ad submissions not verified/i.test(r.error)) return "Not approved: the ads are not verified. Tick Ads verified first.";
     if (/already processed/i.test(r.error)) return "This request was already decided.";
     return "Not approved: the 30% rule says no for this request now. Its row shows why.";
   }
@@ -265,26 +265,6 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
     setAddress(next);
   }
 
-  /** The ads tick was saved: every row of the student follows, and a pending verdict redoes its ads check. */
-  function applyAds(studentId: string, verified: boolean) {
-    setLoaded((cur) => {
-      if (cur.kind !== "ready") return cur;
-      const withAds = (s: StudentBrief) => (s.id === studentId ? { ...s, adsVerified: verified } : s);
-      return {
-        kind: "ready",
-        data: {
-          ...cur.data,
-          requests: cur.data.requests.map((r) =>
-            r.student.id !== studentId
-              ? r
-              : { ...r, student: withAds(r.student), verdict: r.verdict ? verdictWithAds(r.verdict, verified) : null },
-          ),
-          canStillEarn: cur.data.canStillEarn.map((e) => ({ ...e, student: withAds(e.student) })),
-        },
-      };
-    });
-  }
-
   async function refused(kind: "approve" | "reject" | "applied", row: ThirtyRequestRow, r: { status: number; error: string }): RowResult {
     const text = decisionError(kind, r);
     if (!listIsStale(kind, r.status)) return text;
@@ -325,13 +305,6 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
     lock(row.id);
     show({ tone: "success", text: `Marked the code as added in Whop for ${studentName(row.student)}.` });
     await reload();
-    return null;
-  }
-
-  async function verifyAds(s: StudentBrief, verified: boolean): RowResult {
-    const r = await transport.verifyAds(s.id, verified);
-    if (!r.ok) return r.error;
-    applyAds(s.id, r.data.verified);
     return null;
   }
 
@@ -530,7 +503,6 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
                     stale={stale}
                     onApprove={approve}
                     onReject={reject}
-                    onVerifyAds={verifyAds}
                   />
                 ) : (
                   <DecidedRow
@@ -566,13 +538,6 @@ const PANEL: React.CSSProperties = {
   borderRadius: "var(--radius-control)",
   background: "var(--color-bg-elevated)",
   border: "1px solid var(--color-border)",
-};
-
-const LINK: React.CSSProperties = {
-  color: "var(--color-accent-dark)",
-  textDecoration: "underline",
-  textUnderlineOffset: 3,
-  fontWeight: 500,
 };
 
 const ERROR_TEXT: React.CSSProperties = {
@@ -723,15 +688,14 @@ function requestFacts(row: ThirtyRequestRow): string[] {
   ];
 }
 
-/** The verdict's colour: green yes, orange for the ads alone, red when the rule says no, grey for no verdict. */
+/** The verdict's colour: green yes, red when the rule says no, grey for no verdict. */
 function verdictColor(v: Verdict): string {
   if (v.ok) return "var(--color-success)";
-  if (v.reason === "ads") return "var(--color-warning)";
   if (v.reason === "read-failed" || v.reason === "unknown") return "var(--color-neutral)";
   return "var(--color-danger)";
 }
 
-/** A pending request: the facts, the verdict beside Approve, the ads tick, Approve anyway, Reject, the evidence. */
+/** A pending request: the facts, the verdict beside Approve, Approve anyway, Reject, the survey answers. */
 function PendingRow({
   row,
   questions,
@@ -739,7 +703,6 @@ function PendingRow({
   stale,
   onApprove,
   onReject,
-  onVerifyAds,
 }: {
   row: ThirtyRequestRow;
   questions: ThirtyPayload["questions"];
@@ -748,9 +711,8 @@ function PendingRow({
   stale: boolean;
   onApprove: (row: ThirtyRequestRow, override: boolean) => RowResult;
   onReject: (row: ThirtyRequestRow, reason: string | null) => RowResult;
-  onVerifyAds: (student: StudentBrief, verified: boolean) => RowResult;
 }) {
-  const [busy, setBusy] = useState<null | "approve" | "override" | "reject" | "ads">(null);
+  const [busy, setBusy] = useState<null | "approve" | "override" | "reject">(null);
   const [confirm, setConfirm] = useState<null | "override" | "reject">(null);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -772,7 +734,6 @@ function PendingRow({
     else setConfirm(null);
   }
 
-  const verdictText = verdict.reason === "ads" ? `${verdict.text} Tick Ads verified first.` : verdict.text;
   // A rejection the app counts: the student's map shows it and offers no new request (discount.ts, requestCounts).
   const rejectionCounts = requestCounts({ status: "rejected", created_at: row.askedAt }, row.facts.firstPaidAt);
 
@@ -782,35 +743,6 @@ function PendingRow({
       <FactsLine parts={requestFacts(row)} />
 
       <div className="flex flex-wrap items-center" style={{ gap: 10 }}>
-        <label
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-            minHeight: TAP,
-            padding: "0 14px",
-            borderRadius: "var(--radius-pill)",
-            border: "1px solid var(--color-border)",
-            background: "var(--color-bg-elevated)",
-            color: "var(--color-text-primary)",
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: off ? (busy ? "wait" : "not-allowed") : "pointer",
-            whiteSpace: "nowrap",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={row.student.adsVerified}
-            disabled={off}
-            onChange={(e) => {
-              const verified = e.target.checked;
-              void run("ads", () => onVerifyAds(row.student, verified));
-            }}
-            style={{ width: 16, height: 16, margin: 0, accentColor: "var(--color-accent-dark)" }}
-          />
-          Ads verified
-        </label>
         <Button
           variant="raised"
           size="md"
@@ -822,7 +754,7 @@ function PendingRow({
         </Button>
         <p style={{ display: "flex", gap: 8, alignItems: "flex-start", flex: "1 1 240px", minWidth: 0 }}>
           <Dot color={verdictColor(verdict)} />
-          <span style={{ ...T.body, lineHeight: 1.5 }}>{verdictText}</span>
+          <span style={{ ...T.body, lineHeight: 1.5 }}>{verdict.text}</span>
         </p>
         <div className="flex flex-wrap" style={{ gap: 8 }}>
           {!verdict.ok && (
@@ -851,7 +783,7 @@ function PendingRow({
       {confirm === "override" && (
         <div style={PANEL}>
           <p style={{ ...T.body, lineHeight: 1.5 }}>
-            Approve anyway skips the 30% rule and the ads check, and creates the student&apos;s Whop code now.
+            Approve anyway skips the 30% rule and creates the student&apos;s Whop code now.
           </p>
           <div className="flex flex-wrap" style={{ gap: 8 }}>
             <Button
@@ -884,7 +816,7 @@ function PendingRow({
             }}
             maxLength={500}
             autoFocus
-            placeholder="For example: the ads were not handed in"
+            placeholder="For example: not every video was done by the deadline"
             style={{
               width: "100%",
               height: TAP,
@@ -927,38 +859,7 @@ function PendingRow({
         </p>
       )}
 
-      <Submissions list={row.submissions} />
       <Answers answers={row.answers} questions={questions} />
-    </div>
-  );
-}
-
-/** The action items with their hand-ins (C10): the evidence for the ads tick. */
-function Submissions({ list }: { list: Submission[] | null }) {
-  return (
-    <div style={PANEL}>
-      <p style={T.eyebrow}>Action items</p>
-      {list === null ? (
-        <p style={T.bodyDim}>Couldn&apos;t read the action items.</p>
-      ) : list.length === 0 ? (
-        <p style={T.bodyDim}>No action item started yet.</p>
-      ) : (
-        <ul style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {list.map((s) => (
-            <li key={s.lessonId} className="flex flex-wrap items-baseline justify-between" style={{ gap: "4px 12px" }}>
-              <span style={{ ...T.body, overflowWrap: "anywhere" }}>{s.title}</span>
-              <span className="flex flex-wrap items-baseline" style={{ ...T.bodyDim, gap: 10 }}>
-                <span>{s.handedIn ? "Handed in" : "Not handed in yet"}</span>
-                {s.link && (
-                  <a href={s.link} target="_blank" rel="noopener noreferrer" style={LINK}>
-                    Open the post
-                  </a>
-                )}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
     </div>
   );
 }

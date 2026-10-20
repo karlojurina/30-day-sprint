@@ -9,6 +9,8 @@
 //   The admin PRD review (2026-10-19): who approved, rejected or marked a
 //   request applied is the logged-in team member, never what the browser
 //   sends, and the routes' refusals are plain sentences with no em dash.
+//   Lovro, 2026-10-20: Approve no longer checks the ads tick
+//   (students.ad_submissions_verified); the 30% rule alone decides.
 //
 // The routes run as they are. This file copies each one into _gen/ with only
 // its import lines rewritten, as build.mjs and discount-queue.test.mjs do: the
@@ -163,6 +165,7 @@ function tab(source, routes, { answer = null, teamMember = { id: 'team-1' } } = 
  * default, the old course, whose rule needs only these two lessons done in
  * the 14 days: the shortest way to a request the rule approves. What these
  * checks are about, the route's last write, is the same on both courses.
+ * The ads are ticked for the routes at BASE, which still refuse without it.
  */
 function freshDb(requests) {
   const db = new FakeDb({
@@ -290,7 +293,7 @@ for (const v of ['now', 'old']) {
   // A CSM is logged in; the page in their browser sends another id,
   // as a stale or edited page could. Her login decides what is recorded.
   // Three students, one pending request each (v106 allows no more): r3's
-  // ads are not verified, so only Generate anyway approves it.
+  // student has done no lesson, so only Generate anyway approves it.
   const db = freshDb([{ id: 'r1', status: 'pending' }, { id: 'r2', status: 'pending' }, { id: 'r3', status: 'pending' }])
   for (const [i, sid, verified] of [[1, 'c0000000-0000-4000-8000-000000000003', true], [2, 'b0000000-0000-4000-8000-000000000002', false]]) {
     db.rows('discount_requests')[i].student_id = sid
@@ -329,18 +332,35 @@ for (const v of ['now', 'old']) {
     ok(said.includes('—'), `control: at ${BASE} that refusal carries an em dash`, said)
   }
 }
+console.log('\n=== Lovro, 2026-10-20: no ads check on Approve, the 30% rule alone decides ===')
 for (const v of ['now', 'old']) {
+  // Both lessons done in time (the rule says yes), the ads never ticked.
   const db = freshDb([{ id: 'r1', status: 'pending' }])
   db.rows('students')[0].ad_submissions_verified = false
+  const codes = promoCodes.length
   const t = tab(page[v], routes(v))
   await t.approve('r1')
+  const r = row(db, 'r1')
   const said = t.seen.errors.r1 ?? ''
   if (v === 'now') {
-    ok(row(db, 'r1').status === 'pending' && said === "Ad submissions not verified yet. Tick the verification flag on the student's detail page first.",
-       'Approve with the ads not verified: refused in plain sentences, still pending', said)
+    ok(r.status === 'approved' && r.promo_code === 'ECOM30-A1B2C3' && promoCodes.length === codes + 1 && said === '' && t.seen.reloads === 1,
+       'Approve, the rule saying yes and the ads never ticked: approved, one code, no refusal, the list reloads', show({ status: r.status, code: r.promo_code, said }))
   } else {
-    ok(said.includes('—'), `control: at ${BASE} that refusal carries an em dash`, said)
+    ok(r.status === 'pending' && promoCodes.length === codes && said.startsWith('Ad submissions not verified yet') && said.includes('—'),
+       `control: at ${BASE} the route refused it over the ads, in a sentence with an em dash: still pending, no code`, said)
   }
+}
+for (const verified of [false, true]) {
+  // The rule says no (l002 never done): refused, ticked or not.
+  const db = freshDb([{ id: 'r1', status: 'pending' }])
+  db.rows('students')[0].ad_submissions_verified = verified
+  db.tables.student_lesson_completions = db.rows('student_lesson_completions').filter((c) => c.lesson_id !== 'l002')
+  const codes = promoCodes.length
+  const t = tab(page.now, routes('now'))
+  await t.approve('r1')
+  const said = t.seen.errors.r1 ?? ''
+  ok(row(db, 'r1').status === 'pending' && promoCodes.length === codes && said === 'Student has not completed all required R1 + R2 lessons',
+     `Approve, the rule saying no, the ads ${verified ? 'ticked' : 'never ticked'}: refused over the lessons, still pending, no code`, said)
 }
 /** Every string and template text in a file's code (comments left out). */
 function stringsIn(source) {

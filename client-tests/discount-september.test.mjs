@@ -9,7 +9,8 @@
 // visit runs (watch-sync.ts), the Whop webhook, both routes that write a
 // request, and approvalVerdict over the reads loadDiscountReads makes, which is what
 // POST /api/discounts/approve runs on the new course (the route also needs a
-// team login, the ads tick and Whop's promo code, none of which is the rule).
+// team login and Whop's promo code, neither of which is the rule; the ads tick
+// it also needed went on 2026-10-20, Lovro's decision).
 // Since 2026-10-17 the approve route itself runs too, in the section that says
 // so (a founder's login and Whop's promo code standing in), and so does the
 // data route behind every student page, for what it sends of a request.
@@ -471,8 +472,10 @@ console.log('\n=== A request the app\'s Apply could not have made: Approve refus
 console.log('\n=== The approve button itself, POST /api/discounts/approve (2026-10-17) ===')
 {
   // The real route on the stand-in database: a founder's login, the switch's
-  // date read from admin_config, the rule, the ads tick, then Whop's promo
-  // code (a stand-in that records what it is asked for) and the row's update.
+  // date read from admin_config, the rule, then Whop's promo code (a stand-in
+  // that records what it is asked for) and the row's update. Since 2026-10-20
+  // no ads tick: `switched` still sets students.ad_submissions_verified, to
+  // show it decides nothing.
   const RESET = '2026-10-19T05:00:00.000Z'
   const OLD = '2026-10-06T10:00:00.000Z'
   const switched = (db, adsVerified) => {
@@ -524,30 +527,46 @@ console.log('\n=== The approve button itself, POST /api/discounts/approve (2026-
        '51 of them in from Whop: the count says 10 still missing', part.body.error)
   }
   {
-    // A first payment before 1 October with the ads not ticked: until this
-    // round the ads refusal came first, and Generate anyway on it would have
-    // given the 30% without the team ever reading why the rule refuses.
+    // A first payment before 1 October with the ads not ticked: the rule
+    // refuses it over the first payment (the ads refusal that once came first
+    // is gone since 2026-10-20), and Generate anyway still skips every check.
     const WEEKEND = '2026-10-17T10:00:00.000Z'
     const db = switched(freshDb('2026-08-15T10:00:00.000Z', [{ id: 'wk', status: 'pending', created_at: WEEKEND }]), false)
     const r = await press(db, 'wk', '2026-10-20T09:00:00.000Z')
     ok(r.status === 400 && r.body.error === "Cannot approve: the student's first payment (2026-08-15T10:00:00.000Z) is before October 1, 2026. Only a first payment from then on can earn the discount."
          && r.codes === 0 && r.row.status === 'pending',
-       'paid 15 August, ads not verified: the team reads the first-payment refusal, not the ads one', r.body.error)
+       'paid 15 August, the ads never ticked: the rule says no, so Approve refuses it over the first payment, no code, still pending', r.body.error)
     const anyway = await press(db, 'wk', '2026-10-20T09:05:00.000Z', true)
     ok(anyway.status === 200 && anyway.codes === 1 && anyway.row.status === 'approved',
        'Generate anyway still skips every check, as it always did (MORNING.md step 4 tells the team not to press it there)', show(anyway.body))
   }
   {
+    // Lovro, 2026-10-20: no ads check. Ready on the new map, the ads never
+    // ticked: the normal button approves it (it refused over the ads before).
     const db = switched(freshDb(OCT_2), false)
     onWhop(REQUIRED)
     await at('2026-10-19T07:30:00.000Z', backfill)
     const sent = await at('2026-10-20T10:00:00.000Z', apply)
     const r = await press(db, sent.body.id, '2026-10-21T09:00:00.000Z')
-    ok(sent.status === 200 && r.status === 400 && r.body.error.startsWith('Ad submissions not verified yet') && r.codes === 0,
-       'ready on the new map, ads not verified: the ads refusal still stops the normal button', r.body.error)
+    ok(sent.status === 200 && r.status === 200 && r.body.success === true && r.codes === 1 && r.row.status === 'approved'
+         && r.row.promo_code === r.body.promoCode && db.rows('students')[0].ad_submissions_verified === false,
+       'ready on the new map, the ads never ticked: Approve approves it and makes one code', show(r.body))
+  }
+  {
+    // And the rule still decides: 60 of the 61 videos in, the ads never ticked,
+    // a request made after the switch (straight in the table: the map's Apply
+    // would not offer it). Refused over the videos, no code, still pending.
+    const db = switched(freshDb(OCT_2, [{ id: 'part', status: 'pending', created_at: '2026-10-20T10:00:00.000Z' }]), false)
+    onWhop(REQUIRED.slice(0, 60))
+    await at('2026-10-19T07:30:00.000Z', backfill)
+    const r = await press(db, 'part', '2026-10-21T09:00:00.000Z')
+    ok(r.status === 400 && r.body.error.startsWith('Student has not watched every video up to the discount checkpoint')
+         && r.body.error.endsWith('1 of 61 still missing.') && r.codes === 0 && r.row.status === 'pending',
+       '60 of 61 videos, the ads never ticked: the rule says no, so Approve refuses it, no code, still pending', r.body.error)
     db.rows('students')[0].ad_submissions_verified = true
-    const ticked = await press(db, sent.body.id, '2026-10-21T09:05:00.000Z')
-    ok(ticked.status === 200 && ticked.codes === 1 && ticked.row.status === 'approved', 'ticked: approved, one code', show(ticked.body))
+    const ticked = await press(db, 'part', '2026-10-21T09:05:00.000Z')
+    ok(ticked.status === 400 && ticked.body.error === r.body.error && ticked.codes === 0 && ticked.row.status === 'pending',
+       'the same with the ads ticked: the same refusal, word for word (the tick decides nothing)', ticked.body.error)
   }
   {
     const db = switched(freshDb(OCT_2, [{ id: 'old', status: 'pending', created_at: OLD }]), true)

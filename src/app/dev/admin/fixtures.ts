@@ -141,7 +141,6 @@ interface Person {
   plan: string | null;
   status?: string;
   exempt?: boolean;
-  adsVerified?: boolean;
   paid: string | null;
   /** The last Whop backfill. Left out: one after the switch. null: none ever. */
   synced?: string | null;
@@ -200,16 +199,16 @@ interface FixtureDb {
 function fullDb(): FixtureDb {
   return {
     people: [
-      // To decide: the rule says yes and the ads are verified.
+      // To decide: the rule says yes.
       {
         id: "p-maya", name: "Maya Lindqvist", discordUserId: "100000000000000101", discordUsername: "maya.lq",
-        plan: MONTHLY, adsVerified: true, paid: "2026-10-01T09:00:00.000Z", done: 61,
+        plan: MONTHLY, paid: "2026-10-01T09:00:00.000Z", done: 61,
         handIns: {
           v20: { handedIn: true, link: "https://discord.com/channels/100000000000000001/100000000000000002/100000000000000003" },
           v40: { handedIn: false },
         },
       },
-      // To decide: the rule says yes, the ads are not verified.
+      // To decide: the rule says yes, on a yearly plan, reached by @name only.
       {
         id: "p-jonah", name: "Jonah Pereira", discordUsername: "jonah_p", plan: YEARLY,
         paid: "2026-10-12T15:00:00.000Z", done: 61, doneAt: "2026-10-19T20:00:00.000Z",
@@ -223,15 +222,15 @@ function fullDb(): FixtureDb {
       { id: "p-leo", name: "Leo Hartmann", discordUserId: "100000000000000105", plan: OTHER, status: "canceled", paid: "2026-09-15T10:00:00.000Z", done: 61 },
       // To decide: a second request after a rejected one (and a long name).
       {
-        id: "p-max", name: "Maximilian Featherstonehaugh-Smythe", discordUsername: "max.fs", plan: MONTHLY, adsVerified: true,
+        id: "p-max", name: "Maximilian Featherstonehaugh-Smythe", discordUsername: "max.fs", plan: MONTHLY,
         paid: "2026-10-09T10:00:00.000Z", done: 61, doneAt: "2026-10-17T09:00:00.000Z",
       },
       // Approved.
-      { id: "p-ethan", name: "Ethan Cole", discordUserId: "100000000000000107", discordUsername: "ethan.cole", plan: MONTHLY, adsVerified: true, paid: "2026-10-02T09:00:00.000Z", done: 61 },
-      { id: "p-nora", name: "Nora Brandt", discordUsername: "nora.b", plan: YEARLY, adsVerified: true, paid: "2026-10-10T12:00:00.000Z", done: 61 },
+      { id: "p-ethan", name: "Ethan Cole", discordUserId: "100000000000000107", discordUsername: "ethan.cole", plan: MONTHLY, paid: "2026-10-02T09:00:00.000Z", done: 61 },
+      { id: "p-nora", name: "Nora Brandt", discordUsername: "nora.b", plan: YEARLY, paid: "2026-10-10T12:00:00.000Z", done: 61 },
       // Code added in Whop.
-      { id: "p-omar", name: "Omar Haddad", discordUserId: "100000000000000109", plan: MONTHLY, adsVerified: true, paid: "2026-10-01T12:00:00.000Z", done: 61 },
-      { id: "p-lena", name: "Lena Vogel", discordUsername: "lena.v", plan: MONTHLY, status: "past_due", adsVerified: true, paid: "2026-10-04T08:00:00.000Z", done: 61 },
+      { id: "p-omar", name: "Omar Haddad", discordUserId: "100000000000000109", plan: MONTHLY, paid: "2026-10-01T12:00:00.000Z", done: 61 },
+      { id: "p-lena", name: "Lena Vogel", discordUsername: "lena.v", plan: MONTHLY, status: "past_due", paid: "2026-10-04T08:00:00.000Z", done: 61 },
       // Rejected.
       { id: "p-ruby", name: "Ruby Okafor", discordUsername: "ruby.ok", plan: MONTHLY, paid: "2026-10-11T09:00:00.000Z", done: 30 },
       { id: "p-felix", name: "Felix Moreau", plan: MONTHLY, paid: "2026-10-06T09:00:00.000Z", done: 20 },
@@ -371,7 +370,6 @@ function toData(db: FixtureDb, videosFail = false): ThirtyData {
       whop_plan_id: p.plan,
       membership_status: p.status ?? "active",
       csm_exempt: p.exempt ?? false,
-      ad_submissions_verified: p.adsVerified ?? false,
       first_paid_at: p.paid,
     }))
     .sort(byId);
@@ -473,7 +471,7 @@ export function parseFixtureState(value: string | null): FixtureState {
 
 /** One call the page made, for world-tests to read (window.__adminCalls on the dev page). */
 export interface FixtureCall {
-  name: "loadThirty" | "approve" | "reject" | "markApplied" | "verifyAds" | "mark" | "loadToday" | "undo" | "setOutcome";
+  name: "loadThirty" | "approve" | "reject" | "markApplied" | "mark" | "loadToday" | "undo" | "setOutcome";
   args: unknown[];
 }
 
@@ -546,14 +544,7 @@ export function fixtureThirtyTransport(opts: {
       if (!override) {
         const verdict = view().requests.find((r) => r.id === id)?.verdict;
         if (!verdict?.ok) {
-          return later<{ promoCode: string | null }>({
-            ok: false,
-            status: 400,
-            error:
-              verdict?.reason === "ads"
-                ? "Ad submissions not verified yet. Tick the verification flag on the student's detail page first."
-                : "Cannot approve: the rule says no.",
-          });
+          return later<{ promoCode: string | null }>({ ok: false, status: 400, error: "Cannot approve: the rule says no." });
         }
       }
       Object.assign(a, { status: "approved", promoCode: codeFor(a.studentId), reviewedAt: at(), reviewedBy: ME });
@@ -587,14 +578,6 @@ export function fixtureThirtyTransport(opts: {
       }
       Object.assign(a, { status: "applied", appliedAt: at(), appliedBy: ME });
       return later<null>({ ok: true, status: 200, data: null });
-    },
-
-    verifyAds(studentId, verified) {
-      calls.push({ name: "verifyAds", args: [studentId, verified] });
-      const p = db.people.find((x) => x.id === studentId);
-      if (!p) return later<{ verified: boolean }>({ ok: false, status: 404, error: "Student not found" });
-      p.adsVerified = verified;
-      return later({ ok: true, status: 200, data: { verified } });
     },
 
     mark(body: MarkBody) {

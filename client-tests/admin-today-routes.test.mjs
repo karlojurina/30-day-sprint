@@ -115,9 +115,10 @@ function freshDb() {
     // The Tella id is on the row; the route must never send it.
     lesson_videos: Object.keys(lengths).map((lesson_id) => ({ lesson_id, created_at: LOADED, tella_video_id: `tella-${lesson_id}` })),
     students: [
-      // Every video done, a request waiting, the ads verified: Approve would approve it.
+      // Every video done, a request waiting, the ads never ticked: Approve would approve it
+      // (no ads check since 2026-10-20, Lovro's decision).
       person('s-yes', 'Ana Example', '2026-10-02T10:00:00.000Z', {
-        ad_submissions_verified: true, discord_user_id: '100000000000000001', discord_username: 'ana.example',
+        ad_submissions_verified: false, discord_user_id: '100000000000000001', discord_username: 'ana.example',
       }),
       // 50 of the videos, no request: can still earn it.
       person('s-earn', 'Bo Example', '2026-10-03T10:00:00.000Z', { discord_username: 'bo.example' }),
@@ -188,10 +189,10 @@ console.log('\n=== The answer is the builder\'s, at the same moment ===')
   ok(body.requiredCount === 61, 'the 61 videos up to the checkpoint', String(body.requiredCount))
 
   const yes = body.requests.find((x) => x.id === 'r-yes')
-  ok(yes?.verdict?.ok === true && yes.verdict.text === VERDICT_TEXT.yes, 'every video done, ads verified: the verdict says yes', show(yes?.verdict))
+  ok(yes?.verdict?.ok === true && yes.verdict.text === VERDICT_TEXT.yes, 'every video done, the ads never ticked: the verdict says yes', show(yes?.verdict))
   ok(yes?.facts.videosDone === 61 && yes?.facts.videosTotal === 61, 'with its count, 61 of 61', `${yes?.facts.videosDone} of ${yes?.facts.videosTotal}`)
-  ok(yes?.student.discord.userId === '100000000000000001' && yes?.student.plan === 'Monthly' && yes?.student.adsVerified === true,
-     'the student brief: Discord id, plan, ads tick', show(yes?.student))
+  ok(yes?.student.discord.userId === '100000000000000001' && yes?.student.plan === 'Monthly' && yes !== undefined && !('adsVerified' in yes.student),
+     'the student brief: Discord id, plan, and no ads tick (2026-10-20)', show(yes?.student))
   ok(isDeepStrictEqual(yes?.answers, [{ questionId: 'q1', answer: 9 }]), 'the survey answer is on the row', show(yes?.answers))
   const old = body.requests.find((x) => x.id === 'r-old')
   ok(old?.verdict?.ok === false && old.verdict.reason === 'before-launch', 'a first payment before 1 October: the verdict says no, and why', show(old?.verdict))

@@ -4,9 +4,9 @@
  *
  * Every request the page lists, each with the student's facts, and for a
  * pending one the approve route's own verdict (approvalVerdict, then
- * explainOldCourseRequest, then the ads check), its action items and its
- * survey answers; and everyone who can still earn the 30% before their
- * deadline. loadThirtyData (src/lib/admin/thirty-data.ts) reads it all at
+ * explainOldCourseRequest; no ads check since 2026-10-20), its action items
+ * (no page shows them since then) and its survey answers; and everyone who
+ * can still earn the 30% before their deadline. loadThirtyData (src/lib/admin/thirty-data.ts) reads it all at
  * once, paged; buildThirtyView (thirty-view.ts) runs the student app's own
  * rule over it. Neither changes the rule.
  *

@@ -5,9 +5,11 @@
  *
  * A pending request is judged the way POST /api/discounts/approve judges it
  * on the new course: approvalVerdict, then explainOldCourseRequest for a
- * request made before the switch, then the ads check (admin rebuild PRD, C9).
- * The page shows its own fixed sentence for each answer (VERDICT_TEXT): the
- * route's error texts name a button the page no longer has.
+ * request made before the switch (admin rebuild PRD, C9). The ads check that
+ * came after them is gone since 2026-10-20 (Lovro's decision), from the route
+ * and from here. The page shows its own fixed sentence for each answer
+ * (VERDICT_TEXT): the route's error texts name a button the page no longer
+ * has.
  *
  * Every other row, and Can still earn, reads discountState as the student
  * app computes it: the request routes' call (decideDiscountRequest), with
@@ -56,7 +58,6 @@ export interface StudentBrief {
   /** membership_status: active, past_due, canceled or expired. */
   status: string;
   csmExempt: boolean;
-  adsVerified: boolean;
   /** A Whop backfill ran since the switch (student_whop_sync.last_sync_at at or after curriculum_reset_at). */
   whopPulled: boolean;
 }
@@ -82,11 +83,10 @@ export interface Facts {
 
 /**
  * Why a request may not be approved. ApprovalRefusal's reasons are the
- * rule's; "ads": the rule says yes and the ads are not verified;
- * "read-failed": the student's progress could not be read; "unknown": the
- * rule gave no reason (it cannot, today).
+ * rule's; "read-failed": the student's progress could not be read;
+ * "unknown": the rule gave no reason (it cannot, today).
  */
-export type VerdictReason = ApprovalRefusal | "ads" | "read-failed" | "unknown";
+export type VerdictReason = ApprovalRefusal | "read-failed" | "unknown";
 
 export interface Verdict {
   /** Approve would approve it now. */
@@ -128,7 +128,11 @@ export interface ThirtyRequestRow {
   facts: Facts;
   /** Pending rows only. */
   verdict: Verdict | null;
-  /** Pending rows only; null there too when the completions could not be read. */
+  /**
+   * Pending rows only; null there too when the completions could not be read.
+   * No page shows it since 2026-10-20: it was the evidence for the ads tick
+   * (C10), which went with the ads check.
+   */
   submissions: Submission[] | null;
   /** The survey answers, in the questions' order. A number for a scale question. */
   answers: Array<{ questionId: string; answer: string | number | null }>;
@@ -174,7 +178,6 @@ const ELIGIBLE_DAY = dayLabel(DISCOUNT_ELIGIBLE_FROM);
 /** The sentences the page shows for a verdict. Plain words, no em dash: the team reads them as they are. */
 export const VERDICT_TEXT = {
   yes: "Every video up to the checkpoint was done in time.",
-  ads: "Every video up to the checkpoint was done in time. The ads are not verified yet.",
   lockedOpen: "Not every video up to the checkpoint is done yet.",
   lockedClosed: "Not every video up to the checkpoint was done by the deadline.",
   beforeLaunch: `The first payment was before ${ELIGIBLE_DAY}, so this student cannot earn the 30%.`,
@@ -188,20 +191,6 @@ export const VERDICT_TEXT = {
   readFailed: "Couldn't read this student's progress, so there is no verdict. Press Refresh to try again.",
   unknown: "The rule could not judge this request. Judge it by hand.",
 } as const;
-
-/**
- * The verdict once the "Ads verified" tick changes on the page: the rule's
- * answer stays, and the ads check, which the approve route runs last, is
- * done again, as toVerdict does it. The page calls this after the tick is
- * saved, so Approve opens (or closes) without reading every student again.
- */
-export function verdictWithAds(verdict: Verdict, adsVerified: boolean): Verdict {
-  if (verdict.ok && !adsVerified) return { ok: false, reason: "ads", text: VERDICT_TEXT.ads, oldCourse: false };
-  if (!verdict.ok && verdict.reason === "ads" && adsVerified) {
-    return { ok: true, reason: null, text: VERDICT_TEXT.yes, oldCourse: false };
-  }
-  return verdict;
-}
 
 /** "about 2 h": the length of the videos still to watch, to the nearest hour and never under 1. Null when there is none. C4's form. */
 export function aboutHours(seconds: number | null | undefined): string | null {
@@ -357,9 +346,6 @@ function refusalText(reason: VerdictReason, oldCourse: boolean, deadlinePassed: 
     case "another-request":
       text = VERDICT_TEXT.anotherRequest;
       break;
-    case "ads":
-      text = VERDICT_TEXT.ads;
-      break;
     case "read-failed":
       text = VERDICT_TEXT.readFailed;
       break;
@@ -369,13 +355,9 @@ function refusalText(reason: VerdictReason, oldCourse: boolean, deadlinePassed: 
   return oldCourse ? `${VERDICT_TEXT.oldCourse} ${text}` : text;
 }
 
-/** The approve route's answer as the page shows it, the ads check last, as the route has it. */
-function toVerdict(raw: ApprovalVerdict, explained: ApprovalVerdict, adsVerified: boolean, deadlinePassed: boolean): Verdict {
-  if (explained.ok) {
-    return adsVerified
-      ? { ok: true, reason: null, text: VERDICT_TEXT.yes, oldCourse: false }
-      : { ok: false, reason: "ads", text: VERDICT_TEXT.ads, oldCourse: false };
-  }
+/** The approve route's answer as the page shows it. */
+function toVerdict(raw: ApprovalVerdict, explained: ApprovalVerdict, deadlinePassed: boolean): Verdict {
+  if (explained.ok) return { ok: true, reason: null, text: VERDICT_TEXT.yes, oldCourse: false };
   if (explained.status === 500) {
     return { ok: false, reason: "read-failed", text: VERDICT_TEXT.readFailed, oldCourse: false };
   }
@@ -386,15 +368,14 @@ function toVerdict(raw: ApprovalVerdict, explained: ApprovalVerdict, adsVerified
 
 /**
  * A pending request as Approve would judge it now (C9): approvalVerdict, then
- * explainOldCourseRequest for a refusal of one made before the switch, then
- * the ads check. The facts are the ones the verdict judged.
+ * explainOldCourseRequest for a refusal of one made before the switch. The
+ * facts are the ones the verdict judged.
  */
 export function judgeRequest(
   reads: DiscountReads,
   now: Date,
   request: { id: string; created_at: string },
   resetAt: string | null,
-  adsVerified: boolean,
 ): { verdict: Verdict; facts: Facts } {
   const raw = approvalVerdict(reads, now, request.created_at, request.id, resetAt);
   const explained = !raw.ok && raw.status === 400 ? explainOldCourseRequest(raw, request.created_at, resetAt) : raw;
@@ -402,7 +383,7 @@ export function judgeRequest(
   const facts = f.ok
     ? judgedFacts(f.facts, reads.videos.data!, now, request.created_at, resetAt)
     : factsWithoutProgress(reads.student.data?.first_paid_at ?? null, now);
-  return { verdict: toVerdict(raw, explained, adsVerified, facts.deadlinePassed), facts };
+  return { verdict: toVerdict(raw, explained, facts.deadlinePassed), facts };
 }
 
 /** The action items with a completion row, in course order, handed in or not (as the old page listed them). */
@@ -465,7 +446,6 @@ export function buildThirtyView(data: ThirtyData, now: Date, resetAt: string | n
     plan: planLabel(s.whop_plan_id),
     status: s.membership_status,
     csmExempt: s.csm_exempt === true,
-    adsVerified: s.ad_submissions_verified === true,
     whopPulled: whopPulled(data.lastSyncAt.get(s.id), resetAt),
   });
 
@@ -479,7 +459,7 @@ export function buildThirtyView(data: ThirtyData, now: Date, resetAt: string | n
       let verdict: Verdict | null = null;
       let submissions: Submission[] | null = null;
       if (r.status === "pending") {
-        const judged = judgeRequest(reads, now, r, resetAt, s.ad_submissions_verified === true);
+        const judged = judgeRequest(reads, now, r, resetAt);
         facts = judged.facts;
         verdict = judged.verdict;
         const done = data.completions.get(s.id);

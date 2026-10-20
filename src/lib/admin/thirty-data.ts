@@ -72,11 +72,10 @@ export interface ThirtyStudent {
   whop_plan_id: string | null;
   membership_status: string;
   csm_exempt: boolean | null;
-  ad_submissions_verified: boolean | null;
   first_paid_at: string | null;
 }
 export const STUDENT_COLUMNS =
-  "id, name, email, discord_user_id, discord_username, whop_plan_id, membership_status, csm_exempt, ad_submissions_verified, first_paid_at";
+  "id, name, email, discord_user_id, discord_username, whop_plan_id, membership_status, csm_exempt, first_paid_at";
 
 /** A catalog lesson: what the rule reads, plus its title and whether it is an action item. */
 export interface ThirtyLesson extends CatalogLessonRow {

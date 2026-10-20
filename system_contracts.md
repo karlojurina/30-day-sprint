@@ -896,6 +896,14 @@ When adding a new table, append it here. When deleting a field, scan
   after the student's deadline, or one beside another counted request
   (`requestCounts`) that was rejected, approved or applied
   (`madeOutsideApply`, `src/lib/world/discount-server.ts`).
+- **No ads check on approve (2026-10-20, Lovro's decision):**
+  `POST /api/discounts/approve` no longer reads
+  `students.ad_submissions_verified`, on either course: the 30% already
+  asks for 61 videos, so the rule alone decides, and Generate anyway
+  (`override`) skips it. Before, it refused with "Ad submissions not
+  verified yet..." while the column was false. The column is still set
+  from the student page and the journey drawer
+  (`POST /api/admin/verify-ad-submissions`) and gates nothing.
 
 ### `discount_feedback_questions` + `discount_feedback_responses`
 - **Depends on:** `discount_requests`
@@ -1908,8 +1916,11 @@ em dash, "unlock" or "EcomTalent" in it. The pages call them through
     first, `{ id, scenarioId, summary, createdAt }`, and
     `unchecked`: how many members are left out of Can still earn because
     their progress could not be read). A pending row's `verdict` is the
-    approve route's (`approvalVerdict`, then `explainOldCourseRequest`,
-    then the ads check), and its facts are the ones that verdict judged.
+    approve route's (`approvalVerdict`, then `explainOldCourseRequest`;
+    the ads check after them is gone since 2026-10-20), and its facts are
+    the ones that verdict judged. `StudentBrief` carries no ads tick
+    since then. A pending row's `submissions` (its action items and their
+    hand-ins) is still sent, and no page shows it.
   - 500 "Couldn't read the date of the course switch, so the 30% list
     was not made. Try again."
   - 500 "Couldn't read everything the 30% list needs, so nothing is
@@ -1917,9 +1928,9 @@ em dash, "unlock" or "EcomTalent" in it. The pages call them through
     is not a failure of the page: that row says there is no verdict.
 - **Writes:** nothing. `maxDuration` 60, `force-dynamic`.
 - **Rules its caller relies on:** the page decides through the existing
-  routes (`POST /api/discounts/approve`, `/reject`, `/mark-applied`,
-  `POST /api/admin/verify-ad-submissions`), which decide with their own
-  read of the one student; this route only shows.
+  routes (`POST /api/discounts/approve`, `/reject`, `/mark-applied`),
+  which decide with their own read of the one student; this route only
+  shows.
 
 ### Proven and unproven
 - **Proven** on stand-ins: `client-tests/admin-today-routes.test.mjs`

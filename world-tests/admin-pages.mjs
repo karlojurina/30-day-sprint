@@ -825,8 +825,8 @@ if (wanted('thirty')) {
       await open('?state=partial&tab=decide', size)
       await waitReady()
       const nina = await row('Nina Petrova')
-      expect(await nina.evaluate((r) => r.textContent.includes("Couldn't read this student's progress, so there is no verdict.") && r.textContent.includes("Videos: couldn't read")
-        && r.textContent.includes("Couldn't read the action items.")), `${label}: the row says there is no verdict, in words`)
+      expect(await nina.evaluate((r) => r.textContent.includes("Couldn't read this student's progress, so there is no verdict.") && r.textContent.includes("Videos: couldn't read")),
+        `${label}: the row says there is no verdict, in words`)
       expect((await (await buttonIn(nina, 'Approve')).evaluate((b) => b.disabled)) && !(await isNull(await buttonIn(nina, 'Approve anyway'))), `${label}: Approve disabled, Approve anyway offered`)
       await check(label, `thirty-partial-decide-${w}`)
       await press(await page.evaluateHandle(() => [...document.querySelectorAll('[role="tab"]')].find((t) => t.textContent.startsWith('Can still earn'))))
@@ -882,18 +882,30 @@ if (wanted('thirty')) {
     }
   }
 
-  console.log('\n30% off: the verdict beside Approve (C9)')
+  console.log('\n30% off: the verdict beside Approve (C9), and no ads tick since 2026-10-20')
   {
     await open('?tab=decide')
     await waitReady()
     const maya = await row('Maya Lindqvist')
     const approveMaya = await buttonIn(maya, 'Approve')
-    expect(!(await isNull(approveMaya)) && !(await approveMaya.evaluate((b) => b.disabled)), 'Maya, every video and the ads verified: Approve is enabled')
+    expect(!(await isNull(approveMaya)) && !(await approveMaya.evaluate((b) => b.disabled)), 'Maya, every video done: Approve is enabled')
     expect(await maya.evaluate((r) => r.textContent.includes('Every video up to the checkpoint was done in time.')), 'with the yes sentence beside it')
     expect(await isNull(await buttonIn(maya, 'Approve anyway')), 'and no Approve anyway')
     const jonah = await row('Jonah Pereira')
-    expect(await (await buttonIn(jonah, 'Approve')).evaluate((b) => b.disabled), 'Jonah, every video and the ads not verified: Approve is disabled')
-    expect(await jonah.evaluate((r) => r.textContent.includes('Tick Ads verified first')), 'with "Tick Ads verified first" beside it')
+    expect(!(await (await buttonIn(jonah, 'Approve')).evaluate((b) => b.disabled))
+      && (await jonah.evaluate((r) => r.textContent.includes('Every video up to the checkpoint was done in time.'))),
+      'Jonah, every video done and his ads never ticked: Approve is enabled, the yes sentence beside it (until 2026-10-20 it waited for the tick)')
+    const boxes = await page.$$eval('.list-row', (rs) => rs.map((r) => r.querySelectorAll('input[type="checkbox"]').length))
+    expect(boxes.length === 6 && boxes.every((n) => n === 0), 'no row on To decide has a checkbox: the "Ads verified" tick is gone', JSON.stringify(boxes))
+    const decideText = await bodyText()
+    expect(!/ads verified|tick ads|ads are not verified|ads check/i.test(decideText) && !decideText.includes('Action items') && !decideText.includes('Open the post'),
+      "nothing on To decide speaks of the ads, and no row shows the action items' hand-ins (C10 kept them as the tick's evidence)")
+    const approvable = await page.$$eval('.list-row', (rs) => rs.map((r) => {
+      const b = [...r.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Approve')
+      return { name: r.querySelector('a')?.textContent, yes: r.textContent.includes('Every video up to the checkpoint was done in time.'), open: !!b && !b.disabled }
+    }))
+    expect(approvable.every((a) => a.yes === a.open) && approvable.filter((a) => a.open).map((a) => a.name).join() === 'Maya Lindqvist,Jonah Pereira',
+      "Approve is enabled on exactly the rows whose verdict is yes, Maya's and Jonah's", JSON.stringify(approvable))
     const priya = await row('Priya Raman')
     expect(await (await buttonIn(priya, 'Approve')).evaluate((b) => b.disabled), 'Priya, 57 of 61: Approve is disabled')
     expect(await priya.evaluate((r) => r.textContent.includes('Not every video up to the checkpoint is done yet.')), 'with the refusal beside it')
@@ -908,19 +920,20 @@ if (wanted('thirty')) {
       'C7: Open in Discord links discord.com/users/<id>')
     expect(await jonah.evaluate((r) => [...r.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Copy @jonah_p')), 'C7: Copy @jonah_p when only the name is known')
     expect(await maya.evaluate((r) => !!r.querySelector('a[href="/admin/students/p-maya"]')), 'C10: the name links to the student page')
-    expect(await maya.evaluate((r) => r.textContent.includes('Find three ads that sell') && r.textContent.includes('Handed in') && r.textContent.includes('Open the post')
-      && r.textContent.includes('Write five hooks') && r.textContent.includes('Not handed in yet')), 'C10: the action items, handed in or not, with the link')
     expect(await maya.evaluate((r) => { const d = r.querySelector('details'); return !!d && !d.open && d.textContent.includes('Survey answers (3)') }), 'the survey answers, folded')
-    await press(await jonah.evaluateHandle((r) => r.querySelector('input[type="checkbox"]')))
-    await page.waitForFunction(() => {
-      const r = [...document.querySelectorAll('.list-row')].find((x) => x.textContent.includes('Jonah Pereira'))
-      const b = r && [...r.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Approve')
-      return b && !b.disabled
-    }, { timeout: 10000 })
-    expect((await calls()).some((c) => c.name === 'verifyAds' && c.args[0] === 'p-jonah' && c.args[1] === true), 'ticking Ads verified calls verify-ad-submissions, then Approve opens')
+    // Jonah's Approve goes through on the rule's yes alone: one call, no override, nothing before it.
+    await press(await buttonIn(jonah, 'Approve'))
+    await page.waitForFunction(() => document.body.innerText.includes('Approved Jonah Pereira.'), { timeout: 10000 })
+    await settled()
+    const made = await calls()
+    expect(made.filter((c) => c.name === 'approve').map((c) => JSON.stringify(c.args)).join() === '["r-jonah",false]'
+      && made.every((c) => c.name === 'loadThirty' || c.name === 'approve'),
+      'Approve on Jonah: one approve call without override, and no other call before it', JSON.stringify(made.map((c) => c.name)))
+    const counts = await tabCounts()
+    expect(counts[0] === 'To decide 5' && counts[2] === 'Approved 3', 'Jonah moves from To decide to Approved', counts.join(' | '))
     for (const size of SIZES) {
       await viewport(size)
-      await check(`30% off, after ticking Ads verified, ${size.join('x')}`, `thirty-decide-ticked-${size[0]}`)
+      await check(`30% off, after Approve on Jonah, ${size.join('x')}`, `thirty-decide-approved-${size[0]}`)
     }
   }
 
@@ -929,8 +942,11 @@ if (wanted('thirty')) {
     await open('?tab=decide')
     await waitReady()
     await press(await buttonIn(await row('Priya Raman'), 'Approve anyway'))
-    await page.waitForFunction(() => document.body.innerText.includes('Approve anyway skips the 30% rule and the ads check'))
+    await page.waitForFunction(() => document.body.innerText.includes('Approve anyway skips the 30% rule'))
     expect(!(await calls()).some((c) => c.name === 'approve'), 'the first click opens the confirm and calls nothing')
+    const confirmText = await page.evaluate(() => [...document.querySelectorAll('p')].find((p) => p.textContent.startsWith('Approve anyway skips'))?.textContent)
+    expect(confirmText === "Approve anyway skips the 30% rule and creates the student's Whop code now.",
+      'the confirm says it skips the 30% rule, and no longer an ads check', confirmText)
     for (const size of SIZES) {
       await viewport(size)
       await check(`30% off, the Approve anyway confirm, ${size.join('x')}`, `thirty-override-confirm-${size[0]}`)
@@ -954,16 +970,18 @@ if (wanted('thirty')) {
     await press(await buttonIn(await row('Jonah Pereira'), 'Reject'))
     await page.waitForSelector('input[placeholder^="For example"]')
     expect((await bodyText()).includes('The student sees this reason on their map, and cannot ask for the 30% again.'), 'the panel says the student sees the reason and cannot ask again')
+    const example = await page.$eval('input[placeholder^="For example"]', (i) => i.placeholder)
+    expect(example === 'For example: not every video was done by the deadline', 'its example reason is about the videos, no longer the ads', example)
     for (const size of SIZES) {
       await viewport(size)
       await check(`30% off, the Reject panel, ${size.join('x')}`, `thirty-reject-panel-${size[0]}`)
     }
     await viewport([1280, 720])
-    await page.type('input[placeholder^="For example"]', 'The ads were not handed in.')
+    await page.type('input[placeholder^="For example"]', 'Two accounts on one card.')
     await press(await buttonIn(await row('Jonah Pereira'), 'Reject the request'))
     await page.waitForFunction(() => document.body.innerText.includes('Rejected the request from Jonah Pereira.'), { timeout: 10000 })
     await settled()
-    expect((await calls()).some((x) => x.name === 'reject' && x.args[0] === 'r-jonah' && x.args[1] === 'The ads were not handed in.'), 'reject is sent with the reason')
+    expect((await calls()).some((x) => x.name === 'reject' && x.args[0] === 'r-jonah' && x.args[1] === 'Two accounts on one card.'), 'reject is sent with the reason')
   }
 
   console.log('\n30% off: a 409 on approve and on reject')

@@ -56,9 +56,14 @@ When adding a new table, append it here. When deleting a field, scan
   first-paid fix, 2026-10-20: the earliest payment by that user with
   status paid, `paid_at` set, a total above 0 and not fully refunded
   (substatus `refunded` or `auto_refunded`, or `refunded_amount` at or
-  above the total; a partial refund counts), for any product of the
+  above the total; a partial refund counts) nor lost in a dispute
+  (substatus `dispute_lost`, a chargeback the buyer won; a reading taken
+  on 2026-10-20 that Lovro has not ruled on), for any product of the
   company; NULL when there is none: a free member, a seat given away, a
-  comp. The rule and both reads are `src/lib/first-payment.ts`. Until
+  comp. A read that comes back in another shape than the one pinned (no
+  buyer on any row of a page, or no total that reads) is a failed read,
+  never "no payment", so no writer fills or moves anything from it.
+  The rule and both reads are `src/lib/first-payment.ts`. Until
   the fix it was a Whop membership date (v80: the earliest
   membership.created_at; v75.26: the webhook's and the login's
   `joined_at` on insert), which a free membership could hold, so a
@@ -72,7 +77,8 @@ When adding a new table, append it here. When deleting a field, scan
   2-hour sync's recovery pass (active students on a
   `PAYING_WHOP_PLAN_IDS` plan, 25 a run, same guard; the sync's upsert
   carries no `first_paid_at` at all); `/api/admin/backfill-first-paid-at`
-  (every active or past_due row with a NULL, by hand). The webhook writes
+  (every active or past_due row with a NULL, by hand, in id order, a pass
+  followed by its `next_after` cursor). The webhook writes
   none: a row it inserts starts NULL. `POST /api/admin/first-paid-repair`
   is the one writer that moves a stored date (dry, snapshot, write; each
   write guarded on the value read; a student with no payment is left as

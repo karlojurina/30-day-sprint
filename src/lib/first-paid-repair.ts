@@ -18,9 +18,10 @@
  * not reach its last page answers ok: false, kind walk_incomplete, and
  * writes nothing: no repair is made from part of Whop's payments. Every
  * answer shows the walk's pages and how long Whop took to answer one
- * (ms_per_page), so a walk that runs out of time says how far off it was.
- * Then every student row with a whop_user_id, read after the walk so the
- * values the write guards on are fresh.
+ * (ms_per_page), so a walk that runs out of time says how far off it was, and
+ * the oldest payment it kept (oldest_kept_paid_at), so a list that ended
+ * early shows. Then every student row with a whop_user_id, read after the
+ * walk so the values the write guards on are fresh.
  *
  * THE PLAN, per student:
  *   - a first payment at another time than the one stored (compared as
@@ -35,13 +36,19 @@
  *     split by whether a date is stored, and left exactly as it is. Never
  *     emptied.
  *
+ * The answer names the students behind the counts that open the 30%
+ * (thirty_students: a date before 1 October or an empty one moving on or
+ * after it, and a new date that opens it beside an old request), by student
+ * id, so a few can be checked in Whop's dashboard before the write.
+ *
  * MODES. dry: the counts, nothing written. snapshot: the same reads, and
- * [student id, first_paid_at] for every row the write would change, saved to
- * bulk_ops/ before the write. write: each change written with its guard (the
- * row must still hold the value read: .eq on it, or .is null), 8 at a time,
- * none started after 280 s; the answer carries the change log
- * [student id, old, new] of the rows it wrote. A row changed meanwhile is
- * counted and left. A second write right after the first changes nothing.
+ * [student id, first_paid_at, new_first_paid_at] for every row the write
+ * would change, saved to bulk_ops/ before the write. write: each change
+ * written with its guard (the row must still hold the value read: .eq on
+ * it, or .is null), 8 at a time, none started after 280 s; the answer
+ * carries the change log [student id, old, new] of the rows it wrote. A row
+ * changed meanwhile is counted and left. A second write right after the
+ * first changes nothing.
  *
  * No answer names a student, an email or a Whop id: student ids only. The
  * walk's map is keyed by Whop ids and stays in here.
@@ -108,6 +115,8 @@ export interface RepairPlan {
     /** A date on or after the launch moves before it. */
     to_before_launch: number;
   };
+  /** The students behind the two counts that open the 30%, by id, in the students' order. */
+  thirtyStudents: { opens_was_before_oct_1: string[]; opens_was_empty: string[] };
 }
 
 /** A stored time as a number; NaN for none, or one that does not read. */
@@ -135,6 +144,7 @@ export function planFirstPaidRepair(
       from_empty: 0,
     },
     thirty: { opens_was_before_oct_1: 0, opens_was_empty: 0, closes: 0, to_after_launch: 0, to_before_launch: 0 },
+    thirtyStudents: { opens_was_before_oct_1: [], opens_was_empty: [] },
   };
   for (const s of students) {
     const paid = firstByUser.get(s.whop_user_id);
@@ -154,7 +164,10 @@ export function planFirstPaidRepair(
     plan.changes.push({ id: s.id, from: s.first_paid_at, to: paid });
     if (!Number.isFinite(before)) {
       plan.moves.from_empty += 1;
-      if (after >= eligibleFrom) plan.thirty.opens_was_empty += 1;
+      if (after >= eligibleFrom) {
+        plan.thirty.opens_was_empty += 1;
+        plan.thirtyStudents.opens_was_empty.push(s.id);
+      }
       continue;
     }
     const move = after > before ? plan.moves.later : plan.moves.earlier;
@@ -162,7 +175,10 @@ export function planFirstPaidRepair(
     move.all += 1;
     if (gap < MINUTE_MS) move.under_a_minute += 1;
     if (gap >= DAY_MS) move.a_day_or_more += 1;
-    if (before < eligibleFrom && after >= eligibleFrom) plan.thirty.opens_was_before_oct_1 += 1;
+    if (before < eligibleFrom && after >= eligibleFrom) {
+      plan.thirty.opens_was_before_oct_1 += 1;
+      plan.thirtyStudents.opens_was_before_oct_1.push(s.id);
+    }
     if (before >= eligibleFrom && after < eligibleFrom) plan.thirty.closes += 1;
     if (before < launch && after >= launch) plan.thirty.to_after_launch += 1;
     if (before >= launch && after < launch) plan.thirty.to_before_launch += 1;
@@ -183,11 +199,13 @@ export interface RepairRequest {
  *     closed) while the student holds a pending, approved or applied request
  *     that does not count under it. The map then ignores that request and
  *     can offer Apply, though one 30% was already asked for or given.
+ * openWithOldRequest: the students behind open_with_old_request, by id, in
+ * the order of the changes.
  */
 export function countRequestEffects(
   changes: readonly RepairChange[],
   requests: readonly RepairRequest[],
-): { requests_change: number; open_with_old_request: number } {
+): { counts: { requests_change: number; open_with_old_request: number }; openWithOldRequest: string[] } {
   const byStudent = new Map<string, RepairRequest[]>();
   for (const r of requests) {
     const list = byStudent.get(r.student_id) ?? [];
@@ -196,14 +214,16 @@ export function countRequestEffects(
   }
   const live = new Set(["pending", "approved", "applied"]);
   const counts = { requests_change: 0, open_with_old_request: 0 };
+  const openWithOldRequest: string[] = [];
   for (const c of changes) {
     const theirs = byStudent.get(c.id) ?? [];
     if (theirs.some((r) => requestCounts(r, c.from) !== requestCounts(r, c.to))) counts.requests_change += 1;
     if (!("closed" in discountWindow(c.to)) && theirs.some((r) => live.has(r.status) && !requestCounts(r, c.to))) {
       counts.open_with_old_request += 1;
+      openWithOldRequest.push(c.id);
     }
   }
-  return counts;
+  return { counts, openWithOldRequest };
 }
 
 /** Every student with a Whop id, past PostgREST's 1,000-row cap. Throws on a failed read. */
@@ -242,6 +262,15 @@ function msPerPage(walk: FirstPaymentWalk): number | null {
   return walk.pages > 0 ? Math.round(walk.answerMs / walk.pages) : null;
 }
 
+/** The earliest payment the walk kept, ISO, or null when it kept none. A dry run's check against a list that ended early. */
+function oldestKept(firstByUser: ReadonlyMap<string, string>): string | null {
+  let oldest: string | null = null;
+  for (const at of firstByUser.values()) {
+    if (oldest === null || Date.parse(at) < Date.parse(oldest)) oldest = at;
+  }
+  return oldest;
+}
+
 /** The walk as an answer shows it: counts only, never its map. */
 function shownWalk(walk: FirstPaymentWalk, durationMs: number): Record<string, unknown> {
   return {
@@ -253,7 +282,12 @@ function shownWalk(walk: FirstPaymentWalk, durationMs: number): Record<string, u
     retried_429: walk.retried429,
     duration_ms: durationMs,
     ms_per_page: msPerPage(walk),
-    payments: { seen: walk.counts.seen, kept: walk.counts.kept, skipped: walk.counts.skipped },
+    payments: {
+      seen: walk.counts.seen,
+      kept: walk.counts.kept,
+      skipped: walk.counts.skipped,
+      oldest_kept_paid_at: oldestKept(walk.firstByUser),
+    },
     users_with_a_payment: walk.firstByUser.size,
   };
 }
@@ -350,8 +384,8 @@ export async function runFirstPaidRepair(
       taken_at: takenAt,
       walk: walkShown,
       counts: { rows: plan.changes.length },
-      columns: ["student_id", "first_paid_at"],
-      rows: plan.changes.map((c) => [c.id, c.from]),
+      columns: ["student_id", "first_paid_at", "new_first_paid_at"],
+      rows: plan.changes.map((c) => [c.id, c.from, c.to]),
     };
   }
 
@@ -372,7 +406,8 @@ export async function runFirstPaidRepair(
     walk: walkShown,
     students: plan.students,
     moves: plan.moves,
-    thirty: { ...plan.thirty, ...requestEffects },
+    thirty: { ...plan.thirty, ...requestEffects.counts },
+    thirty_students: { ...plan.thirtyStudents, open_with_old_request: requestEffects.openWithOldRequest },
   };
 
   if (mode === "dry") {

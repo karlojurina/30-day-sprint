@@ -19,6 +19,7 @@
 // Every Whop id, email, name, key and secret here is made up.
 import { POST as repair, maxDuration } from './_gen/first-paid-repair-route.ts'
 import { planFirstPaidRepair, countRequestEffects } from './_gen/first-paid-repair.ts'
+import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE } from './_gen/discount.ts'
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
 import { FakeDb, useDb as installDb } from './_gen/stub-server.ts'
 
@@ -313,7 +314,10 @@ let dry
   ok(w.payments.seen === 247 && w.payments.kept === 243 &&
      same(w.payments.skipped, { not_paid: 0, no_paid_at: 0, zero_total: 3, bad_total: 0, refunded: 1, dispute_lost: 0, no_user: 0 }) &&
      w.users_with_a_payment === 241, 'its counts: 247 payments, 243 kept, 3 at $0 and 1 refunded; 241 buyers (11 students, 230 others)', show(w.payments))
-  ok(w.lanes === 1 && w.ms_per_page === 0, 'one lane, and Whop\'s time per page (0 here: no latency)', show({ lanes: w.lanes, ms: w.ms_per_page }))
+  ok(w.lanes === 1 && w.ms_per_page === 0 && w.payments.oldest_kept_paid_at === '2026-07-01T00:00:00.000Z',
+     'one lane, Whop\'s time per page (0 here), and the oldest payment kept, the check against a list that ended early', show({ lanes: w.lanes, ms: w.ms_per_page, oldest: w.payments.oldest_kept_paid_at }))
+  ok(same(dry.thirty_students, { opens_was_before_oct_1: [sid(1), sid(10), sid(13)], opens_was_empty: [sid(6)], open_with_old_request: [sid(10)] }),
+     'and the students behind the counts that open the 30%, by student id: 1, 10 and 13 dated before 1 October, 6 empty, 10 beside its old approval', show(dry.thirty_students))
   const pageReqs = asked.filter((a) => a.path === '/api/v1/payments')
   ok(pageReqs.length === 3 && pageReqs.every((q) => q.headers['Api-Version-Date'] === '2026-10-15-1' && q.headers.Authorization === `Bearer ${KEY}` && !('user_id' in q.params) && q.params.status === 'paid'),
      'one walk: status=paid, no user filter, the key and the pinned version on every page')
@@ -335,7 +339,7 @@ console.log('\n=== The plan, as a function ===')
      'a stored date and a payment at another time change; the same time written two ways does not; no payment stays out', show(plan.changes))
   ok(plan.moves.from_empty === 1 && plan.thirty.opens_was_empty === 1, 'a stored value that does not read counts as empty (its guard still names it)')
   const effects = (from, to, status, createdAt) =>
-    countRequestEffects([{ id: 'x', from, to }], [{ student_id: 'x', status, created_at: createdAt }])
+    countRequestEffects([{ id: 'x', from, to }], [{ student_id: 'x', status, created_at: createdAt }]).counts
   ok(same(effects('2026-09-25T00:00:00Z', '2026-10-03T00:00:00Z', 'approved', '2026-10-04T00:00:00Z'), { requests_change: 1, open_with_old_request: 0 }) &&
      same(effects('2026-09-25T00:00:00Z', '2026-10-03T00:00:00Z', 'rejected', '2026-10-04T00:00:00Z'), { requests_change: 0, open_with_old_request: 0 }) &&
      same(effects('2026-09-05T00:00:00Z', '2026-10-14T00:00:00Z', 'pending', '2026-10-15T00:00:00Z'), { requests_change: 0, open_with_old_request: 0 }),
@@ -345,6 +349,42 @@ console.log('\n=== The plan, as a function ===')
      same(effects('2026-09-05T00:00:00Z', '2026-09-06T00:00:00Z', 'approved', '2026-09-12T00:00:00Z'), { requests_change: 0, open_with_old_request: 0 }) &&
      same(effects('2026-09-05T00:00:00Z', '2026-10-14T00:00:00Z', 'rejected', '2026-09-12T00:00:00Z'), { requests_change: 0, open_with_old_request: 0 }),
      'a new date that opens the 30% beside a live request that does not count under it is counted (the report\'s case with an old approval, or a shared-window request moved past the launch); not when the 30% stays closed, nor for a rejected request')
+  ok(same(effects('2026-09-05T00:00:00Z', '2026-10-14T00:00:00Z', 'applied', '2026-09-12T00:00:00Z'), { requests_change: 0, open_with_old_request: 1 }),
+     'an applied request from before the launch (the 30% already given) beside a 30% its new date opens: counted too')
+  const both = countRequestEffects(
+    [{ id: 'p', from: '2026-09-05T00:00:00Z', to: '2026-10-14T00:00:00Z' }, { id: 'q', from: '2026-09-06T00:00:00Z', to: '2026-10-15T00:00:00Z' },
+      { id: 'r', from: '2026-09-07T00:00:00Z', to: '2026-10-16T00:00:00Z' }],
+    [{ student_id: 'p', status: 'applied', created_at: '2026-09-12T00:00:00Z' }, { student_id: 'q', status: 'rejected', created_at: '2026-09-12T00:00:00Z' },
+      { student_id: 'r', status: 'pending', created_at: '2026-09-13T00:00:00Z' }])
+  ok(same(both.openWithOldRequest, ['p', 'r']) && both.counts.open_with_old_request === 2, 'and the students behind it, by id: the applied and the pending one, not the rejected one', show(both))
+
+  // The two moments the 30% turns on, each hit exactly: 1 October 00:00 and the 9 October launch 00:00 in Croatia.
+  const OCT_1 = DISCOUNT_ELIGIBLE_FROM
+  const LAUNCH = DISCOUNT_LAUNCH_DATE
+  const justBefore = (at) => new RealDate(RealDate.parse(at) - 1).toISOString()
+  ok(OCT_1 === '2026-09-30T22:00:00.000Z' && LAUNCH === '2026-10-08T22:00:00.000Z', 'the moments, from discount.ts', show({ OCT_1, LAUNCH }))
+  const edges = planFirstPaidRepair([
+    { id: 'e1', whop_user_id: W(51), first_paid_at: '2026-09-10T10:00:00+00:00' },
+    { id: 'e2', whop_user_id: W(52), first_paid_at: '2026-09-20T10:00:00+00:00' },
+    { id: 'e3', whop_user_id: W(53), first_paid_at: null },
+    { id: 'e4', whop_user_id: W(54), first_paid_at: OCT_1 },
+    { id: 'e5', whop_user_id: W(55), first_paid_at: LAUNCH },
+    { id: 'e6', whop_user_id: W(56), first_paid_at: '2026-10-02T10:00:00+00:00' },
+    { id: 'e7', whop_user_id: W(57), first_paid_at: '2026-10-10T10:00:00+00:00' },
+    { id: 'e8', whop_user_id: W(58), first_paid_at: null },
+  ], new Map([
+    [W(51), OCT_1], // from 10 September to exactly 1 October: opens
+    [W(52), LAUNCH], // from 20 September to exactly the launch: opens, and past the launch
+    [W(53), OCT_1], // empty, to exactly 1 October: opens
+    [W(54), justBefore(OCT_1)], // from exactly 1 October to the millisecond before: closes
+    [W(55), justBefore(LAUNCH)], // from exactly the launch to the millisecond before: back before the launch
+    [W(56), OCT_1], // from 2 October to exactly 1 October: earlier, still open
+    [W(57), LAUNCH], // from 10 October to exactly the launch: earlier, still after it
+    [W(58), justBefore(OCT_1)], // empty, to the millisecond before 1 October: stays closed
+  ]))
+  ok(edges.changes.length === 8 && same(edges.thirty, { opens_was_before_oct_1: 2, opens_was_empty: 1, closes: 1, to_after_launch: 1, to_before_launch: 1 }),
+     'a first payment exactly at 1 October or exactly at the launch counts as on it, a stored date exactly there as on it too', show(edges.thirty))
+  ok(same(edges.thirtyStudents, { opens_was_before_oct_1: ['e1', 'e2'], opens_was_empty: ['e3'] }), 'and the ids behind the two counts that open it', show(edges.thirtyStudents))
 }
 
 console.log('\n=== The snapshot: the rows the write would change, nothing written ===')
@@ -354,8 +394,8 @@ console.log('\n=== The snapshot: the rows the write would change, nothing writte
   const s = r.body
   ok(r.status === 200 && s.ok === true && s.mode === 'snapshot' && typeof s.taken_at === 'string', 'answers 200 with the time the students were read', show({ ok: s.ok, at: s.taken_at }))
   ok(writes(db).length === 0, 'nothing written')
-  ok(same(s.columns, ['student_id', 'first_paid_at']) && s.counts.rows === 9 && same(s.rows, CHANGES.map(([id, from]) => [id, from])),
-     'every row the write would change, [student id, first_paid_at], the value as it is stored now, and only those', show(s.rows.slice(0, 3)))
+  ok(same(s.columns, ['student_id', 'first_paid_at', 'new_first_paid_at']) && s.counts.rows === 9 && same(s.rows, CHANGES),
+     'every row the write would change, [student id, first_paid_at, new_first_paid_at]: the value stored now and the first payment it would get, and only those', show(s.rows.slice(0, 3)))
   ok(!('students' in s) && !('changes' in s), 'no counts beyond the rows, no change log')
 }
 
@@ -445,9 +485,9 @@ console.log('\n=== lanes: 4 through the route ===')
   let r = await call({ mode: 'dry', lanes: 4 })
   const reqs = asked.filter((a) => a.path === '/api/v1/payments')
   ok(r.status === 200 && r.body.ok === true && r.body.walk.lanes === 4 && r.body.walk.complete === true &&
-     same(r.body.students, dry.students) && same(r.body.moves, dry.moves) && same(r.body.thirty, dry.thirty) &&
+     same(r.body.students, dry.students) && same(r.body.moves, dry.moves) && same(r.body.thirty, dry.thirty) && same(r.body.thirty_students, dry.thirty_students) &&
      r.body.walk.payments.seen === dry.walk.payments.seen && writes(db).length === 0,
-     'a dry run in 4 lanes: the same counts as in 1, nothing written', show({ lanes: r.body.walk.lanes, pages: r.body.walk.pages }))
+     'a dry run in 4 lanes: the same counts and students as in 1, nothing written', show({ lanes: r.body.walk.lanes, pages: r.body.walk.pages }))
   ok(reqs.some((q) => 'created_after' in q.params) && reqs.some((q) => 'created_before' in q.params), 'and its pages ask for the lanes\' dates')
   for (const lanes of [2, '4', 0]) {
     db = freshDb()

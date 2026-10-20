@@ -9,9 +9,11 @@
  *
  * Body: {"mode": "dry" | "snapshot" | "write", "lanes": 1 | 4}
  *   dry       walks Whop's paid payments, reads the students, writes nothing,
- *             answers counts.
- *   snapshot  the same reads, and [student id, first_paid_at] for every row
- *             the write would change, saved to bulk_ops/ right before it.
+ *             answers counts, and the students behind the counts that open
+ *             the 30% (thirty_students, by student id).
+ *   snapshot  the same reads, and [student id, first_paid_at,
+ *             new_first_paid_at] for every row the write would change, saved
+ *             to bulk_ops/ right before it.
  *   write     the same reads, then each change with its guard; the answer
  *             carries its change log [student id, old, new].
  *   lanes     1 when left out: the walk is one chain of pages. 4: the
@@ -24,6 +26,12 @@
  * nothing written, its pages and Whop's time per page (walk.ms_per_page). No
  * write starts after 280 s; one left over answers kind write_incomplete, and
  * the next write call finishes it.
+ *
+ * After a deploy the dry run comes first. It passes when walk.payments.kept
+ * is above 0, skipped.no_user and skipped.bad_total are about 0 (Whop's
+ * payments came back in the shape this code reads) and
+ * walk.payments.oldest_kept_paid_at is about February 2025, the account's
+ * first month of sales (the list was read to its end).
  *
  * Founder or admin session, or CRON_SECRET from a terminal, as the Whop
  * catch-up (both sides trimmed). Refuses: 400 for another mode or another

@@ -73,13 +73,14 @@ if (typeof C.approvalOnMap === 'function') {
     ['no first payment on record: nothing', stateOf(null, []), null],
   ]
   for (const [name, state, want] of cases) {
-    const got = C.approvalOnMap(state)
+    // The map's clock (2026-10-20: an applied one plays within 5 days of the application; discount-next-renewal.test.mjs).
+    const got = C.approvalOnMap(state, NOW.getTime())
     ok(show(got) === show(want), name, `${state.kind} → ${show(got)}`)
   }
 
   console.log('\nOnce per application in this browser, approved or applied')
-  const approved = C.approvalOnMap(newCourse('approved'))
-  const applied = C.approvalOnMap(newCourse('applied'))
+  const approved = C.approvalOnMap(newCourse('approved'), NOW.getTime())
+  const applied = C.approvalOnMap(newCourse('applied'), NOW.getTime())
   ok(C.approvalToCelebrate(applied.requestId, null) === true, 'applied, never celebrated here: it plays')
   ok(approved.requestId === applied.requestId && C.approvalToCelebrate(applied.requestId, approved.requestId) === false,
      'celebrated while approved (the key is the request id), then applied: it does not play again', show({ key: approved.requestId, now: applied.requestId }))
@@ -87,7 +88,7 @@ if (typeof C.approvalOnMap === 'function') {
 
 console.log('\nThe map hands the celebration this rule, and the applied line')
 const host = read('src/components/world/WorldMap.tsx')
-ok(/const approval = approvalOnMap\(discountNow\);/.test(host), 'WorldMap.tsx asks approvalOnMap with its discount state')
+ok(/const approval = approvalOnMap\(discountNow, discountClock\);/.test(host), 'WorldMap.tsx asks approvalOnMap with its discount state and the discount\'s clock')
 ok(/approvedRequestId=\{approval\?\.requestId \?\? null\}/.test(host) && /applied=\{approval\?\.applied \?\? false\}/.test(host),
    'and passes its request id and whether it is applied to WorldCelebrations')
 ok(!/discountNow\.kind === "approved"/.test(host), 'no copy of the old approved-only test is left in WorldMap.tsx')

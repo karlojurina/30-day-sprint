@@ -77,12 +77,13 @@ import { StudentNameStandInContext } from "@/components/world/WorldMap";
  *
  *   ?discount=<preset> the early-finish discount's states, in memory
  *                      (fixtureDiscount.tsx: locked, ready, pending, approved,
- *                      applied, rejected, expired, before-launch, september,
- *                      october, october-expired, october-old-course,
- *                      october-old-course-pending,
+ *                      applied, applied-after-renewal, rejected, expired,
+ *                      before-launch, september, october, october-expired,
+ *                      october-old-course, october-old-course-pending,
  *                      october-old-course-approved, no-payment);
- *                      ready and the four with an application add the videos
- *                      the offer asks for to the ?p= preset. Without it the
+ *                      ready, the four with an application and
+ *                      applied-after-renewal add the videos the offer asks
+ *                      for to the ?p= preset. Without it the
  *                      pretend student paid 3 days ago, as locked (2026-10-16),
  *                      so the 30% shows on the plain page too.
  *

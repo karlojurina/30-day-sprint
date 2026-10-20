@@ -18,7 +18,9 @@ interface DiscountApprovedCelebrationProps {
   /**
    * On the map: the application is applied already (the team approved it and
    * put the 30% on before the student was back on the map), so the line says
-   * it is on (2026-10-20, streak-2; Lovro may change the words).
+   * it is on (2026-10-20, streak-2; Lovro may change the words). The map passes
+   * it only within 5 days of the application, while that payment is sure to
+   * be still ahead (celebrations.ts approvalOnMap).
    */
   applied?: boolean;
 }

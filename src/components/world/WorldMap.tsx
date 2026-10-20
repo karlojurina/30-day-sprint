@@ -224,8 +224,9 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
     />
   );
 
-  // The application the full-screen moment is for: approved, or applied since (approvalOnMap).
-  const approval = approvalOnMap(discountNow);
+  // The application the full-screen moment is for: approved, or applied since,
+  // within 5 days of the application (approvalOnMap), on the discount's clock.
+  const approval = approvalOnMap(discountNow, discountClock);
 
   return (
     <>

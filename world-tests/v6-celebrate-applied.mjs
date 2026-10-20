@@ -39,6 +39,13 @@
  *      the moment over the list, with the applied line and the tap to close
  *   6  applied without ?celebrate=1 (no signed-in student): no moment,
  *      nothing written
+ *   7  applied, with the student's clock past the renewal that used the 30%
+ *      (?discount=applied-after-renewal: applied for on 15 October, the clock
+ *      on 20 November) and no browser key, as on a second device: no moment
+ *      in 10 s, nothing written, and the checkpoint's panel says "You got
+ *      your 30%. The team put it on your Whop subscription.", with no "next
+ *      renewal" (the 2026-10-20 review: an applied one plays only within 5
+ *      days of the application, celebrations.ts renewalStillAhead)
  * After the rows, one MEASURED line: requests to /api, requests to Supabase
  * and page errors over every page the run opened (all three must be 0).
  * Exit code 1 on any FAIL. A picture for a person:
@@ -65,6 +72,8 @@ const READY_MS = 120000
 const DISCOUNT_KEY = 'et.discountApproved.lastSeen'
 const REQUEST = 'fixture-request'
 const APPLIED_LINE = 'Your 30% is on your next payment.'
+/** The checkpoint panel's applied line once the renewal may have used the 30% (WorldV6.tsx, the 2026-10-20 review). */
+const PAST_LINE = 'You got your 30%. The team put it on your Whop subscription.'
 const APPROVED_LINE = 'The team is putting it on your Whop subscription'
 const LABEL = '30% discount approved'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -264,6 +273,21 @@ try {
     const ds = await none(page)
     r.check('no moment', ds.length === 0, ds.map((d) => d.text.slice(0, 80)))
     r.check('the key unset', (await page.evaluate(KEY, DISCOUNT_KEY)) === null, await page.evaluate(KEY, DISCOUNT_KEY))
+  })
+
+  await runRow(7, 'applied, the clock past the renewal that used the 30% (?discount=applied-after-renewal): no moment, nothing written; the panel no longer says "next renewal"', async (r) => {
+    // A browser with no key, as a second device or a wiped one: only the time limit can keep the moment away.
+    const page = await r.open({ discount: 'applied-after-renewal', celebrate: '1' })
+    const ds = await none(page)
+    r.check('no moment in the 10 s after the map is ready', ds.length === 0, ds.map((d) => d.text.slice(0, 80)))
+    r.check('the key unset', (await page.evaluate(KEY, DISCOUNT_KEY)) === null, await page.evaluate(KEY, DISCOUNT_KEY))
+    await page.evaluate(() => window.__worldPark('checkpoint'))
+    const text = await waitFor(page, () => {
+      const p = document.querySelector('main section[aria-labelledby="cp-panel-title"]')
+      return window.__worldFrame?.parkProgress >= 0.999 && p && Number(getComputedStyle(p).opacity) > 0.99 ? p.textContent.replace(/\s+/g, ' ').trim() : null
+    }, { timeout: 30000, what: 'row 7: the checkpoint\'s panel did not open' })
+    r.check(`the panel: "${PAST_LINE}", no "next renewal"`, text.includes(PAST_LINE) && !/next renewal/.test(text), text)
+    await page.screenshot({ path: path.join(OUT, 'after-renewal-panel-1440x900.png'), captureBeyondViewport: false })
   })
 } finally {
   await browser.close()

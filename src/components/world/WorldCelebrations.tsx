@@ -24,7 +24,10 @@ import {
  * The approval is the map's own discount state (useWorldDiscount.ts),
  * approved or applied since (celebrations.ts approvalOnMap, 2026-10-20: the
  * team often applies it in the same sitting, before the student is back on
- * the map); applied, its line says the 30% is on the next payment. An
+ * the map); applied, its line says the 30% is on the next payment, so it
+ * plays only within 5 days of the application, while that renewal is sure to
+ * be still ahead (the same day's review: a second device or a wiped browser
+ * key would replay it months later). An
  * application made before the launch, on the old dashboard (madeBeforeLaunch,
  * of a student who first paid from 1 October until the launch, which the map
  * shows since T-080), is not celebrated

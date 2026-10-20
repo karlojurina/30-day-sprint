@@ -32,6 +32,7 @@ import { SKY_MARKS } from "@/lib/world-v6/layout";
 import { CHECKPOINT, type CheckpointLook } from "@/lib/world-v6/checkpoint";
 import { BOUNTY } from "@/lib/world-v6/bounty";
 import { DISCOUNT_PERCENT, DISCOUNT_WINDOW_DAYS, DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
+import { renewalStillAhead } from "@/lib/world/celebrations";
 import { checkpointView, shortDate, type CheckpointView } from "./checkpointView";
 import { CARD_HINTS, anchorCard, placeCard, placePanel, type Box, type Placement } from "./cardPlace";
 import { DEFAULT_TUNING, clearTuning, loadTuning, sameTuning, sanitize, saveTuning, type Tuning } from "./tuning";
@@ -4151,6 +4152,12 @@ const ELIGIBLE_DAY_NO_YEAR = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString
  * words: "within 48 hours" and "on your next renewal" may no longer hold.
  * Every deadline shows its date and hour in the student's own time zone
  * (checkpointView.ts deadlineAt).
+ *
+ * Applied, "You'll see 30% off on your next renewal" shows for 5 days after
+ * the application (celebrations.ts renewalStillAhead, the 2026-10-20 review):
+ * the applied state lasts for good, and after the renewal that used the 30%
+ * the line was false. Then it says "You got your 30%. The team put it on your
+ * Whop subscription."
  */
 function CheckpointBody({
   discount,
@@ -4291,10 +4298,15 @@ function CheckpointBody({
       </p>
     );
   } else if (st.kind === "applied") {
+    // "On your next renewal" only while that renewal is sure to be still
+    // ahead (celebrations.ts renewalStillAhead, the 30%'s moment's rule);
+    // later it may have used the 30% already, so the line says what stays true.
     body = st.madeBeforeLaunch ? (
       <p className={s.desc}>You got your {DISCOUNT_PERCENT}% before the new course opened. It&apos;s one per student.</p>
-    ) : (
+    ) : renewalStillAhead(st.at, discount.now) ? (
       <p className={s.desc}>It&apos;s on your Whop subscription. You&apos;ll see {DISCOUNT_PERCENT}% off on your next renewal.</p>
+    ) : (
+      <p className={s.desc}>You got your {DISCOUNT_PERCENT}%. The team put it on your Whop subscription.</p>
     );
   } else if (st.kind === "rejected") {
     body = (

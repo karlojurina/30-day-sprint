@@ -24,7 +24,7 @@
 --   4. Sets those tasks to dismissed: dismissed_at = the run's moment,
 --      dismissed_by = null (no team member did it), and
 --      notes = coalesce(notes, '') || ' [reset for the new program]'.
---   5. Writes admin_config['tasks_reset_at'] = the run's moment, in UTC, like
+--   5. Writes (upserts) admin_config['tasks_reset_at'] = the run's moment, in UTC, like
 --      2026-10-20T21:30:00.000Z. The Tasks page, its insights and the
 --      Dashboard count tasks created from that moment on; the Tasks page
 --      shows older ones on its Archived tab, read only.
@@ -124,10 +124,15 @@ begin
    where a.id = t.id;
   get diagnostics v_closed = row_count;
 
+  -- An upsert: step 2 found no row, and the lock keeps a second run out,
+  -- so it inserts; were a row written by hand meanwhile, this run's moment
+  -- still wins, the one the copy and the dismissals carry.
   insert into public.admin_config (key, value, description)
   values ('tasks_reset_at',
           to_char(now() at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
-          'Set by migration 2026_v109, the tasks reset. The Tasks page, its insights and the Dashboard count tasks created from this moment on; older ones are on the Archived tab. Do not edit; the undo of v109 removes it.');
+          'Set by migration 2026_v109, the tasks reset. The Tasks page, its insights and the Dashboard count tasks created from this moment on; older ones are on the Archived tab. Do not edit; the undo of v109 removes it.')
+  on conflict (key) do update
+     set value = excluded.value, description = excluded.description, updated_at = now(), updated_by = null;
 
   perform set_config('v109.counts', v_open || ',' || v_copied || ',' || v_closed, false);
 end

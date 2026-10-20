@@ -45,6 +45,14 @@ import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
 import { runFirstPaidRepair } from "@/lib/first-paid-repair";
 
 export const maxDuration = 300;
+// Pinned to iad1, next to Whop, by this file's entry under `functions` in
+// vercel.json, while the project's functions run in dub1 next to the
+// database: the walk is a chain of Whop pages, each waiting for the one
+// before, against a few database reads, and a walk that has not ended by
+// 240 s writes nothing; a write's updates go 8 at a time, and the next call
+// finishes any left over. Vercel takes a Node route's region only from
+// vercel.json, and a moved file loses the pin. The counts: CONTEXT.md,
+// "Where the functions run".
 
 export async function POST(request: NextRequest) {
   const startedAtMs = Date.now();

@@ -473,3 +473,29 @@ gen('../src/lib/admin/journey-board.ts', './_gen/journey-board.ts', [
   ['from "@/lib/world/discount"', 'from "./discount.ts"'],
   ['from "@/lib/admin/metrics-definitions"', 'from "./metrics-definitions.ts"'],
 ])
+
+// Lesson feedback (admin rebuild 2, WI-7; lesson-rating.test.mjs and
+// lesson-feedback.test.mjs). The rule both sides share (lesson-rating.ts) has
+// no imports and copies across untouched. The student's route asks the real
+// closed doors' gate, progress.ts and the rule (the copies above), with Next's
+// response and its Supabase client from stub-server.ts. The team's loader and
+// builder (lesson-feedback.ts) read through the real pagination helper and the
+// switch's reader; its route runs over the real team check (admin-auth.ts,
+// above), so 401, 403 and 200 are its own answers.
+gen('../src/lib/world/lesson-rating.ts', './_gen/lesson-rating.ts')
+gen('../src/app/api/student/rate-lesson/route.ts', './_gen/rate-lesson-route.ts', [
+  GATE,
+  ['from "@/lib/progress"', 'from "./progress.ts"'],
+  ['from "@/lib/world/lesson-rating"', 'from "./lesson-rating.ts"'],
+  ...toStub('next/server', '@supabase/supabase-js'),
+])
+gen('../src/lib/admin/lesson-feedback.ts', './_gen/lesson-feedback.ts', [
+  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ['from "@/lib/world/lesson-rating"', 'from "./lesson-rating.ts"'],
+])
+gen('../src/app/api/admin/lesson-feedback/route.ts', './_gen/admin-lesson-feedback-route.ts', [
+  ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
+  ['from "@/lib/admin/lesson-feedback"', 'from "./lesson-feedback.ts"'],
+  ...toStub('next/server'),
+])

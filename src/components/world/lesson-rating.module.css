@@ -1,0 +1,263 @@
+/*
+ * The lesson page's "How was this lesson?" block (LessonRating.tsx), under
+ * the card's foot (Done. and Next lesson). Admin rebuild 2, D10.
+ *
+ * Its own file, beside world-ui.module.css, whose buttons it borrows
+ * (.primary, .secondary). Every colour and font is a token of
+ * world-v6/tokens.module.css: the card's wrapper carries that class, so the
+ * variables resolve here. Spacing 6, 8, 12, 16; radius 9; no motion but the
+ * hover's colour.
+ *
+ * The phone's size (under 760px wide, or under 500px tall on a touch screen,
+ * as world-ui.module.css has it): every control here is 44px tall.
+ */
+
+.block {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-line);
+}
+
+/* The question, the five stars and what is picked, on one line when it fits. */
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.question {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.stars {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* One star: a label around its radio, the whole box is the target. */
+.star {
+  position: relative;
+  display: inline-flex;
+  cursor: pointer;
+}
+
+/* The radio is there for the keyboard and screen readers, out of sight. */
+.radio {
+  position: absolute;
+  inset: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  opacity: 0;
+}
+
+/* Its ring goes on the star's box instead (world-ui.module.css rings every
+   focused element of the card; this rule is one class heavier). */
+.block .radio:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.box {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--color-ink-3);
+  transition: color 150ms var(--ease), background-color 150ms var(--ease);
+}
+
+.box svg {
+  width: 24px;
+  height: 24px;
+}
+
+.star:hover .box {
+  background: var(--color-surface-2);
+}
+
+.star[data-lit] .box {
+  color: var(--color-accent);
+}
+
+.radio:focus-visible + .box {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+  box-shadow: var(--focus-halo);
+}
+
+.star[data-off] {
+  cursor: wait;
+}
+
+.picked {
+  font-size: 14px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-2);
+}
+
+/* The comment, once a star is picked. */
+.commentLabel {
+  display: block;
+  margin-top: 12px;
+  font-size: 14px;
+  line-height: 1.35;
+  font-weight: 500;
+  color: var(--color-ink-2);
+}
+
+.textarea {
+  display: block;
+  width: 100%;
+  max-width: 68ch;
+  min-height: 88px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-line-strong);
+  border-radius: 9px;
+  background: var(--color-surface-0);
+  color: var(--color-ink);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+/* The secondary ink: the tertiary measures about 4.46:1 on the field's ground. */
+.textarea::placeholder {
+  color: var(--color-ink-2);
+}
+
+/* iOS Safari zooms into a focused text field under 16px; on a touch screen
+   the field takes 16px (as world-ui.module.css's .input does). */
+@media (pointer: coarse) {
+  .textarea {
+    font-size: 16px;
+  }
+}
+
+.actions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.counter {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-2);
+}
+
+.block button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+/* The saved rating: its stars, the line that says it, and Edit. */
+.savedLine {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--color-ink-2);
+}
+
+/* Focused after a save, which takes the Save button away. Not a control: no ring. */
+.block .savedLine:focus,
+.block .savedLine:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.shownStars {
+  display: inline-flex;
+  gap: 2px;
+  color: var(--color-ink-3);
+}
+
+.shownStars svg {
+  width: 18px;
+  height: 18px;
+}
+
+.shownStars [data-lit] {
+  color: var(--color-accent);
+}
+
+.savedComment {
+  margin: 12px 0 0;
+  max-width: 68ch;
+  padding-left: 12px;
+  border-left: 2px solid var(--color-line-strong);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--color-ink-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.error {
+  margin: 12px 0 0;
+  max-width: 68ch;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--color-ink);
+}
+
+.errorMark {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-danger);
+  transform: translateY(-1px);
+}
+
+/* ── The phone view: every target 44px ─────────────────────── */
+
+@media (width < 760px), (height < 500px) and (pointer: coarse) {
+  .box {
+    width: 44px;
+    height: 44px;
+  }
+
+  .block .tall {
+    height: 44px;
+  }
+
+  /* On the solid phone card the tertiary ink measures about 4.3:1 (as
+     world-ui.module.css says): the unlit stars take the secondary ink. */
+  .box,
+  .shownStars {
+    color: var(--color-ink-2);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .box {
+    transition: none;
+  }
+}

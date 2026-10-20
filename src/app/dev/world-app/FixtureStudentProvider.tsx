@@ -21,6 +21,7 @@ import {
   type FixtureWatchRow,
 } from "./fixtureTransport";
 import { useFixtureActionItems } from "./fixtureActionItems";
+import { useFixtureRatings } from "./fixtureRatings";
 import { FixtureDiscount, discountPresetIds } from "./fixtureDiscount";
 import { FixtureHud, hudStreak } from "./fixtureHud";
 import { CelebrationStandInContext } from "@/components/world/WorldCelebrations";
@@ -52,8 +53,9 @@ import { StudentNameStandInContext } from "@/components/world/WorldMap";
  * patchWatchProgress (kept here the way StudentProvider keeps them, so a
  * lesson left halfway resumes). LessonScreen's action item block reads
  * completions and calls saveDiscordLink and toggleLessonAction, kept in memory
- * by fixtureActionItems.ts. Anything else on StudentContextType is absent,
- * which is what the cast below admits to.
+ * by fixtureActionItems.ts; its rating block reads lessonRatings and calls
+ * rateLesson, kept in memory by fixtureRatings.ts. Anything else on
+ * StudentContextType is absent, which is what the cast below admits to.
  *
  * The query string is read once, when the layout mounts. The stage's links
  * carry no query, so the preset has to survive every navigation inside the
@@ -104,6 +106,11 @@ import { StudentNameStandInContext } from "@/components/world/WorldMap";
  *
  *   ?questions=<preset> the discount application's questions
  *                      (fixtureDiscount.tsx: none, fail; default the six).
+ *
+ *   ?rating=<preset>   the lesson page's "How was this lesson?" block
+ *                      (fixtureRatings.ts: saved, refuse, offline, slow).
+ *                      Without it nothing is rated, and a save the rule
+ *                      allows is kept in memory.
  *
  * The pretend student is called Maya Brooks (a made-up name), so the welcome
  * at the map's start reads "Welcome, Maya" (WorldMap.tsx,
@@ -374,6 +381,8 @@ export function FixtureStudentProvider({
   const [watched, setWatched] = useState<ReadonlySet<string>>(() => new Set());
   // Action items: the Discord link and the two halves, in memory (fixtureActionItems.ts).
   const actionItems = useFixtureActionItems();
+  // Lesson ratings, in memory (fixtureRatings.ts).
+  const ratings = useFixtureRatings(search);
   // The preset and the catalog arrive in the same render, so the map first
   // mounts with the preset in place and a page load never plays the done moment.
   const completedLessonIds = useMemo(() => {
@@ -488,8 +497,11 @@ export function FixtureStudentProvider({
         streak,
         // The corner's Playbook link (?playbook=1).
         playbookUnlocked,
+        // The lesson page's rating block (?rating=, fixtureRatings.ts).
+        lessonRatings: ratings.lessonRatings,
+        rateLesson: ratings.rateFor(rows.lessons, watchedLessonIds, completedLessonIds),
       }) as unknown as StudentContextType,
-    [rows, mode, completedLessonIds, watchedLessonIds, watchProgress, patchWatchProgress, markWatched, actionItems, streak, playbookUnlocked],
+    [rows, mode, completedLessonIds, watchedLessonIds, watchProgress, patchWatchProgress, markWatched, actionItems, streak, playbookUnlocked, ratings],
   );
 
   return (

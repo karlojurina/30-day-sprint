@@ -52,7 +52,9 @@ type Json = Record<string, unknown> | null;
  * member's id: the discount routes of tonight's fix lane (G1) record the
  * member from the login and ignore the id, and the routes before that fix
  * record the id sent, so sending it keeps both right. Exported for the
- * Tasks and students pages' calls (src/lib/admin/people-transport.ts).
+ * other rebuilt pages' transports: the Tasks and students pages' calls
+ * (src/lib/admin/people-transport.ts) and Lesson feedback's
+ * (lesson-feedback-transport.ts).
  */
 export async function send<T>(
   method: "GET" | "POST",

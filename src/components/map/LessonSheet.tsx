@@ -5,6 +5,7 @@ import { useStudent } from "@/contexts/StudentContext";
 import { LESSON_TYPE_LABELS, LESSON_GROUPS } from "@/lib/constants";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import { checkDiscordLink } from "@/lib/world/action-items";
+import { RATING_COMMENT_MAX } from "@/lib/world/lesson-rating";
 
 interface LessonSheetProps {
   lessonId: string | null;
@@ -1170,7 +1171,7 @@ function LessonRatingBlock({
 }: {
   lessonId: string;
   saved: { stars: number; comment: string | null } | null;
-  onSave: (stars: number, comment: string | null) => Promise<void>;
+  onSave: (stars: number, comment: string | null) => Promise<unknown>;
 }) {
   const [editing, setEditing] = useState(!saved);
   const [draftStars, setDraftStars] = useState(saved?.stars ?? 0);
@@ -1290,7 +1291,7 @@ function LessonRatingBlock({
         onChange={(e) => setDraftComment(e.target.value)}
         placeholder="Optional — anything you'd change, anything you loved?"
         rows={3}
-        maxLength={2000}
+        maxLength={RATING_COMMENT_MAX}
         style={{
           width: "100%",
           marginTop: 12,

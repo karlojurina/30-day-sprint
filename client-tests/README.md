@@ -411,6 +411,47 @@ which reports every 250 ms: they use the steps measured on it at 1x, 2x and
 2.5x and hand the heartbeat its own `rpc` and clock (one control in section 16
 leaves the `rpc` out on purpose).
 
+`lesson-rating.test.mjs` (admin rebuild 2, WI-7, 2026-10-20) proves who can
+rate which lesson and what a rating may hold. The rule
+(`src/lib/world/lesson-rating.ts`, copied untouched) runs over a plain video
+lesson, a video action item, a setup step and the Ad Bounty lesson, each with
+no completion row, the video watched, the hand-in only, both, a skip only and
+a skip after watching, against `isLessonComplete` from the real `progress.ts`:
+only a video lesson that is not the Ad Bounty's, watched and done, can be
+rated. The body: stars whole from 1 to 5 (0, 6, 4.5, "4" and NaN refused,
+never rounded), a comment of 1000 characters once trimmed allowed and 1001
+refused, never cut. Then `POST /api/student/rate-lesson` through its handler,
+with the real closed doors' gate, on `stub-server.ts`'s database (which gained
+`lessons.feature_key` and a `student_lesson_ratings` table with its unique
+key): 401 without a token, 503 while the app is closed, the upsert on student
+and lesson writing only the token's student, every refusal with its sentence
+and code and nothing written, the live `lessons` and never `lessons_next`, and
+each failed read or save a 500 in plain words with the database's words in the
+log only. Five changes to the route's copy (done always true, watched always
+true, `lessons_next`, read errors ignored, a 400 for "not finished") each fail
+it.
+
+`lesson-feedback.test.mjs` (the same lane) proves the team's Lesson feedback
+below its page: `buildLessonFeedback` groups made-up ratings by area in route
+order and lesson in course order, averages and counts them, lists comments
+newest first by when they were last saved (blank ones left out), lists every
+video lesson and any other lesson that has a rating, and counts a rating for a
+lesson the catalog lacks as `unplaced`. `loadLessonFeedback` reads only the
+ratings since `curriculum_reset_at` (all of them with no switch), 2,350 of them
+in 3 pages past the 1000-row cap with none twice, the raters in batches of 100
+ids, and fails, naming the read, when any of its five reads fails or the switch
+row is not a date. `GET /api/admin/lesson-feedback` runs over the real
+`admin-auth.ts`: 401, 403 for a student and a csm, 200 for a founder and an
+admin with exactly the builder's answer, and a failed read in words. It also
+checks the page's frame: `/admin/feedback/lessons` is in `REBUILT_PAGES`, the
+csm gate, no database call in the view, and the view's words.
+
+`student-context.test.mjs` gained a section on `rateLesson` in the same lane:
+the saved row reaches `lessonRatings` only when the route saves it, a refusal
+and a dead connection come back as sentences with nothing shown as saved, and a
+read taken before a save and answered after it does not take the saved rating
+off the lesson page (with the guard taken out, that check fails).
+
 ## What it caught
 
 Worth recording, because none of it was visible by reading the code:

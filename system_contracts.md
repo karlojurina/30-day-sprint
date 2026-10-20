@@ -200,9 +200,10 @@ When adding a new table, append it here. When deleting a field, scan
   member it reads from Whop, and nothing for a member whose read
   failed; never names the token columns; its snapshot reads the
   diagnostics columns, with the Whop ids in an old error hidden)
-  `GET /api/admin/today` and `GET /api/admin/thirty` (admin rebuild,
-  branch `night/admin`: `student_id` and `last_sync_at` only, never the
-  tokens, for "Whop progress not pulled yet", call C14)
+  `GET /api/admin/thirty` (admin rebuild, branch `night/admin`:
+  `student_id` and `last_sync_at` only, never the tokens, for "Whop
+  progress not pulled yet", call C14; `GET /api/admin/today` read the
+  same until admin rebuild 2 removed it)
 - **Stable contract:** `student_id`, `access_token`, `refresh_token`,
   `last_sync_at`, `last_sync_error`, `last_sync_error_at`,
   `last_sync_unmatched`, `last_sync_fetched`, `last_sync_matched`
@@ -581,8 +582,8 @@ When adding a new table, append it here. When deleting a field, scan
   `supabase/diagnostics/course-catalog-check.sql` (read only; three of
   its four checks read the video rows, the newest one counting video
   rows on lessons that are not `watch` lessons). The admin rebuild
-  (branch `night/admin`): `GET /api/admin/thirty` and
-  `GET /api/admin/today`, through `loadThirtyData`
+  (branch `night/admin`): `GET /api/admin/thirty` (and
+  `GET /api/admin/today` until admin rebuild 2), through `loadThirtyData`
   (`src/lib/admin/thirty-data.ts`), read `lesson_id` and `created_at`
   of every row, never `tella_video_id`, with the service role's client
   `requireTeam` hands them; `supabase/diagnostics/admin-today-spotcheck.sql`
@@ -688,15 +689,27 @@ When adding a new table, append it here. When deleting a field, scan
 ### `admin_config`
 - **Depends on:** —
 - **Depended on by:** `src/lib/templates.ts` (variable substitution),
-  `/admin/settings`, day-28 DM
+  the crons through `src/lib/dm-toggles.ts` (the 4 Discord switches),
+  day-28 DM, `GET`/`PUT /api/admin/config`
 - **Stable contract:** keys `program_login_link`, `discord_invite_link`
   (v51 dropped `astrid_booking_link` + `karlo_walkthrough_video_link`
   when D1.A/D1.B were merged into a single D1)
+- **Written from the admin (admin rebuild 2, branch `night/admin2`,
+  D6):** only through `PUT /api/admin/config` (founder and admin), and
+  only the 6 keys of `src/lib/admin/config-keys.ts`:
+  `program_login_link`, `discord_invite_link`, `dms_master_enabled`,
+  `day28_dm_enabled`, `engagement_alerts_enabled`,
+  `csm_task_summary_enabled`, a switch only as "true" or "false"; every
+  other key, a value that is not text and a switch set to anything else
+  is a 400 with nothing written. `/admin/settings` (every row as a text
+  field), `/admin/discord` and `/api/admin/dm-toggles` were removed; the
+  Templates page's Message settings panel (WI-8) is the page for these 6.
+  Proven in `client-tests/admin-routes.test.mjs`.
 - **A key with no reader (v95):** `discount_window_days`, seeded `14`.
   No code reads it; the discount routes use `DISCOUNT_WINDOW_DAYS` in
-  `src/lib/constants.ts`. `/admin/settings` lists every row of this
-  table as an editable field and saves through `PUT /api/admin/config`,
-  so the key can be edited there and the edit changes nothing.
+  `src/lib/constants.ts`. `/admin/settings` listed every row of this
+  table as an editable field until admin rebuild 2 removed it, and
+  `PUT /api/admin/config` now refuses this key (400).
 - **`curriculum_reset_at` (cutover, branch `world-engine`, not on
   production).** The moment of the course switch, a string in UTC
   like `2026-10-20T18:25:00.000Z`. No row means the old course is
@@ -704,8 +717,8 @@ When adding a new table, append it here. When deleting a field, scan
   - **Written by** v104 only, in the same transaction as the archive,
     the wipe and the copy, and equal to `archive_v1.meta.reset_at`.
     **Deleted by** the undo of v104, in its transaction. Nothing in
-    `src/` writes it: `/admin/settings` shows it read-only and
-    `PUT /api/admin/config` refuses its key with a 400. A founder can
+    `src/` writes it: `PUT /api/admin/config` refuses its key with a
+    400 (and no admin page shows it since `/admin/settings` went). A founder can
     still change it in the Supabase editor, which would move every
     course day, CSM window and snapshot floor counted from it.
   - **Read in the app** through `getCurriculumResetAt()`
@@ -738,8 +751,8 @@ When adding a new table, append it here. When deleting a field, scan
     - `POST /api/admin/whop-catchup` (T-089): runs only after the
       switch, since before it `lessons` holds the old course; no row
       answers 409, a failed read 500, and nothing runs.
-    - `/admin/settings` and `PUT /api/admin/config` compare the key
-      (`CURRICULUM_RESET_KEY`) to lock it, and read nothing.
+    - `PUT /api/admin/config` compares the key
+      (`CURRICULUM_RESET_KEY`) to lock it, and reads nothing.
   - **Read in SQL:** the trigger function `daily_snapshots_reset_floor()`
     (v103, the snapshot floor); v104 (it skips everything when the row
     exists, and checks the row against `archive_v1.meta`); the undo of
@@ -869,7 +882,7 @@ When adding a new table, append it here. When deleting a field, scan
   admin rebuild, branch `night/admin`, through `GET /api/admin/thirty`:
   every pending request whatever its date, and the others made from
   `DISCOUNT_ELIGIBLE_FROM` on; Today's 30% reasons read the same through
-  `loadThirtyData`), Whop promo flow, `src/lib/csm-triggers.ts`
+  `loadThirtyData` until admin rebuild 2 removed Today), Whop promo flow, `src/lib/csm-triggers.ts`
   (membership/discount status checks where applicable),
   `src/lib/first-paid-repair.ts` (reads `student_id`, `status`,
   `created_at` of the students whose `first_paid_at` it would move, to
@@ -970,14 +983,16 @@ When adding a new table, append it here. When deleting a field, scan
 
 ### `tasks` (CSM task queue)
 - **Depends on:** `students`, `templates`
-- **Depended on by:** `/admin/tasks`, `/admin/today` (through
-  `GET /api/admin/today` and `POST`/`DELETE /api/admin/today/mark`, admin
-  rebuild, branch `night/admin`), the 30% page's last contact
-  (`GET /api/admin/thirty`), `src/lib/csm-events.ts`
+- **Depended on by:** `/admin/tasks`, the 30% page's last contact
+  (`GET /api/admin/thirty`), (`/admin/today` through `GET
+  /api/admin/today` and `POST`/`DELETE /api/admin/today/mark`, admin
+  rebuild, branch `night/admin`, until admin rebuild 2 removed them), `src/lib/csm-events.ts`
   (`recentTaskScenarios` dedupe), optional ops digest. (`/admin/kanban`,
   listed here until 2026-10-20, does not exist.)
 - **Support records (admin rebuild, branch `night/admin`, not on
-  production):** a mark on Today writes a row with `scenario_id`
+  production; nothing writes them since admin rebuild 2 removed Today
+  and its mark route, branch `night/admin2`, and the rows already
+  written stay):** a mark on Today wrote a row with `scenario_id`
   `support.<kind>` (`support.cancel`, `support.pastdue`,
   `support.30close`, `support.30ready`, `support.stopped`,
   `support.nostart`, `support.noopen`), `template_id` null, `status`
@@ -985,16 +1000,12 @@ When adding a new table, append it here. When deleting a field, scan
   `dismissed` (Not needed, with `dismissed_at`, `dismissed_by` and the
   reason in `notes`), `created_at` equal to that moment, and
   `behavior_summary` holding every reason the row had. Never open, so the
-  crons and the one-open-task index never meet one. Written only by
-  `POST /api/admin/today/mark` (from Today, or Mark messaged on the 30%
-  page's Can still earn), deleted only by
-  `DELETE /api/admin/today/mark` (its author, within 15 minutes). The same
-  mark completes or dismisses every open queue task on the row with the
-  same actor, note and moment (the 30% page sends the student's open
-  tasks too, since 2026-10-20), and Undo opens them again unless the queue
-  has a newer open task of the same scenario. Today reads the completed
-  and dismissed tasks of the last 30 days for its waits (call C5), Handled
-  and the last contact. `GET /api/admin/tasks` drops every task with no
+  crons and the one-open-task index never meet one. They were written
+  only by `POST /api/admin/today/mark` (from Today, or Mark messaged on
+  the 30% page's Can still earn) and deleted only by
+  `DELETE /api/admin/today/mark`, both removed in admin rebuild 2; the
+  30% loader still reads a completed one as the last contact.
+  `GET /api/admin/tasks` drops every task with no
   template after its query (v59), so a support record never shows in the
   Tasks tabs; on this branch it still takes one of that query's 100 rows,
   until lane G1's change (`night/hf-admin`, `5bc5e27`) moves the filter
@@ -1148,6 +1159,11 @@ When adding a new table, append it here. When deleting a field, scan
 
 ### `stats_saved_views` (v86)
 
+**No reader since admin rebuild 2 (2026-10-20, branch `night/admin2`)
+removed Stats, its routes and `src/lib/whop-stats*.ts`; the table, its
+policy and `current_user_is_stats_owner()` stay, with no migration.
+What follows is the contract as it was.**
+
 **Owner:** the founder-only `/admin/stats` surface. Nothing else reads or
 writes it.
 
@@ -1177,6 +1193,12 @@ NOT `public.current_user_is_team()`. Do not "fix" it to match the others.
 ---
 
 ### `etfb_team_links` (v87)
+
+**No reader or writer since admin rebuild 2 (2026-10-20, branch
+`night/admin2`) removed Brand Owners, its 5 routes and `src/lib/etfb.ts`;
+this table and `etfb_seat_decisions` stay, with no migration. The ETfB
+and Apex product ids are in `src/lib/whop-products.ts`. What follows is
+the contract as it was.**
 
 **Owner:** the `/admin/etfb` Brand Owners surface. Nothing else reads or
 writes it.
@@ -1812,116 +1834,25 @@ called against a database or run on a deployment.
 
 ## Admin routes of the rebuild (branch `night/admin`)
 
-The four routes behind the rebuilt admin's two pages, Today
-(`/admin/today`) and the 30% page (`/admin/discounts`), built on
+The route behind the rebuilt 30% page (`/admin/discounts`), built on
 2026-10-20 (admin rebuild PRD, milestone 1, in the owner's workspace
-under `_admin/prds/admin-rebuild/`). Local commits only: none has run on
-a deployment or against a real database. Every route takes
-`Authorization: Bearer <session token>` and lets in any team role
-(founder, admin, csm) through `requireTeam`, which answers 401
+under `_admin/prds/admin-rebuild/`), and `PUT /api/admin/config` as
+admin rebuild 2 limited it (D6, `_admin/prds/admin-rebuild-2/`). Local
+commits only: none has run on a deployment or against a real database.
+Every route takes `Authorization: Bearer <session token>` and checks the
+login through `requireTeam`, which answers 401
 `{ error: "Not authenticated" }` with no token, 401
 `{ error: "Invalid token" }` with a bad one, and 403
 `{ error: "Not a team member" }` for a login with no `team_members` row
 (a student's). Every error is `{ error: <one plain sentence> }`, with no
-em dash, "unlock" or "EcomTalent" in it. The pages call them through
-`src/lib/admin/admin-transport.ts`.
+em dash, "unlock" or "EcomTalent" in it. The 30% page calls its route
+through `src/lib/admin/admin-transport.ts`.
 
-### `GET /api/admin/today`
-- **What it is:** Today's whole list in one answer: every member who
-  needs a message, one row per student, and Handled (the last 7 days).
-- **Called by:** `TodayView` (`src/components/admin/today/TodayView.tsx`)
-  on load and on Refresh.
-- **Depends on:** `loadTodayData` (`src/lib/admin/today-data.ts`):
-  `students` (active or past due, with a `whop_membership_id`,
-  `csm_exempt` false, any plan), `student_progress_counts`,
-  `student_last_counted_completion`, `student_current_region`,
-  `regions`, `student_milestones.first_sprint_login_at`,
-  `student_whop_sync` (`student_id, last_sync_at`), the
-  `student_lesson_watch` heartbeats of the last 3 days, `tasks` (every
-  open one, and the completed and dismissed ones of the last 30 days),
-  `templates`, `team_members`, the count of `lessons` with
-  `counts_toward_progress`, `admin_config` (`curriculum_reset_at` and the
-  links the templates name), and the 30% through `loadThirtyData`. Every
-  list is read in pages of 1000 on a unique order, lists of ids in
-  batches of 100; the long reads keyed by one unique column (the
-  members, the three views, the first logins, the Whop dates, the tasks)
-  page by that key (`fetchAllRowsByKey`), so a row that leaves a read
-  meanwhile drops no other, and a task on two status reads is kept
-  once, closed. Then `buildSupportRows`
-  (`src/lib/admin/support-list.ts`, pure).
-- **Produces:**
-  - 200 `{ generatedAt, resetAt, lessonsTotal, rows, handled }`, the
-    types `SupportRow` and `HandledRow` in `support-list.ts` (PRD
-    section 8). `rows[i].reasons[0]` is the row's headline; a reason's
-    `kind` is one of `cancelling`, `past_due`, `thirty_closing`,
-    `thirty_ready`, `stopped`, `not_started`, `never_opened`,
-    `open_task`.
-  - 500 "Couldn't read the date of the course switch, so the list was
-    not made. Try again." when `curriculum_reset_at` cannot be read.
-  - 500 "Couldn't read everything Today needs, so nothing is shown. Try
-    again." with `failed` (the reads that failed, for whoever looks into
-    it) when any read fails, or when a member who can still earn the 30%
-    has progress that cannot be read. Never a list with people missing,
-    and never one without its 30% reasons.
-- **Writes:** nothing. `maxDuration` 60, `force-dynamic`.
-
-### `POST /api/admin/today/mark`
-- **What it is:** Mark messaged and Not needed, one call per row, from
-  Today and from the 30% page's Can still earn.
-- **Consumes:** `{ studentId, action: "messaged" | "not_needed",
-  headlineKind, reasonsText, note?, openTaskIds: string[] }`. The actor
-  is always the login, never the body.
-- **Produces:**
-  - 201 `{ supportId: string | null, movedIds: string[], at }`.
-  - 200 with the first mark's answer, and nothing written, for a second
-    mark of the same student and reason by the same member within 2
-    minutes (a double click).
-  - 409 `{ error, code: "marked-otherwise" }`, nothing written, when that
-    first mark said the other thing ("You marked this student as
-    messaged a moment ago, so Not needed was not saved. To change it,
-    undo that mark first (on Today, under Handled)." and the other way
-    round). The pages show it on the row.
-  - Two marks sent at once both pass the check above. After writing its
-    record each call reads the member's records of that reason again:
-    the oldest (by `created_at`, then `id`) stands, a newer call deletes
-    its own and answers as a second click (200 or 409), and the older
-    deletes any newer one it sees. One record is left either way, with
-    no migration. An open task headline (no record) marked twice at once
-    closes the task once, and the call that finds it closed by the same
-    member answers as a second click.
-  - 400, with nothing written: a body it cannot read, no student, an
-    action other than the two, "That reason is not one Today knows, so
-    nothing was saved.", "Not needed needs a reason. Write one and try
-    again.", an `open_task` headline with no task, and "A task on this
-    row is not an open task of this student in the Tasks queue, so
-    nothing was saved. Reload the list."
-  - 404 "This student is no longer in the database."
-  - 409 "Someone closed this task in the Tasks queue meanwhile, so there
-    was nothing to mark. Reload the list." when every task of an
-    `open_task` row was closed in between.
-  - 500 with a sentence when a read or a write fails. When the queue
-    tasks cannot be closed, the support record is deleted again: the
-    mark is all or nothing.
-- **Writes:** `tasks` only, with one moment and one actor: for a headline
-  the app computed, one support record (see `tasks` above), and every
-  task in `openTaskIds` moved from open to completed or dismissed with
-  the same actor, note and moment.
-
-### `DELETE /api/admin/today/mark`
-- **What it is:** Undo, from the notice after a mark or from Handled.
-- **Consumes:** `{ ids: string[] }`, 1 to 50 (400 otherwise).
-- **Produces:** 200 `{ results: [{ id, ok, status, error? }] }`, each id
-  answered on its own. A support record (a `support.*` row with no
-  template) is deleted; a queue task a mark closed is opened again
-  (status open, its closing fields and `notes` cleared). Per id: 403
-  "Only the team member who marked it can undo it."; 409 "It was marked
-  more than 15 minutes ago, so it can't be undone here."; 409 "The Tasks
-  queue has a newer open task of this kind for the student, so this one
-  stays closed.", whether the route reads that task first or v27's
-  one-open-task index refuses the reopening (23505); 409 when the row
-  changed in between; 404 for an unknown id, one already undone, or a
-  task that is still open; 500 when the write fails.
-- **Writes:** `tasks` only.
+Today's routes, `GET /api/admin/today` and `POST`/`DELETE
+/api/admin/today/mark`, were removed with Today in admin rebuild 2 (D2,
+branch `night/admin2`), with `src/lib/admin/today-data.ts` and
+`support-list.ts`. The support records they wrote stay in `tasks` (see
+`tasks` above).
 
 ### `GET /api/admin/thirty`
 - **What it is:** the 30% page's whole list in one answer.
@@ -1939,8 +1870,9 @@ em dash, "unlock" or "EcomTalent" in it. The pages call them through
   page, so it is one query), their requests, `student_whop_sync`
   (`student_id, last_sync_at`), `discount_feedback_questions` and the
   listed requests' answers, the completed and the open `tasks` of the
-  members who can still earn it (the last message, and the queue tasks
-  Mark messaged closes), `team_members`. The decided requests are read
+  members who can still earn it (the last message, and their open queue
+  tasks, which Mark messaged closed until admin rebuild 2 removed it),
+  `team_members`. The decided requests are read
   after the pending ones, and a request on both is kept once, decided.
   Then `buildThirtyView` (`src/lib/admin/thirty-view.ts`,
   pure), which calls the student app's rule (`discount.ts`,
@@ -1952,7 +1884,9 @@ em dash, "unlock" or "EcomTalent" in it. The pages call them through
     `ThirtyEarnRow.openTasks`, the student's open queue tasks oldest
     first, `{ id, scenarioId, summary, createdAt }`, and
     `unchecked`: how many members are left out of Can still earn because
-    their progress could not be read). A pending row's `verdict` is the
+    their progress could not be read). Since admin rebuild 2 the page
+    shows no Can still earn, so `canStillEarn` and `unchecked` are sent
+    and not shown. A pending row's `verdict` is the
     approve route's (`approvalVerdict`, then `explainOldCourseRequest`;
     the ads check after them is gone since 2026-10-20), and its facts are
     the ones that verdict judged. `StudentBrief` carries no ads tick
@@ -1969,24 +1903,57 @@ em dash, "unlock" or "EcomTalent" in it. The pages call them through
   which decide with their own read of the one student; this route only
   shows.
 
+### `PUT /api/admin/config` (admin rebuild 2, D6)
+- **What it is:** the one way the admin writes `admin_config`: the 2
+  links the message templates fill in and the 4 automated-Discord
+  switches. `GET /api/admin/config` (any team role) lists every row.
+- **Called by:** nothing in the app on this branch since `/admin/settings`
+  was removed; the Templates page's Message settings panel (WI-8) is
+  meant to call it.
+- **Consumes:** `{ key: string, value: string }`, founder and admin only
+  (a csm gets 403).
+- **Produces:**
+  - 200 `{ row }`, the row as saved, with `updated_at` and `updated_by`
+    (the login, never the body).
+  - 400, with nothing written: "Missing key"; "The course switch date is
+    set by the switch and cannot be changed here." for
+    `curriculum_reset_at`; "Only the 2 message links and the 4 Discord
+    switches can be changed here." for any key outside
+    `EDITABLE_CONFIG_KEYS` (`src/lib/admin/config-keys.ts`:
+    `program_login_link`, `discord_invite_link`, `dms_master_enabled`,
+    `day28_dm_enabled`, `engagement_alerts_enabled`,
+    `csm_task_summary_enabled`); "The new value must be text." for a
+    missing, null, number or boolean value; 'A Discord switch is either
+    "true" or "false".' for a switch set to anything else.
+  - 404 "This setting has no row in the database, so nothing was saved."
+    for one of the 6 with no row (it makes none).
+  - 500 "Couldn't save the setting. Try again." when the write fails,
+    the database's words in the server log only.
+- **Writes:** one `admin_config` row's `value`, `updated_at`,
+  `updated_by`.
+
 ### Proven and unproven
-- **Proven** on stand-ins: `client-tests/admin-today-routes.test.mjs`
-  runs the four handlers with the real `requireTeam` on a stand-in
-  database capped at 1000 rows a read (401, 403 and 200 by role, each
-  answer equal to the loader and builder run at the same moment, every
-  refusal above with nothing written, Undo's per-id answers);
-  `thirty-view.test.mjs` proves the bulk 30% equal to the student app's
-  one-student path on every fixture, past 1000 rows;
-  `support-list.test.mjs` proves Today's rules; `world-tests/admin-pages.mjs`
-  renders both pages with made-up data and holds every error sentence
-  the route suite gets back to the words above.
+- **Proven** on stand-ins: `client-tests/admin-routes.test.mjs` (until
+  admin rebuild 2 `admin-today-routes.test.mjs`, with Today's routes)
+  runs both handlers with the real `requireTeam` on a stand-in database
+  capped at 1000 rows a read: for the 30% route 401, 403 and 200 by
+  role, the answer equal to the loader and builder run at the same
+  moment, nothing written, every failure in plain words; for the config
+  route each of the 6 keys saved by a founder and an admin with who and
+  when, every refusal above with nothing written and no update sent, a
+  csm, a student and no token refused, a missing row and a failed write
+  in plain words (run against the route before the limit, 12 of its
+  checks fail). `thirty-view.test.mjs` proves the bulk 30% equal to the
+  student app's one-student path on every fixture, past 1000 rows;
+  `world-tests/admin-pages.mjs` renders the 30% page with made-up data
+  and holds every error sentence the route suite gets back to the words
+  above.
 - **Unproven:** real PostgREST paging over about 1,000 members, the
   time the reads take on Vercel with the database in another region, and
-  production's own rows. Lovro's read-only spot check at `/ship`
-  (`supabase/diagnostics/admin-today-spotcheck.sql`, section 29 of
+  production's own rows. The owner's read-only spot check
+  (`supabase/diagnostics/admin-today-spotcheck.sql`, section 30 of
   `supabase/migration-tests/run.mjs`) compares 5 random members' numbers
-  with the pages.
-
+  with the 30% page.
 ---
 
 ## The world's in-memory contracts (branch `world-engine`)

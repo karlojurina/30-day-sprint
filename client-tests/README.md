@@ -194,61 +194,62 @@ check, and does. With 100 a read, a completion deleted between two pages of a
 read drops another student's row (the check fails for that student); with the
 real loader nothing is asked for twice and nothing differs.
 
-`admin-today-routes.test.mjs` (admin rebuild, work item 3, 2026-10-20; work
-item 4 adds Today's routes to it) runs the rebuilt admin's routes through
-their own handlers, starting with `GET /api/admin/thirty`. Its login is the
-real team check: `build.mjs` copies `src/lib/admin-auth.ts` with Next's
-response and the Supabase client pointed at `stub-server.ts`, so the token is
+`admin-routes.test.mjs` (admin rebuild, work item 3, 2026-10-20; until
+admin rebuild 2 `admin-today-routes.test.mjs`) runs the rebuilt admin's
+routes through their own handlers: `GET /api/admin/thirty` and, since
+admin rebuild 2, `PUT /api/admin/config`. Its login is the real team
+check: `build.mjs` copies `src/lib/admin-auth.ts` with Next's response
+and the Supabase client pointed at `stub-server.ts`, so the token is
 looked up in the stand-in's users and the member in its `team_members` (a
-founder, two csm members and a student who can sign in, all made up), and a
-call gets the 401, 403 or 200 it would get on Vercel. The route's answer must
-equal the loader and the builder run on the same database at the same moment,
-read nothing it may not and write nothing, and fail in plain words. Eight
-mutations of the copies (a role left out, a failed login or read answered
-with a list, the switch's date dropped, the failed read unnamed,
-`maxDuration`, a login with no team row let through) each make it fail.
+founder, two csm members, an admin for the config route and a student who
+can sign in, all made up), and a call gets the 401, 403 or 200 it would
+get on Vercel. The 30% route's answer must equal the loader and the
+builder run on the same database at the same moment, read nothing it may
+not and write nothing, and fail in plain words. Eight mutations of the
+copies (a role left out, a failed login or read answered with a list, the
+switch's date dropped, the failed read unnamed, `maxDuration`, a login
+with no team row let through) each make it fail. The config route (admin
+rebuild 2, D6) must save each of the 6 keys of
+`src/lib/admin/config-keys.ts` for a founder and an admin, with who saved
+it and when, and refuse with nothing written (no update even sent)
+`curriculum_reset_at`, the old `discount_window_days`, a key not in the
+table, a switch set to "yes", "True" or a JSON boolean, a link with no
+value or null, and a body that is not JSON; a csm, a student and no token
+are refused; a missing row is a 404 and a failed write a 500, both in
+plain words. The 4 switches must be dm-toggles.ts's `DmToggleKey` union,
+read from the source. Run against the route before the limit, 12 of its
+checks fail. Every error sentence a route answers in it is kept; with
+`ADMIN_ROUTE_ERRORS_OUT` set to a file path the suite writes them there as
+JSON, and `world-tests/admin-pages.mjs` (work item 5) runs it that way and
+holds each sentence to the page's words: no em dash, "unlock" or
+"EcomTalent".
 
-Work item 4 (2026-10-20) added Today to it: `GET /api/admin/today` (who may
-read it; the answer equals `buildSupportRows` over `loadTodayData` for the
-caller; C3's filters in the query; the Whop tokens never selected; 1,100
-extra members past the 1000-row cap all listed; every failed read a 500 in
-plain words, a member who can still earn the 30% included) and
-`POST`/`DELETE /api/admin/today/mark` (a mark writes one support record and
-closes the row's open queue task with the same actor and moment, the actor
-from the login and never from the body; Not needed without a reason, an
-unknown reason, another student's or a closed task are refused with nothing
-written; a double click within 2 minutes answers the first; Undo by the
-author within 15 minutes deletes the record and reopens the task, and answers
-403, 409 and 404 per entry otherwise, including the database's one-open-task
-index refusing a reopening). The review of 2026-10-20 added: Mark messaged
-on the 30% page closing the student's open queue task with the same actor and
-moment, and Today then hiding them; a second mark within 2 minutes that says
-the other thing answered 409 `marked-otherwise` with nothing written; two
-marks sent at once (one hush around them) leaving one record, whatever their
-order, and a newer record that lands meanwhile taken back; an open task headline
-marked twice at once closed once, the other call answered as a second click; a task reopened
-while 1,100 sent tasks are read dropping no other (pages by key), and a task
-closed between the open and the closed reads counted once, closed. For it the stand-in learned `.not()`, `.like()`,
-`.lt()`, `.lte()`, `.gt()`, head counts, the columns of the tables Today reads,
-and v27's one-open-task index on `tasks`, checked on update as well as insert.
-Every error sentence a route answers in it is kept; with `ADMIN_ROUTE_ERRORS_OUT`
-set to a file path the suite writes them there as JSON, and
-`world-tests/admin-pages.mjs` (work item 5) runs it that way and holds each
-sentence to the page's words: no em dash, "unlock" or "EcomTalent".
-`support-list.test.mjs` runs the builder itself (`src/lib/admin/support-list.ts`)
-on made-up members: each of C4's reasons with its words and thresholds, two
-reasons on one student, who is never listed, the heartbeat hold, every
-cooldown of C5 (and what ends one), the queue's open tasks and their messages,
-C14's folded group, the last message (C12), Handled and its Undo window, and
-the page's filter and counts (C13). 23 mutations of the builder, the loader
-and the two routes each make one of the two suites fail. The review of
-2026-10-20 added: Never opened in whole days from the cron's day 3 (2.04 days:
-"Paid 2 days ago"), a member at 140 of 140 never Stopped, and a 30% mark that
-closed the queue task hiding the row for 2 days. 12 more mutations, one per
-fix (the open tasks not read or not carried, the day number in the sentence,
-the 409, both halves of the settling and the open task answer, the finisher,
-the read size, a request kept twice, Today paged by offset, a task on two
-reads kept open), each make a suite fail.
+Work item 4 (2026-10-20) had added Today's routes (`GET /api/admin/today`,
+`POST`/`DELETE /api/admin/today/mark`) to that suite, and
+`support-list.test.mjs` ran Today's builder; admin rebuild 2 removed
+Today, and with it those checks, that suite and their copies in `_gen`
+(`support-list.ts`, `today-data.ts`, the two route copies, and
+`templates.ts` and `database.ts`, which only Today's builder read).
+
+`admin-frame.test.mjs` (admin rebuild 2, WI-1, 2026-10-20) checks the
+admin's frame and what admin rebuild 2 removed, with no browser. From
+`src/lib/admin/admin-frame.ts` (copied by `build.mjs`): the top bar a
+founder, an admin and a csm get, in order (Dashboard · 30% off · Tasks ·
+Students · Feedback · Templates · Insights · Team, Feedback hidden from a
+csm and Team a founder's only), no "More" and no entry about a plan or a
+subscription, each entry a page file that exists, the entry marked for 14
+addresses, and `isRebuiltPage` keeping `/admin` to itself. From the
+source: sign-in, set-password and the lockup go to `ADMIN_HOME` (`/admin`),
+the root page, StudentGuard and the error page send the team to `/admin`,
+layout.tsx lists only the 30% page as dark, and the bar draws no pill.
+The 17 removed files and folders are gone, vercel.json pins none of their
+routes, and no file under `src/` holds a quoted address of a removed page
+or route or imports a removed module (the same scan finds 1, 6, 1 and 1
+such lines in four files at `d0ebe76`). `whop-products.ts` holds the 2 Whop
+product ids `etfb.ts` held at `d0ebe76` (read with `git show`), in the
+`export const NAME = "...";` form login-1's test reads, and its first line
+says so. With Today put back first in the bar and `/admin` matched as a
+prefix, 9 checks fail.
 
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop

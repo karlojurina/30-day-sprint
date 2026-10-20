@@ -8,6 +8,11 @@
 -- per member. It changes nothing. Each run picks 5 others; run it again
 -- for more.
 --
+-- ADMIN REBUILD 2 (2026-10-20) removed Today (/admin/today). Its columns
+-- below (lessons, last_lesson, area) have no admin page to be read against
+-- now; the 30% columns still read the 30% page until its rebuild (WI-3)
+-- changes what a row shows. The population is still the one Today listed.
+--
 -- WHO. The members Today lists from (call C3): membership active or past
 -- due, a Whop membership, not exempt from messages, any plan.
 --
@@ -27,13 +32,10 @@
 --                  time)". "No 30% deadline": the offer is not open to
 --                  them.
 --
--- WHERE TO LOOK. Today (/admin/today): search the email. A member who
--- needs no message today is not on it. The 30% page:
--- /admin/discounts?student=<student_id>. It lists a member who asked for
--- the 30% or can still earn it. Today shows the 30% only while it can be
--- earned and no 30% reason on the row says it already. On To decide, a
--- pending request's videos are the ones Approve judged: a video loaded
--- after the request is not asked for, and once the deadline has passed
+-- WHERE TO LOOK. The 30% page: /admin/discounts?student=<student_id>. It
+-- lists a member who asked for the 30% (Can still earn went with Today).
+-- On To decide, a pending request's videos are the ones Approve judged: a
+-- video loaded after the request is not asked for, and once the deadline has passed
 -- only the videos done by it count, so that count can be lower than here.
 --
 -- THE 30% RULE, as src/lib/world/discount.ts holds it (every day begins at

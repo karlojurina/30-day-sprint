@@ -770,6 +770,10 @@ function HeroSparkline({
     coords.length > 0
       ? `${line} L ${coords[coords.length - 1].x.toFixed(2)} ${H - PAD} L ${coords[0].x.toFixed(2)} ${H - PAD} Z`
       : "";
+  // The colour can be "var(--…)": its brackets made url(#…) unresolvable, and
+  // Chrome then fills the area black (measured 2026-10-20). Letters, digits,
+  // _ and - only.
+  const gradientId = `hero-spark-${color.replace(/[^a-zA-Z0-9_-]/g, "")}`;
   return (
     <svg
       viewBox={`0 0 ${W} ${H}`}
@@ -778,12 +782,12 @@ function HeroSparkline({
       style={{ width: "100%", height, display: "block" }}
     >
       <defs>
-        <linearGradient id={`hero-spark-${color}`} x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={color} stopOpacity="0.28" />
           <stop offset="100%" stopColor={color} stopOpacity="0" />
         </linearGradient>
       </defs>
-      {area && <path d={area} fill={`url(#hero-spark-${color})`} stroke="none" />}
+      {area && <path d={area} fill={`url(#${gradientId})`} stroke="none" />}
       {line && (
         <path
           d={line}

@@ -9,16 +9,17 @@ import type { FixtureCall } from "../fixtures";
 
 /**
  * /dev/admin/discounts: the 30% page (src/components/admin/thirty/ThirtyView.tsx)
- * with made-up data and no login (admin rebuild PRD, work item 3). The bar
- * above it is the real one, for a made-up csm.
+ * with made-up data and no login (admin rebuild PRD, work item 3; admin
+ * rebuild 2, D4 and D5). The bar above it is the real one, for a made-up csm.
  *
  *   ?state=full | empty | loading | error   the list's answer (default full)
- *          partial | novideos   one student's progress, or the course's
- *                               videos, unreadable (fixtures.ts)
+ *          partial | novideos | nocoupons   one student's progress, the
+ *                               course's videos, or the stored coupons,
+ *                               unreadable (fixtures.ts)
  *   ?conflict=1   the decision buttons answer as if another team member
  *                 decided the request first (fixtures.ts says how)
  *   ?reload=fail  the list loads once, then every read of it fails
- *   ?tab=decide | approved | code-added | rejected
+ *   ?tab=applied | approved | rejected | code-applied
  *   ?student=<id>  one student on every tab, as the student page links it
  *                  (p-maya, p-ethan, p-omar ... in fixtures.ts)
  *

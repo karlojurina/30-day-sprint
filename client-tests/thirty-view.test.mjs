@@ -1,34 +1,35 @@
-// thirty-view.test.mjs: the 30% for every student at once, behind the admin's
-// 30% page and Today (admin rebuild PRD, work item 2:
-// _admin/prds/admin-rebuild/admin_rebuild_prd.md in the workspace).
+// thirty-view.test.mjs: the 30% for every listed student at once, behind the
+// admin's 30% page (admin rebuild PRD, work item 2; admin rebuild 2, D4 and
+// D5: _admin/prds/admin-rebuild-2/admin_rebuild_2_prd.md in the workspace).
 //
-// loadThirtyData (src/lib/admin/thirty-data.ts) reads everyone's 30% facts in
-// pages and in batches of 100 ids, and hands each student the DiscountReads
-// object loadDiscountReads would have made for them; buildThirtyView
-// (thirty-view.ts) runs the student app's own rule over them. Every fixture
-// here runs both ways on the same stand-in database: the bulk path, and
-// loadDiscountReads's five reads for one student at a time, which is what the
-// approve route and the request routes read. The stand-in answers at most 1000
-// rows a read, as PostgREST does, and with `shuffle` on it hands rows back in
-// no fixed order wherever a read's order leaves them open. The reads, the
-// state, the counts and the verdict must come out the same both ways, for
-// every student.
+// loadThirtyData (src/lib/admin/thirty-data.ts) reads every request made from
+// 1 October, the students holding them, their 30% facts in pages and in
+// batches of 100 ids, and the coupons stored for them, and hands each student
+// the DiscountReads object loadDiscountReads would have made for them;
+// buildThirtyView (thirty-view.ts) runs the student app's own rule over them,
+// the stored coupon first. Every fixture here runs both ways on the same
+// stand-in database: the bulk path, and loadDiscountReads's five reads for one
+// student at a time, which is what the approve route and the request routes
+// read. The stand-in answers at most 1000 rows a read, as PostgREST does, and
+// with `shuffle` on it hands rows back in no fixed order wherever a read's
+// order leaves them open. The reads, the state, the counts and the verdict
+// must come out the same both ways, for every listed student.
 //
-// The paths are the PRD's table (A to M, J the 250 students with 15,250
-// completions), on the real course: the catalog from course_catalog.json and a
-// video for each lesson the development page has a length for (61 up to the
-// gate, as on production). Students, names, dates and links are made up.
-// Two controls then show the parity check can fail: the loader with a read
-// that skips paging, and with its completions ordered on a key that is not
-// unique.
+// The paths are the PRD's table (A to W, and J: 250 students with 15,250
+// completions, each with a request waiting), on the real course: the catalog
+// from course_catalog.json and a video for each lesson the development page
+// has a length for (61 up to the gate, as on production). Students, names,
+// dates and links are made up. Two controls then show the parity check can
+// fail: the loader with a read that skips paging, and with its completions
+// ordered on a key that is not unique.
 import fs from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { loadThirtyData } from './_gen/thirty-data.ts'
 import {
-  VERDICT_TEXT, aboutHours, aboutHoursWords, buildThirtyView, judgeRequest, studentAppView, thirtyReasonText, videosLeftText, whopPulled,
+  VERDICT_TEXT, aboutHours, aboutHoursWords, buildThirtyView, couponOf, judgeRequest, studentAppView, thirtyReasonText, videosLeftText, whopPulled,
 } from './_gen/thirty-view.ts'
-import { approvalVerdict, explainOldCourseRequest, factsFromReads, loadDiscountReads, videoDoneIds } from './_gen/discount-server.ts'
+import { approvalVerdict, couponApprovalRefusal, explainOldCourseRequest, factsFromReads, loadDiscountReads, videoDoneIds } from './_gen/discount-server.ts'
 import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_SHARED_DEADLINE, discountState, requiredLessons } from './_gen/discount.ts'
 import { YEARLY_WHOP_PLAN_IDS, planLabel } from './_gen/plans.ts'
 import { clockLabel, dayLabel, dayTimeLabel, deadlineLabel } from './_gen/croatia-dates.ts'
@@ -53,7 +54,6 @@ const LESSONS = catalog.lessons.map((l, i) => ({
   is_gate: l.gate === true, duration_seconds: lengths[l.id] ?? null,
 }))
 const REQUIRED = requiredLessons(LESSONS.map((l) => ({ ...l, has_video: l.id in lengths }))).map((l) => l.id)
-const ACTION = LESSONS.filter((l) => l.requires_action).map((l) => l.id)
 const SECONDS = Object.fromEntries(LESSONS.map((l) => [l.id, l.duration_seconds ?? 0]))
 const secondsOf = (ids) => ids.reduce((s, id) => s + SECONDS[id], 0)
 
@@ -77,10 +77,10 @@ const QUESTIONS = [
 
 /** A set of made-up students and everything they did, each row with its moment. */
 function fixtures() {
-  const f = { people: [], done: [], asked: [], answers: [], tasks: [], synced: [] }
+  const f = { people: [], done: [], asked: [], answers: [], tasks: [], synced: [], coupons: [] }
   f.person = (id, name, paid, more = {}) => {
     f.people.push({
-      id, name, email: `${id}@example.com`, whop_user_id: `user_${id}`, whop_plan_id: MONTHLY,
+      id, name, email: `${id}@example.com`, whop_user_id: `user_${id}`, whop_plan_id: MONTHLY, whop_membership_id: `mem_dev${id.replace(/[^a-z0-9]/g, '')}`,
       membership_status: 'active', first_paid_at: paid, joined_at: paid ?? '2026-09-01T00:00:00.000Z', ...more,
     })
     // A Whop backfill since the switch, unless the fixture says otherwise.
@@ -115,6 +115,7 @@ function world(f, at, { shuffle = 7, videos } = {}) {
     team_members: TEAM,
     student_whop_sync: f.synced.filter((s) => by(s.last_sync_at)),
     tasks: f.tasks.filter((x) => by(x.completed_at ?? x.created_at)),
+    student_membership_discounts: f.coupons,
   })
   db.shuffle = shuffle
   return db
@@ -224,7 +225,12 @@ const main = fixtures()
     const at = `2026-10-19T16:${String(n % 60).padStart(2, '0')}:00.000Z`
     const skipped = n % 2 === 0 ? REQUIRED[n % REQUIRED.length] : null
     watched(id, REQUIRED, at, skipped ? { [skipped]: { completed_at: null, skipped_at: at } } : {})
+    // Each J asks the evening after: 250 requests waiting, so the bulk path reads them all.
+    request(id, `r-${id}`, `2026-10-20T17:${String(n % 60).padStart(2, '0')}:00.000Z`)
   }
+  // X: a request still pending from before 1 October: not listed (the page lists from 1 October, D4).
+  person('s-x', 'Xi Example', '2026-09-10T10:00:00.000Z')
+  request('s-x', 'r-x', '2026-09-28T10:00:00.000Z')
 }
 
 // ── Both ways ──────────────────────────────────────────────────────────────
@@ -242,21 +248,18 @@ function approve(reads, now, request) {
   const raw = approvalVerdict(reads, now, request.askedAt, request.id, RESET)
   return { raw: plain(raw), said: plain(!raw.ok && raw.status === 400 ? explainOldCourseRequest(raw, request.askedAt, RESET) : raw) }
 }
-/** The PRD's population for Can still earn, written out here rather than taken from the code under test. */
-const inOffer = (s) => s.first_paid_at != null && Date.parse(s.first_paid_at) >= Date.parse(DISCOUNT_ELIGIBLE_FROM)
-  && (s.membership_status === 'active' || s.membership_status === 'past_due') && s.csm_exempt !== true
-const KEEP = new Set([...REQUIRED, ...ACTION])
+const KEEP = new Set(REQUIRED)
 const sortBy = (k) => (a, b) => (a[k] < b[k] ? -1 : a[k] > b[k] ? 1 : 0)
 const sorted = (list, k) => (list ? [...list].sort(sortBy(k)) : list)
 const views = []
 
 /**
- * Every student both ways at `nowIso`: the reads, the state, every pending
- * request's verdict, and Can still earn. Returns the differences, which must be
- * none, the view and the number of reads the bulk path made. `skip`: students
- * whose bulk reads failed on purpose, left out of the comparison. `reads`:
- * false where a read failed for everyone on purpose, so the bulk path made no
- * read after it (the answers are still compared).
+ * Every listed student both ways at `nowIso`: the reads, the state and every
+ * pending request's verdict. Returns the differences, which must be none, the
+ * view and the number of reads the bulk path made. `skip`: students whose bulk
+ * reads failed on purpose, left out of the comparison. `reads`: false where a
+ * read failed for everyone on purpose, so the bulk path made no read after it
+ * (the answers are still compared).
  */
 async function bothWays(db, nowIso, { load = loadThirtyData, skip = new Set(), reads = true } = {}) {
   const now = new Date(nowIso)
@@ -292,29 +295,17 @@ async function bothWays(db, nowIso, { load = loadThirtyData, skip = new Set(), r
     // The page's verdict is that answer alone: no ads check since 2026-10-20 (Lovro).
     const rule = jp.said
     const reason = rule.ok ? null : rule.status === 500 ? 'read-failed' : (rule.reason ?? 'unknown')
-    if (r.verdict.ok !== rule.ok || r.verdict.reason !== reason
-        || r.verdict.oldCourse !== (!jp.raw.ok && rule.error !== jp.raw.error)) {
+    // The coupon decides first (D5); with none stored, the page's verdict is the rule's.
+    const coupon = r.coupon?.discounted === true
+    if (coupon ? r.verdict.reason !== 'has-discount' || r.verdict.ok
+        : r.verdict.ok !== rule.ok || r.verdict.reason !== reason || r.verdict.oldCourse !== (!jp.raw.ok && rule.error !== jp.raw.error)) {
       differences.push(`${r.id} the page's verdict`)
-    }
-  }
-  const expected = db.rows('students').filter(inOffer).filter((s) => !skip.has(s.id))
-    .filter((s) => ['locked', 'ready'].includes(app(per.get(s.id), now).kind)).map((s) => s.id).sort()
-  const listed = view.canStillEarn.map((r) => r.student.id).sort()
-  if (!isDeepStrictEqual(listed, expected)) differences.push(`can still earn: ${listed.length} listed, ${expected.length} expected`)
-  for (const row of view.canStillEarn) {
-    const st = app(per.get(row.student.id), now)
-    if (!st.kind) continue
-    const left = st.kind === 'locked' ? st.lessonsLeft : 0
-    if (row.state !== st.kind || row.facts.videosTotal !== st.lessonsTotal || row.facts.videosDone !== st.lessonsTotal - left
-        || row.facts.secondsLeft !== (st.kind === 'locked' ? st.secondsLeft : 0) || row.facts.deadline !== st.endsAt || row.facts.window !== st.window) {
-      differences.push(`${row.student.id} can still earn row`)
     }
   }
   return { view, data, differences, bulkCalls, per }
 }
 
 const request = (view, id) => view.requests.find((r) => r.id === id)
-const earning = (view, id) => view.canStillEarn.find((r) => r.student.id === id)
 
 /** "The verdict says yes exactly when the shown count is full", but for the two refusals about how the request was made. */
 function countMatchesVerdict(view) {
@@ -358,17 +349,17 @@ ok(W.differences.length === 0, `the bulk path and loadDiscountReads agree on the
    W.differences.slice(0, 6).join(', '))
 ok(W.bulkCalls < 60, `the bulk path made ${W.bulkCalls} reads, where one student at a time makes ${5 * W.data.students.length}`)
 const wv = W.view
-ok(wv.requiredCount === 61 && wv.sharedDeadline === DISCOUNT_SHARED_DEADLINE && wv.unchecked === 0 && wv.generatedAt === WED,
-   'the course asks for 61 videos, the shared deadline, nobody unread, the moment it was built', show({ n: wv.requiredCount, unchecked: wv.unchecked }))
-ok(show(wv.questions) === show([
-  { id: 'q1', orderNum: 1, text: 'How likely are you to recommend the course?' },
-  { id: 'q2', orderNum: 2, text: 'What should the course add?' },
-  { id: 'q3', orderNum: 3, text: 'Where did you hear about us?' },
-]), 'the survey\'s questions, in their order')
-ok(wv.requests.map((r) => r.id).join() === 'r-p2,r-e2,r-r,r-g,r-a,r-n,r-p1,r-u,r-t,r-h1,r-h2,r-w,r-v',
-   'listed: every pending request, every approved one whatever its date (r-w from September and r-v from August, codes never added in Whop), and the other decided ones from 1 October on, newest first', wv.requests.map((r) => r.id).join())
-ok(!W.data.students.some((s) => s.id === 's-e') && W.data.students.some((s) => s.id === 's-v') && W.data.students.some((s) => s.id === 's-e2') && W.data.students.some((s) => s.id === 's-n'),
-   'read: everyone with a first payment from 1 October, and the holders of listed requests (an old approved one included) from before it or with none')
+ok(wv.requiredCount === 61 && wv.sharedDeadline === DISCOUNT_SHARED_DEADLINE && wv.generatedAt === WED && wv.listedFrom === DISCOUNT_ELIGIBLE_FROM && wv.couponsUnread === false,
+   'the course asks for 61 videos, the shared deadline, listed from 1 October, the coupons read, the moment it was built', show({ n: wv.requiredCount, from: wv.listedFrom }))
+ok(Object.keys(wv).sort().join() === 'couponsUnread,generatedAt,listedFrom,requests,requiredCount,sharedDeadline',
+   'no Can still earn, no survey questions, nothing unchecked in the answer (D4)', Object.keys(wv).sort().join())
+const own = wv.requests.filter((r) => !r.id.startsWith('r-j-')).map((r) => r.id).join()
+ok(own === 'r-h2,r-h1,r-t,r-u,r-p1,r-n,r-a,r-g,r-r,r-e2,r-p2',
+   'listed: every request made from 1 October, whatever its status, oldest first; r-w (29 September), r-v (August) and r-x (pending since 28 September) are not', own)
+ok(wv.requests.every((r, i) => i === 0 || Date.parse(wv.requests[i - 1].askedAt) <= Date.parse(r.askedAt)) && wv.requests.length === 261,
+   'all 261 rows (the 250 J requests included) run oldest first')
+ok(!W.data.students.some((s) => ['s-e', 's-v', 's-w', 's-x', 's-b', 's-m'].includes(s.id)) && W.data.students.some((s) => s.id === 's-e2') && W.data.students.some((s) => s.id === 's-n'),
+   'read: only the students holding a listed request (one with a first payment before 1 October or none included), nobody else')
 
 {
   const a = request(wv, 'r-a')
@@ -377,63 +368,37 @@ ok(!W.data.students.some((s) => s.id === 's-e') && W.data.students.some((s) => s
   ok(a.facts.videosDone === 61 && a.facts.videosTotal === 61 && a.facts.window === 'shared' && a.facts.deadline === DISCOUNT_SHARED_DEADLINE
        && !a.facts.deadlinePassed && !a.facts.countedByDeadline && a.facts.secondsLeft === 0 && a.facts.firstPaidAt === '2026-10-02T10:00:00.000Z',
      'A: "Videos 61 of 61", deadline Fri 23 Oct, not passed', show(a.facts))
-  ok(show(a.submissions) === show([
-    { lessonId: 'a3l17', title: 'Your First Boss Battle', handedIn: true, link: 'https://discord.com/channels/1/2/3' },
-    { lessonId: 'a3l25', title: "[ACTION ITEM] Congrats! Here's another one", handedIn: false, link: null },
-  ]), 'A: the action items it has a row for: one handed in with its link, one watched and not handed in', show(a.submissions))
-  ok(show(a.answers) === show([{ questionId: 'q1', answer: 9 }, { questionId: 'q2', answer: 'More examples of hooks' }, { questionId: 'q3', answer: 'A friend' }]),
-     'A: the survey answers in the questions\' order, the scale as a number', show(a.answers))
-  ok(show(a.student) === show({
-    id: 's-a', name: 'Ana Example', email: 's-a@example.com', discord: { userId: '100000000000000001', username: 'ana.example' },
-    plan: 'Monthly', status: 'active', csmExempt: false, whopPulled: true,
-  }), 'A: the student as the row shows them, with no ads tick (2026-10-20)', show(a.student))
+  ok(!('submissions' in a) && !('answers' in a) && a.coupon === null,
+     'A: no action items, no survey answers on the row (D4), and no coupon stored', Object.keys(a).join())
+  ok(show(a.student) === show({ id: 's-a', name: 'Ana Example', email: 's-a@example.com', username: 'ana.example', status: 'active', whopPulled: true }),
+     'A: the student as the row\'s top line shows them: name, @username, membership; no plan, no ads tick', show(a.student))
 }
 {
-  const b = earning(wv, 's-b')
-  const left = REQUIRED.slice(50)
-  ok(b?.state === 'locked' && b.facts.videosDone === 50 && b.facts.videosTotal === 61 && b.facts.secondsLeft === secondsOf(left)
-       && b.facts.deadline === DISCOUNT_SHARED_DEADLINE && b.facts.window === 'shared',
-     `B: shared window, 11 videos left before the deadline: can still earn, locked, 50 of 61, ${secondsOf(left)} seconds left`, show(b?.facts))
-  ok(b?.student.whopPulled === false && b.student.discord.username === 'bo.example' && b.student.discord.userId === null,
-     'B: its only Whop backfill ran before the switch: "Whop progress not pulled yet"; reached by @name')
-  ok(show(b?.lastContact) === show({ at: '2026-10-20T14:00:00.000Z', by: { id: 'tm-1', name: 'Robin Test' }, scenarioId: 'support.30close', outcome: null }),
-     'B: the last contact is its newest completed task, with who sent it, no reply yet', show(b?.lastContact))
-  ok(show(b?.openTasks) === show([
-    { id: 't-b-open-1', scenarioId: 'nolessons.day7', summary: null, createdAt: '2026-10-19T09:00:00.000Z' },
-    { id: 't-b-open-2', scenarioId: 'stalled.discord.day5', summary: 'Paid 5 days ago, never logged in', createdAt: '2026-10-20T09:00:00.000Z' },
-  ]), 'B: its open tasks in the Tasks queue, oldest first, for Mark messaged to close (C5)', show(b?.openTasks))
-  ok(wv.canStillEarn.filter((r) => r.student.id !== 's-b').every((r) => Array.isArray(r.openTasks) && r.openTasks.length === 0),
-     'everyone else on Can still earn: no open task')
+  // B, C, D, E and M hold no request: Can still earn went with D4, so nobody without one is read.
+  const b = studentAppView(W.per.get('s-b'), new Date(WED))
+  ok(b.state.kind === 'locked' && b.facts.videosDone === 50 && b.facts.videosTotal === 61 && b.facts.secondsLeft === secondsOf(REQUIRED.slice(50))
+       && !request(wv, 'r-b'), 'B: 50 of 61 by the rule, no request, on no tab')
 }
-{
-  const c = earning(wv, 's-c')
-  ok(c?.state === 'ready' && c.facts.window === 'own' && c.facts.deadline === '2026-10-29T12:00:00.000Z' && c.facts.videosDone === 61
-       && c.facts.secondsLeft === 0 && c.lastContact === null,
-     'C: own window (first payment 15 Oct), every video done: can still earn, ready, deadline 29 Oct; a dismissed task is no contact', show(c))
-}
-ok(earning(wv, 's-d')?.state === 'locked', 'D on Wednesday: 20 of 61, its 14 days still open: can still earn')
-ok(app(W.per.get('s-e'), new Date(WED)).reason === 'before-launch' && !earning(wv, 's-e'),
-   'E: first payment 20 September: not eligible, on no list')
+ok(studentAppView(W.per.get('s-c'), new Date(WED)).state.kind === 'ready' && studentAppView(W.per.get('s-d'), new Date(WED)).state.kind === 'locked',
+   'C ready and D locked by the rule, neither listed')
+ok(app(W.per.get('s-e'), new Date(WED)).reason === 'before-launch', 'E: first payment 20 September: not eligible, on no list')
 {
   const e2 = request(wv, 'r-e2')
   ok(e2.verdict.reason === 'before-launch' && !e2.verdict.ok && e2.verdict.text === 'The first payment was before Thu 1 Oct, so this student cannot earn the 30%.'
        && e2.facts.window === null && e2.facts.deadline === null,
-     'E2: the same with a pending request: To decide says the first payment was before Thu 1 Oct', e2.verdict.text)
+     'E2: the same with a pending request: Applied says the first payment was before Thu 1 Oct', e2.verdict.text)
 }
-ok(earning(wv, 's-f')?.student.plan === 'Yearly' && earning(wv, 's-f')?.state === 'locked' && earning(wv, 's-f')?.student.whopPulled === false,
-   'F: a yearly plan is listed, labelled "Yearly"; no Whop backfill at all: not pulled')
-ok(request(wv, 'r-g').verdict.ok && approve(W.per.get('s-g'), new Date(WED), request(wv, 'r-g')).said.ok && !earning(wv, 's-g'),
-   'G: a canceled member\'s request after every video: yes both ways, and not on Can still earn')
+ok(request(wv, 'r-g').verdict.ok && approve(W.per.get('s-g'), new Date(WED), request(wv, 'r-g')).said.ok && request(wv, 'r-g').student.status === 'canceled',
+   'G: a canceled member\'s request after every video: yes both ways, the row saying the membership is canceled')
 {
   const h1 = request(wv, 'r-h1')
-  ok(h1.status === 'rejected' && h1.verdict === null && h1.submissions === null && show(h1.reviewedBy) === show({ id: 'tm-1', name: 'Robin Test' })
-       && h1.rejectionReason === 'Ads not handed in' && app(W.per.get('s-h1'), new Date(WED)).kind === 'rejected' && !earning(wv, 's-h1'),
-     'H1: rejected after the launch: on the Rejected list with who decided it, and not on Can still earn')
-  ok(h1.facts.videosDone === 61 && h1.facts.countedByDeadline === false, 'H1: its row still shows the videos, as the student app counts them')
+  ok(h1.status === 'rejected' && h1.verdict === null && h1.facts === null && show(h1.reviewedBy) === show({ id: 'tm-1', name: 'Robin Test' })
+       && h1.rejectionReason === 'Ads not handed in' && app(W.per.get('s-h1'), new Date(WED)).kind === 'rejected',
+     'H1: rejected after the launch: on the Rejected list with who decided it and the reason; a decided row carries no verdict and no facts')
 }
-ok(earning(wv, 's-h2')?.state === 'locked' && earning(wv, 's-h2')?.facts.videosDone === 40 && request(wv, 'r-h2')?.status === 'rejected',
-   'H2: a 1-8 Oct payer whose only request (before the launch) was rejected: listed by progress, 40 of 61')
-ok(app(W.per.get('s-m'), new Date(WED)).kind === 'locked' && !earning(wv, 's-m'), 'M: exempt: locked by the rule, and not on Can still earn')
+ok(request(wv, 'r-h2')?.status === 'rejected' && request(wv, 'r-h2').askedAt === '2026-10-06T10:00:00.000Z',
+   'H2: a request of 6 October, rejected: listed (it is from 1 October)')
+ok(app(W.per.get('s-m'), new Date(WED)).kind === 'locked' && !W.data.students.some((s) => s.id === 's-m'), 'M: no request, not read')
 ok(request(wv, 'r-n').verdict.reason === 'no-payment' && request(wv, 'r-n').verdict.text === VERDICT_TEXT.noPayment, 'no first payment on file: the verdict says so')
 ok(request(wv, 'r-p2').verdict.reason === 'another-request' && request(wv, 'r-p2').facts.videosDone === 61,
    'a second request after a rejected one: refused as another request, every video done')
@@ -444,22 +409,15 @@ ok(request(wv, 'r-r').verdict.ok && request(wv, 'r-r').verdict.reason === null &
   const u = request(wv, 'r-u')
   ok(t.status === 'approved' && t.promoCode === 'ECOM30-TEST01' && u.status === 'applied' && u.appliedAt === '2026-10-20T08:00:00.000Z'
        && show(u.appliedBy) === show({ id: 'tm-1', name: 'Robin Test' }) && t.verdict === null,
-     'approved with its code; code added in Whop with who marked it')
+     'approved with its code; code applied in Whop with who marked it')
 }
-ok(app(W.per.get('s-w'), new Date(WED)).kind === 'approved' && app(W.data.reads.get('s-w'), new Date(WED)).kind === 'approved' && !earning(wv, 's-w'),
-   'W: an approved request from before 1 October still decides, both ways: the loader reads every request a student has, not only the listed ones')
+ok(app(W.per.get('s-w'), new Date(WED)).kind === 'approved' && !request(wv, 'r-w'),
+   'W: an approved request from 29 September still decides where the student stands, and is not listed (the page lists from 1 October)')
 {
-  const jays = wv.canStillEarn.filter((r) => r.student.id.startsWith('j-'))
-  ok(jays.length === 250 && jays.filter((r) => r.state === 'ready').length === 125
-       && jays.filter((r) => r.state === 'locked').every((r) => r.facts.videosDone === 60 && r.facts.videosTotal === 61),
-     'J: all 250 listed, 125 ready and 125 at 60 of 61, read from 15,250 completion rows in pages')
-}
-{
-  const list = wv.canStillEarn
-  const inOrder = list.every((r, i) => i === 0 || Date.parse(list[i - 1].facts.deadline) < Date.parse(r.facts.deadline)
-    || (list[i - 1].facts.deadline === r.facts.deadline
-        && list[i - 1].facts.videosTotal - list[i - 1].facts.videosDone <= r.facts.videosTotal - r.facts.videosDone))
-  ok(inOrder && list[0].facts.deadline === '2026-10-23T08:00:00.000Z', 'Can still earn runs by deadline, then fewest videos left (D first: its 14 days end Friday morning)', list[0].student.id)
+  const jays = wv.requests.filter((r) => r.id.startsWith('r-j-'))
+  ok(jays.length === 250 && jays.filter((r) => r.verdict.ok).length === 125
+       && jays.filter((r) => !r.verdict.ok).every((r) => r.verdict.reason === 'locked' && r.facts.videosDone === 60 && r.facts.videosTotal === 61),
+     'J: all 250 requests judged, 125 yes and 125 at 60 of 61, read from 15,250 completion rows in pages')
 }
 ok(countMatchesVerdict(wv).length === 0, 'every pending row: the verdict says yes exactly when the count shown is full (but for another-request and late-request)')
 
@@ -467,7 +425,7 @@ ok(countMatchesVerdict(wv).length === 0, 'every pending row: the verdict says ye
 console.log('\n=== Fri 23 Oct at 10:00 in Croatia: D\'s 14 days end this very moment ===')
 const F = await bothWays(world(main, FRI), FRI)
 ok(F.differences.length === 0, 'both ways agree for every student', F.differences.slice(0, 6).join(', '))
-ok(earning(F.view, 's-d')?.state === 'locked' && earning(F.view, 's-d')?.facts.deadlinePassed === false,
+ok(studentAppView(F.per.get('s-d'), new Date(FRI)).state.kind === 'locked' && studentAppView(F.per.get('s-d'), new Date(FRI)).facts.deadlinePassed === false,
    'D at its deadline to the millisecond: still open (the window\'s end counts as inside it)')
 ok(countMatchesVerdict(F.view).length === 0, 'the verdict says yes exactly when the count shown is full')
 
@@ -476,8 +434,8 @@ console.log('\n=== Mon 26 Oct: past the shared deadline ===')
 const M = await bothWays(world(main, MON), MON)
 ok(M.differences.length === 0, 'both ways agree for every student', M.differences.slice(0, 6).join(', '))
 const mv = M.view
-ok(app(M.per.get('s-d'), new Date(MON)).kind === 'expired' && !earning(mv, 's-d') && !earning(mv, 's-b'),
-   'D: deadline passed, nothing asked: expired, gone from Can still earn (B too: the shared deadline passed)')
+ok(app(M.per.get('s-d'), new Date(MON)).kind === 'expired' && app(M.per.get('s-b'), new Date(MON)).kind === 'expired',
+   'D: deadline passed, nothing asked: expired (B too: the shared deadline passed)')
 {
   const i = request(mv, 'r-i')
   ok(i.verdict.reason === 'locked' && i.verdict.text === VERDICT_TEXT.lockedClosed && i.facts.videosDone === 60 && i.facts.videosTotal === 61
@@ -528,8 +486,9 @@ console.log('\n=== A video loaded after the switch, and requests made on the old
   ok(o2.verdict.ok && o2.facts.videosTotal === 60 && o2.facts.videosDone === 60 && studentAppView(L2.data.reads.get('s-o2'), new Date(THU)).facts.videosTotal === 61,
      'asked before the late video was loaded, every other video done: yes, 60 of 60, while the student app now asks for 61')
   ok(request(v, 'r-o3').verdict.ok && !request(v, 'r-o3').verdict.oldCourse, 'asked on the old dashboard, every video done: yes')
-  ok(earning(v, 's-o4')?.facts.videosTotal === 61 && earning(v, 's-o4')?.facts.videosDone === 60 && v.requiredCount === 61,
-     'Can still earn counts the late video: 60 of 61')
+  const o4 = studentAppView(L2.per.get('s-o4'), new Date(THU))
+  ok(o4.facts.videosTotal === 61 && o4.facts.videosDone === 60 && v.requiredCount === 61,
+     'the student app counts the late video: 60 of 61, and the page asks for 61')
   ok(countMatchesVerdict(v).length === 0, 'the verdict says yes exactly when the count shown is full')
 
   const early = fixtures()
@@ -566,13 +525,11 @@ console.log('\n=== L: a failed batch of completions ===')
   const view = buildThirtyView(loaded.data, new Date(WED), RESET)
   const a = request(view, 'r-a')
   ok(a.verdict.reason === 'read-failed' && !a.verdict.ok && a.verdict.text === VERDICT_TEXT.readFailed && a.facts.videosDone === null
-       && a.facts.deadline === DISCOUNT_SHARED_DEADLINE && a.submissions === null,
-     'A: a read-failed verdict, no count, the deadline still shown, no submissions (never "none handed in")', show({ v: a.verdict.reason, f: a.facts }))
-  const before = W.view.canStillEarn.map((r) => r.student.id).filter((id) => !covered.includes(id))
-  ok(!view.canStillEarn.some((r) => covered.includes(r.student.id)) && isDeepStrictEqual(view.canStillEarn.map((r) => r.student.id).sort(), before.sort()),
-     `no Can still earn row for anyone it covered; the ${before.length} others are there`)
-  const candidates = loaded.data.students.filter((s) => covered.includes(s.id) && inOffer(s)).length
-  ok(view.unchecked === candidates && candidates > 1, `the page is told ${view.unchecked} members could not be checked`)
+       && a.facts.deadline === DISCOUNT_SHARED_DEADLINE,
+     'A: a read-failed verdict, no count (never "0 of 61"), the deadline still shown', show({ v: a.verdict.reason, f: a.facts }))
+  const coveredPending = view.requests.filter((r) => r.status === 'pending' && covered.includes(r.student.id))
+  ok(coveredPending.length > 1 && coveredPending.every((r) => r.verdict.reason === 'read-failed'),
+     `every pending request of the ${covered.length} it covered says there is no verdict, none says no`)
   const rest = await bothWays(db, WED, { skip: new Set(covered) })
   ok(rest.differences.length === 0, 'everyone outside the failed read: the same both ways', rest.differences.slice(0, 6).join(', '))
 }
@@ -581,26 +538,39 @@ console.log('\n=== L: a failed batch of completions ===')
   db.fail['lessons.select'] = { message: 'relation "lessons" does not exist' }
   const R = await bothWays(db, WED, { reads: false })
   const pending = R.view.requests.filter((r) => r.status === 'pending')
-  ok(R.differences.length === 0 && pending.length > 0 && pending.every((r) => r.verdict.reason === 'read-failed')
-       && R.view.canStillEarn.length === 0 && R.view.requiredCount === null && R.view.unchecked === R.data.students.filter(inOffer).length,
-     'no catalog: every verdict is read-failed both ways, Can still earn has nobody and says how many it could not check', show({ unchecked: R.view.unchecked }))
+  ok(R.differences.length === 0 && pending.length > 0 && pending.every((r) => r.verdict.reason === 'read-failed') && R.view.requiredCount === null,
+     'no catalog: every verdict is read-failed both ways, and the page is told the course could not be read')
 }
 {
   const db = world(main, WED)
-  db.failWhen = (q) => q.table === 'discount_requests' && q.filters.some((f) => f.startsWith('student_id in (') && f.includes('s-w'))
+  db.failWhen = (q) => q.table === 'discount_requests' && q.filters.some((f) => f.startsWith('student_id in (') && f.split(',').includes('s-a'))
     ? { message: 'connection reset' } : null
   const loaded = await loadThirtyData(fakeClient(db))
   const view = buildThirtyView(loaded.data, new Date(WED), RESET)
-  ok(loaded.data.reads.get('s-w').requests.data === null && !earning(view, 's-w') && request(view, 'r-a').verdict.reason === 'read-failed'
-       && earning(view, 'j-001')?.state === 'ready',
-     'a failed batch of every request a student has: their state is unknown, so they are on no list (W is not shown as ready)')
+  ok(loaded.data.reads.get('s-a').requests.data === null && request(view, 'r-a').verdict.reason === 'read-failed'
+       && request(view, 'r-j-001').verdict.ok === true,
+     'a failed batch of every request a student has: their verdict is read-failed (never judged without their other requests); another batch is judged')
 }
-for (const table of ['students', 'discount_requests', 'discount_feedback_questions', 'discount_feedback_responses', 'team_members', 'student_whop_sync', 'tasks']) {
+for (const table of ['students', 'discount_requests', 'team_members', 'student_whop_sync']) {
   const db = world(main, WED)
   db.fail[`${table}.select`] = { message: 'permission denied' }
   const loaded = await loadThirtyData(fakeClient(db))
   ok(loaded.ok === false && loaded.failed.some((f) => f.startsWith(table) && f.includes('permission denied')),
      `${table} cannot be read: the load fails and names it, so the page shows an error, never a list with people missing`, show(loaded.failed))
+}
+for (const table of ['discount_feedback_questions', 'discount_feedback_responses', 'tasks']) {
+  const db = world(main, WED)
+  db.fail[`${table}.select`] = { message: 'permission denied' }
+  const loaded = await loadThirtyData(fakeClient(db))
+  ok(loaded.ok && db.calls(table).length === 0, `${table} is not read any more (the survey and Can still earn went with D4), so it cannot fail the page`)
+}
+{
+  const db = world(main, WED)
+  db.fail['student_membership_discounts.select'] = { message: 'relation "student_membership_discounts" does not exist' }
+  const loaded = await loadThirtyData(fakeClient(db))
+  const view = loaded.ok ? buildThirtyView(loaded.data, new Date(WED), RESET) : null
+  ok(loaded.ok && view.couponsUnread === true && view.requests.every((r) => r.coupon === null) && request(view, 'r-a').verdict.ok,
+     'the stored coupons cannot be read (a database without v111): the list still comes, it says so, no row shows a coupon, the rule still judges')
 }
 
 // ── One snapshot per student ───────────────────────────────────────────────
@@ -641,7 +611,7 @@ function completionQueries(db, from = 0) {
   const view = buildThirtyView(loaded.data, new Date(WED), RESET)
   const rows = view.requests.filter((r) => r.id === 'r-a')
   ok(rows.length === 1 && rows[0].status === 'approved' && rows[0].promoCode === 'ECOM30-TEST05',
-     'r-a, decided after the pending read and before the decided one: one row, as decided (never on To decide and Approved at once)', show(rows.map((r) => r.status)))
+     'r-a, decided after the pending read and before the decided one: one row, as decided (never on Applied and Approved at once)', show(rows.map((r) => r.status)))
 }
 
 // ── The controls ───────────────────────────────────────────────────────────
@@ -736,7 +706,7 @@ console.log('\n=== The 30% page: no ads tick since 2026-10-20 (Lovro), C4\'s wor
   ok(ticks(kept).some(Boolean) && ticks(kept).some((t) => !t) && ticks(kept).every((t, i) => t !== ticks(flipped)[i]),
      'the fixtures hold ticked and unticked students, and the second database has every tick the other way')
   ok(a.ok && b.ok && isDeepStrictEqual(va, vb) && pending.length >= 5,
-     `every tick flipped: the same answer, all ${pending.length} pending verdicts and Can still earn included`)
+     `every tick flipped: the same answer, all ${pending.length} pending verdicts included`)
   const notRule = pending.filter((r) => r.verdict.ok !== approve(a.data.reads.get(r.student.id), new Date(WED), r).said.ok
     || r.verdict.ok !== judgeRequest(a.data.reads.get(r.student.id), new Date(WED), { id: r.id, created_at: r.askedAt }, RESET).verdict.ok)
   ok(notRule.length === 0 && pending.some((r) => r.verdict.ok) && pending.some((r) => !r.verdict.ok),
@@ -767,6 +737,53 @@ console.log('\n=== The 30% page: no ads tick since 2026-10-20 (Lovro), C4\'s wor
     thirtyReasonText('thirty_closing', { ...shared, deadline: null }), thirtyReasonText('thirty_ready', { ...shared, deadline: null }),
   ]
   ok(sentences.every((t) => t.length > 0 && !/—|unlock|ecomtalent/i.test(t)), 'none holds an em dash, "unlock" or "EcomTalent"', show(sentences))
+}
+
+// ── The coupon (admin rebuild 2, D5) ──────────────────────────────────────
+console.log('\n=== The coupon decides first: a discount already on the next renewal ===')
+{
+  const f = fixtures()
+  const mem = (id) => `mem_dev${id.replace(/[^a-z0-9]/g, '')}`
+  const stored = (student, more = {}) => ({
+    student_id: student, whop_membership_id: mem(student), promo_code_id: 'promo_devEvolve', promo_code: 'evolve10',
+    renewal_price: '87.30', plan_renewal_price: '97.00', discounted: true, checked_at: '2026-10-21T06:40:00.000Z', ...more,
+  })
+  // C1: every video done, evolve10 on the membership. C2: the same, its row read from a membership it no longer has.
+  // C3: a used-up code (not discounted). C4: evolve10 and 20 videos left. C5: approved before the rule, evolve10 on it.
+  // C6: evolve10 whose name Whop would not give.
+  for (const [id, done] of [['s-c1', 61], ['s-c2', 61], ['s-c3', 61], ['s-c4', 41], ['s-c5', 61], ['s-c6', 61]]) {
+    f.person(id, `${id} Example`, '2026-10-10T10:00:00.000Z')
+    f.watched(id, REQUIRED.slice(0, done), FROM_WHOP)
+  }
+  for (const id of ['s-c1', 's-c2', 's-c3', 's-c4', 's-c6']) f.request(id, `r-${id.slice(2)}`, '2026-10-20T10:00:00.000Z')
+  f.request('s-c5', 'r-c5', '2026-10-19T10:00:00.000Z', 'approved', { promo_code: 'ECOM30-TEST06', reviewed_at: '2026-10-19T12:00:00.000Z', reviewed_by: 'tm-1' })
+  f.coupons.push(
+    stored('s-c1'),
+    stored('s-c2', { whop_membership_id: 'mem_devSomeoneOld' }),
+    stored('s-c3', { promo_code_id: 'promo_devUsed50', promo_code: 'welcome50', renewal_price: '97.00', discounted: false }),
+    stored('s-c4'),
+    stored('s-c5'),
+    stored('s-c6', { promo_code: null, promo_code_id: 'promo_devYear10' }),
+  )
+  const C = await bothWays(world(f, WED), WED)
+  ok(C.differences.length === 0, 'both ways agree for every student, the coupon read beside them', C.differences.join(', '))
+  const c1 = request(C.view, 'r-c1')
+  ok(!c1.verdict.ok && c1.verdict.reason === 'has-discount' && c1.verdict.text === 'This student already has a discount on their membership (evolve10).' && !c1.verdict.oldCourse,
+     'C1: every video done, evolve10 on the membership: no, in the approve route\'s own words', show(c1.verdict))
+  ok(show(c1.coupon) === show({ code: 'evolve10', discounted: true, renewalPrice: 87.3, planRenewalPrice: 97, checkedAt: '2026-10-21T06:40:00.000Z' }),
+     'C1: the coupon on the row, its prices as numbers (Postgres numeric reaches the route as a string)', show(c1.coupon))
+  ok(approve(C.per.get('s-c1'), new Date(WED), c1).said.ok, 'C1: (the rule alone would have said yes: the coupon is what refuses)')
+  ok(request(C.view, 'r-c2').verdict.ok && request(C.view, 'r-c2').coupon === null, 'C2: a row read from another membership says nothing: the rule\'s yes, no coupon')
+  ok(request(C.view, 'r-c3').verdict.ok && request(C.view, 'r-c3').coupon?.discounted === false && request(C.view, 'r-c3').coupon?.code === 'welcome50',
+     'C3: a used-up code: the rule\'s yes, the coupon kept on the row as not discounted')
+  ok(request(C.view, 'r-c4').verdict.reason === 'has-discount' && request(C.view, 'r-c4').facts.videosDone === 41,
+     'C4: videos left and evolve10: the coupon\'s no, ahead of the videos\' (the count still judged)')
+  ok(request(C.view, 'r-c5').status === 'approved' && request(C.view, 'r-c5').verdict === null && request(C.view, 'r-c5').coupon?.discounted === true,
+     'C5: approved before the rule, evolve10 on the membership: the coupon on the row for the page to warn about')
+  ok(request(C.view, 'r-c6').verdict.text === couponApprovalRefusal('promo_devYear10') && request(C.view, 'r-c6').verdict.text.endsWith('(promo_devYear10).'),
+     'C6: no name from Whop: the verdict names the code\'s id')
+  ok(couponOf(undefined, { whop_membership_id: 'mem_x' }) === null && couponOf(stored('s'), { whop_membership_id: null }) === null,
+     'couponOf: no row, or a student with no membership on file: no coupon')
 }
 
 // ── Words ──────────────────────────────────────────────────────────────────

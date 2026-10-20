@@ -3,10 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Button, Card, EmptyState, Pill, T } from "@/components/admin/ui";
+import { Button, Card, EmptyState, T } from "@/components/admin/ui";
 import {
   CopyButton,
-  DiscordReach,
   ListHeader,
   ListPage,
   LoadError,
@@ -15,42 +14,42 @@ import {
   STALE_TEXT,
   SkeletonRows,
   TAP,
-  WhopNotPulled,
   firstName,
   pressPill,
 } from "@/components/admin/list-parts";
 import type { Notice } from "@/components/admin/list-parts";
 import { adminTransport } from "@/lib/admin/admin-transport";
 import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
-import { clockLabel, dayLabel, deadlineLabel } from "@/lib/admin/croatia-dates";
+import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import type {
-  Facts,
   StudentBrief,
   TeamRef,
   ThirtyRequestRow,
   ThirtyView as ThirtyPayload,
   Verdict,
 } from "@/lib/admin/thirty-view";
+import { couponApprovalRefusal } from "@/lib/world/discount-server";
 import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/lib/world/discount";
 
 /**
- * The 30% page, /admin/discounts (admin rebuild PRD, work item 3, calls C9
- * to C11 and C16).
+ * The 30% page, /admin/discounts (admin rebuild 2, D4 and D5).
  *
- * Four tabs: To decide (every pending request, oldest first), Approved (the
- * code is made), Code added in Whop (the code is on the membership) and
- * Rejected. Can still earn and its Mark messaged went with Today (admin
- * rebuild 2, D2); the answer still carries canStillEarn, which this page no
- * longer shows. Every row comes from GET /api/admin/thirty, which runs the
- * student app's own rule; this file only shows it and sends the team's
- * decisions to the existing routes.
+ * Four tabs, each with its count, every row oldest first: Applied (the
+ * requests waiting for a decision, status pending), Approved (the code is
+ * made), Rejected, and Code Applied (the code is on the membership, status
+ * applied). Requests from 1 October on (DISCOUNT_ELIGIBLE_FROM); older ones
+ * stay in the database.
  *
- * A pending request shows the approve route's verdict beside Approve, which
- * opens exactly when the rule says yes. "Approve anyway" asks once more,
- * inline, then sends the approval with `override`, which skips the 30% rule
- * (C9). Since 2026-10-20 a row has no "Ads verified" tick and no action
- * items' hand-ins (C10 kept them as the tick's evidence): Lovro dropped the
- * ads check from approving, since the 30% already asks for 61 videos.
+ * A row's top line is the student: their name (to the student page),
+ * @username and whether the membership is active. Then only the date
+ * applied, the verdict line (meets the rule, or why not), the coupon, and the
+ * actions: Approve and Reject (with a reason) on Applied, Mark code applied
+ * on Approved. "Approve anyway" is a small link after a refusal, never after
+ * the coupon's: a student whose Whop membership already has a discount on its
+ * next renewal gets no 30%, and the approve route refuses it with no override
+ * (D5). The verdicts, the counts and the coupons come from GET
+ * /api/admin/thirty, which runs the student app's own rule; this file only
+ * shows them and sends the team's decisions to the existing routes.
  *
  * What a decision did shows in a fixed place at the bottom of the window
  * (NoticeStack, list-parts.tsx), where it is seen however far down the row
@@ -60,45 +59,46 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * just decided keeps its buttons off until a read works.
  *
  * The address: ?student=<id> keeps every tab to that student (the student
- * page links here, C16), ?tab= picks the tab.
+ * page links here), ?tab= picks the tab (applied, approved, rejected,
+ * code-applied; the old decide and code-added still open theirs).
  *
  * The calls go through `transport` (src/lib/admin/admin-transport.ts), so
  * the dev page /dev/admin/discounts renders this same component with
  * made-up data and no login.
  */
 
-type TabKey = "decide" | "approved" | "code-added" | "rejected";
+type TabKey = "applied" | "approved" | "rejected" | "code-applied";
 
-const TAB_ORDER: TabKey[] = ["decide", "approved", "code-added", "rejected"];
+const TAB_ORDER: TabKey[] = ["applied", "approved", "rejected", "code-applied"];
 const TAB_LABEL: Record<TabKey, string> = {
-  decide: "To decide",
+  applied: "Applied",
   approved: "Approved",
-  "code-added": "Code added in Whop",
   rejected: "Rejected",
+  "code-applied": "Code Applied",
 };
 const TAB_STATUS: Record<TabKey, ThirtyRequestRow["status"]> = {
-  decide: "pending",
+  applied: "pending",
   approved: "approved",
-  "code-added": "applied",
   rejected: "rejected",
+  "code-applied": "applied",
 };
+/** The tab names before admin rebuild 2, so an old link still opens its tab. */
+const OLD_TAB: Record<string, TabKey> = { decide: "applied", "code-added": "code-applied" };
 
 const FROM_DAY = dayLabel(DISCOUNT_ELIGIBLE_FROM);
 const LAUNCH_DAY = dayLabel(DISCOUNT_LAUNCH_DATE);
 
-const TAB_NOTE: Record<TabKey, string> = {
-  decide:
-    "Requests waiting for a decision, whatever their date, oldest first. Approve creates the student's Whop code.",
-  approved: "The code is made. Add it to the student's membership in Whop, then press Mark code added.",
-  "code-added": `The code is on the student's membership. Requests from ${FROM_DAY} on, newest first.`,
-  rejected: `Requests from ${FROM_DAY} on, newest first.`,
+/** One line under the tabs where the team has something to do. */
+const TAB_NOTE: Partial<Record<TabKey, string>> = {
+  applied: "Approve creates the student's Whop code.",
+  approved: "Add the code to the student's membership in Whop, then press Mark code applied.",
 };
 
 const TAB_EMPTY: Record<TabKey, string> = {
-  decide: "No request is waiting for a decision.",
-  approved: "No code is waiting to be added in Whop.",
-  "code-added": "No code has been added in Whop yet.",
+  applied: "No request is waiting for a decision.",
+  approved: "No code is waiting to be applied in Whop.",
   rejected: "No request has been rejected.",
+  "code-applied": "No code has been applied in Whop yet.",
 };
 
 /** The id of the "may be out of date" line among the notices. */
@@ -108,6 +108,7 @@ const STALE_ID = -1;
 const WHOP_CODE = /\bECOM30-[A-Z0-9]{4,}\b/;
 
 function parseTab(value: string | null): TabKey | null {
+  if (value && value in OLD_TAB) return OLD_TAB[value];
   return TAB_ORDER.find((t) => t === value) ?? null;
 }
 
@@ -118,6 +119,8 @@ type RowResult = Promise<string | null>;
 
 /** The last button's notice. */
 type PageNotice = Omit<Notice, "id" | "action">;
+
+type Refusal = Extract<Answer<unknown>, { ok: false }>;
 
 function studentName(s: StudentBrief): string {
   return s.name?.trim() || s.email || "No name on file";
@@ -130,23 +133,23 @@ function byWhom(ref: TeamRef | null): string {
 }
 
 /**
- * The page's own words for a decision the route refused (section 8: this
- * build handles the routes' 400 and 409 answers in plain words). A 409 is
- * the route's sentence as it is: lane G1 wrote those for the team, and the
- * approve route's names the Whop code to delete. The approve route's 400s
- * name a button this page does not have, so they get the page's words; the
- * row's verdict then says why.
+ * The page's own words for a decision the route refused. A 409 is the
+ * route's sentence as it is (it names the Whop code to delete), and so is the
+ * coupon's refusal (it names the code on the membership). The approve route's
+ * other 400s name a button this page does not have, so they get the page's
+ * words; the row's verdict then says why.
  */
-function decisionError(kind: "approve" | "reject" | "applied", r: { status: number; error: string }): string {
+function decisionError(kind: "approve" | "reject" | "applied", r: Refusal): string {
   if (r.status === 409) return r.error;
   if (r.status === 404) return "This request no longer exists.";
   if (kind === "approve" && r.status === 400) {
+    if (r.code === "has-discount") return r.error;
     if (/already processed/i.test(r.error)) return "This request was already decided.";
     return "Not approved: the 30% rule says no for this request now. Its row shows why.";
   }
-  if (kind === "applied" && r.status === 400) return "This request is no longer approved, so the code was not marked as added.";
+  if (kind === "applied" && r.status === 400) return "This request is no longer approved, so the code was not marked as applied.";
   if (kind === "reject" && r.status >= 500) return "Couldn't save the rejection. Try again.";
-  if (kind === "applied" && r.status >= 500) return "Couldn't mark the code as added. Try again.";
+  if (kind === "applied" && r.status >= 500) return "Couldn't mark the code as applied. Try again.";
   return r.error;
 }
 
@@ -154,9 +157,6 @@ function decisionError(kind: "approve" | "reject" | "applied", r: { status: numb
 function listIsStale(kind: "approve" | "reject" | "applied", status: number): boolean {
   return status === 409 || status === 404 || (status === 400 && kind !== "reject");
 }
-
-const byAsked = (a: ThirtyRequestRow, b: ThirtyRequestRow) =>
-  Date.parse(a.askedAt) - Date.parse(b.askedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyTransport }) {
   const params = useSearchParams();
@@ -244,11 +244,11 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
     setAddress(next);
   }
 
-  async function refused(kind: "approve" | "reject" | "applied", row: ThirtyRequestRow, r: { status: number; error: string }): RowResult {
+  async function refused(kind: "approve" | "reject" | "applied", row: ThirtyRequestRow, r: Refusal): RowResult {
     const text = decisionError(kind, r);
     if (!listIsStale(kind, r.status)) return text;
     // A code made in Whop for a request someone else decided must be deleted there: it stays here until dismissed, copyable.
-    const code = text.match(WHOP_CODE)?.[0];
+    const code = r.code === "has-discount" ? undefined : text.match(WHOP_CODE)?.[0];
     show({ tone: "danger", text: `${studentName(row.student)}: ${text}`, ...(code ? { copy: { label: "Copy code", text: code } } : {}) });
     await reload();
     return null;
@@ -282,7 +282,7 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
     const r = await transport.markApplied(row.id);
     if (!r.ok) return refused("applied", row, r);
     lock(row.id);
-    show({ tone: "success", text: `Marked the code as added in Whop for ${studentName(row.student)}.` });
+    show({ tone: "success", text: `Marked the code as applied in Whop for ${studentName(row.student)}.` });
     await reload();
     return null;
   }
@@ -302,7 +302,7 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   const header = (meta: React.ReactNode, action?: React.ReactNode) => (
     <ListHeader
       title="30% off"
-      description="Every request for the 30%."
+      description={`Requests for the 30% from ${FROM_DAY}, oldest first.`}
       meta={meta}
       action={action}
     />
@@ -327,21 +327,18 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   }
 
   const data = loaded.data;
+  // The answer is oldest first already; every tab keeps that order.
   const requests = student ? data.requests.filter((r) => r.student.id === student) : data.requests;
-  const byStatus = (status: ThirtyRequestRow["status"]) => requests.filter((r) => r.status === status);
-  const lists = {
-    // The longest wait first: the answer reads newest first, as the decided tabs show it.
-    decide: [...byStatus(TAB_STATUS.decide)].sort(byAsked),
-    approved: byStatus(TAB_STATUS.approved),
-    "code-added": byStatus(TAB_STATUS["code-added"]),
-    rejected: byStatus(TAB_STATUS.rejected),
-  };
+  const lists = Object.fromEntries(
+    TAB_ORDER.map((t) => [t, requests.filter((r) => r.status === TAB_STATUS[t])] as const),
+  ) as Record<TabKey, ThirtyRequestRow[]>;
   const count = (t: TabKey) => lists[t].length;
   // With one student and no tab asked for, open the first tab that has them.
   const tab: TabKey =
-    pickedTab ?? urlTab ?? (student ? (TAB_ORDER.find((t) => count(t) > 0) ?? "decide") : "decide");
+    pickedTab ?? urlTab ?? (student ? (TAB_ORDER.find((t) => count(t) > 0) ?? "applied") : "applied");
   const studentShown = requests[0]?.student ?? null;
   const emptyTitle = student ? "This student has nothing on this tab." : TAB_EMPTY[tab];
+  const note = TAB_NOTE[tab];
 
   return (
     <ListPage>
@@ -356,8 +353,12 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
 
       {data.requiredCount === null && (
         <Warning>
-          Couldn&apos;t read the course&apos;s videos, so no request has a verdict and no video count is shown. Press
-          Refresh to try again.
+          Couldn&apos;t read the course&apos;s videos, so no request has a verdict. Press Refresh to try again.
+        </Warning>
+      )}
+      {data.couponsUnread && (
+        <Warning>
+          Couldn&apos;t read the membership coupons, so no row shows one. Approve still asks Whop before it makes a code.
         </Warning>
       )}
 
@@ -387,7 +388,7 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
         value={tab}
         onChange={chooseTab}
       />
-      <p style={{ ...T.bodyDim, lineHeight: 1.5, marginBottom: 16 }}>{TAB_NOTE[tab]}</p>
+      {note && <p style={{ ...T.bodyDim, lineHeight: 1.5, marginBottom: 16 }}>{note}</p>}
 
       {count(tab) === 0 ? (
         <Card>
@@ -400,21 +401,13 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
               <PendingRow
                 key={row.id}
                 row={row}
-                questions={data.questions}
                 locked={locked.has(row.id)}
                 stale={stale}
                 onApprove={approve}
                 onReject={reject}
               />
             ) : (
-              <DecidedRow
-                key={row.id}
-                row={row}
-                questions={data.questions}
-                locked={locked.has(row.id)}
-                stale={stale}
-                onMarkApplied={markApplied}
-              />
+              <DecidedRow key={row.id} row={row} locked={locked.has(row.id)} stale={stale} onMarkApplied={markApplied} />
             ),
           )}
         </Card>
@@ -428,7 +421,7 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
 const ROW: React.CSSProperties = {
   flexDirection: "column",
   alignItems: "stretch",
-  gap: 12,
+  gap: 10,
   padding: 16,
 };
 
@@ -448,11 +441,33 @@ const ERROR_TEXT: React.CSSProperties = {
   overflowWrap: "anywhere",
 };
 
+/**
+ * "Approve anyway": a small text link, not a third pill beside Approve and
+ * Reject. The text is 13px in Airy Blue (4.9:1 on a card at the lowest); the
+ * box is the kit's 44px touch target.
+ */
+const SMALL_LINK: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: TAP,
+  padding: "0 2px",
+  background: "transparent",
+  border: "none",
+  cursor: "pointer",
+  fontSize: 13,
+  fontWeight: 500,
+  color: "var(--color-accent-dark)",
+  textDecoration: "underline",
+  textDecorationColor: "rgba(147, 183, 213, 0.55)",
+  textUnderlineOffset: 3,
+  whiteSpace: "nowrap",
+};
+
 /** The line a row shows when it was just decided and the list could not be read again. */
 const SAVED_STALE = "Saved. Press Refresh to see this row as it is now.";
 
 /**
- * The five tabs as pills that wrap onto a second line on a phone, so every
+ * The four tabs as pills that wrap onto a second line on a phone, so every
  * tab is in view and none is cut mid-word. Each is 44px tall; its count is
  * 12px.
  */
@@ -518,53 +533,37 @@ function Dot({ color }: { color: string }) {
   );
 }
 
-/** Name (to the student page, C10), @name, plan, membership, and C7's way to reach them. */
-function StudentHead({
-  student,
-  extra,
-  actions,
-}: {
-  student: StudentBrief;
-  extra?: React.ReactNode;
-  actions?: React.ReactNode;
-}) {
+/** The row's top line: the name (to the student page), @username, and whether the membership is active. */
+function StudentHead({ student }: { student: StudentBrief }) {
   return (
-    <div className="flex flex-wrap items-start justify-between" style={{ gap: 10 }}>
-      <div className="flex flex-wrap items-center" style={{ gap: "6px 8px", minWidth: 0, flex: "1 1 240px" }}>
-        <Link
-          href={`/admin/students/${encodeURIComponent(student.id)}`}
-          style={{
-            fontSize: 15,
-            fontWeight: 600,
-            letterSpacing: "-0.011em",
-            color: "var(--color-text-primary)",
-            textDecoration: "underline",
-            textDecorationColor: "var(--color-border-strong)",
-            textUnderlineOffset: 3,
-            overflowWrap: "anywhere",
-          }}
-        >
-          {studentName(student)}
-        </Link>
-        {student.discord.username && (
-          <span style={{ ...T.bodyDim, overflowWrap: "anywhere" }}>@{student.discord.username.replace(/^@/, "")}</span>
-        )}
-        <Pill tone="neutral">{student.plan}</Pill>
-        <MembershipPill status={student.status} />
-        {extra}
-      </div>
-      <div className="flex flex-wrap items-center" style={{ gap: 8 }}>
-        <DiscordReach discord={student.discord} />
-        {actions}
-      </div>
+    <div className="flex flex-wrap items-center" style={{ gap: "6px 8px", minWidth: 0 }}>
+      <Link
+        href={`/admin/students/${encodeURIComponent(student.id)}`}
+        style={{
+          fontSize: 15,
+          fontWeight: 600,
+          letterSpacing: "-0.011em",
+          color: "var(--color-text-primary)",
+          textDecoration: "underline",
+          textDecorationColor: "var(--color-border-strong)",
+          textUnderlineOffset: 3,
+          overflowWrap: "anywhere",
+        }}
+      >
+        {studentName(student)}
+      </Link>
+      {student.username && (
+        <span style={{ ...T.bodyDim, overflowWrap: "anywhere" }}>@{student.username.replace(/^@/, "")}</span>
+      )}
+      <MembershipPill status={student.status} />
     </div>
   );
 }
 
-/** Facts in one line, a dot between them; it wraps on a phone. */
-function FactsLine({ parts }: { parts: string[] }) {
+/** A line of parts with a dot between them; it wraps on a phone. */
+function DotLine({ parts, dim = true }: { parts: string[]; dim?: boolean }) {
   return (
-    <p style={{ ...T.bodyDim, lineHeight: 1.6 }}>
+    <p style={{ ...(dim ? T.bodyDim : T.body), lineHeight: 1.6 }}>
       {parts.map((p, i) => (
         <span key={i}>
           {i > 0 && <span aria-hidden="true"> · </span>}
@@ -575,39 +574,31 @@ function FactsLine({ parts }: { parts: string[] }) {
   );
 }
 
-function videosPart(f: Facts): string {
-  if (f.videosDone == null || f.videosTotal == null) return "Videos: couldn't read";
-  return `Videos ${f.videosDone} of ${f.videosTotal}${f.countedByDeadline ? " done by the deadline" : ""}`;
-}
-
-/** "Paid Thu 1 Oct" · "Deadline Fri 23 Oct, 23:59 (Croatia time)" · "Videos 57 of 61" · "Asked Fri 16 Oct". */
-function requestFacts(row: ThirtyRequestRow): string[] {
-  return [
-    row.facts.firstPaidAt ? `Paid ${dayLabel(row.facts.firstPaidAt)}` : "No first payment on file",
-    row.facts.deadline ? `Deadline ${deadlineLabel(row.facts.deadline)}` : "No 30% deadline",
-    videosPart(row.facts),
-    `Asked ${dayLabel(row.askedAt)}`,
-  ];
-}
-
-/** The verdict's colour: green yes, red when the rule says no, grey for no verdict. */
+/** The verdict's colour: green yes, red when the rule or the coupon says no, grey for no verdict. */
 function verdictColor(v: Verdict): string {
   if (v.ok) return "var(--color-success)";
   if (v.reason === "read-failed" || v.reason === "unknown") return "var(--color-neutral)";
   return "var(--color-danger)";
 }
 
-/** A pending request: the facts, the verdict beside Approve, Approve anyway, Reject, the survey answers. */
+/** "57 of 61 videos" (and "by the deadline" once it has passed), and when Whop progress is not in yet. */
+function verdictDetail(row: ThirtyRequestRow, v: Verdict): string[] {
+  const f = row.facts;
+  if (v.reason === "has-discount" || !f || f.videosDone == null || f.videosTotal == null) return [];
+  const out = [`${f.videosDone} of ${f.videosTotal} videos${f.countedByDeadline ? " by the deadline" : ""}`];
+  if (v.reason === "locked" && !row.student.whopPulled) out.push("Whop progress not pulled since the switch");
+  return out;
+}
+
+/** An Applied row: the date applied, the verdict line, Approve and Reject, and Approve anyway after a refusal that is not the coupon's. */
 function PendingRow({
   row,
-  questions,
   locked,
   stale,
   onApprove,
   onReject,
 }: {
   row: ThirtyRequestRow;
-  questions: ThirtyPayload["questions"];
   /** Decided since the last read that worked: its buttons stay off until a read works. */
   locked: boolean;
   stale: boolean;
@@ -626,6 +617,9 @@ function PendingRow({
     oldCourse: false,
   };
   const off = busy !== null || locked;
+  // D5: the coupon's refusal has no override, so no Approve anyway after it.
+  const canOverride = !verdict.ok && verdict.reason !== "has-discount";
+  const detail = verdictDetail(row, verdict);
 
   async function run(what: NonNullable<typeof busy>, fn: () => RowResult) {
     setBusy(what);
@@ -637,14 +631,45 @@ function PendingRow({
   }
 
   // A rejection the app counts: the student's map shows it and offers no new request (discount.ts, requestCounts).
-  const rejectionCounts = requestCounts({ status: "rejected", created_at: row.askedAt }, row.facts.firstPaidAt);
+  const rejectionCounts = requestCounts({ status: "rejected", created_at: row.askedAt }, row.facts?.firstPaidAt ?? null);
 
   return (
     <div className="list-row" style={ROW}>
-      <StudentHead student={row.student} extra={!row.student.whopPulled ? <WhopNotPulled /> : null} />
-      <FactsLine parts={requestFacts(row)} />
+      <StudentHead student={row.student} />
+      <DotLine parts={[`Applied ${dayLabel(row.askedAt)}`]} />
 
-      <div className="flex flex-wrap items-center" style={{ gap: 10 }}>
+      {/* The verdict takes its own width, so "Approve anyway" sits right after it (under it on a phone). */}
+      <div className="flex flex-wrap items-center" style={{ columnGap: 14, rowGap: 0 }} data-verdict={verdict.reason ?? "yes"}>
+        <p style={{ display: "flex", gap: 8, alignItems: "flex-start", flex: "0 1 auto", minWidth: 0, padding: "4px 0" }}>
+          <Dot color={verdictColor(verdict)} />
+          <span style={{ ...T.body, lineHeight: 1.5 }}>
+            {verdict.text}
+            {detail.length > 0 && (
+              <span style={{ color: "var(--color-text-secondary)" }}>
+                {detail.map((d) => (
+                  <span key={d}>
+                    <span aria-hidden="true"> · </span>
+                    {d}
+                  </span>
+                ))}
+              </span>
+            )}
+          </span>
+        </p>
+        {canOverride && (
+          <button
+            type="button"
+            style={{ ...SMALL_LINK, opacity: off ? 0.5 : 1, cursor: off ? "not-allowed" : "pointer" }}
+            disabled={off}
+            aria-expanded={confirm === "override"}
+            onClick={() => setConfirm((c) => (c === "override" ? null : "override"))}
+          >
+            Approve anyway
+          </button>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center" style={{ gap: 8 }}>
         <Button
           variant="raised"
           size="md"
@@ -654,38 +679,23 @@ function PendingRow({
         >
           Approve
         </Button>
-        <p style={{ display: "flex", gap: 8, alignItems: "flex-start", flex: "1 1 240px", minWidth: 0 }}>
-          <Dot color={verdictColor(verdict)} />
-          <span style={{ ...T.body, lineHeight: 1.5 }}>{verdict.text}</span>
-        </p>
-        <div className="flex flex-wrap" style={{ gap: 8 }}>
-          {!verdict.ok && (
-            <Button
-              variant="raised"
-              size="md"
-              disabled={off}
-              onClick={() => setConfirm((c) => (c === "override" ? null : "override"))}
-            >
-              Approve anyway
-            </Button>
-          )}
-          <Button
-            variant="raised"
-            size="md"
-            disabled={off}
-            onClick={() => setConfirm((c) => (c === "reject" ? null : "reject"))}
-          >
-            Reject
-          </Button>
-        </div>
+        <Button
+          variant="raised"
+          size="md"
+          disabled={off}
+          onClick={() => setConfirm((c) => (c === "reject" ? null : "reject"))}
+        >
+          Reject
+        </Button>
       </div>
 
       {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
 
-      {confirm === "override" && (
+      {confirm === "override" && canOverride && (
         <div style={PANEL}>
           <p style={{ ...T.body, lineHeight: 1.5 }}>
-            Approve anyway skips the 30% rule and creates the student&apos;s Whop code now.
+            Approve anyway skips the 30% rule and creates the student&apos;s Whop code now. A discount already on the
+            student&apos;s membership still stops it.
           </p>
           <div className="flex flex-wrap" style={{ gap: 8 }}>
             <Button
@@ -734,7 +744,7 @@ function PendingRow({
           <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>
             {rejectionCounts
               ? "The student sees this reason on their map, and cannot ask for the 30% again."
-              : row.facts.window
+              : row.facts?.window
                 ? `This request was made before ${LAUNCH_DAY}, so the student can still ask again from the app.`
                 : "The student may see this reason."}
           </p>
@@ -760,41 +770,11 @@ function PendingRow({
           {error}
         </p>
       )}
-
-      <Answers answers={row.answers} questions={questions} />
     </div>
   );
 }
 
-/** The survey answers, folded. Nothing when the request came with none. */
-function Answers({
-  answers,
-  questions,
-}: {
-  answers: ThirtyRequestRow["answers"];
-  questions: ThirtyPayload["questions"];
-}) {
-  if (answers.length === 0) return null;
-  const text = new Map(questions.map((q) => [q.id, q.text] as const));
-  // A block, not PANEL's flex column: a closed <details> would keep the gap under its summary.
-  return (
-    <details style={{ ...PANEL, display: "block" }}>
-      <summary style={{ ...T.body, fontWeight: 600, cursor: "pointer" }}>Survey answers ({answers.length})</summary>
-      <dl style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-        {answers.map((a) => (
-          <div key={a.questionId}>
-            <dt style={{ ...T.bodyDim, lineHeight: 1.5 }}>{text.get(a.questionId) ?? "A question no longer in the survey"}</dt>
-            <dd style={{ ...T.body, lineHeight: 1.5, marginTop: 2, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-              {a.answer === null ? "No answer" : String(a.answer)}
-            </dd>
-          </div>
-        ))}
-      </dl>
-    </details>
-  );
-}
-
-/** The code, and a button that copies it. */
+/** The 30% code, and a button that copies it. */
 function CodeWithCopy({ code }: { code: string }) {
   return (
     <span className="flex flex-wrap items-center" style={{ gap: 8 }}>
@@ -817,16 +797,14 @@ function CodeWithCopy({ code }: { code: string }) {
   );
 }
 
-/** An approved, added or rejected request (C11's words). */
+/** An Approved, Rejected or Code Applied row: the dates and who decided, the reason or the code, Mark code applied on Approved. */
 function DecidedRow({
   row,
-  questions,
   locked,
   stale,
   onMarkApplied,
 }: {
   row: ThirtyRequestRow;
-  questions: ThirtyPayload["questions"];
   locked: boolean;
   stale: boolean;
   onMarkApplied: (row: ThirtyRequestRow) => RowResult;
@@ -834,25 +812,35 @@ function DecidedRow({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reviewed = row.reviewedAt ? ` ${dayLabel(row.reviewedAt)}` : "";
-  const decided =
-    row.status === "rejected"
-      ? [`Rejected${reviewed}${byWhom(row.reviewedBy)}`]
-      : [
-          `Approved${reviewed}${byWhom(row.reviewedBy)}`,
-          ...(row.status === "applied"
-            ? [`Code added${row.appliedAt ? ` ${dayLabel(row.appliedAt)}` : ""}${byWhom(row.appliedBy)}`]
-            : []),
-        ];
+  const parts = [`Applied ${dayLabel(row.askedAt)}`];
+  if (row.status === "rejected") parts.push(`Rejected${reviewed}${byWhom(row.reviewedBy)}`);
+  else {
+    parts.push(`Approved${reviewed}${byWhom(row.reviewedBy)}`);
+    if (row.status === "applied") {
+      parts.push(`Code applied${row.appliedAt ? ` ${dayLabel(row.appliedAt)}` : ""}${byWhom(row.appliedBy)}`);
+    }
+  }
+  // A code on the membership that still discounts the next renewal, on a request approved before the coupon rule:
+  // adding the 30% code would replace it, so the team checks Whop first.
+  const coupon = row.status === "approved" && row.coupon?.discounted ? row.coupon : null;
 
   return (
     <div className="list-row" style={ROW}>
       <StudentHead student={row.student} />
-      <FactsLine parts={requestFacts(row)} />
-      <p style={{ ...T.body, lineHeight: 1.5 }}>{decided.join(" · ")}</p>
+      <DotLine parts={parts} />
 
       {row.status === "rejected" && (
         <p style={{ ...T.bodyDim, lineHeight: 1.5, overflowWrap: "anywhere" }}>
           {row.rejectionReason ? `Reason: ${row.rejectionReason}` : "No reason given."}
+        </p>
+      )}
+
+      {coupon && (
+        <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="discounted">
+          <Dot color="var(--color-warning)" />
+          <span style={{ ...T.body, lineHeight: 1.5 }}>
+            {couponApprovalRefusal(coupon.code)} Check Whop before you add the 30% code.
+          </span>
         </p>
       )}
 
@@ -873,7 +861,7 @@ function DecidedRow({
                 if (e) setError(e);
               }}
             >
-              Mark code added
+              Mark code applied
             </Button>
           )}
         </div>
@@ -892,8 +880,6 @@ function DecidedRow({
           {error}
         </p>
       )}
-
-      <Answers answers={row.answers} questions={questions} />
     </div>
   );
 }

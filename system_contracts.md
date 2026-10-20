@@ -735,8 +735,14 @@ When adding a new table, append it here. When deleting a field, scan
   `src/lib/admin/tasks-reset.ts` (`getTasksResetAt`, `readTasksConfig`),
   which throw on a failed read or a value with no zone, by
   `GET /api/admin/tasks` (with the 2 DM links, one read) and
-  `GET /api/admin/tasks/insights`, and by the PRD for the Dashboard
-  (see `tasks`).
+  `GET /api/admin/tasks/insights`, and by the Dashboard
+  (`readDashboard` in `src/app/admin/(authenticated)/page.tsx`, with
+  `curriculum_reset_at` in one read, checked by `configReads` of
+  `src/lib/admin/dashboard-metrics.ts`; see "The Dashboard's reads").
+  Both checks accept what v109 writes. `configReads` also accepts
+  Postgres's own text for a timestamptz (`2026-10-21 03:12:45+00`),
+  which `tasks-reset.ts` refuses: a row written by hand that way counts
+  on the Dashboard while the Tasks page answers 500 with its reason.
 - **A key with no reader (v95):** `discount_window_days`, seeded `14`.
   No code reads it; the discount routes use `DISCOUNT_WINDOW_DAYS` in
   `src/lib/constants.ts`. `/admin/settings` listed every row of this
@@ -1157,11 +1163,11 @@ When adding a new table, append it here. When deleting a field, scan
   `GET /api/admin/tasks/insights` hands it to `computeOutreachInsights`
   (`tasksFloorIso`), which reads only tasks created on or after it. With
   no row every task is on the lists, as before. A failed read of the row
-  is a 500 in both routes, never "no reset". The PRD gives the
-  Dashboard's Open tasks tile the same line (D7, lane WI-2, built apart
-  from this lane; `getTasksResetAt` of `src/lib/admin/tasks-reset.ts` is
-  there for it). The 30% loader's last contact and the crons read tasks
-  of any date, as before.
+  is a 500 in both routes, never "no reset". The Dashboard's Open tasks
+  tile draws the same line (D7): it reads the key itself and checks it
+  with `configReads` of `src/lib/admin/dashboard-metrics.ts`, apart from
+  `getTasksResetAt` (see `admin_config`). The 30% loader's last contact
+  and the crons read tasks of any date, as before.
 
 ### `daily_progress_snapshots`
 - **Depends on:** `students`, `lessons`
@@ -1258,7 +1264,7 @@ shown as "Couldn't load" on every tile it feeds, never as 0.
 - `canceling_snapshots`: the same 14 days.
 - `admin_config`: the keys `curriculum_reset_at` and `tasks_reset_at`
   in one read. `tasks_reset_at` is written by the tasks reset (v109,
-  another lane of admin rebuild 2); with no row every open task counts.
+  admin rebuild 2, D7); with no row every open task counts.
   A value that is not a date and time fails the tile that needs it.
 
 ### `sync_runs` (v77)

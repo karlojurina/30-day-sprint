@@ -1333,6 +1333,9 @@ if (wanted('people')) {
   const settledPage = () => page.waitForFunction(() => !document.querySelector('.animate-pulse'), { timeout: 30000 })
 
   // ── Outreach insights ──
+  // Its pictures are tasks-insights-*: the templates lane's part draws
+  // /dev/admin/insights (progress insights) as insights-*, and the same name
+  // would put one page's picture over the other's.
   for (const size of SIZES) {
     const [w, h] = size
     for (const [name, query] of [['full', ''], ['no-reset', '?reset=none'], ['empty', '?state=empty']]) {
@@ -1340,7 +1343,7 @@ if (wanted('people')) {
       console.log(`\n${label}`)
       await go(`/dev/admin/tasks/insights${query}`, size)
       await settledPage()
-      await check(label, `insights-${name}-${w}`)
+      await check(label, `tasks-insights-${name}-${w}`)
       expect((await gluedBold()).length === 0, `${label}: no bold word glued to the next`, JSON.stringify(await gluedBold()))
     }
     for (const state of ['loading', 'error']) {
@@ -1349,7 +1352,7 @@ if (wanted('people')) {
       await go(`/dev/admin/tasks/insights?state=${state}`, size)
       if (state === 'loading') await page.waitForSelector('.animate-pulse')
       else await page.waitForSelector('[role="alert"]')
-      await check(label, `insights-${state}-${w}`)
+      await check(label, `tasks-insights-${state}-${w}`)
     }
   }
   console.log('\nInsights: the ranges and the words')

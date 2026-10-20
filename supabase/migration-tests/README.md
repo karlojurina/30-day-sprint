@@ -19,6 +19,11 @@ npm test
 
 Exit code 0 = every assertion passed. Failures print first and last.
 
+`npm test` runs `run.mjs`, then `v111.test.mjs` (v111 and its undo, admin
+rebuild 2, D5, in a file of its own so the lanes that added v109 and v110
+to `run.mjs` merged without touching it). On `night/admin2` with the 5
+lanes merged: `PASS 702   FAIL 0`, then `PASS 22   FAIL 0`.
+
 ## What it actually checks
 
 The interesting assertions are the ones about things **staying the same**:

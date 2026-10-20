@@ -1,34 +1,6 @@
-/**
- * Admin-side Whop community fetch.
- *
- * Pulls every membership for the products configured in WHOP_PRODUCT_ID
- * (comma-separated). Used by /api/admin/sync-whop (button) and
- * /api/cron/sync-whop (daily 02:00 UTC). Requires WHOP_API_KEY with
- * the members:read scope.
- *
- * The Whop v2 memberships endpoint returns paginated rows. We page
- * defensively (cap at 200 pages) and tolerate either of the two
- * pagination shapes Whop uses across endpoints.
- */
 
-// /api/v2/memberships is the admin endpoint for listing memberships
-// across the company. /api/v1/memberships?product_id=… returns
-// "not authorized" for company admin keys — v1 was the user-scoped
-// endpoint. We use v2 explicitly here even though WHOP_API_BASE
-// elsewhere still points at v1.
 const WHOP_MEMBERSHIPS_BASE = "https://api.whop.com/api/v2";
 
-/**
- * Fetch wrapper with Cloudflare-1015-aware retry. Whop's API sits
- * behind Cloudflare and returns 429 with an HTML/JSON body when
- * sustained request rates exceed (roughly) ~10/sec from one origin.
- * Sync runs paginate through hundreds of pages, so we MUST handle
- * 429 or the whole sync aborts mid-run.
- *
- * Strategy: honor Retry-After if present, else exponential backoff
- * with jitter. Caps total wait at ~60s per attempt. Returns the
- * final Response (which may still be 429 if the last attempt failed).
- */
 export async function whopFetchWithRetry(
   url: string,
   headers: HeadersInit,
@@ -40,8 +12,6 @@ export async function whopFetchWithRetry(
     if (res.status !== 429) return res;
     lastRes = res;
     if (attempt === maxRetries) break;
-    // Retry-After is in seconds when present; otherwise exponential
-    // backoff (1s, 2s, 4s, 8s, 16s) capped at 30s.
     const retryAfterHeader = res.headers.get("retry-after");
     const retryAfterSec = retryAfterHeader
       ? parseInt(retryAfterHeader, 10)
@@ -49,7 +19,6 @@ export async function whopFetchWithRetry(
     let waitMs = !isNaN(retryAfterSec)
       ? retryAfterSec * 1000
       : Math.min(30_000, 1_000 * Math.pow(2, attempt));
-    // Small jitter so multiple in-flight requests don't all retry at once.
     waitMs += Math.floor(Math.random() * 250);
     console.warn(
       `[whop-api] 429 rate-limited; waiting ${waitMs}ms before retry ${attempt + 1}/${maxRetries}`,
@@ -59,21 +28,6 @@ export async function whopFetchWithRetry(
   return lastRes!;
 }
 
-/**
- * Whop v2 /memberships response row. Field names match Whop's actual
- * response shape, NOT the names we'd ideally pick (which would all
- * end in `_id` for clarity). Verified empirically v75.14.3 — the
- * earlier interface used `user_id` / `plan_id` / `product_id` and
- * every read returned undefined, silently breaking sync.
- *
- * IDs are flat strings at the top level, not nested objects:
- *   user:    'user_xxxxx'
- *   plan:    'plan_xxxxx'
- *   product: 'prod_xxxxx'
- *
- * The webhook payload shape is DIFFERENT — those use nested objects
- * (`user.id`, `product.id`) and live in src/types/whop.ts.
- */
 export interface WhopMembershipRow {
   id: string;
   user: string | null;
@@ -82,61 +36,26 @@ export interface WhopMembershipRow {
   valid: boolean | null;
   created_at: number | string | null;
   expires_at: number | string | null;
-  /** For canceled / expired memberships this is approximately when
-   *  access ended (the end of the last paid billing cycle). For
-   *  active memberships it's a future date — only use it as a
-   *  cancellation proxy when status is terminal. */
   renewal_period_end?: number | string | null;
-  /** v75.46: Whop's "Canceling" state. When true AND status is still
-   *  active/past_due, the student clicked cancel but has access
-   *  through end of billing cycle. This is the earliest churn signal
-   *  the platform exposes — sync runner uses it to stamp
-   *  students.cancel_scheduled_at. Previously we were silently
-   *  dropping this field from every read because it wasn't declared
-   *  on the interface (TypeScript erases unknown JSON fields). The
-   *  webhook payload at types/whop.ts:29 has carried it all along. */
   cancel_at_period_end?: boolean | null;
   discord?: { id?: string; username?: string } | null;
-  /** Some endpoints surface discord_user_id at the top level instead. */
   discord_user_id?: string | null;
-  /** Product + plan IDs for filtering / paying-plan classification. */
   product?: string | null;
   plan?: string | null;
 }
 
-/**
- * Map a Whop membership status / valid flag to our students.membership_status
- * enum: 'active' | 'past_due' | 'canceled' | 'expired'.
- *
- * Trust order: row.valid first, then status string. `valid` is Whop's
- * canonical "does this user have access right now" boolean — status is
- * the lifecycle label downstream of it.
- *
- * v75.12 — was status-first, which mapped `completed` → "canceled".
- * That blocked free / lifetime / one-time plans (status=completed,
- * valid=true means "user has permanent entitlement"). Borna +
- * Alessandro (free plan under prod_eE7r6SXa3H0MX) hit this on login.
- */
 export function mapStatus(
   row: Pick<WhopMembershipRow, "status" | "valid">,
 ): "active" | "past_due" | "canceled" | "expired" {
   const s = (row.status ?? "").toLowerCase();
 
-  // valid=true → user has access right now. Default to "active" but
-  // surface past_due so we can flag billing trouble downstream.
   if (row.valid === true) {
     return s === "past_due" ? "past_due" : "active";
   }
-  // valid=false → user does not have access. Default to "canceled"
-  // but preserve "expired" for accurate categorization in the UI.
   if (row.valid === false) {
     return s === "expired" ? "expired" : "canceled";
   }
 
-  // valid missing — fall back to status string. "completed" without a
-  // valid flag is treated as active for the lifetime / one-time /
-  // free-claim case; a recurring plan that genuinely ended would have
-  // valid=false caught above.
   if (s === "active" || s === "trialing" || s === "completed") return "active";
   if (s === "past_due") return "past_due";
   if (s === "expired") return "expired";
@@ -144,14 +63,12 @@ export function mapStatus(
   return "active";
 }
 
-/** Parse a Whop timestamp (unix seconds OR ISO string) into ISO. */
 export function toIso(value: number | string | null): string | null {
   if (value == null) return null;
   if (typeof value === "string") {
     const d = new Date(value);
     return isNaN(d.getTime()) ? null : d.toISOString();
   }
-  // Whop unix epoch is in seconds, not ms.
   const ms = value > 10_000_000_000 ? value : value * 1000;
   const d = new Date(ms);
   return isNaN(d.getTime()) ? null : d.toISOString();
@@ -162,20 +79,12 @@ interface FetchOptions {
   maxPages?: number;
 }
 
-/**
- * Async generator that yields every Whop membership row for a single
- * product id. Handles the two pagination shapes (`pagination.next_page`
- * vs. `links.next`) Whop uses across API versions.
- */
 export async function* listMembershipsForProduct(
   productId: string,
   opts: FetchOptions = {},
 ): AsyncGenerator<WhopMembershipRow> {
   const apiKey = process.env.WHOP_API_KEY;
   if (!apiKey) throw new Error("WHOP_API_KEY not set");
-  // Whop's actual per_page response was 10 even when we asked for 1
-  // — they have a 10-min cap. Push to 50 to halve the request count.
-  // (Lowering still further would help rate-limit but takes longer.)
   const perPage = opts.perPage ?? 50;
   const maxPages = opts.maxPages ?? 500;
   const headers = {
@@ -185,16 +94,7 @@ export async function* listMembershipsForProduct(
 
   let page = 1;
   while (page <= maxPages) {
-    // Throttle: 200ms between pages → max ~5 req/sec from this loop.
-    // Whop's Cloudflare layer rate-limits at ~10 req/sec so this
-    // stays well under. ~16s on a 78-page sync (acceptable).
     if (page > 1) await new Promise((r) => setTimeout(r, 200));
-    // v89: `per=`, NOT `per_page=`. Whop v2 silently ignores `per_page`
-    // and serves 10 rows/page regardless; `per` is honoured up to 50.
-    // Measured 2026-09-17 against prod_eE7r6SXa3H0MX: per_page=50 gives
-    // total_page 389, per=50 gives total_page 78. Identical data, a
-    // fifth of the requests, and it moves the 500-page cap from ~1,100
-    // memberships away to ~21,000 away.
     const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?product_id=${encodeURIComponent(
       productId,
     )}&page=${page}&per=${perPage}`;
@@ -214,12 +114,6 @@ export async function* listMembershipsForProduct(
       };
     };
     const items = Array.isArray(json.data) ? json.data : [];
-    // v89: Whop silently ignores an INVALID product_id — HTTP 200 and the
-    // entire account comes back (verified live 2026-09-17: a plan_ id in
-    // this slot returns all 8,291 rows instead of the product's 3,881).
-    // This loop yields whatever it is handed and applies no product check
-    // of its own, so a bad id would quietly turn `students` into an
-    // account-wide mirror. Fail instead.
     const foreign = items.filter((m) => m.product && m.product !== productId);
     if (foreign.length > 0) {
       const others = Array.from(new Set(foreign.map((m) => m.product)));
@@ -232,17 +126,10 @@ export async function* listMembershipsForProduct(
     for (const item of items) {
       yield item;
     }
-    // Whop v2 uses {current_page, total_page} pagination, not the
-    // {next_page} shape my earlier code assumed. Loop while there are
-    // more pages; break when we've consumed the last one.
     const currentPage = json.pagination?.current_page ?? page;
     const totalPage = json.pagination?.total_page ?? currentPage;
     if (currentPage >= totalPage) break;
     page = currentPage + 1;
-    // v89: refuse to return a truncated list, same rule as etfb.ts. Exiting
-    // silently at the cap is precisely how a partial sync becomes
-    // indistinguishable from a complete one — the runner would upsert the
-    // rows it saw and log status='success'.
     if (page > maxPages) {
       throw new Error(
         `Whop memberships walk for ${productId} exceeded maxPages (${maxPages}); ` +
@@ -252,19 +139,6 @@ export async function* listMembershipsForProduct(
   }
 }
 
-/**
- * Look up the active (or past_due) membership for a single user, by
- * whop_user_id. Used by the OAuth callback to self-heal student rows
- * for legacy customers who joined before our webhook was wired up
- * (Karlo's bug 2026-05-30 — one legacy customer). Falls back across
- * every product configured in WHOP_PRODUCT_ID.
- *
- * Returns null if no active membership exists for any of our
- * products. Tolerates per-product fetch failures so a single bad
- * response doesn't kill the whole check.
- *
- * v75.10 — new.
- */
 export async function fetchActiveMembershipForUser(
   whopUserId: string,
 ): Promise<WhopMembershipRow | null> {
@@ -290,10 +164,6 @@ export async function fetchActiveMembershipForUser(
     `[self-heal] starting for whop_user_id=${whopUserId} productIds=${productIds.join(",")}`,
   );
 
-  // Strategy 1 — query by user_id alone (no product filter). If Whop's
-  // v2 supports user_id filtering, this returns just this user's
-  // memberships across our entire business in one call. Cheapest and
-  // most reliable when supported.
   const headers = {
     Authorization: `Bearer ${apiKey}`,
     Accept: "application/json",
@@ -319,9 +189,6 @@ export async function fetchActiveMembershipForUser(
           })),
         )}`,
       );
-      // If we see memberships for OTHER users in this response, the
-      // user_id filter is silently ignored and strategy 1 isn't safe
-      // to use — fall through to per-product iteration.
       const allMatchUser = rows.every(
         (r) => !r.user || r.user === whopUserId,
       );
@@ -354,8 +221,6 @@ export async function fetchActiveMembershipForUser(
     );
   }
 
-  // Strategy 2 — per-product query with both product_id + user_id
-  // filters. Cheapest fallback if Whop's API does support filtering.
   for (const pid of productIds) {
     const url =
       `${WHOP_MEMBERSHIPS_BASE}/memberships?product_id=` +
@@ -401,9 +266,6 @@ export async function fetchActiveMembershipForUser(
     }
   }
 
-  // Strategy 3 — last-ditch: /api/v2/members/{userId}. This endpoint
-  // returns a member object that may include memberships inline.
-  // Doesn't always work but worth one shot before giving up.
   try {
     const url = `${WHOP_MEMBERSHIPS_BASE}/members/${encodeURIComponent(whopUserId)}`;
     const res = await whopFetchWithRetry(url, headers);
@@ -452,19 +314,11 @@ export async function fetchActiveMembershipForUser(
   return null;
 }
 
-/** Does this membership currently grant access? v85.6 — the tiebreak
- *  the per-user dedupe below sorts on. */
 function grantsAccess(row: WhopMembershipRow): boolean {
   const s = mapStatus(row);
   return s === "active" || s === "past_due";
 }
 
-/** Convenience: collect every membership across every product id in
- *  WHOP_PRODUCT_ID. Per-user dedupe: keeps the membership that best
- *  represents current access (for current state). It computes no
- *  first-paid date: a membership's created_at is when access started,
- *  paid or not, so first_paid_at comes from the student's first real
- *  payment (src/lib/first-payment.ts, the first-paid fix, 2026-10-20). */
 export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
   const raw = process.env.WHOP_PRODUCT_ID ?? "";
   const productIds = raw
@@ -485,22 +339,6 @@ export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
         byUser.set(row.user, { latest: row });
         continue;
       }
-      // Track the row that represents "current state."
-      //
-      // v85.6 — was NEWEST-created wins, unconditionally. A user can
-      // hold several memberships at once (re-subscribe, refund + rebuy,
-      // free-plan claim, or a duplicate created by clicking Renew on
-      // the block overlay). When the newest one was the DEAD one, the
-      // sync stamped membership_status='canceled' on a fully paid-up
-      // student and the dashboard hard-blocked them — every run, forever,
-      // because a dead membership's created_at never stops being the
-      // newest. That's what locked a paying student out on
-      // 2026-07-29: his live membership lost to his canceled
-      // duplicate.
-      //
-      // Access wins over recency. Recency only breaks ties WITHIN the
-      // same access class, which preserves the old behavior for the
-      // normal single-membership case and for genuinely churned users.
       const curGrants = grantsAccess(existing.latest);
       const rowGrants = grantsAccess(row);
       if (rowGrants !== curGrants) {

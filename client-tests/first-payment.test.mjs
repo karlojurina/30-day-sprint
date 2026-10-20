@@ -601,11 +601,16 @@ console.log('\n=== The webhook stamps no first payment ===')
     })))
     return res.status
   }
-  /** A membership event as the handler reads it: joined_at is the user's first join to the company. */
+  /**
+   * A membership event as the handler reads it: joined_at is the user's first
+   * join to the company. It names the course's product, as Whop's payloads do:
+   * since login-1 the webhook writes a row only for a product in
+   * WHOP_PRODUCT_ID (whop-webhook-product.test.mjs).
+   */
   const activated = (user, joinedAt) => ({
     type: 'membership.activated',
     data: { id: `mem_TEST${user.slice(-3)}`, user: { id: user, email: 'buyer@example.com', name: 'Made Up Buyer', username: 'madeupbuyer' },
-      status: 'active', joined_at: joinedAt, created_at: BOUGHT, plan_id: PAYING },
+      status: 'active', joined_at: joinedAt, created_at: BOUGHT, plan_id: PAYING, product: { id: PRODUCT, title: 'The course' } },
   })
   /** payment.succeeded carries a payment, read by the handler as a membership. */
   const paid = (user) => ({ type: 'payment.succeeded', data: pay(user, BOUGHT, 97) })

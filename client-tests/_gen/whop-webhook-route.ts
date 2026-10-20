@@ -3,7 +3,7 @@ import { createServiceClient } from "./stub-server.ts";
 import {
   fetchActiveMembershipForUser,
   mapStatus,
-} from "./stub-server.ts";
+} from "./whop-members.ts";
 import type {
   WhopWebhookPayload,
   WhopMembership,
@@ -79,6 +79,71 @@ function verifyWebhookSignature(
   return false;
 }
 
+/**
+ * The course's Whop products (login-1, 2026-10-20), read as the sync and the
+ * login's Whop check read them: WHOP_PRODUCT_ID, comma separated. The
+ * company's webhook sends the events of every product it sells, and only a
+ * membership of the course opens the course (system-docs/whop_login_handoff.md:
+ * "Apply the same product + plan filter to webhook payloads").
+ */
+function courseProductIds(): string[] {
+  return (process.env.WHOP_PRODUCT_ID ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * The product a membership or payment event is about: `product.id` in Whop's
+ * payloads, `product_id` or a bare `product` id in older shapes. Null when
+ * the payload names none.
+ */
+function eventProductId(data: unknown): string | null {
+  const d = (data ?? {}) as { product?: unknown; product_id?: unknown };
+  if (typeof d.product === "string") return d.product || null;
+  if (d.product && typeof d.product === "object") {
+    const id = (d.product as { id?: unknown }).id;
+    if (typeof id === "string" && id) return id;
+  }
+  return typeof d.product_id === "string" && d.product_id ? d.product_id : null;
+}
+
+/**
+ * What an activation or a payment may write on the student's row (login-1).
+ * A course product: the event's membership, active, as before. Another
+ * product: nothing (the caller answers 200). No product in the payload: only
+ * a course membership Whop lists for this user, with its own id, plan and
+ * status, so a real course member is never left out and nobody else gets in.
+ */
+async function courseAccess(
+  data: WhopMembership,
+  eventName: string,
+): Promise<{ membershipId: string; planId: string | null; status: string } | null> {
+  const courseIds = courseProductIds();
+  const product = eventProductId(data);
+  if (product) {
+    if (courseIds.includes(product)) {
+      return { membershipId: data.id, planId: data.plan_id ?? null, status: "active" };
+    }
+    const message =
+      `[whop-webhook] ${eventName} for product ${product}, not the course ` +
+      `(${courseIds.join(",") || "WHOP_PRODUCT_ID is empty"}): nothing written`;
+    // An empty WHOP_PRODUCT_ID turns every membership away: say it loudly.
+    if (courseIds.length) console.info(message);
+    else console.error(message);
+    return null;
+  }
+  const row = await fetchActiveMembershipForUser(data.user.id);
+  if (!row) {
+    console.info(
+      `[whop-webhook] ${eventName} names no product and Whop lists no course ` +
+        `membership for ${data.user.id}: nothing written`,
+    );
+    return null;
+  }
+  return { membershipId: row.id, planId: row.plan ?? null, status: mapStatus(row) };
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.text();
 
@@ -135,6 +200,9 @@ export async function POST(request: NextRequest) {
     case "membership.went_valid":
     case "membership_went_valid": {
       const membership = payload.data as WhopMembership;
+      // login-1: another product's membership writes nothing (courseAccess).
+      const access = await courseAccess(membership, eventName);
+      if (!access) break;
       // first_paid_at is never sent (the first-paid fix, 2026-10-20): a
       // new row starts without one, and the login or the 2-hour sync
       // fills it from the student's first real payment
@@ -144,17 +212,17 @@ export async function POST(request: NextRequest) {
       // this single-row upsert leaves a stored value as it is.
       const upsertPayload: Record<string, unknown> = {
         whop_user_id: membership.user.id,
-        whop_membership_id: membership.id,
+        whop_membership_id: access.membershipId,
         email: membership.user.email,
         name: membership.user.name,
         discord_username: membership.user.username,
-        membership_status: "active",
+        membership_status: access.status,
         joined_at: membership.joined_at || new Date().toISOString(),
         // Clear canceled_at on re-activation so the snapshot cron's
         // churned_count doesn't double-count a re-enrolled student.
         canceled_at: null,
         // v79: classify paying / free at the source event.
-        whop_plan_id: membership.plan_id ?? null,
+        whop_plan_id: access.planId,
       };
 
       const { error } = await supabase
@@ -176,6 +244,51 @@ export async function POST(request: NextRequest) {
     case "membership.went_invalid":
     case "membership_went_invalid": {
       const membership = payload.data as WhopMembership;
+      const product = eventProductId(membership);
+      const ofCourse = product !== null && courseProductIds().includes(product);
+
+      // login-1 review: the row a membership made. Until login-1 the webhook
+      // wrote a membership of any product as active, and the sync, which
+      // walks only the course's memberships, never closes such a row. So a
+      // membership that is not the course's (or that the payload does not
+      // name) still settles the row when the row points at it, as before
+      // login-1: re-pointed at a course membership Whop lists, else
+      // canceled. A course member's row points at a course membership after
+      // every sync (every 2 hours).
+      let rowPointsAtIt = false;
+      if (!ofCourse) {
+        const { data: madeByIt, error: readError } = await supabase
+          .from("students")
+          .select("id")
+          .eq("whop_user_id", membership.user.id)
+          .eq("whop_membership_id", membership.id)
+          .maybeSingle();
+        if (readError) {
+          // 500 so Whop retries: this event may be the only one that closes the row.
+          console.error("Webhook: student read failed:", readError);
+          return NextResponse.json(
+            { error: "Database error" },
+            { status: 500 },
+          );
+        }
+        rowPointsAtIt = madeByIt !== null;
+      }
+
+      // login-1: another product's membership ending says nothing about the
+      // course when the row points elsewhere. Answer 200, ask Whop nothing,
+      // leave the row as it is.
+      if (product && !ofCourse && !rowPointsAtIt) {
+        console.info(
+          `[whop-webhook] ${eventName} for product ${product}, not the course: nothing written`,
+        );
+        break;
+      }
+      if (rowPointsAtIt) {
+        console.info(
+          `[whop-webhook] ${eventName} for ${product ? `product ${product}` : "no named product"}: ` +
+            `the row points at ${membership.id}, settled as before login-1`,
+        );
+      }
 
       // v85.6 — a user can hold several memberships at once (re-subscribe,
       // refund + rebuy, free-plan claim, or a duplicate created by
@@ -188,7 +301,7 @@ export async function POST(request: NextRequest) {
         // Still entitled — re-point the row at the surviving membership
         // instead of revoking. Keeps whop_membership_id / whop_plan_id
         // pointing at the thing that actually grants access.
-        const { error: repointError } = await supabase
+        let repoint = supabase
           .from("students")
           .update({
             whop_membership_id: surviving.id,
@@ -197,6 +310,13 @@ export async function POST(request: NextRequest) {
             canceled_at: null,
           })
           .eq("whop_user_id", membership.user.id);
+        // login-1 review: a write made because the row points at this
+        // membership lands only while it still does (the sync or a course
+        // activation may re-point the row while Whop is asked).
+        if (rowPointsAtIt) {
+          repoint = repoint.eq("whop_membership_id", membership.id);
+        }
+        const { error: repointError } = await repoint;
         if (repointError) {
           console.error("Webhook: student re-point failed:", repointError);
           return NextResponse.json(
@@ -211,7 +331,21 @@ export async function POST(request: NextRequest) {
         break;
       }
 
-      const { error } = await supabase
+      // login-1: with no product in the payload this may be another
+      // product's membership, and Whop answering nothing may be a failed
+      // read. A row that points elsewhere is not canceled on that: the sync
+      // (every 2 hours) settles it from the course's own memberships. A row
+      // that points at this membership is canceled below, since the sync may
+      // never see it (login-1 review, above).
+      if (!product && !rowPointsAtIt) {
+        console.info(
+          `[whop-webhook] ${eventName} names no product and Whop lists no course ` +
+            `membership for ${membership.user.id}: nothing written, the sync settles it`,
+        );
+        break;
+      }
+
+      let cancel = supabase
         .from("students")
         .update({
           membership_status: "canceled",
@@ -220,6 +354,11 @@ export async function POST(request: NextRequest) {
           canceled_at: new Date().toISOString(),
         })
         .eq("whop_user_id", membership.user.id);
+      // As for the re-point above: only while the row still points at it.
+      if (rowPointsAtIt) {
+        cancel = cancel.eq("whop_membership_id", membership.id);
+      }
+      const { error } = await cancel;
 
       if (error) {
         // v75.30: return 500 so Whop retries. membership.deactivated
@@ -258,19 +397,24 @@ export async function POST(request: NextRequest) {
         );
         break;
       }
+      // login-1: a payment for another product writes nothing (courseAccess).
+      // It used to mark the row active: a lapsed student got back in until
+      // the next sync, and someone with no course membership got in.
+      const paymentAccess = await courseAccess(membership, eventName);
+      if (!paymentAccess) break;
       // first_paid_at is never sent, as for membership.activated above:
       // the login or the sync fills an empty one from the first real
       // payment, and this fires on every renewal.
       const paymentUpsertPayload: Record<string, unknown> = {
         whop_user_id: membership.user.id,
-        whop_membership_id: membership.id,
+        whop_membership_id: paymentAccess.membershipId,
         email: membership.user.email,
         name: membership.user.name,
         discord_username: membership.user.username,
-        membership_status: "active",
+        membership_status: paymentAccess.status,
         joined_at: membership.joined_at || new Date().toISOString(),
         canceled_at: null,
-        whop_plan_id: membership.plan_id ?? null,
+        whop_plan_id: paymentAccess.planId,
       };
 
       const { error } = await supabase

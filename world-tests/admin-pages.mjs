@@ -24,12 +24,19 @@
  *           check of the two passwords (NOT COVERED otherwise, with why)
  *   today   /dev/admin/today full, empty, loading and error, then its paths
  *           by clicks: the reasons and their order, chips, plans, search,
- *           Mark messaged and Undo, Not needed and its reason, Handled
+ *           Mark messaged and Undo, Not needed and its reason, Handled;
+ *           a phone's first screen (the first row whole, the chips one
+ *           sideways row, Refresh beside the title), every tap 44px, the
+ *           focus ring, a mark low on the page with its notice in the
+ *           window, one mark at a time on a row
  *   thirty  /dev/admin/discounts: every tab full and empty, partial,
  *           novideos, loading and error, then its paths by clicks: the
  *           verdict beside Approve, Approve anyway, Reject, a 409 on approve
- *           and on reject, a failed reload, Mark code added, Mark messaged,
- *           ?student=
+ *           (the code to delete pinned in the window, copyable) and on
+ *           reject, a failed reload (its own line, the decided row's buttons
+ *           off), Mark code added, Mark messaged (closing the student's open
+ *           queue task, with Undo), ?student=; the tabs whole on a phone,
+ *           To decide oldest first, every tap 44px
  *
  * Every state at 390x844, 1280x720 and 1440x900 (a few click states at one
  * or two of them), and each one is measured. It fails on: a horizontal
@@ -266,6 +273,18 @@ async function press(handle) {
 /** The header says "Updating" while the page reads its list again: wait until it is done. */
 const settled = () => page.waitForFunction(() => !document.body.innerText.includes('· Updating'), { timeout: 10000 })
 const openAllDetails = () => page.evaluate(() => document.querySelectorAll('details').forEach((d) => { d.open = true }))
+/**
+ * Buttons, chips and tabs, and the links and labels drawn as buttons, on the
+ * page under the bar, that are under 44px tall (the kit's touch target). The
+ * dev pages render the bar inside <main>; its header (the one with the
+ * lockup) is the frame's, and left out here.
+ */
+const smallTaps = () => page.evaluate(() => [...document.querySelectorAll('main button, main a, main label')]
+  .filter((e) => !e.closest('header')?.querySelector('img'))
+  .filter((e) => e.tagName === 'BUTTON' || e.textContent.trim() === 'Open in Discord' || e.querySelector('input[type="checkbox"]'))
+  .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 })
+  .map((e) => ({ text: e.textContent.trim().slice(0, 30), h: Math.round(e.getBoundingClientRect().height) }))
+  .filter((x) => x.h < 44))
 
 // ════════════════════════════════════════════════════════════════════════════
 // frame: the top bar for each role, over a light page and a dark one
@@ -273,9 +292,9 @@ const openAllDetails = () => page.evaluate(() => document.querySelectorAll('deta
 if (wanted('frame')) {
   const from = consoleErrors.length
   const ENTRIES = {
-    founder: ['Today', '30% off', 'Tasks', 'All students', 'Student journey', 'Dashboard', 'Insights', 'Brand Owners', 'Templates', 'Lesson feedback', 'Survey', 'Stats', 'General', 'Discord test', 'Team'],
+    founder: ['Today', '30% off', 'Tasks', 'All students', 'Student journey', 'Dashboard', 'Insights', 'Brand Owners', 'Templates', 'Lesson feedback', 'Survey', 'Stats', 'Settings', 'Discord test', 'Team'],
     csm: ['Today', '30% off', 'Tasks', 'All students', 'Student journey', 'Dashboard', 'Insights', 'Brand Owners', 'Templates'],
-    admin: ['Today', '30% off', 'Tasks', 'All students', 'Student journey', 'Dashboard', 'Insights', 'Brand Owners', 'Templates', 'Lesson feedback', 'Survey', 'General', 'Discord test'],
+    admin: ['Today', '30% off', 'Tasks', 'All students', 'Student journey', 'Dashboard', 'Insights', 'Brand Owners', 'Templates', 'Lesson feedback', 'Survey', 'Settings', 'Discord test'],
   }
   const visibleLabels = (selector) => page.$$eval(selector, (els) => els
     .filter((e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' })
@@ -393,8 +412,10 @@ if (wanted('signin')) {
     const label = `/admin/set-password with no invite, ${w}x${h}`
     console.log(`\n${label}`)
     await go('/admin/set-password', size)
-    await page.waitForSelector('form, a[href="/admin/login"]')
+    await page.waitForFunction(() => document.body.innerText.includes('This invite link has expired'), { timeout: 20000 })
     await sleep(300)
+    const links = await page.$$eval('a[href="/admin/login"]', (as) => as.map((a) => a.textContent.trim()))
+    expect(links.length === 1 && (await bodyText()).includes('This invite link has expired'), `${label}: the expired card, with one link to sign in`, JSON.stringify(links))
     await check(label, `set-password-no-invite-${w}`)
   }
   // The form needs an invite's session: a made-up one, unexpired, in the
@@ -422,7 +443,7 @@ if (wanted('signin')) {
       await go('/admin/set-password', size)
       await page.waitForSelector('form', { timeout: 20000 })
       const btn = await page.$eval('button[type="submit"]', (b) => ({ text: b.textContent.trim(), h: b.getBoundingClientRect().height }))
-      expect(btn.text === 'Set password & continue' && btn.h >= 44, `${label}: the form and its one button, "${btn.text}", ${btn.h}px tall`)
+      expect(btn.text === 'Set password and continue' && btn.h >= 44, `${label}: the form and its one button, "${btn.text}", ${btn.h}px tall`)
       await check(label, `set-password-form-${w}`)
     }
     for (const size of SIZES) {
@@ -521,9 +542,15 @@ if (wanted('today')) {
     const body = await bodyText()
     for (const s of ['Clicked cancel 2 days ago', 'Payment failed', '30% closes Thu 29 Oct, 10:00: 9 videos left (about',
       'Can apply for the 30% now, until Tue 3 Nov, 10:00', 'No lesson for 8 days', 'Stalled', 'No lesson for 5 days', 'Slipping',
-      'No lesson on the new course yet (course day 9)', 'Paid 6 days ago, never opened the app', 'Joined yesterday: send the welcome message']) {
+      'No lesson on the new course yet (course day 9)', 'Paid 5 days ago, never opened the app', 'Joined yesterday: send the welcome message']) {
       expect(body.includes(s), `C4's words: "${s}"`)
     }
+    // Grace paid Thu 22 Oct at 11:00 in Croatia, 5 days and 23 hours before the page's clock: 5 whole days, not 6.
+    expect(!body.includes('Paid 6 days ago'), 'Never opened says the whole days that have passed, as the queue\'s own task does ("Paid 5 days ago")')
+    const tom = await row('Tom Ashby')
+    expect(await tom.evaluate((r) => r.textContent.includes('Also open in the Tasks queue since Mon 26 Oct. Marking this row closes it too.')
+      && !r.textContent.includes('(Day 7)')),
+      "a computed headline over an open queue task: the task's line says since when, without its old summary and its other day count")
     const mara = await row('Mara Quinn')
     expect(await mara.evaluate((r) => r.textContent.includes('Clicked cancel 2 days ago') && [...r.querySelectorAll('li')].some((li) => li.textContent === 'Payment failed')),
       'two reasons on one student: the cancel as the headline, Payment failed as a chip')
@@ -545,6 +572,87 @@ if (wanted('today')) {
       'C7 on the longest name')
     expect(body.includes('Whop progress not pulled yet (2)') && body.includes('Handled in the last 7 days ('), 'the folded group and Handled, both folded')
     expect(body.includes('1 student on another plan is hidden. Choose All plans to see them.'), 'other plans hidden, and said so')
+    await openAllDetails()
+    const opened = await bodyText()
+    expect(opened.includes('Their Whop progress has not been copied into the app since the course switch, so lessons they watched on Whop do not count yet.'),
+      'the folded group says why in plain words')
+    expect(!opened.includes('Payment failed: Payment failed') && !opened.includes('Stopped: No lesson') && !/From the Tasks queue \(/.test(opened),
+      'Handled names each reason once, and a queue task without words by where it came from only')
+  }
+
+  console.log('\nToday: a phone\'s first screen, taps, focus')
+  {
+    await open('', [390, 844])
+    await waitReady()
+    const first = await page.evaluate(() => {
+      const r = document.querySelector('.list-row').getBoundingClientRect()
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: innerHeight }
+    })
+    expect(first.bottom <= first.height, `390x844: the first student's whole row is on the first screen (it ends at ${first.bottom}px of ${first.height})`, JSON.stringify(first))
+    const chips = await page.$eval('[aria-label="Reasons"]', (g) => ({ h: Math.round(g.getBoundingClientRect().height), ox: getComputedStyle(g).overflowX }))
+    expect(chips.h <= 48 && chips.ox === 'auto', '390x844: the reason chips are one row that scrolls sideways in its own box', JSON.stringify(chips))
+    const refresh = await page.evaluate(() => {
+      const h1 = document.querySelector('h1').getBoundingClientRect()
+      const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Refresh').getBoundingClientRect()
+      return Math.abs((h1.top + h1.bottom) / 2 - (b.top + b.bottom) / 2) < 12
+    })
+    expect(refresh, '390x844: Refresh sits beside the title, not on a line of its own')
+    for (const size of SIZES) {
+      await viewport(size)
+      await sleep(150)
+      const small = await smallTaps()
+      expect(small.length === 0, `Today, ${size.join('x')}: every button, chip and link styled as one is 44px tall or more`, JSON.stringify(small.slice(0, 4)))
+    }
+    await viewport([1280, 720])
+    const meta = await page.evaluate(() => {
+      const p = [...document.querySelectorAll('header p')].find((x) => x.textContent.startsWith('Updated'))
+      return p ? getComputedStyle(p).fontSize : null
+    })
+    expect(meta === '12px', '"Updated 09:30" is 12px, the kit\'s floor for text that is not an eyebrow', String(meta))
+    await page.$eval('input[type="search"]', (i) => i.focus())
+    await page.keyboard.press('Tab')
+    const ring = await page.evaluate(() => {
+      const a = document.activeElement
+      const cs = getComputedStyle(a)
+      return { tag: a.tagName, color: cs.outlineColor, width: cs.outlineWidth, offset: cs.outlineOffset, scheme: getComputedStyle(a).colorScheme }
+    })
+    expect(ring.color === 'rgb(247, 246, 243)' && ring.width === '2px' && ring.offset === '2px' && ring.scheme === 'dark',
+      'keyboard focus is the kit\'s 2px Stalactite ring, 2px off, and the browser draws its controls in its dark scheme', JSON.stringify(ring))
+  }
+
+  console.log('\nToday: a mark low on the page, its notice in view')
+  {
+    for (const size of [[1440, 900], [390, 844]]) {
+      await open('', size)
+      await waitReady()
+      await press(await buttonIn(await row('Nadia Kerr'), 'Mark messaged'))
+      await page.waitForFunction(() => document.body.innerText.includes('Marked Nadia Kerr as messaged.'), { timeout: 10000 })
+      await settled()
+      const n = await page.evaluate(() => {
+        const el = [...document.querySelectorAll('[role="status"]')].find((x) => x.textContent.includes('Marked Nadia Kerr as messaged.'))
+        const r = el.getBoundingClientRect()
+        return { top: Math.round(r.top), bottom: Math.round(r.bottom), height: innerHeight, scrollY: Math.round(scrollY), undo: [...el.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Undo') }
+      })
+      expect(n.scrollY > 0 && n.top >= 0 && n.bottom <= n.height && n.undo,
+        `${size.join('x')}: Mark messaged on the 6th row: the notice and its Undo are in the window, where the click was (scrolled ${n.scrollY}px)`, JSON.stringify(n))
+      await check(`Today, a mark low on the page, ${size.join('x')}`, `today-mark-low-${size[0]}`)
+    }
+  }
+
+  console.log('\nToday: Not needed cannot be saved while Mark messaged is on its way')
+  {
+    await open('')
+    await waitReady()
+    await press(await buttonIn(await row('Hugo Brandt'), 'Not needed'))
+    await page.waitForSelector('input[placeholder^="For example"]')
+    await page.type('input[placeholder^="For example"]', 'He is on holiday until Monday.')
+    const hugo = await row('Hugo Brandt')
+    await press(await buttonIn(hugo, 'Mark messaged'))
+    const saveOff = await (await buttonIn(hugo, 'Save as not needed')).evaluate((b) => b.disabled)
+    await page.waitForFunction(() => document.body.innerText.includes('Marked Hugo Brandt as messaged.'), { timeout: 10000 })
+    await settled()
+    expect(saveOff && (await calls()).filter((x) => x.name === 'mark').length === 1,
+      'one mark at a time: with Mark messaged on its way, Save as not needed is off, and only one call is made')
   }
 
   console.log('\nToday: chips, plans, search')
@@ -731,9 +839,29 @@ if (wanted('thirty')) {
       await open('?state=novideos&tab=decide', size)
       await waitReady()
       expect((await bodyText()).includes("Couldn't read the course's videos, so no request has a verdict and no video count is shown."), `${label}: the warning above the list`)
-      const verdicts = await page.$$eval('.list-row', (rs) => rs.map((r) => r.textContent.includes("Couldn't read this student's progress")))
-      expect(verdicts.length === 6 && verdicts.every(Boolean), `${label}: every pending row says there is no verdict`, JSON.stringify(verdicts))
+      const verdicts = await page.$$eval('.list-row', (rs) => rs.map((r) => r.textContent.includes("Couldn't read this student's progress, so there is no verdict. Press Refresh to try again.")))
+      expect(verdicts.length === 6 && verdicts.every(Boolean), `${label}: every pending row says there is no verdict, and to press Refresh`, JSON.stringify(verdicts))
       await check(label, `thirty-novideos-decide-${w}`)
+      await press(await page.evaluateHandle(() => [...document.querySelectorAll('[role="tab"]')].find((t) => t.textContent.startsWith('Can still earn'))))
+      await page.waitForFunction(() => document.body.innerText.includes('members are left out of this list'))
+      const earnText = await bodyText()
+      expect(earnText.includes('Nobody to show until the list can be read. Press Refresh.') && !earnText.includes('Nobody can still earn the 30% right now.'),
+        `${label.replace('To decide', 'Can still earn')}: under "left out", the empty list never says "nobody can still earn"`)
+      await check(label.replace('To decide', 'Can still earn'), `thirty-novideos-earn-${w}`)
+    }
+    {
+      const label = `30% off, the tabs and taps, ${w}x${h}`
+      console.log(`\n${label}`)
+      await open('?tab=decide', size)
+      await waitReady()
+      const tabs = await page.$$eval('[role="tab"]', (ts) => ts.map((t) => { const r = t.getBoundingClientRect(); return { left: r.left, right: r.right, h: r.height, width: innerWidth } }))
+      expect(tabs.length === 5 && tabs.every((t) => t.left >= 0 && t.right <= t.width && t.h >= 44),
+        `${label}: all five tabs whole in the window, 44px tall (they wrap on a phone)`, JSON.stringify(tabs.map((t) => Math.round(t.right))))
+      const small = await smallTaps()
+      expect(small.length === 0, `${label}: every button, tab and link styled as one is 44px tall or more`, JSON.stringify(small.slice(0, 4)))
+      const order = await page.$$eval('.list-row', (rs) => rs.map((r) => r.querySelector('a')?.textContent))
+      expect(JSON.stringify(order) === JSON.stringify(['Leo Hartmann', 'Sofia Marin', 'Maya Lindqvist', 'Jonah Pereira', 'Maximilian Featherstonehaugh-Smythe', 'Priya Raman']),
+        `${label}: To decide, the longest wait first`, order.join(', '))
     }
     {
       const label = `30% off, loading, ${w}x${h}`
@@ -849,6 +977,14 @@ if (wanted('thirty')) {
     expect(await isNull(await row('Maya Lindqvist')), 'Maya is off To decide: another member decided it')
     const notice = await page.$eval('[role="alert"]', (e) => e.textContent)
     expect(notice.startsWith('Maya Lindqvist: The Whop code ECOM30-'), 'the notice names the student and the code to delete', notice)
+    const placed = await page.$eval('[role="alert"]', (e) => {
+      const r = e.getBoundingClientRect()
+      return { top: r.top, bottom: r.bottom, height: innerHeight, copy: [...e.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Copy code') }
+    })
+    expect(placed.top >= 0 && placed.bottom <= placed.height && placed.copy,
+      'the code to delete is in the window where the click was, with Copy code, and stays until dismissed', JSON.stringify(placed))
+    await sleep(500)
+    expect((await page.$('[role="alert"]')) !== null, 'it is still there a moment later (a refusal is never hidden by itself)')
     for (const size of SIZES) {
       await viewport(size)
       await check(`30% off, approve answered 409, ${size.join('x')}`, `thirty-approve-409-${size[0]}`)
@@ -869,18 +1005,29 @@ if (wanted('thirty')) {
 
   console.log('\n30% off: a decision goes through, then the list cannot be read again')
   {
+    const STALE = "Couldn't refresh the list, so it may be out of date. Press Refresh."
     await open('?tab=decide&reload=fail')
     await waitReady()
     await press(await buttonIn(await row('Maya Lindqvist'), 'Approve'))
-    await page.waitForFunction(() => document.body.innerText.includes("Couldn't read the list again"), { timeout: 10000 })
+    await page.waitForFunction((t) => document.body.innerText.includes(t), { timeout: 10000 }, STALE)
     await settled()
-    const text = await page.$eval('[role="alert"]', (e) => e.textContent)
-    expect(text.includes('Approved Maya Lindqvist. The code ECOM30-') && text.includes("Couldn't read the list again, so it may be out of date."),
-      'the approval and its code stay in the notice, beside the failed read', text)
+    const said = () => page.evaluate(() => ({
+      status: [...document.querySelectorAll('[role="status"]')].map((e) => e.textContent),
+      alert: [...document.querySelectorAll('[role="alert"]')].map((e) => e.textContent),
+    }))
+    const first = await said()
+    expect(first.status.some((t) => t.startsWith('Approved Maya Lindqvist. The code ECOM30-')) && first.alert.some((t) => t.startsWith(STALE))
+      && !first.status.some((t) => t.includes(STALE)) && ![...first.status, ...first.alert].some((t) => t.includes('nothing is shown')),
+      'the approval and its code in a notice of their own, the list being out of date on a line of its own, and never "nothing is shown"', JSON.stringify(first))
+    const maya = await row('Maya Lindqvist')
+    expect((await (await buttonIn(maya, 'Approve')).evaluate((b) => b.disabled)) && (await (await buttonIn(maya, 'Reject')).evaluate((b) => b.disabled))
+      && (await maya.evaluate((r) => r.textContent.includes('Saved. Press Refresh to see this row as it is now.'))),
+      "Maya's row, still shown as it was, keeps its buttons off until a read works")
     await press(await button('Refresh'))
     await sleep(700)
     await settled()
-    expect((await page.$eval('[role="alert"]', (e) => e.textContent)) === text, 'a second failed Refresh leaves that notice as it is')
+    const second = await said()
+    expect(JSON.stringify(second) === JSON.stringify(first), 'a second failed Refresh leaves both as they are', JSON.stringify(second))
     for (const size of SIZES) {
       await viewport(size)
       await check(`30% off, the reload failed, ${size.join('x')}`, `thirty-reload-failed-${size[0]}`)
@@ -903,11 +1050,11 @@ if (wanted('thirty')) {
     await open('?tab=earn')
     await waitReady()
     const order = await page.$$eval('.list-row', (rs) => rs.map((r) => r.querySelector('a')?.textContent))
-    expect(JSON.stringify(order) === JSON.stringify(['Theo Marsh', 'Dana Whitfield', 'Zoe Achterberg', 'Iris Kowalski', 'Sam Taylor']),
+    expect(JSON.stringify(order) === JSON.stringify(['Theo Marsh', 'Dana Whitfield', 'Zoe Achterberg', 'Ava Lindgren', 'Iris Kowalski', 'Sam Taylor']),
       'Can still earn: the soonest deadline first, then the fewest videos left; exempt and canceled members left out', order.join(', '))
     const theo = await row('Theo Marsh')
-    expect(await theo.evaluate((r) => r.textContent.includes('Deadline Fri 23 Oct, 23:59 (Croatia time), 3 days left') && r.textContent.includes('50 of 61 videos done, 11 left (about')
-      && r.textContent.includes('Messaged Fri 16 Oct by Jamie, replied')), 'Theo: the deadline and the time left, the videos left and the hours, the last message')
+    expect(await theo.evaluate((r) => r.textContent.includes('Deadline Fri 23 Oct, 23:59 (Croatia time), 3 days left') && /50 of 61 videos done, 11 left \(about \d+ hours?\)/.test(r.textContent)
+      && r.textContent.includes('Messaged Fri 16 Oct by Jamie, replied')), 'Theo: the deadline and the time left, the videos left and the hours in words, the last message')
     expect(await (await row('Dana Whitfield')).evaluate((r) => r.textContent.includes('Whop progress not pulled yet') && r.textContent.includes('No message yet')), 'Dana: the C14 chip, no message yet')
     expect(await (await row('Iris Kowalski')).evaluate((r) => r.textContent.includes('All 61 videos done. Can apply for the 30% now.') && r.textContent.includes('Can apply now')
       && r.textContent.includes('Messaged Mon 19 Oct by Robin, no reply yet')), 'Iris: ready, with the C12 line')
@@ -928,6 +1075,25 @@ if (wanted('thirty')) {
       await viewport(size)
       await check(`30% off, Can still earn after two marks, ${size.join('x')}`, `thirty-earn-marked-${size[0]}`)
     }
+
+    // Ava has the queue's nolessons.day7 task open: the mark closes it with the same member and moment.
+    await viewport([1280, 720])
+    const ava = await row('Ava Lindgren')
+    expect(await ava.evaluate((r) => r.textContent.includes('Also open in the Tasks queue since Tue 20 Oct. Marking this row closes it too.')),
+      'Ava: her open task in the Tasks queue, and that marking her closes it')
+    await press(await buttonIn(ava, 'Mark messaged'))
+    await page.waitForFunction(() => document.body.innerText.includes('Marked Ava Lindgren as messaged.'), { timeout: 10000 })
+    await settled()
+    const aMark = (await calls()).filter((x) => x.name === 'mark')[2]
+    expect(JSON.stringify(aMark?.args[0].openTaskIds) === '["q-ava"]', "Mark messaged sends her open task, so the Tasks queue closes it too", JSON.stringify(aMark?.args[0]))
+    expect(!(await (await row('Ava Lindgren')).evaluate((r) => r.textContent.includes('Also open in the Tasks queue'))), 'after the reload her task is no longer open')
+    await check('30% off, Mark messaged with an open queue task, 1280x720', 'thirty-earn-ava-1280')
+    await press(await button('Undo'))
+    await page.waitForFunction(() => document.body.innerText.includes('Undone. Ava Lindgren is no longer marked as messaged.'), { timeout: 10000 })
+    await settled()
+    const undo = (await calls()).find((x) => x.name === 'undo')
+    expect(undo && undo.args[0].length === 2 && undo.args[0].includes('q-ava'), "the notice's Undo takes back the mark and reopens the queue task, as Today's does", JSON.stringify(undo?.args))
+    expect(await (await row('Ava Lindgren')).evaluate((r) => r.textContent.includes('Also open in the Tasks queue since Tue 20 Oct.')), 'her task is open again')
   }
 
   console.log('\n30% off: ?student= keeps every tab to one student')

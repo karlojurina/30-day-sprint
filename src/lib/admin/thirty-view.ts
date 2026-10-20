@@ -134,11 +134,25 @@ export interface ThirtyRequestRow {
   answers: Array<{ questionId: string; answer: string | number | null }>;
 }
 
+/** An open task in the Tasks queue, as a row names it. */
+export interface QueueTask {
+  id: string;
+  scenarioId: string;
+  summary: string | null;
+  createdAt: string;
+}
+
 export interface ThirtyEarnRow {
   student: StudentBrief;
   facts: Facts;
   state: "locked" | "ready";
   lastContact: LastContact | null;
+  /**
+   * The student's open tasks in the Tasks queue, oldest first. Mark messaged
+   * closes them with the same actor and moment as its record (call C5), so
+   * whoever works the queue sees the contact and sends nothing twice.
+   */
+  openTasks: QueueTask[];
 }
 
 export interface ThirtyView {
@@ -171,7 +185,7 @@ export const VERDICT_TEXT = {
     "Asked on the old course, before the switch, when no video up to the checkpoint was loaded yet. Judge it by hand.",
   lateRequest: "This request was made after the student's deadline, later than the app's Apply allows.",
   anotherRequest: "This student already had a request decided, and the app takes no new one after that.",
-  readFailed: "Couldn't read this student's progress, so there is no verdict. Reload the page to try again.",
+  readFailed: "Couldn't read this student's progress, so there is no verdict. Press Refresh to try again.",
   unknown: "The rule could not judge this request. Judge it by hand.",
 } as const;
 
@@ -189,10 +203,17 @@ export function verdictWithAds(verdict: Verdict, adsVerified: boolean): Verdict 
   return verdict;
 }
 
-/** "about 2 h": the length of the videos still to watch, to the nearest hour and never under 1. Null when there is none. */
+/** "about 2 h": the length of the videos still to watch, to the nearest hour and never under 1. Null when there is none. C4's form. */
 export function aboutHours(seconds: number | null | undefined): string | null {
   if (seconds == null || !(seconds > 0)) return null;
   return `about ${Math.max(1, Math.round(seconds / 3600))} h`;
+}
+
+/** "about 1 hour", "about 6 hours": the same length in words, for the 30% page's own lines. Null when there is none. */
+export function aboutHoursWords(seconds: number | null | undefined): string | null {
+  if (seconds == null || !(seconds > 0)) return null;
+  const h = Math.max(1, Math.round(seconds / 3600));
+  return `about ${h} ${h === 1 ? "hour" : "hours"}`;
 }
 
 /** "1 video left", "4 videos left". */
@@ -503,6 +524,9 @@ export function buildThirtyView(data: ThirtyData, now: Date, resetAt: string | n
       facts: app.facts,
       state: app.state.kind,
       lastContact: lastContactOf(data.contacts.get(s.id), data.team),
+      openTasks: [...(data.openTasks.get(s.id) ?? [])]
+        .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || byId(a, b))
+        .map((t) => ({ id: t.id, scenarioId: t.scenario_id, summary: t.behavior_summary ?? null, createdAt: t.created_at })),
     });
   }
   const left = (r: ThirtyEarnRow) => (r.facts.videosTotal ?? 0) - (r.facts.videosDone ?? 0);

@@ -910,17 +910,22 @@ When adding a new table, append it here. When deleting a field, scan
   reason in `notes`), `created_at` equal to that moment, and
   `behavior_summary` holding every reason the row had. Never open, so the
   crons and the one-open-task index never meet one. Written only by
-  `POST /api/admin/today/mark`, deleted only by
+  `POST /api/admin/today/mark` (from Today, or Mark messaged on the 30%
+  page's Can still earn), deleted only by
   `DELETE /api/admin/today/mark` (its author, within 15 minutes). The same
   mark completes or dismisses every open queue task on the row with the
-  same actor, note and moment, and Undo opens them again unless the queue
+  same actor, note and moment (the 30% page sends the student's open
+  tasks too, since 2026-10-20), and Undo opens them again unless the queue
   has a newer open task of the same scenario. Today reads the completed
   and dismissed tasks of the last 30 days for its waits (call C5), Handled
   and the last contact. `GET /api/admin/tasks` drops every task with no
   template after its query (v59), so a support record never shows in the
   Tasks tabs; on this branch it still takes one of that query's 100 rows,
   until lane G1's change (`night/hf-admin`, `5bc5e27`) moves the filter
-  into the query. Outreach insights count template sends only, so a mark
+  into the query. Merge G1 before this branch or with it, then run
+  `npm run test:client` again: without it a busy day of marks pushes
+  older sends off the Sent tab and the Tasks page's "N sent today"
+  undercounts (review of 2026-10-20). Outreach insights count template sends only, so a mark
   for a reason the app computed is not in them either.
 - **Stable contract:** `student_id`, `scenario_id`, `template_id`,
   `status` (open/completed/dismissed), `behavior_summary`,
@@ -1717,7 +1722,11 @@ em dash, "unlock" or "EcomTalent" in it. The pages call them through
   `counts_toward_progress`, `admin_config` (`curriculum_reset_at` and the
   links the templates name), and the 30% through `loadThirtyData`. Every
   list is read in pages of 1000 on a unique order, lists of ids in
-  batches of 100. Then `buildSupportRows`
+  batches of 100; the long reads keyed by one unique column (the
+  members, the three views, the first logins, the Whop dates, the tasks)
+  page by that key (`fetchAllRowsByKey`), so a row that leaves a read
+  meanwhile drops no other, and a task on two status reads is kept
+  once, closed. Then `buildSupportRows`
   (`src/lib/admin/support-list.ts`, pure).
 - **Produces:**
   - 200 `{ generatedAt, resetAt, lessonsTotal, rows, handled }`, the
@@ -1746,6 +1755,19 @@ em dash, "unlock" or "EcomTalent" in it. The pages call them through
   - 200 with the first mark's answer, and nothing written, for a second
     mark of the same student and reason by the same member within 2
     minutes (a double click).
+  - 409 `{ error, code: "marked-otherwise" }`, nothing written, when that
+    first mark said the other thing ("You marked this student as
+    messaged a moment ago, so Not needed was not saved. To change it,
+    undo that mark first (on Today, under Handled)." and the other way
+    round). The pages show it on the row.
+  - Two marks sent at once both pass the check above. After writing its
+    record each call reads the member's records of that reason again:
+    the oldest (by `created_at`, then `id`) stands, a newer call deletes
+    its own and answers as a second click (200 or 409), and the older
+    deletes any newer one it sees. One record is left either way, with
+    no migration. An open task headline (no record) marked twice at once
+    closes the task once, and the call that finds it closed by the same
+    member answers as a second click.
   - 400, with nothing written: a body it cannot read, no student, an
     action other than the two, "That reason is not one Today knows, so
     nothing was saved.", "Not needed needs a reason. Write one and try
@@ -1791,16 +1813,22 @@ em dash, "unlock" or "EcomTalent" in it. The pages call them through
   the others made from `DISCOUNT_ELIGIBLE_FROM` on), `students` (every
   first payment from `DISCOUNT_ELIGIBLE_FROM`, and everyone holding a
   listed request), their completions of the lessons the 30% asks for and
-  of the action items, their requests, `student_whop_sync`
+  of the action items (each read holds as many students as fit in one
+  page, so it is one query), their requests, `student_whop_sync`
   (`student_id, last_sync_at`), `discount_feedback_questions` and the
-  listed requests' answers, their completed `tasks` (the last message),
-  `team_members`. Then `buildThirtyView` (`src/lib/admin/thirty-view.ts`,
+  listed requests' answers, the completed and the open `tasks` of the
+  members who can still earn it (the last message, and the queue tasks
+  Mark messaged closes), `team_members`. The decided requests are read
+  after the pending ones, and a request on both is kept once, decided.
+  Then `buildThirtyView` (`src/lib/admin/thirty-view.ts`,
   pure), which calls the student app's rule (`discount.ts`,
   `discount-server.ts`) unchanged.
 - **Produces:**
   - 200 `{ generatedAt, sharedDeadline, requiredCount, questions,
     requests, canStillEarn, unchecked }`, the types `ThirtyRequestRow`
     and `ThirtyEarnRow` in `thirty-view.ts` (PRD section 8, plus
+    `ThirtyEarnRow.openTasks`, the student's open queue tasks oldest
+    first, `{ id, scenarioId, summary, createdAt }`, and
     `unchecked`: how many members are left out of Can still earn because
     their progress could not be read). A pending row's `verdict` is the
     approve route's (`approvalVerdict`, then `explainOldCourseRequest`,

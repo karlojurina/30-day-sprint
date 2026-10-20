@@ -56,6 +56,12 @@
   --ease-default: cubic-bezier(0.25, 0.1, 0.25, 1);
   --duration-quick: 150ms;
 
+  /* ui.tsx's ghost and subtle buttons read these two (and fall back to their
+     light-page values anywhere else): the kit's pill and its 44px touch
+     target, the shape of the raised pills beside them. */
+  --admin-button-radius: var(--radius-pill);
+  --admin-button-min-height: 44px;
+
   /* The kit's app font: the system face first, Inter (already loaded by the
      root layout as --font-inter) behind it. Nothing new is downloaded. */
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
@@ -66,6 +72,19 @@
      reads light on dark instead of inheriting .admin-shell's dark ink. */
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
+
+  /* The browser draws its own controls (a checkbox, the search box's clear
+     button, scrollbars) in its dark scheme here, not as white squares. */
+  color-scheme: dark;
+}
+
+/* Keyboard focus: the kit's 2px Stalactite ring, 2px off the element.
+   globals.css (never edited) draws every :focus-visible in the light look's
+   grey (#8E8E84), which is how the dark pages drew it too. Two classes and a
+   pseudo-class outweigh its element-and-pseudo-class rule in any order. */
+:global(.admin-shell) .tokens :focus-visible {
+  outline: 2px solid #f7f6f3;
+  outline-offset: 2px;
 }
 
 /*

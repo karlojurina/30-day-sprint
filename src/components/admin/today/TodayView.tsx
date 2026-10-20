@@ -2,16 +2,21 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { Button, Card, EmptyState, PageHeader, Pill, T } from "@/components/admin/ui";
+import { Button, Card, EmptyState, Pill, T } from "@/components/admin/ui";
 import {
+  CopyButton,
   DiscordReach,
+  ListHeader,
   ListPage,
   LoadError,
-  NoticeBar,
+  NoticeStack,
+  STALE_TEXT,
   SkeletonRows,
+  TAP,
   WhopNotPulled,
   firstName,
   lastContactText,
+  pressPill,
 } from "@/components/admin/list-parts";
 import type { Notice } from "@/components/admin/list-parts";
 import { adminTransport } from "@/lib/admin/admin-transport";
@@ -19,6 +24,7 @@ import type { Answer, MarkAnswer, TodayTransport, UndoResult } from "@/lib/admin
 import { clockLabel, dayLabel, dayTimeLabel } from "@/lib/admin/croatia-dates";
 import {
   DEFAULT_FILTER,
+  MARKED_OTHERWISE,
   REASON_LABEL,
   REASON_ORDER,
   SUPPORT_SCENARIO,
@@ -45,12 +51,12 @@ import type { LastContact } from "@/lib/admin/thirty-view";
  * C12 to C15): every student who needs a message, why, how to reach them
  * and what to send.
  *
- *   - the header: how many students to message (the one hero number, C13),
- *     "Updated HH:MM" and Refresh
- *   - a chip per reason with its count, the plan filter (Monthly and Yearly
- *     by default, All plans adds the rest) and a search (name, email,
- *     @discord); the counts follow them, each student once under their
- *     headline
+ *   - the header: the title with Refresh beside it, how many students to
+ *     message (the one hero number, C13) and "Updated HH:MM"
+ *   - a chip per reason with its count (one sideways row on a phone), the
+ *     plan filter (Monthly and Yearly by default, All plans adds the rest)
+ *     and a search (name, email, @discord); the counts follow them, each
+ *     student once under their headline
  *   - one row per student: the headline reason, the others as chips, the
  *     course facts, the last message sent (C12), C7's way to reach them, the
  *     message to copy (C6), Mark messaged and Not needed (C5), which also
@@ -59,6 +65,12 @@ import type { LastContact } from "@/lib/admin/thirty-view";
  *     backfill since the switch, outside the hero number
  *   - Handled, folded: what was done in the last 7 days, with Replied / No
  *     reply and, on the reader's own entries for 15 minutes, Undo
+ *
+ * What a button did shows in a fixed place at the bottom of the window
+ * (NoticeStack, list-parts.tsx), with Undo after a mark. When the list
+ * cannot be read again after a change, a second line says it may be out of
+ * date, and the row that was just marked keeps its buttons off until a read
+ * works.
  *
  * Every row comes from GET /api/admin/today, which decides who is on the
  * list (src/lib/admin/support-list.ts); this file shows it and sends the
@@ -72,7 +84,8 @@ type Loaded = { kind: "loading" } | { kind: "error"; error: string } | { kind: "
 /** What a row's button hands back: null when it went through, else a sentence to show on the row. */
 type RowResult = Promise<string | null>;
 
-const RELOAD_FAILED = "Couldn't read the list again, so it may be out of date.";
+/** The last button's notice, with the ids its Undo takes back (a mark's record and the queue tasks it closed). */
+type PageNotice = Omit<Notice, "id" | "action"> & { undo?: { ids: string[]; name: string } };
 
 /** The colour of a reason's dot. The words always say it too. */
 const REASON_TONE: Record<ReasonKind, string> = {
@@ -85,6 +98,9 @@ const REASON_TONE: Record<ReasonKind, string> = {
   never_opened: "var(--color-neutral)",
   open_task: "var(--color-accent-dark)",
 };
+
+/** The id of the "may be out of date" line among the notices. */
+const STALE_ID = -1;
 
 function studentName(row: { name: string | null; email?: string | null }): string {
   return row.name?.trim() || row.email || "No name on file";
@@ -111,7 +127,7 @@ function markError(r: { status: number; error: string }): string {
   return r.error;
 }
 
-/** A refusal that means the list is out of date: show it at the top and read the list again. */
+/** A refusal that means the list is out of date: show it in the notices and read the list again. */
 function markIsStale(status: number): boolean {
   return status === 400 || status === 404 || status === 409;
 }
@@ -128,12 +144,17 @@ export function TodayView({ transport = adminTransport }: { transport?: TodayTra
   const [loaded, setLoaded] = useState<Loaded>({ kind: "loading" });
   const [reloading, setReloading] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
-  /** The ids the last mark wrote, for the Undo beside its notice. */
-  const [lastMark, setLastMark] = useState<{ ids: string[]; name: string } | null>(null);
+  /** What the last button did, or what went wrong. A new notice gets a new id, so its own 15 seconds start. */
+  const [notice, setNotice] = useState<(PageNotice & { id: number }) | null>(null);
+  /** The list could not be read again after a change: what it shows may be out of date. */
+  const [stale, setStale] = useState(false);
+  /** The rows changed since the last read that worked, by student: their buttons stay off until a read works. */
+  const [locked, setLocked] = useState<ReadonlySet<string>>(() => new Set());
   const [undoing, setUndoing] = useState(false);
   const [filter, setFilter] = useState<RowFilter>(DEFAULT_FILTER);
   const seq = useRef(0);
+
+  const show = useCallback((n: PageNotice) => setNotice((prev) => ({ ...n, id: (prev?.id ?? 0) + 1 })), []);
 
   /** One read of the list. Null when a newer read started meanwhile: that one's answer wins. */
   const fetchList = useCallback(async (): Promise<Answer<TodayPayload> | null> => {
@@ -160,14 +181,12 @@ export function TodayView({ transport = adminTransport }: { transport?: TodayTra
     setReloading(false);
     if (r.ok) {
       setLoaded({ kind: "ready", data: r.data });
+      setStale(false);
+      setLocked(new Set());
       return;
     }
-    // Keep what the last action said: the list on screen is now out of date.
-    setNotice((prev) => {
-      if (prev?.text.includes(RELOAD_FAILED)) return prev;
-      const failed = `${RELOAD_FAILED} ${r.error}`;
-      return { tone: "danger", text: prev ? `${prev.text} ${failed}` : failed };
-    });
+    // What the last button did stays as it was, in its own notice; one more line says the list may be out of date.
+    setStale(true);
   }, [fetchList]);
 
   async function retry() {
@@ -176,6 +195,10 @@ export function TodayView({ transport = adminTransport }: { transport?: TodayTra
     setRetrying(false);
     if (!r) return;
     setLoaded(r.ok ? { kind: "ready", data: r.data } : { kind: "error", error: r.error });
+  }
+
+  function lock(studentId: string) {
+    setLocked((cur) => new Set(cur).add(studentId));
   }
 
   async function mark(row: SupportRow, action: "messaged" | "not_needed", note?: string): RowResult {
@@ -190,17 +213,18 @@ export function TodayView({ transport = adminTransport }: { transport?: TodayTra
     });
     if (!r.ok) {
       const text = markError(r);
-      if (!markIsStale(r.status)) return text;
-      setLastMark(null);
-      setNotice({ tone: "danger", text: `${name}: ${text}` });
+      // A second mark that says the other thing: nothing was saved, and the row is where it was asked.
+      if (r.code === MARKED_OTHERWISE || !markIsStale(r.status)) return text;
+      show({ tone: "danger", text: `${name}: ${text}` });
       await reload();
       return null;
     }
+    lock(row.studentId);
     const ids = [r.data.supportId, ...r.data.movedIds].filter((x): x is string => typeof x === "string");
-    setLastMark(ids.length ? { ids, name } : null);
-    setNotice({
+    show({
       tone: "success",
       text: action === "messaged" ? `Marked ${name} as messaged.` : `Marked ${name} as not needed.`,
+      ...(ids.length ? { undo: { ids, name } } : {}),
     });
     await reload();
     return null;
@@ -209,9 +233,8 @@ export function TodayView({ transport = adminTransport }: { transport?: TodayTra
   async function undo(ids: string[], name: string): RowResult {
     const r = await transport.undo(ids);
     if (!r.ok) return r.error;
-    setLastMark(null);
     const problem = undoFailures(r.data.results);
-    setNotice(
+    show(
       problem
         ? { tone: "danger", text: `${name}: ${problem}` }
         : { tone: "success", text: `Undone. ${name} is back on the list if a reason still applies.` },
@@ -220,12 +243,12 @@ export function TodayView({ transport = adminTransport }: { transport?: TodayTra
     return null;
   }
 
-  async function undoLastMark() {
-    if (!lastMark) return;
+  /** The Undo in a mark's notice. */
+  async function undoFromNotice(mark: { ids: string[]; name: string }) {
     setUndoing(true);
-    const problem = await undo(lastMark.ids, lastMark.name);
+    const problem = await undo(mark.ids, mark.name);
     setUndoing(false);
-    if (problem) setNotice({ tone: "danger", text: `${lastMark.name}: ${problem}` });
+    if (problem) show({ tone: "danger", text: `${mark.name}: ${problem}` });
   }
 
   async function setOutcome(entries: HandledRow[], outcome: "replied" | "no_reply" | null): RowResult {
@@ -242,12 +265,31 @@ export function TodayView({ transport = adminTransport }: { transport?: TodayTra
     return null;
   }
 
-  const header = (meta: React.ReactNode, actions?: React.ReactNode) => (
-    <PageHeader
+  function closeNotice(id: number) {
+    if (id === STALE_ID) {
+      setStale(false);
+      return;
+    }
+    setNotice((cur) => (cur && cur.id === id ? null : cur));
+  }
+
+  const notices: Notice[] = [];
+  if (notice) {
+    const { undo: mark, ...shown } = notice;
+    notices.push(mark ? { ...shown, action: { label: "Undo", busy: undoing } } : shown);
+  }
+  if (stale) notices.push({ id: STALE_ID, tone: "warning", text: STALE_TEXT });
+  /** The Undo of the notice `id`, if it is still the one shown. */
+  const undoNotice = (id: number) => {
+    if (notice && notice.id === id && notice.undo) void undoFromNotice(notice.undo);
+  };
+
+  const header = (meta: React.ReactNode, action?: React.ReactNode) => (
+    <ListHeader
       title="Today"
       description="Every student who needs a message, why, and how to reach them."
       meta={meta}
-      actions={actions}
+      action={action}
     />
   );
 
@@ -292,22 +334,9 @@ export function TodayView({ transport = adminTransport }: { transport?: TodayTra
         </Button>,
       )}
 
-      {notice && (
-        <NoticeBar
-          notice={notice}
-          onClose={() => {
-            setNotice(null);
-            setLastMark(null);
-          }}
-          action={
-            lastMark && notice.tone === "success"
-              ? { label: "Undo", onClick: () => void undoLastMark(), busy: undoing }
-              : undefined
-          }
-        />
-      )}
+      <NoticeStack notices={notices} onClose={closeNotice} onAction={undoNotice} />
 
-      <div className="flex flex-wrap items-baseline" style={{ gap: "4px 12px", marginBottom: 20 }}>
+      <div className="flex flex-wrap items-baseline mb-3 sm:mb-5" style={{ gap: "4px 12px" }}>
         <span
           style={{
             fontSize: 40,
@@ -323,7 +352,13 @@ export function TodayView({ transport = adminTransport }: { transport?: TodayTra
         <span style={{ ...T.body, fontSize: 15 }}>{hero === 1 ? "student to message" : "students to message"}</span>
       </div>
 
-      <div role="group" aria-label="Reasons" className="flex flex-wrap" style={{ gap: 8, marginBottom: 14 }}>
+      {/* On a phone the chips are one row that scrolls sideways in its own box; wider, they wrap. */}
+      <div
+        role="group"
+        aria-label="Reasons"
+        className="flex flex-nowrap overflow-x-auto sm:flex-wrap sm:overflow-x-visible mb-3"
+        style={{ gap: 8 }}
+      >
         <ReasonChip label="All" count={allCount} pressed={filter.kind === null} onClick={() => setFilter({ ...filter, kind: null })} />
         {REASON_ORDER.filter((k) => chips[k] > 0 || filter.kind === k).map((k) => (
           <ReasonChip
@@ -342,7 +377,7 @@ export function TodayView({ transport = adminTransport }: { transport?: TodayTra
         <SearchBox value={filter.search} onChange={(search) => setFilter({ ...filter, search })} />
       </div>
       {otherPlans > 0 && (
-        <p style={{ ...T.bodyDim, marginBottom: 20 }}>
+        <p style={{ ...T.bodyDim, marginBottom: 12 }}>
           {otherPlans === 1
             ? "1 student on another plan is hidden. Choose All plans to see them."
             : `${otherPlans} students on other plans are hidden. Choose All plans to see them.`}
@@ -367,7 +402,14 @@ export function TodayView({ transport = adminTransport }: { transport?: TodayTra
       ) : (
         <Card padding={0}>
           {main.map((row) => (
-            <TodayRow key={row.studentId} row={row} lessonsTotal={data.lessonsTotal} onMark={mark} />
+            <TodayRow
+              key={row.studentId}
+              row={row}
+              lessonsTotal={data.lessonsTotal}
+              locked={locked.has(row.studentId)}
+              stale={stale}
+              onMark={mark}
+            />
           ))}
         </Card>
       )}
@@ -375,11 +417,18 @@ export function TodayView({ transport = adminTransport }: { transport?: TodayTra
       {whopNotPulled.length > 0 && (
         <Folded
           title={`Whop progress not pulled yet (${whopNotPulled.length})`}
-          note="These students have had no Whop backfill since the course switch, so lessons they watched on Whop are not counted yet. They stay here, outside the number above, until the catch-up pulls their Whop progress."
+          note="Their Whop progress has not been copied into the app since the course switch, so lessons they watched on Whop do not count yet. They stay here, outside the number above, until it is copied."
         >
           <Card padding={0}>
             {whopNotPulled.map((row) => (
-              <TodayRow key={row.studentId} row={row} lessonsTotal={data.lessonsTotal} onMark={mark} />
+              <TodayRow
+                key={row.studentId}
+                row={row}
+                lessonsTotal={data.lessonsTotal}
+                locked={locked.has(row.studentId)}
+                stale={stale}
+                onMark={mark}
+              />
             ))}
           </Card>
         </Folded>
@@ -413,6 +462,9 @@ const ROW: React.CSSProperties = {
   gap: 12,
   padding: 16,
 };
+
+/** A student's row: ROW, with 10px between its parts on a phone (12px wider), so the first row fits the first screen. */
+const STUDENT_ROW: React.CSSProperties = { flexDirection: "column", alignItems: "stretch", padding: 16 };
 
 const PANEL: React.CSSProperties = {
   display: "flex",
@@ -454,27 +506,7 @@ function ReasonChip({
   onClick: () => void;
 }) {
   return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      onClick={onClick}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        minHeight: 36,
-        padding: "6px 14px",
-        borderRadius: "var(--radius-pill)",
-        border: `1px solid ${pressed ? "var(--color-accent-dark)" : "var(--color-border)"}`,
-        background: pressed ? "var(--color-accent-glow)" : "var(--color-bg-elevated)",
-        color: "var(--color-text-primary)",
-        fontSize: 13,
-        fontWeight: 600,
-        cursor: "pointer",
-        whiteSpace: "nowrap",
-        fontVariantNumeric: "tabular-nums",
-      }}
-    >
+    <button type="button" aria-pressed={pressed} onClick={onClick} style={pressPill(pressed)}>
       {dot && <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: dot }} />}
       {label}
       <span style={{ color: "var(--color-text-secondary)", fontWeight: 500 }}>{count}</span>
@@ -482,50 +514,19 @@ function ReasonChip({
   );
 }
 
-/** Monthly and Yearly (the default) or All plans (C3). */
+/** Monthly and Yearly (the default) or All plans (C3): two pills, one pressed. */
 function PlanToggle({ value, onChange }: { value: PlanFilter; onChange: (v: PlanFilter) => void }) {
   const options: Array<{ value: PlanFilter; label: string }> = [
     { value: "monthly-yearly", label: "Monthly and Yearly" },
     { value: "all", label: "All plans" },
   ];
   return (
-    <div
-      role="group"
-      aria-label="Plans"
-      className="inline-flex"
-      style={{
-        background: "var(--color-bg-elevated)",
-        border: "1px solid var(--color-border)",
-        borderRadius: "var(--radius-control)",
-        padding: 3,
-        gap: 2,
-      }}
-    >
-      {options.map((o) => {
-        const on = o.value === value;
-        return (
-          <button
-            key={o.value}
-            type="button"
-            aria-pressed={on}
-            onClick={() => onChange(o.value)}
-            style={{
-              padding: "6px 14px",
-              minHeight: 32,
-              fontSize: 13,
-              fontWeight: on ? 600 : 500,
-              borderRadius: "var(--radius-chip)",
-              border: "none",
-              cursor: "pointer",
-              background: on ? "var(--color-bg-card)" : "transparent",
-              color: on ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {o.label}
-          </button>
-        );
-      })}
+    <div role="group" aria-label="Plans" className="flex" style={{ gap: 8 }}>
+      {options.map((o) => (
+        <button key={o.value} type="button" aria-pressed={o.value === value} onClick={() => onChange(o.value)} style={pressPill(o.value === value)}>
+          {o.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -546,7 +547,7 @@ function SearchBox({ value, onChange }: { value: string; onChange: (v: string) =
         autoComplete="off"
         style={{
           width: "100%",
-          height: 40,
+          height: TAP,
           padding: "0 12px",
           // 16px: a phone's browser zooms the page into a smaller field.
           fontSize: 16,
@@ -564,7 +565,7 @@ function SearchBox({ value, onChange }: { value: string; onChange: (v: string) =
 function Folded({ title, note, children }: { title: string; note: string; children: React.ReactNode }) {
   return (
     <details style={{ marginTop: 24 }}>
-      <summary style={{ ...T.cardTitle, cursor: "pointer", padding: "8px 0" }}>{title}</summary>
+      <summary style={{ ...T.cardTitle, cursor: "pointer", padding: "11px 0", minHeight: TAP }}>{title}</summary>
       <p style={{ ...T.bodyDim, lineHeight: 1.5, margin: "4px 0 12px" }}>{note}</p>
       {children}
     </details>
@@ -661,43 +662,20 @@ function OtherReasons({ reasons }: { reasons: SupportReason[] }) {
   );
 }
 
-/** A button that copies `text` and says so for a moment. */
-function CopyButton({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
-  return (
-    <Button
-      variant="raised"
-      size="md"
-      onClick={async () => {
-        let ok = false;
-        try {
-          await navigator.clipboard.writeText(text);
-          ok = true;
-        } catch {
-          ok = false;
-        }
-        setCopied(ok ? "yes" : "failed");
-        if (timer.current) clearTimeout(timer.current);
-        timer.current = setTimeout(() => setCopied(null), 1500);
-      }}
-    >
-      {copied === "yes" ? "Copied" : copied === "failed" ? "Couldn't copy" : label}
-    </Button>
-  );
-}
-
 /** One student: why, the facts, the last message, the message to copy, and the marks. */
 function TodayRow({
   row,
   lessonsTotal,
+  locked,
+  stale,
   onMark,
 }: {
   row: SupportRow;
   lessonsTotal: number;
+  /** Marked since the last read that worked: the marks stay off until a read works. */
+  locked: boolean;
+  /** The last read after a change failed. */
+  stale: boolean;
   onMark: (row: SupportRow, action: "messaged" | "not_needed", note?: string) => RowResult;
 }) {
   const [busy, setBusy] = useState<null | "messaged" | "not_needed">(null);
@@ -711,6 +689,7 @@ function TodayRow({
   const unresolved = fromQueue ? fromQueue.unresolved : placeholders(row.supportMessage);
   // The queue tasks a mark closes, when the headline is not already one of them.
   const queueNotes = headline.kind === "open_task" ? [] : row.openTasks;
+  const off = busy !== null || locked;
 
   async function run(action: "messaged" | "not_needed") {
     setBusy(action);
@@ -722,7 +701,7 @@ function TodayRow({
   }
 
   return (
-    <div className="list-row" style={ROW}>
+    <div className="list-row gap-2.5 sm:gap-3" style={STUDENT_ROW}>
       <div className="flex flex-wrap items-center" style={{ gap: "6px 8px", minWidth: 0 }}>
         <Link
           href={`/admin/students/${encodeURIComponent(row.studentId)}`}
@@ -754,9 +733,10 @@ function TodayRow({
       <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <FactsLine parts={rowFacts(row, lessonsTotal)} />
         <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{contactText(row.lastContact)}</p>
+        {/* The headline says why today; the task's own summary is from the day the queue opened it, so it is not repeated. */}
         {queueNotes.map((t) => (
           <p key={t.id} style={{ ...T.bodyDim, lineHeight: 1.5, overflowWrap: "anywhere" }}>
-            {`In the Tasks queue since ${dayLabel(t.createdAt)}${t.summary ? `: ${t.summary}` : ""}. Marking this row closes it too.`}
+            {`Also open in the Tasks queue since ${dayLabel(t.createdAt)}. Marking this row closes it too.`}
           </p>
         ))}
       </div>
@@ -790,7 +770,7 @@ function TodayRow({
           variant="raised"
           size="md"
           busy={busy === "messaged"}
-          disabled={busy !== null && busy !== "messaged"}
+          disabled={locked || (busy !== null && busy !== "messaged")}
           onClick={() => void run("messaged")}
         >
           Mark messaged
@@ -798,7 +778,7 @@ function TodayRow({
         <Button
           variant="raised"
           size="md"
-          disabled={busy !== null}
+          disabled={off}
           onClick={() => {
             setError(null);
             setAsking((a) => !a);
@@ -807,6 +787,10 @@ function TodayRow({
           Not needed
         </Button>
       </div>
+
+      {locked && stale && (
+        <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>Saved. Press Refresh to see this row as it is now.</p>
+      )}
 
       {asking && (
         <div style={PANEL}>
@@ -819,14 +803,15 @@ function TodayRow({
             onChange={(e) => setNote(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Escape") setAsking(false);
-              if (e.key === "Enter" && note.trim() && busy === null) void run("not_needed");
+              if (e.key === "Enter" && note.trim() && !off) void run("not_needed");
             }}
             maxLength={500}
             autoFocus
             placeholder="For example: we spoke on a call today"
             style={{
               width: "100%",
-              padding: "10px 12px",
+              height: TAP,
+              padding: "0 12px",
               fontSize: 16,
               borderRadius: "var(--radius-control)",
               border: "1px solid var(--color-border-strong)",
@@ -843,7 +828,8 @@ function TodayRow({
             <Button
               variant="raised"
               size="md"
-              disabled={!note.trim()}
+              // Off while Mark messaged is on its way too: one mark per row at a time.
+              disabled={!note.trim() || locked || (busy !== null && busy !== "not_needed")}
               busy={busy === "not_needed"}
               onClick={() => void run("not_needed")}
             >
@@ -877,13 +863,17 @@ function groupHandled(rows: HandledRow[]): Array<{ key: string; entries: Handled
 }
 
 /**
- * A Handled entry in words: a mark's record by its reason and the reasons it
- * recorded; a queue task by its own summary, or its scenario when it has none.
+ * A Handled entry in words. A mark's record shows the reasons it recorded,
+ * whose first is the headline's own sentence ("Payment failed", "30% closes
+ * Fri 23 Oct ..."), so the reason's short name is shown only when the record
+ * has no words. A queue task shows its own summary, or no more than where it
+ * came from.
  */
 function entryText(e: HandledRow): string {
   const kind = (Object.keys(SUPPORT_SCENARIO) as ComputedKind[]).find((k) => SUPPORT_SCENARIO[k] === e.scenarioId);
-  if (kind) return e.summary ? `${REASON_LABEL[kind]}: ${e.summary}` : REASON_LABEL[kind];
-  return e.summary ? `From the Tasks queue: ${e.summary}` : `From the Tasks queue (${e.scenarioId})`;
+  const summary = e.summary?.trim() || null;
+  if (kind) return summary ?? REASON_LABEL[kind];
+  return summary ? `From the Tasks queue: ${summary}` : "From the Tasks queue";
 }
 
 /** One mark (its record and the queue tasks it closed), or one closing by the app. */
@@ -1018,19 +1008,11 @@ function OutcomeButton({
       disabled={disabled}
       onClick={onClick}
       style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        padding: "8px 16px",
-        fontSize: 13,
+        ...pressPill(pressed),
+        padding: "0 16px",
         fontWeight: 600,
-        borderRadius: "var(--radius-pill)",
-        border: `1px solid ${pressed ? "var(--color-accent-dark)" : "var(--color-border)"}`,
-        background: pressed ? "var(--color-accent-glow)" : "var(--color-bg-elevated)",
-        color: "var(--color-text-primary)",
         cursor: busy ? "wait" : disabled ? "not-allowed" : "pointer",
         opacity: busy ? 0.6 : disabled ? 0.4 : 1,
-        whiteSpace: "nowrap",
       }}
     >
       {pressed && <span aria-hidden="true">✓</span>}

@@ -97,9 +97,15 @@ PostgREST does where paging depends on it: no select returns more than 1000
 rows, `.range()` returns one page after the order, `.order()` called twice
 orders by both columns, `failWhen` fails one batch of a bulk read, and
 `shuffle` hands rows back in no fixed order wherever a read's order leaves
-them open. Two controls the suite writes into `_gen` (a loader whose reads
-skip paging, and one whose completions are paged without a unique order) must
-fail the same check, and do.
+them open. Since the review of 2026-10-20 each read of completions holds only
+as many students as fit in one page, so it is one query: the suite checks that
+no read is asked for twice, and that a request decided between the pending and
+the decided reads is listed once, as decided. Its controls, written into
+`_gen`, put back 100 students a read (`thirty-data.hundred.ts`) and, on top of
+that, skip paging or page without a unique order; each must fail the same
+check, and does. With 100 a read, a completion deleted between two pages of a
+read drops another student's row (the check fails for that student); with the
+real loader nothing is asked for twice and nothing differs.
 
 `admin-today-routes.test.mjs` (admin rebuild, work item 3, 2026-10-20; work
 item 4 adds Today's routes to it) runs the rebuilt admin's routes through
@@ -127,7 +133,15 @@ unknown reason, another student's or a closed task are refused with nothing
 written; a double click within 2 minutes answers the first; Undo by the
 author within 15 minutes deletes the record and reopens the task, and answers
 403, 409 and 404 per entry otherwise, including the database's one-open-task
-index refusing a reopening). For it the stand-in learned `.not()`, `.like()`,
+index refusing a reopening). The review of 2026-10-20 added: Mark messaged
+on the 30% page closing the student's open queue task with the same actor and
+moment, and Today then hiding them; a second mark within 2 minutes that says
+the other thing answered 409 `marked-otherwise` with nothing written; two
+marks sent at once (one hush around them) leaving one record, whatever their
+order, and a newer record that lands meanwhile taken back; an open task headline
+marked twice at once closed once, the other call answered as a second click; a task reopened
+while 1,100 sent tasks are read dropping no other (pages by key), and a task
+closed between the open and the closed reads counted once, closed. For it the stand-in learned `.not()`, `.like()`,
 `.lt()`, `.lte()`, `.gt()`, head counts, the columns of the tables Today reads,
 and v27's one-open-task index on `tasks`, checked on update as well as insert.
 Every error sentence a route answers in it is kept; with `ADMIN_ROUTE_ERRORS_OUT`
@@ -140,7 +154,14 @@ reasons on one student, who is never listed, the heartbeat hold, every
 cooldown of C5 (and what ends one), the queue's open tasks and their messages,
 C14's folded group, the last message (C12), Handled and its Undo window, and
 the page's filter and counts (C13). 23 mutations of the builder, the loader
-and the two routes each make one of the two suites fail.
+and the two routes each make one of the two suites fail. The review of
+2026-10-20 added: Never opened in whole days from the cron's day 3 (2.04 days:
+"Paid 2 days ago"), a member at 140 of 140 never Stopped, and a 30% mark that
+closed the queue task hiding the row for 2 days. 12 more mutations, one per
+fix (the open tasks not read or not carried, the day number in the sentence,
+the 409, both halves of the settling and the open task answer, the finisher,
+the read size, a request kept twice, Today paged by offset, a task on two
+reads kept open), each make a suite fail.
 
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the

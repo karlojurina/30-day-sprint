@@ -13,6 +13,8 @@ import type { LastContact } from "@/lib/admin/thirty-view";
  *
  *   ListPage          the page's frame: ui.tsx's AdminPage, with the kit's
  *                     16px side gutter on a phone
+ *   ListHeader        the title with Refresh beside it, the description, and
+ *                     "Updated 09:30" at 12px
  *   DiscordReach      C7: how to reach a student
  *   lastContactText   C12: "Messaged Tue 20 Oct by Robin, no reply yet"
  *   timeLeftText      "3 days left", "5 hours left"
@@ -20,12 +22,45 @@ import type { LastContact } from "@/lib/admin/thirty-view";
  *   MembershipPill    the membership status, in words
  *   SkeletonRows      what a list shows while it loads (skeletons, not spinners)
  *   LoadError         what a list shows when it could not load, with Retry
- *   NoticeBar         one line about the last thing done, or what went wrong
+ *   NoticeStack       what a row's button did, or what went wrong, in a fixed
+ *                     place at the bottom of the window, where it is seen
+ *                     wherever the click was
+ *
+ * Every tap target here is at least 44px tall (the kit's touch target).
  */
+
+/** The kit's touch target. */
+export const TAP = 44;
+
+/**
+ * A pill that is pressed or not: Today's reason chips and plan choice, the
+ * 30% page's tabs. Raised surface and hairline; pressed in Airy Blue.
+ */
+export function pressPill(pressed: boolean): React.CSSProperties {
+  return {
+    flex: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    minHeight: TAP,
+    padding: "0 14px",
+    borderRadius: "var(--radius-pill)",
+    border: `1px solid ${pressed ? "var(--color-accent-dark)" : "var(--color-border)"}`,
+    background: pressed ? "var(--color-accent-glow)" : "var(--color-bg-elevated)",
+    color: "var(--color-text-primary)",
+    fontSize: 13,
+    fontWeight: pressed ? 600 : 500,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    fontVariantNumeric: "tabular-nums",
+  };
+}
 
 /** The raised pill of ui.tsx's Button (variant "raised", size "md"), for a link that leaves the app. */
 const RAISED_LINK: React.CSSProperties = {
-  padding: "8px 16px",
+  padding: "0 16px",
+  minHeight: TAP,
   fontSize: 13,
   fontWeight: 600,
   letterSpacing: "-0.005em",
@@ -36,6 +71,7 @@ const RAISED_LINK: React.CSSProperties = {
   textDecoration: "none",
   display: "inline-flex",
   alignItems: "center",
+  justifyContent: "center",
   gap: 6,
   whiteSpace: "nowrap",
 };
@@ -47,9 +83,43 @@ const RAISED_LINK: React.CSSProperties = {
  */
 export function ListPage({ children }: { children: React.ReactNode }) {
   return (
-    <div className="px-4 sm:px-8 lg:px-12 pt-6 sm:pt-10 pb-16" style={{ maxWidth: 1180, margin: "0 auto" }}>
+    // pb-28: room under the last row for the notices fixed at the bottom of the window.
+    <div className="px-4 sm:px-8 lg:px-12 pt-4 sm:pt-10 pb-28" style={{ maxWidth: 1180, margin: "0 auto" }}>
       {children}
     </div>
+  );
+}
+
+/**
+ * The page's header. The title and its one action (Refresh) share a line on
+ * every width, so on a phone the action does not take a line of its own; the
+ * description and the meta line ("Updated 09:30", 12px, the kit's floor for
+ * text that is not an eyebrow) follow.
+ */
+export function ListHeader({
+  title,
+  description,
+  meta,
+  action,
+}: {
+  title: string;
+  description: string;
+  meta?: React.ReactNode;
+  action?: React.ReactNode;
+}) {
+  return (
+    <header className="mb-4 sm:mb-8">
+      <div className="flex items-center justify-between" style={{ gap: 12 }}>
+        <h1 style={{ ...T.display, minWidth: 0 }}>{title}</h1>
+        {action}
+      </div>
+      <p style={{ ...T.bodyDim, marginTop: 4, lineHeight: 1.5 }}>{description}</p>
+      {meta && (
+        <p style={{ marginTop: 4, fontSize: 12, color: "var(--color-text-tertiary)", fontVariantNumeric: "tabular-nums" }}>
+          {meta}
+        </p>
+      )}
+    </header>
   );
 }
 
@@ -214,64 +284,153 @@ export function LoadError({
   );
 }
 
-export interface Notice {
-  tone: "success" | "danger" | "neutral";
-  text: string;
+/** A button that copies `text` and says so for a moment. */
+export function CopyButton({ text, label }: { text: string; label: string }) {
+  const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  return (
+    <Button
+      variant="raised"
+      size="md"
+      onClick={async () => {
+        let ok = false;
+        try {
+          await navigator.clipboard.writeText(text);
+          ok = true;
+        } catch {
+          ok = false;
+        }
+        setCopied(ok ? "yes" : "failed");
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => setCopied(null), 1500);
+      }}
+    >
+      {copied === "yes" ? "Copied" : copied === "failed" ? "Couldn't copy" : label}
+    </Button>
+  );
 }
+
+export interface Notice {
+  /** A new number for each notice: a success notice hides itself NOTICE_SECONDS after it shows, and a newer one keeps its own time. */
+  id: number;
+  /** success hides itself; danger (something to act on) and warning (the list may be out of date) stay until dismissed. */
+  tone: "success" | "danger" | "warning";
+  text: string;
+  /** One button beside the words (the Undo after a mark); pressing it calls the stack's onAction with the notice's id. */
+  action?: { label: string; busy?: boolean };
+  /** Something in the words to copy: a Whop code. */
+  copy?: { label: string; text: string };
+}
+
+/** How long a success notice stays: time to press its Undo. */
+export const NOTICE_SECONDS = 15;
 
 const NOTICE_DOT: Record<Notice["tone"], string> = {
   success: "var(--color-success)",
   danger: "var(--color-danger)",
-  neutral: "var(--color-neutral)",
+  warning: "var(--color-warning)",
 };
 
 /**
- * One line at the top of a list: what the last action did, or what went
- * wrong. `action` adds one button beside it (Today's Undo after a mark).
+ * What a row's button did, or what went wrong, fixed at the bottom of the
+ * window (the Toast pattern of ui.tsx). A click low on a long list sees its
+ * answer where it is: a notice at the top of the page would be out of view,
+ * and the row it was about may be gone after the list is read again.
  */
-export function NoticeBar({
-  notice,
+export function NoticeStack({
+  notices,
   onClose,
-  action,
+  onAction,
 }: {
-  notice: Notice;
-  onClose: () => void;
-  action?: { label: string; onClick: () => void; busy?: boolean };
+  notices: Notice[];
+  onClose: (id: number) => void;
+  /** A notice's action button was pressed. */
+  onAction?: (id: number) => void;
 }) {
+  if (notices.length === 0) return null;
   return (
     <div
-      role={notice.tone === "danger" ? "alert" : "status"}
       style={{
+        position: "fixed",
+        left: 16,
+        right: 16,
+        bottom: 16,
+        zIndex: 60,
         display: "flex",
-        alignItems: "flex-start",
-        gap: 10,
-        padding: "10px 12px 10px 14px",
-        marginBottom: 16,
-        borderRadius: "var(--radius-control)",
-        background: "var(--color-bg-elevated)",
-        border: "1px solid var(--color-border)",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 8,
+        // The strip between the cards lets clicks through to the page.
+        pointerEvents: "none",
       }}
     >
-      <span
-        aria-hidden="true"
-        style={{
-          flex: "none",
-          width: 8,
-          height: 8,
-          marginTop: 6,
-          borderRadius: 999,
-          background: NOTICE_DOT[notice.tone],
-        }}
-      />
-      <p style={{ ...T.body, flex: 1, minWidth: 0, lineHeight: 1.5, overflowWrap: "anywhere" }}>{notice.text}</p>
-      {action && (
-        <Button variant="raised" busy={action.busy} onClick={action.onClick}>
-          {action.label}
-        </Button>
-      )}
-      <Button variant="ghost" onClick={onClose}>
-        Dismiss
-      </Button>
+      {notices.map((n) => (
+        <NoticeCard key={n.id} notice={n} onClose={onClose} onAction={onAction} />
+      ))}
     </div>
   );
 }
+
+function NoticeCard({
+  notice,
+  onClose,
+  onAction,
+}: {
+  notice: Notice;
+  onClose: (id: number) => void;
+  onAction?: (id: number) => void;
+}) {
+  const close = useRef(onClose);
+  useEffect(() => {
+    close.current = onClose;
+  });
+  const busy = notice.action?.busy === true;
+  useEffect(() => {
+    if (notice.tone !== "success" || busy) return;
+    const t = setTimeout(() => close.current(notice.id), NOTICE_SECONDS * 1000);
+    return () => clearTimeout(t);
+  }, [notice.id, notice.tone, busy]);
+  return (
+    <div
+      role={notice.tone === "success" ? "status" : "alert"}
+      style={{
+        pointerEvents: "auto",
+        width: "100%",
+        maxWidth: 600,
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: "8px 12px",
+        padding: "10px 10px 10px 14px",
+        borderRadius: "var(--radius-card)",
+        background: "var(--color-bg-elevated)",
+        border: "1px solid var(--color-border-strong)",
+      }}
+    >
+      <p style={{ display: "flex", gap: 10, alignItems: "flex-start", flex: "1 1 260px", minWidth: 0 }}>
+        <span
+          aria-hidden="true"
+          style={{ flex: "none", width: 8, height: 8, marginTop: 6, borderRadius: 999, background: NOTICE_DOT[notice.tone] }}
+        />
+        <span style={{ ...T.body, lineHeight: 1.5, overflowWrap: "anywhere" }}>{notice.text}</span>
+      </p>
+      <div className="flex flex-wrap items-center" style={{ gap: 8, marginLeft: "auto" }}>
+        {notice.copy && <CopyButton text={notice.copy.text} label={notice.copy.label} />}
+        {notice.action && onAction && (
+          <Button variant="raised" size="md" busy={notice.action.busy} onClick={() => onAction(notice.id)}>
+            {notice.action.label}
+          </Button>
+        )}
+        <Button variant="ghost" size="md" onClick={() => onClose(notice.id)}>
+          Dismiss
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** The one line a list shows while what it shows may be out of date (a read after a change failed). */
+export const STALE_TEXT = "Couldn't refresh the list, so it may be out of date. Press Refresh.";

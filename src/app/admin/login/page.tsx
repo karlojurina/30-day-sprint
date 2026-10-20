@@ -213,7 +213,6 @@ function FormField({
           borderRadius: "var(--radius-control)",
           fontSize: 15,
           color: "var(--color-text-primary)",
-          outline: "none",
           transition: "border-color 150ms var(--ease-default)",
         }}
         onFocus={(e) =>

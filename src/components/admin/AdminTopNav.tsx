@@ -86,7 +86,7 @@ const NAV: NavEntry[] = [
       // dynamic server component that checks isStatsOwner(), and
       // /api/admin/stats checks again on its own.
       { type: "leaf", href: "/admin/stats", label: "Stats", founderOnly: true },
-      { type: "leaf", href: "/admin/settings", label: "General", csmHidden: true },
+      { type: "leaf", href: "/admin/settings", label: "Settings", csmHidden: true },
       { type: "leaf", href: "/admin/discord", label: "Discord test", csmHidden: true },
       {
         type: "leaf",

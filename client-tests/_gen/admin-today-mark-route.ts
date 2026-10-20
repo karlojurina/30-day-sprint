@@ -14,7 +14,14 @@
  *   - every open queue task on the row, completed or dismissed with the same
  *     actor, note and moment, so Tasks and Today agree about the student.
  *   201 { supportId, movedIds, at }. A second mark of the same student and
- *   reason by the same member within 2 minutes answers 200 with the first.
+ *   reason by the same member within 2 minutes answers 200 with the first,
+ *   or 409 { error, code: "marked-otherwise" } when the first said the other
+ *   thing (Messaged, then Not needed): nothing is written and the reason is
+ *   not lost silently. Two marks sent at once both pass that check, so after
+ *   writing its record the call reads the member's records of the reason
+ *   again and the oldest stands (by moment, then id), whichever call reads
+ *   it: a newer call takes its own record back and answers as a second
+ *   click, and the older takes back any newer record it sees.
  *   400 for an unknown reason, Not needed without a reason, or a task that is
  *   not an open task of this student. If closing the queue tasks fails, the
  *   record is taken back: the mark is all or nothing.
@@ -35,6 +42,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireTeam, isAuthFailure } from "./admin-auth.ts";
 import { fetchAllRowsPaginated } from "./supabase-pagination.ts";
 import {
+  MARKED_OTHERWISE,
   REASON_LABEL,
   SUPPORT_SCENARIO,
   TASK_COLUMNS,
@@ -55,8 +63,8 @@ const MAX_SUMMARY = 2000;
 const MAX_NOTE = 500;
 const MAX_UNDO = 50;
 
-function refuse(error: string, status = 400) {
-  return NextResponse.json({ error }, { status });
+function refuse(error: string, status = 400, code?: string) {
+  return NextResponse.json(code ? { error, code } : { error }, { status });
 }
 
 function failed(error: string, detail: string) {
@@ -69,6 +77,48 @@ function near(iso: string | null | undefined, nowMs: number, windowMs: number): 
   if (!iso) return false;
   const t = Date.parse(iso);
   return Number.isFinite(t) && Math.abs(nowMs - t) <= windowMs;
+}
+
+/** The words for a second mark that says the other thing within 2 minutes. */
+function otherwiseSentence(earlierStatus: string): string {
+  return earlierStatus === "completed"
+    ? "You marked this student as messaged a moment ago, so Not needed was not saved. To change it, undo that mark first (on Today, under Handled)."
+    : "You marked this student as not needed a moment ago, so Messaged was not saved. To change it, undo that mark first (on Today, under Handled).";
+}
+
+/** The member's own records of this reason for the student made within 2 minutes of now, the oldest first: by moment, then by id. */
+function sameMark(rows: readonly SupportTask[], scenario: string, actor: string, nowMs: number): SupportTask[] {
+  return rows
+    .filter(
+      (t) => isSupportRecord(t) && t.scenario_id === scenario && closedBy(t) === actor && near(t.created_at, nowMs, DUPLICATE_MS),
+    )
+    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/** A second mark's answer: the first mark's, or 409 when the first said the other thing. Nothing is written. */
+function answerFirst(first: SupportTask, rows: readonly SupportTask[], actor: string, wanted: string) {
+  if (first.status !== wanted) return refuse(otherwiseSentence(first.status), 409, MARKED_OTHERWISE);
+  const firstMs = Date.parse(first.created_at);
+  const movedIds = rows
+    .filter((t) => !isSupportRecord(t) && closedBy(t) === actor && Date.parse(closedAt(t) ?? "") === firstMs)
+    .map((t) => t.id);
+  return NextResponse.json({ supportId: first.id, movedIds, at: first.created_at }, { status: 200 });
+}
+
+/**
+ * A mark with no record (an open task headline) whose tasks this member
+ * closed within 2 minutes: a second click, answered as the first (or 409
+ * when the first said the other thing). Null when that is not what happened.
+ */
+function answerClosedTasks(rows: readonly SupportTask[], openTaskIds: string[], actor: string, wanted: string, nowMs: number) {
+  const closed = openTaskIds.map((id) => rows.find((t) => t.id === id));
+  if (!closed.every((t) => t && t.status !== "open" && closedBy(t) === actor && near(closedAt(t), nowMs, DUPLICATE_MS))) {
+    return null;
+  }
+  const other = closed.find((t) => t!.status !== wanted);
+  if (other) return refuse(otherwiseSentence(other.status), 409, MARKED_OTHERWISE);
+  const at = closed.map((t) => closedAt(t!)!).sort()[0];
+  return NextResponse.json({ supportId: null, movedIds: openTaskIds, at }, { status: 200 });
 }
 
 export async function POST(request: NextRequest) {
@@ -113,26 +163,15 @@ export async function POST(request: NextRequest) {
   const nowIso = now.toISOString();
   const nowMs = now.getTime();
   const scenario = kind === "open_task" ? null : SUPPORT_SCENARIO[kind];
+  const wanted = action === "messaged" ? "completed" : "dismissed";
 
-  // A second click: the first mark's answer, and nothing written.
+  // A second click: the first mark's answer (409 if it said the other thing), and nothing written.
   if (scenario) {
-    const first = mine
-      .filter((t) => isSupportRecord(t) && t.scenario_id === scenario && closedBy(t) === actor && near(t.created_at, nowMs, DUPLICATE_MS))
-      .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))[0];
-    if (first) {
-      const firstMs = Date.parse(first.created_at);
-      const movedIds = mine
-        .filter((t) => !isSupportRecord(t) && closedBy(t) === actor && Date.parse(closedAt(t) ?? "") === firstMs)
-        .map((t) => t.id);
-      return NextResponse.json({ supportId: first.id, movedIds, at: first.created_at }, { status: 200 });
-    }
+    const first = sameMark(mine, scenario, actor, nowMs)[0];
+    if (first) return answerFirst(first, mine, actor, wanted);
   } else {
-    const wanted = action === "messaged" ? "completed" : "dismissed";
-    const closed = openTaskIds.map((id) => mine.find((t) => t.id === id));
-    if (closed.every((t) => t && t.status === wanted && closedBy(t) === actor && near(closedAt(t), nowMs, DUPLICATE_MS))) {
-      const at = closed.map((t) => closedAt(t!)!).sort()[0];
-      return NextResponse.json({ supportId: null, movedIds: openTaskIds, at }, { status: 200 });
-    }
+    const again = answerClosedTasks(mine, openTaskIds, actor, wanted, nowMs);
+    if (again) return again;
   }
 
   const notOpen = openTaskIds.filter((id) => {
@@ -165,6 +204,35 @@ export async function POST(request: NextRequest) {
       return failed("Couldn't save the mark, so nothing was changed. Try again.", inserted.error?.message ?? "no row back");
     }
     supportId = (inserted.data as { id: string }).id;
+
+    // Two marks sent at once (two tabs, a request sent again) both pass the
+    // check above. Read the member's records of this reason again: the oldest
+    // stands, whichever call reads it. A newer call takes its own record back
+    // and answers as a second click; the older takes back any newer record it
+    // sees, in case that call read before this one wrote.
+    const again = await fetchAllRowsPaginated<SupportTask>(() =>
+      supabase.from("tasks").select(TASK_COLUMNS).eq("student_id", studentId).order("id"),
+    );
+    if (again.error) {
+      console.error(`[admin today mark] reading the student's marks again: ${again.error.message}`);
+    } else {
+      const same = sameMark(again.data, scenario, actor, nowMs);
+      if (same[0] && same[0].id !== supportId) {
+        const back = await supabase.from("tasks").delete().eq("id", supportId);
+        if (back.error) console.error(`[admin today mark] taking back the second record ${supportId}: ${back.error.message}`);
+        return answerFirst(same[0], again.data, actor, wanted);
+      }
+      const newer = same.filter((t) => t.id !== supportId).map((t) => t.id);
+      if (newer.length) {
+        const gone = await supabase
+          .from("tasks")
+          .delete()
+          .in("id", newer)
+          .like("scenario_id", "support.%")
+          .is("template_id", null);
+        if (gone.error) console.error(`[admin today mark] taking back newer records ${newer.join(", ")}: ${gone.error.message}`);
+      }
+    }
   }
 
   let movedIds: string[] = [];
@@ -202,6 +270,12 @@ export async function POST(request: NextRequest) {
     }
     movedIds = ((moved.data ?? []) as Array<{ id: string }>).map((r) => r.id);
     if (!supportId && movedIds.length === 0) {
+      // Closed meanwhile. By this member's other call (two at once): that call's answer.
+      const reread = await fetchAllRowsPaginated<SupportTask>(() =>
+        supabase.from("tasks").select(TASK_COLUMNS).eq("student_id", studentId).order("id"),
+      );
+      const byMe = reread.error ? null : answerClosedTasks(reread.data, openTaskIds, actor, wanted, nowMs);
+      if (byMe) return byMe;
       return refuse("Someone closed this task in the Tasks queue meanwhile, so there was nothing to mark. Reload the list.", 409);
     }
   }

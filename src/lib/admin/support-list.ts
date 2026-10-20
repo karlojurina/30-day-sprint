@@ -20,16 +20,20 @@
  *   stopped         "No lesson for 5 days" (a counted lesson, then none for
  *                   3 days or more: Slipping up to 7, Stalled after)
  *   not_started     "No lesson on the new course yet (course day 4)"
- *   never_opened    "Paid 6 days ago, never opened the app"
+ *   never_opened    "Paid 6 days ago, never opened the app" (whole days)
  *   open_task       the queue task's own summary, when nothing above applies
  *
  * The thresholds are the app's own: activityLabel (curriculum-reset.ts),
  * nolessons.day3 and the never-logged-in cron's day 3. An app heartbeat in the
- * last 3 days holds back Stopped and Not started. Not started is for a
- * student who opened the app; one who never did is Never opened, which leaves
- * out the members the never-logged-in sequence marked high churn risk at its
- * day 10. The 30% is the student app's own rule (studentAppView in
- * thirty-view.ts, as Can still earn reads it).
+ * last 3 days holds back Stopped and Not started, and a student who has done
+ * every counted lesson is never Stopped (there is nothing left to stop on).
+ * Not started is for a student who opened the app; one who never did is
+ * Never opened, which leaves out the members the never-logged-in sequence
+ * marked high churn risk at its day 10. Never opened starts on the cron's day
+ * 3 (sprintDayNumber's count, a day number), and its sentence says the whole
+ * days since the first payment, as "Clicked cancel" and "No lesson for" do.
+ * The 30% is the student app's own rule (studentAppView in thirty-view.ts, as
+ * Can still earn reads it).
  *
  * ALREADY HANDLED (C5). A row whose headline was messaged, or marked not
  * needed, recently stays hidden: while a support record of that reason, or a
@@ -133,6 +137,12 @@ export const FIRST_REASON_DAY = 3;
 export const HANDLED_DAYS = 7;
 /** A member can undo their own mark for this long (C5, C12). */
 export const UNDO_MINUTES = 15;
+/**
+ * The `code` of the mark route's 409 when a second mark within 2 minutes says
+ * the other thing (Messaged, then Not needed): nothing was saved, and the
+ * page shows the sentence on the row instead of reading the list again.
+ */
+export const MARKED_OTHERWISE = "marked-otherwise";
 
 export function isReasonKind(value: unknown): value is ReasonKind {
   return typeof value === "string" && (REASON_ORDER as readonly string[]).includes(value);
@@ -363,6 +373,12 @@ export function cancelText(days: number | null): string {
   return `Clicked cancel ${days} ${days === 1 ? "day" : "days"} ago`;
 }
 
+/** C4's words for Never opened, with the whole days since the first payment: "Paid 6 days ago, never opened the app". */
+export function neverOpenedText(days: number): string {
+  if (days <= 0) return "Paid less than 1 day ago, never opened the app";
+  return `Paid ${days} ${days === 1 ? "day" : "days"} ago, never opened the app`;
+}
+
 /** "Slipping" for 3 to 7 days without a lesson, "Stalled" after (activityLabel's words). */
 export function stoppedLabel(days: number): "Slipping" | "Stalled" {
   return days <= 7 ? "Slipping" : "Stalled";
@@ -511,8 +527,10 @@ export function buildSupportRows(input: SupportInput, now: Date): { rows: Suppor
     const courseDay = daysOnCourse(courseAnchorIso(s.first_paid_at, joinedAt, input.resetAt), nowMs);
     if (!heldBack) {
       if (lastLessonAt) {
+        // Every counted lesson done: nothing is left to stop on, however long ago the last one was.
+        const finished = input.lessonsTotal > 0 && (input.progress.get(s.id) ?? 0) >= input.lessonsTotal;
         const label = activityLabel(lastLessonAt, nowMs);
-        if (label === "slipping" || label === "stalled") {
+        if (!finished && (label === "slipping" || label === "stalled")) {
           const days = Math.floor((nowMs - Date.parse(lastLessonAt)) / DAY_MS);
           add("stopped", `No lesson for ${days} days`, days);
         }
@@ -521,9 +539,14 @@ export function buildSupportRows(input: SupportInput, now: Date): { rows: Suppor
       }
     }
     if (!openedApp && s.high_churn_risk !== true) {
-      // sprintDayNumber's count (whole days, at least 1), handed the moment.
-      const paidDays = daysOnCourse(s.first_paid_at ?? joinedAt, nowMs);
-      if (paidDays >= FIRST_REASON_DAY) add("never_opened", `Paid ${paidDays} days ago, never opened the app`, paidDays);
+      // From the never-logged-in cron's day 3: sprintDayNumber's count (a day
+      // number, whole days rounded up, at least 1), handed the moment. The
+      // sentence says the whole days that have passed, as the other reasons do.
+      const paidFrom = s.first_paid_at ?? joinedAt;
+      if (daysOnCourse(paidFrom, nowMs) >= FIRST_REASON_DAY) {
+        const days = wholeDaysSince(paidFrom, nowMs) ?? 0;
+        add("never_opened", neverOpenedText(days), days);
+      }
     }
 
     // An open queue task is the headline only when nothing above applies.

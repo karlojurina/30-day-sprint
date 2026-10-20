@@ -27,14 +27,26 @@
  * batches of 100 (`.in()`), as outreach-insights.ts does, to keep the URL
  * short.
  *
+ * ONE SNAPSHOT PER STUDENT. Pages read by offset are separate queries: a row
+ * deleted while they are read shifts the later pages up, and one row of
+ * another student is never read. The completions are the read that is both
+ * long and written to while the page loads (skip-lesson, toggle-lesson and
+ * mark-action-shipped delete rows), so each read of completions holds only as
+ * many students as fit in one page (a student has at most one row per lesson,
+ * unique(student_id, lesson_id)): every read is a single query. The pending
+ * and the decided requests are two reads; the decided ones are read after the
+ * pending ones, so a request decided in between is on both (and kept once, as
+ * decided) and never on neither.
+ *
  * A read that fails is never an empty list. A failed read the rule needs (the
  * catalog, the videos, a batch of completions or of requests) becomes that
  * read's `{ data: null, error }` for every student it covers, so the rule
  * refuses to judge them exactly as it would refuse one student
  * (factsFromReads). Any other failed read (who is in the offer, the listed
  * requests and the students holding them, the survey, the team's names, the
- * Whop sync, the last contacts) fails the whole load, so the page shows an
- * error instead of a list with people missing.
+ * Whop sync, the last contacts, the open tasks in the Tasks queue) fails the
+ * whole load, so the page shows an error instead of a list with people
+ * missing.
  *
  * Server only. lesson_videos is readable by the service role alone: any other
  * client sees no videos and no error, and the rule would then close the offer
@@ -122,6 +134,21 @@ export interface ThirtyContact {
   outcome: string | null;
 }
 
+/**
+ * An open task in the Tasks queue of a member who can still earn the 30%.
+ * Mark messaged on the 30% page closes it with the same actor and moment, as
+ * Today's mark does, so Tasks and Today never disagree about the student.
+ */
+export interface ThirtyOpenTask {
+  id: string;
+  student_id: string;
+  scenario_id: string;
+  template_id: string | null;
+  behavior_summary: string | null;
+  created_at: string;
+}
+export const OPEN_TASK_COLUMNS = "id, student_id, scenario_id, template_id, behavior_summary, created_at";
+
 export interface ThirtyData {
   /** The catalog in course order, with titles and the action flag. Every student's `lessons` read is this one. */
   catalog: Read<ThirtyLesson[]>;
@@ -145,11 +172,15 @@ export interface ThirtyData {
   lastSyncAt: Map<string, string | null>;
   /** Per student id, for those who can still earn it (in the offer, active or past due, not exempt): their completed tasks. */
   contacts: Map<string, ThirtyContact[]>;
+  /** Per student id, for the same members: their open tasks in the Tasks queue (never a support record, which is never open). */
+  openTasks: Map<string, ThirtyOpenTask[]>;
 }
 
 export type ThirtyLoad = { ok: true; data: ThirtyData } | { ok: false; failed: string[] };
 
 const BATCH = 100;
+/** The most rows PostgREST answers for one query (max-rows on Supabase). */
+const PAGE_ROWS = 1000;
 
 /** One read in pages: every row, or the error and no rows. */
 async function paged<T>(build: () => unknown): Promise<Read<T[]>> {
@@ -157,19 +188,23 @@ async function paged<T>(build: () => unknown): Promise<Read<T[]>> {
   return r.error ? { data: null, error: { message: r.error.message } } : { data: r.data, error: null };
 }
 
-function batches<T>(items: readonly T[]): T[][] {
+function batches<T>(items: readonly T[], size = BATCH): T[][] {
   const out: T[][] = [];
-  for (let i = 0; i < items.length; i += BATCH) out.push(items.slice(i, i + BATCH));
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;
 }
 
 /**
- * One read per batch of 100 ids, each in pages, all at once. Each id is
- * handed the answer of the batch it was in, so a failed batch is a failed
- * read for exactly the ids it covered.
+ * One read per batch of ids (100, or `size`), each in pages, all at once.
+ * Each id is handed the answer of the batch it was in, so a failed batch is
+ * a failed read for exactly the ids it covered.
  */
-async function byBatch<T>(ids: readonly string[], build: (batch: string[]) => unknown): Promise<Map<string, Read<T[]>>> {
-  const parts = batches(ids);
+async function byBatch<T>(
+  ids: readonly string[],
+  build: (batch: string[]) => unknown,
+  size = BATCH,
+): Promise<Map<string, Read<T[]>>> {
+  const parts = batches(ids, size);
   const results = await Promise.all(parts.map((batch) => paged<T>(() => build(batch))));
   const out = new Map<string, Read<T[]>>();
   parts.forEach((batch, i) => {
@@ -193,13 +228,12 @@ function groupBy<T>(rows: readonly T[], key: (r: T) => string): Map<string, T[]>
 const failure = (name: string, r: Read<unknown>) => `${name}: ${r.error?.message ?? "no data"}`;
 
 export async function loadThirtyData(db: SupabaseClient): Promise<ThirtyLoad> {
-  // Everything that does not depend on who is listed, at once.
-  const [catalog, videos, pending, decided, offer, questions, team] = await Promise.all([
-    paged<ThirtyLesson>(() => db.from(LESSONS_TABLE).select(CATALOG_COLUMNS).order("sort_order").order("id")),
-    paged<VideoRow>(() => db.from("lesson_videos").select(VIDEO_COLUMNS).order("lesson_id")),
-    paged<ThirtyRequest>(() =>
-      db.from("discount_requests").select(LISTED_REQUEST_COLUMNS).eq("status", "pending").order("id"),
-    ),
+  // The pending requests, then the decided ones: a request decided in between
+  // is on both lists (kept once below, as decided), never on neither.
+  const pendingRead = paged<ThirtyRequest>(() =>
+    db.from("discount_requests").select(LISTED_REQUEST_COLUMNS).eq("status", "pending").order("id"),
+  );
+  const decidedRead = pendingRead.then(() =>
     paged<ThirtyRequest>(() =>
       db
         .from("discount_requests")
@@ -208,6 +242,13 @@ export async function loadThirtyData(db: SupabaseClient): Promise<ThirtyLoad> {
         .gte("created_at", DISCOUNT_ELIGIBLE_FROM)
         .order("id"),
     ),
+  );
+  // Everything that does not depend on who is listed, at once.
+  const [catalog, videos, pending, decided, offer, questions, team] = await Promise.all([
+    paged<ThirtyLesson>(() => db.from(LESSONS_TABLE).select(CATALOG_COLUMNS).order("sort_order").order("id")),
+    paged<VideoRow>(() => db.from("lesson_videos").select(VIDEO_COLUMNS).order("lesson_id")),
+    pendingRead,
+    decidedRead,
     paged<ThirtyStudent>(() =>
       db.from("students").select(STUDENT_COLUMNS).gte("first_paid_at", DISCOUNT_ELIGIBLE_FROM).order("id"),
     ),
@@ -228,7 +269,12 @@ export async function loadThirtyData(db: SupabaseClient): Promise<ThirtyLoad> {
   if (!team.data) failed.push(failure("team_members", team));
   if (failed.length) return { ok: false, failed };
 
-  const requests = [...pending.data!, ...decided.data!].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // One row per request. A request decided between the two reads is on both,
+  // and its decided row, read second, is the newer.
+  const byRequest = new Map<string, ThirtyRequest>();
+  for (const r of pending.data!) byRequest.set(r.id, r);
+  for (const r of decided.data!) byRequest.set(r.id, r);
+  const requests = [...byRequest.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 
   // The students holding a listed request who are not in the offer (a first
   // payment before 1 October, or none on file).
@@ -250,7 +296,10 @@ export async function loadThirtyData(db: SupabaseClient): Promise<ThirtyLoad> {
       return { ok: false, failed: [`students: ${missing.length} student(s) holding a listed request could not be found`] };
     }
   }
-  const students = [...offer.data!, ...holders].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // Each student once, whatever a read handed back twice.
+  const students = [...new Map([...offer.data!, ...holders].map((s) => [s.id, s] as const)).values()].sort((a, b) =>
+    a.id < b.id ? -1 : a.id > b.id ? 1 : 0,
+  );
   const ids = students.map((s) => s.id);
 
   // The lessons whose completions matter: those the offer asks for, by the
@@ -264,21 +313,28 @@ export async function loadThirtyData(db: SupabaseClient): Promise<ThirtyLoad> {
       ? requiredLessons(toDiscountLessons(catalog.data, new Set(videos.data.map((v) => v.lesson_id)))).map((l) => l.id)
       : null;
   const lessonIds = asked ? [...new Set([...asked, ...actionIds])].sort() : null;
+  // Students per read of completions: as many as fit in one page, so each read
+  // is one query (the header says why). 69 lessons today: 14 students a read.
+  const perRead =
+    lessonIds && lessonIds.length ? Math.max(1, Math.min(BATCH, Math.floor((PAGE_ROWS - 1) / lessonIds.length))) : BATCH;
 
-  // The last contact is shown on Can still earn rows only.
+  // The last contact and the open tasks are shown on Can still earn rows only.
   const contactIds = students.filter(canStillEarnCandidate).map((s) => s.id);
   const requestIds = requests.map((r) => r.id);
 
-  const [completionReads, requestReads, syncReads, answerReads, contactReads] = await Promise.all([
+  const [completionReads, requestReads, syncReads, answerReads, contactReads, openReads] = await Promise.all([
     lessonIds && lessonIds.length
-      ? byBatch<ThirtyCompletion>(ids, (batch) =>
-          db
-            .from("student_lesson_completions")
-            .select(COMPLETION_COLUMNS)
-            .in("student_id", batch)
-            .in("lesson_id", lessonIds)
-            .order("student_id")
-            .order("lesson_id"),
+      ? byBatch<ThirtyCompletion>(
+          ids,
+          (batch) =>
+            db
+              .from("student_lesson_completions")
+              .select(COMPLETION_COLUMNS)
+              .in("student_id", batch)
+              .in("lesson_id", lessonIds)
+              .order("student_id")
+              .order("lesson_id"),
+          perRead,
         )
       : Promise.resolve(null),
     byBatch<DiscountRequestRow & { student_id: string }>(ids, (batch) =>
@@ -314,11 +370,19 @@ export async function loadThirtyData(db: SupabaseClient): Promise<ThirtyLoad> {
         ),
       ),
     ),
+    Promise.all(
+      batches(contactIds).map((batch) =>
+        paged<ThirtyOpenTask>(() =>
+          db.from("tasks").select(OPEN_TASK_COLUMNS).in("student_id", batch).eq("status", "open").order("id"),
+        ),
+      ),
+    ),
   ]);
   for (const [name, list] of [
     ["student_whop_sync", syncReads],
     ["discount_feedback_responses", answerReads],
     ["tasks (completed)", contactReads],
+    ["tasks (open)", openReads],
   ] as const) {
     const bad = list.find((r) => !r.data);
     if (bad) failed.push(failure(name, bad));
@@ -417,6 +481,11 @@ export async function loadThirtyData(db: SupabaseClient): Promise<ThirtyLoad> {
       team: new Map(team.data!.map((m) => [m.id, m.full_name ?? ""] as const)),
       lastSyncAt,
       contacts: groupBy(contactReads.flatMap((r) => r.data!), (c) => c.student_id),
+      // A support record (support.*, no template) is never open; one would not be a queue task.
+      openTasks: groupBy(
+        openReads.flatMap((r) => r.data!).filter((t) => !(t.scenario_id.startsWith("support.") && t.template_id == null)),
+        (t) => t.student_id,
+      ),
     },
   };
 }

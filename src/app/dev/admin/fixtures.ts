@@ -169,6 +169,8 @@ interface Ask {
 }
 
 interface Contact {
+  /** Set on a contact a mark wrote: its support record's id, for Undo. */
+  id?: string;
   studentId: string;
   scenarioId: string;
   completedAt: string;
@@ -176,10 +178,23 @@ interface Contact {
   outcome?: "replied" | "no_reply" | null;
 }
 
+/** A task in the Tasks queue (stalled.* and nolessons.*, as the crons open them). */
+interface QueueTask {
+  id: string;
+  studentId: string;
+  scenarioId: string;
+  summary: string | null;
+  createdAt: string;
+  status: "open" | "completed";
+  completedAt?: string | null;
+  completedBy?: string | null;
+}
+
 interface FixtureDb {
   people: Person[];
   asks: Ask[];
   contacts: Contact[];
+  queue: QueueTask[];
 }
 
 function fullDb(): FixtureDb {
@@ -226,6 +241,8 @@ function fullDb(): FixtureDb {
       { id: "p-dana", name: "Dana Whitfield", plan: MONTHLY, paid: "2026-10-07T09:00:00.000Z", done: 12, synced: null },
       { id: "p-sam", name: "Sam Taylor", discordUsername: "samtaylor", plan: MONTHLY, status: "past_due", paid: "2026-10-15T09:00:00.000Z", done: 5 },
       { id: "p-zoe", name: "Zoe Achterberg", discordUserId: "100000000000000117", plan: YEARLY, paid: "2026-10-11T08:00:00.000Z", done: 30 },
+      // Can still earn, with no video watched yet and the queue's nolessons.day7 task open: Mark messaged closes it.
+      { id: "p-ava", name: "Ava Lindgren", discordUsername: "ava.lind", plan: MONTHLY, paid: "2026-10-13T10:00:00.000Z", done: 0 },
       // Never listed: exempt from messages, and a canceled member.
       { id: "p-kai", name: "Kai Lund", plan: MONTHLY, exempt: true, paid: "2026-10-03T09:00:00.000Z", done: 10 },
       { id: "p-mia", name: "Mia Novak", plan: MONTHLY, status: "canceled", paid: "2026-10-12T09:00:00.000Z", done: 10 },
@@ -270,11 +287,17 @@ function fullDb(): FixtureDb {
       { studentId: "p-theo", scenarioId: "nolessons.day3", completedAt: "2026-10-16T09:00:00.000Z", completedBy: "tm-jamie", outcome: "replied" },
       { studentId: "p-sam", scenarioId: "stalled.discord.day3", completedAt: "2026-10-18T09:00:00.000Z", completedBy: "tm-robin", outcome: "no_reply" },
     ],
+    queue: [
+      {
+        id: "q-ava", studentId: "p-ava", scenarioId: "nolessons.day7", summary: "Logged in, no lesson on the new course yet (Day 7)",
+        createdAt: "2026-10-20T06:00:00.000Z", status: "open",
+      },
+    ],
   };
 }
 
 function emptyDb(): FixtureDb {
-  return { people: [], asks: [], contacts: [] };
+  return { people: [], asks: [], contacts: [], queue: [] };
 }
 
 /** The full fixture plus one student whose progress cannot be read, with a request waiting. */
@@ -421,6 +444,21 @@ function toData(db: FixtureDb, videosFail = false): ThirtyData {
     team: TEAM,
     lastSyncAt,
     contacts,
+    openTasks: new Map(
+      db.people.map((p) => [
+        p.id,
+        db.queue
+          .filter((t) => t.studentId === p.id && t.status === "open")
+          .map((t) => ({
+            id: t.id,
+            student_id: t.studentId,
+            scenario_id: t.scenarioId,
+            template_id: `tpl-${t.scenarioId}`,
+            behavior_summary: t.summary,
+            created_at: t.createdAt,
+          })),
+      ]),
+    ),
   };
 }
 
@@ -561,17 +599,45 @@ export function fixtureThirtyTransport(opts: {
 
     mark(body: MarkBody) {
       calls.push({ name: "mark", args: [body] });
+      // As the route: every task named must be an open queue task of this student, or nothing is written.
+      const open = db.queue.filter((t) => body.openTaskIds.includes(t.id) && t.studentId === body.studentId && t.status === "open");
+      if (open.length !== body.openTaskIds.length) {
+        return later<MarkAnswer>({
+          ok: false,
+          status: 400,
+          error: "A task on this row is not an open task of this student in the Tasks queue, so nothing was saved. Reload the list.",
+        });
+      }
       const when = at();
       const scenarioId = SCENARIO_OF[body.headlineKind];
+      const supportId = scenarioId ? `support-${minute}` : null;
       // A message marked as sent is a completed task: the row's last contact (C12).
       if (body.action === "messaged" && scenarioId) {
-        db.contacts.push({ studentId: body.studentId, scenarioId, completedAt: when, completedBy: ME });
+        db.contacts.push({ id: supportId ?? undefined, studentId: body.studentId, scenarioId, completedAt: when, completedBy: ME });
       }
+      // The student's open queue tasks close with it, same member, same moment (C5).
+      for (const t of open) Object.assign(t, { status: "completed", completedAt: when, completedBy: ME });
       return later<MarkAnswer>({
         ok: true,
         status: 201,
-        data: { supportId: scenarioId ? `support-${minute}` : null, movedIds: [], at: when },
+        data: { supportId, movedIds: open.map((t) => t.id), at: when },
       });
+    },
+
+    undo(ids: string[]) {
+      calls.push({ name: "undo", args: [ids] });
+      const results: UndoResult[] = ids.map((id) => {
+        const contact = db.contacts.findIndex((c) => c.id === id);
+        if (contact >= 0) {
+          db.contacts.splice(contact, 1);
+          return { id, ok: true, status: 200 };
+        }
+        const t = db.queue.find((x) => x.id === id && x.status === "completed" && x.completedBy === ME);
+        if (!t) return { id, ok: false, status: 404, error: "Not found. It may have been undone already." };
+        Object.assign(t, { status: "open", completedAt: null, completedBy: null });
+        return { id, ok: true, status: 200 };
+      });
+      return later({ ok: true, status: 200, data: { results } });
     },
   };
 }
@@ -817,6 +883,7 @@ const TODAY_TEMPLATES: SupportTemplate[] = [
 /** The made-up database as loadTodayData hands it to buildSupportRows, the 30% included. */
 function todayInput(db: TodayDb): SupportInput {
   const thirty = toData({
+    queue: [],
     people: db.people.map((p) => ({
       id: p.id,
       name: p.name,

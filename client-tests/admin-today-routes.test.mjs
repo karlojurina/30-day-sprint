@@ -28,7 +28,7 @@ import * as markRoute from './_gen/admin-today-mark-route.ts'
 import { loadTodayData } from './_gen/today-data.ts'
 import { SUPPORT_SCENARIO, buildSupportRows } from './_gen/support-list.ts'
 import { loadThirtyData } from './_gen/thirty-data.ts'
-import { VERDICT_TEXT, buildThirtyView } from './_gen/thirty-view.ts'
+import { VERDICT_TEXT, buildThirtyView, thirtyReasonText } from './_gen/thirty-view.ts'
 import { requiredLessons } from './_gen/discount.ts'
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
 import { FakeDb, NextRequest, fakeClient, setCatalog, useDb as installDb } from './_gen/stub-server.ts'
@@ -348,16 +348,20 @@ function freshTodayDb({ extra = 0 } = {}) {
   return db
 }
 
-async function call(route, method, path, token, body) {
+/** One call to a route's handler, as `token`; its log lines are the caller's to keep quiet (call() does). */
+async function rawCall(route, method, path, token, body) {
   const headers = token === undefined ? {} : { authorization: `Bearer ${token}` }
   const init = { method, headers }
   if (body !== undefined) { init.body = JSON.stringify(body); headers['content-type'] = 'application/json' }
-  const res = await hush(() => route[method](new NextRequest(`http://localhost${path}`, init)))
+  const res = await route[method](new NextRequest(`http://localhost${path}`, init))
   const json = await res.json()
   if (res.status >= 400) errorSentences.push(json?.error)
   for (const r of json?.results ?? []) if (!r.ok) errorSentences.push(r.error)
   return { status: res.status, body: json }
 }
+const call = (route, method, path, token, body) => hush(() => rawCall(route, method, path, token, body))
+/** Marks sent at once, as two tabs or a request sent again would: one hush around all of them. */
+const marksAtOnce = (...sends) => hush(() => Promise.all(sends.map(([token, body]) => rawCall(markRoute, 'POST', '/api/admin/today/mark', token, body))))
 const getToday = (token) => call(todayRoute, 'GET', '/api/admin/today', token)
 const postMark = (token, body) => call(markRoute, 'POST', '/api/admin/today/mark', token, body)
 const deleteMark = (token, body) => call(markRoute, 'DELETE', '/api/admin/today/mark', token, body)
@@ -464,6 +468,50 @@ console.log('\n=== Past 1000 rows: every read is paged ===')
      '1,100 more stopped members (students, milestones, the views and the Whop dates all past 1000 rows): every one listed', `${extras.length}`)
 }
 
+console.log('\n=== A task reopened while the closed tasks are read: no other task is dropped ===')
+{
+  // 1,100 tasks sent in the last 30 days (two pages), then, while the second page is asked for,
+  // one task of the first page is opened again (an Undo, say). Pages read by offset would shift
+  // and skip a task of another student; pages read by key never do.
+  const db = freshTodayDb()
+  const sent = Array.from({ length: 1100 }, (_, i) => `t-${String(i).padStart(4, '0')}`)
+  for (const [i, id] of sent.entries()) {
+    db.rows('tasks').push({
+      id, student_id: `gone-${i % 50}`, scenario_id: 'nolessons.day3', template_id: 'tpl-nl3', status: 'completed', behavior_summary: null,
+      created_at: '2026-10-20T08:00:00.000Z', completed_at: '2026-10-20T09:00:00.000Z', completed_by: 'tm-csm-1',
+      dismissed_at: null, dismissed_by: null, notes: null, outcome: null,
+    })
+  }
+  let completedReads = 0
+  db.failWhen = (q) => {
+    if (q.table === 'tasks' && q.op === 'select' && q.filters.includes('status=completed') && !q.filters.some((f) => f.startsWith('student_id')) && ++completedReads === 2) {
+      Object.assign(taskById(db, 't-0000'), { status: 'open', completed_at: null, completed_by: null })
+    }
+    return null
+  }
+  const load = await at(T_NOW, () => loadTodayData(fakeClient(db), new RealDate(T_NOW)))
+  const read = new Set(load.ok ? load.data.tasks.map((t) => t.id) : [])
+  const missing = sent.filter((id) => !read.has(id))
+  ok(load.ok && completedReads === 2 && missing.length === 0,
+     'every one of the 1,100 is read (the one reopened meanwhile as the first page saw it), none skipped', `missing ${missing.slice(0, 3).join(', ')}`)
+}
+{
+  // Dee's queue task is sent from the Tasks page between the read of the open tasks and the read of
+  // the completed ones: both reads hand it back. It counts once, as sent, so Today does not list her
+  // with a task that is closed already (the second message pre-mortem 2 is about).
+  const db = freshTodayDb()
+  db.failWhen = (q) => {
+    if (q.table === 'tasks' && q.op === 'select' && q.filters.includes('status=completed') && !q.filters.some((f) => f.startsWith('student_id'))) {
+      Object.assign(taskById(db, 'q-dee'), { status: 'completed', completed_at: '2026-10-23T08:59:00.000Z', completed_by: 'tm-csm-2' })
+    }
+    return null
+  }
+  const r = await at(T_NOW, () => getToday('tok-csm-1'))
+  const handled = r.body.handled?.filter((h) => h.taskId === 'q-dee') ?? []
+  ok(r.status === 200 && !r.body.rows.some((x) => x.studentId === 'd-nostart') && handled.length === 1 && handled[0].status === 'completed',
+     'a task closed between the reads is kept once, closed: the row is not listed with it as open, and Handled shows it once', show({ handled: handled.length }))
+}
+
 console.log('\n=== A read that fails is an error in plain words, never a short list ===')
 {
   const db = freshTodayDb()
@@ -565,6 +613,113 @@ console.log('\n=== A double click within 2 minutes returns the first ===')
   ok(t1.status === 201 && t1.body.supportId === null && isDeepStrictEqual(t1.body.movedIds, ['q-ty']) && supportRows(db, 'd-task').length === 0,
      'an open task headline: the task closed, no support record', show(t1.body))
   ok(t2.status === 200 && t2.body.supportId === null && isDeepStrictEqual(t2.body.movedIds, ['q-ty']) && t2.body.at === T_NOW, 'and its double click answers the first', show(t2.body))
+}
+
+console.log('\n=== A second mark within 2 minutes that says the other thing: 409, nothing written, nothing lost ===')
+{
+  const db = freshTodayDb()
+  const first = await at(T_NOW, () => postMark('tok-csm-1', MARK_DEE))
+  const afterFirst = tasksSnapshot(db)
+  const other = await at(later(1), () => postMark('tok-csm-1', { ...MARK_DEE, action: 'not_needed', note: 'Spoke on a call.', openTaskIds: [] }))
+  ok(first.status === 201 && other.status === 409 && other.body.code === 'marked-otherwise' && plain(other.body.error)
+     && /marked this student as messaged/.test(other.body.error),
+     'Messaged, then Not needed with a reason a minute later: 409 "marked-otherwise" in plain words, never the first mark answered as if it were the second', show(other.body))
+  ok(tasksSnapshot(db) === afterFirst && supportRows(db, 'd-nostart').every((r) => r.notes === null),
+     'nothing written: one record, completed, and the reason was not saved silently on it')
+  // The other way round, and on an open task headline (no record, the queue task closed).
+  const db2 = freshTodayDb()
+  await at(T_NOW, () => postMark('tok-csm-1', { ...MARK_DEE, action: 'not_needed', note: 'Away this week.' }))
+  const back = await at(later(1), () => postMark('tok-csm-1', MARK_DEE))
+  ok(back.status === 409 && back.body.code === 'marked-otherwise' && /marked this student as not needed/.test(back.body.error) && supportRows(db2, 'd-nostart').length === 1,
+     'Not needed, then Messaged: 409, the record stays the dismissed one', show(back.body))
+  await at(T_NOW, () => postMark('tok-csm-1', { studentId: 'd-task', action: 'messaged', headlineKind: 'open_task', reasonsText: 'Joined yesterday', openTaskIds: ['q-ty'] }))
+  const taskOther = await at(later(1), () => postMark('tok-csm-1', {
+    studentId: 'd-task', action: 'not_needed', note: 'Already welcomed.', headlineKind: 'open_task', reasonsText: 'Joined yesterday', openTaskIds: ['q-ty'],
+  }))
+  ok(taskOther.status === 409 && taskOther.body.code === 'marked-otherwise' && taskById(db2, 'q-ty').status === 'completed' && taskById(db2, 'q-ty').notes === null,
+     'an open task headline marked Messaged, then Not needed: 409, the task stays completed, no note', show(taskOther.body))
+}
+
+console.log('\n=== Marks sent at once (two tabs, a request sent again): one record, whatever the order ===')
+{
+  const db = freshTodayDb()
+  const answers = await at(T_NOW, () => marksAtOnce(['tok-csm-1', MARK_DEE], ['tok-csm-1', MARK_DEE]))
+  const statuses = answers.map((a) => a.status).sort()
+  const recs = supportRows(db, 'd-nostart')
+  ok(isDeepStrictEqual(statuses, [200, 201]) && recs.length === 1 && answers.every((a) => a.body.supportId === recs[0].id),
+     'two identical marks at once: one 201 and one 200, both naming the one record left', show(answers.map((a) => [a.status, a.body.supportId])))
+  ok(taskById(db, 'q-dee').status === 'completed' && taskById(db, 'q-dee').completed_by === 'tm-csm-1' && taskById(db, 'q-dee').completed_at === T_NOW,
+     'the queue task closed once, by the login, at the moment')
+}
+{
+  const db = freshTodayDb()
+  const [messaged, notNeeded] = await at(T_NOW, () => marksAtOnce(
+    ['tok-csm-1', MARK_DEE],
+    ['tok-csm-1', { ...MARK_DEE, action: 'not_needed', note: 'Spoke on a call.' }],
+  ))
+  const recs = supportRows(db, 'd-nostart')
+  ok(messaged.status === 201 && notNeeded.status === 409 && notNeeded.body.code === 'marked-otherwise' && recs.length === 1 && recs[0].status === 'completed',
+     'Messaged and Not needed at once: the first record stands, the other call answers 409 and leaves nothing behind', show([messaged.status, notNeeded.status, recs.map((r) => r.status)]))
+  ok(taskById(db, 'q-dee').status === 'completed' && taskById(db, 'q-dee').notes === null, 'the queue task completed, with no note from the Not needed')
+}
+{
+  // An open task headline (no record): two at once close the task once; the other call answers as a second click.
+  const db = freshTodayDb()
+  const TY = { studentId: 'd-task', action: 'messaged', headlineKind: 'open_task', reasonsText: 'Joined yesterday', openTaskIds: ['q-ty'] }
+  const answers = await at(T_NOW, () => marksAtOnce(['tok-csm-1', TY], ['tok-csm-1', TY]))
+  ok(isDeepStrictEqual(answers.map((a) => a.status).sort(), [200, 201]) && answers.every((a) => a.body.supportId === null && isDeepStrictEqual(a.body.movedIds, ['q-ty']))
+     && taskById(db, 'q-ty').status === 'completed' && supportRows(db, 'd-task').length === 0,
+     'an open task marked twice at once: closed once, one 201 and one 200 (never "someone closed it")', show(answers.map((a) => [a.status, a.body])))
+}
+{
+  // The rarer order: a newer record by the same member lands while this call writes (that call read
+  // before this one wrote, so it kept its own). This call's record is the older, so it stands, and
+  // the newer one is taken back: one record either way.
+  const db = freshTodayDb()
+  let reads = 0
+  db.failWhen = (q) => {
+    if (q.table === 'tasks' && q.op === 'select' && q.filters.includes('student_id=d-nostart') && ++reads === 2) {
+      db.rows('tasks').push({
+        id: 'sup-newer', student_id: 'd-nostart', scenario_id: 'support.nostart', template_id: null, status: 'completed',
+        behavior_summary: 'No lesson on the new course yet (course day 4)', created_at: '2026-10-23T09:00:01.000Z',
+        completed_at: '2026-10-23T09:00:01.000Z', completed_by: 'tm-csm-1', dismissed_at: null, dismissed_by: null, notes: null, outcome: null,
+      })
+    }
+    return null
+  }
+  const r = await at(T_NOW, () => postMark('tok-csm-1', MARK_DEE))
+  const recs = supportRows(db, 'd-nostart')
+  ok(reads >= 2 && r.status === 201 && recs.length === 1 && recs[0].id === r.body.supportId && !recs.some((x) => x.id === 'sup-newer'),
+     'a newer record that landed meanwhile is taken back; the older stands', show({ status: r.status, recs: recs.map((x) => x.id) }))
+}
+
+console.log('\n=== Mark messaged on the 30% page closes the student\'s open task in the Tasks queue ===')
+{
+  // Tia (d-thirty) can still earn the 30% (50 of 61, the shared deadline tonight) and has an open
+  // queue task: whoever works the queue must see the contact, and Today must not list her again.
+  const db = freshTodayDb()
+  db.rows('tasks').push({
+    id: 'q-tia', student_id: 'd-thirty', scenario_id: 'stalled.discord.day3', template_id: 'tpl-welcome', status: 'open',
+    behavior_summary: 'Paid 3 days ago, never logged in', created_at: '2026-10-22T07:00:00.000Z',
+    completed_at: null, completed_by: null, dismissed_at: null, dismissed_by: null, notes: null, outcome: null,
+  })
+  const thirty = await at(T_NOW, () => getThirty('tok-csm-1'))
+  const tia = thirty.body.canStillEarn?.find((e) => e.student.id === 'd-thirty')
+  ok(tia?.state === 'locked' && isDeepStrictEqual(tia.openTasks, [{ id: 'q-tia', scenarioId: 'stalled.discord.day3', summary: 'Paid 3 days ago, never logged in', createdAt: '2026-10-22T07:00:00.000Z' }]),
+     'the 30% page\'s row carries her open queue task', show(tia?.openTasks))
+  const before = await at(T_NOW, () => getToday('tok-csm-1'))
+  ok(before.body.rows.find((x) => x.studentId === 'd-thirty')?.openTasks.some((t) => t.id === 'q-tia'), 'Today lists her with the same task')
+  const r = await at(T_NOW, () => postMark('tok-csm-1', {
+    studentId: 'd-thirty', action: 'messaged', headlineKind: tia.state === 'ready' ? 'thirty_ready' : 'thirty_closing',
+    reasonsText: thirtyReasonText('thirty_closing', tia.facts), openTaskIds: tia.openTasks.map((t) => t.id),
+  }))
+  const rec = supportRows(db, 'd-thirty')[0]
+  const q = taskById(db, 'q-tia')
+  ok(r.status === 201 && isDeepStrictEqual(r.body.movedIds, ['q-tia']) && rec?.scenario_id === 'support.30close' && rec.completed_by === 'tm-csm-1'
+     && q.status === 'completed' && q.completed_by === rec.completed_by && q.completed_at === rec.completed_at && q.completed_at === T_NOW,
+     'one 30% record and the queue task completed with the same actor and the same moment', show({ rec, q }))
+  const after = await at(later(60), () => getToday('tok-csm-1'))
+  ok(!after.body.rows.some((x) => x.studentId === 'd-thirty'), 'an hour later Today does not list her: the 2-day wait holds, with no open task to show her')
 }
 
 console.log('\n=== Not needed: a dismissed record and the queue task dismissed, with the same note ===')

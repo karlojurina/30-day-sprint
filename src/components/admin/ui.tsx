@@ -362,10 +362,18 @@ export function PacePill({
  *   - ink: the kit's ink button on a dark ground, Stalactite fill and a
  *     Gunpowder label. The one primary action of a screen; the sign-in pages
  *     use it. Its colours are fixed, so it belongs on the dark ground only.
- *   - raised: a row action, a pill on the raised surface with a hairline.
+ *   - raised: a row action, a pill on the raised surface with a hairline,
+ *     44px tall at least (the kit's touch target).
  * "primary" and "danger" keep their fixed white label, which measures about
  * 2:1 on Airy Blue and 3.4:1 on the dark red, so inside the token class a
  * page uses ink or raised instead.
+ *
+ * "ghost" and "subtle" read their corner and height from two variables the
+ * dark look's class sets (--admin-button-radius, a pill, and
+ * --admin-button-min-height, 44px), so a Cancel beside a raised pill has the
+ * same shape. Nothing else sets them: on the light pages the fallbacks are
+ * the values these buttons always had. (Inline styles cannot be restyled
+ * from a stylesheet, which is why the variables live here.)
  */
 type ButtonVariant = "primary" | "ghost" | "danger" | "subtle" | "ink" | "raised";
 type ButtonSize = "sm" | "md";
@@ -412,6 +420,8 @@ function buttonStyle(
       background: "var(--color-bg-elevated)",
       color: "var(--color-text-primary)",
       border: "1px solid var(--color-border)",
+      borderRadius: "var(--admin-button-radius, var(--radius-chip))",
+      minHeight: "var(--admin-button-min-height, auto)",
     };
   }
   if (variant === "ink") {
@@ -432,6 +442,8 @@ function buttonStyle(
       color: "var(--color-text-primary)",
       border: "1px solid var(--color-border)",
       borderRadius: "var(--radius-pill)",
+      minHeight: 44,
+      justifyContent: "center",
     };
   }
   // ghost
@@ -440,6 +452,8 @@ function buttonStyle(
     background: "transparent",
     color: "var(--color-text-secondary)",
     border: "1px solid var(--color-border)",
+    borderRadius: "var(--admin-button-radius, var(--radius-chip))",
+    minHeight: "var(--admin-button-min-height, auto)",
   };
 }
 

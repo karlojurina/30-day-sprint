@@ -155,7 +155,7 @@ console.log('\n=== Each reason of C4, with its words ===')
     ['ready', 'thirty_ready', 'Can apply for the 30% now, until Tue 3 Nov, 10:00'],
     ['stopped', 'stopped', 'No lesson for 5 days'],
     ['nostart', 'not_started', 'No lesson on the new course yet (course day 9)'],
-    ['noopen', 'never_opened', 'Paid 7 days ago, never opened the app'],
+    ['noopen', 'never_opened', 'Paid 6 days ago, never opened the app'],
     ['task', 'open_task', 'Joined yesterday: send the welcome message'],
   ]
   for (const [id, kind, text] of expect) {
@@ -174,12 +174,14 @@ console.log('\n=== Each reason of C4, with its words ===')
   const noopen = rowOf(out, 'noopen')
   ok(noopen.courseDay === daysOnCourse(ago(6, 2), Date.parse(NOW)) && rowOf(out, 'nostart').courseDay === 9,
      'course day counts from the first payment after the switch, from the switch before it', `${noopen.courseDay}, ${rowOf(out, 'nostart').courseDay}`)
-  // Never opened counts days as sprintDayNumber does, at the same moment.
+  // Never opened starts on sprintDayNumber's day 3 (a day number, rounded up), and its
+  // sentence says the whole days that have passed, as "Clicked cancel" and "No lesson for" do.
   const RealNow = Date.now
   Date.now = () => Date.parse(NOW)
   const sprint = sprintDayNumber(ago(6, 2))
   Date.now = RealNow
-  ok(noopen.reasons[0].text === `Paid ${sprint} days ago, never opened the app`, 'never opened: sprintDayNumber\'s day count', String(sprint))
+  ok(sprint === 7 && noopen.reasons[0].text === 'Paid 6 days ago, never opened the app' && noopen.reasons[0].waitDays === 6,
+     'never opened, 6 days and 2 hours after the first payment: the cron\'s day 7, and the sentence says the 6 whole days', `${sprint}, ${show(noopen.reasons[0])}`)
 }
 
 console.log('\n=== The thresholds: day 3, 3 days without a lesson, a deadline 3 days away ===')
@@ -198,6 +200,11 @@ console.log('\n=== The thresholds: day 3, 3 days without a lesson, a deadline 3 
     { id: 'far', paid: '2026-10-17T09:30:00.000Z', thirty: reads('2026-10-17T09:30:00.000Z', ['w1']) },
     // Never opened, paid 1 day 23 hours ago: day 2.
     { id: 'noopen2', opened: false, last: null, paid: ago(1, 23) },
+    // Never opened, paid 2 days and 1 hour (2.04 days) ago: day 3, and 2 whole days.
+    { id: 'noopen3', opened: false, last: null, paid: ago(2, 1) },
+    // Every counted lesson done (140 of 140), the last one 5 days ago; and one lesson short.
+    { id: 'finished', last: ago(5), lessons: 140 },
+    { id: 'almost', last: ago(5), lessons: 139 },
   ]))
   ok(!rowOf(out, 'moving'), 'under 3 whole days without a lesson: not on the list')
   ok(headline(out, 'three')?.text === 'No lesson for 3 days', '3 whole days: "No lesson for 3 days"')
@@ -205,6 +212,10 @@ console.log('\n=== The thresholds: day 3, 3 days without a lesson, a deadline 3 
   ok(!rowOf(out, 'day2') && headline(out, 'day3')?.kind === 'not_started', 'Not started from course day 3, not before', show(headline(out, 'day3')))
   ok(!rowOf(out, 'far'), 'a 30% deadline more than 3 days away is no reason')
   ok(!rowOf(out, 'noopen2'), 'Never opened from the third day after the first payment, not before')
+  ok(headline(out, 'noopen3')?.text === 'Paid 2 days ago, never opened the app' && headline(out, 'noopen3')?.waitDays === 2,
+     'paid 2.04 days ago: on the list from day 3, and "Paid 2 days ago" (never one day more than has passed)', show(headline(out, 'noopen3')))
+  ok(!rowOf(out, 'finished'), 'every counted lesson done (140 of 140), the last one 5 days ago: not Stopped, not on the list')
+  ok(headline(out, 'almost')?.kind === 'stopped' && headline(out, 'almost')?.text === 'No lesson for 5 days', 'one lesson short (139 of 140): Stopped')
 }
 
 console.log('\n=== Two reasons on one student: one row, the more urgent headline, the other a chip ===')
@@ -336,6 +347,27 @@ console.log('\n=== Already handled (C5): a support record or a queue send keeps 
   ok(headline(out, 'ns-app')?.kind === 'not_started', 'the same task dismissed by the app (19 October\'s switch did that): present')
   ok(!rowOf(out, 'no'), 'cron stalled.* completed yesterday, headline Never opened: absent')
   ok(headline(out, 'ns-old')?.kind === 'not_started', 'a nolessons.* send 8 days ago: present')
+}
+
+console.log('\n=== Marked messaged on the 30% page: its record and the queue task it closed hide the row for 2 days ===')
+{
+  // Two students the 30% closes for (deadline Thu 29 Oct, two videos left), each with a queue task.
+  // The 30% page marked both an hour ago (support.30close). For one the mark closed the queue task
+  // with it, as Mark messaged does now; for the other it left the task open, as the page did before.
+  const closing = (id) => ({ id, paid: '2026-10-15T09:00:00.000Z', thirty: reads('2026-10-15T09:00:00.000Z', ['w1', 'w2']) })
+  const marked = (student, taskStatus) => [
+    support(student, 'thirty_closing', minutesAgo(60)),
+    taskRow({
+      id: `q-${student}`, student_id: student, scenario_id: 'stalled.discord.day3', template_id: 'tpl', status: taskStatus, created_at: ago(2),
+      ...(taskStatus === 'completed' ? { completed_at: minutesAgo(60), completed_by: ME } : {}),
+    }),
+  ]
+  const out = build(world([closing('closed'), closing('stillopen')], {
+    tasks: [...marked('closed', 'completed'), ...marked('stillopen', 'open')],
+  }))
+  ok(!rowOf(out, 'closed'), 'the mark closed the queue task too: the row is hidden by the 2-day wait, so Today shows no second message')
+  ok(headline(out, 'stillopen')?.kind === 'thirty_closing' && rowOf(out, 'stillopen').openTasks[0]?.id === 'q-stillopen',
+     'the queue task left open: still listed with it (an open task always shows its row), the double message the fix prevents')
 }
 
 console.log('\n=== An open queue task (C5, C6) ===')

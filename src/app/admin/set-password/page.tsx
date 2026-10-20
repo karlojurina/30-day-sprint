@@ -12,7 +12,8 @@
  *   1. Page mounts, reads supabase.auth.getSession()
  *   2. If no session: tell them the link expired or send to /admin/login
  *   3. If session: show password + confirm fields
- *   4. On submit: supabase.auth.updateUser({ password }) → /admin
+ *   4. On submit: supabase.auth.updateUser({ password }) → /admin/today,
+ *      where signing in lands too (admin rebuild PRD, call C2)
  *
  * v75.4 - new with the team-management invite flow.
  *
@@ -74,7 +75,7 @@ export default function SetPasswordPage() {
       setLoading(false);
       return;
     }
-    window.location.href = "/admin";
+    window.location.href = "/admin/today";
   }
 
   return (
@@ -252,30 +253,33 @@ export default function SetPasswordPage() {
 
               <div style={{ display: "flex", flexDirection: "column", marginTop: 4 }}>
                 <Button variant="ink" size="md" type="submit" busy={loading}>
-                  {loading ? "Saving…" : "Set password & continue"}
+                  {loading ? "Saving…" : "Set password and continue"}
                 </Button>
               </div>
             </form>
           )}
 
-          <p
-            style={{
-              textAlign: "center",
-              marginTop: 20,
-              fontSize: 13,
-              color: "var(--color-text-tertiary)",
-            }}
-          >
-            <a
-              href="/admin/login"
+          {/* The expired card has its own link to sign in: one is enough. */}
+          {sessionState !== "missing" && (
+            <p
               style={{
-                color: "var(--color-accent-dark)",
-                textDecoration: "none",
+                textAlign: "center",
+                marginTop: 20,
+                fontSize: 13,
+                color: "var(--color-text-tertiary)",
               }}
             >
-              Already set a password? Sign in →
-            </a>
-          </p>
+              <a
+                href="/admin/login"
+                style={{
+                  color: "var(--color-accent-dark)",
+                  textDecoration: "none",
+                }}
+              >
+                Already set a password? Sign in →
+              </a>
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -336,7 +340,6 @@ function FormField({
           borderRadius: "var(--radius-control)",
           fontSize: 15,
           color: "var(--color-text-primary)",
-          outline: "none",
           transition: "border-color 150ms var(--ease-default)",
         }}
         onFocus={(e) =>

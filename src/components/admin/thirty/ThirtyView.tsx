@@ -3,24 +3,30 @@
 import Link from "next/link";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Button, Card, EmptyState, PageHeader, Pill, T, Tabs } from "@/components/admin/ui";
+import { Button, Card, EmptyState, Pill, T } from "@/components/admin/ui";
 import {
+  CopyButton,
   DiscordReach,
+  ListHeader,
   ListPage,
   LoadError,
   MembershipPill,
-  NoticeBar,
+  NoticeStack,
+  STALE_TEXT,
   SkeletonRows,
+  TAP,
   WhopNotPulled,
   firstName,
   lastContactText,
+  pressPill,
   timeLeftText,
 } from "@/components/admin/list-parts";
 import type { Notice } from "@/components/admin/list-parts";
 import { adminTransport } from "@/lib/admin/admin-transport";
-import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
+import type { Answer, ThirtyTransport, UndoResult } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel, deadlineLabel } from "@/lib/admin/croatia-dates";
-import { aboutHours, thirtyReasonText, verdictWithAds } from "@/lib/admin/thirty-view";
+import { MARKED_OTHERWISE } from "@/lib/admin/support-list";
+import { aboutHoursWords, thirtyReasonText, verdictWithAds } from "@/lib/admin/thirty-view";
 import type {
   Facts,
   StudentBrief,
@@ -37,16 +43,26 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * The 30% page, /admin/discounts (admin rebuild PRD, work item 3, calls C9
  * to C11 and C16).
  *
- * Five tabs: To decide (every pending request), Can still earn (members who
- * can still finish in time), Approved (the code is made), Code added in Whop
- * (the code is on the membership) and Rejected. Every row comes from GET
- * /api/admin/thirty, which runs the student app's own rule; this file only
- * shows it and sends the team's decisions to the existing routes.
+ * Five tabs: To decide (every pending request, oldest first), Can still
+ * earn (members who can still finish in time), Approved (the code is made),
+ * Code added in Whop (the code is on the membership) and Rejected. Every row
+ * comes from GET /api/admin/thirty, which runs the student app's own rule;
+ * this file only shows it and sends the team's decisions to the existing
+ * routes.
  *
  * A pending request shows the approve route's verdict beside Approve, which
  * opens only when the rule says yes and the ads are verified. "Approve
  * anyway" asks once more, inline, then sends the approval with `override`,
  * which skips the 30% rule and the ads check (C9).
+ *
+ * What a decision did shows in a fixed place at the bottom of the window
+ * (NoticeStack, list-parts.tsx), where it is seen however far down the row
+ * was: a success hides itself after 15 seconds, a refusal stays until it is
+ * dismissed, and a Whop code in either can be copied from it. Mark messaged
+ * on Can still earn closes the student's open tasks in the Tasks queue with
+ * it (C5), and its notice offers Undo. When the list cannot be read again
+ * after a change, a second line says so and the row just decided keeps its
+ * buttons off until a read works.
  *
  * The address: ?student=<id> keeps every tab to that student (the student
  * page links here, C16), ?tab= picks the tab.
@@ -77,7 +93,8 @@ const FROM_DAY = dayLabel(DISCOUNT_ELIGIBLE_FROM);
 const LAUNCH_DAY = dayLabel(DISCOUNT_LAUNCH_DATE);
 
 const TAB_NOTE: Record<TabKey, string> = {
-  decide: "Requests waiting for a decision, whatever their date. Approve creates the student's Whop code.",
+  decide:
+    "Requests waiting for a decision, whatever their date, oldest first. Approve creates the student's Whop code.",
   earn: `Members who first paid from ${FROM_DAY}, still have a membership, and can still finish before their deadline. Soonest deadline first.`,
   approved: "The code is made. Add it to the student's membership in Whop, then press Mark code added.",
   "code-added": `The code is on the student's membership. Requests from ${FROM_DAY} on, newest first.`,
@@ -92,7 +109,14 @@ const TAB_EMPTY: Record<TabKey, string> = {
   rejected: "No request has been rejected.",
 };
 
-const RELOAD_FAILED = "Couldn't read the list again, so it may be out of date.";
+/** Can still earn has nobody to show, and some members could not be read: "nobody" would not be true. */
+const EARN_UNREAD = "Nobody to show until the list can be read. Press Refresh.";
+
+/** The id of the "may be out of date" line among the notices. */
+const STALE_ID = -1;
+
+/** A Whop code in a sentence: the approve route's 409 names the code that must be deleted in Whop. */
+const WHOP_CODE = /\bECOM30-[A-Z0-9]{4,}\b/;
 
 function parseTab(value: string | null): TabKey | null {
   return TAB_ORDER.find((t) => t === value) ?? null;
@@ -102,6 +126,9 @@ type Loaded = { kind: "loading" } | { kind: "error"; error: string } | { kind: "
 
 /** What a row's button hands back: null when it went through, else a sentence to show on the row. */
 type RowResult = Promise<string | null>;
+
+/** The last button's notice, with the ids its Undo takes back after Mark messaged. */
+type PageNotice = Omit<Notice, "id" | "action"> & { undo?: { ids: string[]; name: string } };
 
 function studentName(s: StudentBrief): string {
   return s.name?.trim() || s.email || "No name on file";
@@ -135,10 +162,21 @@ function decisionError(kind: "approve" | "reject" | "applied", r: { status: numb
   return r.error;
 }
 
-/** A refusal that means the list is out of date: show it at the top and read the list again. */
+/** A refusal that means the list is out of date: show it in the notices and read the list again. */
 function listIsStale(kind: "approve" | "reject" | "applied", status: number): boolean {
   return status === 409 || status === 404 || (status === 400 && kind !== "reject");
 }
+
+/** One sentence for an Undo whose entries did not all go through. */
+function undoFailures(results: UndoResult[]): string | null {
+  const bad = results.filter((r) => !r.ok);
+  if (bad.length === 0) return null;
+  const first = bad[0].error ?? "It could not be undone.";
+  return bad.length === 1 ? first : `${bad.length} entries were not undone. The first: ${first}`;
+}
+
+const byAsked = (a: ThirtyRequestRow, b: ThirtyRequestRow) =>
+  Date.parse(a.askedAt) - Date.parse(b.askedAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyTransport }) {
   const params = useSearchParams();
@@ -149,9 +187,17 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   const [loaded, setLoaded] = useState<Loaded>({ kind: "loading" });
   const [reloading, setReloading] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const [notice, setNotice] = useState<Notice | null>(null);
+  /** What the last button did, or what went wrong. A new notice gets a new id, so its own 15 seconds start. */
+  const [notice, setNotice] = useState<(PageNotice & { id: number }) | null>(null);
+  /** The list could not be read again after a change: what it shows may be out of date. */
+  const [stale, setStale] = useState(false);
+  /** The rows changed since the last read that worked (request ids, and student ids on Can still earn): their buttons stay off until a read works. */
+  const [locked, setLocked] = useState<ReadonlySet<string>>(() => new Set());
+  const [undoing, setUndoing] = useState(false);
   const [pickedTab, setPickedTab] = useState<TabKey | null>(null);
   const seq = useRef(0);
+
+  const show = useCallback((n: PageNotice) => setNotice((prev) => ({ ...n, id: (prev?.id ?? 0) + 1 })), []);
 
   /** One read of the list. Null when a newer read started meanwhile: that one's answer wins. */
   const fetchList = useCallback(async (): Promise<Answer<ThirtyPayload> | null> => {
@@ -178,15 +224,12 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
     setReloading(false);
     if (r.ok) {
       setLoaded({ kind: "ready", data: r.data });
+      setStale(false);
+      setLocked(new Set());
       return;
     }
-    // Keep what the last action said (an approval's code, say): the list on screen is now out of date.
-    // A notice that already says so stays as it is.
-    setNotice((prev) => {
-      if (prev?.text.includes(RELOAD_FAILED)) return prev;
-      const failed = `${RELOAD_FAILED} ${r.error}`;
-      return { tone: "danger", text: prev ? `${prev.text} ${failed}` : failed };
-    });
+    // What the last button did stays as it was, in its own notice (an approval's code, say); one more line says the list may be out of date.
+    setStale(true);
   }, [fetchList]);
 
   async function retry() {
@@ -195,6 +238,10 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
     setRetrying(false);
     if (!r) return;
     setLoaded(r.ok ? { kind: "ready", data: r.data } : { kind: "error", error: r.error });
+  }
+
+  function lock(key: string) {
+    setLocked((cur) => new Set(cur).add(key));
   }
 
   /** Puts `params` in the address without loading anything. */
@@ -241,7 +288,9 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   async function refused(kind: "approve" | "reject" | "applied", row: ThirtyRequestRow, r: { status: number; error: string }): RowResult {
     const text = decisionError(kind, r);
     if (!listIsStale(kind, r.status)) return text;
-    setNotice({ tone: "danger", text: `${studentName(row.student)}: ${text}` });
+    // A code made in Whop for a request someone else decided must be deleted there: it stays here until dismissed, copyable.
+    const code = text.match(WHOP_CODE)?.[0];
+    show({ tone: "danger", text: `${studentName(row.student)}: ${text}`, ...(code ? { copy: { label: "Copy code", text: code } } : {}) });
     await reload();
     return null;
   }
@@ -249,12 +298,13 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   async function approve(row: ThirtyRequestRow, override: boolean): RowResult {
     const r = await transport.approve(row.id, override);
     if (!r.ok) return refused("approve", row, r);
+    lock(row.id);
     const name = studentName(row.student);
-    setNotice({
+    const code = r.data.promoCode;
+    show({
       tone: "success",
-      text: r.data.promoCode
-        ? `Approved ${name}. The code ${r.data.promoCode} is on the Approved tab.`
-        : `Approved ${name}. The code is on the Approved tab.`,
+      text: code ? `Approved ${name}. The code ${code} is on the Approved tab.` : `Approved ${name}. The code is on the Approved tab.`,
+      ...(code ? { copy: { label: "Copy code", text: code } } : {}),
     });
     await reload();
     return null;
@@ -263,7 +313,8 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   async function reject(row: ThirtyRequestRow, reason: string | null): RowResult {
     const r = await transport.reject(row.id, reason);
     if (!r.ok) return refused("reject", row, r);
-    setNotice({ tone: "success", text: `Rejected the request from ${studentName(row.student)}.` });
+    lock(row.id);
+    show({ tone: "success", text: `Rejected the request from ${studentName(row.student)}.` });
     await reload();
     return null;
   }
@@ -271,7 +322,8 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   async function markApplied(row: ThirtyRequestRow): RowResult {
     const r = await transport.markApplied(row.id);
     if (!r.ok) return refused("applied", row, r);
-    setNotice({ tone: "success", text: `Marked the code as added in Whop for ${studentName(row.student)}.` });
+    lock(row.id);
+    show({ tone: "success", text: `Marked the code as added in Whop for ${studentName(row.student)}.` });
     await reload();
     return null;
   }
@@ -285,25 +337,72 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
 
   async function markMessaged(row: ThirtyEarnRow): RowResult {
     const kind = row.state === "ready" ? "thirty_ready" : "thirty_closing";
+    const name = studentName(row.student);
     const r = await transport.mark({
       studentId: row.student.id,
       action: "messaged",
       headlineKind: kind,
       reasonsText: thirtyReasonText(kind, row.facts),
-      openTaskIds: [],
+      // The student's open tasks in the Tasks queue close with the mark (C5): nobody sends the queue's message after this one.
+      openTaskIds: row.openTasks.map((t) => t.id),
     });
-    if (!r.ok) return r.error;
-    setNotice({ tone: "success", text: `Marked ${studentName(row.student)} as messaged.` });
+    if (!r.ok) {
+      // A second mark that says the other thing, or a refusal that is not about the list: on the row.
+      if (r.code === MARKED_OTHERWISE || !(r.status === 400 || r.status === 404 || r.status === 409)) return r.error;
+      show({ tone: "danger", text: `${name}: ${r.error}` });
+      await reload();
+      return null;
+    }
+    lock(row.student.id);
+    const ids = [r.data.supportId, ...r.data.movedIds].filter((x): x is string => typeof x === "string");
+    show({ tone: "success", text: `Marked ${name} as messaged.`, ...(ids.length ? { undo: { ids, name } } : {}) });
     await reload();
     return null;
   }
 
-  const header = (meta: React.ReactNode, actions?: React.ReactNode) => (
-    <PageHeader
+  /** The Undo in Mark messaged's notice: the record and the queue tasks it closed, as Today's Undo. */
+  async function undoFromNotice({ ids, name }: { ids: string[]; name: string }) {
+    setUndoing(true);
+    const r = await transport.undo(ids);
+    setUndoing(false);
+    if (!r.ok) {
+      show({ tone: "danger", text: `${name}: ${r.error}` });
+      return;
+    }
+    const problem = undoFailures(r.data.results);
+    show(
+      problem
+        ? { tone: "danger", text: `${name}: ${problem}` }
+        : { tone: "success", text: `Undone. ${name} is no longer marked as messaged.` },
+    );
+    await reload();
+  }
+
+  function closeNotice(id: number) {
+    if (id === STALE_ID) {
+      setStale(false);
+      return;
+    }
+    setNotice((cur) => (cur && cur.id === id ? null : cur));
+  }
+
+  const notices: Notice[] = [];
+  if (notice) {
+    const { undo: mark, ...shown } = notice;
+    notices.push(mark ? { ...shown, action: { label: "Undo", busy: undoing } } : shown);
+  }
+  if (stale) notices.push({ id: STALE_ID, tone: "warning", text: STALE_TEXT });
+  /** The Undo of the notice `id`, if it is still the one shown. */
+  const undoNotice = (id: number) => {
+    if (notice && notice.id === id && notice.undo) void undoFromNotice(notice.undo);
+  };
+
+  const header = (meta: React.ReactNode, action?: React.ReactNode) => (
+    <ListHeader
       title="30% off"
       description="Every request for the 30%, and who can still earn it before their deadline."
       meta={meta}
-      actions={actions}
+      action={action}
     />
   );
 
@@ -330,7 +429,8 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   const earn = student ? data.canStillEarn.filter((e) => e.student.id === student) : data.canStillEarn;
   const byStatus = (status: ThirtyRequestRow["status"]) => requests.filter((r) => r.status === status);
   const lists = {
-    decide: byStatus(TAB_STATUS.decide),
+    // The longest wait first: the answer reads newest first, as the decided tabs show it.
+    decide: [...byStatus(TAB_STATUS.decide)].sort(byAsked),
     approved: byStatus(TAB_STATUS.approved),
     "code-added": byStatus(TAB_STATUS["code-added"]),
     rejected: byStatus(TAB_STATUS.rejected),
@@ -340,6 +440,11 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   const tab: TabKey =
     pickedTab ?? urlTab ?? (student ? (TAB_ORDER.find((t) => count(t) > 0) ?? "decide") : "decide");
   const studentShown = requests[0]?.student ?? earn[0]?.student ?? null;
+  const emptyTitle = student
+    ? "This student has nothing on this tab."
+    : tab === "earn" && data.unchecked > 0
+      ? EARN_UNREAD
+      : TAB_EMPTY[tab];
 
   return (
     <ListPage>
@@ -350,7 +455,7 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
         </Button>,
       )}
 
-      {notice && <NoticeBar notice={notice} onClose={() => setNotice(null)} />}
+      <NoticeStack notices={notices} onClose={closeNotice} onAction={undoNotice} />
 
       {data.requiredCount === null && (
         <Warning>
@@ -382,17 +487,12 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
         </div>
       )}
 
-      {/* Five tabs are wider than a phone: each label stays on one line
-          (white-space is inherited by the tab buttons) and the strip scrolls
-          sideways in its own box, never the page. */}
-      <div style={{ overflowX: "auto", whiteSpace: "nowrap", paddingBottom: 4, marginBottom: 8 }}>
-        <Tabs
-          tabs={TAB_ORDER.map((t) => ({ value: t, label: TAB_LABEL[t], count: count(t) }))}
-          value={tab}
-          onChange={chooseTab}
-        />
-      </div>
-      <p style={{ ...T.bodyDim, marginBottom: 16 }}>{TAB_NOTE[tab]}</p>
+      <TabStrip
+        tabs={TAB_ORDER.map((t) => ({ value: t, label: TAB_LABEL[t], count: count(t) }))}
+        value={tab}
+        onChange={chooseTab}
+      />
+      <p style={{ ...T.bodyDim, lineHeight: 1.5, marginBottom: 16 }}>{TAB_NOTE[tab]}</p>
 
       {tab === "earn" && data.unchecked > 0 && (
         <Warning>
@@ -405,13 +505,20 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
 
       {count(tab) === 0 ? (
         <Card>
-          <EmptyState title={student ? "This student has nothing on this tab." : TAB_EMPTY[tab]} />
+          <EmptyState title={emptyTitle} />
         </Card>
       ) : (
         <Card padding={0}>
           {tab === "earn"
             ? earn.map((row) => (
-                <EarnRow key={row.student.id} row={row} now={data.generatedAt} onMarkMessaged={markMessaged} />
+                <EarnRow
+                  key={row.student.id}
+                  row={row}
+                  now={data.generatedAt}
+                  locked={locked.has(row.student.id)}
+                  stale={stale}
+                  onMarkMessaged={markMessaged}
+                />
               ))
             : lists[tab].map((row) =>
                 row.status === "pending" ? (
@@ -419,12 +526,21 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
                     key={row.id}
                     row={row}
                     questions={data.questions}
+                    locked={locked.has(row.id)}
+                    stale={stale}
                     onApprove={approve}
                     onReject={reject}
                     onVerifyAds={verifyAds}
                   />
                 ) : (
-                  <DecidedRow key={row.id} row={row} questions={data.questions} onMarkApplied={markApplied} />
+                  <DecidedRow
+                    key={row.id}
+                    row={row}
+                    questions={data.questions}
+                    locked={locked.has(row.id)}
+                    stale={stale}
+                    onMarkApplied={markApplied}
+                  />
                 ),
               )}
         </Card>
@@ -464,6 +580,45 @@ const ERROR_TEXT: React.CSSProperties = {
   lineHeight: 1.5,
   overflowWrap: "anywhere",
 };
+
+/** The line a row shows when it was just decided and the list could not be read again. */
+const SAVED_STALE = "Saved. Press Refresh to see this row as it is now.";
+
+/**
+ * The five tabs as pills that wrap onto a second line on a phone, so every
+ * tab is in view and none is cut mid-word. Each is 44px tall; its count is
+ * 12px.
+ */
+function TabStrip({
+  tabs,
+  value,
+  onChange,
+}: {
+  tabs: Array<{ value: TabKey; label: string; count: number }>;
+  value: TabKey;
+  onChange: (t: TabKey) => void;
+}) {
+  return (
+    <div role="tablist" aria-label="Lists" className="flex flex-wrap" style={{ gap: 8, marginBottom: 12 }}>
+      {tabs.map((t) => {
+        const active = t.value === value;
+        return (
+          <button
+            key={t.value}
+            type="button"
+            role="tab"
+            aria-selected={active}
+            onClick={() => onChange(t.value)}
+            style={{ ...pressPill(active), padding: "0 12px" }}
+          >
+            {t.label}
+            <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)" }}>{t.count}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 /** A lasting problem with the whole list, above it. A status, not an alert: it stays while the list is open. */
 function Warning({ children }: { children: React.ReactNode }) {
@@ -580,12 +735,17 @@ function verdictColor(v: Verdict): string {
 function PendingRow({
   row,
   questions,
+  locked,
+  stale,
   onApprove,
   onReject,
   onVerifyAds,
 }: {
   row: ThirtyRequestRow;
   questions: ThirtyPayload["questions"];
+  /** Decided since the last read that worked: its buttons stay off until a read works. */
+  locked: boolean;
+  stale: boolean;
   onApprove: (row: ThirtyRequestRow, override: boolean) => RowResult;
   onReject: (row: ThirtyRequestRow, reason: string | null) => RowResult;
   onVerifyAds: (student: StudentBrief, verified: boolean) => RowResult;
@@ -601,6 +761,7 @@ function PendingRow({
     text: "The rule could not judge this request. Judge it by hand.",
     oldCourse: false,
   };
+  const off = busy !== null || locked;
 
   async function run(what: NonNullable<typeof busy>, fn: () => RowResult) {
     setBusy(what);
@@ -626,21 +787,22 @@ function PendingRow({
             display: "inline-flex",
             alignItems: "center",
             gap: 8,
-            padding: "7px 14px",
+            minHeight: TAP,
+            padding: "0 14px",
             borderRadius: "var(--radius-pill)",
             border: "1px solid var(--color-border)",
             background: "var(--color-bg-elevated)",
             color: "var(--color-text-primary)",
             fontSize: 13,
             fontWeight: 600,
-            cursor: busy ? "wait" : "pointer",
+            cursor: off ? (busy ? "wait" : "not-allowed") : "pointer",
             whiteSpace: "nowrap",
           }}
         >
           <input
             type="checkbox"
             checked={row.student.adsVerified}
-            disabled={busy !== null}
+            disabled={off}
             onChange={(e) => {
               const verified = e.target.checked;
               void run("ads", () => onVerifyAds(row.student, verified));
@@ -652,7 +814,7 @@ function PendingRow({
         <Button
           variant="raised"
           size="md"
-          disabled={!verdict.ok || (busy !== null && busy !== "approve")}
+          disabled={!verdict.ok || locked || (busy !== null && busy !== "approve")}
           busy={busy === "approve"}
           onClick={() => void run("approve", () => onApprove(row, false))}
         >
@@ -667,7 +829,7 @@ function PendingRow({
             <Button
               variant="raised"
               size="md"
-              disabled={busy !== null}
+              disabled={off}
               onClick={() => setConfirm((c) => (c === "override" ? null : "override"))}
             >
               Approve anyway
@@ -676,13 +838,15 @@ function PendingRow({
           <Button
             variant="raised"
             size="md"
-            disabled={busy !== null}
+            disabled={off}
             onClick={() => setConfirm((c) => (c === "reject" ? null : "reject"))}
           >
             Reject
           </Button>
         </div>
       </div>
+
+      {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
 
       {confirm === "override" && (
         <div style={PANEL}>
@@ -693,6 +857,7 @@ function PendingRow({
             <Button
               variant="raised"
               size="md"
+              disabled={locked}
               busy={busy === "override"}
               onClick={() => void run("override", () => onApprove(row, true))}
             >
@@ -722,8 +887,10 @@ function PendingRow({
             placeholder="For example: the ads were not handed in"
             style={{
               width: "100%",
-              padding: "10px 12px",
-              fontSize: 15,
+              height: TAP,
+              padding: "0 12px",
+              // 16px: a phone's browser zooms the page into a smaller field.
+              fontSize: 16,
               borderRadius: "var(--radius-control)",
               border: "1px solid var(--color-border-strong)",
               background: "var(--color-bg-card)",
@@ -741,6 +908,7 @@ function PendingRow({
             <Button
               variant="raised"
               size="md"
+              disabled={locked}
               busy={busy === "reject"}
               onClick={() => void run("reject", () => onReject(row, reason.trim() || null))}
             >
@@ -825,7 +993,6 @@ function Answers({
 
 /** The code, and a button that copies it. */
 function CodeWithCopy({ code }: { code: string }) {
-  const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
   return (
     <span className="flex flex-wrap items-center" style={{ gap: 8 }}>
       <code
@@ -842,21 +1009,7 @@ function CodeWithCopy({ code }: { code: string }) {
       >
         {code}
       </code>
-      <Button
-        variant="raised"
-        size="md"
-        onClick={async () => {
-          try {
-            await navigator.clipboard.writeText(code);
-            setCopied("yes");
-          } catch {
-            setCopied("failed");
-          }
-          setTimeout(() => setCopied(null), 1500);
-        }}
-      >
-        {copied === "yes" ? "Copied" : copied === "failed" ? "Couldn't copy" : "Copy"}
-      </Button>
+      <CopyButton text={code} label="Copy" />
     </span>
   );
 }
@@ -865,10 +1018,14 @@ function CodeWithCopy({ code }: { code: string }) {
 function DecidedRow({
   row,
   questions,
+  locked,
+  stale,
   onMarkApplied,
 }: {
   row: ThirtyRequestRow;
   questions: ThirtyPayload["questions"];
+  locked: boolean;
+  stale: boolean;
   onMarkApplied: (row: ThirtyRequestRow) => RowResult;
 }) {
   const [busy, setBusy] = useState(false);
@@ -904,6 +1061,7 @@ function DecidedRow({
               variant="raised"
               size="md"
               busy={busy}
+              disabled={locked}
               onClick={async () => {
                 setBusy(true);
                 setError(null);
@@ -924,6 +1082,8 @@ function DecidedRow({
         </p>
       )}
 
+      {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
+
       {error && (
         <p role="alert" style={ERROR_TEXT}>
           {error}
@@ -935,14 +1095,18 @@ function DecidedRow({
   );
 }
 
-/** A member who can still earn the 30%: deadline, videos left, last contact (C12), and Mark messaged. */
+/** A member who can still earn the 30%: deadline, videos left, last contact (C12), their open queue tasks, and Mark messaged. */
 function EarnRow({
   row,
   now,
+  locked,
+  stale,
   onMarkMessaged,
 }: {
   row: ThirtyEarnRow;
   now: string;
+  locked: boolean;
+  stale: boolean;
   onMarkMessaged: (row: ThirtyEarnRow) => RowResult;
 }) {
   const [busy, setBusy] = useState(false);
@@ -951,7 +1115,7 @@ function EarnRow({
   const left = timeLeftText(f.deadline, now);
   const total = f.videosTotal ?? 0;
   const done = f.videosDone ?? 0;
-  const hours = aboutHours(f.secondsLeft);
+  const hours = aboutHoursWords(f.secondsLeft);
   const videos =
     row.state === "ready"
       ? `All ${total} videos done. Can apply for the 30% now.`
@@ -972,6 +1136,7 @@ function EarnRow({
             variant="raised"
             size="md"
             busy={busy}
+            disabled={locked}
             onClick={async () => {
               setBusy(true);
               setError(null);
@@ -990,7 +1155,13 @@ function EarnRow({
         </p>
         <p style={{ ...T.body, lineHeight: 1.5 }}>{videos}</p>
         <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{lastContactText(row.lastContact)}</p>
+        {row.openTasks.map((t) => (
+          <p key={t.id} style={{ ...T.bodyDim, lineHeight: 1.5 }}>
+            {`Also open in the Tasks queue since ${dayLabel(t.createdAt)}. Marking this row closes it too.`}
+          </p>
+        ))}
       </div>
+      {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
       {error && (
         <p role="alert" style={ERROR_TEXT}>
           {error}

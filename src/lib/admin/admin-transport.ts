@@ -16,17 +16,20 @@ import type { ReasonKind, TodayView } from "@/lib/admin/support-list";
  *
  * The 30% page's half (work item 3): its read, the three discount routes,
  * the ads tick, and Today's mark route, which "Mark messaged" on Can still
- * earn calls. Today's half (work item 4): its read, the mark route's POST
- * and DELETE (Undo), and the task outcome route (Replied / No reply).
+ * earn calls, with its Undo. Today's half (work item 4): its read, the mark
+ * route's POST and DELETE (Undo), and the task outcome route (Replied / No
+ * reply).
  *
  * No call throws. Every answer is `{ ok: true, data }` or `{ ok: false,
  * error }`, where `error` is a sentence the page can show: the route's own
- * words, or, for a signed-out session or no connection, this file's.
+ * words, or, for a signed-out session or no connection, this file's. A
+ * refusal can also carry the route's `code`, for a page that treats one
+ * refusal apart (the mark route's "marked-otherwise").
  */
 
 export type Answer<T> =
   | { ok: true; status: number; data: T }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: number; error: string; code?: string };
 
 /** The reasons a student can need a message for (admin rebuild PRD, C4 and section 8), defined in support-list.ts. */
 export type { ReasonKind };
@@ -64,6 +67,8 @@ export interface ThirtyTransport {
   verifyAds(studentId: string, verified: boolean): Promise<Answer<{ verified: boolean }>>;
   /** POST /api/admin/today/mark. */
   mark(body: MarkBody): Promise<Answer<MarkAnswer>>;
+  /** DELETE /api/admin/today/mark: the Undo beside Mark messaged's notice. */
+  undo(ids: string[]): Promise<Answer<{ results: UndoResult[] }>>;
 }
 
 /** One entry of an Undo: done, or why not (403 another member's, 409 too old or a newer open task, 404 nothing to undo). */
@@ -132,10 +137,12 @@ async function send<T>(
   if (res.status === 401) return { ok: false, status: 401, error: SIGNED_OUT };
   if (res.status === 403) return { ok: false, status: 403, error: NOT_ALLOWED };
   const said = json && typeof json.error === "string" ? json.error.trim() : "";
+  const code = json && typeof json.code === "string" ? json.code : undefined;
   return {
     ok: false,
     status: res.status,
     error: said || `The server answered with an error (${res.status}). Try again.`,
+    ...(code ? { code } : {}),
   };
 }
 

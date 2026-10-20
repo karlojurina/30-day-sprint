@@ -26,7 +26,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { loadThirtyData } from './_gen/thirty-data.ts'
 import {
-  VERDICT_TEXT, aboutHours, buildThirtyView, judgeRequest, studentAppView, thirtyReasonText, verdictWithAds, videosLeftText, whopPulled,
+  VERDICT_TEXT, aboutHours, aboutHoursWords, buildThirtyView, judgeRequest, studentAppView, thirtyReasonText, verdictWithAds, videosLeftText, whopPulled,
 } from './_gen/thirty-view.ts'
 import { approvalVerdict, explainOldCourseRequest, factsFromReads, loadDiscountReads, videoDoneIds } from './_gen/discount-server.ts'
 import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_SHARED_DEADLINE, discountState, requiredLessons } from './_gen/discount.ts'
@@ -144,6 +144,9 @@ const main = fixtures()
   main.tasks.push(
     { student_id: 's-b', scenario_id: 'nolessons.day3', status: 'completed', created_at: '2026-10-11T08:00:00.000Z', completed_at: '2026-10-12T09:00:00.000Z', completed_by: 'tm-1', outcome: 'no_reply' },
     { student_id: 's-b', scenario_id: 'support.30close', status: 'completed', created_at: '2026-10-20T14:00:00.000Z', completed_at: '2026-10-20T14:00:00.000Z', completed_by: 'tm-1' },
+    // Two open tasks in the Tasks queue: Mark messaged on Can still earn closes them (C5).
+    { id: 't-b-open-2', student_id: 's-b', scenario_id: 'stalled.discord.day5', template_id: 'tpl-s5', status: 'open', behavior_summary: 'Paid 5 days ago, never logged in', created_at: '2026-10-20T09:00:00.000Z' },
+    { id: 't-b-open-1', student_id: 's-b', scenario_id: 'nolessons.day7', template_id: 'tpl-n7', status: 'open', behavior_summary: null, created_at: '2026-10-19T09:00:00.000Z' },
   )
   // C: own window (first payment 15 Oct, after the launch), all 61 done. A dismissed task is no contact.
   person('s-c', 'Cy Example', '2026-10-15T12:00:00.000Z')
@@ -395,6 +398,12 @@ ok(!W.data.students.some((s) => s.id === 's-e' || s.id === 's-v') && W.data.stud
      'B: its only Whop backfill ran before the switch: "Whop progress not pulled yet"; reached by @name')
   ok(show(b?.lastContact) === show({ at: '2026-10-20T14:00:00.000Z', by: { id: 'tm-1', name: 'Robin Test' }, scenarioId: 'support.30close', outcome: null }),
      'B: the last contact is its newest completed task, with who sent it, no reply yet', show(b?.lastContact))
+  ok(show(b?.openTasks) === show([
+    { id: 't-b-open-1', scenarioId: 'nolessons.day7', summary: null, createdAt: '2026-10-19T09:00:00.000Z' },
+    { id: 't-b-open-2', scenarioId: 'stalled.discord.day5', summary: 'Paid 5 days ago, never logged in', createdAt: '2026-10-20T09:00:00.000Z' },
+  ]), 'B: its open tasks in the Tasks queue, oldest first, for Mark messaged to close (C5)', show(b?.openTasks))
+  ok(wv.canStillEarn.filter((r) => r.student.id !== 's-b').every((r) => Array.isArray(r.openTasks) && r.openTasks.length === 0),
+     'everyone else on Can still earn: no open task')
 }
 {
   const c = earning(wv, 's-c')
@@ -537,27 +546,35 @@ console.log('\n=== A video loaded after the switch, and requests made on the old
 console.log('\n=== L: a failed batch of completions ===')
 {
   const db = world(main, WED)
-  // The batch of 100 ids that holds A: j-201 to j-250 and every s- student. Only the bulk read is
-  // failed (`student_id in (...)`); one student's read (`student_id=...`) still answers.
-  db.failWhen = (q) => q.table === 'student_lesson_completions' && q.filters.some((f) => f.startsWith('student_id in (') && f.includes('s-a'))
-    ? { message: 'canceling statement due to statement timeout' } : null
+  // The read of completions that holds A (as many students as fit in one page, A among them).
+  // Only the bulk read is failed (`student_id in (...)`); one student's read (`student_id=...`)
+  // still answers.
+  let covered = []
+  db.failWhen = (q) => {
+    const f = q.table === 'student_lesson_completions' ? q.filters.find((x) => x.startsWith('student_id in (')) : null
+    const ids = f ? f.slice('student_id in ('.length, -1).split(',') : []
+    if (!ids.includes('s-a')) return null
+    covered = ids
+    return { message: 'canceling statement due to statement timeout' }
+  }
   const loaded = await loadThirtyData(fakeClient(db))
-  const covered = loaded.data.students.map((s) => s.id).filter((id) => id >= 'j-201')
-  ok(covered.length === 50 + loaded.data.students.filter((s) => s.id.startsWith('s-')).length
+  const others = loaded.data.students.map((s) => s.id).filter((id) => !covered.includes(id))
+  ok(covered.length > 1
        && covered.every((id) => loaded.data.reads.get(id).completions.data === null && /statement timeout/.test(loaded.data.reads.get(id).completions.error.message))
-       && loaded.data.reads.get('j-200').completions.data.length === 61,
-     `the failed read is a failed read for each of the ${covered.length} students it covered, never an empty list; j-200, in the batch before, is read`)
+       && others.every((id) => Array.isArray(loaded.data.reads.get(id).completions.data)) && loaded.data.reads.get('j-001').completions.data.length === 61,
+     `the failed read is a failed read for each of the ${covered.length} students it covered, never an empty list; the ${others.length} others are read`)
   const view = buildThirtyView(loaded.data, new Date(WED), RESET)
   const a = request(view, 'r-a')
   ok(a.verdict.reason === 'read-failed' && !a.verdict.ok && a.verdict.text === VERDICT_TEXT.readFailed && a.facts.videosDone === null
        && a.facts.deadline === DISCOUNT_SHARED_DEADLINE && a.submissions === null,
      'A: a read-failed verdict, no count, the deadline still shown, no submissions (never "none handed in")', show({ v: a.verdict.reason, f: a.facts }))
-  ok(!view.canStillEarn.some((r) => covered.includes(r.student.id)) && view.canStillEarn.length === 200,
-     'no Can still earn row for anyone it covered; the 200 read before it are there')
+  const before = W.view.canStillEarn.map((r) => r.student.id).filter((id) => !covered.includes(id))
+  ok(!view.canStillEarn.some((r) => covered.includes(r.student.id)) && isDeepStrictEqual(view.canStillEarn.map((r) => r.student.id).sort(), before.sort()),
+     `no Can still earn row for anyone it covered; the ${before.length} others are there`)
   const candidates = loaded.data.students.filter((s) => covered.includes(s.id) && inOffer(s)).length
-  ok(view.unchecked === candidates && candidates > 50, `the page is told ${view.unchecked} members could not be checked`)
+  ok(view.unchecked === candidates && candidates > 1, `the page is told ${view.unchecked} members could not be checked`)
   const rest = await bothWays(db, WED, { skip: new Set(covered) })
-  ok(rest.differences.length === 0, 'everyone outside the failed batch: the same both ways', rest.differences.slice(0, 6).join(', '))
+  ok(rest.differences.length === 0, 'everyone outside the failed read: the same both ways', rest.differences.slice(0, 6).join(', '))
 }
 {
   const db = world(main, WED)
@@ -586,14 +603,60 @@ for (const table of ['students', 'discount_requests', 'discount_feedback_questio
      `${table} cannot be read: the load fails and names it, so the page shows an error, never a list with people missing`, show(loaded.failed))
 }
 
+// ── One snapshot per student ───────────────────────────────────────────────
+console.log('\n=== One snapshot per student: each read of completions is a single query, and a request decided between reads is listed once ===')
+/** The completions reads of a load, by their students: how many queries each list of students took. */
+function completionQueries(db, from = 0) {
+  const counts = new Map()
+  for (const q of db.log.slice(from)) {
+    if (q.table !== 'student_lesson_completions' || q.op !== 'select') continue
+    const students = q.filters.find((f) => f.startsWith('student_id in ('))
+    if (students) counts.set(students, (counts.get(students) ?? 0) + 1)
+  }
+  return counts
+}
+{
+  const db = world(main, WED)
+  await loadThirtyData(fakeClient(db))
+  const counts = completionQueries(db)
+  const perRead = Math.max(...[...counts.keys()].map((f) => f.split(',').length))
+  const lessonFilter = db.calls('student_lesson_completions', 'select').map((q) => q.filters.find((f) => f.startsWith('lesson_id in ('))).find(Boolean)
+  const lessons = lessonFilter ? lessonFilter.split(',').length : 0
+  ok(counts.size > 0 && [...counts.values()].every((n) => n === 1),
+     `the ${counts.size} reads of completions are one query each: no page of one read is asked for after another student's row was deleted`, show([...counts.values()]))
+  ok(lessons > 60 && perRead * lessons < MAX_ROWS,
+     `${perRead} students a read, at one row per student and each of the ${lessons} lessons read, fit in one page (${perRead * lessons} rows at most)`)
+}
+{
+  // A request decided between the read of the pending ones and the read of the decided ones.
+  const db = world(main, WED)
+  db.failWhen = (q) => {
+    if (q.table === 'discount_requests' && q.op === 'select' && q.filters.includes('status!=pending')) {
+      const r = db.rows('discount_requests').find((x) => x.id === 'r-a')
+      if (r.status === 'pending') Object.assign(r, { status: 'approved', promo_code: 'ECOM30-TEST05', reviewed_at: WED, reviewed_by: 'tm-1' })
+    }
+    return null
+  }
+  const loaded = await loadThirtyData(fakeClient(db))
+  const view = buildThirtyView(loaded.data, new Date(WED), RESET)
+  const rows = view.requests.filter((r) => r.id === 'r-a')
+  ok(rows.length === 1 && rows[0].status === 'approved' && rows[0].promoCode === 'ECOM30-TEST05',
+     'r-a, decided after the pending read and before the decided one: one row, as decided (never on To decide and Approved at once)', show(rows.map((r) => r.status)))
+}
+
 // ── The controls ───────────────────────────────────────────────────────────
-console.log('\n=== The controls: the same check on a loader that skips paging, or pages without a unique order ===')
+console.log('\n=== The controls: the same checks on loaders that read completions 100 students at a time (in pages), skip paging, or page without a unique order ===')
 {
   // Made here from the copy build.mjs wrote, as outreach-cutover.test.mjs makes its copies.
   const copy = fs.readFileSync(here('./_gen/thirty-data.ts'), 'utf8')
   const PAGES = 'from "./supabase-pagination.ts"'
-  const ORDER = '.order("student_id")\n            .order("lesson_id"),'
-  ok(copy.split(PAGES).length === 2 && copy.split(ORDER).length === 2, 'the loader has one pages import and one completions order to swap')
+  const ORDER = '.order("student_id")\n              .order("lesson_id"),'
+  // The students a read of completions holds: as many as fit in one page. The controls put back 100,
+  // which takes several pages, so paging, its order and a write between pages matter again.
+  const PER_READ = 'Math.floor((PAGE_ROWS - 1) / lessonIds.length)'
+  ok(copy.split(PAGES).length === 2 && copy.split(ORDER).length === 2 && copy.split(PER_READ).length === 2,
+     'the loader has one pages import, one completions order and one size of read to swap')
+  const hundred = copy.replace(PER_READ, 'BATCH')
   fs.writeFileSync(here('./_gen/one-page.ts'), [
     '// Written by thirty-view.test.mjs for its control: a read that skips paging.',
     '// One call and no .range(), so the stand-in\'s 1000-row cap cuts it short, as PostgREST would.',
@@ -603,16 +666,56 @@ console.log('\n=== The controls: the same check on a loader that skips paging, o
     '}',
     '',
   ].join('\n'))
-  fs.writeFileSync(here('./_gen/thirty-data.one-page.ts'), copy.replace(PAGES, 'from "./one-page.ts"'))
-  fs.writeFileSync(here('./_gen/thirty-data.no-order.ts'), copy.replace(ORDER, '.order("student_id"),'))
+  fs.writeFileSync(here('./_gen/thirty-data.one-page.ts'), hundred.replace(PAGES, 'from "./one-page.ts"'))
+  fs.writeFileSync(here('./_gen/thirty-data.no-order.ts'), hundred.replace(ORDER, '.order("student_id"),'))
+  fs.writeFileSync(here('./_gen/thirty-data.hundred.ts'), hundred)
   const { loadThirtyData: onePage } = await import('./_gen/thirty-data.one-page.ts')
   const { loadThirtyData: noOrder } = await import('./_gen/thirty-data.no-order.ts')
+  const { loadThirtyData: byHundred } = await import('./_gen/thirty-data.hundred.ts')
   const skipped = await bothWays(world(main, WED), WED, { load: onePage })
   ok(skipped.differences.length > 100, `a loader whose reads skip paging: the check fails, ${skipped.differences.length} differences`, skipped.differences.slice(0, 3).join(', '))
   const loose = await bothWays(world(main, WED), WED, { load: noOrder })
   ok(loose.differences.length > 0, `completions paged in an order that is not unique: the check fails, ${loose.differences.length} differences`, loose.differences.slice(0, 3).join(', '))
   const steady = await bothWays(world(main, WED, { shuffle: 12345 }), WED)
   ok(steady.differences.length === 0, 'the real loader on a different shuffle: no difference')
+
+  // A completion deleted while the completions are read (skip-lesson, toggle-lesson and
+  // mark-action-shipped delete rows): the first row of a read is deleted when that read is
+  // asked for a second time, that is, between its pages. The student whose row went is
+  // read before the delete and compared after it, so only they may differ.
+  const deleteBetweenPages = (db) => {
+    const seen = new Map()
+    let gone = null
+    db.failWhen = (q) => {
+      const students = q.table === 'student_lesson_completions' && q.op === 'select' ? q.filters.find((f) => f.startsWith('student_id in (')) : null
+      if (!students || gone) return null
+      seen.set(students, (seen.get(students) ?? 0) + 1)
+      if (seen.get(students) === 2) {
+        const ids = students.slice('student_id in ('.length, -1).split(',')
+        const first = db.rows('student_lesson_completions')
+          .filter((c) => ids.includes(c.student_id))
+          .sort((a, b) => (a.student_id < b.student_id ? -1 : a.student_id > b.student_id ? 1 : a.lesson_id < b.lesson_id ? -1 : 1))[0]
+        db.tables.student_lesson_completions = db.rows('student_lesson_completions').filter((c) => c !== first)
+        gone = first.student_id
+      }
+      return null
+    }
+    return () => gone
+  }
+  const paged = world(main, WED)
+  const pagedGone = deleteBetweenPages(paged)
+  const before = paged.log.length
+  const P = await bothWays(paged, WED, { load: byHundred })
+  const deleted = pagedGone()
+  const others = P.differences.filter((d) => !d.startsWith(`${deleted} `))
+  ok(deleted !== null && others.length > 0 && [...completionQueries(paged, before).values()].some((n) => n > 1),
+     `read 100 students at a time in pages, a row deleted between two pages drops another student's row: the check fails for someone else, ${others.length} differences`,
+     `${deleted}; ${others.slice(0, 3).join(', ')}`)
+  const single = world(main, WED)
+  const singleGone = deleteBetweenPages(single)
+  const S = await bothWays(single, WED)
+  ok(singleGone() === null && S.differences.length === 0,
+     'the real loader: no read is asked for twice, so no delete lands between its pages, and every student is the same both ways', S.differences.slice(0, 3).join(', '))
 }
 
 // ── What the 30% page adds (work item 3) ───────────────────────────────────
@@ -648,6 +751,8 @@ console.log('\n=== The 30% page: the ads tick redone on the page, C4\'s words ==
   ok(aboutHours(null) === null && aboutHours(0) === null && aboutHours(600) === 'about 1 h' && aboutHours(5400) === 'about 2 h'
        && aboutHours(9000) === 'about 3 h' && videosLeftText(1) === '1 video left' && videosLeftText(4) === '4 videos left',
      'about H h: the nearest hour, never under 1; one video, many videos')
+  ok(aboutHoursWords(null) === null && aboutHoursWords(0) === null && aboutHoursWords(600) === 'about 1 hour' && aboutHoursWords(5400) === 'about 2 hours',
+     'the 30% page\'s own lines say it in words: about 1 hour, about 2 hours')
   const sentences = [
     thirtyReasonText('thirty_closing', shared), thirtyReasonText('thirty_ready', shared),
     thirtyReasonText('thirty_closing', { ...shared, deadline: null }), thirtyReasonText('thirty_ready', { ...shared, deadline: null }),

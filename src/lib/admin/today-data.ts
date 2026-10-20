@@ -16,10 +16,16 @@
  *                  course switch, admin_config's links, and the 30% through
  *                  loadThirtyData (thirty-data.ts)
  *
- * Every list is read in pages of 1000 (fetchAllRowsPaginated), ordered on a
- * unique key, and lists of ids go in batches of 100: PostgREST answers at most
- * about 1000 rows, and pages read without a stable order can repeat some rows
- * and skip others.
+ * Every list is read in pages of 1000, ordered on a unique key, and lists of
+ * ids go in batches of 100: PostgREST answers at most about 1000 rows, and
+ * pages read without a stable order can repeat some rows and skip others.
+ * The long reads keyed by one unique column (the members, the three progress
+ * views, the first logins, the Whop dates and the tasks) page BY KEY
+ * (fetchAllRowsByKey): pages read by offset are separate queries, and a row
+ * that leaves the read meanwhile (a task closed or reopened, a student's only
+ * counted lesson undone) would shift the later pages and drop another row.
+ * A task closed or reopened between the open and the closed reads is on two
+ * of them; it is kept once, closed (see tasks below).
  *
  * A read that fails is never an empty list. The course switch failing is its
  * own answer (the route says so); any other failed read fails the whole load,
@@ -34,7 +40,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getCurriculumResetAt } from "@/lib/curriculum-reset";
-import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
+import { fetchAllRowsByKey, fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { loadAdminConfig } from "@/lib/templates";
 import { factsFromReads } from "@/lib/world/discount-server";
 import type { Read } from "@/lib/world/discount-server";
@@ -61,6 +67,12 @@ export type TodayLoad =
 
 async function paged<T>(build: () => unknown): Promise<Read<T[]>> {
   const r = await fetchAllRowsPaginated<T>(build);
+  return r.error ? { data: null, error: { message: r.error.message } } : { data: r.data, error: null };
+}
+
+/** One read in pages by `key` (unique, and the read's only order): every row, or the error and no rows. */
+async function pagedByKey<T>(build: () => unknown, key: string): Promise<Read<T[]>> {
+  const r = await fetchAllRowsByKey<T>(build, key);
   return r.error ? { data: null, error: { message: r.error.message } } : { data: r.data, error: null };
 }
 
@@ -101,37 +113,46 @@ export async function loadTodayData(db: SupabaseClient, now: Date): Promise<Toda
       (value) => ({ ok: true as const, value }),
       (e: unknown) => ({ ok: false as const, error: message(e) }),
     ),
-    paged<SupportStudent>(() =>
-      db
-        .from("students")
-        .select(TODAY_STUDENT_COLUMNS)
-        .in("membership_status", ["active", "past_due"])
-        .not("whop_membership_id", "is", null)
-        .eq("csm_exempt", false)
-        .order("id"),
+    pagedByKey<SupportStudent>(
+      () =>
+        db
+          .from("students")
+          .select(TODAY_STUDENT_COLUMNS)
+          .in("membership_status", ["active", "past_due"])
+          .not("whop_membership_id", "is", null)
+          .eq("csm_exempt", false)
+          .order("id"),
+      "id",
     ),
-    paged<{ student_id: string; completed_count: number }>(() =>
-      db.from("student_progress_counts").select("student_id, completed_count").order("student_id"),
+    // The three views hold one row per student (v92, v98, v103).
+    pagedByKey<{ student_id: string; completed_count: number }>(
+      () => db.from("student_progress_counts").select("student_id, completed_count").order("student_id"),
+      "student_id",
     ),
-    paged<{ student_id: string; last_completed_at: string | null }>(() =>
-      db.from("student_last_counted_completion").select("student_id, last_completed_at").order("student_id"),
+    pagedByKey<{ student_id: string; last_completed_at: string | null }>(
+      () => db.from("student_last_counted_completion").select("student_id, last_completed_at").order("student_id"),
+      "student_id",
     ),
-    paged<{ student_id: string; current_region: string | null }>(() =>
-      db.from("student_current_region").select("student_id, current_region").order("student_id"),
+    pagedByKey<{ student_id: string; current_region: string | null }>(
+      () => db.from("student_current_region").select("student_id, current_region").order("student_id"),
+      "student_id",
     ),
     paged<{ id: string; name: string | null; order_num: number }>(() =>
       db.from("regions").select("id, name, order_num").order("order_num").order("id"),
     ),
-    paged<{ student_id: string; first_sprint_login_at: string }>(() =>
-      db
-        .from("student_milestones")
-        .select("student_id, first_sprint_login_at")
-        .not("first_sprint_login_at", "is", null)
-        .order("student_id"),
+    pagedByKey<{ student_id: string; first_sprint_login_at: string }>(
+      () =>
+        db
+          .from("student_milestones")
+          .select("student_id, first_sprint_login_at")
+          .not("first_sprint_login_at", "is", null)
+          .order("student_id"),
+      "student_id",
     ),
     // The backfill's date only: the row also holds the student's Whop tokens.
-    paged<{ student_id: string; last_sync_at: string | null }>(() =>
-      db.from("student_whop_sync").select("student_id, last_sync_at").order("student_id"),
+    pagedByKey<{ student_id: string; last_sync_at: string | null }>(
+      () => db.from("student_whop_sync").select("student_id, last_sync_at").order("student_id"),
+      "student_id",
     ),
     paged<{ student_id: string; lesson_id: string; last_heartbeat_at: string | null }>(() =>
       db
@@ -141,12 +162,14 @@ export async function loadTodayData(db: SupabaseClient, now: Date): Promise<Toda
         .order("student_id")
         .order("lesson_id"),
     ),
-    paged<SupportTask>(() => db.from("tasks").select(TASK_COLUMNS).eq("status", "open").order("id")),
-    paged<SupportTask>(() =>
-      db.from("tasks").select(TASK_COLUMNS).eq("status", "completed").gte("completed_at", closedFrom).order("id"),
+    pagedByKey<SupportTask>(() => db.from("tasks").select(TASK_COLUMNS).eq("status", "open").order("id"), "id"),
+    pagedByKey<SupportTask>(
+      () => db.from("tasks").select(TASK_COLUMNS).eq("status", "completed").gte("completed_at", closedFrom).order("id"),
+      "id",
     ),
-    paged<SupportTask>(() =>
-      db.from("tasks").select(TASK_COLUMNS).eq("status", "dismissed").gte("dismissed_at", closedFrom).order("id"),
+    pagedByKey<SupportTask>(
+      () => db.from("tasks").select(TASK_COLUMNS).eq("status", "dismissed").gte("dismissed_at", closedFrom).order("id"),
+      "id",
     ),
     paged<SupportTemplate>(() => db.from("templates").select("id, scenario_id, title, body, is_active").order("id")),
     paged<{ id: string; full_name: string | null }>(() => db.from("team_members").select("id, full_name").order("id")),
@@ -200,7 +223,13 @@ export async function loadTodayData(db: SupabaseClient, now: Date): Promise<Toda
     };
   }
 
-  const tasks = [...open.data!, ...completed.data!, ...dismissed.data!];
+  // One row per task. A task closed (or reopened) between the open read and
+  // the closed ones is on two of them; its closed row is kept. Shown as open
+  // when it is closed already, the row would invite a second message.
+  const byTask = new Map<string, SupportTask>();
+  for (const t of open.data!) byTask.set(t.id, t);
+  for (const t of [...completed.data!, ...dismissed.data!]) byTask.set(t.id, t);
+  const tasks = [...byTask.values()];
 
   // The names Handled shows for students who are not on the list (canceled since, say).
   const listed = new Set(students.data!.map((s) => s.id));

@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * Renders one discount application's feedback answers (question → answer),
- * sorted by the question order. Shared by the per-request card on
- * /admin/discounts and the grouped list on /admin/feedback/survey so the
- * two surfaces never drift.
+ * One 30% application's survey answers (question, then answer), in the
+ * questions' order. The Survey page (/admin/feedback/survey) is the only
+ * user since the 30% page reads its answers itself (src/lib/admin/
+ * thirty-data.ts). In the brand kit's dark look since admin rebuild 2
+ * (WI-9).
  */
 
 import type {
@@ -12,97 +13,58 @@ import type {
   DiscountFeedbackResponse,
 } from "@/types/database";
 
+type Question = Pick<DiscountFeedbackQuestion, "id" | "order_num" | "question_text" | "question_type">;
+type Response = Pick<DiscountFeedbackResponse, "question_id" | "answer_scale" | "answer_choice" | "answer_text">;
+
 export function DiscountFeedbackResponses({
   responses,
   questions,
 }: {
-  responses: DiscountFeedbackResponse[];
-  questions: DiscountFeedbackQuestion[];
+  responses: Response[];
+  questions: Question[];
 }) {
-  const byId = new Map<string, DiscountFeedbackResponse>();
+  const byId = new Map<string, Response>();
   for (const r of responses) byId.set(r.question_id, r);
   const sortedQs = [...questions].sort((a, b) => a.order_num - b.order_num);
+  const answered = sortedQs.filter((q) => byId.has(q.id));
   return (
     <div
       style={{
-        padding: 12,
-        borderRadius: 8,
-        background: "var(--color-fill-secondary)",
-        marginBottom: 12,
+        padding: 14,
+        borderRadius: "var(--radius-control)",
+        background: "var(--color-bg-elevated)",
+        border: "1px solid var(--color-border)",
       }}
     >
-      <p
-        style={{
-          fontSize: 11,
-          fontWeight: 600,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          color: "var(--color-text-tertiary)",
-          marginBottom: 8,
-        }}
-      >
-        Feedback responses
-      </p>
-      <div className="flex flex-col gap-3">
-        {sortedQs.map((q) => {
-          const r = byId.get(q.id);
-          if (!r) return null;
-          let valueNode: React.ReactNode;
-          if (q.question_type === "scale" && r.answer_scale != null) {
-            valueNode = (
-              <strong
-                style={{
-                  fontVariantNumeric: "tabular-nums",
-                  color: "var(--color-text-primary)",
-                }}
-              >
-                {r.answer_scale}
-              </strong>
-            );
-          } else if (q.question_type === "multi_choice" && r.answer_choice) {
-            valueNode = (
-              <span style={{ color: "var(--color-text-primary)" }}>
-                {r.answer_choice}
-              </span>
-            );
-          } else if (r.answer_text && r.answer_text.trim().length > 0) {
-            valueNode = (
-              <span
-                style={{
-                  color: "var(--color-text-primary)",
-                  whiteSpace: "pre-wrap",
-                }}
-              >
-                &ldquo;{r.answer_text}&rdquo;
-              </span>
-            );
-          } else {
-            valueNode = (
-              <span
-                style={{
-                  color: "var(--color-text-tertiary)",
-                  fontStyle: "italic",
-                }}
-              >
-                (no answer)
-              </span>
-            );
-          }
-          return (
-            <div key={q.id} style={{ fontSize: 12, lineHeight: 1.5 }}>
-              <div
-                style={{
-                  color: "var(--color-text-tertiary)",
-                  marginBottom: 2,
-                }}
-              >
-                {q.question_text}
+      {answered.length === 0 ? (
+        <p style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
+          No answer matches a question the survey has now.
+        </p>
+      ) : (
+        <dl className="flex flex-col" style={{ gap: 12 }}>
+          {answered.map((q) => {
+            const r = byId.get(q.id)!;
+            let value: React.ReactNode;
+            if (q.question_type === "scale" && r.answer_scale != null) {
+              value = (
+                <strong style={{ fontVariantNumeric: "tabular-nums", fontSize: 15 }}>{r.answer_scale}</strong>
+              );
+            } else if (q.question_type === "multi_choice" && r.answer_choice) {
+              value = r.answer_choice;
+            } else if (r.answer_text && r.answer_text.trim().length > 0) {
+              value = <span style={{ whiteSpace: "pre-wrap" }}>&ldquo;{r.answer_text}&rdquo;</span>;
+            } else {
+              value = <span style={{ color: "var(--color-text-secondary)" }}>No answer</span>;
+            }
+            return (
+              <div key={q.id} style={{ fontSize: 13, lineHeight: 1.5 }}>
+                <dt style={{ color: "var(--color-text-secondary)", marginBottom: 2 }}>{q.question_text}</dt>
+                <dd style={{ color: "var(--color-text-primary)", overflowWrap: "anywhere" }}>{value}</dd>
               </div>
-              <div>{valueNode}</div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </dl>
+      )}
     </div>
   );
 }

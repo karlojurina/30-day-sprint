@@ -262,7 +262,9 @@ console.log(`\n=== Old course, no reset: parity with ${BASE} (14 students × day
         // every DSL condition over every metric, and its words
         for (const cfg of OLD_CONFIGS) {
           comparisons++
-          const a = OLD.evaluateCustomTrigger(oldSnap, cfg), b = NEW.evaluateCustomTrigger(newSnap, cfg)
+          const a0 = OLD.evaluateCustomTrigger(oldSnap, cfg), b = NEW.evaluateCustomTrigger(newSnap, cfg)
+          // The one renamed label (admin rebuild 2, D12): the old summary read "Subscription status".
+          const a = { ...a0, summary: a0.summary.replaceAll('Subscription status', 'Membership status') }
           if (!eq(a, b)) note(`${p.id} day ${day} ${vlabel}: ${JSON.stringify(cfg)} ${JSON.stringify(a)} vs ${JSON.stringify(b)}`)
         }
         // the alert mapping: old = the route at BASE (pickExistingAlertScenario
@@ -307,12 +309,18 @@ console.log(`\n=== Old course, no reset: parity with ${BASE} (14 students × day
   // Shared tables and the UI summary are untouched.
   ok(eq(OLD.SCENARIO_BUCKET, NEW.SCENARIO_BUCKET) && eq(OLD.REGION_LABEL, NEW.REGION_LABEL) && eq(OLD.ACTION_LESSONS, NEW.ACTION_LESSONS),
      'SCENARIO_BUCKET, REGION_LABEL, ACTION_LESSONS identical')
+  // Admin rebuild 2 (D12) renamed one metric's words: "Subscription status"
+  // reads "Membership status" in the editor and in a condition's sentence.
+  // Everything else is word for word as it was.
+  const renamed = (text) => text.replace(/^Subscription status/, 'Membership status')
+  ok(OLD.METRICS.membership_status.label === 'Subscription status' && NEW.METRICS.membership_status.label === 'Membership status',
+     'METRICS: membership_status is the one label renamed, "Subscription status" to "Membership status" (admin rebuild 2, D12)')
   ok(Object.keys(OLD.METRICS).join() === Object.keys(NEW.METRICS).join() &&
-     Object.keys(OLD.METRICS).every((m) => OLD.METRICS[m].label === NEW.METRICS[m].label && OLD.METRICS[m].input === NEW.METRICS[m].input),
-     'METRICS: same ids, labels and inputs')
+     Object.keys(OLD.METRICS).every((m) => renamed(OLD.METRICS[m].label) === NEW.METRICS[m].label && OLD.METRICS[m].input === NEW.METRICS[m].input),
+     'METRICS: same ids, labels and inputs, but for that rename')
   let describeDiffs = 0
-  for (const c of OLD_CONDS) if (OLD.METRICS[c.metric].describe(c) !== NEW.METRICS[c.metric].describe(c)) describeDiffs++
-  ok(describeDiffs === 0, 'every condition is described in the same words', `${OLD_CONDS.length} conditions (r1..r4 and an unknown r9)`)
+  for (const c of OLD_CONDS) if (renamed(OLD.METRICS[c.metric].describe(c)) !== NEW.METRICS[c.metric].describe(c)) describeDiffs++
+  ok(describeDiffs === 0, 'every condition is described in the same words, but for that rename', `${OLD_CONDS.length} conditions (r1..r4 and an unknown r9)`)
   let paceDiffs = 0, paceCases = 0
   for (let d = 0; d < 40; d++) for (const done of [0, 1, 10, 32, 64]) for (const r of OLD_REGIONS) {
     paceCases++

@@ -116,7 +116,7 @@ if (wanted('routes')) {
   for (const s of distinct.slice(0, 40)) console.log(`       "${s}"`)
 }
 
-const needBrowser = ['frame', 'signin', 'thirty'].some(wanted)
+const needBrowser = ['frame', 'signin', 'thirty', 'templates', 'survey', 'team', 'insights'].some(wanted)
 if (!needBrowser) finish()
 
 fs.mkdirSync(OUT, { recursive: true })
@@ -866,6 +866,364 @@ if (wanted('thirty')) {
   }
   const errs = newConsoleErrors(from)
   expect(errs.length === 0, '30% off: no error in the browser console', errs.slice(0, 3).join(' || '))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Admin rebuild 2, WI-8 and WI-9 (the templates lane):
+//   templates  /dev/admin/templates: full (the links and switches of 20
+//              October: both warnings), fixed (none), a csm reading it,
+//              empty, loading, error, nosettings, nocourse; then by clicks:
+//              a built-in opened (no Delete) and saved with only its new
+//              message, its preview with the live link and the empty Discord
+//              link named, the Discord link saved (its warning goes), the
+//              master switch's Turn on asking first, a custom template
+//              deleted, a new template refused without a title then made
+//   survey     /dev/admin/survey: full, empty, loading, error; the status
+//              words of the 30% page (Applied, Code Applied), never Pending
+//   team       /dev/admin/team: full for a founder (name@ecomuniversity.com),
+//              an admin's one line, empty, loading, error; a removal asked
+//              first, a role change
+//   insights   /dev/admin/insights: full (new course and old), partial,
+//              empty, loading, error; each range, the dates, axis labels
+//              at 11px on a phone
+// Every state is measured as above; every tap under the bar is 44px.
+// ════════════════════════════════════════════════════════════════════════════
+const LANE_PARTS = ['templates', 'survey', 'team', 'insights']
+if (LANE_PARTS.some(wanted)) {
+  const from = consoleErrors.length
+  /** The calls the page made, by name, with their arguments. */
+  const laneCalls = () => page.evaluate(() => (window.__adminCalls ?? []).map((c) => ({ name: c.name, args: c.args })))
+  /** A row header (aria-expanded) whose words start with `title`. */
+  const rowHeader = (title) => page.evaluateHandle((t) => [...document.querySelectorAll('button[aria-expanded]')]
+    .find((b) => b.textContent.trim().startsWith(t)) || null, title)
+  /** A button with exactly these words inside the open template row. */
+  const inOpenRow = (label) => page.evaluateHandle((l) => {
+    const row = document.querySelector('button[aria-expanded="true"]')?.closest('.list-row')
+    return (row && [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === l)) || null
+  }, label)
+  /** The control a label with these words points at (the first one). */
+  const byLabel = (text, root = 'body') => page.evaluateHandle((t, r) => {
+    const scope = document.querySelector(r) ?? document.body
+    const label = [...scope.querySelectorAll('label')].find((l) => l.textContent.trim() === t)
+    return (label && document.getElementById(label.htmlFor)) || null
+  }, text, root)
+  /** The button of a Message settings switch, found by the switch's title. */
+  const switchButton = (title, label) => page.evaluateHandle((t, l) => {
+    const name = [...document.querySelectorAll('p')].find((p) => p.textContent.trim() === t)
+    const box = name?.parentElement?.parentElement?.parentElement
+    return (box && [...box.querySelectorAll('button')].find((b) => b.textContent.trim() === l)) || null
+  }, title, label)
+  const ready = (text) => page.waitForFunction((t) => document.body.innerText.includes(t), { timeout: 15000 }, text)
+  const tapsOk = async (label) => {
+    const small = await smallTaps()
+    expect(small.length === 0, `${label}: every button under the bar is 44px tall or more`, JSON.stringify(small.slice(0, 4)))
+  }
+
+  if (wanted('templates')) {
+    const W_DISCORD = '4 messages send an empty Discord link.'
+    const W_PROGRAM = 'The program link is not on sprint.ecomuniversity.com. 9 messages send it.'
+    for (const size of SIZES) {
+      const label = `templates, full, founder, ${size.join('x')}`
+      console.log(`\n${label}`)
+      await go('/dev/admin/templates', size)
+      await ready('Message settings')
+      const text = await bodyText()
+      expect(text.includes(W_DISCORD) && text.includes(W_PROGRAM), `${label}: both warnings show`)
+      expect(text.includes('Each switch below acts only while the master switch is on.') && text.includes('Off: nothing posts'),
+        `${label}: the master switch is off and says nothing posts; the switches under it act only while it is on`)
+      expect(!/subscription/i.test(text), `${label}: no "subscription" on the page`)
+      await check(label, `templates-full-${size[0]}`)
+      await tapsOk(label)
+    }
+    for (const [state, wantText, size] of [
+      ['fixed', 'On', [1440, 900]], ['empty', 'No templates yet.', [390, 844]], ['error', "Couldn't load the templates.", [390, 844]],
+      ['nosettings', "Couldn't load the message settings", [1440, 900]], ['nocourse', 'Templates', [1440, 900]],
+    ]) {
+      const label = `templates, ${state}, ${size.join('x')}`
+      console.log(`\n${label}`)
+      await go(`/dev/admin/templates?state=${state}`, size)
+      await ready(wantText)
+      if (state === 'fixed') {
+        const text = await bodyText()
+        expect(!text.includes(W_DISCORD) && !text.includes('is not on sprint.ecomuniversity.com'), `${label}: no warning once both links are right`)
+      }
+      await check(label, `templates-${state}-${size[0]}`)
+    }
+    {
+      const label = 'templates, loading, 390x844'
+      console.log(`\n${label}`)
+      await go('/dev/admin/templates?state=loading', [390, 844])
+      expect((await page.$('[role="status"]')) !== null, `${label}: the list shows its loading state`)
+      await check(label, 'templates-loading-390')
+    }
+    for (const size of [[390, 844], [1440, 900]]) {
+      const label = `templates, csm, ${size.join('x')}`
+      console.log(`\n${label}`)
+      await go('/dev/admin/templates?role=csm', size)
+      await ready('Message settings')
+      const panel = await page.evaluate(() => {
+        const box = document.getElementById('message-settings-title')?.closest('section')
+        return { inputs: box.querySelectorAll('input').length, buttons: box.querySelectorAll('button').length, text: box.innerText }
+      })
+      expect(panel.inputs === 0 && panel.buttons === 0 && panel.text.includes('Empty') && panel.text.includes('https://old-course-host.example.com/login'),
+        `${label}: a csm reads the links and the switches, with no field and no button`, JSON.stringify(panel).slice(0, 160))
+      expect((await bodyText()).includes('Only a founder or an admin can change them.') && (await button('New template')) && (await isNull(await button('New template'))),
+        `${label}: says only a founder or an admin can change them, and offers no New template`)
+      await press(await rowHeader('Welcome (Day 1)'))
+      await sleep(200)
+      expect(await isNull(await inOpenRow('Save')) && await isNull(await inOpenRow('Delete template')), `${label}: an opened template has no Save and no Delete`)
+      await check(`${label}, a template open`, `templates-csm-open-${size[0]}`)
+    }
+
+    console.log('\ntemplates: by clicks, as a founder')
+    {
+      await go('/dev/admin/templates', [1440, 900])
+      await ready('Message settings')
+      await press(await rowHeader('Stalled student (Whop, no Discord) - Day 3'))
+      await sleep(200)
+      expect(await isNull(await inOpenRow('Delete template')), 'a built-in opened: no Delete template')
+      const body = await byLabel('Message', '.list-row:has(button[aria-expanded="true"])')
+      // The caret at the end of the message, then typed as a person types.
+      await body.evaluate((el) => { el.scrollIntoView({ block: 'center' }); el.focus(); el.setSelectionRange(el.value.length, el.value.length) })
+      await page.keyboard.type(' See you there.')
+      await sleep(150)
+      const rowText = await page.evaluate(() => document.querySelector('button[aria-expanded="true"]').innerText)
+      expect(rowText.includes('Unsaved'), 'a changed message shows Unsaved on its line')
+      await press(await inOpenRow('Show preview'))
+      await sleep(150)
+      const preview = await page.evaluate(() => document.querySelector('button[aria-expanded="true"]').closest('.list-row').innerText)
+      expect(preview.includes('The course: https://old-course-host.example.com/login') && preview.includes('Discord: {discordInvite}')
+        && preview.includes('{discordInvite} stays as written: the Discord link is empty. Set it in Message settings.') && preview.includes('See you there.'),
+        'the preview fills the live program link, names the empty Discord link, and shows the unsaved text')
+      await check('templates, a built-in open with its preview, 1440x900', 'templates-open-preview-1440')
+      await press(await inOpenRow('Save'))
+      await page.waitForFunction(() => document.body.innerText.includes('Saved Stalled student (Whop, no Discord) - Day 3.'), { timeout: 5000 })
+      const saved = (await laneCalls()).filter((c) => c.name === 'saveTemplate')
+      expect(saved.length === 1 && JSON.stringify(Object.keys(saved[0].args[1])) === JSON.stringify(['body']) && saved[0].args[1].body.endsWith('See you there.'),
+        'Save sends the new message and nothing else (no bucket, no conditions)', JSON.stringify(saved))
+
+      const discord = await byLabel('Discord invite link')
+      await discord.evaluate((el) => el.scrollIntoView({ block: 'center' }))
+      await discord.click()
+      await page.keyboard.type('https://discord.gg/madeup123')
+      const saveDiscord = await page.evaluateHandle(() => {
+        const label = [...document.querySelectorAll('label')].find((l) => l.textContent.trim() === 'Discord invite link')
+        return [...label.parentElement.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Save')
+      })
+      await press(saveDiscord)
+      await page.waitForFunction(() => document.body.innerText.includes('Saved the Discord link.'), { timeout: 5000 })
+      const afterLink = await bodyText()
+      expect(!afterLink.includes('4 messages send an empty Discord link.') && afterLink.includes('9 messages send it.'),
+        'the Discord link saved: its warning goes, the program link\'s stays')
+      expect((await laneCalls()).some((c) => c.name === 'saveSetting' && c.args[0] === 'discord_invite_link' && c.args[1] === 'https://discord.gg/madeup123'),
+        'through the settings call with the 1 key and its value')
+
+      await press(await switchButton('Master switch', 'Turn on'))
+      await sleep(150)
+      expect((await bodyText()).includes('Turn on automated Discord posts? Nothing posts yet: every switch below is off.'),
+        'Turn on for the master asks first, and says what starts posting')
+      await check('templates, the master switch asking, 1440x900', 'templates-master-ask-1440')
+      expect(!(await laneCalls()).some((c) => c.name === 'saveSetting' && c.args[0] === 'dms_master_enabled'), 'nothing is sent before Yes')
+      await press(await button('Yes, turn on'))
+      await page.waitForFunction(() => document.body.innerText.includes('Master switch is on.'), { timeout: 5000 })
+      expect((await laneCalls()).some((c) => c.name === 'saveSetting' && c.args[0] === 'dms_master_enabled' && c.args[1] === 'true'), 'Yes sends the master switch as "true"')
+
+      await press(await rowHeader('Is cancelling'))
+      await sleep(200)
+      const rowWords = await page.evaluate(() => document.querySelector('button[aria-expanded="true"]').closest('.list-row').innerText)
+      expect(rowWords.includes('Membership status'), 'the custom template\'s conditions read "Membership status"')
+      await press(await inOpenRow('Delete template'))
+      await sleep(100)
+      expect((await bodyText()).includes('Delete this template? Tasks it already made stay in Tasks, without it. This cannot be undone.'), 'Delete asks first')
+      await press(await inOpenRow('Yes, delete it'))
+      await page.waitForFunction(() => document.body.innerText.includes('Deleted Is cancelling.'), { timeout: 5000 })
+      expect(await isNull(await rowHeader('Is cancelling')), 'the custom template is gone from the list')
+
+      await press(await button('New template'))
+      await page.waitForSelector('[role="dialog"]')
+      await press(await page.evaluateHandle(() => [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === 'Create template')))
+      await sleep(100)
+      expect((await page.$eval('[role="dialog"]', (d) => d.innerText)).includes('Add a title first.'), 'a new template with no title is refused before anything is sent')
+      await check('templates, the new template dialog, 1440x900', 'templates-new-1440')
+      await (await byLabel('Title', '[role="dialog"]')).type('Quiet for a week')
+      await (await byLabel('Message', '[role="dialog"]')).type('Hey {firstName}, all good?')
+      await press(await page.evaluateHandle(() => [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === 'Add a condition')))
+      await press(await page.evaluateHandle(() => [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === 'Create template')))
+      await page.waitForFunction(() => document.body.innerText.includes('Created Quiet for a week. It is on.'), { timeout: 5000 })
+      expect((await page.$('[role="dialog"]')) === null && !(await isNull(await rowHeader('Quiet for a week'))), 'the new template is made, on, and listed')
+      await check('templates, after the clicks, 1440x900', 'templates-after-clicks-1440')
+    }
+    console.log('\ntemplates: Refresh keeps what is being edited, and shows what someone else saved')
+    {
+      await go('/dev/admin/templates?drift=1', [1440, 900])
+      await ready('Message settings')
+      const openMessage = () => page.evaluate(() => {
+        const head = document.querySelector('button[aria-expanded="true"]')
+        const area = head.closest('.list-row').querySelector('textarea[rows]:not([rows="2"])')
+        return { unsaved: head.innerText.includes('Unsaved'), text: area?.value ?? '' }
+      })
+      await press(await rowHeader('Welcome (Day 1)'))
+      await sleep(200)
+      const before = await openMessage()
+      expect(before.text.startsWith('Hey {firstName}! A made-up welcome.'), 'before: Welcome (Day 1) holds its first message', JSON.stringify(before))
+      await press(await rowHeader('Stalled student (Discord) - Day 3'))
+      await sleep(200)
+      const msg = await byLabel('Message', '.list-row:has(button[aria-expanded="true"])')
+      await msg.evaluate((el) => { el.focus(); el.setSelectionRange(el.value.length, el.value.length) })
+      await page.keyboard.type(' Still here.')
+      await press(await button('Refresh'))
+      await page.waitForFunction(() => !document.body.innerText.includes('· Updating') && document.body.innerText.includes('templates'), { timeout: 10000 })
+      await sleep(300)
+      const kept = await page.evaluate(() => {
+        const head = [...document.querySelectorAll('button[aria-expanded]')].find((b) => b.textContent.startsWith('Stalled student (Discord) - Day 3'))
+        const area = head.closest('.list-row').querySelector('textarea[rows]:not([rows="2"])')
+        return { unsaved: head.innerText.includes('Unsaved'), text: area?.value ?? '' }
+      })
+      expect(kept.unsaved && kept.text.endsWith('Still here.'), 'the row being edited keeps its unsaved message through Refresh', JSON.stringify(kept))
+      await press(await rowHeader('Welcome (Day 1)'))
+      await sleep(200)
+      const welcome = await openMessage()
+      expect(!welcome.unsaved && welcome.text.startsWith('Hey {firstName}! A welcome another team member saved.'),
+        'a row nobody here touched shows the message someone else saved, not the old one as an unsaved change', JSON.stringify(welcome))
+    }
+    {
+      const label = 'templates, a template open, 390x844'
+      console.log(`\n${label}`)
+      await go('/dev/admin/templates', [390, 844])
+      await ready('Message settings')
+      await press(await rowHeader('Is cancelling'))
+      await sleep(200)
+      await check(label, 'templates-open-390')
+      await tapsOk(label)
+    }
+  }
+
+  if (wanted('survey')) {
+    for (const size of SIZES) {
+      const label = `survey, full, ${size.join('x')}`
+      console.log(`\n${label}`)
+      await go('/dev/admin/survey', size)
+      // innerText reads the eyebrows in capitals: wait for a name.
+      await ready('Maya Lindqvist')
+      const pills = await page.$$eval('.pill-tone', (ps) => ps.map((p) => p.textContent.trim()))
+      expect(['Applied', 'Approved', 'Code Applied', 'Rejected'].every((w) => pills.includes(w)) && !pills.includes('Pending'),
+        `${label}: the status words are the 30% page's: Applied, Approved, Code Applied, Rejected`, JSON.stringify([...new Set(pills)]))
+      expect((await bodyText()).includes('Unknown student') && (await bodyText()).includes('No email on file'), `${label}: a student who is gone reads "Unknown student"`)
+      await check(label, `survey-full-${size[0]}`)
+      await tapsOk(label)
+    }
+    for (const [state, want] of [['empty', 'No survey answers yet.'], ['error', "Couldn't load the survey."], ['loading', 'Survey']]) {
+      for (const size of [[390, 844], [1440, 900]]) {
+        const label = `survey, ${state}, ${size.join('x')}`
+        console.log(`\n${label}`)
+        await go(`/dev/admin/survey?state=${state}`, size)
+        await ready(want)
+        if (state === 'error') expect((await bodyText()).includes('The applications could not be read'), `${label}: says what could not be read, with Retry`)
+        await check(label, `survey-${state}-${size[0]}`)
+      }
+    }
+  }
+
+  if (wanted('team')) {
+    for (const size of SIZES) {
+      const label = `team, full, founder, ${size.join('x')}`
+      console.log(`\n${label}`)
+      await go('/dev/admin/team', size)
+      await ready('Maximilian Featherstonehaugh-Smythe')
+      expect((await page.$eval('input[type="email"]', (i) => i.placeholder)) === 'name@ecomuniversity.com', `${label}: the email field's example is name@ecomuniversity.com`)
+      await check(label, `team-full-${size[0]}`)
+      await tapsOk(label)
+    }
+    console.log('\nteam: by clicks')
+    {
+      await go('/dev/admin/team', [390, 844])
+      await ready('Sam Lee')
+      await press(await page.evaluateHandle(() => {
+        const row = [...document.querySelectorAll('.list-row')].find((r) => r.innerText.includes('sam.lee@example.com'))
+        return [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Remove')
+      }))
+      await sleep(100)
+      expect((await bodyText()).includes('Remove sam.lee@example.com? Their login is deleted too. This cannot be undone.'), 'Remove asks first')
+      await check('team, a removal asking, 390x844', 'team-remove-ask-390')
+      await press(await button('Yes, remove'))
+      await page.waitForFunction(() => document.body.innerText.includes('Removed sam.lee@example.com.'), { timeout: 5000 })
+      expect(!(await bodyText()).includes('Sam Lee'), 'and the member is gone from the list')
+      const select = await page.evaluateHandle(() => {
+        const row = [...document.querySelectorAll('.list-row')].find((r) => r.innerText.includes('jamie.rowe@example.com'))
+        return row.querySelector('select')
+      })
+      await select.select('csm')
+      await page.waitForFunction(() => document.body.innerText.includes('Jamie Rowe is now CSM.'), { timeout: 5000 })
+      expect((await laneCalls()).some((c) => c.name === 'changeRole' && c.args[0] === 'tm-jamie' && c.args[1] === 'csm'), 'a role change is sent and said')
+      const selfLocked = await page.evaluate(() => [...document.querySelectorAll('.list-row')].find((r) => r.innerText.includes('robin.hale@example.com')).querySelector('select').disabled)
+      expect(selfLocked && (await bodyText()).includes("You can't change your own founder role."), 'the founder\'s own role is locked, and says why')
+    }
+    for (const [state, role, want, size] of [
+      ['full', 'admin', 'Only founders can manage the team.', [390, 844]], ['empty', 'founder', 'No team members to show.', [1440, 900]],
+      ['error', 'founder', "Couldn't load the team.", [390, 844]], ['loading', 'founder', 'Invite a team member', [1440, 900]],
+    ]) {
+      const label = `team, ${state}, ${role}, ${size.join('x')}`
+      console.log(`\n${label}`)
+      await go(`/dev/admin/team?state=${state}&role=${role}`, size)
+      await ready(want)
+      await check(label, `team-${state}-${role}-${size[0]}`)
+    }
+  }
+
+  if (wanted('insights')) {
+    for (const size of SIZES) {
+      const label = `insights, full, ${size.join('x')}`
+      console.log(`\n${label}`)
+      await go('/dev/admin/insights', size)
+      await ready('Avg progress')
+      await page.waitForFunction(() => document.querySelectorAll('svg[role="img"]').length >= 4, { timeout: 10000 })
+      const axis = await page.$$eval('svg[role="img"] text', (ts) => ts.map((t) => Math.round(t.getBoundingClientRect().height * 10) / 10))
+      expect(axis.length > 0 && Math.min(...axis) >= 10, `${label}: the charts' labels draw at their size (${Math.min(...axis)}px at the smallest)`, JSON.stringify(axis.slice(0, 6)))
+      expect((await bodyText()).includes('Activity right now') && !(await bodyText()).includes('—'), `${label}: the activity card, no em dash`)
+      await check(label, `insights-full-${size[0]}`)
+      await tapsOk(label)
+    }
+    console.log('\ninsights: by clicks')
+    {
+      await go('/dev/admin/insights', [1440, 900])
+      await ready('Avg progress')
+      for (const range of ['7 days', '30 days', '90 days', 'All']) {
+        await press(await button(range))
+        await sleep(450)
+        const pressed = await page.$$eval('button[aria-pressed="true"]', (bs) => bs.map((b) => b.textContent.trim()))
+        expect(JSON.stringify(pressed) === JSON.stringify([range]), `${range}: pressed, the charts drawn again`, JSON.stringify(pressed))
+      }
+      await press(await button('Dates'))
+      await sleep(300)
+      expect((await page.$$('input[type="date"]')).length === 2, 'Dates: the two date fields')
+      await check('insights, dates, 1440x900', 'insights-dates-1440')
+    }
+    for (const [state, want, size] of [
+      ['partial', 'Current sprinters: couldn\'t load.', [390, 844]], ['error', "Couldn't load the snapshots.", [1440, 900]],
+      ['empty', 'No snapshots in this range.', [390, 844]], ['loading', 'Loading the snapshots', [390, 844]],
+    ]) {
+      const label = `insights, ${state}, ${size.join('x')}`
+      console.log(`\n${label}`)
+      await go(`/dev/admin/insights?state=${state}`, size)
+      await ready(want)
+      if (state === 'partial') {
+        const text = await bodyText()
+        expect(text.includes('Onboarded to the Bounty Program: couldn\'t load.') && !/\b0%/.test(text.slice(text.indexOf('Current sprinters'), text.indexOf('Avg progress'))),
+          `${label}: the two failed reads say so, with no 0 in their place`)
+      }
+      await check(label, `insights-${state}-${size[0]}`)
+    }
+    {
+      const label = 'insights, old course, 390x844'
+      console.log(`\n${label}`)
+      await go('/dev/admin/insights?course=old', [390, 844])
+      await ready('Pace right now')
+      await check(label, 'insights-old-390')
+    }
+  }
+
+  const errs = newConsoleErrors(from)
+  expect(errs.length === 0, 'templates lane: no error in the browser console', errs.slice(0, 3).join(' || '))
 }
 
 // ── Every page the run opened ──────────────────────────────────────────────

@@ -36,6 +36,10 @@ const REBUILT_PAGES: readonly string[] = [
   // WI-7, Lesson feedback:
 
   // WI-8 and WI-9, Templates, Survey, Team, Insights:
+  "/admin/templates",
+  "/admin/feedback/survey",
+  "/admin/team",
+  "/admin/insights/progress",
 ];
 
 export default function AdminLayout({

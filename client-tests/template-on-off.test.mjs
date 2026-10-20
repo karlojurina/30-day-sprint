@@ -29,8 +29,9 @@
 //     react/jsx-runtime calls, as Next's compiler does) and rendered by
 //     React's server renderer, then called as React calls it to press its
 //     button;
-//   - the page's load(), taken from the source with TypeScript's parser and
-//     run on the stand-in database, and the page's markup read from the source.
+//   - the page's read (loadTemplatesData, src/lib/admin/templates-data.ts,
+//     since admin rebuild 2) run on the stand-in database, and the row's
+//     markup read from its source (TemplateRow.tsx).
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
@@ -417,41 +418,31 @@ console.log('\n=== Finding 1: the row, rendered ===')
 
 console.log('\n=== Finding 1: the page reads the course and renders the row from the view ===')
 {
-  const PAGE = 'src/app/admin/(authenticated)/templates/page.tsx'
-  const src = fromSrc(PAGE)
-  const sf = ts.createSourceFile('page.tsx', src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-  let load = null
-  const visit = (n) => { if (!load && ts.isFunctionDeclaration(n) && n.name?.text === 'load') load = n; else ts.forEachChild(n, visit) }
-  visit(sf)
-  const runLoad = async (db) => {
-    const seen = {}
-    const scope = {
-      setLoading: (v) => { seen.loading = v }, setLive: (v) => { seen.live = v }, setRows: (v) => { seen.rows = v },
-      setDrafts: (v) => { seen.drafts = v }, supabase: fakeClient(db), readLiveCourse: ONOFF.readLiveCourse,
-      weekRank: () => 0, EMPTY_TRIGGER: { all: [] },
-    }
-    const js = plainJs(`const __f = ${load.getText(sf)};`)
-    await new Function(...Object.keys(scope), `${js}\nreturn __f;`)(...Object.values(scope))()
-    return seen
-  }
+  // Since admin rebuild 2 (WI-8) the page is src/components/admin/templates/
+  // TemplatesView.tsx, its rows TemplateRow.tsx, and its read
+  // loadTemplatesData (src/lib/admin/templates-data.ts, copied by build.mjs).
+  // templates-page.test.mjs renders the row.
+  const { loadTemplatesData } = await import('./_gen/templates-data.ts')
   const db = courseDb('new')
   db.tables.templates = templateSet(false)
-  const fine = await runLoad(db)
-  ok(fine.live?.course?.courseIsNew === true && fine.live.error === null && fine.rows?.length === 19 && fine.loading === false,
-     'the page\'s load(), run on the stand-in database: the templates and the live course (new) together', show(fine.live))
+  const fine = await loadTemplatesData(fakeClient(db))
+  ok(fine.ok && fine.data.live.course?.courseIsNew === true && fine.data.live.error === null && fine.data.templates.length === 19,
+     'the page\'s read, run on the stand-in database: the templates and the live course (new) together', show(fine.ok && fine.data.live))
   db.fail['admin_config.select'] = { message: 'permission denied for table admin_config' }
-  const failed = await runLoad(db)
-  ok(failed.live?.course === null && failed.live.error === UNREAD && failed.rows?.length === 19,
-     'a failed course read keeps the editor and records why, for the rows that need it', show(failed.live))
+  const failed = await loadTemplatesData(fakeClient(db))
+  ok(failed.ok && failed.data.live.course === null && failed.data.live.error === UNREAD && failed.data.templates.length === 19,
+     'a failed course read keeps the editor and records why, for the rows that need it', show(failed.ok && failed.data.live))
+  const src = fromSrc('src/components/admin/templates/TemplateRow.tsx')
+  const view = fromSrc('src/components/admin/templates/TemplatesView.tsx')
   ok(src.includes('const onOff = onOffView(t, live, dirty);')
-       && /\{onOff\.kind === "switch" && !onOff\.on && \(\s*<span\s+title="This template is off\."/.test(src)
-       && /<TemplateOnOff\s+view=\{onOff\}\s+canEdit=\{canEdit\}\s+busy=\{saving === t\.id\}\s+onToggle=\{\(\) => void setActive\(t\.id, !t\.is_active\)\}\s*\/>/.test(src),
-     'in the source, each row takes its view from onOffView: the header shows "Off" only where the switch works, and the open row renders TemplateOnOff wired to setActive')
-  ok(!src.includes('turnOnWaits') && !/\{!t\.is_active && \(/.test(src),
+       && /\{onOff\.kind === "switch" && !onOff\.on && <Pill tone="warning">Off<\/Pill>\}/.test(src)
+       && /<TemplateOnOff view=\{onOff\} canEdit=\{canEdit\} busy=\{busy\} onToggle=\{handlers\.onSetActive\} \/>/.test(src)
+       && /onSetActive: \(\) => void setActive\(t\)/.test(view) && view.includes('transport.setActive(t.id, !t.is_active)'),
+     'in the source, each row takes its view from onOffView: the header shows "Off" only where the switch works, and the open row renders TemplateOnOff wired to the page\'s setActive')
+  ok(!src.includes('turnOnWaits') && !/\{!t\.is_active && \(/.test(src) && !view.includes('turnOnWaits'),
      'and the page no longer decides on or off itself (admin-3\'s badge read !t.is_active on every row)')
 }
 
-// ════════════════════════════════════════════════════════════════════════════
 console.log('\n=== Finding 2: the live course, as the page reads it ===')
 {
   const n = LIVE.new.course, o = LIVE.old.course

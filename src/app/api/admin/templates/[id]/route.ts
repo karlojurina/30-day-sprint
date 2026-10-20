@@ -1,13 +1,16 @@
 /**
- * GET  /api/admin/templates/:id   — single template (team read)
- * PUT  /api/admin/templates/:id   — update body / title / metadata
+ * GET    /api/admin/templates/:id   single template (team read)
+ * PUT    /api/admin/templates/:id   update body / title / metadata
  *                                   (founder + admin only)
+ * DELETE /api/admin/templates/:id   delete a custom template (below)
  *
- * PUT body — partial; only provided keys are touched:
- *   { body?, title?, intent?, tone?, trigger_description?, is_active?, word_count? }
+ * PUT body, partial; only provided keys are touched:
+ *   { body?, title?, intent?, tone?, trigger_description?, is_active?,
+ *     word_count?, bucket?, trigger_config? }
+ * trigger_config: null clears, an object replaces. The Templates page sends
+ * only the fields that changed (changedFields, src/lib/admin/templates-data.ts).
  *
- * scenario_id, bucket, week, is_admin_only are intentionally NOT editable
- * via this endpoint — they're structural and locked at seed time.
+ * scenario_id, week and is_admin_only are not editable here.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -82,29 +85,52 @@ export async function PUT(request: NextRequest, ctx: RouteContext) {
 }
 
 /**
- * DELETE /api/admin/templates/:id — delete any template.
+ * DELETE /api/admin/templates/:id: delete a CUSTOM template (founder +
+ * admin only).
  *
- * Built-ins used to be protected, but Karlo wants full control over
- * which scenarios fire. Deleting a built-in is non-destructive:
- *   - tasks.template_id has ON DELETE SET NULL, so historical tasks
- *     keep their row + behavior_summary but lose the link.
- *   - The CSM cron `if (!templateId) continue;` guard means built-in
- *     scenarios whose template is missing just stop creating new tasks.
+ * A built-in is refused with a 400 since admin rebuild 2 (WI-8): no route
+ * can make a built-in scenario again, so a deleted one was gone for good,
+ * and the crons that look for it went quiet (`if (!templateId) continue;`).
+ * Where a built-in's switch works, Turn off on the Templates page stops it
+ * instead (src/lib/template-on-off.ts). Deleting a custom template is
+ * non-destructive for history: tasks.template_id has ON DELETE SET NULL, so
+ * its tasks keep their row and behavior_summary but lose the link.
  *
- * Re-seeding the deleted template = re-running v27's seed insert (with
- * the matching scenario_id and ON CONFLICT DO NOTHING removed).
+ * The delete itself is limited to custom rows (`is_custom = true`), so a
+ * built-in is never deleted, whatever else happens in between; a template
+ * that was not deleted is then read to answer 400 (a built-in) or 404.
  */
 export async function DELETE(request: NextRequest, ctx: RouteContext) {
   const auth = await requireTeam(request, ["founder", "admin"]);
   if (isAuthFailure(auth)) return auth.error;
   const { id } = await ctx.params;
 
-  const { error } = await auth.supabase
+  const { data: deleted, error } = await auth.supabase
     .from("templates")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .eq("is_custom", true)
+    .select("id");
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
-  return NextResponse.json({ ok: true });
+  if (deleted && deleted.length > 0) {
+    return NextResponse.json({ ok: true });
+  }
+
+  const { data: found, error: readError } = await auth.supabase
+    .from("templates")
+    .select("id")
+    .eq("id", id)
+    .maybeSingle();
+  if (readError) {
+    return NextResponse.json({ error: readError.message }, { status: 500 });
+  }
+  if (found) {
+    return NextResponse.json(
+      { error: "A built-in template can't be deleted. Only a custom one can." },
+      { status: 400 },
+    );
+  }
+  return NextResponse.json({ error: "Template not found" }, { status: 404 });
 }

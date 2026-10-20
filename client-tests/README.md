@@ -320,6 +320,37 @@ subscribed" were renamed on purpose, D12) and ignore the new
 `tasks_floor` field; `whop-backfill.test.mjs` and `streak.test.mjs` read the
 student page's note and streak where they live now.
 
+The Templates, Survey, Team and Insights pages (admin rebuild 2, WI-8 and
+WI-9, 2026-10-20) each have a suite. `build.mjs` copies their data modules
+(`templates-data.ts`, `survey-data.ts`, `team-data.ts`, `insights-data.ts`,
+the Templates page's transport and `call-route.ts`, whose browser client is
+the hand-written `_gen/a2-browser-stub.ts`) and, under `a2-` names so they
+never meet another lane's copies, the message renderer and the types file
+it reads (`a2-templates.ts`, `a2-database.ts`); the suites compile the
+pages' components themselves (TypeScript, JSX to react/jsx-runtime) into
+`_gen/a2-*.mjs` and render them with React's server renderer.
+`templates-page.test.mjs` (71): the loader on the stand-in database, the
+Message settings panel's warnings and switches (held to the crons' own
+`readDmEnabled` on 12 combinations), the panel rendered for a founder and
+a csm, its saves through the real `PUT /api/admin/config` and `requireTeam`,
+the preview's live links, Delete for a custom template only (on the row and
+in the route, with the route at `ca9b5ef` as the control), Save sending
+only what changed, "Membership status", and the trigger editor reading
+nothing itself. `survey-page.test.mjs` (22): 250 applications and 1,500
+answers on a shuffled database, every one read once (the old read on
+`created_at` repeats or skips answers on 11 of 12 shuffles), at most 100
+ids per `.in()`, every failed read named, the 30% page's status words.
+`team-page.test.mjs` (14): the invite's `name@ecomuniversity.com`, the
+page's first state rendered, its rules, and its calls through the real
+team-members routes. `insights-page.test.mjs` (14): the moved reads, each
+failure said (they showed 0), the claims counted once on 8 shuffles (the
+old read on the claim time fails all 8). `template-on-off`, `admin-pages`
+and `csm-cutover` follow the new files and the one renamed label. Each was
+also run against a broken copy (Delete allowed for a built-in, conditions
+always sent, every template counted for the warning, batches of 300, the
+answers paged on `created_at`, the route deleting any template): each
+break fails it.
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

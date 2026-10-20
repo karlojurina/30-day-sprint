@@ -6,6 +6,9 @@
  * Turn off; Turn on waits, with the reason beside it, while the view gives
  * one. Where the switch would not stop the template's tasks, it shows the
  * view's one line and no button. src/lib/template-on-off.ts decides which.
+ *
+ * In the brand kit's dark look since admin rebuild 2 (WI-8): the button is
+ * the raised pill, 44px tall, and the line reads at 13px.
  */
 
 import type { OnOffView } from "@/lib/template-on-off";
@@ -26,8 +29,8 @@ export function TemplateOnOff({
     return (
       <p
         style={{
-          marginTop: 14,
           fontSize: 13,
+          lineHeight: 1.5,
           color: "var(--color-text-secondary)",
         }}
       >
@@ -38,11 +41,12 @@ export function TemplateOnOff({
   const waits = !view.on && view.turnOnWaits != null;
   const disabled = busy || waits;
   return (
-    <div className="flex items-center gap-3 flex-wrap" style={{ marginTop: 14 }}>
+    <div className="flex items-center gap-3 flex-wrap">
       <span
         style={{
           fontSize: 13,
-          color: view.on ? "var(--color-text-secondary)" : "var(--color-warning)",
+          fontWeight: 600,
+          color: view.on ? "var(--color-text-primary)" : "var(--color-warning)",
         }}
       >
         {view.line}
@@ -53,14 +57,15 @@ export function TemplateOnOff({
           disabled={disabled}
           onClick={onToggle}
           style={{
-            padding: "8px 12px",
-            fontSize: 12,
-            fontWeight: 500,
-            borderRadius: 6,
-            background: "transparent",
+            minHeight: 44,
+            padding: "0 16px",
+            fontSize: 13,
+            fontWeight: 600,
+            borderRadius: "var(--radius-pill)",
+            background: "var(--color-bg-elevated)",
             border: "1px solid var(--color-border)",
-            color: "var(--color-text-secondary)",
-            opacity: disabled ? 0.5 : 1,
+            color: "var(--color-text-primary)",
+            opacity: disabled ? 0.4 : 1,
             cursor: disabled ? "not-allowed" : "pointer",
           }}
         >
@@ -68,7 +73,7 @@ export function TemplateOnOff({
         </button>
       )}
       {canEdit && waits && (
-        <span style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>
+        <span style={{ fontSize: 13, lineHeight: 1.5, color: "var(--color-text-secondary)" }}>
           {view.turnOnWaits}
         </span>
       )}

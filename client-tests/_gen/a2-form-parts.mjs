@@ -1,0 +1,53 @@
+"use client";
+import { jsx as _jsx, jsxs as _jsxs } from "react/jsx-runtime";
+import { T } from "./a2-ui.mjs";
+import { TAP } from "./a2-list-parts.mjs";
+/**
+ * Form pieces the Templates and Team pages share (admin rebuild 2, WI-8 and
+ * WI-9), in the brand kit's dark look. In this lane's own folder so the
+ * shared list-parts.tsx and ui.tsx stay as milestone 1 left them.
+ *
+ * Every field is 44px tall at least with 16px text: a phone's browser zooms
+ * the page into a field with smaller text.
+ */
+export const INPUT = {
+    width: "100%",
+    minHeight: TAP,
+    padding: "0 12px",
+    fontSize: 16,
+    fontFamily: "inherit",
+    borderRadius: "var(--radius-control)",
+    border: "1px solid var(--color-border-strong)",
+    background: "var(--color-bg-card)",
+    color: "var(--color-text-primary)",
+};
+export const TEXTAREA = {
+    ...INPUT,
+    padding: "10px 12px",
+    lineHeight: 1.55,
+    resize: "vertical",
+};
+/** A labelled field: the eyebrow label, the control, and an optional line under it. */
+export function Field({ label, htmlFor, hint, children, }) {
+    return (_jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 6 }, children: [_jsx("label", { htmlFor: htmlFor, style: { ...T.eyebrow, color: "var(--color-text-secondary)" }, children: label }), children, hint && _jsx("p", { style: { ...T.bodyDim, lineHeight: 1.5 }, children: hint })] }));
+}
+/** A coloured dot beside words: status is never colour alone. */
+export function Dot({ color }) {
+    return (_jsx("span", { "aria-hidden": "true", style: { flex: "none", width: 8, height: 8, marginTop: 6, borderRadius: 999, background: color } }));
+}
+/** A lasting problem the page shows until it is fixed: an orange dot and the sentence. */
+export function WarningLine({ children }) {
+    return (_jsxs("div", { role: "status", style: {
+            display: "flex",
+            gap: 10,
+            alignItems: "flex-start",
+            padding: "10px 14px",
+            borderRadius: "var(--radius-control)",
+            background: "var(--color-bg-elevated)",
+            border: "1px solid var(--color-border)",
+        }, children: [_jsx(Dot, { color: "var(--color-warning)" }), _jsx("p", { style: { ...T.body, lineHeight: 1.5 }, children: children })] }));
+}
+/** A section heading inside a card. */
+export function SubHeading({ children }) {
+    return _jsx("h3", { style: { ...T.eyebrow, color: "var(--color-text-secondary)" }, children: children });
+}

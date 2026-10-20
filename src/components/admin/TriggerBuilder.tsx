@@ -6,11 +6,11 @@
  * The builder is intentionally jargon-light:
  *   - "When ALL of these are true:" header
  *   - Each row: [Metric ▼] [Sub-param ▼ if applicable] [Op ▼] [Value]
- *   - Operators are phrases ("is at least", "is more than", "is not") —
+ *   - Operators are phrases ("is at least", "is more than", "is not"),
  *     never raw symbols. Karlo doesn't program; this should read like
  *     a sentence.
  *   - Boolean metrics ("Region 1 is complete") collapse the value
- *     input — only "is" / "is not".
+ *     input: only "is" / "is not".
  *   - Live preview at the bottom shows the rendered sentence.
  *
  * The component is fully controlled: parent owns the TriggerConfig
@@ -22,15 +22,18 @@
  * (admin_config.curriculum_reset_at), the three metrics that measure pace
  * against the old 30-day clock are not offered: on the new course they
  * never match (cutover PRD, C5).
+ *
+ * The page reads that catalog once and hands it in (admin rebuild 2, WI-8:
+ * readTriggerCatalog in src/lib/admin/templates-data.ts). This component
+ * used to read it itself, once for every open row, which also made the dev
+ * page /dev/admin/templates reach for the database.
+ *
+ * Its controls are the brand kit's: 44px tall, 16px text (a phone's browser
+ * zooms into a smaller field), the 12px control radius.
  */
 
-import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase-browser";
-import { getCurriculumResetAt } from "@/lib/curriculum-reset";
-import {
-  METRICS,
-  REGION_LABEL,
-} from "@/lib/csm-triggers";
+import { METRICS, REGION_LABEL } from "@/lib/csm-triggers";
+import type { TriggerCatalog, TriggerCatalogRead, TriggerOption } from "@/lib/admin/templates-data";
 import type {
   Condition,
   ConditionMetric,
@@ -60,106 +63,13 @@ const CLOCK_METRICS = new Set<ConditionMetric>([
   "region_pace",
 ]);
 
-interface Option {
-  id: string;
-  label: string;
-}
-
-/** What the dropdowns offer, read from the live catalog. */
-interface Catalog {
-  /** Areas in order_num order. */
-  regions: Option[];
-  /** Lessons with an action item, in course order. */
-  actionLessons: Option[];
-  /** True once the course switch has run. */
-  courseIsNew: boolean;
-}
-
-/**
- * Reads the areas, the action lessons and the reset key. `catalog` stays
- * null while loading and after a failed read, and `error` says why; the
- * dropdowns that need the catalog are disabled until it arrives, so a
- * condition is never given a default that was guessed.
- */
-function useTriggerCatalog(): { catalog: Catalog | null; error: string | null } {
-  const [state, setState] = useState<{
-    catalog: Catalog | null;
-    error: string | null;
-  }>({ catalog: null, error: null });
-
-  useEffect(() => {
-    let cancelled = false;
-    const supabase = createClient();
-    (async () => {
-      try {
-        const [resetAt, regionsRes, lessonsRes] = await Promise.all([
-          getCurriculumResetAt(supabase),
-          supabase.from("regions").select("id, name, order_num").order("order_num"),
-          supabase
-            .from("lessons")
-            .select("id, title, region_id, day, sort_order")
-            .eq("requires_action", true),
-        ]);
-        if (regionsRes.error) throw new Error(`areas: ${regionsRes.error.message}`);
-        if (lessonsRes.error) throw new Error(`lessons: ${lessonsRes.error.message}`);
-        const regions = (regionsRes.data ?? []) as Array<{
-          id: string;
-          name: string;
-          order_num: number;
-        }>;
-        const order = new Map(regions.map((r) => [r.id, r.order_num]));
-        const lessons = [
-          ...((lessonsRes.data ?? []) as Array<{
-            id: string;
-            title: string;
-            region_id: string;
-            day: number | null;
-            sort_order: number;
-          }>),
-        ].sort(
-          (a, b) =>
-            (order.get(a.region_id) ?? 0) - (order.get(b.region_id) ?? 0) ||
-            (a.day ?? 0) - (b.day ?? 0) ||
-            a.sort_order - b.sort_order,
-        );
-        if (cancelled) return;
-        setState({
-          catalog: {
-            regions: regions.map((r) => ({
-              id: r.id,
-              label: REGION_LABEL[r.id] ?? `Area ${r.order_num} (${r.name})`,
-            })),
-            actionLessons: lessons.map((l) => ({
-              id: l.id,
-              label: `${l.title} (${l.id})`,
-            })),
-            courseIsNew: resetAt != null,
-          },
-          error: null,
-        });
-      } catch (e) {
-        if (cancelled) return;
-        setState({
-          catalog: null,
-          error: e instanceof Error ? e.message : String(e),
-        });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return state;
-}
-
 /**
  * The options for one dropdown, with the condition's current value kept
  * in the list even when the catalog no longer has it (a template written
  * for the old course), so the select never shows a different value from
  * the one saved.
  */
-function withCurrent(options: Option[], current: string, loaded: boolean): Option[] {
+function withCurrent(options: TriggerOption[], current: string, loaded: boolean): TriggerOption[] {
   if (options.some((o) => o.id === current)) return options;
   // An old area keeps its old label; a lesson id stands for itself.
   const label = REGION_LABEL[current] ?? current;
@@ -173,11 +83,13 @@ interface Props {
   value: TriggerConfig;
   onChange: (next: TriggerConfig) => void;
   disabled?: boolean;
+  /** The live catalog, read once by the page; null with the reason while it could not be read. */
+  catalog: TriggerCatalogRead;
 }
 
-export function TriggerBuilder({ value, onChange, disabled }: Props) {
+export function TriggerBuilder({ value, onChange, disabled, catalog: read }: Props) {
   const conds = value.all ?? [];
-  const { catalog, error } = useTriggerCatalog();
+  const { catalog, error } = read;
 
   const updateRow = (idx: number, next: Condition) => {
     onChange({ all: conds.map((c, i) => (i === idx ? next : c)) });
@@ -194,8 +106,9 @@ export function TriggerBuilder({ value, onChange, disabled }: Props) {
   return (
     <div
       style={{
-        background: "var(--color-fill-secondary)",
-        borderRadius: 8,
+        background: "var(--color-bg-elevated)",
+        border: "1px solid var(--color-border)",
+        borderRadius: "var(--radius-control)",
         padding: 14,
       }}
     >
@@ -205,28 +118,31 @@ export function TriggerBuilder({ value, onChange, disabled }: Props) {
           fontWeight: 600,
           letterSpacing: "0.08em",
           textTransform: "uppercase",
-          color: "var(--color-text-tertiary)",
+          color: "var(--color-text-secondary)",
           marginBottom: 4,
         }}
       >
-        When to fire this DM
+        When this message comes up
       </p>
       <p
         style={{
-          fontSize: 12,
+          fontSize: 13,
+          lineHeight: 1.5,
           color: "var(--color-text-secondary)",
           marginBottom: 10,
         }}
       >
-        Send this DM when <strong>ALL</strong> of these are true. To
-        cover multiple OR cases, make separate templates.
+        A task comes up when <strong style={{ color: "var(--color-text-primary)" }}>all</strong> of these are true.
+        For either-or cases, make one template for each.
       </p>
 
       {error && (
         <p
+          role="alert"
           style={{
-            fontSize: 12,
-            color: "var(--color-danger)",
+            fontSize: 13,
+            lineHeight: 1.5,
+            color: "var(--color-text-primary)",
             marginBottom: 10,
           }}
         >
@@ -238,13 +154,12 @@ export function TriggerBuilder({ value, onChange, disabled }: Props) {
       {conds.length === 0 && (
         <p
           style={{
-            fontSize: 12,
-            color: "var(--color-text-tertiary)",
-            fontStyle: "italic",
+            fontSize: 13,
+            color: "var(--color-text-secondary)",
             padding: "8px 0",
           }}
         >
-          No conditions yet — add one below.
+          No conditions yet. Add one below.
         </p>
       )}
 
@@ -262,21 +177,8 @@ export function TriggerBuilder({ value, onChange, disabled }: Props) {
       </div>
 
       {!disabled && (
-        <button
-          type="button"
-          onClick={addRow}
-          style={{
-            marginTop: 10,
-            padding: "6px 12px",
-            fontSize: 12,
-            background: "transparent",
-            border: "1px dashed var(--color-border-hover)",
-            borderRadius: 6,
-            color: "var(--color-text-secondary)",
-            cursor: "pointer",
-          }}
-        >
-          + Add another condition
+        <button type="button" onClick={addRow} style={{ ...pillStyle(), marginTop: 10 }}>
+          Add a condition
         </button>
       )}
 
@@ -284,19 +186,19 @@ export function TriggerBuilder({ value, onChange, disabled }: Props) {
         <div
           style={{
             marginTop: 14,
-            padding: 10,
-            borderRadius: 6,
-            background: "var(--color-bg-primary)",
+            padding: 12,
+            borderRadius: "var(--radius-chip)",
+            background: "var(--color-bg-card)",
             border: "1px solid var(--color-border)",
           }}
         >
           <p
             style={{
-              fontSize: 10,
+              fontSize: 11,
               fontWeight: 600,
               letterSpacing: "0.08em",
               textTransform: "uppercase",
-              color: "var(--color-text-tertiary)",
+              color: "var(--color-text-secondary)",
               marginBottom: 4,
             }}
           >
@@ -309,7 +211,7 @@ export function TriggerBuilder({ value, onChange, disabled }: Props) {
               lineHeight: 1.55,
             }}
           >
-            Fire when{" "}
+            Comes up when{" "}
             {conds.map((c, i) => {
               const def = METRICS[c.metric];
               const text = def.describe(c);
@@ -323,7 +225,7 @@ export function TriggerBuilder({ value, onChange, disabled }: Props) {
                       }}
                     >
                       {" "}
-                      AND{" "}
+                      and{" "}
                     </span>
                   )}
                   {text}
@@ -347,7 +249,7 @@ function ConditionRow({
 }: {
   cond: Condition;
   /** Null while loading or after a failed read. */
-  catalog: Catalog | null;
+  catalog: TriggerCatalog | null;
   disabled?: boolean;
   onChange: (c: Condition) => void;
   onRemove: () => void;
@@ -366,7 +268,7 @@ function ConditionRow({
         !(METRICS[m].param === "lesson" && !firstLesson)),
   );
 
-  // Change metric → reset to a sensible default for the new shape.
+  // Change metric: reset to a sensible default for the new shape.
   const handleMetricChange = (newId: ConditionMetric) => {
     const newDef = METRICS[newId];
     if (newDef.input === "boolean") {
@@ -379,7 +281,7 @@ function ConditionRow({
           op: "is",
         } as Condition);
       } else {
-        // Plain boolean (no param) — has_logged_into_app and similar.
+        // Plain boolean (no param): has_logged_into_app and similar.
         onChange({ metric: newId, op: "is" } as Condition);
       }
     } else if (newDef.input === "enum") {
@@ -408,9 +310,9 @@ function ConditionRow({
       className="flex flex-wrap items-center gap-2"
       style={{
         padding: 8,
-        background: "var(--color-bg-elevated)",
+        background: "var(--color-bg-card)",
         border: "1px solid var(--color-border)",
-        borderRadius: 6,
+        borderRadius: "var(--radius-chip)",
       }}
     >
       {/* Metric */}
@@ -503,7 +405,7 @@ function ConditionRow({
         />
       )}
       {inputType === "number" && def.unit && (
-        <span style={{ fontSize: 12, color: "var(--color-text-tertiary)" }}>
+        <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
           {def.unit}
         </span>
       )}
@@ -527,34 +429,39 @@ function ConditionRow({
       <div className="flex-1" />
 
       {!disabled && (
-        <button
-          type="button"
-          onClick={onRemove}
-          aria-label="Remove condition"
-          style={{
-            background: "transparent",
-            border: "none",
-            color: "var(--color-text-tertiary)",
-            fontSize: 18,
-            cursor: "pointer",
-            padding: "0 6px",
-            lineHeight: 1,
-          }}
-        >
-          ×
+        <button type="button" onClick={onRemove} style={pillStyle()}>
+          Remove
         </button>
       )}
     </div>
   );
 }
 
+/** A dropdown or a number: 44px tall, 16px text, so a phone's browser does not zoom into it. */
 function selectStyle(): React.CSSProperties {
   return {
-    padding: "6px 8px",
-    fontSize: 13,
-    background: "var(--color-bg-primary)",
-    border: "1px solid var(--color-border)",
-    borderRadius: 5,
+    minHeight: 44,
+    maxWidth: "100%",
+    padding: "0 10px",
+    fontSize: 16,
+    background: "var(--color-bg-elevated)",
+    border: "1px solid var(--color-border-strong)",
+    borderRadius: "var(--radius-control)",
     color: "var(--color-text-primary)",
+  };
+}
+
+/** The raised pill of ui.tsx's Button (variant "raised"): 44px, a hairline. */
+function pillStyle(): React.CSSProperties {
+  return {
+    minHeight: 44,
+    padding: "0 16px",
+    fontSize: 13,
+    fontWeight: 600,
+    borderRadius: "var(--radius-pill)",
+    border: "1px solid var(--color-border)",
+    background: "var(--color-bg-elevated)",
+    color: "var(--color-text-primary)",
+    cursor: "pointer",
   };
 }

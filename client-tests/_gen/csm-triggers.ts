@@ -882,6 +882,8 @@ export const METRICS: Record<import("./types-erased.ts").ConditionMetric, Metric
     input: "number",
     describe: (c) => describeNumeric("Days since last login", c),
   },
+  // Admin rebuild 2, D12: the admin says "membership", never "subscription".
+  // The metric's id stays (custom templates hold it); only the words moved.
   membership_status: {
     id: "membership_status",
     label: "Membership status",

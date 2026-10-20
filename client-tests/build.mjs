@@ -499,3 +499,57 @@ gen('../src/app/api/admin/lesson-feedback/route.ts', './_gen/admin-lesson-feedba
   ['from "@/lib/admin/lesson-feedback"', 'from "./lesson-feedback.ts"'],
   ...toStub('next/server'),
 ])
+
+// ── Admin rebuild 2, WI-8 and WI-9 (the templates lane): Templates, Survey,
+// Team, Insights. Each page's data module, as the page imports it; the
+// suites templates-page, survey-page, team-page and insights-page run them on
+// the stand-in database, and compile the pages' components themselves.
+// template-on-off.ts as template-on-off.test.mjs copies it (the same bytes),
+// and metrics-definitions.ts as cron-failed-reads.test.mjs does, so these
+// suites also run alone. The type-only imports point at a file that does not
+// exist, as csm-triggers.ts's do.
+gen('../src/lib/template-on-off.ts', './_gen/template-on-off.ts', [
+  ['from "@/lib/csm-triggers"', 'from "./csm-triggers.ts"'],
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ['from "@/types/database"', 'from "./types-erased.ts"'],
+])
+gen('../src/lib/admin/metrics-definitions.ts', './_gen/metrics-definitions.ts', [['from "@/lib/constants"', 'from "./constants.ts"']])
+const LANE_TYPES = [
+  ['from "@/lib/admin/admin-transport"', 'from "./types-erased.ts"'],
+  ['from "@/types/database"', 'from "./types-erased.ts"'],
+]
+gen('../src/lib/admin/templates-data.ts', './_gen/templates-data.ts', [
+  ...LANE_TYPES,
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ['from "@/lib/csm-triggers"', 'from "./csm-triggers.ts"'],
+  ['from "@/lib/template-on-off"', 'from "./template-on-off.ts"'],
+  ['from "@/lib/admin/config-keys"', 'from "./config-keys.ts"'],
+])
+gen('../src/lib/admin/survey-data.ts', './_gen/survey-data.ts', [
+  ...LANE_TYPES,
+  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+])
+gen('../src/lib/admin/team-data.ts', './_gen/team-data.ts', LANE_TYPES)
+gen('../src/lib/admin/insights-data.ts', './_gen/insights-data.ts', [
+  ...LANE_TYPES,
+  ['from "@/lib/constants"', 'from "./constants.ts"'],
+  ['from "@/lib/admin/metrics-definitions"', 'from "./metrics-definitions.ts"'],
+  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+])
+// The message renderer the preview runs (templates.ts): its one value import
+// is getDayNumber from the types file, which has no imports and runs as it is.
+gen('../src/types/database.ts', './_gen/a2-database.ts')
+gen('../src/lib/templates.ts', './_gen/a2-templates.ts', [['from "@/types/database"', 'from "./a2-database.ts"']])
+// The Templates page's real calls (templates-transport.ts and call-route.ts):
+// the browser client goes to a hand-written stand-in
+// (a2-browser-stub.ts), so fetch() reaches the routes' copies.
+gen('../src/lib/admin/call-route.ts', './_gen/call-route.ts', [
+  ['from "@/lib/supabase-browser"', 'from "./a2-browser-stub.ts"'],
+  ['from "@/lib/admin/admin-transport"', 'from "./types-erased.ts"'],
+])
+gen('../src/lib/admin/templates-transport.ts', './_gen/templates-transport.ts', [
+  ['from "@/lib/supabase-browser"', 'from "./a2-browser-stub.ts"'],
+  ['from "@/lib/admin/call-route"', 'from "./call-route.ts"'],
+  ['from "@/lib/admin/templates-data"', 'from "./templates-data.ts"'],
+  ['from "@/types/database"', 'from "./types-erased.ts"'],
+])

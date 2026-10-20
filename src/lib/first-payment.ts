@@ -27,10 +27,10 @@
  * list changed shape on 2026-09-02-1, and the key's own pin is older. In the
  * pinned shape an amount is a money object ({ amount: "97.00", currency, ... })
  * and the buyer is `user: { id, ... }`; a bare number (the older shape) reads
- * too. At most 4 requests a second, start to start. A 429 is waited out (the
- * seconds Whop names, or 15, at most 30) and retried twice; a third ends the
- * read. The facts behind all of it: _admin/prds/first-paid-fix/ in the
- * workspace (outside this repository).
+ * too. At most 4 requests a second, start to start, shared by every lane of a
+ * walk. A 429 is waited out (the seconds Whop names, or 15, at most 30) and
+ * retried twice; a third ends the read. The facts behind all of it:
+ * _admin/prds/first-paid-fix/ in the workspace (outside this repository).
  *
  * A PAGE IN ANOTHER SHAPE. In the pinned shape every payment carries its
  * buyer and its total. A page with rows of which not one carries a buyer, or
@@ -46,7 +46,8 @@
  *     for anyone else means Whop ignored the filter, and the read answers an
  *     error and no date, so the caller writes nothing.
  *   walkFirstPayments: every paid payment of the account once, grouped by user
- *     (POST /api/admin/first-paid-repair).
+ *     (POST /api/admin/first-paid-repair), in one lane, or in 4 lanes that
+ *     split the account's history by created_at and read side by side.
  *
  * Neither writes anything. A failure comes back as a kind, never as Whop's
  * message, so no caller can pass a Whop id on by accident.
@@ -68,16 +69,35 @@ const WAIT_429_MAX_S = 30;
 const USER_MAX_PAGES = 10;
 /** The account held about 160 pages of payments on 2026-09-03; a walk past this many is stuck. */
 const WALK_MAX_PAGES = 2_000;
+/**
+ * Where a walk in 4 lanes splits the account's payments by created_at. Sales
+ * begin in February 2025 and grow month on month
+ * (system-docs/plan_2026-09-03_revenue-stats-page.md), so the later stretches
+ * are shorter, each meant to hold about a quarter of the pages. A guess, not a
+ * count: an uneven split only reads slower.
+ */
+export const WALK_LANE_SPLITS = [
+  "2025-12-01T00:00:00.000Z",
+  "2026-04-01T00:00:00.000Z",
+  "2026-07-15T00:00:00.000Z",
+] as const;
+/**
+ * Each lane asks for a second more on either side of its splits, so a payment
+ * at a split is read whether Whop's created_after and created_before take in
+ * their own moment or not. A payment two lanes read is counted once, by its id.
+ */
+const LANE_OVERLAP_MS = 1_000;
 
 /** A money field in either shape: { amount: "97.00", ... } from 2026-09-02-1, or a bare number before it. */
 type WhopMoney = { amount?: string | number | null } | number | string | null;
 
-/** The fields of a Whop payment the rule reads, in either shape. */
+/** The fields of a Whop payment the rule and the walk read, in either shape. */
 export interface WhopPayment {
   id?: string;
   status?: string | null;
   substatus?: string | null;
   paid_at?: string | number | null;
+  created_at?: string | number | null;
   total?: WhopMoney;
   refunded_amount?: WhopMoney;
   user?: { id?: string | null } | null;
@@ -215,7 +235,7 @@ async function fetchBefore(url: string, init: RequestInit, answerBy: number): Pr
   }
 }
 
-/** The requests one read has made, and when the next may start. */
+/** The requests one read has made, and when the next may start. A walk's lanes share one. */
 interface Pace {
   nextAt: number;
   requests: number;
@@ -223,13 +243,14 @@ interface Pace {
 }
 
 type PageRead =
-  | { ok: true; rows: WhopPayment[]; next: string | null }
+  | { ok: true; rows: WhopPayment[]; next: string | null; answerMs: number }
   | { ok: false; fail: PaymentReadFail };
 
 /**
  * One page: paced, a 429 waited out and retried twice. `startBy`: no request
  * starts after it and no 429 wait that would end after it begins.
  * `answerBy`: an answer still missing then is given up. null for no limit.
+ * `answerMs` is how long Whop took to answer the page.
  */
 async function readPage(
   url: string,
@@ -246,11 +267,14 @@ async function readPage(
     },
   };
   for (let attempt = 0; ; attempt++) {
-    const wait = Math.max(0, pace.nextAt - Date.now());
-    if (startBy !== null && Date.now() + wait > startBy) return { ok: false, fail: "time_budget" };
-    if (wait > 0) await sleep(wait);
-    pace.nextAt = Date.now() + WHOP_GAP_MS;
+    // The next free moment of the pace, taken before waiting for it, so
+    // lanes that wait at once each get their own.
+    const at = Math.max(Date.now(), pace.nextAt);
+    if (startBy !== null && at > startBy) return { ok: false, fail: "time_budget" };
+    pace.nextAt = at + WHOP_GAP_MS;
+    if (at > Date.now()) await sleep(at - Date.now());
     pace.requests += 1;
+    const sentAt = Date.now();
     let res: Response | typeof TIMED_OUT;
     try {
       res = answerBy === null ? await fetch(url, init) : await fetchBefore(url, init, answerBy);
@@ -264,7 +288,8 @@ async function readPage(
       const waitMs = waitAfter429Ms(body, res.headers.get("retry-after"));
       if (startBy !== null && Date.now() + waitMs > startBy) return { ok: false, fail: "time_budget" };
       pace.retried429 += 1;
-      await sleep(waitMs);
+      // The limit is the key's, so every lane waits it out.
+      pace.nextAt = Math.max(pace.nextAt, Date.now() + waitMs);
       continue;
     }
     if (res.status === 401 || res.status === 403) return { ok: false, fail: "http_401_403" };
@@ -282,7 +307,7 @@ async function readPage(
       ? page.page_info.end_cursor
       : null;
     if (more && !cursor) return { ok: false, fail: "bad_page" };
-    return { ok: true, rows: page.data as WhopPayment[], next: more ? cursor : null };
+    return { ok: true, rows: page.data as WhopPayment[], next: more ? cursor : null, answerMs: Date.now() - sentAt };
   }
 }
 
@@ -335,10 +360,43 @@ export async function fetchFirstPaymentForUser(
   return failed("too_many_pages");
 }
 
+/** The created_after and created_before a lane of a walk sends; null sends none. */
+export interface WalkLane {
+  after: string | null;
+  before: string | null;
+}
+
+/**
+ * The lanes of a walk. 1: one lane over the whole history. 4: the history cut
+ * at WALK_LANE_SPLITS, each stretch widened by LANE_OVERLAP_MS on either side,
+ * oldest first.
+ */
+export function walkLanes(lanes: 1 | 4): WalkLane[] {
+  if (lanes === 1) return [{ after: null, before: null }];
+  const edges: Array<number | null> = [null, ...WALK_LANE_SPLITS.map((s) => Date.parse(s)), null];
+  return edges.slice(1).map((to, i) => {
+    const from = edges[i];
+    return {
+      after: from === null ? null : new Date(from - LANE_OVERLAP_MS).toISOString(),
+      before: to === null ? null : new Date(to + LANE_OVERLAP_MS).toISOString(),
+    };
+  });
+}
+
+/** Whether a payment was created inside its lane, both ends counted. A created_at that does not read is not. */
+function createdInLane(p: WhopPayment, lane: WalkLane): boolean {
+  const iso = toIso(p.created_at ?? null);
+  if (!iso) return false;
+  const t = Date.parse(iso);
+  return (lane.after === null || t >= Date.parse(lane.after)) && (lane.before === null || t <= Date.parse(lane.before));
+}
+
 export interface FirstPaymentWalk {
-  /** True when the last page was read. A walk that is not complete must not be written from. */
+  /** True when the last page of every lane was read. A walk that is not complete must not be written from. */
   complete: boolean;
   stoppedBecause: "done" | PaymentReadFail;
+  /** How many lanes read the history side by side: 1 or 4. */
+  lanes: number;
   /** Whop user id to the first real payment, ISO. Its keys are Whop ids: never put it in an answer. */
   firstByUser: Map<string, string>;
   /** Pages read. */
@@ -346,6 +404,8 @@ export interface FirstPaymentWalk {
   /** Requests made, retries included. */
   requests: number;
   retried429: number;
+  /** How long Whop took to answer the pages read, summed. */
+  answerMs: number;
   counts: PaymentCounts;
 }
 
@@ -353,40 +413,77 @@ export interface FirstPaymentWalk {
  * Every paid payment of the account, once: GET /api/v1/payments?status=paid
  * &first=100, page after page, grouped by user under the rule. `startBy`: no
  * page starts after it. `answerBy`: a page still unanswered then is given up.
- * Either ends the walk incomplete.
+ * Either ends the walk incomplete. `lanes`: 1 (the default), or 4, which
+ * reads the stretches of walkLanes(4) side by side, each with its
+ * created_after and created_before, inside the same 4 requests a second. A
+ * lane given a payment created outside its stretch ends the walk as
+ * filter_ignored: Whop did not apply the dates, and the lanes would not add
+ * up to the account.
  */
 export async function walkFirstPayments(
-  opts: { startBy?: number; answerBy?: number } = {},
+  opts: { startBy?: number; answerBy?: number; lanes?: 1 | 4 } = {},
 ): Promise<FirstPaymentWalk> {
   const counts = noPaymentCounts();
   const firstByUser = new Map<string, string>();
   const pace: Pace = { nextAt: 0, requests: 0, retried429: 0 };
-  let pages = 0;
+  const lanes = walkLanes(opts.lanes ?? 1);
+  // Shared by the lanes: an object, so each lane reads what another wrote.
+  const walk = { pages: 0, answerMs: 0, stopped: null as PaymentReadFail | null };
   const end = (stoppedBecause: "done" | PaymentReadFail): FirstPaymentWalk => ({
     complete: stoppedBecause === "done",
     stoppedBecause,
+    lanes: lanes.length,
     firstByUser,
-    pages,
+    pages: walk.pages,
     requests: pace.requests,
     retried429: pace.retried429,
+    answerMs: walk.answerMs,
     counts,
   });
   const apiKey = process.env.WHOP_API_KEY;
   if (!apiKey) return end("no_api_key");
-  const cursorsSeen = new Set<string>();
-  let after: string | null = null;
-  for (let page = 0; page < WALK_MAX_PAGES; page++) {
-    const params = new URLSearchParams({ status: "paid", first: String(PAGE_SIZE) });
-    if (after) params.set("after", after);
-    const got = await readPage(`${WHOP_PAYMENTS_URL}?${params}`, apiKey, pace, opts.startBy ?? null, opts.answerBy ?? null);
-    if (!got.ok) return end(got.fail);
-    pages += 1;
-    addFirstPayments(got.rows, firstByUser, counts);
-    if (!got.next) return end("done");
-    // A cursor Whop already gave would read the same pages again, for ever.
-    if (cursorsSeen.has(got.next)) return end("bad_page");
-    cursorsSeen.add(got.next);
-    after = got.next;
-  }
-  return end("too_many_pages");
+  /** Payment ids already counted: one at a split is read by two lanes. */
+  const counted = new Set<string>();
+
+  const walkLane = async (lane: WalkLane): Promise<void> => {
+    const cursorsSeen = new Set<string>();
+    let after: string | null = null;
+    for (;;) {
+      // Another lane failed: the walk is incomplete whatever this one reads.
+      if (walk.stopped) return;
+      if (walk.pages >= WALK_MAX_PAGES) {
+        walk.stopped = "too_many_pages";
+        return;
+      }
+      const params = new URLSearchParams({ status: "paid", first: String(PAGE_SIZE) });
+      if (lane.after) params.set("created_after", lane.after);
+      if (lane.before) params.set("created_before", lane.before);
+      if (after) params.set("after", after);
+      const got = await readPage(`${WHOP_PAYMENTS_URL}?${params}`, apiKey, pace, opts.startBy ?? null, opts.answerBy ?? null);
+      if (walk.stopped) return;
+      if (!got.ok) {
+        walk.stopped = got.fail;
+        return;
+      }
+      if (lanes.length > 1 && !got.rows.every((p) => createdInLane(p, lane))) {
+        walk.stopped = "filter_ignored";
+        return;
+      }
+      walk.pages += 1;
+      walk.answerMs += got.answerMs;
+      const fresh = got.rows.filter((p) => !p.id || !counted.has(p.id));
+      for (const p of fresh) if (p.id) counted.add(p.id);
+      addFirstPayments(fresh, firstByUser, counts);
+      if (!got.next) return;
+      // A cursor Whop already gave would read the same pages again, for ever.
+      if (cursorsSeen.has(got.next)) {
+        walk.stopped = "bad_page";
+        return;
+      }
+      cursorsSeen.add(got.next);
+      after = got.next;
+    }
+  };
+  await Promise.all(lanes.map(walkLane));
+  return end(walk.stopped ?? "done");
 }

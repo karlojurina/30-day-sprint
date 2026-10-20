@@ -6,9 +6,10 @@
 //
 // What runs is the real source, copied by build.mjs: the reader
 // (src/lib/first-payment.ts) on a stand-in for Whop's API that pages
-// GET /api/v1/payments as Whop's v1 does (cursor, first=100; rows served in
-// another shape on demand), and the four writers through their own entry
-// points: the webhook's POST, the login's GET
+// GET /api/v1/payments as Whop's v1 does (cursor, first=100; created_after and
+// created_before for the walk's 4 lanes, which no live call has tried yet,
+// taken in each way Whop might; rows served in another shape on demand), and
+// the four writers through their own entry points: the webhook's POST, the login's GET
 // (its Whop calls as stand-ins in stub-server.ts, the first-payment read
 // included), the sync (runWhopCommunitySync, with the real whop-members.ts and
 // first-payment.ts on the same stand-in fetch) and the backfill route's POST
@@ -24,7 +25,7 @@
 import { createHmac, randomBytes } from 'node:crypto'
 import {
   judgePayment, moneyAmount, addFirstPayments, noPaymentCounts, hasOtherUser, waitAfter429Ms, pageInShape,
-  fetchFirstPaymentForUser, walkFirstPayments, WHOP_PAYMENTS_URL, WHOP_PAYMENTS_VERSION,
+  fetchFirstPaymentForUser, walkFirstPayments, walkLanes, WALK_LANE_SPLITS, WHOP_PAYMENTS_URL, WHOP_PAYMENTS_VERSION,
 } from './_gen/first-payment.ts'
 import { runWhopCommunitySync } from './_gen/whop-sync-runner.ts'
 import { POST as webhook } from './_gen/whop-webhook-route.ts'
@@ -132,6 +133,13 @@ let asked = []
 let answerWith = null
 let latency = 0
 let ignoreUserFilter = false
+/**
+ * How the stand-in takes created_after and created_before, the walk's lanes:
+ * 'inclusive' (a payment at the moment named is listed), 'exclusive' (it is
+ * not), 'ignored' (the whole list, as for a name Whop does not know) or
+ * 'refused' (400, as Whop's native list answers a filter it does not take).
+ */
+let dateFilters = 'inclusive'
 /** When set, every listed payment is served through it: the same payments, in another shape than the pinned one. */
 let reshape = null
 /** The buyer as a bare user_id, no nested user. */
@@ -159,8 +167,18 @@ globalThis.fetch = async (url, init = {}) => {
     const first = Number(u.searchParams.get('first') ?? 20)
     const after = u.searchParams.get('after')
     const from = after ? Number(after.slice(1)) : 0
+    const createdAfter = u.searchParams.get('created_after')
+    const createdBefore = u.searchParams.get('created_before')
+    if ((createdAfter || createdBefore) && dateFilters === 'refused') return answer({ error: 'Unsupported parameter(s)' }, 400)
+    const inDates = (p) => {
+      if (dateFilters === 'ignored') return true
+      const t = RealDate.parse(p.created_at)
+      const lo = createdAfter ? RealDate.parse(createdAfter) : -Infinity
+      const hi = createdBefore ? RealDate.parse(createdBefore) : Infinity
+      return dateFilters === 'exclusive' ? t > lo && t < hi : t >= lo && t <= hi
+    }
     const list = [...payments].sort(byNewest)
-      .filter((p) => (!user || ignoreUserFilter || p.user?.id === user) && (!status || p.status === status))
+      .filter((p) => (!user || ignoreUserFilter || p.user?.id === user) && (!status || p.status === status) && inDates(p))
     const more = list.length > from + first
     const rows = list.slice(from, from + first).map((p) => (reshape ? reshape(p) : p))
     return answer({ data: rows, page_info: { has_next_page: more, end_cursor: more ? `c${from + first}` : null, start_cursor: `c${from}` } })
@@ -174,6 +192,7 @@ function freshWhop() {
   answerWith = null
   latency = 0
   ignoreUserFilter = false
+  dateFilters = 'inclusive'
   reshape = null
   firstPaymentReads.length = 0
 }
@@ -406,6 +425,7 @@ console.log('\n=== The walk: every paid payment of the account, once (the repair
   ok(firsts.size === 108 && w.firstByUser.size === 108 && [...firsts].every(([u, at]) => w.firstByUser.get(u) === at),
      'grouped by buyer: each one\'s earliest payment above 0, as worked out here row by row; the $0-only buyers have none', `${w.firstByUser.size} buyers`)
   ok(w.counts.seen === 250 && w.counts.kept === 225 && w.counts.skipped.zero_total === 25, 'the counts: 250 read, 225 kept, 25 at $0', show(w.counts))
+  ok(w.lanes === 1 && w.answerMs === 0, 'one lane, and Whop\'s answer time summed over its pages (0 here: no latency)', show({ lanes: w.lanes, answerMs: w.answerMs }))
 
   // One row with no buyer and one with no total among whole ones: the page reads.
   resetClock(); freshWhop()
@@ -463,6 +483,104 @@ console.log('\n=== The walk: every paid payment of the account, once (the repair
   resetClock(); freshWhop()
   const empty = await walkFirstPayments()
   ok(empty.complete === true && empty.firstByUser.size === 0 && empty.pages === 1, 'an account with no payment: one page, complete, no buyer')
+}
+
+console.log('\n=== The walk in 4 lanes: the history in 4 stretches, side by side ===')
+{
+  const SPLITS = WALK_LANE_SPLITS.map((x) => RealDate.parse(x))
+  const iso = (t) => new RealDate(t).toISOString()
+  ok(same(walkLanes(1), [{ after: null, before: null }]), 'one lane: no dates sent')
+  ok(same(walkLanes(4), [
+    { after: null, before: iso(SPLITS[0] + 1000) },
+    { after: iso(SPLITS[0] - 1000), before: iso(SPLITS[1] + 1000) },
+    { after: iso(SPLITS[1] - 1000), before: iso(SPLITS[2] + 1000) },
+    { after: iso(SPLITS[2] - 1000), before: null },
+  ]), '4 lanes, oldest first, cut at the 3 splits, each a second wider on either side', show(walkLanes(4)))
+
+  /** 600 payments from February 2025 to October 2026, and 5 at each split: 1 s and half a second either side, and on it. */
+  const history = () => {
+    const list = []
+    const start = RealDate.parse('2025-02-01T00:00:00.000Z')
+    const span = RealDate.parse('2026-10-19T00:00:00.000Z') - start
+    for (let i = 0; i < 600; i++) list.push(pay(W(1000 + (i % 150)), iso(start + Math.floor((span * i) / 600)), i % 10 === 0 ? 0 : 97))
+    SPLITS.forEach((t, k) => [-1000, -500, 0, 500, 1000].forEach((d, j) => list.push(pay(W(2000 + k * 10 + j), iso(t + d), 97))))
+    return list
+  }
+  const shown = (walk) => ({ firsts: Object.fromEntries([...walk.firstByUser].sort()), counts: walk.counts })
+
+  resetClock(); freshWhop()
+  payments = history()
+  const one = await walkFirstPayments()
+  ok(one.complete === true && one.firstByUser.size === 150 && one.counts.seen === 615, 'the history in 1 lane: complete, 615 payments, 150 buyers (15 of them at the splits)', show({ seen: one.counts.seen, buyers: one.firstByUser.size }))
+
+  for (const how of ['inclusive', 'exclusive']) {
+    resetClock(); freshWhop()
+    payments = history()
+    dateFilters = how
+    const four = await walkFirstPayments({ lanes: 4 })
+    ok(four.complete === true && four.lanes === 4 && same(shown(four), shown(one)),
+       `in 4 lanes, Whop taking its dates as ${how}: the same first payments and the same counts as 1 lane, each payment at a split counted once`, show({ seen: four.counts.seen, kept: four.counts.kept }))
+    const firstOfLane = walkLanes(4).map((lane) => paymentRequests().find((q) => (q.params.created_after ?? null) === lane.after && (q.params.created_before ?? null) === lane.before && !q.params.after))
+    ok(firstOfLane.every((q) => q && q.params.status === 'paid' && q.params.first === '100'), 'each lane asks for its own dates, status=paid&first=100',
+       show(firstOfLane.map((q) => q && { after: q.params.created_after, before: q.params.created_before })))
+    const starts = paymentRequests().map((q) => q.at).sort((a, b) => a - b)
+    ok(gaps(starts.map((at) => ({ at }))).every((g) => g >= 250) && starts.length === four.requests && four.requests === four.pages,
+       'and the 4 lanes together still start at most 4 requests a second', show(gaps(starts.map((at) => ({ at })))))
+  }
+
+  // The time it saves: Whop taking 1 s a page.
+  resetClock(); freshWhop()
+  payments = history()
+  latency = 1000
+  let startedAt = clock
+  const slowOne = await walkFirstPayments()
+  const oneTook = clock - startedAt
+  resetClock(); freshWhop()
+  payments = history()
+  latency = 1000
+  startedAt = clock
+  const slowFour = await walkFirstPayments({ lanes: 4 })
+  const fourTook = clock - startedAt
+  ok(slowOne.complete && slowFour.complete && oneTook === 7000 && fourTook <= oneTook / 2,
+     'Whop taking 1 s a page: 1 lane reads its 7 pages in 7 s, 4 lanes the same history in half that or less', show({ oneTook, fourTook, pages: [slowOne.pages, slowFour.pages] }))
+  ok(slowFour.answerMs === slowFour.pages * 1000, 'and Whop\'s answer time is summed per page read (1 s each)', show({ answerMs: slowFour.answerMs, pages: slowFour.pages }))
+
+  // A 429 on one lane: every lane waits it out.
+  resetClock(); freshWhop()
+  payments = history()
+  answerWith = (n) => (n === 3 ? answer('{"error":{"message":"Try again in 5 seconds."}}', 429) : null)
+  const waited = await walkFirstPayments({ lanes: 4 })
+  const reqs = paymentRequests()
+  const T = reqs[2].at
+  const during = reqs.filter((q) => q.at > T && q.at < T + 5000)
+  ok(waited.complete === true && waited.retried429 === 1 && same(shown(waited), shown(one)) && during.length === 3 && during.every((q) => q.at <= T + 750) &&
+     reqs.some((q) => q.at === T + 5000),
+     'a 429 on one lane: only the 3 requests already given their moment go out, then none until the 5 s are over, and the walk ends whole',
+     show(during.map((q) => q.at - T)))
+
+  // Whop not applying the dates: the lanes would not add up to the account, so the walk stops.
+  resetClock(); freshWhop()
+  payments = history()
+  dateFilters = 'ignored'
+  const ignored = await walkFirstPayments({ lanes: 4 })
+  ok(ignored.complete === false && ignored.stoppedBecause === 'filter_ignored', 'Whop ignoring created_after and created_before: a lane gets a payment outside its stretch, filter_ignored, incomplete',
+     show({ stopped: ignored.stoppedBecause, pages: ignored.pages }))
+  resetClock(); freshWhop()
+  payments = history()
+  dateFilters = 'refused'
+  const refused = await walkFirstPayments({ lanes: 4 })
+  ok(refused.complete === false && refused.stoppedBecause === 'http_other', 'Whop refusing the dates (400): http_other, incomplete', show({ stopped: refused.stoppedBecause }))
+  resetClock(); freshWhop()
+  payments = history()
+  reshape = (p) => ({ ...p, created_at: null })
+  const undated = await walkFirstPayments({ lanes: 4 })
+  ok(undated.complete === false && undated.stoppedBecause === 'filter_ignored', 'a payment with no created_at cannot be placed in a lane: filter_ignored, incomplete')
+  resetClock(); freshWhop()
+  payments = history()
+  dateFilters = 'refused'
+  const plain = await walkFirstPayments()
+  ok(plain.complete === true && paymentRequests().every((q) => !('created_after' in q.params) && !('created_before' in q.params)),
+     '1 lane sends no dates, so a Whop that refuses them still reads the whole account')
 }
 
 // ── The writers ──────────────────────────────────────────────────────────────

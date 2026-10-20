@@ -96,6 +96,8 @@ let asked = []
 let latency = 0
 /** When set, answers the nth request (1-based) instead of the list. */
 let answerWith = null
+/** Whether the stand-in applies the 4 lanes' created_after and created_before (both ends counted), or lists everything. */
+let applyDates = true
 /** When set, every listed payment is served through it. */
 let reshape = null
 const answer = (body, status = 200) =>
@@ -112,9 +114,12 @@ globalThis.fetch = async (url, init = {}) => {
   const first = Number(u.searchParams.get('first') ?? 20)
   const after = u.searchParams.get('after')
   const from = after ? Number(after.slice(1)) : 0
+  const lo = applyDates && u.searchParams.get('created_after') ? RealDate.parse(u.searchParams.get('created_after')) : -Infinity
+  const hi = applyDates && u.searchParams.get('created_before') ? RealDate.parse(u.searchParams.get('created_before')) : Infinity
   const list = [...payments]
     .sort((a, b) => RealDate.parse(b.created_at) - RealDate.parse(a.created_at))
     .filter((p) => !u.searchParams.get('status') || p.status === u.searchParams.get('status'))
+    .filter((p) => RealDate.parse(p.created_at) >= lo && RealDate.parse(p.created_at) <= hi)
   const more = list.length > from + first
   const rows = list.slice(from, from + first).map((p) => (reshape ? reshape(p) : p))
   return answer({ data: rows, page_info: { has_next_page: more, end_cursor: more ? `c${from + first}` : null } })
@@ -214,6 +219,7 @@ function freshDb({ students = STUDENTS, requests = REQUESTS } = {}) {
   asked = []
   latency = 0
   answerWith = null
+  applyDates = true
   reshape = null
   timers = []
   clock = RealDate.parse(NOW)
@@ -307,6 +313,7 @@ let dry
   ok(w.payments.seen === 247 && w.payments.kept === 243 &&
      same(w.payments.skipped, { not_paid: 0, no_paid_at: 0, zero_total: 3, bad_total: 0, refunded: 1, dispute_lost: 0, no_user: 0 }) &&
      w.users_with_a_payment === 241, 'its counts: 247 payments, 243 kept, 3 at $0 and 1 refunded; 241 buyers (11 students, 230 others)', show(w.payments))
+  ok(w.lanes === 1 && w.ms_per_page === 0, 'one lane, and Whop\'s time per page (0 here: no latency)', show({ lanes: w.lanes, ms: w.ms_per_page }))
   const pageReqs = asked.filter((a) => a.path === '/api/v1/payments')
   ok(pageReqs.length === 3 && pageReqs.every((q) => q.headers['Api-Version-Date'] === '2026-10-15-1' && q.headers.Authorization === `Bearer ${KEY}` && !('user_id' in q.params) && q.params.status === 'paid'),
      'one walk: status=paid, no user filter, the key and the pinned version on every page')
@@ -406,6 +413,8 @@ console.log('\n=== The walk does not finish: nothing is written ===')
   ok(writes(db).length === 0 && db.calls('students').length === 0 && r.took === 285_000,
      'nothing written, the students not even read, and the call answered at 285 s, before Vercel\'s 300 s', show({ took: r.took }))
   ok(/Nothing was written/.test(r.body.error) && !('changes' in r.body), 'the answer says nothing was written', r.body.error)
+  ok(r.body.walk.ms_per_page === 100_000 && /2 pages were read, Whop answering each in about 100000 ms/.test(r.body.error) && /"lanes": 4/.test(r.body.error),
+     'and how far off it was: 2 pages, about 100000 ms each, and the way on, "lanes": 4', show({ ms: r.body.walk.ms_per_page, error: r.body.error }))
   timers = []
 
   // Whop taking 85 s a page: the 4th page would start at 255 s, past the 240 s budget.
@@ -428,6 +437,28 @@ console.log('\n=== The walk does not finish: nothing is written ===')
   r = await call({ mode: 'dry' })
   ok(r.body.kind === 'walk_incomplete' && r.body.walk.stopped_because === 'rate_limited' && r.body.walk.retried_429 === 2 && r.took === 60_000,
      'three 429s: waited 30 s twice, then walk_incomplete (rate_limited)', show({ walk: r.body.walk, took: r.took }))
+}
+
+console.log('\n=== lanes: 4 through the route ===')
+{
+  let db = freshDb()
+  let r = await call({ mode: 'dry', lanes: 4 })
+  const reqs = asked.filter((a) => a.path === '/api/v1/payments')
+  ok(r.status === 200 && r.body.ok === true && r.body.walk.lanes === 4 && r.body.walk.complete === true &&
+     same(r.body.students, dry.students) && same(r.body.moves, dry.moves) && same(r.body.thirty, dry.thirty) &&
+     r.body.walk.payments.seen === dry.walk.payments.seen && writes(db).length === 0,
+     'a dry run in 4 lanes: the same counts as in 1, nothing written', show({ lanes: r.body.walk.lanes, pages: r.body.walk.pages }))
+  ok(reqs.some((q) => 'created_after' in q.params) && reqs.some((q) => 'created_before' in q.params), 'and its pages ask for the lanes\' dates')
+  for (const lanes of [2, '4', 0]) {
+    db = freshDb()
+    r = await call({ mode: 'dry', lanes })
+    ok(r.status === 400 && asked.length === 0 && db.log.length === 0, `lanes ${show(lanes)}: 400, Whop and the database untouched`, show(r.body))
+  }
+  db = freshDb()
+  applyDates = false
+  r = await call({ mode: 'write', lanes: 4 })
+  ok(r.status === 500 && r.body.kind === 'walk_incomplete' && r.body.walk.stopped_because === 'filter_ignored' && writes(db).length === 0 && /"lanes": 1/.test(r.body.error),
+     'Whop not applying the lanes\' dates: walk_incomplete (filter_ignored), nothing written, and the answer says to run it in 1 lane', show({ stopped: r.body.walk.stopped_because, error: r.body.error }))
 }
 
 console.log('\n=== Whop\'s payments in another shape: nothing written ===')

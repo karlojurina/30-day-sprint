@@ -12,12 +12,15 @@
  * stored one, so the wrong dates already stored need this pass.
  *
  * ONE CALL. Whop first: every paid payment of the account in one walk
- * (walkFirstPayments, at most 4 requests a second). No page starts after
- * 240 s and none is waited on past 285 s. A walk that does not reach its last
- * page answers ok: false, kind walk_incomplete, and writes nothing: no
- * repair is made from part of Whop's payments. Then every student row with a
- * whop_user_id, read after the walk so the values the write guards on are
- * fresh.
+ * (walkFirstPayments, at most 4 requests a second), in 1 lane or, with
+ * lanes: 4, in 4 stretches of the account's history read side by side. No
+ * page starts after 240 s and none is waited on past 285 s. A walk that does
+ * not reach its last page answers ok: false, kind walk_incomplete, and
+ * writes nothing: no repair is made from part of Whop's payments. Every
+ * answer shows the walk's pages and how long Whop took to answer one
+ * (ms_per_page), so a walk that runs out of time says how far off it was.
+ * Then every student row with a whop_user_id, read after the walk so the
+ * values the write guards on are fresh.
  *
  * THE PLAN, per student:
  *   - a first payment at another time than the one stored (compared as
@@ -45,7 +48,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { walkFirstPayments, type FirstPaymentWalk, type PaymentReadFail } from "@/lib/first-payment";
+import { walkFirstPayments, type FirstPaymentWalk } from "@/lib/first-payment";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, discountWindow, requestCounts } from "@/lib/world/discount";
 
@@ -234,31 +237,46 @@ async function readRequests(supabase: SupabaseClient, studentIds: string[]): Pro
   return all;
 }
 
+/** How long Whop took to answer a page of the walk, on average, in whole ms; null before any page. */
+function msPerPage(walk: FirstPaymentWalk): number | null {
+  return walk.pages > 0 ? Math.round(walk.answerMs / walk.pages) : null;
+}
+
 /** The walk as an answer shows it: counts only, never its map. */
 function shownWalk(walk: FirstPaymentWalk, durationMs: number): Record<string, unknown> {
   return {
     complete: walk.complete,
     stopped_because: walk.stoppedBecause,
+    lanes: walk.lanes,
     pages: walk.pages,
     requests: walk.requests,
     retried_429: walk.retried429,
     duration_ms: durationMs,
+    ms_per_page: msPerPage(walk),
     payments: { seen: walk.counts.seen, kept: walk.counts.kept, skipped: walk.counts.skipped },
     users_with_a_payment: walk.firstByUser.size,
   };
 }
 
 /** What an answer with kind walk_incomplete says, in words a person reads. */
-function walkSentence(stopped: "done" | PaymentReadFail): string {
+function walkSentence(walk: FirstPaymentWalk): string {
   const nothing = "Nothing was written: no repair is made from part of Whop's payments.";
+  const stopped = walk.stoppedBecause;
+  const perPage = msPerPage(walk);
+  const read = perPage === null ? "" : ` ${walk.pages} pages were read, Whop answering each in about ${perPage} ms.`;
   if (stopped === "time_budget") {
-    return `Whop's payments could not all be read in 240 seconds. ${nothing} Run it again; if it stops here every time, tell Claude.`;
+    return walk.lanes === 1
+      ? `Whop's payments could not all be read in 240 seconds.${read} ${nothing} Run it again with "lanes": 4, which reads 4 stretches of the account's history side by side; if that stops here too, tell Claude.`
+      : `Whop's payments could not all be read in 240 seconds, even in 4 lanes.${read} ${nothing} Tell Claude.`;
   }
   if (stopped === "rate_limited") {
     return `Whop kept answering "too many requests" after two waits. ${nothing} Try again in a few minutes.`;
   }
   if (stopped === "http_401_403") {
     return `Whop refused the key (401 or 403): it may have lost its permission to read payments. ${nothing}`;
+  }
+  if (walk.lanes > 1 && (stopped === "filter_ignored" || stopped === "http_other")) {
+    return `In 4 lanes the read of Whop's payments stopped (${stopped}): Whop may not take the dates the lanes ask for (created_after, created_before). ${nothing} Run it with "lanes": 1, and tell Claude.`;
   }
   if (stopped === "bad_page") {
     return `Whop answered a page of payments this code cannot read (not JSON, no list, a next page without a cursor, a cursor given twice, or rows of which none has a buyer, or none a total that reads). ${nothing} Tell Claude before running it again.`;
@@ -291,18 +309,22 @@ async function eachInPool<T>(
  */
 export async function runFirstPaidRepair(
   supabase: SupabaseClient,
-  { mode, startedAtMs }: { mode: RepairMode; startedAtMs: number },
+  { mode, startedAtMs, lanes = 1 }: { mode: RepairMode; startedAtMs: number; lanes?: 1 | 4 },
 ): Promise<Record<string, unknown>> {
   const head = { mode, run_started_at: new Date(startedAtMs).toISOString() };
 
   const walk = await walkFirstPayments({
     startBy: startedAtMs + REPAIR_WALK_BUDGET_MS,
     answerBy: startedAtMs + REPAIR_READ_LIMIT_MS,
+    lanes,
   });
   const walkShown = shownWalk(walk, Date.now() - startedAtMs);
   if (!walk.complete) {
-    console.error(`[first-paid-repair] mode=${mode} the walk stopped (${walk.stoppedBecause}) after ${walk.pages} pages; nothing written`);
-    return { ok: false, ...head, kind: "walk_incomplete", error: walkSentence(walk.stoppedBecause), walk: walkShown };
+    console.error(
+      `[first-paid-repair] mode=${mode} lanes=${walk.lanes} the walk stopped (${walk.stoppedBecause}) after ${walk.pages} pages, ` +
+        `ms_per_page=${msPerPage(walk) ?? "none"}; nothing written`,
+    );
+    return { ok: false, ...head, kind: "walk_incomplete", error: walkSentence(walk), walk: walkShown };
   }
 
   let students: RepairStudent[];

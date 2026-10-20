@@ -32,7 +32,14 @@ import { refuseWhileClosed } from "./student-app-gate.ts";
 import { DISCOUNT_WINDOW_DAYS } from "./constants.ts";
 import { onDiscountRequested } from "./stub-server.ts";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "./stub-server.ts";
-import { SAVE_FAILED, decideDiscountRequest, loadDiscountReads, secondPendingRequest } from "./discount-server.ts";
+import { checkMembershipDiscount } from "./membership-discount.ts";
+import {
+  SAVE_FAILED,
+  decideDiscountRequest,
+  loadDiscountReads,
+  membershipDiscountRefusal,
+  secondPendingRequest,
+} from "./discount-server.ts";
 
 interface IncomingAnswer {
   question_id?: unknown;
@@ -113,6 +120,13 @@ export async function POST(request: NextRequest) {
         { error: decision.error, state: decision.state },
         { status: decision.status },
       );
+    }
+    // The coupon (admin rebuild 2, D5), as /api/discounts/request checks it:
+    // the map's Apply sends here whenever the team has questions.
+    const coupon = await checkMembershipDiscount(supabase, studentId);
+    if (coupon.discounted) {
+      const refusal = membershipDiscountRefusal();
+      return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
     }
   } else {
     // Re-validate the eligibility window (server-side defense — same

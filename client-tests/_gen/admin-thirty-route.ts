@@ -1,14 +1,15 @@
 /**
  * GET /api/admin/thirty: everything the 30% page (/admin/discounts) shows, in
- * one answer (admin rebuild PRD, section 8, "Admin 30% view").
+ * one answer (admin rebuild PRD, section 8; admin rebuild 2, D4 and D5).
  *
- * Every request the page lists, each with the student's facts, and for a
- * pending one the approve route's own verdict (approvalVerdict, then
- * explainOldCourseRequest; no ads check since 2026-10-20), its action items
- * (no page shows them since then) and its survey answers; and everyone who
- * can still earn the 30% before their deadline. loadThirtyData (src/lib/admin/thirty-data.ts) reads it all at
- * once, paged; buildThirtyView (thirty-view.ts) runs the student app's own
- * rule over it. Neither changes the rule.
+ * Every request made from 1 October, oldest first, each with the student
+ * (name, @username, membership), who decided it and when, the 30% code, the
+ * coupon stored for the student's membership, and for a pending one the
+ * approve route's own verdict: the coupon first (a discount already on the
+ * next renewal, no override), then the rule (approvalVerdict, then
+ * explainOldCourseRequest). loadThirtyData (src/lib/admin/thirty-data.ts)
+ * reads it all at once, paged; buildThirtyView (thirty-view.ts) runs the
+ * student app's own rule over it. Neither changes the rule.
  *
  * Why a route: lesson_videos is readable by the service role alone, and the
  * rule needs it. A browser page reading it would see no videos and no error,
@@ -22,8 +23,9 @@
  * people missing: the course switch's date (it decides which videos a request
  * made before the switch is judged by), or any read loadThirtyData cannot do
  * without. A failed read of one student's progress is not a failure of the
- * page: that student's verdict says so, and Can still earn counts them in
- * `unchecked`.
+ * page: that student's verdict says so. Nor is a failed read of the stored
+ * coupons: the answer says `couponsUnread`, and the approve route asks Whop
+ * itself.
  */
 
 import { NextRequest, NextResponse } from "./stub-server.ts";
@@ -33,7 +35,7 @@ import { loadThirtyData } from "./thirty-data.ts";
 import { buildThirtyView } from "./thirty-view.ts";
 
 export const dynamic = "force-dynamic";
-// About 300 students in the offer, read in pages of 1000 and batches of 100.
+// The students holding a request from 1 October, read in pages of 1000 and batches of 100.
 export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {

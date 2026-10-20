@@ -31,7 +31,7 @@ import { areaShare, type WorldProgress } from "@/lib/world-v6/progress";
 import { SKY_MARKS } from "@/lib/world-v6/layout";
 import { CHECKPOINT, type CheckpointLook } from "@/lib/world-v6/checkpoint";
 import { BOUNTY } from "@/lib/world-v6/bounty";
-import { DISCOUNT_PERCENT } from "@/lib/world/discount";
+import { DISCOUNT_PERCENT, MEMBERSHIP_DISCOUNT_LINE } from "@/lib/world/discount";
 import { renewalStillAhead } from "@/lib/world/celebrations";
 import { checkpointView, discountRule, shortDate, type CheckpointView } from "./checkpointView";
 import { CARD_HINTS, anchorCard, placeCard, placePanel, type Box, type Placement } from "./cardPlace";
@@ -4137,7 +4137,8 @@ function BountyBody({
  *
  * Since Lovro's second Loom (2026-10-16) it opens for every student and state.
  * Where the offer is closed for the student (the deadline passed, a first
- * payment before 1 October) it says so in one plain line, and the eyebrow
+ * payment before 1 October, a discount already on their Whop membership's
+ * next renewal) it says so in one plain line, and the eyebrow
  * says "Closed"; with no first payment on record it asks them to tell the
  * team, and the eyebrow says "Ask the team". Apply shows only while it can
  * still be earned (locked) or is on (ready), never as a dead button.
@@ -4320,13 +4321,16 @@ function CheckpointBody({
   } else if (st.kind === "expired") {
     body = <p className={s.desc}>{`This closed on ${cv.deadline}. ${rule.closed}`}</p>;
   } else if (st.kind === "not-eligible") {
+    // "has-discount" (admin rebuild 2, D5): a discount already on the next Whop renewal, the owner's line, no Apply.
     body = (
       <p className={s.desc}>
         {st.reason === "before-launch"
           ? rule.beforeLaunch
           : st.reason === "no-payment"
             ? `${rule.open} We can't see your first payment yet. Tell the team and they'll sort it out.`
-            : "This offer isn't open yet."}
+            : st.reason === "has-discount"
+              ? MEMBERSHIP_DISCOUNT_LINE
+              : "This offer isn't open yet."}
       </p>
     );
   }

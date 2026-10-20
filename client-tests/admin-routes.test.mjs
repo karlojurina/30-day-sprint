@@ -118,9 +118,9 @@ function freshDb() {
       // Every video done, a request waiting, the ads never ticked: Approve would approve it
       // (no ads check since 2026-10-20, Lovro's decision).
       person('s-yes', 'Ana Example', '2026-10-02T10:00:00.000Z', {
-        ad_submissions_verified: false, discord_user_id: '100000000000000001', discord_username: 'ana.example',
+        ad_submissions_verified: false, discord_user_id: '100000000000000001', discord_username: 'ana.example', whop_membership_id: 'mem_devAna',
       }),
-      // 50 of the videos, no request: can still earn it.
+      // 50 of the videos, a request waiting: not yet.
       person('s-earn', 'Bo Example', '2026-10-03T10:00:00.000Z', { discord_username: 'bo.example' }),
       // A first payment before 1 October, a request waiting.
       person('s-old', 'Ed Example', '2026-09-20T10:00:00.000Z'),
@@ -131,6 +131,9 @@ function freshDb() {
     discount_requests: [
       { id: 'r-yes', student_id: 's-yes', status: 'pending', created_at: '2026-10-20T10:00:00.000Z', promo_code: null, rejection_reason: null },
       { id: 'r-old', student_id: 's-old', status: 'pending', created_at: '2026-10-20T11:00:00.000Z', promo_code: null, rejection_reason: null },
+      { id: 'r-earn', student_id: 's-earn', status: 'pending', created_at: '2026-10-20T12:00:00.000Z', promo_code: null, rejection_reason: null },
+      // Before 1 October: not listed (admin rebuild 2, D4).
+      { id: 'r-sept', student_id: 's-old', status: 'applied', created_at: '2026-09-25T10:00:00.000Z', promo_code: 'ECOM30-TEST09', rejection_reason: null },
     ],
     discount_feedback_questions: [{ id: 'q1', order_num: 1, question_text: 'How likely are you to recommend the course?', question_type: 'scale' }],
     discount_feedback_responses: [{ id: 'a1', discount_request_id: 'r-yes', question_id: 'q1', answer_scale: 9 }],
@@ -163,7 +166,7 @@ console.log('\n=== GET /api/admin/thirty: who may read it ===')
   freshDb()
   const none = await at(NOW, () => getThirty(undefined))
   ok(none.status === 401 && typeof none.body.error === 'string', 'no token: 401', show(none))
-  ok(none.body.requests === undefined && none.body.canStillEarn === undefined, 'and no list in the answer')
+  ok(none.body.requests === undefined, 'and no list in the answer')
 
   const unknown = await at(NOW, () => getThirty('tok-nobody'))
   ok(unknown.status === 401, 'a token nobody holds: 401', show(unknown))
@@ -173,7 +176,7 @@ console.log('\n=== GET /api/admin/thirty: who may read it ===')
 
   for (const [token, who] of [['tok-csm-1', 'a csm'], ['tok-csm-2', 'the other csm'], ['tok-founder', 'a founder']]) {
     const r = await at(NOW, () => getThirty(token))
-    ok(r.status === 200 && Array.isArray(r.body.requests) && Array.isArray(r.body.canStillEarn), `${who}: 200 with the list`, `status ${r.status}`)
+    ok(r.status === 200 && Array.isArray(r.body.requests), `${who}: 200 with the list`, `status ${r.status}`)
   }
 }
 
@@ -183,28 +186,28 @@ console.log('\n=== The answer is the builder\'s, at the same moment ===')
   const r = await at(NOW, () => getThirty('tok-csm-1'))
   const body = r.body
   ok(r.status === 200, 'as a csm: 200')
-  ok(['generatedAt', 'sharedDeadline', 'requiredCount', 'questions', 'requests', 'canStillEarn', 'unchecked'].every((k) => k in body),
-     'section 8\'s fields are all there', Object.keys(body).join(', '))
+  ok(Object.keys(body).sort().join() === 'couponsUnread,generatedAt,listedFrom,requests,requiredCount,sharedDeadline',
+     'the fields of admin rebuild 2 (D4): no Can still earn, no survey questions', Object.keys(body).join(', '))
+  ok(body.requests.map((x) => x.id).join() === 'r-yes,r-old,r-earn' && body.couponsUnread === false,
+     'the requests from 1 October, oldest first (one from 25 September is not listed); the coupons read', body.requests.map((x) => x.id).join())
   ok(body.generatedAt === NOW, 'generatedAt is the moment of the call', body.generatedAt)
   ok(body.requiredCount === 61, 'the 61 videos up to the checkpoint', String(body.requiredCount))
 
   const yes = body.requests.find((x) => x.id === 'r-yes')
   ok(yes?.verdict?.ok === true && yes.verdict.text === VERDICT_TEXT.yes, 'every video done, the ads never ticked: the verdict says yes', show(yes?.verdict))
   ok(yes?.facts.videosDone === 61 && yes?.facts.videosTotal === 61, 'with its count, 61 of 61', `${yes?.facts.videosDone} of ${yes?.facts.videosTotal}`)
-  ok(yes?.student.discord.userId === '100000000000000001' && yes?.student.plan === 'Monthly' && yes !== undefined && !('adsVerified' in yes.student),
-     'the student brief: Discord id, plan, and no ads tick (2026-10-20)', show(yes?.student))
-  ok(isDeepStrictEqual(yes?.answers, [{ questionId: 'q1', answer: 9 }]), 'the survey answer is on the row', show(yes?.answers))
+  ok(yes?.student.username === 'ana.example' && yes?.student.status === 'active' && yes !== undefined && !('plan' in yes.student) && !('adsVerified' in yes.student),
+     'the student brief: @username and the membership; no plan, no ads tick', show(yes?.student))
+  ok(yes !== undefined && !('answers' in yes) && !('submissions' in yes) && yes.coupon === null, 'no survey answers and no action items on the row (D4); no coupon stored', show(yes && Object.keys(yes)))
   const old = body.requests.find((x) => x.id === 'r-old')
   ok(old?.verdict?.ok === false && old.verdict.reason === 'before-launch', 'a first payment before 1 October: the verdict says no, and why', show(old?.verdict))
 
-  const earn = body.canStillEarn.map((e) => e.student.id)
-  ok(earn.includes('s-earn') && earn.includes('s-student') && !earn.includes('s-yes') && !earn.includes('s-old'),
-     'Can still earn: the two members still in time, neither the one who asked nor the one before 1 October', earn.join(', '))
-  const bo = body.canStillEarn.find((e) => e.student.id === 's-earn')
-  ok(bo?.state === 'locked' && bo.facts.videosDone === 50 && bo.lastContact?.by?.name === 'Robin Hale',
-     'with the count and the last message the team marked sent', show({ state: bo?.state, done: bo?.facts.videosDone, last: bo?.lastContact }))
+  const bo = body.requests.find((x) => x.id === 'r-earn')
+  ok(bo?.verdict?.reason === 'locked' && bo.facts.videosDone === 50 && bo.facts.videosTotal === 61,
+     'Bo, 50 of 61: the verdict says not yet, with the count', show({ v: bo?.verdict, done: bo?.facts.videosDone }))
   ok(bo?.student.whopPulled === false && yes?.student.whopPulled === true,
      'the switch is read from admin_config: a Whop backfill before it is "not pulled yet", one after it is', show({ bo: bo?.student.whopPulled, ana: yes?.student.whopPulled }))
+  ok(!body.requests.some((x) => x.student.id === 's-student'), 'a member with no request is on no tab (Can still earn went with D4)')
 
   // The route's answer, against loadThirtyData and buildThirtyView run on the same database at the same moment.
   const load = await at(NOW, () => loadThirtyData(fakeClient(db)))
@@ -235,12 +238,37 @@ console.log('\n=== A read that fails is an error in plain words, never a short l
 }
 {
   const db = freshDb()
-  db.fail['discount_feedback_questions.select'] = { message: 'permission denied for table discount_feedback_questions' }
+  db.fail['student_whop_sync.select'] = { message: 'permission denied for table student_whop_sync' }
   const r = await at(NOW, () => getThirty('tok-csm-1'))
   ok(r.status === 500 && r.body.requests === undefined, 'a read the whole list needs fails: 500, and no list', show(r.body.error))
   ok(plain(r.body.error), 'in plain words', r.body.error)
-  ok(Array.isArray(r.body.failed) && r.body.failed.some((f) => f.startsWith('discount_feedback_questions')),
+  ok(Array.isArray(r.body.failed) && r.body.failed.some((f) => f.startsWith('student_whop_sync')),
      'with the failed read named for whoever looks into it', show(r.body.failed))
+}
+{
+  // The survey and the Tasks queue are not read since D4: their failure cannot take the page down.
+  const db = freshDb()
+  db.fail['discount_feedback_questions.select'] = { message: 'permission denied for table discount_feedback_questions' }
+  db.fail['tasks.select'] = { message: 'permission denied for table tasks' }
+  const r = await at(NOW, () => getThirty('tok-csm-1'))
+  ok(r.status === 200 && Array.isArray(r.body.requests), 'the survey or the Tasks queue unreadable: 200, the list as ever', `status ${r.status}`)
+}
+{
+  // D5: the stored coupons. A discount on the next renewal is the verdict; a failed read is said, never a 500.
+  const db = freshDb()
+  db.tables.student_membership_discounts = [{
+    student_id: 's-yes', whop_membership_id: 'mem_devAna', promo_code_id: 'promo_devEvolve', promo_code: 'evolve10',
+    renewal_price: '87.30', plan_renewal_price: '97.00', discounted: true, checked_at: '2026-10-21T06:40:00.000Z',
+  }]
+  const r = await at(NOW, () => getThirty('tok-csm-1'))
+  const yes = r.body.requests?.find((x) => x.id === 'r-yes')
+  ok(r.status === 200 && yes?.verdict?.ok === false && yes.verdict.reason === 'has-discount'
+       && yes.verdict.text === 'This student already has a discount on their membership (evolve10).' && yes.coupon?.code === 'evolve10',
+     'a discount stored for the membership: the verdict is the approve route\'s refusal, naming the code', show(yes?.verdict))
+  db.fail['student_membership_discounts.select'] = { message: 'relation "student_membership_discounts" does not exist' }
+  const r2 = await at(NOW, () => getThirty('tok-csm-1'))
+  ok(r2.status === 200 && r2.body.couponsUnread === true && r2.body.requests.find((x) => x.id === 'r-yes')?.verdict?.ok === true,
+     'the coupons cannot be read (no v111 yet): 200, couponsUnread, the rule judges alone (the approve route still asks Whop)', `status ${r2.status}`)
 }
 {
   // One student's progress cannot be read: the list still comes, and that student's verdict says so.
@@ -250,9 +278,9 @@ console.log('\n=== A read that fails is an error in plain words, never a short l
   const yes = r.body.requests?.find((x) => x.id === 'r-yes')
   ok(r.status === 200 && yes?.verdict?.reason === 'read-failed' && yes.verdict.text === VERDICT_TEXT.readFailed,
      'the completions read fails: 200, and the pending row says there is no verdict', show(yes?.verdict))
-  // The three members in the offer (one of them holds the pending request, which only their reads could show).
-  ok(r.body.canStillEarn?.length === 0 && r.body.unchecked === 3,
-     'nobody is put on Can still earn unchecked; the three who could be are counted instead', `canStillEarn ${r.body.canStillEarn?.length}, unchecked ${r.body.unchecked}`)
+  const bo = r.body.requests?.find((x) => x.id === 'r-earn')
+  ok(bo?.verdict?.reason === 'read-failed' && bo.facts.videosDone === null,
+     'every pending row says so, none shows "0 of 61"', show(bo?.verdict))
 }
 
 // ════════════════════════════════════════════════════════════════════════════

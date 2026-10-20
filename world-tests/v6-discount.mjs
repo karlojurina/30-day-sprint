@@ -159,6 +159,13 @@
  *      passed." and then the rule, with no date (until 2026-10-20 it named
  *      1 October 2026, Croatia time), in the closed look; no Apply. The
  *      phone's sheet says the same
+ *  28  admin rebuild 2, D5 (?discount=has-discount): every video watched,
+ *      and the Whop membership already has a discount on its next renewal.
+ *      No chip, the tag and the marker closed; a real click on the tag opens
+ *      the panel, which says "You can't apply for this discount because you
+ *      already have a discount applied to your account." and nothing about
+ *      videos, days or a deadline, "Closed" in its eyebrow, no Apply, grey.
+ *      At 1440x900, and the phone's sheet at 390x844 says the same
  *  Rows 24 to 27 load their pages in Europe/Zagreb (page.emulateTimezone),
  *  so they read the same on any machine.
  *
@@ -195,6 +202,7 @@
  *   panel-october.png, panel-october-expired.png, panel-october-old-course*.png,
  *   panel-september.png   the panel parked at the cache, in Croatia (rows 24 to 27)
  *   phone-sheet-october*.png, phone-sheet-september.png  their sheets at 390x844 (rows 24 to 27)
+ *   panel-has-discount-1440.png, phone-sheet-has-discount.png  a discount already on the membership (row 28)
  *
  * What a row reads:
  *   hooks      window.__worldReady, __worldFrame, __worldScrollFor(depth),
@@ -1593,6 +1601,31 @@ try {
     await page.close()
     const p = await phoneSheet(r, 'september', ZAGREB, 'phone-sheet-september.png')
     r.check('phone: the sheet says the same, no Apply', WORDS.test(p.text ?? '') && p.apply === null, p)
+  })
+
+  // Admin rebuild 2, D5: the student's Whop membership already has a discount on its next renewal (the stored flag
+  // /api/student/data carries). Every video is watched, so without the flag the panel would offer Apply.
+  await runRow(28, "has-discount (every video watched, a discount already on the Whop membership): no chip; the tag and the marker closed; the panel says the student already has a discount applied, with no Apply; 1440x900 and the phone's sheet at 390x844", async (r) => {
+    const LINE = "You can't apply for this discount because you already have a discount applied to your account."
+    const page = await r.open({ discount: 'has-discount' }, '', { width: 1440, height: 900 })
+    let s = await page.evaluate(SNAP)
+    r.check('no chip in the header', s.chip === null && s.chipState === null, { chip: s.chip, chipState: s.chipState })
+    r.check('the tag is closed and tells a screen reader "Closed"', s.tag?.state === 'closed' && s.tag.label === 'Discount checkpoint, 30% off, Closed', s.tag)
+    r.check('the cache stands closed, its marker in the closed look', s.cp?.shown === true && s.cp.look === 'closed' && s.marker?.state === 'closed', { cp: s.cp, marker: s.marker })
+    const via = await click(page, FIND.tag, 'row 28: the tag')
+    await parked(page, 'row 28')
+    s = await page.evaluate(SNAP)
+    r.check('a real click on the tag opens the panel, the camera parked at the cache', via === 'mouse' && s.panel?.title === '30% off your next month' && s.park?.id === 'checkpoint', { via, panel: s.panel?.title, park: s.park })
+    r.check('it says the line, and nothing about videos to watch, days left or a deadline', (s.panel?.text ?? '').includes(LINE) && !/Apply by|days left|\bvideos\b|Finish every video/.test(s.panel?.text ?? ''), s.panel?.text)
+    const eyebrow = await page.evaluate(EYEBROW)
+    r.check('its eyebrow ends "Closed"', eyebrow?.at(-1) === 'Closed', eyebrow)
+    r.check('no Apply', (await page.evaluate(FIND.apply)) === null)
+    const lk = await page.evaluate(LOOK)
+    r.check('its tag and "Closed" are grey (closed)', lk.glyph === GREY && lk.word?.text === 'Closed' && lk.word.color === GREY, lk)
+    await page.screenshot({ path: path.join(OUT, 'panel-has-discount-1440.png') })
+    await page.close()
+    const p = await phoneSheet(r, 'has-discount', null, 'phone-sheet-has-discount.png')
+    r.check('phone (390x844): the sheet says the same, no Apply', (p.text ?? '').includes(LINE) && p.apply === null, p)
   })
 } finally {
   await browser.close()

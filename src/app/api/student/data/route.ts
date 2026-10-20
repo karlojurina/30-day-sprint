@@ -63,6 +63,8 @@ export async function GET(request: NextRequest) {
     watchProgressRes,
     // v100 — which lessons have a video. Lesson ids only, see below.
     lessonVideosRes,
+    // v111 — a discount already on the student's next Whop renewal (D5).
+    membershipDiscountRes,
   ] = await Promise.all([
     supabase.from(REGIONS_TABLE).select("*").order("order_num"),
     // Keyed on the catalog SHAPE, never on the table name — after cutover the
@@ -167,6 +169,15 @@ export async function GET(request: NextRequest) {
     // through api/student/lesson-video. One row per recorded lesson, about
     // 150 for the whole course, under Supabase's 1000-row cap.
     supabase.from("lesson_videos").select("lesson_id"),
+    // v111 (admin rebuild 2, D5) — the stored answer to "does this student's
+    // Whop membership already have a discount on its next renewal". The
+    // flag and the membership it was read from only, never the code or the
+    // prices.
+    supabase
+      .from("student_membership_discounts")
+      .select("whop_membership_id, discounted")
+      .eq("student_id", student.id)
+      .maybeSingle(),
   ]);
 
   // A failed read must never answer as a believable empty state (progress-1,
@@ -202,6 +213,24 @@ export async function GET(request: NextRequest) {
   const lessonIdsWithVideo = new Set(
     (lessonVideosRes.data ?? []).map((v) => v.lesson_id as string),
   );
+
+  // The map's 30% panel reads this (discount.ts membershipDiscounted). A
+  // stored row counts only for the membership it was read from (as
+  // membership-discount.ts storedRowApplies says). A failed read, or a
+  // database without v111, is no flag: the request routes ask Whop
+  // themselves before anything is written, so nothing is lost but the
+  // panel's early line.
+  if (membershipDiscountRes.error) {
+    console.error(`[student/data] student_membership_discounts read failed: ${membershipDiscountRes.error.message}`);
+  }
+  const storedDiscount = membershipDiscountRes.error
+    ? null
+    : (membershipDiscountRes.data as { whop_membership_id: string | null; discounted: boolean } | null);
+  const membershipDiscounted =
+    !!storedDiscount &&
+    !!storedDiscount.whop_membership_id &&
+    storedDiscount.whop_membership_id === student.whop_membership_id &&
+    storedDiscount.discounted === true;
   // The client learns THAT a lesson has a video, never which one.
   const lessons = (lessonsRes.data ?? []).map((lesson) => ({
     ...lesson,
@@ -233,6 +262,7 @@ export async function GET(request: NextRequest) {
     catalogSuffix: CATALOG_TABLE_SUFFIX,
     completions: completionsRes.data ?? [],
     discountRequest: discountRes.data ?? null,
+    membershipDiscounted,
     quizzes: quizzesRes.data ?? [],
     quizQuestions: quizQuestionsRes.data ?? [],
     quizAttempts: quizAttemptsRes.data ?? [],

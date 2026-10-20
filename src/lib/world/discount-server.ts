@@ -13,6 +13,10 @@
  *   secondPendingRequest   both routes that write a request, on either course:
  *                          a double submit the database refused (v106)
  *   SAVE_FAILED            those routes' answer to any other failed write
+ *   membershipDiscountRefusal, couponApprovalRefusal
+ *                          a discount already on the student's next Whop
+ *                          renewal (admin rebuild 2, D5): the request routes'
+ *                          refusal and the approve route's
  *
  * Everything fails closed. A read that errors, or comes back empty where a
  * row must exist, means no request and no approval: a believable "you're not
@@ -29,6 +33,7 @@ import {
   DISCOUNT_PERCENT,
   DISCOUNT_SHARED_DEADLINE,
   DISCOUNT_WINDOW_DAYS,
+  MEMBERSHIP_DISCOUNT_LINE,
   discountEndsAt,
   discountState,
   requestCounts,
@@ -263,6 +268,7 @@ export function discountRefusalMessage(state: DiscountState): string {
     case "not-eligible":
       if (state.reason === "before-launch") return `Your 2 weeks for the ${DISCOUNT_PERCENT}% have passed.`;
       if (state.reason === "no-payment") return "We can't see your first payment yet. Tell the team and they'll sort it out.";
+      if (state.reason === "has-discount") return MEMBERSHIP_DISCOUNT_LINE;
       return "The discount can't be applied for right now. Contact support and we'll sort it out.";
     case "pending":
       return ALREADY_APPLIED;
@@ -312,6 +318,27 @@ export function decideDiscountRequest(reads: DiscountReads, now: Date): RequestD
       ? { log: "nothing granted: the catalog has no gate lesson (is_gate), or no lesson up to it has a video, so the offer is closed" }
       : {}),
   };
+}
+
+/**
+ * Both request routes on the new course, once decideDiscountRequest has
+ * granted: the student's Whop membership already has a discount on its next
+ * renewal (D5, src/lib/membership-discount.ts checkMembershipDiscount), so
+ * nothing is written and the student reads the map's own line.
+ */
+export function membershipDiscountRefusal(): Extract<RequestDecision, { grant: false }> {
+  const state: DiscountState = { kind: "not-eligible", reason: "has-discount" };
+  return { grant: false, status: 400, state: state.kind, error: discountRefusalMessage(state) };
+}
+
+/**
+ * The approve route's refusal for a student whose membership already has a
+ * discount on its next renewal (D5), and the admin 30% page's verdict for
+ * one. No "Approve anyway" passes it. `code` is the code's name, or its Whop
+ * promo id when the name could not be read.
+ */
+export function couponApprovalRefusal(code: string | null): string {
+  return `This student already has a discount on their membership (${code ?? "code not known"}).`;
 }
 
 /**

@@ -2,8 +2,9 @@ import { Suspense } from "react";
 import { ThirtyView } from "@/components/admin/thirty/ThirtyView";
 
 /**
- * /admin/discounts: the 30% page (admin rebuild PRD, work item 3). The page
- * itself is src/components/admin/thirty/ThirtyView.tsx, a client component
+ * /admin/discounts: the 30% page (admin rebuild PRD, work item 3; admin
+ * rebuild 2, D4: Applied, Approved, Rejected, Code Applied, and the coupon of
+ * D5). The page itself is src/components/admin/thirty/ThirtyView.tsx, a client component
  * that reads GET /api/admin/thirty with the team member's token; this
  * server wrapper exists to give the tab its title, which the client layout
  * above it cannot.

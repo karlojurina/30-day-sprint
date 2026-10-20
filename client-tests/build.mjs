@@ -203,6 +203,7 @@ for (const [route, out] of [['request', 'discount-request-route'], ['submit-feed
     GATE,
     ['from "@/lib/constants"', 'from "./constants.ts"'],
     ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
+    ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
     ...toStub('next/server', '@supabase/supabase-js', '@/lib/csm-events', '@/lib/catalog-tables'),
   ])
 }
@@ -214,6 +215,7 @@ gen('../src/app/api/discounts/approve/route.ts', './_gen/discount-approve-route.
   ['from "@/lib/constants"', 'from "./constants.ts"'],
   ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
   ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
+  ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
   ...toStub('next/server', '@/lib/admin-auth', '@/lib/whop', '@/lib/catalog-tables'),
 ])
 
@@ -404,4 +406,28 @@ gen('../src/lib/admin/dashboard-metrics.ts', './_gen/dashboard-metrics.ts', [
   ['from "@/lib/admin/metrics-definitions"', 'from "./metrics-definitions.ts"'],
   ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
   ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+])
+
+// ── Admin rebuild 2, lane thirty (WI-3 and WI-4): the coupon rule ────────────
+// A discount already on the student's next Whop renewal (D5,
+// membership-discount.test.mjs). The reader and its run, on a stand-in
+// fetch: its imports are the rule's dates (discount.ts), the pages helper
+// and the 429 wait of first-payment.ts, all copied above. The three discount
+// routes point their import at this copy (their gen() lines above). The cron
+// route runs with Next and the service client from stub-server.ts, and the
+// real cron-auth.ts, its own service client pointed at stub-server.ts too, so
+// its cron_runs rows land in the stand-in's database. (cron-failed-reads.test.mjs
+// writes _gen/cron-auth.ts on a real supabase-js client; this copy is apart.)
+gen('../src/lib/membership-discount.ts', './_gen/membership-discount.ts', [
+  ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+  ['from "@/lib/first-payment"', 'from "./first-payment.ts"'],
+])
+gen('../src/lib/cron-auth.ts', './_gen/cron-auth.stub-server.ts', [
+  ['from "@/lib/supabase-server"', 'from "./stub-server.ts"'],
+])
+gen('../src/app/api/cron/refresh-membership-discounts/route.ts', './_gen/refresh-membership-discounts-route.ts', [
+  ['from "@/lib/cron-auth"', 'from "./cron-auth.stub-server.ts"'],
+  ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
+  ...toStub('next/server', '@/lib/supabase-server'),
 ])

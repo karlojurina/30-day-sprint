@@ -67,6 +67,12 @@ export interface StudentContextType {
   lessons: Lesson[];
   completions: StudentLessonCompletion[];
   discountRequest: DiscountRequest | null;
+  /**
+   * The student's Whop membership already has a discount on its next
+   * renewal (admin rebuild 2, D5), as /api/student/data stores it: the 30%
+   * panel then says so and offers no Apply. False until known.
+   */
+  membershipDiscounted: boolean;
   quizzes: Quiz[];
   quizQuestions: Record<string, QuizQuestion[]>;
   quizAttempts: StudentQuizAttempt[];
@@ -313,6 +319,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [lessons, setLessons] = useState<Lesson[]>([]);
   const [completions, setCompletions] = useState<StudentLessonCompletion[]>([]);
   const [discountRequest, setDiscountRequest] = useState<DiscountRequest | null>(null);
+  const [membershipDiscounted, setMembershipDiscounted] = useState(false);
   // v46 — per-function student state, split from the students row into
   // their own tables. Each is one row per student (or null if the row
   // doesn't exist yet — treated as "all fields default").
@@ -609,6 +616,8 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     // applied) from /admin/discounts. Refresh it here so the student
     // sees the new state when they switch back to their tab.
     setDiscountRequest(fresh.discountRequest ?? null);
+    // D5: a discount already on the student's next Whop renewal (the stored row's flag).
+    setMembershipDiscounted(fresh.membershipDiscounted === true);
     // v46 — push the fresh student row up to AuthContext (identity
     // changes are rare but possible — name, avatar, membership status)
     // AND refresh the per-function sibling tables so admin-side state
@@ -1811,6 +1820,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         lessons,
         completions,
         discountRequest,
+        membershipDiscounted,
         quizzes,
         quizQuestions,
         quizAttempts,

@@ -3,17 +3,22 @@
  * reads by the student app's own rule. Pure: no database, no clock of its
  * own; the route hands it the moment and the course switch's date.
  *
- * A pending request is judged the way POST /api/discounts/approve judges it
- * on the new course: approvalVerdict, then explainOldCourseRequest for a
- * request made before the switch (admin rebuild PRD, C9). The ads check that
- * came after them is gone since 2026-10-20 (Lovro's decision), from the route
- * and from here. The page shows its own fixed sentence for each answer
- * (VERDICT_TEXT): the route's error texts name a button the page no longer
- * has.
+ * Admin rebuild 2 (D4): the page lists every request from 1 October in four
+ * tabs (Applied = pending, Approved, Rejected, Code Applied = applied), each
+ * row with the student, the date applied, a verdict line on a pending one,
+ * the coupon and the decision. Can still earn, the plan, the last contact,
+ * the action items and the survey answers went with it.
  *
- * Every other row, and Can still earn, reads discountState as the student
- * app computes it: the request routes' call (decideDiscountRequest), with
- * every video done up to now and every request of the student.
+ * A pending request is judged the way POST /api/discounts/approve judges it
+ * (D5 first, then the rule):
+ *   1. the coupon: the student's stored membership row says a discount is on
+ *      the next renewal (student_membership_discounts, for the membership the
+ *      student has now). The approve route refuses that with no override,
+ *      in the same words (couponApprovalRefusal).
+ *   2. the rule on the new course: approvalVerdict, then
+ *      explainOldCourseRequest for a request made before the switch. The page
+ *      shows its own fixed sentence for each answer (VERDICT_TEXT): the
+ *      route's error texts name a button the page no longer has.
  *
  * The numbers on a pending row are the ones Approve judged: the videos
  * loaded after the request (after the switch, for one made before it) are
@@ -32,16 +37,15 @@ import {
 import type { DiscountLesson, DiscountState, DiscountWindow } from "./discount.ts";
 import {
   approvalVerdict,
+  couponApprovalRefusal,
   explainOldCourseRequest,
   factsFromReads,
   toDiscountLessons,
   videoDoneIds,
 } from "./discount-server.ts";
 import type { ApprovalRefusal, ApprovalVerdict, DiscountFacts, DiscountReads, VideoRow } from "./discount-server.ts";
-import { planLabel } from "./plans.ts";
-import type { PlanLabel } from "./plans.ts";
 import { dayLabel, dayTimeLabel } from "./croatia-dates.ts";
-import type { ThirtyAnswer, ThirtyCompletion, ThirtyContact, ThirtyData, ThirtyLesson, ThirtyStudent } from "./thirty-data.ts";
+import type { ThirtyCouponRow, ThirtyData, ThirtyStudent } from "./thirty-data.ts";
 
 /** A team member as a row names them. `name` is null when the id is no longer a team member. */
 export interface TeamRef {
@@ -49,15 +53,25 @@ export interface TeamRef {
   name: string | null;
 }
 
+/**
+ * The newest message the team marked as sent. The 30% page no longer shows
+ * it (D4); list-parts.tsx's lastContactText still takes this shape.
+ */
+export interface LastContact {
+  at: string;
+  by: TeamRef | null;
+  scenarioId: string;
+  outcome: "replied" | "no_reply" | null;
+}
+
 export interface StudentBrief {
   id: string;
   name: string | null;
   email: string | null;
-  discord: { userId: string | null; username: string | null };
-  plan: PlanLabel;
+  /** students.discord_username, shown as @username (it can hold a Whop username). */
+  username: string | null;
   /** membership_status: active, past_due, canceled or expired. */
   status: string;
-  csmExempt: boolean;
   /** A Whop backfill ran since the switch (student_whop_sync.last_sync_at at or after curriculum_reset_at). */
   whopPulled: boolean;
 }
@@ -83,35 +97,35 @@ export interface Facts {
 
 /**
  * Why a request may not be approved. ApprovalRefusal's reasons are the
- * rule's; "read-failed": the student's progress could not be read;
- * "unknown": the rule gave no reason (it cannot, today).
+ * rule's; "has-discount": a discount is already on the student's next Whop
+ * renewal (D5, no override); "read-failed": the student's progress could not
+ * be read; "unknown": the rule gave no reason (it cannot, today).
  */
-export type VerdictReason = ApprovalRefusal | "read-failed" | "unknown";
+export type VerdictReason = ApprovalRefusal | "has-discount" | "read-failed" | "unknown";
 
 export interface Verdict {
   /** Approve would approve it now. */
   ok: boolean;
   /** Null when ok. */
   reason: VerdictReason | null;
-  /** One of VERDICT_TEXT's sentences. */
+  /** One of VERDICT_TEXT's sentences, or the coupon's (couponApprovalRefusal). */
   text: string;
   /** Asked on the old course, before the switch, and refused over its videos (explainOldCourseRequest). */
   oldCourse: boolean;
 }
 
-/** An action item the student handed in, or watched and has not handed in yet. */
-export interface Submission {
-  lessonId: string;
-  title: string;
-  handedIn: boolean;
-  link: string | null;
-}
-
-export interface LastContact {
-  at: string;
-  by: TeamRef | null;
-  scenarioId: string;
-  outcome: "replied" | "no_reply" | null;
+/**
+ * The student's Whop membership as last read (student_membership_discounts),
+ * for the membership they have now. `code` is the code's name, or its Whop
+ * promo id when the name could not be read; null with no code.
+ */
+export interface Coupon {
+  code: string | null;
+  /** A discount is on the next renewal: no 30% (D5). */
+  discounted: boolean;
+  renewalPrice: number | null;
+  planRenewalPrice: number | null;
+  checkedAt: string;
 }
 
 export interface ThirtyRequestRow {
@@ -122,55 +136,29 @@ export interface ThirtyRequestRow {
   reviewedBy: TeamRef | null;
   appliedAt: string | null;
   appliedBy: TeamRef | null;
+  /** The 30% code Approve made (ECOM30-...). */
   promoCode: string | null;
   rejectionReason: string | null;
   student: StudentBrief;
-  facts: Facts;
+  /** Pending rows only: what the verdict judged. */
+  facts: Facts | null;
   /** Pending rows only. */
   verdict: Verdict | null;
-  /**
-   * Pending rows only; null there too when the completions could not be read.
-   * No page shows it since 2026-10-20: it was the evidence for the ads tick
-   * (C10), which went with the ads check.
-   */
-  submissions: Submission[] | null;
-  /** The survey answers, in the questions' order. A number for a scale question. */
-  answers: Array<{ questionId: string; answer: string | number | null }>;
-}
-
-/** An open task in the Tasks queue, as a row names it. */
-export interface QueueTask {
-  id: string;
-  scenarioId: string;
-  summary: string | null;
-  createdAt: string;
-}
-
-export interface ThirtyEarnRow {
-  student: StudentBrief;
-  facts: Facts;
-  state: "locked" | "ready";
-  lastContact: LastContact | null;
-  /**
-   * The student's open tasks in the Tasks queue, oldest first. Mark messaged
-   * closes them with the same actor and moment as its record (call C5), so
-   * whoever works the queue sees the contact and sends nothing twice.
-   */
-  openTasks: QueueTask[];
+  /** The stored coupon, or null when none is stored for this membership (or the coupons could not be read: couponsUnread). */
+  coupon: Coupon | null;
 }
 
 export interface ThirtyView {
   generatedAt: string;
   sharedDeadline: string;
+  /** The first request date the page lists (DISCOUNT_ELIGIBLE_FROM). */
+  listedFrom: string;
   /** The videos the offer asks for today, or null when the catalog or the videos could not be read. */
   requiredCount: number | null;
-  questions: Array<{ id: string; orderNum: number; text: string }>;
-  /** Every listed request, newest first: the page splits them into its tabs by status. */
+  /** The stored coupons could not be read: no row shows one, and the approve route still asks Whop. */
+  couponsUnread: boolean;
+  /** Every listed request, oldest first (the date applied, then the id): each tab keeps this order. */
   requests: ThirtyRequestRow[];
-  /** Who can still earn it, by deadline, then fewest videos left. */
-  canStillEarn: ThirtyEarnRow[];
-  /** Members who could be on Can still earn but whose progress could not be read: they are left out of it, and the page says how many. */
-  unchecked: number;
 }
 
 const ELIGIBLE_DAY = dayLabel(DISCOUNT_ELIGIBLE_FROM);
@@ -198,7 +186,7 @@ export function aboutHours(seconds: number | null | undefined): string | null {
   return `about ${Math.max(1, Math.round(seconds / 3600))} h`;
 }
 
-/** "about 1 hour", "about 6 hours": the same length in words, for the 30% page's own lines. Null when there is none. */
+/** "about 1 hour", "about 6 hours": the same length in words. Null when there is none. */
 export function aboutHoursWords(seconds: number | null | undefined): string | null {
   if (seconds == null || !(seconds > 0)) return null;
   const h = Math.max(1, Math.round(seconds / 3600));
@@ -210,7 +198,7 @@ export function videosLeftText(left: number): string {
   return `${left} ${left === 1 ? "video" : "videos"} left`;
 }
 
-/** The two 30% reasons a student can need a message for (admin rebuild PRD, C4). */
+/** The two 30% reasons a student could need a message for (admin rebuild PRD, C4). */
 export type ThirtyReasonKind = "thirty_closing" | "thirty_ready";
 
 /**
@@ -231,17 +219,6 @@ export function thirtyReasonText(kind: ThirtyReasonKind, facts: Facts): string {
   return until ? `30% closes ${until}: ${rest}` : `30% still open: ${rest}`;
 }
 
-/**
- * Can this member be on Can still earn: a first payment from 1 October (the
- * rule's own window), active or past due, not exempt. Whether they are on it
- * is then the rule's state alone: locked or ready.
- */
-export function canStillEarnCandidate(s: Pick<ThirtyStudent, "first_paid_at" | "membership_status" | "csm_exempt">): boolean {
-  if (s.csm_exempt === true) return false;
-  if (s.membership_status !== "active" && s.membership_status !== "past_due") return false;
-  return !("closed" in discountWindow(s.first_paid_at));
-}
-
 /** A Whop backfill ran since the switch. Before the switch any backfill counts. */
 export function whopPulled(lastSyncAt: string | null | undefined, resetAt: string | null): boolean {
   if (!lastSyncAt) return false;
@@ -249,6 +226,32 @@ export function whopPulled(lastSyncAt: string | null | undefined, resetAt: strin
   if (!Number.isFinite(t)) return false;
   if (resetAt == null) return true;
   return t >= Date.parse(resetAt);
+}
+
+/** A stored price as a number: Postgres numeric reaches the page as a string or a number. */
+function priceOf(value: number | string | null | undefined): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/**
+ * The stored coupon for the membership the student has now, or null. A row
+ * read from another membership says nothing about this one
+ * (membership-discount.ts storedRowApplies).
+ */
+export function couponOf(row: ThirtyCouponRow | undefined, student: Pick<ThirtyStudent, "whop_membership_id">): Coupon | null {
+  if (!row || !row.whop_membership_id || row.whop_membership_id !== student.whop_membership_id) return null;
+  return {
+    code: row.promo_code ?? row.promo_code_id ?? null,
+    discounted: row.discounted === true,
+    renewalPrice: priceOf(row.renewal_price),
+    planRenewalPrice: priceOf(row.plan_renewal_price),
+    checkedAt: row.checked_at,
+  };
 }
 
 /** The first payment and the deadline, with no counts: the progress could not be read. */
@@ -368,9 +371,10 @@ function toVerdict(raw: ApprovalVerdict, explained: ApprovalVerdict, deadlinePas
 }
 
 /**
- * A pending request as Approve would judge it now (C9): approvalVerdict, then
+ * A pending request as the rule judges it now (C9): approvalVerdict, then
  * explainOldCourseRequest for a refusal of one made before the switch. The
- * facts are the ones the verdict judged.
+ * facts are the ones the verdict judged. The coupon comes before it
+ * (buildThirtyView).
  */
 export function judgeRequest(
   reads: DiscountReads,
@@ -387,91 +391,39 @@ export function judgeRequest(
   return { verdict: toVerdict(raw, explained, facts.deadlinePassed), facts };
 }
 
-/** The action items with a completion row, in course order, handed in or not (as the old page listed them). */
-function submissionsFor(catalog: readonly ThirtyLesson[], rows: readonly ThirtyCompletion[]): Submission[] {
-  const byLesson = new Map(rows.map((r) => [r.lesson_id, r] as const));
-  const out: Submission[] = [];
-  for (const l of catalog) {
-    if (l.requires_action !== true && l.type !== "action") continue;
-    const c = byLesson.get(l.id);
-    if (!c) continue;
-    out.push({
-      lessonId: l.id,
-      title: l.title ?? l.id,
-      handedIn: l.requires_action === true ? c.action_completed_at != null : c.completed_at != null,
-      link: c.discord_message_link ?? null,
-    });
-  }
-  return out;
-}
-
-/** The answer as DiscountFeedbackResponses shows it: the scale or the choice for those questions, else the text, else none. */
-function answerOf(a: ThirtyAnswer, questionType: string | undefined): string | number | null {
-  if (questionType === "scale" && a.answer_scale != null) return a.answer_scale;
-  if (questionType === "multi_choice" && a.answer_choice) return a.answer_choice;
-  if (a.answer_text && a.answer_text.trim().length > 0) return a.answer_text;
-  return null;
-}
-
-/** The newest completed task, or null. */
-function lastContactOf(rows: readonly ThirtyContact[] | undefined, team: ReadonlyMap<string, string>): LastContact | null {
-  let best: ThirtyContact | null = null;
-  let bestAt = -Infinity;
-  for (const r of rows ?? []) {
-    const t = r.completed_at ? Date.parse(r.completed_at) : NaN;
-    if (Number.isFinite(t) && t > bestAt) {
-      best = r;
-      bestAt = t;
-    }
-  }
-  if (!best || !best.completed_at) return null;
-  return {
-    at: best.completed_at,
-    by: best.completed_by ? { id: best.completed_by, name: team.get(best.completed_by) ?? null } : null,
-    scenarioId: best.scenario_id,
-    outcome: best.outcome === "replied" || best.outcome === "no_reply" ? best.outcome : null,
-  };
+/** The verdict for a student whose membership already has a discount on its next renewal: the approve route's words, no override. */
+export function couponVerdict(coupon: Coupon): Verdict {
+  return { ok: false, reason: "has-discount", text: couponApprovalRefusal(coupon.code), oldCourse: false };
 }
 
 const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 export function buildThirtyView(data: ThirtyData, now: Date, resetAt: string | null): ThirtyView {
   const students = new Map(data.students.map((s) => [s.id, s] as const));
-  const questionsById = new Map(data.questions.map((q) => [q.id, q] as const));
   const ref = (id: string | null): TeamRef | null => (id ? { id, name: data.team.get(id) ?? null } : null);
   const brief = (s: ThirtyStudent): StudentBrief => ({
     id: s.id,
     name: s.name ?? null,
     email: s.email ?? null,
-    discord: { userId: s.discord_user_id ?? null, username: s.discord_username ?? null },
-    plan: planLabel(s.whop_plan_id),
+    username: s.discord_username ?? null,
     status: s.membership_status,
-    csmExempt: s.csm_exempt === true,
     whopPulled: whopPulled(data.lastSyncAt.get(s.id), resetAt),
   });
 
   const requests = [...data.requests]
-    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || -byId(a, b))
+    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || byId(a, b))
     .map((r): ThirtyRequestRow => {
       // loadThirtyData reads every student holding a listed request, or fails.
       const s = students.get(r.student_id)!;
-      const reads = data.reads.get(s.id)!;
-      let facts: Facts;
+      const coupon = couponOf(data.coupons.data?.get(s.id), s);
+      let facts: Facts | null = null;
       let verdict: Verdict | null = null;
-      let submissions: Submission[] | null = null;
       if (r.status === "pending") {
-        const judged = judgeRequest(reads, now, r, resetAt);
+        const judged = judgeRequest(data.reads.get(s.id)!, now, r, resetAt);
         facts = judged.facts;
-        verdict = judged.verdict;
-        const done = data.completions.get(s.id);
-        submissions = done && data.catalog.data ? submissionsFor(data.catalog.data, done) : null;
-      } else {
-        facts = studentAppView(reads, now)?.facts ?? factsWithoutProgress(s.first_paid_at ?? null, now);
+        // D5 first: a discount on the next renewal decides, whatever the rule says.
+        verdict = coupon?.discounted ? couponVerdict(coupon) : judged.verdict;
       }
-      const order = (a: ThirtyAnswer) => questionsById.get(a.question_id)?.order_num ?? Number.MAX_SAFE_INTEGER;
-      const answers = [...(data.answers.get(r.id) ?? [])]
-        .sort((a, b) => order(a) - order(b) || byId(a, b))
-        .map((a) => ({ questionId: a.question_id, answer: answerOf(a, questionsById.get(a.question_id)?.question_type) }));
       return {
         id: r.id,
         status: r.status,
@@ -485,50 +437,19 @@ export function buildThirtyView(data: ThirtyData, now: Date, resetAt: string | n
         student: brief(s),
         facts,
         verdict,
-        submissions,
-        answers,
+        coupon,
       };
     });
-
-  const canStillEarn: ThirtyEarnRow[] = [];
-  let unchecked = 0;
-  for (const s of data.students) {
-    if (!canStillEarnCandidate(s)) continue;
-    const app = studentAppView(data.reads.get(s.id)!, now);
-    if (!app) {
-      unchecked++;
-      continue;
-    }
-    if (app.state.kind !== "locked" && app.state.kind !== "ready") continue;
-    canStillEarn.push({
-      student: brief(s),
-      facts: app.facts,
-      state: app.state.kind,
-      lastContact: lastContactOf(data.contacts.get(s.id), data.team),
-      openTasks: [...(data.openTasks.get(s.id) ?? [])]
-        .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at) || byId(a, b))
-        .map((t) => ({ id: t.id, scenarioId: t.scenario_id, summary: t.behavior_summary ?? null, createdAt: t.created_at })),
-    });
-  }
-  const left = (r: ThirtyEarnRow) => (r.facts.videosTotal ?? 0) - (r.facts.videosDone ?? 0);
-  canStillEarn.sort(
-    (a, b) =>
-      Date.parse(a.facts.deadline!) - Date.parse(b.facts.deadline!) ||
-      left(a) - left(b) ||
-      (a.student.name ?? "").localeCompare(b.student.name ?? "") ||
-      byId(a.student, b.student),
-  );
 
   return {
     generatedAt: now.toISOString(),
     sharedDeadline: DISCOUNT_SHARED_DEADLINE,
+    listedFrom: DISCOUNT_ELIGIBLE_FROM,
     requiredCount:
       data.catalog.data && data.videos.data
         ? requiredLessons(toDiscountLessons(data.catalog.data, new Set(data.videos.data.map((v) => v.lesson_id)))).length
         : null,
-    questions: data.questions.map((q) => ({ id: q.id, orderNum: q.order_num, text: q.question_text })),
+    couponsUnread: data.coupons.data === null,
     requests,
-    canStillEarn,
-    unchecked,
   };
 }

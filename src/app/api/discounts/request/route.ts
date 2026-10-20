@@ -4,7 +4,14 @@ import { refuseWhileClosed } from "@/lib/student-app-gate";
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { onDiscountRequested } from "@/lib/csm-events";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
-import { SAVE_FAILED, decideDiscountRequest, loadDiscountReads, secondPendingRequest } from "@/lib/world/discount-server";
+import { checkMembershipDiscount } from "@/lib/membership-discount";
+import {
+  SAVE_FAILED,
+  decideDiscountRequest,
+  loadDiscountReads,
+  membershipDiscountRefusal,
+  secondPendingRequest,
+} from "@/lib/world/discount-server";
 
 /**
  * The new course (2026-10-14): on a deployment that reads the v2 catalog
@@ -14,6 +21,10 @@ import { SAVE_FAILED, decideDiscountRequest, loadDiscountReads, secondPendingReq
  * made on or after 2026-10-09; the end of 2026-10-23 for one from 2026-10-01
  * until then; never for an earlier one). It grants only on `ready` and fails
  * closed on any read error.
+ * Then the coupon (admin rebuild 2, D5): a Whop membership that already has a
+ * discount on its next renewal gets no 30%. Whop is asked now; when it does
+ * not answer, the stored row decides; with neither the request goes through
+ * and the approve route's own check decides (checkMembershipDiscount).
  * The old rule below runs everywhere else, unchanged, so the live app on the
  * v1 catalog behaves exactly as before.
  */
@@ -26,6 +37,12 @@ async function requestUnderNewCourse(supabase: SupabaseClient, studentId: string
       { error: decision.error, state: decision.state },
       { status: decision.status },
     );
+  }
+
+  const coupon = await checkMembershipDiscount(supabase, studentId);
+  if (coupon.discounted) {
+    const refusal = membershipDiscountRefusal();
+    return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
   }
 
   const { data, error } = await supabase

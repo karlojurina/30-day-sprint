@@ -44,9 +44,13 @@ function write(text, label, outRel, rewrites) {
   fs.writeFileSync(here(outRel), s)
   console.log(`generated ${outRel} from ${label}`)
 }
-/** The route at `rel`, now and at BASE, copied to _gen/<out>.ts and _gen/<out>.old.ts. */
-function copyRoute(rel, out, rewrites) {
-  write(fromSrc(rel), rel, `./_gen/${out}.ts`, rewrites)
+/**
+ * The route at `rel`, now and at BASE, copied to _gen/<out>.ts and
+ * _gen/<out>.old.ts. `nowOnly`: rewrites for imports the route gained after
+ * BASE (the coupon check of admin rebuild 2, D5), applied to today's copy.
+ */
+function copyRoute(rel, out, rewrites, nowOnly = []) {
+  write(fromSrc(rel), rel, `./_gen/${out}.ts`, [...rewrites, ...nowOnly])
   write(fromBase(rel), `${rel}@${BASE}`, `./_gen/${out}.old.ts`, rewrites)
 }
 
@@ -62,6 +66,9 @@ copyRoute('src/app/api/discounts/approve/route.ts', 'admin-approve-route', [
   ['from "@/lib/constants"', 'from "./constants.ts"'],
   ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
   ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
+], [
+  // The coupon check (D5) on build.mjs's copy: no WHOP_API_KEY here, so it reads no Whop and finds no stored row.
+  ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
 ])
 
 copyRoute('src/app/api/discounts/mark-applied/route.ts', 'admin-mark-applied-route', LOGIN)

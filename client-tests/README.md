@@ -251,6 +251,28 @@ product ids `etfb.ts` held at `d0ebe76` (read with `git show`), in the
 says so. With Today put back first in the bar and `/admin` matched as a
 prefix, 9 checks fail.
 
+`dashboard.test.mjs` (admin rebuild 2, WI-2, 2026-10-20) checks the
+Dashboard's numbers, `src/lib/admin/dashboard-metrics.ts` (copied by
+`build.mjs` over the real `metrics-definitions.ts`, `curriculum-reset.ts`
+and `discount.ts`): Month 2 counts only the students who first paid on or
+after the launch (a first payment at the launch second counts whichever way
+it is written; the students from before it, who would make a rate without
+the floor, never do) and waits with the first renewal's date (a calendar
+month after the first payment) and the first rate's (that payment plus 30
+days and a week of grace); once renewals resolve, the rate and a line whose
+days before the first resolution are gaps and whose last point is the big
+number. Bounty keeps its count; Churned adds exactly 14 days; a day with no
+snapshot is a gap; Avg progress's number is its line's last point and the
+line starts on the switch's date. A count that did not come back, a paged
+read's empty list with an error, a broken `tasks_reset_at` and a failed
+settings read are failures, each failing every tile it feeds, named once.
+Refresh's line names a step that failed inside a 200. The page's
+`readDashboard` is taken from `page.tsx` with TypeScript's parser and run on
+a client that records every call: the open tasks get the tasks reset's floor
+only when the key exists and are not counted without it, 30% to decide
+counts the pending requests from 1 October, the students read names its 6
+columns and pages by id. 81 checks.
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

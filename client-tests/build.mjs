@@ -391,3 +391,17 @@ gen('../src/app/api/admin/first-paid-repair/route.ts', './_gen/first-paid-repair
   ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
   ...toStub('next/server', '@/lib/supabase-server'),
 ])
+
+// The Dashboard (admin rebuild 2, WI-2, D3; dashboard.test.mjs): its numbers,
+// dashboard-metrics.ts, over the real rules it builds on: Month 2 and the
+// member predicates (metrics-definitions.ts, the same copy
+// discount-queue.test.mjs makes), the switch's date (curriculum-reset.ts,
+// above) and the launch and 30% dates (discount.ts, above). The page's reads
+// are run by the test itself, from page.tsx, over supabase-pagination.ts (above).
+gen('../src/lib/admin/metrics-definitions.ts', './_gen/metrics-definitions.ts', [['from "@/lib/constants"', 'from "./constants.ts"']])
+gen('../src/lib/admin/dashboard-metrics.ts', './_gen/dashboard-metrics.ts', [
+  ['from "@/lib/constants"', 'from "./constants.ts"'],
+  ['from "@/lib/admin/metrics-definitions"', 'from "./metrics-definitions.ts"'],
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+])

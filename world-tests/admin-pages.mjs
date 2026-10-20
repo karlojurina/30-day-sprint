@@ -4,7 +4,7 @@
  * page, in every state, at a phone's width and two desktop widths. Today,
  * which this file also drew, was removed in admin rebuild 2 (D2).
  *
- *   node world-tests/admin-pages.mjs [--only routes,frame,signin,thirty]
+ *   node world-tests/admin-pages.mjs [--only routes,frame,signin,thirty,dash]
  *
  * Opens BASE_URL (default http://localhost:3226): a development server
  * started for the run in the app root, `PORT=3226 npx next dev`. This script
@@ -38,6 +38,13 @@
  *           reject, a failed reload (its own line, the decided row's buttons
  *           off), Mark code added, ?student=; the 4 tabs whole on a phone,
  *           To decide oldest first, every tap 44px
+ *   dash    /dev/admin/dashboard (admin rebuild 2, WI-2): full, renewed,
+ *           empty, partial, error and loading; Month 2 waiting with no
+ *           rate before the first renewals, then its rate; Avg progress's
+ *           line from the switch only; every failed tile "Couldn't load"
+ *           with no number; the readouts by pointer and keyboard; How it's
+ *           counted; Refresh for a founder (its line, a refusal, a step that
+ *           failed) and none for a csm; Retry; every tap 44px
  *
  * Every state at 390x844, 1280x720 and 1440x900 (a few click states at one
  * or two of them), and each one is measured. It fails on: a horizontal
@@ -116,7 +123,7 @@ if (wanted('routes')) {
   for (const s of distinct.slice(0, 40)) console.log(`       "${s}"`)
 }
 
-const needBrowser = ['frame', 'signin', 'thirty'].some(wanted)
+const needBrowser = ['frame', 'signin', 'thirty', 'dash'].some(wanted)
 if (!needBrowser) finish()
 
 fs.mkdirSync(OUT, { recursive: true })
@@ -866,6 +873,226 @@ if (wanted('thirty')) {
   }
   const errs = newConsoleErrors(from)
   expect(errs.length === 0, '30% off: no error in the browser console', errs.slice(0, 3).join(' || '))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// dash: /dev/admin/dashboard (admin rebuild 2, WI-2)
+// ════════════════════════════════════════════════════════════════════════════
+if (wanted('dash')) {
+  const from = consoleErrors.length
+  const TILES = ['month2', 'bounty', 'open-tasks', 'to-decide', 'active', 'canceling', 'churned', 'avg-progress']
+  const open = (query, size) => go(`/dev/admin/dashboard${query}`, size)
+  const ready = () => page.waitForFunction(() => /Updated \d\d:\d\d/.test(document.body.innerText), { timeout: 30000 })
+  /** Each tile: its words, whether it shows a number, whether it says it could not load. */
+  const tiles = () => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('[data-tile]')].map((t) => [t.dataset.tile, {
+    text: t.innerText.replace(/\s+/g, ' ').trim(),
+    numbers: [...t.querySelectorAll('[data-number]')].map((n) => n.textContent.trim()),
+    failed: !!t.querySelector('[data-failed]'),
+    href: t.getAttribute('href'),
+  }])))
+  /** The rows of a chart's table for screen readers, in a tile. */
+  const tableOf = (tile) => page.evaluate((name) => [...document.querySelectorAll(`[data-tile="${name}"] tbody tr`)].map((r) => r.innerText.replace(/\s+/g, ' ').trim()), tile)
+  const dashCalls = () => page.evaluate(() => (window.__dashCalls ?? []).map((c) => c.name))
+  const refreshButton = () => page.evaluateHandle(() => [...document.querySelectorAll('button')].find((b) => /^↻?\s*Refresh/.test(b.textContent.trim())) || null)
+
+  for (const size of SIZES) {
+    const [w, h] = size
+    {
+      const label = `Dashboard, full (20 Oct, before the first renewals), ${w}x${h}`
+      console.log(`\n${label}`)
+      await open('?state=full', size)
+      await ready()
+      await check(label, `dash-full-${w}`)
+      const t = await tiles()
+      expect(TILES.every((k) => t[k] && !t[k].failed), `${label}: all 8 tiles, none failed`, JSON.stringify(Object.keys(t)))
+      expect(t.month2.text.includes('First renewals from Mon 9 Nov') && t.month2.text.includes('paid since Fri 9 Oct') && t.month2.text.includes('Sun 15 Nov')
+        && !/\d%/.test(t.month2.text), `${label}: Month 2 waits for the first renewals, with the dates, and shows no rate (no 0%, no old 61%)`, t.month2.text.slice(0, 160))
+      expect(t['open-tasks'].numbers[0] === '95' && t['open-tasks'].href === '/admin/tasks' && t['to-decide'].numbers[0] === '3' && t['to-decide'].href === '/admin/discounts',
+        `${label}: Open tasks 95, links to Tasks; 30% to decide 3, links to the 30% page`, JSON.stringify([t['open-tasks'].numbers, t['to-decide'].numbers]))
+      const avgRows = await tableOf('avg-progress')
+      expect(t['avg-progress'].numbers[0] === '2.7%' && JSON.stringify(avgRows) === JSON.stringify(['Mon 19 Oct 2.66%', 'Tue 20 Oct 2.71%']),
+        `${label}: Avg progress 2.7%, its line from the switch only (19 and 20 Oct, no 36%)`, JSON.stringify([t['avg-progress'].numbers, avgRows]))
+      expect((await tableOf('active')).length === 14 && (await tableOf('churned')).length === 14, `${label}: the other lines hold the 14 days`)
+      expect(!(await isNull(await refreshButton())), `${label}: a founder has Refresh`)
+      const small = await smallTaps()
+      expect(small.length === 0, `${label}: every button is 44px tall or more`, JSON.stringify(small.slice(0, 4)))
+    }
+    {
+      const label = `Dashboard, renewed (24 Nov, the first rates in), ${w}x${h}`
+      console.log(`\n${label}`)
+      await open('?state=renewed', size)
+      await ready()
+      await check(label, `dash-renewed-${w}`)
+      const t = await tiles()
+      expect(/^\d+%$/.test(t.month2.numbers[0] ?? '') && t.month2.text.includes('still paying after their first renewal'),
+        `${label}: Month 2 shows its rate`, JSON.stringify(t.month2.numbers))
+      const m2 = await tableOf('month2')
+      expect(m2.length === 14 && m2[0] === 'Wed 11 Nov Nobody past a renewal yet' && /^Tue 24 Nov \d+%$/.test(m2[13]) && m2[13].endsWith(t.month2.numbers[0]),
+        `${label}: its line: no rate before anyone resolved, and the last day is the big number`, JSON.stringify([m2[0], m2[13]]))
+      expect(t['open-tasks'].text.includes('Created since the reset, Wed 21 Oct'), `${label}: Open tasks count from the tasks reset`, t['open-tasks'].text)
+    }
+    {
+      const label = `Dashboard, empty, ${w}x${h}`
+      console.log(`\n${label}`)
+      await open('?state=empty', size)
+      await ready()
+      await check(label, `dash-empty-${w}`)
+      const t = await tiles()
+      expect(t['open-tasks'].text.includes('All caught up') && t['to-decide'].text.includes('Nothing to decide') && t.month2.text.includes('No first payment since Fri 9 Oct yet')
+        && t['avg-progress'].text.includes('No snapshot since the switch') && t.churned.text.includes('No snapshot in these 14 days') && !t.churned.numbers.length,
+        `${label}: each tile says what nothing means, and Churned shows no 0 without a snapshot`)
+    }
+    {
+      const label = `Dashboard, partial (the open tasks and the snapshots fail), ${w}x${h}`
+      console.log(`\n${label}`)
+      await open('?state=partial', size)
+      await ready()
+      await check(label, `dash-partial-${w}`)
+      const t = await tiles()
+      const down = ['open-tasks', 'churned', 'avg-progress']
+      expect(down.every((k) => t[k].failed && t[k].numbers.length === 0 && t[k].text.includes("Couldn't load")),
+        `${label}: Open tasks, Churned and Avg progress say "Couldn't load" and show no number`, JSON.stringify(down.map((k) => t[k].numbers)))
+      expect(t['to-decide'].numbers[0] === '3' && !t.active.failed && t.active.numbers.length === 1 && t.active.text.includes("Couldn't load the line"),
+        `${label}: the rest stands; Active keeps its number and says its line could not load`)
+      const alert = await page.$eval('[role="alert"]', (e) => e.innerText)
+      expect(alert.includes('Some numbers couldn\'t load.') && alert.includes('Open tasks: permission denied for table tasks') && alert.includes('Daily snapshots:') && alert.includes('Retry'),
+        `${label}: one line at the top names each failed read, with Retry`, alert.replace(/\s+/g, ' '))
+    }
+    {
+      const label = `Dashboard, error (every read fails), ${w}x${h}`
+      console.log(`\n${label}`)
+      await open('?state=error', size)
+      await ready()
+      await check(label, `dash-error-${w}`)
+      const t = await tiles()
+      expect(TILES.every((k) => t[k].failed && t[k].numbers.length === 0), `${label}: all 8 tiles "Couldn't load", not one number`, JSON.stringify(TILES.map((k) => t[k].numbers)))
+      expect((await page.$eval('[role="alert"]', (e) => e.innerText)).includes("Couldn't load the dashboard."), `${label}: the line at the top says nothing could load`)
+    }
+    {
+      const label = `Dashboard, loading, ${w}x${h}`
+      console.log(`\n${label}`)
+      await open('?state=loading', size)
+      await page.waitForSelector('.animate-pulse')
+      expect((await page.$('.animate-spin')) === null && (await bodyText()).includes('Loading'), `${label}: skeletons, no spinner`)
+      await check(label, `dash-loading-${w}`)
+    }
+  }
+
+  console.log('\nDashboard: the readouts, How it\'s counted, Retry')
+  {
+    await open('?state=full', [1280, 720])
+    await ready()
+    // Pointer: the middle of the Bounty chart shows that day.
+    const bars = await page.$('[data-tile="bounty"] [aria-roledescription="chart"]')
+    const box = await bars.boundingBox()
+    await page.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5)
+    await sleep(150)
+    const readout = await page.evaluate(() => document.querySelector('[data-tile="bounty"] [aria-live="polite"]').textContent)
+    const tip = await page.evaluate(() => [...document.querySelectorAll('[data-tile="bounty"] [aria-roledescription="chart"] > div[aria-hidden="true"]')].map((d) => d.innerText.trim()).filter(Boolean).pop() ?? '')
+    expect(/^\w{3} \d{1,2} Oct: \d+$/.test(readout) && tip.includes(readout.split(': ')[1]) && tip.includes(readout.split(': ')[0]),
+      `the pointer over the Bounty chart reads that day: "${readout}", and the readout box says the same`, tip)
+    await check('Dashboard, the Bounty readout open, 1280x720', 'dash-readout-bounty-1280')
+    await page.mouse.move(5, 5)
+    await sleep(100)
+    expect(await page.evaluate(() => document.querySelector('[data-tile="bounty"] [aria-live="polite"]').textContent === ''), 'it goes when the pointer leaves')
+    // Keyboard: the Active chart, from the last day back one.
+    await page.$eval('[data-tile="active"] [aria-roledescription="chart"]', (c) => c.focus())
+    await sleep(100)
+    const last = await page.evaluate(() => document.querySelector('[data-tile="active"] [aria-live="polite"]').textContent)
+    await page.keyboard.press('ArrowLeft')
+    await sleep(100)
+    const before = await page.evaluate(() => document.querySelector('[data-tile="active"] [aria-live="polite"]').textContent)
+    expect(last.startsWith('Tue 20 Oct: ') && before.startsWith('Mon 19 Oct: '), `the keyboard reads the Active line: "${last}", then "${before}"`)
+    await page.keyboard.press('Escape')
+    // How it's counted, on Avg progress.
+    const how = await page.$('[data-tile="avg-progress"] button[aria-controls]')
+    expect((await how.evaluate((b) => b.getAttribute('aria-label'))) === 'How Avg progress is counted', 'Avg progress has its "How it\'s counted" button')
+    const tileHeights = () => page.$$eval('[data-tile]', (ts) => ts.map((t) => Math.round(t.getBoundingClientRect().height)).join(','))
+    const heightsShut = await tileHeights()
+    await how.click()
+    await sleep(100)
+    expect((await tileHeights()) === heightsShut, 'the rule floats over its tile: no tile changes height, no line drops to a tile\'s foot', `${heightsShut} / ${await tileHeights()}`)
+    const panel = await page.evaluate(() => {
+      const b = document.querySelector('[data-tile="avg-progress"] button[aria-controls]')
+      const p = document.getElementById(b.getAttribute('aria-controls'))
+      return { expanded: b.getAttribute('aria-expanded'), shown: !p.hidden, text: p.innerText }
+    })
+    expect(panel.expanded === 'true' && panel.shown && panel.text.startsWith('One number for the tile and its line'), "it opens the rule, which says it is one metric for the number and the line", panel.text.slice(0, 80))
+    await check("Dashboard, Avg progress's rule open, 1280x720", 'dash-how-avg-1280')
+    const ruleState = () => page.evaluate(() => {
+      const b = document.querySelector('[data-tile="avg-progress"] button[aria-controls]')
+      return { expanded: b.getAttribute('aria-expanded'), hidden: document.getElementById(b.getAttribute('aria-controls')).hidden, focused: document.activeElement === b }
+    })
+    await page.keyboard.press('Escape')
+    await sleep(100)
+    const afterEscape = await ruleState()
+    expect(afterEscape.expanded === 'false' && afterEscape.hidden && afterEscape.focused, 'Escape closes it, and the focus is back on its button', JSON.stringify(afterEscape))
+    await how.click()
+    await sleep(100)
+    await page.mouse.click(20, 400)
+    await sleep(100)
+    const afterOutside = await ruleState()
+    expect(afterOutside.expanded === 'false' && afterOutside.hidden, 'a press outside it closes it', JSON.stringify(afterOutside))
+    // On a phone a trend tile is about 173px wide: the rule opens wider than it, inside the window.
+    await open('?state=full', [390, 844])
+    await ready()
+    for (const name of ['active', 'avg-progress']) {
+      await press(await page.$(`[data-tile="${name}"] button[aria-controls]`))
+      await sleep(150)
+      const box = await page.evaluate((t) => {
+        const b = document.querySelector(`[data-tile="${t}"] button[aria-controls]`)
+        const r = document.getElementById(b.getAttribute('aria-controls')).getBoundingClientRect()
+        return { left: Math.round(r.left), right: Math.round(r.right), width: Math.round(r.width), room: document.documentElement.clientWidth }
+      }, name)
+      expect(box.width >= 300 && box.left >= 0 && box.right <= box.room, `on a phone, ${name}'s rule is ${box.width}px wide and inside the window (${box.left} to ${box.right})`, JSON.stringify(box))
+      await check(`Dashboard, ${name}'s rule open, 390x844`, `dash-how-${name}-390`)
+      await page.keyboard.press('Escape')
+      await sleep(100)
+    }
+    await open('?state=error', [1280, 720])
+    await ready()
+    const loadsBefore = (await dashCalls()).filter((c) => c === 'load').length
+    await press(await button('Retry'))
+    await page.waitForFunction((n) => (window.__dashCalls ?? []).filter((c) => c.name === 'load').length > n, { timeout: 10000 }, loadsBefore)
+    expect(true, 'Retry reads everything again')
+  }
+
+  console.log('\nDashboard: Refresh')
+  {
+    await open('?state=full', [1280, 720])
+    await ready()
+    const loadsBefore = (await dashCalls()).filter((c) => c === 'load').length
+    await press(await refreshButton())
+    await page.waitForFunction(() => [...document.querySelectorAll('[role="status"]')].some((e) => e.textContent.includes('snapshots rebuilt')), { timeout: 15000 })
+    const note = await page.evaluate(() => [...document.querySelectorAll('[role="status"]')].map((e) => e.textContent).find((t) => t.includes('snapshots rebuilt')))
+    const calls = await dashCalls()
+    expect(note === 'Whop synced, 3 new and 118 updated · snapshots rebuilt · 4 new tasks · 2 alerts', `Refresh says what each step did: "${note}"`)
+    await page.waitForFunction((n) => (window.__dashCalls ?? []).filter((c) => c.name === 'load').length > n, { timeout: 10000 }, loadsBefore)
+    expect(calls.includes('refresh'), 'one refresh call, then the numbers are read again', JSON.stringify(calls))
+    await check('Dashboard, after Refresh, 1280x720', 'dash-refreshed-1280')
+
+    await open('?state=full&refresh=fail', [1280, 720])
+    await ready()
+    await press(await refreshButton())
+    await page.waitForFunction(() => [...document.querySelectorAll('[role="alert"]')].some((e) => e.textContent.startsWith('Refresh failed')), { timeout: 15000 })
+    const refusal = await page.evaluate(() => [...document.querySelectorAll('[role="alert"]')].map((e) => e.textContent).find((t) => t.startsWith('Refresh failed')))
+    expect(refusal === 'Refresh failed: Founder or admin role required', `a refusal is said in the route's words: "${refusal}"`)
+
+    await open('?state=full&refresh=partial', [1280, 720])
+    await ready()
+    await press(await refreshButton())
+    await page.waitForFunction(() => document.body.innerText.includes('Whop sync failed: HTTP 502'), { timeout: 15000 })
+    expect(true, 'a step that failed inside a 200 is said: "Whop sync failed: HTTP 502"')
+
+    for (const size of SIZES) {
+      await open('?state=full&role=csm', size)
+      await ready()
+      expect(await isNull(await refreshButton()), `a csm has no Refresh (the route refuses one), ${size.join('x')}`)
+      await check(`Dashboard, a csm, ${size.join('x')}`, `dash-csm-${size[0]}`)
+    }
+  }
+  const errs = newConsoleErrors(from)
+  expect(errs.length === 0, 'Dashboard: no error in the browser console', errs.slice(0, 3).join(' || '))
 }
 
 // ── Every page the run opened ──────────────────────────────────────────────

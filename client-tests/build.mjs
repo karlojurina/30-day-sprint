@@ -262,6 +262,20 @@ gen('../src/app/api/auth/whop/callback/route.ts', './_gen/whop-callback-route.ts
   ...toStub('next/server', '@/lib/supabase-server', '@/lib/whop', '@/lib/whop-members', '@/lib/achievements',
     '@/app/api/student/_lib/update-streak', '@supabase/supabase-js', '@/lib/first-payment'),
 ], { dropLineComments: true })
+// The same login with its Whop reads real, for the production WHOP_PRODUCT_ID
+// (three products, whop-product-setting.test.mjs): the code exchange and the
+// login check (checkActiveMembershipDiagnostic) from the whop.ts copy above,
+// the self-heal (fetchActiveMembershipForUser) from the whop-members.ts copy
+// above, both on the test's stand-in fetch. Its comment lines go, as above.
+gen('../src/app/api/auth/whop/callback/route.ts', './_gen/whop-callback-route-real-whop.ts', [
+  GATE,
+  ['from "@/lib/pkce"', 'from "./pkce.ts"'],
+  ['from "@/app/api/student/_lib/watch-sync"', 'from "./watch-sync.ts"'],
+  ['from "@/lib/whop"', 'from "./whop.ts"'],
+  ['from "@/lib/whop-members"', 'from "./whop-members.ts"'],
+  ...toStub('next/server', '@/lib/supabase-server', '@/lib/achievements',
+    '@/app/api/student/_lib/update-streak', '@supabase/supabase-js', '@/lib/first-payment'),
+], { dropLineComments: true })
 
 // The Whop catch-up (T-089, whop-catchup.test.mjs): the route and the run as
 // they are. The run reads Whop through the real whop.ts (above), which the

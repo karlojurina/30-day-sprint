@@ -799,16 +799,28 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
   row only for a product in `WHOP_PRODUCT_ID` (comma separated); the
   company's webhook is taken to send every product's events (no real
   delivery of another product's has been seen), and another product's
-  used to be written as `active`. If the webhook does send them, that
-  row was the only way into the app for an Apex seat or an ETfB
-  membership without the
-  course, since the login's own Whop check and self-heal accept only
-  `WHOP_PRODUCT_ID`: since login-1 a new seat gets no row and is turned
-  away, while a row written before stays until its membership ends
-  (below) or a cleanup closes it. Whether those seat-holders should use
-  the app is the owner's call; letting them in needs a setting of its
-  own, since `WHOP_PRODUCT_ID` also drives the sync and the login
-  check. Another product's event answers 200
+  used to be written as `active`. While the list named the course
+  alone, that row was the only way into the app for an Apex seat or an
+  ETfB membership without the course, since the login's own Whop check
+  and self-heal accept only `WHOP_PRODUCT_ID`. The owner's call
+  (2026-10-20): Apex and ETfB members keep the app, so production's
+  `WHOP_PRODUCT_ID` names three products, the course
+  (`prod_eE7r6SXa3H0MX`), ETfB for brands (`prod_bGNf1u02RruKC`) and
+  Apex team seats (`prod_vCHZUO8dU4ts2`), from the first deploy after
+  it was set. The login check, the self-heal, the 2-hour sync and this
+  webhook read the one list, so a membership of any of the three gets
+  in and one of any other product is turned away
+  (`whop-product-setting` client test); "the course" below means the
+  products the list names. What the wider list brings: the sync makes
+  a row for every Apex and ETfB member, and on plans outside
+  `PAYING_WHOP_PLAN_IDS` they stay out of the admin surfaces and the
+  CSM crons and get no first payment from the sync (an Apex seat is a
+  free team link, so with no payment of its own its `first_paid_at`
+  stays empty and the 30% checkpoint reads "Ask the team"); a course
+  member who also holds a newer Apex seat or ETfB membership has the
+  row pointed at it and its plan, by the sync (the newest membership
+  that grants access wins) or by that product's webhook event, which
+  takes them off the paying plan. Another product's event answers 200
   and writes nothing (its membership ending asks Whop nothing either),
   with one exception: a membership ending that the student's row still
   points at (`whop_membership_id`) is the row the old webhook made for

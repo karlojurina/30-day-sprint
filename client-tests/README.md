@@ -236,6 +236,30 @@ lanes' guard, overlap, dedupe and shared pace, the sync's and the
 backfill's time limits, the cursor) each failed this suite or
 `first-payment.test.mjs`.
 
+`whop-product-setting.test.mjs` (login-1 merged onto main, 2026-10-20) runs
+production's `WHOP_PRODUCT_ID` exactly as Lovro set it that day so that Apex
+and ETfB members keep the app: three product ids (the course, ETfB for brands,
+Apex team seats), no plan id. The four readers of it run on that value: the
+login's `GET`, from a second copy of the callback
+(`whop-callback-route-real-whop.ts`) whose login check
+(`checkActiveMembershipDiagnostic`, `whop.ts`) and self-heal
+(`fetchActiveMembershipForUser`, `whop-members.ts`) are the real copies, once
+with the company key's reads failing (the login check decides alone) and once
+with the student's token getting the 404 legacy customers get (the self-heal
+decides alone); the 2-hour sync (`runWhopCommunitySync`); and the webhook's
+`POST`. A course member, an ETfB member and an Apex seat get in, get a row and
+are written by the webhook; a member of a product the list does not name is
+turned away with no row and no account, and the self-heal and the sync ask
+Whop about the three products only. It also pins what the setting brings with
+it: a member of another product whose row the old webhook wrote active still
+gets in (the login asks the database first); the Apex seat and the ETfB member,
+on plans outside `PAYING_WHOP_PLAN_IDS`, get no first payment from the sync;
+and a course member who also holds a newer Apex seat has the sync point the
+row at the seat and its plan. Ten breaks (each reader taking any product or
+only the first id, the sync's dedupe turned around, the webhook or the sync
+writing `first_paid_at` again) each failed it, and the course alone in
+`WHOP_PRODUCT_ID` fails 19 of its 32 checks.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

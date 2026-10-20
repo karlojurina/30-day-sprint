@@ -130,6 +130,10 @@ author within 15 minutes deletes the record and reopens the task, and answers
 index refusing a reopening). For it the stand-in learned `.not()`, `.like()`,
 `.lt()`, `.lte()`, `.gt()`, head counts, the columns of the tables Today reads,
 and v27's one-open-task index on `tasks`, checked on update as well as insert.
+Every error sentence a route answers in it is kept; with `ADMIN_ROUTE_ERRORS_OUT`
+set to a file path the suite writes them there as JSON, and
+`world-tests/admin-pages.mjs` (work item 5) runs it that way and holds each
+sentence to the page's words: no em dash, "unlock" or "EcomTalent".
 `support-list.test.mjs` runs the builder itself (`src/lib/admin/support-list.ts`)
 on made-up members: each of C4's reasons with its words and thresholds, two
 reasons on one student, who is never listed, the heartbeat hold, every

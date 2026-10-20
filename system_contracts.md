@@ -168,7 +168,10 @@ When adding a new table, append it here. When deleting a field, scan
 - **Depends on:** `students`
 - **Depended on by:** `/api/auth/whop/callback` (token write),
   `src/app/api/student/_lib/watch-sync.ts` (all sync diagnostics),
-  `StudentContext` (`syncDiagnostics`), admin student detail page
+  `StudentContext` (`syncDiagnostics`), admin student detail page,
+  `GET /api/admin/today` and `GET /api/admin/thirty` (admin rebuild,
+  branch `night/admin`: `student_id` and `last_sync_at` only, never the
+  tokens, for "Whop progress not pulled yet", call C14)
 - **Stable contract:** `student_id`, `access_token`, `refresh_token`,
   `last_sync_at`, `last_sync_error`, `last_sync_error_at`,
   `last_sync_unmatched`, `last_sync_fetched`, `last_sync_matched`
@@ -546,7 +549,13 @@ When adding a new table, append it here. When deleting a field, scan
   refuses while a row points at any course-shaped id) and
   `supabase/diagnostics/course-catalog-check.sql` (read only; three of
   its four checks read the video rows, the newest one counting video
-  rows on lessons that are not `watch` lessons)
+  rows on lessons that are not `watch` lessons). The admin rebuild
+  (branch `night/admin`): `GET /api/admin/thirty` and
+  `GET /api/admin/today`, through `loadThirtyData`
+  (`src/lib/admin/thirty-data.ts`), read `lesson_id` and `created_at`
+  of every row, never `tella_video_id`, with the service role's client
+  `requireTeam` hands them; `supabase/diagnostics/admin-today-spotcheck.sql`
+  (read only) reads `lesson_id` to know which lessons the 30% asks for
 - **Stable contract:** `lesson_id` (text, primary key, so one video per
   lesson), `tella_video_id` (text, not null, unique, so one lesson per
   video; it must match `^vid_[a-z0-9]{10,64}$`, the same pattern as
@@ -809,9 +818,12 @@ When adding a new table, append it here. When deleting a field, scan
 
 ### `discount_requests`
 - **Depends on:** `students`
-- **Depended on by:** `StudentContext`, `/admin/discounts`, Whop
-  promo flow, `src/lib/csm-triggers.ts` (membership/discount
-  status checks where applicable)
+- **Depended on by:** `StudentContext`, `/admin/discounts` (since the
+  admin rebuild, branch `night/admin`, through `GET /api/admin/thirty`:
+  every pending request whatever its date, and the others made from
+  `DISCOUNT_ELIGIBLE_FROM` on; Today's 30% reasons read the same through
+  `loadThirtyData`), Whop promo flow, `src/lib/csm-triggers.ts`
+  (membership/discount status checks where applicable)
 - **Stable contract:** `student_id`, `status`
   (pending/approved/rejected/applied), `promo_code`, `created_at`
 - **Added in v95, unused:** `gate_lesson_id` (text, nullable, no
@@ -882,9 +894,34 @@ When adding a new table, append it here. When deleting a field, scan
 
 ### `tasks` (CSM task queue)
 - **Depends on:** `students`, `templates`
-- **Depended on by:** `/admin/tasks`, `/admin/kanban`,
-  `src/lib/csm-events.ts` (`recentTaskScenarios` dedupe),
-  optional ops digest
+- **Depended on by:** `/admin/tasks`, `/admin/today` (through
+  `GET /api/admin/today` and `POST`/`DELETE /api/admin/today/mark`, admin
+  rebuild, branch `night/admin`), the 30% page's last contact
+  (`GET /api/admin/thirty`), `src/lib/csm-events.ts`
+  (`recentTaskScenarios` dedupe), optional ops digest. (`/admin/kanban`,
+  listed here until 2026-10-20, does not exist.)
+- **Support records (admin rebuild, branch `night/admin`, not on
+  production):** a mark on Today writes a row with `scenario_id`
+  `support.<kind>` (`support.cancel`, `support.pastdue`,
+  `support.30close`, `support.30ready`, `support.stopped`,
+  `support.nostart`, `support.noopen`), `template_id` null, `status`
+  `completed` (Messaged, with `completed_at` and `completed_by`) or
+  `dismissed` (Not needed, with `dismissed_at`, `dismissed_by` and the
+  reason in `notes`), `created_at` equal to that moment, and
+  `behavior_summary` holding every reason the row had. Never open, so the
+  crons and the one-open-task index never meet one. Written only by
+  `POST /api/admin/today/mark`, deleted only by
+  `DELETE /api/admin/today/mark` (its author, within 15 minutes). The same
+  mark completes or dismisses every open queue task on the row with the
+  same actor, note and moment, and Undo opens them again unless the queue
+  has a newer open task of the same scenario. Today reads the completed
+  and dismissed tasks of the last 30 days for its waits (call C5), Handled
+  and the last contact. `GET /api/admin/tasks` drops every task with no
+  template after its query (v59), so a support record never shows in the
+  Tasks tabs; on this branch it still takes one of that query's 100 rows,
+  until lane G1's change (`night/hf-admin`, `5bc5e27`) moves the filter
+  into the query. Outreach insights count template sends only, so a mark
+  for a reason the app computed is not in them either.
 - **Stable contract:** `student_id`, `scenario_id`, `template_id`,
   `status` (open/completed/dismissed), `behavior_summary`,
   `created_at`, `completed_at`, `dismissed_at`, `dismissed_by`,
@@ -1644,6 +1681,158 @@ called against a database or run on a deployment.
   how long a write takes, Tella's real answers from Vercel, Discord
   accepting the message, and Vercel's own clock have never been
   exercised, because the route has never run for real.
+
+---
+
+## Admin routes of the rebuild (branch `night/admin`)
+
+The four routes behind the rebuilt admin's two pages, Today
+(`/admin/today`) and the 30% page (`/admin/discounts`), built on
+2026-10-20 (admin rebuild PRD, milestone 1, in the owner's workspace
+under `_admin/prds/admin-rebuild/`). Local commits only: none has run on
+a deployment or against a real database. Every route takes
+`Authorization: Bearer <session token>` and lets in any team role
+(founder, admin, csm) through `requireTeam`, which answers 401
+`{ error: "Not authenticated" }` with no token, 401
+`{ error: "Invalid token" }` with a bad one, and 403
+`{ error: "Not a team member" }` for a login with no `team_members` row
+(a student's). Every error is `{ error: <one plain sentence> }`, with no
+em dash, "unlock" or "EcomTalent" in it. The pages call them through
+`src/lib/admin/admin-transport.ts`.
+
+### `GET /api/admin/today`
+- **What it is:** Today's whole list in one answer: every member who
+  needs a message, one row per student, and Handled (the last 7 days).
+- **Called by:** `TodayView` (`src/components/admin/today/TodayView.tsx`)
+  on load and on Refresh.
+- **Depends on:** `loadTodayData` (`src/lib/admin/today-data.ts`):
+  `students` (active or past due, with a `whop_membership_id`,
+  `csm_exempt` false, any plan), `student_progress_counts`,
+  `student_last_counted_completion`, `student_current_region`,
+  `regions`, `student_milestones.first_sprint_login_at`,
+  `student_whop_sync` (`student_id, last_sync_at`), the
+  `student_lesson_watch` heartbeats of the last 3 days, `tasks` (every
+  open one, and the completed and dismissed ones of the last 30 days),
+  `templates`, `team_members`, the count of `lessons` with
+  `counts_toward_progress`, `admin_config` (`curriculum_reset_at` and the
+  links the templates name), and the 30% through `loadThirtyData`. Every
+  list is read in pages of 1000 on a unique order, lists of ids in
+  batches of 100. Then `buildSupportRows`
+  (`src/lib/admin/support-list.ts`, pure).
+- **Produces:**
+  - 200 `{ generatedAt, resetAt, lessonsTotal, rows, handled }`, the
+    types `SupportRow` and `HandledRow` in `support-list.ts` (PRD
+    section 8). `rows[i].reasons[0]` is the row's headline; a reason's
+    `kind` is one of `cancelling`, `past_due`, `thirty_closing`,
+    `thirty_ready`, `stopped`, `not_started`, `never_opened`,
+    `open_task`.
+  - 500 "Couldn't read the date of the course switch, so the list was
+    not made. Try again." when `curriculum_reset_at` cannot be read.
+  - 500 "Couldn't read everything Today needs, so nothing is shown. Try
+    again." with `failed` (the reads that failed, for whoever looks into
+    it) when any read fails, or when a member who can still earn the 30%
+    has progress that cannot be read. Never a list with people missing,
+    and never one without its 30% reasons.
+- **Writes:** nothing. `maxDuration` 60, `force-dynamic`.
+
+### `POST /api/admin/today/mark`
+- **What it is:** Mark messaged and Not needed, one call per row, from
+  Today and from the 30% page's Can still earn.
+- **Consumes:** `{ studentId, action: "messaged" | "not_needed",
+  headlineKind, reasonsText, note?, openTaskIds: string[] }`. The actor
+  is always the login, never the body.
+- **Produces:**
+  - 201 `{ supportId: string | null, movedIds: string[], at }`.
+  - 200 with the first mark's answer, and nothing written, for a second
+    mark of the same student and reason by the same member within 2
+    minutes (a double click).
+  - 400, with nothing written: a body it cannot read, no student, an
+    action other than the two, "That reason is not one Today knows, so
+    nothing was saved.", "Not needed needs a reason. Write one and try
+    again.", an `open_task` headline with no task, and "A task on this
+    row is not an open task of this student in the Tasks queue, so
+    nothing was saved. Reload the list."
+  - 404 "This student is no longer in the database."
+  - 409 "Someone closed this task in the Tasks queue meanwhile, so there
+    was nothing to mark. Reload the list." when every task of an
+    `open_task` row was closed in between.
+  - 500 with a sentence when a read or a write fails. When the queue
+    tasks cannot be closed, the support record is deleted again: the
+    mark is all or nothing.
+- **Writes:** `tasks` only, with one moment and one actor: for a headline
+  the app computed, one support record (see `tasks` above), and every
+  task in `openTaskIds` moved from open to completed or dismissed with
+  the same actor, note and moment.
+
+### `DELETE /api/admin/today/mark`
+- **What it is:** Undo, from the notice after a mark or from Handled.
+- **Consumes:** `{ ids: string[] }`, 1 to 50 (400 otherwise).
+- **Produces:** 200 `{ results: [{ id, ok, status, error? }] }`, each id
+  answered on its own. A support record (a `support.*` row with no
+  template) is deleted; a queue task a mark closed is opened again
+  (status open, its closing fields and `notes` cleared). Per id: 403
+  "Only the team member who marked it can undo it."; 409 "It was marked
+  more than 15 minutes ago, so it can't be undone here."; 409 "The Tasks
+  queue has a newer open task of this kind for the student, so this one
+  stays closed.", whether the route reads that task first or v27's
+  one-open-task index refuses the reopening (23505); 409 when the row
+  changed in between; 404 for an unknown id, one already undone, or a
+  task that is still open; 500 when the write fails.
+- **Writes:** `tasks` only.
+
+### `GET /api/admin/thirty`
+- **What it is:** the 30% page's whole list in one answer.
+- **Called by:** `ThirtyView` (`src/components/admin/thirty/ThirtyView.tsx`)
+  on load, on Refresh and after each decision.
+- **Depends on:** `getCurriculumResetAt`, then `loadThirtyData`
+  (`src/lib/admin/thirty-data.ts`): the catalog (`LESSONS_TABLE`, by
+  `sort_order`), `lesson_videos` (`lesson_id, created_at`; the service
+  role alone can read it), `discount_requests` (every pending one, and
+  the others made from `DISCOUNT_ELIGIBLE_FROM` on), `students` (every
+  first payment from `DISCOUNT_ELIGIBLE_FROM`, and everyone holding a
+  listed request), their completions of the lessons the 30% asks for and
+  of the action items, their requests, `student_whop_sync`
+  (`student_id, last_sync_at`), `discount_feedback_questions` and the
+  listed requests' answers, their completed `tasks` (the last message),
+  `team_members`. Then `buildThirtyView` (`src/lib/admin/thirty-view.ts`,
+  pure), which calls the student app's rule (`discount.ts`,
+  `discount-server.ts`) unchanged.
+- **Produces:**
+  - 200 `{ generatedAt, sharedDeadline, requiredCount, questions,
+    requests, canStillEarn, unchecked }`, the types `ThirtyRequestRow`
+    and `ThirtyEarnRow` in `thirty-view.ts` (PRD section 8, plus
+    `unchecked`: how many members are left out of Can still earn because
+    their progress could not be read). A pending row's `verdict` is the
+    approve route's (`approvalVerdict`, then `explainOldCourseRequest`,
+    then the ads check), and its facts are the ones that verdict judged.
+  - 500 "Couldn't read the date of the course switch, so the 30% list
+    was not made. Try again."
+  - 500 "Couldn't read everything the 30% list needs, so nothing is
+    shown. Try again." with `failed`. One student's unreadable progress
+    is not a failure of the page: that row says there is no verdict.
+- **Writes:** nothing. `maxDuration` 60, `force-dynamic`.
+- **Rules its caller relies on:** the page decides through the existing
+  routes (`POST /api/discounts/approve`, `/reject`, `/mark-applied`,
+  `POST /api/admin/verify-ad-submissions`), which decide with their own
+  read of the one student; this route only shows.
+
+### Proven and unproven
+- **Proven** on stand-ins: `client-tests/admin-today-routes.test.mjs`
+  runs the four handlers with the real `requireTeam` on a stand-in
+  database capped at 1000 rows a read (401, 403 and 200 by role, each
+  answer equal to the loader and builder run at the same moment, every
+  refusal above with nothing written, Undo's per-id answers);
+  `thirty-view.test.mjs` proves the bulk 30% equal to the student app's
+  one-student path on every fixture, past 1000 rows;
+  `support-list.test.mjs` proves Today's rules; `world-tests/admin-pages.mjs`
+  renders both pages with made-up data and holds every error sentence
+  the route suite gets back to the words above.
+- **Unproven:** real PostgREST paging over about 1,000 members, the
+  time the reads take on Vercel with the database in another region, and
+  production's own rows. Lovro's read-only spot check at `/ship`
+  (`supabase/diagnostics/admin-today-spotcheck.sql`, section 29 of
+  `supabase/migration-tests/run.mjs`) compares 5 random members' numbers
+  with the pages.
 
 ---
 

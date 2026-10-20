@@ -679,6 +679,9 @@ ok(markRoute.dynamic === 'force-dynamic' && typeof markRoute.POST === 'function'
 console.log('\n=== Every error sentence the routes answered ===')
 ok(errorSentences.length >= 5 && errorSentences.every(plain),
    'no em dash, no "unlock", no "EcomTalent", none empty', show(errorSentences))
+// world-tests/admin-pages.mjs runs this file with ADMIN_ROUTE_ERRORS_OUT set
+// and holds every one of these sentences to the same words (work item 5).
+if (process.env.ADMIN_ROUTE_ERRORS_OUT) fs.writeFileSync(process.env.ADMIN_ROUTE_ERRORS_OUT, JSON.stringify(errorSentences))
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)
 if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1) }

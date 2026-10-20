@@ -15,6 +15,8 @@
  * It is one 30% per student: a request already made decides the state, and
  * one made on the old dashboard still does, unless it was rejected, for a
  * student who first paid from 1 October until the launch (requestCounts).
+ * A student whose Whop membership already has a discount on its next renewal
+ * cannot earn it (admin rebuild 2, D5: membershipDiscounted, "has-discount").
  *
  * "The videos up to the checkpoint" are the counting watch lessons, in course
  * order, up to and including the gate lesson (`is_gate`), that have a video.
@@ -58,6 +60,16 @@ export const DISCOUNT_ELIGIBLE_FROM = "2026-09-30T22:00:00.000Z";
  */
 export const DISCOUNT_SHARED_DEADLINE = "2026-10-23T21:59:59.999Z";
 
+/**
+ * What a student reads when their Whop membership already has a discount on
+ * its next renewal (admin rebuild 2, D5; the owner's words with one grammar fix):
+ * the map's panel says it with no Apply, and both request routes refuse with
+ * it (discount-server.ts discountRefusalMessage). Whop's side of it:
+ * src/lib/membership-discount.ts.
+ */
+export const MEMBERSHIP_DISCOUNT_LINE =
+  "You can't apply for this discount because you already have a discount applied to your account.";
+
 const DAY_MS = 86_400_000;
 
 /**
@@ -89,8 +101,10 @@ export type DiscountState =
    * "no-gate" also covers a gate with no video up to it: there is nothing to
    * reach. "before-launch" is a first payment before DISCOUNT_ELIGIBLE_FROM
    * (1 October); the name is from when the launch was the cutoff.
+   * "has-discount": the student's Whop membership already has a discount on
+   * its next renewal (DiscountInput.membershipDiscounted, D5).
    */
-  | { kind: "not-eligible"; reason: "no-payment" | "before-launch" | "no-gate" }
+  | { kind: "not-eligible"; reason: "no-payment" | "before-launch" | "no-gate" | "has-discount" }
   | { kind: "expired"; endsAt: string; window: DiscountWindow; lessonsLeft: number }
   | {
       kind: "locked";
@@ -126,6 +140,14 @@ export interface DiscountInput {
   videoDoneIds: ReadonlySet<string>;
   /** The student's discount requests, any order. Those requestCounts leaves out are ignored. */
   requests: readonly DiscountRequestRow[];
+  /**
+   * The student's Whop membership has a discount on its next renewal, as
+   * stored in student_membership_discounts (D5; /api/student/data carries
+   * it to the map). Left out or false: none known. It closes the offer to a
+   * student it is open to, after the requests and the dates: a request
+   * already made still decides, and a closed window keeps its own words.
+   */
+  membershipDiscounted?: boolean;
 }
 
 /** The gate lesson's id, or null when the catalog has none (the offer is then closed). */
@@ -223,6 +245,8 @@ export function discountState(input: DiscountInput): DiscountState {
 
   const open = discountWindow(firstPaidAt);
   if ("closed" in open) return { kind: "not-eligible", reason: open.closed };
+  // A discount already on the next renewal: no 30% on top, however many videos are done (D5).
+  if (input.membershipDiscounted === true) return { kind: "not-eligible", reason: "has-discount" };
   if (!gateLessonId(lessons)) return { kind: "not-eligible", reason: "no-gate" };
 
   const required = requiredLessons(lessons);

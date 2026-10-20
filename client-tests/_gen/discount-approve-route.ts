@@ -4,8 +4,10 @@ import { DISCOUNT_WINDOW_DAYS } from "./constants.ts";
 import { createWhopPromoCode } from "./stub-server.ts";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "./stub-server.ts";
 import { getCurriculumResetAt } from "./curriculum-reset.ts";
+import { checkMembershipDiscount } from "./membership-discount.ts";
 import {
   approvalVerdict,
+  couponApprovalRefusal,
   explainOldCourseRequest,
   loadDiscountReads,
 } from "./discount-server.ts";
@@ -14,6 +16,12 @@ import {
  * Approve a pending discount request.
  *
  * Flow (one click for Astrid):
+ *   0. The coupon (admin rebuild 2, D5): a student whose Whop membership
+ *      already has a discount on its next renewal gets no 30%, whatever the
+ *      rule says and with `override` too. Whop is asked now
+ *      (checkMembershipDiscount); when it does not answer, the stored row
+ *      decides; with neither, nothing blocks. The refusal is a 400 with
+ *      code "has-discount" and names the code.
  *   1. Validate eligibility: the course's 30% rule, below. Since 2026-10-20
  *      the ads are not checked (Lovro's decision: the 30% already asks for
  *      61 videos), so students.ad_submissions_verified decides nothing here.
@@ -92,6 +100,16 @@ export async function POST(request: NextRequest) {
 
   if (!studentRow) {
     return NextResponse.json({ error: "Student not found" }, { status: 404 });
+  }
+
+  // D5: a discount already on the next renewal, before the rule and before
+  // any override. No Whop code is made for this student.
+  const coupon = await checkMembershipDiscount(supabase, discountReq.student_id);
+  if (coupon.discounted) {
+    return NextResponse.json(
+      { error: couponApprovalRefusal(coupon.code), code: "has-discount" },
+      { status: 400 },
+    );
   }
 
   if (CATALOG_IS_V2) {

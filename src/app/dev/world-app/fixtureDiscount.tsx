@@ -61,6 +61,13 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *                            words for an application made before the new
  *                            course opened (madeBeforeLaunch)
  *   ?discount=no-payment     no first payment on record
+ *   ?discount=has-discount   as ready (first payment 5 days ago, every video
+ *                            watched), and the Whop membership already has a
+ *                            discount on its next renewal (admin rebuild 2,
+ *                            D5): the panel says "You can't apply for this
+ *                            discount because you already have a discount
+ *                            applied to your account." with no Apply, the
+ *                            word "Closed", no chip in the header
  *   no ?discount             as locked: a first payment 3 days ago, videos as
  *                            ?p= has them, so the 30% shows with no parameter
  *                            (2026-10-16, Lovro's second Loom: he reviewed
@@ -104,11 +111,12 @@ export type DiscountPreset =
   | "october-old-course"
   | "october-old-course-pending"
   | "october-old-course-approved"
-  | "no-payment";
+  | "no-payment"
+  | "has-discount";
 const PRESETS: readonly DiscountPreset[] = [
   "locked", "ready", "pending", "approved", "applied", "applied-after-renewal", "rejected", "expired",
   "before-launch", "september", "october", "october-expired", "october-old-course",
-  "october-old-course-pending", "october-old-course-approved", "no-payment",
+  "october-old-course-pending", "october-old-course-approved", "no-payment", "has-discount",
 ];
 /** The presets with an application in, and its status. Their student has watched every video the offer asks for. */
 const APPLIED: Partial<Record<DiscountPreset, DiscountRequestRow["status"]>> = {
@@ -209,7 +217,7 @@ export function discountPresetOf(search: string | null): DiscountPreset | null {
  */
 export function discountPresetIds(search: string | null, lessons: readonly CatalogLessonLike[]): string[] {
   const preset = discountPresetOf(search);
-  if (preset === null || (preset !== "ready" && preset !== "applied-after-renewal" && !APPLIED[preset])) return [];
+  if (preset === null || (preset !== "ready" && preset !== "applied-after-renewal" && preset !== "has-discount" && !APPLIED[preset])) return [];
   const course: DiscountLesson[] = [...lessons]
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((l) => ({
@@ -261,6 +269,7 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
   const firstPaidAt = useMemo(() => {
     switch (preset) {
       case "ready":
+      case "has-discount":
         return new Date(boot - 5 * DAY_MS).toISOString();
       case "pending":
       case "approved":
@@ -322,9 +331,10 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
     [questionsPreset],
   );
 
+  const membershipDiscounted = preset === "has-discount";
   const value = useMemo<DiscountStandIn>(
-    () => ({ firstPaidAt, now, requests, apply, questions, submit }),
-    [firstPaidAt, now, requests, apply, questions, submit],
+    () => ({ firstPaidAt, membershipDiscounted, now, requests, apply, questions, submit }),
+    [firstPaidAt, membershipDiscounted, now, requests, apply, questions, submit],
   );
 
   useEffect(() => {

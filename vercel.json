@@ -5,7 +5,8 @@
     "src/app/api/admin/sync-whop/route.ts": { "regions": ["iad1"] },
     "src/app/api/admin/backfill-first-paid-at/route.ts": { "regions": ["iad1"] },
     "src/app/api/admin/first-paid-repair/route.ts": { "regions": ["iad1"] },
-    "src/app/api/admin/backfill-discord-ids/route.ts": { "regions": ["iad1"] }
+    "src/app/api/admin/backfill-discord-ids/route.ts": { "regions": ["iad1"] },
+    "src/app/api/cron/refresh-membership-discounts/route.ts": { "regions": ["iad1"] }
   },
   "crons": [
     {
@@ -27,6 +28,10 @@
     {
       "path": "/api/cron/check-na-tasks",
       "schedule": "20 */2 * * *"
+    },
+    {
+      "path": "/api/cron/refresh-membership-discounts",
+      "schedule": "40 */2 * * *"
     }
   ]
 }

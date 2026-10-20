@@ -31,7 +31,9 @@
  *   applied       "Yours".
  *   rejected      "Not approved".
  *   expired       "Closed": the student's deadline passed with no application.
- *   not eligible  "Closed": a first payment before 1 October. "Not open yet" when
+ *   not eligible  "Closed": a first payment before 1 October, or a discount
+ *                 already on the student's next Whop renewal (admin rebuild 2,
+ *                 D5: "has-discount"). "Not open yet" when
  *                 the course has no gate. "Ask the team" with no first payment
  *                 on record, in the open (locked) look: it may be a new student
  *                 whose payment has not reached the app, and the panel asks
@@ -168,6 +170,8 @@ export function checkpointView(state: DiscountState, now: number, place: number,
     default:
       // No first payment on record: what the panel asks of them, in the open look (above).
       if (state.reason === "no-payment") return noClock(lead, "Ask the team", "locked", "closed");
+      // A discount already on the next renewal (D5): closed to them for good, as a first payment before 1 October.
+      if (state.reason === "has-discount") return noClock(lead, "Closed", "closed", "closed");
       return noClock(lead, state.reason === "no-gate" ? "Not open yet" : "Closed", "closed", "closed");
   }
 }

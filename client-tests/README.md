@@ -115,6 +115,29 @@ mutations of the copies (a role left out, a failed login or read answered
 with a list, the switch's date dropped, the failed read unnamed,
 `maxDuration`, a login with no team row let through) each make it fail.
 
+Work item 4 (2026-10-20) added Today to it: `GET /api/admin/today` (who may
+read it; the answer equals `buildSupportRows` over `loadTodayData` for the
+caller; C3's filters in the query; the Whop tokens never selected; 1,100
+extra members past the 1000-row cap all listed; every failed read a 500 in
+plain words, a member who can still earn the 30% included) and
+`POST`/`DELETE /api/admin/today/mark` (a mark writes one support record and
+closes the row's open queue task with the same actor and moment, the actor
+from the login and never from the body; Not needed without a reason, an
+unknown reason, another student's or a closed task are refused with nothing
+written; a double click within 2 minutes answers the first; Undo by the
+author within 15 minutes deletes the record and reopens the task, and answers
+403, 409 and 404 per entry otherwise, including the database's one-open-task
+index refusing a reopening). For it the stand-in learned `.not()`, `.like()`,
+`.lt()`, `.lte()`, `.gt()`, head counts, the columns of the tables Today reads,
+and v27's one-open-task index on `tasks`, checked on update as well as insert.
+`support-list.test.mjs` runs the builder itself (`src/lib/admin/support-list.ts`)
+on made-up members: each of C4's reasons with its words and thresholds, two
+reasons on one student, who is never listed, the heartbeat hold, every
+cooldown of C5 (and what ends one), the queue's open tasks and their messages,
+C14's folded group, the last message (C12), Handled and its Undo window, and
+the page's filter and counts (C13). 23 mutations of the builder, the loader
+and the two routes each make one of the two suites fail.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

@@ -2,6 +2,7 @@
 
 import { createClient, getSharedSession } from "@/lib/supabase-browser";
 import type { ThirtyView } from "@/lib/admin/thirty-view";
+import type { ReasonKind, TodayView } from "@/lib/admin/support-list";
 
 /**
  * The rebuilt admin pages' calls to the server, behind one interface (admin
@@ -13,10 +14,10 @@ import type { ThirtyView } from "@/lib/admin/thirty-view";
  * (src/app/dev/admin/fixtures.ts), and every state of a page can be looked
  * at with no login and no database.
  *
- * This file holds the 30% page's half (work item 3): its read, the three
- * discount routes, the ads tick, and Today's mark route, which "Mark
- * messaged" on Can still earn calls. Today's own calls join it in work
- * item 4.
+ * The 30% page's half (work item 3): its read, the three discount routes,
+ * the ads tick, and Today's mark route, which "Mark messaged" on Can still
+ * earn calls. Today's half (work item 4): its read, the mark route's POST
+ * and DELETE (Undo), and the task outcome route (Replied / No reply).
  *
  * No call throws. Every answer is `{ ok: true, data }` or `{ ok: false,
  * error }`, where `error` is a sentence the page can show: the route's own
@@ -27,16 +28,8 @@ export type Answer<T> =
   | { ok: true; status: number; data: T }
   | { ok: false; status: number; error: string };
 
-/** The reasons a student can need a message for (admin rebuild PRD, C4 and section 8). */
-export type ReasonKind =
-  | "cancelling"
-  | "past_due"
-  | "thirty_closing"
-  | "thirty_ready"
-  | "stopped"
-  | "not_started"
-  | "never_opened"
-  | "open_task";
+/** The reasons a student can need a message for (admin rebuild PRD, C4 and section 8), defined in support-list.ts. */
+export type { ReasonKind };
 
 /** POST /api/admin/today/mark (section 8). */
 export interface MarkBody {
@@ -73,6 +66,26 @@ export interface ThirtyTransport {
   mark(body: MarkBody): Promise<Answer<MarkAnswer>>;
 }
 
+/** One entry of an Undo: done, or why not (403 another member's, 409 too old or a newer open task, 404 nothing to undo). */
+export interface UndoResult {
+  id: string;
+  ok: boolean;
+  status: number;
+  error?: string;
+}
+
+/** What Today (src/components/admin/today/TodayView.tsx) calls. */
+export interface TodayTransport {
+  /** GET /api/admin/today. */
+  loadToday(): Promise<Answer<TodayView>>;
+  /** POST /api/admin/today/mark: Mark messaged or Not needed, closing the row's open queue tasks with it. */
+  mark(body: MarkBody): Promise<Answer<MarkAnswer>>;
+  /** DELETE /api/admin/today/mark: undo a mark (its support record and the queue tasks it closed). */
+  undo(ids: string[]): Promise<Answer<{ results: UndoResult[] }>>;
+  /** POST /api/admin/tasks/[id]/outcome: Replied, No reply, or null to clear it, on a completed task. */
+  setOutcome(taskId: string, outcome: "replied" | "no_reply" | null): Promise<Answer<null>>;
+}
+
 const NO_SERVER = "Couldn't reach the server. Check the connection and try again.";
 const SIGNED_OUT = "You are signed out. Sign in again to go on.";
 const NOT_ALLOWED = "Your team account can't do this.";
@@ -86,7 +99,7 @@ type Json = Record<string, unknown> | null;
  * record the id sent, so sending it keeps both right.
  */
 async function send<T>(
-  method: "GET" | "POST",
+  method: "GET" | "POST" | "DELETE",
   path: string,
   body?: (memberId: string) => unknown,
 ): Promise<Answer<T>> {
@@ -127,8 +140,17 @@ async function send<T>(
 }
 
 /** The real calls, with the signed-in team member's session. */
-export const adminTransport: ThirtyTransport = {
+export const adminTransport: ThirtyTransport & TodayTransport = {
   loadThirty: () => send<ThirtyView>("GET", "/api/admin/thirty"),
+
+  loadToday: () => send<TodayView>("GET", "/api/admin/today"),
+
+  undo: (ids) => send<{ results: UndoResult[] }>("DELETE", "/api/admin/today/mark", () => ({ ids })),
+
+  async setOutcome(taskId, outcome) {
+    const r = await send<unknown>("POST", `/api/admin/tasks/${encodeURIComponent(taskId)}/outcome`, () => ({ outcome }));
+    return r.ok ? { ...r, data: null } : r;
+  },
 
   async approve(requestId, override) {
     const r = await send<{ promoCode?: string }>("POST", "/api/discounts/approve", (me) => ({

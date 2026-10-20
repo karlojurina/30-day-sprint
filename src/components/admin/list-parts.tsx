@@ -225,8 +225,19 @@ const NOTICE_DOT: Record<Notice["tone"], string> = {
   neutral: "var(--color-neutral)",
 };
 
-/** One line at the top of a list: what the last action did, or what went wrong. */
-export function NoticeBar({ notice, onClose }: { notice: Notice; onClose: () => void }) {
+/**
+ * One line at the top of a list: what the last action did, or what went
+ * wrong. `action` adds one button beside it (Today's Undo after a mark).
+ */
+export function NoticeBar({
+  notice,
+  onClose,
+  action,
+}: {
+  notice: Notice;
+  onClose: () => void;
+  action?: { label: string; onClick: () => void; busy?: boolean };
+}) {
   return (
     <div
       role={notice.tone === "danger" ? "alert" : "status"}
@@ -253,6 +264,11 @@ export function NoticeBar({ notice, onClose }: { notice: Notice; onClose: () => 
         }}
       />
       <p style={{ ...T.body, flex: 1, minWidth: 0, lineHeight: 1.5, overflowWrap: "anywhere" }}>{notice.text}</p>
+      {action && (
+        <Button variant="raised" busy={action.busy} onClick={action.onClick}>
+          {action.label}
+        </Button>
+      )}
       <Button variant="ghost" onClick={onClose}>
         Dismiss
       </Button>

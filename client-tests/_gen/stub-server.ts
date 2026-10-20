@@ -35,6 +35,14 @@
 //     is the page from row `from` to row `to`, after the order. .order() can
 //     be called more than once: each call adds a column, as supabase-js does,
 //     and a null sorts last going up and first going down, as in Postgres.
+//   - .select(cols, { count: "exact", head: true }) answers the number of
+//     matching rows in `count` (every match, whatever the page) and, with
+//     head, no rows. .not(col, "is" | "eq" | "like", value), .like(col,
+//     pattern) (% and _, case-sensitive), .lt(), .lte() and .gt() filter as
+//     PostgREST's operators do.
+//   - an update refuses a row that would break a unique key or index (23505)
+//     and then writes nothing: `tasks` has v27's one open task per student
+//     and scenario (idx_tasks_unique_open).
 // `fail['table.op']` makes every such call fail with that error, and
 // `failWhen(call)` fails the calls it returns an error for (one batch of a
 // bulk read, say: the call's filters are in `call.filters`). With `shuffle`
@@ -75,6 +83,7 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
       joined_at: now, first_paid_at: none, membership_status: () => "active", cancel_scheduled_at: none,
       last_active_at: now, ad_submissions_verified: () => false,
       discord_user_id: none, discord_username: none, whop_plan_id: none, csm_exempt: () => false,
+      whop_membership_id: none, high_churn_risk: () => false,
     },
     unique: [["whop_user_id"]],
   },
@@ -123,16 +132,47 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
     unique: [["student_id"]],
   },
   templates: {
-    columns: { id: newId, scenario_id: none, is_active: () => true },
+    // v27's columns, v34's trigger_config.
+    columns: {
+      id: newId, scenario_id: none, is_active: () => true, bucket: none, week: none, title: none,
+      trigger_description: none, intent: none, tone: none, variables: none, body: none, word_count: none,
+      is_admin_only: none, trigger_config: none, created_at: none, updated_at: none,
+    },
     unique: [["scenario_id"]],
   },
   tasks: {
+    // v27's columns and v85's outcome columns.
     columns: {
       id: newId, student_id: none, scenario_id: none, template_id: none, status: () => "open",
-      behavior_summary: none, created_at: now, completed_at: none, completed_by: none, dismissed_at: none, notes: none,
-      outcome: none,
+      behavior_summary: none, created_at: now, completed_at: none, completed_by: none, dismissed_at: none,
+      dismissed_by: none, notes: none, outcome: none, outcome_at: none, outcome_by: none,
+    },
+    // v27: at most one open task per student and scenario.
+    partialUnique: [{ name: "idx_tasks_unique_open", key: ["student_id", "scenario_id"], where: (r) => r.status === "open" }],
+  },
+  // v46's columns and the later ones. Every default is null, as a table the
+  // stand-in did not list read before: the suites that seed these rows keep
+  // reading what they did.
+  student_milestones: {
+    columns: {
+      student_id: none, onboarding_completed_at: none, first_sprint_login_at: none, bounty_access_claimed_at: none,
+      sprint_completed_at: none, first_client_landed_at: none, playbook_welcome_seen_at: none, updated_at: none,
+      first_dashboard_login_at: none, intro_video_threshold_met: none, playbook_unlocked_at: none,
+      why_youre_here_panel_dismissed: none,
     },
   },
+  // v93's columns, every default null for the same reason.
+  student_lesson_watch: {
+    columns: {
+      student_id: none, lesson_id: none, max_position_seconds: none, last_position_seconds: none,
+      watched_seconds: none, reported_duration_seconds: none, heartbeat_count: none, first_played_at: none,
+      last_heartbeat_at: none, threshold_met_at: none,
+    },
+  },
+  // The progress views (v92, v103): one row per student.
+  student_progress_counts: { columns: { student_id: none, completed_count: none } },
+  student_last_counted_completion: { columns: { student_id: none, last_completed_at: none } },
+  student_current_region: { columns: { student_id: none, current_region: none } },
   disengagement_alerts: {
     columns: { id: newId, student_id: none, alert_type: none, is_dismissed: () => false },
   },
@@ -239,6 +279,25 @@ function byColumns(orders: Array<[string, boolean]>) {
   };
 }
 
+/** SQL LIKE as a regular expression: % is any run of characters, _ is one. Case-sensitive, as LIKE is. */
+function likeRe(pattern: string): RegExp {
+  let re = "";
+  for (const ch of pattern) {
+    if (ch === "%") re += ".*";
+    else if (ch === "_") re += ".";
+    else re += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${re}$`, "s");
+}
+
+/** PostgREST's operators that .not() takes here. */
+function holds(op: string, value: unknown, v: unknown): boolean {
+  if (op === "is") return (value ?? null) === v;
+  if (op === "eq") return value === v;
+  if (op === "like") return typeof value === "string" && likeRe(String(v)).test(value);
+  throw new Error(`the stand-in's .not() does not know the operator "${op}"`);
+}
+
 function builder(db: FakeDb, table: string) {
   const q: Logged = { table, op: "select", filters: [], returning: null };
   const preds: Array<(r: Row) => boolean> = [];
@@ -249,6 +308,9 @@ function builder(db: FakeDb, table: string) {
   let lim: number | null = null;
   let values: Row | Row[] | null = null;
   let opts: { onConflict?: string; ignoreDuplicates?: boolean } = {};
+  let counting = false;
+  let head = false;
+  let count: number | null = null;
   let ran = false;
 
   const filter = (desc: string, fn: (r: Row) => boolean) => {
@@ -257,18 +319,30 @@ function builder(db: FakeDb, table: string) {
     return b;
   };
   const matching = () => db.rows(table).filter((r) => preds.every((p) => p(r)));
+  /** A comparison that, as in SQL, is never true for a null. */
+  const compare = (c: string, v: unknown, sign: string, test: (a: string, b: string) => boolean) =>
+    filter(`${c}${sign}${String(v)}`, (r) => r[c] != null && test(r[c] as string, v as string));
 
   const b = {
-    select(c = "*") {
-      if (q.op === "select") cols = c;
-      else q.returning = c;
+    select(c = "*", o: { count?: "exact" | "planned" | "estimated"; head?: boolean } = {}) {
+      if (q.op === "select") {
+        cols = c;
+        counting = o.count !== undefined;
+        head = o.head === true;
+      } else q.returning = c;
       return b;
     },
     eq: (c: string, v: unknown) => filter(`${c}=${String(v)}`, (r) => r[c] === v),
     neq: (c: string, v: unknown) => filter(`${c}!=${String(v)}`, (r) => r[c] !== v),
     in: (c: string, vs: unknown[]) => filter(`${c} in (${vs.map(String).join(",")})`, (r) => vs.includes(r[c])),
     is: (c: string, v: unknown) => filter(`${c} is ${String(v)}`, (r) => (r[c] ?? null) === v),
-    gte: (c: string, v: unknown) => filter(`${c}>=${String(v)}`, (r) => r[c] != null && (r[c] as string) >= (v as string)),
+    not: (c: string, op: string, v: unknown) => filter(`${c} not ${op} ${String(v)}`, (r) => !holds(op, r[c], v)),
+    like: (c: string, pattern: string) =>
+      filter(`${c} like ${pattern}`, (r) => typeof r[c] === "string" && likeRe(pattern).test(r[c] as string)),
+    gte: (c: string, v: unknown) => compare(c, v, ">=", (a, z) => a >= z),
+    gt: (c: string, v: unknown) => compare(c, v, ">", (a, z) => a > z),
+    lt: (c: string, v: unknown) => compare(c, v, "<", (a, z) => a < z),
+    lte: (c: string, v: unknown) => compare(c, v, "<=", (a, z) => a <= z),
     order(c: string, o: { ascending?: boolean } = {}) {
       orders.push([c, o.ascending !== false]);
       return b;
@@ -323,8 +397,9 @@ function builder(db: FakeDb, table: string) {
     return Promise.resolve(shape(run()));
   }
 
-  function shape(r: { data: Row[] | null; error: DbError | null }): { data: unknown; error: DbError | null } {
-    if (r.error) return { data: null, error: r.error };
+  function shape(r: { data: Row[] | null; error: DbError | null }): { data: unknown; error: DbError | null; count?: number | null } {
+    if (r.error) return counting ? { data: null, error: r.error, count: null } : { data: null, error: r.error };
+    if (counting) return { data: head ? null : r.data, error: null, count };
     if (r.data === null) return { data: null, error: null };
     if (single === "one") {
       return r.data.length === 1
@@ -343,6 +418,15 @@ function builder(db: FakeDb, table: string) {
   }
 
   function violation(row: Row, others: Row[]): DbError | null {
+    const clash = uniqueViolation(row, others);
+    if (clash) return clash;
+    if (table === "student_lesson_completions" && !db.rows("lessons").some((l) => l.id === row.lesson_id)) {
+      return { code: "23503", message: `insert or update on table "student_lesson_completions" violates foreign key constraint (lesson_id ${String(row.lesson_id)})` };
+    }
+    return null;
+  }
+
+  function uniqueViolation(row: Row, others: Row[]): DbError | null {
     for (const key of DEFS[table]?.unique ?? []) {
       // As in Postgres, a key holding a null never clashes.
       if (key.some((k) => row[k] == null)) continue;
@@ -357,9 +441,6 @@ function builder(db: FakeDb, table: string) {
         return { code: "23505", message: `duplicate key value violates unique constraint "${idx.name}"` };
       }
     }
-    if (table === "student_lesson_completions" && !db.rows("lessons").some((l) => l.id === row.lesson_id)) {
-      return { code: "23503", message: `insert or update on table "student_lesson_completions" violates foreign key constraint (lesson_id ${String(row.lesson_id)})` };
-    }
     return null;
   }
 
@@ -370,6 +451,8 @@ function builder(db: FakeDb, table: string) {
 
     if (q.op === "select") {
       let rows = matching();
+      // count=exact counts every match, whatever page is asked for.
+      count = rows.length;
       if (db.shuffle !== null) rows = shuffled(rows, db.shuffle + db.log.length);
       if (orders.length) rows = [...rows].sort(byColumns(orders));
       if (page) rows = rows.slice(page[0], page[1] + 1);
@@ -413,6 +496,13 @@ function builder(db: FakeDb, table: string) {
 
     if (q.op === "update") {
       const rows = matching();
+      // As Postgres: an update that would break a unique key or index writes nothing.
+      const others = db.rows(table).filter((r) => !rows.includes(r));
+      const next = rows.map((r) => ({ ...r, ...(values as Row) }));
+      for (let i = 0; i < next.length; i++) {
+        const bad = uniqueViolation(next[i], [...others, ...next.slice(0, i)]);
+        if (bad) return { data: null, error: bad };
+      }
       for (const r of rows) Object.assign(r, values as Row);
       return written(rows);
     }

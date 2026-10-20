@@ -39,7 +39,8 @@ export default function TeamLoginPage() {
       return;
     }
 
-    window.location.href = "/admin";
+    // Signing in lands on Today (admin rebuild PRD, call C2).
+    window.location.href = "/admin/today";
   }
 
   return (

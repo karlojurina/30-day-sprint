@@ -1682,7 +1682,8 @@
   opacity: 1;
 }
 
-@media (width < 760px) {
+/* A phone's size, narrow, or short on a touch screen: WorldV6.tsx NARROW_QUERY. */
+@media (width < 760px), (height < 500px) and (pointer: coarse) {
   .poster {
     display: none;
   }

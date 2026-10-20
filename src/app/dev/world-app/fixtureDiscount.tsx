@@ -20,6 +20,13 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *   ?discount=pending        as ready, and an application sent 2 hours ago
  *   ?discount=approved       as ready, and the application approved
  *   ?discount=applied        as ready, and the 30% on the Whop subscription
+ *   ?discount=applied-after-renewal  first payment on 2026-10-12, applied for
+ *                            on 2026-10-15 and applied, and this student's
+ *                            clock held at 20 November, after the 12 November
+ *                            renewal took the 30% off: no full-screen moment,
+ *                            and the panel no longer says "next renewal"
+ *                            (celebrations.ts renewalStillAhead, the
+ *                            2026-10-20 review)
  *   ?discount=rejected       as ready, and the application not approved, with
  *                            the team's reason
  *   ?discount=expired        first payment 20 days ago, nothing applied for
@@ -87,6 +94,7 @@ export type DiscountPreset =
   | "pending"
   | "approved"
   | "applied"
+  | "applied-after-renewal"
   | "rejected"
   | "expired"
   | "before-launch"
@@ -98,7 +106,7 @@ export type DiscountPreset =
   | "october-old-course-approved"
   | "no-payment";
 const PRESETS: readonly DiscountPreset[] = [
-  "locked", "ready", "pending", "approved", "applied", "rejected", "expired",
+  "locked", "ready", "pending", "approved", "applied", "applied-after-renewal", "rejected", "expired",
   "before-launch", "september", "october", "october-expired", "october-old-course",
   "october-old-course-pending", "october-old-course-approved", "no-payment",
 ];
@@ -130,6 +138,14 @@ const OCTOBER_OLD_REQUEST: DiscountRequestRow = {
   status: "applied",
   created_at: "2026-10-06T10:00:00.000Z",
 };
+/** ?discount=applied-after-renewal: paid 12 October, applied for on 15 October and applied, and the clock on 20 November, 10:00 UTC. */
+const AFTER_RENEWAL_PAID = "2026-10-12T10:00:00.000Z";
+const AFTER_RENEWAL_REQUEST: DiscountRequestRow = {
+  id: "fixture-request",
+  status: "applied",
+  created_at: "2026-10-15T10:00:00.000Z",
+};
+const AFTER_RENEWAL_CLOCK = Date.parse("2026-11-20T10:00:00.000Z");
 /** The presets with that old request, and its status. */
 const OLD_COURSE: Partial<Record<DiscountPreset, DiscountRequestRow["status"]>> = {
   "october-old-course": "applied",
@@ -193,7 +209,7 @@ export function discountPresetOf(search: string | null): DiscountPreset | null {
  */
 export function discountPresetIds(search: string | null, lessons: readonly CatalogLessonLike[]): string[] {
   const preset = discountPresetOf(search);
-  if (preset === null || (preset !== "ready" && !APPLIED[preset])) return [];
+  if (preset === null || (preset !== "ready" && preset !== "applied-after-renewal" && !APPLIED[preset])) return [];
   const course: DiscountLesson[] = [...lessons]
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((l) => ({
@@ -238,7 +254,9 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
         ? OCTOBER_CLOCK
         : preset === "october-expired"
           ? OCTOBER_EXPIRED_CLOCK
-          : undefined;
+          : preset === "applied-after-renewal"
+            ? AFTER_RENEWAL_CLOCK
+            : undefined;
 
   const firstPaidAt = useMemo(() => {
     switch (preset) {
@@ -251,6 +269,8 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
         return new Date(boot - 6 * DAY_MS).toISOString();
       case "expired":
         return new Date(expiredPaid).toISOString();
+      case "applied-after-renewal":
+        return AFTER_RENEWAL_PAID;
       case "before-launch":
         return "2026-09-05T10:00:00.000Z";
       case "september":
@@ -275,9 +295,11 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
     const old = preset === null ? undefined : OLD_COURSE[preset];
     const base: DiscountRequestRow[] = old
       ? [{ ...OCTOBER_OLD_REQUEST, status: old }]
-      : status
-        ? [{ id: "fixture-request", status, created_at: at, rejection_reason: status === "rejected" ? FIXTURE_REJECTION : null }]
-        : [];
+      : preset === "applied-after-renewal"
+        ? [AFTER_RENEWAL_REQUEST]
+        : status
+          ? [{ id: "fixture-request", status, created_at: at, rejection_reason: status === "rejected" ? FIXTURE_REJECTION : null }]
+          : [];
     return [...base, ...sent];
   }, [preset, boot, sent]);
 

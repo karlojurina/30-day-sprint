@@ -14,6 +14,7 @@ import { WorldCorner } from "@/components/world/WorldCorner";
 import { PlaybookLink } from "@/components/world/PlaybookLink";
 import { WorldDiscountForm } from "@/components/world/WorldDiscountForm";
 import { WorldCelebrations } from "@/components/world/WorldCelebrations";
+import { approvalOnMap } from "@/lib/world/celebrations";
 import { useLessonAccess, useLessonTransport } from "@/lib/world/useLessonTransport";
 import { STUDENT_HOME, WORLD_LOCK_MODE } from "@/lib/world/access";
 import { posterSrc } from "@/lib/world-v6/poster";
@@ -223,13 +224,18 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
     />
   );
 
+  // The application the full-screen moment is for: approved, or applied since,
+  // within 5 days of the application (approvalOnMap), on the discount's clock.
+  const approval = approvalOnMap(discountNow, discountClock);
+
   return (
     <>
       <WorldV6 source={source} corner={corner} />
       {/* Over the map, outside it: the discount's questions and the two celebrations. */}
       <WorldDiscountForm form={discountForm} paused={lessonId !== null} />
       <WorldCelebrations
-        approvedRequestId={discountNow.kind === "approved" && !discountNow.madeBeforeLaunch ? discountNow.requestId : null}
+        approvedRequestId={approval?.requestId ?? null}
+        applied={approval?.applied ?? false}
         paused={lessonId !== null}
       />
     </>

@@ -12,7 +12,7 @@
  * follow .impeccable.md: radius 9 on a button, touch targets at least 40px,
  * motion on transform and opacity only.
  *
- * Phones (under 760px, the map's own breakpoint) keep the same page, with
+ * Phones (under 760px wide, the map's width line) keep the same page, with
  * the button full width where a thumb reaches it.
  */
 

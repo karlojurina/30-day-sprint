@@ -32,6 +32,7 @@ import { SKY_MARKS } from "@/lib/world-v6/layout";
 import { CHECKPOINT, type CheckpointLook } from "@/lib/world-v6/checkpoint";
 import { BOUNTY } from "@/lib/world-v6/bounty";
 import { DISCOUNT_PERCENT, DISCOUNT_WINDOW_DAYS, DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
+import { renewalStillAhead } from "@/lib/world/celebrations";
 import { checkpointView, shortDate, type CheckpointView } from "./checkpointView";
 import { CARD_HINTS, anchorCard, placeCard, placePanel, type Box, type Placement } from "./cardPlace";
 import { DEFAULT_TUNING, clearTuning, loadTuning, sameTuning, sanitize, saveTuning, type Tuning } from "./tuning";
@@ -176,7 +177,22 @@ import s from "./world.module.css";
 const N = STUDY_AREAS.length;
 /** The window.__world* test hooks: every build but production. */
 const HOOKS = process.env.NODE_ENV !== "production";
-const NARROW_QUERY = "(width < 760px)";
+/**
+ * The phone's list: narrow screens, and short touch screens (bug hunt
+ * 2026-10-19, phones-1 and map-2). A phone held sideways is 780 to 932 px wide
+ * and 304 to 430 px tall, and the 3D layout was only ever measured from 700
+ * px tall: the welcome's Continue sat on the opening's pins, the timeline
+ * covered the card's Watch, a place's panel had no lesson above its fold, and
+ * turning the phone built the 3D behind an open lesson. The height asks for a
+ * finger (pointer: coarse) since the 2026-10-20 review: a short laptop window
+ * (about 1093x490 on a 1366x768 laptop at 125%, 911x435 zoomed to 150%) keeps
+ * the 3D it could already draw, and no longer swaps it for the list when a
+ * browser bar or devtools opens. Its twins in the stylesheets
+ * (world.module.css, world-ui.module.css) and the landing poster's <source>
+ * say the same, so client-tests/phone-view.test.mjs and
+ * phone-view-laptops.test.mjs check them together.
+ */
+const NARROW_QUERY = "(width < 760px), (height < 500px) and (pointer: coarse)";
 /** Final pass C: the place whose click-in goes through the telescope (scene.ts TEL_PARK_PLACE, a7). */
 const TEL_K = SKY_MARKS.findIndex((m) => m.id === "a7");
 const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";
@@ -397,7 +413,7 @@ const PLAIN_HOOKS = [
   "__worldCheckpoint",
 ] as const;
 
-/** A transparent pixel: the landing poster's fallback below 760 px, where the page is a list and needs no poster. */
+/** A transparent pixel: the landing poster's fallback on a phone's size (NARROW_QUERY), where the page is a list and needs no poster. */
 const BLANK_GIF = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 const NP = POSTER_IDS.length;
 
@@ -666,7 +682,7 @@ function WorldV6View({
     cpKind: "discount" as Cp,
     /** The Ad Bounty's page was opened by its address with no checkpoint panel under it: the checkpoint opens once the page closes (reconcile). */
     bountySeed: false,
-    /** The phone list has been up since the scene last ran (a resize under 760 px): the next scene starts where the student was. */
+    /** The phone list has been up since the scene last ran (a resize into NARROW_QUERY): the next scene starts where the student was. */
     fromList: false,
     /** The camera's rail depth when the 3D last gave way to the list; -1 when it never did. */
     listDepth: -1,
@@ -2135,7 +2151,7 @@ function WorldV6View({
       // The tuning may have moved on while the world was building.
       applyTuning(sc, tuningRef.current, studyRef.current);
       writeRide();
-      // Back from the phone list (the window widened past 760 px): the camera
+      // Back from the phone list (the window left NARROW_QUERY): the camera
       // where it was when the list took over, or at the student's place when
       // the page opened narrow. The list's own scroll means nothing here.
       if (u.fromList) {
@@ -2452,7 +2468,7 @@ function WorldV6View({
     if (view === "list") harness().__worldView = "list";
   }, [view]);
 
-  // ── Between the 3D map and the phone list (a resize across 760 px). The list
+  // ── Between the 3D map and the phone list (a resize across NARROW_QUERY). The list
   // opens at its top, whatever the page scroll was on the map. Leaving the 3D,
   // the camera's depth is kept (the last frame, read before the scene effect's
   // own clean-up empties it), and the next scene starts there (above).
@@ -2802,7 +2818,7 @@ function WorldV6View({
           {POSTER_IDS.map((id, i) =>
             i === 0 ? (
               <picture key={id}>
-                <source media="(min-width: 760px)" srcSet={posterSrc(id)} />
+                <source media="(min-width: 760px) and (min-height: 500px), (min-width: 760px) and (pointer: fine), (min-width: 760px) and (pointer: none)" srcSet={posterSrc(id)} />
                 <img
                   ref={(el) => {
                     posterImgs.current[0] = el;
@@ -3471,7 +3487,7 @@ function NextBlock({ study, onWatch }: { study: Study; onWatch: (el: HTMLElement
   );
 }
 
-/** Final pass C: the phone's window on the world (under 760 px no 3D ever loads). */
+/** Final pass C: the phone's window on the world (on a phone's size, NARROW_QUERY, no 3D ever loads). */
 const HERO_H = 620;
 /** Where the landmark's pin sits in the window: centred, just under the header, so the structure
  *  hangs below it in the open band above the Next block's text (196 zoomed the lookout to fill it). */
@@ -4141,6 +4157,12 @@ const ELIGIBLE_DAY_NO_YEAR = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString
  * words: "within 48 hours" and "on your next renewal" may no longer hold.
  * Every deadline shows its date and hour in the student's own time zone
  * (checkpointView.ts deadlineAt).
+ *
+ * Applied, "You'll see 30% off on your next renewal" shows for 5 days after
+ * the application (celebrations.ts renewalStillAhead, the 2026-10-20 review):
+ * the applied state lasts for good, and after the renewal that used the 30%
+ * the line was false. Then it says "You got your 30%. The team put it on your
+ * Whop subscription."
  */
 function CheckpointBody({
   discount,
@@ -4281,10 +4303,15 @@ function CheckpointBody({
       </p>
     );
   } else if (st.kind === "applied") {
+    // "On your next renewal" only while that renewal is sure to be still
+    // ahead (celebrations.ts renewalStillAhead, the 30%'s moment's rule);
+    // later it may have used the 30% already, so the line says what stays true.
     body = st.madeBeforeLaunch ? (
       <p className={s.desc}>You got your {DISCOUNT_PERCENT}% before the new course opened. It&apos;s one per student.</p>
-    ) : (
+    ) : renewalStillAhead(st.at, discount.now) ? (
       <p className={s.desc}>It&apos;s on your Whop subscription. You&apos;ll see {DISCOUNT_PERCENT}% off on your next renewal.</p>
+    ) : (
+      <p className={s.desc}>You got your {DISCOUNT_PERCENT}%. The team put it on your Whop subscription.</p>
     );
   } else if (st.kind === "rejected") {
     body = (

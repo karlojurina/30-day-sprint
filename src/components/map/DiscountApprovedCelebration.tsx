@@ -15,6 +15,14 @@ interface DiscountApprovedCelebrationProps {
    * dashboard (the default) keeps its words (D5).
    */
   where?: "dashboard" | "map";
+  /**
+   * On the map: the application is applied already (the team approved it and
+   * put the 30% on before the student was back on the map), so the line says
+   * it is on (2026-10-20, streak-2; Lovro may change the words). The map passes
+   * it only within 5 days of the application, while that payment is sure to
+   * be still ahead (celebrations.ts approvalOnMap).
+   */
+  applied?: boolean;
 }
 
 /** A finger, not a mouse: the closing line says tap. */
@@ -56,12 +64,15 @@ const getFalse = () => false;
  * the map (`where="map"`) the explainer no longer says the 30% is applied:
  * "The team is putting it on your Whop subscription, and you'll see it on
  * your next renewal. Nothing else to do.", as the map's panel says when
- * approved.
+ * approved. Since 2026-10-20 the map also plays it for an application the
+ * team has applied already (`applied`), whose line is "Your 30% is on your
+ * next payment."
  */
 export function DiscountApprovedCelebration({
   show,
   onDismiss,
   where = "dashboard",
+  applied = false,
 }: DiscountApprovedCelebrationProps) {
   /** Closed by a click, Esc or the safety net; the exit animation then calls onDismiss. */
   const [closed, setClosed] = useState(false);
@@ -212,7 +223,9 @@ export function DiscountApprovedCelebration({
                   lineHeight: 1.5,
                 }}
               >
-                {where === "map" ? (
+                {where === "map" && applied ? (
+                  <>Your 30% is on your next payment.</>
+                ) : where === "map" ? (
                   <>
                     The team is putting it on your Whop subscription, and
                     you&rsquo;ll see it on your next renewal. Nothing else to do.

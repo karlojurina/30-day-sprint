@@ -21,7 +21,13 @@ import {
  * THE DISCOUNT. The dashboard's full-screen celebration
  * (DiscountApprovedCelebration), the first time this browser sees the
  * student's application approved: WorldCelebrations, mounted beside the map.
- * The approval is the map's own discount state (useWorldDiscount.ts). An
+ * The approval is the map's own discount state (useWorldDiscount.ts),
+ * approved or applied since (celebrations.ts approvalOnMap, 2026-10-20: the
+ * team often applies it in the same sitting, before the student is back on
+ * the map); applied, its line says the 30% is on the next payment, so it
+ * plays only within 5 days of the application, while that renewal is sure to
+ * be still ahead (the same day's review: a second device or a wiped browser
+ * key would replay it months later). An
  * application made before the launch, on the old dashboard (madeBeforeLaunch,
  * of a student who first paid from 1 October until the launch, which the map
  * shows since T-080), is not celebrated
@@ -338,10 +344,13 @@ export function useStreakMoment(paused: boolean, seg: RefObject<HTMLElement | nu
 
 export function WorldCelebrations({
   approvedRequestId,
+  applied = false,
   paused,
 }: {
-  /** The approved application to celebrate, or null: none approved, or one made on the old dashboard (madeBeforeLaunch). */
+  /** The approved application to celebrate (approved, or applied since: approvalOnMap), or null: none, or one made on the old dashboard (madeBeforeLaunch). */
   approvedRequestId: string | null;
+  /** That application is applied: the 30% is on the student's subscription, and the moment's line says so. */
+  applied?: boolean;
   /** A lesson page is open over the map: the celebration waits until the student is back on it. */
   paused: boolean;
 }) {
@@ -392,6 +401,6 @@ export function WorldCelebrations({
     return () => window.removeEventListener("et:test:discount-approved", onApproved);
   }, []);
 
-  // The map's words: approved, the team is putting it on (the dashboard's say it is applied).
-  return <DiscountApprovedCelebration show={open} onDismiss={() => setApproval(null)} where="map" />;
+  // The map's words: approved, the team is putting it on; or applied, on the next payment (the dashboard's say it is applied).
+  return <DiscountApprovedCelebration show={open} onDismiss={() => setApproval(null)} where="map" applied={applied} />;
 }

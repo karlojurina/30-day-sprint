@@ -24,9 +24,25 @@ interface DiscordEmbed {
 
 const DEFAULT_GOLD = 0xe6c07a;
 
+/** Discord refuses an embed whose description is longer than this. */
+export const EMBED_DESCRIPTION_MAX = 4096;
+
+/** How many times a post Discord answered 429 is sent again. */
+const RATE_LIMIT_RETRIES = 2;
+
+/** How long to wait after a 429: Discord's Retry-After (seconds), at most 10 s. */
+function retryAfterMs(res: Response): number {
+  const seconds = Number.parseFloat(res.headers.get("retry-after") ?? "");
+  return Math.min(Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : 2000, 10_000);
+}
+
 /**
  * Post a single embed to the team's webhook channel.
  * Pass multiple embeds at once (max 10 per message).
+ *
+ * Discord answers 429 when a webhook posts faster than it takes, with
+ * Retry-After in seconds. The post waits that long and is sent again, at
+ * most twice: the engagement alerts go out as several messages in a row.
  */
 export async function postTeamAlert(
   embeds: DiscordEmbed[],
@@ -40,17 +56,27 @@ export async function postTeamAlert(
     return { ok: false, reason: "env-var-missing" };
   }
   try {
-    const res = await fetch(url, {
+    const body = JSON.stringify({
+      content: contentText,
+      embeds: embeds.map((e) => ({
+        color: e.color ?? DEFAULT_GOLD,
+        ...e,
+      })),
+    });
+    let res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        content: contentText,
-        embeds: embeds.map((e) => ({
-          color: e.color ?? DEFAULT_GOLD,
-          ...e,
-        })),
-      }),
+      body,
     });
+    for (let retry = 0; res.status === 429 && retry < RATE_LIMIT_RETRIES; retry++) {
+      await res.text().catch(() => "");
+      await new Promise((resolve) => setTimeout(resolve, retryAfterMs(res)));
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      });
+    }
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       console.error(
@@ -140,25 +166,49 @@ export async function dmStudent(
 }
 
 /**
- * Convenience helper for the team-alerts cron — formats a list of
- * disengagement alerts as a single Discord embed.
+ * Convenience helper for the team-alerts cron: the disengagement alerts
+ * as Discord embeds, in order, each alert in exactly one embed, and each
+ * embed's description within Discord's 4096 characters (one embed held
+ * every alert until 20 October, and Discord refused it from about 22
+ * alerts on). Post each embed as its own message: a full description with
+ * its title and footer stays under Discord's 6000 characters a message.
  */
-export function buildAlertsEmbed(
+export function buildAlertsEmbeds(
   alerts: { studentName: string; alertType: string; message: string; studentId: string }[],
   baseUrl: string
-): DiscordEmbed {
-  return {
-    title: `🚨 ${alerts.length} student${alerts.length === 1 ? "" : "s"} flagged`,
-    description: alerts
-      .map(
-        (a) =>
-          `**${a.studentName}** — ${labelForAlertType(a.alertType)}\n${a.message}\n[Open in admin](${baseUrl}/admin/students/${a.studentId})`
-      )
-      .join("\n\n"),
+): DiscordEmbed[] {
+  const entries = alerts.map((a) => {
+    const entry = `**${a.studentName}**: ${labelForAlertType(a.alertType)}\n${a.message}\n[Open in admin](${baseUrl}/admin/students/${a.studentId})`;
+    if (entry.length <= EMBED_DESCRIPTION_MAX) return entry;
+    // Only a name thousands of characters long gets here. Cut it to fit,
+    // never through the middle of an emoji.
+    let cut = entry.slice(0, EMBED_DESCRIPTION_MAX - 1);
+    if (/[\uD800-\uDBFF]$/.test(cut)) cut = cut.slice(0, -1);
+    return `${cut}…`;
+  });
+
+  const chunks: string[][] = [];
+  let length = 0;
+  for (const entry of entries) {
+    const chunk = chunks[chunks.length - 1];
+    if (chunk && length + 2 + entry.length <= EMBED_DESCRIPTION_MAX) {
+      chunk.push(entry);
+      length += 2 + entry.length;
+    } else {
+      chunks.push([entry]);
+      length = entry.length;
+    }
+  }
+
+  const flagged = `🚨 ${alerts.length} student${alerts.length === 1 ? "" : "s"} flagged`;
+  const timestamp = new Date().toISOString();
+  return chunks.map((chunk, i) => ({
+    title: chunks.length === 1 ? flagged : `${flagged} (part ${i + 1} of ${chunks.length})`,
+    description: chunk.join("\n\n"),
     color: 0xf05454,
-    timestamp: new Date().toISOString(),
-    footer: { text: "EcomTalent · check-engagement" },
-  };
+    timestamp,
+    footer: { text: "Ecom University · check-engagement" },
+  }));
 }
 
 function labelForAlertType(t: string): string {

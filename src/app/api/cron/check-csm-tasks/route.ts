@@ -285,22 +285,40 @@ export async function GET(request: NextRequest) {
     skipped_at: string | null;
   };
   const completionsByStudent = new Map<string, CompletionRow[]>();
+  const completionErrors: string[] = [];
   const COMPLETION_FETCH_CONCURRENCY = 20;
-  for (let i = 0; i < students.length; i += COMPLETION_FETCH_CONCURRENCY) {
+  for (
+    let i = 0;
+    i < students.length && completionErrors.length === 0;
+    i += COMPLETION_FETCH_CONCURRENCY
+  ) {
     const wave = students.slice(i, i + COMPLETION_FETCH_CONCURRENCY);
     await Promise.all(
       wave.map(async (s) => {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("student_lesson_completions")
           .select(
             "student_id, lesson_id, completed_at, action_completed_at, skipped_at",
           )
           .eq("student_id", s.id);
+        if (error) {
+          completionErrors.push(error.message);
+          return;
+        }
         if (data && data.length > 0) {
           completionsByStudent.set(s.id, data as CompletionRow[]);
         }
       }),
     );
+  }
+  // A failed read stops the run before anything is written, as the bulk
+  // reads above do: read as "no completions", it would give a student who
+  // watched lessons a nolessons task, and 3c would judge their open tasks
+  // on 0 lessons.
+  if (completionErrors.length > 0) {
+    const message = `Completions fetch failed: ${completionErrors[0]}`;
+    await logCronFinish(runId, "failed", { error: message });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
   // ─── Pre-compute lookups ───────────────────────────────────
@@ -548,6 +566,30 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // v85.4 (F2) — past_due students who clicked cancel sit OUTSIDE the
+  // active-only pool above, so studentById misses them and the plain
+  // "no longer in eligible pool" dismissal in 3c would kill their
+  // save-the-sale task — which could never be re-created (creation
+  // only sees active students). Fetch just their ids so canceling-
+  // aware tasks survive. Tiny set; single query.
+  // Read here, before section 3 writes anything (it was read in 3c): a
+  // failed read stops the run. Read as "none", it would dismiss those
+  // save tasks for good.
+  const { data: pastDueCancelingRows, error: pastDueErr } = await supabase
+    .from("students")
+    .select("id")
+    .eq("membership_status", "past_due")
+    .not("cancel_scheduled_at", "is", null)
+    .eq("csm_exempt", false);
+  if (pastDueErr) {
+    const message = `Past-due canceling students fetch failed: ${pastDueErr.message}`;
+    await logCronFinish(runId, "failed", { error: message });
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+  const pastDueCancelingIds = new Set(
+    ((pastDueCancelingRows ?? []) as Array<{ id: string }>).map((r) => r.id),
+  );
+
   type OpenSlot = { id: string; bucket: string };
   const negativeSlot = new Map<string, OpenSlot>();
   for (const t of (openTasksWithBucket ?? []) as unknown as OpenTaskRow[]) {
@@ -703,22 +745,7 @@ export async function GET(request: NextRequest) {
   const templateByScenario = new Map(templates.map((t) => [t.scenario_id, t]));
   const autoDismissals = new Map<string, string>();
 
-  // v85.4 (F2) — past_due students who clicked cancel sit OUTSIDE the
-  // active-only pool above, so studentById misses them and the plain
-  // "no longer in eligible pool" dismissal below would kill their
-  // save-the-sale task — which could never be re-created (creation
-  // only sees active students). Fetch just their ids so canceling-
-  // aware tasks survive. Tiny set; single query.
-  const { data: pastDueCancelingRows } = await supabase
-    .from("students")
-    .select("id")
-    .eq("membership_status", "past_due")
-    .not("cancel_scheduled_at", "is", null)
-    .eq("csm_exempt", false);
-  const pastDueCancelingIds = new Set(
-    ((pastDueCancelingRows ?? []) as Array<{ id: string }>).map((r) => r.id),
-  );
-
+  // pastDueCancelingIds (v85.4, F2) is read before section 3, above.
   const isCancelingAwareScenario = (scenarioId: string): boolean => {
     const tpl = templateByScenario.get(scenarioId);
     return Boolean(

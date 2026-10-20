@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
-import { postTeamAlert, buildAlertsEmbed } from "@/lib/discord";
+import { postTeamAlert, buildAlertsEmbeds } from "@/lib/discord";
 import { isDmEnabled } from "@/lib/dm-toggles";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import { csmSprintWindowCutoffIso } from "@/lib/constants";
@@ -22,13 +22,18 @@ export const maxDuration = 300;
 
 const ROUTE_NAME = "check-engagement";
 
+// Ids per .in() read, as outreach-insights.ts reads them (ID_BATCH = 100).
+const ID_BATCH = 100;
+
 /**
  * V3 engagement cron: detect disengaged students and queue alerts for the team.
  * Simplified from V2 since we no longer have activation points or week buckets.
  *
  * V10 (2026-04-28): added `no_lessons_3d` (early-warning) plus a Discord
- * webhook post to DISCORD_TEAM_WEBHOOK_URL with a single embed listing
- * all NEW alerts produced this run.
+ * webhook post to DISCORD_TEAM_WEBHOOK_URL listing all NEW alerts
+ * produced this run. Since 2026-10-20 (cron-1) the list goes out as one
+ * message per embed, each within Discord's 4096 characters, and a post
+ * that fails marks the run failed.
  */
 export async function GET(request: NextRequest) {
   // v75.37: shared cron auth + audit.
@@ -100,18 +105,29 @@ export async function GET(request: NextRequest) {
     skipped_at: string | null;
   };
   const allCompletions: EngagementCompletion[] = [];
+  const completionErrors: string[] = [];
   const CONCURRENT = 20;
-  for (let i = 0; i < students.length; i += CONCURRENT) {
+  for (let i = 0; i < students.length && completionErrors.length === 0; i += CONCURRENT) {
     const wave = students.slice(i, i + CONCURRENT);
     await Promise.all(
       wave.map(async (s) => {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("student_lesson_completions")
           .select("student_id, lesson_id, completed_at, skipped_at")
           .eq("student_id", s.id);
-        if (data) allCompletions.push(...(data as EngagementCompletion[]));
+        if (error) completionErrors.push(error.message);
+        else if (data) allCompletions.push(...(data as EngagementCompletion[]));
       }),
     );
+  }
+  // A failed read stops the run before anything is written, and shows in
+  // cron_runs: read as "no completions", it would alert a student who
+  // watched lessons as never having started.
+  if (completionErrors.length > 0) {
+    const message = `Completions fetch failed: ${completionErrors[0]}`;
+    console.error(`[check-engagement] ${message}`);
+    await logCronFinish(runId, "failed", { error: message });
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
   // Build per-student completion data
@@ -147,16 +163,28 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // The open alerts, read in batches of ID_BATCH ids: one .in() list for
+  // the whole pool makes a request URL past a gateway's limit at about
+  // 200 students. A failed read stops the run: read as "no open alerts",
+  // it would insert and post every live alert again, every run.
   const studentIds = students.map((s) => s.id);
-  const { data: existingAlerts } = await supabase
-    .from("disengagement_alerts")
-    .select("student_id, alert_type")
-    .eq("is_dismissed", false)
-    .in("student_id", studentIds);
-
-  const existingAlertSet = new Set(
-    (existingAlerts || []).map((a) => `${a.student_id}:${a.alert_type}`)
-  );
+  const existingAlertSet = new Set<string>();
+  for (let i = 0; i < studentIds.length; i += ID_BATCH) {
+    const { data: existingAlerts, error: alertsErr } = await supabase
+      .from("disengagement_alerts")
+      .select("student_id, alert_type")
+      .eq("is_dismissed", false)
+      .in("student_id", studentIds.slice(i, i + ID_BATCH));
+    if (alertsErr) {
+      const message = `Open alerts fetch failed: ${alertsErr.message}`;
+      console.error(`[check-engagement] ${message}`);
+      await logCronFinish(runId, "failed", { error: message });
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+    for (const a of existingAlerts ?? []) {
+      existingAlertSet.add(`${a.student_id}:${a.alert_type}`);
+    }
+  }
 
   for (const student of students) {
     // Cutover WI-3: Day N on the course, counted from the later of first
@@ -237,6 +265,8 @@ export async function GET(request: NextRequest) {
 
   let discordOk: boolean | null = null;
   let discordReason: string | null = null;
+  // Set when the toggle is on and a post did not go out.
+  let discordFailure: string | null = null;
   if (alerts.length > 0) {
     const { error } = await supabase
       .from("disengagement_alerts")
@@ -246,14 +276,18 @@ export async function GET(request: NextRequest) {
       console.error("Failed to insert alerts:", error);
     }
 
-    // Push a single embed to the team's Discord channel summarizing
-    // these new alerts. Best-effort — no impact on the cron's status.
-    // Gated by /admin/discord toggle; default off until launch.
+    // Post these new alerts to the team's Discord channel, one message
+    // per embed: Discord refuses an embed over 4096 characters, which one
+    // embed for every alert passed at about 22. Gated by /admin/discord
+    // toggle; default off until launch. On the new course this post is
+    // the only place the team sees no_login_5d and no_tasks_7d, and an
+    // open alert is never sent again, so a post that fails marks the run
+    // failed in cron_runs.
     if (await isDmEnabled(supabase, "engagement_alerts_enabled")) {
       const studentsById = new Map(students.map((s) => [s.id, s]));
       const baseUrl =
         process.env.NEXT_PUBLIC_APP_URL ?? "https://30-day-sprint-smkv.vercel.app";
-      const embed = buildAlertsEmbed(
+      const embeds = buildAlertsEmbeds(
         alerts.map((a) => ({
           studentId: a.student_id,
           studentName: studentsById.get(a.student_id)?.name ?? "Student",
@@ -262,16 +296,28 @@ export async function GET(request: NextRequest) {
         })),
         baseUrl,
       );
-      const result = await postTeamAlert([embed]);
-      discordOk = result.ok;
-      discordReason = result.reason ?? null;
+      const failed: string[] = [];
+      for (let i = 0; i < embeds.length; i++) {
+        const result = await postTeamAlert([embeds[i]]);
+        if (!result.ok) {
+          failed.push(`part ${i + 1}: ${result.reason ?? "no reason given"}`);
+        }
+      }
+      discordOk = failed.length === 0;
+      if (failed.length > 0) {
+        discordFailure = `${failed.length} of ${embeds.length} Discord posts not delivered (${failed.join("; ")})`;
+        discordReason = discordFailure;
+      }
     } else {
       discordOk = false;
       discordReason = "paused-by-toggle";
     }
   }
 
-  await logCronFinish(runId, "success", { rowsAffected: alerts.length });
+  await logCronFinish(runId, discordFailure ? "failed" : "success", {
+    rowsAffected: alerts.length,
+    error: discordFailure ?? undefined,
+  });
   return NextResponse.json({
     checked: students.length,
     alerts: alerts.length,

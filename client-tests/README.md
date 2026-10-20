@@ -115,6 +115,32 @@ breaks of the two rules that round added (the read limit, and no tick for a
 streak that already counts today). `streak.test.mjs` runs the catch-up's one
 streak rule too.
 
+The crons (bug hunt of 19 October) run with less stood in than the routes
+above: `engagement-alerts.test.mjs` copies the real route, `discord.ts`,
+`cron-auth.ts`, `dm-toggles.ts` and `supabase-server.ts`, so the database is
+reached by a real supabase-js client. Only the network is stood in, by
+`_gen/stub-cron.ts`: a PostgREST over plain rows that answers the requests
+the client really sends (its URLs, headers and methods, a request line past a
+gateway's 8 KB refused with 414), and a Discord webhook with Discord's
+documented limits (4096 characters an embed, 6000 a message, a rate limit
+answered 429 with Retry-After). The route as it stood at production (70c934a)
+is taken from git and run beside it: one embed for 60 alerts is refused and
+the run says success; now every alert lands once, across one message per
+embed, and a post that fails marks the run failed with the reason.
+`cron-failed-reads.test.mjs` runs check-na-tasks, check-engagement and
+check-csm-tasks the same way, with `failWhen` failing one read at a time (the
+student pool, the milestones, one student's completions, the open alerts, the
+past-due canceling students): each run now stops with a 500, cron_runs failed
+and nothing written, where the copy from 70c934a wrote wrong tasks, alerts or
+dismissals and said success. With 250 students the pool-wide reads go out
+100 ids at a time, each request line under 4,500 characters; the old single
+request passed 8 KB and was refused. The copies of `dm-toggles.ts`,
+check-na-tasks and check-csm-tasks (now and at 70c934a) leave out every
+comment line (`dropComments` in both files' `write()`), since some name team
+members and this repository is public; the code is checked unchanged on
+every run (TypeScript prints the source and the copy without comments, and a
+difference stops the test).
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

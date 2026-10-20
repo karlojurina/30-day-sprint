@@ -54,6 +54,9 @@ export const maxDuration = 300;
 
 const ROUTE_NAME = "check-na-tasks";
 
+// Ids per .in() read, as outreach-insights.ts reads them (ID_BATCH = 100).
+const ID_BATCH = 100;
+
 interface NotActivatedRow {
   id: string;
   name: string | null;
@@ -132,17 +135,28 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // Read in batches of ID_BATCH ids: one .in() list for the whole pool
+  // makes a request URL past a gateway's limit at about 200 students. A
+  // failed read stops the run and shows in cron_runs: read as "nobody
+  // logged in", it would give logged-in students "No dashboard login since
+  // signup" tasks and flag the day-10 ones high_churn_risk for good.
   const allIds = (studentsRaw ?? []).map((s) => s.id as string);
-  let activatedIds = new Set<string>();
-  if (allIds.length > 0) {
-    const { data: activated } = await supabase
+  const activatedIds = new Set<string>();
+  for (let i = 0; i < allIds.length; i += ID_BATCH) {
+    const { data: activated, error: activatedErr } = await supabase
       .from("student_milestones")
       .select("student_id")
-      .in("student_id", allIds)
+      .in("student_id", allIds.slice(i, i + ID_BATCH))
       .not("first_sprint_login_at", "is", null);
-    activatedIds = new Set(
-      (activated ?? []).map((r) => r.student_id as string),
-    );
+    if (activatedErr) {
+      console.error("[check-na-tasks] milestones query failed:", activatedErr);
+      await logCronFinish(runId, "failed", { error: activatedErr.message });
+      return NextResponse.json(
+        { error: activatedErr.message },
+        { status: 500 },
+      );
+    }
+    for (const r of activated ?? []) activatedIds.add(r.student_id as string);
   }
 
   const pool = (studentsRaw ?? []).filter(

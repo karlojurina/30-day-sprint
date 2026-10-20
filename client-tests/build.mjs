@@ -87,6 +87,13 @@ gen('../src/lib/world/discount.ts', './_gen/discount.ts', [
 gen('../src/lib/world/discount-server.ts', './_gen/discount-server.ts', [
   ['from "./discount"', 'from "./discount.ts"'],
 ])
+// checkpointView.ts holds the panel's words for the 30% (discountRule): it
+// imports discount.ts (above) and only a TYPE from checkpoint.ts, by an @/
+// path, which this file refuses, so that line goes; the name is a type only.
+gen('../src/components/world-v6/checkpointView.ts', './_gen/checkpointView.ts', [
+  ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+  ['import type { CheckpointLook } from "@/lib/world-v6/checkpoint";\n', ''],
+])
 
 // curriculum-reset.ts imports only a TYPE from supabase-js, which --experimental-strip-types erases.
 gen('../src/lib/curriculum-reset.ts', './_gen/curriculum-reset.ts')

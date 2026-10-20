@@ -31,8 +31,8 @@ import { areaShare, type WorldProgress } from "@/lib/world-v6/progress";
 import { SKY_MARKS } from "@/lib/world-v6/layout";
 import { CHECKPOINT, type CheckpointLook } from "@/lib/world-v6/checkpoint";
 import { BOUNTY } from "@/lib/world-v6/bounty";
-import { DISCOUNT_PERCENT, DISCOUNT_WINDOW_DAYS, DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
-import { checkpointView, shortDate, type CheckpointView } from "./checkpointView";
+import { DISCOUNT_PERCENT } from "@/lib/world/discount";
+import { checkpointView, discountRule, shortDate, type CheckpointView } from "./checkpointView";
 import { CARD_HINTS, anchorCard, placeCard, placePanel, type Box, type Placement } from "./cardPlace";
 import { DEFAULT_TUNING, clearTuning, loadTuning, sameTuning, sanitize, saveTuning, type Tuning } from "./tuning";
 import { TuningPanel } from "./TuningPanel";
@@ -4105,14 +4105,6 @@ function BountyBody({
   );
 }
 
-// The earliest first payment that can earn the 30% (discount.ts DISCOUNT_ELIGIBLE_FROM, T-080): midnight in
-// Croatia, so the day is read there, "1 October 2026" and "1 October" (9 September until 2026-10-19). In UTC it
-// would print 30 September. The closed line says "Croatia time" after it: 05:59 on 1 October in Manila is still
-// 30 September in Croatia.
-// No-break spaces keep the date on one line (on a 390 px phone it split as "9 / September 2026").
-const ELIGIBLE_DAY = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: "Europe/Zagreb" }).replace(/ /g, " ");
-const ELIGIBLE_DAY_NO_YEAR = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "Europe/Zagreb" }).replace(/ /g, " ");
-
 /**
  * The discount checkpoint's panel (2026-10-14): the offer, where the student
  * stands on it (src/lib/world/discount.ts discountState), and Apply. No video
@@ -4133,10 +4125,14 @@ const ELIGIBLE_DAY_NO_YEAR = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString
  * team, and the eyebrow says "Ask the team". Apply shows only while it can
  * still be earned (locked) or is on (ready), never as a dead button.
  *
- * T-080 (Lovro, 2026-10-16; from 1 October since 2026-10-19): a first payment
- * from 1 October until the launch shares one deadline, the end of 23 October
- * in Croatia (st.window "shared"), and the panel says so while locked and
- * once it has passed. An
+ * The rule is one line since 2026-10-20 (Lovro: "a lot of confusion for the
+ * 30% off"): "Finish every video through Video Ads II within 2 weeks of
+ * joining to apply." (checkpointView.ts discountRule), the same words for
+ * every student, said while locked and with no first payment on record, and
+ * after "This closed on ..." or "Your 2 weeks have passed." where it is closed.
+ * T-080's shared deadline (a first payment from 1 October until the launch:
+ * the end of 23 October in Croatia, st.window "shared") is unchanged and
+ * reaches those students only as the date in "Apply by". An
  * application made on the old dashboard (st.madeBeforeLaunch) gets its own
  * words: "within 48 hours" and "on your next renewal" may no longer hold.
  * Every deadline shows its date and hour in the student's own time zone
@@ -4158,6 +4154,7 @@ function CheckpointBody({
   const c = useContent();
   const st = discount.state;
   const after = c.areas[CHECKPOINT.after]?.name ?? "";
+  const rule = discountRule(after);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
@@ -4216,10 +4213,7 @@ function CheckpointBody({
           </span>
           {cv.left && <span className={s.cpLeft}>{cv.left}</span>}
         </p>
-        <p className={s.desc}>
-          {st.window === "shared" && `Everyone who joined from ${ELIGIBLE_DAY_NO_YEAR} until the new course opened has this same deadline. `}
-          Watch all {st.lessonsTotal} videos through {after}, then apply here.
-        </p>
+        <p className={s.desc}>{rule.open}</p>
         <div className={s.cpBar} aria-hidden="true">
           <i style={{ transform: `scaleX(${st.lessonsTotal > 0 ? done / st.lessonsTotal : 0})` }} />
         </div>
@@ -4295,20 +4289,14 @@ function CheckpointBody({
       </>
     );
   } else if (st.kind === "expired") {
-    body = (
-      <p className={s.desc}>
-        {st.window === "shared"
-          ? `This offer closed on ${cv.deadline}. That was the deadline for everyone who joined from ${ELIGIBLE_DAY_NO_YEAR} until the new course opened.`
-          : `This offer closed on ${cv.deadline}. It runs for your first ${DISCOUNT_WINDOW_DAYS} days.`}
-      </p>
-    );
+    body = <p className={s.desc}>{`This closed on ${cv.deadline}. ${rule.closed}`}</p>;
   } else if (st.kind === "not-eligible") {
     body = (
       <p className={s.desc}>
         {st.reason === "before-launch"
-          ? `This offer is for students who joined from ${ELIGIBLE_DAY}, Croatia time. You joined before that, so it's closed for you.`
+          ? rule.beforeLaunch
           : st.reason === "no-payment"
-            ? `We can't see your first payment yet. If you joined on or after ${ELIGIBLE_DAY_NO_YEAR}, tell the team and they'll sort it out.`
+            ? `${rule.open} We can't see your first payment yet. Tell the team and they'll sort it out.`
             : "This offer isn't open yet."}
       </p>
     );

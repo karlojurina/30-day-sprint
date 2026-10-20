@@ -247,8 +247,8 @@ console.log('\n=== The same student, the gate finished at 00:00:30 on 24 October
   ok(hook === 200 && completedAt(db, GATE) === '2026-10-23T22:00:30.000Z', 'the gate comes in 30 seconds into 24 October in Croatia')
   const sent = await at('2026-10-23T22:05:00.000Z', apply)
   ok(sent.status === 400 && sent.body.state === 'expired'
-       && sent.body.error === 'The discount closed at the end of October 23, Croatia time. That was the deadline for students who joined from October 1 until the new course launched.',
-     'Apply at 00:05 on 24 October: refused as expired, the day and the clock named', show(sent))
+       && sent.body.error === 'Your deadline for the 30% has passed.',
+     'Apply at 00:05 on 24 October: refused as expired, in the words every student reads (no date since 2026-10-20)', show(sent))
   ok(db.rows('discount_requests').length === 0, 'and no request is written')
   const v = await approve(db, '2026-10-27T09:00:00.000Z', null)
   ok(!v.ok && v.status === 400 && v.error.includes('by the end of October 23') && v.error.includes('1 of 61 still missing'),
@@ -276,8 +276,8 @@ console.log('\n=== Paid at 23:59 on 30 September in Croatia: never ===')
   await at('2026-10-19T07:30:00.000Z', backfill)
   const sent = await at('2026-10-20T10:00:00.000Z', apply)
   ok(sent.status === 400 && sent.body.state === 'not-eligible'
-       && sent.body.error === 'The 30% discount is for students who joined on or after October 1, 2026, Croatia time. Your first payment was before that.',
-     'every video done, Apply on 20 October: not eligible, the day named', show(sent))
+       && sent.body.error === 'Your 2 weeks for the 30% have passed.',
+     'every video done, Apply on 20 October: not eligible, its 2 weeks passed', show(sent))
   const v = await approve(db, '2026-10-27T09:00:00.000Z', null)
   ok(!v.ok && v.error.includes('before October 1, 2026'), 'and the approval refuses it', v.error)
 }
@@ -291,9 +291,9 @@ console.log('\n=== Paid 15 September: in while the first date was 9 September, n
   const sent = await at('2026-10-20T10:00:00.000Z', apply)
   const form = await at('2026-10-20T10:00:00.000Z', submit)
   ok(map.kind === 'not-eligible' && map.reason === 'before-launch' && sent.status === 400 && sent.body.state === 'not-eligible'
-       && sent.body.error === 'The 30% discount is for students who joined on or after October 1, 2026, Croatia time. Your first payment was before that.'
-       && form.status === 400 && form.body.state === 'not-eligible' && db.rows('discount_requests').length === 0,
-     'every video in from Whop, on 20 October: the map says closed, and both ways to apply refuse with the day named, nothing written', show({ map, sent: sent.body, form: form.body }))
+       && sent.body.error === 'Your 2 weeks for the 30% have passed.'
+       && form.status === 400 && form.body.state === 'not-eligible' && form.body.error === sent.body.error && db.rows('discount_requests').length === 0,
+     'every video in from Whop, on 20 October: the map says closed, and both ways to apply refuse, its 2 weeks passed, nothing written', show({ map, sent: sent.body, form: form.body }))
 }
 
 console.log('\n=== Paid at 00:00 on 1 October in Croatia: in ===')

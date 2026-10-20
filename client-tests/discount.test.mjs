@@ -2,7 +2,8 @@
 // (what the request and approve routes do with it on the new course). Every
 // branch on stand-in rows, then the real course: course_catalog.json with the
 // video lengths of the development page. Both modules are the real source
-// (build.mjs copies them with their import lines rewritten).
+// (build.mjs copies them with their import lines rewritten), and so is
+// checkpointView.ts, for the rule's one line on the map's panel.
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
@@ -15,6 +16,7 @@ import {
   approvalVerdict, decideDiscountRequest, discountRefusalMessage, explainOldCourseRequest, factsFromReads,
   loadDiscountReads, toDiscountLessons, videoDoneIds,
 } from './_gen/discount-server.ts'
+import { discountRule } from './_gen/checkpointView.ts'
 
 let pass = 0
 const fails = []
@@ -390,26 +392,26 @@ ok(decideDiscountRequest(reads({ completions: badRead('x'), requests: badRead('y
 {
   const d = decideDiscountRequest(reads({ completions: done(['x01']) }), IN_WINDOW)
   ok(!d.grant && d.status === 400 && d.state === 'locked', 'locked: 400', show(d))
-  ok(d.error === 'You have 2 lessons left to watch before the discount checkpoint, about 15 minutes of video. Finish them within your 14 days and apply again.',
-     'locked says how many lessons are left', d.error)
+  ok(d.error === 'You have 2 videos left to watch, about 15 minutes of video. Finish them before your deadline and apply again.',
+     'locked says how many videos are left', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ completions: done(['x01', 'x05']) }), IN_WINDOW)
-  ok(d.error === 'You have 1 lesson left to watch before the discount checkpoint, about 15 minutes of video. Finish it within your 14 days and apply again.', 'one lesson left reads in the singular', d.error)
+  ok(d.error === 'You have 1 video left to watch, about 15 minutes of video. Finish it before your deadline and apply again.', 'one video left reads in the singular', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ completions: done(['x01', 'x06']) }), IN_WINDOW)
-  ok(d.error === 'You have 1 lesson left to watch before the discount checkpoint. Finish it within your 14 days and apply again.', 'no length known: no time in the sentence', d.error)
+  ok(d.error === 'You have 1 video left to watch. Finish it before your deadline and apply again.', 'no length known: no time in the sentence', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ completions: done(['x01', 'x05', 'x06']) }), AFTER)
-  ok(!d.grant && d.status === 400 && d.state === 'expired' && d.error.startsWith('Your 14 days for the discount are over.'), 'expired: 400, even with every video done', d.error)
+  ok(!d.grant && d.status === 400 && d.state === 'expired' && d.error === 'Your deadline for the 30% has passed.', 'expired: 400, even with every video done', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-09-15T10:00:00Z' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-10-19T08:00:00Z'))
   ok(!d.grant && d.status === 400 && d.state === 'not-eligible'
-       && d.error === 'The 30% discount is for students who joined on or after October 1, 2026, Croatia time. Your first payment was before that.',
-     'first payment on 15 September (before 1 October), every video done, applied on 19 October: 400, not eligible, the day named with its clock', d.error)
+       && d.error === 'Your 2 weeks for the 30% have passed.',
+     'first payment on 15 September (before 1 October), every video done, applied on 19 October: 400, not eligible, its 2 weeks passed', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-09-30T21:59:59.999Z' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-10-19T08:00:00Z'))
@@ -419,9 +421,10 @@ ok(decideDiscountRequest(reads({ completions: badRead('x'), requests: badRead('y
 }
 {
   // East of Croatia the line falls on 1 October: 05:59 in Manila is 23:59 on 30 September in Croatia (the cutoff fix round, 2026-10-19).
+  // Until 2026-10-20 the refusal named the day with "Croatia time"; it names no date now, so the Manila payment reads as any other before it.
   const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-10-01T05:59:59.999+08:00' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-10-19T08:00:00Z'))
-  ok(!d.grant && d.state === 'not-eligible' && d.error.includes('October 1, 2026, Croatia time'),
-     'a first payment at 05:59 on 1 October in Manila: refused, and the refusal says whose 1 October it is', d.error)
+  ok(!d.grant && d.state === 'not-eligible' && d.error === 'Your 2 weeks for the 30% have passed.',
+     'a first payment at 05:59 on 1 October in Manila (23:59 on 30 September in Croatia): refused, in the same words as any first payment before 1 October', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-10-01T00:00:00Z' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-10-19T08:00:00Z'))
@@ -430,19 +433,19 @@ ok(decideDiscountRequest(reads({ completions: badRead('x'), requests: badRead('y
 {
   const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-10-02T10:00:00Z' }), completions: done(['x01']) }), new Date('2026-10-20T10:00:00Z'))
   ok(!d.grant && d.state === 'locked'
-       && d.error === 'You have 2 lessons left to watch before the discount checkpoint, about 15 minutes of video. Finish them by the end of October 23, Croatia time, and apply again.',
-     'an early-October joiner with lessons left is told the day and whose clock it is, never "your 14 days"', d.error)
+       && d.error === 'You have 2 videos left to watch, about 15 minutes of video. Finish them before your deadline and apply again.',
+     'an early-October joiner with videos left reads the same sentence as a student with their own 14 days: no date and never "your 14 days" (their deadline, 23 October, is the panel\'s "Apply by")', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-10-02T10:00:00Z' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-10-23T22:00:00.000Z'))
   ok(!d.grant && d.status === 400 && d.state === 'expired'
-       && d.error === 'The discount closed at the end of October 23, Croatia time. That was the deadline for students who joined from October 1 until the new course launched.',
-     'an early-October joiner at 00:00 on 24 October in Croatia, every video done: expired, the day and the clock named', d.error)
+       && d.error === 'Your deadline for the 30% has passed.',
+     'an early-October joiner at 00:00 on 24 October in Croatia, every video done: expired, in the same words as any other', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: null }) }), IN_WINDOW)
   ok(!d.grant && d.state === 'not-eligible'
-       && d.error === "We can't find your first payment yet, so we can't check whether the discount is open to you. Contact support and we'll sort it out within 24h.",
+       && d.error === "We can't see your first payment yet. Tell the team and they'll sort it out.",
      'no first payment: 400, not eligible, with no length of window named (it may be 23 October, not 14 days)', d.error)
 }
 {
@@ -471,13 +474,40 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
   ok(msgs.every((m) => m.length > 0 && !m.includes('—') && !/\bR[12]\b/.test(m) && !/unlock/i.test(m)),
      'every refusal is a plain sentence: no em dash, no region code, no "unlock"', show(msgs))
   ok(msgs[0].includes('about 2 hours of video'), 'hours read as hours', msgs[0])
-  ok(msgs[1] === 'You have 1 lesson left to watch before the discount checkpoint. Finish it by the end of October 23, Croatia time, and apply again.',
+  ok(msgs[1] === 'You have 1 video left to watch. Finish it before your deadline and apply again.',
      'the shared deadline in the singular, with no length known', msgs[1])
-  ok(msgs[1].includes('Croatia time') && msgs[3].includes('Croatia time'), 'the shared deadline always says whose clock it runs on')
+  // Since 2026-10-20 the panel says the rule in one line (checkpointView.ts discountRule) and a refusal says only the
+  // fact: the shared window's words are the own window's, and no refusal names a date, a clock or a length of window.
+  ok(discountRefusalMessage({ ...all[1], window: 'own' }) === msgs[1] && msgs[3] === msgs[2],
+     'the shared deadline reads the same as the own 14 days, locked and expired', show([msgs[1], msgs[2], msgs[3]]))
+  ok(msgs.every((m) => !/Croatia|October|September|\b14\b|\d{4}/.test(m)), 'no refusal names a date, a clock or the 14 days', show(msgs))
   ok(!msgs[1].includes('14 days') && !msgs[3].includes('14 days') && !msgs[4].includes('14 days'),
      'a student who joined before the launch never reads "14 days", nor does a student whose first payment is not found yet', show([msgs[1], msgs[3], msgs[4]]))
-  ok(msgs[5] === 'The 30% discount is for students who joined on or after October 1, 2026, Croatia time. Your first payment was before that.',
-     'before-launch names 1 October, read in Croatia and saying so (in UTC the day would be 30 September)', msgs[5])
+  ok(msgs[2] === 'Your deadline for the 30% has passed.', 'expired: the deadline has passed, with no date', msgs[2])
+  ok(msgs[4] === "We can't see your first payment yet. Tell the team and they'll sort it out.", 'no first payment: tell the team', msgs[4])
+  ok(msgs[5] === 'Your 2 weeks for the 30% have passed.',
+     'before-launch: its 2 weeks have passed, with no date (the panel says the rule)', msgs[5])
+  ok(msgs[6] === "The discount can't be applied for right now. Contact support and we'll sort it out.", 'no gate: the words it had', msgs[6])
+
+  console.log('\n=== The words a student reads about the 30%: one line on the panel, "2 weeks" is DISCOUNT_WINDOW_DAYS ===')
+  // Lovro, 2026-10-20: "I see there's a lot of confusion for the 30% off. Just write complete until video ads 2
+  // within 2 weeks of joining to apply. That's it." The panel's words are checkpointView.ts's, the place's name the
+  // course's own (Video Ads II on the real course, CHECKPOINT.after).
+  const rule = discountRule('Video Ads II')
+  ok(rule.open === 'Finish every video through Video Ads II within 2 weeks of joining to apply.',
+     'the panel\'s line while the 30% can be earned (locked, and with no first payment on record)', rule.open)
+  ok(rule.closed === 'The 30% is for finishing every video through Video Ads II within 2 weeks of joining.',
+     'the same rule once the student\'s deadline has passed, after "This closed on <deadline>."', rule.closed)
+  ok(rule.beforeLaunch === 'Your 2 weeks have passed. The 30% is for finishing every video through Video Ads II within 2 weeks of joining.',
+     'a first payment before 1 October', rule.beforeLaunch)
+  ok(discountRule('Somewhere Else').open === 'Finish every video through Somewhere Else within 2 weeks of joining to apply.',
+     'the place is the name handed in, never written into the words')
+  const twoWeeks = [rule.open, rule.closed, rule.beforeLaunch, msgs[5]]
+  ok(DISCOUNT_WINDOW_DAYS === 14 && twoWeeks.every((m) => m.includes('2 weeks')),
+     'the words say "2 weeks" and DISCOUNT_WINDOW_DAYS is 14: if the window ever changes, change these words with it (checkpointView.ts discountRule, discount-server.ts before-launch)',
+     `${DISCOUNT_WINDOW_DAYS} days; ${show(twoWeeks)}`)
+  ok([rule.open, rule.closed, rule.beforeLaunch].every((m) => !m.includes('—') && !/unlock|EcomTalent/i.test(m) && !/\btwo\b|fourteen/i.test(m)),
+     'no em dash, no "unlock", no "EcomTalent", numbers as digits')
 }
 
 {
@@ -519,7 +549,7 @@ console.log('\n=== decideDiscountRequest: an early-October joiner who already ha
     const old = R('old', status, '2026-09-25T10:00:00.000Z')
     const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-09-15T10:00:00.000Z' }), completions: done(ALL), requests: okRead([old]) }), NOW)
     const map = discountState({ now: NOW, firstPaidAt: '2026-09-15T10:00:00.000Z', lessons: COURSE, videoDoneIds: new Set(ALL), requests: [old] })
-    ok(!d.grant && d.status === 400 && d.state === 'not-eligible' && map.kind === 'not-eligible' && map.reason === 'before-launch' && d.error.includes('October 1, 2026'),
+    ok(!d.grant && d.status === 400 && d.state === 'not-eligible' && map.kind === 'not-eligible' && map.reason === 'before-launch' && d.error === 'Your 2 weeks for the 30% have passed.',
        `paid 15 September, ${status} on the old dashboard: the map says closed and the server refuses as not eligible`, show({ d: d.error, map }))
   }
 }
@@ -866,7 +896,7 @@ console.log('\n=== The real course: course_catalog.json + the development page\'
   ok(s.kind === 'locked' && s.lessonsLeft === 61 && s.lessonsTotal === 61 && s.secondsLeft === 75575 && s.nextLessonId === 'a1l01',
      'a new student: locked, 61 left, 75,575 seconds, next a1l01', show(s))
   const d0 = decideDiscountRequest(r(), IN_WINDOW)
-  ok(!d0.grant && d0.error === 'You have 61 lessons left to watch before the discount checkpoint, about 21 hours of video. Finish them within your 14 days and apply again.',
+  ok(!d0.grant && d0.error === 'You have 61 videos left to watch, about 21 hours of video. Finish them before your deadline and apply again.',
      'and the route tells them so', d0.error)
   const allIds = req.map((l) => l.id)
   ok(decideDiscountRequest(r({ completions: done(allIds) }), IN_WINDOW).grant === true, 'every required video done: the route grants')

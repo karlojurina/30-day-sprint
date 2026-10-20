@@ -186,22 +186,14 @@ export function factsFromReads(
 }
 
 // The rule's dates are midnight in Croatia (discount.ts), so the day is read
-// there: in UTC the first one falls on the evening before. A student reads the
-// shared deadline with "Croatia time" after it: it closes at one moment
-// everywhere, 18:00 in New York and early on the 24th in Asia. The refusal of
-// a first payment before the first day says it too: 05:59 on 1 October in
-// Manila is still 30 September in Croatia (the cutoff fix round, 2026-10-19).
+// there: in UTC the first one falls on the evening before. Since 2026-10-20
+// only the team reads them (approvalVerdict): a student's refusal names no
+// date (discountRefusalMessage).
 /** "October 1, 2026": the earliest first payment that can earn it. */
 const ELIGIBLE_DAY = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString("en-US", {
   month: "long",
   day: "numeric",
   year: "numeric",
-  timeZone: "Europe/Zagreb",
-});
-/** "October 1": the same day, in a sentence that needs no year. */
-const ELIGIBLE_DAY_NO_YEAR = new Date(DISCOUNT_ELIGIBLE_FROM).toLocaleDateString("en-US", {
-  month: "long",
-  day: "numeric",
   timeZone: "Europe/Zagreb",
 });
 /** "October 23": the last day for a first payment before the launch. */
@@ -247,45 +239,30 @@ export function secondPendingRequest(
   return { error: ALREADY_APPLIED, state: "pending" };
 }
 
-/** What the student reads when the request is refused, one plain sentence or two. */
+/**
+ * What the student reads when the request is refused, one plain sentence or
+ * two. Since 2026-10-20 the panel states the rule in one line
+ * (checkpointView.ts discountRule), so these say only the fact: no date, no
+ * length of window, the same words for either window. One shows only when
+ * the server disagrees with a panel that offered Apply (the deadline passed
+ * with the tab open, a completion the server does not have): under Apply, or
+ * on the questions' last step.
+ */
 export function discountRefusalMessage(state: DiscountState): string {
   switch (state.kind) {
     case "locked": {
       const n = state.lessonsLeft;
       const time = videoTime(state.secondsLeft);
-      const by =
-        state.window === "shared"
-          ? `by the end of ${SHARED_DEADLINE_DAY}, Croatia time,`
-          : `within your ${DISCOUNT_WINDOW_DAYS} days`;
       return (
-        `You have ${n} ${n === 1 ? "lesson" : "lessons"} left to watch before the discount checkpoint` +
-        `${time ? `, ${time}` : ""}. Finish ${n === 1 ? "it" : "them"} ${by} and apply again.`
+        `You have ${n} ${n === 1 ? "video" : "videos"} left to watch${time ? `, ${time}` : ""}. ` +
+        `Finish ${n === 1 ? "it" : "them"} before your deadline and apply again.`
       );
     }
     case "expired":
-      if (state.window === "shared") {
-        return (
-          `The discount closed at the end of ${SHARED_DEADLINE_DAY}, Croatia time. That was the deadline ` +
-          `for students who joined from ${ELIGIBLE_DAY_NO_YEAR} until the new course launched.`
-        );
-      }
-      return (
-        `Your ${DISCOUNT_WINDOW_DAYS} days for the discount are over. The ${DISCOUNT_PERCENT}% is for students ` +
-        `who reach the checkpoint within ${DISCOUNT_WINDOW_DAYS} days of their first payment.`
-      );
+      return `Your deadline for the ${DISCOUNT_PERCENT}% has passed.`;
     case "not-eligible":
-      if (state.reason === "before-launch") {
-        return (
-          `The ${DISCOUNT_PERCENT}% discount is for students who joined on or after ${ELIGIBLE_DAY}, Croatia time. ` +
-          `Your first payment was before that.`
-        );
-      }
-      if (state.reason === "no-payment") {
-        return (
-          `We can't find your first payment yet, so we can't check whether the discount is open to you. ` +
-          `Contact support and we'll sort it out within 24h.`
-        );
-      }
+      if (state.reason === "before-launch") return `Your 2 weeks for the ${DISCOUNT_PERCENT}% have passed.`;
+      if (state.reason === "no-payment") return "We can't see your first payment yet. Tell the team and they'll sort it out.";
       return "The discount can't be applied for right now. Contact support and we'll sort it out.";
     case "pending":
       return ALREADY_APPLIED;

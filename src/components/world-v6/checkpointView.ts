@@ -1,8 +1,9 @@
 /**
  * What the map shows of the discount, from the student's DiscountState
  * (src/lib/world/discount.ts): the header's chip, the timeline's tag, the
- * marker's label in the world, the panel's deadline, and the trail cache's
- * look (src/lib/world-v6/checkpoint.ts). Pure, so node can test it.
+ * marker's label in the world, the panel's deadline and its rule line
+ * (discountRule), and the trail cache's look (src/lib/world-v6/checkpoint.ts).
+ * Pure, so node can test it.
  *
  * IT SHOWS AT ALL TIMES (Lovro's second Loom, 2026-10-16: "it should be
  * clickable at all times, but the actual button to click on apply for the
@@ -93,6 +94,32 @@ export function deadlineAt(iso: string): string {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return "";
   return new Date(t).toLocaleString("en-GB", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * The 30%'s rule as the panel says it, in one line (Lovro, 2026-10-20: "I see
+ * there's a lot of confusion for the 30% off. Just write complete until video
+ * ads 2 within 2 weeks of joining to apply. That's it."). `after` is the name
+ * of the place the checkpoint follows (CHECKPOINT.after), as the course names
+ * it: Video Ads II on the real course.
+ *   open          while it can still be earned: locked, and with no first
+ *                 payment on record.
+ *   closed        the same rule once the student's deadline has passed.
+ *   beforeLaunch  a first payment before 1 October.
+ * "Every video": an action item counts by its video alone. "Through": Video
+ * Ads II's own videos are asked for. The 2 weeks are DISCOUNT_WINDOW_DAYS,
+ * written as words, so client-tests/discount.test.mjs fails if that is ever
+ * not 14. A first payment from 1 October until the launch has until the end
+ * of 23 October (discount.ts DISCOUNT_SHARED_DEADLINE), more than 2 weeks:
+ * the line does not name that group, and their "Apply by" row shows their date.
+ */
+export function discountRule(after: string): { open: string; closed: string; beforeLaunch: string } {
+  const closed = `The ${DISCOUNT_PERCENT}% is for finishing every video through ${after} within 2 weeks of joining.`;
+  return {
+    open: `Finish every video through ${after} within 2 weeks of joining to apply.`,
+    closed,
+    beforeLaunch: `Your 2 weeks have passed. ${closed}`,
+  };
 }
 
 /**

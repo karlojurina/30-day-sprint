@@ -135,18 +135,13 @@ export async function POST(request: NextRequest) {
     case "membership.went_valid":
     case "membership_went_valid": {
       const membership = payload.data as WhopMembership;
-      // v75.26: pre-fetch to detect INSERT vs UPDATE. We only set
-      // first_paid_at on INSERT — never on UPDATE — to preserve the
-      // original signup date for returning customers. Without this,
-      // a renewal webhook would overwrite a returning customer's
-      // months-old first_paid_at with today's date, re-opening the
-      // discount window they shouldn't have access to.
-      const { data: existingStudent } = await supabase
-        .from("students")
-        .select("first_paid_at")
-        .eq("whop_user_id", membership.user.id)
-        .maybeSingle();
-
+      // first_paid_at is never sent (the first-paid fix, 2026-10-20): a
+      // new row starts without one, and the login or the 2-hour sync
+      // fills it from the student's first real payment
+      // (src/lib/first-payment.ts). Whop's joined_at is when the user
+      // first joined the company, a free membership's date for a member
+      // who bought later, so it never goes there; and a key left out of
+      // this single-row upsert leaves a stored value as it is.
       const upsertPayload: Record<string, unknown> = {
         whop_user_id: membership.user.id,
         whop_membership_id: membership.id,
@@ -161,14 +156,6 @@ export async function POST(request: NextRequest) {
         // v79: classify paying / free at the source event.
         whop_plan_id: membership.plan_id ?? null,
       };
-
-      // INSERT path: stamp first_paid_at so the new student isn't
-      // invisible to every cohort-scoped admin surface until the
-      // nightly Whop sync runs.
-      if (!existingStudent) {
-        upsertPayload.first_paid_at =
-          membership.joined_at || new Date().toISOString();
-      }
 
       const { error } = await supabase
         .from("students")
@@ -271,18 +258,9 @@ export async function POST(request: NextRequest) {
         );
         break;
       }
-      // v75.26: same INSERT-only first_paid_at pattern as
-      // membership.activated above. payment.succeeded fires on EVERY
-      // recurring renewal, so blindly setting first_paid_at here
-      // would overwrite a returning customer's true original signup
-      // date on every billing cycle — closing the discount window
-      // they shouldn't have access to.
-      const { data: existingPaymentStudent } = await supabase
-        .from("students")
-        .select("first_paid_at")
-        .eq("whop_user_id", membership.user.id)
-        .maybeSingle();
-
+      // first_paid_at is never sent, as for membership.activated above:
+      // the login or the sync fills an empty one from the first real
+      // payment, and this fires on every renewal.
       const paymentUpsertPayload: Record<string, unknown> = {
         whop_user_id: membership.user.id,
         whop_membership_id: membership.id,
@@ -294,11 +272,6 @@ export async function POST(request: NextRequest) {
         canceled_at: null,
         whop_plan_id: membership.plan_id ?? null,
       };
-
-      if (!existingPaymentStudent) {
-        paymentUpsertPayload.first_paid_at =
-          membership.joined_at || new Date().toISOString();
-      }
 
       const { error } = await supabase
         .from("students")

@@ -1,7 +1,8 @@
 // What the server copies import, standing in for the real thing. build.mjs
 // points their import lines here: Next's response and after(), the
 // service-role Supabase client, Whop (the completions read, the login's
-// calls and the approve route's promo code), the team's login, the steps that
+// calls, its first-payment read and self-heal lookup, and the approve
+// route's promo code), the team's login, the steps that
 // run after a lesson (and the CSM's hook for a discount request), and which
 // catalog is live. Hand-written, like
 // stub-supabase.ts and stub-call-gate.ts; the routes and libraries under test
@@ -63,6 +64,8 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
       last_active_at: now, ad_submissions_verified: () => false,
       // v38 and v79, read by the Whop catch-up's pool (whop-catchup.test.mjs).
       csm_exempt: () => false, whop_plan_id: none,
+      // Read by the Whop sync's pre-read (first-payment.test.mjs runs the sync).
+      discord_user_id: none, discord_username: none, canceled_at: none,
     },
     unique: [["whop_user_id"]],
   },
@@ -206,6 +209,11 @@ function builder(db: FakeDb, table: string) {
     neq: (c: string, v: unknown) => filter(`${c}!=${String(v)}`, (r) => r[c] !== v),
     in: (c: string, vs: unknown[]) => filter(`${c} in (${vs.map(String).join(",")})`, (r) => vs.includes(r[c])),
     is: (c: string, v: unknown) => filter(`${c} is ${String(v)}`, (r) => (r[c] ?? null) === v),
+    /** Only `.not(column, "is", null)`, the form the routes use. */
+    not(c: string, op: string, v: unknown) {
+      if (op !== "is") throw new Error(`the stand-in has no .not(${op})`);
+      return filter(`${c} is not ${String(v)}`, (r) => (r[c] ?? null) !== v);
+    },
     gte: (c: string, v: unknown) => filter(`${c}>=${String(v)}`, (r) => r[c] != null && (r[c] as string) >= (v as string)),
     order(c: string, o: { ascending?: boolean } = {}) {
       order = [c, o.ascending !== false];
@@ -213,6 +221,10 @@ function builder(db: FakeDb, table: string) {
     },
     limit(n: number) {
       lim = n;
+      return b;
+    },
+    /** supabase-js's type-only `.returns<T>()` (the Whop sync calls it): the builder unchanged. */
+    returns() {
       return b;
     },
     /** Rows `from` to `to`, both counted, as fetchAllRowsPaginated asks for a page (logged as a filter). */
@@ -518,8 +530,28 @@ export async function createWhopPromoCode(params: Record<string, unknown>) {
   promoCodes.push(structuredClone(params));
   return { id: `promo_${promoCodes.length}` };
 }
-export async function fetchActiveMembershipForUser(_whopUserId: string) {
-  return null;
+/** What the login's self-heal finds on Whop (fetchActiveMembershipForUser); none unless a test sets it. */
+let activeMembership: (whopUserId: string) => Promise<unknown> = async () => null;
+export function setActiveMembership(fn: (whopUserId: string) => Promise<unknown>) {
+  activeMembership = fn;
+}
+export async function fetchActiveMembershipForUser(whopUserId: string) {
+  return activeMembership(whopUserId);
+}
+/**
+ * The first-payment read (src/lib/first-payment.ts) as the login calls it:
+ * no payment unless a test says otherwise. Every call is recorded, with the
+ * deadline it was handed.
+ */
+type FirstPaymentAnswer = { firstPaidIso: string | null; kept: number; seen: number; error: string | null };
+let firstPayment: (whopUserId: string) => Promise<FirstPaymentAnswer> = async () => ({ firstPaidIso: null, kept: 0, seen: 0, error: null });
+export const firstPaymentReads: Array<{ whopUserId: string; deadlineAtMs: number | null }> = [];
+export function setFirstPayment(fn: (whopUserId: string) => Promise<FirstPaymentAnswer>) {
+  firstPayment = fn;
+}
+export async function fetchFirstPaymentForUser(whopUserId: string, opts: { deadlineAtMs?: number } = {}) {
+  firstPaymentReads.push({ whopUserId, deadlineAtMs: opts.deadlineAtMs ?? null });
+  return firstPayment(whopUserId);
 }
 export function mapStatus(_m: unknown) {
   return "active";
@@ -545,8 +577,13 @@ export async function fetchWhopUserInfo(_accessToken: string) {
 export async function checkActiveMembershipDiagnostic(_accessToken: string) {
   return { hasAccess: false, configured: true, fetchStatus: 200, fetchError: null, memberships: [] };
 }
+/** What the login reads as the Whop join date (fetchWhopMembershipJoinDate); none unless a test sets it. */
+let whopJoinDate: string | null = null;
+export function setWhopJoinDate(iso: string | null) {
+  whopJoinDate = iso;
+}
 export async function fetchWhopMembershipJoinDate(_accessToken: string) {
-  return null;
+  return whopJoinDate;
 }
 export async function fetchWhopDiscordId(_whopUserId: string) {
   return null;

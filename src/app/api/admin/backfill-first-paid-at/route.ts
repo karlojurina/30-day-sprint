@@ -2,31 +2,31 @@
  * POST /api/admin/backfill-first-paid-at
  *
  * One-time (re-runnable) backfill of students.first_paid_at for every
- * paying member whose first_paid_at is NULL.
+ * active or past_due member whose first_paid_at is NULL.
  *
- * Background: the v75.10 self-heal OAuth path + the membership/payment
- * webhooks insert students with whop_plan_id but the sync runner only
- * computes first_paid_at for users whose memberships are in products
- * listed in WHOP_PRODUCT_ID. Students on products NOT in that env var
- * never get first_paid_at populated (350 such students as of 2026-06-09).
+ * Background: the membership/payment webhooks insert students with no
+ * first_paid_at, and the sync only fills the empty ones on the paying
+ * plan, 25 a run; a member who never logs in keeps an empty one. This
+ * clears any such backlog in one pass.
  *
- * Strategy: for each NULL student, hit Whop's v2 API at
- * /api/v2/memberships?user_id=USER_ID to fetch ALL their memberships
- * (regardless of product), compute min(created_at) across the set, and
- * write that to first_paid_at. This is the TRUE original signup date
- * — stable across renewals, correct for returning customers, and
- * sufficient for cohort filtering + discount eligibility.
+ * Strategy (the first-paid fix, 2026-10-20): for each NULL student, read
+ * their first real Whop payment (src/lib/first-payment.ts: paid, above 0,
+ * not fully refunded, any product) and write it to first_paid_at. Until
+ * then this wrote the earliest membership created_at on any product,
+ * which a free membership could hold.
  *
  * Rate limit: Whop caps at ~10 req/sec. We throttle to 200ms between
- * calls (5 req/sec); the shared fetchEarliestMembershipDateForUser also
- * retries on 429 via whopFetchWithRetry, so a throttled run can take
- * meaningfully longer than the ~70s nominal for ~350 students and may
- * approach maxDuration=300. That's fine — it's idempotent, so if it
- * dies mid-pass just re-run; each run resumes from the remaining NULLs.
+ * students (5 req/sec); the payments read also waits out a 429 (twice,
+ * at most 30 s each), so a throttled run can take meaningfully longer
+ * than the ~70s nominal for ~350 students and may approach
+ * maxDuration=300. That's fine — it's idempotent, so if it dies mid-pass
+ * just re-run; each run resumes from the remaining NULLs.
  *
  * Idempotent. Safe to re-run — only touches NULL rows. Existing
- * first_paid_at values are NEVER overwritten (preserves the v75.18+
- * "first paid never moves" invariant).
+ * first_paid_at values are NEVER overwritten: only
+ * /api/admin/first-paid-repair corrects a stored date. A member with no
+ * real payment (a free member, a comp) stays NULL and is counted in
+ * no_payment.
  *
  * Founder + admin only.
  */
@@ -34,7 +34,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
-import { fetchEarliestMembershipDateForUser } from "@/lib/whop-members";
+import { fetchFirstPaymentForUser } from "@/lib/first-payment";
 
 export const maxDuration = 300;
 
@@ -89,10 +89,12 @@ export async function POST(request: NextRequest) {
   const summary = {
     total_candidates: candidatesList.length,
     backfilled: 0,
-    // v75.58: rows Whop has no record for stay NULL (no joined_at
-    // fallback) — they show up here and need manual review.
-    no_whop_record: 0,
+    // v75.58: rows with no real payment stay NULL (no joined_at
+    // fallback): a free member, a seat given away, a comp.
+    no_payment: 0,
     api_errors: 0,
+    // The reason is the read's failure kind, never Whop's message, which
+    // can carry the member's Whop id.
     errors: [] as Array<{ student_id: string; reason: string }>,
   };
 
@@ -102,22 +104,26 @@ export async function POST(request: NextRequest) {
     if (!c.whop_user_id) continue;
 
     try {
-      const { firstPaidIso } = await fetchEarliestMembershipDateForUser(
+      const { firstPaidIso, error: readError } = await fetchFirstPaymentForUser(
         c.whop_user_id as string,
       );
+      if (readError) {
+        summary.api_errors += 1;
+        summary.errors.push({ student_id: c.id as string, reason: `payments read failed: ${readError}` });
+        continue;
+      }
 
       // v75.58: NO joined_at fallback. first_paid_at is the cohort
-      // anchor AND the discount-window anchor, and it never moves once
-      // set — writing a fabricated date (joined_at is a renewal/login
-      // date, not a payment date) would permanently mislabel the
-      // student and could re-open a discount window. Leave NULL: the
-      // student stays out-of-cohort (correct for missing data), keeps
-      // showing in the NULL-first_paid_at diagnostics, and is retried
-      // on every re-run + by the nightly sync recovery pass — we PULL
-      // from Whop's API, so no webhook is needed for the real date to
-      // eventually land.
+      // anchor AND the discount-window anchor, and the live writers only
+      // fill it — writing a fabricated date (joined_at is a renewal/login
+      // date, not a payment date) would mislabel the student and could
+      // re-open a discount window. Leave NULL: the student stays
+      // out-of-cohort (correct for missing data), keeps showing in the
+      // NULL-first_paid_at diagnostics, and is retried on every re-run +
+      // by the sync recovery pass — we PULL from Whop's API, so no
+      // webhook is needed for the real date to eventually land.
       if (!firstPaidIso) {
-        summary.no_whop_record += 1;
+        summary.no_payment += 1;
         continue;
       }
 
@@ -144,10 +150,12 @@ export async function POST(request: NextRequest) {
       const msg = e instanceof Error ? e.message : String(e);
       summary.api_errors += 1;
       summary.errors.push({ student_id: c.id as string, reason: msg });
+    } finally {
+      // Throttle: 5 req/sec to stay well under Whop's 10 req/sec cap,
+      // after every student, a `continue` included (a member with no
+      // payment used to skip it).
+      await new Promise((r) => setTimeout(r, 200));
     }
-
-    // Throttle: 5 req/sec to stay well under Whop's 10 req/sec cap.
-    await new Promise((r) => setTimeout(r, 200));
   }
 
   const durationMs = Date.now() - t0;

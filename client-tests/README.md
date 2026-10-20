@@ -155,6 +155,33 @@ into headless Chrome (touch emulation and a mouse) and reads the sizes back
 from the browser's cascade, with the files at 70c934a beside them (13px and
 15px on touch).
 
+`first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
+`students.first_paid_at` comes from now: the student's first real Whop
+payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on
+made-up payments in the shape `Api-Version-Date: 2026-10-15-1` gives (money
+objects, `user: { id }`) and in the older bare-number shape: $0, a 100% promo,
+a $1 plan, a full and a partial refund, a payment not yet paid, no `paid_at`,
+no buyer. Both reads run on a stand-in `fetch` that pages
+`GET /api/v1/payments` as Whop's v1 does: one user's (paging, another user's
+row refused, a 429 waited out, every failure by its kind, the login's 2.5 s
+deadline) and the walk of every paid payment (4 requests a second, the 240 s
+start budget, the 285 s answer limit, a cursor given twice). Then the four
+writers through their entry points: the webhook's `POST` (no `first_paid_at`
+sent, a stored one kept), the login's `GET` (its first-payment read a stand-in
+in `stub-server.ts`: a new student, the self-heal, a row the webhook made, a
+stored date untouched, no payment, a failed, throwing or slow read, a value
+written meanwhile), the 2-hour sync (`runWhopCommunitySync` with the real
+`whop-members.ts` and `first-payment.ts` on the same `fetch`: no row of its
+upsert names `first_paid_at`, and an empty row on the paying plan is filled
+from the payment, only while empty) and the backfill route. For it
+`stub-server.ts` gained `.not(column, "is", null)`, `.returns()`, the
+`students` columns the sync reads (`discord_user_id`, `discord_username`,
+`canceled_at`) and settable stand-ins for the login's self-heal lookup, join
+date and first-payment read, whose defaults answer as before. The production
+writers (`de9a077`) fail it: the webhook 4 checks, the login 11, the sync 9,
+the backfill 5. 17 breaks of the rule and of the writers' guards each failed
+it once.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

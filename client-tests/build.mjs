@@ -246,7 +246,7 @@ gen('../src/app/api/auth/whop/callback/route.ts', './_gen/whop-callback-route.ts
   ['from "@/lib/pkce"', 'from "./pkce.ts"'],
   ['from "@/app/api/student/_lib/watch-sync"', 'from "./watch-sync.ts"'],
   ...toStub('next/server', '@/lib/supabase-server', '@/lib/whop', '@/lib/whop-members', '@/lib/achievements',
-    '@/app/api/student/_lib/update-streak', '@supabase/supabase-js'),
+    '@/app/api/student/_lib/update-streak', '@supabase/supabase-js', '@/lib/first-payment'),
 ], { dropLineComments: true })
 
 // The Whop catch-up (T-089, whop-catchup.test.mjs): the route and the run as
@@ -273,5 +273,27 @@ gen('../src/app/api/admin/whop-catchup/route.ts', './_gen/whop-catchup-route.ts'
   ['from "@/lib/whop-catchup"', 'from "./whop-catchup.ts"'],
   ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
   ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ...toStub('next/server', '@/lib/supabase-server'),
+])
+
+// The first-paid fix (2026-10-20, first-payment.test.mjs): first_paid_at is
+// the student's first real Whop payment. The reader (first-payment.ts) runs on
+// a stand-in fetch; its one import is whop-members.ts, which has no imports of
+// its own and copies across untouched. The writers run through their entry
+// points: the sync (whop-sync-runner.ts) with the real reads on that fetch and
+// the stand-in's database, and the backfill route with the real team login
+// (admin-auth.ts, above).
+gen('../src/lib/whop-members.ts', './_gen/whop-members.ts')
+gen('../src/lib/first-payment.ts', './_gen/first-payment.ts', [
+  ['from "@/lib/whop-members"', 'from "./whop-members.ts"'],
+])
+gen('../src/lib/whop-sync-runner.ts', './_gen/whop-sync-runner.ts', [
+  ['from "@/lib/whop-members"', 'from "./whop-members.ts"'],
+  ['from "@/lib/first-payment"', 'from "./first-payment.ts"'],
+  ['from "@/lib/constants"', 'from "./constants.ts"'],
+])
+gen('../src/app/api/admin/backfill-first-paid-at/route.ts', './_gen/backfill-first-paid-at-route.ts', [
+  ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
+  ['from "@/lib/first-payment"', 'from "./first-payment.ts"'],
   ...toStub('next/server', '@/lib/supabase-server'),
 ])

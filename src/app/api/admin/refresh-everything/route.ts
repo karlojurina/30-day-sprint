@@ -18,8 +18,9 @@
  *
  * Sequence (~110-130s total):
  *   1. sync-whop                    ~80s — pulls Whop memberships,
- *                                          populates first_paid_at +
- *                                          canceled_at transitions
+ *                                          canceled_at transitions,
+ *                                          fills an empty first_paid_at
+ *                                          from the first payment
  *   2. rebuild_daily_snapshots      ~10s — recomputes daily metric
  *                                          history with current logic
  *   3. check-engagement (parallel)   ~5s — emits churn-risk alerts

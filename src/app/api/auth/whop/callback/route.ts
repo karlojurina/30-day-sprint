@@ -13,6 +13,7 @@ import {
   mapStatus,
   toIso,
 } from "@/lib/whop-members";
+import { fetchFirstPaymentForUser } from "@/lib/first-payment";
 import { unsignState } from "@/lib/pkce";
 import { whopLoginMayProceed } from "@/lib/student-app-gate";
 import { syncWatchProgress } from "@/app/api/student/_lib/watch-sync";
@@ -31,6 +32,45 @@ import { createClient } from "@supabase/supabase-js";
 function isNoAccountYet(error: { code?: string; message?: string }): boolean {
   if (error.code) return error.code === "invalid_credentials";
   return /invalid login credentials/i.test(error.message ?? "");
+}
+
+/**
+ * The longest a login waits for the student's first payment, as long as it
+ * waits for its Whop lesson sync (step 5b).
+ */
+const FIRST_PAYMENT_WAIT_MS = 2500;
+
+/**
+ * The student's first real payment (src/lib/first-payment.ts, the first-paid
+ * fix, 2026-10-20), or null when Whop has none, the read failed, or it took
+ * longer than FIRST_PAYMENT_WAIT_MS. Never throws, and never holds the login
+ * longer than that wait.
+ */
+async function readFirstPaymentForLogin(whopUserId: string): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const gaveUp = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), FIRST_PAYMENT_WAIT_MS);
+  });
+  const read = fetchFirstPaymentForUser(whopUserId, {
+    deadlineAtMs: Date.now() + FIRST_PAYMENT_WAIT_MS,
+  })
+    .then((r) => {
+      if (r.error) {
+        console.warn(`[whop-callback] first payment not read for ${whopUserId}: ${r.error}`);
+      }
+      return r.firstPaidIso;
+    })
+    .catch((err: unknown) => {
+      console.warn(
+        `[whop-callback] first payment not read for ${whopUserId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    });
+  try {
+    return await Promise.race([read, gaveUp]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -176,26 +216,19 @@ export async function GET(request: NextRequest) {
       if (!dbHasActive) {
         const adminRow = await fetchActiveMembershipForUser(userInfo.sub);
         if (adminRow) {
-          // v75.30: also stamp first_paid_at on this INSERT path.
-          // The v75.10 self-heal branch is the FIRST insert site;
-          // without first_paid_at here, the later v75.26 stamp at
-          // line ~283 is skipped (because `existing` is truthy
-          // after self-heal runs). Net regression: every legacy
-          // self-healed customer was left with first_paid_at=NULL
-          // until nightly sync — they'd then be hard-blocked from
-          // claiming the discount with the "contact support"
-          // message.
+          // first_paid_at is not written here (the first-paid fix,
+          // 2026-10-20). It used to take healAnchor, this membership's
+          // created_at, which a free plan on the product has too. The
+          // student's first real payment fills an empty one in step 5,
+          // later in this same login, for this row as for a new one.
           //
-          // Pre-fetch existing.first_paid_at so we ONLY set it on
-          // a real INSERT, not on UPDATE. Otherwise we'd overwrite
-          // a returning customer's true original signup date with
-          // the current renewal date and re-open their discount
-          // window — exactly the leak v75.20 was meant to prevent.
+          // Pre-fetch joined_at so we ONLY set it on a real INSERT, not
+          // on UPDATE (the v85.6 note below).
           const healAnchor =
             toIso(adminRow.created_at) ?? new Date().toISOString();
           const { data: existingHealRow } = await supabaseAdmin
             .from("students")
-            .select("first_paid_at, joined_at, name")
+            .select("joined_at, name")
             .eq("whop_user_id", userInfo.sub)
             .maybeSingle();
 
@@ -219,7 +252,7 @@ export async function GET(request: NextRequest) {
             // (non-paying) until the next nightly sync.
             whop_plan_id: adminRow.plan ?? null,
           };
-          // v85.6: joined_at is INSERT-only, same rule as first_paid_at.
+          // v85.6: joined_at is INSERT-only (an empty one is filled).
           // Now that this branch also repairs EXISTING rows (see the
           // gate note above), writing healAnchor unconditionally would
           // shove a long-time student's joined_at forward to whichever
@@ -229,9 +262,6 @@ export async function GET(request: NextRequest) {
           // this branch runs.
           if (!existingHealRow?.joined_at) {
             healPayload.joined_at = healAnchor;
-          }
-          if (!existingHealRow?.first_paid_at) {
-            healPayload.first_paid_at = healAnchor;
           }
 
           const { error: healError } = await supabaseAdmin
@@ -339,9 +369,18 @@ export async function GET(request: NextRequest) {
     // without overwriting it on returning students.
     const { data: existing } = await supabase
       .from("students")
-      .select("id, joined_at")
+      .select("id, joined_at, first_paid_at")
       .eq("whop_user_id", userInfo.sub)
       .single();
+
+    // The first payment (the first-paid fix, 2026-10-20), read only when
+    // the row holds none: a new student, a row the webhook or the
+    // self-heal made without one, a free member. Started here so it runs
+    // beside the lookups below; written after the upsert, and only while
+    // the column is still empty, so a stored date never moves.
+    const firstPaymentRead = existing?.first_paid_at
+      ? null
+      : readFirstPaymentForLogin(userInfo.sub);
 
     // Best-effort Discord ID lookup — null if user hasn't connected
     // Discord on Whop, or if the API call fails. Doesn't block signup.
@@ -365,27 +404,19 @@ export async function GET(request: NextRequest) {
     let upsertFields: Record<string, unknown> = baseFields;
 
     if (!existing) {
-      // New student — fetch actual Whop membership join date so the
-      // 14-day discount window is counted from when they joined Whop,
-      // not from their first login here.
+      // New student — fetch the Whop membership join date for joined_at,
+      // so their day count starts when they joined Whop, not at their
+      // first login here. first_paid_at is not that date: Whop's
+      // joined_at is the first join to the company, a free membership's
+      // for a member who bought later. It is the first real payment,
+      // filled below (firstPaymentRead).
       const whopJoinDate = await fetchWhopMembershipJoinDate(
         tokens.access_token
       );
-      // v75.26: also set first_paid_at on INSERT. Before this fix,
-      // first_paid_at stayed NULL until the nightly Whop sync ran,
-      // so a customer who paid + logged in today was invisible to
-      // every cohort-scoped admin surface for up to 24h AND could
-      // bypass the discount eligibility gate via the joined_at
-      // fallback. Setting it here closes both gaps.
-      //
-      // Only set on INSERT (the !existing branch) — never on UPDATE,
-      // so a returning customer's original first_paid_at is preserved.
-      // The Whop sync runner separately enforces this invariant.
       const anchorIso = whopJoinDate ?? new Date().toISOString();
       upsertFields = {
         ...baseFields,
         joined_at: anchorIso,
-        first_paid_at: anchorIso,
       };
     }
 
@@ -432,6 +463,26 @@ export async function GET(request: NextRequest) {
           },
           { onConflict: "student_id" }
         );
+    }
+
+    // 5a. The first payment read above, written only into an empty
+    //     first_paid_at. A failed read, no payment or a read slower than
+    //     FIRST_PAYMENT_WAIT_MS leaves it empty for the 2-hour sync (or
+    //     the next login) to fill; the login goes on either way.
+    if (upsertedStudent && firstPaymentRead) {
+      const firstPaidIso = await firstPaymentRead;
+      if (firstPaidIso) {
+        const { error: firstPaidError } = await supabase
+          .from("students")
+          .update({ first_paid_at: firstPaidIso })
+          .eq("id", upsertedStudent.id)
+          .is("first_paid_at", null);
+        if (firstPaidError) {
+          console.error(
+            `[whop-callback] first_paid_at fill failed for ${userInfo.sub}: ${firstPaidError.message}`,
+          );
+        }
+      }
     }
 
     // 5b. Initial watch-progress sync with a short timeout. We don't want

@@ -621,8 +621,8 @@ export default function StudentDetailPage() {
                 </p>
                 <p style={{ ...T.meta, marginTop: 2 }}>
                   Tick this once you&rsquo;ve confirmed the student submitted
-                  all action items in the Discord ad-review channel. Required
-                  for discount approval.
+                  all action items in the Discord ad-review channel. Approving
+                  the 30% no longer needs it.
                 </p>
               </div>
             </label>

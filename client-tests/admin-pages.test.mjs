@@ -6,6 +6,9 @@
 //   had none, and a slow answer for one student could land on the next.
 //   admin-3: /admin/templates never showed which templates are off (the
 //   course switch turned some off) and could not turn one back on.
+//   The ads tick (2026-10-20): approving the 30% no longer needs "Ad
+//   submissions verified" (Lovro), so the tick kept on the student page and
+//   in the drawer may not say it is required.
 //
 // No browser runs here (the repo has no DOM harness), so each fix is checked
 // on the real source in the ways that need none:
@@ -21,6 +24,8 @@
 //   - the templates page's own handler, taken from the source the same way,
 //     with fetch() going to a copy of the real PUT route (its login pointed
 //     at stub-admin.ts), and its markup read from the source;
+//   - the tick's help text on both pages, compiled the same way, so each
+//     line is the one string React renders;
 //   - the pages as they were at BASE, run or read the same way, to show each
 //     check fails on the old code.
 import fs from 'node:fs'
@@ -314,6 +319,30 @@ console.log('\n=== admin-3: a template that is off shows it, and can be turned o
        && /const disabled = busy \|\| waits;/.test(row) && row.includes('{view.turnOnWaits}'),
      'Turn on waits while the row has unsaved changes, and says why, so a template never goes live on the conditions being replaced')
   ok(!templatesPage.old.includes('is_active'), `control: at ${BASE} the page never read or sent is_active`)
+}
+
+// ── The ads tick's help text (2026-10-20) ───────────────────────────────────
+
+const STUDENT_PAGE = 'src/app/admin/(authenticated)/students/[id]/page.tsx'
+/** The JSX text children in `source` that speak of approval, as React renders them. */
+function approvalTexts(source) {
+  const js = ts.transpileModule(source, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX },
+  }).outputText
+  return [...js.matchAll(/children: ("(?:[^"\\]|\\.)*")/g)].map((m) => m[1])
+    .filter((literal) => /discount approval|Approving the 30%/.test(literal)).map((literal) => JSON.parse(literal))
+}
+console.log('\n=== The ads tick on the student page and in the drawer: approving the 30% no longer needs it ===')
+{
+  const now = { page: approvalTexts(fromSrc(STUDENT_PAGE)), drawer: approvalTexts(drawer.now) }
+  const old = { page: approvalTexts(fromBase(STUDENT_PAGE)), drawer: approvalTexts(drawer.old) }
+  ok(show(now) === show({
+    page: ['Tick this once you’ve confirmed the student submitted all action items in the Discord ad-review channel. Approving the 30% no longer needs it.'],
+    drawer: ['Approving the 30% no longer needs it. Tick after confirming submissions in Discord.'],
+  }), 'under "Ad submissions verified", both say approving the 30% no longer needs the tick, and neither says it is required', show(now))
+  ok(old.page.length === 1 && old.drawer.length === 1
+       && [...old.page, ...old.drawer].every((t) => /Required (for|before) discount approval/.test(t)),
+     `control: at ${BASE} both said the tick was required for the approval`, show(old))
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

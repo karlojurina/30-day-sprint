@@ -226,7 +226,7 @@ function StudentDrawerBody({ studentId, onClose }) {
                                                     }, children: "Ad submissions verified" }), _jsx("span", { style: {
                                                         color: "var(--color-text-tertiary)",
                                                         fontSize: 12,
-                                                    }, children: "Required before discount approval. Tick after confirming submissions in Discord." })] })] })] }), _jsx("div", { style: {
+                                                    }, children: "Approving the 30% no longer needs it. Tick after confirming submissions in Discord." })] })] })] }), _jsx("div", { style: {
                                 paddingTop: 16,
                                 borderTop: "1px solid var(--color-border)",
                             }, children: _jsxs(Link, { href: `/admin/students/${student.id}`, className: "inline-flex items-center", style: {

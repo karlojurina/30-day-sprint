@@ -634,7 +634,8 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
 - The ads tick (`/api/admin/verify-ad-submissions`), from the student
   page and the journey drawer: sets `students.ad_submissions_verified`.
   Since 2026-10-20 it gates nothing: the approve route no longer reads it
-  (Lovro's decision). The two checkboxes still say it is required.
+  (Lovro's decision), and both checkboxes' help text says "Approving the
+  30% no longer needs it."
 - The admin rebuild's routes (branch `night/admin`, 2026-10-20, not on
   production), any team role, bearer token, every error a plain
   sentence; full contracts in `system_contracts.md` ("Admin routes of

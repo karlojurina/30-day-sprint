@@ -431,7 +431,7 @@ function StudentDrawerBody({ studentId, onClose }: StudentDrawerProps) {
                       fontSize: 12,
                     }}
                   >
-                    Required before discount approval. Tick after confirming
+                    Approving the 30% no longer needs it. Tick after confirming
                     submissions in Discord.
                   </span>
                 </span>

@@ -39,7 +39,7 @@ Every entity the platform stores, in plain English. This is what lets you design
 | `whop_last_sync_matched_count` | How many of those matched a lesson in our DB. |
 | `whop_last_sync_unmatched` | List of Whop lesson IDs we couldn't match (diagnostic — usually means we forgot to set `whop_lesson_id` on one of our lessons). |
 | `whop_last_sync_error` | Last sync error message, if any. Shown on the student detail page. |
-| `ad_submissions_verified` | **Manual gate.** Karlo or Astrid ticks this checkbox after confirming the student has submitted their action-item ads in Discord `#ad-review`. Must be `true` before a discount can be approved. |
+| `ad_submissions_verified` | **Manual gate.** Karlo or Astrid ticks this checkbox after confirming the student has submitted their action-item ads in Discord `#ad-review`. Must be `true` before a discount can be approved. **Since 2026-10-20 it gates nothing: the approve route no longer reads it (Lovro's decision, the 30% already asks for 61 videos).** |
 | `ad_submissions_verified_at`, `ad_submissions_verified_by` | Audit trail for who ticked it and when. |
 | `day28_dm_sent_at` | Timestamp the day-28 summary DM was sent. Null until sent; prevents duplicate sends. |
 | `last_streak_milestone_shown`, `month_review_seen_at`, `celebrated_region_ids` | Flags so we don't replay celebrations on every page load. |
@@ -363,6 +363,7 @@ Single student. Layout, top to bottom:
    - "Gate lesson (l049): completed / not yet"
    - If a discount request exists: status pill, promo code (if approved), rejection reason (if rejected)
    - **The verification checkbox** — "Ad submissions verified" with helper text: "Tick this once you've confirmed the student submitted all action items in the Discord ad-review channel. Required for discount approval." This is the gate Karlo has to manually flip before an Approve will succeed.
+     - **Since 2026-10-20** the tick gates nothing (see 2.1), and the helper text's last sentence is "Approving the 30% no longer needs it."
 6. **Quick DM templates.** Three buttons that copy templated text to clipboard:
    - **Welcome:** "Hey {name}! Welcome to EcomTalent. I'm here to help you get the most out of your first 30 days. Have you checked out your expedition map yet? Let me know if you have any questions!"
    - **Check-in:** "Hey {name}! Just checking in — how's everything going? I noticed you're on Day {dayNumber}. Is there anything I can help you with?"
@@ -399,6 +400,7 @@ Per row:
 - **Pending only:**
   - **Approve** button — calls `/api/discounts/approve`. Server validates:
     1. `ad_submissions_verified = true` on the student. If not, returns "Ad submissions not verified yet — tick the verification flag on the student's detail page first."
+       - **Since 2026-10-20** this check is gone: the route no longer reads `ad_submissions_verified` (see 2.1).
     2. All R1+R2 lessons fully complete (compound lessons need both halves).
     3. Latest completion is within 14 days of join.
     
@@ -545,11 +547,13 @@ The explicit gap list. Anywhere new logic will need to be designed and implement
 **What works:**
 - Application flow: student clicks Apply → row created with `status = pending`.
 - Validation on Approve: ad-submissions-verified + R1+R2 complete + within 14 days.
+  - **Since 2026-10-20** the ads tick is no longer part of it (see 2.1).
 - Whop promo code generation (or `MANUAL-` fallback).
 - Approval celebration on the student side.
 
 **What's missing:**
 - **Feedback survey gating** (see 8.4) — currently the only gate is the manual checkbox + the time/progress checks.
+  - **Since 2026-10-20** the manual checkbox gates nothing (see 2.1).
 - **MANUAL- recovery.** Once a code is stored with the `MANUAL-` prefix, there's no async retry job to attempt the Whop API again. Karlo has to create that promo by hand in Whop's dashboard.
 - **Rejection UI.** Rejection uses `window.prompt()` for the reason. A proper form with reason categories / templated replies would help.
 - **Audit log / history.** A given request has only one `reviewed_by` / `reviewed_at`. There's no history if it was approved, then re-evaluated.
@@ -560,6 +564,8 @@ The explicit gap list. Anywhere new logic will need to be designed and implement
 **Status: not built.**
 
 What exists today: the discount is gated by lesson completion + the manual ad-verification checkbox. There is **no survey form**, no questions table, no answers table, no UI surface that asks the student anything before they apply.
+
+**Since 2026-10-20** the ad-verification checkbox gates nothing (see 2.1).
 
 When Karlo designs this:
 - Decide where it sits in the flow (before "Apply", as part of the application, before the celebration?).

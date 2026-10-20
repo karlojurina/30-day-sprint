@@ -5,7 +5,10 @@ import { createServiceClient } from "@/lib/supabase-server";
 /**
  * Admin endpoint to toggle a student's `ad_submissions_verified` flag.
  *
- * Required for discount approval (see /api/discounts/approve).
+ * Since 2026-10-20 the flag gates nothing: /api/discounts/approve no longer
+ * reads it (Lovro's decision, the 30% already asks for 61 videos). The
+ * student page and the journey drawer still set it, and their help text says
+ * approving the 30% no longer needs it.
  * Auth: must be an authenticated team member.
  *
  * Body: { studentId: string, verified: boolean }

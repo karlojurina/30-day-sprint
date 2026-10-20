@@ -182,7 +182,11 @@ export function discountEndsAt(firstPaidAt: string | null): Date | null {
  *     June student's approved June request, for a student the offer is
  *     closed to. A student who first paid from the launch on should not have
  *     one: the routes refuse a request with no first payment on record, and
- *     first_paid_at never moves later (whop-sync-runner.ts).
+ *     the live writers only fill an empty first_paid_at. The exception is the
+ *     one-off repair (POST /api/admin/first-paid-repair, 2026-10-20), which
+ *     moves a free membership's date later to the first real payment: a
+ *     request made under the old date can then stop counting, and the
+ *     repair's answer counts those students (thirty.requests_change).
  *   - A date that does not parse: it does not count.
  */
 export function requestCounts(

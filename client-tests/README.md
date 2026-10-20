@@ -182,6 +182,25 @@ writers (`de9a077`) fail it: the webhook 4 checks, the login 11, the sync 9,
 the backfill 5. 17 breaks of the rule and of the writers' guards each failed
 it once.
 
+`first-paid-repair.test.mjs` runs `POST /api/admin/first-paid-repair` (the
+first-paid fix) through its own `POST`: the route, the run
+(`src/lib/first-paid-repair.ts`), the walk on the same kind of stand-in
+`fetch`, `discount.ts`'s dates and `requestCounts`, and the real team login
+(401, and 403 for a CSM). 14 students cover the cases: the report's student
+(5 September stored, 14 October paid), a buyer whose membership is 2 seconds
+older than his payment, one moment written two ways, free members with and
+without a date, empty rows, a first payment for another product before the
+course's, a 100% promo, a full and a partial refund, a canceled student. Dry
+writes nothing; the snapshot lists exactly the rows the write changes, with
+their stored values; the write moves the report's student to 14 October and
+leaves every row with no payment as it was; a row changed between the read
+and the write is left by the guard; a second write changes 0; a walk that does
+not finish (Whop slow, a 401, three 429s) writes nothing and answers by 285 s;
+writes due past 280 s are not started and the next write finishes them; no
+answer or log line holds an email, a name or a Whop id. Its clock is the
+suite's, as in `whop-catchup.test.mjs`. 11 breaks of the repair each failed it
+once.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

@@ -276,13 +276,15 @@ gen('../src/app/api/admin/whop-catchup/route.ts', './_gen/whop-catchup-route.ts'
   ...toStub('next/server', '@/lib/supabase-server'),
 ])
 
-// The first-paid fix (2026-10-20, first-payment.test.mjs): first_paid_at is
-// the student's first real Whop payment. The reader (first-payment.ts) runs on
-// a stand-in fetch; its one import is whop-members.ts, which has no imports of
-// its own and copies across untouched. The writers run through their entry
-// points: the sync (whop-sync-runner.ts) with the real reads on that fetch and
-// the stand-in's database, and the backfill route with the real team login
-// (admin-auth.ts, above).
+// The first-paid fix (2026-10-20, first-payment.test.mjs and
+// first-paid-repair.test.mjs): first_paid_at is the student's first real
+// Whop payment. The reader (first-payment.ts) runs on a stand-in fetch; its one
+// import is whop-members.ts, which has no imports of its own and copies across
+// untouched. The writers run through their entry points: the sync
+// (whop-sync-runner.ts) with the real reads on that fetch and the stand-in's
+// database, and the backfill route and the repair (first-paid-repair.ts and
+// its route) with the real team login (admin-auth.ts, above). The repair reads
+// the 30%'s dates and requestCounts from the real discount.ts (above).
 gen('../src/lib/whop-members.ts', './_gen/whop-members.ts')
 gen('../src/lib/first-payment.ts', './_gen/first-payment.ts', [
   ['from "@/lib/whop-members"', 'from "./whop-members.ts"'],
@@ -295,5 +297,15 @@ gen('../src/lib/whop-sync-runner.ts', './_gen/whop-sync-runner.ts', [
 gen('../src/app/api/admin/backfill-first-paid-at/route.ts', './_gen/backfill-first-paid-at-route.ts', [
   ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
   ['from "@/lib/first-payment"', 'from "./first-payment.ts"'],
+  ...toStub('next/server', '@/lib/supabase-server'),
+])
+gen('../src/lib/first-paid-repair.ts', './_gen/first-paid-repair.ts', [
+  ['from "@/lib/first-payment"', 'from "./first-payment.ts"'],
+  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+  ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+])
+gen('../src/app/api/admin/first-paid-repair/route.ts', './_gen/first-paid-repair-route.ts', [
+  ['from "@/lib/first-paid-repair"', 'from "./first-paid-repair.ts"'],
+  ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
   ...toStub('next/server', '@/lib/supabase-server'),
 ])

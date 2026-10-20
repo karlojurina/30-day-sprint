@@ -509,6 +509,8 @@ export interface WorldSceneOptions {
    * then nothing. Proves a cold first frame does not lower the tier.
    */
   coldStall?: { ms: number; frames: number };
+  /** NOT SHIPPED, dev only (?mood=morning): light.ts's morning probe. Ignored in production. */
+  mood?: "morning";
 }
 
 // ── Internals ────────────────────────────────────────────────────────────────
@@ -1567,6 +1569,8 @@ export class WorldScene {
   private checkpointLook: CheckpointLook = "closed";
   /** The night factor from the student's clock (setNight), handed to light.ts once it installs. */
   private nightTarget = 0;
+  /** NOT SHIPPED, dev only: the morning probe (WorldSceneOptions.mood). */
+  private mood: "morning" | null = null;
   private depthMax = 1;
   private spacerEl: HTMLElement | null = null;
 
@@ -1738,6 +1742,7 @@ export class WorldScene {
     this.posterPref = opts.poster ?? "auto";
     this.tryingLive = this.posterPref === "try";
     this.slowGpuFactor = Math.max(1, opts.slowGpu ?? 1);
+    if (process.env.NODE_ENV !== "production" && opts.mood === "morning") this.mood = "morning";
     if (process.env.NODE_ENV !== "production" && opts.coldStall && opts.coldStall.ms > 0) {
       this.coldStall = { ms: Math.min(2000, opts.coldStall.ms), frames: Math.max(1, Math.min(8, Math.round(opts.coldStall.frames || 1))) };
     }
@@ -2870,6 +2875,8 @@ export class WorldScene {
         const light = m as Partial<LightModule>;
         if (typeof light.setNight === "function") {
           light.setNight(this.nightTarget, 0);
+          // NOT SHIPPED, dev only: the morning probe.
+          if (this.mood) light.setMood?.(this.mood);
           light.update?.(0, 0);
         }
       } catch (e) {

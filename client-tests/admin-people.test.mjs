@@ -218,6 +218,10 @@ function detailDb(extra = {}) {
   ok(d.day === 6 && d.username === 'mila.e' && d.canceling && d.activity === 'moving' && d.areaName === 'Research' && d.streak.ok && d.streak.data === 4,
      'day 6, the username, canceling, moving, in Research (the furthest area with a finished lesson), a 4-day streak',
      show({ day: d.day, activity: d.activity, area: d.areaName, streak: d.streak }))
+  const pondOnly = D.buildStudentDetail(await D.readStudentDetail(fakeClient(detailDb({
+    student_lesson_completions: [{ student_id: 'stu', lesson_id: 'a2pond', completed_at: iso(NOW_MS - DAY) }] })), 'stu'), course(), NOW)
+  ok(pondOnly.areaName === 'Foundations' && pondOnly.progress.ok && pondOnly.progress.data === 0,
+     'a lesson outside progress moves neither the area nor the progress: the first area, 0% (the journey\'s chip by the same rule)', show([pondOnly.areaName, pondOnly.progress]))
   ok(d.discount.ok && d.discount.data.text === 'Applied' && D.DISCOUNT_STATUS_TEXT.applied === 'Code applied',
      'the request in the 30% page\'s words: pending reads Applied, applied reads Code applied')
   ok(d.sync.ok && d.sync.data.state === 'synced' && d.sync.data.error?.note === true && d.sync.data.unmatched.length === 1,

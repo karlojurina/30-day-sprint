@@ -249,10 +249,12 @@ export function buildStudentDetail(
     data: areasOf(reads.regions.ok ? reads.regions.data : [], lessons, done),
   };
 
-  // The furthest area with a finished lesson, in the course's order; the first one when there is none.
+  // The furthest area with a finished lesson that counts, in the course's
+  // order, the first one when there is none: the journey's chip by the same
+  // rule (student_current_region, v98).
   let areaName: string | null = null;
   if (areas.ok && areas.data.length > 0) {
-    const reached = areas.data.filter((a) => a.lessons.some((l) => l.done));
+    const reached = areas.data.filter((a) => a.done > 0);
     areaName = (reached.at(-1) ?? areas.data[0]).name;
   }
 

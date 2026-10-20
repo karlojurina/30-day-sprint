@@ -267,6 +267,8 @@ progress over the counting lessons (a skip counts, a half-done action item
 and a lesson outside progress do not), the activity, the six columns at
 days 7, 8, 14, 15, 21, 22, 30 and 31 (past due and canceled apart), the
 Whop sync's mark on each side of the switch's millisecond (`whopPulled`),
+the area a student is in named by the lessons that count (as the
+journey's chip),
 and every failed read carried to the page as a failure, never 0% or "no
 request". The Tasks rules: the tabs (Archived once the reset ran), the
 tiers, the closed lines (the reset's note in plain words), the queue line's
@@ -275,7 +277,7 @@ floor, and `GET /api/admin/tasks/insights` (copied here with its imports
 pointed at the stand-ins) reading `tasks_reset_at` or answering 500 when it
 cannot. The words: "Membership status" and "still a member", and no plan or
 subscription in this lane's pages and readers. Where the old page held the
-rule inline, the page at `ca9b5ef` (git) is the control. 60 checks.
+rule inline, the page at `ca9b5ef` (git) is the control. 61 checks.
 `build.mjs` copies `templates.ts` and `database.ts` again for it (the Tasks
 rules read the buckets' order), beside `metrics-definitions.ts`.
 

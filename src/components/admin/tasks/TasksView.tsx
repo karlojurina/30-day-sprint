@@ -367,7 +367,10 @@ export function TasksView({
         </p>
       )}
 
-      {data.links.discord_invite_link === "" && current === "open" && health.open > 0 && (
+      {/* Only when a DM on To do prints the invite: 4 of the Whop DMs do. */}
+      {data.links.discord_invite_link === "" &&
+        current === "open" &&
+        data.tasks.some((r) => r.status === "open" && r.template?.body.includes("{discordInvite}")) && (
         <Warning>
           The Discord invite link is empty, so a DM that prints it keeps the words {"{discordInvite}"}. Set it on the
           Templates page.

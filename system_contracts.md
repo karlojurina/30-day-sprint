@@ -685,6 +685,21 @@ When adding a new table, append it here. When deleting a field, scan
   why the clock built-ins are stopped in code (`courseIsNew`) and not
   here. After the switch the trigger editor offers areas from
   `regions` and no clock metric.
+- **From the admin (admin rebuild 2, WI-8, branch `night/a2-templates`):**
+  a built-in row (`is_custom = false`) is never deleted:
+  `DELETE /api/admin/templates/:id` deletes only `is_custom = true` and
+  answers 400 for a built-in, so `check-na-tasks` and `check-csm-tasks`
+  always find their scenarios. The Templates page's Save writes only the
+  fields that changed, and an emptied condition list as `null`, never
+  `{"all": []}`: `check-csm-tasks`' auto-dismiss evaluates any
+  `trigger_config` it finds, and an empty list never matches, so a
+  `stalled.*` or `welcome.day1` row saved that way would have its open
+  tasks dismissed. Rows a page saved before this may hold `{"all": []}`:
+  on 20 October only `nolessons.day14` and the custom `C-42c1aa` had a
+  non-null `trigger_config` (whether `nolessons.day14`'s is an empty list
+  or conditions was not read). The auto-dismiss judges a `nolessons.*`
+  task by its built-in rule first, so an empty list there dismisses
+  nothing.
 
 ### `admin_config`
 - **Depends on:** —
@@ -1907,9 +1922,11 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
 - **What it is:** the one way the admin writes `admin_config`: the 2
   links the message templates fill in and the 4 automated-Discord
   switches. `GET /api/admin/config` (any team role) lists every row.
-- **Called by:** nothing in the app on this branch since `/admin/settings`
-  was removed; the Templates page's Message settings panel (WI-8) is
-  meant to call it.
+- **Called by:** the Templates page's Message settings panel
+  (`src/components/admin/templates/MessageSettings.tsx`, through
+  `templatesTransport.saveSetting`; WI-8, branch `night/a2-templates`),
+  since `/admin/settings` was removed. It sends one key and its value per
+  save; a switch as "true" or "false".
 - **Consumes:** `{ key: string, value: string }`, founder and admin only
   (a csm gets 403).
 - **Produces:**
@@ -1931,6 +1948,45 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
     the database's words in the server log only.
 - **Writes:** one `admin_config` row's `value`, `updated_at`,
   `updated_by`.
+
+### The Templates, Survey, Team and Insights pages (admin rebuild 2, WI-8 and WI-9)
+- **Branch:** `night/a2-templates`, not on production.
+- **Templates (`/admin/templates`):** reads, with the team member's
+  client, `templates` (`*`), `regions`, `lessons`,
+  `admin_config.curriculum_reset_at` and the 6 keys of
+  `src/lib/admin/config-keys.ts` (`loadTemplatesData`,
+  `src/lib/admin/templates-data.ts`), and `GET /api/admin/templates/stats`.
+  Writes through `PUT /api/admin/templates/:id` (the fields that changed,
+  or `{ is_active }` alone), `POST /api/admin/templates` (a custom
+  template), `DELETE /api/admin/templates/:id` (a custom one only: 400
+  "A built-in template can't be deleted. Only a custom one can." for a
+  built-in, 404 for an id that is not there) and `PUT /api/admin/config`.
+  A failed read of the templates fails the page with Retry; a failed read
+  of the course, the catalog or the settings leaves the templates shown
+  and says why where it is needed.
+- **Survey (`/admin/feedback/survey`):** reads
+  `discount_feedback_questions` and `discount_feedback_responses` paged on
+  `id`, then `discount_requests` (`id, student_id, status, created_at`) and
+  `students` (`id, name, email`) by id, at most 100 ids per `.in()`
+  (`loadSurveyData`, `src/lib/admin/survey-data.ts`). Any failed read
+  fails the page with what failed. Writes nothing.
+- **Team (`/admin/team`):** the existing founder-only routes,
+  unchanged: `GET`/`POST /api/admin/team-members`, `PATCH`/`DELETE
+  /api/admin/team-members/:id` (`src/lib/admin/team-transport.ts`).
+- **Insights (`/admin/insights/progress`):** reads
+  `daily_progress_snapshots`, `students`, `student_milestones`, `lessons`
+  (a count) and `student_progress_counts` with the page's own filters
+  (`src/lib/admin/insights-data.ts`), the long reads paged on a unique
+  key; a failed read is `{ ok: false }` and its card says so. Writes
+  nothing.
+- **Proven** on stand-ins: `client-tests/templates-page.test.mjs`,
+  `survey-page.test.mjs`, `team-page.test.mjs`, `insights-page.test.mjs`
+  (the loaders on `stub-server.ts`'s database capped at 1000 rows a read
+  and shuffled, the transports through copies of the real routes with the
+  real `requireTeam` where the route has one, the components rendered by
+  React's server renderer), and `world-tests/admin-pages.mjs --only
+  templates,survey,team,insights` on the dev pages. **Unproven:** a team
+  login against production's rows.
 
 ### Proven and unproven
 - **Proven** on stand-ins: `client-tests/admin-routes.test.mjs` (until

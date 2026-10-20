@@ -194,7 +194,11 @@ When adding a new table, append it here. When deleting a field, scan
 - **Depends on:** `students`
 - **Depended on by:** `/api/auth/whop/callback` (token write),
   `src/app/api/student/_lib/watch-sync.ts` (all sync diagnostics),
-  `StudentContext` (`syncDiagnostics`), admin student detail page,
+  `StudentContext` (`syncDiagnostics`), admin student detail page and
+  the journey's drawer (since admin rebuild 2, `src/lib/admin/student-detail.ts`:
+  the diagnostics columns only, never the tokens; the block says "Not
+  synced since the switch" when `last_sync_at` is before
+  `curriculum_reset_at`, by `whopPulled`),
   `src/lib/whop-catchup.ts` (T-089, 2026-10-20: writes the same
   diagnostics columns with the same values as the backfill for every
   member it reads from Whop, and nothing for a member whose read
@@ -705,6 +709,17 @@ When adding a new table, append it here. When deleting a field, scan
   field), `/admin/discord` and `/api/admin/dm-toggles` were removed; the
   Templates page's Message settings panel (WI-8) is the page for these 6.
   Proven in `client-tests/admin-routes.test.mjs`.
+- **`tasks_reset_at` (v109, admin rebuild 2, D7, branch `night/a2-tasks`,
+  not on production).** The moment of the tasks reset, a string in UTC
+  like `2026-10-20T21:30:00.000Z`. Written by v109 only, in the
+  transaction that copies and dismisses the open tasks, and equal to
+  `archive_tasks.reset_2026_10.reset_at`; deleted by its undo. Nothing in
+  `src/` writes it (`PUT /api/admin/config` refuses the key). Read through
+  `src/lib/admin/tasks-reset.ts` (`getTasksResetAt`, `readTasksConfig`),
+  which throw on a failed read or a value with no zone, by
+  `GET /api/admin/tasks` (with the 2 DM links, one read) and
+  `GET /api/admin/tasks/insights`, and by the PRD for the Dashboard
+  (see `tasks`).
 - **A key with no reader (v95):** `discount_window_days`, seeded `14`.
   No code reads it; the discount routes use `DISCOUNT_WINDOW_DAYS` in
   `src/lib/constants.ts`. `/admin/settings` listed every row of this
@@ -1036,6 +1051,33 @@ When adding a new table, append it here. When deleting a field, scan
   progress was reset." appended to `notes`, and a copy of the row in
   `archive_v1.csm_changes`. The undo reopens a task only where no open
   task now exists for the same student and scenario.
+- **The tasks reset (v109, admin rebuild 2, D7, branch `night/a2-tasks`,
+  not on production; Lovro pastes it):** in one transaction, holding
+  `tasks` in SHARE ROW EXCLUSIVE (5 s at most), every task open at the
+  run is copied into `archive_tasks.reset_2026_10` (every column, plus
+  `reset_at`, the run's moment) and set `status = 'dismissed'`,
+  `dismissed_at` = the moment, `dismissed_by` null, `notes =
+  coalesce(notes, '') || ' [reset for the new program]'`; then
+  `admin_config.tasks_reset_at` = the moment. A second run changes
+  nothing. Sent and dismissed tasks are not touched; the crons are not
+  changed, so the queue refills where a rule still holds (check-na-tasks
+  reads no tasks; check-csm-tasks dedupes on open or sent only), with
+  new `created_at`s. The undo (`supabase/undo/2026_v109_undo.sql`)
+  reopens a reset task only while it is exactly as the reset left it and
+  no open task of the same student and scenario exists.
+- **The reset's line (`tasks_reset_at`), as its readers draw it:**
+  `GET /api/admin/tasks` lists To do, Sent and Dismissed from tasks with
+  `created_at >= tasks_reset_at`, and `archived` (the Tasks page's
+  read-only Archived tab) from every older task of any status, newest
+  first, capped like Sent; every count is exact on its side of the line.
+  `GET /api/admin/tasks/insights` hands it to `computeOutreachInsights`
+  (`tasksFloorIso`), which reads only tasks created on or after it. With
+  no row every task is on the lists, as before. A failed read of the row
+  is a 500 in both routes, never "no reset". The PRD gives the
+  Dashboard's Open tasks tile the same line (D7, lane WI-2, built apart
+  from this lane; `getTasksResetAt` of `src/lib/admin/tasks-reset.ts` is
+  there for it). The 30% loader's last contact and the crons read tasks
+  of any date, as before.
 
 ### `daily_progress_snapshots`
 - **Depends on:** `students`, `lessons`

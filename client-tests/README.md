@@ -251,6 +251,51 @@ product ids `etfb.ts` held at `d0ebe76` (read with `git show`), in the
 says so. With Today put back first in the bar and `/admin` matched as a
 prefix, 9 checks fail.
 
+`admin-people.test.mjs` (admin rebuild 2, lane WI-5 and WI-6, 2026-10-20)
+runs the rules of Tasks, its insights, All students, a student's page and
+the Student journey. The readers (`src/lib/admin/students-list.ts`,
+`student-detail.ts`, `journey-board.ts`, copied by `build.mjs`) run on
+`stub-server.ts`'s database: All students holds every student with a first
+payment (monthly, yearly, another plan, none, before 25 May, every
+membership, no Whop membership) and never a free seat, past 1,000 students
+read by key, with the list's columns only (no plan); the journey holds a
+first payment from `DISCOUNT_LAUNCH_DATE` on (not a millisecond before),
+any plan, active, past due or canceled with a membership; a student's
+latest 30% request is the newest of any date, and the Whop sync read names
+no token. The builders run on hand-made reads: the order, the day, the
+progress over the counting lessons (a skip counts, a half-done action item
+and a lesson outside progress do not), the activity, the six columns at
+days 7, 8, 14, 15, 21, 22, 30 and 31 (past due and canceled apart), the
+Whop sync's mark on each side of the switch's millisecond (`whopPulled`),
+and every failed read carried to the page as a failure, never 0% or "no
+request". The Tasks rules: the tabs (Archived once the reset ran), the
+tiers, the closed lines (the reset's note in plain words), the queue line's
+"sent today" in Croatia. `computeOutreachInsights` with and without the
+floor, and `GET /api/admin/tasks/insights` (copied here with its imports
+pointed at the stand-ins) reading `tasks_reset_at` or answering 500 when it
+cannot. The words: "Membership status" and "still a member", and no plan or
+subscription in this lane's pages and readers. Where the old page held the
+rule inline, the page at `ca9b5ef` (git) is the control. 60 checks.
+`build.mjs` copies `templates.ts` and `database.ts` again for it (the Tasks
+rules read the buckets' order), beside `metrics-definitions.ts`.
+
+`admin-tasks.test.mjs` gained the reset (11 checks): To do, Sent and
+Dismissed hold the tasks created on or after `tasks_reset_at` and
+`archived` every older one of any status, the line drawn in the database
+in every list and count, the reset and the DM links from one read of
+`admin_config`, no archived read and no line before v109, and a failed or
+unreadable `tasks_reset_at` a 500 with its reason. Its page checks read the
+new view (`src/components/admin/tasks/TasksView.tsx`). `admin-pages.test.mjs`
+reads the journey's drawer where it lives now (`JourneyView.tsx`, keyed by
+the student, fed by the student page's `useStudent`, which it runs on a
+small stand-in for React's hooks: a slow answer for the last student is
+still dropped) and the ads tick's two sentences in `StudentDetailView.tsx`.
+`csm-cutover.test.mjs` and `outreach-cutover.test.mjs` put the old words
+back before comparing with their bases ("Subscription status" and "still
+subscribed" were renamed on purpose, D12) and ignore the new
+`tasks_floor` field; `whop-backfill.test.mjs` and `streak.test.mjs` read the
+student page's note and streak where they live now.
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

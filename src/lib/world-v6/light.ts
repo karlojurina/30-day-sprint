@@ -738,7 +738,10 @@ export const NIGHT_BASE = {
   sunColor: 0xff7040, sunIntensity: 0, sunGlow: 0x000000, sunHero: 0,
   moonColor: 0xc8d4ff, moonIntensity: 1.5, moonVis: 1,
   rimColor: 0x8fa6ff, rimIntensity: 0.8,
-  skyTop: 0x0a1036, skyMid: 0x18224e, skyHorizon: 0x2e3c70, skyGlow: 0x3a4a80,
+  // A moonlit sky, a step lighter than the island's (0x0a1036 / 0x18224e /
+  // 0x2e3c70 / 0x3a4a80): with the Milky Way kept off the ground skies the
+  // falls' frame went to 69% very dark on SwiftShader; with this, 61.
+  skyTop: 0x101848, skyMid: 0x222e64, skyHorizon: 0x38487e, skyGlow: 0x44558c,
   haze: 0x202a50,
   // A little less fill and moonlight than the island's night (2.2, 0.9, 1.6):
   // seen from the ground the meadows read as day lit grass under it.

@@ -4,6 +4,7 @@ import {
   accessRank,
   fetchActiveMembershipForUser,
   isEtfbOrApexProduct,
+  lookUpActiveMembershipForUser,
   mapStatus,
 } from "./whop-members.ts";
 import type {
@@ -378,6 +379,11 @@ export async function POST(request: NextRequest) {
       const product = eventProductId(membership);
       const ofCourse = product !== null && courseProductIds().includes(product);
 
+      // Does the student's row point at the membership that ended
+      // (whop_membership_id)? Asked for every product since the membership
+      // order's second review (2026-10-20): a row that points at another
+      // membership is never canceled here (below).
+      //
       // login-1 review: the row a membership made. Until login-1 the webhook
       // wrote a membership of any product as active, and the sync, which
       // walks only the course's memberships, never closes such a row. So a
@@ -386,24 +392,21 @@ export async function POST(request: NextRequest) {
       // login-1: re-pointed at a course membership Whop lists, else
       // canceled. A course member's row points at a course membership after
       // every sync (every 2 hours).
-      let rowPointsAtIt = false;
-      if (!ofCourse) {
-        const { data: madeByIt, error: readError } = await supabase
-          .from("students")
-          .select("id")
-          .eq("whop_user_id", membership.user.id)
-          .eq("whop_membership_id", membership.id)
-          .maybeSingle();
-        if (readError) {
-          // 500 so Whop retries: this event may be the only one that closes the row.
-          console.error("Webhook: student read failed:", readError);
-          return NextResponse.json(
-            { error: "Database error" },
-            { status: 500 },
-          );
-        }
-        rowPointsAtIt = madeByIt !== null;
+      const { data: madeByIt, error: readError } = await supabase
+        .from("students")
+        .select("id")
+        .eq("whop_user_id", membership.user.id)
+        .eq("whop_membership_id", membership.id)
+        .maybeSingle();
+      if (readError) {
+        // 500 so Whop retries: this event may be the only one that closes the row.
+        console.error("Webhook: student read failed:", readError);
+        return NextResponse.json(
+          { error: "Database error" },
+          { status: 500 },
+        );
       }
+      const rowPointsAtIt = madeByIt !== null;
 
       // login-1: another product's membership ending says nothing about the
       // course when the row points elsewhere. Answer 200, ask Whop nothing,
@@ -414,7 +417,7 @@ export async function POST(request: NextRequest) {
         );
         break;
       }
-      if (rowPointsAtIt) {
+      if (rowPointsAtIt && !ofCourse) {
         console.info(
           `[whop-webhook] ${eventName} for ${product ? `product ${product}` : "no named product"}: ` +
             `the row points at ${membership.id}, settled as before login-1`,
@@ -423,11 +426,27 @@ export async function POST(request: NextRequest) {
 
       // v85.6 — a user can hold several memberships at once (re-subscribe,
       // refund + rebuy, free-plan claim, or a duplicate created by
-      // clicking Renew on the block overlay). This update keys on
+      // clicking Renew on the block overlay). This update keyed on
       // whop_user_id alone, so ONE membership deactivating revoked
       // dashboard access even while another was live and paid.
       // Ask Whop whether anything valid survives before downgrading.
-      const surviving = await fetchActiveMembershipForUser(membership.user.id);
+      const lookup = await lookUpActiveMembershipForUser(membership.user.id);
+      // The membership order's second review (2026-10-20): when no read of Whop
+      // answered, the lookup's null says nothing, and the student may hold a
+      // valid membership. Nothing is written and Whop sends the event again.
+      // It used to cancel the row: a course student's too, when an ETfB or
+      // Apex membership of theirs ended while Whop could not be read.
+      if (lookup.everyReadFailed) {
+        console.error(
+          `[whop-webhook] ${eventName} for ${membership.id}: every read of Whop failed for ` +
+            `${membership.user.id}, nothing written; 500 so Whop sends it again`,
+        );
+        return NextResponse.json(
+          { error: "Whop could not be read" },
+          { status: 500 },
+        );
+      }
+      const surviving = lookup.row;
       if (surviving) {
         // Still entitled — re-point the row at the surviving membership
         // instead of revoking. Keeps whop_membership_id / whop_plan_id
@@ -465,21 +484,23 @@ export async function POST(request: NextRequest) {
         break;
       }
 
-      // login-1: with no product in the payload this may be another
-      // product's membership, and Whop answering nothing may be a failed
-      // read. A row that points elsewhere is not canceled on that: the sync
-      // (every 2 hours) settles it from the course's own memberships. A row
-      // that points at this membership is canceled below, since the sync may
-      // never see it (login-1 review, above).
-      if (!product && !rowPointsAtIt) {
+      // Whop lists nothing that grants access. A row that points at another
+      // membership is not canceled on that: that membership's own event, or
+      // the sync (every 2 hours), settles it. Whatever the product since the
+      // membership order's second review (2026-10-20); it held only for an event
+      // that names no product, and an ETfB or Apex membership ending canceled
+      // a course student's row. A row that points at this membership is canceled
+      // below, since the sync may never see it (login-1 review, above).
+      if (!rowPointsAtIt) {
         console.info(
-          `[whop-webhook] ${eventName} names no product and Whop lists no course ` +
-            `membership for ${membership.user.id}: nothing written, the sync settles it`,
+          `[whop-webhook] ${eventName}: Whop lists no membership that grants access for ` +
+            `${membership.user.id} and the row does not point at ${membership.id}: ` +
+            `nothing written, the sync settles it`,
         );
         break;
       }
 
-      let cancel = supabase
+      const { error } = await supabase
         .from("students")
         .update({
           membership_status: "canceled",
@@ -487,12 +508,9 @@ export async function POST(request: NextRequest) {
           // "churned today" off real events instead of updated_at.
           canceled_at: new Date().toISOString(),
         })
-        .eq("whop_user_id", membership.user.id);
-      // As for the re-point above: only while the row still points at it.
-      if (rowPointsAtIt) {
-        cancel = cancel.eq("whop_membership_id", membership.id);
-      }
-      const { error } = await cancel;
+        .eq("whop_user_id", membership.user.id)
+        // As for the re-point above: only while the row still points at it.
+        .eq("whop_membership_id", membership.id);
 
       if (error) {
         // v75.30: return 500 so Whop retries. membership.deactivated

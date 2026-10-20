@@ -22,6 +22,11 @@
 // whose course membership is past_due (locked out of the app) is let in on an
 // active seat (isEtfbOrApexProduct in whop-members.ts, whose two ids are
 // checked against etfb.ts's here). A payment points the row at its membership.
+// The order's second review (the same evening): a membership ending while no
+// read of Whop answers writes nothing and answers 500, so Whop sends it again
+// (the lookup says so, lookUpActiveMembershipForUser's everyReadFailed); one
+// that is not the row's ending with nothing found leaves the row for the sync;
+// the lookup's second read picks from every listed product or from none.
 // Whop is a stand-in fetch answering in the shapes this code reads; the
 // database is stub-server.ts's. No network: a request to anything but the
 // stand-in fails the test. The member ids, plans and emails are made up; the
@@ -36,7 +41,7 @@ import { GET as login } from './_gen/whop-callback-route-real-whop.ts'
 import { POST as webhook } from './_gen/whop-webhook-route.ts'
 import { runWhopCommunitySync } from './_gen/whop-sync-runner.ts'
 import { checkActiveMembershipDiagnostic } from './_gen/whop.ts'
-import { fetchActiveMembershipForUser, isEtfbOrApexProduct } from './_gen/whop-members.ts'
+import { fetchActiveMembershipForUser, isEtfbOrApexProduct, lookUpActiveMembershipForUser } from './_gen/whop-members.ts'
 // useDb is the stand-in's "use this database", not a React hook: imported under a plainer name.
 import { FakeDb, useDb as switchDb, fakeClient, NextRequest, afterTasks } from './_gen/stub-server.ts'
 import { signState } from './_gen/pkce.ts'
@@ -95,13 +100,24 @@ for (const k of ['STUDENT_APP_CLOSED', 'STUDENT_APP_OPEN_FOR', 'WHOP_BYPASS_USER
  * `down.byUser` and `down.byProduct`: only the lookup's first read (a user's
  * memberships) or its second (one product's, for a user) fails, so its next
  * read decides (fetchActiveMembershipForUser's strategies 2 and 3).
+ * `down.oneProduct`: the second read fails for that product only.
+ * `down.member`: the third read (the member) fails, or, set to 'no list',
+ * answers a member that carries no memberships.
+ * A membership that names no product sets `listedUnder`, the product whose
+ * read lists it; the stand-in keeps that key to itself.
  */
-const whop = { memberships: [], payments: [], down: { me: false, admin: false, byUser: false, byProduct: false }, calls: [] }
+const whop = { memberships: [], payments: [], down: { me: false, admin: false, byUser: false, byProduct: false, oneProduct: null, member: false }, calls: [] }
 const v2 = (m, extra = {}) => ({
   id: m.id, user: m.user, email: `${m.user}@example.com`, product: m.product, plan: m.plan,
   status: 'active', valid: true, created_at: 1760000000, expires_at: null, renewal_period_end: null,
   cancel_at_period_end: false, ...extra,
 })
+/** A membership as Whop answers it: the stand-in's own `listedUnder` left out. */
+const shown = (m) => {
+  const row = { ...m }
+  delete row.listedUnder
+  return row
+}
 globalThis.fetch = async (input, init = {}) => {
   const url = new URL(String(input))
   if (url.hostname !== 'api.whop.com') throw new Error(`the test made a request to ${url.hostname}`)
@@ -127,15 +143,20 @@ globalThis.fetch = async (input, init = {}) => {
   if (whop.down.admin) return new Response('upstream error', { status: 500 })
   const member = url.pathname.match(/^\/api\/v2\/members\/([^/]+)$/)
   if (member) {
+    if (whop.down.member === true) return new Response('upstream error', { status: 500 })
     const user = decodeURIComponent(member[1])
-    return Response.json({ id: user, social_accounts: [], memberships: whop.memberships.filter((m) => m.user === user) })
+    const body = { id: user, social_accounts: [] }
+    if (whop.down.member !== 'no list') body.memberships = whop.memberships.filter((m) => m.user === user).map(shown)
+    return Response.json(body)
   }
   if (url.pathname === '/api/v2/memberships') {
     const product = url.searchParams.get('product_id')
     const user = url.searchParams.get('user_id')
-    if (user && (product ? whop.down.byProduct : whop.down.byUser)) return new Response('upstream error', { status: 500 })
-    const rows = whop.memberships.filter((m) => (!product || m.product === product) && (!user || m.user === user))
-    return Response.json({ data: rows, pagination: { current_page: 1, total_page: 1, total_count: rows.length } })
+    if (user && (product ? whop.down.byProduct || whop.down.oneProduct === product : whop.down.byUser)) {
+      return new Response('upstream error', { status: 500 })
+    }
+    const rows = whop.memberships.filter((m) => (!product || (m.product ?? m.listedUnder) === product) && (!user || m.user === user))
+    return Response.json({ data: rows.map(shown), pagination: { current_page: 1, total_page: 1, total_count: rows.length } })
   }
   if (url.pathname === '/api/v1/payments') {
     const rows = whop.payments.filter((p) => p.user?.id === url.searchParams.get('user_id'))
@@ -156,7 +177,7 @@ function freshWorld({ students = [], memberships = Object.values(MEMBERS).map((m
   switchDb(db)
   whop.memberships = memberships
   whop.payments = payments
-  whop.down = { me: false, admin: false, byUser: false, byProduct: false, ...down }
+  whop.down = { me: false, admin: false, byUser: false, byProduct: false, oneProduct: null, member: false, ...down }
   whop.calls = []
   return db
 }
@@ -303,6 +324,8 @@ console.log('\n=== The 2-hour sync walks the three listed products ===')
 
 /** A membership whose renewal charge failed: valid on Whop, past_due here, and locked out of the app (MembershipBlockOverlay). */
 const PAST_DUE = { status: 'past_due', valid: true }
+/** A membership that has ended: no access. */
+const CANCELED = { status: 'canceled', valid: false }
 
 console.log('\n=== The sync\'s dedupe: active, then the course over ETfB and Apex, then the newest, whatever the order of the setting ===')
 for (const order of [PRODUCTION, [APEX, ETFB, COURSE].join(',')]) {
@@ -312,6 +335,7 @@ for (const order of [PRODUCTION, [APEX, ETFB, COURSE].join(',')]) {
   const U = {
     etfb: 'user_TESTcourseetfb', twoApex: 'user_TESTtwoapex', twoCourse: 'user_TESTtwocourse', lapsed: 'user_TESTlapsed',
     pastDueCourse: 'user_TESTpastduecourse', pastDueSeat: 'user_TESTpastdueseat', bothPastDue: 'user_TESTbothpastdue', renewal: 'user_TESTrenewal',
+    bothEnded: 'user_TESTbothended', sameDate: 'user_TESTsamedate',
   }
   const db = freshWorld({
     memberships: [
@@ -334,6 +358,13 @@ for (const order of [PRODUCTION, [APEX, ETFB, COURSE].join(',')]) {
       held(U.bothPastDue, 'mem_TESTbp_etfb', ETFB, MEMBERS.etfb.plan, 5, PAST_DUE),
       held(U.renewal, 'mem_TESTrn_new', COURSE, COURSE_PLAN, 5, PAST_DUE),
       held(U.renewal, 'mem_TESTrn_old', COURSE, COURSE_PLAN, 1),
+      // Neither grants access, so only the date decides (step d): the course
+      // rule (step c) is for two that grant access.
+      held(U.bothEnded, 'mem_TESTbe_course', COURSE, COURSE_PLAN, 1, CANCELED),
+      held(U.bothEnded, 'mem_TESTbe_apex', APEX, MEMBERS.apex.plan, 5, CANCELED),
+      // One created_at for both: a tie keeps the one seen first.
+      held(U.sameDate, 'mem_TESTsd_first', COURSE, COURSE_PLAN, 3),
+      held(U.sameDate, 'mem_TESTsd_second', COURSE, COURSE_PLAN, 3),
     ],
   })
   await quietly(() => runWhopCommunitySync(fakeClient(db), 'cron'))
@@ -359,6 +390,11 @@ for (const order of [PRODUCTION, [APEX, ETFB, COURSE].join(',')]) {
     `${listed}: both past_due, the course's older than the ETfB one: the course (the course before recency)`, show(at(U.bothPastDue)))
   ok(at(U.renewal)?.membership === 'mem_TESTrn_old' && at(U.renewal)?.status === 'active',
     `${listed}: two course memberships, the newer past_due: the older active one (active before recency)`, show(at(U.renewal)))
+  ok(at(U.bothEnded)?.membership === 'mem_TESTbe_apex' && at(U.bothEnded)?.status === 'canceled' && at(U.bothEnded)?.plan === MEMBERS.apex.plan,
+    `${listed}: a canceled course membership older than a canceled seat: the seat, canceled, on its plan (as built: between two that grant no access only the date decides)`,
+    show(at(U.bothEnded)))
+  ok(at(U.sameDate)?.membership === 'mem_TESTsd_first' && at(U.sameDate)?.status === 'active',
+    `${listed}: two active course memberships with the same created_at: the one Whop lists first (a tie keeps the first seen)`, show(at(U.sameDate)))
 }
 process.env.WHOP_PRODUCT_ID = PRODUCTION
 
@@ -568,7 +604,6 @@ console.log('\n=== The webhook takes the same three ===')
   }
 
   console.log('\n=== The webhook\'s re-point after a membership ends follows the same order ===')
-  const CANCELED = { status: 'canceled', valid: false }
   const K_APEX2 = { ...keeps, id: 'mem_TESTkeepsapex2', product: APEX, plan: MEMBERS.apex.plan }
   for (const [what, memberships] of [
     ['Whop listing the ended course membership and an active seat', [v2(K_COURSE, CANCELED), v2(K_APEX)]],
@@ -606,6 +641,86 @@ console.log('\n=== The webhook takes the same three ===')
       `one of ${keeps.who}'s two seats ends, Whop listing the other seat first: the row stays on the course membership and its plan`,
       show({ status: row.membership_status, membership: row.whop_membership_id }))
   }
+
+  console.log('\n=== The webhook when a membership ends and Whop cannot be read, or lists nothing that grants access (the order\'s second review) ===')
+  const K_COURSE2 = { ...keeps, id: 'mem_TESTkeepscourse2', product: COURSE, plan: COURSE_PLAN }
+  /** The calls that change a row. */
+  const writesOn = (d) => d.calls('students').filter((c) => c.op !== 'select')
+  // No read of the lookup answers: its null says nothing, and the student
+  // still holds a valid membership. Nothing is written and the answer is 500,
+  // so Whop sends the event again. Until then an ETfB or Apex membership
+  // ending canceled the course student's row: both are listed products since
+  // 2026-10-20, so their endings reach the lookup.
+  const ON_SEAT = courseRow({ whop_membership_id: K_APEX.id, whop_plan_id: K_APEX.plan })
+  const SEAT_ENDED = [v2(K_COURSE), v2(K_APEX, CANCELED)]
+  for (const [what, ended, row, memberships, down] of [
+    ['an Apex seat ends beside the course membership the row is on, the company key\'s reads failing', K_APEX, courseRow(), SEAT_ENDED, { admin: true }],
+    ['an ETfB membership ends beside the course membership the row is on, the company key\'s reads failing',
+      K_ETFB, courseRow(), [v2(K_COURSE), v2(K_ETFB, CANCELED)], { admin: true }],
+    ['the Apex seat the row is on ends beside a valid course membership, the company key\'s reads failing', K_APEX, ON_SEAT, SEAT_ENDED, { admin: true }],
+    ['the course membership the row is on ends beside an active seat, the company key\'s reads failing',
+      K_COURSE, courseRow(), [v2(K_COURSE, CANCELED), v2(K_APEX)], { admin: true }],
+    ['an Apex seat ends beside the course membership the row is on, the first read failing, the second for the course only, the third too',
+      K_APEX, courseRow(), SEAT_ENDED, { byUser: true, oneProduct: COURSE, member: true }],
+  ]) {
+    const d = freshWorld({ students: [row], memberships, down })
+    const before = rowNow(d)
+    const r = await send(event('membership.went_invalid', ended))
+    ok(r.status === 500 && r.whopCalls > 0 && rowNow(d) === before && writesOn(d).length === 0 &&
+      r.log.some((l) => l.startsWith('error: ') && l.includes('every read of Whop failed')),
+      `${what}: 500 (Whop sends it again), nothing written, an error line says why`,
+      show({ status: r.status, whopCalls: r.whopCalls, row: rowOf(d, keeps) && { status: rowOf(d, keeps).membership_status, membership: rowOf(d, keeps).whop_membership_id } }))
+  }
+  {
+    // The same delivery again once Whop's reads answer: the course membership
+    // is found, and the row stays on it.
+    const d = freshWorld({ students: [courseRow()], memberships: [v2(K_COURSE), v2(K_APEX, CANCELED)], down: { admin: true } })
+    const first = await send(event('membership.went_invalid', K_APEX))
+    whop.down.admin = false
+    const again = await send(event('membership.went_invalid', K_APEX))
+    const row = rowOf(d, keeps)
+    ok(first.status === 500 && again.status === 200 && row.membership_status === 'active' && row.whop_membership_id === K_COURSE.id &&
+      row.whop_plan_id === COURSE_PLAN && row.canceled_at === null,
+      `sent again once Whop answers: 200, ${keeps.who} still active on the course membership and its plan`,
+      show({ first: first.status, again: again.status, status: row.membership_status, membership: row.whop_membership_id }))
+  }
+  // Whop answers and lists nothing that grants access (here not even the
+  // course membership the row is on), and the row points at another
+  // membership than the one that ended: left for that membership's own event
+  // or the sync, whatever the product. An ETfB or Apex ending used to cancel
+  // the course student's row here.
+  for (const [what, ended, row] of [
+    ['an Apex seat ends, the row on the course membership', K_APEX, courseRow()],
+    ['an ETfB membership ends, the row on the course membership', K_ETFB, courseRow()],
+    ['a course membership ends, the row on another course membership', K_COURSE2, courseRow()],
+    ['the course membership ends, the row on an Apex seat', K_COURSE, ON_SEAT],
+  ]) {
+    const d = freshWorld({ students: [row], memberships: [v2(ended, CANCELED)] })
+    const before = rowNow(d)
+    const r = await send(event('membership.went_invalid', ended))
+    ok(r.status === 200 && r.whopCalls > 0 && rowNow(d) === before && writesOn(d).length === 0 && r.log.some((l) => l.includes('the sync settles it')),
+      `${what}, Whop listing nothing that grants access: 200, the row left for the sync, the log says why`,
+      show({ status: r.status, whopCalls: r.whopCalls, row: rowOf(d, keeps)?.membership_status }))
+  }
+  {
+    // The membership the row is on ends with nothing else on Whop: canceled,
+    // and the write lands only while the row points at it.
+    const d = freshWorld({ students: [courseRow()], memberships: [v2(K_COURSE, CANCELED)] })
+    const r = await send(event('membership.went_invalid', K_COURSE))
+    const row = rowOf(d, keeps)
+    const w = writesOn(d)
+    ok(r.status === 200 && row.membership_status === 'canceled' && row.canceled_at && w.length === 1 &&
+      w[0].filters.includes(`whop_membership_id=${K_COURSE.id}`),
+      `the course membership the row is on ends, nothing else on Whop: canceled with the time, the write keyed on that membership`,
+      show({ status: row.membership_status, filters: w.map((x) => x.filters) }))
+  }
+  {
+    const d = freshWorld({ students: [courseRow()], memberships: [v2(K_COURSE), v2(K_APEX, CANCELED)] })
+    d.fail['students.select'] = { message: 'connection reset' }
+    const r = await send(event('membership.went_invalid', K_APEX))
+    ok(r.status === 500 && r.whopCalls === 0 && writesOn(d).length === 0,
+      'an Apex seat ends and the row cannot be read: 500, Whop not asked, nothing written', show({ status: r.status, whopCalls: r.whopCalls }))
+  }
 }
 
 console.log('\n=== The login\'s self-heal picks by the same order, in each of its three reads ===')
@@ -638,6 +753,76 @@ console.log('\n=== The login\'s self-heal picks by the same order, in each of it
         `${read}, ${what}: in, the row active on ${want === H_COURSE ? 'the course membership' : 'the seat'} and its plan`,
         show({ location: r.location, calls, row: row && { status: row.membership_status, membership: row.whop_membership_id } }))
     }
+  }
+}
+
+console.log('\n=== The lookup says when no read answered, and its second read picks from every listed product or none (the order\'s second review) ===')
+{
+  // lookUpActiveMembershipForUser, called as the webhook's re-point calls it.
+  const L = { user: 'user_TESTlookup' }
+  const L_COURSE = { ...L, id: 'mem_TESTlookupcourse', product: COURSE, plan: COURSE_PLAN }
+  const L_APEX = { ...L, id: 'mem_TESTlookupapex', product: APEX, plan: MEMBERS.apex.plan }
+  const older = { created_at: 1759000000 }
+  const newer = { created_at: 1760500000 }
+  /** The lookup on these memberships with these reads failing: its answer, and the calls of its second and third reads. */
+  const look = async (memberships, down = {}) => {
+    freshWorld({ memberships, down })
+    const [res] = await quietly(() => lookUpActiveMembershipForUser(L.user))
+    const calls = {
+      byProduct: whop.calls.filter((c) => c.path === '/api/v2/memberships' && c.params.user_id === L.user && c.params.product_id)
+        .map((c) => c.params.product_id),
+      members: whop.calls.filter((c) => c.path === `/api/v2/members/${L.user}`).length,
+    }
+    return { row: res.row?.id ?? null, everyReadFailed: res.everyReadFailed, calls }
+  }
+  for (const [what, down, failed] of [
+    ['every read answering', {}, false],
+    ['the company key\'s reads all failing', { admin: true }, true],
+    ['the first read answering, the second and the third failing', { byProduct: true, member: true }, false],
+    ['the first and the third read failing, the second answering', { byUser: true, member: true }, false],
+    ['the first two reads failing, the member listing the memberships', { byUser: true, byProduct: true }, false],
+    ['the first two reads failing, the member carrying no memberships (no answer)', { byUser: true, byProduct: true, member: 'no list' }, true],
+  ]) {
+    const r = await look([v2(L_COURSE, CANCELED)], down)
+    ok(r.row === null && r.everyReadFailed === failed,
+      `only a canceled course membership, ${what}: no row, everyReadFailed ${failed}`, show(r))
+  }
+  {
+    // The second read finds an active course membership in the course's
+    // read, and the Apex read fails: that part is not picked from, and with
+    // the member read failing too, no read answered.
+    const r = await look([v2(L_COURSE)], { byUser: true, oneProduct: APEX, member: true })
+    ok(r.row === null && r.everyReadFailed === true && same(r.calls.byProduct, [COURSE, ETFB, APEX]) && r.calls.members === 1,
+      'the second read failing for Apex after the course\'s found an active membership, the first and third failing: no pick from part of the products, everyReadFailed true',
+      show(r))
+  }
+  {
+    // The course's read fails and the Apex seat is newer: a pick from the
+    // other products' rows would be the seat. The second read asks no product
+    // after the one that failed, and the third, which lists both, decides.
+    const r = await look([v2(L_COURSE, older), v2(L_APEX, newer)], { byUser: true, oneProduct: COURSE })
+    ok(r.row === L_COURSE.id && r.everyReadFailed === false && same(r.calls.byProduct, [COURSE]) && r.calls.members === 1,
+      'the second read failing for the course, an active course membership and a newer active seat: the third read decides, the course membership',
+      show(r))
+  }
+  {
+    // Rows that name no product, each in the read of one product: the one the
+    // course's read lists is the course's, so it wins over the newer one the
+    // Apex read lists (step c). Taken as the course's, both would leave the
+    // newer seat first.
+    const r = await look([
+      { ...v2(L_APEX, newer), product: undefined, listedUnder: APEX },
+      { ...v2(L_COURSE, older), product: undefined, listedUnder: COURSE },
+    ], { byUser: true })
+    ok(r.row === L_COURSE.id && same(r.calls.byProduct, [COURSE, ETFB, APEX]) && r.calls.members === 0,
+      'the second read, two active rows naming no product: the one the course\'s read lists, over a newer one the Apex read lists',
+      show(r))
+  }
+  {
+    // A tie keeps the one seen first, here in the first read.
+    const r = await look([v2({ ...L_COURSE, id: 'mem_TESTlookupfirst' }), v2({ ...L_COURSE, id: 'mem_TESTlookupsecond' })])
+    ok(r.row === 'mem_TESTlookupfirst' && r.calls.byProduct.length === 0,
+      'two active course memberships with the same created_at: the one Whop lists first', show(r))
   }
 }
 

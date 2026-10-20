@@ -253,15 +253,32 @@ export async function* listMembershipsForProduct(
 }
 
 /**
+ * What the lookup learned about one user (lookUpActiveMembershipForUser).
+ * `row` is the membership the order puts first, or null. `everyReadFailed`
+ * is true when no read of Whop answered: the null then says nothing about the
+ * user, who may still hold a valid membership.
+ */
+export interface ActiveMembershipLookup {
+  row: WhopMembershipRow | null;
+  everyReadFailed: boolean;
+}
+
+/**
  * Look up the active (or past_due) membership for a single user, by
  * whop_user_id. Used by the OAuth callback to self-heal student rows
  * for legacy customers who joined before our webhook was wired up
  * (Karlo's bug 2026-05-30 — one legacy customer). Falls back across
  * every product configured in WHOP_PRODUCT_ID.
  *
- * Returns null if no active membership exists for any of our
- * products. Tolerates per-product fetch failures so a single bad
- * response doesn't kill the whole check.
+ * `row` is null if no active membership exists for any of our
+ * products. A read that fails (an HTTP error, a throw, a list it cannot
+ * use) hands over to the next one, so a single bad response doesn't kill
+ * the whole check; when none of the three answers, `everyReadFailed` says
+ * so (the order's second review, 2026-10-20). The webhook's
+ * re-point after a membership ends then answers 500, so Whop sends the
+ * event again: it used to cancel the row, a course student's too when an
+ * ETfB or Apex membership of theirs ended while Whop could not be read.
+ * fetchActiveMembershipForUser, below, gives the row alone.
  *
  * 2026-10-20: each strategy collects the memberships it finds that grant
  * access on a listed product and returns the one the sync's order puts first
@@ -273,15 +290,16 @@ export async function* listMembershipsForProduct(
  *
  * v75.10 — new.
  */
-export async function fetchActiveMembershipForUser(
+export async function lookUpActiveMembershipForUser(
   whopUserId: string,
-): Promise<WhopMembershipRow | null> {
+): Promise<ActiveMembershipLookup> {
   const apiKey = process.env.WHOP_API_KEY;
   if (!apiKey) {
     console.warn(
       `[self-heal] ABORT: WHOP_API_KEY not set (whop_user_id=${whopUserId})`,
     );
-    return null;
+    // No read can be made, so nothing is known about the user.
+    return { row: null, everyReadFailed: true };
   }
   const productIds = (process.env.WHOP_PRODUCT_ID ?? "")
     .split(",")
@@ -291,7 +309,8 @@ export async function fetchActiveMembershipForUser(
     console.warn(
       `[self-heal] ABORT: WHOP_PRODUCT_ID empty (whop_user_id=${whopUserId})`,
     );
-    return null;
+    // No product is listed, so no membership of one can be found.
+    return { row: null, everyReadFailed: false };
   }
 
   console.info(
@@ -306,6 +325,8 @@ export async function fetchActiveMembershipForUser(
     Authorization: `Bearer ${apiKey}`,
     Accept: "application/json",
   };
+  // Set by each read that answers (everyReadFailed when none does).
+  let answered = false;
   try {
     const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?user_id=${encodeURIComponent(whopUserId)}&per_page=50`;
     const res = await whopFetchWithRetry(url, headers);
@@ -338,6 +359,7 @@ export async function fetchActiveMembershipForUser(
           `[self-heal] strategy1 user_id filter appears ignored (got memberships for other users); falling through`,
         );
       } else {
+        answered = true;
         const myActive = bestThatGrants(
           rows.map((row) => ({ row, listedUnder: null })),
           productIds,
@@ -346,7 +368,7 @@ export async function fetchActiveMembershipForUser(
           console.info(
             `[self-heal] strategy1 MATCH id=${myActive.id} status=${myActive.status} valid=${myActive.valid}`,
           );
-          return myActive;
+          return { row: myActive, everyReadFailed: false };
         }
         console.info(
           `[self-heal] strategy1 found ${rows.length} memberships but none active+matching our products`,
@@ -363,7 +385,12 @@ export async function fetchActiveMembershipForUser(
   // filters. Cheapest fallback if Whop's API does support filtering.
   // 2026-10-20: every listed product is asked before one is picked, so the
   // order decides (bestThatGrants), whatever the order of WHOP_PRODUCT_ID.
+  // A product whose read fails ends this strategy with no pick (the order's
+  // second review): the other products' rows are only part of the
+  // user's, and the pick among them can be the wrong one (an Apex seat when
+  // the course's read failed). Strategy 3 decides instead.
   const perProduct: Array<{ row: WhopMembershipRow; listedUnder: string }> = [];
+  let failedProduct: string | null = null;
   for (const pid of productIds) {
     const url =
       `${WHOP_MEMBERSHIPS_BASE}/memberships?product_id=` +
@@ -374,7 +401,10 @@ export async function fetchActiveMembershipForUser(
       console.info(
         `[self-heal] strategy2 product=${pid}: HTTP ${res.status} for ${whopUserId}`,
       );
-      if (!res.ok) continue;
+      if (!res.ok) {
+        failedProduct = pid;
+        break;
+      }
       const json = (await res.json()) as { data?: WhopMembershipRow[] };
       const rows = (json.data ?? []).filter(
         (r) => !r.user || r.user === whopUserId,
@@ -396,15 +426,23 @@ export async function fetchActiveMembershipForUser(
       console.warn(
         `[self-heal] strategy2 product=${pid} threw: ${err instanceof Error ? err.message : String(err)}`,
       );
-      continue;
+      failedProduct = pid;
+      break;
     }
   }
-  const fromProducts = bestThatGrants(perProduct, productIds);
-  if (fromProducts) {
-    console.info(
-      `[self-heal] strategy2 MATCH product=${fromProducts.product ?? "none named"} id=${fromProducts.id} status=${fromProducts.status}`,
+  if (failedProduct) {
+    console.warn(
+      `[self-heal] strategy2 read for product=${failedProduct} failed: no pick from the other products' rows, going on to strategy3`,
     );
-    return fromProducts;
+  } else {
+    answered = true;
+    const fromProducts = bestThatGrants(perProduct, productIds);
+    if (fromProducts) {
+      console.info(
+        `[self-heal] strategy2 MATCH product=${fromProducts.product ?? "none named"} id=${fromProducts.id} status=${fromProducts.status}`,
+      );
+      return { row: fromProducts, everyReadFailed: false };
+    }
   }
 
   // Strategy 3 — last-ditch: /api/v2/members/{userId}. This endpoint
@@ -432,6 +470,9 @@ export async function fetchActiveMembershipForUser(
           })),
         )}`,
       );
+      // A member object without the list says nothing about the
+      // memberships (the endpoint does not always carry them).
+      if (Array.isArray(data.memberships)) answered = true;
       const active = bestThatGrants(
         rows.map((row) => ({ row, listedUnder: null })),
         productIds,
@@ -440,7 +481,7 @@ export async function fetchActiveMembershipForUser(
         console.info(
           `[self-heal] strategy3 MATCH id=${active.id} status=${active.status}`,
         );
-        return active;
+        return { row: active, everyReadFailed: false };
       }
     }
   } catch (err) {
@@ -449,10 +490,27 @@ export async function fetchActiveMembershipForUser(
     );
   }
 
+  if (!answered) {
+    console.warn(
+      `[self-heal] EXHAUSTED all strategies for whop_user_id=${whopUserId}: every read failed, nothing is known`,
+    );
+    return { row: null, everyReadFailed: true };
+  }
   console.warn(
     `[self-heal] EXHAUSTED all strategies for whop_user_id=${whopUserId} — no active membership found anywhere`,
   );
-  return null;
+  return { row: null, everyReadFailed: false };
+}
+
+/**
+ * The lookup's pick (lookUpActiveMembershipForUser), null when it finds none
+ * or no read answers. For the login's self-heal and the webhook's writes for
+ * an event that names no product, which write nothing on either.
+ */
+export async function fetchActiveMembershipForUser(
+  whopUserId: string,
+): Promise<WhopMembershipRow | null> {
+  return (await lookUpActiveMembershipForUser(whopUserId)).row;
 }
 
 /** Does this membership currently grant access? v85.6 — the tiebreak

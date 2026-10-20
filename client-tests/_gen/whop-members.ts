@@ -139,15 +139,20 @@ export async function* listMembershipsForProduct(
   }
 }
 
-export async function fetchActiveMembershipForUser(
+export interface ActiveMembershipLookup {
+  row: WhopMembershipRow | null;
+  everyReadFailed: boolean;
+}
+
+export async function lookUpActiveMembershipForUser(
   whopUserId: string,
-): Promise<WhopMembershipRow | null> {
+): Promise<ActiveMembershipLookup> {
   const apiKey = process.env.WHOP_API_KEY;
   if (!apiKey) {
     console.warn(
       `[self-heal] ABORT: WHOP_API_KEY not set (whop_user_id=${whopUserId})`,
     );
-    return null;
+    return { row: null, everyReadFailed: true };
   }
   const productIds = (process.env.WHOP_PRODUCT_ID ?? "")
     .split(",")
@@ -157,7 +162,7 @@ export async function fetchActiveMembershipForUser(
     console.warn(
       `[self-heal] ABORT: WHOP_PRODUCT_ID empty (whop_user_id=${whopUserId})`,
     );
-    return null;
+    return { row: null, everyReadFailed: false };
   }
 
   console.info(
@@ -168,6 +173,7 @@ export async function fetchActiveMembershipForUser(
     Authorization: `Bearer ${apiKey}`,
     Accept: "application/json",
   };
+  let answered = false;
   try {
     const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?user_id=${encodeURIComponent(whopUserId)}&per_page=50`;
     const res = await whopFetchWithRetry(url, headers);
@@ -197,6 +203,7 @@ export async function fetchActiveMembershipForUser(
           `[self-heal] strategy1 user_id filter appears ignored (got memberships for other users); falling through`,
         );
       } else {
+        answered = true;
         const myActive = bestThatGrants(
           rows.map((row) => ({ row, listedUnder: null })),
           productIds,
@@ -205,7 +212,7 @@ export async function fetchActiveMembershipForUser(
           console.info(
             `[self-heal] strategy1 MATCH id=${myActive.id} status=${myActive.status} valid=${myActive.valid}`,
           );
-          return myActive;
+          return { row: myActive, everyReadFailed: false };
         }
         console.info(
           `[self-heal] strategy1 found ${rows.length} memberships but none active+matching our products`,
@@ -219,6 +226,7 @@ export async function fetchActiveMembershipForUser(
   }
 
   const perProduct: Array<{ row: WhopMembershipRow; listedUnder: string }> = [];
+  let failedProduct: string | null = null;
   for (const pid of productIds) {
     const url =
       `${WHOP_MEMBERSHIPS_BASE}/memberships?product_id=` +
@@ -229,7 +237,10 @@ export async function fetchActiveMembershipForUser(
       console.info(
         `[self-heal] strategy2 product=${pid}: HTTP ${res.status} for ${whopUserId}`,
       );
-      if (!res.ok) continue;
+      if (!res.ok) {
+        failedProduct = pid;
+        break;
+      }
       const json = (await res.json()) as { data?: WhopMembershipRow[] };
       const rows = (json.data ?? []).filter(
         (r) => !r.user || r.user === whopUserId,
@@ -251,15 +262,23 @@ export async function fetchActiveMembershipForUser(
       console.warn(
         `[self-heal] strategy2 product=${pid} threw: ${err instanceof Error ? err.message : String(err)}`,
       );
-      continue;
+      failedProduct = pid;
+      break;
     }
   }
-  const fromProducts = bestThatGrants(perProduct, productIds);
-  if (fromProducts) {
-    console.info(
-      `[self-heal] strategy2 MATCH product=${fromProducts.product ?? "none named"} id=${fromProducts.id} status=${fromProducts.status}`,
+  if (failedProduct) {
+    console.warn(
+      `[self-heal] strategy2 read for product=${failedProduct} failed: no pick from the other products' rows, going on to strategy3`,
     );
-    return fromProducts;
+  } else {
+    answered = true;
+    const fromProducts = bestThatGrants(perProduct, productIds);
+    if (fromProducts) {
+      console.info(
+        `[self-heal] strategy2 MATCH product=${fromProducts.product ?? "none named"} id=${fromProducts.id} status=${fromProducts.status}`,
+      );
+      return { row: fromProducts, everyReadFailed: false };
+    }
   }
 
   try {
@@ -284,6 +303,7 @@ export async function fetchActiveMembershipForUser(
           })),
         )}`,
       );
+      if (Array.isArray(data.memberships)) answered = true;
       const active = bestThatGrants(
         rows.map((row) => ({ row, listedUnder: null })),
         productIds,
@@ -292,7 +312,7 @@ export async function fetchActiveMembershipForUser(
         console.info(
           `[self-heal] strategy3 MATCH id=${active.id} status=${active.status}`,
         );
-        return active;
+        return { row: active, everyReadFailed: false };
       }
     }
   } catch (err) {
@@ -301,10 +321,22 @@ export async function fetchActiveMembershipForUser(
     );
   }
 
+  if (!answered) {
+    console.warn(
+      `[self-heal] EXHAUSTED all strategies for whop_user_id=${whopUserId}: every read failed, nothing is known`,
+    );
+    return { row: null, everyReadFailed: true };
+  }
   console.warn(
     `[self-heal] EXHAUSTED all strategies for whop_user_id=${whopUserId} — no active membership found anywhere`,
   );
-  return null;
+  return { row: null, everyReadFailed: false };
+}
+
+export async function fetchActiveMembershipForUser(
+  whopUserId: string,
+): Promise<WhopMembershipRow | null> {
+  return (await lookUpActiveMembershipForUser(whopUserId)).row;
 }
 
 function grantsAccess(row: WhopMembershipRow): boolean {

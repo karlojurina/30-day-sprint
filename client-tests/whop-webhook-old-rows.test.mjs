@@ -6,7 +6,9 @@
 // and the student's row still points at it (whop_membership_id), the route
 // settles the row as it did before login-1: re-pointed at a course membership
 // Whop lists, else canceled. A row that points anywhere else is left alone
-// and Whop is not asked (whop-webhook-product.test.mjs).
+// and Whop is not asked (whop-webhook-product.test.mjs). When no read of Whop
+// answers, nothing is written and the route answers 500, so Whop sends the
+// event again (the order's second review, the same evening).
 //
 // The route is the real source (src/app/api/webhooks/whop/route.ts), copied by
 // build.mjs onto stub-server.ts (Next's response, a stand-in database) and the
@@ -146,13 +148,21 @@ console.log('\n=== A course member whose row still points at an Apex seat: kept 
      'the Apex seat ends: the row is re-pointed at the course membership and stays active, as before login-1', show(row))
 }
 {
+  // Whop failing: no read answered, so a valid course membership may be
+  // there. Nothing is written and Whop sends the event again (the order's
+  // second review); it used to cancel the row. Once Whop answers with nothing
+  // valid, the row is canceled.
   const db = freshDb()
   whop.down = true
+  const before = snapshot(db)
   const r = await send(ending('membership.went_invalid'))
-  const row = student(db)
-  ok(r.status === 200 && row.membership_status === 'canceled' && r.whopCalls > 0,
-     'Whop failing: canceled, as before login-1 (for a course member the next sync, or the login\'s own Whop check, lets them back in)',
-     show({ status: r.status, membership_status: row.membership_status }))
+  ok(r.status === 500 && r.whopCalls > 0 && snapshot(db) === before && writes(db).length === 0,
+     'Whop failing: 500 so Whop sends it again, the row not canceled', show({ status: r.status, membership_status: student(db).membership_status }))
+  whop.down = false
+  whop.memberships.user_1 = [whopRow('mem_apex', 'user_1', APEX, { status: 'expired', valid: false })]
+  const again = await send(ending('membership.went_invalid'))
+  ok(again.status === 200 && student(db).membership_status === 'canceled' && student(db).canceled_at,
+     'sent again once Whop answers, nothing valid: canceled, with the time', show({ status: again.status, membership_status: student(db).membership_status }))
 }
 
 console.log('\n=== A row that points anywhere else: left alone, Whop not asked ===')
@@ -201,11 +211,12 @@ console.log('\n=== No product in the payload: the row it points at is settled to
 
 console.log('\n=== The row moves on while Whop is asked: the cancel does not follow it ===')
 {
-  // Whop fails, and meanwhile the sync (or a course activation) points the row
-  // at the student's course membership. The cancel was meant for the row the
-  // Apex seat made, so it must not land on the row the course made.
+  // Whop lists nothing valid (not yet the course membership), and meanwhile
+  // the sync (or a course activation) points the row at the student's course
+  // membership. The cancel was meant for the row the Apex seat made, so it
+  // must not land on the row the course made.
   const db = freshDb()
-  whop.down = true
+  whop.memberships.user_1 = [whopRow('mem_apex', 'user_1', APEX, { status: 'expired', valid: false })]
   whop.onAsk = () => {
     const row = student(db)
     row.whop_membership_id = 'mem_course'
@@ -234,15 +245,20 @@ console.log('\n=== A failed database call answers 500, so Whop sends the event a
   ok(r.status === 500, 'the cancel fails: 500', show({ status: r.status }))
 }
 
-console.log('\n=== The course\'s own membership ending: as before ===')
+console.log('\n=== The course\'s own membership ending ===')
 {
+  // Since the order's second review the row is read for a course membership
+  // too, and the cancel lands only while the row points at the one that
+  // ended; it was keyed on the student alone. A row on another membership is
+  // left for the sync (whop-webhook-product.test.mjs, whop-product-setting.test.mjs).
   const db = freshDb([{ ...OLD_APEX_ROW, whop_membership_id: 'mem_course', whop_plan_id: 'plan_paid' }])
   const r = await send(ending('membership.went_invalid', { id: 'mem_course', product: COURSE }))
   const row = student(db)
-  ok(r.status === 200 && row.membership_status === 'canceled' && r.whopCalls > 0 &&
-     !db.calls('students', 'select').some((c) => c.filters.some((f) => f.startsWith('whop_membership_id'))) &&
-     !writes(db).some((w) => w.filters.some((f) => f.startsWith('whop_membership_id'))),
-     'canceled with nothing valid on Whop, keyed on the student alone as before', show(writes(db).map((w) => w.filters)))
+  ok(r.status === 200 && row.membership_status === 'canceled' && row.canceled_at && r.whopCalls > 0 &&
+     writes(db).length === 1 && writes(db)[0].filters.includes('whop_membership_id=mem_course'),
+     'the row on it, nothing valid on Whop: canceled with the time, the write keyed on that membership too', show(writes(db).map((w) => w.filters)))
+  ok(!r.log.some((l) => l.includes('settled as before login-1')),
+     'and the log does not take it for a row the old webhook made for another product', r.log.filter((l) => l.includes('settled')).join(' | '))
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

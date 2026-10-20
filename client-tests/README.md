@@ -322,6 +322,50 @@ writing its own `pay_` id, and `membership_id` read before `membership.id` or
 the bare `membership` before `membership_id`. The course alone in
 `WHOP_PRODUCT_ID` fails 43 of its 78 checks (30 of 52 before the round).
 
+The order's second review (the same evening, of d1979df) takes it to 104 checks. The
+webhook: a membership ending while no read of Whop answers writes nothing and
+answers 500 (`lookUpActiveMembershipForUser` says `everyReadFailed`), for an
+Apex seat or an ETfB membership beside the course membership the row is on,
+the seat the row is on, the course membership the row is on beside an active
+seat, and the second read failing for the course alone with the first and the
+third failing; sent again once Whop answers, the row stays on the course.
+When Whop answers with nothing that grants access, a row on another
+membership is left for the sync whatever the product (an Apex seat, an ETfB
+membership, another course membership, the course membership beside a row on
+a seat), the row on the membership that ended is canceled with the write
+keyed on that membership, and a failed read of the row answers 500. The
+lookup: which failing reads make `everyReadFailed` (a member with no
+memberships list is no answer, and neither is a second read with one product
+failing); the course's read failing hands over to the third read, which gives
+the course membership where the other products' rows gave a newer seat; rows
+naming no product take the product their read asked for; a tie keeps the one
+seen first. The sync: a canceled course membership older than a canceled seat
+leaves the row on the seat (as built: between two that grant no access only
+the date decides), and a tie keeps the one seen first. The stand-in fetch
+gained `down.oneProduct`, `down.member` and `listedUnder`. Five checks of
+`whop-webhook-product.test.mjs` (now 34) and `whop-webhook-old-rows.test.mjs`
+(now 19) changed with it: a deactivation with no product and Whop failing
+answers 500 (it answered 200); Whop failing on the row an Apex seat made
+answers 500 and the event sent again cancels it (it canceled at once); a
+second course product's membership ending cancels a row on it and leaves a
+row on another membership; the course's own membership ending reads and
+cancels the row by that membership too (it was keyed on the student alone);
+and the row moving while Whop is asked is tested with Whop answering nothing.
+On the route and lookup of d1979df the three suites fail 16 of 104 (the new
+lookup's name pointed at the old lookup, which never says `everyReadFailed`),
+2 of 34 and 2 of 19. 14 breaks
+each fail at least one of them: the lookup never saying `everyReadFailed`, the
+route ignoring it, nothing found leaving only a row of an event with no
+product, the row read only for a product outside the list, the cancel keyed
+on the student alone, the first read not counted as an answer, a member with
+no list counted, a second read with a failed product counted, the second read
+as before (a failed product skipped, a pick from the rest), the second read
+picking from what it had before the failure, the course rule applied between
+two that grant no access, a tie keeping the one seen last, a row naming no
+product classified without its read's product, and a course row logged as one
+the old webhook made. The course alone in `WHOP_PRODUCT_ID` fails 53 of the
+104.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

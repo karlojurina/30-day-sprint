@@ -830,12 +830,15 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
   the lesson-video route); (c) the course product's over an ETfB or
   Apex one; (d) the newest `created_at`. Between two that grant no
   access only (d) decides, as before. The sync's dedupe follows it,
-  and so does the lookup `fetchActiveMembershipForUser` behind the
+  and so does the lookup (`lookUpActiveMembershipForUser`;
+  `fetchActiveMembershipForUser` gives its pick alone) behind the
   login's self-heal, the webhook's re-point after a membership ends
   and its writes for an event that names no product: each of its three
   reads collects the memberships that grant access on a listed product
   and returns the one the order puts first (it took the first one Whop
-  listed until then). So a course member who also holds an Apex seat
+  listed until then). Its second read picks only when every listed
+  product's read answered: one that fails hands over to the third read
+  (the order's second review, 2026-10-20). So a course member who also holds an Apex seat
   or an ETfB membership stays on the course product's membership and
   its plan, and so in the CSM crons' pool, while that membership is
   active; a course membership whose renewal failed (past_due) gives
@@ -844,7 +847,9 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
   outside `PAYING_WHOP_PLAN_IDS`: the admin counts stop counting them
   as paying, and the CSM cron's guard for a past_due student's open
   save task (`check-csm-tasks`, past_due with `cancel_scheduled_at`)
-  no longer sees them, so that task is dismissed. An
+  no longer sees them, so that task is dismissed. The login leaves a
+  past_due row to the sync: it asks Whop only when the row is neither
+  active nor past_due, so step (b) never runs at login. An
   ETfB or Apex activation or payment follows the order as far as the
   stored row can tell (`etfbOrApexMayWrite`): it writes a row for a
   user with none, a row already on its membership, a row that grants
@@ -889,9 +894,16 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
   payment made then is closed only by a cleanup (a listed product's
   member's row is re-pointed by the next sync).
   An event with no product writes only the course membership Whop lists
-  for that user, with its own status, and a deactivation with no product
-  and no course membership on Whop leaves the row for the sync, unless
-  the row points at the membership that ended (then it is canceled).
+  for that user, with its own status. A deactivation, of any product,
+  that finds nothing granting access on Whop cancels the row only when
+  the row points at the membership that ended, and only while it still
+  does; a row on another membership is left for that membership's own
+  event or the sync. When no read of the lookup answers
+  (`everyReadFailed`), the deactivation writes nothing and answers 500,
+  so Whop sends it again. Both since the order's second review
+  (2026-10-20): until then an ETfB or Apex membership ending while
+  Whop could not be read canceled a course student's row, and a course
+  membership ending canceled the row whatever it pointed at.
   `supabase/diagnostics/non-course-members-read.sql` counts the active
   and past_due rows the last successful sync did not rewrite; the
   `whop-webhook-product` and `whop-webhook-old-rows` client tests run

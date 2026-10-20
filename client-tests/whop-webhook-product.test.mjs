@@ -242,14 +242,17 @@ console.log('\n=== No product in the payload: only a course membership Whop list
   ok(r.status === 200 && row.membership_status === 'active' && row.whop_membership_id === 'mem_course_kept',
      'went_invalid with no product, Whop lists a valid course membership: re-pointed at it and kept active, as before', show(row))
 }
-for (const down of [false, true]) {
+// With Whop failing no read answers, so the route answers 500 and Whop sends
+// the event again (the order's second review, 2026-10-20); it answered 200.
+for (const [down, status, label] of [
+  [false, 200, 'went_invalid with no product and no course membership on Whop: 200, the student is not canceled, the sync settles it'],
+  [true, 500, 'went_invalid with no product and Whop failing: 500 so Whop sends it again, the student is not canceled'],
+]) {
   const db = freshDb([ACTIVE_ROW])
   whop.down = down
   const before = snapshot(db)
   const r = await send(membershipEvent('membership.went_invalid', { product: null, id: 'mem_gone' }))
-  ok(r.status === 200 && snapshot(db) === before && writes(db).length === 0,
-     `went_invalid with no product and ${down ? 'Whop failing' : 'no course membership on Whop'}: the student is not canceled, the sync settles it`,
-     show(student(db)))
+  ok(r.status === status && snapshot(db) === before && writes(db).length === 0, label, show({ status: r.status, row: student(db) }))
 }
 
 console.log('\n=== The course\'s own membership ending: as before ===')
@@ -281,10 +284,20 @@ process.env.WHOP_PRODUCT_ID = ` ${COURSE} , prod_course_b `
   ok(!student(db, 'user_c'), 'a product not listed is still turned away')
 }
 {
-  const db = freshDb([ACTIVE_ROW])
+  const db = freshDb([{ ...ACTIVE_ROW, whop_membership_id: 'mem_b' }])
   const r = await send(membershipEvent('membership.went_invalid', { product: 'prod_course_b', id: 'mem_b' }))
   ok(r.status === 200 && student(db).membership_status === 'canceled' && r.whopCalls > 0,
-     'went_invalid for the second course product: Whop is asked, and with nothing valid the student is canceled', show(student(db)))
+     'went_invalid for the second course product, the row on it: Whop is asked, and with nothing valid the student is canceled', show(student(db)))
+}
+{
+  // The row is on another membership: with nothing valid on Whop it is left
+  // for that membership's own event or the sync (the order's second review).
+  // It was canceled, keyed on the student alone.
+  const db = freshDb([ACTIVE_ROW])
+  const before = snapshot(db)
+  const r = await send(membershipEvent('membership.went_invalid', { product: 'prod_course_b', id: 'mem_b' }))
+  ok(r.status === 200 && r.whopCalls > 0 && snapshot(db) === before && writes(db).length === 0,
+     'went_invalid for the second course product, the row on another membership, nothing valid on Whop: left for the sync', show(student(db)))
 }
 
 console.log('\n=== WHOP_PRODUCT_ID empty: no membership is written, and the log says why ===')

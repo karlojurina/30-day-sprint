@@ -23,14 +23,15 @@ function gen(srcRel, outRel, rewrites = [], { dropLineComments = false, dropComm
   // dropComments also leaves out the lines of /* */ comments (each must start its own line).
   if (dropComments) s = s.split('\n').filter((l) => !/^(\/\/|\/\*|\*)/.test(l.trimStart())).join('\n')
   if (s.includes('@/')) throw new Error(`an unrewritten @/ import remains in ${srcRel}`)
-  fs.writeFileSync(out, s)
   // A line of code that starts with // or * (a line inside a template string,
   // a `* b` carried over from the line above) would be left out with the
-  // comments. So the copy as written and the source it was cut from, its
-  // imports already rewritten, must make the same JavaScript.
-  if ((dropLineComments || dropComments) && codeOf(fs.readFileSync(out, 'utf8'), out) !== codeOf(withComments, out)) {
+  // comments. So the copy and the source it was cut from, its imports already
+  // rewritten, must make the same JavaScript, checked before the copy is
+  // written: a copy whose code changed is never left on disk for a test to run.
+  if ((dropLineComments || dropComments) && codeOf(s, out) !== codeOf(withComments, out)) {
     throw new Error(`${outRel}: leaving out the comment lines of ${srcRel} changed its code (a line of code starts with // or *)`)
   }
+  fs.writeFileSync(out, s)
   console.log(`generated ${outRel} from the real source`)
 }
 

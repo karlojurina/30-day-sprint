@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "./stub-server.ts";
 import { createServiceClient } from "./stub-server.ts";
 import {
+  accessRank,
   fetchActiveMembershipForUser,
   isEtfbOrApexProduct,
   mapStatus,
@@ -109,24 +110,37 @@ function eventProductId(data: unknown): string | null {
   return typeof d.product_id === "string" && d.product_id ? d.product_id : null;
 }
 
+/** What courseAccess lets an activation or a payment write. */
+type CourseWrite = {
+  membershipId: string;
+  planId: string | null;
+  status: string;
+  product: string | null;
+  /** True when the payload names the product; false when Whop's lookup found the membership. */
+  named: boolean;
+};
+
 /**
  * What an activation or a payment may write on the student's row (login-1).
- * A course product: the event's membership, active, as before. Another
+ * A course product: the event's membership (`membershipId`: a membership
+ * event's own id, a payment's membership), active, as before. Another
  * product: nothing (the caller answers 200). No product in the payload: only
  * a course membership Whop lists for this user, with its own id, plan and
  * status, so a real course member is never left out and nobody else gets in.
  * `product` is the product of the membership written (null when Whop's row
- * names none), for etfbOrApexMayWrite.
+ * names none), and `named` says which of the two it came from, for
+ * etfbOrApexMayWrite.
  */
 async function courseAccess(
   data: WhopMembership,
+  membershipId: string,
   eventName: string,
-): Promise<{ membershipId: string; planId: string | null; status: string; product: string | null } | null> {
+): Promise<CourseWrite | null> {
   const courseIds = courseProductIds();
   const product = eventProductId(data);
   if (product) {
     if (courseIds.includes(product)) {
-      return { membershipId: data.id, planId: data.plan_id ?? null, status: "active", product };
+      return { membershipId, planId: data.plan_id ?? null, status: "active", product, named: true };
     }
     const message =
       `[whop-webhook] ${eventName} for product ${product}, not the course ` +
@@ -144,7 +158,26 @@ async function courseAccess(
     );
     return null;
   }
-  return { membershipId: row.id, planId: row.plan ?? null, status: mapStatus(row), product: row.product ?? null };
+  return { membershipId: row.id, planId: row.plan ?? null, status: mapStatus(row), product: row.product ?? null, named: false };
+}
+
+/**
+ * The membership a payment is for, which its write puts on the row:
+ * `membership.id`, else `membership_id`, else `membership` as a bare id. The
+ * payment's own id (`pay_...`) only when the payload names none of these, as
+ * a last resort. Until 2026-10-20 every payment wrote its own `pay_` id there
+ * (main did too, before login-1), and no membership event names one.
+ */
+function paymentMembershipId(data: WhopMembership): string {
+  const d = data as unknown as { membership?: unknown; membership_id?: unknown };
+  const nested =
+    d.membership && typeof d.membership === "object"
+      ? (d.membership as { id?: unknown }).id
+      : undefined;
+  for (const id of [nested, d.membership_id, d.membership]) {
+    if (typeof id === "string" && id) return id;
+  }
+  return data.id;
 }
 
 /**
@@ -165,21 +198,36 @@ function eventMembershipIds(data: unknown): string[] {
 
 /**
  * May an activation or a payment of an ETfB or Apex membership write the
- * student's row? The course wins (2026-10-20), as in the sync's dedupe
- * (fetchAllMemberships): a row that is already active or past_due on another
- * membership is left as it is, so a course student who also holds an Apex
- * seat or an ETfB membership keeps the course membership and its plan, and
- * stays in the CSM crons' pool (PAYING_WHOP_PLAN_IDS). The sync, every 2
- * hours, points any such row at the membership that wins. It still writes a
- * row for a user with none, a row that is not active or past_due, and a row
- * that already points at the event's membership or at `writes`, the one the
- * write would point it at. Null when the row could not be read: the caller
- * answers 500, so Whop sends the event again.
+ * student's row? It follows the sync's order (outranks in whop-members.ts,
+ * 2026-10-20) as far as a stored row can tell: the row holds a status and a
+ * membership id, not that membership's product or created_at.
+ *   - No row, or a row already on the membership this write puts there:
+ *     written. When the payload names the product, a row on a membership the
+ *     event names counts too (eventMembershipIds). With no product in the
+ *     payload the write is the membership Whop's lookup found, and only that
+ *     one is compared: the event's own id may be a course membership the row
+ *     is on, and matching it would move the row off the course onto the seat.
+ *   - Steps (a) and (b) (accessRank): a row that grants no access (canceled,
+ *     expired), and a past_due row when the write is active, are written
+ *     over. So an active seat beats a past_due course membership, which locks
+ *     the person out of the app.
+ *   - Otherwise the row is left as it is: active on another membership, or
+ *     past_due beside a past_due write (only a write found by the lookup can
+ *     be past_due). Steps (c) and (d) need the row's product and created_at,
+ *     and a course membership wins at (c), so a course student who also holds
+ *     an Apex seat or an ETfB membership keeps the course membership and its
+ *     plan, and stays in the CSM crons' pool (PAYING_WHOP_PLAN_IDS). The sync,
+ *     every 2 hours, points the row at the membership that wins.
+ * The read here and the caller's upsert are two separate calls: a write that
+ * lands between them (the sync, another event for this user) is overwritten
+ * by this one, and the next sync puts back the membership that wins.
+ * Null when the row could not be read: the caller answers 500, so Whop sends
+ * the event again.
  */
 async function etfbOrApexMayWrite(
   supabase: ReturnType<typeof createServiceClient>,
   data: WhopMembership,
-  writes: string,
+  write: CourseWrite,
   eventName: string,
 ): Promise<boolean | null> {
   const { data: row, error } = await supabase
@@ -192,17 +240,19 @@ async function etfbOrApexMayWrite(
     return null;
   }
   if (!row) return true;
-  if (row.membership_status !== "active" && row.membership_status !== "past_due") {
+  const same = write.named
+    ? [...eventMembershipIds(data), write.membershipId]
+    : [write.membershipId];
+  if (row.whop_membership_id && same.includes(row.whop_membership_id)) {
     return true;
   }
-  const named = [...eventMembershipIds(data), writes];
-  if (row.whop_membership_id && named.includes(row.whop_membership_id)) {
+  if (accessRank(row.membership_status) < accessRank(write.status)) {
     return true;
   }
   console.info(
-    `[whop-webhook] ${eventName} for an ETfB or Apex membership (${writes}): the row is already ` +
-      `${row.membership_status} on ${row.whop_membership_id ?? "no membership id"}, left as it is ` +
-      `for the sync; nothing written`,
+    `[whop-webhook] ${eventName} for an ETfB or Apex membership (${write.membershipId}, ${write.status}): ` +
+      `the row is already ${row.membership_status} on ${row.whop_membership_id ?? "no membership id"}, ` +
+      `left as it is for the sync; nothing written`,
   );
   return false;
 }
@@ -264,15 +314,16 @@ export async function POST(request: NextRequest) {
     case "membership_went_valid": {
       const membership = payload.data as WhopMembership;
       // login-1: another product's membership writes nothing (courseAccess).
-      const access = await courseAccess(membership, eventName);
+      const access = await courseAccess(membership, membership.id, eventName);
       if (!access) break;
-      // An ETfB or Apex membership leaves a row on another membership as
-      // it is: the course wins (etfbOrApexMayWrite).
+      // An ETfB or Apex membership takes a row that is on another
+      // membership only where the sync's order says it wins
+      // (etfbOrApexMayWrite).
       if (isEtfbOrApexProduct(access.product)) {
         const mayWrite = await etfbOrApexMayWrite(
           supabase,
           membership,
-          access.membershipId,
+          access,
           eventName,
         );
         if (mayWrite === null) {
@@ -380,7 +431,10 @@ export async function POST(request: NextRequest) {
       if (surviving) {
         // Still entitled — re-point the row at the surviving membership
         // instead of revoking. Keeps whop_membership_id / whop_plan_id
-        // pointing at the thing that actually grants access.
+        // pointing at the thing that actually grants access. Since
+        // 2026-10-20 it is the one the sync's order puts first (active,
+        // then the course's, then the newest); it was the first one Whop
+        // listed.
         let repoint = supabase
           .from("students")
           .update({
@@ -479,16 +533,21 @@ export async function POST(request: NextRequest) {
       }
       // login-1: a payment for another product writes nothing (courseAccess).
       // It used to mark the row active: a lapsed student got back in until
-      // the next sync, and someone with no course membership got in.
-      const paymentAccess = await courseAccess(membership, eventName);
+      // the next sync, and someone with no course membership got in. The
+      // row is pointed at the payment's membership (paymentMembershipId).
+      const paymentAccess = await courseAccess(
+        membership,
+        paymentMembershipId(membership),
+        eventName,
+      );
       if (!paymentAccess) break;
-      // As for membership.activated above: an ETfB or Apex payment leaves a
-      // row on another membership as it is.
+      // As for membership.activated above: an ETfB or Apex payment takes a
+      // row on another membership only where the order says it wins.
       if (isEtfbOrApexProduct(paymentAccess.product)) {
         const mayWrite = await etfbOrApexMayWrite(
           supabase,
           membership,
-          paymentAccess.membershipId,
+          paymentAccess,
           eventName,
         );
         if (mayWrite === null) {

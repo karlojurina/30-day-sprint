@@ -164,8 +164,9 @@ console.log('\n=== A row that points anywhere else: left alone, Whop not asked =
      'the row points at another membership of another product: untouched', show({ whopCalls: r.whopCalls, row: student(db) }))
 }
 {
-  // payment.succeeded wrote the payment's own id. No membership event names it:
-  // only a cleanup closes these rows (supabase/diagnostics/non-course-members-read.sql).
+  // Until 2026-10-20 payment.succeeded wrote the payment's own id (it writes
+  // the payment's membership now). No membership event names it: only a
+  // cleanup closes these rows (supabase/diagnostics/non-course-members-read.sql).
   const db = freshDb([{ ...OLD_APEX_ROW, whop_membership_id: 'pay_1' }])
   const before = snapshot(db)
   const r = await send(ending('membership.went_invalid', { id: 'mem_apex' }))

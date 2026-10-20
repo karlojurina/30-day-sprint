@@ -197,13 +197,10 @@ export async function fetchActiveMembershipForUser(
           `[self-heal] strategy1 user_id filter appears ignored (got memberships for other users); falling through`,
         );
       } else {
-        const myActive = rows.find((m) => {
-          const matchesProduct =
-            !m.product || productIds.includes(m.product);
-          if (!matchesProduct) return false;
-          const status = mapStatus(m);
-          return status === "active" || status === "past_due";
-        });
+        const myActive = bestThatGrants(
+          rows.map((row) => ({ row, listedUnder: null })),
+          productIds,
+        );
         if (myActive) {
           console.info(
             `[self-heal] strategy1 MATCH id=${myActive.id} status=${myActive.status} valid=${myActive.valid}`,
@@ -221,6 +218,7 @@ export async function fetchActiveMembershipForUser(
     );
   }
 
+  const perProduct: Array<{ row: WhopMembershipRow; listedUnder: string }> = [];
   for (const pid of productIds) {
     const url =
       `${WHOP_MEMBERSHIPS_BASE}/memberships?product_id=` +
@@ -248,22 +246,20 @@ export async function fetchActiveMembershipForUser(
           })),
         )}`,
       );
-      const active = rows.find((m) => {
-        const status = mapStatus(m);
-        return status === "active" || status === "past_due";
-      });
-      if (active) {
-        console.info(
-          `[self-heal] strategy2 MATCH product=${pid} id=${active.id} status=${active.status}`,
-        );
-        return active;
-      }
+      for (const row of rows) perProduct.push({ row, listedUnder: pid });
     } catch (err) {
       console.warn(
         `[self-heal] strategy2 product=${pid} threw: ${err instanceof Error ? err.message : String(err)}`,
       );
       continue;
     }
+  }
+  const fromProducts = bestThatGrants(perProduct, productIds);
+  if (fromProducts) {
+    console.info(
+      `[self-heal] strategy2 MATCH product=${fromProducts.product ?? "none named"} id=${fromProducts.id} status=${fromProducts.status}`,
+    );
+    return fromProducts;
   }
 
   try {
@@ -288,13 +284,10 @@ export async function fetchActiveMembershipForUser(
           })),
         )}`,
       );
-      const active = rows.find((m) => {
-        const matchesProduct =
-          !m.product || productIds.includes(m.product);
-        if (!matchesProduct) return false;
-        const status = mapStatus(m);
-        return status === "active" || status === "past_due";
-      });
+      const active = bestThatGrants(
+        rows.map((row) => ({ row, listedUnder: null })),
+        productIds,
+      );
       if (active) {
         console.info(
           `[self-heal] strategy3 MATCH id=${active.id} status=${active.status}`,
@@ -319,6 +312,12 @@ function grantsAccess(row: WhopMembershipRow): boolean {
   return s === "active" || s === "past_due";
 }
 
+export function accessRank(status: string | null | undefined): number {
+  if (status === "active") return 2;
+  if (status === "past_due") return 1;
+  return 0;
+}
+
 const ETFB_OR_APEX_PRODUCT_IDS: ReadonlySet<string> = new Set([
   "prod_bGNf1u02RruKC",
   "prod_vCHZUO8dU4ts2",
@@ -330,6 +329,35 @@ export function isEtfbOrApexProduct(
   return productId != null && ETFB_OR_APEX_PRODUCT_IDS.has(productId);
 }
 
+type Ranked = { row: WhopMembershipRow; course: boolean };
+
+function outranks(a: Ranked, b: Ranked): boolean {
+  const aRank = accessRank(mapStatus(a.row));
+  const bRank = accessRank(mapStatus(b.row));
+  if (aRank !== bRank) return aRank > bRank;
+  if (aRank > 0 && a.course !== b.course) return a.course;
+  const aIso = toIso(a.row.created_at);
+  const bIso = toIso(b.row.created_at);
+  return Boolean(aIso && bIso && aIso > bIso);
+}
+
+function bestThatGrants(
+  found: Array<{ row: WhopMembershipRow; listedUnder: string | null }>,
+  productIds: string[],
+): WhopMembershipRow | null {
+  let best: Ranked | null = null;
+  for (const { row, listedUnder } of found) {
+    if (row.product && !productIds.includes(row.product)) continue;
+    if (!grantsAccess(row)) continue;
+    const candidate = {
+      row,
+      course: !isEtfbOrApexProduct(row.product ?? listedUnder),
+    };
+    if (!best || outranks(candidate, best)) best = candidate;
+  }
+  return best ? best.row : null;
+}
+
 export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
   const raw = process.env.WHOP_PRODUCT_ID ?? "";
   const productIds = raw
@@ -339,34 +367,20 @@ export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
   if (productIds.length === 0) {
     throw new Error("WHOP_PRODUCT_ID not set");
   }
-  type Acc = { latest: WhopMembershipRow; course: boolean };
-  const byUser = new Map<string, Acc>();
+  const byUser = new Map<string, Ranked>();
   for (const pid of productIds) {
     const course = !isEtfbOrApexProduct(pid);
     for await (const row of listMembershipsForProduct(pid)) {
       if (!row.user) continue;
-      const createdIso = toIso(row.created_at);
       const existing = byUser.get(row.user);
       if (!existing) {
-        byUser.set(row.user, { latest: row, course });
+        byUser.set(row.user, { row, course });
         continue;
       }
-      const curGrants = grantsAccess(existing.latest);
-      const rowGrants = grantsAccess(row);
-      let wins: boolean;
-      if (rowGrants !== curGrants) {
-        wins = rowGrants;
-      } else if (rowGrants && course !== existing.course) {
-        wins = course;
-      } else {
-        const latestIso = toIso(existing.latest.created_at);
-        wins = Boolean(createdIso && latestIso && createdIso > latestIso);
-      }
-      if (wins) {
-        existing.latest = row;
-        existing.course = course;
+      if (outranks({ row, course }, existing)) {
+        byUser.set(row.user, { row, course });
       }
     }
   }
-  return Array.from(byUser.values()).map(({ latest }) => latest);
+  return Array.from(byUser.values()).map(({ row }) => row);
 }

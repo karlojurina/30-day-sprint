@@ -12,12 +12,16 @@
 //   - the sync (runWhopCommunitySync) with the real whop-members.ts and
 //     first-payment.ts;
 //   - the webhook's POST with the real whop-members.ts.
-// It also pins the rule the setting needs (the same day): when a user holds
-// more than one membership that grants access, the course's wins over an ETfB
-// or Apex one, in the sync's dedupe and in the webhook's activations and
-// payments, so a paying course student who also holds an Apex seat or an ETfB
-// membership stays on the course membership and its plan (isEtfbOrApexProduct
-// in whop-members.ts, whose two ids are checked against etfb.ts's here).
+// It also pins the order the setting needs (the same day), one order wherever
+// one of a user's memberships is picked: one that grants access, then active
+// over past_due, then the course's over an ETfB or Apex one, then the newest.
+// The sync's dedupe, the lookup behind the login's self-heal and the webhook's
+// re-point (in each of its three reads), and the webhook's activations and
+// payments follow it. So a paying course student who also holds an Apex seat
+// or an ETfB membership stays on the course membership and its plan, and one
+// whose course membership is past_due (locked out of the app) is let in on an
+// active seat (isEtfbOrApexProduct in whop-members.ts, whose two ids are
+// checked against etfb.ts's here). A payment points the row at its membership.
 // Whop is a stand-in fetch answering in the shapes this code reads; the
 // database is stub-server.ts's. No network: a request to anything but the
 // stand-in fails the test. The member ids, plans and emails are made up; the
@@ -88,8 +92,11 @@ for (const k of ['STUDENT_APP_CLOSED', 'STUDENT_APP_OPEN_FOR', 'WHOP_BYPASS_USER
  * own /api/v1/me/memberships answers the same memberships in the shape the
  * login check reads (product_id, plan_id). `down.me`: the student's token gets
  * the 404 legacy customers get; `down.admin`: the company key's reads fail.
+ * `down.byUser` and `down.byProduct`: only the lookup's first read (a user's
+ * memberships) or its second (one product's, for a user) fails, so its next
+ * read decides (fetchActiveMembershipForUser's strategies 2 and 3).
  */
-const whop = { memberships: [], payments: [], down: { me: false, admin: false }, calls: [] }
+const whop = { memberships: [], payments: [], down: { me: false, admin: false, byUser: false, byProduct: false }, calls: [] }
 const v2 = (m, extra = {}) => ({
   id: m.id, user: m.user, email: `${m.user}@example.com`, product: m.product, plan: m.plan,
   status: 'active', valid: true, created_at: 1760000000, expires_at: null, renewal_period_end: null,
@@ -126,6 +133,7 @@ globalThis.fetch = async (input, init = {}) => {
   if (url.pathname === '/api/v2/memberships') {
     const product = url.searchParams.get('product_id')
     const user = url.searchParams.get('user_id')
+    if (user && (product ? whop.down.byProduct : whop.down.byUser)) return new Response('upstream error', { status: 500 })
     const rows = whop.memberships.filter((m) => (!product || m.product === product) && (!user || m.user === user))
     return Response.json({ data: rows, pagination: { current_page: 1, total_page: 1, total_count: rows.length } })
   }
@@ -148,7 +156,7 @@ function freshWorld({ students = [], memberships = Object.values(MEMBERS).map((m
   switchDb(db)
   whop.memberships = memberships
   whop.payments = payments
-  whop.down = { me: false, admin: false, ...down }
+  whop.down = { me: false, admin: false, byUser: false, byProduct: false, ...down }
   whop.calls = []
   return db
 }
@@ -293,12 +301,18 @@ console.log('\n=== The 2-hour sync walks the three listed products ===')
     'the run: 4 members (one per user), 3 rows made, 1 updated, no error, logged as a success', show({ ...result, status_breakdown: undefined, run: run?.status }))
 }
 
-console.log('\n=== The sync\'s dedupe: the course wins over ETfB and Apex, whatever the order of the setting ===')
+/** A membership whose renewal charge failed: valid on Whop, past_due here, and locked out of the app (MembershipBlockOverlay). */
+const PAST_DUE = { status: 'past_due', valid: true }
+
+console.log('\n=== The sync\'s dedupe: active, then the course over ETfB and Apex, then the newest, whatever the order of the setting ===')
 for (const order of [PRODUCTION, [APEX, ETFB, COURSE].join(',')]) {
   process.env.WHOP_PRODUCT_ID = order
   const when = (n) => 1759000000 + n * 100000
   const held = (user, id, product, plan, n, extra = {}) => v2({ user, id, product, plan }, { created_at: when(n), ...extra })
-  const U = { etfb: 'user_TESTcourseetfb', twoApex: 'user_TESTtwoapex', twoCourse: 'user_TESTtwocourse', lapsed: 'user_TESTlapsed' }
+  const U = {
+    etfb: 'user_TESTcourseetfb', twoApex: 'user_TESTtwoapex', twoCourse: 'user_TESTtwocourse', lapsed: 'user_TESTlapsed',
+    pastDueCourse: 'user_TESTpastduecourse', pastDueSeat: 'user_TESTpastdueseat', bothPastDue: 'user_TESTbothpastdue', renewal: 'user_TESTrenewal',
+  }
   const db = freshWorld({
     memberships: [
       held(U.etfb, 'mem_TESTce_course', COURSE, COURSE_PLAN, 1),
@@ -311,6 +325,15 @@ for (const order of [PRODUCTION, [APEX, ETFB, COURSE].join(',')]) {
       held(U.twoCourse, 'mem_TESTtc_old', COURSE, COURSE_PLAN, 1),
       held(U.lapsed, 'mem_TESTlc_course', COURSE, COURSE_PLAN, 5, { status: 'canceled', valid: false }),
       held(U.lapsed, 'mem_TESTlc_apex', APEX, MEMBERS.apex.plan, 1),
+      // Active over past_due, before the course and before recency.
+      held(U.pastDueCourse, 'mem_TESTpc_course', COURSE, COURSE_PLAN, 5, PAST_DUE),
+      held(U.pastDueCourse, 'mem_TESTpc_apex', APEX, MEMBERS.apex.plan, 1),
+      held(U.pastDueSeat, 'mem_TESTps_course', COURSE, COURSE_PLAN, 1),
+      held(U.pastDueSeat, 'mem_TESTps_apex', APEX, MEMBERS.apex.plan, 5, PAST_DUE),
+      held(U.bothPastDue, 'mem_TESTbp_course', COURSE, COURSE_PLAN, 1, PAST_DUE),
+      held(U.bothPastDue, 'mem_TESTbp_etfb', ETFB, MEMBERS.etfb.plan, 5, PAST_DUE),
+      held(U.renewal, 'mem_TESTrn_new', COURSE, COURSE_PLAN, 5, PAST_DUE),
+      held(U.renewal, 'mem_TESTrn_old', COURSE, COURSE_PLAN, 1),
     ],
   })
   await quietly(() => runWhopCommunitySync(fakeClient(db), 'cron'))
@@ -327,6 +350,15 @@ for (const order of [PRODUCTION, [APEX, ETFB, COURSE].join(',')]) {
     `${listed}: two course memberships, both valid: the newer one`, show(at(U.twoCourse)))
   ok(at(U.lapsed)?.membership === 'mem_TESTlc_apex' && at(U.lapsed)?.status === 'active',
     `${listed}: a canceled course membership and a valid Apex seat: the seat, active (access still comes first)`, show(at(U.lapsed)))
+  ok(at(U.pastDueCourse)?.membership === 'mem_TESTpc_apex' && at(U.pastDueCourse)?.status === 'active' && at(U.pastDueCourse)?.plan === MEMBERS.apex.plan,
+    `${listed}: a newer past_due course membership and an older active Apex seat: the seat, active (active comes before the course; past_due would lock them out)`,
+    show(at(U.pastDueCourse)))
+  ok(at(U.pastDueSeat)?.membership === 'mem_TESTps_course' && at(U.pastDueSeat)?.status === 'active',
+    `${listed}: the mirror, an older active course membership and a newer past_due seat: the course, active`, show(at(U.pastDueSeat)))
+  ok(at(U.bothPastDue)?.membership === 'mem_TESTbp_course' && at(U.bothPastDue)?.status === 'past_due',
+    `${listed}: both past_due, the course's older than the ETfB one: the course (the course before recency)`, show(at(U.bothPastDue)))
+  ok(at(U.renewal)?.membership === 'mem_TESTrn_old' && at(U.renewal)?.status === 'active',
+    `${listed}: two course memberships, the newer past_due: the older active one (active before recency)`, show(at(U.renewal)))
 }
 process.env.WHOP_PRODUCT_ID = PRODUCTION
 
@@ -371,7 +403,7 @@ console.log('\n=== The webhook takes the same three ===')
   const upserts = db.calls('students', 'upsert').flatMap((q) => (Array.isArray(q.values) ? q.values : [q.values]))
   ok(upserts.length === 3 && upserts.every((v) => !('first_paid_at' in v)), 'no upsert the webhook sent names first_paid_at', `${upserts.length} upserts`)
 
-  console.log('\n=== The webhook: an ETfB or Apex membership leaves a course student\'s row on the course ===')
+  console.log('\n=== The webhook: an ETfB or Apex membership takes a course student\'s row only where the order says it wins ===')
   const keeps = { user: 'user_TESTkeeps', who: 'a course student' }
   const K_COURSE = { ...keeps, id: 'mem_TESTkeepscourse', product: COURSE, plan: COURSE_PLAN }
   const K_APEX = { ...keeps, id: 'mem_TESTkeepsapex', product: APEX, plan: MEMBERS.apex.plan }
@@ -388,6 +420,10 @@ console.log('\n=== The webhook takes the same three ===')
     data: { id: `pay_TEST${m.id.slice(-6)}`, user: { id: m.user, username: m.user, name: 'A Member', email: `${m.user}@example.com` },
       membership: { id: m.id }, plan_id: m.plan, product: { id: m.product, title: 'A product' } },
   })
+  /** A membership event whose payload names no product, `id` its own id: Whop's lookup decides what is written. */
+  const unnamed = (type, id) => ({
+    type, data: { id, user: { id: keeps.user, username: keeps.user, name: 'A Member', email: `${keeps.user}@example.com` }, status: 'active' },
+  })
   const rowNow = (d) => JSON.stringify(rowOf(d, keeps))
   const upsertsOn = (d) => d.calls('students', 'upsert')
   for (const [what, payload] of [
@@ -403,22 +439,69 @@ console.log('\n=== The webhook takes the same three ===')
       `${what}, ${keeps.who} active on the course: 200, the row keeps the course membership and its plan, Whop not asked, the log says why`,
       show(rowOf(d, keeps) && { membership: rowOf(d, keeps).whop_membership_id, plan: rowOf(d, keeps).whop_plan_id }))
   }
-  {
+  // Active comes before the course (the order's step b): past_due locks the
+  // person out of the app, so an active seat or ETfB membership takes a row
+  // whose course membership is past_due, with that membership's own id (a
+  // payment's membership, never the payment's pay_ id).
+  for (const [what, payload, m] of [
+    ['membership.activated for an Apex seat', event('membership.activated', K_APEX), K_APEX],
+    ['payment.succeeded for an ETfB membership', paid(K_ETFB), K_ETFB],
+  ]) {
     const d = freshWorld({ students: [courseRow({ membership_status: 'past_due' })] })
+    const r = await send(payload)
+    const row = rowOf(d, keeps)
+    ok(r.status === 200 && r.whopCalls === 0 && row.membership_status === 'active' && row.whop_membership_id === m.id &&
+      row.whop_plan_id === m.plan && row.canceled_at === null && row.first_paid_at === PAID,
+      `${what}, ${keeps.who} past_due on the course: written, active on ${m.id} and its plan (an active one beats a past_due course membership); first_paid_at kept`,
+      show({ status: row.membership_status, membership: row.whop_membership_id, plan: row.whop_plan_id }))
+  }
+  // The mirrors. A write that would be past_due (only Whop's lookup, for an
+  // event that names no product, finds one) leaves a row that is active on
+  // another membership; and beside a row that is past_due on another
+  // membership it is left too: between two past_due the course's wins, and
+  // the row does not say whose its membership is (the sync does).
+  for (const [status, label] of [['active', 'active'], ['past_due', 'past_due too']]) {
+    const d = freshWorld({ students: [courseRow({ membership_status: status })], memberships: [v2(K_APEX, PAST_DUE)] })
     const before = rowNow(d)
-    const r = await send(event('membership.activated', K_APEX))
-    ok(r.status === 200 && rowNow(d) === before && upsertsOn(d).length === 0,
-      `membership.activated for an Apex seat, ${keeps.who} past_due on the course: still past_due on the course membership and plan`,
-      show(rowOf(d, keeps)?.membership_status))
+    const r = await send(unnamed('membership.went_valid', 'mem_TESTkeepsunnamed'))
+    ok(r.status === 200 && r.whopCalls > 0 && rowNow(d) === before && upsertsOn(d).length === 0 && r.log.some((l) => l.includes('left as it is')),
+      `went_valid with no product, Whop's lookup finding only a past_due seat, ${keeps.who} ${label} on the course: left as it is`,
+      show({ whopCalls: r.whopCalls, row: rowOf(d, keeps)?.membership_status }))
   }
   {
-    // No product in the payload: Whop's lookup lists the seat first, so the
-    // membership it finds is the seat's, and that leaves the row too.
-    const d = freshWorld({ students: [courseRow()], memberships: [v2(K_APEX), v2(K_COURSE)] })
+    // No product, and the event's own id is the course membership the row is
+    // on. Whop's lookup lists only the seat (the course membership not yet,
+    // or its read failed): only the membership the write would put there is
+    // compared with the row, so the event's id does not move the row off
+    // the course onto the seat.
+    const d = freshWorld({ students: [courseRow()], memberships: [v2(K_APEX)] })
     const before = rowNow(d)
-    const r = await send({ type: 'membership.went_valid', data: { id: 'mem_TESTkeepsunnamed', user: { id: keeps.user, username: keeps.user, name: 'A Member', email: `${keeps.user}@example.com` }, status: 'active' } })
+    const r = await send(unnamed('membership.went_valid', K_COURSE.id))
     ok(r.status === 200 && r.whopCalls > 0 && rowNow(d) === before && upsertsOn(d).length === 0,
-      `went_valid with no product, Whop's lookup finding the Apex seat: ${keeps.who}'s row is left on the course`, show({ whopCalls: r.whopCalls }))
+      `went_valid with no product, its own id ${keeps.who}'s course membership, Whop's lookup finding only the seat: the row stays on the course`,
+      show({ whopCalls: r.whopCalls, membership: rowOf(d, keeps)?.whop_membership_id }))
+  }
+  {
+    // No product, Whop listing the course membership past_due first and the
+    // seat active: the lookup picks the seat, which beats the past_due row.
+    const d = freshWorld({ students: [courseRow({ membership_status: 'past_due' })], memberships: [v2(K_COURSE, PAST_DUE), v2(K_APEX)] })
+    const r = await send(unnamed('membership.went_valid', 'mem_TESTkeepsunnamed'))
+    const row = rowOf(d, keeps)
+    ok(r.status === 200 && row.membership_status === 'active' && row.whop_membership_id === K_APEX.id && row.whop_plan_id === K_APEX.plan,
+      `went_valid with no product, Whop listing the course past_due first and a seat active: the lookup picks the seat, written over ${keeps.who}'s past_due row`,
+      show({ status: row.membership_status, membership: row.whop_membership_id }))
+  }
+  // No product, Whop listing the seat first and the course second, both
+  // active: the lookup picks the course membership, written on it and its plan.
+  for (const students of [[courseRow()], []]) {
+    const d = freshWorld({ students, memberships: [v2(K_APEX), v2(K_COURSE)] })
+    const r = await send(unnamed('membership.went_valid', 'mem_TESTkeepsunnamed'))
+    const row = rowOf(d, keeps)
+    const sent = upsertsOn(d).map((q) => q.values.whop_membership_id)
+    ok(r.status === 200 && r.whopCalls > 0 && same(sent, [K_COURSE.id]) && row?.membership_status === 'active' &&
+      row.whop_membership_id === K_COURSE.id && row.whop_plan_id === COURSE_PLAN,
+      `went_valid with no product, Whop listing the seat first and the course second, ${students.length ? `${keeps.who} on the course` : 'no row yet'}: the lookup picks the course membership, written on it and its plan`,
+      show({ sent }))
   }
   {
     const d = freshWorld({ students: [courseRow()] })
@@ -446,8 +529,22 @@ console.log('\n=== The webhook takes the same three ===')
   {
     const d = freshWorld({ students: [courseRow({ whop_membership_id: K_ETFB.id, whop_plan_id: K_ETFB.plan })] })
     const r = await send(paid(K_ETFB))
-    ok(r.status === 200 && upsertsOn(d).length === 1,
-      'payment.succeeded naming the ETfB membership the row already points at: written', `${upsertsOn(d).length} upserts`)
+    const sent = upsertsOn(d).map((q) => q.values.whop_membership_id)
+    ok(r.status === 200 && same(sent, [K_ETFB.id]) && rowOf(d, keeps).whop_membership_id === K_ETFB.id,
+      'payment.succeeded naming the ETfB membership the row already points at: written, still on the membership (never the payment\'s pay_ id)',
+      show({ sent }))
+  }
+  {
+    // When the payload names the product, the event's own ids count too: a row
+    // an earlier delivery of this payment stamped with the payment's id (as
+    // every payment did until 2026-10-20) is the payment's own row, and the
+    // redelivery points it at the membership.
+    const payload = paid(K_ETFB)
+    const d = freshWorld({ students: [courseRow({ whop_membership_id: payload.data.id, whop_plan_id: K_ETFB.plan })] })
+    const r = await send(payload)
+    ok(r.status === 200 && same(upsertsOn(d).map((q) => q.values.whop_membership_id), [K_ETFB.id]) && rowOf(d, keeps).whop_membership_id === K_ETFB.id,
+      'payment.succeeded again for a row its earlier delivery stamped with the payment\'s id: written, now on the ETfB membership',
+      show({ membership: rowOf(d, keeps).whop_membership_id }))
   }
   {
     // A user with no row is covered above (the ETfB member and the Apex seat
@@ -459,6 +556,88 @@ console.log('\n=== The webhook takes the same three ===')
     ok(r.status === 200 && row.whop_membership_id === K_COURSE.id && row.whop_plan_id === COURSE_PLAN,
       'membership.activated for the course, a row on an Apex seat: pointed at the course membership and its plan, as before',
       show({ membership: row.whop_membership_id, plan: row.whop_plan_id }))
+  }
+  {
+    // And a course payment over a row that is past_due on a seat.
+    const d = freshWorld({ students: [courseRow({ membership_status: 'past_due', whop_membership_id: K_APEX.id, whop_plan_id: K_APEX.plan })] })
+    const r = await send(paid(K_COURSE))
+    const row = rowOf(d, keeps)
+    ok(r.status === 200 && row.membership_status === 'active' && row.whop_membership_id === K_COURSE.id && row.whop_plan_id === COURSE_PLAN,
+      'payment.succeeded for the course, a row past_due on an Apex seat: active on the course membership and its plan',
+      show({ status: row.membership_status, membership: row.whop_membership_id, plan: row.whop_plan_id }))
+  }
+
+  console.log('\n=== The webhook\'s re-point after a membership ends follows the same order ===')
+  const CANCELED = { status: 'canceled', valid: false }
+  const K_APEX2 = { ...keeps, id: 'mem_TESTkeepsapex2', product: APEX, plan: MEMBERS.apex.plan }
+  for (const [what, memberships] of [
+    ['Whop listing the ended course membership and an active seat', [v2(K_COURSE, CANCELED), v2(K_APEX)]],
+    ['a past_due ETfB membership listed first', [v2(K_ETFB, PAST_DUE), v2(K_COURSE, CANCELED), v2(K_APEX)]],
+  ]) {
+    // A course student whose course membership ends while an Apex seat is active.
+    const d = freshWorld({ students: [courseRow()], memberships })
+    const r = await send(event('membership.went_invalid', K_COURSE))
+    const row = rowOf(d, keeps)
+    ok(r.status === 200 && r.whopCalls > 0 && row.membership_status === 'active' && row.whop_membership_id === K_APEX.id &&
+      row.whop_plan_id === K_APEX.plan && row.canceled_at === null,
+      `${keeps.who}'s course membership ends, ${what}: re-pointed at the active seat and its plan, still in`,
+      show({ status: row.membership_status, membership: row.whop_membership_id, plan: row.whop_plan_id }))
+  }
+  {
+    // The reverse: the row is on a seat, the seat ends, and Whop lists a newer
+    // seat first, then the ended one, then the (older) course membership.
+    const d = freshWorld({
+      students: [courseRow({ whop_membership_id: K_APEX.id, whop_plan_id: K_APEX.plan })],
+      memberships: [v2(K_APEX2, { created_at: 1760900000 }), v2(K_APEX, CANCELED), v2(K_COURSE, { created_at: 1759000000 })],
+    })
+    const r = await send(event('membership.went_invalid', K_APEX))
+    const row = rowOf(d, keeps)
+    ok(r.status === 200 && row.membership_status === 'active' && row.whop_membership_id === K_COURSE.id && row.whop_plan_id === COURSE_PLAN,
+      'the seat the row is on ends, Whop listing a newer seat first and the course membership last: re-pointed at the course membership and its plan',
+      show({ status: row.membership_status, membership: row.whop_membership_id, plan: row.whop_plan_id }))
+  }
+  {
+    // A seat ending beside a row on the course: the row stays on the course,
+    // whatever Whop lists first.
+    const d = freshWorld({ students: [courseRow()], memberships: [v2(K_APEX2), v2(K_APEX, CANCELED), v2(K_COURSE)] })
+    const r = await send(event('membership.went_invalid', K_APEX))
+    const row = rowOf(d, keeps)
+    ok(r.status === 200 && row.membership_status === 'active' && row.whop_membership_id === K_COURSE.id && row.whop_plan_id === COURSE_PLAN,
+      `one of ${keeps.who}'s two seats ends, Whop listing the other seat first: the row stays on the course membership and its plan`,
+      show({ status: row.membership_status, membership: row.whop_membership_id }))
+  }
+}
+
+console.log('\n=== The login\'s self-heal picks by the same order, in each of its three reads ===')
+{
+  // The student's token gets the 404 legacy customers get, so the self-heal
+  // (fetchActiveMembershipForUser) decides; down.byUser and down.byProduct
+  // make its first, then its first two reads fail, so its next read decides.
+  const heal = { user: 'user_TESTheal', who: 'a student with no row' }
+  const H_COURSE = { ...heal, id: 'mem_TESThealcourse', product: COURSE, plan: COURSE_PLAN }
+  const H_APEX = { ...heal, id: 'mem_TESThealapex', product: APEX, plan: MEMBERS.apex.plan }
+  for (const [read, down, decided] of [
+    ['its first read (the user\'s memberships)', {}, (c) => c.byProduct.length === 0 && c.members === 1],
+    ['its second read (each listed product\'s)', { byUser: true }, (c) => same(c.byProduct, [COURSE, ETFB, APEX]) && c.members === 1],
+    ['its third read (the member)', { byUser: true, byProduct: true }, (c) => c.members === 2],
+  ]) {
+    for (const [what, memberships, want] of [
+      ['an Apex seat listed first and the course second, both active', [v2(H_APEX), v2(H_COURSE)], H_COURSE],
+      ['the course past_due listed first and an Apex seat active second', [v2(H_COURSE, PAST_DUE), v2(H_APEX)], H_APEX],
+    ]) {
+      const db = freshWorld({ memberships, down: { me: true, ...down } })
+      const r = await logIn(heal)
+      const row = rowOf(db, heal)
+      const asked = whop.calls.filter((c) => c.path === '/api/v2/memberships' && c.params.user_id === heal.user)
+      // The login reads /api/v2/members/{id} once more after the self-heal, for the Discord id.
+      const calls = {
+        byProduct: asked.filter((c) => c.params.product_id).map((c) => c.params.product_id),
+        members: whop.calls.filter((c) => c.path === `/api/v2/members/${heal.user}`).length,
+      }
+      ok(gotIn(r) && decided(calls) && row?.membership_status === 'active' && row.whop_membership_id === want.id && row.whop_plan_id === want.plan,
+        `${read}, ${what}: in, the row active on ${want === H_COURSE ? 'the course membership' : 'the seat'} and its plan`,
+        show({ location: r.location, calls, row: row && { status: row.membership_status, membership: row.whop_membership_id } }))
+    }
   }
 }
 

@@ -127,8 +127,29 @@ for (const type of ['membership.went_valid', 'membership.activated']) {
   const db = freshDb([{ ...ACTIVE_ROW, membership_status: 'canceled', canceled_at: '2026-10-10T00:00:00.000Z' }])
   const r = await send(paymentEvent())
   const row = student(db)
-  ok(r.status === 200 && row.membership_status === 'active' && row.canceled_at === null,
-     'payment.succeeded for the course: a renewal makes a lapsed student active again', show(row))
+  ok(r.status === 200 && row.membership_status === 'active' && row.canceled_at === null && row.whop_membership_id === 'mem_paid',
+     'payment.succeeded for the course: a renewal makes a lapsed student active again, on the payment\'s membership', show(row))
+}
+
+console.log('\n=== A payment points the row at its membership, never at the payment ===')
+// Until 2026-10-20 every payment wrote its own id (pay_...) as the row's
+// whop_membership_id, main too before login-1. It is the payment's membership
+// now: membership.id, else membership_id, else membership as a bare id; the
+// payment's own id only when the payload names none of them.
+for (const [shape, fields, want] of [
+  ['membership as an object', { membership: { id: 'mem_object' } }, 'mem_object'],
+  ['membership_id', { membership_id: 'mem_flat' }, 'mem_flat'],
+  ['membership as a bare id', { membership: 'mem_bare' }, 'mem_bare'],
+  ['membership as an object and membership_id', { membership: { id: 'mem_object' }, membership_id: 'mem_flat' }, 'mem_object'],
+  ['membership_id and membership as a bare id', { membership_id: 'mem_flat', membership: 'mem_bare' }, 'mem_flat'],
+  ['no membership at all (the last resort)', {}, 'pay_1'],
+]) {
+  const db = freshDb([{ ...ACTIVE_ROW, membership_status: 'canceled', canceled_at: '2026-10-10T00:00:00.000Z' }])
+  const data = { id: 'pay_1', user: person('user_1'), plan_id: 'plan_from_event', product: { id: COURSE, title: 'A product' }, ...fields }
+  const r = await send({ type: 'payment.succeeded', data })
+  const sent = db.calls('students', 'upsert').map((q) => q.values.whop_membership_id)
+  ok(r.status === 200 && sent.length === 1 && sent[0] === want && student(db).whop_membership_id === want && student(db).membership_status === 'active',
+     `payment.succeeded with ${shape}: the row points at ${want}`, show({ sent }))
 }
 
 console.log('\n=== A membership of another product: 200, nothing written ===')

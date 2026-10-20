@@ -129,7 +129,7 @@ const routesAsked = new Set<string>();
 /** The map with a real student in it. Mounted once the model is the eight-area one. */
 function SourcedMap({ model }: { model: ReadyMapModel }) {
   const router = useRouter();
-  const { openAreaId, lessonId, href, open } = useWorldStage();
+  const { openAreaId, lessonId, href, open, base } = useWorldStage();
   // The lesson page's own transport, so what is asked for here is what its player finds.
   const transport = useLessonTransport();
   // Nothing is asked for ahead while the membership is not active.
@@ -230,7 +230,8 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
 
   return (
     <>
-      <WorldV6 source={source} corner={corner} />
+      {/* The students' map follows their own clock (night after dark, clock.ts); the dev harness stays on day unless its address asks. */}
+      <WorldV6 source={source} corner={corner} liveClock={base === "/world"} />
       {/* Over the map, outside it: the discount's questions and the two celebrations. */}
       <WorldDiscountForm form={discountForm} paused={lessonId !== null} />
       <WorldCelebrations

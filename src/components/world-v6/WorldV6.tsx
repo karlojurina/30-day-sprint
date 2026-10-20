@@ -55,6 +55,7 @@ import {
   type PosterManifest,
 } from "@/lib/world-v6/poster";
 import { benchText, runBench, type BenchResult } from "./bench";
+import { clockSetting, watchClock } from "@/lib/world-v6/clock";
 import tokens from "./tokens.module.css";
 import s from "./world.module.css";
 
@@ -461,12 +462,17 @@ interface Gate {
   open: (trigger: HTMLElement | null) => void;
 }
 
-export function WorldV6({ source, corner }: { source?: WorldSource; corner?: Corner } = {}) {
+/**
+ * `liveClock`: the map follows the student's own clock (clock.ts), night after
+ * dark. Only the students' map passes it (WorldMap on /world); every other
+ * page stays pinned to day unless its address says ?tod= or ?hour=.
+ */
+export function WorldV6({ source, corner, liveClock = false }: { source?: WorldSource; corner?: Corner; liveClock?: boolean } = {}) {
   // The course's words and counts, for the map and every component under it (content.ts).
   const content = useMemo(() => contentOf(source), [source]);
   return (
     <WorldContentContext.Provider value={content}>
-      <WorldV6View source={source} content={content} corner={corner} />
+      <WorldV6View source={source} content={content} corner={corner} liveClock={liveClock} />
     </WorldContentContext.Provider>
   );
 }
@@ -475,10 +481,12 @@ function WorldV6View({
   source,
   content,
   corner,
+  liveClock,
 }: {
   source: WorldSource | undefined;
   content: WorldContent;
   corner?: Corner;
+  liveClock: boolean;
 }) {
   const hasSource = source !== undefined;
   /** A lesson page is open over the map (always false on the dev page). */
@@ -707,6 +715,17 @@ function WorldV6View({
   useLayoutEffect(() => {
     sceneRef.current?.setPaused(scenePaused(sourceRef.current));
   }, [paused]);
+
+  // The student's clock (clock.ts): the night factor now, every few minutes
+  // and on coming back to the tab, for the scene's light. A scene made later
+  // takes the last value as it is built (the scene effect below).
+  const nightRef = useRef(0);
+  useEffect(() => {
+    return watchClock(clockSetting(window.location.search, liveClock), (n) => {
+      nightRef.current = n;
+      sceneRef.current?.setNight(n);
+    });
+  }, [liveClock]);
 
   // ── Tuning. Read once mounted; every later change is saved and, if the
   // pacing or the lock moved the scroll range, the camera is kept in place.
@@ -2088,6 +2107,8 @@ function WorldV6View({
       }
       const sc = scene;
       sceneRef.current = sc;
+      // Before the world builds: its first frame is drawn in the clock's light.
+      sc.setNight(nightRef.current);
       // Poster mode: on now (no WebGL, a software renderer, ?poster=on, a
       // remembered verdict) or later (the load probe, the governor, the panel).
       const enterPoster = (reason: string) => {

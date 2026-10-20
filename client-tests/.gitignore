@@ -7,3 +7,6 @@ client-tests/_gen/access.ts
 _gen/world-layout.ts
 _gen/terrain.ts
 _gen/terrain-70c934a.ts
+# The night layer's copies (build.mjs and night-clock.test.mjs write them on every run):
+_gen/world-light.ts
+_gen/light-d0ebe76.ts

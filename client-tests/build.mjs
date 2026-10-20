@@ -380,6 +380,18 @@ gen('../src/app/api/admin/whop-catchup/route.ts', './_gen/whop-catchup-route.ts'
 gen('../src/lib/world-v6/layout.ts', './_gen/world-layout.ts')
 gen('../src/lib/world-v6/terrain.ts', './_gen/terrain.ts', [['from "./layout"', 'from "./world-layout.ts"']])
 
+// The night on the student's clock (2026-10-20 night, night-clock.test.mjs).
+// clock.ts has no imports and copies across untouched. light.ts's layout and
+// terrain imports point at the copies above; "three" and three's Reflector
+// resolve from node_modules as they are. light.ts is not committed
+// (client-tests/.gitignore), as the terrain is not: 2,900 lines every run
+// writes again.
+gen('../src/lib/world-v6/clock.ts', './_gen/clock.ts')
+gen('../src/lib/world-v6/light.ts', './_gen/world-light.ts', [
+  ['from "./layout"', 'from "./world-layout.ts"'],
+  ['from "./terrain"', 'from "./terrain.ts"'],
+])
+
 // The first-paid fix (2026-10-20, first-payment.test.mjs and
 // first-paid-repair.test.mjs): first_paid_at is the student's first real
 // Whop payment. The reader (first-payment.ts) runs on a stand-in fetch; its one

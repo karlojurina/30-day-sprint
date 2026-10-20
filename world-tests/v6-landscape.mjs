@@ -20,8 +20,10 @@
  * Fundamentals), the timeline covered the card's Watch at 780x304, a place's
  * panel was 163 px tall with no lesson above its fold, and turning the phone
  * with a lesson open built the whole 3D world behind the lesson. Since the fix
- * a screen under 760 px wide or under 500 px tall gets the list (the phone's
- * own layout, with no three.js). Where the 3D still draws, no pin or plaque
+ * a screen under 760 px wide, or under 500 px tall on a touch screen, gets the
+ * list (the phone's own layout, with no three.js); the touch part came with
+ * the 2026-10-20 review, after the height alone also took the 3D from short
+ * laptop windows that draw it well (row 6). Where the 3D still draws, no pin or plaque
  * reaches Continue: measured before the fix from 760x500 to 3440x620 at three
  * progress presets, and from 844x460 tall the overlap was already gone. Row 5
  * keeps that true, with the welcome's title on one line and on two (a long
@@ -49,6 +51,15 @@
  *      long first name on two; a tap at its centre makes the trip (the
  *      address stays the map's, the camera comes to rest at the student's
  *      place and the card shows there, no panel opens)
+ *   6  short laptop windows with a mouse (1093x490, 1093x465, 1097x470,
+ *      911x435: a 1366x768 laptop at 125%, with the bookmarks bar, a 1080p
+ *      laptop at 175%, a 1366x768 laptop zoomed to 150%): the 3D, and a
+ *      click at Continue's centre makes the trip; the same four sizes by
+ *      touch: the list, with no canvas and no 3D scene. Row 5's 33-point grid
+ *      on Continue is printed for each size (MEASURED), not checked: below
+ *      500 px the opening's pins reach Continue's edges, with a long first
+ *      name from 490 px, and with a short one at 911x435 (the 3D layout
+ *      as production has drawn these windows all along)
  * After the rows, one MEASURED line: requests to /api, requests to Supabase
  * and page errors over every page the run opened (all three must be 0).
  * Exit code 1 on any FAIL. Pictures for a person, of the list sideways and
@@ -479,6 +490,88 @@ async function diff(la, lb) {
   if (bad) process.exitCode = 1
 }
 
+// ── The welcome's Continue where the 3D draws (rows 5 and 6) ────────────────
+
+/** Over a 3x11 grid on Continue: the points where it is the top of the page, and those with a pin or plaque that takes a tap under it. */
+const GRID = () => {
+  const go = document.querySelector('main section[aria-labelledby="welcome-title"] button')
+  const b = go.getBoundingClientRect()
+  let top = 0
+  const under = []
+  for (let iy = 0; iy < 3; iy++) {
+    for (let ix = 0; ix < 11; ix++) {
+      const x = b.left + ((ix + 0.5) / 11) * b.width
+      const y = b.top + ((iy + 0.5) / 3) * b.height
+      const el = document.elementFromPoint(x, y)
+      if (el && go.contains(el)) top++
+      const pin = document.elementsFromPoint(x, y).find((e) => {
+        const m = e.closest('main button[data-mode]')
+        return m && m.dataset.mode !== 'hidden' && getComputedStyle(e).pointerEvents !== 'none'
+      })
+      if (pin) under.push(`${pin.closest('button').getAttribute('aria-label').split(',')[0]} at ${Math.round(x)},${Math.round(y)}`)
+    }
+  }
+  const h2 = document.querySelector('main h2#welcome-title')
+  return { view: document.querySelector('main').dataset.view, top, under: under.slice(0, 4), lines: Math.round(h2.getBoundingClientRect().height / parseFloat(getComputedStyle(h2).lineHeight)), go: { t: Math.round(b.top), b: Math.round(b.bottom) } }
+}
+
+/**
+ * The 2026-10-20 review's short laptop windows (CSS px inside the browser): a
+ * 1366x768 laptop at 125% with Chrome maximised, the same with the bookmarks
+ * bar, a 1080p laptop at 175%, and a 1366x768 laptop zoomed to 150%.
+ */
+const LAPTOPS = [
+  { width: 1093, height: 490 },
+  { width: 1093, height: 465 },
+  { width: 1097, height: 470 },
+  { width: 911, height: 435 },
+]
+
+/**
+ * At this size: the 3D, Continue clear at all 33 points with the title on one
+ * line and on two, and a tap (or click) on it makes the trip. `measureOnly`
+ * (row 6): the grid is printed as a MEASURED line, not checked, and the 3D and
+ * the trip from Continue's centre are what is checked.
+ */
+async function continueMakesTheTrip(r, vp, touch, { measureOnly = false } = {}) {
+  const page = await r.open(url({ p: 'mid' }), vp, { touch })
+  const at = vpName(vp)
+  await waitFor(page, () => document.querySelector('main section[aria-labelledby="welcome-title"]')?.hasAttribute('data-on'), { timeout: 10000, what: `${at}: the welcome did not show` })
+  const one = await page.evaluate(GRID)
+  // A long first name: the title on two lines, Continue a line lower. Put back after.
+  const two = await page.evaluate((grid) => {
+    const h2 = document.querySelector('main h2#welcome-title')
+    const was = h2.textContent
+    h2.textContent = 'Welcome, Konstantinos-Alexandros Papadopoulos'
+    const g = new Function(`return (${grid})()`)()
+    h2.textContent = was
+    return g
+  }, GRID.toString())
+  if (measureOnly) {
+    const p = await page.evaluate(PHONE_STATE)
+    r.check(`${at}: the 3D (a canvas, the scene built), not the list`, one.view === 'world' && p.canvases > 0 && p.sceneReady, { view: one.view, canvases: p.canvases, ready: p.sceneReady })
+    console.log(`        MEASURED ${at}: Continue the top of the page at ${one.top} of 33 points with the title on one line${one.under.length ? `, under it ${one.under.join('; ')}` : ''}; at ${two.top} of 33 on two lines${two.under.length ? `, under it ${two.under.join('; ')}` : ''}`)
+  } else {
+    r.check(`${at}: the 3D; Continue the top of the page at all 33 points, no pin or plaque under them`, one.view === 'world' && one.lines === 1 && one.top === 33 && one.under.length === 0, one)
+    r.check(`${at}: the title on two lines; Continue still clear at all 33 points`, two.lines === 2 && two.top === 33 && two.under.length === 0, two)
+  }
+  const c = await page.evaluate(() => {
+    const b = document.querySelector('main section[aria-labelledby="welcome-title"] button').getBoundingClientRect()
+    return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }
+  })
+  if (touch) await page.touchscreen.tap(c.x, c.y)
+  else await page.mouse.click(c.x, c.y)
+  const want = await page.evaluate(() => window.__worldDepthFor('a4'))
+  const rest = await waitFor(page, (d) => {
+    const f = window.__worldFrame
+    const card = document.querySelector('main section[data-side][data-show]:not([aria-label="Place done"])')
+    return f && Math.abs(f.depth - d) < 0.003 && f.parkedId === null && card ? { depth: f.depth, card: card.textContent.slice(0, 60) } : null
+  }, { arg: want, timeout: 20000, poll: 200, what: `${at}: the camera did not come to rest at the student's place with the card` }).catch((e) => ({ error: e.message }))
+  const after = await page.evaluate(() => ({ path: location.pathname, open: document.querySelector('main')?.hasAttribute('data-open') ?? null }))
+  r.check(`${at}: the tap made the trip (the student's place, its card), the address the map's, no panel`, !rest.error && /Video Ads II/.test(rest.card) && after.path === '/dev/world-app' && after.open === false, { rest, after })
+  await page.close()
+}
+
 // ── Run ─────────────────────────────────────────────────────────────────────
 
 browser = await puppeteer.launch({
@@ -609,59 +702,16 @@ try {
     })
 
     await runRow(5, 'the 3D just above the line, on a tablet and on computers: the welcome\'s Continue takes every tap on it and makes the trip', async (r) => {
-      /** Over a 3x11 grid on Continue: the points where it is the top of the page, and those with a pin or plaque that takes a tap under it. */
-      const GRID = () => {
-        const go = document.querySelector('main section[aria-labelledby="welcome-title"] button')
-        const b = go.getBoundingClientRect()
-        let top = 0
-        const under = []
-        for (let iy = 0; iy < 3; iy++) {
-          for (let ix = 0; ix < 11; ix++) {
-            const x = b.left + ((ix + 0.5) / 11) * b.width
-            const y = b.top + ((iy + 0.5) / 3) * b.height
-            const el = document.elementFromPoint(x, y)
-            if (el && go.contains(el)) top++
-            const pin = document.elementsFromPoint(x, y).find((e) => {
-              const m = e.closest('main button[data-mode]')
-              return m && m.dataset.mode !== 'hidden' && getComputedStyle(e).pointerEvents !== 'none'
-            })
-            if (pin) under.push(`${pin.closest('button').getAttribute('aria-label').split(',')[0]} at ${Math.round(x)},${Math.round(y)}`)
-          }
-        }
-        const h2 = document.querySelector('main h2#welcome-title')
-        return { view: document.querySelector('main').dataset.view, top, under: under.slice(0, 4), lines: Math.round(h2.getBoundingClientRect().height / parseFloat(getComputedStyle(h2).lineHeight)), go: { t: Math.round(b.top), b: Math.round(b.bottom) } }
-      }
       const sizes = [[{ width: 760, height: 500 }, true], [{ width: 1024, height: 500 }, true], [{ width: 768, height: 1024 }, true], [DESKS[0], false], [DESKS[1], false], [{ width: 3428, height: 1230 }, false]]
-      for (const [vp, touch] of sizes) {
-        const page = await r.open(url({ p: 'mid' }), vp, { touch })
-        const at = vpName(vp)
-        await waitFor(page, () => document.querySelector('main section[aria-labelledby="welcome-title"]')?.hasAttribute('data-on'), { timeout: 10000, what: `${at}: the welcome did not show` })
-        const one = await page.evaluate(GRID)
-        r.check(`${at}: the 3D; Continue the top of the page at all 33 points, no pin or plaque under them`, one.view === 'world' && one.lines === 1 && one.top === 33 && one.under.length === 0, one)
-        // A long first name: the title on two lines, Continue a line lower. Put back after.
-        const two = await page.evaluate((grid) => {
-          const h2 = document.querySelector('main h2#welcome-title')
-          const was = h2.textContent
-          h2.textContent = 'Welcome, Konstantinos-Alexandros Papadopoulos'
-          const g = new Function(`return (${grid})()`)()
-          h2.textContent = was
-          return g
-        }, GRID.toString())
-        r.check(`${at}: the title on two lines; Continue still clear at all 33 points`, two.lines === 2 && two.top === 33 && two.under.length === 0, two)
-        const c = await page.evaluate(() => {
-          const b = document.querySelector('main section[aria-labelledby="welcome-title"] button').getBoundingClientRect()
-          return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }
-        })
-        if (touch) await page.touchscreen.tap(c.x, c.y)
-        else await page.mouse.click(c.x, c.y)
-        const want = await page.evaluate(() => window.__worldDepthFor('a4'))
-        const rest = await waitFor(page, (d) => {
-          const f = window.__worldFrame
-          const card = document.querySelector('main section[data-side][data-show]:not([aria-label="Place done"])')
-          return f && Math.abs(f.depth - d) < 0.003 && f.parkedId === null && card ? { depth: f.depth, card: card.textContent.slice(0, 60) } : null
-        }, { arg: want, timeout: 20000, poll: 200, what: `${at}: the camera did not come to rest at the student's place with the card` }).catch((e) => ({ error: e.message }))
-        const after = await page.evaluate(() => ({ path: location.pathname, open: document.querySelector('main')?.hasAttribute('data-open') ?? null }))
-        r.check(`${at}: the tap made the trip (the student's place, its card), the address the map's, no panel`, !rest.error && /Video Ads II/.test(rest.card) && after.path === '/dev/world-app' && after.open === false, { rest, after })
+      for (const [vp, touch] of sizes) await continueMakesTheTrip(r, vp, touch)
+    })
+
+    await runRow(6, 'short laptop windows with a mouse keep the 3D, and a click on Continue makes the trip; the same window by touch gets the list', async (r) => {
+      for (const vp of LAPTOPS) await continueMakesTheTrip(r, vp, false, { measureOnly: true })
+      for (const vp of LAPTOPS) {
+        const page = await r.open(url({ p: 'mid' }), vp, { touch: true })
+        const s = await page.evaluate(PHONE_STATE)
+        r.check(`${vpName(vp)} by touch: the list, no canvas and no 3D scene`, s.view === 'list' && s.canvases === 0 && !s.sceneReady && !s.scene, { view: s.view, canvases: s.canvases, ready: s.sceneReady, scene: s.scene })
         await page.close()
       }
     })

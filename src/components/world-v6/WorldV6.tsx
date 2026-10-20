@@ -178,16 +178,21 @@ const N = STUDY_AREAS.length;
 /** The window.__world* test hooks: every build but production. */
 const HOOKS = process.env.NODE_ENV !== "production";
 /**
- * The phone's list: narrow screens, and short ones (bug hunt 2026-10-19,
- * phones-1 and map-2). A phone held sideways is 780 to 932 px wide and 304 to
- * 430 px tall, and the 3D layout was only ever measured from 700 px tall: the
- * welcome's Continue sat on the opening's pins, the timeline covered the
- * card's Watch, a place's panel had no lesson above its fold, and turning the
- * phone built the 3D behind an open lesson. Its twins in the stylesheets
+ * The phone's list: narrow screens, and short touch screens (bug hunt
+ * 2026-10-19, phones-1 and map-2). A phone held sideways is 780 to 932 px wide
+ * and 304 to 430 px tall, and the 3D layout was only ever measured from 700
+ * px tall: the welcome's Continue sat on the opening's pins, the timeline
+ * covered the card's Watch, a place's panel had no lesson above its fold, and
+ * turning the phone built the 3D behind an open lesson. The height asks for a
+ * finger (pointer: coarse) since the 2026-10-20 review: a short laptop window
+ * (about 1093x490 on a 1366x768 laptop at 125%, 911x435 zoomed to 150%) keeps
+ * the 3D it could already draw, and no longer swaps it for the list when a
+ * browser bar or devtools opens. Its twins in the stylesheets
  * (world.module.css, world-ui.module.css) and the landing poster's <source>
- * say the same, so client-tests/phone-view.test.mjs checks them together.
+ * say the same, so client-tests/phone-view.test.mjs and
+ * phone-view-laptops.test.mjs check them together.
  */
-const NARROW_QUERY = "(width < 760px), (height < 500px)";
+const NARROW_QUERY = "(width < 760px), (height < 500px) and (pointer: coarse)";
 /** Final pass C: the place whose click-in goes through the telescope (scene.ts TEL_PARK_PLACE, a7). */
 const TEL_K = SKY_MARKS.findIndex((m) => m.id === "a7");
 const REDUCED_QUERY = "(prefers-reduced-motion: reduce)";
@@ -677,7 +682,7 @@ function WorldV6View({
     cpKind: "discount" as Cp,
     /** The Ad Bounty's page was opened by its address with no checkpoint panel under it: the checkpoint opens once the page closes (reconcile). */
     bountySeed: false,
-    /** The phone list has been up since the scene last ran (a resize under 760 px): the next scene starts where the student was. */
+    /** The phone list has been up since the scene last ran (a resize into NARROW_QUERY): the next scene starts where the student was. */
     fromList: false,
     /** The camera's rail depth when the 3D last gave way to the list; -1 when it never did. */
     listDepth: -1,
@@ -2146,7 +2151,7 @@ function WorldV6View({
       // The tuning may have moved on while the world was building.
       applyTuning(sc, tuningRef.current, studyRef.current);
       writeRide();
-      // Back from the phone list (the window widened past 760 px): the camera
+      // Back from the phone list (the window left NARROW_QUERY): the camera
       // where it was when the list took over, or at the student's place when
       // the page opened narrow. The list's own scroll means nothing here.
       if (u.fromList) {
@@ -2463,7 +2468,7 @@ function WorldV6View({
     if (view === "list") harness().__worldView = "list";
   }, [view]);
 
-  // ── Between the 3D map and the phone list (a resize across 760 px). The list
+  // ── Between the 3D map and the phone list (a resize across NARROW_QUERY). The list
   // opens at its top, whatever the page scroll was on the map. Leaving the 3D,
   // the camera's depth is kept (the last frame, read before the scene effect's
   // own clean-up empties it), and the next scene starts there (above).
@@ -2813,7 +2818,7 @@ function WorldV6View({
           {POSTER_IDS.map((id, i) =>
             i === 0 ? (
               <picture key={id}>
-                <source media="(min-width: 760px) and (min-height: 500px)" srcSet={posterSrc(id)} />
+                <source media="(min-width: 760px) and (min-height: 500px), (min-width: 760px) and (pointer: fine), (min-width: 760px) and (pointer: none)" srcSet={posterSrc(id)} />
                 <img
                   ref={(el) => {
                     posterImgs.current[0] = el;

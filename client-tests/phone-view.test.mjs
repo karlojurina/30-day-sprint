@@ -9,19 +9,18 @@
 // <source> loads the opening's still only where the 3D draws. The query used
 // to be width alone, so a phone held sideways (780 to 932 px wide, 304 to 430
 // px tall) got the 3D layout, which was never measured below 700 px tall.
+// Since the 2026-10-20 review the height applies to touch screens only
+// ("(width < 760px), (height < 500px) and (pointer: coarse)"), so a short
+// laptop window keeps its 3D (phone-view-laptops.test.mjs).
 //
 // This test reads the four from the source and asks each of them, through a
-// small evaluator of the media features they use, about real screens: phones
-// upright and sideways get the list, tablets and computers get the 3D, and
-// the twins agree with the query at every size.
+// small evaluator of the media features they use (media-query.mjs), about
+// real screens with their pointer: phones upright and sideways get the list,
+// tablets and computers get the 3D, and the twins agree with the query at
+// every size, for a finger, a mouse and no pointer.
 //
 //   node --experimental-strip-types client-tests/phone-view.test.mjs
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-
-const ROOT = fileURLToPath(new URL('..', import.meta.url))
-const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8')
+import { POINTERS, matches, phoneQueries } from './media-query.mjs'
 
 let pass = 0
 const fails = []
@@ -32,17 +31,7 @@ const ok = (c, label, detail = '') => {
 const show = (v) => JSON.stringify(v)
 
 // ── The four, read from the source ──────────────────────────────────────────
-const map = read('src/components/world-v6/WorldV6.tsx')
-const mapCss = read('src/components/world-v6/world.module.css')
-const uiCss = read('src/components/world/world-ui.module.css')
-
-const narrow = /const NARROW_QUERY = "([^"]+)";/.exec(map)?.[1] ?? null
-// The landing poster's still, for the opening (POSTER_IDS[0]): only where the 3D draws.
-const source = /<source media="([^"]+)" srcSet=\{posterSrc\(id\)\} \/>/.exec(map)?.[1] ?? null
-// The poster layer, hidden on a phone: the @media wrapping `.poster { display: none; }`.
-const posterHide = /@media ([^{]+)\{\s*\.poster \{\s*display: none;\s*\}\s*\}/.exec(mapCss)?.[1]?.trim() ?? null
-// The screens over the map, their phone look: the @media after its heading.
-const uiPhone = /The phone view: solid surfaces, no blur[^\n]*\n\s*\n@media ([^{]+)\{/.exec(uiCss)?.[1]?.trim() ?? null
+const { narrow, source, posterHide, uiPhone } = phoneQueries()
 
 console.log('\nThe four are in the source')
 ok(narrow !== null, 'WorldV6.tsx NARROW_QUERY', show(narrow))
@@ -54,83 +43,64 @@ for (const [name, q] of [['NARROW_QUERY', narrow], ['the poster layer', posterHi
   ok(q !== null && /\(width < \d+px\)/.test(q), `${name} keeps the width rule in range syntax`, show(q))
 }
 
-// ── A small evaluator: a list of queries joined by ",", each a list of
-// features joined by " and ". The features these four use, and their
-// level 3 spellings.
-function feature(text, w, h) {
-  const t = text.trim()
-  let m = /^\((width|height) (<|<=|>|>=) (\d+(?:\.\d+)?)px\)$/.exec(t)
-  if (m) {
-    const v = m[1] === 'width' ? w : h
-    const n = Number(m[3])
-    return m[2] === '<' ? v < n : m[2] === '<=' ? v <= n : m[2] === '>' ? v > n : v >= n
-  }
-  m = /^\((min|max)-(width|height): (\d+(?:\.\d+)?)px\)$/.exec(t)
-  if (m) {
-    const v = m[2] === 'width' ? w : h
-    const n = Number(m[3])
-    return m[1] === 'min' ? v >= n : v <= n
-  }
-  throw new Error(`a media feature this test cannot read: ${t}`)
-}
-function matches(query, w, h) {
-  return query.split(',').some((q) => q.split(/\s+and\s+/).every((f) => feature(f, w, h)))
-}
-
-// ── Real screens, CSS px ────────────────────────────────────────────────────
+// ── Real screens, CSS px, with their pointer ────────────────────────────────
 const PHONES = [
   // Upright.
-  [320, 568, 'iPhone SE (1st), upright'],
-  [360, 740, 'a 6" Android, upright'],
-  [390, 844, 'iPhone 14/15, upright'],
-  [430, 932, 'iPhone Pro Max, upright'],
+  [320, 568, 'coarse', 'iPhone SE (1st), upright'],
+  [360, 740, 'coarse', 'a 6" Android, upright'],
+  [390, 844, 'coarse', 'iPhone 14/15, upright'],
+  [430, 932, 'coarse', 'iPhone Pro Max, upright'],
   // Sideways: the bug hunt's sizes (Safari's bars shown and hidden, Android Chrome).
-  [844, 390, 'iPhone 14, sideways, bars hidden'],
-  [852, 393, 'iPhone 15, sideways, bars hidden'],
-  [852, 343, 'iPhone 15, sideways, in Safari'],
-  [844, 340, 'iPhone 14, sideways, in Safari'],
-  [812, 375, 'iPhone X to 13 mini, sideways'],
-  [915, 412, 'a 6.7" Android, sideways'],
-  [932, 430, 'iPhone Pro Max, sideways, bars hidden'],
-  [932, 380, 'iPhone Pro Max, sideways, in Safari'],
-  [780, 304, 'Android Chrome, sideways'],
-  [667, 375, 'iPhone SE (2nd), sideways'],
+  [844, 390, 'coarse', 'iPhone 14, sideways, bars hidden'],
+  [852, 393, 'coarse', 'iPhone 15, sideways, bars hidden'],
+  [852, 343, 'coarse', 'iPhone 15, sideways, in Safari'],
+  [844, 340, 'coarse', 'iPhone 14, sideways, in Safari'],
+  [812, 375, 'coarse', 'iPhone X to 13 mini, sideways'],
+  [915, 412, 'coarse', 'a 6.7" Android, sideways'],
+  [932, 430, 'coarse', 'iPhone Pro Max, sideways, bars hidden'],
+  [932, 380, 'coarse', 'iPhone Pro Max, sideways, in Safari'],
+  [780, 304, 'coarse', 'Android Chrome, sideways'],
+  [667, 375, 'coarse', 'iPhone SE (2nd), sideways'],
 ]
 const WORLDS = [
-  [768, 1024, 'iPad, upright'],
-  [820, 1180, 'iPad Air, upright'],
-  [1024, 768, 'iPad, sideways'],
-  [1180, 820, 'iPad Air, sideways'],
-  [760, 500, 'the smallest 3D window'],
-  [1024, 500, 'a short laptop window'],
-  [1280, 577, 'a 1280x720 laptop with its browser bars'],
-  [1366, 768, 'a 1366x768 laptop'],
-  [1440, 900, 'a 1440x900 laptop'],
-  [1691, 1278, "Lovro's split screen"],
-  [1920, 1080, 'a full HD screen'],
-  [3428, 1230, "Lovro's ultrawide"],
+  [768, 1024, 'coarse', 'iPad, upright'],
+  [820, 1180, 'coarse', 'iPad Air, upright'],
+  [1024, 768, 'coarse', 'iPad, sideways'],
+  [1180, 820, 'coarse', 'iPad Air, sideways'],
+  [760, 500, 'coarse', 'the smallest 3D window on a touch screen'],
+  [1024, 500, 'fine', 'a short laptop window'],
+  [1280, 577, 'fine', 'a 1280x720 laptop with its browser bars'],
+  [1366, 768, 'fine', 'a 1366x768 laptop'],
+  [1440, 900, 'fine', 'a 1440x900 laptop'],
+  [1691, 1278, 'fine', "Lovro's split screen"],
+  [1920, 1080, 'fine', 'a full HD screen'],
+  [3428, 1230, 'fine', "Lovro's ultrawide"],
 ]
 
 if (narrow && source && posterHide && uiPhone) {
   console.log('\nPhones, upright and sideways, get the list')
-  for (const [w, h, name] of PHONES) ok(matches(narrow, w, h), `${w}x${h}, ${name}: the list`, `matchMedia(${show(narrow)})`)
+  for (const [width, height, pointer, name] of PHONES) ok(matches(narrow, { width, height, pointer }), `${width}x${height}, ${name}: the list`, `matchMedia(${show(narrow)})`)
 
   console.log('\nTablets and computers get the 3D')
-  for (const [w, h, name] of WORLDS) ok(!matches(narrow, w, h), `${w}x${h}, ${name}: the 3D`, `matchMedia(${show(narrow)})`)
+  for (const [width, height, pointer, name] of WORLDS) ok(!matches(narrow, { width, height, pointer }), `${width}x${height}, ${name}: the 3D`, `matchMedia(${show(narrow)})`)
 
-  console.log('\nThe twins agree with NARROW_QUERY at every size (and either side of both lines)')
+  console.log('\nThe twins agree with NARROW_QUERY at every size (and either side of both lines), for every pointer')
   const edges = [[759, 900], [760, 900], [1200, 499], [1200, 500], [759, 499], [760, 500]]
   const all = [...PHONES, ...WORLDS].map(([w, h]) => [w, h]).concat(edges)
   const off = { posterHide: [], uiPhone: [], source: [] }
-  for (const [w, h] of all) {
-    const phone = matches(narrow, w, h)
-    if (matches(posterHide, w, h) !== phone) off.posterHide.push(`${w}x${h}`)
-    if (matches(uiPhone, w, h) !== phone) off.uiPhone.push(`${w}x${h}`)
-    if (matches(source, w, h) === phone) off.source.push(`${w}x${h}`)
+  for (const pointer of POINTERS) {
+    for (const [width, height] of all) {
+      const screen = { width, height, pointer }
+      const phone = matches(narrow, screen)
+      if (matches(posterHide, screen) !== phone) off.posterHide.push(`${width}x${height} ${pointer}`)
+      if (matches(uiPhone, screen) !== phone) off.uiPhone.push(`${width}x${height} ${pointer}`)
+      if (matches(source, screen) === phone) off.source.push(`${width}x${height} ${pointer}`)
+    }
   }
-  ok(off.posterHide.length === 0, 'world.module.css hides the poster layer exactly on a phone', off.posterHide.length ? `differs at ${off.posterHide.join(', ')}` : `${all.length} sizes`)
-  ok(off.uiPhone.length === 0, 'world-ui.module.css gives the screens over the map their phone look exactly on a phone', off.uiPhone.length ? `differs at ${off.uiPhone.join(', ')}` : `${all.length} sizes`)
-  ok(off.source.length === 0, "the landing poster's <source> loads the still exactly where the 3D draws", off.source.length ? `differs at ${off.source.join(', ')}` : `${all.length} sizes`)
+  const n = all.length * POINTERS.length
+  ok(off.posterHide.length === 0, 'world.module.css hides the poster layer exactly on a phone', off.posterHide.length ? `differs at ${off.posterHide.join(', ')}` : `${n} screens`)
+  ok(off.uiPhone.length === 0, 'world-ui.module.css gives the screens over the map their phone look exactly on a phone', off.uiPhone.length ? `differs at ${off.uiPhone.join(', ')}` : `${n} screens`)
+  ok(off.source.length === 0, "the landing poster's <source> loads the still exactly where the 3D draws", off.source.length ? `differs at ${off.source.join(', ')}` : `${n} screens`)
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

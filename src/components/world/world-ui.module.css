@@ -9,8 +9,8 @@
  * translucency on the phone view.
  *
  * These screens sit outside the map's .root, so its type base, its focus ring
- * and the phone's size (under 760px wide or 500px tall: WorldV6.tsx
- * NARROW_QUERY) are repeated here.
+ * and the phone's size (under 760px wide, or under 500px tall on a touch
+ * screen: WorldV6.tsx NARROW_QUERY) are repeated here.
  */
 
 /* ── The two wrappers ──────────────────────────────────────── */
@@ -779,7 +779,7 @@
 
 /* ── The phone view: solid surfaces, no blur ───────────────── */
 
-@media (width < 760px), (height < 500px) {
+@media (width < 760px), (height < 500px) and (pointer: coarse) {
   .scrim {
     padding: 8px;
     background: var(--color-surface-0);

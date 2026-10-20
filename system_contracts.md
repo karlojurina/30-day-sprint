@@ -202,8 +202,10 @@ When adding a new table, append it here. When deleting a field, scan
   diagnostics columns, with the Whop ids in an old error hidden)
   `GET /api/admin/thirty` (admin rebuild, branch `night/admin`:
   `student_id` and `last_sync_at` only, never the tokens, for "Whop
-  progress not pulled yet", call C14; `GET /api/admin/today` read the
-  same until admin rebuild 2 removed it)
+  progress not pulled yet", call C14, which since admin rebuild 2 is a
+  part of a pending row's verdict line, "Whop progress not pulled since
+  the switch"; `GET /api/admin/today` read the same until admin rebuild 2
+  removed it)
 - **Stable contract:** `student_id`, `access_token`, `refresh_token`,
   `last_sync_at`, `last_sync_error`, `last_sync_error_at`,
   `last_sync_unmatched`, `last_sync_fetched`, `last_sync_matched`
@@ -879,10 +881,13 @@ When adding a new table, append it here. When deleting a field, scan
 ### `discount_requests`
 - **Depends on:** `students`
 - **Depended on by:** `StudentContext`, `/admin/discounts` (since the
-  admin rebuild, branch `night/admin`, through `GET /api/admin/thirty`:
-  every pending request whatever its date, and the others made from
-  `DISCOUNT_ELIGIBLE_FROM` on; Today's 30% reasons read the same through
-  `loadThirtyData` until admin rebuild 2 removed Today), Whop promo flow, `src/lib/csm-triggers.ts`
+  admin rebuild, branch `night/admin`, through `GET /api/admin/thirty`;
+  since admin rebuild 2, D4, branch `night/a2-thirty`: every request made
+  from `DISCOUNT_ELIGIBLE_FROM` on, whatever its status, and no older one;
+  Today's 30% reasons read the same through `loadThirtyData` until admin
+  rebuild 2 removed Today), the coupon cron
+  `refresh-membership-discounts` (`student_id` of the approved and
+  applied requests, whose students it leaves out), Whop promo flow, `src/lib/csm-triggers.ts`
   (membership/discount status checks where applicable),
   `src/lib/first-paid-repair.ts` (reads `student_id`, `status`,
   `created_at` of the students whose `first_paid_at` it would move, to
@@ -946,6 +951,20 @@ When adding a new table, append it here. When deleting a field, scan
   after the student's deadline, or one beside another counted request
   (`requestCounts`) that was rejected, approved or applied
   (`madeOutsideApply`, `src/lib/world/discount-server.ts`).
+- **The coupon (admin rebuild 2, D5, branch `night/a2-thirty`, not on
+  production):** a student whose Whop membership already has a discount
+  on its next renewal gets no request and no approval. On the new course
+  `POST /api/discounts/request` and `POST /api/discounts/submit-feedback`,
+  once the rule grants and before anything is written, and
+  `POST /api/discounts/approve`, before the rule and with `override` too,
+  call `checkMembershipDiscount` (`src/lib/membership-discount.ts`): Whop
+  now, then the stored row in `student_membership_discounts` for the
+  student's current membership, then nothing. The request routes refuse
+  with 400 `{ error: "You can't apply for this discount because you
+  already have a discount applied to your account.", state:
+  "not-eligible" }`; the approve route with 400 `{ error: "This student
+  already has a discount on their membership (<code>).", code:
+  "has-discount" }`, before any Whop code is made.
 - **No ads check on approve (2026-10-20, Lovro's decision):**
   `POST /api/discounts/approve` no longer reads
   `students.ad_submissions_verified`, on either course: the 30% already
@@ -955,9 +974,40 @@ When adding a new table, append it here. When deleting a field, scan
   from the student page and the journey drawer
   (`POST /api/admin/verify-ad-submissions`) and gates nothing.
 
+### `student_membership_discounts` (v111, admin rebuild 2, D5; built, not on production)
+- **Depends on:** `students` (`student_id` primary key, on delete
+  cascade); Whop's v1 memberships, plans and promo codes, read with
+  `Api-Version-Date: 2026-10-15-1`.
+- **Written by (the service role only; row level security has no write
+  policy, and `anon` and `authenticated` hold no write privilege):** the
+  cron `GET /api/cron/refresh-membership-discounts` (every 2 hours at
+  minute 40, pinned to `iad1`: students with `first_paid_at` from
+  `DISCOUNT_ELIGIBLE_FROM`, `membership_status` active or past_due, and no
+  approved or applied request; reads `students.id, whop_membership_id`),
+  and `POST /api/discounts/request`, `POST /api/discounts/submit-feedback`
+  and `POST /api/discounts/approve` after a live read
+  (`checkMembershipDiscount`). One row per student, upserted on
+  `student_id`.
+- **Depended on by:** `GET /api/student/data` (`whop_membership_id,
+  discounted` only; answers `membershipDiscounted`, never the code or the
+  prices, and a failed read is `false`, never a 500), the request and
+  approve routes (their fallback when Whop does not answer), and
+  `GET /api/admin/thirty` (every column, for the coupon on a row and the
+  verdict on a pending one).
+- **Stable contract:** `student_id`, `whop_membership_id` (the membership
+  the row was read from: a row counts only while the student holds that
+  membership), `promo_code_id`, `promo_code` (the code's name, null when
+  Whop gave none), `renewal_price`, `plan_renewal_price` (numeric,
+  dollars), `discounted` (a promo code on the membership and a renewal
+  below the plan's renewal price), `checked_at`.
+- **Read by the team:** the policy "Team reads membership discounts",
+  `current_user_is_team()`. A student reads nothing here, not even their
+  own row; their flag reaches them through `/api/student/data`.
+
 ### `discount_feedback_questions` + `discount_feedback_responses`
 - **Depends on:** `discount_requests`
-- **Depended on by:** discount review UI, analytics
+- **Depended on by:** discount review UI, analytics (the 30% page has
+  read neither since admin rebuild 2, D4: no survey answers on its rows)
 - **Stable contract:** question id, response shape (scale / choice / text)
 
 ### `disengagement_alerts`
@@ -984,7 +1034,8 @@ When adding a new table, append it here. When deleting a field, scan
 ### `tasks` (CSM task queue)
 - **Depends on:** `students`, `templates`
 - **Depended on by:** `/admin/tasks`, the 30% page's last contact
-  (`GET /api/admin/thirty`), (`/admin/today` through `GET
+  (`GET /api/admin/thirty`, until admin rebuild 2, D4, removed the last
+  contact: it reads no `tasks` since), (`/admin/today` through `GET
   /api/admin/today` and `POST`/`DELETE /api/admin/today/mark`, admin
   rebuild, branch `night/admin`, until admin rebuild 2 removed them), `src/lib/csm-events.ts`
   (`recentTaskScenarios` dedupe), optional ops digest. (`/admin/kanban`,
@@ -1855,43 +1906,43 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
 `tasks` above).
 
 ### `GET /api/admin/thirty`
-- **What it is:** the 30% page's whole list in one answer.
+- **What it is:** the 30% page's whole list in one answer (admin
+  rebuild 2, D4 and D5, branch `night/a2-thirty`).
 - **Called by:** `ThirtyView` (`src/components/admin/thirty/ThirtyView.tsx`)
   on load, on Refresh and after each decision.
 - **Depends on:** `getCurriculumResetAt`, then `loadThirtyData`
-  (`src/lib/admin/thirty-data.ts`): the catalog (`LESSONS_TABLE`, by
-  `sort_order`), `lesson_videos` (`lesson_id, created_at`; the service
-  role alone can read it), `discount_requests` (every pending or approved one,
-  whatever its date, and the applied and rejected ones made from
-  `DISCOUNT_ELIGIBLE_FROM` on), `students` (every
-  first payment from `DISCOUNT_ELIGIBLE_FROM`, and everyone holding a
-  listed request), their completions of the lessons the 30% asks for and
-  of the action items (each read holds as many students as fit in one
-  page, so it is one query), their requests, `student_whop_sync`
-  (`student_id, last_sync_at`), `discount_feedback_questions` and the
-  listed requests' answers, the completed and the open `tasks` of the
-  members who can still earn it (the last message, and their open queue
-  tasks, which Mark messaged closed until admin rebuild 2 removed it),
-  `team_members`. The decided requests are read
-  after the pending ones, and a request on both is kept once, decided.
-  Then `buildThirtyView` (`src/lib/admin/thirty-view.ts`,
+  (`src/lib/admin/thirty-data.ts`): `discount_requests` made from
+  `DISCOUNT_ELIGIBLE_FROM` on, whatever their status (the pending ones,
+  then the decided ones; a request on both is kept once, decided), the
+  `students` holding them (`id, name, email, discord_username,
+  membership_status, first_paid_at, whop_membership_id`), the catalog
+  (`LESSONS_TABLE`, by `sort_order`), `lesson_videos` (`lesson_id,
+  created_at`; the service role alone can read it), their completions of
+  the lessons the 30% asks for (each read holds as many students as fit in
+  one page, so it is one query), all their requests, `student_whop_sync`
+  (`student_id, last_sync_at`), `student_membership_discounts` (v111) and
+  `team_members`. Then `buildThirtyView` (`src/lib/admin/thirty-view.ts`,
   pure), which calls the student app's rule (`discount.ts`,
-  `discount-server.ts`) unchanged.
+  `discount-server.ts`) unchanged. It reads no survey and no `tasks`
+  since D4.
 - **Produces:**
-  - 200 `{ generatedAt, sharedDeadline, requiredCount, questions,
-    requests, canStillEarn, unchecked }`, the types `ThirtyRequestRow`
-    and `ThirtyEarnRow` in `thirty-view.ts` (PRD section 8, plus
-    `ThirtyEarnRow.openTasks`, the student's open queue tasks oldest
-    first, `{ id, scenarioId, summary, createdAt }`, and
-    `unchecked`: how many members are left out of Can still earn because
-    their progress could not be read). Since admin rebuild 2 the page
-    shows no Can still earn, so `canStillEarn` and `unchecked` are sent
-    and not shown. A pending row's `verdict` is the
-    approve route's (`approvalVerdict`, then `explainOldCourseRequest`;
-    the ads check after them is gone since 2026-10-20), and its facts are
-    the ones that verdict judged. `StudentBrief` carries no ads tick
-    since then. A pending row's `submissions` (its action items and their
-    hand-ins) is still sent, and no page shows it.
+  - 200 `{ generatedAt, sharedDeadline, listedFrom, requiredCount,
+    couponsUnread, requests }`, `requests` oldest first, each a
+    `ThirtyRequestRow` (`thirty-view.ts`): `id, status, askedAt,
+    reviewedAt, reviewedBy, appliedAt, appliedBy, promoCode,
+    rejectionReason`, `student` (`id, name, email, username, status,
+    whopPulled`; no plan, no ads tick), `facts` and `verdict` on a pending
+    row (null on the others), and `coupon` (`code, discounted,
+    renewalPrice, planRenewalPrice, checkedAt`, or null) for the
+    membership the student holds now. A pending row's verdict is the
+    approve route's in its order: a stored discount on the next renewal
+    first (`reason: "has-discount"`, the text
+    `couponApprovalRefusal(code)`), then `approvalVerdict` and
+    `explainOldCourseRequest`; its facts are the ones the rule judged.
+    `couponsUnread` is true when the stored coupons could not be read (a
+    database without v111): no row then has a coupon, and the rule judges
+    alone. No Can still earn, survey questions, answers, action items or
+    `unchecked` since D4.
   - 500 "Couldn't read the date of the course switch, so the 30% list
     was not made. Try again."
   - 500 "Couldn't read everything the 30% list needs, so nothing is

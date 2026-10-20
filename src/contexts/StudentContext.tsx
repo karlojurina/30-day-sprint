@@ -180,8 +180,9 @@ export interface StudentContextType {
   ) => Promise<{ passed: boolean; bestScorePct: number } | null>;
 
   // v75 - per-lesson rating + optional comment. Map keyed by
-  // lesson id. Read-mostly; the LessonSheet writes via rateLesson()
-  // once the student is done with the lesson.
+  // lesson id. Read-mostly; the lesson page's rating block
+  // (src/components/world/LessonRating.tsx) writes via rateLesson()
+  // once the student has finished the lesson.
   lessonRatings: Map<string, { stars: number; comment: string | null }>;
 
   // v93 — video watch telemetry, keyed by lesson id. Present only for
@@ -212,13 +213,18 @@ export interface StudentContextType {
    * next refresh that is answered (T-026, 2026-10-20).
    */
   loadError: string | null;
-  /** Upsert a rating for a lesson. Optimistic; server reconciles
-   *  in the background. */
+  /**
+   * Save the student's rating of a lesson through POST
+   * /api/student/rate-lesson (admin rebuild 2, D10). Waits for the server:
+   * resolves to null once the rating is saved (lessonRatings then holds the
+   * saved row), or to the sentence to show when it is not (the route's own,
+   * or this file's when there was no answer). Nothing changes on a refusal.
+   */
   rateLesson: (
     lessonId: string,
     stars: number,
     comment: string | null,
-  ) => Promise<void>;
+  ) => Promise<string | null>;
 
   // v51 (Phase 2, brief v3) — intro video gate + WYH panel state.
   // The 3 flags below drive the first-login chain on /dashboard.
@@ -278,6 +284,10 @@ const studentDataGate = createCallGate(
  *  says it failed (loadError): a read that timed out under load is usually
  *  answered a second or two later (T-026, 2026-10-20). */
 const FIRST_LOAD_RETRY_MS = [1_000, 3_000] as const;
+
+/** rateLesson's own sentences, for when the route never answered (admin rebuild 2, D10). */
+const RATE_SIGNED_OUT = "You're signed out. Sign in again to rate this lesson.";
+const RATE_NO_ANSWER = "Couldn't reach the server. Nothing was saved, so try again.";
 
 export const StudentContext = createContext<StudentContextType | null>(null);
 
@@ -490,6 +500,11 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   // (Supabase read-replica lag racing the post-write refresh).
   const recentlyToggledRef = useRef<Map<string, number>>(new Map());
   const RECENT_TOGGLE_WINDOW_MS = 3000;
+  // The same guard for ratings (admin rebuild 2, D10): a lesson rated in the
+  // last RECENT_TOGGLE_WINDOW_MS keeps the rating the save answered with, so a
+  // refresh that read before the save (or from a replica behind it) does not
+  // put the lesson page's rating block back to empty.
+  const recentlyRatedRef = useRef<Map<string, number>>(new Map());
   function markRecentlyToggled(lessonId: string) {
     const now = Date.now();
     recentlyToggledRef.current.set(lessonId, now);
@@ -632,15 +647,29 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         fresh.student?.id,
       ),
     );
-    setLessonRatings(
-      foldLessonRatings(
-        (fresh.lessonRatings ?? []) as Array<{
-          lesson_id: string;
-          stars: number;
-          comment: string | null;
-        }>,
-      ),
+    const freshRatings = foldLessonRatings(
+      (fresh.lessonRatings ?? []) as Array<{
+        lesson_id: string;
+        stars: number;
+        comment: string | null;
+      }>,
     );
+    for (const [id, ts] of recentlyRatedRef.current.entries()) {
+      if (now - ts > RECENT_TOGGLE_WINDOW_MS) recentlyRatedRef.current.delete(id);
+    }
+    if (recentlyRatedRef.current.size === 0) {
+      setLessonRatings(freshRatings);
+    } else {
+      const rated = [...recentlyRatedRef.current.keys()];
+      setLessonRatings((prev) => {
+        const next = new Map(freshRatings);
+        for (const id of rated) {
+          const local = prev.get(id);
+          if (local) next.set(id, local);
+        }
+        return next;
+      });
+    }
     setWatchProgress((prev) =>
       mergeWatchProgress(
         prev,
@@ -1664,44 +1693,52 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     [student, regionQuizMap],
   );
 
-  // v75 - upsert a lesson rating. Optimistic - the map flips
-  // immediately so the LessonSheet UI shows the chosen stars + saved
-  // comment without waiting on the round-trip. Server reconciliation
-  // runs in the background.
+  // A lesson's rating, saved (admin rebuild 2, D10). Not optimistic: the
+  // rating block shows "Saving…" until the route answers, and only a saved
+  // rating reaches lessonRatings, so the page never shows stars the server
+  // refused. The route checks everything (src/lib/world/lesson-rating.ts) and
+  // its refusal is handed back as it is, for the block to show.
   const rateLesson = useCallback(
-    async (lessonId: string, stars: number, comment: string | null) => {
-      if (!student) return;
-      const cleanedStars = Math.max(1, Math.min(5, Math.round(stars)));
-      const cleanedComment =
-        typeof comment === "string" && comment.trim().length > 0
-          ? comment.trim().slice(0, 2000)
-          : null;
-      setLessonRatings((prev) => {
-        const next = new Map(prev);
-        next.set(lessonId, { stars: cleanedStars, comment: cleanedComment });
-        return next;
-      });
-      void (async () => {
-        const token = await getAccessToken();
-        if (!token) return;
-        try {
-          await fetch("/api/student/rate-lesson", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({
-              lessonId,
-              stars: cleanedStars,
-              comment: cleanedComment,
-            }),
-          });
-        } catch {
-          // Optimistic state persists; next refreshFromServer will
-          // reconcile if the server diverged.
-        }
-      })();
+    async (lessonId: string, stars: number, comment: string | null): Promise<string | null> => {
+      if (!student) return RATE_SIGNED_OUT;
+      const token = await getAccessToken();
+      if (!token) return RATE_SIGNED_OUT;
+      const sentComment =
+        typeof comment === "string" && comment.trim().length > 0 ? comment.trim() : null;
+      let res: Response;
+      try {
+        res = await fetch("/api/student/rate-lesson", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ lessonId, stars, comment: sentComment }),
+        });
+      } catch {
+        return RATE_NO_ANSWER;
+      }
+      const body = (await res.json().catch(() => null)) as {
+        error?: unknown;
+        rating?: { stars?: unknown; comment?: unknown };
+      } | null;
+      if (!res.ok) {
+        return typeof body?.error === "string" && body.error.trim()
+          ? body.error
+          : `Couldn't save your rating (${res.status}). Try again.`;
+      }
+      // The row the route saved; what was sent if its answer had none.
+      const row = body?.rating;
+      const saved = {
+        stars: typeof row?.stars === "number" ? row.stars : stars,
+        comment:
+          row && (typeof row.comment === "string" || row.comment === null)
+            ? (row.comment as string | null)
+            : sentComment,
+      };
+      recentlyRatedRef.current.set(lessonId, Date.now());
+      setLessonRatings((prev) => new Map(prev).set(lessonId, saved));
+      return null;
     },
     [student],
   );

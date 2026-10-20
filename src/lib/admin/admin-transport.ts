@@ -51,9 +51,10 @@ type Json = Record<string, unknown> | null;
  * One call with the session's bearer token. `body` is handed the signed-in
  * member's id: the discount routes of tonight's fix lane (G1) record the
  * member from the login and ignore the id, and the routes before that fix
- * record the id sent, so sending it keeps both right.
+ * record the id sent, so sending it keeps both right. Exported for the other
+ * rebuilt pages' transports (lesson-feedback-transport.ts).
  */
-async function send<T>(
+export async function send<T>(
   method: "GET" | "POST",
   path: string,
   body?: (memberId: string) => unknown,

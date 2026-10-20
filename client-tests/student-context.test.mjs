@@ -109,6 +109,12 @@ const server = {
   holdSync: null,
   dataReads: 0,
   syncs: 0,
+  /** student_lesson_ratings for the student, as GET /api/student/data hands them over. */
+  ratings: [],
+  /** POST /api/student/rate-lesson answers, oldest first: 'ok', 'reject' (a dead connection), or { status, error }. Empty: 'ok'. */
+  ratePlan: [],
+  /** Every rating the provider sent. */
+  rateCalls: [],
   unexpected: [],
 }
 function seed() {
@@ -128,6 +134,7 @@ function seed() {
     { id: 'c5', student_id: 's1', lesson_id: 'a1l05', completed_at: '2026-10-19T18:10:00.000Z', action_completed_at: '2026-10-19T18:10:00.000Z', skipped_at: null, discord_message_link: null },
   ]
   Object.assign(server, { milestones: null, plainRequests: 0, dataPlan: [], holdData: null, dataOver: null, syncStatus: 200, onSync: null, holdSync: null, dataReads: 0, syncs: 0 })
+  Object.assign(server, { ratings: [], ratePlan: [], rateCalls: [] })
 }
 function payload() {
   return {
@@ -140,7 +147,7 @@ function payload() {
     milestones: server.milestones,
     streaks: server.streak,
     whopSync: null, celebrations: null, dmLog: null,
-    regionQuiz: [], lessonRatings: [], watchProgress: [],
+    regionQuiz: [], lessonRatings: server.ratings, watchProgress: [],
     catalogSuffix: '', whopCourseIdMasked: null,
   }
 }
@@ -180,6 +187,18 @@ globalThis.fetch = async (input, init = {}) => {
     const row = server.completions.find((c) => c.lesson_id === lessonId)
     row.discord_message_link = link
     return json({ completion: { ...row } })
+  }
+  if (method === 'POST' && url === '/api/student/rate-lesson') {
+    // The rating route (admin rebuild 2, D10): it saves and answers the row, or refuses in its words.
+    const { lessonId, stars, comment } = JSON.parse(init.body)
+    server.rateCalls.push({ lessonId, stars, comment })
+    const plan = server.ratePlan.shift() ?? 'ok'
+    if (plan === 'reject') throw new TypeError('Failed to fetch')
+    if (typeof plan === 'object') return json(plan.error === null ? {} : { error: plan.error }, plan.status)
+    const at = new Date(clock).toISOString()
+    const saved = { lesson_id: lessonId, stars, comment, created_at: at, updated_at: at }
+    server.ratings = [...server.ratings.filter((r) => r.lesson_id !== lessonId), saved]
+    return json({ rating: saved })
   }
   if (method === 'POST' && url === '/api/discounts/request') {
     // The plain 30% request: an application with no answers for the team.
@@ -661,6 +680,68 @@ console.log('\n=== The Whop sync tells the corner to read the badges again (prog
   const worked = await view.ctx.forceSync()
   await settle()
   ok(failed.ok === false && worked.ok === true && badgeEvents === 1, 'a forced sync sends it when it works, and not when it fails', `${badgeEvents} events`)
+  root.unmount()
+}
+
+console.log('\n=== A lesson rating: saved only when the server says so, and not put back by an older read (admin rebuild 2, D10) ===')
+{
+  seed()
+  server.ratings = [{ lesson_id: 'a1l02', stars: 2, comment: 'Old one.', created_at: '2026-10-19T18:00:00.000Z', updated_at: '2026-10-19T18:00:00.000Z' }]
+  const root = await mount()
+  const rating = (id) => view.ctx.lessonRatings.get(id) ?? null
+  ok(show(rating('a1l02')) === show({ stars: 2, comment: 'Old one.' }), 'the first load brings the saved ratings in', show(rating('a1l02')))
+
+  const saved = await view.ctx.rateLesson('a1l01', 4, '  Clear and short.  ')
+  await settle()
+  ok(saved === null && show(rating('a1l01')) === show({ stars: 4, comment: 'Clear and short.' }),
+     'a rating the route saves: null, and the saved row is shown (the comment as the route kept it)', show([saved, rating('a1l01')]))
+  ok(show(server.rateCalls.at(-1)) === show({ lessonId: 'a1l01', stars: 4, comment: 'Clear and short.' }),
+     'what was sent: the lesson, the stars as picked, the comment trimmed', show(server.rateCalls.at(-1)))
+
+  server.ratePlan.push({ status: 403, error: 'Finish this lesson first, then rate it.' })
+  const refused = await view.ctx.rateLesson('a1l03', 5, null)
+  await settle()
+  ok(refused === 'Finish this lesson first, then rate it.' && rating('a1l03') === null,
+     "a refusal: the route's own sentence, and nothing shown as saved (it is not optimistic any more)", show(refused))
+
+  server.ratePlan.push({ status: 403, error: 'Finish this lesson first, then rate it.' })
+  const edit = await view.ctx.rateLesson('a1l02', 5, 'New one.')
+  await settle()
+  ok(edit === 'Finish this lesson first, then rate it.' && show(rating('a1l02')) === show({ stars: 2, comment: 'Old one.' }),
+     'a refused edit leaves the saved rating as it was', show(rating('a1l02')))
+
+  server.ratePlan.push('reject')
+  const offline = await view.ctx.rateLesson('a1l03', 5, null)
+  ok(offline === "Couldn't reach the server. Nothing was saved, so try again." && rating('a1l03') === null, 'no answer: its own sentence', show(offline))
+  server.ratePlan.push({ status: 502, error: null })
+  const bare = await view.ctx.rateLesson('a1l03', 5, null)
+  ok(bare === "Couldn't save your rating (502). Try again." && rating('a1l03') === null, 'an answer with no sentence: one with the status', show(bare))
+
+  // A return to the tab: its read is taken now (before the save) and answered after it.
+  advance(6_000)
+  server.holdData = deferred()
+  const stale = server.holdData
+  window.dispatchEvent(new Event('focus'))
+  await settle()
+  server.ratings = server.ratings.filter((r) => r.lesson_id !== 'a2l01')
+  const late = await view.ctx.rateLesson('a2l01', 3, null)
+  await settle()
+  ok(late === null && show(rating('a2l01')) === show({ stars: 3, comment: null }), 'a rating saved while an older read is on its way', show(rating('a2l01')))
+  const savedAt = view.renders.length
+  stale.resolve()
+  await settle()
+  const after = view.renders.slice(savedAt).map((c) => c.lessonRatings.get('a2l01')?.stars ?? null)
+  ok(rating('a2l01')?.stars === 3 && after.every((n) => n === 3),
+     'the older read lands and the rating stays: the block never goes back to empty', `${after.length} renders after the save: ${show([...new Set(after)])}`)
+  ok(show(rating('a1l01')) === show({ stars: 4, comment: 'Clear and short.' }) && show(rating('a1l02')) === show({ stars: 2, comment: 'Old one.' }),
+     '...and the read still brings every other rating as the server has it')
+
+  // Past the guard's 3 seconds, a read is taken as it is.
+  advance(6_000)
+  server.ratings = server.ratings.filter((r) => r.lesson_id !== 'a2l01')
+  window.dispatchEvent(new Event('focus'))
+  await settle()
+  ok(rating('a2l01') === null, 'past the guard\'s 3 seconds a read is taken as it is (a rating the server no longer has goes)', show(rating('a2l01')))
   root.unmount()
 }
 

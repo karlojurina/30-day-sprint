@@ -34,6 +34,7 @@ const REBUILT_PAGES: readonly string[] = [
   // WI-5 and WI-6, Tasks, All students, student detail, Student journey:
 
   // WI-7, Lesson feedback:
+  "/admin/feedback/lessons",
 
   // WI-8 and WI-9, Templates, Survey, Team, Insights:
 ];

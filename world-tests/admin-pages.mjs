@@ -38,6 +38,13 @@
  *           reject, a failed reload (its own line, the decided row's buttons
  *           off), Mark code added, ?student=; the 4 tabs whole on a phone,
  *           To decide oldest first, every tap 44px
+ *   feedback  /dev/admin/feedback/lessons (admin rebuild 2, WI-7): full,
+ *           empty, loading, error, unplaced and stray; the areas in route
+ *           order with their counts, a lesson's average and count, its 3
+ *           newest comments and "Show all", a lesson with none and an area
+ *           with none saying so, a name missing (the email) and a student
+ *           gone; a failed Refresh keeps the page with its own line; every
+ *           tap 44px
  *
  * Every state at 390x844, 1280x720 and 1440x900 (a few click states at one
  * or two of them), and each one is measured. It fails on: a horizontal
@@ -116,7 +123,7 @@ if (wanted('routes')) {
   for (const s of distinct.slice(0, 40)) console.log(`       "${s}"`)
 }
 
-const needBrowser = ['frame', 'signin', 'thirty'].some(wanted)
+const needBrowser = ['frame', 'signin', 'thirty', 'feedback'].some(wanted)
 if (!needBrowser) finish()
 
 fs.mkdirSync(OUT, { recursive: true })
@@ -866,6 +873,103 @@ if (wanted('thirty')) {
   }
   const errs = newConsoleErrors(from)
   expect(errs.length === 0, '30% off: no error in the browser console', errs.slice(0, 3).join(' || '))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// feedback: /dev/admin/feedback/lessons (admin rebuild 2, WI-7, lane feedback)
+// ════════════════════════════════════════════════════════════════════════════
+if (wanted('feedback')) {
+  const from = consoleErrors.length
+  // The made-up ratings of src/app/dev/admin/feedback/lesson-fixtures.ts over the real course.
+  const AREAS = ['01 Introduction', '02 Marketing Fundamentals', '03 Video Ads I', '04 Video Ads II', '05 Static Ads',
+    '06 AI Ads + Content', '07 Creative Strategy', '08 How To Land Clients']
+  const UNRATED_AREAS = ['04 Video Ads II', '06 AI Ads + Content', '08 How To Land Clients']
+  const open = (query, size) => go(`/dev/admin/feedback/lessons${query}`, size)
+  const ready = () => page.waitForFunction(() => /Updated \d\d:\d\d/.test(document.body.innerText), { timeout: 30000 })
+  const headings = () => page.$$eval('main section h2', (hs) => hs.map((x) => x.textContent.replace(/\s+/g, ' ').trim()))
+  const stats = () => page.$$eval('main .stat-value', (vs) => vs.map((v) => v.textContent.trim()))
+  const lessonRow = (id) => page.$(`main li[data-lesson="${id}"]`)
+  const comments = (id) => page.$$eval(`main li[data-lesson="${id}"] ul li p:last-child`, (ps) => ps.map((x) => x.textContent.trim()))
+
+  for (const size of SIZES) {
+    const [w, h] = size
+    {
+      const label = `lesson feedback, full, ${w}x${h}`
+      console.log(`\n${label}`)
+      await open('', size)
+      await ready()
+      expect(JSON.stringify(await headings()) === JSON.stringify(AREAS), `${label}: the 8 areas in route order`, JSON.stringify(await headings()))
+      expect(JSON.stringify(await stats()) === JSON.stringify(['4.0 of 5', '17', '9 of 135']),
+        `${label}: the three numbers: the average of every rating, 17 ratings, 9 of the 135 video lessons rated`, JSON.stringify(await stats()))
+      const text = await bodyText()
+      expect(text.includes('Since Mon 19 Oct · Updated 11:00'), `${label}: since the switch, and when it was read (Croatia time)`)
+      expect(text.includes('4.0 average · 10 ratings · 3 of 8 lessons rated'), `${label}: Introduction's own line`)
+      const unrated = await page.$$eval('main section', (ss) => ss.filter((x) => x.textContent.includes('No lesson in this area has a rating yet.')).map((x) => x.querySelector('h2').textContent.replace(/\s+/g, ' ').trim()))
+      expect(JSON.stringify(unrated) === JSON.stringify(UNRATED_AREAS), `${label}: an area with no rating says so in one line`, JSON.stringify(unrated))
+      const welcome = await lessonRow('a1l01')
+      expect(!!welcome && (await welcome.evaluate((r) => r.textContent.includes('4.0') && r.textContent.includes('7 ratings'))), `${label}: the welcome lesson: 4.0 from 7 ratings`)
+      expect(JSON.stringify(await comments('a1l01')) === JSON.stringify(['I already knew all of this from Whop.', 'Fine.', 'Too long for a welcome. Cut it to 3 minutes.']),
+        `${label}: its 3 newest comments, the edited one first`, JSON.stringify(await comments('a1l01')))
+      const third = await lessonRow('a1l03')
+      expect(!!third && (await third.evaluate((r) => r.textContent.includes('No ratings yet.'))), `${label}: a lesson with none says "No ratings yet."`)
+      expect(text.includes('s-noname@example.com') && text.includes('A student no longer on file'), `${label}: a student with no name shows the email, a student gone says so`)
+      const small = await smallTaps()
+      expect(small.length === 0, `${label}: every button and link drawn as one is 44px or taller`, JSON.stringify(small.slice(0, 4)))
+      await check(label, `feedback-full-${w}`)
+    }
+    for (const [state, wait, want] of [
+      ['empty', ready, 'No ratings yet.'],
+      ['loading', () => page.waitForSelector('main [role="status"]'), 'Loading'],
+      ['error', () => page.waitForFunction(() => document.body.innerText.includes("Couldn't load lesson feedback.")), "Couldn't read the lesson ratings, so nothing is shown. Try again."],
+      ['unplaced', ready, "2 ratings are for a lesson the course list didn't have"],
+      ['stray', ready, "students can't rate this lesson now"],
+    ]) {
+      const label = `lesson feedback, ${state}, ${w}x${h}`
+      console.log(`\n${label}`)
+      await open(`?state=${state}`, size)
+      await wait()
+      expect((await bodyText()).includes(want), `${label}: "${want}"`)
+      if (state === 'empty') {
+        expect(JSON.stringify(await stats()) === JSON.stringify(['None yet', '0', '0 of 135']), `${label}: None yet, 0, 0 of 135`, JSON.stringify(await stats()))
+        expect((await headings()).length === 0, `${label}: no area list when nothing is rated`)
+      }
+      if (state === 'error') expect(!(await bodyText()).includes('of 135'), `${label}: no numbers at all, never zeros`)
+      await check(label, `feedback-${state}-${w}`)
+    }
+  }
+
+  console.log('\nlesson feedback: Show all, and a Refresh that fails')
+  {
+    await open('', [1280, 720])
+    await ready()
+    const more = await page.evaluateHandle(() => [...document.querySelectorAll('main li[data-lesson="a1l01"] button')].find((b) => b.textContent.trim() === 'Show all 6 comments') ?? null)
+    expect(!(await isNull(more)) && (await more.evaluate((b) => b.getAttribute('aria-expanded'))) === 'false', '"Show all 6 comments", collapsed')
+    await press(more)
+    await sleep(150)
+    expect((await comments('a1l01')).length === 6 && (await more.evaluate((b) => b.textContent.trim() === 'Show fewer' && b.getAttribute('aria-expanded') === 'true')),
+      'pressed: all 6, newest first, and the button says "Show fewer"', JSON.stringify(await comments('a1l01')))
+    await check('lesson feedback, every comment shown, 1280x720', 'feedback-all-comments-1280')
+    await press(more)
+    await sleep(150)
+    expect((await comments('a1l01')).length === 3, 'pressed again: the 3 newest')
+
+    await open('?reload=fail', [1280, 720])
+    await ready()
+    await press(await button('Refresh'))
+    await page.waitForFunction(() => document.body.innerText.includes("Couldn't refresh the list, so it may be out of date. Press Refresh."), { timeout: 10000 })
+    expect(JSON.stringify(await headings()) === JSON.stringify(AREAS), 'a Refresh that fails: its own line, and the page stays as it was')
+    await check('lesson feedback, a failed Refresh, 1280x720', 'feedback-refresh-failed-1280')
+    const reads = await calls()
+    expect(reads.length === 2 && reads.every((c) => c.name === 'loadLessonFeedback'), 'two reads: the load and the Refresh', JSON.stringify(reads))
+
+    await open('?state=error', [1280, 720])
+    await page.waitForFunction(() => document.body.innerText.includes("Couldn't load lesson feedback."))
+    await press(await button('Retry'))
+    await sleep(600)
+    expect((await calls()).length === 2 && (await bodyText()).includes("Couldn't load lesson feedback."), 'Retry asks again, and a second failure still says so', JSON.stringify(await calls()))
+  }
+  const errs = newConsoleErrors(from)
+  expect(errs.length === 0, 'lesson feedback: no error in the browser console', errs.slice(0, 3).join(' || '))
 }
 
 // ── Every page the run opened ──────────────────────────────────────────────

@@ -9,6 +9,8 @@ import { useStudent } from "@/contexts/StudentContext";
 import { LessonPlayer } from "@/components/world/LessonPlayer";
 import { LessonText } from "@/components/world/LessonText";
 import { ActionItemBlock } from "@/components/world/ActionItemBlock";
+import { LessonRating } from "@/components/world/LessonRating";
+import { ratingRefusal } from "@/lib/world/lesson-rating";
 import { useLessonTransport } from "@/lib/world/useLessonTransport";
 import { parseLessonText } from "@/lib/world/lesson-text";
 import { Panel } from "@/components/world/AreaScreen";
@@ -71,6 +73,15 @@ import u from "@/components/world/world-ui.module.css";
  * lesson with no video yet, map-model.ts) has "Next lesson" on from the start,
  * so it never holds a student (Loom 2, 2026-10-16).
  *
+ * HOW WAS THIS LESSON? (admin rebuild 2, D10). Under the foot, a video lesson
+ * the student has finished gets the rating block (LessonRating.tsx): five
+ * stars and an optional comment, saved through POST /api/student/rate-lesson,
+ * then shown with Edit. "Finished" is the map's own: the video watched and
+ * the lesson done (watchedLessonIds and completedLessonIds), so an action
+ * item asks for its hand-in first. A setup step, the Ad Bounty lesson and a
+ * lesson not finished get nothing. The rule is ratingRefusal in
+ * src/lib/world/lesson-rating.ts, which the route refuses by too.
+ *
  * AN ADDRESS THAT DOESN'T MATCH THE COURSE says "That lesson isn't here.": a
  * lesson id the course doesn't have, or one filed under another place than
  * the address names. Its Back goes to that place, or to the map when the
@@ -100,8 +111,16 @@ export function LessonScreen({
   const anyLessonFinishes = useContext(AnyLessonFinishesContext);
   // While the course is loading, or did not arrive, the host's card says so.
   const silent = mapIsSilent(status);
-  const { completedLessonIds, watchedLessonIds, markWatched, completions, saveDiscordLink, toggleLessonAction } =
-    useStudent();
+  const {
+    completedLessonIds,
+    watchedLessonIds,
+    markWatched,
+    completions,
+    saveDiscordLink,
+    toggleLessonAction,
+    lessonRatings,
+    rateLesson,
+  } = useStudent();
   const [justCompleted, setJustCompleted] = useState<string[] | null>(null);
   // The lesson the player was put up for. It stays up for that lesson.
   const [playerFor, setPlayerFor] = useState<string | null>(null);
@@ -175,6 +194,8 @@ export function LessonScreen({
   // an action item once its video is watched: its hand-in stays open (isPassed).
   const finishable = anyLessonFinishes || ((model && finishableIn(model, lesson.id)) ?? canFinishInApp(lesson));
   const nextOn = isPassed(lesson, done, watchedLessonIds.has(lessonId)) || !finishable;
+  // How was this lesson?: a video lesson, not the Ad Bounty's, finished as the map counts it.
+  const rateable = ratingRefusal(lesson, { watched: watchedLessonIds.has(lessonId), done }) === null;
 
   // The eyebrow. `position` stays 0 for a lesson that is not one of the place's
   // counting lessons, and the eyebrow then names the place.
@@ -305,6 +326,15 @@ export function LessonScreen({
             )}
           </div>
         </div>
+      )}
+
+      {rateable && (
+        <LessonRating
+          // Per lesson, so nothing picked carries over; apart from the hand-in's key beside it.
+          key={`rating-${lesson.id}`}
+          saved={lessonRatings.get(lesson.id) ?? null}
+          onSave={(stars, comment) => rateLesson(lesson.id, stars, comment)}
+        />
       )}
     </Panel>
   );

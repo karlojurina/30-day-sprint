@@ -120,6 +120,8 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
       id: none, region_id: none, type: () => "watch", title: none, day: none, sort_order: () => 0,
       requires_action: () => false, counts_toward_progress: () => true, whop_lesson_id: none,
       is_gate: () => false, duration_seconds: none,
+      // Read by the rating route and the lesson feedback page (admin rebuild 2, WI-7): the Ad Bounty's key.
+      feature_key: none,
     },
     unique: [["id"]],
   },
@@ -127,6 +129,13 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
     columns: {
       id: newId, student_id: none, lesson_id: none, completed_at: now,
       action_completed_at: none, skipped_at: none, discord_message_link: none,
+    },
+    unique: [["student_id", "lesson_id"]],
+  },
+  // v75's columns (admin rebuild 2, WI-7: the rating route and the lesson feedback page).
+  student_lesson_ratings: {
+    columns: {
+      id: newId, student_id: none, lesson_id: none, stars: none, comment: none, created_at: now, updated_at: now,
     },
     unique: [["student_id", "lesson_id"]],
   },

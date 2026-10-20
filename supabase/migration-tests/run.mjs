@@ -4948,5 +4948,195 @@ console.log('\n=== 30. the admin spot check (diagnostics/admin-today-spotcheck.s
   await d.close()
 }
 
+// ════════════════════════════════════════════════════════════════════
+// 31: v110 and its undo (admin rebuild 2, D10, lane WI-7). v75 gave a
+// student two write policies on student_lesson_ratings, so their own browser
+// session could rate any lesson past POST /api/student/rate-lesson. On a
+// database of its own (base.sql and the chain v92 to v101), with the
+// Supabase seam of section 25 and v75's trigger, row level security and four
+// policies lifted verbatim. What a student's session could send is run for
+// real under SET ROLE authenticated, inside a transaction rolled back.
+// ════════════════════════════════════════════════════════════════════
+console.log('\n=== 31. v110: students read their lesson ratings and write none; its undo ===')
+{
+  const V75F = '2026_v75_lesson_ratings.sql'
+  const v110 = read('2026_v110_lesson_ratings_route_only.sql')
+  const undo110 = undoText('2026_v110_undo.sql')
+  const WRITES = ['students_insert_own_ratings', 'students_update_own_ratings']
+  const READS = ['students_select_own_ratings', 'team_select_all_ratings']
+  const policyOf = n => lift(V75F, `create policy "${n}"`)
+  const blockOf = n => `${lift(V75F, `drop policy if exists "${n}"`)}\n${policyOf(n)}`
+  note(WRITES.every(n => undo110.includes(blockOf(n))),
+       "the undo makes v75's two write policies from v75's own text, word for word, each with its drop-if-exists")
+  const LOCK110 = 'lock table public.student_lesson_ratings in access exclusive mode;'
+  const MARK = '-- ─────────────── 2 to 4. The two write policies go ───────────────'
+  const FIRST = 'v110 ran now: 2 dropped. Students read their own ratings and write none; the server writes them.'
+  const AGAIN = 'v110 was already in place. This run changed nothing.'
+
+  const d = await chainDatabase()
+  // The seam, as on Supabase (section 25).
+  await d.exec(`
+    grant usage on schema public, auth to anon, authenticated, service_role;
+    grant all on all tables in schema public to authenticated, service_role;
+    alter role service_role bypassrls;`)
+  for (const sql of [lift(V75F, 'create or replace function bump_student_lesson_ratings_updated_at()', '$$;'),
+                     lift(V75F, 'create trigger trg_bump_student_lesson_ratings_updated_at'),
+                     lift(V75F, 'alter table student_lesson_ratings enable row level security;'),
+                     ...[...READS, ...WRITES].map(policyOf)]) {
+    await d.exec(sql)
+  }
+  await d.exec(`insert into team_members (id, email) values ('${TEAM_ID}', 'team@example.test');
+    insert into student_lesson_ratings (student_id, lesson_id, stars, comment) values
+      ('${UID(1)}', 'l001', 4, 'Fine.'), ('${UID(2)}', 'l001', 2, null), ('${UID(2)}', 'l002', 5, 'Great.');`)
+
+  const ratingPolicies = async dd => asJson((await dd.query(`
+    select p.policyname::text as n, p.permissive, p.roles::text as roles, p.cmd, p.qual, p.with_check,
+           obj_description(pol.oid, 'pg_policy') as comment
+      from pg_policies p
+      join pg_policy pol on pol.polrelid = 'public.student_lesson_ratings'::regclass and pol.polname = p.policyname
+     where p.schemaname = 'public' and p.tablename = 'student_lesson_ratings'
+     order by 1`)).rows)
+  const without = (json, names) => asJson(JSON.parse(json).filter(p => !names.includes(p.n)))
+  // The whole catalogue (section 25's catalogOf) with this table's policies left out, and every row.
+  const restOf = async dd => {
+    const c = JSON.parse(await catalogOf(dd))
+    c.policies = c.policies.filter(p => p.t !== 'student_lesson_ratings')
+    return asJson(c) + await rowsOf(dd)
+  }
+  const ownRead = `select lesson_id, stars from student_lesson_ratings order by lesson_id`
+  const studentOneRows = [{ lesson_id: 'l001', stars: 4 }]
+  {
+    const s = (await d.query(`select (select relrowsecurity from pg_class where oid = 'public.student_lesson_ratings'::regclass) as rls,
+        has_table_privilege('authenticated', 'public.student_lesson_ratings', 'insert') as granted,
+        (select count(*)::int from pg_policies where tablename = 'student_lesson_ratings') as policies`)).rows[0]
+    note(s.rls && s.granted && s.policies === 4,
+         "harness: student_lesson_ratings as v75 left it: row level security on, students granted the table, v75's 4 policies", asJson(s))
+  }
+  const policiesBefore = await ratingPolicies(d)
+  const restBefore = await restOf(d)
+  const stateBefore = await stateOf(d)
+
+  // ── the hole, before v110 ──
+  {
+    const ins = await asStudent(d, 1, `insert into student_lesson_ratings (student_id, lesson_id, stars, comment) values ('${UID(1)}', 'l064', 5, 'never watched it')`)
+    const upd = await asStudent(d, 1, `update student_lesson_ratings set stars = 1, comment = repeat('x', 5000) where lesson_id = 'l001'`)
+    const other = await asStudent(d, 1, `insert into student_lesson_ratings (student_id, lesson_id, stars) values ('${UID(2)}', 'l003', 1)`)
+    const read = await asStudent(d, 1, ownRead)
+    note(ins.ok && ins.n === 1 && upd.ok && upd.n === 1,
+         'before v110 (the hole): a student, with their own session, rates a lesson they never finished and rewrites their rating with a 5000-character comment',
+         `insert ${told(ins)}, update ${upd.n}`)
+    note(rlsRefused(other) && read.ok && sameJson(read.rows, studentOneRows),
+         '...but never for another student, and reads only their own: the policies apply, as the student', `${told(other)}; ${asJson(read.rows)}`)
+    note(await stateOf(d) === stateBefore, '...and every attempt above was rolled back: nothing changed')
+  }
+
+  // ── its lock, its refusals ──
+  {
+    const c = await d.clone()
+    const rr = await runFile(c, probeAt(probeAt(v110, MARK, 'v110_locked', lockedIn('AccessExclusiveLock')),
+                                        MARK, 'v110_timeout', `current_setting('lock_timeout')`))
+    const locked = await probed(c, 'v110_locked'), timeout = await probed(c, 'v110_timeout')
+    await c.close()
+    note(v110.includes(MARK) && rr.ok && locked.v === 'student_lesson_ratings' && timeout.v === '5s' && timeout.after === '0',
+         'v110 holds student_lesson_ratings in ACCESS EXCLUSIVE before it reads anything, with lock_timeout 5s, and the setting ends with its commit',
+         `${locked.v} [${timeout.v}, after ${timeout.after}] ${rr.ok ? '' : told(rr)}`)
+    const c2 = await d.clone()
+    const was = await stateOf(c2)
+    const busy = await runFile(c2, v110.replace(LOCK110, TIMED_OUT))
+    note(v110.includes(LOCK110) && busy.code === '55P03'
+         && busy.said.includes('so v110 did not start. Nothing was changed. Paste it again in a minute.') && await stateOf(c2) === was,
+         'v110 with its lock timing out (55P03, raised in place of the lock): "Nothing was changed. Paste it again in a minute.", and nothing changed', told(busy))
+    await c2.close()
+  }
+  for (const [what, breakIt, sentence] of [
+    ['row level security off', `alter table student_lesson_ratings disable row level security;`,
+     'Row level security is off on student_lesson_ratings'],
+    ['the table missing', `alter table student_lesson_ratings rename to student_lesson_ratings_aside;`,
+     'student_lesson_ratings is missing'],
+    ['a third write policy under another name', `create policy "ratings_delete_own" on student_lesson_ratings for delete to authenticated using (true);`,
+     'These policies still write to student_lesson_ratings after this file: "ratings_delete_own" (DELETE).'],
+  ]) {
+    const c = await d.clone()
+    const broke = await runFile(c, breakIt)
+    const was = await stateOf(c)
+    const rr = await runFile(c, v110)
+    note(broke.ok && stopped(rr, sentence) && await stateOf(c) === was,
+         `v110 refuses with ${what}: it says so, and nothing changed (the two v75 write policies included)`, broke.ok ? told(rr) : `the break failed: ${told(broke)}`)
+    await c.close()
+  }
+
+  // ── v110 ──
+  let r = await runFile(d, v110)
+  note(r.ok && r.rows[0]?.v110 === FIRST && r.rows.length === 3
+       && sameJson(r.rows.slice(1).map(x => [x.policy, x.command, x.v110]), [['students_select_own_ratings', 'SELECT', 'kept'], ['team_select_all_ratings', 'SELECT', 'kept']]),
+       'v110 first run: "2 dropped", then the two read policies, kept', told(r))
+  const policiesAfter = await ratingPolicies(d)
+  note(policiesAfter === without(policiesBefore, WRITES) && JSON.parse(policiesAfter).every(p => p.cmd === 'SELECT'),
+       "v110: the student INSERT and UPDATE policies are gone, and the student's and the team's SELECT are as they were, character for character",
+       JSON.parse(policiesAfter).map(p => `${p.n}:${p.cmd}`).join(' '))
+  note(await restOf(d) === restBefore, '...and nothing else differs: every other policy, table, index, grant, function and schema, and every row')
+
+  // ── after v110, as a student, the team and the server ──
+  {
+    const stateAfterV110 = await stateOf(d)
+    const ins = await asStudent(d, 1, `insert into student_lesson_ratings (student_id, lesson_id, stars) values ('${UID(1)}', 'l064', 5)`)
+    const ups = await asStudent(d, 1, `insert into student_lesson_ratings (student_id, lesson_id, stars) values ('${UID(1)}', 'l001', 1)
+                                       on conflict (student_id, lesson_id) do update set stars = excluded.stars`)
+    const upd = await asStudent(d, 1, `update student_lesson_ratings set stars = 1 where lesson_id = 'l001'`)
+    const del = await asStudent(d, 1, `delete from student_lesson_ratings where lesson_id = 'l001'`)
+    note(rlsRefused(ins) && rlsRefused(ups) && upd.ok && upd.n === 0 && del.ok && del.n === 0,
+         'after v110: a student cannot insert or upsert a rating (row level security, 42501), and their update and delete touch no row',
+         `${told(ins)}; upsert ${ups.code}; update ${upd.n}, delete ${del.n}`)
+    const read = await asStudent(d, 1, ownRead)
+    note(read.ok && sameJson(read.rows, studentOneRows), 'after v110: a student still reads their own ratings, and no one else\'s', asJson(read.rows))
+    const team = await asRole(d, 'authenticated', `select count(*)::int as n from student_lesson_ratings`, { uid: TEAM_ID })
+    note(team.ok && team.rows[0]?.n === 3, 'after v110: the team still reads every rating', told(team))
+    const svc = await asRole(d, 'service_role', [
+        `insert into student_lesson_ratings (student_id, lesson_id, stars, comment) values ('${UID(1)}', 'l002', 5, 'Saved by the route.')
+           on conflict (student_id, lesson_id) do update set stars = excluded.stars, comment = excluded.comment`,
+        `insert into student_lesson_ratings (student_id, lesson_id, stars) values ('${UID(1)}', 'l001', 3)
+           on conflict (student_id, lesson_id) do update set stars = excluded.stars`],
+      { check: `select lesson_id, stars, comment, updated_at > created_at as edited from student_lesson_ratings where student_id = '${UID(1)}' order by 1` })
+    note(svc.ok && sameJson(svc.checked, [{ lesson_id: 'l001', stars: 3, comment: 'Fine.', edited: true }, { lesson_id: 'l002', stars: 5, comment: 'Saved by the route.', edited: false }]),
+         "after v110: the service role (the route) still adds and changes ratings with the route's upsert, and v75's trigger moves updated_at on a change",
+         svc.ok ? asJson(svc.checked) : told(svc))
+    note(await stateOf(d) === stateAfterV110, '...and every one of those statements was rolled back: no row changed')
+  }
+
+  // ── run again ──
+  {
+    const was = await stateOf(d)
+    const rr = await runFile(d, v110)
+    note(rr.ok && rr.rows[0]?.v110 === AGAIN && rr.rows.length === 3 && await stateOf(d) === was,
+         'v110 run again: "already in place", and every policy, grant and row unchanged', told(rr))
+  }
+
+  // ── the undo ──
+  {
+    const c = await d.clone()
+    const rr = await runFile(c, probeAt(undo110, 'drop policy if exists "students_insert_own_ratings"', 'u110_timeout', `current_setting('lock_timeout')`))
+    const timeout = await probed(c, 'u110_timeout')
+    await c.close()
+    note(rr.ok && timeout.v === '5s' && timeout.after === '0', 'the undo runs with lock_timeout 5s, and the setting ends with its commit', `${timeout.v}, after ${timeout.after}`)
+  }
+  r = await runFile(d, undo110)
+  note(r.ok && sameJson(r.rows.map(x => [x.policy, x.command]), [['students_insert_own_ratings', 'INSERT'], ['students_select_own_ratings', 'SELECT'],
+                                                                ['students_update_own_ratings', 'UPDATE'], ['team_select_all_ratings', 'SELECT']]),
+       'the undo runs and lists the four policies, as before v110', told(r))
+  note(await ratingPolicies(d) === policiesBefore && await stateOf(d) === stateBefore,
+       'after the undo every policy on the table is back exactly as v75 made it (command, roles, using, check), and nothing else differs from before v110')
+  {
+    const back = await asStudent(d, 1, `insert into student_lesson_ratings (student_id, lesson_id, stars) values ('${UID(1)}', 'l064', 5)`)
+    note(back.ok && back.n === 1, 'after the undo a student can write their own rating again: it reopens the door, as its header says', told(back))
+    const was = await stateOf(d)
+    const again = await runFile(d, undo110)
+    note(again.ok && await stateOf(d) === was, 'a second undo changes nothing', told(again))
+    r = await runFile(d, v110)
+    note(r.ok && r.rows[0]?.v110 === FIRST && await ratingPolicies(d) === policiesAfter,
+         'v110 applies again after its undo, with the same policies as its first run', told(r))
+  }
+  await d.close()
+}
+
 console.log(`\n${'='.repeat(60)}\n  PASS ${ok.length}   FAIL ${fail.length}`)
 if (fail.length) { console.log('\nFAILURES:'); fail.forEach(f => console.log('  - ' + f)); process.exit(1) }

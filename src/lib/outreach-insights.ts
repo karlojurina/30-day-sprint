@@ -38,6 +38,12 @@
  * created on created_at, send-based metrics on completed_at,
  * dismissals on dismissed_at.
  *
+ * The tasks reset (admin rebuild 2, D7; migration v109). Handed
+ * `tasksFloorIso` (admin_config.tasks_reset_at), only the tasks created on
+ * or after it are read: the Tasks insights page counts the new program's
+ * tasks, as its queue lists them, and the reset's own dismissals never
+ * show. Without it (the Templates strip) every task counts, as before.
+ *
  * Excluded from all outreach numbers (reported in `info` instead):
  * tasks on admin-only templates (discount reviews — no DM exists) and
  * tasks with no template link.
@@ -80,7 +86,7 @@ export const FAMILY_SUCCESS_LABEL: Record<OutreachFamily, string> = {
   nolessons: "started a lesson within 72h",
   noship: "shipped an action within 72h",
   pace: "came back within 72h (dormant sends only)",
-  canceling: "still subscribed, cancel withdrawn",
+  canceling: "still a member, cancel withdrawn",
   custom: "came back within 72h (dormant sends only)",
   event: "not graded",
 };
@@ -169,6 +175,8 @@ export interface OutreachInsights {
   since: string | null;
   /** The course switch, or null while the old course is live. */
   reset_at: string | null;
+  /** The tasks reset this was computed from (tasksFloorIso), or null for every task. */
+  tasks_floor: string | null;
   computed_at: string;
 }
 
@@ -243,10 +251,11 @@ function blankAcc(): Acc {
 
 export async function computeOutreachInsights(
   supabase: SupabaseClient,
-  opts: { sinceIso?: string | null } = {},
+  opts: { sinceIso?: string | null; tasksFloorIso?: string | null } = {},
 ): Promise<OutreachInsights> {
   const since = opts.sinceIso ?? null;
   const sinceMs = since ? new Date(since).getTime() : null;
+  const floor = opts.tasksFloorIso ?? null;
 
   // tasks is a narrow queue table (no blob columns) — select * so this
   // works both before and after the v85 outcome migration (an explicit
@@ -258,7 +267,9 @@ export async function computeOutreachInsights(
   // against the emptied table would be a believable wrong answer.
   const [tasksRes, templatesRes, resetAt] = await Promise.all([
     fetchAllRowsPaginated<TaskLite>(() =>
-      supabase.from("tasks").select("*").order("id"),
+      floor === null
+        ? supabase.from("tasks").select("*").order("id")
+        : supabase.from("tasks").select("*").gte("created_at", floor).order("id"),
     ),
     fetchAllRowsPaginated<TemplateLite>(() =>
       supabase
@@ -639,6 +650,7 @@ export async function computeOutreachInsights(
     },
     since,
     reset_at: resetAt,
+    tasks_floor: floor,
     computed_at: new Date().toISOString(),
   };
 }

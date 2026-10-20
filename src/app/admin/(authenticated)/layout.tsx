@@ -32,6 +32,9 @@ const REBUILT_PAGES: readonly string[] = [
   // WI-2, Dashboard:
 
   // WI-5 and WI-6, Tasks, All students, student detail, Student journey:
+  "/admin/tasks",
+  "/admin/students",
+  "/admin/journey",
 
   // WI-7, Lesson feedback:
 

@@ -884,14 +884,14 @@ export const METRICS: Record<import("@/types/database").ConditionMetric, MetricD
   },
   membership_status: {
     id: "membership_status",
-    label: "Subscription status",
+    label: "Membership status",
     input: "enum",
     enumValues: ["active", "canceled", "past_due", "expired"] as const,
     describe: (c) => {
       if ("value" in c && typeof c.value === "string") {
-        return `Subscription status ${c.op === "is" ? "is" : "is not"} ${c.value}`;
+        return `Membership status ${c.op === "is" ? "is" : "is not"} ${c.value}`;
       }
-      return "Subscription status";
+      return "Membership status";
     },
   },
   // ─── Pace metrics ───

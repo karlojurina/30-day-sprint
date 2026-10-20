@@ -4,7 +4,7 @@
  * page, in every state, at a phone's width and two desktop widths. Today,
  * which this file also drew, was removed in admin rebuild 2 (D2).
  *
- *   node world-tests/admin-pages.mjs [--only routes,frame,signin,thirty]
+ *   node world-tests/admin-pages.mjs [--only routes,frame,signin,thirty,tasks,people]
  *
  * Opens BASE_URL (default http://localhost:3226): a development server
  * started for the run in the app root, `PORT=3226 npx next dev`. This script
@@ -38,6 +38,17 @@
  *           reject, a failed reload (its own line, the decided row's buttons
  *           off), Mark code added, ?student=; the 4 tabs whole on a phone,
  *           To decide oldest first, every tap 44px
+ *   tasks   /dev/admin/tasks (admin rebuild 2, D7): To do, Sent, Dismissed
+ *           and Archived full, before the reset (no Archived), empty, loading
+ *           and error; the Archived rows read only, with the reset's words;
+ *           then by clicks: Mark sent, Dismiss (a reason is asked for), Move
+ *           to To do, Replied, a task's detail, the search; every tap 44px
+ *   people  /dev/admin/tasks/insights, /dev/admin/students, a student's page
+ *           and /dev/admin/journey (D7 to D9), in every state, with what each
+ *           says when a read failed; then by clicks: the insights' ranges, the
+ *           students' filters and search, the student's ticks and areas, the
+ *           journey's drawer (opened by a card, closed by Escape); every tap
+ *           44px, and no bold word glued to the next one
  *
  * Every state at 390x844, 1280x720 and 1440x900 (a few click states at one
  * or two of them), and each one is measured. It fails on: a horizontal
@@ -116,7 +127,7 @@ if (wanted('routes')) {
   for (const s of distinct.slice(0, 40)) console.log(`       "${s}"`)
 }
 
-const needBrowser = ['frame', 'signin', 'thirty'].some(wanted)
+const needBrowser = ['frame', 'signin', 'thirty', 'tasks', 'people'].some(wanted)
 if (!needBrowser) finish()
 
 fs.mkdirSync(OUT, { recursive: true })
@@ -866,6 +877,355 @@ if (wanted('thirty')) {
   }
   const errs = newConsoleErrors(from)
   expect(errs.length === 0, '30% off: no error in the browser console', errs.slice(0, 3).join(' || '))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// tasks and people: admin rebuild 2's lane WI-5 and WI-6 (Tasks, its
+// insights, All students, a student's page, the Student journey), on their
+// dev pages (src/app/dev/admin/fixtures-people.ts, made-up people only)
+// ════════════════════════════════════════════════════════════════════════════
+const peopleCalls = () => page.evaluate(() => (window.__peopleCalls ?? []).map((c) => ({ name: c.name, args: c.args })))
+const rowWith = (text) => page.evaluateHandle((t) => [...document.querySelectorAll('.list-row')].find((r) => r.textContent.includes(t)) ?? null, text)
+/** Each tab's words, its label and its count apart: "To do 6". */
+const tabTexts = () => page.$$eval('[role="tab"]', (ts) => ts.map((t) => [...t.childNodes].map((n) => n.textContent.trim()).filter(Boolean).join(' ')))
+/** Bold words glued to the next word ("switcharchived"): a space lost in the JSX. */
+const gluedBold = () => page.evaluate(() => [...document.querySelectorAll('main strong, main b')]
+  .filter((b) => { const n = b.nextSibling; return n && n.nodeType === 3 && /^[A-Za-z0-9]/.test(n.textContent) })
+  .map((b) => `${b.textContent}|${b.nextSibling.textContent.slice(0, 12)}`))
+const waitText = (text, timeout = 15000) => page.waitForFunction((t) => document.body.innerText.includes(t), { timeout }, text)
+
+if (wanted('tasks')) {
+  const from = consoleErrors.length
+  const ready = () => page.waitForSelector('[role="tablist"]', { timeout: 30000 })
+  for (const size of SIZES) {
+    const [w, h] = size
+    for (const [tab, query] of [['todo', ''], ['sent', '&tab=sent'], ['dismissed', '&tab=dismissed'], ['archived', '&tab=archived']]) {
+      const label = `Tasks, full, ${tab}, ${w}x${h}`
+      console.log(`\n${label}`)
+      await go(`/dev/admin/tasks?state=full${query}`, size)
+      await ready()
+      await check(label, `tasks-full-${tab}-${w}`)
+    }
+    {
+      const label = `Tasks, before the reset, ${w}x${h}`
+      console.log(`\n${label}`)
+      await go('/dev/admin/tasks?reset=none', size)
+      await ready()
+      const tabs = await tabTexts()
+      expect(JSON.stringify(tabs) === JSON.stringify(['To do 6', 'Sent 3', 'Dismissed 5']), `${label}: no Archived tab, every task on the three lists`, JSON.stringify(tabs))
+      await check(label, `tasks-no-reset-${w}`)
+    }
+    for (const state of ['empty', 'loading', 'error']) {
+      const label = `Tasks, ${state}, ${w}x${h}`
+      console.log(`\n${label}`)
+      await go(`/dev/admin/tasks?state=${state}`, size)
+      if (state === 'loading') {
+        await page.waitForSelector('.animate-pulse')
+        expect((await page.$('.animate-spin')) === null, `${label}: skeleton rows, no spinner`)
+      } else if (state === 'error') {
+        await page.waitForSelector('[role="alert"]')
+        const text = await page.$eval('[role="alert"]', (e) => e.textContent)
+        expect(text.includes("Couldn't load the tasks.") && text.includes('Retry'), `${label}: the error sentence and Retry`, text)
+      } else {
+        await ready()
+        expect((await bodyText()).includes('Nothing to do.'), `${label}: "Nothing to do."`)
+      }
+      await check(label, `tasks-${state}-${w}`)
+    }
+  }
+
+  console.log('\nTasks: the reset, To do and Archived')
+  {
+    await go('/dev/admin/tasks')
+    await ready()
+    expect(JSON.stringify(await tabTexts()) === JSON.stringify(['To do 6', 'Sent 2', 'Dismissed 2', 'Archived 4']),
+      'after the reset: To do 6, Sent 2, Dismissed 2, Archived 4', JSON.stringify(await tabTexts()))
+    const text = await bodyText()
+    expect(text.includes('Open tasks made since the reset on Tue 20 Oct, 09:00 (Croatia time)') && text.includes('New program since Tue 20 Oct'),
+      'To do says its tasks were made since the reset, in Croatia time')
+    const heads = await page.$$eval('main section h2', (hs) => hs.map((h) => [...h.childNodes].map((n) => n.textContent.trim()).filter(Boolean).join(' ')))
+    expect(JSON.stringify(heads) === JSON.stringify(['Canceling: save first 1', 'Cancel path 1', 'At risk 2', 'Events and wins 2']),
+      'the tiers: canceling first, then cancel path, at risk, events and wins', JSON.stringify(heads))
+    expect((await page.$$eval('.list-row', (rs) => rs.map((r) => r.querySelector('button')?.textContent))).join() === 'Sofia Marin,Priya Raman,Omar Haddad,Nora Brandt,Maya Lindqvist,Maximilian Featherstonehaugh-Smythe',
+      'the longest wait first in each tier')
+    const small = await smallTaps()
+    expect(small.length === 0, 'To do: every button and tab 44px tall or more', JSON.stringify(small.slice(0, 4)))
+    await page.$$eval('[role="tab"]', (ts) => ts.find((t) => t.textContent.startsWith('Archived')).click())
+    await sleep(200)
+    const archived = await page.$$eval('.list-row', (rs) => rs.map((r) => ({
+      buttons: [...r.querySelectorAll('button')].map((b) => b.textContent.trim()),
+      text: r.textContent,
+    })))
+    expect(archived.length === 4 && archived.every((r) => r.buttons.length === 1),
+      'Archived: four rows, read only: the name opens the task, and nothing else is a button', JSON.stringify(archived.map((r) => r.buttons)))
+    expect(archived.some((r) => r.text.includes('Dismissed Tue 20 Oct by the reset for the new program. Before it: checked twice'))
+      && archived.some((r) => r.text.includes('Sent Mon 12 Oct, no reply')),
+      'an archived row says how it was closed: by the reset (with the note before it), or sent with its reply')
+    await press(await button('Leo Hartmann'))
+    await page.waitForSelector('[role="dialog"]')
+    const dialogButtons = await page.$$eval('[role="dialog"] button', (bs) => bs.map((b) => b.textContent.trim()))
+    expect(JSON.stringify(dialogButtons) === JSON.stringify(['Close']), 'an archived task\'s detail has no Copy DM, Mark sent, Dismiss or Move to To do', JSON.stringify(dialogButtons))
+    for (const size of SIZES) {
+      await viewport(size)
+      await check(`Tasks, an archived task's detail, ${size.join('x')}`, `tasks-archived-detail-${size[0]}`)
+    }
+    await viewport([1280, 720])
+    await press(await button('Close'))
+  }
+
+  console.log('\nTasks: Mark sent, Dismiss, Move to To do, Replied')
+  {
+    await go('/dev/admin/tasks')
+    await ready()
+    await press(await buttonIn(await rowWith('Omar Haddad'), 'Mark sent'))
+    await waitText('Marked the DM to Omar Haddad as sent.')
+    await page.waitForFunction(() => [...document.querySelectorAll('[role="tab"]')].some((t) => t.textContent === 'To do5'))
+    expect((await peopleCalls()).some((c) => c.name === 'transition' && c.args[0] === 't-04' && c.args[1] === 'completed'),
+      'Mark sent on Omar: transition to completed, and To do reads 5')
+    await press(await buttonIn(await rowWith('Nora Brandt'), 'Dismiss'))
+    await page.waitForSelector('[role="dialog"] textarea')
+    await press(await page.evaluateHandle(() => [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === 'Dismiss')))
+    await waitText('Add a short reason first.')
+    expect(!(await peopleCalls()).some((c) => c.name === 'transition' && c.args[1] === 'dismissed'), 'Dismiss with no reason asks for one and sends nothing')
+    for (const size of SIZES) {
+      await viewport(size)
+      await check(`Tasks, the Dismiss dialog, ${size.join('x')}`, `tasks-dismiss-${size[0]}`)
+    }
+    await viewport([1280, 720])
+    await page.type('[role="dialog"] textarea', 'Paid by the hour, will join on Monday')
+    await press(await page.evaluateHandle(() => [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === 'Dismiss')))
+    await waitText('Dismissed the task for Nora Brandt.')
+    await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), { timeout: 5000 })
+    expect((await peopleCalls()).some((c) => c.name === 'transition' && c.args[0] === 't-03' && c.args[1] === 'dismissed' && c.args[2] === 'Paid by the hour, will join on Monday'),
+      'then Dismiss sends the reason, and the dialog closes')
+    await page.$$eval('[role="tab"]', (ts) => ts.find((t) => t.textContent.startsWith('Dismissed')).click())
+    await sleep(200)
+    expect((await bodyText()).includes('Dismissed Wed 21 Oct: Paid by the hour, will join on Monday'), 'Dismissed shows it with its reason')
+    await press(await buttonIn(await rowWith('Ethan Cole'), 'Move to To do'))
+    await waitText('Moved the task for Ethan Cole back to To do.')
+    expect((await peopleCalls()).some((c) => c.name === 'transition' && c.args[0] === 't-09' && c.args[1] === 'open'), 'Move to To do on Ethan')
+    await page.$$eval('[role="tab"]', (ts) => ts.find((t) => t.textContent.startsWith('Sent')).click())
+    await sleep(200)
+    await press(await buttonIn(await rowWith('Leo Hartmann'), 'Replied'))
+    await waitText('Leo Hartmann replied.')
+    const pressed = await (await rowWith('Leo Hartmann')).evaluate((r) => [...r.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Replied')?.getAttribute('aria-pressed'))
+    expect(pressed === 'true' && (await peopleCalls()).some((c) => c.name === 'setOutcome' && c.args[0] === 't-08' && c.args[1] === 'replied'),
+      'Replied on Leo: the outcome is sent and the button stays pressed')
+    for (const size of SIZES) {
+      await viewport(size)
+      await check(`Tasks, Sent after Replied, ${size.join('x')}`, `tasks-sent-replied-${size[0]}`)
+    }
+    await viewport([1280, 720])
+    await page.$$eval('[role="tab"]', (ts) => ts.find((t) => t.textContent.startsWith('To do')).click())
+    await page.type('input[type="search"]', 'maya')
+    await page.waitForFunction(() => document.querySelectorAll('.list-row').length === 1, { timeout: 10000 })
+    expect((await peopleCalls()).some((c) => c.name === 'loadTasks' && c.args[0] === 'maya'), 'the search goes to the route, and To do shows Maya alone')
+  }
+  const errs = newConsoleErrors(from)
+  expect(errs.length === 0, 'tasks: no error in the browser console', errs.slice(0, 3).join(' || '))
+}
+
+if (wanted('people')) {
+  const from = consoleErrors.length
+  const settledPage = () => page.waitForFunction(() => !document.querySelector('.animate-pulse'), { timeout: 30000 })
+
+  // ── Outreach insights ──
+  for (const size of SIZES) {
+    const [w, h] = size
+    for (const [name, query] of [['full', ''], ['no-reset', '?reset=none'], ['empty', '?state=empty']]) {
+      const label = `Insights, ${name}, ${w}x${h}`
+      console.log(`\n${label}`)
+      await go(`/dev/admin/tasks/insights${query}`, size)
+      await settledPage()
+      await check(label, `insights-${name}-${w}`)
+      expect((await gluedBold()).length === 0, `${label}: no bold word glued to the next`, JSON.stringify(await gluedBold()))
+    }
+    for (const state of ['loading', 'error']) {
+      const label = `Insights, ${state}, ${w}x${h}`
+      console.log(`\n${label}`)
+      await go(`/dev/admin/tasks/insights?state=${state}`, size)
+      if (state === 'loading') await page.waitForSelector('.animate-pulse')
+      else await page.waitForSelector('[role="alert"]')
+      await check(label, `insights-${state}-${w}`)
+    }
+  }
+  console.log('\nInsights: the ranges and the words')
+  {
+    await go('/dev/admin/tasks/insights')
+    await settledPage()
+    const text = await bodyText()
+    expect(text.includes('Since the reset, Tue 20 Oct') && text.includes('still a member') && !/subscri/i.test(text),
+      'after the reset the second range is "Since the reset, Tue 20 Oct", and a save is "still a member", never "subscribed"')
+    await press(await button('Since the reset, Tue 20 Oct'))
+    await page.waitForFunction(() => [...document.querySelectorAll('[aria-pressed="true"]')].some((b) => b.textContent.startsWith('Since the reset')))
+    await settledPage()
+    const asked = (await peopleCalls()).filter((c) => c.name === 'loadInsights').map((c) => c.args[0])
+    expect(asked.length === 2 && typeof asked[0] === 'string' && asked[1] === null, 'Last 30 days asks from 30 days ago; Since the reset asks for everything the route counts', JSON.stringify(asked))
+    await go('/dev/admin/tasks/insights?reset=none')
+    await settledPage()
+    expect((await bodyText()).includes('All time'), 'before the reset the second range reads "All time"')
+    const small = await smallTaps()
+    expect(small.length === 0, 'Insights: every button 44px tall or more', JSON.stringify(small.slice(0, 4)))
+  }
+
+  // ── All students ──
+  for (const size of SIZES) {
+    const [w, h] = size
+    for (const state of ['full', 'partial', 'empty', 'loading', 'error']) {
+      const label = `All students, ${state}, ${w}x${h}`
+      console.log(`\n${label}`)
+      await go(`/dev/admin/students?state=${state}`, size)
+      if (state === 'loading') await page.waitForSelector('.animate-pulse')
+      else if (state === 'error') await page.waitForSelector('[role="alert"]')
+      else await settledPage()
+      if (state === 'partial') {
+        const text = await bodyText()
+        expect(text.includes("Couldn't load the students' progress") && text.includes("Couldn't read which course is live") && text.includes("Couldn't load") && !/\b0%/.test(text),
+          `${label}: the failed reads say so, and no row shows 0% for a progress nobody could read`)
+      }
+      if (state === 'error') {
+        const t = await page.$eval('[role="alert"]', (e) => e.textContent)
+        expect(t.includes("Couldn't load the students.") && t.includes('Retry'), `${label}: the error, never "no students"`, t)
+      }
+      await check(label, `students-${state}-${w}`)
+    }
+  }
+  console.log('\nAll students: the order, the username, the filters')
+  {
+    await go('/dev/admin/students', [1440, 900])
+    await settledPage()
+    const header = await page.$$eval('main div[aria-hidden="true"]', (ds) => ds.map((d) => d.textContent))
+    expect(header.some((t) => t.includes('Username') && t.includes('First paid') && !t.includes('Discord')), 'the column reads Username, not Discord', JSON.stringify(header))
+    const names = await page.$$eval('main a.list-row', (as) => as.map((a) => a.querySelector('p')?.textContent))
+    expect(names[0] === 'Nora Brandt' && names[names.length - 1] === 'Felix Moreau' && names.length === 13,
+      'every student with a first payment, newest first payment first (Nora, 20 Oct) to the oldest (Felix, 28 May)', names.join(', '))
+    expect(!/\bplan\b/i.test(await bodyText()) || (await bodyText()).includes('any plan'), 'no plan shown on any row (the page says "any plan" once)')
+    await press(await button('Payment failed1'))
+    await sleep(150)
+    expect((await page.$$eval('main a.list-row', (as) => as.length)) === 1 && (await bodyText()).includes('Priya Raman'), 'Payment failed: Priya alone')
+    await press(await button('All13'))
+    await page.type('input[type="search"]', '@JONAH')
+    await sleep(150)
+    expect((await page.$$eval('main a.list-row', (as) => as.map((a) => a.querySelector('p')?.textContent))).join() === 'Jonah Pereira', 'the search finds @jonah_p in any case')
+    const small = await smallTaps()
+    expect(small.length === 0, 'All students: every button 44px tall or more', JSON.stringify(small.slice(0, 4)))
+  }
+
+  // ── A student ──
+  for (const size of SIZES) {
+    const [w, h] = size
+    for (const [name, route] of [['synced', '/p-maya'], ['stale', '/p-jonah'], ['never', '/p-priya'], ['canceling', '/p-sofia'], ['no-name', '/p-iris'],
+      ['partial', '/p-sofia?state=partial'], ['missing', '/p-nobody'], ['error', '/p-maya?state=error'], ['loading', '/p-maya?state=loading']]) {
+      const label = `A student, ${name}, ${w}x${h}`
+      console.log(`\n${label}`)
+      await go(`/dev/admin/students${route}`, size)
+      if (name === 'loading') await page.waitForSelector('.animate-pulse')
+      else if (name === 'error') await page.waitForSelector('[role="alert"]')
+      else await settledPage()
+      const text = await bodyText()
+      if (name === 'synced') expect(text.includes('Synced since the switch'), `${label}: "Synced since the switch"`)
+      if (name === 'stale') expect(text.includes('Not synced since the switch') && text.includes('These numbers are from before the course switch.'), `${label}: "Not synced since the switch", and why the numbers are old`)
+      if (name === 'never') expect(text.includes('Never synced'), `${label}: "Never synced"`)
+      if (name === 'canceling') expect(text.includes('Canceling') && text.includes('Note: Whop returned 3 interactions but 0 marked completed'), `${label}: Canceling, and the backfill's note as a note`)
+      if (name === 'partial') {
+        // Progress, Streak, the Whop sync, the 30% request and the lessons: their reads failed.
+        expect((text.match(/Couldn't load/g) ?? []).length === 5 && !text.includes('0 days') && !text.includes('No 30% request') && !text.includes('Never synced'),
+          `${label}: each of the 5 blocks whose read failed says "Couldn't load", never 0 days, "No 30% request" or "Never synced"`,
+          String((text.match(/Couldn't load/g) ?? []).length))
+      }
+      if (name === 'missing') expect(text.includes('No student has this id.'), `${label}: "No student has this id."`)
+      if (name === 'error') expect(text.includes("Couldn't load this student.") && text.includes('Retry'), `${label}: the error and Retry, never a spinner forever`)
+      await check(label, `student-${name}-${w}`)
+    }
+  }
+  console.log('\nA student: the ticks, the areas, the words')
+  {
+    await go('/dev/admin/students/p-maya')
+    await settledPage()
+    const text = await bodyText()
+    expect(!/\bplan\b/i.test(text) && !/subscri/i.test(text), 'no plan and no subscription on the page')
+    await press(await page.evaluateHandle(() => [...document.querySelectorAll('label')].find((l) => l.textContent.includes('Leave out of the tasks'))))
+    await page.waitForFunction(() => document.body.innerText.includes('No task and no day 28 DM is made for this account.'), { timeout: 10000 })
+    expect((await peopleCalls()).some((c) => c.name === 'setExempt' && c.args[0] === 'p-maya' && c.args[1] === true), 'the exempt tick writes, and the page says what it does now')
+    await press(await page.evaluateHandle(() => [...document.querySelectorAll('label')].find((l) => l.textContent.includes('Ad submissions verified'))))
+    await page.waitForFunction(() => (window.__peopleCalls ?? []).some((c) => c.name === 'setAdVerified'), { timeout: 10000 })
+    expect((await peopleCalls()).some((c) => c.name === 'setAdVerified' && c.args[0] === 'p-maya' && c.args[1] === false), 'the ads tick writes (Maya\'s was ticked)')
+    await press(await page.evaluateHandle(() => [...document.querySelectorAll('summary')].find((x) => x.textContent.includes('Foundations'))))
+    await waitText('Hide')
+    expect(await page.evaluate(() => [...document.querySelectorAll('details')].find((d) => d.textContent.includes('Foundations'))?.open === true && document.body.innerText.includes('Foundations, part 1')),
+      'an area opens on a tap and lists its lessons, its fold now saying Hide')
+    for (const size of SIZES) {
+      await viewport(size)
+      await check(`A student, an area open, ${size.join('x')}`, `student-area-open-${size[0]}`)
+    }
+    await viewport([1280, 720])
+    const small = await smallTaps()
+    expect(small.length === 0, 'A student: every button and tick 44px tall or more', JSON.stringify(small.slice(0, 4)))
+  }
+
+  // ── The journey ──
+  for (const size of SIZES) {
+    const [w, h] = size
+    for (const [name, query] of [['full', ''], ['later', '?at=later'], ['partial', '?state=partial'], ['empty', '?state=empty'], ['loading', '?state=loading'], ['error', '?state=error']]) {
+      const label = `Journey, ${name}, ${w}x${h}`
+      console.log(`\n${label}`)
+      await go(`/dev/admin/journey${query}`, size)
+      if (name === 'loading') await page.waitForSelector('.animate-pulse')
+      else if (name === 'error') await page.waitForSelector('[role="alert"]')
+      else await settledPage()
+      if (name === 'partial') {
+        const text = await bodyText()
+        expect(text.includes("Couldn't load the students' progress") && text.includes("Couldn't load where each student is") && !/\b0%/.test(text),
+          `${label}: the failed reads say so on the board and on every card, never 0%`)
+      }
+      if (name === 'error') {
+        const t = await page.$eval('[role="alert"]', (e) => e.textContent)
+        expect(t.includes("Couldn't load the journey."), `${label}: the error, never an empty board`, t)
+      }
+      await check(label, `journey-${name}-${w}`)
+    }
+  }
+  console.log('\nJourney: the population, the columns, the drawer')
+  {
+    await go('/dev/admin/journey', [1440, 900])
+    await settledPage()
+    const cols = await page.$$eval('main section[aria-label]', (ss) => ss.map((s) => `${s.getAttribute('aria-label')}:${s.querySelectorAll('button').length}`))
+    expect(JSON.stringify(cols) === JSON.stringify(['Week 1:4', 'Week 2:3', 'Week 3:0', 'Week 4:0', 'Churned:1', 'Month 2+:0']),
+      'the six columns: on 21 October everyone is in weeks 1 and 2, the canceled one in Churned', JSON.stringify(cols))
+    const text = await bodyText()
+    expect(text.includes('a first payment on or after Fri 9 Oct, on any plan') && !text.includes('Leo Hartmann') && !text.includes('Theo Marsh'),
+      'the new program\'s students only: Leo (paid in September) and Theo (no Whop membership) are not on it')
+    await press(await page.evaluateHandle(() => [...document.querySelectorAll('main section button')].find((b) => b.textContent.includes('Maya Lindqvist'))))
+    await page.waitForSelector('aside[role="dialog"]')
+    // textContent: the block's title is drawn in capitals, which innerText reports.
+    await page.waitForFunction(() => document.querySelector('aside[role="dialog"]')?.textContent.includes('Lessons by area'), { timeout: 10000 })
+    expect(await page.$eval('aside[role="dialog"]', (a) => a.innerText.includes('Maya Lindqvist') && a.innerText.includes('Open the full page') && a.innerText.includes('Approving the 30% no longer needs it.')),
+      'a card opens the drawer with that student, the ads tick\'s words and the link to the full page')
+    for (const size of SIZES) {
+      await viewport(size)
+      await check(`Journey, the drawer, ${size.join('x')}`, `journey-drawer-${size[0]}`)
+    }
+    await viewport([1440, 900])
+    await press(await page.evaluateHandle(() => [...document.querySelectorAll('aside button')].find((b) => b.textContent.trim() === 'Close')))
+    expect((await page.$('aside[role="dialog"]')) === null, 'Close closes it')
+    await press(await page.evaluateHandle(() => [...document.querySelectorAll('main section button')].find((b) => b.textContent.includes('Priya Raman'))))
+    await page.waitForSelector('aside[role="dialog"]')
+    await page.waitForFunction(() => document.querySelector('aside[role="dialog"]')?.innerText.includes('Priya Raman'), { timeout: 10000 })
+    expect(!(await page.$eval('aside[role="dialog"]', (a) => a.innerText.includes('Maya Lindqvist'))), 'the next student\'s drawer holds nothing of the last one')
+    await page.keyboard.press('Escape')
+    expect((await page.$('aside[role="dialog"]')) === null, 'Escape closes it')
+    await go('/dev/admin/journey?at=later', [1440, 900])
+    await settledPage()
+    const later = await page.$$eval('main section[aria-label]', (ss) => ss.map((s) => `${s.getAttribute('aria-label')}:${s.querySelectorAll('button').length}`))
+    expect(JSON.stringify(later) === JSON.stringify(['Week 1:0', 'Week 2:1', 'Week 3:1', 'Week 4:6', 'Churned:1', 'Month 2+:2']),
+      'read on 12 November: weeks 3 and 4 and Month 2+ fill up, a past-due student past day 30 stays in Week 4', JSON.stringify(later))
+    const fits = await page.evaluate(() => { const s = [...document.querySelectorAll('main section[aria-label]')].at(-1).getBoundingClientRect(); return s.right <= innerWidth })
+    expect(fits, 'at 1440px wide all six columns are in the window')
+    const small = await smallTaps()
+    expect(small.length === 0, 'Journey: every card and button 44px tall or more', JSON.stringify(small.slice(0, 4)))
+  }
+  const errs = newConsoleErrors(from)
+  expect(errs.length === 0, 'people: no error in the browser console', errs.slice(0, 3).join(' || '))
 }
 
 // ── Every page the run opened ──────────────────────────────────────────────

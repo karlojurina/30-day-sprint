@@ -871,6 +871,24 @@ When adding a new table, append it here. When deleting a field, scan
   `student_lesson_ratings` (key `fk_student_lesson_ratings_lesson_id`,
   RESTRICT): both name old-course lessons.
 
+### `student_lesson_ratings` (v75; v110)
+- **Depends on:** `students` (cascade), `lessons` (after v104 the key is
+  `fk_student_lesson_ratings_lesson_id`, `ON DELETE RESTRICT`)
+- **Depended on by:** `POST /api/student/rate-lesson` (the only writer
+  since v110), `GET /api/student/data` (`lessonRatings`, the student's
+  own rows), `GET /api/admin/lesson-feedback` (every row since the
+  switch), the old `LessonSheet`'s block on `/dashboard-mockup`
+- **Stable contract:** one row per `student_id` and `lesson_id`
+  (unique); `stars` 1 to 5 (CHECK); `comment` text or null;
+  `created_at`; `updated_at`, moved by
+  `trg_bump_student_lesson_ratings_updated_at` on every update
+- **Policies:** after v110, `students_select_own_ratings` (a student
+  reads their own) and `team_select_all_ratings` (the team reads all),
+  both SELECT. v75's `students_insert_own_ratings` and
+  `students_update_own_ratings` are dropped by v110 and put back by
+  `supabase/undo/2026_v110_undo.sql`. Before v110 is pasted, a student's
+  own session can still write their rows past the route.
+
 ### `student_quiz_attempts`
 - **Depends on:** `students`, `quizzes`
 - **Depended on by:** quiz UI, region unlock logic
@@ -1955,6 +1973,101 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
   `supabase/migration-tests/run.mjs`) compares 5 random members' numbers
   with the 30% page.
 ---
+
+## Lesson ratings (admin rebuild 2, WI-7, branch `night/a2-feedback`)
+
+A student rates a video lesson they have finished, on its page, and the
+team reads every rating since the course switch on
+`/admin/feedback/lessons` (D10, `_admin/prds/admin-rebuild-2/` in the
+owner's workspace). Local commits only: none has run on a deployment or
+against a real database.
+
+### The rule (`src/lib/world/lesson-rating.ts`)
+- `ratingRefusal(lesson, { watched, done })`: null when the student can
+  rate the lesson, otherwise `not_video` (its `type` is not `watch`),
+  `bounty` (its `feature_key` is `bounty_access`) or `not_finished`.
+  `watched` is the video half (`completed_at`, StudentContext's
+  `watchedLessonIds`), `done` the map's own count (`isLessonComplete`,
+  `completedLessonIds`): an action item needs its hand-in too, and a
+  skip alone is never a watch. The lesson page shows its block by this
+  and the route refuses by it, so the two cannot disagree.
+- `checkRatingInput(body)`: a lesson id, whole stars from 1 to 5, a
+  comment that is text of at most `RATING_COMMENT_MAX` (1000) characters
+  once trimmed, empty meaning none. Nothing is rounded or cut.
+- `RATING_WORDS`: every sentence the route answers, which the page shows
+  as it is (no dash, digits for numbers).
+
+### `POST /api/student/rate-lesson`
+- **Consumes:** `Authorization: Bearer <student session>`, body
+  `{ lessonId, stars, comment? }`.
+- **Checks, in order:** the token (401), the closed doors (503
+  `student_app_closed`, T-078), the body (400), the student
+  (404 "Your student account wasn't found. Sign in again."), the lesson
+  in `lessons`, always the live table the ratings' key points at (404
+  "That lesson isn't in the course."), the student's completion row,
+  then the rule: 400 "Only video lessons can be rated." (`code`
+  `not_a_video_lesson`), 400 "The Ad Bounty lesson can't be rated."
+  (`ad_bounty_lesson`), 403 "Finish this lesson first, then rate it."
+  (`lesson_not_finished`).
+- **Produces:** 200 `{ rating: { lesson_id, stars, comment, created_at,
+  updated_at } }`. A failed read is a 500 "Couldn't check this lesson
+  just now. Try again.", a failed save a 500 "Couldn't save your rating.
+  Try again."; the database's words go to the log only, and a failed
+  read is never answered as "not found" or "not finished".
+- **Writes:** one `student_lesson_ratings` row, upserted on
+  `student_id,lesson_id` with `student_id`, `lesson_id`, `stars`,
+  `comment` (the student from the token, whatever the body says).
+- **Called by:** `StudentContext.rateLesson`, which waits for the answer
+  and resolves to null or to the sentence to show; it changes
+  `lessonRatings` only with the saved row. A refresh inside 3 seconds of
+  a save keeps that row (the v74 guard's window).
+
+### `GET /api/admin/lesson-feedback`
+- **Consumes:** a team member's bearer token; founders and admins
+  (`requireTeam(request, ["founder", "admin"])`; a csm and a student get
+  403, no token 401).
+- **Depends on:** `getCurriculumResetAt`, then `loadLessonFeedback`
+  (`src/lib/admin/lesson-feedback.ts`): `regions` (`id, name,
+  order_num`), `lessons` (`id, region_id, title, type, sort_order,
+  feature_key`), `student_lesson_ratings` with `created_at` on or after
+  the switch (every row while there is no switch), paged by `updated_at`
+  then `id`, and `students` (`id, name, email`) of those who rated, in
+  batches of 100 ids.
+- **Produces:** 200 `LessonFeedbackView`: `{ generatedAt, since,
+  totals: { ratings, comments, average, lessonsRated, lessons }, areas,
+  unplaced }`. `areas` in `order_num` order, each `{ id, number, name,
+  ratings, average, lessonsRated, lessons }`; a lesson `{ id, title,
+  rateable, ratings, average, comments }`, in `sort_order`; `comments`
+  are the ratings with a comment, newest `updated_at` first, each with
+  its stars, its time and its `student` (null when the students read had
+  no such row). Listed lessons: every one `isRateableLesson` allows, and
+  any other that has a rating. `average` is unrounded, null with no
+  rating. `unplaced` counts ratings of a lesson the `lessons` read did
+  not have; they are in no other number and the page says so. A failed
+  read: 500 "Couldn't read the lesson ratings, so nothing is shown. Try
+  again." with `failed`.
+- **Writes:** nothing. `force-dynamic`.
+- **Called by:** `LessonFeedbackView` through
+  `src/lib/admin/lesson-feedback-transport.ts` (which uses `send` from
+  `admin-transport.ts`).
+
+### v110 (`supabase/migrations/2026_v110_lesson_ratings_route_only.sql`)
+Drops `students_insert_own_ratings` and `students_update_own_ratings`
+from `student_lesson_ratings`, in one transaction, with the table locked
+first (5 s at most). Refuses, changing nothing, when the table is
+missing, its row level security is off, or another policy still writes
+to it after the drops (it names it). A second run changes nothing and
+says so. The undo puts back v75's two policies from v75's own text.
+
+### Proven and unproven
+- **Proven** on stand-ins: the two client suites and the context suite
+  (see CONTEXT.md, Testing), the migration harness's section 31 (v110
+  and its undo, with a student's own session under row level security),
+  and both pages in headless Chrome on their dev pages
+  (`world-tests/lesson-rating.mjs`, `world-tests/admin-pages.mjs --only
+  feedback`).
+- **Unproven:** the route against the real database, v110 on
+  production, the page with real ratings, and a real phone.
 
 ## The world's in-memory contracts (branch `world-engine`)
 

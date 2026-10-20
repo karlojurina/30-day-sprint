@@ -212,8 +212,10 @@ function cycleEndMs(firstPaidAt: string): number {
 
 /** cycleEnd + grace: the point past which surviving access can only be
  *  explained by a second payment. Numerator and denominator BOTH key
- *  off this — they must never diverge. */
-function renewalResolvedMs(firstPaidAt: string): number {
+ *  off this — they must never diverge. Exported for the Dashboard's
+ *  Month 2 tile (dashboard-metrics.ts), which says when its first rate
+ *  can show. */
+export function renewalResolvedMs(firstPaidAt: string): number {
   return cycleEndMs(firstPaidAt) + RENEWAL_GRACE_MS;
 }
 

@@ -90,3 +90,56 @@ export async function fetchAllRowsPaginated<T>(
 
   return { data: all, error: null };
 }
+
+/**
+ * Every row matching the query, page after page BY KEY instead of by offset:
+ * each page asks for the rows after the last key it saw (`key > last`, in key
+ * order, at most `pageSize` of them). Same answer and error contract as
+ * fetchAllRowsPaginated.
+ *
+ * Why: pages read by offset are separate queries, and a row deleted (or one
+ * that leaves the filter, a task closed or reopened, say) while they are read
+ * shifts every later row up by one, so one row of the next page is never
+ * read. By key, a row that goes is simply not there and nothing else moves.
+ * A row added meanwhile is read if its key comes after the page it would
+ * have been on, as a snapshot taken a moment later would read it.
+ *
+ * `key` must be unique (a primary key, or a view with one row per key), and
+ * `buildQuery` must order on `key` alone: the pages follow that order. Every
+ * row must carry `key` in its selected columns.
+ */
+export async function fetchAllRowsByKey<T>(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  buildQuery: () => any,
+  key: string,
+  pageSize: number = DEFAULT_PAGE_SIZE,
+): Promise<PaginatedResult<T>> {
+  const all: T[] = [];
+  let last: unknown = null;
+
+  // The same runaway backstop as above: 100 pages.
+  for (let page = 0; page < 100; page++) {
+    let result: { data: T[] | null; error: { message: string } | null };
+    try {
+      const query = buildQuery();
+      result = (await (last === null ? query : query.gt(key, last)).limit(pageSize)) as {
+        data: T[] | null;
+        error: { message: string } | null;
+      };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { data: [], error: new Error(msg) };
+    }
+    const { data, error } = result;
+    if (error) return { data: [], error: new Error(error.message) };
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+    last = (data[data.length - 1] as Record<string, unknown>)[key];
+    if (last === null || last === undefined) {
+      return { data: [], error: new Error(`a row came back without its ${key}, so the next page cannot be asked for`) };
+    }
+  }
+
+  return { data: all, error: null };
+}

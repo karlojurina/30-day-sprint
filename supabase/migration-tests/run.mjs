@@ -4701,5 +4701,252 @@ console.log('\n=== 29. v108: only the server calls increment_region_quiz_attempt
   }
 }
 
+// 30: diagnostics/admin-today-spotcheck.sql, the read Lovro runs at the
+// admin rebuild's ship step (admin rebuild PRD, validation row 15): 5
+// members picked at random from the ones Today lists from, each with the
+// numbers Today and the 30% page show. After v104, on a database of its
+// own, with made-up members: the file runs the way the SQL editor runs it
+// and changes nothing, picks only members Today can list, and every column
+// equals the same fact worked out here separately: lesson_is_complete()
+// and the two views' rules written again in JavaScript, the 30% rule of
+// src/lib/world/discount.ts with its dates and its 14 days read from the
+// source, the plan ids read from constants.ts and plans.ts, and the dates
+// in Croatia time through Intl, as src/lib/admin/croatia-dates.ts reads
+// them. A member is put on each edge of the rule, so a date in the file
+// that drifts from the source fails here.
+// ════════════════════════════════════════════════════════════════════
+console.log('\n=== 30. the admin spot check (diagnostics/admin-today-spotcheck.sql), after v104 ===')
+{
+  const d = await chainDatabase()
+  const raw = diagnostic('admin-today-spotcheck.sql')
+  const src = rel => fs.readFileSync(fileURLToPath(new URL('../../src/' + rel, import.meta.url)), 'utf8')
+  const constOf = (text, name) => {
+    const m = text.match(new RegExp(`export const ${name} = "([^"]+)";`))
+    if (!m) throw new Error(`${name} is not in the source`)
+    return m[1]
+  }
+  const idsIn = (text, decl) => {
+    const at = text.indexOf(decl)
+    if (at < 0) throw new Error(`${decl} is not in the source`)
+    return [...text.slice(at, text.indexOf(']', at)).matchAll(/"(plan_[A-Za-z0-9]+)"/g)].map(m => m[1])
+  }
+  // The rule as the student app holds it (src/lib/world/discount.ts, src/lib/constants.ts).
+  const discountTs = src('lib/world/discount.ts')
+  const ELIGIBLE = Date.parse(constOf(discountTs, 'DISCOUNT_ELIGIBLE_FROM'))
+  const LAUNCH = Date.parse(constOf(discountTs, 'DISCOUNT_LAUNCH_DATE'))
+  const SHARED = constOf(discountTs, 'DISCOUNT_SHARED_DEADLINE')
+  const WINDOW_DAYS = Number(src('lib/constants.ts').match(/export const DISCOUNT_WINDOW_DAYS = (\d+);/)?.[1])
+  const MONTHLY = idsIn(src('lib/constants.ts'), 'export const PAYING_WHOP_PLAN_IDS')
+  const YEARLY = idsIn(src('lib/admin/plans.ts'), 'export const YEARLY_WHOP_PLAN_IDS')
+  note(Number.isFinite(ELIGIBLE) && Number.isFinite(LAUNCH) && WINDOW_DAYS > 0 && MONTHLY.length === 1 && YEARLY.length === 2,
+       "the rule's two dates, its shared deadline and its days, the monthly plan and the two yearly ones, read from the source",
+       asJson({ ELIGIBLE: new Date(ELIGIBLE).toISOString(), LAUNCH: new Date(LAUNCH).toISOString(), SHARED, WINDOW_DAYS, MONTHLY, YEARLY }))
+  const iso = ms => new Date(ms).toISOString()
+  const deadlineOf = paid => {
+    if (!paid) return null
+    const t = Date.parse(paid)
+    if (t < ELIGIBLE) return null
+    if (t < LAUNCH) return SHARED
+    return iso(t + WINDOW_DAYS * 86_400_000)
+  }
+  const planOf = id => (MONTHLY.includes(id) ? 'Monthly' : YEARLY.includes(id) ? 'Yearly' : 'Other plan')
+  // Croatia time, read the way croatia-dates.ts reads it: Intl for the numbers, the names from tables.
+  const ZAGREB = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Zagreb', year: 'numeric', month: 'numeric', day: 'numeric',
+                                                     hour: 'numeric', minute: 'numeric', hourCycle: 'h23' })
+  const WEEKDAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const MONTH = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+  const zagreb = when => {
+    const n = {}
+    for (const p of ZAGREB.formatToParts(new Date(when))) if (p.type !== 'literal') n[p.type] = Number(p.value)
+    return { ...n, hour: n.hour % 24 }
+  }
+  const dayOf = when => { const c = zagreb(when); return `${WEEKDAY[new Date(Date.UTC(c.year, c.month - 1, c.day)).getUTCDay()]} ${c.day} ${MONTH[c.month - 1]}` }
+  const clockOf = when => { const c = zagreb(when); return `${String(c.hour).padStart(2, '0')}:${String(c.minute).padStart(2, '0')}` }
+  const COLS = ['name', 'email', 'student_id', 'membership', 'lessons', 'last_lesson', 'area', 'first_payment', 'videos_30', 'deadline_30']
+  const told = r => (r.ok ? asJson(r.rows) : `${r.code}: ${r.said.slice(0, 160)}`)
+  const dump = async () => {
+    const out = {}
+    for (const { tablename: t } of await rowsOn(d, `select tablename from pg_tables where schemaname = 'public' order by 1`)) {
+      out[t] = (await rowsOn(d, `select * from public."${t}"`)).map(asJson).sort()
+    }
+    return asJson(out)
+  }
+
+  // ── the file itself ──
+  const code = raw.replace(/--.*$/gm, '').replace(/'(?:[^']|'')*'/g, "''")
+  note(/^\s*with\b/i.test(code) && countOf(code, ';') === 1 && code.trim().endsWith(';')
+       && !/\b(insert|update|delete|merge|alter|drop|create|truncate|grant|revoke|copy|call|lock|vacuum|refresh)\b/i.test(code)
+       && !/REPLACE_WITH|line marked HERE/.test(raw),
+       'the file is one read: a single select, no statement that writes, no placeholder to fill in')
+
+  // ── the switch ──
+  let s = await runFile(d, read(V103F))
+  note(s.ok, 'v103 runs here', s.ok ? '' : `${s.code}: ${s.said.slice(0, 120)}`)
+  s = await runFile(d, read(V104F))
+  note(s.ok, 'v104 runs here', s.ok ? '' : `${s.code}: ${s.said.slice(0, 120)}`)
+  // Two columns of production's students table (schema.sql) that base.sql leaves out and the file reads.
+  await d.exec(`alter table students add column if not exists name text,
+                                     add column if not exists whop_membership_id text unique;`)
+
+  // ── the course as v104 left it, and the videos ──
+  const lessons = await rowsOn(d, `select l.id, l.type, l.sort_order, l.counts_toward_progress, l.requires_action, l.is_gate,
+                                          r.order_num, r.name as area
+                                     from lessons l join regions r on r.id = l.region_id order by l.sort_order`)
+  const counting = lessons.filter(l => l.counts_toward_progress).length
+  const gateAt = lessons.findIndex(l => l.is_gate === true)
+  const upToGate = lessons.slice(0, gateAt + 1).filter(l => l.type === 'watch' && l.counts_toward_progress !== false)
+  note(counting === 140 && upToGate.length === 61 && upToGate[0]?.id === 'a1l01' && upToGate.at(-1)?.id === 'a4l17',
+       'after v104: 140 lessons count, and with a video on each the 30% would ask for 61, a1l01 to a4l17',
+       `${counting} counting, ${upToGate.length} up to the checkpoint, ${upToGate[0]?.id} to ${upToGate.at(-1)?.id}`)
+  // One of them has no video yet, and three lessons past the checkpoint have one.
+  const NOVIDEO = upToGate[9].id
+  const pastGate = lessons.slice(gateAt + 1).filter(l => l.type === 'watch' && l.counts_toward_progress).slice(0, 3)
+  const ASKED = upToGate.filter(l => l.id !== NOVIDEO)
+  const COMPOUND = ASKED.find(l => l.requires_action)
+  // Well-formed FAKE video ids, as in sections 18 to 24. Never a real one.
+  const SPOTFAKE = n => ['vid', `spotcheckfake${String(n).padStart(3, '0')}`].join('_')
+  await d.exec(`insert into lesson_videos (lesson_id, tella_video_id) values
+    ${[...ASKED, ...pastGate].map((l, i) => `('${l.id}', '${SPOTFAKE(i + 1)}')`).join(',\n    ')};`)
+
+  // ── the members, all made up ──
+  const ID = n => `c2900000-0000-0000-0000-0000000000${String(n).padStart(2, '0')}`
+  const at = (base, minutes) => iso(Date.parse(base) + minutes * 60_000)
+  const PEOPLE = [
+    // In Today's population: active or past due, a Whop membership, not exempt.
+    { n: 1, name: 'Ana Spot', status: 'active', plan: MONTHLY[0], paid: '2026-10-02T10:00:00.000Z',
+      // Every lesson up to the checkpoint, the one with no video included; the last at 00:30 on Wed 21 Oct in Croatia.
+      done: upToGate.map((l, i) => ({ id: l.id, at: l.id === 'a4l17' ? '2026-10-20T22:30:00.000Z' : at('2026-10-15T08:00:00.000Z', i),
+                                      action: l.requires_action ? at('2026-10-15T09:00:00.000Z', i) : null })) },
+    { n: 2, name: 'Bo Spot', status: 'past_due', plan: YEARLY[0], paid: iso(ELIGIBLE + 30 * 60_000),
+      // 20 videos, a skip that is no video, and the lesson with no video.
+      done: [...ASKED.slice(0, 20).map((l, i) => ({ id: l.id, at: at('2026-10-19T16:00:00.000Z', i),
+                                                    action: l.requires_action ? at('2026-10-19T17:00:00.000Z', i) : null })),
+             { id: ASKED[20].id, at: null, skipped: '2026-10-19T18:00:00.000Z' },
+             { id: NOVIDEO, at: '2026-10-19T18:05:00.000Z' }] },
+    { n: 3, name: 'Cy Spot', status: 'active', plan: 'plan_madeupfree', paid: iso(LAUNCH), done: [] },
+    { n: 4, name: 'Di Spot', status: 'active', plan: MONTHLY[0], paid: '2026-10-12T09:15:00.000Z',
+      // Two plain lessons, and an action item's video with its hand-in still open.
+      done: [{ id: ASKED[0].id, at: '2026-10-19T15:00:00.000Z' }, { id: ASKED[1].id, at: '2026-10-19T15:20:00.000Z' },
+             { id: COMPOUND.id, at: '2026-10-20T07:00:00.000Z' }] },
+    { n: 5, name: 'Ed Spot', status: 'active', plan: MONTHLY[0], paid: iso(ELIGIBLE - 60_000),
+      done: ASKED.slice(0, 5).map((l, i) => ({ id: l.id, at: at('2026-10-20T06:00:00.000Z', i) })) },
+    { n: 6, name: 'Flo Spot', status: 'active', plan: YEARLY[1], paid: null,
+      // A lesson past the checkpoint, with a video: progress, and nothing the 30% asks for.
+      done: [{ id: pastGate[0].id, at: '2026-10-20T09:00:00.000Z' }] },
+    { n: 7, name: 'Gus Spot', status: 'active', plan: MONTHLY[0], paid: iso(LAUNCH - 60_000),
+      // The Ad Bounty lesson, which does not count.
+      done: [{ id: 'a7l19', at: '2026-10-20T10:00:00.000Z' }] },
+    // Not in it: each must never be picked.
+    { n: 11, name: 'Hal Out', status: 'canceled', plan: MONTHLY[0], paid: '2026-10-03T10:00:00.000Z', done: [] },
+    { n: 12, name: 'Ivy Out', status: 'expired', plan: MONTHLY[0], paid: '2026-10-03T10:00:00.000Z', done: [] },
+    { n: 13, name: 'Jo Out', status: 'active', plan: MONTHLY[0], paid: '2026-10-03T10:00:00.000Z', done: [], noMembership: true },
+    { n: 14, name: 'Kai Out', status: 'active', plan: MONTHLY[0], paid: '2026-10-03T10:00:00.000Z', done: [], exempt: true },
+    { n: 15, name: 'Lu Out', status: null, plan: MONTHLY[0], paid: '2026-10-03T10:00:00.000Z', done: [] },
+  ]
+  const lit = v => (v == null ? 'null' : `'${v}'`)
+  await d.exec(PEOPLE.map(p => `
+    insert into students (id, supabase_user_id, name, email, membership_status, whop_plan_id, first_paid_at, csm_exempt, whop_membership_id)
+    values ('${ID(p.n)}', '${ID(p.n)}', '${p.name}', 'spot-${p.n}@example.test', ${lit(p.status)}, '${p.plan}', ${lit(p.paid)},
+            ${p.exempt ? 'true' : 'false'}, ${p.noMembership ? 'null' : `'mem_spot${p.n}'`});
+    ${p.done.map(c => `insert into student_lesson_completions (student_id, lesson_id, completed_at, action_completed_at, skipped_at)
+      values ('${ID(p.n)}', '${c.id}', ${lit(c.at)}, ${lit(c.action)}, ${lit(c.skipped)});`).join('\n')}`).join('\n'))
+
+  // ── what each row must say, worked out here ──
+  const byId = new Map(lessons.map(l => [l.id, l]))
+  const asked = new Set(ASKED.map(l => l.id))
+  const complete = (l, c) => doneJs({ requires_action: l.requires_action, completed_at: c.at ?? null,
+                                      action_completed_at: c.action ?? null, skipped_at: c.skipped ?? null })
+  const expected = new Map()
+  for (const p of PEOPLE.filter(x => x.n < 10)) {
+    const counted = p.done.filter(c => byId.get(c.id).counts_toward_progress && complete(byId.get(c.id), c))
+    const moments = counted.filter(c => c.at).map(c => Math.max(Date.parse(c.at), c.action ? Date.parse(c.action) : -Infinity))
+    const top = counted.map(c => byId.get(c.id)).sort((a, b) => b.order_num - a.order_num)[0]
+    const last = moments.length ? iso(Math.max(...moments)) : null
+    const ends = deadlineOf(p.paid)
+    expected.set(ID(p.n), {
+      name: p.name,
+      email: `spot-${p.n}@example.test`,
+      student_id: ID(p.n),
+      membership: `${p.status.replace('_', ' ')}, ${planOf(p.plan)}`,
+      lessons: `${counted.length} of ${counting} lessons`,
+      last_lesson: last ? `${dayOf(last)}, ${clockOf(last)}` : 'No lesson yet',
+      area: top ? top.area : 'none',
+      first_payment: p.paid ? dayOf(p.paid) : 'No first payment on file',
+      videos_30: `${new Set(p.done.filter(c => c.at && asked.has(c.id)).map(c => c.id)).size} of ${ASKED.length} videos`,
+      deadline_30: ends ? `${dayOf(ends)}, ${clockOf(ends)} (Croatia time)` : 'No 30% deadline',
+    })
+  }
+  const IN = new Set(expected.keys())
+  const want = n => expected.get(ID(n))
+  // The edges, written out by hand: the worked-out rule must say exactly this.
+  note(want(1).videos_30 === '60 of 60 videos' && want(1).lessons === '61 of 140 lessons' && want(1).last_lesson === 'Wed 21 Oct, 00:30'
+       && want(1).first_payment === 'Fri 2 Oct' && want(1).deadline_30 === 'Fri 23 Oct, 23:59 (Croatia time)'
+       && want(2).first_payment === 'Thu 1 Oct' && want(2).deadline_30 === 'Fri 23 Oct, 23:59 (Croatia time)' && want(2).videos_30 === '20 of 60 videos'
+       && want(2).membership === 'past due, Yearly'
+       && want(3).first_payment === 'Fri 9 Oct' && want(3).deadline_30 === 'Fri 23 Oct, 00:00 (Croatia time)'
+       && want(3).lessons === '0 of 140 lessons' && want(3).area === 'none' && want(3).last_lesson === 'No lesson yet' && want(3).membership === 'active, Other plan'
+       && want(4).deadline_30 === 'Mon 26 Oct, 10:15 (Croatia time)' && want(4).videos_30 === '3 of 60 videos' && want(4).lessons === '2 of 140 lessons'
+       && want(5).first_payment === 'Wed 30 Sep' && want(5).deadline_30 === 'No 30% deadline' && want(5).videos_30 === '5 of 60 videos'
+       && want(6).first_payment === 'No first payment on file' && want(6).videos_30 === '0 of 60 videos' && want(6).lessons === '1 of 140 lessons'
+       && want(7).first_payment === 'Thu 8 Oct' && want(7).deadline_30 === 'Fri 23 Oct, 23:59 (Croatia time)' && want(7).lessons === '0 of 140 lessons'
+       && want(7).area === 'none',
+       "the worked-out rows say what the edges must: 1 October and 9 October in Croatia, the shared and the own deadline (Mon 26 Oct after the clocks go back), a video with no lesson, a skip, a hand-in still open, a lesson past the checkpoint, the Ad Bounty",
+       asJson([...expected.values()].map(e => [e.name, e.lessons, e.last_lesson, e.area, e.first_payment, e.videos_30, e.deadline_30])))
+
+  // ── the file, as the owner runs it ──
+  const was = await dump()
+  let r = await runFile(d, raw)
+  note(r.ok && sameJson(r.cols, COLS), 'it runs after v104, with its ten columns in order', r.ok ? r.cols.join(', ') : told(r))
+  note(await dump() === was, 'it changes nothing: every table reads the same after it')
+  note(r.ok && r.rows.length === 5 && new Set(r.rows.map(x => x.student_id)).size === 5 && r.rows.every(x => IN.has(x.student_id)),
+       '5 members, each once, each one Today lists from', told(r))
+  note(r.ok && sameJson(r.rows.map(x => x.name), r.rows.map(x => x.name).sort()), 'sorted by name')
+  note(r.ok && !/vid_|tella/i.test(asJson(r.rows)), 'no video id in what it shows')
+
+  // Many runs: every member of the population turns up, nobody else ever does, every row is right.
+  const seen = new Set()
+  const wrong = []
+  const outsiders = []
+  for (let i = 0; i < 40; i++) {
+    const x = await runFile(d, raw)
+    if (!x.ok) { wrong.push(told(x)); break }
+    for (const row of x.rows) {
+      seen.add(row.student_id)
+      if (!IN.has(row.student_id)) outsiders.push(row.name)
+      else if (!sameJson(row, expected.get(row.student_id))) wrong.push(asJson({ got: row, want: expected.get(row.student_id) }))
+    }
+  }
+  note(seen.size === IN.size && outsiders.length === 0,
+       'over 40 runs all 7 members of the population are picked, and never the canceled, expired, exempt, status-less or no-Whop-membership one, nor the seed\'s',
+       `${seen.size} seen; outsiders: ${asJson([...new Set(outsiders)])}`)
+  note(wrong.length === 0, "every row equals the row worked out here: the lessons, the last one, the area, the first payment, the 30%'s videos and deadline",
+       wrong.slice(0, 2).join(' | '))
+
+  // The session's time zone changes nothing: the same picks (one seed) read the same in UTC, Croatia and New York.
+  const seeded = async zone => {
+    await d.exec(`set timezone to '${zone}';`)
+    const x = await runFile(d, `select setseed(0.29);\n${raw}`)
+    await d.exec(`set timezone to 'UTC';`)
+    return x
+  }
+  const inUtc = await seeded('UTC')
+  const inZagreb = await seeded('Europe/Zagreb')
+  const inNewYork = await seeded('America/New_York')
+  note(inUtc.ok && inUtc.rows.length === 5 && sameJson(inZagreb.rows, inUtc.rows) && sameJson(inNewYork.rows, inUtc.rows),
+       "the SQL editor's time zone changes nothing: the same 5 members read the same with the session in UTC, Europe/Zagreb and America/New_York",
+       inUtc.ok ? `${inUtc.rows.map(x => `${x.name}: ${x.deadline_30}`).join('; ')}` : told(inUtc))
+  {
+    // Di's 14 days end after the clocks go back on 25 October. Pick her alone and read her under Croatia's clock.
+    await d.exec(`set timezone to 'Europe/Zagreb';`)
+    const alone = await runFile(d, raw.replace("s.membership_status in ('active', 'past_due')", `s.id = '${ID(4)}' and s.membership_status in ('active', 'past_due')`))
+    await d.exec(`set timezone to 'UTC';`)
+    note(countOf(raw, "s.membership_status in ('active', 'past_due')") === 1 && alone.ok && alone.rows.length === 1
+         && alone.rows[0].deadline_30 === 'Mon 26 Oct, 10:15 (Croatia time)',
+         "14 days from 11:15 on Mon 12 Oct end at 10:15 on Mon 26 Oct in Croatia, with the session on Croatia's clock too (336 hours, not 14 calendar days)",
+         told(alone))
+  }
+  await d.close()
+}
+
 console.log(`\n${'='.repeat(60)}\n  PASS ${ok.length}   FAIL ${fail.length}`)
 if (fail.length) { console.log('\nFAILURES:'); fail.forEach(f => console.log('  - ' + f)); process.exit(1) }

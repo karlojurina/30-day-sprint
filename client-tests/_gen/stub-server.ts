@@ -30,7 +30,27 @@
 //     overwritten (merge-duplicates), and the row is returned.
 //   - a column left out of an insert takes the table's default
 //     (student_lesson_completions.completed_at defaults to now()).
-// `fail['table.op']` makes every such call fail with that error. Every call is
+//   - a select hands back at most MAX_ROWS (1000) rows, PostgREST's max-rows
+//     on Supabase, whatever .limit() or .range() asks for. .range(from, to)
+//     is the page from row `from` to row `to`, after the order. .order() can
+//     be called more than once: each call adds a column, as supabase-js does,
+//     and a null sorts last going up and first going down, as in Postgres.
+//   - .select(cols, { count: "exact", head: true }) answers the number of
+//     matching rows in `count` (every match, whatever the page) and, with
+//     head, no rows. .not(col, "is" | "eq" | "like", value), .like(col,
+//     pattern) (% and _, case-sensitive), .lt(), .lte() and .gt() filter as
+//     PostgREST's operators do.
+//   - an update refuses a row that would break a unique key or index (23505)
+//     and then writes nothing: `tasks` has v27's one open task per student
+//     and scenario (idx_tasks_unique_open).
+// `fail['table.op']` makes every such call fail with that error, and
+// `failWhen(call)` fails the calls it returns an error for (one batch of a
+// bulk read, say: the call's filters are in `call.filters`). With `shuffle`
+// set to a number, every select's rows are shuffled (seeded by that number
+// and the call's place in the log, so a run repeats) before the order is
+// applied: rows the order does not tell apart come back in no fixed order,
+// as Postgres may hand them, and pages read without an order on a unique key
+// repeat some rows and skip others, as they can there. Every call is
 // logged in `log`, in order. `.rpc(fn, args)` runs the test's own stand-in for
 // that database function from `functions[fn]` (none: PostgREST's "not found"),
 // handing it the arguments the calling client was made with (createClient's
@@ -54,6 +74,9 @@ let seq = 0;
 const newId = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, "0")}`;
 const none = () => null;
 
+/** PostgREST's max-rows on Supabase: no select answers more rows than this. */
+export const MAX_ROWS = 1000;
+
 /** The tables whose columns are known, with each column's default. */
 const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: string[][]; partialUnique?: PartialUnique[] }> = {
   students: {
@@ -61,10 +84,27 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
       id: newId, whop_user_id: none, supabase_user_id: none, email: none, name: none,
       joined_at: now, first_paid_at: none, membership_status: () => "active", cancel_scheduled_at: none,
       last_active_at: now, ad_submissions_verified: () => false,
-      // v38 and v79, read by the Whop catch-up's pool (whop-catchup.test.mjs).
-      csm_exempt: () => false, whop_plan_id: none,
+      // Read by the Whop catch-up's pool (whop-catchup.test.mjs) and the admin rebuild's loaders.
+      discord_user_id: none, discord_username: none, whop_plan_id: none, csm_exempt: () => false,
+      whop_membership_id: none, high_churn_risk: () => false,
     },
     unique: [["whop_user_id"]],
+  },
+  team_members: {
+    columns: { id: newId, email: none, full_name: none, role: () => "csm", created_at: now },
+    unique: [["id"]],
+  },
+  discount_feedback_questions: {
+    columns: {
+      id: newId, order_num: () => 0, question_text: none, question_type: () => "open_text", options: none,
+      scale_min: none, scale_max: none, is_required: () => false, is_active: () => true, created_at: now,
+    },
+  },
+  discount_feedback_responses: {
+    columns: {
+      id: newId, discount_request_id: none, question_id: none, answer_scale: none, answer_choice: none,
+      answer_text: none, created_at: now,
+    },
   },
   student_streaks: {
     columns: {
@@ -74,7 +114,7 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
   },
   lessons: {
     columns: {
-      id: none, region_id: none, type: () => "watch", day: none, sort_order: () => 0,
+      id: none, region_id: none, type: () => "watch", title: none, day: none, sort_order: () => 0,
       requires_action: () => false, counts_toward_progress: () => true, whop_lesson_id: none,
       is_gate: () => false, duration_seconds: none,
     },
@@ -95,15 +135,47 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
     unique: [["student_id"]],
   },
   templates: {
-    columns: { id: newId, scenario_id: none, is_active: () => true },
+    // v27's columns, v34's trigger_config.
+    columns: {
+      id: newId, scenario_id: none, is_active: () => true, bucket: none, week: none, title: none,
+      trigger_description: none, intent: none, tone: none, variables: none, body: none, word_count: none,
+      is_admin_only: none, trigger_config: none, created_at: none, updated_at: none,
+    },
     unique: [["scenario_id"]],
   },
   tasks: {
+    // v27's columns and v85's outcome columns.
     columns: {
       id: newId, student_id: none, scenario_id: none, template_id: none, status: () => "open",
-      behavior_summary: none, created_at: now, dismissed_at: none, notes: none,
+      behavior_summary: none, created_at: now, completed_at: none, completed_by: none, dismissed_at: none,
+      dismissed_by: none, notes: none, outcome: none, outcome_at: none, outcome_by: none,
+    },
+    // v27: at most one open task per student and scenario.
+    partialUnique: [{ name: "idx_tasks_unique_open", key: ["student_id", "scenario_id"], where: (r) => r.status === "open" }],
+  },
+  // v46's columns and the later ones. Every default is null, as a table the
+  // stand-in did not list read before: the suites that seed these rows keep
+  // reading what they did.
+  student_milestones: {
+    columns: {
+      student_id: none, onboarding_completed_at: none, first_sprint_login_at: none, bounty_access_claimed_at: none,
+      sprint_completed_at: none, first_client_landed_at: none, playbook_welcome_seen_at: none, updated_at: none,
+      first_dashboard_login_at: none, intro_video_threshold_met: none, playbook_unlocked_at: none,
+      why_youre_here_panel_dismissed: none,
     },
   },
+  // v93's columns, every default null for the same reason.
+  student_lesson_watch: {
+    columns: {
+      student_id: none, lesson_id: none, max_position_seconds: none, last_position_seconds: none,
+      watched_seconds: none, reported_duration_seconds: none, heartbeat_count: none, first_played_at: none,
+      last_heartbeat_at: none, threshold_met_at: none,
+    },
+  },
+  // The progress views (v92, v103): one row per student.
+  student_progress_counts: { columns: { student_id: none, completed_count: none } },
+  student_last_counted_completion: { columns: { student_id: none, last_completed_at: none } },
+  student_current_region: { columns: { student_id: none, current_region: none } },
   disengagement_alerts: {
     columns: { id: newId, student_id: none, alert_type: none, is_dismissed: () => false },
   },
@@ -111,6 +183,7 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
     columns: {
       id: newId, student_id: none, status: () => "pending", promo_code: none, whop_promo_id: none,
       reviewed_by: none, reviewed_at: none, rejection_reason: none, gate_lesson_id: none, created_at: now,
+      applied_at: none, applied_by: none,
     },
     // v106: at most one pending request per student.
     partialUnique: [{ name: "discount_requests_one_pending_per_student", key: ["student_id"], where: (r) => r.status === "pending" }],
@@ -142,6 +215,10 @@ export interface Logged {
 export class FakeDb {
   tables: Record<string, Row[]> = {};
   fail: Record<string, DbError> = {};
+  /** Fails a call when it returns an error, after `fail` is asked (the header says when to use it). */
+  failWhen: ((call: Logged) => DbError | null) | null = null;
+  /** A seed: when set, every select's rows are shuffled before its order is applied (the header says why). */
+  shuffle: number | null = null;
   log: Logged[] = [];
   /** Access token -> auth user id, for auth.getUser. */
   users: Record<string, string> = {};
@@ -177,16 +254,72 @@ function project(table: string, rows: Row[], cols: string): { data: Row[] | null
   return { data: rows.map((r) => Object.fromEntries(names.map((c) => [c, r[c] ?? null]))), error: null };
 }
 
+/** The rows in a shuffled order, the same for the same seed (mulberry32, then Fisher-Yates). */
+function shuffled(rows: Row[], seed: number): Row[] {
+  let a = seed >>> 0;
+  const random = () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const out = [...rows];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+/** Postgres's order by these columns: a null sorts last going up and first going down. */
+function byColumns(orders: Array<[string, boolean]>) {
+  return (x: Row, y: Row): number => {
+    for (const [c, asc] of orders) {
+      const a = x[c] as string | number | null | undefined;
+      const b = y[c] as string | number | null | undefined;
+      if (a === b || (a == null && b == null)) continue;
+      if (a == null) return asc ? 1 : -1;
+      if (b == null) return asc ? -1 : 1;
+      if (a < b) return asc ? -1 : 1;
+      if (a > b) return asc ? 1 : -1;
+    }
+    return 0;
+  };
+}
+
+/** SQL LIKE as a regular expression: % is any run of characters, _ is one. Case-sensitive, as LIKE is. */
+function likeRe(pattern: string): RegExp {
+  let re = "";
+  for (const ch of pattern) {
+    if (ch === "%") re += ".*";
+    else if (ch === "_") re += ".";
+    else re += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${re}$`, "s");
+}
+
+/** PostgREST's operators that .not() takes here. */
+function holds(op: string, value: unknown, v: unknown): boolean {
+  if (op === "is") return (value ?? null) === v;
+  if (op === "eq") return value === v;
+  if (op === "like") return typeof value === "string" && likeRe(String(v)).test(value);
+  throw new Error(`the stand-in's .not() does not know the operator "${op}"`);
+}
+
 function builder(db: FakeDb, table: string) {
   const q: Logged = { table, op: "select", filters: [], returning: null };
   const preds: Array<(r: Row) => boolean> = [];
   let cols = "*";
   let single: "one" | "maybe" | null = null;
-  let order: [string, boolean] | null = null;
+  const orders: Array<[string, boolean]> = [];
+  let page: [number, number] | null = null;
   let lim: number | null = null;
-  let rng: [number, number] | null = null;
   let values: Row | Row[] | null = null;
   let opts: { onConflict?: string; ignoreDuplicates?: boolean } = {};
+  let counting = false;
+  let head = false;
+  let count: number | null = null;
   let ran = false;
 
   const filter = (desc: string, fn: (r: Row) => boolean) => {
@@ -195,20 +328,32 @@ function builder(db: FakeDb, table: string) {
     return b;
   };
   const matching = () => db.rows(table).filter((r) => preds.every((p) => p(r)));
+  /** A comparison that, as in SQL, is never true for a null. */
+  const compare = (c: string, v: unknown, sign: string, test: (a: string, b: string) => boolean) =>
+    filter(`${c}${sign}${String(v)}`, (r) => r[c] != null && test(r[c] as string, v as string));
 
   const b = {
-    select(c = "*") {
-      if (q.op === "select") cols = c;
-      else q.returning = c;
+    select(c = "*", o: { count?: "exact" | "planned" | "estimated"; head?: boolean } = {}) {
+      if (q.op === "select") {
+        cols = c;
+        counting = o.count !== undefined;
+        head = o.head === true;
+      } else q.returning = c;
       return b;
     },
     eq: (c: string, v: unknown) => filter(`${c}=${String(v)}`, (r) => r[c] === v),
     neq: (c: string, v: unknown) => filter(`${c}!=${String(v)}`, (r) => r[c] !== v),
     in: (c: string, vs: unknown[]) => filter(`${c} in (${vs.map(String).join(",")})`, (r) => vs.includes(r[c])),
     is: (c: string, v: unknown) => filter(`${c} is ${String(v)}`, (r) => (r[c] ?? null) === v),
-    gte: (c: string, v: unknown) => filter(`${c}>=${String(v)}`, (r) => r[c] != null && (r[c] as string) >= (v as string)),
+    not: (c: string, op: string, v: unknown) => filter(`${c} not ${op} ${String(v)}`, (r) => !holds(op, r[c], v)),
+    like: (c: string, pattern: string) =>
+      filter(`${c} like ${pattern}`, (r) => typeof r[c] === "string" && likeRe(pattern).test(r[c] as string)),
+    gte: (c: string, v: unknown) => compare(c, v, ">=", (a, z) => a >= z),
+    gt: (c: string, v: unknown) => compare(c, v, ">", (a, z) => a > z),
+    lt: (c: string, v: unknown) => compare(c, v, "<", (a, z) => a < z),
+    lte: (c: string, v: unknown) => compare(c, v, "<=", (a, z) => a <= z),
     order(c: string, o: { ascending?: boolean } = {}) {
-      order = [c, o.ascending !== false];
+      orders.push([c, o.ascending !== false]);
       return b;
     },
     limit(n: number) {
@@ -217,7 +362,7 @@ function builder(db: FakeDb, table: string) {
     },
     /** Rows `from` to `to`, both counted, as fetchAllRowsPaginated asks for a page (logged as a filter). */
     range(from: number, to: number) {
-      rng = [from, to];
+      page = [from, to];
       q.filters.push(`range ${from}-${to}`);
       return b;
     },
@@ -264,8 +409,9 @@ function builder(db: FakeDb, table: string) {
     return Promise.resolve(shape(run()));
   }
 
-  function shape(r: { data: Row[] | null; error: DbError | null }): { data: unknown; error: DbError | null } {
-    if (r.error) return { data: null, error: r.error };
+  function shape(r: { data: Row[] | null; error: DbError | null }): { data: unknown; error: DbError | null; count?: number | null } {
+    if (r.error) return counting ? { data: null, error: r.error, count: null } : { data: null, error: r.error };
+    if (counting) return { data: head ? null : r.data, error: null, count };
     if (r.data === null) return { data: null, error: null };
     if (single === "one") {
       return r.data.length === 1
@@ -284,6 +430,15 @@ function builder(db: FakeDb, table: string) {
   }
 
   function violation(row: Row, others: Row[]): DbError | null {
+    const clash = uniqueViolation(row, others);
+    if (clash) return clash;
+    if (table === "student_lesson_completions" && !db.rows("lessons").some((l) => l.id === row.lesson_id)) {
+      return { code: "23503", message: `insert or update on table "student_lesson_completions" violates foreign key constraint (lesson_id ${String(row.lesson_id)})` };
+    }
+    return null;
+  }
+
+  function uniqueViolation(row: Row, others: Row[]): DbError | null {
     for (const key of DEFS[table]?.unique ?? []) {
       // As in Postgres, a key holding a null never clashes.
       if (key.some((k) => row[k] == null)) continue;
@@ -298,26 +453,23 @@ function builder(db: FakeDb, table: string) {
         return { code: "23505", message: `duplicate key value violates unique constraint "${idx.name}"` };
       }
     }
-    if (table === "student_lesson_completions" && !db.rows("lessons").some((l) => l.id === row.lesson_id)) {
-      return { code: "23503", message: `insert or update on table "student_lesson_completions" violates foreign key constraint (lesson_id ${String(row.lesson_id)})` };
-    }
     return null;
   }
 
   function run(): { data: Row[] | null; error: DbError | null } {
-    const fail = db.fail[`${table}.${q.op}`];
+    const fail = db.fail[`${table}.${q.op}`] ?? db.failWhen?.(q);
     if (fail) return { data: null, error: fail };
     const list = values === null ? [] : Array.isArray(values) ? values : [values];
 
     if (q.op === "select") {
       let rows = matching();
-      if (order) {
-        const [c, asc] = order;
-        rows = [...rows].sort((x, y) => ((x[c] as string) < (y[c] as string) ? -1 : (x[c] as string) > (y[c] as string) ? 1 : 0) * (asc ? 1 : -1));
-      }
+      // count=exact counts every match, whatever page is asked for.
+      count = rows.length;
+      if (db.shuffle !== null) rows = shuffled(rows, db.shuffle + db.log.length);
+      if (orders.length) rows = [...rows].sort(byColumns(orders));
+      if (page) rows = rows.slice(page[0], page[1] + 1);
       if (lim !== null) rows = rows.slice(0, lim);
-      if (rng !== null) rows = rows.slice(rng[0], rng[1] + 1);
-      return project(table, rows, cols);
+      return project(table, rows.slice(0, MAX_ROWS), cols);
     }
 
     if (q.op === "insert") {
@@ -356,6 +508,13 @@ function builder(db: FakeDb, table: string) {
 
     if (q.op === "update") {
       const rows = matching();
+      // As Postgres: an update that would break a unique key or index writes nothing.
+      const others = db.rows(table).filter((r) => !rows.includes(r));
+      const next = rows.map((r) => ({ ...r, ...(values as Row) }));
+      for (let i = 0; i < next.length; i++) {
+        const bad = uniqueViolation(next[i], [...others, ...next.slice(0, i)]);
+        if (bad) return { data: null, error: bad };
+      }
       for (const r of rows) Object.assign(r, values as Row);
       return written(rows);
     }

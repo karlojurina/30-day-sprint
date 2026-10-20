@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase-browser";
@@ -190,10 +191,6 @@ export default function StudentDetailPage() {
     if (!lessonsByRegion[lesson.region_id]) lessonsByRegion[lesson.region_id] = [];
     lessonsByRegion[lesson.region_id].push(lesson);
   }
-
-  // Discount status: the lesson the catalog marks as the gate.
-  const gateLesson = lessons.find((l) => l.is_gate) ?? null;
-  const gateCompleted = gateLesson != null && completedIds.has(gateLesson.id);
 
   // DM templates
   const dmTemplates = [
@@ -546,10 +543,22 @@ export default function StudentDetailPage() {
 
       <Section eyebrow="Discount">
         <Card padding={20}>
+          {/* The 30% rule (61 videos by a deadline) is judged on the 30%
+              page, which this links to filtered to the student (admin
+              rebuild PRD, C16). */}
           <p style={{ ...T.bodyDim, fontSize: 12, marginBottom: 12 }}>
-            {gateLesson
-              ? `Gate lesson (${gateLesson.title}): ${gateCompleted ? "completed" : "not yet"}`
-              : "No lesson is marked as the gate."}
+            30%:{" "}
+            <Link
+              href={`/admin/discounts?student=${encodeURIComponent(student.id)}`}
+              style={{
+                color: "var(--color-accent-dark)",
+                textDecoration: "underline",
+                textUnderlineOffset: 3,
+                fontWeight: 500,
+              }}
+            >
+              see 30% off
+            </Link>
           </p>
           {discountRequest ? (
             <DiscountStatusPill

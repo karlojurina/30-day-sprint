@@ -189,7 +189,19 @@ interface LightStateLike {
   cloudBase: THREE.Color;
   skyHorizon: THREE.Color;
   haze: THREE.Color;
+  /** The night layer here, 0..1 (light.ts state.night); 0 by day and from the Sky Island on. */
+  night?: number;
 }
+
+/**
+ * The night layer (light.ts NIGHT_ROWS): the gulls and the smoke take the
+ * moon's light. Both kept their day colour at full strength at every hour, so
+ * at night a gull and the campfire's smoke read white, lit from inside. At
+ * night 1 the gulls' tint is `gull` times the moonlight's colour, the smoke's
+ * lit side `smokeLit` and its shade `smokeShade` (linear). By day, at the
+ * island and at the arch (night 0) nothing changes.
+ */
+const NIGHT_LIFE = { tint: 0x9aaad8, gull: 0.32, smokeLit: 0.24, smokeShade: 0.1 } as const;
 
 // ── Birds ───────────────────────────────────────────────────────────────────
 
@@ -1495,6 +1507,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   const WHITE = new THREE.Color(1, 1, 1);
   const tint = new THREE.Color();
   const sunTmp = new THREE.Color();
+  const nightTint = hex(NIGHT_LIFE.tint);
+  const nightC = new THREE.Color();
   let animating = false;
   let lastT = -1;
   let timeOverride: number | null = null;
@@ -1511,7 +1525,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     camera.getWorldDirection(camDir);
   };
 
-  const poseBirds = (t: number) => {
+  const poseBirds = (t: number, ls: LightStateLike | null) => {
     let any = false;
     let n = 0;
     for (const f of flocks) {
@@ -1574,6 +1588,9 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     sunTmp.copy(ctx.sunColor);
     const mx = Math.max(sunTmp.r, sunTmp.g, sunTmp.b, 1e-3);
     tint.setRGB(sunTmp.r / mx, sunTmp.g / mx, sunTmp.b / mx).lerp(WHITE, 0.5);
+    // The night layer (light.ts state.night): moonlit, not lit from inside.
+    const nk = ls?.night ?? 0;
+    if (nk > 0) tint.lerp(nightC.copy(nightTint).multiplyScalar(NIGHT_LIFE.gull), nk);
     birdMat.uniforms.uTint.value.copy(tint);
     return any;
   };
@@ -1595,6 +1612,13 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     // Lit side leans to the sun's colour, shade to the haze.
     u.uLit.value.setHex(0xe8ded2).lerp(ctx.sunColor, 0.16);
     u.uShade.value.setHex(0x7e7c86).lerp(ctx.hazeColor, 0.35);
+    // The night layer: the campfire's and the chimneys' smoke is moonlit grey,
+    // not the day's cream (it stayed white at night, as if lit from inside).
+    const nk = ls?.night ?? 0;
+    if (nk > 0) {
+      u.uLit.value.lerp(nightC.copy(nightTint).multiplyScalar(NIGHT_LIFE.smokeLit), nk);
+      u.uShade.value.lerp(nightC.copy(nightTint).multiplyScalar(NIGHT_LIFE.smokeShade), nk);
+    }
     if (ls) {
       u.uCloudTop.value.copy(ls.cloudTop);
       u.uCloudBase.value.copy(ls.cloudBase);
@@ -1750,7 +1774,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     const ls = lightHandle();
     refreshView();
     gateLife();
-    const b = poseBirds(t);
+    const b = poseBirds(t, ls);
     const s = poseSoft(t, ls);
     const sh = poseShips(t);
     const g = poseGlow(t, ls, still || timeOverride !== null);

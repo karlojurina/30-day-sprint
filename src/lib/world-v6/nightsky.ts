@@ -357,6 +357,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   ctx.scene.add(group);
   const disposables: { dispose(): void }[] = [];
   const uNight = { value: 0 };
+  /** The aurora's own level (light state.aurora): the star level by day; at night only the forest and the island have one. */
+  const uAurora = { value: 0 };
   const uTime = { value: 0 };
   /** Final pass: the moon's direction and how much of it shows (light state), for the aurora's clearing round it. */
   const uMoonDir = { value: new THREE.Vector3(0, 1, 0) };
@@ -400,7 +402,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     side: THREE.DoubleSide,
     fog: false,
     toneMapped: false,
-    uniforms: { uNight, uTime, uMoonDir, uMoonVis },
+    uniforms: { uAurora, uTime, uMoonDir, uMoonVis },
     vertexShader: /* glsl */ `
       attribute vec3 aUv;
       varying vec3 vUv;
@@ -412,7 +414,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
         gl_Position = farClip(vDir);
       }`,
     fragmentShader: /* glsl */ `
-      uniform float uNight;
+      uniform float uAurora;
       uniform float uTime;
       uniform vec3 uMoonDir;
       uniform float uMoonVis;
@@ -441,7 +443,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
         vec3 teal = vec3(0.12, 0.85, 0.62);
         vec3 violet = vec3(0.45, 0.22, 0.75);
         vec3 col = mix(teal, violet, smoothstep(0.15, 0.8, v));
-        float a = edge * ends * rays * k * uNight * 0.34;
+        float a = edge * ends * rays * k * uAurora * 0.34;
         // Final pass: the bright moon outshines the curtain round it (a soft
         // clearing from ~3 to ~10 degrees), so the disc stays a clean shape
         // where it sits inside the aurora at a7 (light.ts NIGHT_MOON).
@@ -886,12 +888,19 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   setProgress(0);
 
   let lastNight = -1;
+  let lastAurora = -1;
   let lastAim = 0;
   const viewSize = new THREE.Vector2();
   const update = (time: number) => {
     const s = light?.state;
     const night = s ? Math.min(1, Math.max(0, s.stars)) * (1 - s.under) : 0;
+    // The night layer (light.ts NIGHT_ROWS): the opening's stars come out but
+    // its sky has no aurora; the forest and the island keep theirs. By day
+    // state.aurora is the star level, so nothing here changed.
+    const auroraNow = s ? Math.min(night, Math.max(0, s.aurora)) * (1 - s.under) : 0;
     uNight.value = night;
+    uAurora.value = auroraNow;
+    aurora.visible = auroraNow > 0.003;
     uTime.value = time;
     uSig.value = LINE_SIGMA * (ctx.renderer ? ctx.renderer.getPixelRatio() : 1);
     if (s) {
@@ -899,8 +908,9 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       uMoonVis.value = s.moonVis;
     }
     const aimK = Math.min(1, Math.max(0, Number(ctx.scene.userData.telescopeK) || 0));
-    const changed = Math.abs(night - lastNight) > 1e-4 || Math.abs(aimK - lastAim) > 1e-4;
+    const changed = Math.abs(night - lastNight) > 1e-4 || Math.abs(auroraNow - lastAurora) > 1e-4 || Math.abs(aimK - lastAim) > 1e-4;
     lastNight = night;
+    lastAurora = auroraNow;
     lastAim = aimK;
     // Round 1: the star signs only through the telescope (smoothstep over TEL_FADE).
     const tt = Math.min(1, Math.max(0, (aimK - TEL_FADE[0]) / (TEL_FADE[1] - TEL_FADE[0])));
@@ -923,7 +933,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
         }
       }
     }
-    return changed || refit || (night > 0.05 && !ctx.reducedMotion);
+    // What moves on its own is the aurora's drift (the chart's stars only with it, through the telescope).
+    return changed || refit || (auroraNow > 0.05 && !ctx.reducedMotion);
   };
   update(0);
 
@@ -931,7 +942,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   const nightsky: WorldModule & { setProgress(p: number): void; setWorldProgress(p: WorldProgress): void } = {
     name: "nightsky",
     update,
-    isAnimating: () => uNight.value > 0.05 && !ctx.reducedMotion,
+    isAnimating: () => uAurora.value > 0.05 && !ctx.reducedMotion,
     setProgress,
     setWorldProgress,
     dispose() {

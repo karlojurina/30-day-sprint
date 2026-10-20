@@ -87,6 +87,14 @@ const PAL = {
   forestFloor: "#3c3c2b", // dark green brown
 } as const;
 
+/**
+ * The night layer (light.ts state.night): the dry sand's colour at night 1,
+ * near the wet sand's value, so the beach reads as moonlit sand and not as
+ * snow; and the share of its day value the wet band keeps.
+ */
+const SAND_NIGHT = "#8c8270";
+const NIGHT_WET_SAND = 0.8;
+
 export const lin = (hex: string) => new THREE.Color(hex);
 
 // ── Tunables ─────────────────────────────────────────────────────────────────
@@ -1329,6 +1337,12 @@ export interface LightStateLike {
   haze: THREE.Color;
   hemiIntensity: number;
   water: THREE.Color;
+  /** The night layer here, 0..1 (light.ts state.night): 0 by day and from the Sky Island on. */
+  night?: number;
+  /** The moon's disc (direction, colour, how much of it shows), for the water's moon path at night. */
+  moonDir?: THREE.Vector3;
+  moonColor?: THREE.Color;
+  moonVis?: number;
 }
 
 /** light.ts's live state, or null before it has one (or without light.ts). */
@@ -1647,9 +1661,24 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   // ── Light: slopes away from the sun lean to the key's near shade ───────────
   const sunDirNow = new THREE.Vector3();
   const hueNow = new THREE.Color();
+  // The night layer (light.ts state.night): the sand is the palest ground, and
+  // under the night's raised fill and exposure the beach read as snow. At
+  // night 1 the dry sand is SAND_NIGHT and the wet band NIGHT_WET_SAND of its
+  // day value; by day and from the island on (night 0) both are PAL's.
+  const sandDay = lin(PAL.sand);
+  const wetSandDay = lin(PAL.wetSand);
+  const sandNight = lin(SAND_NIGHT);
+  let sandAt = 0;
   function applyLight(): boolean {
     const s = lightStateOf(scene);
     let changed = false;
+    const nk = s?.night ?? 0;
+    if (nk !== sandAt) {
+      sandAt = nk;
+      tU.uSand.value.copy(sandDay).lerp(sandNight, nk);
+      tU.uWetSand.value.copy(wetSandDay).multiplyScalar(1 - (1 - NIGHT_WET_SAND) * nk);
+      changed = true;
+    }
     if (s) {
       // The key's mid sky, normalised to luma 1 and softened: blue by day,
       // violet at sunset, so shade takes the sky's colour (bible 2.3, 2.6).

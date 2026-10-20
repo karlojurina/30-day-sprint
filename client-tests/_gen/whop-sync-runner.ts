@@ -434,6 +434,10 @@ export async function runWhopCommunitySync(
     // already run long on heavy days, so bail out of the recovery loop
     // rather than risk the function timing out mid-pass.
     const RECOVERY_DEADLINE_MS = 240_000;
+    // And no payments read is waited on past this, its 429 waits included:
+    // a candidate started just before 240 s still ends in time for the
+    // sync_runs row below, which a function cut off at 300 s never writes.
+    const RECOVERY_READ_LIMIT_MS = 280_000;
     if (result.errors > 0) {
       // A batch upsert failed this run, so some candidate rows are in
       // partial/unknown state (a new insert may not exist; an existing
@@ -467,7 +471,9 @@ export async function runWhopCommunitySync(
         processed++;
         try {
           const { firstPaidIso: recovered, error: readError } =
-            await fetchFirstPaymentForUser(cand.whopUserId);
+            await fetchFirstPaymentForUser(cand.whopUserId, {
+              deadlineAtMs: t0 + RECOVERY_READ_LIMIT_MS,
+            });
           // v75.58: NO joined_at fallback. first_paid_at anchors cohort
           // membership AND the discount window, and the live writers only
           // fill it — a fabricated date would mislabel the student. A

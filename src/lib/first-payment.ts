@@ -260,7 +260,8 @@ export interface FirstPaymentResult {
 /**
  * One user's first real payment: GET /api/v1/payments?user_id=<id>&status=paid
  * &first=100, every page. `deadlineAtMs`: no request starts, no 429 wait ends
- * and no answer is waited on past it (the login's short wait); none by default.
+ * and no answer is waited on past it (the login's short wait, the sync's and
+ * the backfill's time budgets); none by default.
  */
 export async function fetchFirstPaymentForUser(
   whopUserId: string,

@@ -616,6 +616,28 @@ console.log('\n=== The sync: no membership date; an empty paying row filled from
   const [again] = await quietly(() => runWhopCommunitySync(createClient(), 'cron'))
   ok(raced.rows('students')[0].first_paid_at === '2026-10-18T10:00:02.000Z' && again.first_paid_recovered === 0,
      'a value written meanwhile is kept, and not counted as recovered', show({ first: raced.rows('students')[0].first_paid_at, recovered: again.first_paid_recovered }))
+
+  // The recovery starts a read at 239 s that Whop never answers: given up at 280 s, and the run still writes its success row.
+  resetClock(); freshWhop()
+  memberships = [mem(W(38), PAYING, '2026-10-18T10:00:00.000Z')]
+  payments = [pay(W(38), '2026-10-18T10:00:03.000Z', 97)]
+  answerWith = async (_n, u) => {
+    if (u.pathname === '/api/v2/memberships') await wait(239_000)
+    if (u.pathname === '/api/v1/payments') await wait(1_000_000)
+    return null
+  }
+  const hungDb = new FakeDb({ students: [] })
+  installDb(hungDb)
+  const syncStart = clock
+  const [hung, hungLog] = await quietly(() => runWhopCommunitySync(createClient(), 'cron'))
+  const tookSync = clock - syncStart
+  ok(paymentRequests().length === 1 && paymentRequests()[0].at - syncStart === 239_000 && hung.first_paid_recovered === 0 &&
+     hungDb.rows('sync_runs').length === 1 && hungDb.rows('sync_runs')[0].status === 'success' && tookSync <= 280_200,
+     'a payments read started at 239 s and never answered: given up at 280 s, the sync_runs success row written, the run over before Vercel\'s 300 s',
+     show({ startedAt: paymentRequests()[0]?.at - syncStart, took: tookSync, runs: hungDb.rows('sync_runs').map((x) => x.status) }))
+  ok(hungDb.rows('students')[0].first_paid_at === null && hungLog.some((l) => l.includes('payments read failed (time_budget)')),
+     'and the row is left empty, the log naming time_budget (the next sync tries again)')
+  timers = []
 }
 
 console.log('\n=== The backfill route: an empty first_paid_at filled from the payment ===')
@@ -653,6 +675,68 @@ console.log('\n=== The backfill route: an empty first_paid_at filled from the pa
   ok(same(r.body.errors, [{ student_id: sid(43), reason: 'payments read failed: http_401_403' }]), 'the failure by kind and student id', show(r.body.errors))
   ok(!/user_TEST|@example|Made Up/.test(r.text), 'the answer names no Whop id, email or name')
   ok(same(gaps(paymentRequests()), [200, 200]), 'still 200 ms between students, the one with no payment included', show(gaps(paymentRequests())))
+  ok(r.body.checked === 3 && r.body.remaining === 0 && r.body.next_after === null, 'all 3 read in one call: remaining 0, no next_after', show({ checked: r.body.checked, remaining: r.body.remaining }))
+
+  // The cursor: from the student after the one named, in id order.
+  db.rows('students').find((x) => x.id === sid(41)).first_paid_at = null
+  freshWhop()
+  payments = [pay(W(41), BOUGHT, 97), pay(W(42), FREE_DAY, 0)]
+  const callWith = async (body) => {
+    const [res] = await quietly(() => backfill(new Request('http://app/api/admin/backfill-first-paid-at', {
+      method: 'POST', headers: { authorization: `Bearer ${SECRET}`, 'content-type': 'application/json' }, body: JSON.stringify(body),
+    })))
+    const text = await res.text()
+    return { status: res.status, body: JSON.parse(text), text }
+  }
+  r = await callWith({ after: sid(41) })
+  ok(r.status === 200 && same(paymentRequests().map((q) => q.params.user_id), [W(42), W(43)]) && r.body.checked === 2 && r.body.remaining === 0 && first(41) === null,
+     'after a student id: only the students after it are read, in id order', show({ read: paymentRequests().map((q) => q.params.user_id), checked: r.body.checked }))
+  for (const bad of ['not-an-id', 42, { id: sid(41) }]) {
+    freshWhop()
+    r = await callWith({ after: bad })
+    ok(r.status === 400 && asked.length === 0, `after ${show(bad)}: 400, Whop not asked`, show(r.body))
+  }
+}
+
+console.log('\n=== The backfill route: no student started after 240 s, no read waited on past 280 s ===')
+{
+  resetClock(); freshWhop()
+  const ids = [61, 62, 63, 64, 65, 66]
+  payments = ids.map((n) => pay(W(n), BOUGHT, 97))
+  // Seeded out of order: the route reads them in id order.
+  const db = new FakeDb({ students: [...ids].reverse().map((n) => ({ id: sid(n), whop_user_id: W(n), membership_status: 'active' })) })
+  installDb(db)
+  const call = async (body) => {
+    const startedAt = clock
+    const [res] = await quietly(() => backfill(new Request('http://app/api/admin/backfill-first-paid-at', {
+      method: 'POST', headers: { authorization: `Bearer ${SECRET}`, 'content-type': 'application/json' }, body: JSON.stringify(body),
+    })))
+    return { status: res.status, body: JSON.parse(await res.text()), took: clock - startedAt }
+  }
+  // Whop taking 70 s a read: students start at 0, 70.2, 140.4 and 210.6 s; the 4th read is still unanswered at 280 s.
+  latency = 70_000
+  let r = await call({})
+  const first = (n) => db.rows('students').find((x) => x.id === sid(n)).first_paid_at
+  ok(r.status === 200 && r.body.ok === true && r.body.checked === 3 && r.body.backfilled === 3 && r.body.remaining === 3 && r.body.next_after === sid(63) && r.took === 280_000,
+     'Whop slow: 3 students filled, the 4th given up at 280 s, the answer at 280 s with remaining 3 and next_after the 3rd', show({ checked: r.body.checked, remaining: r.body.remaining, next: r.body.next_after, took: r.took }))
+  ok(same(paymentRequests().map((q) => q.params.user_id), [W(61), W(62), W(63), W(64)]) && first(63) === BOUGHT && first(64) === null && r.body.api_errors === 0,
+     'read in id order; the 4th is left empty and not counted as an error (the next call reads it first)', show(paymentRequests().map((q) => q.params.user_id)))
+  timers = []
+
+  // Whop taking 90 s: the 4th student would start at 270.6 s, past 240, so it is not started.
+  resetClock(); freshWhop()
+  payments = ids.map((n) => pay(W(n), BOUGHT, 97))
+  for (const s of db.rows('students')) s.first_paid_at = null
+  latency = 90_000
+  r = await call({})
+  ok(r.body.checked === 3 && r.body.remaining === 3 && paymentRequests().length === 3 && r.took === 270_600,
+     'Whop taking 90 s a read: no 4th student is started past 240 s; the answer at 270.6 s', show({ requests: paymentRequests().length, took: r.took }))
+
+  resetClock(); freshWhop()
+  payments = ids.map((n) => pay(W(n), BOUGHT, 97))
+  r = await call({ after: r.body.next_after })
+  ok(r.body.checked === 3 && r.body.remaining === 0 && r.body.next_after === null && ids.every((n) => first(n) === BOUGHT),
+     'the next call, from next_after: the other 3, remaining 0, every student filled', show({ checked: r.body.checked, remaining: r.body.remaining }))
 }
 
 globalThis.Date = RealDate

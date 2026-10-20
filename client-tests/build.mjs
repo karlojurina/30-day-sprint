@@ -297,6 +297,7 @@ gen('../src/lib/whop-sync-runner.ts', './_gen/whop-sync-runner.ts', [
 gen('../src/app/api/admin/backfill-first-paid-at/route.ts', './_gen/backfill-first-paid-at-route.ts', [
   ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
   ['from "@/lib/first-payment"', 'from "./first-payment.ts"'],
+  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
   ...toStub('next/server', '@/lib/supabase-server'),
 ])
 gen('../src/lib/first-paid-repair.ts', './_gen/first-paid-repair.ts', [

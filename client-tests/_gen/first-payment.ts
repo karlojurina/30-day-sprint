@@ -6,10 +6,15 @@
  *   - status "paid", with paid_at set;
  *   - a total above 0. A $1 plan counts. A 100% promo code and a free trial
  *     leave payments with a total of 0 (or none at all), so they count from
- *     their first real charge;
+ *     their first real charge. A total that does not read is left out too,
+ *     and counted apart (bad_total);
  *   - not fully refunded: substatus "refunded" or "auto_refunded", or a
  *     refunded_amount at or above the total, leaves a payment out. A partial
  *     refund still counts;
+ *   - not lost in a dispute: substatus "dispute_lost" (a chargeback the buyer
+ *     won, so the money went back) leaves a payment out like a full refund,
+ *     counted apart (dispute_lost). A reading taken on 2026-10-20 while Lovro
+ *     could not be asked; the repair's dry run says how many there are;
  *   - for any product of the company.
  * A user with no such payment has no first payment (null): a free member, a
  * seat given away, a comp. Membership dates never decide it. A membership's
@@ -26,6 +31,15 @@
  * seconds Whop names, or 15, at most 30) and retried twice; a third ends the
  * read. The facts behind all of it: _admin/prds/first-paid-fix/ in the
  * workspace (outside this repository).
+ *
+ * A PAGE IN ANOTHER SHAPE. In the pinned shape every payment carries its
+ * buyer and its total. A page with rows of which not one carries a buyer, or
+ * not one carries a total that reads, was answered in a shape this code does
+ * not read (the buyer no longer nested, the total under another name). Judged
+ * row by row it would say "no payment" for every buyer on it, which reads
+ * exactly like a free member, so both reads treat it as a failed read
+ * (bad_page): the caller writes nothing and logs the kind. One odd row on a
+ * page is judged as usual (no_user, bad_total).
  *
  *   fetchFirstPaymentForUser: one user's payments (the login, the sync's
  *     recovery pass, the backfill route). Every row's user is checked: a row
@@ -70,7 +84,14 @@ export interface WhopPayment {
 }
 
 /** Why a payment read does not count. */
-export type PaymentSkip = "not_paid" | "no_paid_at" | "zero_total" | "refunded" | "no_user";
+export type PaymentSkip =
+  | "not_paid"
+  | "no_paid_at"
+  | "zero_total"
+  | "bad_total"
+  | "refunded"
+  | "dispute_lost"
+  | "no_user";
 
 /** Why a read ended without an answer. The caller writes nothing then. */
 export type PaymentReadFail =
@@ -93,7 +114,11 @@ export interface PaymentCounts {
 }
 
 export function noPaymentCounts(): PaymentCounts {
-  return { seen: 0, kept: 0, skipped: { not_paid: 0, no_paid_at: 0, zero_total: 0, refunded: 0, no_user: 0 } };
+  return {
+    seen: 0,
+    kept: 0,
+    skipped: { not_paid: 0, no_paid_at: 0, zero_total: 0, bad_total: 0, refunded: 0, dispute_lost: 0, no_user: 0 },
+  };
 }
 
 /** The number in a money field, in either shape. NaN when there is none or it does not read. */
@@ -112,11 +137,25 @@ export function judgePayment(
   const paidAt = toIso(p.paid_at ?? null);
   if (!paidAt) return { keep: false, skip: "no_paid_at" };
   const total = moneyAmount(p.total);
+  if (!Number.isFinite(total)) return { keep: false, skip: "bad_total" };
   if (!(total > 0)) return { keep: false, skip: "zero_total" };
   if (p.substatus === "refunded" || p.substatus === "auto_refunded") return { keep: false, skip: "refunded" };
+  if (p.substatus === "dispute_lost") return { keep: false, skip: "dispute_lost" };
   // A refund of the whole total, whatever the substatus says. NaN (none) compares false.
   if (moneyAmount(p.refunded_amount) >= total) return { keep: false, skip: "refunded" };
   return { keep: true, paidAt };
+}
+
+/**
+ * Whether a page of payments is in the shape this code reads: empty, or with
+ * a buyer on at least one row and a total that reads on at least one row
+ * (A PAGE IN ANOTHER SHAPE, above). A row that is not an object fails it.
+ */
+export function pageInShape(rows: readonly unknown[]): boolean {
+  if (rows.length === 0) return true;
+  if (!rows.every((p) => p !== null && typeof p === "object")) return false;
+  const payments = rows as readonly WhopPayment[];
+  return payments.some((p) => !!p.user?.id) && payments.some((p) => Number.isFinite(moneyAmount(p.total)));
 }
 
 /**
@@ -237,6 +276,7 @@ async function readPage(
       return { ok: false, fail: "bad_page" };
     }
     if (!page || !Array.isArray(page.data)) return { ok: false, fail: "bad_page" };
+    if (!pageInShape(page.data)) return { ok: false, fail: "bad_page" };
     const more = page.page_info?.has_next_page === true;
     const cursor = typeof page.page_info?.end_cursor === "string" && page.page_info.end_cursor !== ""
       ? page.page_info.end_cursor

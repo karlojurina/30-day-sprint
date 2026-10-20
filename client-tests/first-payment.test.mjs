@@ -6,8 +6,9 @@
 //
 // What runs is the real source, copied by build.mjs: the reader
 // (src/lib/first-payment.ts) on a stand-in for Whop's API that pages
-// GET /api/v1/payments as Whop's v1 does (cursor, first=100), and the four
-// writers through their own entry points: the webhook's POST, the login's GET
+// GET /api/v1/payments as Whop's v1 does (cursor, first=100; rows served in
+// another shape on demand), and the four writers through their own entry
+// points: the webhook's POST, the login's GET
 // (its Whop calls as stand-ins in stub-server.ts, the first-payment read
 // included), the sync (runWhopCommunitySync, with the real whop-members.ts and
 // first-payment.ts on the same stand-in fetch) and the backfill route's POST
@@ -22,7 +23,7 @@
 // Every Whop id, email, name, key and secret here is made up.
 import { createHmac, randomBytes } from 'node:crypto'
 import {
-  judgePayment, moneyAmount, addFirstPayments, noPaymentCounts, hasOtherUser, waitAfter429Ms,
+  judgePayment, moneyAmount, addFirstPayments, noPaymentCounts, hasOtherUser, waitAfter429Ms, pageInShape,
   fetchFirstPaymentForUser, walkFirstPayments, WHOP_PAYMENTS_URL, WHOP_PAYMENTS_VERSION,
 } from './_gen/first-payment.ts'
 import { runWhopCommunitySync } from './_gen/whop-sync-runner.ts'
@@ -131,6 +132,12 @@ let asked = []
 let answerWith = null
 let latency = 0
 let ignoreUserFilter = false
+/** When set, every listed payment is served through it: the same payments, in another shape than the pinned one. */
+let reshape = null
+/** The buyer as a bare user_id, no nested user. */
+const flat = ({ user, ...rest }) => ({ ...rest, user_id: user?.id ?? null })
+/** The total under another name. */
+const renamed = ({ total, ...rest }) => ({ ...rest, amount_total: total })
 const answer = (body, status = 200, headers = {}) =>
   new Response(typeof body === 'string' ? body : JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } })
 const byNewest = (a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)
@@ -155,7 +162,8 @@ globalThis.fetch = async (url, init = {}) => {
     const list = [...payments].sort(byNewest)
       .filter((p) => (!user || ignoreUserFilter || p.user?.id === user) && (!status || p.status === status))
     const more = list.length > from + first
-    return answer({ data: list.slice(from, from + first), page_info: { has_next_page: more, end_cursor: more ? `c${from + first}` : null, start_cursor: `c${from}` } })
+    const rows = list.slice(from, from + first).map((p) => (reshape ? reshape(p) : p))
+    return answer({ data: rows, page_info: { has_next_page: more, end_cursor: more ? `c${from + first}` : null, start_cursor: `c${from}` } })
   }
   return answer({ error: 'not found' }, 404)
 }
@@ -166,6 +174,7 @@ function freshWhop() {
   answerWith = null
   latency = 0
   ignoreUserFilter = false
+  reshape = null
   firstPaymentReads.length = 0
 }
 const paymentRequests = () => asked.filter((a) => a.path === '/api/v1/payments')
@@ -201,9 +210,16 @@ console.log('\n=== The rule, one payment at a time ===')
      'the older shape, a bare number: read too')
   ok(keep(pay(W(1), BOUGHT, 97, { total: 0 })).keep === false && keep(pay(W(1), BOUGHT, 97, { total: 97, refunded_amount: 97 })).keep === false,
      'the older shape: $0 and a full refund left out')
-  ok(same(keep(pay(W(1), BOUGHT, 97, { total: undefined })), { keep: false, skip: 'zero_total' }) &&
-     same(keep(pay(W(1), BOUGHT, 97, { total: { amount: 'n/a' } })), { keep: false, skip: 'zero_total' }),
-     'no total, or one that does not read: left out (it cannot be shown to be above 0)')
+  ok(same(keep(pay(W(1), BOUGHT, 97, { total: undefined })), { keep: false, skip: 'bad_total' }) &&
+     same(keep(pay(W(1), BOUGHT, 97, { total: { amount: 'n/a' } })), { keep: false, skip: 'bad_total' }) &&
+     same(keep(pay(W(1), BOUGHT, 97, { total: null })), { keep: false, skip: 'bad_total' }),
+     'no total, or one that does not read: left out (it cannot be shown to be above 0), and counted apart from a $0 one (bad_total)')
+  ok(same(keep(pay(W(1), BOUGHT, 97, { substatus: 'dispute_lost' })), { keep: false, skip: 'dispute_lost' }) &&
+     same(keep(pay(W(1), BOUGHT, 97, { substatus: 'dispute_lost', refunded_amount: money(97) })), { keep: false, skip: 'dispute_lost' }),
+     'a lost dispute (a chargeback the buyer won): left out like a full refund, counted apart, whatever refunded_amount says')
+  ok(keep(pay(W(1), BOUGHT, 97, { substatus: 'dispute_won' })).keep === true, 'a dispute the account won: the money stood, so it counts')
+  ok(same(noPaymentCounts().skipped, { not_paid: 0, no_paid_at: 0, zero_total: 0, bad_total: 0, refunded: 0, dispute_lost: 0, no_user: 0 }),
+     'every reason a payment is left out has its own count')
   ok(same(keep(pay(W(1), 1791972005, 97)), { keep: true, paidAt: BOUGHT }), 'a paid_at in Unix seconds reads as the same moment')
   ok(moneyAmount({ amount: '97.00' }) === 97 && moneyAmount(1) === 1 && moneyAmount('5') === 5 && Number.isNaN(moneyAmount(null)) &&
      Number.isNaN(moneyAmount({})) && Number.isNaN(moneyAmount('')), 'money in either shape', '97.00, 1, "5"; none reads as NaN')
@@ -228,17 +244,23 @@ console.log('\n=== The rule over many payments: the earliest real one per user =
     pay(W(5), FREE_DAY, 0),
     // No buyer on the row.
     pay(null, '2026-09-11T09:00:00.000Z', 97),
+    // Charged back on 15 September (a lost dispute), bought again on 16 October.
+    pay(W(7), '2026-09-15T10:00:00.000Z', 97, { substatus: 'dispute_lost' }), pay(W(7), '2026-10-16T10:00:00.000Z', 97),
+    // A total that does not read on 2 September, a real payment on 3 October.
+    pay(W(8), '2026-09-02T10:00:00.000Z', 97, { total: { amount: 'n/a' } }), pay(W(8), '2026-10-03T10:00:00.000Z', 97),
   ]
   const expected = {
     [W(1)]: BOUGHT, [W(2)]: '2026-10-01T08:00:00.000Z', [W(3)]: '2026-08-20T12:00:00.000Z', [W(4)]: '2026-09-10T09:00:00.000Z',
+    [W(7)]: '2026-10-16T10:00:00.000Z', [W(8)]: '2026-10-03T10:00:00.000Z',
   }
-  for (const [label, order] of [['newest first', [...rows].reverse()], ['oldest first', rows], ['mixed', [rows[5], rows[1], rows[9], rows[0], rows[3], rows[7], rows[2], rows[6], rows[4], rows[8]]]]) {
+  const mixed = [rows[5], rows[11], rows[1], rows[9], rows[13], rows[0], rows[3], rows[10], rows[7], rows[2], rows[12], rows[6], rows[4], rows[8]]
+  for (const [label, order] of [['newest first', [...rows].reverse()], ['oldest first', rows], ['mixed', mixed]]) {
     const map = new Map()
     const counts = noPaymentCounts()
     addFirstPayments(order, map, counts)
     ok(same(Object.fromEntries([...map].sort()), expected), `the earliest real payment per user, read ${label}`, show(Object.fromEntries(map)))
-    ok(same(counts, { seen: 10, kept: 5, skipped: { not_paid: 0, no_paid_at: 0, zero_total: 3, refunded: 1, no_user: 1 } }),
-       `and the counts, read ${label}: 10 read, 5 kept, 3 at $0, 1 refunded, 1 with no buyer`, show(counts))
+    ok(same(counts, { seen: 14, kept: 7, skipped: { not_paid: 0, no_paid_at: 0, zero_total: 3, bad_total: 1, refunded: 1, dispute_lost: 1, no_user: 1 } }),
+       `and the counts, read ${label}: 14 read, 7 kept, 3 at $0, 1 total that does not read, 1 refunded, 1 lost dispute, 1 with no buyer`, show(counts))
   }
   const map = new Map()
   addFirstPayments([pay(W(1), BOUGHT, 97)], map, noPaymentCounts())
@@ -246,6 +268,10 @@ console.log('\n=== The rule over many payments: the earliest real one per user =
   ok(map.get(W(1)) === '2026-10-13T10:00:00.000Z', 'pages add up: an earlier payment on a later page wins')
   ok(hasOtherUser([pay(W(1), BOUGHT, 97), pay(W(2), BOUGHT, 97)], W(1)) && !hasOtherUser([pay(W(1), BOUGHT, 97), pay(null, BOUGHT, 97)], W(1)),
      'a row for another buyer is caught; a row with no buyer is not taken for one')
+  ok(pageInShape([]) && pageInShape(rows) && pageInShape([pay(null, BOUGHT, 97), pay(W(1), BOUGHT, 97, { total: null })]),
+     'a page is in the shape read when some row has a buyer and some row a total that reads; one odd row is judged, not the page')
+  ok(!pageInShape(rows.map(flat)) && !pageInShape(rows.map(renamed)) && !pageInShape([null]) && !pageInShape(['pay_TEST000001']),
+     'and not when no row has a nested buyer, no row a total under that name, or a row is not an object')
 }
 
 console.log('\n=== One user\'s first payment (the login, the sync, the backfill) ===')
@@ -319,6 +345,20 @@ console.log('\n=== Failures: a 429 waited out, the rest by kind ===')
     r = await fetchFirstPaymentForUser(W(1))
     ok(r.error === kind && r.firstPaidIso === null, `${kind}: no date`, show(r))
   }
+  // Whop answering in a shape this code does not read: every buyer would look like a free member.
+  for (const [shape, label] of [[flat, 'the buyer as a bare user_id'], [renamed, 'the total under another name']]) {
+    resetClock(); freshWhop()
+    payments = [pay(W(1), FREE_DAY, 0), pay(W(1), BOUGHT, 97)]
+    reshape = shape
+    r = await fetchFirstPaymentForUser(W(1))
+    ok(same(r, { firstPaidIso: null, kept: 0, seen: 0, error: 'bad_page' }), `a page in another shape (${label}): bad_page, an error and no date, never "no payment"`, show(r))
+  }
+  resetClock(); freshWhop()
+  payments = [pay(W(1), FREE_DAY, 0), pay(W(1), BOUGHT, 97)]
+  reshape = (p) => (p.paid_at === FREE_DAY ? { ...p, total: undefined } : p)
+  r = await fetchFirstPaymentForUser(W(1))
+  ok(same(r, { firstPaidIso: BOUGHT, kept: 1, seen: 2, error: null }), 'one row with no total beside a whole one: the page reads, that row is left out', show(r))
+
   resetClock(); freshWhop()
   answerWith = (n) => answer({ data: [pay(W(1), BOUGHT, 97)], page_info: { has_next_page: true, end_cursor: `c${n}` } })
   r = await fetchFirstPaymentForUser(W(1))
@@ -366,6 +406,25 @@ console.log('\n=== The walk: every paid payment of the account, once (the repair
   ok(firsts.size === 108 && w.firstByUser.size === 108 && [...firsts].every(([u, at]) => w.firstByUser.get(u) === at),
      'grouped by buyer: each one\'s earliest payment above 0, as worked out here row by row; the $0-only buyers have none', `${w.firstByUser.size} buyers`)
   ok(w.counts.seen === 250 && w.counts.kept === 225 && w.counts.skipped.zero_total === 25, 'the counts: 250 read, 225 kept, 25 at $0', show(w.counts))
+
+  // One row with no buyer and one with no total among whole ones: the page reads.
+  resetClock(); freshWhop()
+  payments = Array.from({ length: 150 }, (_, i) => pay(W(300 + i), '2026-09-01T00:00:00.000Z', 97))
+  payments[3].user = null
+  payments[7].total = { amount: 'n/a' }
+  const odd = await walkFirstPayments()
+  ok(odd.complete === true && odd.counts.skipped.no_user === 1 && odd.counts.skipped.bad_total === 1 && odd.counts.kept === 148,
+     'one row with no buyer and one with no total among whole ones: complete, the two counted apart', show(odd.counts))
+
+  // The second page in another shape: the walk stops there, never planning from a blind read.
+  for (const [shape, label] of [[flat, 'the buyer as a bare user_id'], [renamed, 'the total under another name']]) {
+    resetClock(); freshWhop()
+    payments = Array.from({ length: 150 }, (_, i) => pay(W(300 + i), '2026-09-01T00:00:00.000Z', 97))
+    reshape = (p) => (asked.length >= 2 ? shape(p) : p)
+    const blind = await walkFirstPayments()
+    ok(blind.complete === false && blind.stoppedBecause === 'bad_page' && blind.pages === 1,
+       `the second page in another shape (${label}): incomplete, bad_page, after 1 page`, show({ stopped: blind.stoppedBecause, pages: blind.pages }))
+  }
 
   resetClock(); freshWhop()
   payments = Array.from({ length: 450 }, (_, i) => pay(W(300 + i), '2026-09-01T00:00:00.000Z', 97))
@@ -617,6 +676,17 @@ console.log('\n=== The sync: no membership date; an empty paying row filled from
   ok(raced.rows('students')[0].first_paid_at === '2026-10-18T10:00:02.000Z' && again.first_paid_recovered === 0,
      'a value written meanwhile is kept, and not counted as recovered', show({ first: raced.rows('students')[0].first_paid_at, recovered: again.first_paid_recovered }))
 
+  // Whop's payments in another shape: logged as a failed read, never as "no real payment" (which reads like a comp).
+  freshWhop()
+  memberships = [mem(W(39), PAYING, '2026-10-18T10:00:00.000Z')]
+  payments = [pay(W(39), '2026-10-18T10:00:03.000Z', 97)]
+  reshape = flat
+  const blindDb = new FakeDb({ students: [] })
+  installDb(blindDb)
+  const [, blindLog] = await quietly(() => runWhopCommunitySync(createClient(), 'cron'))
+  ok(blindDb.rows('students')[0].first_paid_at === null && blindLog.some((l) => l.includes('payments read failed (bad_page)')) && !blindLog.some((l) => l.includes('no real payment')),
+     'payments in another shape: left empty, and the log names bad_page, not "no real payment"', show(blindLog.filter((l) => l.includes('first_paid'))))
+
   // The recovery starts a read at 239 s that Whop never answers: given up at 280 s, and the run still writes its success row.
   resetClock(); freshWhop()
   memberships = [mem(W(38), PAYING, '2026-10-18T10:00:00.000Z')]
@@ -696,6 +766,14 @@ console.log('\n=== The backfill route: an empty first_paid_at filled from the pa
     r = await callWith({ after: bad })
     ok(r.status === 400 && asked.length === 0, `after ${show(bad)}: 400, Whop not asked`, show(r.body))
   }
+
+  // Payments in another shape: a failed read by its kind.
+  freshWhop()
+  payments = [pay(W(41), BOUGHT, 97)]
+  reshape = flat
+  r = await callWith({ after: null })
+  ok(first(41) === null && r.body.errors.some((e) => e.student_id === sid(41) && e.reason === 'payments read failed: bad_page'),
+     'payments in another shape: left empty, and the answer names bad_page, never "no payment"', show(r.body.errors))
 }
 
 console.log('\n=== The backfill route: no student started after 240 s, no read waited on past 280 s ===')

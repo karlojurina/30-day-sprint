@@ -96,6 +96,8 @@ let asked = []
 let latency = 0
 /** When set, answers the nth request (1-based) instead of the list. */
 let answerWith = null
+/** When set, every listed payment is served through it. */
+let reshape = null
 const answer = (body, status = 200) =>
   new Response(typeof body === 'string' ? body : JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 globalThis.fetch = async (url, init = {}) => {
@@ -114,7 +116,8 @@ globalThis.fetch = async (url, init = {}) => {
     .sort((a, b) => RealDate.parse(b.created_at) - RealDate.parse(a.created_at))
     .filter((p) => !u.searchParams.get('status') || p.status === u.searchParams.get('status'))
   const more = list.length > from + first
-  return answer({ data: list.slice(from, from + first), page_info: { has_next_page: more, end_cursor: more ? `c${from + first}` : null } })
+  const rows = list.slice(from, from + first).map((p) => (reshape ? reshape(p) : p))
+  return answer({ data: rows, page_info: { has_next_page: more, end_cursor: more ? `c${from + first}` : null } })
 }
 
 // ── The students and their payments ──────────────────────────────────────────
@@ -211,6 +214,7 @@ function freshDb({ students = STUDENTS, requests = REQUESTS } = {}) {
   asked = []
   latency = 0
   answerWith = null
+  reshape = null
   timers = []
   clock = RealDate.parse(NOW)
   return db
@@ -300,7 +304,8 @@ let dry
   const w = dry.walk
   ok(w.complete === true && w.stopped_because === 'done' && w.pages === 3 && w.requests === 3 && w.retried_429 === 0,
      'the walk: 3 pages, complete', show({ pages: w.pages, requests: w.requests }))
-  ok(w.payments.seen === 247 && w.payments.kept === 243 && same(w.payments.skipped, { not_paid: 0, no_paid_at: 0, zero_total: 3, refunded: 1, no_user: 0 }) &&
+  ok(w.payments.seen === 247 && w.payments.kept === 243 &&
+     same(w.payments.skipped, { not_paid: 0, no_paid_at: 0, zero_total: 3, bad_total: 0, refunded: 1, dispute_lost: 0, no_user: 0 }) &&
      w.users_with_a_payment === 241, 'its counts: 247 payments, 243 kept, 3 at $0 and 1 refunded; 241 buyers (11 students, 230 others)', show(w.payments))
   const pageReqs = asked.filter((a) => a.path === '/api/v1/payments')
   ok(pageReqs.length === 3 && pageReqs.every((q) => q.headers['Api-Version-Date'] === '2026-10-15-1' && q.headers.Authorization === `Bearer ${KEY}` && !('user_id' in q.params) && q.params.status === 'paid'),
@@ -423,6 +428,15 @@ console.log('\n=== The walk does not finish: nothing is written ===')
   r = await call({ mode: 'dry' })
   ok(r.body.kind === 'walk_incomplete' && r.body.walk.stopped_because === 'rate_limited' && r.body.walk.retried_429 === 2 && r.took === 60_000,
      'three 429s: waited 30 s twice, then walk_incomplete (rate_limited)', show({ walk: r.body.walk, took: r.took }))
+}
+
+console.log('\n=== Whop\'s payments in another shape: nothing written ===')
+{
+  const db = freshDb()
+  reshape = ({ user, ...rest }) => ({ ...rest, user_id: user.id })
+  const r = await call({ mode: 'write' })
+  ok(r.status === 500 && r.body.kind === 'walk_incomplete' && r.body.walk.stopped_because === 'bad_page' && writes(db).length === 0 &&
+     /none has a buyer, or none a total that reads/.test(r.body.error), 'the buyer as a bare user_id on every row: walk_incomplete (bad_page), nothing written, every student left as is', show({ stopped: r.body.walk.stopped_because }))
 }
 
 console.log('\n=== Other failures: answered, nothing written ===')

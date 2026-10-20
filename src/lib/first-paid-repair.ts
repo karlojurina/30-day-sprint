@@ -260,6 +260,9 @@ function walkSentence(stopped: "done" | PaymentReadFail): string {
   if (stopped === "http_401_403") {
     return `Whop refused the key (401 or 403): it may have lost its permission to read payments. ${nothing}`;
   }
+  if (stopped === "bad_page") {
+    return `Whop answered a page of payments this code cannot read (not JSON, no list, a next page without a cursor, a cursor given twice, or rows of which none has a buyer, or none a total that reads). ${nothing} Tell Claude before running it again.`;
+  }
   return `The read of Whop's payments stopped (${stopped}). ${nothing} Tell Claude before running it again.`;
 }
 

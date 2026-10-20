@@ -250,6 +250,83 @@ the 409, both halves of the settling and the open task answer, the finisher,
 the read size, a request kept twice, Today paged by offset, a task on two
 reads kept open), each make a suite fail.
 
+`first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
+`students.first_paid_at` comes from now: the student's first real Whop
+payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on
+made-up payments in the shape `Api-Version-Date: 2026-10-15-1` gives (money
+objects, `user: { id }`) and in the older bare-number shape: $0, a 100% promo,
+a $1 plan, a full and a partial refund, a payment not yet paid, no `paid_at`,
+no buyer. Both reads run on a stand-in `fetch` that pages
+`GET /api/v1/payments` as Whop's v1 does: one user's (paging, another user's
+row refused, a 429 waited out, every failure by its kind, the login's 2.5 s
+deadline) and the walk of every paid payment (4 requests a second, the 240 s
+start budget, the 285 s answer limit, a cursor given twice). Then the four
+writers through their entry points: the webhook's `POST` (no `first_paid_at`
+sent, a stored one kept), the login's `GET` (its first-payment read a stand-in
+in `stub-server.ts`: a new student, the self-heal, a row the webhook made, a
+stored date untouched, no payment, a failed, throwing or slow read, a value
+written meanwhile), the 2-hour sync (`runWhopCommunitySync` with the real
+`whop-members.ts` and `first-payment.ts` on the same `fetch`: no row of its
+upsert names `first_paid_at`, and an empty row on the paying plan is filled
+from the payment, only while empty) and the backfill route. For it
+`stub-server.ts` gained `.not(column, "is", null)`, `.returns()`, the
+`students` columns the sync reads (`discord_user_id`, `discord_username`,
+`canceled_at`) and settable stand-ins for the login's self-heal lookup, join
+date and first-payment read, whose defaults answer as before. Since the merge
+into world-engine (2026-10-20) the `.not()` is the admin rebuild's (above),
+which also takes `eq` and `like` and logs the filter as
+`whop_user_id not is null`. The production
+writers (`de9a077`) fail it: the webhook 4 checks, the login 11, the sync 9,
+the backfill 5. 17 breaks of the rule and of the writers' guards each failed
+it once. The review fix round (same day) added: a total that does not read
+and a lost dispute, each left out and counted apart; Whop answering in
+another shape (the buyer as a bare `user_id`, the total under another name,
+served by the stand-in after it filters as Whop would) failing one user's
+read, the walk, the sync's recovery and the backfill as `bad_page`, never
+as "no payment"; the walk in 4 lanes, the stand-in taking `created_after`
+and `created_before` as inclusive, as exclusive, ignoring them or refusing
+them with a 400, on a history with 5 payments at each split: the same first
+payments and counts as 1 lane, the lanes together at most 4 requests a
+second, half the time or less with Whop at 1 s a page, and a 429 on one lane
+pausing all of them; the sync's recovery read started at 239 s and never
+answered, given up at 280 s with the `sync_runs` row written; and the
+backfill in id order, its `after` cursor, no student started past 240 s and
+no read waited on past 280 s.
+
+`first-paid-repair.test.mjs` runs `POST /api/admin/first-paid-repair` (the
+first-paid fix) through its own `POST`: the route, the run
+(`src/lib/first-paid-repair.ts`), the walk on the same kind of stand-in
+`fetch`, `discount.ts`'s dates and `requestCounts`, and the real team login
+(401, and 403 for a CSM). 14 students cover the cases: the report's student
+(5 September stored, 14 October paid), a buyer whose membership is 2 seconds
+older than his payment, one moment written two ways, free members with and
+without a date, empty rows, a first payment for another product before the
+course's, a 100% promo, a full and a partial refund, a canceled student; and
+four 30% requests: one that starts counting, one made after the launch, an
+old approval beside the 30% its new date opens, and a rejected one. Dry
+writes nothing; the snapshot lists exactly the rows the write changes, with
+their stored values; the write moves the report's student to 14 October and
+leaves every row with no payment as it was; a row changed between the read
+and the write is left by the guard; a second write changes 0; a walk that does
+not finish (Whop slow, a 401, three 429s) writes nothing and answers by 285 s;
+writes due past 280 s are not started and the next write finishes them; no
+answer or log line holds an email, a name or a Whop id. Its clock is the
+suite's, as in `whop-catchup.test.mjs`. 13 breaks of the repair each failed it
+once. The review fix round (same day) added, on the plan as a function, first
+payments and stored dates exactly at 1 October and exactly at the launch
+(and the millisecond before each), an applied request beside a 30% its new
+date opens, and the student ids behind the counts that open the 30%; through
+the route, those ids in the dry answer (`thirty_students`), the snapshot's
+third column (`new_first_paid_at`), the oldest payment kept and Whop's time
+per page, a walk out of time naming both and `"lanes": 4`, a dry run in 4
+lanes giving the same counts as in 1, `lanes` other than 1 or 4 refused, a
+Whop that ignores the lanes' dates and one that answers in another shape
+writing nothing. 32 breaks of the round's code (the boundary and applied
+mutations the review found, the shape guard, the two new skip kinds, the
+lanes' guard, overlap, dedupe and shared pace, the sync's and the
+backfill's time limits, the cursor) each failed this suite or
+`first-payment.test.mjs`.
+
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the
 heartbeat and the gate is genuinely exercised rather than stubbed away.

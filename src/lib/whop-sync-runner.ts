@@ -22,10 +22,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   fetchAllMemberships,
-  fetchEarliestMembershipDateForUser,
   mapStatus,
   toIso,
 } from "@/lib/whop-members";
+import { fetchFirstPaymentForUser } from "@/lib/first-payment";
 import { PAYING_WHOP_PLAN_IDS } from "@/lib/constants";
 
 export interface SyncResult {
@@ -36,8 +36,8 @@ export interface SyncResult {
   /** Whop membership_status -> count, for debugging. */
   status_breakdown: Record<string, number>;
   errors: number;
-  /** v75.53: active paying rows whose NULL first_paid_at this run
-   *  recovered via the cross-product lookup (the leak fix). */
+  /** Active paying rows whose empty first_paid_at this run filled from
+   *  the student's first real payment (src/lib/first-payment.ts). */
   first_paid_recovered: number;
 }
 
@@ -147,10 +147,9 @@ export async function runWhopCommunitySync(
     // function timeout.
     const upsertRows: Record<string, unknown>[] = [];
 
-    // v75.53: active paying students whose first_paid_at would be left
-    // NULL this run (the product-scoped fetch can't see their
-    // membership). Recovered after the upsert via a bounded
-    // cross-product lookup — see the recovery pass below.
+    // Active paying students with no first_paid_at stored: filled after
+    // the upsert from their first real payment, a bounded number per run
+    // (the recovery pass below).
     const recoveryCandidates: Array<{ whopUserId: string }> = [];
 
     for (const m of members) {
@@ -277,23 +276,17 @@ export async function runWhopCommunitySync(
       // copied from `cur` when there's no new value. The tripwire before
       // the batch loop enforces this shape forever.
 
-      // first_paid_at (v75.18): the earliest membership.created_at
-      // across this user's memberships in the configured products
-      // (m._firstPaidAt). INSERT: whatever we computed. UPDATE: only
-      // move when the stored value is NULL or the computed date is
-      // EARLIER — "first paid" never moves forward in time.
-      const firstPaidIso = m._firstPaidAt ?? null;
-      let firstPaidValue: string | null;
-      if (!cur) {
-        firstPaidValue = firstPaidIso;
-      } else if (
-        firstPaidIso &&
-        (!cur.first_paid_at || firstPaidIso < cur.first_paid_at)
-      ) {
-        firstPaidValue = firstPaidIso;
-      } else {
-        firstPaidValue = cur.first_paid_at;
-      }
+      // first_paid_at is in NO row (the first-paid fix, 2026-10-20). It
+      // used to be the earliest membership created_at on the configured
+      // products, free plans included, so a free member who bought later
+      // kept the free date. It is the first real payment now, and this
+      // upsert never writes it: a column left out of every row is left
+      // out of postgrest-js's columns union, so a new row starts empty
+      // and a stored value is untouched (carrying cur's value instead
+      // would write back a stale one over a login's fill or the repair
+      // made while this sync read). Empty rows are filled from the
+      // payment by the recovery pass below; only
+      // /api/admin/first-paid-repair moves a stored date.
 
       const row: Record<string, unknown> = {
         whop_user_id: m.user,
@@ -361,19 +354,17 @@ export async function runWhopCommunitySync(
       // Refresh plan_id when Whop returns one; preserve last-known
       // BY VALUE when Whop didn't send it.
       row.whop_plan_id = planId ?? cur?.whop_plan_id ?? null;
-      row.first_paid_at = firstPaidValue;
 
-      // v75.53: if this active paying student would be left with a NULL
-      // first_paid_at — no _firstPaidAt from the product-scoped fetch
-      // AND nothing already stored — queue a cross-product recovery
-      // lookup for after the upsert. effectivePlan falls back to the
-      // stored plan when Whop omits it this run. Limitation: students on
-      // a paid plan NOT in PAYING_WHOP_PLAN_IDS are treated as
-      // non-paying platform-wide (see the UNKNOWN_PLAN_ID warning above)
-      // and are intentionally NOT recovered until the plan is allowlisted.
+      // An active paying student with no first_paid_at stored (a row this
+      // run inserts starts empty) is queued for the recovery pass after
+      // the upsert. effectivePlan falls back to the stored plan when Whop
+      // omits it this run. Limitation: students on a paid plan NOT in
+      // PAYING_WHOP_PLAN_IDS are treated as non-paying platform-wide (see
+      // the UNKNOWN_PLAN_ID warning above) and are not filled here; the
+      // login fills theirs (auth/whop/callback), and the backfill route
+      // fills any it is run on.
       const effectivePlan = planId ?? cur?.whop_plan_id ?? null;
       if (
-        !firstPaidIso &&
         (status === "active" || status === "past_due") &&
         effectivePlan != null &&
         PAYING_WHOP_PLAN_IDS.has(effectivePlan) &&
@@ -427,22 +418,26 @@ export async function runWhopCommunitySync(
       }
     }
 
-    // ─── first_paid_at recovery (v75.53) ──────────────────────
-    // The product-scoped fetch above can't see memberships under
-    // products outside WHOP_PRODUCT_ID, so _firstPaidAt is null for
-    // those users and first_paid_at would stay NULL — making active
-    // paying students invisible to every cohort surface AND uncovered
-    // by the CSM crons (the leak behind the 91 NULL rows found
-    // 2026-06-11). For the bounded set left NULL this run, do the
-    // per-user cross-product lookup to recover the true earliest date.
-    // Capped + throttled so it can't approach maxDuration; the daily
-    // inflow is a handful, and /api/admin/backfill-first-paid-at clears
-    // any large backlog in one pass.
+    // ─── first_paid_at recovery (v75.53; payments since 2026-10-20) ──
+    // An active paying student with an empty first_paid_at is invisible
+    // to every cohort surface AND uncovered by the CSM crons (the leak
+    // behind the 91 NULL rows found 2026-06-11). For the bounded set
+    // left empty this run, read the student's first real payment
+    // (src/lib/first-payment.ts: paid, above 0, not fully refunded, any
+    // product) and fill it. It used to be the earliest membership
+    // created_at on every product, which a free membership could hold.
+    // Capped + throttled so it can't approach maxDuration; the login
+    // fills most rows first, and /api/admin/backfill-first-paid-at
+    // clears any large backlog in one pass.
     const FIRST_PAID_RECOVERY_CAP = 25;
     // Leave headroom under maxDuration=300s: the main sync above can
     // already run long on heavy days, so bail out of the recovery loop
     // rather than risk the function timing out mid-pass.
     const RECOVERY_DEADLINE_MS = 240_000;
+    // And no payments read is waited on past this, its 429 waits included:
+    // a candidate started just before 240 s still ends in time for the
+    // sync_runs row below, which a function cut off at 300 s never writes.
+    const RECOVERY_READ_LIMIT_MS = 280_000;
     if (result.errors > 0) {
       // A batch upsert failed this run, so some candidate rows are in
       // partial/unknown state (a new insert may not exist; an existing
@@ -457,10 +452,10 @@ export async function runWhopCommunitySync(
       }
     } else {
       // Fairness rotation: candidates arrive in stable Whop member
-      // order, so >cap permanent no-record rows (Whop has no
-      // membership data) would occupy the same slice every sync and
-      // starve newer candidates forever. Shuffle when over cap so
-      // every candidate eventually gets attempts.
+      // order, so >cap permanent no-payment rows (a comp or a 100%
+      // promo on the paying plan) would occupy the same slice every
+      // sync and starve newer candidates forever. Shuffle when over cap
+      // so every candidate eventually gets attempts.
       if (recoveryCandidates.length > FIRST_PAID_RECOVERY_CAP) {
         for (let i = recoveryCandidates.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
@@ -475,22 +470,28 @@ export async function runWhopCommunitySync(
         if (Date.now() - t0 > RECOVERY_DEADLINE_MS) break;
         processed++;
         try {
-          const { firstPaidIso: recovered } =
-            await fetchEarliestMembershipDateForUser(cand.whopUserId);
+          const { firstPaidIso: recovered, error: readError } =
+            await fetchFirstPaymentForUser(cand.whopUserId, {
+              deadlineAtMs: t0 + RECOVERY_READ_LIMIT_MS,
+            });
           // v75.58: NO joined_at fallback. first_paid_at anchors cohort
-          // membership AND the discount window, and never moves once
-          // set — a fabricated date would permanently mislabel the
-          // student. When Whop has no parseable record, leave NULL:
-          // this candidate set is re-derived every sync, so the row is
-          // simply retried tomorrow (we pull from Whop's API; nothing
-          // depends on a webhook re-firing).
-          if (!recovered) {
+          // membership AND the discount window, and the live writers only
+          // fill it — a fabricated date would mislabel the student. A
+          // failed read or no real payment leaves NULL: this candidate
+          // set is re-derived every sync, so the row is simply retried
+          // next run (we pull from Whop's API; nothing depends on a
+          // webhook re-firing).
+          if (readError) {
             console.warn(
-              `[whop-sync] first_paid recovery: no parseable membership date for ${cand.whopUserId}; left NULL (retries next sync).`,
+              `[whop-sync] first_paid recovery: payments read failed (${readError}) for ${cand.whopUserId}; left NULL (retries next sync).`,
+            );
+          } else if (!recovered) {
+            console.warn(
+              `[whop-sync] first_paid recovery: no real payment for ${cand.whopUserId}; left NULL (retries next sync).`,
             );
           } else {
-            // .is("first_paid_at", null) preserves the "first paid never
-            // moves" invariant (only fills a NULL, never overwrites).
+            // .is("first_paid_at", null): a live writer only fills a NULL,
+            // never overwrites (only the repair route moves a date).
             // .select() returns the rows actually changed so we count ONLY
             // real fills — a no-op update (row gone, or filled by a racing
             // writer) doesn't inflate first_paid_recovered.
@@ -510,8 +511,8 @@ export async function runWhopCommunitySync(
             }`,
           );
         }
-        // Pace under Whop's ~10 req/sec cap (whopFetchWithRetry also backs
-        // off on 429, but pacing avoids triggering it in the first place).
+        // Pace under Whop's ~10 req/sec cap (the payments read also waits
+        // out a 429, but pacing avoids triggering it in the first place).
         await new Promise((r) => setTimeout(r, 200));
       }
       if (recoveryCandidates.length > processed) {

@@ -52,17 +52,39 @@ When adding a new table, append it here. When deleting a field, scan
   `PAYING_WHOP_PLAN_IDS` allowlist. Free-plan members keep full
   student-side access but are excluded from CSM tasks, dashboard
   metrics, and operational surfaces.),
-  `first_paid_at` (v80 — EARLIEST membership.created_at across all of
-  this user's Whop memberships. NEVER moves on renewal. THE foundation
-  field for cohort filtering and discount eligibility. v75.26 stamps it
-  on every INSERT path (OAuth callback, membership.activated webhook,
-  payment.succeeded webhook). v75.34 endpoint backfilled the column
-  for ~400 legacy students whose first_paid_at was NULL. v75.53 — the
-  sync runner (`runWhopCommunitySync`) self-heals NULL first_paid_at for
-  active paying students each run via a bounded cross-product
-  `fetchEarliestMembershipDateForUser` lookup, so members on products
-  outside `WHOP_PRODUCT_ID` (which the per-product sync can't see) no
-  longer stay NULL. Post-v75.28
+  `first_paid_at` (the student's FIRST REAL WHOP PAYMENT since the
+  first-paid fix, 2026-10-20: the earliest payment by that user with
+  status paid, `paid_at` set, a total above 0 and not fully refunded
+  (substatus `refunded` or `auto_refunded`, or `refunded_amount` at or
+  above the total; a partial refund counts) nor lost in a dispute
+  (substatus `dispute_lost`, a chargeback the buyer won; a reading taken
+  on 2026-10-20 that Lovro has not ruled on), for any product of the
+  company; NULL when there is none: a free member, a seat given away, a
+  comp. A read that comes back in another shape than the one pinned (no
+  buyer on any row of a page, or no total that reads) is a failed read,
+  never "no payment", so no writer fills or moves anything from it.
+  The rule and both reads are `src/lib/first-payment.ts`. Until
+  the fix it was a Whop membership date (v80: the earliest
+  membership.created_at; v75.26: the webhook's and the login's
+  `joined_at` on insert), which a free membership could hold, so a
+  free member who bought later carried the free date. NEVER moves on
+  renewal. THE foundation field for cohort filtering and discount
+  eligibility.
+  Writers since the fix, each filling an EMPTY value only, never moving
+  a stored one: the login (`auth/whop/callback`, one read of at most
+  2.5 s when the row holds none, written `.is("first_paid_at", null)`;
+  the self-heal no longer stamps the membership's `created_at`); the
+  2-hour sync's recovery pass (active students on a
+  `PAYING_WHOP_PLAN_IDS` plan, 25 a run, same guard; the sync's upsert
+  carries no `first_paid_at` at all); `/api/admin/backfill-first-paid-at`
+  (every active or past_due row with a NULL, by hand, in id order, a pass
+  followed by its `next_after` cursor). The webhook writes
+  none: a row it inserts starts NULL. `POST /api/admin/first-paid-repair`
+  is the one writer that moves a stored date (dry, snapshot, write; each
+  write guarded on the value read; a student with no payment is left as
+  is), run once after the fix. A payer on a plan outside the paying list
+  who never logs in stays NULL until the backfill or the repair is run.
+  Post-v75.28
   NULL is treated as out-of-cohort everywhere — no joined_at fallback.
   On the new course it decides the discount window (T-080,
   `discountWindow` in `src/lib/world/discount.ts`): before 2026-09-30
@@ -848,7 +870,10 @@ When adding a new table, append it here. When deleting a field, scan
   every pending request whatever its date, and the others made from
   `DISCOUNT_ELIGIBLE_FROM` on; Today's 30% reasons read the same through
   `loadThirtyData`), Whop promo flow, `src/lib/csm-triggers.ts`
-  (membership/discount status checks where applicable)
+  (membership/discount status checks where applicable),
+  `src/lib/first-paid-repair.ts` (reads `student_id`, `status`,
+  `created_at` of the students whose `first_paid_at` it would move, to
+  count `thirty.requests_change` and `thirty.open_with_old_request`)
 - **Stable contract:** `student_id`, `status`
   (pending/approved/rejected/applied), `promo_code`, `created_at`
 - **Added in v95, unused:** `gate_lesson_id` (text, nullable, no
@@ -871,6 +896,18 @@ When adding a new table, append it here. When deleting a field, scan
   then. Discount Earned (`achievements.ts`) reads the same function. The
   course switch leaves the table untouched (call C10), so a request
   still pending at the switch has to be decided before it.
+  The first-paid repair (2026-10-20) can change which requests count,
+  because it moves `first_paid_at`: a date moved into 1 to 8 October
+  makes an old pending, approved or applied request count; a date moved
+  out of that window makes one stop counting. And a date that opens the
+  30% (from before 1 October to the launch or later, the reported case)
+  leaves an old request from before the launch uncounted: the map ignores
+  it and can offer Apply to a student who already asked for, or got, a
+  30% on the old dashboard. `POST /api/discounts/request` on the new
+  course grants on `ready` and inserts; the one refusal below it is
+  v106's index, which stops only a second pending row (and v106 is not on
+  production, below). Its dry run counts both before anything is written
+  (`thirty.requests_change`, `thirty.open_with_old_request`).
 - **One pending request per student (v106, built 2026-10-16, not on
   production):** the unique index `discount_requests_one_pending_per_student`
   on `student_id` where `status = 'pending'`. A second pending row, inserted

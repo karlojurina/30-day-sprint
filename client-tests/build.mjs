@@ -87,6 +87,13 @@ gen('../src/lib/world/discount.ts', './_gen/discount.ts', [
 gen('../src/lib/world/discount-server.ts', './_gen/discount-server.ts', [
   ['from "./discount"', 'from "./discount.ts"'],
 ])
+// checkpointView.ts holds the panel's words for the 30% (discountRule): it
+// imports discount.ts (above) and only a TYPE from checkpoint.ts, by an @/
+// path, which this file refuses, so that line goes; the name is a type only.
+gen('../src/components/world-v6/checkpointView.ts', './_gen/checkpointView.ts', [
+  ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+  ['import type { CheckpointLook } from "@/lib/world-v6/checkpoint";\n', ''],
+])
 
 // curriculum-reset.ts imports only a TYPE from supabase-js, which --experimental-strip-types erases.
 gen('../src/lib/curriculum-reset.ts', './_gen/curriculum-reset.ts')
@@ -336,7 +343,7 @@ gen('../src/app/api/auth/whop/callback/route.ts', './_gen/whop-callback-route.ts
   ['from "@/lib/pkce"', 'from "./pkce.ts"'],
   ['from "@/app/api/student/_lib/watch-sync"', 'from "./watch-sync.ts"'],
   ...toStub('next/server', '@/lib/supabase-server', '@/lib/whop', '@/lib/whop-members', '@/lib/achievements',
-    '@/app/api/student/_lib/update-streak', '@supabase/supabase-js'),
+    '@/app/api/student/_lib/update-streak', '@supabase/supabase-js', '@/lib/first-payment'),
 ], { dropLineComments: true })
 
 // The Whop catch-up (T-089, whop-catchup.test.mjs): the route and the run as
@@ -372,3 +379,38 @@ gen('../src/app/api/admin/whop-catchup/route.ts', './_gen/whop-catchup-route.ts'
 // (client-tests/.gitignore): 2,500 lines that every run writes again.
 gen('../src/lib/world-v6/layout.ts', './_gen/world-layout.ts')
 gen('../src/lib/world-v6/terrain.ts', './_gen/terrain.ts', [['from "./layout"', 'from "./world-layout.ts"']])
+
+// The first-paid fix (2026-10-20, first-payment.test.mjs and
+// first-paid-repair.test.mjs): first_paid_at is the student's first real
+// Whop payment. The reader (first-payment.ts) runs on a stand-in fetch; its one
+// import is whop-members.ts, which has no imports of its own and copies across
+// untouched. The writers run through their entry points: the sync
+// (whop-sync-runner.ts) with the real reads on that fetch and the stand-in's
+// database, and the backfill route and the repair (first-paid-repair.ts and
+// its route) with the real team login (admin-auth.ts, above). The repair reads
+// the 30%'s dates and requestCounts from the real discount.ts (above).
+gen('../src/lib/whop-members.ts', './_gen/whop-members.ts')
+gen('../src/lib/first-payment.ts', './_gen/first-payment.ts', [
+  ['from "@/lib/whop-members"', 'from "./whop-members.ts"'],
+])
+gen('../src/lib/whop-sync-runner.ts', './_gen/whop-sync-runner.ts', [
+  ['from "@/lib/whop-members"', 'from "./whop-members.ts"'],
+  ['from "@/lib/first-payment"', 'from "./first-payment.ts"'],
+  ['from "@/lib/constants"', 'from "./constants.ts"'],
+])
+gen('../src/app/api/admin/backfill-first-paid-at/route.ts', './_gen/backfill-first-paid-at-route.ts', [
+  ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
+  ['from "@/lib/first-payment"', 'from "./first-payment.ts"'],
+  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+  ...toStub('next/server', '@/lib/supabase-server'),
+])
+gen('../src/lib/first-paid-repair.ts', './_gen/first-paid-repair.ts', [
+  ['from "@/lib/first-payment"', 'from "./first-payment.ts"'],
+  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+  ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+])
+gen('../src/app/api/admin/first-paid-repair/route.ts', './_gen/first-paid-repair-route.ts', [
+  ['from "@/lib/first-paid-repair"', 'from "./first-paid-repair.ts"'],
+  ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
+  ...toStub('next/server', '@/lib/supabase-server'),
+])

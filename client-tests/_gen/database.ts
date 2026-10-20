@@ -61,13 +61,16 @@ export interface Student {
    *  excluded from CSM tasks, dashboard metrics, etc. Populated by
    *  the webhook + sync runner + OAuth callback self-heal. */
   whop_plan_id: string | null;
-  /** v75.18: original Whop signup date across ALL of this user's
-   *  memberships, not just the current one. Never moves on renewal.
+  /** The student's first real Whop payment (since the first-paid fix,
+   *  2026-10-20; src/lib/first-payment.ts): paid, above 0, not fully
+   *  refunded, any product. Null when there is none (a free member).
+   *  Never moves on renewal: the live writers only fill an empty one.
+   *  Until the fix it was the first membership's creation, which a free
+   *  membership could hold.
    *  joined_at = current subscription cycle start (could be recent
    *  even for a 6-month customer who just renewed).
-   *  first_paid_at = first-ever membership creation = "true Day 1."
    *  Used by every "is this a launch-cohort student / first-time
-   *  joiner?" check across the app. */
+   *  joiner?" check across the app, and by the 30% (discount.ts). */
   first_paid_at: string | null;
   /** Computed/derived from the streak count. Cached here for the UI. */
   current_title: StudentTitle;

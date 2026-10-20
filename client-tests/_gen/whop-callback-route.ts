@@ -13,6 +13,7 @@ import {
   mapStatus,
   toIso,
 } from "./stub-server.ts";
+import { fetchFirstPaymentForUser } from "./stub-server.ts";
 import { unsignState } from "./pkce.ts";
 import { whopLoginMayProceed } from "./student-app-gate.ts";
 import { syncWatchProgress } from "./watch-sync.ts";
@@ -31,6 +32,45 @@ import { createClient } from "./stub-server.ts";
 function isNoAccountYet(error: { code?: string; message?: string }): boolean {
   if (error.code) return error.code === "invalid_credentials";
   return /invalid login credentials/i.test(error.message ?? "");
+}
+
+/**
+ * The longest a login waits for the student's first payment, as long as it
+ * waits for its Whop lesson sync (step 5b).
+ */
+const FIRST_PAYMENT_WAIT_MS = 2500;
+
+/**
+ * The student's first real payment (src/lib/first-payment.ts, the first-paid
+ * fix, 2026-10-20), or null when Whop has none, the read failed, or it took
+ * longer than FIRST_PAYMENT_WAIT_MS. Never throws, and never holds the login
+ * longer than that wait.
+ */
+async function readFirstPaymentForLogin(whopUserId: string): Promise<string | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const gaveUp = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), FIRST_PAYMENT_WAIT_MS);
+  });
+  const read = fetchFirstPaymentForUser(whopUserId, {
+    deadlineAtMs: Date.now() + FIRST_PAYMENT_WAIT_MS,
+  })
+    .then((r) => {
+      if (r.error) {
+        console.warn(`[whop-callback] first payment not read for ${whopUserId}: ${r.error}`);
+      }
+      return r.firstPaidIso;
+    })
+    .catch((err: unknown) => {
+      console.warn(
+        `[whop-callback] first payment not read for ${whopUserId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return null;
+    });
+  try {
+    return await Promise.race([read, gaveUp]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export async function GET(request: NextRequest) {
@@ -133,7 +173,7 @@ export async function GET(request: NextRequest) {
             toIso(adminRow.created_at) ?? new Date().toISOString();
           const { data: existingHealRow } = await supabaseAdmin
             .from("students")
-            .select("first_paid_at, joined_at, name")
+            .select("joined_at, name")
             .eq("whop_user_id", userInfo.sub)
             .maybeSingle();
 
@@ -148,9 +188,6 @@ export async function GET(request: NextRequest) {
           };
           if (!existingHealRow?.joined_at) {
             healPayload.joined_at = healAnchor;
-          }
-          if (!existingHealRow?.first_paid_at) {
-            healPayload.first_paid_at = healAnchor;
           }
 
           const { error: healError } = await supabaseAdmin
@@ -233,9 +270,13 @@ export async function GET(request: NextRequest) {
 
     const { data: existing } = await supabase
       .from("students")
-      .select("id, joined_at")
+      .select("id, joined_at, first_paid_at")
       .eq("whop_user_id", userInfo.sub)
       .single();
+
+    const firstPaymentRead = existing?.first_paid_at
+      ? null
+      : readFirstPaymentForLogin(userInfo.sub);
 
     const discordUserId = await fetchWhopDiscordId(userInfo.sub);
 
@@ -261,7 +302,6 @@ export async function GET(request: NextRequest) {
       upsertFields = {
         ...baseFields,
         joined_at: anchorIso,
-        first_paid_at: anchorIso,
       };
     }
 
@@ -304,6 +344,22 @@ export async function GET(request: NextRequest) {
           },
           { onConflict: "student_id" }
         );
+    }
+
+    if (upsertedStudent && firstPaymentRead) {
+      const firstPaidIso = await firstPaymentRead;
+      if (firstPaidIso) {
+        const { error: firstPaidError } = await supabase
+          .from("students")
+          .update({ first_paid_at: firstPaidIso })
+          .eq("id", upsertedStudent.id)
+          .is("first_paid_at", null);
+        if (firstPaidError) {
+          console.error(
+            `[whop-callback] first_paid_at fill failed for ${userInfo.sub}: ${firstPaidError.message}`,
+          );
+        }
+      }
     }
 
     if (upsertedStudent?.id) {

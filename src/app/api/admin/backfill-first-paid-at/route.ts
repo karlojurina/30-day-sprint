@@ -2,31 +2,36 @@
  * POST /api/admin/backfill-first-paid-at
  *
  * One-time (re-runnable) backfill of students.first_paid_at for every
- * paying member whose first_paid_at is NULL.
+ * active or past_due member whose first_paid_at is NULL.
  *
- * Background: the v75.10 self-heal OAuth path + the membership/payment
- * webhooks insert students with whop_plan_id but the sync runner only
- * computes first_paid_at for users whose memberships are in products
- * listed in WHOP_PRODUCT_ID. Students on products NOT in that env var
- * never get first_paid_at populated (350 such students as of 2026-06-09).
+ * Background: the membership/payment webhooks insert students with no
+ * first_paid_at, and the sync only fills the empty ones on the paying
+ * plan, 25 a run; a member who never logs in keeps an empty one. This
+ * clears any such backlog.
  *
- * Strategy: for each NULL student, hit Whop's v2 API at
- * /api/v2/memberships?user_id=USER_ID to fetch ALL their memberships
- * (regardless of product), compute min(created_at) across the set, and
- * write that to first_paid_at. This is the TRUE original signup date
- * — stable across renewals, correct for returning customers, and
- * sufficient for cohort filtering + discount eligibility.
+ * Strategy (the first-paid fix, 2026-10-20): for each NULL student, read
+ * their first real Whop payment (src/lib/first-payment.ts: paid, above 0,
+ * not fully refunded, any product) and write it to first_paid_at. Until
+ * then this wrote the earliest membership created_at on any product,
+ * which a free membership could hold.
+ *
+ * Body (optional): {"after": null | "<student id>"}. The students go in id
+ * order. A call starts no student after 240 s and waits on no Whop read
+ * past 280 s, then answers `checked`, `remaining` and `next_after`; call
+ * again with {"after": <next_after>} until `remaining` is 0. So a long
+ * backlog ends in answers instead of being cut off by Vercel at 300 s. A
+ * member with no real payment (a free member, a comp) stays NULL and stays a
+ * candidate, so a pass started over from the beginning reads them all
+ * again: follow `next_after` to the end of a pass instead.
  *
  * Rate limit: Whop caps at ~10 req/sec. We throttle to 200ms between
- * calls (5 req/sec); the shared fetchEarliestMembershipDateForUser also
- * retries on 429 via whopFetchWithRetry, so a throttled run can take
- * meaningfully longer than the ~70s nominal for ~350 students and may
- * approach maxDuration=300. That's fine — it's idempotent, so if it
- * dies mid-pass just re-run; each run resumes from the remaining NULLs.
+ * students (5 req/sec); the payments read also waits out a 429 (twice,
+ * at most 30 s each), inside the 280 s limit.
  *
  * Idempotent. Safe to re-run — only touches NULL rows. Existing
- * first_paid_at values are NEVER overwritten (preserves the v75.18+
- * "first paid never moves" invariant).
+ * first_paid_at values are NEVER overwritten: only
+ * /api/admin/first-paid-repair corrects a stored date. A member with no
+ * real payment is counted in no_payment.
  *
  * Founder + admin only.
  */
@@ -34,7 +39,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase-server";
 import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
-import { fetchEarliestMembershipDateForUser } from "@/lib/whop-members";
+import { fetchFirstPaymentForUser } from "@/lib/first-payment";
+import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 
 export const maxDuration = 300;
 // Pinned to iad1, next to Whop, by this file's entry under `functions` in
@@ -44,7 +50,16 @@ export const maxDuration = 300;
 // and a moved file loses the pin. The counts: CONTEXT.md, "Where the
 // functions run".
 
+/** No student is started after this, so a call answers before maxDuration (300 s). */
+const BACKFILL_START_LIMIT_MS = 240_000;
+/** No Whop read is waited on past this, its 429 waits included. */
+const BACKFILL_READ_LIMIT_MS = 280_000;
+/** A student id as the database writes it: a `next_after` from an earlier answer. */
+const STUDENT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 export async function POST(request: NextRequest) {
+  const t0 = Date.now();
+
   // v75.34: dual auth — accept CRON_SECRET for service-level one-time
   // backfill (so the founder can trigger it from terminal without
   // extracting a Supabase JWT), OR a team-member session for in-app
@@ -69,6 +84,22 @@ export async function POST(request: NextRequest) {
     supabase = auth.supabase;
   }
 
+  let body: { after?: unknown } = {};
+  try {
+    const parsed: unknown = await request.json();
+    if (parsed && typeof parsed === "object") body = parsed as typeof body;
+  } catch {
+    // No body, or one that is not JSON: from the first student.
+  }
+  const rawAfter = body.after ?? null;
+  const after = typeof rawAfter === "string" ? rawAfter.trim().toLowerCase() : rawAfter;
+  if (after !== null && (typeof after !== "string" || !STUDENT_ID.test(after))) {
+    return NextResponse.json(
+      { ok: false, error: "after must be null or the next_after of an earlier answer. Nothing ran." },
+      { status: 400 },
+    );
+  }
+
   if (!process.env.WHOP_API_KEY) {
     return NextResponse.json(
       { error: "WHOP_API_KEY not set" },
@@ -76,54 +107,76 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Fetch the candidate set. We backfill any paying member missing
-  // first_paid_at — both currently-active and past_due. Canceled
-  // members are skipped (their first_paid_at history only matters
-  // for re-enrollment, and they'd get backfilled on re-OAuth).
-  const { data: candidates, error: candErr } = await supabase
-    .from("students")
-    .select("id, whop_user_id, email")
-    .is("first_paid_at", null)
-    .in("membership_status", ["active", "past_due"])
-    .not("whop_user_id", "is", null);
+  // Fetch the candidate set, every page, in id order. We backfill any
+  // paying member missing first_paid_at — both currently-active and
+  // past_due. Canceled members are skipped (their first_paid_at history
+  // only matters for re-enrollment, and they'd get backfilled on re-OAuth).
+  const { data: candidatesList, error: candErr } = await fetchAllRowsPaginated<{
+    id: string;
+    whop_user_id: string | null;
+  }>(() =>
+    supabase
+      .from("students")
+      .select("id, whop_user_id")
+      .is("first_paid_at", null)
+      .in("membership_status", ["active", "past_due"])
+      .not("whop_user_id", "is", null)
+      .order("id", { ascending: true }),
+  );
 
   if (candErr) {
     return NextResponse.json({ error: candErr.message }, { status: 500 });
   }
 
-  const candidatesList = candidates ?? [];
   const summary = {
     total_candidates: candidatesList.length,
+    // Students this call read.
+    checked: 0,
     backfilled: 0,
-    // v75.58: rows Whop has no record for stay NULL (no joined_at
-    // fallback) — they show up here and need manual review.
-    no_whop_record: 0,
+    // v75.58: rows with no real payment stay NULL (no joined_at
+    // fallback): a free member, a seat given away, a comp.
+    no_payment: 0,
     api_errors: 0,
+    // The reason is the read's failure kind, never Whop's message, which
+    // can carry the member's Whop id.
     errors: [] as Array<{ student_id: string; reason: string }>,
   };
 
-  const t0 = Date.now();
-
+  // The last student this pass has finished: where the next call starts.
+  let nextAfter: string | null = after;
   for (const c of candidatesList) {
+    if (after !== null && c.id <= after) continue;
+    if (Date.now() - t0 > BACKFILL_START_LIMIT_MS) break;
     if (!c.whop_user_id) continue;
 
+    let outOfTime = false;
     try {
-      const { firstPaidIso } = await fetchEarliestMembershipDateForUser(
-        c.whop_user_id as string,
+      const { firstPaidIso, error: readError } = await fetchFirstPaymentForUser(
+        c.whop_user_id,
+        { deadlineAtMs: t0 + BACKFILL_READ_LIMIT_MS },
       );
+      if (readError === "time_budget") {
+        // Whop had not answered by 280 s: this student is the next call's first.
+        outOfTime = true;
+        break;
+      }
+      if (readError) {
+        summary.api_errors += 1;
+        summary.errors.push({ student_id: c.id, reason: `payments read failed: ${readError}` });
+        continue;
+      }
 
       // v75.58: NO joined_at fallback. first_paid_at is the cohort
-      // anchor AND the discount-window anchor, and it never moves once
-      // set — writing a fabricated date (joined_at is a renewal/login
-      // date, not a payment date) would permanently mislabel the
-      // student and could re-open a discount window. Leave NULL: the
-      // student stays out-of-cohort (correct for missing data), keeps
-      // showing in the NULL-first_paid_at diagnostics, and is retried
-      // on every re-run + by the nightly sync recovery pass — we PULL
-      // from Whop's API, so no webhook is needed for the real date to
-      // eventually land.
+      // anchor AND the discount-window anchor, and the live writers only
+      // fill it — writing a fabricated date (joined_at is a renewal/login
+      // date, not a payment date) would mislabel the student and could
+      // re-open a discount window. Leave NULL: the student stays
+      // out-of-cohort (correct for missing data), keeps showing in the
+      // NULL-first_paid_at diagnostics, and is retried on every re-run +
+      // by the sync recovery pass — we PULL from Whop's API, so no
+      // webhook is needed for the real date to eventually land.
       if (!firstPaidIso) {
-        summary.no_whop_record += 1;
+        summary.no_payment += 1;
         continue;
       }
 
@@ -139,7 +192,7 @@ export async function POST(request: NextRequest) {
       if (updateErr) {
         summary.api_errors += 1;
         summary.errors.push({
-          student_id: c.id as string,
+          student_id: c.id,
           reason: `update failed: ${updateErr.message}`,
         });
         continue;
@@ -149,13 +202,20 @@ export async function POST(request: NextRequest) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       summary.api_errors += 1;
-      summary.errors.push({ student_id: c.id as string, reason: msg });
+      summary.errors.push({ student_id: c.id, reason: msg });
+    } finally {
+      if (!outOfTime) {
+        summary.checked += 1;
+        nextAfter = c.id;
+        // Throttle: 5 req/sec to stay well under Whop's 10 req/sec cap,
+        // after every student, a `continue` included (a member with no
+        // payment used to skip it).
+        await new Promise((r) => setTimeout(r, 200));
+      }
     }
-
-    // Throttle: 5 req/sec to stay well under Whop's 10 req/sec cap.
-    await new Promise((r) => setTimeout(r, 200));
   }
 
+  const remaining = candidatesList.filter((c) => nextAfter === null || c.id > nextAfter).length;
   const durationMs = Date.now() - t0;
 
   // Truncate errors so the response stays a sane size; full list is
@@ -167,6 +227,10 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     ok: true,
     ...summary,
+    // Candidates after next_after, not read yet: call again with
+    // {"after": next_after} until this is 0.
+    remaining,
+    next_after: remaining > 0 ? nextAfter : null,
     duration_ms: durationMs,
   });
 }

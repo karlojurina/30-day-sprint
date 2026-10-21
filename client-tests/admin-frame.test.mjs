@@ -206,8 +206,11 @@ console.log('\n=== D11: the Whop product ids, moved out of etfb.ts ===')
   ok(ETFB_PRODUCT_ID === declared(before, 'ETFB_PRODUCT_ID') && TEAM_SEAT_PRODUCT_ID === declared(before, 'TEAM_SEAT_PRODUCT_ID'),
      'and the module exports exactly those values')
   const first = now.split('\n')[0]
-  ok(first.startsWith('//') && /login-1/.test(first) && /night\/login1-main/.test(first) && /etfb\.ts/.test(first) && /this file/.test(first),
-     'its first line says login-1 (night/login1-main) has its own copy and its test reads etfb.ts, so the merge must point at this file', first.slice(0, 120))
+  // Since login-1's merge (night/preview-2026-10-21) the line says what the
+  // merge did: login-1's test reads this file, where it read etfb.ts.
+  ok(first.startsWith('//') && /login-1/.test(first) && /night\/login1-main/.test(first) && /whop-members\.ts/.test(first) &&
+     /whop-product-setting\.test\.mjs reads them from this file/.test(first) && /etfb\.ts/.test(first),
+     'its first line says login-1 (night/login1-main) has its own copy in whop-members.ts and its test reads this file, where it read etfb.ts before the merge', first.slice(0, 120))
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

@@ -253,27 +253,53 @@ export async function* listMembershipsForProduct(
 }
 
 /**
+ * What the lookup learned about one user (lookUpActiveMembershipForUser).
+ * `row` is the membership the order puts first, or null. `everyReadFailed`
+ * is true when no read of Whop answered: the null then says nothing about the
+ * user, who may still hold a valid membership.
+ */
+export interface ActiveMembershipLookup {
+  row: WhopMembershipRow | null;
+  everyReadFailed: boolean;
+}
+
+/**
  * Look up the active (or past_due) membership for a single user, by
  * whop_user_id. Used by the OAuth callback to self-heal student rows
  * for legacy customers who joined before our webhook was wired up
  * (Karlo's bug 2026-05-30 — one legacy customer). Falls back across
  * every product configured in WHOP_PRODUCT_ID.
  *
- * Returns null if no active membership exists for any of our
- * products. Tolerates per-product fetch failures so a single bad
- * response doesn't kill the whole check.
+ * `row` is null if no active membership exists for any of our
+ * products. A read that fails (an HTTP error, a throw, a list it cannot
+ * use) hands over to the next one, so a single bad response doesn't kill
+ * the whole check; when none of the three answers, `everyReadFailed` says
+ * so (the order's second review, 2026-10-20). The webhook's
+ * re-point after a membership ends then answers 500, so Whop sends the
+ * event again: it used to cancel the row, a course student's too when an
+ * ETfB or Apex membership of theirs ended while Whop could not be read.
+ * fetchActiveMembershipForUser, below, gives the row alone.
+ *
+ * 2026-10-20: each strategy collects the memberships it finds that grant
+ * access on a listed product and returns the one the sync's order puts first
+ * (bestThatGrants, outranks): active over past_due, then the course's over an
+ * ETfB or Apex one, then the newest. It used to return the first one Whop
+ * listed, so the login's self-heal, the webhook's re-point after a membership
+ * ends and its writes for an event with no product could land on an Apex seat
+ * beside a valid course membership.
  *
  * v75.10 — new.
  */
-export async function fetchActiveMembershipForUser(
+export async function lookUpActiveMembershipForUser(
   whopUserId: string,
-): Promise<WhopMembershipRow | null> {
+): Promise<ActiveMembershipLookup> {
   const apiKey = process.env.WHOP_API_KEY;
   if (!apiKey) {
     console.warn(
       `[self-heal] ABORT: WHOP_API_KEY not set (whop_user_id=${whopUserId})`,
     );
-    return null;
+    // No read can be made, so nothing is known about the user.
+    return { row: null, everyReadFailed: true };
   }
   const productIds = (process.env.WHOP_PRODUCT_ID ?? "")
     .split(",")
@@ -283,7 +309,8 @@ export async function fetchActiveMembershipForUser(
     console.warn(
       `[self-heal] ABORT: WHOP_PRODUCT_ID empty (whop_user_id=${whopUserId})`,
     );
-    return null;
+    // No product is listed, so no membership of one can be found.
+    return { row: null, everyReadFailed: false };
   }
 
   console.info(
@@ -298,6 +325,8 @@ export async function fetchActiveMembershipForUser(
     Authorization: `Bearer ${apiKey}`,
     Accept: "application/json",
   };
+  // Set by each read that answers (everyReadFailed when none does).
+  let answered = false;
   try {
     const url = `${WHOP_MEMBERSHIPS_BASE}/memberships?user_id=${encodeURIComponent(whopUserId)}&per_page=50`;
     const res = await whopFetchWithRetry(url, headers);
@@ -330,18 +359,16 @@ export async function fetchActiveMembershipForUser(
           `[self-heal] strategy1 user_id filter appears ignored (got memberships for other users); falling through`,
         );
       } else {
-        const myActive = rows.find((m) => {
-          const matchesProduct =
-            !m.product || productIds.includes(m.product);
-          if (!matchesProduct) return false;
-          const status = mapStatus(m);
-          return status === "active" || status === "past_due";
-        });
+        answered = true;
+        const myActive = bestThatGrants(
+          rows.map((row) => ({ row, listedUnder: null })),
+          productIds,
+        );
         if (myActive) {
           console.info(
             `[self-heal] strategy1 MATCH id=${myActive.id} status=${myActive.status} valid=${myActive.valid}`,
           );
-          return myActive;
+          return { row: myActive, everyReadFailed: false };
         }
         console.info(
           `[self-heal] strategy1 found ${rows.length} memberships but none active+matching our products`,
@@ -356,6 +383,14 @@ export async function fetchActiveMembershipForUser(
 
   // Strategy 2 — per-product query with both product_id + user_id
   // filters. Cheapest fallback if Whop's API does support filtering.
+  // 2026-10-20: every listed product is asked before one is picked, so the
+  // order decides (bestThatGrants), whatever the order of WHOP_PRODUCT_ID.
+  // A product whose read fails ends this strategy with no pick (the order's
+  // second review): the other products' rows are only part of the
+  // user's, and the pick among them can be the wrong one (an Apex seat when
+  // the course's read failed). Strategy 3 decides instead.
+  const perProduct: Array<{ row: WhopMembershipRow; listedUnder: string }> = [];
+  let failedProduct: string | null = null;
   for (const pid of productIds) {
     const url =
       `${WHOP_MEMBERSHIPS_BASE}/memberships?product_id=` +
@@ -366,7 +401,10 @@ export async function fetchActiveMembershipForUser(
       console.info(
         `[self-heal] strategy2 product=${pid}: HTTP ${res.status} for ${whopUserId}`,
       );
-      if (!res.ok) continue;
+      if (!res.ok) {
+        failedProduct = pid;
+        break;
+      }
       const json = (await res.json()) as { data?: WhopMembershipRow[] };
       const rows = (json.data ?? []).filter(
         (r) => !r.user || r.user === whopUserId,
@@ -383,21 +421,27 @@ export async function fetchActiveMembershipForUser(
           })),
         )}`,
       );
-      const active = rows.find((m) => {
-        const status = mapStatus(m);
-        return status === "active" || status === "past_due";
-      });
-      if (active) {
-        console.info(
-          `[self-heal] strategy2 MATCH product=${pid} id=${active.id} status=${active.status}`,
-        );
-        return active;
-      }
+      for (const row of rows) perProduct.push({ row, listedUnder: pid });
     } catch (err) {
       console.warn(
         `[self-heal] strategy2 product=${pid} threw: ${err instanceof Error ? err.message : String(err)}`,
       );
-      continue;
+      failedProduct = pid;
+      break;
+    }
+  }
+  if (failedProduct) {
+    console.warn(
+      `[self-heal] strategy2 read for product=${failedProduct} failed: no pick from the other products' rows, going on to strategy3`,
+    );
+  } else {
+    answered = true;
+    const fromProducts = bestThatGrants(perProduct, productIds);
+    if (fromProducts) {
+      console.info(
+        `[self-heal] strategy2 MATCH product=${fromProducts.product ?? "none named"} id=${fromProducts.id} status=${fromProducts.status}`,
+      );
+      return { row: fromProducts, everyReadFailed: false };
     }
   }
 
@@ -426,18 +470,18 @@ export async function fetchActiveMembershipForUser(
           })),
         )}`,
       );
-      const active = rows.find((m) => {
-        const matchesProduct =
-          !m.product || productIds.includes(m.product);
-        if (!matchesProduct) return false;
-        const status = mapStatus(m);
-        return status === "active" || status === "past_due";
-      });
+      // A member object without the list says nothing about the
+      // memberships (the endpoint does not always carry them).
+      if (Array.isArray(data.memberships)) answered = true;
+      const active = bestThatGrants(
+        rows.map((row) => ({ row, listedUnder: null })),
+        productIds,
+      );
       if (active) {
         console.info(
           `[self-heal] strategy3 MATCH id=${active.id} status=${active.status}`,
         );
-        return active;
+        return { row: active, everyReadFailed: false };
       }
     }
   } catch (err) {
@@ -446,10 +490,27 @@ export async function fetchActiveMembershipForUser(
     );
   }
 
+  if (!answered) {
+    console.warn(
+      `[self-heal] EXHAUSTED all strategies for whop_user_id=${whopUserId}: every read failed, nothing is known`,
+    );
+    return { row: null, everyReadFailed: true };
+  }
   console.warn(
     `[self-heal] EXHAUSTED all strategies for whop_user_id=${whopUserId} — no active membership found anywhere`,
   );
-  return null;
+  return { row: null, everyReadFailed: false };
+}
+
+/**
+ * The lookup's pick (lookUpActiveMembershipForUser), null when it finds none
+ * or no read answers. For the login's self-heal and the webhook's writes for
+ * an event that names no product, which write nothing on either.
+ */
+export async function fetchActiveMembershipForUser(
+  whopUserId: string,
+): Promise<WhopMembershipRow | null> {
+  return (await lookUpActiveMembershipForUser(whopUserId)).row;
 }
 
 /** Does this membership currently grant access? v85.6 — the tiebreak
@@ -459,12 +520,116 @@ function grantsAccess(row: WhopMembershipRow): boolean {
   return s === "active" || s === "past_due";
 }
 
+/**
+ * A membership status's place in the first two steps of the order (outranks,
+ * below): 2 active, 1 past_due, 0 anything else (canceled, expired, none).
+ * past_due grants access on Whop, but the app locks the person out
+ * (MembershipBlockOverlay, the lesson-video route), so active comes first.
+ * The webhook ranks a stored students.membership_status with it before an
+ * ETfB or Apex write (etfbOrApexMayWrite, src/app/api/webhooks/whop/route.ts).
+ */
+export function accessRank(status: string | null | undefined): number {
+  if (status === "active") return 2;
+  if (status === "past_due") return 1;
+  return 0;
+}
+
+/**
+ * ETfB for brands and Apex team seats, the two products production's
+ * WHOP_PRODUCT_ID names beside the course since 2026-10-20 (the owner's call
+ * that their members keep the app). The same ids as ETFB_PRODUCT_ID and
+ * TEAM_SEAT_PRODUCT_ID in src/lib/whop-products.ts, written out here as they
+ * were while src/lib/etfb.ts held them (etfb.ts and this module imported
+ * nothing from each other; admin rebuild 2 moved the ids to whop-products.ts
+ * with the same values, and this module still imports nothing);
+ * whop-product-setting.test.mjs checks that the two agree.
+ */
+const ETFB_OR_APEX_PRODUCT_IDS: ReadonlySet<string> = new Set([
+  "prod_bGNf1u02RruKC",
+  "prod_vCHZUO8dU4ts2",
+]);
+
+/**
+ * Is this product ETfB for brands or Apex team seats? A membership of any
+ * other product WHOP_PRODUCT_ID names is the course's. Between two of a user's
+ * memberships with the same access (both active, or both past_due), the
+ * course's wins over an ETfB or Apex one (outranks, step c): in the sync's
+ * dedupe (fetchAllMemberships), in the lookup (fetchActiveMembershipForUser)
+ * and in the webhook's activations and payments
+ * (src/app/api/webhooks/whop/route.ts). So a course student who also holds an
+ * Apex seat or an ETfB membership keeps the course membership and its plan,
+ * and stays on PAYING_WHOP_PLAN_IDS, the pool the CSM crons read, while the
+ * course membership is active; a past_due one gives way to an active seat or
+ * ETfB membership (step b).
+ */
+export function isEtfbOrApexProduct(
+  productId: string | null | undefined,
+): boolean {
+  return productId != null && ETFB_OR_APEX_PRODUCT_IDS.has(productId);
+}
+
+/** One of a user's memberships, and whether it is the course's (not ETfB's or Apex's). */
+type Ranked = { row: WhopMembershipRow; course: boolean };
+
+/**
+ * Does `a` stand for its user over `b`? The one order (2026-10-20) for every
+ * reader that picks one of a user's memberships: the sync's dedupe
+ * (fetchAllMemberships), the lookup behind the login's self-heal, the
+ * webhook's re-point after a membership ends and its writes for an event that
+ * names no product (fetchActiveMembershipForUser), and, as far as a stored row
+ * can tell, the webhook's check before an ETfB or Apex write
+ * (etfbOrApexMayWrite):
+ *   (a) one that grants access (active or past_due) over one that does not;
+ *   (b) active over past_due (accessRank): past_due locks the person out of
+ *       the app, so an active Apex seat beats a past_due course membership;
+ *   (c) the course's over an ETfB or Apex one;
+ *   (d) the newer created_at. A tie, or a date missing, keeps `b`, the one
+ *       seen first.
+ * Between two that grant no access only (d) decides, as before 2026-10-20.
+ */
+function outranks(a: Ranked, b: Ranked): boolean {
+  const aRank = accessRank(mapStatus(a.row));
+  const bRank = accessRank(mapStatus(b.row));
+  if (aRank !== bRank) return aRank > bRank;
+  if (aRank > 0 && a.course !== b.course) return a.course;
+  const aIso = toIso(a.row.created_at);
+  const bIso = toIso(b.row.created_at);
+  return Boolean(aIso && bIso && aIso > bIso);
+}
+
+/**
+ * fetchActiveMembershipForUser's pick among the rows one strategy found: of
+ * those that grant access on a product WHOP_PRODUCT_ID names (a row that names
+ * no product counts, as before), the one the order puts first (outranks); null
+ * when there is none. `listedUnder` is the product a per-product read asked
+ * for, which says whether a row naming no product is the course's.
+ */
+function bestThatGrants(
+  found: Array<{ row: WhopMembershipRow; listedUnder: string | null }>,
+  productIds: string[],
+): WhopMembershipRow | null {
+  let best: Ranked | null = null;
+  for (const { row, listedUnder } of found) {
+    if (row.product && !productIds.includes(row.product)) continue;
+    if (!grantsAccess(row)) continue;
+    const candidate = {
+      row,
+      course: !isEtfbOrApexProduct(row.product ?? listedUnder),
+    };
+    if (!best || outranks(candidate, best)) best = candidate;
+  }
+  return best ? best.row : null;
+}
+
 /** Convenience: collect every membership across every product id in
  *  WHOP_PRODUCT_ID. Per-user dedupe: keeps the membership that best
- *  represents current access (for current state). It computes no
- *  first-paid date: a membership's created_at is when access started,
- *  paid or not, so first_paid_at comes from the student's first real
- *  payment (src/lib/first-payment.ts, the first-paid fix, 2026-10-20). */
+ *  represents current access (for current state), by the order in
+ *  outranks: one that grants access over one that does not; active over
+ *  past_due; the course's over an ETfB or Apex one (isEtfbOrApexProduct);
+ *  then the newest created_at. It computes no first-paid date: a
+ *  membership's created_at is when access started, paid or not, so
+ *  first_paid_at comes from the student's first real payment
+ *  (src/lib/first-payment.ts, the first-paid fix, 2026-10-20). */
 export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
   const raw = process.env.WHOP_PRODUCT_ID ?? "";
   const productIds = raw
@@ -474,15 +639,17 @@ export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
   if (productIds.length === 0) {
     throw new Error("WHOP_PRODUCT_ID not set");
   }
-  type Acc = { latest: WhopMembershipRow };
-  const byUser = new Map<string, Acc>();
+  const byUser = new Map<string, Ranked>();
   for (const pid of productIds) {
+    // A row is the course's, or ETfB's or Apex's, by the product it was
+    // listed under: listMembershipsForProduct refuses a page holding any
+    // other product.
+    const course = !isEtfbOrApexProduct(pid);
     for await (const row of listMembershipsForProduct(pid)) {
       if (!row.user) continue;
-      const createdIso = toIso(row.created_at);
       const existing = byUser.get(row.user);
       if (!existing) {
-        byUser.set(row.user, { latest: row });
+        byUser.set(row.user, { row, course });
         continue;
       }
       // Track the row that represents "current state."
@@ -501,17 +668,20 @@ export async function fetchAllMemberships(): Promise<WhopMembershipRow[]> {
       // Access wins over recency. Recency only breaks ties WITHIN the
       // same access class, which preserves the old behavior for the
       // normal single-membership case and for genuinely churned users.
-      const curGrants = grantsAccess(existing.latest);
-      const rowGrants = grantsAccess(row);
-      if (rowGrants !== curGrants) {
-        if (rowGrants) existing.latest = row;
-      } else {
-        const latestIso = toIso(existing.latest.created_at);
-        if (createdIso && latestIso && createdIso > latestIso) {
-          existing.latest = row;
-        }
+      //
+      // 2026-10-20: and between two that grant access, active before
+      // past_due, then the course's before an ETfB or Apex one, whichever
+      // is newer (outranks). Newest-wins would point a paying course
+      // student who takes a newer Apex seat at the seat and its free plan,
+      // outside PAYING_WHOP_PLAN_IDS: the CSM cron would drop them from its
+      // pool and dismiss their open tasks. Active comes before the course
+      // because past_due locks the person out of the app: a course
+      // membership whose renewal failed gives way to an active seat until
+      // it is paid. Recency still decides within the same status and kind.
+      if (outranks({ row, course }, existing)) {
+        byUser.set(row.user, { row, course });
       }
     }
   }
-  return Array.from(byUser.values()).map(({ latest }) => latest);
+  return Array.from(byUser.values()).map(({ row }) => row);
 }

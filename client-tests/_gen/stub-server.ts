@@ -85,7 +85,9 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
       id: newId, whop_user_id: none, supabase_user_id: none, email: none, name: none,
       joined_at: now, first_paid_at: none, membership_status: () => "active", cancel_scheduled_at: none,
       last_active_at: now, ad_submissions_verified: () => false,
-      // Read by the Whop catch-up's pool (whop-catchup.test.mjs) and the admin rebuild's loaders.
+      // Read by the Whop catch-up's pool (whop-catchup.test.mjs) and the admin rebuild's loaders;
+      // whop_membership_id also by the webhook before an ETfB or Apex membership
+      // writes a row (whop-product-setting.test.mjs).
       discord_user_id: none, discord_username: none, whop_plan_id: none, csm_exempt: () => false,
       whop_membership_id: none, high_churn_risk: () => false,
       // Read by the Whop sync's pre-read (first-payment.test.mjs runs the sync).

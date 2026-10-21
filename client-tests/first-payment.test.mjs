@@ -601,11 +601,16 @@ console.log('\n=== The webhook stamps no first payment ===')
     })))
     return res.status
   }
-  /** A membership event as the handler reads it: joined_at is the user's first join to the company. */
+  /**
+   * A membership event as the handler reads it: joined_at is the user's first
+   * join to the company. It names the course's product, as Whop's payloads do:
+   * since login-1 the webhook writes a row only for a product in
+   * WHOP_PRODUCT_ID (whop-webhook-product.test.mjs).
+   */
   const activated = (user, joinedAt) => ({
     type: 'membership.activated',
     data: { id: `mem_TEST${user.slice(-3)}`, user: { id: user, email: 'buyer@example.com', name: 'Made Up Buyer', username: 'madeupbuyer' },
-      status: 'active', joined_at: joinedAt, created_at: BOUGHT, plan_id: PAYING },
+      status: 'active', joined_at: joinedAt, created_at: BOUGHT, plan_id: PAYING, product: { id: PRODUCT, title: 'The course' } },
   })
   /** payment.succeeded carries a payment, read by the handler as a membership. */
   const paid = (user) => ({ type: 'payment.succeeded', data: pay(user, BOUGHT, 97) })
@@ -613,9 +618,14 @@ console.log('\n=== The webhook stamps no first payment ===')
   resetClock()
   const db = new FakeDb({ students: [{ id: sid(1), whop_user_id: W(11), first_paid_at: '2026-10-14T10:00:05.000Z', joined_at: FREE_DAY }] })
   installDb(db)
-  const statuses = [await send(activated(W(10), FREE_DAY)), await send(paid(W(12))), await send(activated(W(11), FREE_DAY)), await send(paid(W(11)))]
+  const paidW12 = paid(W(12))
+  const paidW11 = paid(W(11))
+  const statuses = [await send(activated(W(10), FREE_DAY)), await send(paidW12), await send(activated(W(11), FREE_DAY)), await send(paidW11)]
   const row = (u) => db.rows('students').find((s) => s.whop_user_id === u)
   ok(statuses.every((s) => s === 200), 'every event answers 200', show(statuses))
+  ok(row(W(12))?.whop_membership_id === paidW12.data.membership_id && row(W(11))?.whop_membership_id === paidW11.data.membership_id,
+     'payment.succeeded points the row at the payment\'s membership (membership_id), never at the payment (pay_...)',
+     show({ w12: row(W(12))?.whop_membership_id, w11: row(W(11))?.whop_membership_id }))
   ok(row(W(10)) && row(W(10)).first_paid_at === null && row(W(10)).joined_at === FREE_DAY,
      'membership.activated for a new member: the row is made with no first payment (it took joined_at, the free date); joined_at as before', show(row(W(10))))
   ok(row(W(12)) && row(W(12)).first_paid_at === null, 'payment.succeeded for a new member: no first payment either (it took the arrival time)', show(row(W(12))?.first_paid_at))

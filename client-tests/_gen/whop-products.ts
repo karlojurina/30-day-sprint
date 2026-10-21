@@ -1,4 +1,4 @@
-// login-1 (branch night/login1-main) has its own copy of these 2 ids in whop-members.ts, and its whop-product-setting.test.mjs reads them from src/lib/etfb.ts, so its merge must point that test at this file.
+// login-1 (branch night/login1-main) has its own copy of these 2 ids in whop-members.ts, and its whop-product-setting.test.mjs reads them from this file (it read src/lib/etfb.ts until the merge into night/preview-2026-10-21) and checks that the copies agree, so an id changes in both files or in neither.
 
 /**
  * The 2 Whop products beside the course (admin rebuild 2, D11). They lived in

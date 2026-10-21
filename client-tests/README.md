@@ -24,7 +24,14 @@ against a retyped copy it would be testing a fiction.
 
 The other modules under test are copied the same way (`build.mjs` lists them,
 with what each one needed rewritten). A copy that still holds an `@/` import
-stops the build.
+stops the build. So does a copy that leaves out comment lines
+(`dropComments`, `dropLineComments`) and then makes other JavaScript than its
+source with the imports rewritten, both run through TypeScript's
+`transpileModule` with comments removed (2026-10-20): a line of code that
+starts with `//` or `*` stops the build instead of going missing. The check
+runs before the copy is written, so such a copy never reaches `_gen/` (a code
+line starting with `*` put into `whop-members.ts` on purpose: the copy left on
+disk before, none now).
 
 Server code is copied too (since 2026-10-16): the Whop backfill and the visit
 route that runs it, the Whop webhook, `mark-action-shipped`, `skip-lesson`,
@@ -39,6 +46,16 @@ on it: `.single()` on no row is an error, a select returns only the columns it
 names, `ON CONFLICT DO NOTHING` returns only the rows it added), Whop's
 completions read, the steps after a lesson (recorded in order) and the catalog
 flags. Each test calls the route's own `POST` with a real `Request`.
+Since login-1 (2026-10-20) the webhook's copy imports the real
+`whop-members.ts` instead of the stand-in, so `whop-webhook-product.test.mjs`
+runs the real Whop lookup on a stand-in `fetch`; that copy leaves out every
+comment line (`dropComments`), since one of them names two people.
+`whop-webhook-old-rows.test.mjs` runs the same copy for a row the webhook
+wrote for another product before login-1, which closes when that membership
+ends. `whop-webhook-product.test.mjs` also sends a course payment in six
+shapes: the row points at `membership.id`, else `membership_id`, else
+`membership` as a bare id, and at the payment's own `pay_` id only when the
+payload names none (until 2026-10-20 it always took the `pay_` id).
 `whop-backfill.test.mjs` also checks the login callback's one streak line in
 the source; since T-079 `streak.test.mjs` runs the callback itself (below).
 
@@ -515,6 +532,129 @@ mutations the review found, the shape guard, the two new skip kinds, the
 lanes' guard, overlap, dedupe and shared pace, the sync's and the
 backfill's time limits, the cursor) each failed this suite or
 `first-payment.test.mjs`.
+
+`whop-product-setting.test.mjs` (login-1 merged onto main, 2026-10-20) runs
+production's `WHOP_PRODUCT_ID` exactly as the owner set it that day so that
+Apex and ETfB members keep the app: three product ids (the course, ETfB for
+brands, Apex team seats), no plan id. Four readers of it run on that value (a
+fifth, `fetchWhopMembershipJoinDate`, a new student's `joined_at`, runs inside
+the login's copy, and no check reads what it gives): the login's `GET`, from a
+second copy of the callback (`whop-callback-route-real-whop.ts`) whose login
+check (`checkActiveMembershipDiagnostic`, `whop.ts`) and self-heal
+(`fetchActiveMembershipForUser`, `whop-members.ts`) are the real copies, once
+with the company key's reads failing (the login check decides alone) and once
+with the student's token getting the 404 legacy customers get (the self-heal
+decides alone); the 2-hour sync (`runWhopCommunitySync`); and the webhook's
+`POST`. A course member, an ETfB member and an Apex seat get in, get a row and
+are written by the webhook; a member of a product the list does not name is
+turned away with no row and no account, and the self-heal and the sync ask
+Whop about the three products only. It also pins what the setting brings with
+it: a member of another product whose row the old webhook wrote active still
+gets in (the login asks the database first); the Apex seat and the ETfB member,
+on plans outside `PAYING_WHOP_PLAN_IDS`, get no first payment from the sync;
+and one order (same day; its review round the same evening) wherever one of a
+user's memberships is picked: one that grants access, then active over
+past_due (past_due locks the person out of the app), then the course's over an
+ETfB or Apex one, then the newest. In the sync, with the course listed first
+and then last: the course's membership over a newer ETfB one, the newer of two
+Apex seats and of two course memberships, a valid seat over a canceled course
+membership, an older active seat over a newer past_due course membership (and
+the mirror, an active course membership over a newer past_due seat), the
+course over a newer ETfB membership when both are past_due, and an older
+active course membership over a newer past_due one. In the webhook: an Apex or
+ETfB activation and an ETfB payment leave a course student's active row as it
+is, with Whop not asked, and over a row past_due on the course they write the
+seat or ETfB membership, active, with its own id and plan (a payment's
+membership, never its `pay_` id). With no product in the payload: a past_due
+seat, the only membership Whop lists, leaves an active row and a past_due row
+as they are; an event whose own id is the course membership the row is on
+does not move the row onto a seat Whop lists alone; the lookup picks an active
+seat over a past_due course membership, and the course over a seat listed
+before it (for a row and for no row). A failed read of the row answers 500; a
+lapsed row, a row already on the event's membership (a payment's membership
+too, and a row an earlier delivery of the same payment stamped with its `pay_`
+id) and a user with no row are still written, and the course's own activation
+and payment still point a row on a seat (active or past_due) at the course.
+The webhook's re-point after a membership ends: the course membership ending
+re-points the row at an active seat (also past a past_due ETfB membership
+listed first), a seat ending re-points it at the course membership (past a
+newer seat listed first), and one of two seats ending leaves it on the course.
+The login's self-heal, in each of its three reads (the user's memberships,
+each listed product's, the member; the stand-in's `down.byUser` and
+`down.byProduct` fail the reads before), lets a student with no row in on the
+course membership when a seat is listed first, and on the seat when the
+course membership listed first is past_due; the calls show which read decided.
+`isEtfbOrApexProduct`'s two ids are checked against `whop-products.ts`'s
+(admin rebuild 2 moved them there from `etfb.ts` with the same values, and the
+merge into `night/preview-2026-10-21` pointed the check there). For it
+`stub-server.ts` gained `students.whop_membership_id`, which the webhook reads
+before an ETfB or Apex event writes (admin rebuild 2 had added the column for
+its loaders; the merge keeps the one). Ten breaks (each reader taking any product
+or only the first id, the sync's dedupe turned around, the webhook or the sync
+writing `first_paid_at` again) each failed it at the merge. 13 breaks of the
+course rule each failed it at its first round (8d213e7): in the sync, the rule
+dropped, decided before access, and recency turned around within a kind; in
+`isEtfbOrApexProduct`, an id mistyped and a missing product taken for ETfB or
+Apex; in the webhook, the check dropped on an activation or on a payment, keyed
+on the payload's product, past_due not counted, a row on the event's own
+membership or a user with no row left unwritten, a payment's membership not
+read, and a failed read writing anyway. The review round's 19 breaks each fail
+it, `whop-webhook-product.test.mjs` or `first-payment.test.mjs`: in the order,
+step (b) dropped, the course put before it, the course rule dropped, recency
+turned around, and past_due ranked as no access; in the lookup, the first
+membership that grants access taken, its second read taking the first listed
+product's, and its product check and its access check dropped; in the
+webhook's check, the status rule of the first round, an active write taking
+an active row, the event's own ids compared when the payload names no
+product, and left out when it names one, a named event taken for one the
+lookup found, and the check dropped on a payment or an activation; a payment
+writing its own `pay_` id, and `membership_id` read before `membership.id` or
+the bare `membership` before `membership_id`. The course alone in
+`WHOP_PRODUCT_ID` fails 43 of its 78 checks (30 of 52 before the round).
+
+The order's second review (the same evening, of d1979df) takes it to 104 checks. The
+webhook: a membership ending while no read of Whop answers writes nothing and
+answers 500 (`lookUpActiveMembershipForUser` says `everyReadFailed`), for an
+Apex seat or an ETfB membership beside the course membership the row is on,
+the seat the row is on, the course membership the row is on beside an active
+seat, and the second read failing for the course alone with the first and the
+third failing; sent again once Whop answers, the row stays on the course.
+When Whop answers with nothing that grants access, a row on another
+membership is left for the sync whatever the product (an Apex seat, an ETfB
+membership, another course membership, the course membership beside a row on
+a seat), the row on the membership that ended is canceled with the write
+keyed on that membership, and a failed read of the row answers 500. The
+lookup: which failing reads make `everyReadFailed` (a member with no
+memberships list is no answer, and neither is a second read with one product
+failing); the course's read failing hands over to the third read, which gives
+the course membership where the other products' rows gave a newer seat; rows
+naming no product take the product their read asked for; a tie keeps the one
+seen first. The sync: a canceled course membership older than a canceled seat
+leaves the row on the seat (as built: between two that grant no access only
+the date decides), and a tie keeps the one seen first. The stand-in fetch
+gained `down.oneProduct`, `down.member` and `listedUnder`. Five checks of
+`whop-webhook-product.test.mjs` (now 34) and `whop-webhook-old-rows.test.mjs`
+(now 19) changed with it: a deactivation with no product and Whop failing
+answers 500 (it answered 200); Whop failing on the row an Apex seat made
+answers 500 and the event sent again cancels it (it canceled at once); a
+second course product's membership ending cancels a row on it and leaves a
+row on another membership; the course's own membership ending reads and
+cancels the row by that membership too (it was keyed on the student alone);
+and the row moving while Whop is asked is tested with Whop answering nothing.
+On the route and lookup of d1979df the three suites fail 16 of 104 (the new
+lookup's name pointed at the old lookup, which never says `everyReadFailed`),
+2 of 34 and 2 of 19. 14 breaks
+each fail at least one of them: the lookup never saying `everyReadFailed`, the
+route ignoring it, nothing found leaving only a row of an event with no
+product, the row read only for a product outside the list, the cancel keyed
+on the student alone, the first read not counted as an answer, a member with
+no list counted, a second read with a failed product counted, the second read
+as before (a failed product skipped, a pick from the rest), the second read
+picking from what it had before the failure, the course rule applied between
+two that grant no access, a tie keeping the one seen last, a row naming no
+product classified without its read's product, and a course row logged as one
+the old webhook made. The course alone in `WHOP_PRODUCT_ID` fails 53 of the
+104.
 
 `stub-call-gate.ts` reimplements the real gate's interval logic (minus its
 telemetry fetch, which needs a network), so the interaction between the

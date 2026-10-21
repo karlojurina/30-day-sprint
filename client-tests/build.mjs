@@ -3,16 +3,34 @@
 // copied byte for byte apart from its import lines.
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 
-function gen(srcRel, outRel, rewrites = [], { dropLineComments = false } = {}) {
+/** The JavaScript TypeScript makes of a file, every comment left out. */
+const codeOf = (text, fileName) => ts.transpileModule(text, {
+  fileName,
+  compilerOptions: { removeComments: true, target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext },
+}).outputText
+
+function gen(srcRel, outRel, rewrites = [], { dropLineComments = false, dropComments = false } = {}) {
   const src = fileURLToPath(new URL(srcRel, import.meta.url))
   const out = fileURLToPath(new URL(outRel, import.meta.url))
   let s = fs.readFileSync(src, 'utf8')
   s = s.replace('"use client";\n', '')
   for (const [from, to] of rewrites) s = s.split(from).join(to)
+  const withComments = s
   // Lines that are only a `//` comment, left out of the copy (the code is untouched).
   if (dropLineComments) s = s.split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n')
+  // dropComments also leaves out the lines of /* */ comments (each must start its own line).
+  if (dropComments) s = s.split('\n').filter((l) => !/^(\/\/|\/\*|\*)/.test(l.trimStart())).join('\n')
   if (s.includes('@/')) throw new Error(`an unrewritten @/ import remains in ${srcRel}`)
+  // A line of code that starts with // or * (a line inside a template string,
+  // a `* b` carried over from the line above) would be left out with the
+  // comments. So the copy and the source it was cut from, its imports already
+  // rewritten, must make the same JavaScript, checked before the copy is
+  // written: a copy whose code changed is never left on disk for a test to run.
+  if ((dropLineComments || dropComments) && codeOf(s, out) !== codeOf(withComments, out)) {
+    throw new Error(`${outRel}: leaving out the comment lines of ${srcRel} changed its code (a line of code starts with // or *)`)
+  }
   fs.writeFileSync(out, s)
   console.log(`generated ${outRel} from the real source`)
 }
@@ -165,10 +183,15 @@ gen('../src/lib/whop.ts', './_gen/whop.ts', [
   ['from "./constants"', 'from "./constants.ts"'],
   ['from "@/types/whop"', 'from "./types-erased.ts"'],
 ])
-// The webhook runs the real chain after a lesson (complete-lesson.ts, above).
+// The webhook runs the real chain after a lesson (complete-lesson.ts, above)
+// and, since login-1, the real Whop lookup (whop-members.ts has no imports) on
+// a stand-in fetch (whop-webhook-product.test.mjs). Its copy leaves out every
+// comment line: one names two people, and this repository is public.
+gen('../src/lib/whop-members.ts', './_gen/whop-members.ts', [], { dropComments: true })
 gen('../src/app/api/webhooks/whop/route.ts', './_gen/whop-webhook-route.ts', [
   ['from "@/lib/complete-lesson"', 'from "./complete-lesson.ts"'],
-  ...toStub('next/server', '@/lib/supabase-server', '@/lib/whop-members'),
+  ['from "@/lib/whop-members"', 'from "./whop-members.ts"'],
+  ...toStub('next/server', '@/lib/supabase-server'),
   ['from "@/types/whop"', 'from "./types-erased.ts"'],
 ])
 gen('../src/app/api/student/mark-action-shipped/route.ts', './_gen/mark-action-shipped-route.ts', [
@@ -326,6 +349,20 @@ gen('../src/app/api/auth/whop/callback/route.ts', './_gen/whop-callback-route.ts
   ...toStub('next/server', '@/lib/supabase-server', '@/lib/whop', '@/lib/whop-members', '@/lib/achievements',
     '@/app/api/student/_lib/update-streak', '@supabase/supabase-js', '@/lib/first-payment'),
 ], { dropLineComments: true })
+// The same login with its Whop reads real, for the production WHOP_PRODUCT_ID
+// (three products, whop-product-setting.test.mjs): the code exchange and the
+// login check (checkActiveMembershipDiagnostic) from the whop.ts copy above,
+// the self-heal (fetchActiveMembershipForUser) from the whop-members.ts copy
+// above, both on the test's stand-in fetch. Its comment lines go, as above.
+gen('../src/app/api/auth/whop/callback/route.ts', './_gen/whop-callback-route-real-whop.ts', [
+  GATE,
+  ['from "@/lib/pkce"', 'from "./pkce.ts"'],
+  ['from "@/app/api/student/_lib/watch-sync"', 'from "./watch-sync.ts"'],
+  ['from "@/lib/whop"', 'from "./whop.ts"'],
+  ['from "@/lib/whop-members"', 'from "./whop-members.ts"'],
+  ...toStub('next/server', '@/lib/supabase-server', '@/lib/achievements',
+    '@/app/api/student/_lib/update-streak', '@supabase/supabase-js', '@/lib/first-payment'),
+], { dropLineComments: true })
 
 // The Whop catch-up (T-089, whop-catchup.test.mjs): the route and the run as
 // they are. The run reads Whop through the real whop.ts (above), which the
@@ -379,13 +416,13 @@ gen('../src/lib/world-v6/light.ts', './_gen/world-light.ts', [
 // The first-paid fix (2026-10-20, first-payment.test.mjs and
 // first-paid-repair.test.mjs): first_paid_at is the student's first real
 // Whop payment. The reader (first-payment.ts) runs on a stand-in fetch; its one
-// import is whop-members.ts, which has no imports of its own and copies across
-// untouched. The writers run through their entry points: the sync
+// import is whop-members.ts, whose copy is the webhook's above (no imports of
+// its own, its comment lines left out, the code the same). The writers run
+// through their entry points: the sync
 // (whop-sync-runner.ts) with the real reads on that fetch and the stand-in's
 // database, and the backfill route and the repair (first-paid-repair.ts and
 // its route) with the real team login (admin-auth.ts, above). The repair reads
 // the 30%'s dates and requestCounts from the real discount.ts (above).
-gen('../src/lib/whop-members.ts', './_gen/whop-members.ts')
 gen('../src/lib/first-payment.ts', './_gen/first-payment.ts', [
   ['from "@/lib/whop-members"', 'from "./whop-members.ts"'],
 ])

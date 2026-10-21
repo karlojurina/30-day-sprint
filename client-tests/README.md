@@ -504,6 +504,43 @@ row patterns and the log's words), `admin-people` (78), and
 `admin-render-second`, whose 30% row and journey card patterns follow the
 new source.
 
+T-122 (2026-10-21, `night/admin3`): every student a yes or a no. The
+first live dry run of the coupon cron could not read 46 of 290 students (22
+payment ids where the membership's belongs, 24 memberships with no plan or
+no renewal price), and the request routes refuse every check that gives no
+answer. `membership-discount` (255, +85) gives its stand-in Whop two more
+reads: v2's `GET /api/v2/memberships?user_id=` (a user's memberships, in
+pages of 50) and the pinned `GET /api/v1/payments?user_id=` (in pages by
+cursor, newest first). It proves `judgeStudentDiscount` step by step: the
+membership on file; a payment's id, no id, an id Whop does not know (404)
+and another 4xx answered through the Whop user, of whose memberships the
+order takes the active before the past due, then the newest, never another
+product's or a canceled one, over two pages; a null renewal price, no plan
+id and a plan Whop does not know judged by the newest real course payment
+(87.30 a discount, 97.00 none; a $0, a refunded and another product's
+payment left out; the code named), as is no course membership, and with no
+payment at all no discount; a list that ignores the user filter, a 404 or
+another shape handing over to the payment; no answer only for Whop down at
+each step (no connection, a 5xx, a 429 three times, a hang past the answer
+limit, a refused key, payments of another user or in another shape) and for
+the deployment that cannot ask (no key, no course product, no Whop user),
+the membership on file getting a 5xx never being asked about through the
+user. Then `fetchLatestRealPayment` on its own (the older shape, a payment
+naming no product, two pages, more than 10), `checkMembershipDiscount` with
+`via` and the row's `source`, a database without v113 (the row refused with
+`source` and written without it, once per run in the cron), both request
+routes for each case with the student's line, a 200 or the 503, the approve
+route, Check Whop again (200 through the user or the payment where it was a
+422, the list read after it, 422 only with no Whop user, 500 with no course
+product), the cron's `by_source`, `no_real_payment` and `failed` (only the
+student Whop gave no answer for), and the data route counting a row stored
+through the user for a student with a payment's id or none on file.
+`admin-review` (100, +2) holds an Applied row with a payment's id or none as
+"not checked yet" (Approve asks through the Whop user) and its stored row
+counting, the Approved row's read still asking by the membership on file
+alone, and the payment's-id check run on a stand-in fetch (it was logged and
+never asked); `thirty-view` (98) `couponOf` with no membership id on file.
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

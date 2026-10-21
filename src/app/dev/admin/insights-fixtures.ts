@@ -3,12 +3,14 @@
  * only: the dev layout calls notFound() anywhere else.
  *
  * MADE-UP NUMBERS ONLY. The 90 days of snapshots end today, so every range
- * has rows; the line for Avg progress drops on the day 2 days ago, as the
- * live one dropped at the course switch.
+ * has rows; the snapshots' Avg progress drops on the day 2 days ago, as the
+ * live one dropped at the course switch, and the course switch is that day
+ * (loadResetAt), so the page's line starts there.
  *
  *   ?state=full | empty | loading | error   (default full)
  *          partial   the snapshots load, the sprinters' and the Bounty
  *                    Program's reads fail
+ *          noreset   everything loads but the course switch's date
  *   ?course=new | old   activity or pace in the first card (default new)
  */
 
@@ -16,9 +18,9 @@ import type { Answer } from "@/lib/admin/admin-transport";
 import type { InsightsTransport, SnapshotRow, SprinterProgress } from "@/lib/admin/insights-data";
 import type { PaceCounts } from "@/lib/useJourneyPaceCounts";
 
-export type InsightsFixtureState = "full" | "empty" | "loading" | "error" | "partial";
+export type InsightsFixtureState = "full" | "empty" | "loading" | "error" | "partial" | "noreset";
 
-const STATES: InsightsFixtureState[] = ["full", "empty", "loading", "error", "partial"];
+const STATES: InsightsFixtureState[] = ["full", "empty", "loading", "error", "partial", "noreset"];
 
 export function parseInsightsState(value: string | null): InsightsFixtureState {
   return STATES.find((s) => s === value) ?? "full";
@@ -97,6 +99,18 @@ export function fixtureInsightsTransport(state: InsightsFixtureState): InsightsT
         return later<string[]>({ ok: false, status: 500, error: `the Bounty Program claims could not be read: ${READ_FAILED}` });
       }
       return later({ ok: true, status: 200, data: state === "empty" ? [] : claims() });
+    },
+    loadResetAt() {
+      if (state === "error" || state === "noreset") {
+        return later<string | null>({
+          ok: false,
+          status: 500,
+          error: `admin_config.curriculum_reset_at could not be read: ${READ_FAILED}`,
+        });
+      }
+      // The course switch: 2 days ago, at the live switch's time of day.
+      const today = Math.floor(Date.now() / DAY) * DAY;
+      return later<string | null>({ ok: true, status: 200, data: `${new Date(today - 2 * DAY).toISOString().slice(0, 10)}T14:33:33.972Z` });
     },
     loadSprinters() {
       if (state === "error" || state === "partial") {

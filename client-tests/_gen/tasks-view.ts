@@ -9,7 +9,8 @@
  *   closedLine        what a closed task says about how it was closed
  *   waitingText       how long an open task has waited
  *   queueHealth       the "am I done for today" line
- *   insightsRanges    the insights page's two ranges, the second named for the reset
+ *   insightsRanges    the insights page's ranges: "Since the reset" alone while the
+ *                     reset is under 30 days old, else the last 30 days too
  *
  * Every clock here is the moment the list was read (the answer's
  * generatedAt), so a row and the list agree and the dev page reads the same
@@ -204,12 +205,15 @@ export function taskStudentName(row: TaskRow): string {
 export type InsightsRange = "30d" | "all";
 
 /**
- * The insights page's two ranges. Once the reset ran, "all" covers only the
- * tasks made since it (the route counts nothing older), so it says so.
+ * The insights page's ranges. Once the reset ran, "all" covers only the
+ * tasks made since it (the route counts nothing older), so it says so; and
+ * while the reset is under 30 days old the last 30 days hold exactly those
+ * tasks too, so the page offers "Since the reset" alone (the two showed the
+ * same numbers: admin rebuild 2, the review's fix round).
  */
-export function insightsRanges(resetAt: string | null): Array<{ value: InsightsRange; label: string }> {
-  return [
-    { value: "30d", label: "Last 30 days" },
-    { value: "all", label: resetAt ? `Since the reset, ${dayLabel(resetAt)}` : "All time" },
-  ];
+export function insightsRanges(resetAt: string | null, nowMs: number = Date.now()): Array<{ value: InsightsRange; label: string }> {
+  const since = { value: "all" as const, label: resetAt ? `Since the reset, ${dayLabel(resetAt)}` : "All time" };
+  const resetMs = resetAt ? Date.parse(resetAt) : NaN;
+  if (Number.isFinite(resetMs) && nowMs - resetMs < 30 * 86_400_000) return [since];
+  return [{ value: "30d", label: "Last 30 days" }, since];
 }

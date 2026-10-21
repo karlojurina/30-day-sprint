@@ -177,8 +177,9 @@ console.log('\n=== The status words are the 30% page\'s ===')
      'pending reads "Applied" (asked, waiting for a decision) and applied reads "Code Applied" (the code is on Whop)', show(words))
   ok(SURVEY.statusWords('weird').label === 'Unknown status (weird)' && SURVEY.statusWords('').label === 'No status', 'a status no one knows is named as it is')
   const apps = ['pending', 'pending', 'applied', 'rejected', 'approved', 'applied', 'applied'].map((status, i) => ({ id: `r${i}`, status, created_at: '', student: null, answers: [] }))
-  ok(show(SURVEY.statusCounts(apps)) === show([{ label: 'Applied', count: 2 }, { label: 'Approved', count: 1 }, { label: 'Code Applied', count: 3 }, { label: 'Rejected', count: 1 }]),
-     'the header\'s counts, in the 30% page\'s order')
+  // The review's fix round: the 30% page's tab order (Applied, Approved, Rejected, Code Applied), the one order every page uses.
+  ok(show(SURVEY.statusCounts(apps)) === show([{ label: 'Applied', count: 2 }, { label: 'Approved', count: 1 }, { label: 'Rejected', count: 1 }, { label: 'Code Applied', count: 3 }]),
+     'the header\'s counts, in the 30% page\'s tab order', show(SURVEY.statusCounts(apps)))
   const old = fromBase('src/app/admin/(authenticated)/feedback/survey/page.tsx')
   ok(/textTransform: "capitalize"/.test(old) && /\{status\}/.test(old), `control: at ${BASE} the pill printed the database's word, "Pending" and "Applied"`)
 }

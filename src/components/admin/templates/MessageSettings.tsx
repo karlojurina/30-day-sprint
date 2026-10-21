@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { Button, Card, Pill, T } from "@/components/admin/ui";
+import { ReadFailure } from "@/components/admin/review-parts";
 import {
   LINK_PLACEHOLDER,
   masterTurnOnText,
@@ -27,6 +28,16 @@ import { Field, INPUT, SubHeading, WarningLine } from "./form-parts";
  * sprint.ecomuniversity.com. A switch under the master posts only while the
  * master is on, and its state says so. Turning the master on asks once,
  * naming what starts posting.
+ *
+ * Since the review's fix round it is one line at the top of the page (the
+ * templates are the page): "Message settings" and what it holds, a button
+ * ("Show settings", "Hide settings") that opens the links and the switches,
+ * and under it the warnings, always
+ * shown. It opens folded for every role, a warning standing or not, so the
+ * first template is on the first screen; the warnings say what to fix and
+ * the button is one press away. The one sentence about who can change it
+ * is here. SettingsBody is exported for the client tests, which render it
+ * open.
  */
 
 type Saver = (key: EditableConfigKey, value: string) => Promise<string | null>;
@@ -50,31 +61,57 @@ export function MessageSettings({
   /** Writes one key; answers null when it went through, else the sentence to show. */
   onSave: Saver;
 }) {
+  const panelId = useId();
+  const warnings = settings.ok ? settingsWarnings(settings.values, templates, live) : [];
+  const [open, setOpen] = useState(false);
+  const who = canEdit ? "Founders and admins can change them." : "Only a founder or an admin can change them.";
   return (
-    <Card padding={20} style={{ marginBottom: 24 }}>
-      <section aria-labelledby="message-settings-title" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        <div>
-          <h2 id="message-settings-title" style={T.cardTitle}>
-            Message settings
-          </h2>
-          <p style={{ ...T.bodyDim, marginTop: 4, lineHeight: 1.5 }}>
-            The links the messages fill in, and the automated Discord posts.{" "}
-            {canEdit ? "Founders and admins can change them." : "Only a founder or an admin can change them."}
-          </p>
+    <Card padding={0} style={{ marginBottom: 24 }}>
+      <section aria-labelledby="message-settings-title" data-settings-open={open ? "yes" : "no"}>
+        <div className="flex flex-wrap items-center justify-between" style={{ gap: "8px 16px", padding: "12px 16px" }}>
+          <div style={{ flex: "1 1 260px", minWidth: 0 }}>
+            <h2 id="message-settings-title" style={T.cardTitle}>
+              Message settings
+            </h2>
+            <p style={{ ...T.bodyDim, marginTop: 2, lineHeight: 1.5 }}>
+              The links the messages fill in, and the automated Discord posts. {who}
+            </p>
+          </div>
+          {settings.ok && (
+            <Button variant="raised" size="md" onClick={() => setOpen((v) => !v)} title={open ? "Hide the links and the switches" : "Show the links and the switches"}>
+              {open ? "Hide settings" : "Show settings"}
+              <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ flex: "none", transform: open ? "rotate(180deg)" : undefined, transition: "transform 150ms" }}>
+                <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </Button>
+          )}
         </div>
         {!settings.ok ? (
-          <p role="alert" style={{ ...T.body, lineHeight: 1.5 }}>
-            Couldn&apos;t load the message settings: {settings.error}. Press Refresh to try again.
-          </p>
+          <div role="alert" style={{ padding: "0 16px 16px" }}>
+            <ReadFailure lead="Couldn't load the message settings. Press Refresh to try again." raw={settings.error} />
+          </div>
         ) : (
-          <SettingsBody settings={settings} templates={templates} live={live} canEdit={canEdit} onSave={onSave} />
+          <>
+            {warnings.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 16px 16px" }}>
+                {warnings.map((w) => (
+                  <WarningLine key={w.key}>{w.text}</WarningLine>
+                ))}
+              </div>
+            )}
+            {open && (
+              <div id={panelId} style={{ display: "flex", flexDirection: "column", gap: 16, padding: "4px 16px 20px", borderTop: "1px solid var(--color-border)" }}>
+                <SettingsBody settings={settings} templates={templates} live={live} canEdit={canEdit} onSave={onSave} />
+              </div>
+            )}
+          </>
         )}
       </section>
     </Card>
   );
 }
 
-function SettingsBody({
+export function SettingsBody({
   settings,
   templates,
   live,
@@ -88,19 +125,10 @@ function SettingsBody({
   onSave: Saver;
 }) {
   const values = settings.values;
-  const warnings = settingsWarnings(values, templates, live);
   const { master, others } = switchViews(values);
   return (
     <>
-      {warnings.length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {warnings.map((w) => (
-            <WarningLine key={w.key}>{w.text}</WarningLine>
-          ))}
-        </div>
-      )}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 14, paddingTop: 12 }}>
         <SubHeading>Links</SubHeading>
         {LINK_FIELDS.map((f) => (
           <LinkField

@@ -24,6 +24,7 @@ import { ADMIN_STUDENT_JOIN_CUTOFF, TASKS_STUDENT_JOIN_CUTOFF } from "@/lib/cons
 import { CURRICULUM_RESET_KEY } from "@/lib/curriculum-reset";
 import {
   DASH_STUDENT_COLUMNS,
+  DASH_STUDENT_STATUSES,
   SNAPSHOT_COLUMNS,
   TASKS_RESET_KEY,
   configReads,
@@ -57,7 +58,11 @@ async function readDashboard(supabase: SupabaseClient, nowMs: number): Promise<D
 
   // The same population as before admin rebuild 2: a Whop membership, active,
   // past due or canceled, on a paying plan, first paid since the cutoff.
-  // first_paid_at, never joined_at: a renewal moves joined_at.
+  // first_paid_at, never joined_at: a renewal moves joined_at. Expired is
+  // read as well, for Month 2 only (buildDashboard keeps it out of every other
+  // tile): Whop can end a membership as expired, the sync then keeps its
+  // canceled_at, and a student who did not renew must stay in Month 2's
+  // denominator, where the dates judge them (the review's fix round).
   const students = (async (): Promise<DashRead<DashStudent[]>> =>
     rowsRead(
       await fetchAllRowsByKey<DashStudent>(
@@ -66,7 +71,7 @@ async function readDashboard(supabase: SupabaseClient, nowMs: number): Promise<D
             .from("students")
             .select(DASH_STUDENT_COLUMNS)
             .not("whop_membership_id", "is", null)
-            .in("membership_status", ["active", "past_due", "canceled"])
+            .in("membership_status", [...DASH_STUDENT_STATUSES])
             .in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])
             .gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)
             .order("id"),

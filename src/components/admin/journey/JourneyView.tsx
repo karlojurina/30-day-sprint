@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, Pill, T } from "@/components/admin/ui";
 import { ListHeader, LoadError, SkeletonRows, TAP } from "@/components/admin/list-parts";
-import { ActivityPill, FactsLine, Meter, STATUS_WORDS, Warning } from "@/components/admin/people-parts";
+import { ActivityPill, FactsLine, Meter, STATUS_WORDS } from "@/components/admin/people-parts";
+import { ProblemNotice, ReadFailure } from "@/components/admin/review-parts";
 import { Block, DiscountBlock, StatGrid, useStudent } from "@/components/admin/students/StudentDetailView";
 import type { Answer } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
@@ -32,23 +33,27 @@ import { ACTIVITY_ORDER, ACTIVITY_TEXT } from "@/lib/useJourneyPaceCounts";
 type Loaded = { kind: "loading" } | { kind: "error"; error: string } | { kind: "ready"; data: Journey };
 
 /**
- * ListPage's gutters (16px on a phone), wider: the six columns sit side by
- * side from about 1400px; under that the board scrolls sideways inside
- * itself.
+ * ListPage's gutters (16px on a phone) with the page's standard column for
+ * the header and the lines above the board (BoardColumn, ListPage's width),
+ * so the header sits where it sits on every other page; only the board
+ * breaks out, to 1584px: the six columns sit side by side from about 1400px,
+ * and under that the board scrolls sideways inside itself.
  */
 function BoardPage({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="px-4 sm:px-8 lg:px-12 pt-4 sm:pt-10 pb-28" style={{ maxWidth: 1680, margin: "0 auto" }}>
-      {children}
-    </div>
-  );
+  return <div className="px-4 sm:px-8 lg:px-12 pt-4 sm:pt-10 pb-28">{children}</div>;
 }
 
-const ACTIVITY_COLOR = {
-  not_started: "var(--color-text-primary)",
+/** ListPage's content width (1180px less its 48px gutters at the widest). */
+function BoardColumn({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
+  return <div style={{ maxWidth: wide ? 1584 : 1084, margin: "0 auto" }}>{children}</div>;
+}
+
+/** The activity colours, on each tile's dot (status is never colour alone: its word is beside it), as Insights' Activity right now. */
+const ACTIVITY_DOT = {
+  not_started: "var(--color-neutral)",
   moving: "var(--color-success)",
   slipping: "var(--color-warning)",
-  stalled: "var(--color-text-primary)",
+  stalled: "var(--color-danger)",
 } as const;
 
 export function JourneyView({
@@ -101,12 +106,11 @@ export function JourneyView({
       title="Student journey"
       description={`The new program's students: a first payment on or after ${dayLabel(data?.launchedAt ?? "2026-10-08T22:00:00.000Z")}, on any plan, by days since that payment. Open a card for the student.`}
       meta={data ? `Updated ${clockLabel(data.generatedAt)}${busy ? " · Updating" : ""} · ${data.total} ${data.total === 1 ? "student" : "students"}` : "Loading"}
+      // Kept while the board loads or failed, so the header never jumps (the review's fix round).
       action={
-        data ? (
-          <Button variant="raised" size="md" busy={busy} onClick={() => void refresh()}>
-            Refresh
-          </Button>
-        ) : undefined
+        <Button variant="raised" size="md" busy={busy || loaded.kind === "loading"} disabled={loaded.kind === "loading"} onClick={() => void refresh()}>
+          Refresh
+        </Button>
       }
     />
   );
@@ -114,16 +118,20 @@ export function JourneyView({
   if (loaded.kind === "loading") {
     return (
       <BoardPage>
-        {header(null)}
-        <SkeletonRows rows={4} label="Loading the journey" />
+        <BoardColumn>
+          {header(null)}
+          <SkeletonRows rows={4} label="Loading the journey" />
+        </BoardColumn>
       </BoardPage>
     );
   }
   if (loaded.kind === "error") {
     return (
       <BoardPage>
-        {header(null)}
-        <LoadError title="Couldn't load the journey." detail={loaded.error} onRetry={() => void refresh()} busy={busy} />
+        <BoardColumn>
+          {header(null)}
+          <LoadError title="Couldn't load the journey." detail={loaded.error} onRetry={() => void refresh()} busy={busy} />
+        </BoardColumn>
       </BoardPage>
     );
   }
@@ -131,67 +139,75 @@ export function JourneyView({
   const data = loaded.data;
   return (
     <BoardPage>
-      {header(data)}
-      {refreshError && <Warning>Couldn&apos;t refresh the board ({refreshError}), so it may be out of date. Press Refresh.</Warning>}
-      {data.problems.map((p) => (
-        <Warning key={p}>{p}</Warning>
-      ))}
+      <BoardColumn>
+        {header(data)}
+        {refreshError && <ProblemNotice text="Couldn't refresh the board, so it may be out of date. Press Refresh." raw={refreshError} />}
+        {data.problems.map((p) => (
+          <ProblemNotice key={p.text} text={p.text} raw={p.error} />
+        ))}
 
-      {data.activity && (
-        <div
-          aria-label="Activity of the students who have not churned"
-          className="grid grid-cols-2 sm:grid-cols-4"
-          style={{ gap: 8, marginBottom: 16 }}
-        >
-          {ACTIVITY_ORDER.map((label) => (
-            <Card key={label} padding={12}>
-              <p style={{ fontSize: 22, fontWeight: 600, color: ACTIVITY_COLOR[label], fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
-                {data.activity?.[label] ?? 0}
-              </p>
-              <p style={{ fontSize: 12, color: "var(--color-text-secondary)", marginTop: 4 }}>{ACTIVITY_TEXT[label]}</p>
-            </Card>
-          ))}
-        </div>
-      )}
+        {data.activity && (
+          <div
+            aria-label="Activity of the students who have not churned"
+            className="grid grid-cols-2 sm:grid-cols-4"
+            style={{ gap: 8, marginBottom: 16 }}
+          >
+            {ACTIVITY_ORDER.map((label) => (
+              <Card key={label} padding={12}>
+                <p style={{ fontSize: 22, fontWeight: 600, color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
+                  {data.activity?.[label] ?? 0}
+                </p>
+                <p className="flex items-center" style={{ gap: 6, fontSize: 12, color: "var(--color-text-secondary)", marginTop: 4 }}>
+                  <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: ACTIVITY_DOT[label], flex: "none" }} />
+                  {ACTIVITY_TEXT[label]}
+                </p>
+              </Card>
+            ))}
+          </div>
+        )}
+      </BoardColumn>
 
       {/* Six columns of at least 208px (264px on a phone). Under that the board
-          scrolls sideways inside itself; the page never does. */}
-      <div style={{ overflowX: "auto", paddingBottom: 8, scrollSnapType: "x proximity" }}>
-        <div
-          className="grid grid-cols-[repeat(6,minmax(264px,1fr))] lg:grid-cols-[repeat(6,minmax(208px,1fr))]"
-          style={{ gap: 12, alignItems: "start" }}
-        >
-          {data.columns.map((col) => (
-            <section key={col.id} aria-label={col.label} style={{ minWidth: 0, scrollSnapAlign: "start" }}>
-              <div className="flex items-baseline justify-between" style={{ padding: "0 4px", marginBottom: 8 }}>
-                <div>
-                  <h2 style={{ ...T.eyebrow, fontSize: 12, color: "var(--color-text-primary)" }}>{col.label}</h2>
-                  <p style={{ fontSize: 12, color: "var(--color-text-secondary)", marginTop: 2 }}>{col.description}</p>
+          scrolls sideways inside itself; the page never does. The columns grow
+          with the page: one scroll, the page's. */}
+      <BoardColumn wide>
+        <div style={{ overflowX: "auto", paddingBottom: 8, scrollSnapType: "x proximity" }}>
+          <div
+            className="grid grid-cols-[repeat(6,minmax(264px,1fr))] lg:grid-cols-[repeat(6,minmax(208px,1fr))]"
+            style={{ gap: 12, alignItems: "start" }}
+          >
+            {data.columns.map((col) => (
+              <section key={col.id} aria-label={col.label} style={{ minWidth: 0, scrollSnapAlign: "start" }}>
+                <div className="flex items-baseline justify-between" style={{ padding: "0 4px", marginBottom: 8 }}>
+                  <div>
+                    <h2 style={{ ...T.eyebrow, fontSize: 12, color: "var(--color-text-primary)" }}>{col.label}</h2>
+                    <p style={{ fontSize: 12, color: "var(--color-text-secondary)", marginTop: 2 }}>{col.description}</p>
+                  </div>
+                  <span style={{ fontSize: 12, color: "var(--color-text-secondary)", fontVariantNumeric: "tabular-nums" }}>{col.cards.length}</span>
                 </div>
-                <span style={{ fontSize: 12, color: "var(--color-text-secondary)", fontVariantNumeric: "tabular-nums" }}>{col.cards.length}</span>
-              </div>
-              <div className="lg:max-h-[70vh] lg:overflow-y-auto" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {col.cards.length === 0 ? (
-                  <p
-                    style={{
-                      padding: "24px 12px",
-                      textAlign: "center",
-                      fontSize: 12,
-                      color: "var(--color-text-secondary)",
-                      borderRadius: "var(--radius-control)",
-                      border: "1px dashed var(--color-border)",
-                    }}
-                  >
-                    No students
-                  </p>
-                ) : (
-                  col.cards.map((c) => <JourneyCardView key={c.id} card={c} onOpen={() => setDrawer(c.id)} />)
-                )}
-              </div>
-            </section>
-          ))}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {col.cards.length === 0 ? (
+                    <p
+                      style={{
+                        padding: "24px 12px",
+                        textAlign: "center",
+                        fontSize: 12,
+                        color: "var(--color-text-secondary)",
+                        borderRadius: "var(--radius-control)",
+                        border: "1px dashed var(--color-border)",
+                      }}
+                    >
+                      No students
+                    </p>
+                  ) : (
+                    col.cards.map((c) => <JourneyCardView key={c.id} card={c} onOpen={() => setDrawer(c.id)} />)
+                  )}
+                </div>
+              </section>
+            ))}
+          </div>
         </div>
-      </div>
+      </BoardColumn>
 
       {drawer && <JourneyDrawer key={drawer} studentId={drawer} transport={transport} onClose={() => setDrawer(null)} />}
     </BoardPage>
@@ -205,7 +221,6 @@ function JourneyCardView({ card: c, onOpen }: { card: JourneyCard; onOpen: () =>
       onClick={onOpen}
       className="surface-resting"
       style={{
-        // The column scrolls on a wide screen: a card keeps its height instead of shrinking into it.
         flex: "none",
         width: "100%",
         textAlign: "left",
@@ -265,7 +280,7 @@ function AreaChip({ numeral, name }: { numeral: string; name: string }) {
 
 /** The drawer: one student's detail, fresh for each student (keyed by the page). */
 function JourneyDrawer({ studentId, transport, onClose }: { studentId: string; transport: PeopleTransport; onClose: () => void }) {
-  const { loaded, busy, retry, patch } = useStudent(transport, studentId);
+  const { loaded, busy, retry } = useStudent(transport, studentId);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -310,7 +325,15 @@ function JourneyDrawer({ studentId, transport, onClose }: { studentId: string; t
         {loaded.kind === "missing" && <p style={T.body}>No student has this id any more.</p>}
         {loaded.kind === "ready" && (
           <>
-            <h2 style={{ ...T.heading, overflowWrap: "anywhere" }}>{loaded.data.name}</h2>
+            <div className="flex flex-wrap items-baseline justify-between" style={{ gap: "0 12px" }}>
+              <h2 style={{ ...T.heading, overflowWrap: "anywhere", minWidth: 0 }}>{loaded.data.name}</h2>
+              <Link
+                href={`/admin/students/${encodeURIComponent(loaded.data.id)}`}
+                style={{ display: "inline-flex", alignItems: "center", minHeight: TAP, fontSize: 13, fontWeight: 600, color: "var(--color-accent-dark)", whiteSpace: "nowrap" }}
+              >
+                Open the full page
+              </Link>
+            </div>
             <FactsLine
               parts={[
                 loaded.data.email,
@@ -339,14 +362,14 @@ function JourneyDrawer({ studentId, transport, onClose }: { studentId: string; t
                 </Card>
               ) : (
                 <Card padding={14}>
-                  <p style={T.body}>Couldn&apos;t load the lessons ({loaded.data.areas.error}).</p>
+                  <ReadFailure lead="Couldn't load the lessons." raw={loaded.data.areas.error} />
                 </Card>
               )}
             </Block>
             <Block title="Action items">
               <Card padding={14}>
                 {!loaded.data.actionItems.ok ? (
-                  <p style={T.body}>Couldn&apos;t load the action items ({loaded.data.actionItems.error}).</p>
+                  <ReadFailure lead="Couldn't load the action items." raw={loaded.data.actionItems.error} />
                 ) : loaded.data.actionItems.data.length === 0 ? (
                   <p style={T.bodyDim}>This course has no action items.</p>
                 ) : (
@@ -372,14 +395,8 @@ function JourneyDrawer({ studentId, transport, onClose }: { studentId: string; t
               </Card>
             </Block>
             <Block title="30% off">
-              <DiscountBlock student={loaded.data} transport={transport} onSaved={(v) => patch({ adVerified: v })} compact />
+              <DiscountBlock student={loaded.data} />
             </Block>
-            <Link
-              href={`/admin/students/${encodeURIComponent(loaded.data.id)}`}
-              style={{ display: "inline-flex", alignItems: "center", minHeight: TAP, fontSize: 13, fontWeight: 600, color: "var(--color-accent-dark)" }}
-            >
-              Open the full page
-            </Link>
           </>
         )}
       </aside>

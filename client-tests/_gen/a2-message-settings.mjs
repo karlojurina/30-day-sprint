@@ -2,6 +2,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useId, useState } from "react";
 import { Button, Card, Pill, T } from "./a2-ui.mjs";
+import { ReadFailure } from "./a2-review-parts.mjs";
 import { LINK_PLACEHOLDER, masterTurnOnText, messagesUsing, settingsWarnings, switchViews, } from "./templates-data.ts";
 import { Field, INPUT, SubHeading, WarningLine } from "./a2-form-parts.mjs";
 const LINK_FIELDS = [
@@ -9,13 +10,16 @@ const LINK_FIELDS = [
     { key: "discord_invite_link", label: "Discord invite link", placeholder: "https://discord.gg/your-invite" },
 ];
 export function MessageSettings({ settings, templates, live, canEdit, onSave, }) {
-    return (_jsx(Card, { padding: 20, style: { marginBottom: 24 }, children: _jsxs("section", { "aria-labelledby": "message-settings-title", style: { display: "flex", flexDirection: "column", gap: 16 }, children: [_jsxs("div", { children: [_jsx("h2", { id: "message-settings-title", style: T.cardTitle, children: "Message settings" }), _jsxs("p", { style: { ...T.bodyDim, marginTop: 4, lineHeight: 1.5 }, children: ["The links the messages fill in, and the automated Discord posts.", " ", canEdit ? "Founders and admins can change them." : "Only a founder or an admin can change them."] })] }), !settings.ok ? (_jsxs("p", { role: "alert", style: { ...T.body, lineHeight: 1.5 }, children: ["Couldn't load the message settings: ", settings.error, ". Press Refresh to try again."] })) : (_jsx(SettingsBody, { settings: settings, templates: templates, live: live, canEdit: canEdit, onSave: onSave }))] }) }));
+    const panelId = useId();
+    const warnings = settings.ok ? settingsWarnings(settings.values, templates, live) : [];
+    const [open, setOpen] = useState(false);
+    const who = canEdit ? "Founders and admins can change them." : "Only a founder or an admin can change them.";
+    return (_jsx(Card, { padding: 0, style: { marginBottom: 24 }, children: _jsxs("section", { "aria-labelledby": "message-settings-title", "data-settings-open": open ? "yes" : "no", children: [_jsxs("div", { className: "flex flex-wrap items-center justify-between", style: { gap: "8px 16px", padding: "12px 16px" }, children: [_jsxs("div", { style: { flex: "1 1 260px", minWidth: 0 }, children: [_jsx("h2", { id: "message-settings-title", style: T.cardTitle, children: "Message settings" }), _jsxs("p", { style: { ...T.bodyDim, marginTop: 2, lineHeight: 1.5 }, children: ["The links the messages fill in, and the automated Discord posts. ", who] })] }), settings.ok && (_jsxs(Button, { variant: "raised", size: "md", onClick: () => setOpen((v) => !v), title: open ? "Hide the links and the switches" : "Show the links and the switches", children: [open ? "Hide settings" : "Show settings", _jsx("svg", { "aria-hidden": "true", width: "14", height: "14", viewBox: "0 0 16 16", style: { flex: "none", transform: open ? "rotate(180deg)" : undefined, transition: "transform 150ms" }, children: _jsx("path", { d: "M4 6l4 4 4-4", fill: "none", stroke: "currentColor", strokeWidth: "1.6", strokeLinecap: "round", strokeLinejoin: "round" }) })] }))] }), !settings.ok ? (_jsx("div", { role: "alert", style: { padding: "0 16px 16px" }, children: _jsx(ReadFailure, { lead: "Couldn't load the message settings. Press Refresh to try again.", raw: settings.error }) })) : (_jsxs(_Fragment, { children: [warnings.length > 0 && (_jsx("div", { style: { display: "flex", flexDirection: "column", gap: 8, padding: "0 16px 16px" }, children: warnings.map((w) => (_jsx(WarningLine, { children: w.text }, w.key))) })), open && (_jsx("div", { id: panelId, style: { display: "flex", flexDirection: "column", gap: 16, padding: "4px 16px 20px", borderTop: "1px solid var(--color-border)" }, children: _jsx(SettingsBody, { settings: settings, templates: templates, live: live, canEdit: canEdit, onSave: onSave }) }))] }))] }) }));
 }
-function SettingsBody({ settings, templates, live, canEdit, onSave, }) {
+export function SettingsBody({ settings, templates, live, canEdit, onSave, }) {
     const values = settings.values;
-    const warnings = settingsWarnings(values, templates, live);
     const { master, others } = switchViews(values);
-    return (_jsxs(_Fragment, { children: [warnings.length > 0 && (_jsx("div", { style: { display: "flex", flexDirection: "column", gap: 8 }, children: warnings.map((w) => (_jsx(WarningLine, { children: w.text }, w.key))) })), _jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 14 }, children: [_jsx(SubHeading, { children: "Links" }), LINK_FIELDS.map((f) => (_jsx(LinkField
+    return (_jsxs(_Fragment, { children: [_jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 14, paddingTop: 12 }, children: [_jsx(SubHeading, { children: "Links" }), LINK_FIELDS.map((f) => (_jsx(LinkField
                     // A save, or a fresh read, changes the saved value: the field starts again from it.
                     , { settingKey: f.key, label: f.label, placeholder: f.placeholder, saved: values[f.key], users: messagesUsing(templates, live, LINK_PLACEHOLDER[f.key]).length, canEdit: canEdit, onSave: onSave }, `${f.key}:${values[f.key] ?? ""}`)))] }), _jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 10 }, children: [_jsx(SubHeading, { children: "Automated Discord posts" }), _jsx(SwitchRow, { view: master, canEdit: canEdit, onSave: onSave, confirmOn: masterTurnOnText(values) }), _jsx("p", { style: { ...T.bodyDim, lineHeight: 1.5 }, children: "Each switch below acts only while the master switch is on." }), others.map((v) => (_jsx(SwitchRow, { view: v, canEdit: canEdit, onSave: onSave }, v.key)))] })] }));
 }

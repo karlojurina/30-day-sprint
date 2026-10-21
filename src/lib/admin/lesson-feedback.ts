@@ -147,6 +147,8 @@ export interface FeedbackLessonRow {
   ratings: number;
   /** The mean of its stars, or null with no rating. Unrounded: the page rounds. */
   average: number | null;
+  /** When its newest rating was last saved (updated_at), or null with no rating: the page lists the rated lessons newest first. */
+  latestAt: string | null;
   /** Its ratings with a comment, newest first. */
   comments: FeedbackComment[];
 }
@@ -222,6 +224,7 @@ export function buildLessonFeedback(data: LessonFeedbackData, now: Date): Lesson
       rateable: isRateableLesson(l),
       ratings: ratings.length,
       average: mean(ratings.map((r) => r.stars)),
+      latestAt: ratings[0]?.updated_at ?? null,
       comments: ratings
         .filter((r) => (r.comment ?? "").trim() !== "")
         .map((r) => ({
@@ -272,4 +275,27 @@ export function buildLessonFeedback(data: LessonFeedbackData, now: Date): Lesson
     areas,
     unplaced,
   };
+}
+
+/**
+ * An area's lessons as the page lists them (admin rebuild 2, the review's fix
+ * round): the rated ones, newest rating first (the same moment in course
+ * order, which `lessons` already holds), and the ones with no rating, in
+ * course order, which the page folds into one line.
+ */
+export function splitRated(lessons: FeedbackLessonRow[]): { rated: FeedbackLessonRow[]; unrated: FeedbackLessonRow[] } {
+  const isRated = (l: FeedbackLessonRow) => l.ratings > 0 && l.average !== null;
+  const rated = lessons
+    .map((l, i) => ({ l, i }))
+    .filter(({ l }) => isRated(l))
+    .sort((a, b) => {
+      if (a.l.latestAt !== b.l.latestAt) {
+        if (a.l.latestAt === null) return 1;
+        if (b.l.latestAt === null) return -1;
+        return a.l.latestAt < b.l.latestAt ? 1 : -1;
+      }
+      return a.i - b.i;
+    })
+    .map(({ l }) => l);
+  return { rated, unrated: lessons.filter((l) => !isRated(l)) };
 }

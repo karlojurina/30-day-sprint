@@ -13,6 +13,17 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 /** A read that worked, with its rows, or one that failed, with the reason. */
 export type Read<T> = { ok: true; data: T } | { ok: false; error: string };
 
+/**
+ * A read that failed, for the line above a list: what it means for the page
+ * in a sentence, and the read's own words, which the page says plainly
+ * (read-failure.ts) and keeps behind Details (admin rebuild 2, the review's
+ * fix round: the raw text used to sit in the sentence).
+ */
+export interface Problem {
+  text: string;
+  error: string;
+}
+
 export function ok<T>(data: T): Read<T> {
   return { ok: true, data };
 }

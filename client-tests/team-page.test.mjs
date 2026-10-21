@@ -62,7 +62,16 @@ write(fromSrc('src/lib/admin/team-transport.ts'), 'src/lib/admin/team-transport.
 ])
 const UI = [['from "@/components/admin/ui"', 'from "./a2-ui.mjs"']]
 compile('src/components/admin/ui.tsx', 'a2-ui.mjs', [['import Link from "next/link";', 'const Link = (props) => props.children;']])
-compile('src/components/admin/list-parts.tsx', 'a2-list-parts.mjs', [...UI, ['from "@/lib/admin/croatia-dates"', 'from "./croatia-dates.ts"']])
+// The review fix round's parts (review-parts.tsx), which LoadError uses: its plain words are read-failure.ts, copied by build.mjs.
+compile('src/components/admin/review-parts.tsx', 'a2-review-parts.mjs', [
+  ['import Link from "next/link";', 'const Link = (props) => props.children;'],
+  ...UI,
+  ['from "@/lib/admin/read-failure"', 'from "./read-failure.ts"'],
+])
+compile('src/components/admin/list-parts.tsx', 'a2-list-parts.mjs', [
+  ...UI,
+  ['from "@/components/admin/review-parts"', 'from "./a2-review-parts.mjs"'],
+])
 compile('src/components/admin/templates/form-parts.tsx', 'a2-form-parts.mjs', [...UI, ['from "@/components/admin/list-parts"', 'from "./a2-list-parts.mjs"']])
 compile('src/components/admin/team/TeamView.tsx', 'a2-team-view.mjs', [
   ...UI,

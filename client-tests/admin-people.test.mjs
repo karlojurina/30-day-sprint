@@ -144,16 +144,18 @@ console.log('\n=== All students: every student with a first payment, any plan, n
   ok(!r1.students.ok && r1.students.error === 'canceling statement due to statement timeout', 'the students read fails: an error, never an empty list', show(r1.students))
   const r2 = await L.readStudentsList(fakeClient(failing('student_progress_counts')))
   const l2 = L.buildStudentsList(r2, course(), NOW)
-  ok(l2.rows[0].progress === null && !l2.progressKnown && /^Couldn't load the students' progress \(canceling statement due to statement timeout\)/.test(l2.problems[0] ?? ''),
-     'the progress read fails: Progress unknown on every row (never 0%), and a sentence says so', show(l2.problems))
+  // Since the review's fix round a problem is its sentence and the read's own words apart: the page says the words plainly, the raw ones behind Details.
+  ok(l2.rows[0].progress === null && !l2.progressKnown && /^Couldn't load the students' progress, so Progress says so/.test(l2.problems[0]?.text ?? '')
+       && l2.problems[0]?.error === 'canceling statement due to statement timeout',
+     'the progress read fails: Progress unknown on every row (never 0%), a sentence says so, and the read\'s own words come with it', show(l2.problems))
   const r3 = await L.readStudentsList(fakeClient(failing('lessons')))
   const l3 = L.buildStudentsList(r3, course(), NOW)
-  ok(l3.rows[0].progress === null && /^Couldn't count the course's lessons/.test(l3.problems[0] ?? ''), 'the lesson count fails: the same, in its own words', show(l3.problems))
+  ok(l3.rows[0].progress === null && /^Couldn't count the course's lessons/.test(l3.problems[0]?.text ?? ''), 'the lesson count fails: the same, in its own words', show(l3.problems))
   const l4 = L.buildStudentsList(r3, courseFailed, NOW)
-  ok(l4.rows[0].activity === null && l4.courseIsNew === null && l4.problems.some((p) => p.startsWith("Couldn't read which course is live")),
+  ok(l4.rows[0].activity === null && l4.courseIsNew === null && l4.problems.some((p) => p.text.startsWith("Couldn't read which course is live")),
      'the course cannot be read: no activity, and a sentence says so', show(l4.problems))
   const l5 = L.buildStudentsList(r2, course({}, null), NOW)
-  ok(l5.courseIsNew === false && l5.rows[0].activity === null && !l5.problems.some((p) => p.includes('course')), 'before the switch: no activity, and nothing failed')
+  ok(l5.courseIsNew === false && l5.rows[0].activity === null && !l5.problems.some((p) => p.text.includes('course')), 'before the switch: no activity, and nothing failed')
   ok(l2.rows[0].username === 'ana.k' && l2.rows[0].name === 'Ana', 'the username without its "@"')
 }
 {
@@ -222,8 +224,9 @@ function detailDb(extra = {}) {
     student_lesson_completions: [{ student_id: 'stu', lesson_id: 'a2pond', completed_at: iso(NOW_MS - DAY) }] })), 'stu'), course(), NOW)
   ok(pondOnly.areaName === 'Foundations' && pondOnly.progress.ok && pondOnly.progress.data === 0,
      'a lesson outside progress moves neither the area nor the progress: the first area, 0% (the journey\'s chip by the same rule)', show([pondOnly.areaName, pondOnly.progress]))
-  ok(d.discount.ok && d.discount.data.text === 'Applied' && D.DISCOUNT_STATUS_TEXT.applied === 'Code applied',
-     'the request in the 30% page\'s words: pending reads Applied, applied reads Code applied')
+  // The review's fix round: one map for every page (discount-status.ts), so "Code Applied" as on the 30% tab and the Survey, and the same tone.
+  ok(d.discount.ok && d.discount.data.text === 'Applied' && d.discount.data.tone === 'accent' && D.DISCOUNT_STATUS_TEXT === undefined,
+     'the request in the 30% page\'s words and colour: pending reads Applied, in the accent tone, from the one map')
   ok(d.sync.ok && d.sync.data.state === 'synced' && d.sync.data.error?.note === true && d.sync.data.unmatched.length === 1,
      'a sync on 20 Oct, after the switch (19 Oct, 14:33 UTC): synced; the backfill\'s note is a note, not an error; the unmatched id listed', show(d.sync))
 }
@@ -329,7 +332,8 @@ console.log('\n=== The journey: the new program\'s students, any plan, in the sa
      'the header counts every student who has not churned by activity (the canceled ones left out)', show(b.activity))
   const failed = J.buildJourney({ ...reads, progress: { ok: false, error: 'timed out' }, currentArea: { ok: false, error: 'timed out' } }, courseFailed, nowIso)
   const any = failed.columns.flatMap((c) => c.cards)
-  ok(any.every((c) => c.progress === null && c.area === null && c.activity === null) && failed.activity === null && failed.problems.length === 3,
+  ok(any.every((c) => c.progress === null && c.area === null && c.activity === null) && failed.activity === null && failed.problems.length === 3
+       && failed.problems.every((p) => typeof p.text === 'string' && p.text.startsWith("Couldn't") && typeof p.error === 'string' && p.error.length > 0 && !p.text.includes(p.error)),
      'the progress, the areas and the course fail: every card says it does not know, three sentences say why, never 0% or the first area', show(failed.problems))
   ok(J.buildJourney(reads, course({}, null), nowIso).activity === null, 'before the switch: no activity counts')
 }
@@ -376,9 +380,14 @@ console.log('\n=== Tasks: the tabs, the tiers and the closed lines ===')
        && closed({ status: 'completed', completed_at: '2026-10-19T22:30:00.000Z', outcome: 'replied' }) === 'Sent Tue 20 Oct, replied'
        && closed({}) === 'Made Sun 18 Oct, still open',
      'how each closed task says it was closed: by the reset (with the note before it), by the checks, by the team with its reason, sent with the reply; dates in Croatia')
-  ok(show(V.insightsRanges('2026-10-20T07:00:00.000Z').map((r) => r.label)) === show(['Last 30 days', 'Since the reset, Tue 20 Oct'])
-       && show(V.insightsRanges(null).map((r) => r.label)) === show(['Last 30 days', 'All time']),
-     'the insights\' second range is named for the reset once it ran')
+  // The review's fix round: while the reset is under 30 days old, the last 30 days are the tasks since it, so only "Since the reset" is offered.
+  const resetAt = '2026-10-20T07:00:00.000Z'
+  const nowMs = Date.parse(resetAt)
+  ok(show(V.insightsRanges(resetAt, nowMs + 2 * 86_400_000).map((r) => r.label)) === show(['Since the reset, Tue 20 Oct'])
+       && show(V.insightsRanges(resetAt, nowMs + 29.9 * 86_400_000).map((r) => r.label)) === show(['Since the reset, Tue 20 Oct'])
+       && show(V.insightsRanges(resetAt, nowMs + 30 * 86_400_000).map((r) => r.label)) === show(['Last 30 days', 'Since the reset, Tue 20 Oct'])
+       && show(V.insightsRanges(null, nowMs).map((r) => r.label)) === show(['Last 30 days', 'All time']),
+     'the insights\' ranges: "Since the reset" alone while the reset is under 30 days old, then the last 30 days too; with no reset, the last 30 days and all time')
   ok(R.isAfterTasksReset('2026-10-20T07:00:00.000Z', '2026-10-20T07:00:00.000Z') && !R.isAfterTasksReset('2026-10-20T06:59:59.999Z', '2026-10-20T07:00:00.000Z')
        && R.isAfterTasksReset('2020-01-01T00:00:00.000Z', null),
      'the line: a task made at the reset\'s moment is on the lists, a millisecond before is archived; with no reset every task is on the lists')

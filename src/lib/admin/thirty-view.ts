@@ -7,7 +7,8 @@
  * tabs (Applied = pending, Approved, Rejected, Code Applied = applied), each
  * row with the student, the date applied, a verdict line on a pending one,
  * the coupon and the decision. Can still earn, the plan, the last contact,
- * the action items and the survey answers went with it.
+ * the action items and the survey answers went with it, and in the review's
+ * fix round the words they were shown in (the C4 reasons, the hours left).
  *
  * A pending request is judged the way POST /api/discounts/approve judges it
  * (D5 first, then the rule):
@@ -44,24 +45,14 @@ import {
   videoDoneIds,
 } from "@/lib/world/discount-server";
 import type { ApprovalRefusal, ApprovalVerdict, DiscountFacts, DiscountReads, VideoRow } from "@/lib/world/discount-server";
-import { dayLabel, dayTimeLabel } from "./croatia-dates";
-import type { ThirtyCouponRow, ThirtyData, ThirtyStudent } from "./thirty-data";
+import { isMembershipId } from "@/lib/membership-discount";
+import { dayLabel } from "./croatia-dates";
+import type { LiveCoupon, ThirtyCouponRow, ThirtyData, ThirtyStudent } from "./thirty-data";
 
 /** A team member as a row names them. `name` is null when the id is no longer a team member. */
 export interface TeamRef {
   id: string;
   name: string | null;
-}
-
-/**
- * The newest message the team marked as sent. The 30% page no longer shows
- * it (D4); list-parts.tsx's lastContactText still takes this shape.
- */
-export interface LastContact {
-  at: string;
-  by: TeamRef | null;
-  scenarioId: string;
-  outcome: "replied" | "no_reply" | null;
 }
 
 export interface StudentBrief {
@@ -128,6 +119,22 @@ export interface Coupon {
   checkedAt: string;
 }
 
+/**
+ * Where a row's coupon comes from (the review's fix round):
+ *   live         Whop answered now (an Approved row)
+ *   stored       the stored row for the membership the student has now
+ *   not-checked  no stored row applies to this membership yet: never
+ *                checked, or a membership changed since (an Applied row
+ *                says so; Approve asks Whop first)
+ *   no-membership  the student's Whop id is missing or is not a
+ *                membership's (the webhook has stored a payment's id
+ *                there): neither the cron nor Approve can ask Whop, so
+ *                nothing blocks the 30% and the row says to check Whop
+ *   failed       Whop gave no answer now and nothing is stored (an Approved row)
+ *   unread       the stored coupons could not be read at all (couponsUnread)
+ */
+export type CouponCheck = "live" | "stored" | "not-checked" | "no-membership" | "failed" | "unread";
+
 export interface ThirtyRequestRow {
   id: string;
   status: "pending" | "approved" | "rejected" | "applied";
@@ -144,8 +151,10 @@ export interface ThirtyRequestRow {
   facts: Facts | null;
   /** Pending rows only. */
   verdict: Verdict | null;
-  /** The stored coupon, or null when none is stored for this membership (or the coupons could not be read: couponsUnread). */
+  /** The coupon (Whop's answer now on an Approved row, else the stored one), or null when none is known for this membership. */
   coupon: Coupon | null;
+  /** Where `coupon` comes from, or why there is none. */
+  couponCheck: CouponCheck;
 }
 
 export interface ThirtyView {
@@ -179,45 +188,6 @@ export const VERDICT_TEXT = {
   readFailed: "Couldn't read this student's progress, so there is no verdict. Press Refresh to try again.",
   unknown: "The rule could not judge this request. Judge it by hand.",
 } as const;
-
-/** "about 2 h": the length of the videos still to watch, to the nearest hour and never under 1. Null when there is none. C4's form. */
-export function aboutHours(seconds: number | null | undefined): string | null {
-  if (seconds == null || !(seconds > 0)) return null;
-  return `about ${Math.max(1, Math.round(seconds / 3600))} h`;
-}
-
-/** "about 1 hour", "about 6 hours": the same length in words. Null when there is none. */
-export function aboutHoursWords(seconds: number | null | undefined): string | null {
-  if (seconds == null || !(seconds > 0)) return null;
-  const h = Math.max(1, Math.round(seconds / 3600));
-  return `about ${h} ${h === 1 ? "hour" : "hours"}`;
-}
-
-/** "1 video left", "4 videos left". */
-export function videosLeftText(left: number): string {
-  return `${left} ${left === 1 ? "video" : "videos"} left`;
-}
-
-/** The two 30% reasons a student could need a message for (admin rebuild PRD, C4). */
-export type ThirtyReasonKind = "thirty_closing" | "thirty_ready";
-
-/**
- * C4's words for the two 30% reasons: "30% closes Fri 23 Oct, 23:59: 4
- * videos left (about 1 h)" and "Can apply for the 30% now, until Fri 23 Oct,
- * 23:59". Today showed them and Mark messaged recorded them; both went in
- * admin rebuild 2, so no page calls this now (thirty-view.test.mjs still
- * checks its words).
- */
-export function thirtyReasonText(kind: ThirtyReasonKind, facts: Facts): string {
-  const until = facts.deadline ? dayTimeLabel(facts.deadline) : "";
-  if (kind === "thirty_ready") {
-    return until ? `Can apply for the 30% now, until ${until}` : "Can apply for the 30% now";
-  }
-  const left = (facts.videosTotal ?? 0) - (facts.videosDone ?? 0);
-  const hours = aboutHours(facts.secondsLeft);
-  const rest = `${videosLeftText(left)}${hours ? ` (${hours})` : ""}`;
-  return until ? `30% closes ${until}: ${rest}` : `30% still open: ${rest}`;
-}
 
 /** A Whop backfill ran since the switch. Before the switch any backfill counts. */
 export function whopPulled(lastSyncAt: string | null | undefined, resetAt: string | null): boolean {
@@ -398,7 +368,17 @@ export function couponVerdict(coupon: Coupon): Verdict {
 
 const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-export function buildThirtyView(data: ThirtyData, now: Date, resetAt: string | null): ThirtyView {
+/**
+ * The page's answer. `live`: Whop's answers now for the students holding an
+ * approved request (readApprovedCoupons); an Approved row shows that coupon,
+ * or the stored one when Whop said nothing, or that it could not check.
+ */
+export function buildThirtyView(
+  data: ThirtyData,
+  now: Date,
+  resetAt: string | null,
+  live?: ReadonlyMap<string, LiveCoupon>,
+): ThirtyView {
   const students = new Map(data.students.map((s) => [s.id, s] as const));
   const ref = (id: string | null): TeamRef | null => (id ? { id, name: data.team.get(id) ?? null } : null);
   const brief = (s: ThirtyStudent): StudentBrief => ({
@@ -415,7 +395,22 @@ export function buildThirtyView(data: ThirtyData, now: Date, resetAt: string | n
     .map((r): ThirtyRequestRow => {
       // loadThirtyData reads every student holding a listed request, or fails.
       const s = students.get(r.student_id)!;
-      const coupon = couponOf(data.coupons.data?.get(s.id), s);
+      const stored = couponOf(data.coupons.data?.get(s.id), s);
+      // Whop is asked by membership id only: with no id, or a payment's, nothing can be checked.
+      const askable = isMembershipId(s.whop_membership_id);
+      let coupon = stored;
+      let couponCheck: CouponCheck =
+        data.coupons.data === null ? "unread" : stored ? "stored" : askable ? "not-checked" : "no-membership";
+      if (r.status === "approved" && live) {
+        const answer = live.get(s.id);
+        const fresh = answer?.ok ? couponOf(answer.row, s) : null;
+        if (fresh) {
+          coupon = fresh;
+          couponCheck = "live";
+        } else if (!stored) {
+          couponCheck = askable ? "failed" : "no-membership";
+        }
+      }
       let facts: Facts | null = null;
       let verdict: Verdict | null = null;
       if (r.status === "pending") {
@@ -438,6 +433,7 @@ export function buildThirtyView(data: ThirtyData, now: Date, resetAt: string | n
         facts,
         verdict,
         coupon,
+        couponCheck,
       };
     });
 

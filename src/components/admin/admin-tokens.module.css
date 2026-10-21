@@ -61,6 +61,9 @@
      target, the shape of the raised pills beside them. */
   --admin-button-radius: var(--radius-pill);
   --admin-button-min-height: 44px;
+  /* The danger button's label (ui.tsx; admin rebuild 2, the review's fix
+     round): Gunpowder on the kit's red, 5.2:1. */
+  --admin-danger-label: #18181a;
 
   /* The kit's app font: the system face first, Inter (already loaded by the
      root layout as --font-inter) behind it. Nothing new is downloaded. */
@@ -188,4 +191,18 @@
 .dashInfo[aria-expanded="true"] > span {
   border-color: var(--color-accent-dark);
   color: var(--color-accent-dark);
+}
+
+/*
+ * Admin rebuild 2, WI-11, the review's fix round.
+ *
+ * --admin-field-size  the text of a form field (form-parts.tsx's INPUT, the
+ *                     Templates and Team pages): 16px, so a phone's browser
+ *                     does not zoom into it, and 14px with a mouse on a window
+ *                     640px wide or more, where 16px looked oversized.
+ */
+@media (min-width: 640px) and (pointer: fine) {
+  :where(.tokens) {
+    --admin-field-size: 14px;
+  }
 }

@@ -170,7 +170,7 @@ const shown = ({ loaded }) => ({
 console.log('\n=== admin-2: the journey drawer shows the clicked student only ===')
 {
   ok(/\{drawer && <JourneyDrawer key=\{drawer\} studentId=\{drawer\} transport=\{transport\} onClose=\{\(\) => setDrawer\(null\)\} \/>\}/.test(journeyView)
-       && /function JourneyDrawer\(\{ studentId, transport, onClose \}: \{[^}]*\}\) \{\s*const \{ loaded, busy, retry, patch \} = useStudent\(transport, studentId\);/.test(journeyView),
+       && /function JourneyDrawer\(\{ studentId, transport, onClose \}: \{[^}]*\}\) \{\s*const \{ loaded, busy, retry \} = useStudent\(transport, studentId\);/.test(journeyView),
      'the board mounts the drawer keyed by the student\'s id, so React mounts it fresh for each one, and its state is useStudent\'s alone')
   ok(/export function StudentDrawer\(\{ studentId, onClose \}: StudentDrawerProps\) \{\s*const supabase = createClient\(\);\s*const \[student, setStudent\] = useState/.test(fromBase(OLD_DRAWER)),
      `control: at ${BASE} the exported drawer held the state itself, unkeyed, and the page keeps it mounted`)
@@ -308,17 +308,20 @@ function approvalTexts(source) {
   return [...js.matchAll(/children: ("(?:[^"\\]|\\.)*")/g)].map((m) => m[1])
     .filter((literal) => /discount approval|Approving the 30%/.test(literal)).map((literal) => JSON.parse(literal))
 }
-console.log('\n=== The ads tick on the student page and in the drawer: approving the 30% no longer needs it ===')
+console.log('\n=== The ads tick: on the student page only, folded under More, and approving the 30% does not need it ===')
 {
-  // Since admin rebuild 2 both are DiscountBlock in StudentDetailView.tsx: the
-  // page's words, and the drawer's shorter ones (compact, from JourneyView.tsx).
-  const texts = approvalTexts(detailView)
-  ok(show(texts) === show([
-    'Approving the 30% no longer needs it. Tick after confirming submissions in Discord.',
-    'Tick this once you’ve confirmed the student submitted all action items in the Discord ad-review channel. Approving the 30% no longer needs it.',
-  ]) && /<DiscountBlock student=\{loaded\.data\} transport=\{transport\} onSaved=\{\(v\) => patch\(\{ adVerified: v \}\)\} compact \/>/.test(journeyView)
-     && /<DiscountBlock student=\{s\} transport=\{transport\} onSaved=\{\(v\) => patch\(\{ adVerified: v \}\)\} \/>/.test(detailView),
-     'under "Ad submissions verified", the page and the drawer (compact) both say approving the 30% no longer needs the tick, and neither says it is required', show(texts))
+  // Since admin rebuild 2's review fix round: the tick is no longer in the
+  // 30% card or the journey's drawer. It sits in the quiet settings at the
+  // foot of the student page, under a closed More, beside "Leave out of the
+  // tasks", and its words say approving the 30% does not need it.
+  const settings = detailView.slice(detailView.indexOf('function SettingsRow'), detailView.indexOf('const SYNC_PILL'))
+  const more = settings.slice(settings.indexOf('<details data-more'), settings.indexOf('</details>'))
+  ok(more.includes('title="Ad submissions verified"') && /description="[^"]*Approving the 30% does not need it\."/.test(more)
+       && settings.indexOf('title="Leave out of the tasks"') < settings.indexOf('<details data-more')
+       && !/Ad submissions verified/.test(detailView.slice(detailView.indexOf('export function DiscountBlock'), detailView.indexOf('function LessonsBlock')))
+       && !/Ad submissions verified|setAdVerified|adVerified/.test(journeyView)
+       && /<SettingsRow student=\{s\} transport=\{transport\} onSaved=\{patch\} \/>\s*<\/ListPage>/.test(detailView),
+     'the ads tick is in the settings at the foot of the student page, under a closed More, after "Leave out of the tasks", saying approving the 30% does not need it; the 30% card and the drawer have none')
   const old = { page: approvalTexts(fromBase(STUDENT_PAGE)), drawer: approvalTexts(fromBase(OLD_DRAWER)) }
   ok(old.page.length === 1 && old.drawer.length === 1
        && [...old.page, ...old.drawer].every((t) => /Required (for|before) discount approval/.test(t)),

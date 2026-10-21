@@ -27,11 +27,10 @@ import { isDeepStrictEqual } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { loadThirtyData } from './_gen/thirty-data.ts'
 import {
-  VERDICT_TEXT, aboutHours, aboutHoursWords, buildThirtyView, couponOf, judgeRequest, studentAppView, thirtyReasonText, videosLeftText, whopPulled,
+  VERDICT_TEXT, buildThirtyView, couponOf, judgeRequest, studentAppView, whopPulled,
 } from './_gen/thirty-view.ts'
 import { approvalVerdict, couponApprovalRefusal, explainOldCourseRequest, factsFromReads, loadDiscountReads, videoDoneIds } from './_gen/discount-server.ts'
 import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_SHARED_DEADLINE, discountState, requiredLessons } from './_gen/discount.ts'
-import { YEARLY_WHOP_PLAN_IDS, planLabel } from './_gen/plans.ts'
 import { clockLabel, dayLabel, dayTimeLabel, deadlineLabel } from './_gen/croatia-dates.ts'
 import { FakeDb, MAX_ROWS, fakeClient, setCatalog } from './_gen/stub-server.ts'
 
@@ -323,9 +322,6 @@ ok(deadlineLabel('2026-10-26T15:30:27.000Z') === 'Mon 26 Oct, 16:30 (Croatia tim
    'after the clocks go back on 25 October, Croatia is one hour ahead of UTC, not two')
 ok(dayLabel('2026-09-15T10:00:00.000Z') === 'Tue 15 Sep', 'September is "Sep" on every machine (Intl\'s en-GB says "Sept")')
 ok(dayLabel(null) === '' && dayLabel('not a date') === '' && deadlineLabel(undefined) === '', 'no date, or one that does not parse: an empty string')
-ok(planLabel(MONTHLY) === 'Monthly' && planLabel('plan_fMMqxAljrzu75') === 'Yearly' && planLabel(YEARLY) === 'Yearly'
-     && planLabel('plan_somethingelse') === 'Other plan' && planLabel(null) === 'Other plan' && YEARLY_WHOP_PLAN_IDS.size === 2,
-   'Monthly, the two yearly plans, and every other plan or none')
 ok(!whopPulled(null, RESET) && !whopPulled('2026-10-19T14:32:59.000Z', RESET) && whopPulled(RESET, RESET) && whopPulled('2026-10-01T00:00:00.000Z', null),
    'Whop progress pulled: a backfill at or after the switch; none, or one before it, is not')
 
@@ -721,22 +717,8 @@ console.log('\n=== The 30% page: no ads tick since 2026-10-20 (Lovro), C4\'s wor
   ok(dayTimeLabel(DISCOUNT_SHARED_DEADLINE) === 'Fri 23 Oct, 23:59' && clockLabel('2026-10-20T08:30:00.000Z') === '10:30'
        && clockLabel('2026-10-26T09:00:00.000Z') === '10:00' && dayTimeLabel(null) === '' && clockLabel('nope') === '',
      'the deadline without the zone, and the clock, in Croatia on both sides of the clocks going back')
-  ok(thirtyReasonText('thirty_closing', shared) === '30% closes Fri 23 Oct, 23:59: 4 videos left (about 1 h)',
-     'C4, 30% closing', thirtyReasonText('thirty_closing', shared))
-  ok(thirtyReasonText('thirty_ready', { ...shared, videosDone: 61, secondsLeft: 0 }) === 'Can apply for the 30% now, until Fri 23 Oct, 23:59',
-     'C4, 30% ready', thirtyReasonText('thirty_ready', { ...shared, videosDone: 61, secondsLeft: 0 }))
-  ok(thirtyReasonText('thirty_closing', { ...shared, videosDone: 60, secondsLeft: 0 }) === '30% closes Fri 23 Oct, 23:59: 1 video left',
-     'one video, and no length known: no hours', thirtyReasonText('thirty_closing', { ...shared, videosDone: 60, secondsLeft: 0 }))
-  ok(aboutHours(null) === null && aboutHours(0) === null && aboutHours(600) === 'about 1 h' && aboutHours(5400) === 'about 2 h'
-       && aboutHours(9000) === 'about 3 h' && videosLeftText(1) === '1 video left' && videosLeftText(4) === '4 videos left',
-     'about H h: the nearest hour, never under 1; one video, many videos')
-  ok(aboutHoursWords(null) === null && aboutHoursWords(0) === null && aboutHoursWords(600) === 'about 1 hour' && aboutHoursWords(5400) === 'about 2 hours',
-     'the 30% page\'s own lines say it in words: about 1 hour, about 2 hours')
-  const sentences = [
-    thirtyReasonText('thirty_closing', shared), thirtyReasonText('thirty_ready', shared),
-    thirtyReasonText('thirty_closing', { ...shared, deadline: null }), thirtyReasonText('thirty_ready', { ...shared, deadline: null }),
-  ]
-  ok(sentences.every((t) => t.length > 0 && !/—|unlock|ecomtalent/i.test(t)), 'none holds an em dash, "unlock" or "EcomTalent"', show(sentences))
+  // The C4 reasons and the hours left (thirtyReasonText, aboutHours and the rest) went in the review's fix round: no page showed them.
+  ok(shared.videosTotal === 61, 'the shared deadline\'s facts, for the clock above')
 }
 
 // ── The coupon (admin rebuild 2, D5) ──────────────────────────────────────

@@ -21,6 +21,10 @@ const MEMBERSHIP_WORDS = {
   back: (text) => (typeof text === 'string' ? text.split('Membership status').join('Subscription status') : text),
 }
 const asOldWords = (r) => (r && typeof r.summary === 'string' ? { ...r, summary: MEMBERSHIP_WORDS.back(r.summary) } : r)
+// Its review fix round gave is_canceling one label: the TriggerBuilder's select took its sentence's words. Only the
+// label moved (the sentences and the task summaries are BASE's), so only the label comparison puts it back.
+const CANCELING_LABEL = { old: 'Is canceling (clicked cancel, still has access)', now: 'Is canceling (cancel scheduled)' }
+const labelAsOld = (m, label) => (m === 'is_canceling' && label === CANCELING_LABEL.now ? CANCELING_LABEL.old : MEMBERSHIP_WORDS.back(label))
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url))
 const gitShow = (path) =>
@@ -319,8 +323,11 @@ console.log(`\n=== Old course, no reset: parity with ${BASE} (14 students × day
   ok(eq(OLD.SCENARIO_BUCKET, NEW.SCENARIO_BUCKET) && eq(OLD.REGION_LABEL, NEW.REGION_LABEL) && eq(OLD.ACTION_LESSONS, NEW.ACTION_LESSONS),
      'SCENARIO_BUCKET, REGION_LABEL, ACTION_LESSONS identical')
   ok(Object.keys(OLD.METRICS).join() === Object.keys(NEW.METRICS).join() &&
-     Object.keys(OLD.METRICS).every((m) => OLD.METRICS[m].label === MEMBERSHIP_WORDS.back(NEW.METRICS[m].label) && OLD.METRICS[m].input === NEW.METRICS[m].input),
-     'METRICS: same ids, labels and inputs (with membership_status renamed)')
+     Object.keys(OLD.METRICS).every((m) => OLD.METRICS[m].label === labelAsOld(m, NEW.METRICS[m].label) && OLD.METRICS[m].input === NEW.METRICS[m].input),
+     'METRICS: same ids, labels and inputs (with membership_status renamed, and is_canceling\'s label in its sentence\'s words)')
+  ok(OLD.METRICS.is_canceling.label === CANCELING_LABEL.old && NEW.METRICS.is_canceling.label === CANCELING_LABEL.now
+       && NEW.METRICS.is_canceling.describe({ metric: 'is_canceling', op: 'is' }) === CANCELING_LABEL.now,
+     'the review\'s fix round: is_canceling has one label, the select\'s words the same as its sentence\'s')
   ok(OLD.METRICS.membership_status.label === MEMBERSHIP_WORDS.old && NEW.METRICS.membership_status.label === MEMBERSHIP_WORDS.now
        && NEW.METRICS.membership_status.describe({ metric: 'membership_status', op: 'is', value: 'active' }) === 'Membership status is active',
      'admin rebuild 2 (D12): the membership_status metric reads "Membership status", in the TriggerBuilder and in the summaries, where it read "Subscription status"')

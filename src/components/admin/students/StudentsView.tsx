@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, EmptyState, T } from "@/components/admin/ui";
 import { ListHeader, ListPage, LoadError, MembershipPill, SkeletonRows, pressPill } from "@/components/admin/list-parts";
-import { ActivityPill, Meter, SearchField, Warning } from "@/components/admin/people-parts";
+import { ActivityPill, Meter, SearchField } from "@/components/admin/people-parts";
+import { ProblemNotice } from "@/components/admin/review-parts";
 import type { Answer } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import { agoText } from "@/lib/admin/people-common";
@@ -29,7 +30,8 @@ import {
  * username (their writers differ), so it is not called Discord. A read that
  * failed says so: the list's own read is the page's error, with Retry; a
  * failed progress or course read shows "Couldn't load" in its column and a
- * line above the list. No plan anywhere.
+ * line above the list, why in plain words with the database's own behind
+ * Details (review-parts.tsx). No plan anywhere.
  *
  * The rows come 100 at a time ("Show 100 more"), so a phone is not handed
  * every student at once; the search and the filters work on all of them.
@@ -100,12 +102,11 @@ export function StudentsView({ transport = peopleTransport }: { transport?: Peop
           ? `Updated ${clockLabel(data.generatedAt)}${busy ? " · Updating" : ""} · ${count} ${count === 1 ? "student" : "students"}`
           : "Loading"
       }
+      // Kept while the list loads or failed, so the header never jumps (the review's fix round).
       action={
-        data ? (
-          <Button variant="raised" size="md" busy={busy} onClick={() => void refresh()}>
-            Refresh
-          </Button>
-        ) : undefined
+        <Button variant="raised" size="md" busy={busy || loaded.kind === "loading"} disabled={loaded.kind === "loading"} onClick={() => void refresh()}>
+          Refresh
+        </Button>
       }
     />
   );
@@ -136,9 +137,9 @@ export function StudentsView({ transport = peopleTransport }: { transport?: Peop
     <ListPage>
       {header(data, data.rows.length)}
 
-      {refreshError && <Warning>Couldn&apos;t refresh the list ({refreshError}), so it may be out of date. Press Refresh.</Warning>}
+      {refreshError && <ProblemNotice text="Couldn't refresh the list, so it may be out of date. Press Refresh." raw={refreshError} />}
       {data.problems.map((p) => (
-        <Warning key={p}>{p}</Warning>
+        <ProblemNotice key={p.text} text={p.text} raw={p.error} />
       ))}
 
       <div className="flex flex-col" style={{ gap: 12, marginBottom: 16 }}>

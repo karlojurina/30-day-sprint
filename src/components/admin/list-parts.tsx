@@ -3,22 +3,20 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Card, Pill, T } from "@/components/admin/ui";
 import type { PillTone } from "@/components/admin/ui";
-import { dayLabel } from "@/lib/admin/croatia-dates";
-import type { LastContact } from "@/lib/admin/thirty-view";
+import { ReadFailure } from "@/components/admin/review-parts";
 
 /**
  * Pieces the rebuilt list pages share (admin rebuild PRD): the 30% page
- * (thirty/ThirtyView.tsx), and Today until admin rebuild 2 removed it. They
- * read the dark look's tokens (admin-tokens.module.css) and sit inside it.
+ * (thirty/ThirtyView.tsx) and every page admin rebuild 2 rebuilt. They read
+ * the dark look's tokens (admin-tokens.module.css) and sit inside it. The
+ * pieces only Today and the old 30% rows used (how to reach a student on
+ * Discord, the last contact, the time left, Whop not pulled) went with them
+ * in the review's fix round.
  *
  *   ListPage          the page's frame: ui.tsx's AdminPage, with the kit's
  *                     16px side gutter on a phone
  *   ListHeader        the title with Refresh beside it, the description, and
  *                     "Updated 09:30" at 12px
- *   DiscordReach      C7: how to reach a student
- *   lastContactText   C12: "Messaged Tue 20 Oct by Robin, no reply yet"
- *   timeLeftText      "3 days left", "5 hours left"
- *   WhopNotPulled     C14: the student has had no Whop backfill since the switch
  *   MembershipPill    the membership status, in words
  *   SkeletonRows      what a list shows while it loads (skeletons, not spinners)
  *   LoadError         what a list shows when it could not load, with Retry
@@ -57,25 +55,6 @@ export function pressPill(pressed: boolean): React.CSSProperties {
   };
 }
 
-/** The raised pill of ui.tsx's Button (variant "raised", size "md"), for a link that leaves the app. */
-const RAISED_LINK: React.CSSProperties = {
-  padding: "0 16px",
-  minHeight: TAP,
-  fontSize: 13,
-  fontWeight: 600,
-  letterSpacing: "-0.005em",
-  borderRadius: "var(--radius-pill)",
-  border: "1px solid var(--color-border)",
-  background: "var(--color-bg-elevated)",
-  color: "var(--color-text-primary)",
-  textDecoration: "none",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: 6,
-  whiteSpace: "nowrap",
-};
-
 /**
  * The page's frame: AdminPage's width and rhythm (ui.tsx), with a 16px side
  * gutter on a phone instead of 32px, so a row at 390px wide keeps room for
@@ -95,27 +74,52 @@ export function ListPage({ children }: { children: React.ReactNode }) {
  * every width, so on a phone the action does not take a line of its own; the
  * description and the meta line ("Updated 09:30", 12px, the kit's floor for
  * text that is not an eyebrow) follow.
+ *
+ * The title's line is 44px tall at least, with or without an action, so the
+ * header keeps its height from page to page and from loading to loaded.
+ * Several actions (`actions`, Templates' Refresh and New template) share the
+ * title's line from 480px wide; under that they go under the description,
+ * where they have the width (admin rebuild 2, the review's fix round).
  */
 export function ListHeader({
   title,
   description,
   meta,
   action,
+  actions,
 }: {
   title: string;
   description: string;
   meta?: React.ReactNode;
   action?: React.ReactNode;
+  /** Two or more actions; one action goes in `action`. */
+  actions?: React.ReactNode[];
 }) {
+  const many = (actions?.length ?? 0) > 1;
+  const act = actions && actions.length > 0 ? actions : action;
   return (
-    <header className="mb-4 sm:mb-8">
-      <div className="flex items-center justify-between" style={{ gap: 12 }}>
-        <h1 style={{ ...T.display, minWidth: 0 }}>{title}</h1>
-        {action}
-      </div>
-      <p style={{ ...T.bodyDim, marginTop: 4, lineHeight: 1.5 }}>{description}</p>
+    <header className="mb-4 sm:mb-8 grid grid-cols-[minmax(0,1fr)_auto] items-center" style={{ columnGap: 12 }}>
+      <h1 className="col-start-1 row-start-1 flex items-center" style={{ ...T.display, minWidth: 0, minHeight: TAP }}>
+        {title}
+      </h1>
+      {act && (
+        <div
+          data-header-actions={many ? "many" : "one"}
+          className={
+            many
+              ? "col-start-2 row-start-1 flex flex-wrap items-center justify-end max-[479px]:col-span-2 max-[479px]:col-start-1 max-[479px]:row-start-auto max-[479px]:order-last max-[479px]:justify-start max-[479px]:mt-3"
+              : "col-start-2 row-start-1 flex items-center"
+          }
+          style={{ gap: 8 }}
+        >
+          {act}
+        </div>
+      )}
+      <p className="col-span-2" style={{ ...T.bodyDim, marginTop: 4, lineHeight: 1.5 }}>
+        {description}
+      </p>
       {meta && (
-        <p style={{ marginTop: 4, fontSize: 12, color: "var(--color-text-tertiary)", fontVariantNumeric: "tabular-nums" }}>
+        <p className="col-span-2" style={{ marginTop: 4, fontSize: 12, color: "var(--color-text-tertiary)", fontVariantNumeric: "tabular-nums" }}>
           {meta}
         </p>
       )}
@@ -123,94 +127,10 @@ export function ListHeader({
   );
 }
 
-/**
- * How long until a deadline, from `now` (the moment the list was read, so a
- * row and the list agree): "3 days left", "5 hours left", "under 1 hour
- * left", "deadline passed". Null when either date is missing.
- */
-export function timeLeftText(deadline: string | null | undefined, now: string): string | null {
-  if (!deadline) return null;
-  const ms = Date.parse(deadline) - Date.parse(now);
-  if (!Number.isFinite(ms)) return null;
-  if (ms <= 0) return "deadline passed";
-  const hours = ms / 3_600_000;
-  if (hours < 1) return "under 1 hour left";
-  if (hours < 48) {
-    const h = Math.floor(hours);
-    return `${h} ${h === 1 ? "hour" : "hours"} left`;
-  }
-  return `${Math.floor(hours / 24)} days left`;
-}
-
 /** The first word of a team member's name: "Messaged by Robin". */
 export function firstName(name: string | null | undefined): string | null {
   const first = (name ?? "").trim().split(/\s+/)[0];
   return first ? first : null;
-}
-
-/**
- * C7: "Open in Discord" when Discord's id for the student is known, else
- * "Copy @name" (discord_username can hold a Whop username, so it is a
- * fallback only), else "No Discord linked" with nothing to copy.
- */
-export function DiscordReach({ discord }: { discord: { userId: string | null; username: string | null } }) {
-  const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
-
-  if (discord.userId) {
-    return (
-      <a
-        href={`https://discord.com/users/${encodeURIComponent(discord.userId)}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        style={RAISED_LINK}
-      >
-        Open in Discord
-      </a>
-    );
-  }
-  if (discord.username) {
-    const handle = `@${discord.username.replace(/^@/, "")}`;
-    return (
-      <Button
-        variant="raised"
-        size="md"
-        title="Copies the name, to find the student in Discord"
-        onClick={async () => {
-          let ok = false;
-          try {
-            await navigator.clipboard.writeText(handle);
-            ok = true;
-          } catch {
-            ok = false;
-          }
-          setCopied(ok ? "yes" : "failed");
-          if (timer.current) clearTimeout(timer.current);
-          timer.current = setTimeout(() => setCopied(null), 1500);
-        }}
-      >
-        {copied === "yes" ? "Copied" : copied === "failed" ? "Couldn't copy" : `Copy ${handle}`}
-      </Button>
-    );
-  }
-  return <span style={{ ...T.bodyDim, whiteSpace: "nowrap" }}>No Discord linked</span>;
-}
-
-/** C12: the newest message the team marked as sent, from the Tasks queue (or Today, before it was removed). */
-export function lastContactText(contact: LastContact | null): string {
-  if (!contact) return "No message yet";
-  const by = firstName(contact.by?.name);
-  const outcome =
-    contact.outcome === "replied" ? "replied" : contact.outcome === "no_reply" ? "no reply" : "no reply yet";
-  return `Messaged ${dayLabel(contact.at)}${by ? ` by ${by}` : ""}, ${outcome}`;
-}
-
-/** C14: no Whop backfill since the switch, so the student's Whop watching is not counted yet. */
-export function WhopNotPulled() {
-  return <Pill tone="warning">Whop progress not pulled yet</Pill>;
 }
 
 const MEMBERSHIP: Record<string, { tone: PillTone; text: string }> = {
@@ -259,7 +179,11 @@ function SkeletonBar({ width, height = 10 }: { width: string; height?: number })
   );
 }
 
-/** A list that could not load: what happened, in a sentence, and Retry. */
+/**
+ * A list that could not load: what happened, in a sentence, and Retry. The
+ * reason is said in plain words (read-failure.ts); the database's own text
+ * stays behind a closed Details (review-parts.tsx).
+ */
 export function LoadError({
   title,
   detail,
@@ -267,6 +191,7 @@ export function LoadError({
   busy,
 }: {
   title: string;
+  /** The raw reason, as the read gave it. */
   detail?: string | null;
   onRetry: () => void;
   busy?: boolean;
@@ -275,7 +200,7 @@ export function LoadError({
     <Card padding={20}>
       <div role="alert" style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-start" }}>
         <p style={{ ...T.body, fontSize: 15, fontWeight: 600 }}>{title}</p>
-        {detail && <p style={T.bodyDim}>{detail}</p>}
+        {detail && <ReadFailure raw={detail} style={{ alignSelf: "stretch" }} />}
         <Button variant="raised" size="md" busy={busy} onClick={onRetry}>
           Retry
         </Button>

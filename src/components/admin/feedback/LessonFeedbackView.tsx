@@ -8,6 +8,7 @@ import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import type { Answer } from "@/lib/admin/admin-transport";
 import { lessonFeedbackTransport } from "@/lib/admin/lesson-feedback-transport";
 import type { LessonFeedbackTransport } from "@/lib/admin/lesson-feedback-transport";
+import { splitRated } from "@/lib/admin/lesson-feedback";
 import type {
   FeedbackAreaRow,
   FeedbackComment,
@@ -24,10 +25,13 @@ import type {
  *   - three numbers on top: the average of every rating, how many ratings
  *     (and how many with a comment), and how many lessons have one;
  *   - then each area in route order, "01 Introduction", with its own
- *     average and counts, and its lessons in course order. A lesson shows
- *     its average stars and its count, or "No ratings yet."; its comments
- *     follow, newest first: the 3 newest, then "Show all N comments". An
- *     area where no lesson has a rating says so in one line instead.
+ *     average and counts, and only its rated lessons, the newest rating
+ *     first. A lesson shows its average stars and its count; its comments
+ *     follow, newest first: the 3 newest, then "Show all N comments". The
+ *     area's lessons with no rating are one muted line, "12 lessons with no
+ *     rating yet", that lists them when pressed (admin rebuild 2, the
+ *     review's fix round: the page once listed all 135, a wall of "No
+ *     ratings yet."). A lesson's id is in its row's title only.
  *
  * Every number comes from GET /api/admin/lesson-feedback, which groups the
  * ratings (buildLessonFeedback, src/lib/admin/lesson-feedback.ts); this file
@@ -107,10 +111,16 @@ export function LessonFeedbackView({ transport = lessonFeedbackTransport }: { tr
     />
   );
 
+  // The header keeps its Refresh while the page loads or failed, so it never jumps (the review's fix round).
+  const refreshButton = (
+    <Button variant="raised" size="md" busy={reloading || loaded.kind === "loading"} disabled={loaded.kind === "loading"} onClick={() => void reload()}>
+      Refresh
+    </Button>
+  );
   if (loaded.kind === "loading") {
     return (
       <ListPage>
-        {header("Loading")}
+        {header("Loading", refreshButton)}
         <SkeletonRows rows={4} label="Loading the lesson ratings" />
       </ListPage>
     );
@@ -119,7 +129,7 @@ export function LessonFeedbackView({ transport = lessonFeedbackTransport }: { tr
   if (loaded.kind === "error") {
     return (
       <ListPage>
-        {header(null)}
+        {header(null, refreshButton)}
         <LoadError title="Couldn't load lesson feedback." detail={loaded.error} onRetry={() => void reload()} busy={reloading} />
       </ListPage>
     );
@@ -132,12 +142,7 @@ export function LessonFeedbackView({ transport = lessonFeedbackTransport }: { tr
 
   return (
     <ListPage>
-      {header(
-        `${since} · ${updated}`,
-        <Button variant="raised" size="md" busy={reloading} onClick={() => void reload()}>
-          Refresh
-        </Button>,
-      )}
+      {header(`${since} · ${updated}`, refreshButton)}
 
       {stale && <Warning>{STALE_TEXT}</Warning>}
       {data.unplaced > 0 && <Warning>{unplacedText(data.unplaced)}</Warning>}
@@ -225,6 +230,7 @@ function Warning({ children }: { children: React.ReactNode }) {
 
 function AreaSection({ area }: { area: FeedbackAreaRow }) {
   const headingId = useId();
+  const { rated, unrated } = splitRated(area.lessons);
   const summary =
     area.ratings === 0
       ? "No ratings yet"
@@ -242,30 +248,66 @@ function AreaSection({ area }: { area: FeedbackAreaRow }) {
         </h2>
         <p style={{ ...T.bodyDim, fontVariantNumeric: "tabular-nums" }}>{summary}</p>
       </div>
-      {area.ratings === 0 ? (
-        <Card>
-          <p style={T.bodyDim}>No lesson in this area has a rating yet.</p>
-        </Card>
-      ) : (
-        <Card padding={0}>
+      <Card padding={0}>
+        {rated.length > 0 && (
           <ul>
-            {area.lessons.map((lesson) => (
+            {rated.map((lesson) => (
               <LessonRow key={lesson.id} lesson={lesson} />
             ))}
           </ul>
-        </Card>
-      )}
+        )}
+        <UnratedLine lessons={unrated} alone={rated.length === 0} />
+      </Card>
     </section>
   );
 }
 
-/** The lesson's id beside its title, quiet: the course's own name for it. */
-function LessonId({ lesson }: { lesson: FeedbackLessonRow }) {
+/**
+ * The area's lessons with no rating, as one muted line: "12 lessons with no
+ * rating yet", which lists their titles when pressed. Their ids are in the
+ * titles' title attribute, for the team.
+ */
+function UnratedLine({ lessons, alone }: { lessons: FeedbackLessonRow[]; alone: boolean }) {
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  if (lessons.length === 0) return null;
   return (
-    <span style={{ ...T.meta, fontSize: 12, fontWeight: 400, marginLeft: 8 }}>
-      <span style={{ whiteSpace: "nowrap" }}>{lesson.id}</span>
-      {!lesson.rateable && " · students can't rate this lesson now"}
-    </span>
+    <div className="list-row" data-unrated={lessons.length} style={{ flexDirection: "column", alignItems: "stretch", padding: "0 16px", borderTop: alone ? "none" : "1px solid var(--color-border)" }}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={listId}
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center justify-between"
+        style={{
+          minHeight: TAP,
+          gap: 12,
+          padding: 0,
+          border: "none",
+          background: "transparent",
+          cursor: "pointer",
+          textAlign: "left",
+          ...T.bodyDim,
+        }}
+      >
+        <span>
+          {plural(lessons.length, "lesson")} with no rating yet
+        </span>
+        <svg aria-hidden="true" width="16" height="16" viewBox="0 0 16 16" style={{ flex: "none", transform: open ? "rotate(180deg)" : undefined, transition: "transform 150ms" }}>
+          <path d="M4 6l4 4 4-4" fill="none" stroke="var(--color-text-secondary)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <ul id={listId} className="flex flex-col" style={{ gap: 6, padding: "0 0 14px" }}>
+          {lessons.map((l) => (
+            <li key={l.id} data-lesson={l.id} title={l.id} style={{ ...T.bodyDim, lineHeight: 1.5, overflowWrap: "anywhere" }}>
+              {l.title}
+              {!l.rateable && <span style={{ fontSize: 12 }}> · students can&apos;t rate this lesson now</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -275,38 +317,24 @@ function LessonRow({ lesson }: { lesson: FeedbackLessonRow }) {
   const shown = all ? lesson.comments : lesson.comments.slice(0, FIRST_COMMENTS);
   const more = lesson.comments.length - FIRST_COMMENTS;
 
-  // A lesson with no rating: one quiet line, so a long area stays easy to scan.
-  if (lesson.ratings === 0 || lesson.average === null) {
-    return (
-      <li
-        className="list-row"
-        data-lesson={lesson.id}
-        style={{ flexWrap: "wrap", alignItems: "baseline", justifyContent: "space-between", gap: "2px 16px", padding: "11px 16px" }}
-      >
-        <p style={{ ...T.body, fontWeight: 500, flex: "1 1 160px", minWidth: 0, overflowWrap: "anywhere" }}>
-          {lesson.title}
-          <LessonId lesson={lesson} />
-        </p>
-        <p style={{ ...T.bodyDim, flex: "none" }}>No ratings yet.</p>
-      </li>
-    );
-  }
-
   return (
     <li
       className="list-row"
       data-lesson={lesson.id}
+      title={lesson.id}
       style={{ flexDirection: "column", alignItems: "stretch", gap: 12, padding: 16 }}
     >
       <div className="flex flex-wrap items-baseline justify-between" style={{ gap: "6px 16px" }}>
         <p style={{ ...T.cardTitle, flex: "1 1 220px", minWidth: 0, overflowWrap: "anywhere" }}>
           {lesson.title}
-          <LessonId lesson={lesson} />
+          {!lesson.rateable && (
+            <span style={{ ...T.meta, fontSize: 12, fontWeight: 400, marginLeft: 8 }}>students can&apos;t rate this lesson now</span>
+          )}
         </p>
         <p className="flex items-center" style={{ gap: 10, flex: "none" }}>
-          <Stars value={lesson.average} />
+          <Stars value={lesson.average ?? 0} />
           <span style={{ fontSize: 15, fontWeight: 600, color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums" }}>
-            {one(lesson.average)}
+            {one(lesson.average ?? 0)}
             <span className="sr-only"> average out of 5</span>
           </span>
           <span style={{ ...T.bodyDim, fontVariantNumeric: "tabular-nums" }}>{plural(lesson.ratings, "rating")}</span>

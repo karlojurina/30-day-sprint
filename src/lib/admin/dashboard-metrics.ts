@@ -55,6 +55,7 @@ import {
   renewalResolvedMs,
 } from "@/lib/admin/metrics-definitions";
 import { CURRICULUM_RESET_KEY, resetDateUtc } from "@/lib/curriculum-reset";
+import { checkTasksResetAt } from "@/lib/admin/tasks-reset";
 import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE } from "@/lib/world/discount";
 
 export const DAY_MS = 86_400_000;
@@ -94,6 +95,24 @@ export interface DashStudent {
 }
 export const DASH_STUDENT_COLUMNS =
   "id, membership_status, whop_plan_id, first_paid_at, canceled_at, cancel_scheduled_at";
+
+/**
+ * The statuses the Dashboard's students read takes. Active, past due and
+ * canceled are the population every tile had before admin rebuild 2;
+ * expired is read for Month 2 alone (the review's fix round). Whop can end a
+ * membership as expired (mapStatus keeps it), the sync keeps its canceled_at
+ * as for a cancel, and Month 2 judges a student by those dates, so leaving
+ * expired out took a student who did not renew out of the denominator and
+ * pushed the rate up. buildDashboard hands every other tile the rows without
+ * it (SHARED_STATUSES), so the Bounty Program's count is unchanged (D3).
+ */
+export const DASH_STUDENT_STATUSES = ["active", "past_due", "canceled", "expired"] as const;
+const SHARED_STATUSES: ReadonlySet<string> = new Set(["active", "past_due", "canceled"]);
+
+/** The students every tile but Month 2 counts: the read without the expired rows. */
+export function sharedPopulation(students: DashStudent[]): DashStudent[] {
+  return students.filter((s) => SHARED_STATUSES.has(s.membership_status ?? ""));
+}
 
 /** A student_milestones row with a bounty stamp. */
 export interface BountyStamp {
@@ -194,6 +213,12 @@ export function momentMs(value: string): number | null {
  * null (no switch yet, no tasks reset yet). A value that is not a date and
  * time with its zone is an error for that key: guessing "no reset" from a
  * broken row would put the archived tasks back in the count.
+ *
+ * tasks_reset_at goes through checkTasksResetAt (tasks-reset.ts), the check
+ * the Tasks page and its insights make, so all three draw the line from the
+ * same values and refuse the same ones (Postgres's own text among them: v109
+ * writes ISO). curriculum_reset_at keeps momentMs; Avg progress then holds
+ * it to curriculum-reset.ts's own format.
  */
 export function configReads(r: {
   data: Array<{ key: string; value: string | null }> | null;
@@ -208,6 +233,13 @@ export function configReads(r: {
     const row = rows.find((x) => x.key === key);
     if (!row) return { ok: true, data: null };
     const value = typeof row.value === "string" ? row.value : "";
+    if (key === TASKS_RESET_KEY) {
+      try {
+        return { ok: true, data: checkTasksResetAt(value) };
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : String(e) };
+      }
+    }
     if (momentMs(value) === null) {
       return { ok: false, error: `admin_config.${key} holds ${JSON.stringify(row.value)}, which is not a date and time` };
     }
@@ -511,8 +543,8 @@ export interface DashboardModel {
 const READ_NAMES: Record<keyof DashboardReads, string> = {
   students: "Students",
   bounty: "Bounty stamps",
-  tasksResetAt: "Settings",
-  resetAt: "Settings",
+  tasksResetAt: "Admin config",
+  resetAt: "Admin config",
   openTasks: "Open tasks",
   toDecide: "30% requests",
   snapshots: "Daily snapshots",
@@ -559,7 +591,9 @@ const fail = (error: string) => ({ ok: false as const, error });
 /** Every tile from the reads, as of `nowMs`. Pure: the same reads and moment give the same page. */
 export function buildDashboard(reads: DashboardReads, nowMs: number): DashboardModel {
   const days = trendDays(nowMs);
-  const { students, bounty: stamps, snapshots, resetAt } = reads;
+  const { students: read, bounty: stamps, snapshots, resetAt } = reads;
+  // Month 2 takes every row read; every other tile the population it always had (sharedPopulation).
+  const students: DashRead<DashStudent[]> = read.ok ? { ok: true, data: sharedPopulation(read.data) } : read;
 
   let avg: Tile<AvgProgress>;
   if (!snapshots.ok) avg = fail(snapshots.error);
@@ -575,7 +609,7 @@ export function buildDashboard(reads: DashboardReads, nowMs: number): DashboardM
   return {
     generatedAt: new Date(nowMs).toISOString(),
     days,
-    monthTwo: students.ok ? { ok: true, value: monthTwo(students.data, days, nowMs) } : fail(students.error),
+    monthTwo: read.ok ? { ok: true, value: monthTwo(read.data, days, nowMs) } : fail(read.error),
     bounty: !students.ok
       ? fail(students.error)
       : !stamps.ok
@@ -597,7 +631,7 @@ export function buildDashboard(reads: DashboardReads, nowMs: number): DashboardM
   };
 }
 
-// ── Refresh ─────────────────────────────────────────────────────────────────
+// ── Sync Whop and rebuild ───────────────────────────────────────────────────
 
 export interface RefreshSummary {
   /** ok: every step went through; warn: the route answered, a step inside it failed; err: the route refused or failed. */
@@ -614,7 +648,7 @@ const stepError = (v: unknown): string | null => {
 const plural = (n: number, one: string, many: string) => `${n.toLocaleString("en-US")} ${n === 1 ? one : many}`;
 
 /**
- * The line Refresh shows after POST /api/admin/refresh-everything answers:
+ * The line "Sync Whop and rebuild" shows after POST /api/admin/refresh-everything answers:
  * what each step did, and a step that failed inside a 200 answer named as
  * such (it used to read as a success). `status` 0 is no answer at all.
  */
@@ -623,7 +657,7 @@ export function refreshSummary(status: number, body: unknown): RefreshSummary {
   if (status < 200 || status >= 300) {
     const said = stepError(b);
     const why = said ?? (status === 0 ? "couldn't reach the server" : `the server answered ${status}`);
-    return { tone: "err", text: `Refresh failed: ${why}` };
+    return { tone: "err", text: `Sync failed: ${why}` };
   }
   const parts: string[] = [];
   let tone: RefreshSummary["tone"] = "ok";
@@ -658,7 +692,7 @@ export function refreshSummary(status: number, body: unknown): RefreshSummary {
   const naError = stepError(b?.na_tasks);
   if (naError) warn(`the NA task check failed: ${naError}`);
 
-  if (parts.length === 0) return { tone, text: "Refreshed" };
+  if (parts.length === 0) return { tone, text: "Synced" };
   const text = parts.join(" · ");
   return { tone, text: text[0].toUpperCase() + text.slice(1) };
 }

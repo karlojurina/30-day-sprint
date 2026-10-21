@@ -10,7 +10,8 @@
  *     never raw symbols. Karlo doesn't program; this should read like
  *     a sentence.
  *   - Boolean metrics ("Region 1 is complete") collapse the value
- *     input: only "is" / "is not".
+ *     input into the operator: one select, "is yes" / "is no" (admin
+ *     rebuild 2, the review's fix round: "is" alone read half-built).
  *   - Live preview at the bottom shows the rendered sentence.
  *
  * The component is fully controlled: parent owns the TriggerConfig
@@ -51,9 +52,16 @@ const NUMERIC_OPS: Array<{ value: ConditionOp; label: string }> = [
   { value: "less_than", label: "is less than" },
 ];
 
+/** An enum's operator: "is" / "is not", before its value. */
 const BINARY_OPS: Array<{ value: ConditionOp; label: string }> = [
   { value: "is", label: "is" },
   { value: "is_not", label: "is not" },
+];
+
+/** A yes-or-no metric's one select: the operator and the value in one. */
+const BOOLEAN_OPS: Array<{ value: ConditionOp; label: string }> = [
+  { value: "is", label: "is yes" },
+  { value: "is_not", label: "is no" },
 ];
 
 /** The metrics that measure pace against the old course's 30-day clock. */
@@ -382,7 +390,7 @@ function ConditionRow({
         }
         style={selectStyle()}
       >
-        {(inputType === "number" ? NUMERIC_OPS : BINARY_OPS).map((o) => (
+        {(inputType === "number" ? NUMERIC_OPS : inputType === "boolean" ? BOOLEAN_OPS : BINARY_OPS).map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
           </option>
@@ -437,13 +445,13 @@ function ConditionRow({
   );
 }
 
-/** A dropdown or a number: 44px tall, 16px text, so a phone's browser does not zoom into it. */
+/** A dropdown or a number: 44px tall, 16px text, so a phone's browser does not zoom into it (14px with a mouse on a wide window: --admin-field-size). */
 function selectStyle(): React.CSSProperties {
   return {
     minHeight: 44,
     maxWidth: "100%",
     padding: "0 10px",
-    fontSize: 16,
+    fontSize: "var(--admin-field-size, 16px)",
     background: "var(--color-bg-elevated)",
     border: "1px solid var(--color-border-strong)",
     borderRadius: "var(--radius-control)",

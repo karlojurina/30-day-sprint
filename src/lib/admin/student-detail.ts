@@ -15,6 +15,16 @@
  *
  * No plan is read or shown.
  *
+ * THE 30% REQUEST is named and coloured by the one map every admin page
+ * uses (discount-status.ts): "Applied", "Approved", "Rejected", "Code
+ * Applied", as on the 30% page's tabs and the Survey.
+ *
+ * THE QUICK DMS (quickDms below) are the words of the messages draft of
+ * admin rebuild 2 (WI-10, _admin/prds/admin-rebuild-2/messages_v2.md), for
+ * the new program: the first name, the program link from admin_config, the
+ * area the student is in and the lessons they finished. A part that is not
+ * known drops out of its sentence, in words, never a dash.
+ *
  *   readStudentDetail   the reads, each one's result kept apart
  *   buildStudentDetail  what the page and the drawer show
  *
@@ -27,10 +37,11 @@ import { isWhopNoneFinishedNote, progressPercent } from "@/lib/constants";
 import { completedLessonIdsFor } from "@/lib/progress";
 import { currentStreakAsOf } from "@/lib/streak";
 import { activityLabel, type ActivityLabel } from "@/lib/curriculum-reset";
+import { discountStatusWords, type DiscountTone } from "@/lib/admin/discount-status";
 import { isCanceling } from "@/lib/admin/metrics-definitions";
 import { whopPulled } from "@/lib/admin/thirty-view";
 import type { CourseActivity } from "@/lib/useJourneyPaceCounts";
-import { bareUsername, dayNumber, readOf, type Read } from "./people-common";
+import { bareUsername, dayNumber, readOf, type Problem, type Read } from "./people-common";
 
 /** The student's own columns the page needs. Never `*`, and never a plan. */
 export const DETAIL_COLUMNS =
@@ -91,10 +102,12 @@ export interface StudentDetailReads {
   discount: Read<{ status: string; promo_code: string | null; created_at: string } | null>;
   streak: Read<{ current_streak: number | null; last_streak_date: string | null } | null>;
   sync: Read<DetailSync | null>;
+  /** admin_config.program_login_link, the {programLink} of the messages: the Welcome DM's link. */
+  programLink: Read<{ value: string | null } | null>;
 }
 
 export async function readStudentDetail(supabase: SupabaseClient, studentId: string): Promise<StudentDetailReads> {
-  const [student, regions, lessons, completions, discount, streak, sync] = await Promise.all([
+  const [student, regions, lessons, completions, discount, streak, sync, programLink] = await Promise.all([
     supabase.from("students").select(DETAIL_COLUMNS).eq("id", studentId).maybeSingle(),
     supabase.from("regions").select("id, name, order_num").order("order_num"),
     // day is empty on the new course, so sort_order decides there; the old course's days still lead.
@@ -117,6 +130,7 @@ export async function readStudentDetail(supabase: SupabaseClient, studentId: str
       .maybeSingle(),
     supabase.from("student_streaks").select("current_streak, last_streak_date").eq("student_id", studentId).maybeSingle(),
     supabase.from("student_whop_sync").select(SYNC_COLUMNS).eq("student_id", studentId).maybeSingle(),
+    supabase.from("admin_config").select("value").eq("key", "program_login_link").maybeSingle(),
   ]);
   return {
     student: readOf(student, null),
@@ -126,6 +140,7 @@ export async function readStudentDetail(supabase: SupabaseClient, studentId: str
     discount: readOf(discount, null),
     streak: readOf(streak, null),
     sync: readOf(sync, null),
+    programLink: readOf(programLink, null),
   };
 }
 
@@ -155,14 +170,6 @@ export type SyncView =
       error: { text: string; at: string | null; note: boolean } | null;
     };
 
-/** The 30% request's status in the 30% page's words (admin rebuild 2, D4). */
-export const DISCOUNT_STATUS_TEXT: Record<string, string> = {
-  pending: "Applied",
-  approved: "Approved",
-  applied: "Code applied",
-  rejected: "Rejected",
-};
-
 export interface StudentDetail {
   id: string;
   /** The name, or the email, or "No name on file". */
@@ -185,13 +192,17 @@ export interface StudentDetail {
   /** The furthest area with a finished lesson, by the course's order (the first area when none). Null when unknown. */
   areaName: string | null;
   progress: Read<number>;
+  /** Lessons that count toward progress, finished. */
+  lessonsDone: Read<number>;
   streak: Read<number>;
   areas: Read<AreaProgress[]>;
   actionItems: Read<Array<{ id: string; title: string; shipped: boolean; link: string | null }>>;
-  discount: Read<{ status: string; text: string; code: string | null; askedAt: string } | null>;
+  discount: Read<{ status: string; text: string; tone: DiscountTone; code: string | null; askedAt: string } | null>;
   sync: Read<SyncView>;
-  /** Sentences for what could not be read, beside the block that needs it. */
-  courseProblem: string | null;
+  /** The program link the Welcome DM sends, or null when it is not set or could not be read (the sentence then has no link). */
+  programLink: string | null;
+  /** Which course is live could not be read: what that means for the page, and the read's own words. */
+  courseProblem: Problem | null;
   generatedAt: string;
 }
 
@@ -243,6 +254,7 @@ export function buildStudentDetail(
     (counting.length === 0
       ? { ok: false, error: "No lesson counts toward progress." }
       : { ok: true, data: progressPercent(counting.filter((l) => done.has(l.id)).length, counting.length) });
+  const lessonsDone: Read<number> = lessonsFailed ?? { ok: true, data: counting.filter((l) => done.has(l.id)).length };
 
   const areas: Read<AreaProgress[]> = firstFailure(reads.regions, reads.lessons, reads.completions) ?? {
     ok: true,
@@ -304,12 +316,14 @@ export function buildStudentDetail(
         data: reads.discount.data
           ? {
               status: reads.discount.data.status,
-              text: DISCOUNT_STATUS_TEXT[reads.discount.data.status] ?? reads.discount.data.status,
+              text: discountStatusWords(reads.discount.data.status).label,
+              tone: discountStatusWords(reads.discount.data.status).tone,
               code: reads.discount.data.promo_code,
               askedAt: reads.discount.data.created_at,
             }
           : null,
       };
+  const link = reads.programLink.ok ? (reads.programLink.data?.value ?? "").trim() : "";
 
   const streak: Read<number> = reads.streak.ok
     ? { ok: true, data: currentStreakAsOf(reads.streak.data, nowIso.slice(0, 10)) }
@@ -332,12 +346,54 @@ export function buildStudentDetail(
     activity: course.ok && course.resetAt != null ? activityLabel(course.lastByStudent.get(s.id) ?? null, nowMs) : null,
     areaName: course.ok && course.resetAt != null ? areaName : null,
     progress,
+    lessonsDone,
     streak,
     areas,
     actionItems,
     discount,
     sync,
-    courseProblem: course.ok ? null : `Couldn't read which course is live (${course.error}), so no activity is shown.`,
+    programLink: link || null,
+    courseProblem: course.ok ? null : { text: "Couldn't read which course is live, so no activity is shown.", error: course.error },
     generatedAt: nowIso,
   };
+}
+
+/** "Mike" from "Mike Smith"; "there" with no name on file, as the templates greet. */
+export function dmFirstName(nameOnFile: string | null | undefined): string {
+  return (nameOnFile ?? "").trim().split(/\s+/)[0] || "there";
+}
+
+/**
+ * The three quick DMs of the student page, in the messages draft's words
+ * (admin rebuild 2, WI-10). Each part that is not known leaves its sentence
+ * out, in words: no link, no area, or no count of lessons. No em dash, no
+ * "unlock", no old brand, numbers in digits.
+ */
+export function quickDms(
+  s: Pick<StudentDetail, "nameOnFile" | "programLink" | "areaName" | "lessonsDone">,
+): Array<{ label: string; text: string }> {
+  const name = dmFirstName(s.nameOnFile);
+  const signIn = s.programLink
+    ? `Sign in with your Whop account here: ${s.programLink} and start with the first lesson on the map.`
+    : "Sign in with your Whop account and start with the first lesson on the map.";
+  const where = s.areaName ? ` I can see you're in ${s.areaName} now.` : "";
+  const done = s.lessonsDone.ok ? s.lessonsDone.data : null;
+  const finished =
+    done == null || done === 0
+      ? "Saw you're working through the lessons, nice 💪"
+      : `Saw you've finished ${done} ${done === 1 ? "lesson" : "lessons"} so far, nice 💪`;
+  return [
+    {
+      label: "Welcome",
+      text: `Hey ${name}! Welcome to Ecom University 🙌 Have you opened the app yet? ${signIn} Let me know if you have any questions!`,
+    },
+    {
+      label: "Check-in",
+      text: `Hey ${name}! Just checking in, how's the course going?${where} Anything I can help with?`,
+    },
+    {
+      label: "Encouragement",
+      text: `Hey ${name}! ${finished} When you hit an action item, do it even if it feels scary. That's where things actually click.`,
+    },
+  ];
 }

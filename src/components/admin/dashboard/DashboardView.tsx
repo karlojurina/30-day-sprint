@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import tokens from "@/components/admin/admin-tokens.module.css";
 import { ListHeader, ListPage, TAP } from "@/components/admin/list-parts";
+import { FailureList } from "@/components/admin/review-parts";
 import { Button, Card, T } from "@/components/admin/ui";
 import { clockLabel, dayLabel, dayTimeLabel } from "@/lib/admin/croatia-dates";
 import {
@@ -32,23 +33,28 @@ import { TrendChart, pointDay } from "./TrendChart";
  * The Dashboard, /admin, the admin's home (admin rebuild 2, D1 and D3), in
  * the brand kit's dark look.
  *
- * Top: the two north-star numbers, Month 2 conversion and the Bounty
- * Program, each with its chart. Then Today, what waits for the team (open
- * tasks, 30% requests to decide), each tile a link to its page. Then the
- * trends of the last 14 days. Every tile says where its number comes from,
- * and the ones with a chart have "How it's counted" with the whole rule.
+ * Top: Today, what waits for the team (open tasks, 30% requests to decide),
+ * each tile a link to its page. Then the program's two numbers, Month 2
+ * conversion and the Bounty Program: until the first Month 2 rate is in,
+ * Month 2 is a compact tile beside the Bounty Program's chart (when the
+ * first renewals come and how many paid since the launch); from then on, its
+ * full tile with its chart. Then the trends of the last 14 days. Every tile
+ * says where its number comes from, and the ones with a chart have "How it's
+ * counted" with the whole rule.
  *
  * The numbers are worked out by src/lib/admin/dashboard-metrics.ts from what
  * `source` reads: the page (src/app/admin/(authenticated)/page.tsx) reads the
  * database, and the dev page /dev/admin/dashboard hands made-up reads, so
  * every state renders with no login. A read that failed shows "Couldn't
- * load" on each tile it feeds, and a line at the top names it with Retry;
- * no failed read is ever shown as 0.
+ * load" on each tile it feeds, and one line at the top says why in plain
+ * words (read-failure.ts), with the database's own text behind Details and
+ * Retry beside it; no failed read is ever shown as 0.
  *
- * Refresh (founders and admins, as POST /api/admin/refresh-everything
- * allows): Whop sync, snapshot rebuild and the task checks, about 2
- * minutes; then the numbers are read again, and what each step did shows
- * for 12 seconds.
+ * Refresh reads every number again. "Sync Whop and rebuild" (founders and
+ * admins, as POST /api/admin/refresh-everything allows) syncs Whop, rebuilds
+ * the snapshots and runs the task checks, about 2 minutes; then the numbers
+ * are read again, and what each step did shows for 12 seconds. While a read
+ * failed, Retry in the line at the top is the reload.
  */
 
 /** What the Dashboard reads and calls. */
@@ -163,25 +169,33 @@ export function DashboardView({
     setRefreshing(false);
   };
 
-  const action = canRefresh ? (
+  /** Reads every number again: the ordinary reload, for every role. */
+  const reloadButton = (
+    <Button key="reload" variant="raised" size="md" busy={reloading && !refreshing} disabled={!model || refreshing} onClick={() => void reload()}>
+      Refresh
+    </Button>
+  );
+  const syncButton = canRefresh ? (
     <Button
+      key="sync"
       variant="raised"
       size="md"
       busy={refreshing}
       onClick={() => void refresh()}
-      title="Syncs Whop, rebuilds the snapshots and runs the task checks. About 2 minutes."
+      title="Syncs Whop, rebuilds the snapshots and runs the task checks, then reads every number again. Takes about 2 minutes."
     >
-      <span aria-hidden="true">↻</span>
-      {refreshing ? "Refreshing" : "Refresh"}
+      {refreshing ? "Syncing, about 2 minutes" : "Sync Whop and rebuild"}
     </Button>
-  ) : undefined;
+  ) : null;
 
+  // While a read failed, Retry in the line at the top is the reload: no Refresh beside it.
+  const failed = model ? model.failed.length > 0 : false;
   const header = (meta: React.ReactNode) => (
     <ListHeader
       title="Dashboard"
       description="How the program is doing, and what is waiting for the team."
       meta={meta}
-      action={action}
+      actions={[failed ? null : reloadButton, syncButton].filter((b): b is React.JSX.Element => b !== null)}
     />
   );
 
@@ -196,26 +210,20 @@ export function DashboardView({
 
   const meta = [
     `Updated ${clockLabel(model.generatedAt)}`,
-    refreshing ? "Refreshing, about 2 minutes" : reloading ? "Updating" : null,
+    refreshing ? "Syncing Whop and rebuilding, about 2 minutes" : reloading ? "Updating" : null,
   ]
     .filter(Boolean)
     .join(" · ");
+  const waiting = model.monthTwo.ok && model.monthTwo.value.kind === "waiting" ? model.monthTwo.value : null;
 
   return (
     <ListPage>
       {header(meta)}
 
       {note && <RefreshNote note={note} />}
-      {model.failed.length > 0 && <FailedReads model={model} onRetry={() => void reload()} busy={reloading} />}
+      {failed && <FailedReads model={model} onRetry={() => void reload()} busy={reloading} />}
 
-      <section aria-label="The two numbers that matter most">
-        <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: 16 }}>
-          <MonthTwoCard tile={model.monthTwo} nowMs={Date.parse(model.generatedAt)} />
-          <BountyCard tile={model.bounty} />
-        </div>
-      </section>
-
-      <section style={{ marginTop: 40 }} aria-labelledby="dash-today">
+      <section aria-labelledby="dash-today">
         <SectionTitle id="dash-today">Today</SectionTitle>
         <div className="grid grid-cols-2" style={{ gap: 12 }}>
           <CountTile
@@ -237,6 +245,24 @@ export function DashboardView({
             source={(v) => `Applied since ${dayLabel(v.since)}, waiting for a yes or no`}
           />
         </div>
+      </section>
+
+      <section style={{ marginTop: 40 }} aria-labelledby="dash-program">
+        <SectionTitle id="dash-program">The program</SectionTitle>
+        {waiting ? (
+          // Until the first Month 2 rate: the Bounty Program's chart, and Month 2 as a compact tile beside it.
+          <div className="grid grid-cols-1 md:grid-cols-3 items-start" style={{ gap: 16 }}>
+            <div className="md:col-span-2" style={{ minWidth: 0 }}>
+              <BountyCard tile={model.bounty} />
+            </div>
+            <MonthTwoCompact m={waiting} nowMs={Date.parse(model.generatedAt)} />
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: 16 }}>
+            <MonthTwoCard tile={model.monthTwo} />
+            <BountyCard tile={model.bounty} />
+          </div>
+        )}
       </section>
 
       <section style={{ marginTop: 40 }} aria-labelledby="dash-trends">
@@ -301,7 +327,11 @@ function RefreshNote({ note }: { note: RefreshSummary }) {
   );
 }
 
-/** The reads that failed, by name and reason, with Retry. The tiles they feed say "Couldn't load". */
+/**
+ * The reads that failed, with Retry: why, in plain words, each reason once;
+ * the reads by name with the database's own words behind Details. The tiles
+ * they feed say "Couldn't load" and nothing more.
+ */
 function FailedReads({ model, onRetry, busy }: { model: DashboardModel; onRetry: () => void; busy: boolean }) {
   const tiles = [model.monthTwo, model.bounty, model.openTasks, model.toDecide, model.active, model.canceling, model.churned, model.avgProgress];
   const everything = tiles.every((t) => !t.ok);
@@ -309,17 +339,11 @@ function FailedReads({ model, onRetry, busy }: { model: DashboardModel; onRetry:
     <Card padding={0} style={{ marginBottom: 24, borderColor: "var(--color-border-strong)" }}>
       <div role="alert" className="flex flex-wrap items-start" style={{ gap: 12, padding: 16 }}>
         <div style={{ flex: "1 1 280px", minWidth: 0 }}>
-          <p style={{ display: "flex", gap: 10, alignItems: "center", ...T.body, fontSize: 15, fontWeight: 600 }}>
+          <p style={{ display: "flex", gap: 10, alignItems: "center", ...T.body, fontSize: 15, fontWeight: 600, marginBottom: 4 }}>
             <span aria-hidden="true" style={{ flex: "none", width: 8, height: 8, borderRadius: 999, background: "var(--color-warning)" }} />
             {everything ? "Couldn't load the dashboard." : "Some numbers couldn't load."}
           </p>
-          <ul style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 2 }}>
-            {model.failed.map((f) => (
-              <li key={`${f.read}:${f.error}`} style={{ ...T.bodyDim, fontSize: 12, lineHeight: 1.5, overflowWrap: "anywhere" }}>
-                {f.read}: {f.error}
-              </li>
-            ))}
-          </ul>
+          <FailureList failures={model.failed} />
         </div>
         <Button variant="raised" size="md" busy={busy} onClick={onRetry}>
           Retry
@@ -329,29 +353,13 @@ function FailedReads({ model, onRetry, busy }: { model: DashboardModel; onRetry:
   );
 }
 
-/** "Couldn't load" in place of a number, and the reason under it. */
-function Failed({ error, big = false }: { error: string; big?: boolean }) {
+/** "Couldn't load" in place of a number. Why is said once, in the line at the top of the page. */
+function Failed({ big = false }: { big?: boolean }) {
   return (
     <div data-failed="" style={{ marginTop: big ? 14 : 10 }}>
       <p style={{ display: "flex", gap: 8, alignItems: "center", fontSize: big ? 22 : 17, fontWeight: 600, color: "var(--color-text-primary)", lineHeight: 1.2 }}>
         <span aria-hidden="true" style={{ flex: "none", width: 8, height: 8, borderRadius: 999, background: "var(--color-warning)" }} />
         Couldn&apos;t load
-      </p>
-      <p
-        title={error}
-        style={{
-          marginTop: 6,
-          fontSize: 12,
-          lineHeight: 1.45,
-          color: "var(--color-text-secondary)",
-          overflowWrap: "anywhere",
-          display: "-webkit-box",
-          WebkitLineClamp: 2,
-          WebkitBoxOrient: "vertical",
-          overflow: "hidden",
-        }}
-      >
-        {error}
       </p>
     </div>
   );
@@ -595,24 +603,28 @@ function HeroCard({ tile, children }: { tile?: string; children: React.ReactNode
   );
 }
 
-function MonthTwoCard({ tile, nowMs }: { tile: Tile<MonthTwo>; nowMs: number }) {
+/** Month 2's rule, the same words on its full tile and its compact one. */
+function MonthTwoHow() {
+  return (
+    <>
+      Of the students on the monthly plan who first paid on or after {LAUNCH_DAY}, the share still paying after their
+      first renewal: a week after it they still have access, or it ended later, and they had not booked a cancel by the
+      renewal. Students who paid before {LAUNCH_DAY} are not counted. Nothing in the app records payments, so this reads
+      the access Whop gives. The line is the rate at the end of each day.
+    </>
+  );
+}
+
+/** Month 2's full tile: its rate and its chart, or "Couldn't load". Until the first rate, MonthTwoCompact stands in. */
+function MonthTwoCard({ tile }: { tile: Tile<MonthTwo> }) {
   const info = useInfo();
   return (
     <HeroCard tile="month2">
       <TileHead title="Month 2 conversion" level={2} info={info} />
-      {!tile.ok ? (
-        <Failed error={tile.error} big />
-      ) : tile.value.kind === "rate" ? (
-        <MonthTwoRate m={tile.value} />
-      ) : (
-        <MonthTwoWaiting m={tile.value} nowMs={nowMs} />
-      )}
+      {!tile.ok ? <Failed big /> : tile.value.kind === "rate" ? <MonthTwoRate m={tile.value} /> : null}
       <SourceLine>Students on the monthly plan who first paid from {LAUNCH_DAY}.</SourceLine>
       <HowCounted info={info} top={56}>
-        Of the students on the monthly plan who first paid on or after {LAUNCH_DAY}, the share still paying after their
-        first renewal: a week after it they still have access, or it ended later, and they had not booked a cancel by the
-        renewal. Students who paid before {LAUNCH_DAY} are not counted. Nothing in the app records payments, so this reads
-        the access Whop gives. The line is the rate at the end of each day.
+        <MonthTwoHow />
       </HowCounted>
     </HeroCard>
   );
@@ -645,18 +657,35 @@ function MonthTwoRate({ m }: { m: Extract<MonthTwo, { kind: "rate" }> }) {
   );
 }
 
+/**
+ * Month 2 before its first rate: a compact tile beside the Bounty Program,
+ * with no headline of its own. When the first renewals come, the 2 small
+ * numbers (paid since the launch, days until the first rate) and the
+ * countdown line from the launch to the first rate. With no payment since
+ * the launch yet, one line says so.
+ */
+function MonthTwoCompact({ m, nowMs }: { m: Extract<MonthTwo, { kind: "waiting" }>; nowMs: number }) {
+  const info = useInfo();
+  return (
+    <HeroCard tile="month2">
+      <TileHead title="Month 2 conversion" level={2} info={info} />
+      <MonthTwoWaiting m={m} nowMs={nowMs} />
+      <SourceLine>Students on the monthly plan who first paid from {LAUNCH_DAY}.</SourceLine>
+      <HowCounted info={info} top={56}>
+        <MonthTwoHow />
+      </HowCounted>
+    </HeroCard>
+  );
+}
+
 function MonthTwoWaiting({ m, nowMs }: { m: Extract<MonthTwo, { kind: "waiting" }>; nowMs: number }) {
   const renewal = dayLabel(`${m.firstRenewalDay}T12:00:00.000Z`);
   if (m.paid === 0 || !m.firstRateAt) {
     return (
-      <div style={{ marginTop: 14 }}>
-        <p style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.25, color: "var(--color-text-primary)" }}>
-          No first payment since {LAUNCH_DAY} yet
-        </p>
-        <p style={{ ...T.bodyDim, marginTop: 8, lineHeight: 1.5 }}>
-          The rate shows about 5 weeks after the first payment, once its first renewal has had a week to go through.
-        </p>
-      </div>
+      <p style={{ ...T.bodyDim, marginTop: 12, lineHeight: 1.5 }}>
+        No first payment since {LAUNCH_DAY} yet. The rate shows about 5 weeks after the first one, once its first renewal
+        has had a week to go through.
+      </p>
     );
   }
   const startMs = Date.parse(DISCOUNT_LAUNCH_DATE);
@@ -667,25 +696,23 @@ function MonthTwoWaiting({ m, nowMs }: { m: Extract<MonthTwo, { kind: "waiting" 
   const renewalPassed = nowMs >= Date.parse(`${m.firstRenewalDay}T00:00:00.000Z`);
   const stat: React.CSSProperties = { marginTop: 6, fontSize: 12, lineHeight: 1.4, color: "var(--color-text-secondary)" };
   return (
-    <div style={{ marginTop: 14, display: "flex", flexDirection: "column", flex: 1 }}>
-      <p style={{ fontSize: 28, fontWeight: 600, lineHeight: 1.15, letterSpacing: "-0.02em", color: "var(--color-text-primary)" }}>
+    <div style={{ marginTop: 12, display: "flex", flexDirection: "column", flex: 1 }}>
+      <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>
         {renewalPassed ? "First renewals since " : "First renewals from "}
-        <span style={{ whiteSpace: "nowrap" }}>{renewal}</span>
+        <span style={{ whiteSpace: "nowrap" }}>{renewal}</span>. The rate shows from{" "}
+        <span style={{ whiteSpace: "nowrap" }}>{rateDay}</span>.
       </p>
-      <p style={{ ...T.bodyDim, marginTop: 10, lineHeight: 1.5, maxWidth: 520 }}>
-        The rate shows from {rateDay}, once Whop has had a week to charge their first renewals.
-      </p>
-      <div className="grid grid-cols-2" style={{ marginTop: 22 }}>
-        <div style={{ paddingRight: 16 }}>
-          <BigNumber size={28}>{int(m.paid)}</BigNumber>
+      <div className="grid grid-cols-2" style={{ marginTop: 16 }}>
+        <div style={{ paddingRight: 12 }}>
+          <BigNumber size={24}>{int(m.paid)}</BigNumber>
           <p style={stat}>paid since {LAUNCH_DAY}</p>
         </div>
-        <div style={{ paddingLeft: 16, borderLeft: "1px solid var(--color-border)" }}>
-          <BigNumber size={28}>{daysLeft === 0 ? "Today" : int(daysLeft)}</BigNumber>
+        <div style={{ paddingLeft: 12, borderLeft: "1px solid var(--color-border)" }}>
+          <BigNumber size={24}>{daysLeft === 0 ? "Today" : int(daysLeft)}</BigNumber>
           <p style={stat}>{daysLeft === 0 ? "the first rate shows" : `${daysLeft === 1 ? "day" : "days"} until the first rate`}</p>
         </div>
       </div>
-      <div style={{ marginTop: "auto", paddingTop: 28 }}>
+      <div style={{ paddingTop: 20 }}>
         <div
           role="meter"
           aria-label="Time until the first Month 2 rate"
@@ -727,7 +754,7 @@ function BountyCard({ tile }: { tile: Tile<Bounty> }) {
     <HeroCard tile="bounty">
       <TileHead title="Bounty Program · joined" level={2} info={info} />
       {!tile.ok ? (
-        <Failed error={tile.error} big />
+        <Failed big />
       ) : (
         <>
           <div className="flex flex-wrap items-baseline" style={{ gap: "6px 12px", marginTop: 14 }}>
@@ -797,7 +824,7 @@ function CountTile<V extends { count: number }>({
           </svg>
         </div>
         {!tile.ok ? (
-          <Failed error={tile.error} />
+          <Failed />
         ) : (
           <>
             <div style={{ marginTop: 12 }}>
@@ -871,7 +898,7 @@ function Spark({
   kind?: "line" | "bars";
 }) {
   const note: React.CSSProperties = { marginTop: "auto", paddingTop: 14, fontSize: 12, lineHeight: 1.45, color: "var(--color-text-secondary)", overflowWrap: "anywhere" };
-  if (!line.ok) return <p style={note}>Couldn&apos;t load the line: {line.error}</p>;
+  if (!line.ok) return <p style={note}>Couldn&apos;t load the line</p>;
   if (!line.value.some((p) => p.value !== null)) return <p style={note}>No snapshot in these 14 days</p>;
   return (
     <div style={{ marginTop: "auto", paddingTop: 22 }}>
@@ -907,7 +934,7 @@ function ActiveTile({ tile }: { tile: Tile<WithLine> }) {
       }
     >
       {!tile.ok ? (
-        <Failed error={tile.error} />
+        <Failed />
       ) : (
         <>
           <TrendNumber>{int(tile.value.count)}</TrendNumber>
@@ -935,7 +962,7 @@ function CancelingTile({ tile }: { tile: Tile<WithLine> }) {
       }
     >
       {!tile.ok ? (
-        <Failed error={tile.error} />
+        <Failed />
       ) : (
         <>
           <TrendNumber unit="pressed cancel">{int(tile.value.count)}</TrendNumber>
@@ -964,7 +991,7 @@ function ChurnedTile({ tile }: { tile: Tile<Churned> }) {
       }
     >
       {!tile.ok ? (
-        <Failed error={tile.error} />
+        <Failed />
       ) : !read ? (
         <p style={{ marginTop: 12, fontSize: 13, color: "var(--color-text-secondary)" }}>No snapshot in these 14 days</p>
       ) : (
@@ -1005,7 +1032,7 @@ function AvgProgressTile({ tile }: { tile: Tile<AvgProgress> }) {
       }
     >
       {!tile.ok ? (
-        <Failed error={tile.error} />
+        <Failed />
       ) : tile.value.kind === "none" ? (
         <p style={{ marginTop: 12, fontSize: 13, lineHeight: 1.45, color: "var(--color-text-secondary)" }}>
           No snapshot since the switch, {pointDay(tile.value.since)}, yet
@@ -1039,17 +1066,7 @@ export function DashboardSkeleton() {
         Loading the dashboard
       </p>
       <div aria-hidden="true">
-        <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: 16 }}>
-          {[0, 1].map((i) => (
-            <HeroCard key={i}>
-              <Bar w="38%" h={11} />
-              <Bar w="30%" h={48} mt={18} />
-              <Bar w="55%" mt={14} />
-              <Bar w="100%" h={112} mt={32} />
-            </HeroCard>
-          ))}
-        </div>
-        <div style={{ marginTop: 40 }}>
+        <div>
           <Bar w="64px" h={11} />
           <div className="grid grid-cols-2" style={{ gap: 12, marginTop: 12 }}>
             {[0, 1].map((i) => (
@@ -1060,6 +1077,19 @@ export function DashboardSkeleton() {
                   <Bar w="60%" mt={14} />
                 </div>
               </Card>
+            ))}
+          </div>
+        </div>
+        <div style={{ marginTop: 40 }}>
+          <Bar w="120px" h={11} />
+          <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: 16, marginTop: 12 }}>
+            {[0, 1].map((i) => (
+              <HeroCard key={i}>
+                <Bar w="38%" h={11} />
+                <Bar w="30%" h={48} mt={18} />
+                <Bar w="55%" mt={14} />
+                <Bar w="100%" h={112} mt={32} />
+              </HeroCard>
             ))}
           </div>
         </div>

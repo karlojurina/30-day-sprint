@@ -17,6 +17,11 @@ import type { InviteFields, TeamRole, TeamRow, TeamTransport } from "@/lib/admin
  *
  * Every call goes through `transport` (src/lib/admin/team-data.ts), so the
  * dev page /dev/admin/team renders this same component with made-up data.
+ *
+ * "Send invite" is the page's one ink button; "Yes, remove", which deletes a
+ * login, the danger one. A founder's own role, which no one can change here,
+ * is a "Founder" pill, never a select that looks live but does nothing (the
+ * review's fix round).
  */
 
 type Loaded = { kind: "loading" } | { kind: "error"; error: string } | { kind: "ready"; members: TeamRow[] };
@@ -248,7 +253,7 @@ function InviteCard({ onInvite }: { onInvite: (f: InviteFields) => Promise<strin
           </p>
         )}
         <div>
-          <Button variant="raised" size="md" type="submit" busy={busy}>
+          <Button variant="ink" size="md" type="submit" busy={busy}>
             {busy ? "Sending the invite" : "Send invite"}
           </Button>
         </div>
@@ -289,22 +294,30 @@ function MemberRow({
           <p style={{ ...T.bodyDim, marginTop: 2 }}>Added {dayLabel(m.created_at)}</p>
         </div>
         <div className="flex flex-wrap items-center" style={{ gap: 8 }}>
-          <label htmlFor={`${id}-role`} className="sr-only">
-            Role of {m.full_name || m.email}
-          </label>
-          <select
-            id={`${id}-role`}
-            value={m.role}
-            disabled={busy || locked}
-            onChange={(e) => onRole(e.target.value as TeamRole)}
-            style={{ ...INPUT, width: "auto", minWidth: 140 }}
-          >
-            {ROLE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+          {locked ? (
+            <span data-role-locked="">
+              <Pill tone="neutral">{roleLabel(m.role)}</Pill>
+            </span>
+          ) : (
+            <>
+              <label htmlFor={`${id}-role`} className="sr-only">
+                Role of {m.full_name || m.email}
+              </label>
+              <select
+                id={`${id}-role`}
+                value={m.role}
+                disabled={busy}
+                onChange={(e) => onRole(e.target.value as TeamRole)}
+                style={{ ...INPUT, width: "auto", minWidth: 140 }}
+              >
+                {ROLE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
           {removable && !asking && (
             <Button variant="ghost" size="md" disabled={busy} onClick={() => setAsking(true)}>
               Remove
@@ -330,7 +343,7 @@ function MemberRow({
           </p>
           <div className="flex flex-wrap" style={{ gap: 8 }}>
             <Button
-              variant="raised"
+              variant="danger"
               size="md"
               busy={busy}
               onClick={async () => {

@@ -315,6 +315,8 @@ export function fixturePeopleTransport(opts: { state: PeopleState; reloadFails?:
                   }
                 : null,
             ),
+        // The program link the Welcome DM sends: the live one's host, as messages_v2.sql sets it.
+        programLink: partial ? bad() : ok({ value: "https://sprint.ecomuniversity.com/login" }),
       };
       return later(okAnswer(buildStudentDetail(reads, courseOf(people, partial), now)));
     },

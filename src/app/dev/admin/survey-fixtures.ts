@@ -6,6 +6,9 @@
  * answer below is invented.
  *
  *   ?state=full | empty | loading | error   (default full)
+ *
+ * In full, 7 applications from 1 October on and 2 from before it (hidden
+ * until "Show them"), with some questions left unanswered.
  */
 
 import type { Answer } from "@/lib/admin/admin-transport";
@@ -21,7 +24,16 @@ export function parseSurveyState(value: string | null): SurveyFixtureState {
 
 const QUESTIONS: SurveyQuestion[] = [
   { id: "q1", order_num: 1, question_text: "How likely are you to recommend the course to a friend, from 1 to 10?", question_type: "scale", scale_min: 1, scale_max: 10, is_active: true },
-  { id: "q2", order_num: 2, question_text: "Has the pace of the course felt right?", question_type: "multi_choice", scale_min: null, scale_max: null, is_active: true },
+  {
+    id: "q2",
+    order_num: 2,
+    question_text: "Has the pace of the course felt right?",
+    question_type: "multi_choice",
+    options: ["Way too fast", "A bit too fast", "Just right", "A bit too slow", "Way too slow"],
+    scale_min: null,
+    scale_max: null,
+    is_active: true,
+  },
   { id: "q3", order_num: 3, question_text: "What has been your biggest win so far?", question_type: "open_text", scale_min: null, scale_max: null, is_active: true },
   { id: "q4", order_num: 4, question_text: "What should the course change?", question_type: "open_text", scale_min: null, scale_max: null, is_active: true },
 ];
@@ -36,6 +48,9 @@ const SEEDS: Seed[] = [
   ["r-lena", "Lena Vogel", "applied", "2026-10-15T08:00:00.000Z", [6, "A bit too slow", null, null]],
   ["r-ruby", "Ruby Okafor", "rejected", "2026-10-14T10:00:00.000Z", [5, "Way too fast", "Not yet.", "Shorter videos, please. Some of them run past 20 minutes and I lose the thread."]],
   ["r-gone", null, "applied", "2026-10-05T10:00:00.000Z", [9, null, null, null]],
+  // From before 1 October: hidden until "Show them".
+  ["r-noah", "Noah Brandt", "applied", "2026-09-22T10:00:00.000Z", [8, "Just right", null, null]],
+  ["r-priya", "Priya Nair", "rejected", "2026-08-30T10:00:00.000Z", [3, "Way too fast", null, "More live calls, please."]],
 ];
 
 function data(): SurveyData {

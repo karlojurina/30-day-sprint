@@ -21,6 +21,7 @@ import type { Notice } from "@/components/admin/list-parts";
 import { adminTransport } from "@/lib/admin/admin-transport";
 import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
+import { DISCOUNT_STATUS } from "@/lib/admin/discount-status";
 import type {
   StudentBrief,
   TeamRef,
@@ -44,12 +45,24 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * @username and whether the membership is active. Then only the date
  * applied, the verdict line (meets the rule, or why not), the coupon, and the
  * actions: Approve and Reject (with a reason) on Applied, Mark code applied
- * on Approved. "Approve anyway" is a small link after a refusal, never after
- * the coupon's: a student whose Whop membership already has a discount on its
- * next renewal gets no 30%, and the approve route refuses it with no override
- * (D5). The verdicts, the counts and the coupons come from GET
- * /api/admin/thirty, which runs the student app's own rule; this file only
- * shows them and sends the team's decisions to the existing routes.
+ * on Approved. "Approve anyway" is a small link in the place of Approve after
+ * a refusal, never after the coupon's: a student whose Whop membership
+ * already has a discount on its next renewal gets no 30%, and the approve
+ * route refuses it with no override (D5). Approve stays on beside the
+ * coupon's verdict, since the route asks Whop again and refuses while the
+ * discount is there (a stored row can be out of date). The verdicts, the
+ * counts and the coupons come from GET /api/admin/thirty, which runs the
+ * student app's own rule and asks Whop now about the Approved rows' coupons;
+ * this file only shows them and sends the team's decisions to the existing
+ * routes. An Applied row whose membership has no stored check says "Coupon
+ * not checked yet"; one whose Whop id is missing or is not a membership's
+ * (Approve cannot ask Whop then, and nothing blocks the 30%) says to check
+ * Whop by hand; an Approved row says when Whop could not be asked.
+ *
+ * Buttons (the brand kit: one ink primary at most, verbs that say what
+ * happens): Approve, Mark code applied and Refresh are raised; Reject is
+ * ghost, the "no" of the row, as Dismiss is on Tasks; "Reject the request",
+ * which the student cannot undo by asking again, is the danger button.
  *
  * What a decision did shows in a fixed place at the bottom of the window
  * (NoticeStack, list-parts.tsx), where it is seen however far down the row
@@ -70,18 +83,14 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
 type TabKey = "applied" | "approved" | "rejected" | "code-applied";
 
 const TAB_ORDER: TabKey[] = ["applied", "approved", "rejected", "code-applied"];
-const TAB_LABEL: Record<TabKey, string> = {
-  applied: "Applied",
-  approved: "Approved",
-  rejected: "Rejected",
-  "code-applied": "Code Applied",
-};
 const TAB_STATUS: Record<TabKey, ThirtyRequestRow["status"]> = {
   applied: "pending",
   approved: "approved",
   rejected: "rejected",
   "code-applied": "applied",
 };
+/** The tabs' names: the one map every admin page names the statuses by (discount-status.ts). */
+const TAB_LABEL = Object.fromEntries(TAB_ORDER.map((t) => [t, DISCOUNT_STATUS[TAB_STATUS[t]].label])) as Record<TabKey, string>;
 /** The tab names before admin rebuild 2, so an old link still opens its tab. */
 const OLD_TAB: Record<string, TabKey> = { decide: "applied", "code-added": "code-applied" };
 
@@ -308,10 +317,16 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
     />
   );
 
+  // While the list loads or failed, the header keeps its Refresh and the tabs keep their place, with no counts.
+  const blankTabs = (
+    <TabStrip tabs={TAB_ORDER.map((t) => ({ value: t, label: TAB_LABEL[t], count: null }))} value={pickedTab ?? urlTab ?? "applied"} onChange={() => {}} disabled />
+  );
+
   if (loaded.kind === "loading") {
     return (
       <ListPage>
-        {header("Loading")}
+        {header("Loading", <RefreshButton onPress={() => {}} busy disabled />)}
+        {blankTabs}
         <SkeletonRows rows={4} label="Loading the 30% list" />
       </ListPage>
     );
@@ -320,7 +335,8 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   if (loaded.kind === "error") {
     return (
       <ListPage>
-        {header(null)}
+        {header(null, <RefreshButton onPress={() => void retry()} busy={retrying} />)}
+        {blankTabs}
         <LoadError title="Couldn't load the 30% list." detail={loaded.error} onRetry={retry} busy={retrying} />
       </ListPage>
     );
@@ -344,9 +360,7 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
     <ListPage>
       {header(
         reloading ? `Updated ${clockLabel(data.generatedAt)} · Updating` : `Updated ${clockLabel(data.generatedAt)}`,
-        <Button variant="raised" size="md" busy={reloading} onClick={() => void reload()}>
-          Refresh
-        </Button>,
+        <RefreshButton onPress={() => void reload()} busy={reloading} />,
       )}
 
       <NoticeStack notices={notices} onClose={closeNotice} />
@@ -466,22 +480,41 @@ const SMALL_LINK: React.CSSProperties = {
 /** The line a row shows when it was just decided and the list could not be read again. */
 const SAVED_STALE = "Saved. Press Refresh to see this row as it is now.";
 
+/** The header's Refresh: there while the list loads (busy, off) or failed (it retries), so the header never jumps. */
+function RefreshButton({ onPress, busy, disabled = false }: { onPress: () => void; busy: boolean; disabled?: boolean }) {
+  return (
+    <Button variant="raised" size="md" busy={busy} disabled={disabled} onClick={onPress}>
+      Refresh
+    </Button>
+  );
+}
+
 /**
- * The four tabs as pills that wrap onto a second line on a phone, so every
- * tab is in view and none is cut mid-word. Each is 44px tall; its count is
- * 12px.
+ * The four tabs as pills, each 44px tall, its count 12px. Under 400px the
+ * pills, their words and the gaps between them narrow (8px of padding, 12px
+ * words, 4px apart: measured at 390px wide, the four take 357 of the 358px
+ * the page has) so they fit on one line; on a narrower phone the row scrolls
+ * sideways instead of wrapping onto a second. While the list loads or
+ * failed, the tabs stay with no counts (`count` null) and do nothing.
  */
 function TabStrip({
   tabs,
   value,
   onChange,
+  disabled = false,
 }: {
-  tabs: Array<{ value: TabKey; label: string; count: number }>;
+  tabs: Array<{ value: TabKey; label: string; count: number | null }>;
   value: TabKey;
   onChange: (t: TabKey) => void;
+  disabled?: boolean;
 }) {
   return (
-    <div role="tablist" aria-label="Lists" className="flex flex-wrap" style={{ gap: 8, marginBottom: 12 }}>
+    <div
+      role="tablist"
+      aria-label="Lists"
+      className="flex flex-wrap gap-2 max-[399px]:flex-nowrap max-[399px]:overflow-x-auto max-[399px]:gap-1 max-[399px]:[--tab-pad:8px] max-[399px]:[--tab-gap:4px] max-[399px]:[--tab-font:12px]"
+      style={{ marginBottom: 12 }}
+    >
       {tabs.map((t) => {
         const active = t.value === value;
         return (
@@ -490,11 +523,20 @@ function TabStrip({
             type="button"
             role="tab"
             aria-selected={active}
-            onClick={() => onChange(t.value)}
-            style={{ ...pressPill(active), padding: "0 12px" }}
+            aria-disabled={disabled || undefined}
+            onClick={() => {
+              if (!disabled) onChange(t.value);
+            }}
+            style={{
+              ...pressPill(active),
+              padding: "0 var(--tab-pad, 12px)",
+              gap: "var(--tab-gap, 8px)",
+              fontSize: "var(--tab-font, 13px)",
+              cursor: disabled ? "default" : "pointer",
+            }}
           >
             {t.label}
-            <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)" }}>{t.count}</span>
+            {t.count !== null && <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)" }}>{t.count}</span>}
           </button>
         );
       })}
@@ -618,7 +660,8 @@ function PendingRow({
   };
   const off = busy !== null || locked;
   // D5: the coupon's refusal has no override, so no Approve anyway after it.
-  const canOverride = !verdict.ok && verdict.reason !== "has-discount";
+  const coupon = verdict.reason === "has-discount";
+  const canOverride = !verdict.ok && !coupon;
   const detail = verdictDetail(row, verdict);
 
   async function run(what: NonNullable<typeof busy>, fn: () => RowResult) {
@@ -638,49 +681,64 @@ function PendingRow({
       <StudentHead student={row.student} />
       <DotLine parts={[`Applied ${dayLabel(row.askedAt)}`]} />
 
-      {/* The verdict takes its own width, so "Approve anyway" sits right after it (under it on a phone). */}
-      <div className="flex flex-wrap items-center" style={{ columnGap: 14, rowGap: 0 }} data-verdict={verdict.reason ?? "yes"}>
-        <p style={{ display: "flex", gap: 8, alignItems: "flex-start", flex: "0 1 auto", minWidth: 0, padding: "4px 0" }}>
-          <Dot color={verdictColor(verdict)} />
+      <p style={{ display: "flex", gap: 8, alignItems: "flex-start", minWidth: 0 }} data-verdict={verdict.reason ?? "yes"}>
+        <Dot color={verdictColor(verdict)} />
+        <span style={{ ...T.body, lineHeight: 1.5 }}>
+          {verdict.text}
+          {coupon && <span style={{ color: "var(--color-text-secondary)" }}> Approve asks Whop again first.</span>}
+          {detail.length > 0 && (
+            <span style={{ color: "var(--color-text-secondary)" }}>
+              {detail.map((d) => (
+                <span key={d}>
+                  <span aria-hidden="true"> · </span>
+                  {d}
+                </span>
+              ))}
+            </span>
+          )}
+        </span>
+      </p>
+      {row.couponCheck === "not-checked" && (
+        <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="not-checked">
+          <Dot color="var(--color-neutral)" />
+          <span style={{ ...T.bodyDim, lineHeight: 1.5 }}>Coupon not checked yet. Approve asks Whop first.</span>
+        </p>
+      )}
+      {row.couponCheck === "no-membership" && (
+        <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="no-membership">
+          <Dot color="var(--color-warning)" />
           <span style={{ ...T.body, lineHeight: 1.5 }}>
-            {verdict.text}
-            {detail.length > 0 && (
-              <span style={{ color: "var(--color-text-secondary)" }}>
-                {detail.map((d) => (
-                  <span key={d}>
-                    <span aria-hidden="true"> · </span>
-                    {d}
-                  </span>
-                ))}
-              </span>
-            )}
+            Coupon not checked: the student&apos;s Whop membership is not on file, so Approve can&apos;t ask Whop. Check
+            Whop before you approve.
           </span>
         </p>
-        {canOverride && (
+      )}
+
+      {/* Approve, or "Approve anyway" in its place after a refusal that is not the coupon's: a small link, as tall as Reject. */}
+      <div className="flex flex-wrap items-center" style={{ gap: 8 }}>
+        {canOverride ? (
           <button
             type="button"
-            style={{ ...SMALL_LINK, opacity: off ? 0.5 : 1, cursor: off ? "not-allowed" : "pointer" }}
+            style={{ ...SMALL_LINK, padding: "0 6px", opacity: off ? 0.5 : 1, cursor: off ? "not-allowed" : "pointer" }}
             disabled={off}
             aria-expanded={confirm === "override"}
             onClick={() => setConfirm((c) => (c === "override" ? null : "override"))}
           >
             Approve anyway
           </button>
+        ) : (
+          <Button
+            variant="raised"
+            size="md"
+            disabled={locked || (busy !== null && busy !== "approve")}
+            busy={busy === "approve"}
+            onClick={() => void run("approve", () => onApprove(row, false))}
+          >
+            Approve
+          </Button>
         )}
-      </div>
-
-      <div className="flex flex-wrap items-center" style={{ gap: 8 }}>
         <Button
-          variant="raised"
-          size="md"
-          disabled={!verdict.ok || locked || (busy !== null && busy !== "approve")}
-          busy={busy === "approve"}
-          onClick={() => void run("approve", () => onApprove(row, false))}
-        >
-          Approve
-        </Button>
-        <Button
-          variant="raised"
+          variant="ghost"
           size="md"
           disabled={off}
           onClick={() => setConfirm((c) => (c === "reject" ? null : "reject"))}
@@ -750,7 +808,7 @@ function PendingRow({
           </p>
           <div className="flex flex-wrap" style={{ gap: 8 }}>
             <Button
-              variant="raised"
+              variant="danger"
               size="md"
               disabled={locked}
               busy={busy === "reject"}
@@ -820,9 +878,12 @@ function DecidedRow({
       parts.push(`Code applied${row.appliedAt ? ` ${dayLabel(row.appliedAt)}` : ""}${byWhom(row.appliedBy)}`);
     }
   }
-  // A code on the membership that still discounts the next renewal, on a request approved before the coupon rule:
-  // adding the 30% code would replace it, so the team checks Whop first.
-  const coupon = row.status === "approved" && row.coupon?.discounted ? row.coupon : null;
+  // A code on the membership that still discounts the next renewal (Whop's answer now, or the stored one when Whop
+  // said nothing): adding the 30% code would replace it, so the team checks Whop first. A request approved before
+  // the coupon rule has no stored row, which is why the page asks Whop about the Approved rows itself.
+  const approved = row.status === "approved";
+  const coupon = approved && row.coupon?.discounted ? row.coupon : null;
+  const unchecked = approved && !coupon && (row.couponCheck === "failed" || row.couponCheck === "no-membership");
 
   return (
     <div className="list-row" style={ROW}>
@@ -840,6 +901,20 @@ function DecidedRow({
           <Dot color="var(--color-warning)" />
           <span style={{ ...T.body, lineHeight: 1.5 }}>
             {couponApprovalRefusal(coupon.code)} Check Whop before you add the 30% code.
+            {row.couponCheck === "stored" && (
+              <span style={{ color: "var(--color-text-secondary)" }}> Whop gave no answer now; this is its answer of {dayLabel(coupon.checkedAt)}.</span>
+            )}
+          </span>
+        </p>
+      )}
+      {unchecked && (
+        <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="unchecked">
+          <Dot color="var(--color-neutral)" />
+          <span style={{ ...T.body, lineHeight: 1.5 }}>
+            {row.couponCheck === "no-membership"
+              ? "Couldn't ask Whop about a coupon: the student's Whop membership is not on file."
+              : "Couldn't ask Whop about a coupon on this membership."}{" "}
+            Check Whop before you add the 30% code.
           </span>
         </p>
       )}

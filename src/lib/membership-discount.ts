@@ -401,8 +401,16 @@ export async function checkMembershipDiscount(
   } catch {
     // No stored answer: nothing blocks (the PRD's fallback).
   }
-  // Only a Whop read that was tried and gave no answer is worth a line: with no key or no membership there was none to try.
-  if (liveFail !== "no_membership" && liveFail !== "no_api_key" && liveFail !== "student_unread" && liveFail !== "not_a_membership") {
+  // A Whop read that was tried and gave no answer is worth a line, and so is a
+  // stored Whop id that is not a membership's (the webhook has stored a
+  // payment's id there): Whop is never asked then, nothing is stored for it,
+  // and nothing blocks, so without this line the request goes through
+  // unseen. With no key or no membership there was nothing to try.
+  if (liveFail === "not_a_membership") {
+    console.warn(
+      `[membership discount] student ${studentId}: the stored Whop id is not a membership id, so Whop was not asked and ${answer.source === "stored" ? "the stored row decides" : "nothing blocks"}`,
+    );
+  } else if (liveFail !== null && liveFail !== "no_membership" && liveFail !== "no_api_key" && liveFail !== "student_unread") {
     console.warn(
       `[membership discount] student ${studentId}: Whop gave no answer (${liveFail}), so ${answer.source === "stored" ? "the stored row decides" : "nothing blocks"}`,
     );
@@ -568,5 +576,9 @@ export async function refreshMembershipDiscounts(
   if (writeError) return done({ error: writeError });
   // Every read failed: the shape or the key is wrong, and a run that wrote nothing must say so out loud.
   const allFailed = answer.checked === 0 && failedReads > 0;
+  // Whop answered nothing before the time ran out (it hangs): no read failed, none was checked, every candidate is left.
+  // That run read nothing either, so it says so too (the review's fix round: it answered ok).
+  const stalled = answer.checked === 0 && answer.left > 0;
+  if (stalled && !allFailed) return done({ ok: false, error: "Whop answered no membership read before the time ran out, so nothing was checked. The next run tries again." });
   return done({ ok: !allFailed });
 }

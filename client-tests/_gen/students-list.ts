@@ -30,7 +30,7 @@ import { fetchAllRowsByKey } from "./supabase-pagination.ts";
 import { progressPercent } from "./constants.ts";
 import { activityLabel, type ActivityLabel } from "./curriculum-reset.ts";
 import type { CourseActivity } from "./types-erased.ts";
-import { bareUsername, dayNumber, failed, ok, readCountingLessons, type Read } from "./people-common.ts";
+import { bareUsername, dayNumber, failed, ok, readCountingLessons, type Problem, type Read } from "./people-common.ts";
 
 /** The columns the list needs, and no more: `*` would carry every column of every student to the browser. */
 export const LIST_COLUMNS = "id, name, email, discord_username, membership_status, first_paid_at, last_active_at";
@@ -100,8 +100,8 @@ export interface StudentsList {
   progressKnown: boolean;
   /** True after the course switch, false before it, null when it could not be read: the Activity column says so. */
   courseIsNew: boolean | null;
-  /** Each read that failed, in a sentence for the top of the list. */
-  problems: string[];
+  /** Each read that failed: a sentence for the top of the list, and the read's own words. */
+  problems: Problem[];
 }
 
 export type StudentSort = "paid" | "name" | "progress" | "active";
@@ -129,14 +129,14 @@ export function buildStudentsList(
   nowIso: string,
 ): StudentsList {
   const nowMs = Date.parse(nowIso);
-  const problems: string[] = [];
+  const problems: Problem[] = [];
   if (!reads.progress.ok) {
-    problems.push(`Couldn't load the students' progress (${reads.progress.error}), so Progress says so on every row. Press Refresh to try again.`);
+    problems.push({ text: "Couldn't load the students' progress, so Progress says so on every row. Press Refresh to try again.", error: reads.progress.error });
   } else if (!reads.countingLessons.ok) {
-    problems.push(`Couldn't count the course's lessons (${reads.countingLessons.error}), so no progress is shown. Press Refresh to try again.`);
+    problems.push({ text: "Couldn't count the course's lessons, so no progress is shown. Press Refresh to try again.", error: reads.countingLessons.error });
   }
   if (!course.ok) {
-    problems.push(`Couldn't read which course is live (${course.error}), so no activity is shown. Press Refresh to try again.`);
+    problems.push({ text: "Couldn't read which course is live, so no activity is shown. Press Refresh to try again.", error: course.error });
   }
   const progressKnown = reads.progress.ok && reads.countingLessons.ok;
   const courseIsNew = course.ok ? course.resetAt != null : null;

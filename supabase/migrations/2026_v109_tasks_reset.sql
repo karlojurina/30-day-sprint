@@ -2,7 +2,7 @@
 -- v109: the Tasks queue starts fresh for the new program.
 --
 -- Admin rebuild 2, decision D7 (_admin/prds/admin-rebuild-2/
--- admin_rebuild_2_prd.md). Lovro pastes it in the SQL editor.
+-- admin_rebuild_2_prd.md). The owner pastes it in the SQL editor.
 --
 -- WHY
 --   On 20 October the queue still held 95 open tasks from before the new

@@ -9,14 +9,16 @@ import { TAP } from "@/components/admin/list-parts";
  * shared list-parts.tsx and ui.tsx stay as milestone 1 left them.
  *
  * Every field is 44px tall at least with 16px text: a phone's browser zooms
- * the page into a field with smaller text.
+ * the page into a field with smaller text. With a mouse on a window 640px
+ * wide or more the text is 14px (--admin-field-size, admin-tokens.module.css;
+ * the review's fix round: 16px looked oversized on a desktop).
  */
 
 export const INPUT: React.CSSProperties = {
   width: "100%",
   minHeight: TAP,
   padding: "0 12px",
-  fontSize: 16,
+  fontSize: "var(--admin-field-size, 16px)",
   fontFamily: "inherit",
   borderRadius: "var(--radius-control)",
   border: "1px solid var(--color-border-strong)",

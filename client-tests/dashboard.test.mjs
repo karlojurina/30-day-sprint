@@ -31,6 +31,7 @@ const { isInMonth2Cohort, PAYING_WHOP_PLAN_IDS_ARRAY } = await import('./_gen/me
 const { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE } = await import('./_gen/discount.ts')
 const { ADMIN_STUDENT_JOIN_CUTOFF, TASKS_STUDENT_JOIN_CUTOFF } = await import('./_gen/constants.ts')
 const { CURRICULUM_RESET_KEY } = await import('./_gen/curriculum-reset.ts')
+const { checkTasksResetAt } = await import('./_gen/tasks-reset.ts')
 const { fetchAllRowsByKey } = await import('./_gen/supabase-pagination.ts')
 
 let pass = 0
@@ -132,6 +133,19 @@ console.log('\n=== Month 2: the rate, once renewals resolve ===')
      'before 15 Nov nobody had resolved: those days are gaps, never 0%', show(m.line.slice(0, 5)))
   ok(m.line[13].value === m.rate * 100, 'the last point is the big number: today is judged now, as the number is', `${m.line[13].value} ${m.rate * 100}`)
   ok(m.line[4].value === 100, 'on 15 Nov only a had resolved, and still paid: 100%', String(m.line[4].value))
+
+  // The review's fix round: Whop can end a membership as expired, and the sync keeps its canceled_at as for a
+  // cancel. The page reads expired for Month 2 alone; Month 2 judges the row by its dates, as it judges d.
+  const expired = student('x', '2026-10-12T08:00:00.000Z', { membership_status: 'expired', canceled_at: cycleEnd('2026-10-12T08:00:00.000Z') })
+  const withExpired = M.buildDashboard(reads({ students: read([...students, expired]) }), NOW_NOV)
+  ok(withExpired.monthTwo.ok && withExpired.monthTwo.value.resolved === 7 && withExpired.monthTwo.value.converted === 4,
+     'an expired student who did not renew is in Month 2\'s denominator: 4 of 7, never 4 of 6', show(withExpired.monthTwo.value && { r: withExpired.monthTwo.value.resolved, c: withExpired.monthTwo.value.converted }))
+  const renewedThenExpired = student('y', '2026-10-12T08:00:00.000Z', { membership_status: 'expired', canceled_at: '2026-11-23T08:00:00.000Z' })
+  const both = M.buildDashboard(reads({ students: read([...students, renewedThenExpired]) }), NOW_NOV)
+  ok(both.monthTwo.ok && both.monthTwo.value.resolved === 7 && both.monthTwo.value.converted === 5,
+     'one whose access ended as expired after the renewal and its week is converted, as a cancel after it is', show(both.monthTwo.value && { r: both.monthTwo.value.resolved, c: both.monthTwo.value.converted }))
+  ok(M.DASH_STUDENT_STATUSES.join() === 'active,past_due,canceled,expired' && show(M.sharedPopulation([...students, expired]).map((s) => s.id)) === show(students.map((s) => s.id)),
+     'the read takes the 4 statuses; every tile but Month 2 gets the 3 it always had')
 }
 
 console.log('\n=== Bounty Program, unchanged ===')
@@ -149,6 +163,11 @@ console.log('\n=== Bounty Program, unchanged ===')
   const b = M.bounty(students, stamps, M.trendDays(NOW_OCT))
   ok(b.last14 === 2 && b.allTime === 3, 'the 14 days hold 2 stamps, all time 3; a stamp outside the population counts nowhere', show({ l: b.last14, a: b.allTime }))
   ok(b.line[0].value === 1 && b.line[13].value === 1 && b.line.every((p) => p.value !== null), 'per UTC day, every day a count', show(b.line.map((p) => p.value)))
+  // The review's fix round reads expired students for Month 2; the Bounty Program keeps the population it had (D3: unchanged).
+  const gone = student('s3', '2026-07-01T00:00:00.000Z', { membership_status: 'expired', canceled_at: '2026-08-01T00:00:00.000Z' })
+  const dash = M.buildDashboard(reads({ students: read([...students, gone]), bounty: read([...stamps, { student_id: 's3', bounty_access_claimed_at: '2026-10-18T07:00:00.000Z' }]) }), NOW_OCT)
+  ok(dash.bounty.ok && dash.bounty.value.last14 === 2 && dash.bounty.value.allTime === 3,
+     'an expired student\'s stamp is in no Bounty count, as before the Month 2 read took expired', show(dash.bounty.ok && { l: dash.bounty.value.last14, a: dash.bounty.value.allTime }))
 }
 
 console.log('\n=== The reads: a failure is never a number ===')
@@ -170,9 +189,15 @@ console.log('\n=== The reads: a failure is never a number ===')
   ok(M.momentMs('2026-10-21') === null && M.momentMs('2026-10-21T05:00:00') === null && M.momentMs('yesterday') === null,
      'a date alone, a time with no zone and words are not moments')
 
-  const both = M.configReads({ data: [{ key: CURRICULUM_RESET_KEY, value: '2026-10-19T14:33:33.972Z' }, { key: M.TASKS_RESET_KEY, value: '2026-10-21 05:00:00.123456+00' }], error: null })
-  ok(both.resetAt.ok && both.resetAt.data === '2026-10-19T14:33:33.972Z' && both.tasksResetAt.ok && both.tasksResetAt.data === '2026-10-21 05:00:00.123456+00',
-     'both keys, as written', show(both))
+  const both = M.configReads({ data: [{ key: CURRICULUM_RESET_KEY, value: '2026-10-19T14:33:33.972Z' }, { key: M.TASKS_RESET_KEY, value: '2026-10-21T05:00:00.123Z' }], error: null })
+  ok(both.resetAt.ok && both.resetAt.data === '2026-10-19T14:33:33.972Z' && both.tasksResetAt.ok && both.tasksResetAt.data === '2026-10-21T05:00:00.123Z',
+     'both keys, as written (tasks_reset_at as v109 writes it)', show(both))
+  // The review's fix round: tasks_reset_at is held to tasks-reset.ts's check, as the Tasks page and its insights hold it.
+  const pgText = M.configReads({ data: [{ key: M.TASKS_RESET_KEY, value: '2026-10-21 05:00:00.123456+00' }], error: null })
+  let tasksPage = null
+  try { checkTasksResetAt('2026-10-21 05:00:00.123456+00') } catch (e) { tasksPage = e.message }
+  ok(!pgText.tasksResetAt.ok && tasksPage !== null && pgText.tasksResetAt.error === tasksPage,
+     "Postgres's own text for tasks_reset_at is refused with the Tasks page's own sentence, so the Dashboard and the Tasks page draw the line alike", show(pgText.tasksResetAt))
   const absent = M.configReads({ data: [], error: null })
   ok(absent.resetAt.ok && absent.resetAt.data === null && absent.tasksResetAt.ok && absent.tasksResetAt.data === null,
      'no row is no date: before the switch, before the tasks reset (v109 is another lane\'s)')
@@ -203,7 +228,7 @@ console.log('\n=== The whole page: what a failed read takes with it ===')
   const settingsDown = 'admin_config: permission denied for table admin_config'
   const noSettings = M.buildDashboard(reads({ tasksResetAt: failed(settingsDown), resetAt: failed(settingsDown), openTasks: failed(settingsDown) }), NOW_OCT)
   ok(!noSettings.openTasks.ok && !noSettings.avgProgress.ok, 'no settings: the open tasks (no floor) and Avg progress (no switch date) fail')
-  ok(noSettings.failed.length === 1 && noSettings.failed[0].read === 'Settings',
+  ok(noSettings.failed.length === 1 && noSettings.failed[0].read === 'Admin config',
      'and the list names that one read once', show(noSettings.failed))
 
   const twoTimeouts = M.buildDashboard(reads({ students: failed('timeout'), snapshots: failed('timeout') }), NOW_OCT)
@@ -287,11 +312,11 @@ console.log('\n=== The change over the window ===')
   ok(M.deltaOf([{ date: 'x', value: 900 }, { date: 'y', value: 879 }]).from === 'x', 'it says which day it is counted from')
 }
 
-console.log('\n=== Refresh: what each step did ===')
+console.log('\n=== Sync Whop and rebuild: what each step did ===')
 {
   const refused = M.refreshSummary(403, { error: 'Founder or admin role required' })
-  ok(refused.tone === 'err' && refused.text === 'Refresh failed: Founder or admin role required', 'a refusal, in the route\'s words', refused.text)
-  ok(M.refreshSummary(0, null).text === "Refresh failed: couldn't reach the server" && M.refreshSummary(500, null).text === 'Refresh failed: the server answered 500',
+  ok(refused.tone === 'err' && refused.text === 'Sync failed: Founder or admin role required', 'a refusal, in the route\'s words', refused.text)
+  ok(M.refreshSummary(0, null).text === "Sync failed: couldn't reach the server" && M.refreshSummary(500, null).text === 'Sync failed: the server answered 500',
      'no answer, and an answer with no words')
   const all = M.refreshSummary(200, { ok: true, sync: { fetched: 1031, inserted: 3, updated: 118 }, rebuild: { ok: true }, engagement: { alerts: 1 }, csm_tasks: { tasks_created: 4 }, na_tasks: { ok: true } })
   ok(all.tone === 'ok' && all.text === 'Whop synced, 3 new and 118 updated · snapshots rebuilt · 4 new tasks · 1 alert', 'every step went through', all.text)
@@ -312,7 +337,7 @@ console.log("\n=== The page's reads (readDashboard in page.tsx) ===")
   const js = ts.transpileModule(fn.getText(sf), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
   const scope = {
     configReads: M.configReads, countRead: M.countRead, rowsRead: M.rowsRead, trendDays: M.trendDays,
-    DASH_STUDENT_COLUMNS: M.DASH_STUDENT_COLUMNS, SNAPSHOT_COLUMNS: M.SNAPSHOT_COLUMNS, TASKS_RESET_KEY: M.TASKS_RESET_KEY,
+    DASH_STUDENT_COLUMNS: M.DASH_STUDENT_COLUMNS, DASH_STUDENT_STATUSES: M.DASH_STUDENT_STATUSES, SNAPSHOT_COLUMNS: M.SNAPSHOT_COLUMNS, TASKS_RESET_KEY: M.TASKS_RESET_KEY,
     CURRICULUM_RESET_KEY, ADMIN_STUDENT_JOIN_CUTOFF, TASKS_STUDENT_JOIN_CUTOFF, PAYING_WHOP_PLAN_IDS_ARRAY,
     fetchAllRowsByKey, DISCOUNT_ELIGIBLE_FROM,
   }
@@ -340,7 +365,8 @@ console.log("\n=== The page's reads (readDashboard in page.tsx) ===")
     }
   }
   const config = (rows) => ({ data: rows, error: null })
-  const RESET = '2026-10-21 05:00:00.123456+00'
+  // As v109 writes it (the review's fix round holds tasks_reset_at to tasks-reset.ts's check).
+  const RESET = '2026-10-21T05:00:00.123Z'
   const answers = (over = {}) => (table, calls) => {
     if (over[table]) return over[table](calls)
     if (table === 'admin_config') return config([{ key: CURRICULUM_RESET_KEY, value: '2026-10-19T14:33:33.972Z' }])
@@ -368,10 +394,10 @@ console.log("\n=== The page's reads (readDashboard in page.tsx) ===")
        '30% to decide: the pending requests from 1 October, counted by the database (the Applied tab)', show(disc.calls))
     const [stu] = queries(log, 'students')
     ok(has(stu.calls, 'select', M.DASH_STUDENT_COLUMNS) && has(stu.calls, 'not', 'whop_membership_id', 'is', null)
-       && has(stu.calls, 'in', 'membership_status', ['active', 'past_due', 'canceled'])
+       && has(stu.calls, 'in', 'membership_status', ['active', 'past_due', 'canceled', 'expired'])
        && has(stu.calls, 'in', 'whop_plan_id', [...PAYING_WHOP_PLAN_IDS_ARRAY]) && has(stu.calls, 'gte', 'first_paid_at', ADMIN_STUDENT_JOIN_CUTOFF)
        && has(stu.calls, 'order', 'id') && has(stu.calls, 'limit', 1000),
-       'students: the population as before (a membership, the three statuses, the paying plan, since 25 May), the named columns only, paged by id', show(stu.calls))
+       'students: the population as before (a membership, the three statuses, the paying plan, since 25 May), and expired for Month 2 alone; the named columns only, paged by id', show(stu.calls))
     ok(!stu.calls.some((c) => c[0] === 'select' && c[1] === '*'), 'no select("*"): the tiles need 6 columns')
     const [mil] = queries(log, 'student_milestones')
     ok(has(mil.calls, 'not', 'bounty_access_claimed_at', 'is', null) && has(mil.calls, 'order', 'student_id'),

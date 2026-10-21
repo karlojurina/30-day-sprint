@@ -87,7 +87,16 @@ write(fromSrc('src/lib/dm-toggles.ts'), 'src/lib/dm-toggles.ts', 'a2-dm-toggles.
 
 const UI = [['from "@/components/admin/ui"', 'from "./a2-ui.mjs"']]
 compile('src/components/admin/ui.tsx', 'a2-ui.mjs', [['import Link from "next/link";', 'const Link = (props) => props.children;']])
-compile('src/components/admin/list-parts.tsx', 'a2-list-parts.mjs', [...UI, ['from "@/lib/admin/croatia-dates"', 'from "./croatia-dates.ts"']])
+// The review fix round's parts (review-parts.tsx), which LoadError uses: its plain words are read-failure.ts, copied by build.mjs.
+compile('src/components/admin/review-parts.tsx', 'a2-review-parts.mjs', [
+  ['import Link from "next/link";', 'const Link = (props) => props.children;'],
+  ...UI,
+  ['from "@/lib/admin/read-failure"', 'from "./read-failure.ts"'],
+])
+compile('src/components/admin/list-parts.tsx', 'a2-list-parts.mjs', [
+  ...UI,
+  ['from "@/components/admin/review-parts"', 'from "./a2-review-parts.mjs"'],
+])
 compile('src/components/admin/templates/form-parts.tsx', 'a2-form-parts.mjs', [...UI, ['from "@/components/admin/list-parts"', 'from "./a2-list-parts.mjs"']])
 compile('src/components/admin/TemplateOnOff.tsx', 'a2-template-on-off-view.mjs')
 compile('src/components/admin/TriggerBuilder.tsx', 'a2-trigger-builder.mjs', [['from "@/lib/csm-triggers"', 'from "./csm-triggers.ts"']])
@@ -95,7 +104,12 @@ const PAGE_LIBS = [
   ['from "@/lib/admin/templates-data"', 'from "./templates-data.ts"'],
   ['from "./form-parts"', 'from "./a2-form-parts.mjs"'],
 ]
-compile('src/components/admin/templates/MessageSettings.tsx', 'a2-message-settings.mjs', [...UI, ...PAGE_LIBS])
+compile('src/components/admin/templates/MessageSettings.tsx', 'a2-message-settings.mjs', [
+  ...UI,
+  ...PAGE_LIBS,
+  // The review's fix round: a failed read of the settings in plain words (review-parts.tsx, compiled above).
+  ['from "@/components/admin/review-parts"', 'from "./a2-review-parts.mjs"'],
+])
 compile('src/components/admin/templates/TemplateRow.tsx', 'a2-template-row.mjs', [
   ...UI,
   ...PAGE_LIBS,
@@ -118,7 +132,7 @@ const configRoute = await import('./_gen/admin-config-route.ts')
 const { setTeam } = await import('./_gen/stub-admin.ts')
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
 const { FakeDb, NextRequest, fakeClient, useDb: installDb } = await import('./_gen/stub-server.ts')
-const { MessageSettings } = await import('./_gen/a2-message-settings.mjs')
+const { MessageSettings, SettingsBody } = await import('./_gen/a2-message-settings.mjs')
 const { TemplateRow, TemplatePreview } = await import('./_gen/a2-template-row.mjs')
 const { TriggerBuilder } = await import('./_gen/a2-trigger-builder.mjs')
 
@@ -301,19 +315,31 @@ console.log('\n=== D6: the panel, rendered for each role ===')
   const founder = render(MessageSettings, { ...props, canEdit: true })
   const fw = words(founder)
   ok(fw.includes(W_DISCORD) && fw.includes(W_PROGRAM), 'a founder sees both warnings', fw.slice(0, 200))
-  ok((founder.match(/<input /g) ?? []).length === 2 && founder.includes('value="https://30-day-sprint-smkv.vercel.app/login"')
-       && (founder.match(/>Save<\/button>/g) ?? []).length === 2,
-     'and the 2 links in fields, each with Save')
-  ok((founder.match(/>Turn on<\/button>/g) ?? []).length === 4 && fw.includes('Each switch below acts only while the master switch is on.')
-       && fw.includes('Fills {programLink} in 9 messages.') && fw.includes('Fills {discordInvite} in 4 messages.'),
+  // The review's fix round: the panel opens folded for every role, its warnings above the fold, so the templates come first.
+  ok(founder.includes('data-settings-open="no"') && !founder.includes('<input') && (founder.match(/>Show settings<svg/g) ?? []).length === 1,
+     'with a warning standing, a founder still finds the panel folded: the warnings and one button, "Show settings"')
+  const opened = render(SettingsBody, { ...props, canEdit: true })
+  const ow = words(opened)
+  ok((opened.match(/<input /g) ?? []).length === 2 && opened.includes('value="https://30-day-sprint-smkv.vercel.app/login"')
+       && (opened.match(/>Save<\/button>/g) ?? []).length === 2,
+     'opened: the 2 links in fields, each with Save')
+  ok((opened.match(/>Turn on<\/button>/g) ?? []).length === 4 && ow.includes('Each switch below acts only while the master switch is on.')
+       && ow.includes('Fills {programLink} in 9 messages.') && ow.includes('Fills {discordInvite} in 4 messages.'),
      'the 4 switches with Turn on, the line that they act only while the master is on, and how many messages each link fills')
   const csm = render(MessageSettings, { ...props, canEdit: false })
   const cw = words(csm)
-  ok(!csm.includes('<input') && !csm.includes('<button') && cw.includes('https://30-day-sprint-smkv.vercel.app/login') && cw.includes('Empty')
-       && cw.includes(W_DISCORD) && cw.includes('Only a founder or an admin can change them.'),
-     'a csm reads the same links (the Discord one "Empty") and the warnings, with no field and no button', cw.slice(0, 160))
-  const unread = words(render(MessageSettings, { ...props, settings: { ok: false, error: 'permission denied for table admin_config' }, canEdit: true }))
-  ok(unread.includes("Couldn't load the message settings: permission denied for table admin_config."), 'settings that could not be read say so', unread)
+  ok(!csm.includes('<input') && (csm.match(/<button/g) ?? []).length === 1 && csm.includes('>Show settings<svg') && csm.includes('data-settings-open="no"')
+       && cw.includes(W_DISCORD) && cw.includes(W_PROGRAM) && (cw.match(/Only a founder or an admin can change them\./g) ?? []).length === 1,
+     'a csm, who cannot fix them, gets the warnings and the one sentence that only a founder or an admin can change them; the panel folded, its one button "Show settings", no field', cw.slice(0, 200))
+  const fixed = { ...LIVE_SETTINGS, discord_invite_link: 'https://discord.gg/example', program_login_link: 'https://sprint.ecomuniversity.com/login' }
+  const settled = render(MessageSettings, { ...props, settings: { ok: true, values: fixed }, canEdit: true })
+  ok(settled.includes('data-settings-open="no"') && !settled.includes('<input') && !words(settled).includes(W_DISCORD),
+     'with nothing to fix, a founder finds the panel folded: the templates come first', words(settled).slice(0, 160))
+  const unread = render(MessageSettings, { ...props, settings: { ok: false, error: 'permission denied for table admin_config' }, canEdit: true })
+  const uw = words(unread)
+  ok(uw.includes("Couldn't load the message settings. Press Refresh to try again.") && uw.includes("This account can't read the admin settings.")
+       && unread.includes('<summary') && uw.includes('permission denied for table admin_config'),
+     'settings that could not be read say so, why in plain words, the database\'s own words behind Details', uw)
 }
 
 console.log('\n=== D6: a change goes through PUT /api/admin/config (the real route and the real team check) ===')

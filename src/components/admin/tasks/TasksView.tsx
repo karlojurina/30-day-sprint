@@ -6,13 +6,15 @@ import { Button, Card, EmptyState, Modal, Pill, T } from "@/components/admin/ui"
 import type { PillTone } from "@/components/admin/ui";
 import { ListHeader, ListPage, LoadError, NoticeStack, STALE_TEXT, SkeletonRows, TAP } from "@/components/admin/list-parts";
 import type { Notice } from "@/components/admin/list-parts";
-import { FactsLine, PillLinks, SearchField, STATUS_WORDS, TabStrip, Warning } from "@/components/admin/people-parts";
+import { FactsLine, SearchField, STATUS_WORDS, TabStrip, Warning } from "@/components/admin/people-parts";
+import { TextLink } from "@/components/admin/review-parts";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Answer } from "@/lib/admin/admin-transport";
-import { clockLabel, dayLabel, dayTimeLabel } from "@/lib/admin/croatia-dates";
+import { clockLabel, dayTimeLabel } from "@/lib/admin/croatia-dates";
 import { tasksTransport, type TasksTransport } from "@/lib/admin/people-transport";
 import {
   HISTORY_LABEL,
+  TAB_LABEL,
   TIER_LABEL,
   TIER_ORDER,
   closedLine,
@@ -50,9 +52,13 @@ import type { TeamMember } from "@/types/database";
  * saying how and when. Every count is the route's exact count; a list cut
  * at 500 says so.
  *
- * Refresh runs the task checks (founders and admins: the Whop sync and the
- * snapshots too, about 2 minutes), then reads the list again. What a button
- * did, or why it failed, shows at the bottom of the window (NoticeStack).
+ * "Run task checks" runs the task checks (founders and admins: the Whop
+ * sync and the snapshots too, about 2 minutes), then reads the list again;
+ * "Refresh" on the other pages only reads again, so this one is named for
+ * what it does. "Outreach insights" in the header opens
+ * /admin/tasks/insights (the pills that did were the status tabs' twins).
+ * What a button did, or why it failed, shows at the bottom of the window
+ * (NoticeStack).
  *
  * The calls go through `transport` (people-transport.ts), so the dev page
  * /dev/admin/tasks renders this same view with made-up data and no login.
@@ -61,7 +67,7 @@ import type { TeamMember } from "@/types/database";
 type Loaded = { kind: "loading" } | { kind: "error"; error: string } | { kind: "ready"; data: TasksAnswer };
 
 const TAB_EMPTY: Record<TaskTab, { title: string; description: string }> = {
-  open: { title: "Nothing to do.", description: "New tasks land here when the task checks run, every 2 hours, or on Refresh." },
+  open: { title: "Nothing to do.", description: "New tasks land here when the task checks run: every 2 hours, or on Run task checks." },
   completed: { title: "Nothing sent yet.", description: "A task marked sent moves here, for the record." },
   dismissed: { title: "Nothing dismissed.", description: "A task dismissed with a reason, or by the checks, moves here." },
   archived: { title: "Nothing from before the reset.", description: "" },
@@ -73,12 +79,15 @@ const BUCKET_TONE: Record<string, PillTone> = {
   crushing: "accent",
 };
 
-/** The left edge of a To do row: canceling, cancel path, at risk. Colour on an edge only; the tier's name is above the list. */
+/**
+ * The left edge of a To do row: red for canceling (the save comes first),
+ * orange for cancel path and at risk. Colour on an edge only; the tier's
+ * name is above the list.
+ */
 function edgeOf(row: TaskRow): string | null {
   const tier = tierOf(row);
-  if (tier === "canceling") return "var(--color-text-primary)";
-  if (tier === "cancel_path") return "var(--color-danger)";
-  if (tier === "at_risk") return "var(--color-warning)";
+  if (tier === "canceling") return "var(--color-danger)";
+  if (tier === "cancel_path" || tier === "at_risk") return "var(--color-warning)";
   return null;
 }
 
@@ -233,38 +242,43 @@ export function TasksView({
     <ListHeader
       title="Tasks"
       description="Copy a DM, send it in Discord, then mark it sent."
-      meta={
-        data
-          ? `Updated ${clockLabel(data.generatedAt)}${reloading || checking ? " · Updating" : ""}${
-              data.resetAt ? ` · New program since ${dayLabel(data.resetAt)}` : ""
-            }`
-          : "Loading"
-      }
-      action={
+      meta={data ? `Updated ${clockLabel(data.generatedAt)}${reloading || checking ? " · Updating" : ""}` : "Loading"}
+      actions={[
+        <TextLink key="insights" href="/admin/tasks/insights">
+          Outreach insights <span aria-hidden="true">→</span>
+        </TextLink>,
         <Button
+          key="checks"
           variant="raised"
           size="md"
           busy={checking}
           onClick={() => void runChecks()}
           title={
             fullChecks
-              ? "Syncs Whop, rebuilds the snapshots and runs the task checks, then reads the list again. About 2 minutes."
-              : "Runs the task checks, then reads the list again."
+              ? "Syncs Whop, rebuilds the snapshots and runs the task checks, then reads the list again. Takes about 2 minutes."
+              : "Runs the task checks, then reads the list again. Takes under a minute."
           }
         >
-          {checking ? "Refreshing" : "Refresh"}
-        </Button>
-      }
+          {checking ? (fullChecks ? "Running the checks, about 2 minutes" : "Running the checks") : "Run task checks"}
+        </Button>,
+      ]}
     />
   );
 
-  const views = <PillLinks current="/admin/tasks" links={[{ href: "/admin/tasks", label: "Queue" }, { href: "/admin/tasks/insights", label: "Insights" }]} />;
-
+  // While the list loads or failed, the tabs keep their place, with no counts (the review's fix round).
+  const blankTabs = (
+    <TabStrip
+      label="Task lists"
+      tabs={(["open", "completed", "dismissed"] as TaskTab[]).map((t) => ({ value: t, label: TAB_LABEL[t] }))}
+      value={tab === "archived" ? "open" : tab}
+      onChange={() => {}}
+    />
+  );
   if (loaded.kind === "loading") {
     return (
       <ListPage>
         {header(null)}
-        {views}
+        {blankTabs}
         <SkeletonRows rows={4} label="Loading the tasks" />
       </ListPage>
     );
@@ -273,7 +287,7 @@ export function TasksView({
     return (
       <ListPage>
         {header(null)}
-        {views}
+        {blankTabs}
         <LoadError title="Couldn't load the tasks." detail={loaded.error} onRetry={() => void reload()} busy={reloading} />
         <NoticeStack notices={notices} onClose={() => setNotice(null)} />
       </ListPage>
@@ -340,7 +354,6 @@ export function TasksView({
   return (
     <ListPage>
       {header(data)}
-      {views}
       <NoticeStack notices={notices} onClose={(id) => (id === -1 ? setStale(false) : setNotice(null))} />
 
       <TabStrip label="Task lists" tabs={tabs} value={current} onChange={setTab} />
@@ -806,7 +819,7 @@ function DismissPanel({
           Cancel
         </Button>
         <Button
-          variant="raised"
+          variant="danger"
           size="md"
           busy={busy}
           onClick={() => {
@@ -817,7 +830,7 @@ function DismissPanel({
             onDismiss(reason.trim());
           }}
         >
-          Dismiss
+          Dismiss the task
         </Button>
       </div>
     </div>

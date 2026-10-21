@@ -57,6 +57,8 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { LESSONS_TABLE } from "./stub-server.ts";
+import { newReadContext, readMembershipDiscount, rowOf } from "./membership-discount.ts";
+import type { MembershipReadFail } from "./membership-discount.ts";
 import { fetchAllRowsPaginated } from "./one-page.ts";
 import { DISCOUNT_ELIGIBLE_FROM, requiredLessons } from "./discount.ts";
 import type { DiscountRequestRow } from "./discount.ts";
@@ -129,6 +131,52 @@ export interface ThirtyData {
 }
 
 export type ThirtyLoad = { ok: true; data: ThirtyData } | { ok: false; failed: string[] };
+
+/**
+ * What Whop says now about the membership of a student with an approved
+ * request: the coupon the 30% code would replace on it (admin rebuild 2,
+ * the review's fix round). The cron leaves those students out (D5's
+ * population), and no route reads them again after the approval, so a
+ * request approved before the coupon rule never had a stored row: the page
+ * asks Whop for them itself, a handful each load. `fail` is why Whop said
+ * nothing: a MembershipReadFail, or no membership id, or no API key.
+ */
+export type LiveCoupon = { ok: true; row: ThirtyCouponRow } | { ok: false; fail: MembershipReadFail | "no_membership" };
+
+/** The live reads' limits, the request routes' own: no Whop request starts after 6 s, none is waited on past 8 s. */
+const LIVE_START_BUDGET_MS = 6_000;
+const LIVE_ANSWER_BUDGET_MS = 8_000;
+
+/**
+ * Whop now, for each student holding an approved request (readMembershipDiscount,
+ * pinned and paced as the cron reads). Never throws; writes nothing: the
+ * page shows the answer, and the request routes and the cron keep their own
+ * rows. Without an API key every answer is { ok: false, fail: "no_api_key" }.
+ */
+export async function readApprovedCoupons(
+  data: Pick<ThirtyData, "requests" | "students">,
+  apiKey: string | null,
+  nowMs: number = Date.now(),
+): Promise<Map<string, LiveCoupon>> {
+  const out = new Map<string, LiveCoupon>();
+  const holders = new Set(data.requests.filter((r) => r.status === "approved").map((r) => r.student_id));
+  const students = data.students.filter((s) => holders.has(s.id));
+  if (students.length === 0) return out;
+  const ctx = newReadContext(apiKey ?? "", nowMs + LIVE_START_BUDGET_MS, nowMs + LIVE_ANSWER_BUDGET_MS);
+  for (const s of students) {
+    if (!s.whop_membership_id) {
+      out.set(s.id, { ok: false, fail: "no_membership" });
+      continue;
+    }
+    try {
+      const r = await readMembershipDiscount(s.whop_membership_id, ctx);
+      out.set(s.id, r.ok ? { ok: true, row: rowOf(s.id, r.membership, new Date().toISOString()) } : { ok: false, fail: r.fail });
+    } catch {
+      out.set(s.id, { ok: false, fail: "network" });
+    }
+  }
+  return out;
+}
 
 const BATCH = 100;
 /** The most rows PostgREST answers for one query (max-rows on Supabase). */

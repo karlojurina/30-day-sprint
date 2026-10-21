@@ -156,32 +156,6 @@ export function Stat({ label, value, sublabel, tone = "default", }) {
 export function Pill({ tone = "neutral", children, }) {
     return _jsx("span", { className: `pill-tone pill-tone-${tone}`, children: children });
 }
-/**
- * Pace pill — student progress relative to expected pace for their
- * day. Admin-only signal that lives next to the student's name on
- * /admin/students and on task cards.
- *
- *   label = "behind"  -> red
- *   label = "on_pace" -> neutral
- *   label = "ahead"   -> green
- *
- * Pass `compact` to render just the icon (no label) — useful inside
- * very dense rows like task cards.
- */
-export function PacePill({ label, compact = false, }) {
-    const tone = label === "behind"
-        ? "danger"
-        : label === "ahead"
-            ? "success"
-            : "neutral";
-    const icon = label === "behind" ? "↓" : label === "ahead" ? "↑" : "→";
-    const text = label === "behind"
-        ? "Behind"
-        : label === "ahead"
-            ? "Ahead"
-            : "On pace";
-    return (_jsxs(Pill, { tone: tone, children: [_jsx("span", { "aria-hidden": "true", children: icon }), !compact && _jsx("span", { children: text })] }));
-}
 function buttonStyle(variant, size, busy, disabled = false) {
     const pad = size === "sm" ? "5px 12px" : "8px 16px";
     const fs = size === "sm" ? 12 : 13;
@@ -210,7 +184,10 @@ function buttonStyle(variant, size, busy, disabled = false) {
         return {
             ...base,
             background: "var(--color-danger)",
-            color: "#FFFFFF",
+            color: "var(--admin-danger-label, #FFFFFF)",
+            borderRadius: "var(--admin-button-radius, var(--radius-chip))",
+            minHeight: "var(--admin-button-min-height, auto)",
+            justifyContent: "center",
         };
     }
     if (variant === "subtle") {
@@ -261,45 +238,6 @@ export function Button({ children, variant = "ghost", size = "sm", busy = false,
         return (_jsx(Link, { href: href, style: style, title: title, children: children }));
     }
     return (_jsx("button", { type: type, onClick: onClick, disabled: busy || disabled, style: style, title: title, children: children }));
-}
-/**
- * Small circular icon button. For kebab menus, close buttons, etc.
- */
-export function IconButton({ label, onClick, children, }) {
-    return (_jsx("button", { type: "button", "aria-label": label, title: label, onClick: onClick, style: {
-            width: 28,
-            height: 28,
-            borderRadius: "var(--radius-chip)",
-            background: "transparent",
-            border: "none",
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: "var(--color-text-tertiary)",
-            transition: "background 150ms var(--ease-default), color 150ms var(--ease-default)",
-        }, onMouseEnter: (e) => {
-            e.currentTarget.style.background = "rgba(20,20,24,0.06)";
-            e.currentTarget.style.color = "var(--color-text-primary)";
-        }, onMouseLeave: (e) => {
-            e.currentTarget.style.background = "transparent";
-            e.currentTarget.style.color = "var(--color-text-tertiary)";
-        }, children: children }));
-}
-/* ─── Avatar ─── */
-export function Avatar({ src, name, size = 28, }) {
-    const initial = (name ?? "?")[0]?.toUpperCase() ?? "?";
-    return (_jsx("div", { className: "flex items-center justify-center shrink-0", style: {
-            width: size,
-            height: size,
-            borderRadius: "50%",
-            fontSize: size <= 28 ? 11 : 14,
-            fontWeight: 600,
-            background: src
-                ? `url(${src}) center/cover`
-                : "var(--color-accent-glow)",
-            color: "var(--color-accent-dark)",
-        }, children: src ? "" : initial }));
 }
 /* ─── Tabs ─── */
 /**

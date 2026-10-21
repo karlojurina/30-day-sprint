@@ -30,7 +30,7 @@ import { DISCOUNT_LAUNCH_DATE } from "@/lib/world/discount";
 import { activityLabel, type ActivityLabel } from "@/lib/curriculum-reset";
 import { isCanceling } from "@/lib/admin/metrics-definitions";
 import type { CourseActivity } from "@/lib/useJourneyPaceCounts";
-import { agoText, dayNumber, failed, ok, readCountingLessons, readOf, type Read } from "./people-common";
+import { agoText, dayNumber, failed, ok, readCountingLessons, readOf, type Read, type Problem } from "./people-common";
 
 /** The columns a card needs. Never `*`, and never a plan. */
 export const JOURNEY_COLUMNS = "id, name, email, membership_status, first_paid_at, last_active_at, cancel_scheduled_at";
@@ -134,7 +134,8 @@ export interface Journey {
   total: number;
   launchedAt: string;
   generatedAt: string;
-  problems: string[];
+  /** Each read that failed: a sentence for the top of the board, and the read's own words. */
+  problems: Problem[];
 }
 
 /** The board, from the reads. Hand it reads whose `students` worked. `nowIso` is the moment of the read. */
@@ -144,13 +145,13 @@ export function buildJourney(
   nowIso: string,
 ): Journey {
   const nowMs = Date.parse(nowIso);
-  const problems: string[] = [];
+  const problems: Problem[] = [];
   const again = "Press Refresh to try again.";
-  if (!reads.progress.ok) problems.push(`Couldn't load the students' progress (${reads.progress.error}), so no card shows it. ${again}`);
-  else if (!reads.countingLessons.ok) problems.push(`Couldn't count the course's lessons (${reads.countingLessons.error}), so no card shows progress. ${again}`);
-  if (!reads.areas.ok) problems.push(`Couldn't load the course's areas (${reads.areas.error}), so no card shows its area. ${again}`);
-  else if (!reads.currentArea.ok) problems.push(`Couldn't load where each student is (${reads.currentArea.error}), so no card shows its area. ${again}`);
-  if (!course.ok) problems.push(`Couldn't read which course is live (${course.error}), so no activity is shown. ${again}`);
+  if (!reads.progress.ok) problems.push({ text: `Couldn't load the students' progress, so no card shows it. ${again}`, error: reads.progress.error });
+  else if (!reads.countingLessons.ok) problems.push({ text: `Couldn't count the course's lessons, so no card shows progress. ${again}`, error: reads.countingLessons.error });
+  if (!reads.areas.ok) problems.push({ text: `Couldn't load the course's areas, so no card shows its area. ${again}`, error: reads.areas.error });
+  else if (!reads.currentArea.ok) problems.push({ text: `Couldn't load where each student is, so no card shows its area. ${again}`, error: reads.currentArea.error });
+  if (!course.ok) problems.push({ text: `Couldn't read which course is live, so no activity is shown. ${again}`, error: course.error });
 
   const progressKnown = reads.progress.ok && reads.countingLessons.ok;
   const done = new Map(reads.progress.ok ? reads.progress.data.map((r) => [r.student_id, r.completed_count]) : []);

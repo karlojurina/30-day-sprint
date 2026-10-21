@@ -22,6 +22,12 @@ import type { Point } from "@/lib/admin/dashboard-metrics";
  *
  * A day with no reading is a gap in the line (and "No reading" in the
  * readout and the table), never a 0.
+ *
+ * Insights draws its charts with this one too (admin rebuild 2, the review's
+ * fix round), with labelled gridlines (`guides`, from axisTicks in
+ * src/lib/admin/insights-data.ts) in a gutter left of the plot (`gutter`),
+ * so a label never covers a bar. With no gutter, a guide's label sits on its
+ * line, as Month 2's 50% and 100% do.
  */
 
 const ACCENT = "var(--color-accent-dark)";
@@ -77,6 +83,8 @@ export function TrendChart({
   axis = false,
   domain,
   guides = [],
+  guideFormat,
+  gutter = 0,
   emptyText = "No reading",
 }: {
   /** Oldest first. */
@@ -92,8 +100,12 @@ export function TrendChart({
   axis?: boolean;
   /** A fixed value range (Month 2's 0 to 100). */
   domain?: [number, number];
-  /** Values to mark with a labelled hairline (Month 2's 50% and 100%), so a line on a fixed range can be read without hovering. */
+  /** Values to mark with a labelled hairline (Month 2's 50% and 100%), so a line on a fixed range can be read without hovering. Bars take them too. */
   guides?: number[];
+  /** A guide's label, when it reads differently from a value (Insights' "2.7%" beside a readout of "2.71%"). */
+  guideFormat?: (v: number) => string;
+  /** Room in px left of the plot for the guides' labels; 0 puts each label on its line. */
+  gutter?: number;
   /** The readout for a day with no reading. */
   emptyText?: string;
 }) {
@@ -107,8 +119,12 @@ export function TrendChart({
 
   /** Where day i sits across the plot, 0 to 1. */
   const frac = (i: number) => (kind === "bars" ? (i + 0.5) / n : n === 1 ? 0.5 : i / (n - 1));
-  const left = (i: number) => `calc(${INSET}px + (100% - ${2 * INSET}px) * ${frac(i)})`;
+  const padL = INSET + gutter;
+  const left = (i: number) => `calc(${padL}px + (100% - ${padL + INSET}px) * ${frac(i)})`;
   const y = (v: number) => padTop + (1 - (v - lo) / (hi - lo)) * plotH;
+  /** The top of a bar of value v, or the line's height for v: where a guide at v is drawn. */
+  const guideTop = (v: number) => (kind === "bars" ? height - 1 - (v / hi) * (height - padTop - 1) : y(v));
+  const labelOf = guideFormat ?? format;
 
   let lastRead = -1;
   for (let i = n - 1; i >= 0; i--) {
@@ -168,9 +184,9 @@ export function TrendChart({
   const nearest = (clientX: number, el: HTMLElement): number | null => {
     if (n === 0) return null;
     const r = el.getBoundingClientRect();
-    const inner = r.width - 2 * INSET;
+    const inner = r.width - padL - INSET;
     if (inner <= 0) return null;
-    const rel = (clientX - r.left - INSET) / inner;
+    const rel = (clientX - r.left - padL) / inner;
     const i = kind === "bars" ? Math.floor(rel * n) : Math.round(rel * (n - 1));
     return Math.max(0, Math.min(n - 1, i));
   };
@@ -215,7 +231,7 @@ export function TrendChart({
           aria-hidden="true"
           style={{
             position: "absolute",
-            left: 0,
+            left: gutter,
             right: 0,
             top: kind === "bars" ? height - 1 : Math.round(base),
             height: 1,
@@ -224,7 +240,8 @@ export function TrendChart({
           }}
         />
 
-        {kind === "line" &&
+        {gutter === 0 &&
+          kind === "line" &&
           guides
             .filter((g) => g > lo && g <= hi)
             .map((g) => (
@@ -242,17 +259,49 @@ export function TrendChart({
                     fontVariantNumeric: "tabular-nums",
                   }}
                 >
-                  {format(g)}
+                  {labelOf(g)}
                 </span>
               </div>
             ))}
+
+        {/* With a gutter: each guide's hairline across the plot (none over the baseline) and its label in the gutter, on its line. */}
+        {gutter > 0 &&
+          guides
+            .filter((g) => g >= lo && g <= hi)
+            .map((g) => {
+              const top = Math.round(guideTop(g));
+              const onBaseline = g === lo && (kind === "bars" || lo === 0);
+              return (
+                <div key={g} aria-hidden="true" data-guide={labelOf(g)}>
+                  {!onBaseline && (
+                    <div style={{ position: "absolute", left: gutter, right: 0, top, height: 1, background: "var(--color-border)" }} />
+                  )}
+                  <span
+                    style={{
+                      position: "absolute",
+                      left: 0,
+                      width: gutter - 6,
+                      top: top - 7,
+                      textAlign: "right",
+                      fontSize: 11,
+                      lineHeight: "14px",
+                      color: "var(--color-text-secondary)",
+                      fontVariantNumeric: "tabular-nums",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {labelOf(g)}
+                  </span>
+                </div>
+              );
+            })}
 
         {kind === "line" && (
           <svg
             aria-hidden="true"
             viewBox={`0 0 100 ${height}`}
             preserveAspectRatio="none"
-            style={{ position: "absolute", left: INSET, right: INSET, top: 0, width: `calc(100% - ${2 * INSET}px)`, height, overflow: "visible" }}
+            style={{ position: "absolute", left: padL, right: INSET, top: 0, width: `calc(100% - ${padL + INSET}px)`, height, overflow: "visible" }}
           >
             {/* The kit's own accent tint (16% Airy Blue), flat. */}
             {areaPath && <path d={areaPath} style={{ fill: "var(--color-accent-glow)", stroke: "none" }} />}
@@ -269,7 +318,7 @@ export function TrendChart({
         {kind === "bars" && (
           <div
             aria-hidden="true"
-            style={{ position: "absolute", left: INSET, right: INSET, top: padTop, bottom: 1, display: "flex", alignItems: "flex-end", gap: 2 }}
+            style={{ position: "absolute", left: padL, right: INSET, top: padTop, bottom: 1, display: "flex", alignItems: "flex-end", gap: 2 }}
           >
             {points.map((p, i) => (
               <div
@@ -371,6 +420,7 @@ export function TrendChart({
             justifyContent: "space-between",
             gap: 12,
             marginTop: 8,
+            paddingLeft: gutter,
             fontSize: 12,
             color: "var(--color-text-secondary)",
             fontVariantNumeric: "tabular-nums",

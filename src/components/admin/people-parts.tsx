@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { Pill, T } from "@/components/admin/ui";
 import { TAP, pressPill } from "@/components/admin/list-parts";
 import { ACTIVITY_TEXT, ACTIVITY_TONE } from "@/lib/useJourneyPaceCounts";
@@ -13,7 +12,6 @@ import type { ActivityLabel } from "@/lib/curriculum-reset";
  * page's): the same 44px pills and taps, the same 12px floor for words.
  *
  *   TabStrip      tabs as pills with their counts, wrapping on a phone
- *   PillLinks     two or three pages as pills (Queue · Insights)
  *   Warning       a lasting problem with the whole page, above it
  *   SearchField   the search box: 44px tall, 16px words so a phone does not zoom
  *   Meter         a share as a bar and its number, or "Couldn't load"
@@ -53,25 +51,6 @@ export function TabStrip<K extends string>({
         );
       })}
     </div>
-  );
-}
-
-/** Pages as pills: the one shown is pressed and is not a link. */
-export function PillLinks({ links, current }: { links: Array<{ href: string; label: string }>; current: string }) {
-  return (
-    <nav aria-label="Views" className="flex flex-wrap" style={{ gap: 8, marginBottom: 16 }}>
-      {links.map((l) =>
-        l.href === current ? (
-          <span key={l.href} aria-current="page" style={pressPill(true)}>
-            {l.label}
-          </span>
-        ) : (
-          <Link key={l.href} href={l.href} style={{ ...pressPill(false), textDecoration: "none" }}>
-            {l.label}
-          </Link>
-        ),
-      )}
-    </nav>
   );
 }
 

@@ -11,7 +11,7 @@ import { fixtureInsightsTransport, fixturePace, parseInsightsState } from "../in
  * InsightsView.tsx) with made-up numbers and no login (admin rebuild 2,
  * WI-9). The bar above it is the real one, for a made-up founder.
  *
- *   ?state=full | empty | loading | error | partial   (default full)
+ *   ?state=full | empty | loading | error | partial | noreset   (default full)
  *   ?course=new | old   activity or pace in the first card (default new)
  */
 

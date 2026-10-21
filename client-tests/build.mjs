@@ -220,13 +220,12 @@ gen('../src/app/api/discounts/approve/route.ts', './_gen/discount-approve-route.
 ])
 
 // The 30% for every student at once (admin rebuild, WI-2, thirty-view.test.mjs):
-// the bulk loader and the 30% page's builder, with the plan and date helpers
+// the bulk loader and the 30% page's builder, with the date helpers
 // they use. The rule is the real copies above; the pages helper has no
 // imports; which catalog is live goes to stub-server.ts. The loader's
 // Supabase import and the builder's imports from the loader are TYPES, which
 // --experimental-strip-types erases.
 gen('../src/lib/supabase-pagination.ts', './_gen/supabase-pagination.ts')
-gen('../src/lib/admin/plans.ts', './_gen/plans.ts', [['from "@/lib/constants"', 'from "./constants.ts"']])
 gen('../src/lib/admin/croatia-dates.ts', './_gen/croatia-dates.ts')
 const RULE = [
   ['from "@/lib/world/discount"', 'from "./discount.ts"'],
@@ -234,14 +233,17 @@ const RULE = [
 ]
 gen('../src/lib/admin/thirty-view.ts', './_gen/thirty-view.ts', [
   ...RULE,
-  ['from "./plans"', 'from "./plans.ts"'],
   ['from "./croatia-dates"', 'from "./croatia-dates.ts"'],
   ['from "./thirty-data"', 'from "./thirty-data.ts"'],
+  // Whether a stored Whop id can be asked about at all (the review's fix round): the coupon rule's copy below.
+  ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
 ])
 gen('../src/lib/admin/thirty-data.ts', './_gen/thirty-data.ts', [
   ...RULE,
   ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
   ['from "./thirty-view"', 'from "./thirty-view.ts"'],
+  // The Approved rows' live coupon read (the review's fix round): the coupon rule's reader, copied below.
+  ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
   ...toStub('@/lib/catalog-tables'),
 ])
 
@@ -406,6 +408,8 @@ gen('../src/lib/admin/dashboard-metrics.ts', './_gen/dashboard-metrics.ts', [
   ['from "@/lib/admin/metrics-definitions"', 'from "./metrics-definitions.ts"'],
   ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
   ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+  // The tasks reset's check (the review's fix round): tasks-reset.ts is copied below, for the Tasks lane.
+  ['from "@/lib/admin/tasks-reset"', 'from "./tasks-reset.ts"'],
 ])
 
 // ── Admin rebuild 2, lane thirty (WI-3 and WI-4): the coupon rule ────────────
@@ -467,6 +471,8 @@ gen('../src/lib/admin/student-detail.ts', './_gen/student-detail.ts', [
   ['from "@/lib/streak"', 'from "./streak.ts"'],
   ['from "@/lib/admin/metrics-definitions"', 'from "./metrics-definitions.ts"'],
   ['from "@/lib/admin/thirty-view"', 'from "./thirty-view.ts"'],
+  // The 30% statuses' one map (the review's fix round), copied at the end of this file.
+  ['from "@/lib/admin/discount-status"', 'from "./discount-status.ts"'],
 ])
 gen('../src/lib/admin/journey-board.ts', './_gen/journey-board.ts', [
   ...PEOPLE,
@@ -528,6 +534,9 @@ gen('../src/lib/admin/templates-data.ts', './_gen/templates-data.ts', [
 gen('../src/lib/admin/survey-data.ts', './_gen/survey-data.ts', [
   ...LANE_TYPES,
   ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+  // The review's fix round: the one status map (copied at the end of this file) and the 30%'s first day.
+  ['from "@/lib/admin/discount-status"', 'from "./discount-status.ts"'],
+  ['from "@/lib/world/discount"', 'from "./discount.ts"'],
 ])
 gen('../src/lib/admin/team-data.ts', './_gen/team-data.ts', LANE_TYPES)
 gen('../src/lib/admin/insights-data.ts', './_gen/insights-data.ts', [
@@ -535,6 +544,8 @@ gen('../src/lib/admin/insights-data.ts', './_gen/insights-data.ts', [
   ['from "@/lib/constants"', 'from "./constants.ts"'],
   ['from "@/lib/admin/metrics-definitions"', 'from "./metrics-definitions.ts"'],
   ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+  // The course switch, for Avg progress's floor (the review's fix round).
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
 ])
 // The message renderer the preview runs (templates.ts): its one value import
 // is getDayNumber from the types file, which has no imports and runs as it is.
@@ -553,3 +564,14 @@ gen('../src/lib/admin/templates-transport.ts', './_gen/templates-transport.ts', 
   ['from "@/lib/admin/templates-data"', 'from "./templates-data.ts"'],
   ['from "@/types/database"', 'from "./types-erased.ts"'],
 ])
+
+// ── Admin rebuild 2, WI-11: the review's fix round (admin-review.test.mjs) ───
+// A failed read in plain words (read-failure.ts, no imports): the pages'
+// LoadError and the Dashboard's line about its failed reads say it, the raw
+// text behind Details. templates-page and team-page compile review-parts.tsx
+// over this copy, since list-parts.tsx's LoadError imports it.
+gen('../src/lib/admin/read-failure.ts', './_gen/read-failure.ts')
+// The 30% statuses' one map (discount-status.ts, no imports): the 30% page,
+// the Survey (survey-data.ts above) and a student's page (student-detail.ts
+// above) name and colour them from it.
+gen('../src/lib/admin/discount-status.ts', './_gen/discount-status.ts')

@@ -5,12 +5,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, Pill, Stat, T } from "@/components/admin/ui";
 import type { PillTone } from "@/components/admin/ui";
 import { CopyButton, ListPage, LoadError, MembershipPill, SkeletonRows, TAP } from "@/components/admin/list-parts";
-import { ActivityPill, Dot, FactsLine, Meter, Warning } from "@/components/admin/people-parts";
+import { ActivityPill, Dot, FactsLine, Meter } from "@/components/admin/people-parts";
+import { ProblemNotice, ReadFailure } from "@/components/admin/review-parts";
 import type { Answer } from "@/lib/admin/admin-transport";
 import { dayLabel, dayTimeLabel } from "@/lib/admin/croatia-dates";
 import { agoText, type Read } from "@/lib/admin/people-common";
 import { peopleTransport, type PeopleTransport } from "@/lib/admin/people-transport";
-import type { StudentDetail, SyncView } from "@/lib/admin/student-detail";
+import { quickDms, type StudentDetail, type SyncView } from "@/lib/admin/student-detail";
 
 /**
  * One student, /admin/students/[id] (admin rebuild 2, D9), in the brand
@@ -18,13 +19,18 @@ import type { StudentDetail, SyncView } from "@/lib/admin/student-detail";
  * src/lib/admin/student-detail.ts; this file shows them.
  *
  * Each block whose read failed says "Couldn't load", never 0%, 0 days or
- * "No application submitted"; the student's own read failing is the page's
- * error, with Retry, and an id with no student says so. The Whop sync block
- * says "Not synced since the switch" when its numbers are the old course's
+ * "No application submitted", why in plain words with the database's own
+ * behind Details; the student's own read failing is the page's error, with
+ * Retry, and an id with no student says so. The Whop sync block says "Not
+ * synced since the switch" when its numbers are the old course's
  * (whopPulled, as the 30% page marks it). No plan anywhere.
  *
- * The quick DMs keep their words as they were; the messages draft of admin
- * rebuild 2 (WI-10) rewrites them.
+ * The order is what the team uses most first: the numbers, Whop sync, the
+ * 30%, the lessons, the quick DMs; then, quiet at the foot, the settings:
+ * "Leave out of the tasks" (a team test account) and, folded under More,
+ * "Ad submissions verified", which approving the 30% no longer needs (the
+ * review's fix round). The quick DMs are the messages draft's words
+ * (student-detail.ts quickDms).
  */
 
 type Loaded =
@@ -34,14 +40,6 @@ type Loaded =
   | { kind: "ready"; data: StudentDetail };
 
 export const COULD_NOT_LOAD = "Couldn't load";
-
-/** The latest 30% request's pill colour, in the 30% page's words. */
-const DISCOUNT_TONE: Record<string, PillTone> = {
-  pending: "warning",
-  approved: "success",
-  applied: "neutral",
-  rejected: "danger",
-};
 
 /** Loads one student through `transport`, for the page and the journey's drawer. */
 export function useStudent(transport: PeopleTransport, studentId: string) {
@@ -140,18 +138,16 @@ export function StudentDetailView({ studentId, transport = peopleTransport }: { 
         </div>
       </header>
 
-      {s.courseProblem && <Warning>{s.courseProblem}</Warning>}
+      {s.courseProblem && <ProblemNotice text={s.courseProblem.text} raw={s.courseProblem.error} />}
 
       <StatGrid student={s} nowMs={nowMs} />
-
-      <ExemptCard student={s} transport={transport} onSaved={(v) => patch({ csmExempt: v })} />
 
       <Block title="Whop sync">
         <SyncBlock sync={s.sync} />
       </Block>
 
       <Block title="30% off">
-        <DiscountBlock student={s} transport={transport} onSaved={(v) => patch({ adVerified: v })} />
+        <DiscountBlock student={s} />
       </Block>
 
       <Block title="Lesson progress">
@@ -161,6 +157,8 @@ export function StudentDetailView({ studentId, transport = peopleTransport }: { 
       <Block title="Quick DMs">
         <QuickDms student={s} />
       </Block>
+
+      <SettingsRow student={s} transport={transport} onSaved={patch} />
     </ListPage>
   );
 }
@@ -191,46 +189,88 @@ export function StatGrid({ student: s, nowMs, compact = false }: { student: Stud
   );
 }
 
-function ExemptCard({
+/** A tick that saves itself, with its words beside it and what went wrong under it. */
+function SavingTick({
+  checked,
+  title,
+  description,
+  save,
+  onSaved,
+}: {
+  checked: boolean;
+  title: string;
+  description: string;
+  save: (next: boolean) => Promise<Answer<null>>;
+  onSaved: (next: boolean) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div>
+      <label className="flex items-start" style={{ gap: 12, minHeight: TAP, padding: "12px 0", cursor: saving ? "wait" : "pointer" }}>
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={saving}
+          onChange={async (e) => {
+            const next = e.currentTarget.checked;
+            setSaving(true);
+            setError(null);
+            const r = await save(next);
+            setSaving(false);
+            if (r.ok) onSaved(next);
+            else setError(r.error);
+          }}
+          style={{ width: 18, height: 18, marginTop: 1, flex: "none" }}
+        />
+        <span style={{ ...T.bodyDim, lineHeight: 1.5 }}>
+          <span style={{ color: "var(--color-text-primary)", fontWeight: 600 }}>{title}</span>
+          <span aria-hidden="true">. </span>
+          {description}
+        </span>
+      </label>
+      {error && <ReadFailure raw={error} lead="Couldn't save it." style={{ marginBottom: 8 }} />}
+    </div>
+  );
+}
+
+/**
+ * The settings, quiet, at the foot of the page: "Leave out of the tasks" (a
+ * team test account), and under a closed More, "Ad submissions verified",
+ * which approving the 30% no longer needs.
+ */
+function SettingsRow({
   student: s,
   transport,
   onSaved,
 }: {
   student: StudentDetail;
   transport: PeopleTransport;
-  onSaved: (v: boolean) => void;
+  onSaved: (change: Partial<StudentDetail>) => void;
 }) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   return (
-    <Card padding={14} style={{ marginBottom: 24 }}>
-      <label className="flex items-center" style={{ gap: 12, minHeight: TAP, cursor: saving ? "wait" : "pointer" }}>
-        <input
-          type="checkbox"
-          checked={s.csmExempt}
-          disabled={saving}
-          onChange={async (e) => {
-            const next = e.currentTarget.checked;
-            setSaving(true);
-            setError(null);
-            const r = await transport.setExempt(s.id, next);
-            setSaving(false);
-            if (r.ok) onSaved(next);
-            else setError(r.error);
-          }}
-          style={{ width: 18, height: 18 }}
+    <section aria-label="Settings" data-settings="" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--color-border)" }}>
+      <SavingTick
+        checked={s.csmExempt}
+        title="Leave out of the tasks"
+        description={s.csmExempt ? "No task and no day 28 DM is made for this account." : "For a team test account."}
+        save={(next) => transport.setExempt(s.id, next)}
+        onSaved={(next) => onSaved({ csmExempt: next })}
+      />
+      <details data-more="">
+        {/* A list item keeps the browser's triangle, so it reads as something to press; 44px with its padding. */}
+        <summary style={{ display: "list-item", padding: "12px 0", lineHeight: "20px", fontSize: 13, fontWeight: 600, color: "var(--color-text-secondary)", cursor: "pointer" }}>
+          More
+        </summary>
+        <SavingTick
+          checked={s.adVerified}
+          title="Ad submissions verified"
+          description="A note for the team: the student's action items were checked in the Discord ad-review channel. Approving the 30% does not need it."
+          save={(next) => transport.setAdVerified(s.id, next)}
+          onSaved={(next) => onSaved({ adVerified: next })}
         />
-        <span style={T.bodyDim}>
-          <strong style={{ color: "var(--color-text-primary)" }}>Leave out of the tasks</strong>.{" "}
-          {s.csmExempt ? "No task and no day 28 DM is made for this account." : "For a team test account."}
-        </span>
-      </label>
-      {error && (
-        <p role="alert" style={{ ...T.body, marginTop: 8 }}>
-          {error}
-        </p>
-      )}
-    </Card>
+      </details>
+    </section>
   );
 }
 
@@ -244,7 +284,7 @@ function SyncBlock({ sync }: { sync: StudentDetail["sync"] }) {
   if (!sync.ok) {
     return (
       <Card padding={16}>
-        <p style={T.body}>{COULD_NOT_LOAD} the Whop sync ({sync.error}).</p>
+        <ReadFailure lead={`${COULD_NOT_LOAD} the Whop sync.`} raw={sync.error} />
       </Card>
     );
   }
@@ -325,29 +365,17 @@ function SyncNumber({ label, value }: { label: string; value: number | null }) {
   );
 }
 
-/** The latest 30% request (any date), the link to the 30% page, and the ads tick. */
-export function DiscountBlock({
-  student: s,
-  transport,
-  onSaved,
-  compact = false,
-}: {
-  student: StudentDetail;
-  transport: PeopleTransport;
-  onSaved: (v: boolean) => void;
-  compact?: boolean;
-}) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+/** The latest 30% request (any date), in the 30% page's words and colours, and the link to the 30% page. */
+export function DiscountBlock({ student: s }: { student: StudentDetail }) {
   const d = s.discount;
   return (
     <Card padding={16}>
       <div className="flex flex-wrap items-center" style={{ gap: 8 }}>
         {!d.ok ? (
-          <span style={T.body}>{COULD_NOT_LOAD} the 30% request ({d.error}).</span>
+          <ReadFailure lead={`${COULD_NOT_LOAD} the 30% request.`} raw={d.error} style={{ flex: "1 1 220px" }} />
         ) : d.data ? (
           <>
-            <Pill tone={DISCOUNT_TONE[d.data.status] ?? "neutral"}>{d.data.text}</Pill>
+            <Pill tone={d.data.tone as PillTone}>{d.data.text}</Pill>
             <span style={{ ...T.bodyDim, fontSize: 12 }}>Asked {dayLabel(d.data.askedAt)}</span>
             {d.data.code && <CopyButton text={d.data.code} label={`Copy ${d.data.code}`} />}
           </>
@@ -361,42 +389,6 @@ export function DiscountBlock({
           See on the 30% page
         </Link>
       </div>
-      <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--color-border)" }}>
-        <label className="flex items-start" style={{ gap: 12, minHeight: TAP, cursor: saving ? "wait" : "pointer" }}>
-          <input
-            type="checkbox"
-            checked={s.adVerified}
-            disabled={saving}
-            onChange={async (e) => {
-              const next = e.currentTarget.checked;
-              setSaving(true);
-              setError(null);
-              const r = await transport.setAdVerified(s.id, next);
-              setSaving(false);
-              if (r.ok) onSaved(next);
-              else setError(r.error);
-            }}
-            style={{ width: 18, height: 18, marginTop: 2 }}
-          />
-          <span>
-            <span style={{ ...T.body, fontWeight: 600, display: "block" }}>Ad submissions verified</span>
-            {compact ? (
-              <span style={{ ...T.bodyDim, fontSize: 12 }}>
-                Approving the 30% no longer needs it. Tick after confirming submissions in Discord.
-              </span>
-            ) : (
-              <span style={{ ...T.bodyDim, fontSize: 12 }}>
-                Tick this once you&rsquo;ve confirmed the student submitted all action items in the Discord ad-review channel. Approving the 30% no longer needs it.
-              </span>
-            )}
-          </span>
-        </label>
-        {error && (
-          <p role="alert" style={{ ...T.body, marginTop: 8 }}>
-            {error}
-          </p>
-        )}
-      </div>
     </Card>
   );
 }
@@ -405,7 +397,7 @@ function LessonsBlock({ areas }: { areas: StudentDetail["areas"] }) {
   if (!areas.ok) {
     return (
       <Card padding={16}>
-        <p style={T.body}>{COULD_NOT_LOAD} the lessons ({areas.error}).</p>
+        <ReadFailure lead={`${COULD_NOT_LOAD} the lessons.`} raw={areas.error} />
       </Card>
     );
   }
@@ -418,22 +410,41 @@ function LessonsBlock({ areas }: { areas: StudentDetail["areas"] }) {
   );
 }
 
-/** One area: its count and bar, and its lessons under a fold that says Show and Hide. */
+/**
+ * One area: its count and bar, its lessons under a fold the whole row opens
+ * (a chevron says which way). Wide: one line, the name, "3 of 3 done", the
+ * bar and the chevron. Under 640px: the name with "3 of 3 done" and the
+ * chevron on the right, then the bar across the row with its percent, 12px
+ * of air above and below.
+ */
 function AreaLessons({ area: a }: { area: Extract<StudentDetail["areas"], { ok: true }>["data"][number] }) {
   const [open, setOpen] = useState(false);
   return (
     <details className="list-row" style={{ display: "block", padding: "0 16px" }} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary className="flex flex-wrap items-center" style={{ gap: "4px 12px", minHeight: TAP, cursor: "pointer", listStyle: "none" }}>
-        <span style={{ ...T.body, fontWeight: 600, flex: "1 1 140px", minWidth: 0 }}>{a.name}</span>
-        <span style={{ fontSize: 12, color: "var(--color-text-secondary)", fontVariantNumeric: "tabular-nums" }}>
+      <summary
+        className="grid items-center grid-cols-[minmax(0,1fr)_auto_auto] sm:grid-cols-[minmax(0,1fr)_auto_96px_auto] py-3 sm:py-0"
+        style={{ columnGap: 12, rowGap: 8, minHeight: TAP, cursor: "pointer", listStyle: "none" }}
+        aria-label={`${a.name}, ${a.done} of ${a.total} done. ${open ? "Hide" : "Show"} its lessons.`}
+      >
+        <span className="col-start-1 row-start-1" style={{ ...T.body, fontWeight: 600, minWidth: 0, overflowWrap: "anywhere" }}>
+          {a.name}
+        </span>
+        <span className="col-start-2 row-start-1" style={{ fontSize: 12, color: "var(--color-text-secondary)", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>
           {a.done} of {a.total} done
         </span>
-        <span style={{ width: 96 }}>
+        <span className="col-span-3 col-start-1 row-start-2 sm:col-span-1 sm:col-start-3 sm:row-start-1" style={{ minWidth: 0 }}>
           <Meter value={a.total ? Math.round((a.done / a.total) * 100) : 0} label={`${a.name} progress`} />
         </span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-accent-dark)", width: 36, textAlign: "right" }}>
-          {open ? "Hide" : "Show"}
-        </span>
+        <svg
+          aria-hidden="true"
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          className="col-start-3 row-start-1 sm:col-start-4"
+          style={{ justifySelf: "end", transform: open ? "rotate(180deg)" : undefined, transition: "transform 150ms" }}
+        >
+          <path d="M4 6l4 4 4-4" fill="none" stroke="var(--color-text-secondary)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
       </summary>
       <ul style={{ display: "flex", flexDirection: "column", gap: 6, padding: "4px 0 12px" }}>
             {a.lessons.map((l) => (
@@ -460,25 +471,9 @@ function AreaLessons({ area: a }: { area: Extract<StudentDetail["areas"], { ok: 
   );
 }
 
-/** The three quick DMs, copied as they were written (WI-10 rewrites their words). */
+/** The three quick DMs, in the messages draft's words (student-detail.ts quickDms). */
 function QuickDms({ student: s }: { student: StudentDetail }) {
-  const overallPercent = s.progress.ok ? s.progress.data : null;
-  const dayNumber = s.day;
-  const name = s.nameOnFile;
-  const dmTemplates = [
-    {
-      label: "Welcome",
-      text: `Hey ${name || "there"}! Welcome to EcomTalent. I'm here to help you get the most out of your first 30 days. Have you checked out your expedition map yet? Let me know if you have any questions!`,
-    },
-    {
-      label: "Check-in",
-      text: `Hey ${name || "there"}! Just checking in — how's everything going? I noticed you're on Day ${dayNumber}. Is there anything I can help you with?`,
-    },
-    {
-      label: "Encouragement",
-      text: `Hey ${name || "there"}! You're making great progress — ${overallPercent == null ? "—" : `${overallPercent}%`} through your expedition. Keep going! The next region is where things really click.`,
-    },
-  ];
+  const dmTemplates = quickDms(s);
   return (
     <Card padding={16}>
       <div className="flex flex-wrap" style={{ gap: 8 }}>

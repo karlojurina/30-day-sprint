@@ -942,9 +942,14 @@ export const METRICS: Record<import("./types-erased.ts").ConditionMetric, Metric
   // through end of billing cycle. THE save-the-sale window. True only
   // while membership is still active/past_due (terminal students are
   // churned, not canceling).
+  // Admin rebuild 2's review fix round: one label for the metric. The
+  // TriggerBuilder's select read "Is canceling (clicked cancel, still has
+  // access)" beside a sentence that read "Is canceling (cancel scheduled)";
+  // the select now uses the sentence's words, which the task summaries and
+  // their history keep.
   is_canceling: {
     id: "is_canceling",
-    label: "Is canceling (clicked cancel, still has access)",
+    label: "Is canceling (cancel scheduled)",
     input: "boolean",
     describe: (c) =>
       c.op === "is"

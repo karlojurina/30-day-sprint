@@ -82,9 +82,10 @@ function RowActions({ template: t, draft, settings, canEdit, dirty, busy, onSave
     const [asking, setAsking] = useState(false);
     const [error, setError] = useState(null);
     const deletable = canEdit && canDelete(t);
-    return (_jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 12 }, children: [_jsxs("div", { className: "flex flex-wrap items-center", style: { gap: 8 }, children: [_jsx(Button, { variant: "raised", size: "md", onClick: () => setPreview((p) => !p), children: preview ? "Hide preview" : "Show preview" }), deletable && !asking && (_jsx(Button, { variant: "ghost", size: "md", disabled: busy, onClick: () => setAsking(true), children: "Delete template" })), canEdit && (_jsxs("span", { className: "flex flex-wrap items-center", style: { gap: 8, marginLeft: "auto" }, children: [!dirty && _jsx("span", { style: T.bodyDim, children: "No changes to save" }), _jsx(Button, { variant: "raised", size: "md", busy: busy, disabled: !dirty, onClick: async () => {
+    // Delete, red, at the start of the row, away from Preview and Save at its end (the review's fix round).
+    return (_jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 12 }, children: [_jsxs("div", { className: "flex flex-wrap items-center", style: { gap: 8 }, children: [deletable && !asking && (_jsx(Button, { variant: "danger", size: "md", disabled: busy, onClick: () => setAsking(true), children: "Delete template" })), _jsxs("span", { className: "flex flex-wrap items-center justify-end", style: { gap: 8, marginLeft: "auto" }, children: [canEdit && !dirty && _jsx("span", { style: T.bodyDim, children: "No changes to save" }), _jsx(Button, { variant: "raised", size: "md", onClick: () => setPreview((p) => !p), children: preview ? "Hide preview" : "Show preview" }), canEdit && (_jsx(Button, { variant: "raised", size: "md", busy: busy, disabled: !dirty, onClick: async () => {
                                     setError(await onSave());
-                                }, children: busy ? "Saving" : "Save" })] }))] }), asking && (_jsxs("div", { style: {
+                                }, children: busy ? "Saving" : "Save" }))] })] }), asking && (_jsxs("div", { style: {
                     display: "flex",
                     flexDirection: "column",
                     gap: 10,
@@ -92,7 +93,7 @@ function RowActions({ template: t, draft, settings, canEdit, dirty, busy, onSave
                     borderRadius: "var(--radius-control)",
                     background: "var(--color-bg-elevated)",
                     border: "1px solid var(--color-border)",
-                }, children: [_jsx("p", { style: { ...T.body, lineHeight: 1.5 }, children: "Delete this template? Tasks it already made stay in Tasks, without it. This cannot be undone." }), _jsxs("div", { className: "flex flex-wrap", style: { gap: 8 }, children: [_jsx(Button, { variant: "raised", size: "md", busy: busy, onClick: async () => {
+                }, children: [_jsx("p", { style: { ...T.body, lineHeight: 1.5 }, children: "Delete this template? Tasks it already made stay in Tasks, without it. This cannot be undone." }), _jsxs("div", { className: "flex flex-wrap", style: { gap: 8 }, children: [_jsx(Button, { variant: "danger", size: "md", busy: busy, onClick: async () => {
                                     const said = await onDelete();
                                     if (said) {
                                         setError(said);

@@ -16,6 +16,14 @@
  * and the rule would then close the offer for everyone. requireTeam hands
  * this route the service-role client.
  *
+ * The Approved rows' coupon is read from Whop now (readApprovedCoupons, a
+ * handful of reads within the request routes' 6 and 8 second limits): the
+ * cron leaves students with an approved request out, so the stored row of
+ * a request approved before the coupon rule never existed, and the warning
+ * to check Whop before adding the 30% code could never show for it (the
+ * review's fix round). A Whop read that fails is logged, by kind, and the
+ * row then says the coupon could not be checked.
+ *
  * Auth: any team role (founder, admin, csm), as the three discount routes
  * the page calls. Writes nothing.
  *
@@ -31,7 +39,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
 import { getCurriculumResetAt } from "@/lib/curriculum-reset";
-import { loadThirtyData } from "@/lib/admin/thirty-data";
+import { loadThirtyData, readApprovedCoupons } from "@/lib/admin/thirty-data";
 import { buildThirtyView } from "@/lib/admin/thirty-view";
 
 export const dynamic = "force-dynamic";
@@ -66,5 +74,12 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  return NextResponse.json(buildThirtyView(load.data, new Date(), resetAt));
+  const live = await readApprovedCoupons(load.data, process.env.WHOP_API_KEY ?? null);
+  // With no key or no membership there was nothing to ask: no line, as the request routes do.
+  const fails = [...live.values()].flatMap((c) => (c.ok || c.fail === "no_membership" || c.fail === "no_api_key" ? [] : [c.fail]));
+  if (fails.length > 0) {
+    console.warn(`[admin thirty] Whop gave no answer for ${fails.length} approved student(s)' coupon (${[...new Set(fails)].join(", ")})`);
+  }
+
+  return NextResponse.json(buildThirtyView(load.data, new Date(), resetAt, live));
 }

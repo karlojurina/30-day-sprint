@@ -43,8 +43,8 @@ const NOW_FULL = "2026-10-20T08:30:00.000Z";
 const NOW_RENEWED = "2026-11-24T09:00:00.000Z";
 /** The course switch, as admin_config holds it. */
 const RESET_AT = "2026-10-19T14:33:33.972Z";
-/** The tasks reset (v109), in Postgres's own text, as a migration may write it. */
-const TASKS_RESET_AT = "2026-10-21 05:00:00.123456+00";
+/** The tasks reset (v109), as v109 writes it: ISO in UTC (tasks-reset.ts refuses any other text). */
+const TASKS_RESET_AT = "2026-10-21T05:00:00.123Z";
 
 const MONTHLY = "plan_4ZrwR4PmBsVsx";
 const DAY = 86_400_000;

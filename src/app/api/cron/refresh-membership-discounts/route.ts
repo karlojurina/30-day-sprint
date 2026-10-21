@@ -20,8 +20,9 @@
  *
  * Auth: CRON_SECRET as a bearer, like every cron (src/lib/cron-auth.ts), with
  * a cron_runs row. Answers 500, ok: false, when who is in the window cannot
- * be read, when a write fails, or when every Whop read failed; 500 without
- * WHOP_API_KEY. No request starts after 240 s; a student not reached is read
+ * be read, when a write fails, when every Whop read failed, or when Whop
+ * answered no read before the time ran out, so nothing was checked (the
+ * review's fix round; that run answered 200, ok); 500 without WHOP_API_KEY. No request starts after 240 s; a student not reached is read
  * first by the next run. No answer names a student, an email or a Whop id.
  */
 

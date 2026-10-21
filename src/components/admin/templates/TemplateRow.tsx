@@ -321,20 +321,21 @@ function RowActions({
   const [error, setError] = useState<string | null>(null);
   const deletable = canEdit && canDelete(t);
 
+  // Delete, red, at the start of the row, away from Preview and Save at its end (the review's fix round).
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div className="flex flex-wrap items-center" style={{ gap: 8 }}>
-        <Button variant="raised" size="md" onClick={() => setPreview((p) => !p)}>
-          {preview ? "Hide preview" : "Show preview"}
-        </Button>
         {deletable && !asking && (
-          <Button variant="ghost" size="md" disabled={busy} onClick={() => setAsking(true)}>
+          <Button variant="danger" size="md" disabled={busy} onClick={() => setAsking(true)}>
             Delete template
           </Button>
         )}
-        {canEdit && (
-          <span className="flex flex-wrap items-center" style={{ gap: 8, marginLeft: "auto" }}>
-            {!dirty && <span style={T.bodyDim}>No changes to save</span>}
+        <span className="flex flex-wrap items-center justify-end" style={{ gap: 8, marginLeft: "auto" }}>
+          {canEdit && !dirty && <span style={T.bodyDim}>No changes to save</span>}
+          <Button variant="raised" size="md" onClick={() => setPreview((p) => !p)}>
+            {preview ? "Hide preview" : "Show preview"}
+          </Button>
+          {canEdit && (
             <Button
               variant="raised"
               size="md"
@@ -346,8 +347,8 @@ function RowActions({
             >
               {busy ? "Saving" : "Save"}
             </Button>
-          </span>
-        )}
+          )}
+        </span>
       </div>
 
       {asking && (
@@ -367,7 +368,7 @@ function RowActions({
           </p>
           <div className="flex flex-wrap" style={{ gap: 8 }}>
             <Button
-              variant="raised"
+              variant="danger"
               size="md"
               busy={busy}
               onClick={async () => {

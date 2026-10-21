@@ -1,6 +1,11 @@
 /**
  * The Survey page's data (admin rebuild 2, WI-9): every 30% application's
- * answers to the survey, grouped by application, newest first.
+ * answers to the survey, grouped by application, newest first. The page
+ * shows the applications from 1 October (DISCOUNT_ELIGIBLE_FROM, the 30%
+ * page's first day) and counts the older ones in a line with a toggle; its
+ * summary on top (the recommend average, the scores' spread, how many picked
+ * each pace answer) is worked out over the applications it shows, so the old
+ * course's answers never mix into the new course's (the review's fix round).
  *
  * Read so it holds at any size (the page sent every request id in one
  * `.in()`, paged its answers on created_at alone and checked no error):
@@ -24,7 +29,9 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Answer } from "@/lib/admin/admin-transport";
+import { DISCOUNT_STATUS, DISCOUNT_STATUS_ORDER, discountStatusWords } from "@/lib/admin/discount-status";
 import { fetchAllRowsByKey } from "@/lib/supabase-pagination";
+import { DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
 
 /** The most ids in one `.in()`. */
 export const SURVEY_BATCH = 100;
@@ -34,6 +41,8 @@ export interface SurveyQuestion {
   order_num: number;
   question_text: string;
   question_type: "scale" | "multi_choice" | "open_text";
+  /** A multi_choice question's answers, in the form's order (jsonb); null for the other types. */
+  options?: string[] | null;
   scale_min: number | null;
   scale_max: number | null;
   is_active: boolean;
@@ -67,7 +76,7 @@ export interface SurveyData {
   applications: SurveyApplication[];
 }
 
-const QUESTION_COLUMNS = "id, order_num, question_text, question_type, scale_min, scale_max, is_active";
+const QUESTION_COLUMNS = "id, order_num, question_text, question_type, options, scale_min, scale_max, is_active";
 const ANSWER_COLUMNS = "id, discount_request_id, question_id, answer_scale, answer_choice, answer_text, created_at";
 
 function batches<T>(items: readonly T[], size = SURVEY_BATCH): T[][] {
@@ -154,42 +163,104 @@ const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /* ─── What the page shows ─── */
 
-type Tone = "success" | "warning" | "danger" | "accent" | "neutral";
-
 /**
- * The status words, as the 30% page names them (admin rebuild 2, D4):
- * "Applied" is a request waiting for a decision (pending), "Code Applied" is
- * a code on the student's membership in Whop (applied).
+ * The status words and tones: the one map every admin page uses
+ * (src/lib/admin/discount-status.ts). "Applied" is a request waiting for a
+ * decision (pending), "Code Applied" is a code on the student's membership
+ * in Whop (applied).
  */
-export const STATUS_WORDS: Record<string, { label: string; tone: Tone }> = {
-  pending: { label: "Applied", tone: "accent" },
-  approved: { label: "Approved", tone: "success" },
-  rejected: { label: "Rejected", tone: "danger" },
-  applied: { label: "Code Applied", tone: "neutral" },
-};
+export const STATUS_WORDS = DISCOUNT_STATUS;
 
-export function statusWords(status: string): { label: string; tone: Tone } {
-  return STATUS_WORDS[status] ?? { label: status ? `Unknown status (${status})` : "No status", tone: "neutral" };
+export const statusWords = discountStatusWords;
+
+/** How many applications are in each status, in the 30% page's tab order. */
+export function statusCounts(applications: SurveyApplication[]): Array<{ label: string; count: number }> {
+  return DISCOUNT_STATUS_ORDER.map((s) => ({ label: DISCOUNT_STATUS[s].label, count: applications.filter((a) => a.status === s).length })).filter(
+    (c) => c.count > 0,
+  );
 }
 
-/** How many applications are in each status, in the 30% page's order. */
-export function statusCounts(applications: SurveyApplication[]): Array<{ label: string; count: number }> {
-  return ["pending", "approved", "applied", "rejected"]
-    .map((s) => ({ label: STATUS_WORDS[s].label, count: applications.filter((a) => a.status === s).length }))
-    .filter((c) => c.count > 0);
+/** The first day the page lists by default: the 30% page's (DISCOUNT_ELIGIBLE_FROM, 1 October in Croatia). */
+export const SURVEY_LISTED_FROM = DISCOUNT_ELIGIBLE_FROM;
+
+/** The applications made from SURVEY_LISTED_FROM on, and the older ones, each newest first. */
+export function splitByListedFrom(applications: SurveyApplication[]): { listed: SurveyApplication[]; older: SurveyApplication[] } {
+  const from = Date.parse(SURVEY_LISTED_FROM);
+  const listed: SurveyApplication[] = [];
+  const older: SurveyApplication[] = [];
+  for (const a of applications) (Date.parse(a.created_at) >= from ? listed : older).push(a);
+  return { listed, older };
+}
+
+/** An answer that says something: a score, a choice, or words. A row with none of them is no answer. */
+export function isAnswered(a: Pick<SurveyAnswer, "answer_scale" | "answer_choice" | "answer_text">): boolean {
+  return typeof a.answer_scale === "number" || (typeof a.answer_choice === "string" && a.answer_choice.trim() !== "") || (a.answer_text ?? "").trim() !== "";
+}
+
+/**
+ * How many gave each score of the scale question (the recommend question),
+ * from its lowest to its highest, over `applications`. Null when the survey
+ * has no scale question.
+ */
+export function scoreSpread(
+  questions: SurveyQuestion[],
+  applications: SurveyApplication[],
+): { question: SurveyQuestion; counts: Array<{ score: number; count: number }> } | null {
+  const q = questions.find((x) => x.question_type === "scale");
+  if (!q) return null;
+  const tally = new Map<number, number>();
+  for (const app of applications) {
+    for (const a of app.answers) {
+      if (a.question_id === q.id && typeof a.answer_scale === "number") tally.set(a.answer_scale, (tally.get(a.answer_scale) ?? 0) + 1);
+    }
+  }
+  const scores = [...tally.keys()];
+  const lo = Math.min(q.scale_min ?? 1, ...scores);
+  const hi = Math.max(q.scale_max ?? 10, ...scores);
+  const counts: Array<{ score: number; count: number }> = [];
+  for (let score = lo; score <= hi; score++) counts.push({ score, count: tally.get(score) ?? 0 });
+  return { question: q, counts };
+}
+
+/**
+ * How many picked each answer of the pace question (the multi_choice
+ * question that asks about the pace), in the form's order, over
+ * `applications`; an answer the form no longer offers comes after them.
+ * Null when the survey has no such question.
+ */
+export function paceTally(
+  questions: SurveyQuestion[],
+  applications: SurveyApplication[],
+): { question: SurveyQuestion; counts: Array<{ choice: string; count: number }> } | null {
+  const q = questions.find((x) => x.question_type === "multi_choice" && /\bpace\b/i.test(x.question_text));
+  if (!q) return null;
+  const tally = new Map<string, number>();
+  for (const app of applications) {
+    for (const a of app.answers) {
+      if (a.question_id === q.id && typeof a.answer_choice === "string" && a.answer_choice.trim() !== "") {
+        tally.set(a.answer_choice, (tally.get(a.answer_choice) ?? 0) + 1);
+      }
+    }
+  }
+  const offered = Array.isArray(q.options) ? q.options.filter((o): o is string => typeof o === "string") : [];
+  const extra = [...tally.keys()].filter((c) => !offered.includes(c));
+  return { question: q, counts: [...offered, ...extra].map((choice) => ({ choice, count: tally.get(choice) ?? 0 })) };
 }
 
 /**
  * The mean of every answer to a scale question (the recommend question):
  * a plain average, not an NPS score. The scale's ends are named when every
- * scale question shares them.
+ * scale question shares them. Over `applications` (every one by default).
  */
-export function recommendAverage(data: SurveyData): { value: number | null; count: number; scale: string | null } {
+export function recommendAverage(
+  data: SurveyData,
+  applications: SurveyApplication[] = data.applications,
+): { value: number | null; count: number; scale: string | null } {
   const scale = data.questions.filter((q) => q.question_type === "scale");
   const ids = new Set(scale.map((q) => q.id));
   let sum = 0;
   let count = 0;
-  for (const app of data.applications) {
+  for (const app of applications) {
     for (const a of app.answers) {
       if (ids.has(a.question_id) && typeof a.answer_scale === "number") {
         sum += a.answer_scale;

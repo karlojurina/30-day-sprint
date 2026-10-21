@@ -314,46 +314,6 @@ export function Pill({
   return <span className={`pill-tone pill-tone-${tone}`}>{children}</span>;
 }
 
-/**
- * Pace pill — student progress relative to expected pace for their
- * day. Admin-only signal that lives next to the student's name on
- * /admin/students and on task cards.
- *
- *   label = "behind"  -> red
- *   label = "on_pace" -> neutral
- *   label = "ahead"   -> green
- *
- * Pass `compact` to render just the icon (no label) — useful inside
- * very dense rows like task cards.
- */
-export function PacePill({
-  label,
-  compact = false,
-}: {
-  label: "behind" | "on_pace" | "ahead";
-  compact?: boolean;
-}) {
-  const tone: PillTone =
-    label === "behind"
-      ? "danger"
-      : label === "ahead"
-        ? "success"
-        : "neutral";
-  const icon = label === "behind" ? "↓" : label === "ahead" ? "↑" : "→";
-  const text =
-    label === "behind"
-      ? "Behind"
-      : label === "ahead"
-        ? "Ahead"
-        : "On pace";
-  return (
-    <Pill tone={tone}>
-      <span aria-hidden="true">{icon}</span>
-      {!compact && <span>{text}</span>}
-    </Pill>
-  );
-}
-
 /* ─── Buttons ─── */
 
 /**
@@ -374,6 +334,12 @@ export function PacePill({
  * same shape. Nothing else sets them: on the light pages the fallbacks are
  * the values these buttons always had. (Inline styles cannot be restyled
  * from a stylesheet, which is why the variables live here.)
+ *
+ * "danger" reads them too, and its label from --admin-danger-label: the dark
+ * look sets it to Gunpowder, which measures 5.2:1 on the kit's red where
+ * white measures 3.4:1 (admin rebuild 2, the review's fix round: the
+ * confirm of a step the student cannot undo, "Reject the request", is the
+ * danger button). On the light pages it stays white.
  */
 type ButtonVariant = "primary" | "ghost" | "danger" | "subtle" | "ink" | "raised";
 type ButtonSize = "sm" | "md";
@@ -411,7 +377,10 @@ function buttonStyle(
     return {
       ...base,
       background: "var(--color-danger)",
-      color: "#FFFFFF",
+      color: "var(--admin-danger-label, #FFFFFF)",
+      borderRadius: "var(--admin-button-radius, var(--radius-chip))",
+      minHeight: "var(--admin-button-min-height, auto)",
+      justifyContent: "center",
     };
   }
   if (variant === "subtle") {
@@ -496,83 +465,6 @@ export function Button({
     >
       {children}
     </button>
-  );
-}
-
-/**
- * Small circular icon button. For kebab menus, close buttons, etc.
- */
-export function IconButton({
-  label,
-  onClick,
-  children,
-}: {
-  label: string;
-  onClick?: (e: React.MouseEvent) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      style={{
-        width: 28,
-        height: 28,
-        borderRadius: "var(--radius-chip)",
-        background: "transparent",
-        border: "none",
-        cursor: "pointer",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        color: "var(--color-text-tertiary)",
-        transition: "background 150ms var(--ease-default), color 150ms var(--ease-default)",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "rgba(20,20,24,0.06)";
-        e.currentTarget.style.color = "var(--color-text-primary)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "transparent";
-        e.currentTarget.style.color = "var(--color-text-tertiary)";
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-/* ─── Avatar ─── */
-
-export function Avatar({
-  src,
-  name,
-  size = 28,
-}: {
-  src?: string | null;
-  name?: string | null;
-  size?: number;
-}) {
-  const initial = (name ?? "?")[0]?.toUpperCase() ?? "?";
-  return (
-    <div
-      className="flex items-center justify-center shrink-0"
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        fontSize: size <= 28 ? 11 : 14,
-        fontWeight: 600,
-        background: src
-          ? `url(${src}) center/cover`
-          : "var(--color-accent-glow)",
-        color: "var(--color-accent-dark)",
-      }}
-    >
-      {src ? "" : initial}
-    </div>
   );
 }
 

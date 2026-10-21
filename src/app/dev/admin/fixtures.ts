@@ -22,7 +22,13 @@
  *   ?state=full | empty | loading | error   (default full)
  *          partial    full, plus a student whose progress cannot be read
  *          novideos   full, with the course's videos unreadable
- *          nocoupons  full, with the stored coupons unreadable
+ *          nocoupons  full, with the stored coupons unreadable and Whop
+ *                     giving no answer about the Approved rows' coupons
+ *
+ * The Approved rows' coupon is what Whop says now (liveCoupons, as
+ * GET /api/admin/thirty asks it): Ethan was approved before the coupon rule
+ * with nothing stored, and Whop names the forever 10%; for Nora Whop gives
+ * no answer, and the stored row stands in, with its date.
  *   ?conflict=1   approve, reject and mark-applied answer as if another team
  *                 member decided the request first: approve and reject with
  *                 lane G1's 409 and its sentence, mark-applied with its 400
@@ -33,7 +39,7 @@
 
 import { buildThirtyView } from "@/lib/admin/thirty-view";
 import type { ThirtyView } from "@/lib/admin/thirty-view";
-import type { ThirtyCouponRow, ThirtyData, ThirtyRequest, ThirtyStudent } from "@/lib/admin/thirty-data";
+import type { LiveCoupon, ThirtyCouponRow, ThirtyData, ThirtyRequest, ThirtyStudent } from "@/lib/admin/thirty-data";
 import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
 import { DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
 import { couponApprovalRefusal } from "@/lib/world/discount-server";
@@ -91,8 +97,10 @@ interface Person {
   readFails?: boolean;
   /** The coupon stored for their membership (student_membership_discounts), when the cron has read it. */
   stored?: Membership;
-  /** What Whop says about the membership now, when it is not what is stored: the approve route reads it. */
+  /** What Whop says about the membership now, when it is not what is stored: the approve route reads it, and the page for an Approved row. */
   live?: Membership;
+  /** Whop gives no answer about their membership now (the page's read for an Approved row). */
+  liveFails?: boolean;
 }
 
 interface Ask {
@@ -117,28 +125,31 @@ interface FixtureDb {
 const EVOLVE: Membership = { code: "evolve10", renewal: 87.3, plan: 97 };
 /** A one-month code that is used up: the id stays on the membership, and it renews at full price. */
 const USED_UP: Membership = { code: "welcome50", renewal: 97, plan: 97 };
+/** No code: the cron read the membership and found nothing. */
+const CLEAN: Membership = { code: null, renewal: 97, plan: 97 };
 
 function fullDb(): FixtureDb {
   return {
     people: [
       // Applied: the rule says yes.
       { id: "p-maya", name: "Maya Lindqvist", username: "maya.lq", paid: "2026-10-01T09:00:00.000Z", done: 61, stored: USED_UP },
-      { id: "p-jonah", name: "Jonah Pereira", username: "jonah_p", paid: "2026-10-12T15:00:00.000Z", done: 61, doneAt: "2026-10-19T20:00:00.000Z" },
+      { id: "p-jonah", name: "Jonah Pereira", username: "jonah_p", paid: "2026-10-12T15:00:00.000Z", done: 61, doneAt: "2026-10-19T20:00:00.000Z", stored: CLEAN },
       // Applied: 4 videos missing, payment failed, no Whop backfill since the switch.
-      { id: "p-priya", name: "Priya Raman", status: "past_due", paid: "2026-10-03T08:00:00.000Z", done: 57, synced: "2026-10-18T10:00:00.000Z" },
+      { id: "p-priya", name: "Priya Raman", status: "past_due", paid: "2026-10-03T08:00:00.000Z", done: 57, synced: "2026-10-18T10:00:00.000Z", stored: CLEAN },
       // Applied: asked on the old course, before the switch.
-      { id: "p-sofia", name: "Sofia Marin", username: "sofia.marin", paid: "2026-10-05T10:00:00.000Z", done: 40 },
-      // Applied: first payment before 1 October.
+      { id: "p-sofia", name: "Sofia Marin", username: "sofia.marin", paid: "2026-10-05T10:00:00.000Z", done: 40, stored: CLEAN },
+      // Applied: first payment before 1 October; canceled, so the cron never checked the coupon.
       { id: "p-leo", name: "Leo Hartmann", status: "canceled", paid: "2026-09-15T10:00:00.000Z", done: 61 },
       // Applied: a second request after a rejected one (and a long name).
-      { id: "p-max", name: "Maximilian Featherstonehaugh-Smythe", username: "max.fs", paid: "2026-10-09T10:00:00.000Z", done: 61, doneAt: "2026-10-17T09:00:00.000Z" },
+      { id: "p-max", name: "Maximilian Featherstonehaugh-Smythe", username: "max.fs", paid: "2026-10-09T10:00:00.000Z", done: 61, doneAt: "2026-10-17T09:00:00.000Z", stored: CLEAN },
       // Applied: every video done, and the forever 10% on the membership: the coupon decides (D5).
       { id: "p-tara", name: "Tara Quinn", username: "tara.q", paid: "2026-10-10T09:00:00.000Z", done: 61, stored: EVOLVE },
       // Applied: every video done, nothing stored yet, and Whop says now that a code applies: Approve is refused.
       { id: "p-hugo", name: "Hugo Lindahl", username: "hugo.l", paid: "2026-10-11T09:00:00.000Z", done: 61, live: EVOLVE },
-      // Approved: one with the forever 10% on the membership (approved before the coupon rule).
-      { id: "p-ethan", name: "Ethan Cole", username: "ethan.cole", paid: "2026-10-02T09:00:00.000Z", done: 61 },
-      { id: "p-nora", name: "Nora Brandt", username: "nora.b", paid: "2026-10-10T12:00:00.000Z", done: 61, stored: EVOLVE },
+      // Approved before the coupon rule, so nothing was ever stored for him: Whop says now the forever 10% is on the membership.
+      { id: "p-ethan", name: "Ethan Cole", username: "ethan.cole", paid: "2026-10-02T09:00:00.000Z", done: 61, live: EVOLVE },
+      // Approved, the forever 10% stored by the cron, and Whop gives no answer now: the stored row is shown, with its date.
+      { id: "p-nora", name: "Nora Brandt", username: "nora.b", paid: "2026-10-10T12:00:00.000Z", done: 61, stored: EVOLVE, liveFails: true },
       // Code Applied.
       { id: "p-omar", name: "Omar Haddad", paid: "2026-10-01T12:00:00.000Z", done: 61 },
       { id: "p-lena", name: "Lena Vogel", username: "lena.v", status: "past_due", paid: "2026-10-04T08:00:00.000Z", done: 61 },
@@ -298,6 +309,23 @@ function toData(db: FixtureDb, opts: { videosFail?: boolean; couponsFail?: boole
   };
 }
 
+/**
+ * What Whop says now about each approved student's membership, as
+ * GET /api/admin/thirty reads it (readApprovedCoupons): their `live`
+ * membership, else the stored one, else none; nothing when `liveFails`, and
+ * nothing for anyone when the coupons cannot be read (nocoupons).
+ */
+function liveCoupons(db: FixtureDb, failAll: boolean): Map<string, LiveCoupon> {
+  const out = new Map<string, LiveCoupon>();
+  for (const a of db.asks.filter((x) => x.status === "approved")) {
+    const p = db.people.find((x) => x.id === a.studentId);
+    if (!p) continue;
+    if (failAll || p.liveFails) out.set(p.id, { ok: false, fail: "http_other" });
+    else out.set(p.id, { ok: true, row: couponRow(p, p.live ?? p.stored ?? CLEAN, FIXTURE_NOW) });
+  }
+  return out;
+}
+
 // ── The stand-in for the server ─────────────────────────────────────────────
 export type FixtureState = "full" | "empty" | "loading" | "error" | "partial" | "novideos" | "nocoupons";
 
@@ -341,6 +369,7 @@ export function fixtureThirtyTransport(opts: {
       toData(db, { videosFail: opts.state === "novideos", couponsFail: opts.state === "nocoupons" }),
       new Date(FIXTURE_NOW),
       RESET_AT,
+      liveCoupons(db, opts.state === "nocoupons"),
     );
   const ask = (id: string) => db.asks.find((a) => a.id === id);
   const person = (id: string) => db.people.find((p) => p.id === id);

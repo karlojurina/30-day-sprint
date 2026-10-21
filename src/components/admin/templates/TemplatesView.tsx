@@ -39,12 +39,15 @@ import { TemplateRow } from "./TemplateRow";
  * /admin/templates (admin rebuild 2, WI-8: PRD D6 and D12), in the brand
  * kit's dark look.
  *
- * On top, Message settings: the 2 links the messages fill in and the 4
- * automated Discord switches, read by every team role and changed by
- * founders and admins (MessageSettings.tsx). Then every template, grouped by
- * the day it comes up: what it is, its numbers, Off where its switch works,
- * and when opened, its editor (TemplateRow.tsx). A built-in template cannot
- * be deleted, only a custom one. Save sends only what changed.
+ * On top, Message settings as one line: the 2 links the messages fill in
+ * and the 4 automated Discord switches behind a button, with their warnings
+ * always shown, read by every team role and changed by founders and admins
+ * (MessageSettings.tsx; folded when the page opens, for every role, so the
+ * first template is on the first screen). Then every template, grouped by the day it comes
+ * up: what it is, its numbers, Off where its switch works, and when opened,
+ * its editor (TemplateRow.tsx). A built-in template cannot be deleted, only
+ * a custom one. Save sends only what changed. "New template" is the page's
+ * one ink button; under 480px wide it and Refresh go under the description.
  *
  * Every call goes through `transport` (src/lib/admin/templates-data.ts), so
  * the dev page /dev/admin/templates renders this same component with
@@ -226,20 +229,18 @@ export function TemplatesView({ transport, role }: { transport: TemplatesTranspo
       title="Templates"
       description="The messages the team sends to students, and when each one comes up as a task."
       meta={meta}
-      action={
-        ready ? (
-          <div className="flex flex-wrap justify-end" style={{ gap: 8 }}>
-            <Button variant="raised" size="md" busy={reloading} onClick={() => void refresh()}>
-              Refresh
-            </Button>
-            {canEdit && (
-              <Button variant="raised" size="md" onClick={() => setCreating(true)}>
+      actions={[
+        <Button key="refresh" variant="raised" size="md" busy={reloading} disabled={!ready} onClick={() => void refresh()}>
+          Refresh
+        </Button>,
+        ...(canEdit
+          ? [
+              <Button key="new" variant="ink" size="md" disabled={!ready} onClick={() => setCreating(true)}>
                 New template
-              </Button>
-            )}
-          </div>
-        ) : undefined
-      }
+              </Button>,
+            ]
+          : []),
+      ]}
     />
   );
 
@@ -274,12 +275,6 @@ export function TemplatesView({ transport, role }: { transport: TemplatesTranspo
   return (
     <ListPage>
       {header(meta, true)}
-
-      {!canEdit && (
-        <p role="status" style={{ ...T.bodyDim, lineHeight: 1.5, marginBottom: 16 }}>
-          You can read the templates and the message settings. Only a founder or an admin can change them.
-        </p>
-      )}
 
       <MessageSettings
         settings={data.settings}

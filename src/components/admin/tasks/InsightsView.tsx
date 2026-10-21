@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, EmptyState, Stat, T } from "@/components/admin/ui";
 import { ListHeader, ListPage, LoadError, SkeletonRows, TAP, pressPill } from "@/components/admin/list-parts";
-import { PillLinks } from "@/components/admin/people-parts";
+import { TextLink } from "@/components/admin/review-parts";
 import type { Answer } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import { insightsTransport, type InsightsTransport } from "@/lib/admin/people-transport";
@@ -19,7 +19,15 @@ import { stripBucketGlyph } from "@/lib/templates";
  *
  * Since the tasks reset (v109) the route counts only the tasks made on or
  * after it, as the queue lists them, so "All time" reads "Since the reset"
- * then. A save is a student who is still a member with the cancel withdrawn.
+ * then, and while the reset is under 30 days old it is the one range
+ * (insightsRanges). A save is a student who is still a member with the
+ * cancel withdrawn.
+ *
+ * The review's fix round: "Queue" is a text link back to Tasks (the pills
+ * that linked the two looked like the status tabs); how the numbers work is
+ * folded under one line, as on Insights; and under 640px each template is a
+ * card (its name and success rule, then Sent, Time to send, Success and
+ * Replied in a 2 by 2 grid) where the table would scroll sideways.
  */
 
 type SortKey = "title" | "sent" | "time" | "success" | "replied";
@@ -62,6 +70,8 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
   const [loaded, setLoaded] = useState<Loaded>({ kind: "loading" });
   const [busy, setBusy] = useState(false);
   const [floor, setFloor] = useState<string | null>(null);
+  /** When the last answer that worked was worked out (its computed_at): the ranges are judged at that moment. */
+  const [computedAt, setComputedAt] = useState<string | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: "sent", dir: -1 });
   const seq = useRef(0);
 
@@ -78,7 +88,10 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
 
   const apply = useCallback((r: Answer<OutreachInsights>) => {
     setLoaded(r.ok ? { kind: "ready", data: r.data } : { kind: "error", error: r.error });
-    if (r.ok) setFloor(r.data.tasks_floor ?? null);
+    if (r.ok) {
+      setFloor(r.data.tasks_floor ?? null);
+      setComputedAt(r.data.computed_at);
+    }
   }, []);
 
   useEffect(() => {
@@ -104,23 +117,30 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
     setRange(r);
   }
 
-  const ranges = (
-    <div role="group" aria-label="Range" className="flex flex-wrap" style={{ gap: 8, marginBottom: 16 }}>
-      {insightsRanges(floor).map((r) => (
-        <button key={r.value} type="button" aria-pressed={range === r.value} onClick={() => choose(r.value)} style={pressPill(range === r.value)}>
-          {r.label}
-        </button>
-      ))}
-    </div>
-  );
+  // While the reset is under 30 days old, "Since the reset" is the one range: no choice to show. Counted from
+  // the moment the last answer was worked out (its computed_at), so the page and its dev page agree; before the
+  // first answer the reset is unknown, so no range shows yet.
+  const offered = computedAt ? insightsRanges(floor, Date.parse(computedAt)) : [];
+  const ranges =
+    offered.length > 1 ? (
+      <div role="group" aria-label="Range" className="flex flex-wrap" style={{ gap: 8, marginBottom: 16 }}>
+        {offered.map((r) => (
+          <button key={r.value} type="button" aria-pressed={range === r.value} onClick={() => choose(r.value)} style={pressPill(range === r.value)}>
+            {r.label}
+          </button>
+        ))}
+      </div>
+    ) : null;
   const top = (meta: React.ReactNode) => (
     <>
+      <TextLink href="/admin/tasks">
+        <span aria-hidden="true">←</span> Queue
+      </TextLink>
       <ListHeader
         title="Outreach insights"
         description="Every template graded on what its message asks for. How each number works is at the bottom."
         meta={meta}
       />
-      <PillLinks current="/admin/tasks/insights" links={[{ href: "/admin/tasks", label: "Queue" }, { href: "/admin/tasks/insights", label: "Insights" }]} />
       {ranges}
     </>
   );
@@ -180,7 +200,7 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 12 }}>
         <Stat label="Students reached" value={totals.students_reached} sublabel="got at least 1 DM" />
         <Stat label="DMs sent" value={totals.sent} />
-        <Stat label="Task to send" value={humanizeMs(totals.median_time_to_send_ms)} sublabel="the middle wait, from task to sent" />
+        <Stat label="Time to send" value={humanizeMs(totals.median_time_to_send_ms)} sublabel="the middle wait, from task to sent" />
         <Stat
           label="Saves"
           value={pct(totals.saves, totals.saves_eligible)}
@@ -197,7 +217,7 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
           sublabel={
             totals.success_eligible === 0
               ? "no graded sends in this range"
-              : `${totals.success} of ${totals.success_eligible} graded sends did the thing`
+              : `${totals.success} of ${totals.success_eligible} graded sends did what the DM asked`
           }
           tone={totals.success_eligible > 0 ? "accent" : "default"}
         />
@@ -231,7 +251,39 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
           </Card>
         ) : (
           <Card padding={0}>
-            <div style={{ overflowX: "auto" }}>
+            {/* Under 640px: a card per template, where the table would scroll sideways. */}
+            <ul className="sm:hidden" aria-label="Templates">
+              {rows.map((r) => {
+                const marked = r.replied + r.no_reply;
+                return (
+                  <li key={r.template_id} className="list-row" data-template-card="" style={{ flexDirection: "column", alignItems: "stretch", gap: 10, padding: 16 }}>
+                    <div>
+                      <span className="flex items-center" style={{ gap: 8, minWidth: 0 }}>
+                        <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: "50%", background: bucketDot(r.bucket), flexShrink: 0 }} />
+                        <span style={{ ...T.body, fontWeight: 600, overflowWrap: "anywhere" }}>
+                          {r.title ? stripBucketGlyph(r.title) : (r.scenario_id ?? "A deleted template")}
+                        </span>
+                      </span>
+                      <span style={{ display: "block", fontSize: 12, color: "var(--color-text-secondary)", marginTop: 2, paddingLeft: 14 }}>
+                        success = {r.success_label}
+                        {r.graded_on_old_course > 0 && ` · ${r.graded_on_old_course} graded on the old course`}
+                      </span>
+                    </div>
+                    <dl className="grid grid-cols-2" style={{ gap: "10px 12px", fontVariantNumeric: "tabular-nums" }}>
+                      <CardNumber label="Sent" value={String(r.sent)} />
+                      <CardNumber label="Time to send" value={humanizeMs(r.median_time_to_send_ms)} />
+                      <CardNumber
+                        label="Success"
+                        value={r.family === "event" ? "Not graded" : pct(r.success, r.success_eligible)}
+                        sub={r.success_eligible > 0 ? `${r.success} of ${r.success_eligible}` : undefined}
+                      />
+                      <CardNumber label="Replied" value={pct(r.replied, marked)} sub={r.unmarked > 0 ? `${r.unmarked} unmarked` : undefined} />
+                    </dl>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="hidden sm:block" style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", minWidth: 640, borderCollapse: "collapse", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
                 <thead>
                   <tr>
@@ -303,8 +355,10 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
         )}
       </section>
 
-      <section>
-        <h2 style={{ ...T.eyebrow, fontSize: 12, marginBottom: 8 }}>How these numbers work</h2>
+      <details style={{ marginTop: 8 }}>
+        <summary style={{ ...T.body, fontWeight: 600, minHeight: TAP, display: "flex", alignItems: "center", cursor: "pointer", color: "var(--color-text-secondary)" }}>
+          How these numbers work
+        </summary>
         <Card>
           <ul style={{ ...T.bodyDim, lineHeight: 1.7, paddingLeft: 18, margin: 0, listStyle: "disc" }}>
             <li>
@@ -324,7 +378,7 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
               Sent tab. Only as good as the marking; a send with neither is left out of the rate.
             </li>
             <li>
-              <strong style={{ color: "var(--color-text-primary)" }}>Task to send</strong>: the middle wait between a task
+              <strong style={{ color: "var(--color-text-primary)" }}>Time to send</strong>: the middle wait between a task
               appearing and the team marking it sent. It measures the team&apos;s pace, not the words of the DM.
             </li>
             <li>
@@ -360,8 +414,21 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
             </li>
           </ul>
         </Card>
-      </section>
+      </details>
     </ListPage>
+  );
+}
+
+/** One number of a template's card on a phone: its name over it, and a smaller line under it when there is one. */
+function CardNumber({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <dt style={{ ...T.eyebrow, fontSize: 11 }}>{label}</dt>
+      <dd style={{ marginTop: 2, fontSize: 15, fontWeight: 600, color: "var(--color-text-primary)" }}>
+        {value}
+        {sub && <span style={{ display: "block", fontSize: 12, fontWeight: 400, color: "var(--color-text-secondary)" }}>{sub}</span>}
+      </dd>
+    </div>
   );
 }
 

@@ -4,7 +4,7 @@
  * page, in every state, at a phone's width and two desktop widths. Today,
  * which this file also drew, was removed in admin rebuild 2 (D2).
  *
- *   node world-tests/admin-pages.mjs [--only routes,frame,signin,thirty,dash,tasks,people,feedback,templates,survey,team,insights]
+ *   node world-tests/admin-pages.mjs [--only routes,frame,signin,thirty,dash,tasks,people,feedback,templates,survey,team,insights,review]
  *
  * Opens BASE_URL (default http://localhost:3226): a development server
  * started for the run in the app root, `PORT=3226 npx next dev`. This script
@@ -73,6 +73,13 @@
  *   templates, survey, team, insights  /dev/admin/templates, survey, team
  *           and insights (admin rebuild 2, WI-8 and WI-9), every state and
  *           the clicks the comment above their part lists
+ *   review  admin rebuild 2's review fix round (WI-11), across the pages:
+ *           every header keeps its 44px title line, its place and its
+ *           action from loading to loaded and on a failed read; the 30%
+ *           page's tabs on one line at 390px, scrolling sideways rather
+ *           than wrapping at 375 and 360. The round's other checks sit in
+ *           the parts of the pages they changed (each says "the review's
+ *           fix round")
  *
  * Every state at 390x844, 1280x720 and 1440x900 (a few click states at one
  * or two of them), and each one is measured. It fails on: a horizontal
@@ -151,7 +158,7 @@ if (wanted('routes')) {
   for (const s of distinct.slice(0, 40)) console.log(`       "${s}"`)
 }
 
-const needBrowser = ['frame', 'signin', 'thirty', 'dash', 'tasks', 'people', 'feedback', 'templates', 'survey', 'team', 'insights'].some(wanted)
+const needBrowser = ['frame', 'signin', 'thirty', 'dash', 'tasks', 'people', 'feedback', 'templates', 'survey', 'team', 'insights', 'review'].some(wanted)
 if (!needBrowser) finish()
 
 fs.mkdirSync(OUT, { recursive: true })
@@ -646,7 +653,7 @@ if (wanted('thirty')) {
       const nina = await row('Nina Petrova')
       expect(await nina.evaluate((r) => r.textContent.includes("Couldn't read this student's progress, so there is no verdict.") && !/\d+ of 61 videos/.test(r.textContent)),
         `${label}: the row says there is no verdict, in words, and shows no count`)
-      expect((await (await buttonIn(nina, 'Approve')).evaluate((b) => b.disabled)) && !(await isNull(await linkIn(nina))), `${label}: Approve disabled, the Approve anyway link offered`)
+      expect((await isNull(await buttonIn(nina, 'Approve'))) && !(await isNull(await linkIn(nina))), `${label}: the Approve anyway link in Approve's place (no Approve that does nothing)`)
       await check(label, `thirty-partial-applied-${w}`)
     }
     {
@@ -679,8 +686,9 @@ if (wanted('thirty')) {
       const tabs = await page.$$eval('[role="tab"]', (ts) => ts.map((t) => { const r = t.getBoundingClientRect(); return { label: t.childNodes[0].textContent.trim(), left: r.left, right: r.right, h: r.height, width: innerWidth, on: t.getAttribute('aria-selected') } }))
       expect(tabs.map((t) => t.label).join() === 'Applied,Approved,Rejected,Code Applied' && tabs[0].on === 'true',
         `${label}: the tabs are Applied, Approved, Rejected, Code Applied, Applied open first`, tabs.map((t) => t.label).join())
-      expect(tabs.length === 4 && tabs.every((t) => t.left >= 0 && t.right <= t.width && t.h >= 44),
-        `${label}: all four tabs whole in the window, 44px tall (they wrap on a phone)`, JSON.stringify(tabs.map((t) => Math.round(t.right))))
+      const rows = new Set(await page.$$eval('[role="tab"]', (ts) => ts.map((t) => Math.round(t.getBoundingClientRect().top))))
+      expect(tabs.length === 4 && tabs.every((t) => t.left >= 0 && t.right <= t.width && t.h >= 44) && rows.size === 1,
+        `${label}: all four tabs whole in the window, 44px tall, on one line (the review's fix round: on a phone they narrowed instead of wrapping)`, JSON.stringify({ rights: tabs.map((t) => Math.round(t.right)), rows: [...rows] }))
       expect(JSON.stringify(await tabCounts()) === JSON.stringify(['Applied 8', 'Approved 2', 'Rejected 3', 'Code Applied 2']),
         `${label}: each with its count; the September request is on none`, (await tabCounts()).join(' | '))
       const small = await smallTaps()
@@ -758,13 +766,20 @@ if (wanted('thirty')) {
       const link = [...r.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Approve anyway')
       return { name: r.querySelector('a')?.textContent, yes: r.textContent.includes('Every video up to the checkpoint was done in time.'), open: !!b && !b.disabled, link: !!link }
     }))
-    expect(approvable.every((a) => a.yes === a.open) && approvable.filter((a) => a.open).map((a) => a.name).join() === 'Hugo Lindahl,Maya Lindqvist,Jonah Pereira',
-      'Approve is on exactly where the verdict is yes: Hugo, Maya, Jonah', JSON.stringify(approvable))
+    expect(approvable.filter((a) => a.open).map((a) => a.name).join() === 'Tara Quinn,Hugo Lindahl,Maya Lindqvist,Jonah Pereira' && approvable.every((a) => a.open !== a.link),
+      'Approve is on where the verdict is yes (Hugo, Maya, Jonah) and beside the coupon\'s verdict (Tara: the route asks Whop again); every other row has Approve anyway in its place, never both', JSON.stringify(approvable))
     expect(approvable.filter((a) => a.link).map((a) => a.name).join() === 'Leo Hartmann,Sofia Marin,Maximilian Featherstonehaugh-Smythe,Priya Raman',
-      'the Approve anyway link after every refusal but the coupon\'s: Leo, Sofia, Max, Priya, never Tara', approvable.filter((a) => a.link).map((a) => a.name).join())
+      'the Approve anyway link after every refusal but the coupon\'s: Leo, Sofia, Max, Priya, never Tara', JSON.stringify(approvable))
+    const notChecked = await page.$$eval('.list-row', (rs) => rs.filter((r) => r.textContent.includes('Coupon not checked yet. Approve asks Whop first.')).map((r) => r.querySelector('a')?.textContent))
+    expect(notChecked.join() === 'Leo Hartmann,Hugo Lindahl', 'the rows whose membership has no stored check say "Coupon not checked yet": Leo and Hugo, no other', notChecked.join())
+    const buttons = await (await row('Jonah Pereira')).evaluate((r) => [...r.querySelectorAll('button')].map((b) => ({ t: b.textContent.trim(), bg: getComputedStyle(b).backgroundColor, border: getComputedStyle(b).borderTopColor })))
+    const reject = buttons.find((b) => b.t === 'Reject')
+    const approve = buttons.find((b) => b.t === 'Approve')
+    expect(reject && approve && reject.bg === 'rgba(0, 0, 0, 0)' && approve.bg !== 'rgba(0, 0, 0, 0)',
+      'Reject is the ghost button, the row\'s "no" as Dismiss is on Tasks; Approve is raised', JSON.stringify(buttons))
     const tara = await row('Tara Quinn')
-    expect((await rowText(tara)).includes(COUPON_LINE) && (await (await buttonIn(tara, 'Approve')).evaluate((b) => b.disabled)) && (await isNull(await linkIn(tara))) && !(await rowText(tara)).includes('videos'),
-      'Tara, every video done and evolve10 on her membership: the coupon\'s line, Approve off, no Approve anyway, no count', await rowText(tara))
+    expect((await rowText(tara)).includes(`${COUPON_LINE} Approve asks Whop again first.`) && !(await (await buttonIn(tara, 'Approve')).evaluate((b) => b.disabled)) && (await isNull(await linkIn(tara))) && !(await rowText(tara)).includes('videos'),
+      'Tara, every video done and evolve10 stored for her membership: the coupon\'s line, Approve on (it asks Whop again and refuses while the code is there), no Approve anyway, no count', await rowText(tara))
     const link = await (await linkIn(await row('Priya Raman'))).evaluate((b) => {
       const cs = getComputedStyle(b)
       const r = b.getBoundingClientRect()
@@ -796,8 +811,8 @@ if (wanted('thirty')) {
     expect(notice.text.startsWith(`Hugo Lindahl: ${COUPON_LINE}`) && !notice.copy,
       'Whop says now that evolve10 applies: the approve route\'s own sentence, naming the code, with nothing to copy', JSON.stringify(notice))
     const hugo = await row('Hugo Lindahl')
-    expect((await rowText(hugo)).includes(COUPON_LINE) && (await (await buttonIn(hugo, 'Approve')).evaluate((b) => b.disabled)) && (await isNull(await linkIn(hugo))),
-      'the list is read again: Hugo\'s row now shows the coupon, Approve off, no Approve anyway after it')
+    expect((await rowText(hugo)).includes(COUPON_LINE) && !(await rowText(hugo)).includes('Coupon not checked yet') && (await isNull(await linkIn(hugo))),
+      'the list is read again: Hugo\'s row now shows the coupon the route stored, no "not checked" line, no Approve anyway after it')
     counts = await tabCounts()
     expect(counts[0] === 'Applied 7' && counts[1] === 'Approved 3', 'and he stays on Applied, nothing approved', counts.join(' | '))
     for (const size of SIZES) {
@@ -907,12 +922,14 @@ if (wanted('thirty')) {
     await waitReady()
     const ethan = await row('Ethan Cole')
     const e = await rowText(ethan)
-    expect(e.includes('ECOM30-3F9A21') && e.includes('Applied Sat 17 Oct') && e.includes('Approved Sun 18 Oct by Robin') && !(e.includes('already has a discount')),
+    expect(e.includes('ECOM30-3F9A21') && e.includes('Applied Sat 17 Oct') && e.includes('Approved Sun 18 Oct by Robin'),
       'Ethan: the code, the date applied, who approved it and when', e)
+    expect(e.includes(`${COUPON_LINE} Check Whop before you add the 30% code.`) && !e.includes('Whop gave no answer now'),
+      'Ethan, approved before the coupon rule with nothing stored: Whop asked now names evolve10, so the line to check Whop shows (it never could before)', e)
     expect(!(await isNull(await buttonIn(ethan, 'Copy'))) && !(await isNull(await buttonIn(ethan, 'Mark code applied'))), 'with Copy and Mark code applied')
     const nora = await rowText(await row('Nora Brandt'))
-    expect(nora.includes(`${COUPON_LINE} Check Whop before you add the 30% code.`),
-      'Nora, approved before the coupon rule, evolve10 on her membership: a line to check Whop before adding the code', nora)
+    expect(nora.includes(`${COUPON_LINE} Check Whop before you add the 30% code. Whop gave no answer now; this is its answer of Mon 19 Oct.`),
+      'Nora, evolve10 stored, Whop giving no answer now: the stored row stands in, with its date', nora)
     for (const size of SIZES) {
       await viewport(size)
       await check(`30% off, Approved, ${size.join('x')}`, `thirty-approved-${size[0]}`)
@@ -980,7 +997,9 @@ if (wanted('dash')) {
   /** The rows of a chart's table for screen readers, in a tile. */
   const tableOf = (tile) => page.evaluate((name) => [...document.querySelectorAll(`[data-tile="${name}"] tbody tr`)].map((r) => r.innerText.replace(/\s+/g, ' ').trim()), tile)
   const dashCalls = () => page.evaluate(() => (window.__dashCalls ?? []).map((c) => c.name))
-  const refreshButton = () => page.evaluateHandle(() => [...document.querySelectorAll('button')].find((b) => /^↻?\s*Refresh/.test(b.textContent.trim())) || null)
+  const refreshButton = () => page.evaluateHandle(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Refresh') || null)
+  // The review's fix round: "Refresh" only reads again; the 2 minute sync is "Sync Whop and rebuild".
+  const syncButton = () => page.evaluateHandle(() => [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Sync Whop and rebuild') || null)
 
   for (const size of SIZES) {
     const [w, h] = size
@@ -1000,7 +1019,18 @@ if (wanted('dash')) {
       expect(t['avg-progress'].numbers[0] === '2.7%' && JSON.stringify(avgRows) === JSON.stringify(['Mon 19 Oct 2.66%', 'Tue 20 Oct 2.71%']),
         `${label}: Avg progress 2.7%, its line from the switch only (19 and 20 Oct, no 36%)`, JSON.stringify([t['avg-progress'].numbers, avgRows]))
       expect((await tableOf('active')).length === 14 && (await tableOf('churned')).length === 14, `${label}: the other lines hold the 14 days`)
-      expect(!(await isNull(await refreshButton())), `${label}: a founder has Refresh`)
+      expect(!(await isNull(await refreshButton())) && !(await isNull(await syncButton())), `${label}: a founder has Refresh (reads again) and Sync Whop and rebuild`)
+      const order = await page.evaluate(() => ['dash-today', 'dash-program', 'dash-trends'].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().top)))
+      expect(order[0] < order[1] && order[1] < order[2], `${label}: Today first, then the program, then the trends (the review's fix round: what waits for the team on top)`, JSON.stringify(order))
+      const m2 = await page.evaluate(() => {
+        const t = document.querySelector('[data-tile="month2"]')
+        const sizes = [...t.querySelectorAll('p, span')].map((e) => parseFloat(getComputedStyle(e).fontSize))
+        const b = document.querySelector('[data-tile="bounty"]').getBoundingClientRect()
+        const m = t.getBoundingClientRect()
+        return { biggest: Math.max(...sizes), m2Width: Math.round(m.width), bountyWidth: Math.round(b.width), side: Math.round(m.top) === Math.round(b.top) }
+      })
+      expect(m2.biggest <= 24 && (w < 768 || (m2.side && m2.m2Width < m2.bountyWidth)),
+        `${label}: until its first rate Month 2 is a compact tile (no headline over 24px) beside the Bounty Program's chart`, JSON.stringify(m2))
       const small = await smallTaps()
       expect(small.length === 0, `${label}: every button is 44px tall or more`, JSON.stringify(small.slice(0, 4)))
     }
@@ -1042,8 +1072,17 @@ if (wanted('dash')) {
       expect(t['to-decide'].numbers[0] === '3' && !t.active.failed && t.active.numbers.length === 1 && t.active.text.includes("Couldn't load the line"),
         `${label}: the rest stands; Active keeps its number and says its line could not load`)
       const alert = await page.$eval('[role="alert"]', (e) => e.innerText)
-      expect(alert.includes('Some numbers couldn\'t load.') && alert.includes('Open tasks: permission denied for table tasks') && alert.includes('Daily snapshots:') && alert.includes('Retry'),
-        `${label}: one line at the top names each failed read, with Retry`, alert.replace(/\s+/g, ' '))
+      expect(alert.includes('Some numbers couldn\'t load.') && alert.includes("This account can't read the tasks.") && alert.includes('The database took too long to answer.') && alert.includes('Retry')
+          && !/permission denied|canceling statement/.test(alert),
+        `${label}: one line at the top says why in plain words, each reason once, with Retry; the database's own words are not on the page`, alert.replace(/\s+/g, ' '))
+      const tileWords = Object.values(t).map((x) => x.text).join(' ')
+      expect(!/permission denied|canceling statement|admin_config|statement timeout/.test(tileWords), `${label}: no tile repeats a reason, or a table's name`)
+      await page.$eval('[role="alert"] details summary', (sm) => sm.click())
+      await sleep(100)
+      const opened = await page.$eval('[role="alert"]', (e) => e.innerText)
+      expect(opened.includes('Open tasks: permission denied for table tasks') && opened.includes('Daily snapshots: canceling statement due to statement timeout'),
+        `${label}: Details names each read with the database's own words`, opened.replace(/\s+/g, ' '))
+      await check(`${label}, Details open`, `dash-partial-details-${w}`)
     }
     {
       const label = `Dashboard, error (every read fails), ${w}x${h}`
@@ -1144,37 +1183,45 @@ if (wanted('dash')) {
     expect(true, 'Retry reads everything again')
   }
 
-  console.log('\nDashboard: Refresh')
+  console.log('\nDashboard: Refresh reads again; Sync Whop and rebuild')
   {
     await open('?state=full', [1280, 720])
     await ready()
+    {
+      const before = await dashCalls()
+      await press(await refreshButton())
+      await page.waitForFunction((n) => (window.__dashCalls ?? []).filter((c) => c.name === 'load').length > n, { timeout: 10000 }, before.filter((c) => c === 'load').length)
+      const after = await dashCalls()
+      expect(after.filter((c) => c === 'refresh').length === before.filter((c) => c === 'refresh').length,
+        'Refresh reads every number again and starts no sync (it started the 2 minute sync before the review\'s fix round)', JSON.stringify(after))
+    }
     const loadsBefore = (await dashCalls()).filter((c) => c === 'load').length
-    await press(await refreshButton())
+    await press(await syncButton())
     await page.waitForFunction(() => [...document.querySelectorAll('[role="status"]')].some((e) => e.textContent.includes('snapshots rebuilt')), { timeout: 15000 })
     const note = await page.evaluate(() => [...document.querySelectorAll('[role="status"]')].map((e) => e.textContent).find((t) => t.includes('snapshots rebuilt')))
     const calls = await dashCalls()
-    expect(note === 'Whop synced, 3 new and 118 updated · snapshots rebuilt · 4 new tasks · 2 alerts', `Refresh says what each step did: "${note}"`)
+    expect(note === 'Whop synced, 3 new and 118 updated · snapshots rebuilt · 4 new tasks · 2 alerts', `Sync Whop and rebuild says what each step did: "${note}"`)
     await page.waitForFunction((n) => (window.__dashCalls ?? []).filter((c) => c.name === 'load').length > n, { timeout: 10000 }, loadsBefore)
     expect(calls.includes('refresh'), 'one refresh call, then the numbers are read again', JSON.stringify(calls))
     await check('Dashboard, after Refresh, 1280x720', 'dash-refreshed-1280')
 
     await open('?state=full&refresh=fail', [1280, 720])
     await ready()
-    await press(await refreshButton())
-    await page.waitForFunction(() => [...document.querySelectorAll('[role="alert"]')].some((e) => e.textContent.startsWith('Refresh failed')), { timeout: 15000 })
-    const refusal = await page.evaluate(() => [...document.querySelectorAll('[role="alert"]')].map((e) => e.textContent).find((t) => t.startsWith('Refresh failed')))
-    expect(refusal === 'Refresh failed: Founder or admin role required', `a refusal is said in the route's words: "${refusal}"`)
+    await press(await syncButton())
+    await page.waitForFunction(() => [...document.querySelectorAll('[role="alert"]')].some((e) => e.textContent.startsWith('Sync failed')), { timeout: 15000 })
+    const refusal = await page.evaluate(() => [...document.querySelectorAll('[role="alert"]')].map((e) => e.textContent).find((t) => t.startsWith('Sync failed')))
+    expect(refusal === 'Sync failed: Founder or admin role required', `a refusal is said in the route's words: "${refusal}"`)
 
     await open('?state=full&refresh=partial', [1280, 720])
     await ready()
-    await press(await refreshButton())
+    await press(await syncButton())
     await page.waitForFunction(() => document.body.innerText.includes('Whop sync failed: HTTP 502'), { timeout: 15000 })
     expect(true, 'a step that failed inside a 200 is said: "Whop sync failed: HTTP 502"')
 
     for (const size of SIZES) {
       await open('?state=full&role=csm', size)
       await ready()
-      expect(await isNull(await refreshButton()), `a csm has no Refresh (the route refuses one), ${size.join('x')}`)
+      expect(await isNull(await syncButton()) && !(await isNull(await refreshButton())), `a csm has Refresh, which only reads, and no Sync Whop and rebuild (the route refuses one), ${size.join('x')}`)
       await check(`Dashboard, a csm, ${size.join('x')}`, `dash-csm-${size[0]}`)
     }
   }
@@ -1244,8 +1291,18 @@ if (wanted('tasks')) {
     expect(JSON.stringify(await tabTexts()) === JSON.stringify(['To do 6', 'Sent 2', 'Dismissed 2', 'Archived 4']),
       'after the reset: To do 6, Sent 2, Dismissed 2, Archived 4', JSON.stringify(await tabTexts()))
     const text = await bodyText()
-    expect(text.includes('Open tasks made since the reset on Tue 20 Oct, 09:00 (Croatia time)') && text.includes('New program since Tue 20 Oct'),
-      'To do says its tasks were made since the reset, in Croatia time')
+    expect(text.includes('Open tasks made since the reset on Tue 20 Oct, 09:00 (Croatia time)') && !text.includes('New program since'),
+      'To do says its tasks were made since the reset, in Croatia time (the meta no longer calls the reset "New program since")')
+    // The review's fix round: the header links to the outreach insights in words; no pill row twin of the tabs; the checks named for what they do.
+    const header = await page.evaluate(() => {
+      const h = [...document.querySelectorAll('main header')].find((x) => x.querySelector('h1'))
+      return { links: [...h.querySelectorAll('a')].map((a) => `${a.textContent.trim()} ${a.getAttribute('href')}`), buttons: [...h.querySelectorAll('button')].map((b) => b.textContent.trim()) }
+    })
+    expect(JSON.stringify(header) === JSON.stringify({ links: ['Outreach insights → /admin/tasks/insights'], buttons: ['Run task checks'] }) && (await page.$('nav[aria-label="Views"]')) === null,
+      'the header: "Outreach insights →" and "Run task checks"; no Queue | Insights pills over the tabs', JSON.stringify(header))
+    const edges = await page.$$eval('main section', (ss) => ss.map((sec) => ({ head: sec.querySelector('h2')?.textContent.trim(), edge: getComputedStyle(sec.querySelector('.list-row')).boxShadow })))
+    expect(/rgb\(255, 69, 58\)/.test(edges[0].edge) && /rgb\(255, 159, 10\)/.test(edges[1].edge) && /rgb\(255, 159, 10\)/.test(edges[2].edge) && edges[3].edge === 'none',
+      'the edges: red for canceling, orange for cancel path and at risk, none for the rest', JSON.stringify(edges))
     const heads = await page.$$eval('main section h2', (hs) => hs.map((h) => [...h.childNodes].map((n) => n.textContent.trim()).filter(Boolean).join(' ')))
     expect(JSON.stringify(heads) === JSON.stringify(['Canceling: save first 1', 'Cancel path 1', 'At risk 2', 'Events and wins 2']),
       'the tiers: canceling first, then cancel path, at risk, events and wins', JSON.stringify(heads))
@@ -1287,7 +1344,7 @@ if (wanted('tasks')) {
       'Mark sent on Omar: transition to completed, and To do reads 5')
     await press(await buttonIn(await rowWith('Nora Brandt'), 'Dismiss'))
     await page.waitForSelector('[role="dialog"] textarea')
-    await press(await page.evaluateHandle(() => [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === 'Dismiss')))
+    await press(await page.evaluateHandle(() => [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === 'Dismiss the task')))
     await waitText('Add a short reason first.')
     expect(!(await peopleCalls()).some((c) => c.name === 'transition' && c.args[1] === 'dismissed'), 'Dismiss with no reason asks for one and sends nothing')
     for (const size of SIZES) {
@@ -1296,7 +1353,7 @@ if (wanted('tasks')) {
     }
     await viewport([1280, 720])
     await page.type('[role="dialog"] textarea', 'Paid by the hour, will join on Monday')
-    await press(await page.evaluateHandle(() => [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === 'Dismiss')))
+    await press(await page.evaluateHandle(() => [...document.querySelectorAll('[role="dialog"] button')].find((b) => b.textContent.trim() === 'Dismiss the task')))
     await waitText('Dismissed the task for Nora Brandt.')
     await page.waitForFunction(() => !document.querySelector('[role="dialog"]'), { timeout: 5000 })
     expect((await peopleCalls()).some((c) => c.name === 'transition' && c.args[0] === 't-03' && c.args[1] === 'dismissed' && c.args[2] === 'Paid by the hour, will join on Monday'),
@@ -1360,16 +1417,30 @@ if (wanted('people')) {
     await go('/dev/admin/tasks/insights')
     await settledPage()
     const text = await bodyText()
-    expect(text.includes('Since the reset, Tue 20 Oct') && text.includes('still a member') && !/subscri/i.test(text),
-      'after the reset the second range is "Since the reset, Tue 20 Oct", and a save is "still a member", never "subscribed"')
-    await press(await button('Since the reset, Tue 20 Oct'))
-    await page.waitForFunction(() => [...document.querySelectorAll('[aria-pressed="true"]')].some((b) => b.textContent.startsWith('Since the reset')))
-    await settledPage()
-    const asked = (await peopleCalls()).filter((c) => c.name === 'loadInsights').map((c) => c.args[0])
-    expect(asked.length === 2 && typeof asked[0] === 'string' && asked[1] === null, 'Last 30 days asks from 30 days ago; Since the reset asks for everything the route counts', JSON.stringify(asked))
+    // The review's fix round: with the reset under 30 days old the last 30 days are the tasks since it, so there is no range to pick.
+    expect(text.includes('Counts the tasks made since the reset on Tue 20 Oct') && (await page.$('[role="group"][aria-label="Range"]')) === null
+        && text.includes('still a member') && !/subscri/i.test(text),
+      'the reset is under 30 days old: one range, said in the meta ("since the reset on Tue 20 Oct"), no pills that show the same numbers twice; a save is "still a member", never "subscribed"')
+    const backLink = await page.evaluate(() => [...document.querySelectorAll('main a')].find((a) => a.textContent.includes('Queue'))?.getAttribute('href'))
+    expect(backLink === '/admin/tasks' && (await page.$('nav[aria-label="Views"]')) === null, 'a "← Queue" link back to Tasks, and no Queue | Insights pills', String(backLink))
+    const notes = await page.evaluate(() => { const d = [...document.querySelectorAll('details')].find((x) => x.querySelector('summary')?.textContent.trim() === 'How these numbers work'); return d ? { open: d.open } : null })
+    expect(notes && notes.open === false, 'how the numbers work is folded under one line, as on Insights', JSON.stringify(notes))
+    expect(/time to send/i.test(text) && !/task to send/i.test(text) && /\d+ of \d+ graded sends did what the DM asked/.test(text), 'the tile is "Time to send", and success reads "N of M graded sends did what the DM asked"')
     await go('/dev/admin/tasks/insights?reset=none')
     await settledPage()
-    expect((await bodyText()).includes('All time'), 'before the reset the second range reads "All time"')
+    expect((await bodyText()).includes('All time') && (await bodyText()).includes('Last 30 days'), 'before the reset the two ranges are "Last 30 days" and "All time"')
+    await press(await button('All time'))
+    await page.waitForFunction(() => [...document.querySelectorAll('[aria-pressed="true"]')].some((b) => b.textContent.startsWith('All time')))
+    await settledPage()
+    const asked = (await peopleCalls()).filter((c) => c.name === 'loadInsights').map((c) => c.args[0])
+    expect(asked.length === 2 && typeof asked[0] === 'string' && asked[1] === null, 'Last 30 days asks from 30 days ago; All time asks for everything the route counts', JSON.stringify(asked))
+    await go('/dev/admin/tasks/insights', [390, 844])
+    await settledPage()
+    const cards = await page.$$eval('[data-template-card]', (cs) => cs.filter((c) => c.getBoundingClientRect().height > 0).map((c) => c.innerText.replace(/\s+/g, ' ')))
+    const table = await page.$$eval('main table', (ts) => ts.filter((t) => t.getBoundingClientRect().height > 0).length)
+    expect(cards.length >= 1 && table === 0 && cards.every((c) => /SENT/i.test(c) && /TIME TO SEND/i.test(c) && /SUCCESS/i.test(c) && /REPLIED/i.test(c)),
+      'on a phone each template is a card with Sent, Time to send, Success and Replied, and no table to scroll sideways', JSON.stringify(cards.slice(0, 1)))
+    await check('Insights, the phone\'s template cards, 390x844', 'tasks-insights-cards-390')
     const small = await smallTaps()
     expect(small.length === 0, 'Insights: every button 44px tall or more', JSON.stringify(small.slice(0, 4)))
   }
@@ -1453,17 +1524,56 @@ if (wanted('people')) {
     await press(await page.evaluateHandle(() => [...document.querySelectorAll('label')].find((l) => l.textContent.includes('Leave out of the tasks'))))
     await page.waitForFunction(() => document.body.innerText.includes('No task and no day 28 DM is made for this account.'), { timeout: 10000 })
     expect((await peopleCalls()).some((c) => c.name === 'setExempt' && c.args[0] === 'p-maya' && c.args[1] === true), 'the exempt tick writes, and the page says what it does now')
+    // The review's fix round: the settings sit quiet at the foot, after the quick DMs; the ads tick under a closed More.
+    const order = await page.evaluate(() => {
+      const top = (sel, txt) => { const el = [...document.querySelectorAll(sel)].find((e) => e.textContent.includes(txt)); return el ? Math.round(el.getBoundingClientRect().top + scrollY) : -1 }
+      return { stats: top('p', 'Progress'), sync: top('h2', 'Whop sync'), dms: top('h2', 'Quick DMs'), exempt: top('label', 'Leave out of the tasks'), more: top('summary', 'More') }
+    })
+    expect(order.stats < order.sync && order.sync < order.dms && order.dms < order.exempt && order.exempt < order.more,
+      'the numbers and Whop sync come first; "Leave out of the tasks" and More at the foot, after the quick DMs', JSON.stringify(order))
+    expect(!(await page.evaluate(() => [...document.querySelectorAll('details[data-more]')][0]?.open)) && !(await bodyText()).includes('Ad submissions verified'),
+      'the ads tick is folded under a closed More, out of sight')
+    await press(await page.evaluateHandle(() => [...document.querySelectorAll('summary')].find((x) => x.textContent.trim() === 'More')))
     await press(await page.evaluateHandle(() => [...document.querySelectorAll('label')].find((l) => l.textContent.includes('Ad submissions verified'))))
     await page.waitForFunction(() => (window.__peopleCalls ?? []).some((c) => c.name === 'setAdVerified'), { timeout: 10000 })
-    expect((await peopleCalls()).some((c) => c.name === 'setAdVerified' && c.args[0] === 'p-maya' && c.args[1] === false), 'the ads tick writes (Maya\'s was ticked)')
+    expect((await peopleCalls()).some((c) => c.name === 'setAdVerified' && c.args[0] === 'p-maya' && c.args[1] === false), 'opened, the ads tick writes (Maya\'s was ticked)')
+    expect((await bodyText()).includes('Approving the 30% does not need it.'), 'and its words say approving the 30% does not need it')
+    // The quick DMs, as the team copies them: the messages draft's words.
+    await page.evaluate(() => {
+      window.__copied = []
+      navigator.clipboard.writeText = (t) => { window.__copied.push(t); return Promise.resolve() }
+    })
+    for (const label of ['Welcome', 'Check-in', 'Encouragement']) await press(await button(label))
+    const copied = await page.evaluate(() => window.__copied)
+    expect(copied.length === 3 && copied[0].startsWith('Hey Maya! Welcome to Ecom University') && copied[0].includes('https://sprint.ecomuniversity.com/login')
+        && copied.every((t) => !/\u2014|unlock|ecomtalent|expedition|region|30 days/i.test(t)),
+      'the 3 quick DMs copy the messages draft\'s words: the first name, Ecom University, the program link; no em dash, no old brand, no old course words', JSON.stringify(copied))
     await press(await page.evaluateHandle(() => [...document.querySelectorAll('summary')].find((x) => x.textContent.includes('Foundations'))))
-    await waitText('Hide')
-    expect(await page.evaluate(() => [...document.querySelectorAll('details')].find((d) => d.textContent.includes('Foundations'))?.open === true && document.body.innerText.includes('Foundations, part 1')),
-      'an area opens on a tap and lists its lessons, its fold now saying Hide')
+    await page.waitForFunction(() => [...document.querySelectorAll('summary')].find((x) => x.textContent.includes('Foundations'))?.getAttribute('aria-label').endsWith('Hide its lessons.'), { timeout: 10000 })
+    const area = await page.evaluate(() => {
+      const d = [...document.querySelectorAll('details')].find((x) => x.textContent.includes('Foundations'))
+      const sm = d.querySelector('summary')
+      return { open: d.open, lists: document.body.innerText.includes('Foundations, part 1'), words: sm.innerText.replace(/\s+/g, ' ').trim(), label: sm.getAttribute('aria-label') }
+    })
+    expect(area.open && area.lists && !/\b(Show|Hide)\b/.test(area.words) && area.label.endsWith('Hide its lessons.'),
+      'an area opens on a tap of its row and lists its lessons; a chevron, no "Show" or "Hide" word (the label says it)', JSON.stringify(area))
     for (const size of SIZES) {
       await viewport(size)
       await check(`A student, an area open, ${size.join('x')}`, `student-area-open-${size[0]}`)
     }
+    await viewport([390, 844])
+    const phoneRow = await page.evaluate(() => {
+      const sm = [...document.querySelectorAll('summary')].find((x) => x.textContent.includes('Research'))
+      const r = sm.getBoundingClientRect()
+      const cs = getComputedStyle(sm)
+      const name = [...sm.children][0].getBoundingClientRect()
+      const done = [...sm.children][1].getBoundingClientRect()
+      const bar = sm.querySelector('[role="meter"]').getBoundingClientRect()
+      return { pad: [cs.paddingTop, cs.paddingBottom], nameTop: Math.round(name.top), doneTop: Math.round(done.top), barTop: Math.round(bar.top), nameBottom: Math.round(name.bottom), barWidth: Math.round(bar.width), rowWidth: Math.round(r.width) }
+    })
+    expect(phoneRow.pad[0] === '12px' && phoneRow.pad[1] === '12px' && Math.abs(phoneRow.nameTop - phoneRow.doneTop) <= 4 && phoneRow.barTop > phoneRow.nameBottom && phoneRow.barWidth > phoneRow.rowWidth * 0.6,
+      'on a phone an area row has 12px of air, the name and "N of M done" on one line, then the bar across the row', JSON.stringify(phoneRow))
+    await check('A student, the lesson areas on a phone, 390x844', 'student-areas-390')
     await viewport([1280, 720])
     const small = await smallTaps()
     expect(small.length === 0, 'A student: every button and tick 44px tall or more', JSON.stringify(small.slice(0, 4)))
@@ -1505,8 +1615,13 @@ if (wanted('people')) {
     await page.waitForSelector('aside[role="dialog"]')
     // textContent: the block's title is drawn in capitals, which innerText reports.
     await page.waitForFunction(() => document.querySelector('aside[role="dialog"]')?.textContent.includes('Lessons by area'), { timeout: 10000 })
-    expect(await page.$eval('aside[role="dialog"]', (a) => a.innerText.includes('Maya Lindqvist') && a.innerText.includes('Open the full page') && a.innerText.includes('Approving the 30% no longer needs it.')),
-      'a card opens the drawer with that student, the ads tick\'s words and the link to the full page')
+    const drawer = await page.$eval('aside[role="dialog"]', (a) => {
+      const h = a.querySelector('h2')
+      const link = [...a.querySelectorAll('a')].find((x) => x.textContent.trim() === 'Open the full page')
+      return { name: h?.textContent, linkTop: link ? Math.round(link.getBoundingClientRect().top) : null, nameTop: h ? Math.round(h.getBoundingClientRect().top) : null, ads: a.innerText.includes('Ad submissions verified'), firstBlock: Math.round([...a.querySelectorAll('section')][0]?.getBoundingClientRect().top ?? 0) }
+    })
+    expect(drawer.name === 'Maya Lindqvist' && drawer.linkTop !== null && Math.abs(drawer.linkTop - drawer.nameTop) < 30 && drawer.linkTop < drawer.firstBlock && !drawer.ads,
+      'a card opens the drawer with that student, "Open the full page" at its top beside the name, and no ads tick (the review\'s fix round)', JSON.stringify(drawer))
     for (const size of SIZES) {
       await viewport(size)
       await check(`Journey, the drawer, ${size.join('x')}`, `journey-drawer-${size[0]}`)
@@ -1563,14 +1678,25 @@ if (wanted('feedback')) {
       const text = await bodyText()
       expect(text.includes('Since Mon 19 Oct · Updated 11:00'), `${label}: since the switch, and when it was read (Croatia time)`)
       expect(text.includes('4.0 average · 10 ratings · 3 of 8 lessons rated'), `${label}: Introduction's own line`)
-      const unrated = await page.$$eval('main section', (ss) => ss.filter((x) => x.textContent.includes('No lesson in this area has a rating yet.')).map((x) => x.querySelector('h2').textContent.replace(/\s+/g, ' ').trim()))
-      expect(JSON.stringify(unrated) === JSON.stringify(UNRATED_AREAS), `${label}: an area with no rating says so in one line`, JSON.stringify(unrated))
+      // The review's fix round: only the rated lessons are rows; the rest of an area is one line, "N lessons with no rating yet".
+      const unrated = await page.$$eval('main section', (ss) => ss.filter((x) => !x.querySelector('li[data-lesson]') && x.querySelector('[data-unrated]')).map((x) => x.querySelector('h2').textContent.replace(/\s+/g, ' ').trim()))
+      expect(JSON.stringify(unrated) === JSON.stringify(UNRATED_AREAS), `${label}: an area with no rating is its heading and one line, no rows`, JSON.stringify(unrated))
+      const lines = await page.$$eval('main [data-unrated] > button', (bs) => bs.map((b) => `${b.textContent.trim()} ${b.getAttribute('aria-expanded')}`))
+      expect(lines.length === 8 && lines[0] === '5 lessons with no rating yet false' && lines.every((l) => /^\d+ lessons? with no rating yet false$/.test(l)),
+        `${label}: each area folds its unrated lessons into one line, closed`, JSON.stringify(lines))
+      expect(!(await page.$$eval('main li[data-lesson]', (ls) => ls.some((l) => l.textContent.includes('No ratings yet.')))) && !/\ba\dl\d\d\b/.test(text),
+        `${label}: no row of "No ratings yet.", and no lesson id in the words (it is in a row's title)`)
+      const order = await page.$$eval('main section:first-of-type > div + div > ul > li[data-lesson]', (ls) => ls.map((l) => l.dataset.lesson))
+      expect(order[0] === 'a1l01' && order.length === 3, `${label}: Introduction lists its 3 rated lessons, the newest rating first`, JSON.stringify(order))
       const welcome = await lessonRow('a1l01')
       expect(!!welcome && (await welcome.evaluate((r) => r.textContent.includes('4.0') && r.textContent.includes('7 ratings'))), `${label}: the welcome lesson: 4.0 from 7 ratings`)
       expect(JSON.stringify(await comments('a1l01')) === JSON.stringify(['I already knew all of this from Whop.', 'Fine.', 'Too long for a welcome. Cut it to 3 minutes.']),
         `${label}: its 3 newest comments, the edited one first`, JSON.stringify(await comments('a1l01')))
-      const third = await lessonRow('a1l03')
-      expect(!!third && (await third.evaluate((r) => r.textContent.includes('No ratings yet.'))), `${label}: a lesson with none says "No ratings yet."`)
+      expect((await lessonRow('a1l03')) === null, `${label}: a lesson with no rating is no row of its own`)
+      if (w === 1440) {
+        const height = await page.evaluate(() => document.scrollingElement.scrollHeight)
+        expect(height < 3200, `${label}: the page is ${height}px tall (5,969px when it listed every unrated lesson)`)
+      }
       expect(text.includes('s-noname@example.com') && text.includes('A student no longer on file'), `${label}: a student with no name shows the email, a student gone says so`)
       const small = await smallTaps()
       expect(small.length === 0, `${label}: every button and link drawn as one is 44px or taller`, JSON.stringify(small.slice(0, 4)))
@@ -1611,6 +1737,16 @@ if (wanted('feedback')) {
     await press(more)
     await sleep(150)
     expect((await comments('a1l01')).length === 3, 'pressed again: the 3 newest')
+    const fold = await page.evaluateHandle(() => document.querySelector('main section [data-unrated] > button'))
+    await press(fold)
+    await sleep(150)
+    const listed = await page.evaluate(() => {
+      const box = document.querySelector('main section [data-unrated]')
+      return { expanded: box.querySelector('button').getAttribute('aria-expanded'), items: [...box.querySelectorAll('li')].map((li) => ({ title: li.getAttribute('title'), text: li.textContent.trim() })) }
+    })
+    expect(listed.expanded === 'true' && listed.items.length === 5 && listed.items.some((i) => i.title === 'a1l03') && listed.items.every((i) => !/\ba\dl\d\d\b/.test(i.text)),
+      'the line pressed lists the 5 lessons by title, each lesson\'s id in its title attribute only', JSON.stringify(listed).slice(0, 200))
+    await check('lesson feedback, the unrated lessons listed, 1280x720', 'feedback-unrated-open-1280')
 
     await open('?reload=fail', [1280, 720])
     await ready()
@@ -1692,14 +1828,18 @@ if (LANE_PARTS.some(wanted)) {
       await ready('Message settings')
       const text = await bodyText()
       expect(text.includes(W_DISCORD) && text.includes(W_PROGRAM), `${label}: both warnings show`)
-      expect(text.includes('Each switch below acts only while the master switch is on.') && text.includes('Off: nothing posts'),
-        `${label}: the master switch is off and says nothing posts; the switches under it act only while it is on`)
-      expect(!/subscription/i.test(text), `${label}: no "subscription" on the page`)
+      // The review's fix round: the panel opens folded; opened here, so the links and the switches are measured too.
+      await press(await button('Show settings'))
+      await sleep(150)
+      const opened = await bodyText()
+      expect(opened.includes('Each switch below acts only while the master switch is on.') && opened.includes('Off: nothing posts'),
+        `${label}: opened, the master switch is off and says nothing posts; the switches under it act only while it is on`)
+      expect(!/subscription/i.test(opened), `${label}: no "subscription" on the page`)
       await check(label, `templates-full-${size[0]}`)
       await tapsOk(label)
     }
     for (const [state, wantText, size] of [
-      ['fixed', 'On', [1440, 900]], ['empty', 'No templates yet.', [390, 844]], ['error', "Couldn't load the templates.", [390, 844]],
+      ['fixed', 'Message settings', [1440, 900]], ['empty', 'No templates yet.', [390, 844]], ['error', "Couldn't load the templates.", [390, 844]],
       ['nosettings', "Couldn't load the message settings", [1440, 900]], ['nocourse', 'Templates', [1440, 900]],
     ]) {
       const label = `templates, ${state}, ${size.join('x')}`
@@ -1709,6 +1849,9 @@ if (LANE_PARTS.some(wanted)) {
       if (state === 'fixed') {
         const text = await bodyText()
         expect(!text.includes(W_DISCORD) && !text.includes('is not on sprint.ecomuniversity.com'), `${label}: no warning once both links are right`)
+        // The review's fix round: with nothing to fix, Message settings is one line, and the first template is on the first screen.
+        const first = await page.evaluate(() => ({ open: document.querySelector('[data-settings-open]')?.dataset.settingsOpen, top: Math.round(document.querySelector('.list-row button[aria-expanded]').getBoundingClientRect().top) }))
+        expect(first.open === 'no' && first.top < 900, `${label}: Message settings folded, the first template at ${first.top}px, on the first screen`, JSON.stringify(first))
       }
       await check(label, `templates-${state}-${size[0]}`)
     }
@@ -1724,18 +1867,62 @@ if (LANE_PARTS.some(wanted)) {
       console.log(`\n${label}`)
       await go('/dev/admin/templates?role=csm', size)
       await ready('Message settings')
+      const folded = await page.evaluate(() => {
+        const box = document.getElementById('message-settings-title')?.closest('section')
+        return { open: box.dataset.settingsOpen, buttons: [...box.querySelectorAll('button')].map((b) => b.textContent.trim()), text: box.innerText }
+      })
+      expect(folded.open === 'no' && JSON.stringify(folded.buttons) === JSON.stringify(['Show settings']) && folded.text.includes(W_DISCORD) && folded.text.includes(W_PROGRAM),
+        `${label}: for a csm, who cannot fix them, Message settings is folded: its warnings and one button, Show settings`, JSON.stringify(folded).slice(0, 200))
+      await press(await button('Show settings'))
+      await sleep(150)
       const panel = await page.evaluate(() => {
         const box = document.getElementById('message-settings-title')?.closest('section')
-        return { inputs: box.querySelectorAll('input').length, buttons: box.querySelectorAll('button').length, text: box.innerText }
+        return { inputs: box.querySelectorAll('input').length, buttons: [...box.querySelectorAll('button')].map((b) => b.textContent.trim()), text: box.innerText }
       })
-      expect(panel.inputs === 0 && panel.buttons === 0 && panel.text.includes('Empty') && panel.text.includes('https://old-course-host.example.com/login'),
-        `${label}: a csm reads the links and the switches, with no field and no button`, JSON.stringify(panel).slice(0, 160))
-      expect((await bodyText()).includes('Only a founder or an admin can change them.') && (await button('New template')) && (await isNull(await button('New template'))),
-        `${label}: says only a founder or an admin can change them, and offers no New template`)
+      expect(panel.inputs === 0 && JSON.stringify(panel.buttons) === JSON.stringify(['Hide settings']) && panel.text.includes('Empty') && panel.text.includes('https://old-course-host.example.com/login'),
+        `${label}: opened, a csm reads the links and the switches, with no field and no button but the fold`, JSON.stringify(panel).slice(0, 160))
+      expect(((await bodyText()).match(/Only a founder or an admin can change them\./g) ?? []).length === 1 && (await isNull(await button('New template'))),
+        `${label}: says once that only a founder or an admin can change them, and offers no New template`)
       await press(await rowHeader('Welcome (Day 1)'))
       await sleep(200)
       expect(await isNull(await inOpenRow('Save')) && await isNull(await inOpenRow('Delete template')), `${label}: an opened template has no Save and no Delete`)
       await check(`${label}, a template open`, `templates-csm-open-${size[0]}`)
+    }
+
+    console.log('\ntemplates: the header, the buttons, the conditions')
+    {
+      await go('/dev/admin/templates', [1440, 900])
+      await ready('Message settings')
+      const ink = await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'New template'); const cs = getComputedStyle(b); return { bg: cs.backgroundColor, color: cs.color } })
+      expect(ink.bg === 'rgb(247, 246, 243)' && ink.color === 'rgb(24, 24, 26)', 'New template is the page\'s one ink button (Stalactite fill, Gunpowder words); Refresh stays raised', JSON.stringify(ink))
+      const top = await page.evaluate(() => ({ open: document.querySelector('[data-settings-open]').dataset.settingsOpen, top: Math.round(document.querySelector('.list-row button[aria-expanded]').getBoundingClientRect().top) }))
+      expect(top.open === 'no' && top.top < 900, `with both warnings standing, a founder finds Message settings folded and the first template at ${top.top}px, on the first screen`, JSON.stringify(top))
+      await go('/dev/admin/templates', [390, 844])
+      await ready('Message settings')
+      const head = await page.evaluate(() => {
+        const h = [...document.querySelectorAll('main header')].find((x) => x.querySelector('h1'))
+        const acts = h.querySelector('[data-header-actions]').getBoundingClientRect()
+        const desc = h.querySelector('p').getBoundingClientRect()
+        const title = h.querySelector('h1').getBoundingClientRect()
+        return { actsTop: Math.round(acts.top), descBottom: Math.round(desc.bottom), titleH: Math.round(title.height) }
+      })
+      expect(head.actsTop >= head.descBottom && head.titleH >= 44, 'on a phone Refresh and New template go under the description, the title alone on its 44px line', JSON.stringify(head))
+      await go('/dev/admin/templates', [1440, 900])
+      await ready('Message settings')
+      await press(await rowHeader('Is cancelling'))
+      await sleep(200)
+      const ops = await page.evaluate(() => [...document.querySelector('button[aria-expanded="true"]').closest('.list-row').querySelectorAll('select')].map((sel) => [...sel.options].map((o) => o.textContent.trim()).join('|')))
+      expect(ops.some((o) => o === 'is yes|is no'), 'a yes-or-no condition (Is canceling) is one select, "is yes" or "is no", never a lone "is"', JSON.stringify(ops))
+      const del = await page.evaluate(() => {
+        const row = document.querySelector('button[aria-expanded="true"]').closest('.list-row')
+        const bs = [...row.querySelectorAll('button')].filter((b) => ['Delete template', 'Show preview', 'Save'].includes(b.textContent.trim()))
+        return bs.map((b) => ({ t: b.textContent.trim(), left: Math.round(b.getBoundingClientRect().left), bg: getComputedStyle(b).backgroundColor, color: getComputedStyle(b).color }))
+      })
+      const d = del.find((x) => x.t === 'Delete template')
+      const pv = del.find((x) => x.t === 'Show preview')
+      expect(d && pv && d.bg === 'rgb(255, 69, 58)' && d.color === 'rgb(24, 24, 26)' && d.left < pv.left,
+        'Delete template is the red danger button, Gunpowder words, at the start of the row, Show preview and Save at its end', JSON.stringify(del))
+      await check('templates, a custom template open, 1440x900', 'templates-custom-open-1440')
     }
 
     console.log('\ntemplates: by clicks, as a founder')
@@ -1765,6 +1952,9 @@ if (LANE_PARTS.some(wanted)) {
       expect(saved.length === 1 && JSON.stringify(Object.keys(saved[0].args[1])) === JSON.stringify(['body']) && saved[0].args[1].body.endsWith('See you there.'),
         'Save sends the new message and nothing else (no bucket, no conditions)', JSON.stringify(saved))
 
+      await press(await button('Show settings'))
+      await sleep(150)
+      expect((await page.evaluate(() => document.querySelector('[data-settings-open]').dataset.settingsOpen)) === 'yes', 'Show settings opens the links and the switches')
       const discord = await byLabel('Discord invite link')
       await discord.evaluate((el) => el.scrollIntoView({ block: 'center' }))
       await discord.click()
@@ -1875,13 +2065,39 @@ if (LANE_PARTS.some(wanted)) {
       await check(label, `survey-full-${size[0]}`)
       await tapsOk(label)
     }
+    console.log('\nsurvey: from 1 October, the summary, the questions answered (the review\'s fix round)')
+    {
+      await go('/dev/admin/survey', [1440, 900])
+      await ready('Maya Lindqvist')
+      const text = await bodyText()
+      const cards = () => page.$$eval('main article', (as) => as.length)
+      expect(text.includes('2 applications from before Thu 1 Oct are not shown.') && !text.includes('Noah Brandt') && (await cards()) === 7,
+        'the applications from 1 October, as the 30% page lists them; one line counts the 2 older ones', String(await cards()))
+      const summary = await page.evaluate(() => ({ parts: [...document.querySelectorAll('[data-summary]')].map((x) => x.dataset.summary), text: document.querySelector('[data-summary="pace"]')?.innerText ?? '' }))
+      expect(JSON.stringify(summary.parts) === JSON.stringify(['average', 'spread', 'pace']) && /Just right\s*3/.test(summary.text) && /Way too slow\s*0/.test(summary.text),
+        'the summary on top: the average, the scores\' spread and how many picked each pace answer', JSON.stringify(summary).slice(0, 200))
+      const jonah = await page.evaluate(() => [...document.querySelectorAll('main article')].find((a) => a.innerText.includes('Jonah Pereira')).innerText)
+      expect(!jonah.includes('No answer') && !jonah.includes('biggest win'), 'a card names only the questions its student answered: no "No answer" lines', jonah.slice(0, 160))
+      await press(await button('Show them'))
+      await sleep(200)
+      expect((await cards()) === 9 && (await bodyText()).includes('Noah Brandt') && (await bodyText()).includes('Showing every application, 2 of them from before Thu 1 Oct.'),
+        'Show them: every application, the older 2 too, and the line says so', String(await cards()))
+      await check('survey, every application shown, 1440x900', 'survey-all-1440')
+    }
     for (const [state, want] of [['empty', 'No survey answers yet.'], ['error', "Couldn't load the survey."], ['loading', 'Survey']]) {
       for (const size of [[390, 844], [1440, 900]]) {
         const label = `survey, ${state}, ${size.join('x')}`
         console.log(`\n${label}`)
         await go(`/dev/admin/survey?state=${state}`, size)
         await ready(want)
-        if (state === 'error') expect((await bodyText()).includes('The applications could not be read'), `${label}: says what could not be read, with Retry`)
+        if (state === 'error') {
+          // The review's fix round: in plain words; the database's own behind a closed Details.
+          const t = await bodyText()
+          expect(t.includes('The database took too long to answer.') && t.includes('Retry') && !t.includes('canceling statement'), `${label}: says why in plain words, with Retry`)
+          await page.$eval('[role="alert"] details summary', (sm) => sm.click())
+          await sleep(100)
+          expect((await bodyText()).includes('The applications could not be read: canceling statement due to statement timeout'), `${label}: Details holds what could not be read, in the database's words`)
+        }
         await check(label, `survey-${state}-${size[0]}`)
       }
     }
@@ -1894,6 +2110,12 @@ if (LANE_PARTS.some(wanted)) {
       await go('/dev/admin/team', size)
       await ready('Maximilian Featherstonehaugh-Smythe')
       expect((await page.$eval('input[type="email"]', (i) => i.placeholder)) === 'name@ecomuniversity.com', `${label}: the email field's example is name@ecomuniversity.com`)
+      const fields = await page.evaluate(() => {
+        const send = [...document.querySelectorAll('button')].find((b) => b.textContent.trim() === 'Send invite')
+        return { size: getComputedStyle(document.querySelector('input[type="email"]')).fontSize, send: getComputedStyle(send).backgroundColor }
+      })
+      expect(fields.size === (size[0] >= 640 ? '14px' : '16px') && fields.send === 'rgb(247, 246, 243)',
+        `${label}: the fields' words are ${size[0] >= 640 ? '14px with a mouse on a wide window' : '16px on a phone'}; Send invite is the ink button`, JSON.stringify(fields))
       await check(label, `team-full-${size[0]}`)
       await tapsOk(label)
     }
@@ -1908,6 +2130,8 @@ if (LANE_PARTS.some(wanted)) {
       await sleep(100)
       expect((await bodyText()).includes('Remove sam.lee@example.com? Their login is deleted too. This cannot be undone.'), 'Remove asks first')
       await check('team, a removal asking, 390x844', 'team-remove-ask-390')
+      const yes = await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Yes, remove'); const cs = getComputedStyle(b); return { bg: cs.backgroundColor, color: cs.color, h: Math.round(b.getBoundingClientRect().height) } })
+      expect(yes.bg === 'rgb(255, 69, 58)' && yes.color === 'rgb(24, 24, 26)' && yes.h >= 44, 'Yes, remove is the danger button: red, Gunpowder words (5.2:1), 44px', JSON.stringify(yes))
       await press(await button('Yes, remove'))
       await page.waitForFunction(() => document.body.innerText.includes('Removed sam.lee@example.com.'), { timeout: 5000 })
       expect(!(await bodyText()).includes('Sam Lee'), 'and the member is gone from the list')
@@ -1918,8 +2142,9 @@ if (LANE_PARTS.some(wanted)) {
       await select.select('csm')
       await page.waitForFunction(() => document.body.innerText.includes('Jamie Rowe is now CSM.'), { timeout: 5000 })
       expect((await laneCalls()).some((c) => c.name === 'changeRole' && c.args[0] === 'tm-jamie' && c.args[1] === 'csm'), 'a role change is sent and said')
-      const selfLocked = await page.evaluate(() => [...document.querySelectorAll('.list-row')].find((r) => r.innerText.includes('robin.hale@example.com')).querySelector('select').disabled)
-      expect(selfLocked && (await bodyText()).includes("You can't change your own founder role."), 'the founder\'s own role is locked, and says why')
+      const self = await page.evaluate(() => { const r = [...document.querySelectorAll('.list-row')].find((x) => x.innerText.includes('robin.hale@example.com')); return { select: !!r.querySelector('select'), pill: r.querySelector('[data-role-locked]')?.textContent.trim() } })
+      expect(!self.select && self.pill === 'Founder' && (await bodyText()).includes("You can't change your own founder role."),
+        'the founder\'s own role is a "Founder" pill, not a select that looks live and does nothing, and says why', JSON.stringify(self))
     }
     for (const [state, role, want, size] of [
       ['full', 'admin', 'Only founders can manage the team.', [390, 844]], ['empty', 'founder', 'No team members to show.', [1440, 900]],
@@ -1939,9 +2164,33 @@ if (LANE_PARTS.some(wanted)) {
       console.log(`\n${label}`)
       await go('/dev/admin/insights', size)
       await ready('Avg progress')
-      await page.waitForFunction(() => document.querySelectorAll('svg[role="img"]').length >= 4, { timeout: 10000 })
-      const axis = await page.$$eval('svg[role="img"] text', (ts) => ts.map((t) => Math.round(t.getBoundingClientRect().height * 10) / 10))
-      expect(axis.length > 0 && Math.min(...axis) >= 10, `${label}: the charts' labels draw at their size (${Math.min(...axis)}px at the smallest)`, JSON.stringify(axis.slice(0, 6)))
+      await page.waitForFunction(() => document.querySelectorAll('[aria-roledescription="chart"]').length >= 4, { timeout: 10000 })
+      const axis = await page.$$eval('[data-guide] span', (ts) => ts.map((t) => parseFloat(getComputedStyle(t).fontSize)))
+      expect(axis.length >= 12 && Math.min(...axis) >= 11, `${label}: the gridlines' labels draw at their size (${Math.min(...axis)}px at the smallest)`, JSON.stringify(axis.slice(0, 6)))
+      // The review's fix round: Avg progress from the switch, in points; the Dashboard's chart, its days and its palette; Churned whole.
+      const avg = await page.evaluate(() => {
+        const card = document.querySelector('[data-metric="avg_progress"]')
+        return {
+          rows: [...card.querySelectorAll('tbody tr')].map((r) => r.innerText.replace(/\s+/g, ' ').trim()),
+          delta: card.querySelector('[data-delta]')?.textContent.replace(/\s+/g, ' ').trim(),
+          guides: [...card.querySelectorAll('[data-guide]')].map((g) => g.dataset.guide),
+        }
+      })
+      expect(avg.rows.length === 3 && avg.rows.every((r) => /\b2\.\d+%$/.test(r)) && /^↑\s*Up 0\.1 pts since \w{3} \d{1,2} Oct$/.test(avg.delta ?? ''),
+        `${label}: Avg progress starts on the switch's day (no 36% beside 3%), and its change is in points since then`, JSON.stringify(avg))
+      const churned = await page.evaluate(() => {
+        const card = document.querySelector('[data-metric="churned_count"]')
+        const bars = [...card.querySelectorAll('[aria-roledescription="chart"] div[aria-hidden="true"] > div > div')].map((b) => getComputedStyle(b).backgroundColor)
+        const box = card.getBoundingClientRect()
+        const avgBox = document.querySelector('[data-metric="avg_progress"]').getBoundingClientRect()
+        return { guides: [...card.querySelectorAll('[data-guide]')].map((g) => g.dataset.guide), bars: [...new Set(bars)], wide: Math.round(box.width), half: Math.round(avgBox.width) }
+      })
+      expect(JSON.stringify(churned.guides) === JSON.stringify(['0', '2', '4']) && churned.bars.length > 0 && churned.bars.every((c) => c === 'rgb(147, 183, 213)')
+          && (size[0] < 1280 || churned.wide > churned.half * 1.8),
+        `${label}: Churned's bars in Airy Blue (not red), its gridlines 0, 2 and 4 (a top of 3: a 1 under its own height), the card the whole width`, JSON.stringify(churned))
+      const labels = await page.$$eval('[data-metric] figure > div[aria-hidden="true"] span', (ss) => ss.map((x) => x.textContent.trim()))
+      expect(labels.length >= 6 && labels.every((l) => /^\w{3} \d{1,2} \w{3}$/.test(l)), `${label}: the axes' days read like "Wed 7 Oct"`, JSON.stringify(labels.slice(0, 4)))
+      expect(/Updated \d\d:\d\d/.test(await bodyText()), `${label}: the header says when it was updated`)
       expect((await bodyText()).includes('Activity right now') && !(await bodyText()).includes('—'), `${label}: the activity card, no em dash`)
       await check(label, `insights-full-${size[0]}`)
       await tapsOk(label)
@@ -1963,6 +2212,7 @@ if (LANE_PARTS.some(wanted)) {
     }
     for (const [state, want, size] of [
       ['partial', 'Current sprinters: couldn\'t load.', [390, 844]], ['error', "Couldn't load the snapshots.", [1440, 900]],
+      ['noreset', "Couldn't read the date of the course switch, so the line is not drawn.", [1440, 900]],
       ['empty', 'No snapshots in this range.', [390, 844]], ['loading', 'Loading the snapshots', [390, 844]],
     ]) {
       const label = `insights, ${state}, ${size.join('x')}`
@@ -1973,6 +2223,12 @@ if (LANE_PARTS.some(wanted)) {
         const text = await bodyText()
         expect(text.includes('Onboarded to the Bounty Program: couldn\'t load.') && !/\b0%/.test(text.slice(text.indexOf('Current sprinters'), text.indexOf('Avg progress'))),
           `${label}: the two failed reads say so, with no 0 in their place`)
+        expect(text.includes('The database took too long to answer.') && !text.includes('canceling statement'), `${label}: in plain words, the database's own behind Details`)
+      }
+      if (state === 'noreset') {
+        const text = await bodyText()
+        expect(text.includes('The database took too long to answer.') && (await page.$('[data-metric="avg_progress"]')) === null && (await page.$('[data-metric="churned_count"]')) !== null,
+          `${label}: Avg progress, which needs the switch's date, says it could not draw its line; the other charts stand`)
       }
       await check(label, `insights-${state}-${size[0]}`)
     }
@@ -1987,6 +2243,66 @@ if (LANE_PARTS.some(wanted)) {
 
   const errs = newConsoleErrors(from)
   expect(errs.length === 0, 'templates lane: no error in the browser console', errs.slice(0, 3).join(' || '))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// review: admin rebuild 2's review fix round (WI-11), across the pages
+// ════════════════════════════════════════════════════════════════════════════
+if (wanted('review')) {
+  const from = consoleErrors.length
+  console.log('\nreview: a header keeps its height, its place and its action from loading to loaded, and on a failed read')
+  /** The page's own header (the one with an h1): its title line's top and height, and its buttons. */
+  const headerOf = () => page.evaluate(() => {
+    const h = [...document.querySelectorAll('main header')].find((x) => x.querySelector('h1'))
+    if (!h) return null
+    const t = h.querySelector('h1').getBoundingClientRect()
+    return { top: Math.round(t.top), height: Math.round(t.height), buttons: [...h.querySelectorAll('button')].map((b) => b.textContent.trim()).filter(Boolean) }
+  })
+  const PAGES = [
+    ['/dev/admin/dashboard', 'state'], ['/dev/admin/discounts', 'state'], ['/dev/admin/tasks', 'state'], ['/dev/admin/students', 'state'],
+    ['/dev/admin/journey', 'state'], ['/dev/admin/feedback/lessons', 'state'], ['/dev/admin/survey', 'state'], ['/dev/admin/templates', 'state'],
+    ['/dev/admin/insights', 'state'],
+  ]
+  for (const size of [[390, 844], [1440, 900]]) {
+    for (const [path] of PAGES) {
+      const seen = {}
+      for (const state of ['loading', 'error', 'full']) {
+        await go(`${path}?state=${state}`, size)
+        await sleep(state === 'loading' ? 400 : 900)
+        seen[state] = await headerOf()
+      }
+      const ok3 = ['loading', 'error', 'full'].every((k) => seen[k] && seen[k].height >= 44)
+      const sameTop = seen.loading && seen.full && seen.error && seen.loading.top === seen.full.top && seen.error.top === seen.full.top
+      const sameButtons = seen.loading && seen.full && seen.error
+        && JSON.stringify(seen.loading.buttons) === JSON.stringify(seen.full.buttons) && seen.full.buttons.every((b) => seen.error.buttons.includes(b) || b === 'Refresh')
+      expect(ok3 && sameTop && sameButtons, `${path}, ${size.join('x')}: the title line 44px tall and in one place, loading, failed and loaded, its action there all along`, JSON.stringify(seen))
+    }
+  }
+  {
+    // The 30% page and Tasks keep their tabs, with no counts, while the list loads.
+    await go('/dev/admin/discounts?state=loading', [390, 844])
+    const tabs = await page.$$eval('[role="tab"]', (ts) => ts.map((t) => t.textContent.trim()))
+    expect(JSON.stringify(tabs) === JSON.stringify(['Applied', 'Approved', 'Rejected', 'Code Applied']), 'the 30% page, loading: its four tabs, no counts', JSON.stringify(tabs))
+    await go('/dev/admin/tasks?state=loading', [390, 844])
+    const taskTabs = await page.$$eval('[role="tab"]', (ts) => ts.map((t) => t.textContent.trim()))
+    expect(JSON.stringify(taskTabs) === JSON.stringify(['To do', 'Sent', 'Dismissed']), 'Tasks, loading: its tabs, no counts', JSON.stringify(taskTabs))
+  }
+  console.log('\nreview: the 30% page\'s tabs on a phone')
+  for (const width of [390, 375, 360]) {
+    await go('/dev/admin/discounts', [width, 844])
+    await page.waitForSelector('[role="tablist"]')
+    await sleep(300)
+    const m = await page.evaluate(() => {
+      const t = document.querySelector('[role="tablist"][aria-label="Lists"]')
+      const tabs = [...t.querySelectorAll('[role="tab"]')]
+      return { client: t.clientWidth, scroll: t.scrollWidth, rows: new Set(tabs.map((x) => Math.round(x.getBoundingClientRect().top))).size, h: Math.min(...tabs.map((x) => x.getBoundingClientRect().height)), overflowX: getComputedStyle(t).overflowX }
+    })
+    expect(m.rows === 1 && m.h >= 44 && (width >= 390 ? m.scroll <= m.client : m.overflowX === 'auto'),
+      `${width}px wide: the four tabs on one line, 44px tall, ${width >= 390 ? 'all in view' : 'the row scrolling sideways rather than wrapping'}`, JSON.stringify(m))
+    if (width === 390) await check('review, the 30% tabs at 390x844', 'review-thirty-tabs-390')
+  }
+  const errs = newConsoleErrors(from)
+  expect(errs.length === 0, 'review: no error in the browser console', errs.slice(0, 3).join(' || '))
 }
 
 // ── Every page the run opened ──────────────────────────────────────────────

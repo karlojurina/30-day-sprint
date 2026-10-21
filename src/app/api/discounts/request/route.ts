@@ -25,9 +25,10 @@ import {
  * closed on any read error.
  * Then the coupon (admin rebuild 2, D5): a Whop membership that already has a
  * discount on its next renewal gets no 30%. Whop is asked now (since T-122:
- * the membership on file, else the course membership found through the
- * student's Whop user, else the latest real payment, under 97.00 being a
- * discount); when it does not answer, the stored row decides
+ * the membership on file, else every course membership found through the
+ * student's Whop user, else the latest real payment, a code on it that took
+ * money off or a price under 97.00 being a discount); when it does not
+ * answer, the stored row decides
  * (checkMembershipDiscount). With neither, since the owner's review
  * (2026-10-21) nothing is written and the student reads "We couldn't check
  * your membership just now. Try again in a minute." (membershipUncheckedRefusal,

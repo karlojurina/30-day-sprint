@@ -21,7 +21,12 @@
 // v2's GET /api/v2/memberships?user_id= (a student's memberships, found
 // through their Whop user) and the pinned GET /api/v1/payments?user_id=
 // (the latest real payment, under 97.00 being a discount), and the cron's
-// answer counts by the step that answered.
+// answer counts by the step that answered. Since T-122's fix round (the same
+// day) the payments carry their subtotal, tax_amount and tax_behavior as the
+// pinned shape does: a payment naming a code that took money off is a
+// discount at any price, and the price is the total less any tax added on
+// top; and every course membership found through the Whop user is read (a
+// newer free one hid an older paid one), as is the case of a free one on file.
 //
 // The clock is the suite's, as in first-payment.test.mjs: `new Date()` and
 // `Date.now()` answer it, and setTimeout sets a timer on it that fires in the
@@ -87,6 +92,9 @@ const KEY = 'whop-test-key'
 const PINNED = '2026-10-15-1'
 const MONTHLY = 'plan_devMonthly97'
 const YEARLY = 'plan_devYearly997'
+// T-122's fix round: a $970 yearly plan, and a free plan sold on the course product (friends and family).
+const YEAR970 = 'plan_devYearly970'
+const FREE = 'plan_devFree'
 // T-122: the course's product, and another one. WHOP_PRODUCT_ID names the course alone, as on production since 2026-10-20.
 const COURSE = 'prod_devCourse'
 const OTHER = 'prod_devOther'
@@ -139,12 +147,20 @@ globalThis.fetch = async (url, init = {}) => {
 }
 /** A membership as v2 lists it for a user: flat ids, status and valid, created_at in seconds. */
 const v2 = (id, user, more = {}) => ({ id, user, product: COURSE, plan: MONTHLY, status: 'active', valid: true, created_at: 1_759_000_000, ...more })
-/** A real payment in the pinned shape: paid, a money object, the buyer nested, the rest as ids. */
+/** An amount as the pinned shape gives it. */
+const money = (amount) => ({ amount, currency: 'usd' })
+/**
+ * A real payment in the pinned shape: paid, a money object, the buyer nested, the rest as ids. Every payment carries
+ * subtotal, tax_amount and tax_behavior there (Whop's payment object at 2026-10-15-1): by default the subtotal is the
+ * total and no tax applied (null).
+ */
 const pay = (id, user, total, paidAt, more = {}) => ({
   id, status: 'paid', substatus: 'succeeded', paid_at: paidAt, created_at: paidAt,
-  total: { amount: total, currency: 'usd' }, refunded_amount: { amount: '0.00', currency: 'usd' },
+  total: money(total), subtotal: money(total), tax_amount: null, tax_behavior: null, refunded_amount: money('0.00'),
   user: { id: user }, product_id: COURSE, membership_id: null, promo_code_id: null, ...more,
 })
+/** A payment a promo code took money off: the subtotal the plan's price, the total less. */
+const onCode = (code, subtotal, more = {}) => ({ promo_code_id: code, subtotal: money(subtotal), ...more })
 function resetWhop() {
   whop.memberships = new Map([
     // The forever 10%: renews at 87.30 on the 97.00 plan.
@@ -168,10 +184,20 @@ function resetWhop() {
     ['mem_devNoPlan', { id: 'mem_devNoPlan', status: 'active', promo_code_id: null, renewal_price: '97.00' }],
     // On a plan Whop does not know.
     ['mem_devGone', { id: 'mem_devGone', status: 'active', promo_code_id: null, renewal_price: '97.00', plan_id: 'plan_devGone' }],
+    // T-122's fix round. No renewal price, so the latest real payment decides: a $970 yearly member on a 10% code, an
+    // evolve10 member taxed on top, and a full-price member (each control's payment is its user's).
+    ['mem_devYear970Null', { id: 'mem_devYear970Null', status: 'active', promo_code_id: 'promo_devYear10', renewal_price: null, plan_id: YEAR970 }],
+    ['mem_devTaxNull', { id: 'mem_devTaxNull', status: 'active', promo_code_id: 'promo_devEvolve', renewal_price: null, plan_id: MONTHLY }],
+    ['mem_devCtlNull', { id: 'mem_devCtlNull', status: 'active', promo_code_id: null, renewal_price: null, plan_id: MONTHLY }],
+    // evolve10 on a paid membership, and a free friends-and-family membership of the course product given later.
+    ['mem_devEvolve3', { id: 'mem_devEvolve3', status: 'active', promo_code_id: 'promo_devEvolve', renewal_price: '87.30', plan_id: MONTHLY }],
+    ['mem_devFree', { id: 'mem_devFree', status: 'completed', promo_code_id: null, renewal_price: '0.00', plan_id: FREE }],
   ])
   whop.plans = new Map([
     [MONTHLY, { id: MONTHLY, plan_type: 'renewal', renewal_price: '97.00', initial_price: '0.00' }],
     [YEARLY, { id: YEARLY, plan_type: 'renewal', renewal_price: 997 }],
+    [YEAR970, { id: YEAR970, plan_type: 'renewal', renewal_price: '970.00', initial_price: '0.00' }],
+    [FREE, { id: FREE, plan_type: 'one_time', renewal_price: '0.00', initial_price: '0.00' }],
   ])
   whop.promos = new Map([
     ['promo_devEvolve', { id: 'promo_devEvolve', code: 'evolve10' }],
@@ -195,6 +221,18 @@ function resetWhop() {
     ['user_devNoCourse', [v2('mem_devYear', 'user_devNoCourse', { product: OTHER }), v2('mem_devFull', 'user_devNoCourse', { status: 'expired', valid: false })]],
     // The course membership has no renewal price: the payment decides.
     ['user_devNullPay', [v2('mem_devNullPrice', 'user_devNullPay')]],
+    // T-122's fix round: evolve10 on a paid membership (September), then a free one given later (October). Both grant
+    // access (a free one-time claim reads completed and valid). And the same free one beside a full-price membership.
+    ['user_devFreeLater', [
+      v2('mem_devEvolve3', 'user_devFreeLater', { created_at: 1_759_000_000 }),
+      v2('mem_devFree', 'user_devFreeLater', { plan: FREE, status: 'completed', valid: true, created_at: 1_760_500_000 }),
+    ]],
+    ['user_devFreeFull', [
+      v2('mem_devFull', 'user_devFreeFull', { created_at: 1_759_000_000 }),
+      v2('mem_devFree', 'user_devFreeFull', { plan: FREE, status: 'completed', valid: true, created_at: 1_760_500_000 }),
+    ]],
+    // A list that cannot be used: Whop ignored the user filter and answered with someone else's membership.
+    ['user_devIgnored', [v2('mem_devSomeone', 'user_devSomeoneElse')]],
   ])
   whop.payments = new Map([
     // The newest real course payment is 87.30 on evolve10; a refund, another product and a $0 one after it do not count.
@@ -203,16 +241,31 @@ function resetWhop() {
       pay('pay_devO4', 'user_devOdd', '20.00', '2026-10-12T10:00:00.000Z', { product_id: OTHER }),
       pay('pay_devO3', 'user_devOdd', '50.00', '2026-10-10T10:00:00.000Z', { substatus: 'refunded', refunded_amount: { amount: '50.00', currency: 'usd' } }),
       pay('pay_devO1', 'user_devOdd', '97.00', '2026-09-03T10:00:00.000Z'),
-      pay('pay_devO2', 'user_devOdd', '87.30', '2026-10-03T10:00:00.000Z', { promo_code_id: 'promo_devEvolve', membership_id: 'mem_devOdd' }),
+      pay('pay_devO2', 'user_devOdd', '87.30', '2026-10-03T10:00:00.000Z', onCode('promo_devEvolve', '97.00', { membership_id: 'mem_devOdd' })),
     ]],
     // 87.30 once, then 97.00, the newest: full price now.
     ['user_devOddFull', [
       pay('pay_devF2', 'user_devOddFull', '97.00', '2026-10-05T10:00:00.000Z'),
-      pay('pay_devF1', 'user_devOddFull', '87.30', '2026-09-05T10:00:00.000Z', { promo_code_id: 'promo_devEvolve' }),
+      pay('pay_devF1', 'user_devOddFull', '87.30', '2026-09-05T10:00:00.000Z', onCode('promo_devEvolve', '97.00')),
     ]],
     // No course membership, a real payment under 97.00 with no code on it, made for a membership of its own.
     ['user_devNoCourse', [pay('pay_devN1', 'user_devNoCourse', '87.30', '2026-10-03T10:00:00.000Z', { membership_id: 'mem_devPaid' })]],
-    ['user_devNullPay', [pay('pay_devP1', 'user_devNullPay', '87.30', '2026-10-04T10:00:00.000Z', { promo_code_id: 'promo_devEvolve' })]],
+    ['user_devNullPay', [pay('pay_devP1', 'user_devNullPay', '87.30', '2026-10-04T10:00:00.000Z', onCode('promo_devEvolve', '97.00'))]],
+    // T-122's fix round, the adversarial check's cases: a yearly 873.00 on a 10% code (970.00 before it); evolve10's
+    // 87.30 with 20% tax added on top (a total of 104.76); the same yearly payment for a student whose list cannot be used.
+    ['user_devYear970', [pay('pay_devY1', 'user_devYear970', '873.00', '2026-10-12T10:00:00.000Z', onCode('promo_devYear10', '970.00', { membership_id: 'mem_devYear970Null' }))]],
+    ['user_devTaxed', [pay('pay_devT1', 'user_devTaxed', '104.76', '2026-10-12T10:00:00.000Z',
+      onCode('promo_devEvolve', '97.00', { tax_amount: money('17.46'), tax_behavior: 'exclusive', membership_id: 'mem_devTaxNull' }))]],
+    ['user_devIgnored', [pay('pay_devI1', 'user_devIgnored', '873.00', '2026-10-12T10:00:00.000Z', onCode('promo_devYear10', '970.00'))]],
+    // The controls, no code on any: 97.00; 97.00 with 20% tax added on top (116.40); a yearly 970.00; and 97.00 with
+    // the tax inside the price (Whop's tax_behavior "inclusive": 16.17 of the 97.00 is VAT).
+    ['user_devCtl97', [pay('pay_devC1', 'user_devCtl97', '97.00', '2026-10-12T10:00:00.000Z')]],
+    ['user_devCtlTax', [pay('pay_devC2', 'user_devCtlTax', '116.40', '2026-10-12T10:00:00.000Z',
+      { subtotal: money('97.00'), tax_amount: money('19.40'), tax_behavior: 'exclusive' })]],
+    ['user_devCtl970', [pay('pay_devC3', 'user_devCtl970', '970.00', '2026-10-12T10:00:00.000Z')]],
+    ['user_devCtlIncl', [pay('pay_devC4', 'user_devCtlIncl', '97.00', '2026-10-12T10:00:00.000Z', { tax_amount: money('16.17'), tax_behavior: 'inclusive' })]],
+    // A used one-month code on a full-price renewal: the payment names it, and it took nothing off.
+    ['user_devUsedPay', [pay('pay_devU1', 'user_devUsedPay', '97.00', '2026-10-12T10:00:00.000Z', onCode('promo_devUsed50', '97.00'))]],
   ])
   whop.log = []
   whop.answer = null
@@ -222,9 +275,10 @@ resetWhop()
 const {
   WHOP_DISCOUNT_VERSION, MEMBERSHIP_DISCOUNTS_TABLE, REFRESH_START_BUDGET_MS, priceOf, idOf, isDiscounted, storedRowApplies,
   isMembershipId, newReadContext, readMembershipDiscount, checkMembershipDiscount, codeOf,
-  FULL_PRICE, paidUnderFullPrice, courseProductIds, findCourseMembership, judgeStudentDiscount, lacksSourceColumn, isNoAnswer,
+  FULL_PRICE, paidUnderFullPrice, courseProductIds, findCourseMemberships, judgeStudentDiscount, lacksSourceColumn, isNoAnswer,
+  paymentCoupon,
 } = await import('./_gen/membership-discount.ts')
-const { fetchLatestRealPayment } = await import('./_gen/first-payment.ts')
+const { fetchLatestRealPayment, taxOnTopOf } = await import('./_gen/first-payment.ts')
 const { ETFB_PRODUCT_ID, TEAM_SEAT_PRODUCT_ID } = await import('./_gen/whop-products.ts')
 const { POST: requestRoute } = await import('./_gen/discount-request-route.ts')
 const { POST: feedbackRoute } = await import('./_gen/discount-submit-feedback-route.ts')
@@ -270,6 +324,36 @@ ok(storedRowApplies({ whop_membership_id: 'mem_a' }, 'pay_devPayment') && stored
 // T-122's rule of thumb and the course's products.
 ok(FULL_PRICE === 97 && paidUnderFullPrice(87.3) && paidUnderFullPrice(96.99) && !paidUnderFullPrice(97) && !paidUnderFullPrice(97.000001) && !paidUnderFullPrice(997),
    'a real payment under 97.00 is a discount (87.30, 96.99); 97.00 and more is none, compared in cents')
+// T-122's fix round: the tax a total carries on top of the price (Whop: total is "the price after discounts, plus any
+// tax added on top"), and step 3's answer on one payment: the code is the rule, 97.00 the rule of thumb.
+ok(taxOnTopOf({ tax_amount: null }) === 0 && taxOnTopOf({ tax_amount: null, tax_behavior: 'exclusive' }) === 0,
+   'tax_amount null is no tax ("Null when no tax applied"): nothing on top')
+ok(taxOnTopOf({ tax_amount: money('17.46'), tax_behavior: 'exclusive' }) === 17.46 && taxOnTopOf({ tax_amount: 17.46 }) === 17.46
+     && taxOnTopOf({ tax_amount: money('17.46'), tax_behavior: 'unspecified' }) === 17.46 && taxOnTopOf({ tax_amount: '17.46', tax_behavior: null }) === 17.46,
+   'a tax added on top ("exclusive") is on top; so is one whose behaviour is another word or none, the reading that can only make a coupon more likely; a money object, a number or a string')
+ok(taxOnTopOf({ tax_amount: money('16.17'), tax_behavior: 'inclusive' }) === 0, 'a tax already inside the price ("inclusive") is not on top: the total is the price')
+ok(taxOnTopOf({}) === null && taxOnTopOf({ tax_behavior: 'exclusive' }) === null && taxOnTopOf({ tax_amount: { amount: null } }) === null && taxOnTopOf({ tax_amount: 'some' }) === null,
+   'a tax_amount missing (another shape) or that does not read: not known (null), never 0')
+{
+  const coupon = (total, subtotal, taxOnTop, promoCodeId = null) => paymentCoupon({ total, subtotal, taxOnTop, promoCodeId })
+  ok(show(coupon(873, 970, 0, 'promo_devYear10')) === show({ price: 873, heldAgainst: 970, discounted: true }),
+     'a yearly 873.00 naming a code, 970.00 before it: the code took money off, a coupon (it read as none until the fix round, 873.00 being over 97.00)', show(coupon(873, 970, 0, 'promo_devYear10')))
+  ok(show(coupon(104.76, 97, 17.46, 'promo_devEvolve')) === show({ price: 87.3, heldAgainst: 97, discounted: true }),
+     'evolve10 with 20% tax added on top (104.76 less 17.46 is 87.30): a coupon, held against its subtotal', show(coupon(104.76, 97, 17.46, 'promo_devEvolve')))
+  ok(show(coupon(97, 97, 0)) === show({ price: 97, heldAgainst: 97, discounted: false })
+       && show(coupon(116.4, 97, 19.4)) === show({ price: 97, heldAgainst: 97, discounted: false })
+       && show(coupon(970, 970, 0)) === show({ price: 970, heldAgainst: 97, discounted: false }),
+     'the controls, no code named: 97.00; 116.40 with 19.40 added on top (97.00, in cents, no float\'s dust); a yearly 970.00: none of them a coupon')
+  ok(coupon(97, 97, 0, 'promo_devUsed50').discounted === false && coupon(970, 970, 0, 'promo_devYear10').discounted === false,
+     'a code that took nothing off (a used one-month code on a full-price renewal, or yearly): none, as on the membership')
+  ok(coupon(970, null, 0, 'promo_devYear10').discounted === true && coupon(970, 970, null, 'promo_devYear10').discounted === true
+       && coupon(116.4, null, 19.4, 'promo_devEvolve').discounted === true,
+     'a code named with a subtotal or a tax that does not read: a coupon, whatever the price (a missing figure never clears a named code)')
+  ok(coupon(104.76, null, null).discounted === false && coupon(104.76, null, null).price === 104.76 && coupon(96, 96, null).discounted === true,
+     'no code named and a tax that does not read: the total stands for the price (104.76 none, 96.00 a coupon by the rule of thumb)')
+  ok(coupon(116.4, 97, 19.41).discounted === true && coupon(116.4, 97, 19.41).price === 96.99 && coupon(1, 1, 0).discounted === true,
+     'a price a cent under 97.00 is a coupon, code or none; so is a $1 plan\'s payment (the rule of thumb\'s known limit)')
+}
 ok(show([...courseProductIds(`${COURSE}, ${ETFB_PRODUCT_ID},${TEAM_SEAT_PRODUCT_ID}`)]) === show([COURSE]) && courseProductIds('').size === 0 && courseProductIds(' , ').size === 0
      && show([...courseProductIds()]) === show([COURSE]),
    'the course is what WHOP_PRODUCT_ID names less ETfB and Apex (whop-products.ts); nothing when it names nothing')
@@ -422,8 +506,9 @@ const paths = () => whop.log.map((r) => `${r.path}${r.path.endsWith('/membership
   const refused = await judge('mem_devFull', 'user_devGone', (p) => (p === '/api/v1/memberships/mem_devFull' ? json(400, { error: 'no' }) : null))
   ok(refused.ok && refused.source === 'user' && refused.row.whop_membership_id === 'mem_devEvolve2', 'another 4xx for the id on file: through the Whop user too', show(refused))
   const order = await judge('pay_devPayment', 'user_devOrder')
-  ok(order.ok && order.source === 'user' && order.row.whop_membership_id === 'mem_devEvolve' && order.row.discounted === true,
-     'the order: of the course memberships that grant access, active before past_due, then the newest; another product\'s and a canceled one never (the newer past-due one, the other product\'s and the canceled one passed over)', show(order.ok && order.row.whop_membership_id))
+  ok(order.ok && order.source === 'user' && order.row.whop_membership_id === 'mem_devEvolve' && order.row.discounted === true
+       && show(paths()) === show(['/api/v2/memberships?user_id=user_devOrder&per=50&page=1', '/api/v1/plans/plan_devMonthly97', '/api/v1/memberships/mem_devEvolve', '/api/v1/promo_codes/promo_devEvolve']),
+     'the order: of the course memberships that grant access (3, all on the monthly plan, read once to order them), active before past_due, then the newest; another product\'s and a canceled one never; the first with a discount answers and nothing after it is read', show(paths()))
 
   // 24 of the 46: no plan or no renewal price. The latest real payment decides: 87.30 is a discount, 97.00 is not.
   const price = await judge('mem_devNullPrice', 'user_devOdd')
@@ -461,8 +546,9 @@ const paths = () => whop.log.map((r) => `${r.path}${r.path.endsWith('/membership
   // A user with more than 50 memberships: the second page is read.
   resetWhop()
   whop.byUser.set('user_devMany', [...Array.from({ length: 50 }, (_, i) => v2(`mem_devOld${i}`, 'user_devMany', { status: 'expired', valid: false })), v2('mem_devEvolve', 'user_devMany')])
-  const many = await findCourseMembership('user_devMany', new Set([COURSE]), newReadContext(KEY))
-  ok(many.ok && many.membershipId === 'mem_devEvolve' && whop.log.length === 2 && whop.log[1].query.includes('page=2'), 'a list over two pages: both read, the one that grants access found on the second', show(many))
+  const many = await findCourseMemberships('user_devMany', new Set([COURSE]), newReadContext(KEY))
+  ok(many.ok && show(many.membershipIds) === show(['mem_devEvolve']) && whop.log.length === 2 && whop.log[1].query.includes('page=2'),
+     'a list over two pages: both read, the one that grants access found on the second (one found, so no plan is read to order them)', show(many))
 
   // No answer: only when Whop does not answer, or the deployment cannot ask.
   const down = await judge('pay_devPayment', 'user_devEvolvePay', () => 'throw')
@@ -499,6 +585,84 @@ const paths = () => whop.log.map((r) => `${r.path}${r.path.endsWith('/membership
   ok(show(noProduct) === show({ ok: false, fail: 'no_course_product' }) && noProductOnFile.ok && noProductOnFile.source === 'membership',
      'WHOP_PRODUCT_ID naming no course product: no answer where the course must be found, and the membership on file still reads', show(noProduct))
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// T-122's fix round (2026-10-21). An adversarial check on a stand-in Whop found
+// two ways past the owner's rule ("they should not be able to apply for the
+// code if they have a coupon already"). Step 3 read only "a total under
+// 97.00", so a yearly member on a 10% code (873.00), an evolve10 member with
+// tax added on top (104.76) and a payment's-id student whose list cannot be
+// used, each with the code on the payment, read as none. Step 2 read only the
+// first course membership in its order, so a newer free one hid an older paid
+// one with a code; step 1 did too, as the sync puts the newest membership
+// that grants access on file. The same cases run through both request routes
+// and the cron below.
+console.log('\n=== T-122\'s fix round: the code on the payment, and every course membership ===')
+{
+  const year = await judge('mem_devYear970Null', 'user_devYear970')
+  ok(year.ok && year.source === 'payment' && year.row.discounted === true && year.row.renewal_price === 873 && year.row.plan_renewal_price === 970
+       && year.row.promo_code_id === 'promo_devYear10' && year.row.whop_membership_id === 'mem_devYear970Null',
+     'a $970 yearly member on a 10% code whose membership has no renewal price, the payment 873.00 naming the code: a coupon, 873.00 against its subtotal 970.00 stored (none until the fix round)', show(year))
+  const taxed = await judge('mem_devTaxNull', 'user_devTaxed')
+  ok(taxed.ok && taxed.source === 'payment' && taxed.row.discounted === true && taxed.row.renewal_price === 87.3 && taxed.row.plan_renewal_price === 97 && taxed.row.promo_code === 'evolve10',
+     'evolve10 with 20% tax added on top, a total of 104.76: a coupon, its price after the code (87.30) against its subtotal (97.00) stored (none until the fix round)', show(taxed))
+  const ignoredList = await judge('pay_devPayment', 'user_devIgnored')
+  ok(ignoredList.ok && ignoredList.source === 'payment' && ignoredList.row.discounted === true && ignoredList.row.promo_code_id === 'promo_devYear10' && ignoredList.row.whop_membership_id === null
+       && show(paths()) === show(['/api/v2/memberships?user_id=user_devIgnored&per=50&page=1', '/api/v1/payments?user_id=user_devIgnored&status=paid&first=100', '/api/v1/promo_codes/promo_devYear10']),
+     'a payment\'s id on file and a list that cannot be used (someone else\'s membership in it), the latest payment a yearly 873.00 naming a code: a coupon (none until the fix round); the list, the payments, the code\'s name (which Whop does not give here)', show({ ignoredList, paths: paths() }))
+  // The controls: no code named, so the rule of thumb alone, on the price before any tax added on top.
+  for (const [why, user, price] of [
+    ['a 97.00 payment naming no code', 'user_devCtl97', 97],
+    ['a 116.40 payment (97.00 and 20% tax added on top) naming no code', 'user_devCtlTax', 97],
+    ['a $970 yearly payment naming no code', 'user_devCtl970', 970],
+    ['a 97.00 payment with the tax inside the price ("inclusive") naming no code', 'user_devCtlIncl', 97],
+    ['a 97.00 renewal naming a used one-month code that took nothing off', 'user_devUsedPay', 97],
+  ]) {
+    const r = await judge('mem_devCtlNull', user)
+    ok(r.ok && r.source === 'payment' && r.row.discounted === false && r.row.renewal_price === price && r.row.plan_renewal_price === 97,
+       `${why}: no coupon, ${price.toFixed(2)} against 97.00 stored`, show(r.ok && r.row))
+  }
+
+  // Step 2 reads every course membership that grants access. evolve10 on the older paid one, a free one given later.
+  const freeLater = await judge('pay_devPayment', 'user_devFreeLater')
+  ok(freeLater.ok && freeLater.source === 'user' && freeLater.row.discounted === true && freeLater.row.whop_membership_id === 'mem_devEvolve3' && freeLater.row.promo_code === 'evolve10',
+     'a payment\'s id on file, an evolve10 monthly membership and a newer free course membership: a coupon, the row naming the membership that carried the code (until the fix round the newer free one was read alone: none)', show(freeLater))
+  ok(show(paths()) === show(['/api/v2/memberships?user_id=user_devFreeLater&per=50&page=1', '/api/v1/plans/plan_devMonthly97', '/api/v1/plans/plan_devFree',
+    '/api/v1/memberships/mem_devEvolve3', '/api/v1/promo_codes/promo_devEvolve']),
+     'the two plans read to put the paid one first, and nothing read after the discount found', show(paths()))
+  // The same student with the free one on file: a plan that renews at 0 has no renewal to discount, so step 2 answers.
+  const freeOnFile = await judge('mem_devFree', 'user_devFreeLater')
+  ok(freeOnFile.ok && freeOnFile.source === 'user' && freeOnFile.row.discounted === true && freeOnFile.row.whop_membership_id === 'mem_devEvolve3'
+       && paths()[0] === '/api/v1/memberships/mem_devFree' && paths()[2].startsWith('/api/v2/memberships?user_id=user_devFreeLater'),
+     'the free membership on file (the sync puts the newest that grants access there), evolve10 on the older paid one: a coupon through the Whop user (the membership on file answered none until the fix round)', show(freeOnFile))
+  // No code on any: the paid one answers, before the free one.
+  const freeFull = await judge('pay_devPayment', 'user_devFreeFull')
+  ok(freeFull.ok && freeFull.source === 'user' && freeFull.row.discounted === false && freeFull.row.whop_membership_id === 'mem_devFull' && freeFull.row.plan_renewal_price === 97
+       && paths().filter((p) => p.startsWith('/api/v1/memberships/')).join() === '/api/v1/memberships/mem_devFull,/api/v1/memberships/mem_devFree',
+     'a full-price monthly membership and a newer free one: no coupon, both read, the paid one first, and the row naming it (paid plans before free)', show(paths()))
+  const paidOnFile = await judge('mem_devFull', 'user_devFreeFull')
+  ok(paidOnFile.ok && paidOnFile.source === 'membership' && paidOnFile.row.discounted === false && !whop.log.some((x) => x.path.startsWith('/api/v2/')),
+     'a paid plan on file with no discount still answers by itself: the Whop user is not asked', show(paths()))
+  resetWhop()
+  whop.byUser.set('user_devComp', [v2('mem_devFree', 'user_devComp', { plan: FREE, status: 'completed', valid: true })])
+  const comp = await judgeStudentDiscount(student('mem_devFree', 'user_devComp'), newReadContext(KEY))
+  ok(comp.ok && comp.source === 'user' && comp.row.discounted === false && comp.row.whop_membership_id === 'mem_devFree',
+     'a free membership and nothing else: no coupon, answered by that membership through the Whop user', show(comp))
+  resetWhop()
+  whop.byUser.set('user_devPair', [v2('mem_devCtlNull', 'user_devPair', { created_at: 1_760_000_000 }), v2('mem_devFull', 'user_devPair', { created_at: 1_759_000_000 })])
+  whop.payments.set('user_devPair', [pay('pay_devR1', 'user_devPair', '97.00', '2026-10-12T10:00:00.000Z')])
+  const pair = await judgeStudentDiscount(student('pay_devPayment', 'user_devPair'), newReadContext(KEY))
+  ok(pair.ok && pair.source === 'payment' && pair.row.discounted === false && pair.row.whop_membership_id === 'mem_devCtlNull',
+     'one membership with no renewal price beside one at full price: neither carries a known discount, so the latest payment decides (97.00, none), the row naming the one without a price', show(pair))
+
+  // Whop gives no answer for one of them: no answer, never "none" from the others.
+  const secondDown = await judge('pay_devPayment', 'user_devFreeFull', (p) => (p === '/api/v1/memberships/mem_devFree' ? json(503, {}) : null))
+  ok(show(secondDown) === show({ ok: false, fail: 'http_other' }), 'Whop down for the second of two memberships (the first at full price): no answer, never "none" from the first alone', show(secondDown))
+  const t0 = Date.now()
+  const secondHung = await judge('pay_devPayment', 'user_devFreeFull', (p) => (p === '/api/v1/memberships/mem_devFree' ? 'hang' : null), { startBy: Date.now() + 6000, answerBy: Date.now() + 8000 })
+  ok(show(secondHung) === show({ ok: false, fail: 'time_budget' }) && Date.now() - t0 <= 8000,
+     `the second never answers, on the request routes' limits: given up by 8 s (${Date.now() - t0} ms), no answer`, show(secondHung))
+}
 {
   // The payment read itself (first-payment.ts), on the coupon check's pace and limits.
   resetWhop()
@@ -509,6 +673,27 @@ const paths = () => whop.log.map((r) => `${r.path}${r.path.endsWith('/membership
   ok(odd.ok && odd.latest.total === 87.3 && odd.latest.paidAt === '2026-10-03T10:00:00.000Z' && odd.latest.promoCodeId === 'promo_devEvolve' && odd.latest.membershipId === 'mem_devOdd'
        && odd.seen === 5 && odd.kept === 2 && pace.requests === 1,
      'the newest real course payment by paid_at, whatever order Whop gives: a $0 one, a refunded one and another product\'s left out (5 seen, 2 kept), on the caller\'s pace', show(odd))
+  ok(odd.ok && odd.latest.subtotal === 97 && odd.latest.taxOnTop === 0,
+     'with its subtotal (97.00, before the code) and nothing on top (tax_amount null), read from the pinned shape (T-122\'s fix round)', show(odd.ok && odd.latest))
+  const taxed = await fetchLatestRealPayment('user_devTaxed', opts)
+  const incl = await fetchLatestRealPayment('user_devCtlIncl', opts)
+  ok(taxed.ok && taxed.latest.total === 104.76 && taxed.latest.subtotal === 97 && taxed.latest.taxOnTop === 17.46 && taxed.latest.promoCodeId === 'promo_devEvolve'
+       && incl.ok && incl.latest.total === 97 && incl.latest.taxOnTop === 0,
+     'a tax added on top read as on top (17.46 of 104.76), one inside the price ("inclusive") as nothing on top', show([taxed.ok && taxed.latest, incl.ok && incl.latest]))
+  const noFields = pay('pay_devX1', 'user_devNoTaxField', '97.00', '2026-10-12T10:00:00.000Z', onCode('promo_devEvolve', '97.00'))
+  delete noFields.subtotal
+  delete noFields.tax_amount
+  whop.payments.set('user_devNoTaxField', [noFields])
+  const bare = await fetchLatestRealPayment('user_devNoTaxField', opts)
+  ok(bare.ok && bare.latest.subtotal === null && bare.latest.taxOnTop === null && bare.latest.promoCodeId === 'promo_devEvolve',
+     'a payment without subtotal and tax_amount (another shape): both not known (null), never 0', show(bare.ok && bare.latest))
+  whop.payments.set('user_devLegacyTax', [
+    { id: 'pay_devL4', status: 'paid', paid_at: 1_759_700_000, total: 104.76, subtotal: 97, tax_amount: 17.46, tax_behavior: 'exclusive', refunded_amount: 0, user: { id: 'user_devLegacyTax' }, product: { id: COURSE }, promo_code: { id: 'promo_devL', code: 'legacy10' } },
+  ])
+  const legacyTax = await fetchLatestRealPayment('user_devLegacyTax', opts)
+  ok(legacyTax.ok && legacyTax.latest.subtotal === 97 && legacyTax.latest.taxOnTop === 17.46 && legacyTax.latest.promoCodeId === 'promo_devL'
+       && paymentCoupon(legacyTax.latest).discounted === true,
+     'the key\'s older shape (bare numbers, the code nested) reads the same subtotal and tax', show(legacyTax.ok && legacyTax.latest))
   whop.payments.set('user_devLegacy', [
     { id: 'pay_devL1', status: 'paid', paid_at: 1_759_500_000, total: 87.3, refunded_amount: 0, user: { id: 'user_devLegacy' }, product: { id: COURSE }, membership: { id: 'mem_devL' }, promo_code: { id: 'promo_devL', code: 'legacy10' } },
     { id: 'pay_devL2', status: 'paid', paid_at: 1_759_600_000, total: 40, user: { id: 'user_devLegacy' } },
@@ -797,6 +982,37 @@ for (const [name, route, path, body] of [
     ok(r.value.status === 503 && r.value.body.error === LINE_503 && r.value.body.state === 'read-failed' && db.rows('discount_requests').length === 0 && db.rows(MEMBERSHIP_DISCOUNTS_TABLE).length === 0,
        `${why}: 503, "${LINE_503}", nothing written or stored`, show(r.value))
   }
+  // T-122's fix round: the adversarial check's cases refused, the controls let in. Until the fix round the first four
+  // went in (each read as no coupon) and the fifth too (the free membership on file answered).
+  for (const [why, membership, user, status, judged] of [
+    ['a $970 yearly member on a 10% code with no renewal price, the payment 873.00 naming the code', 'mem_devYear970Null', 'user_devYear970', 400, 'mem_devYear970Null'],
+    ['evolve10 with 20% tax added on top (104.76) and no renewal price', 'mem_devTaxNull', 'user_devTaxed', 400, 'mem_devTaxNull'],
+    ['a payment\'s id on file and a list that cannot be used, the latest payment a yearly 873.00 naming a code', 'pay_devNotAMembership', 'user_devIgnored', 400, null],
+    ['a payment\'s id on file, evolve10 on a monthly membership and a newer free one', 'pay_devNotAMembership', 'user_devFreeLater', 400, 'mem_devEvolve3'],
+    ['the newer free membership on file, evolve10 on the older paid one', 'mem_devFree', 'user_devFreeLater', 400, 'mem_devEvolve3'],
+    ['control: a 97.00 payment naming no code', 'mem_devCtlNull', 'user_devCtl97', 200, 'mem_devCtlNull'],
+    ['control: a 116.40 payment (97.00 and 20% tax added on top) naming no code', 'mem_devCtlNull', 'user_devCtlTax', 200, 'mem_devCtlNull'],
+    ['control: a $970 yearly payment naming no code', 'mem_devCtlNull', 'user_devCtl970', 200, 'mem_devCtlNull'],
+    ['control: a full-price monthly membership and a newer free one', 'pay_devNotAMembership', 'user_devFreeFull', 200, 'mem_devFull'],
+  ]) {
+    resetWhop()
+    db = readyDb(membership, {}, user)
+    r = await quiet(() => post(route, path, body))
+    const stored = db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
+    const wrote = db.rows('discount_requests').length
+    ok(r.value.status === status && (status === 400 ? r.value.body.error === LINE && r.value.body.state === 'not-eligible' && wrote === 0 : wrote === 1)
+         && stored?.discounted === (status === 400) && stored?.whop_membership_id === judged,
+       `${why}: ${status === 400 ? '400, the student\'s line, nothing written' : '200, the request goes in'} (the row stored for ${judged ?? 'no membership'})`,
+       show({ status: r.value.status, body: r.value.body, stored }))
+  }
+  // Two memberships, and Whop never answers for the second: given up at the routes' 8 s, the 503, nothing written.
+  resetWhop()
+  whop.answer = (p) => (p === '/api/v1/memberships/mem_devFree' ? 'hang' : null)
+  db = readyDb('pay_devNotAMembership', {}, 'user_devFreeFull')
+  const hangFrom = Date.now()
+  r = await quiet(() => post(route, path, body))
+  ok(r.value.status === 503 && r.value.body.error === LINE_503 && db.rows('discount_requests').length === 0 && Date.now() - hangFrom <= 8000,
+     `two course memberships through the Whop user, the second never answered: 503 after ${Date.now() - hangFrom} ms (the 8 s limit kept), nothing written, never "none" from the first alone`, show(r.value))
   // Whop down, a payment's id on file, and the cron's row found through the user: that row decides (it counts with no membership id on file).
   resetWhop()
   whop.answer = () => 'throw'
@@ -1258,6 +1474,30 @@ const cron = async (q = '', secret = process.env.CRON_SECRET) => {
      `1,000 members: ${b.checked} read in the 240 s, ${b.left} left for the next run, the last request started at ${Math.round((lastStart - started) / 1000)} s`, show({ checked: b.checked, left: b.left }))
   const writes = db.calls(MEMBERSHIP_DISCOUNTS_TABLE, 'upsert').map((q) => q.values.length)
   ok(writes.length > 1 && writes.slice(0, -1).every((n) => n === 25), `written 25 at a time, as it went: ${writes.length} writes`)
+}
+{
+  // T-122's fix round in the cron: the yearly code, the tax on top and the free membership's two ways are discounts now.
+  resetWhop()
+  const p = (id, membership, user) => ({ id, first_paid_at: '2026-10-05T10:00:00.000Z', membership_status: 'active', whop_membership_id: membership, whop_user_id: user })
+  const db = new FakeDb({ students: [
+    p('f-year', 'mem_devYear970Null', 'user_devYear970'),
+    p('f-taxed', 'mem_devTaxNull', 'user_devTaxed'),
+    p('f-free-later', 'pay_devPayment', 'user_devFreeLater'),
+    p('f-free-on-file', 'mem_devFree', 'user_devFreeLater'),
+    p('f-free-full', 'pay_devPayment', 'user_devFreeFull'),
+    p('f-ctl-tax', 'mem_devCtlNull', 'user_devCtlTax'),
+  ] })
+  installDb(db)
+  const r = await quiet(() => cron())
+  const b = r.value.body
+  const rows = new Map(db.rows(MEMBERSHIP_DISCOUNTS_TABLE).map((x) => [x.student_id, x]))
+  ok(r.value.status === 200 && b.ok === true && b.checked === 6 && show(b.by_source) === show({ membership: 0, user: 3, payment: 3 }) && b.discounted === 4
+       && b.written === 6 && show(b.failed) === show({}),
+     '6 read and written: 4 discounted (the yearly code, the tax on top, evolve10 beside a newer free membership with a payment\'s id or the free one on file), 3 through the Whop user and 3 from the latest payment, none failed', show(b))
+  ok(rows.get('f-year')?.discounted === true && rows.get('f-year')?.plan_renewal_price === 970 && rows.get('f-taxed')?.discounted === true && rows.get('f-taxed')?.renewal_price === 87.3
+       && rows.get('f-free-later')?.whop_membership_id === 'mem_devEvolve3' && rows.get('f-free-on-file')?.whop_membership_id === 'mem_devEvolve3' && rows.get('f-free-on-file')?.source === 'user'
+       && rows.get('f-free-full')?.discounted === false && rows.get('f-free-full')?.whop_membership_id === 'mem_devFull' && rows.get('f-ctl-tax')?.discounted === false,
+     'each row as the fix round reads it: the code\'s membership named, the prices compared stored, the controls none', show([...rows.values()].map((x) => [x.student_id, x.whop_membership_id, x.discounted, x.renewal_price, x.plan_renewal_price])))
 }
 
 // ════════════════════════════════════════════════════════════════════════════

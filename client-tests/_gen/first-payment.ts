@@ -50,7 +50,9 @@
  *     split the account's history by created_at and read side by side.
  *   fetchLatestRealPayment: one user's newest real payment for the course,
  *     for the coupon check when no renewal price can be read
- *     (membership-discount.ts, T-122), on that check's key, pace and limits.
+ *     (membership-discount.ts, T-122), on that check's key, pace and limits,
+ *     with its promo code, its subtotal and the tax its total carries on top
+ *     (since T-122's fix round).
  *
  * None of them writes anything. A failure comes back as a kind, never as
  * Whop's message, so no caller can pass a Whop id on by accident.
@@ -116,6 +118,25 @@ export interface WhopPayment {
   membership?: { id?: string | null } | string | null;
   promo_code_id?: string | null;
   promo_code?: { id?: string | null; code?: string | null } | string | null;
+  /**
+   * What the coupon check weighs beside the total, read by
+   * fetchLatestRealPayment alone (T-122's fix round, 2026-10-21). The names
+   * are those of Whop's payment object pinned to 2026-10-15-1 (docs.whop.com,
+   * API reference, Payments, read 2026-10-21), where every one of them is on
+   * every payment: `subtotal`, "The price before discounts, tax and fees";
+   * `tax_amount`, "The sales tax or VAT collected. Null when no tax
+   * applied"; `tax_behavior`, "Whether `tax_amount` was added on top of the
+   * price (`exclusive`) or was already inside it (`inclusive`)" (or
+   * `unspecified`, `unable_to_collect`, null). There `total` is "the price
+   * after discounts, plus any tax added on top", and a payment quote's total
+   * is "the subtotal less the discount, plus `tax_amount` when tax is added
+   * on top". The amounts are money objects ({ amount: "97.00", ... }); the
+   * key's older shape uses the same three names, its amounts bare numbers
+   * (the workspace's _admin/prds/first-paid-fix/facts_whop.md).
+   */
+  subtotal?: WhopMoney;
+  tax_amount?: WhopMoney;
+  tax_behavior?: string | null;
 }
 
 /** Why a payment read does not count. */
@@ -391,6 +412,31 @@ export interface LatestRealPayment {
   promoCodeId: string | null;
   /** The code's name when the payment carries it (the older shape); null otherwise. */
   promoCode: string | null;
+  /** The price before discounts, tax and fees (`subtotal`); null when it is missing, null or does not read. */
+  subtotal: number | null;
+  /** The tax `total` carries on top of the price (taxOnTopOf); null when `tax_amount` is missing or does not read. */
+  taxOnTop: number | null;
+}
+
+/** A money field's amount, in either shape; null when it is missing, null or does not read. */
+function amountOrNull(value: unknown): number | null {
+  const n = moneyAmount(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * The tax a payment's `total` carries on top of the price (the fields'
+ * words on WhopPayment): 0 when no tax applied (`tax_amount` null) or the
+ * price already held it (`tax_behavior` "inclusive"), else `tax_amount`,
+ * whatever `tax_behavior` says or when it says nothing, the reading that can
+ * only make a coupon more likely. null when `tax_amount` is missing (another
+ * shape) or does not read.
+ */
+export function taxOnTopOf(p: Pick<WhopPayment, "tax_amount" | "tax_behavior">): number | null {
+  if (p.tax_amount === null) return 0;
+  const tax = amountOrNull(p.tax_amount);
+  if (tax === null) return null;
+  return p.tax_behavior === "inclusive" ? 0 : tax;
 }
 
 export type LatestRealPaymentRead =
@@ -441,6 +487,8 @@ export async function fetchLatestRealPayment(
         membershipId: refId(p.membership_id) ?? refId(p.membership),
         promoCodeId: refId(p.promo_code_id) ?? refId(p.promo_code),
         promoCode: typeof code === "string" && code.trim() !== "" ? code.trim() : null,
+        subtotal: amountOrNull(p.subtotal),
+        taxOnTop: taxOnTopOf(p),
       };
     }
     if (!got.next) return { ok: true, latest, seen, kept };

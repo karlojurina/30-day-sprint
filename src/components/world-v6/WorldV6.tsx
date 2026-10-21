@@ -2125,8 +2125,6 @@ function WorldV6View({
           poster: posterPreference(window.location.search),
           slowGpu: Math.max(1, Number(query.get("slowgpu")) || 1),
           coldStall: query.get("coldstall") ? { ms: Number(query.get("coldstall")) || 0, frames: Number(query.get("coldframes")) || 1 } : undefined,
-          // NOT SHIPPED, dev only: the morning probe (light.ts MORNING_PROBE); the scene ignores it in production.
-          mood: query.get("mood") === "morning" ? "morning" : undefined,
         });
       } catch (e) {
         fail(e);

@@ -836,48 +836,6 @@ export const NIGHT_ROWS: Partial<Record<LightWaypointKey, NightRow>> = {
   dusk: { dial: 1, moonAz: MOON_AZ, moonEl: MOON_EL, moonLightAz: MOONLIGHT_AZ, moonLightEl: MOONLIGHT_EL, light: { aurora: 1, band: 1 } },
 };
 
-// ── The morning probe (dev only, NOT SHIPPED) ───────────────────────────────
-
-/**
- * NOT SHIPPED. A throwaway probe of option B's morning (real_time_light.md),
- * so Lovro can see whether a morning reads differently from the route's
- * sunset: /dev/world-app?mood=morning&hour=8 (scene.ts passes ?mood on only in
- * development). Over the blended light, k of the way, a cooler, pinker,
- * brighter morning: a clear blue top, a pink and peach horizon, a pale lilac
- * haze (morning mist), a pink-white sun, cooler shade, a touch more exposure
- * and less saturation. Each place keeps its own sun and view. It fades out
- * from the forest to the island (night) and never reaches the arch. Remove
- * with its commit.
- */
-export const MORNING_PROBE = {
-  k: 0.6,
-  colors: {
-    skyTop: 0x6c9ad6, skyMid: 0xd2c8de, skyHorizon: 0xf6d0c6, skyGlow: 0xffcab2,
-    sunColor: 0xffd8cc, sunGlow: 0xffbaa8, haze: 0xcfcce2,
-    hemiSky: 0xaabfe4, ambient: 0xa6b0cc, cloudTop: 0xfff2f0, cloudBase: 0xbcb8ce,
-    water: 0x4a6278, nearShade: 0x3a4862, halo: 0xffd4cc,
-  },
-  exposure: 1.1,
-  sat: 0.9,
-  fogAdd: 0.15,
-} as const;
-let _morning: Record<keyof typeof MORNING_PROBE.colors, THREE.Color> | null = null;
-/** MORNING_PROBE over a blended light, w of the way (in place). */
-function applyMorningProbe(s: LightState, w: number): void {
-  if (!(w > 0)) return;
-  if (!_morning) {
-    const m = {} as Record<keyof typeof MORNING_PROBE.colors, THREE.Color>;
-    for (const [k, hex] of Object.entries(MORNING_PROBE.colors)) m[k as keyof typeof MORNING_PROBE.colors] = new THREE.Color().setHex(hex);
-    _morning = m;
-  }
-  for (const k of Object.keys(_morning) as Array<keyof typeof MORNING_PROBE.colors>) (s[k] as THREE.Color).lerp(_morning[k], w);
-  s.exposure *= 1 + (MORNING_PROBE.exposure - 1) * w;
-  s.sat *= 1 + (MORNING_PROBE.sat - 1) * w;
-  s.fogAdd += MORNING_PROBE.fogAdd * w;
-  s.gainB += 0.05 * w;
-  s.liftB += 0.012 * w;
-}
-
 /** A day key's night (NIGHT_ROWS' header). */
 export function nightKeyframe(day: LightKeyframe, row: NightRow): LightKeyframe {
   return {
@@ -1166,8 +1124,6 @@ export interface LightModule {
   setNight(f: number, easeMs?: number): void;
   /** The night factor being shown (mid ease: between the old and the new). */
   readonly nightFactor: number;
-  /** NOT SHIPPED, dev only: the morning probe (MORNING_PROBE) on or off. */
-  setMood?(mood: "morning" | null): void;
 }
 
 /**
@@ -2049,8 +2005,6 @@ export function install(ctx: LightCtx): LightModule {
   // The night layer (setNight): the factor shown, and the ease toward a new one.
   let nightNow = 0;
   const nightEase = { from: 0, to: 0, t0: 0, ms: 0 };
-  /** NOT SHIPPED: the morning probe's strength (setMood), 0 off. */
-  let moodK = 0;
 
   const skyUniforms = {
     uHaze: { value: new THREE.Color() },
@@ -2660,10 +2614,6 @@ export function install(ctx: LightCtx): LightModule {
     get nightFactor() {
       return nightNow;
     },
-    setMood(mood) {
-      moodK = mood === "morning" ? MORNING_PROBE.k : 0;
-      lastU = NaN;
-    },
     update() {
       // The night's ease, by the wall clock: a frame drawn late (the map woke
       // after a sleep) lands on the light the ease would have reached.
@@ -2688,8 +2638,6 @@ export function install(ctx: LightCtx): LightModule {
       if (uChanged) {
         lastU = u;
         blendTrack(u, track, placeU, state);
-        // NOT SHIPPED: the morning probe, full to the forest, gone by the island.
-        if (moodK > 0) applyMorningProbe(state, moodK * (1 - smoothstep(placeU[5], placeU[6], u)));
         state.rev++;
         applyState();
         walkMaterials();
